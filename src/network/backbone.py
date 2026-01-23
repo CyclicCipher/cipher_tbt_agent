@@ -165,64 +165,57 @@ class BackboneNetwork(nn.Module):
 
     def update_weights(self, lr: float) -> None:
         """
-        Update all weights using current layer states and errors.
+        Update all weights using local learning rules from prospective learning.
 
-        In predictive coding, each layer predicts its input from below.
-        Errors are computed in the input space, then used to update weights.
+        In prospective learning/predictive coding:
+        1. Each layer's error = its state - prediction from layer above (value error)
+        2. Weights updated using local Hebbian rules: ΔW = lr * error * input
+        3. No backpropagation or error projection through weights
 
         Args:
             lr: Learning rate
         """
-        # First, compute prediction error at the input level
-        reconstruction = self.compute_reconstruction()
-        input_error = self.input_buffer - reconstruction
-
-        # Update first layer using input prediction error
-        # The error is in input space (input_size), but we need to map it to affect layer state
-        # For simplicity in MVP, use the basal weights to project error to layer space
-        first_layer = self.layers[0]
-
-        if len(self.layers) == 1:
-            input_above = first_layer.get_state()  # Self-predict for single layer
-        else:
-            input_above = self.layers[1].compute_prediction_for_below()
-
-        # Project input error to layer space for gradient computation
-        # error_in_layer_space = W_basal @ input_error
-        layer_error = first_layer.neurons.W_basal @ input_error
-        first_layer.error = layer_error
-
-        first_layer.update_weights(
-            input_from_below=self.input_buffer,
-            input_from_above=input_above,
-            lr=lr
-        )
-
-        # Update higher layers using state prediction errors
-        for i in range(1, len(self.layers)):
+        # Update each layer using value error (state - prediction_from_above)
+        for i in range(len(self.layers)):
             layer = self.layers[i]
 
-            # Input from below
-            input_below = self.layers[i - 1].compute_signal_for_above()
-
-            # Input from above
+            # Get prediction from layer above
             if i == len(self.layers) - 1:
-                input_above = layer.get_state()  # Top layer self-predicts
+                # Top layer: no layer above, so use state as prediction (gives error=0)
+                # OR use 0 as prediction (gives error=state)
+                # For learning to occur at top layer, use 0 as prediction
+                prediction_from_above = torch.zeros_like(layer.get_state())
             else:
-                input_above = self.layers[i + 1].compute_prediction_for_below()
+                prediction_from_above = self.layers[i + 1].compute_prediction_for_below()
 
-            # Error: difference between actual and predicted state of layer below
-            actual_state_below = self.layers[i - 1].get_state()
-            predicted_state_below = layer.compute_prediction_for_below()
-
-            # Error in the space of layer below (neurons_per_layer)
-            error_below = actual_state_below - predicted_state_below
-
-            # Project error to current layer space
-            layer_error = layer.neurons.W_basal @ error_below
+            # Value error: difference between actual state and prediction from above
+            # This is the LOCAL error signal at this layer
+            layer_error = layer.get_state() - prediction_from_above
             layer.error = layer_error
 
-            layer.update_weights(input_below, input_above, lr)
+            # Get inputs for weight update
+            if i == 0:
+                # First layer receives sensory input from below
+                input_from_below = self.input_buffer
+            else:
+                # Higher layers receive signal from layer below
+                input_from_below = self.layers[i - 1].get_state()
+
+            if i == len(self.layers) - 1:
+                # Top layer: use own state as apical input (or could use zeros)
+                input_from_above = layer.get_state()
+            else:
+                # Other layers receive state from layer above
+                input_from_above = self.layers[i + 1].get_state()
+
+            # Update weights using local learning rule
+            # ΔW_apical = lr * error * input_from_above
+            # ΔW_basal = lr * error * input_from_below
+            layer.update_weights(
+                input_from_below=input_from_below,
+                input_from_above=input_from_above,
+                lr=lr
+            )
 
     def reset_states(self) -> None:
         """Reset all layer states to zero."""
