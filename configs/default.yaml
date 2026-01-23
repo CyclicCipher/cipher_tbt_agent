@@ -4,7 +4,7 @@
 
 device: "cuda"
 
-dtype: "float32"  # Use float16 if memory is tight
+dtype: "float16"  # FP16 for 4GB VRAM efficiency
 
 # Network Architecture
 
