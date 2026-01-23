@@ -167,29 +167,61 @@ class BackboneNetwork(nn.Module):
         """
         Update all weights using current layer states and errors.
 
+        In predictive coding, each layer predicts its input from below.
+        Errors are computed in the input space, then used to update weights.
+
         Args:
             lr: Learning rate
         """
-        for i, layer in enumerate(self.layers):
-            if i == 0:
-                input_below = self.input_buffer
-            else:
-                input_below = self.layers[i - 1].compute_signal_for_above()
+        # First, compute prediction error at the input level
+        reconstruction = self.compute_reconstruction()
+        input_error = self.input_buffer - reconstruction
 
+        # Update first layer using input prediction error
+        # The error is in input space (input_size), but we need to map it to affect layer state
+        # For simplicity in MVP, use the basal weights to project error to layer space
+        first_layer = self.layers[0]
+
+        if len(self.layers) == 1:
+            input_above = first_layer.get_state()  # Self-predict for single layer
+        else:
+            input_above = self.layers[1].compute_prediction_for_below()
+
+        # Project input error to layer space for gradient computation
+        # error_in_layer_space = W_basal @ input_error
+        layer_error = first_layer.neurons.W_basal @ input_error
+        first_layer.error = layer_error
+
+        first_layer.update_weights(
+            apical_input=input_above,
+            basal_input=self.input_buffer,
+            lr=lr
+        )
+
+        # Update higher layers using state prediction errors
+        for i in range(1, len(self.layers)):
+            layer = self.layers[i]
+
+            # Input from below
+            input_below = self.layers[i - 1].compute_signal_for_above()
+
+            # Input from above
             if i == len(self.layers) - 1:
-                input_above = layer.get_state()
+                input_above = layer.get_state()  # Top layer self-predicts
             else:
                 input_above = self.layers[i + 1].compute_prediction_for_below()
 
-            # Compute error: target = what layer should predict
-            if i == 0:
-                # First layer should predict input
-                target = self.input_buffer
-            else:
-                # Higher layers predict representations from below
-                target = self.layers[i - 1].get_state()
+            # Error: difference between actual and predicted state of layer below
+            actual_state_below = self.layers[i - 1].get_state()
+            predicted_state_below = layer.compute_prediction_for_below()
 
-            layer.compute_error(target)
+            # Error in the space of layer below (neurons_per_layer)
+            error_below = actual_state_below - predicted_state_below
+
+            # Project error to current layer space
+            layer_error = layer.neurons.W_basal @ error_below
+            layer.error = layer_error
+
             layer.update_weights(input_below, input_above, lr)
 
     def reset_states(self) -> None:

@@ -312,30 +312,46 @@ class AudioCapture:
                 "Note: May require numpy.frombuffer patch (see docs/notes/setup_issues.md)"
             )
 
-        # Get default loopback device (captures system audio)
-        # Note: Windows audio devices typically output stereo (2 channels)
+        # Get loopback device (captures system audio)
+        # Loopback devices are exposed as microphones with the speaker's name
         if self.device_name is None:
             try:
-                self.recorder = sc.default_speaker().recorder(
-                    samplerate=self.sample_rate,
-                    channels=2  # Stereo (most Windows devices are stereo)
-                )
+                # Get default speaker name for loopback
+                default_speaker = sc.default_speaker()
+                speaker_name = default_speaker.name
+
+                # Find matching loopback microphone
+                loopback_mics = sc.all_microphones(include_loopback=True)
+                loopback = None
+
+                for mic in loopback_mics:
+                    if speaker_name in mic.name or "loopback" in mic.name.lower():
+                        loopback = mic
+                        break
+
+                if loopback is None:
+                    # Fallback: try to get any loopback device
+                    loopback = [m for m in loopback_mics if "loopback" in str(m).lower()]
+                    if loopback:
+                        loopback = loopback[0]
+                    else:
+                        raise RuntimeError("No loopback device found")
+
+                self.loopback_device = loopback
+
             except Exception as e:
                 raise RuntimeError(
-                    f"Failed to initialize audio recorder: {e}\n"
+                    f"Failed to initialize audio loopback: {e}\n"
                     f"Check audio device availability and permissions.\n"
                     f"Note: Ensure soundcard library has numpy.frombuffer patch applied."
                 )
         else:
-            # Find specific device by name
-            speakers = sc.all_speakers()
-            matching = [s for s in speakers if self.device_name.lower() in s.name.lower()]
+            # Find specific loopback device by name
+            loopback_mics = sc.all_microphones(include_loopback=True)
+            matching = [m for m in loopback_mics if self.device_name.lower() in m.name.lower()]
             if not matching:
-                raise ValueError(f"Audio device '{self.device_name}' not found")
-            self.recorder = matching[0].recorder(
-                samplerate=self.sample_rate,
-                channels=2  # Stereo
-            )
+                raise ValueError(f"Audio loopback device '{self.device_name}' not found")
+            self.loopback_device = matching[0]
 
         self.running = True
 
@@ -345,11 +361,11 @@ class AudioCapture:
 
     def _capture_loop(self) -> None:
         """Background thread for continuous audio capture."""
-        with self.recorder:
+        with self.loopback_device.recorder(samplerate=self.sample_rate) as recorder:
             while self.running:
                 try:
                     # Record one chunk
-                    data = self.recorder.record(numframes=self.chunk_samples)
+                    data = recorder.record(numframes=self.chunk_samples)
 
                     # Convert to mono if needed
                     if data.ndim > 1:
