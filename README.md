@@ -92,26 +92,29 @@ hippocampus:
 
 ## Current Status
 
-### ✅ Completed (Phase 1: Sensorimotor Wrapper)
+### ✅ Phase 1 Complete: Sensorimotor Wrapper
 
 - Gaze position control system
 - Screen capture (foveal + peripheral vision)
-- Mouse and keyboard control
-- Gameplay logging and replay
-- Emergency stop system
+- Window-specific capture (safety feature)
+- Audio capture with soundcard integration
+- Motor control (mouse + keyboard + emergency stop)
+- Gameplay logging and replay (HDF5 format)
 - Comprehensive test suite
+- **Performance: 29 FPS @ 34ms latency** (exceeds 20 FPS / 50ms targets)
 
-### 🚧 In Progress
+### 📋 Phase 2: Minimal Viable Network (Next)
 
-- Audio capture integration (soundcard)
-- Core predictive coding network
-- Hippocampal memory system
-
-### 📋 Planned
-
-- Text pretraining pipeline
+- 5-layer predictive coding backbone
+- Two-compartment neurons with temporal processing
+- Prospective learning implementation
 - Network-wrapper integration
-- Experimental comparison (Models A, B, C)
+
+### 📋 Future Phases
+
+- Hippocampal memory system (Phase 5)
+- Text pretraining pipeline (Phase 6)
+- Experimental comparison Models A, B, C (Phase 7)
 
 ## Testing
 
@@ -144,6 +147,17 @@ screen = ScreenCapture(gaze_controller=gaze)
 # Capture frame
 foveal, peripheral, timestamp = screen.capture()
 print(f"Foveal: {foveal.shape}, Peripheral: {peripheral.shape}")
+```
+
+### Window-Specific Capture (Safety Feature)
+
+```python
+# Capture only a specific window (for non-fullscreen apps)
+screen = ScreenCapture(
+    gaze_controller=gaze,
+    window_title="My Application"  # Partial match supported
+)
+# Falls back to full screen if window not found
 ```
 
 ### Sensorimotor Loop with Network

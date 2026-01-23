@@ -41,7 +41,8 @@ class ScreenCapture:
         fovea_size: int = 320,
         periphery_size: int = 96,
         monitor_index: int = 0,
-        normalize: bool = True
+        normalize: bool = True,
+        window_title: Optional[str] = None
     ):
         """
         Initialize screen capture system.
@@ -52,15 +53,23 @@ class ScreenCapture:
             periphery_size: Size of peripheral downsample in pixels (square)
             monitor_index: Index of monitor to capture (0 = primary)
             normalize: If True, normalize pixel values to [0, 1]
+            window_title: Optional window title to capture. If specified, only
+                        captures this window. For safety with non-fullscreen apps.
         """
         self.gaze_controller = gaze_controller
         self.fovea_size = fovea_size
         self.periphery_size = periphery_size
         self.normalize = normalize
+        self.window_title = window_title
 
         # Initialize mss
         self.sct = mss.mss()
-        self.monitor = self.sct.monitors[monitor_index + 1]  # 0 is "all monitors"
+
+        # Try to get window-specific region if window_title specified
+        if window_title is not None:
+            self.monitor = self._get_window_region(window_title, monitor_index)
+        else:
+            self.monitor = self.sct.monitors[monitor_index + 1]  # 0 is "all monitors"
 
         # Update gaze controller with actual screen dimensions
         self.screen_width = self.monitor["width"]
@@ -76,6 +85,47 @@ class ScreenCapture:
         # Timing statistics
         self.last_capture_time = 0.0
         self.capture_times = deque(maxlen=100)
+
+    def _get_window_region(self, window_title: str, monitor_index: int) -> Dict:
+        """
+        Get screen region for a specific window by title.
+
+        Args:
+            window_title: Window title to search for (partial match)
+            monitor_index: Fallback monitor index if window not found
+
+        Returns:
+            Dictionary with 'left', 'top', 'width', 'height' keys for mss
+        """
+        try:
+            import pygetwindow as gw
+
+            # Find windows matching title (partial match)
+            windows = gw.getWindowsWithTitle(window_title)
+
+            if windows:
+                # Use first matching window
+                window = windows[0]
+
+                # Get window position and size
+                return {
+                    'left': window.left,
+                    'top': window.top,
+                    'width': window.width,
+                    'height': window.height
+                }
+            else:
+                print(f"Warning: Window '{window_title}' not found. Using full screen.")
+                return self.sct.monitors[monitor_index + 1]
+
+        except ImportError:
+            print("Warning: pygetwindow not available. Install with: pip install pygetwindow")
+            print("Falling back to full screen capture.")
+            return self.sct.monitors[monitor_index + 1]
+        except Exception as e:
+            print(f"Warning: Could not get window region: {e}")
+            print("Falling back to full screen capture.")
+            return self.sct.monitors[monitor_index + 1]
 
     def capture(self) -> Tuple[np.ndarray, np.ndarray, float]:
         """
@@ -250,21 +300,100 @@ class AudioCapture:
         """
         Start audio capture in background thread.
 
-        Note: This will be implemented with soundcard library.
-        For now, this is a placeholder that needs soundcard integration.
+        Uses soundcard library with WASAPI loopback for system audio capture.
+        Converts raw audio to mel spectrograms in real-time.
         """
-        # TODO: Implement actual audio capture with soundcard
-        # This requires:
-        # 1. Initialize soundcard loopback recorder
-        # 2. Start capture thread
-        # 3. Convert to mel spectrograms
-        # 4. Put in queue with timestamps
+        try:
+            import soundcard as sc
+        except ImportError:
+            raise ImportError(
+                "Audio capture requires soundcard library. "
+                "Install with: pip install soundcard\n"
+                "Note: May require numpy.frombuffer patch (see docs/notes/setup_issues.md)"
+            )
+
+        # Get default loopback device (captures system audio)
+        if self.device_name is None:
+            try:
+                self.recorder = sc.default_speaker().recorder(
+                    samplerate=self.sample_rate,
+                    channels=1  # Mono
+                )
+            except Exception as e:
+                raise RuntimeError(
+                    f"Failed to initialize audio recorder: {e}\n"
+                    f"Check audio device availability and permissions."
+                )
+        else:
+            # Find specific device by name
+            speakers = sc.all_speakers()
+            matching = [s for s in speakers if self.device_name.lower() in s.name.lower()]
+            if not matching:
+                raise ValueError(f"Audio device '{self.device_name}' not found")
+            self.recorder = matching[0].recorder(
+                samplerate=self.sample_rate,
+                channels=1
+            )
 
         self.running = True
-        raise NotImplementedError(
-            "Audio capture requires soundcard library integration. "
-            "Implementation pending soundcard setup and testing."
-        )
+
+        # Start capture thread
+        self.capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self.capture_thread.start()
+
+    def _capture_loop(self) -> None:
+        """Background thread for continuous audio capture."""
+        with self.recorder:
+            while self.running:
+                try:
+                    # Record one chunk
+                    data = self.recorder.record(numframes=self.chunk_samples)
+
+                    # Convert to mono if needed
+                    if data.ndim > 1:
+                        data = data.mean(axis=1)
+
+                    # Convert to mel spectrogram (simplified - just return raw for now)
+                    # TODO: Implement actual mel spectrogram conversion
+                    mel_spec = self._simple_mel_spectrogram(data)
+
+                    # Add to buffer with timestamp
+                    timestamp = time.time()
+                    self.buffer.append(mel_spec)
+                    self.timestamps.append(timestamp)
+
+                except Exception as e:
+                    if self.running:  # Only print if not shutting down
+                        print(f"Audio capture error: {e}")
+                    break
+
+    def _simple_mel_spectrogram(self, audio_data: np.ndarray) -> np.ndarray:
+        """
+        Convert audio to mel spectrogram (simplified implementation).
+
+        Args:
+            audio_data: Raw audio samples
+
+        Returns:
+            Mel spectrogram of shape (mel_bands, time_steps)
+        """
+        # Simplified: Return power spectrum approximation
+        # For MVP, just return energy bands
+        # TODO: Implement proper mel filterbank
+
+        # Compute FFT
+        fft = np.fft.rfft(audio_data)
+        power = np.abs(fft) ** 2
+
+        # Downsample to mel_bands
+        bins_per_band = len(power) // self.mel_bands
+        mel_spec = np.array([
+            power[i * bins_per_band:(i + 1) * bins_per_band].mean()
+            for i in range(self.mel_bands)
+        ])
+
+        # Reshape to (mel_bands, 1) for consistency
+        return mel_spec.reshape(-1, 1).astype(np.float32)
 
     def stop(self) -> None:
         """Stop audio capture."""
