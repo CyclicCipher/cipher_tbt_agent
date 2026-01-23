@@ -193,8 +193,8 @@ class BackboneNetwork(nn.Module):
         first_layer.error = layer_error
 
         first_layer.update_weights(
-            apical_input=input_above,
-            basal_input=self.input_buffer,
+            input_from_below=self.input_buffer,
+            input_from_above=input_above,
             lr=lr
         )
 
