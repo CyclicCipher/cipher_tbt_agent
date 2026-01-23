@@ -1,0 +1,127 @@
+# Predictive Coding Agent Configuration
+
+# Hardware
+
+device: "cuda"
+
+dtype: "float32"  # Use float16 if memory is tight
+
+# Network Architecture
+
+network:
+
+  num_layers: 10
+
+  neurons_per_layer: 1500
+
+  temporal_window: 8
+
+  
+
+  # Neuron parameters
+
+  neuron:
+
+    apical_kernel_size: 8
+
+    basal_kernel_size: 8
+
+    initial_gate: 0.5
+
+    divisive_norm_sigma: 0.01
+
+# Foveal Vision
+
+vision:
+
+  fovea_size: 320          # pixels, square
+
+  periphery_size: 96       # pixels, square
+
+  frame_buffer_size: 16    # number of frames
+
+  
+
+# Audio
+
+audio:
+
+  sample_rate: 16000
+
+  chunk_duration_ms: 100
+
+  mel_bands: 64
+
+  buffer_size: 16          # number of chunks
+
+# Learning
+
+learning:
+
+  backbone_lr_awake: 0.001
+
+  backbone_lr_consolidation: 0.01
+
+  overlay_lr_awake: 0.001
+
+  overlay_lr_consolidation: 0.01
+
+  
+
+# Hippocampus
+
+hippocampus:
+
+  buffer_size: 2000        # number of episodes
+
+  latent_dim: 512
+
+  temporal_context: 8      # timesteps before/after
+
+  salience_percentile: 80  # top 20% get stored
+
+  consolidation_replay_speed: 10  # 10x faster
+
+# Motor Control
+
+motor:
+
+  cursor_gain: 5.0
+
+  click_threshold: 0.7
+
+  gaze_gain: 50.0
+
+  
+
+# Overlay (experimental)
+
+overlay:
+
+  enabled: true
+
+  sparsity: 0.03           # 3% of connections
+
+  refinement_steps: 2
+
+# Consolidation
+
+consolidation:
+
+  trigger: "manual"        # "manual" or "pause_detected"
+
+  min_duration_seconds: 60
+
+  interruptible: true
+
+  
+
+# Logging
+
+logging:
+
+  tensorboard: true
+
+  log_interval: 100        # steps
+
+  checkpoint_interval: 1000

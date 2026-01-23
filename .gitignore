@@ -1,0 +1,53 @@
+notepad .gitignore
+```
+
+Paste this:
+```
+# Virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.pyproj
+*.sln
+Debug/
+Release/
+x64/
+x86/
+
+# VS Code (in case you ever use it)
+.vscode/
+
+# Logs and checkpoints
+logs/
+checkpoints/
+*.pt
+*.pth
+*.ckpt
+
+# Data (too large for git)
+data/recordings/
+data/text_corpus/
+data/rendered_text/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+
+# Temporary files
+*.tmp
+*.temp
