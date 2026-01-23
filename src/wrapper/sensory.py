@@ -258,7 +258,7 @@ class AudioCapture:
 
     def __init__(
         self,
-        sample_rate: int = 16000,
+        sample_rate: int = 48000,
         chunk_duration_ms: int = 100,
         mel_bands: int = 64,
         buffer_size: int = 16,
@@ -268,7 +268,7 @@ class AudioCapture:
         Initialize audio capture system.
 
         Args:
-            sample_rate: Audio sample rate in Hz
+            sample_rate: Audio sample rate in Hz (48000 for most Windows devices)
             chunk_duration_ms: Duration of each audio chunk in milliseconds
             mel_bands: Number of mel frequency bands
             buffer_size: Number of chunks to keep in buffer
@@ -313,16 +313,18 @@ class AudioCapture:
             )
 
         # Get default loopback device (captures system audio)
+        # Note: Windows audio devices typically output stereo (2 channels)
         if self.device_name is None:
             try:
                 self.recorder = sc.default_speaker().recorder(
                     samplerate=self.sample_rate,
-                    channels=1  # Mono
+                    channels=2  # Stereo (most Windows devices are stereo)
                 )
             except Exception as e:
                 raise RuntimeError(
                     f"Failed to initialize audio recorder: {e}\n"
-                    f"Check audio device availability and permissions."
+                    f"Check audio device availability and permissions.\n"
+                    f"Note: Ensure soundcard library has numpy.frombuffer patch applied."
                 )
         else:
             # Find specific device by name
@@ -332,7 +334,7 @@ class AudioCapture:
                 raise ValueError(f"Audio device '{self.device_name}' not found")
             self.recorder = matching[0].recorder(
                 samplerate=self.sample_rate,
-                channels=1
+                channels=2  # Stereo
             )
 
         self.running = True

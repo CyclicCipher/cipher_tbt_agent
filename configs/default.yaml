@@ -46,7 +46,7 @@ vision:
 
 audio:
 
-  sample_rate: 16000
+  sample_rate: 48000  # Native sample rate for most Windows audio devices
 
   chunk_duration_ms: 100
 
