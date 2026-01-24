@@ -39,6 +39,9 @@ class BackboneNetwork(nn.Module):
         use_muon: bool = False,
         muon_lr: float = 0.02,
         muon_momentum: float = 0.95,
+        use_adam: bool = False,
+        adam_lr: float = 0.001,
+        adam_betas: tuple = (0.9, 0.999),
         saturation_penalty: float = 0.01,
         activity_target: float = 0.3
     ):
@@ -54,9 +57,12 @@ class BackboneNetwork(nn.Module):
             device: Device to run on ("cuda" or "cpu")
             inference_lr: Learning rate for inference phase (state updates)
             temperature: Noise level for Langevin dynamics (0.0 = no noise, >0 = simulated annealing)
-            use_muon: Whether to use Muon optimizer (default: False, uses manual updates)
+            use_muon: Whether to use Muon optimizer (default: False)
             muon_lr: Muon optimizer learning rate (default: 0.02)
             muon_momentum: Muon optimizer momentum (default: 0.95)
+            use_adam: Whether to use Adam optimizer (default: False)
+            adam_lr: Adam optimizer learning rate (default: 0.001)
+            adam_betas: Adam optimizer beta parameters (default: (0.9, 0.999))
             saturation_penalty: Penalty for saturated activations (default: 0.01)
             activity_target: Target mean activation level (default: 0.3)
         """
@@ -71,6 +77,7 @@ class BackboneNetwork(nn.Module):
         self.inference_lr = inference_lr
         self.temperature = temperature
         self.use_muon = use_muon
+        self.use_adam = use_adam
         self.saturation_penalty = saturation_penalty
         self.activity_target = activity_target
 
@@ -108,14 +115,23 @@ class BackboneNetwork(nn.Module):
         # Input buffer (layer 0)
         self.register_buffer('input_buffer', torch.zeros(input_size, dtype=dtype))
 
-        # Initialize Muon optimizer if requested
+        # Initialize optimizer if requested
         self.optimizer = None
-        if use_muon:
+        if use_muon and use_adam:
+            raise ValueError("Cannot use both Muon and Adam optimizers simultaneously. Choose one.")
+        elif use_muon:
             self.optimizer = Muon(
                 self.parameters(),
                 lr=muon_lr,
                 momentum=muon_momentum,
-                weight_decay=0.01  # Keep consistent with manual updates
+                weight_decay=0.01
+            )
+        elif use_adam:
+            self.optimizer = torch.optim.Adam(
+                self.parameters(),
+                lr=adam_lr,
+                betas=adam_betas,
+                weight_decay=0.01
             )
 
     def forward(self, sensory_input: torch.Tensor, num_iterations: int = 5) -> torch.Tensor:
@@ -249,7 +265,8 @@ class BackboneNetwork(nn.Module):
         2. Weights updated using local Hebbian rules: ΔW = lr * error * input - decay * W
         3. No backpropagation or error projection through weights
 
-        If use_muon=True, uses Muon optimizer with momentum and adaptive learning rates.
+        If use_muon=True, uses Muon optimizer (momentum in neuron space).
+        If use_adam=True, uses Adam optimizer (per-parameter adaptive learning rates).
         Otherwise uses manual updates with fixed learning rate.
 
         Args:
@@ -297,12 +314,12 @@ class BackboneNetwork(nn.Module):
                 # Other layers: use RAW state from layer above
                 input_from_above = self.layers[i + 1].get_state()
 
-            if self.use_muon and self.optimizer is not None:
-                # Compute gradients manually for Muon
+            if self.optimizer is not None:
+                # Compute gradients manually for optimizer (Muon or Adam)
                 # Gradient is negative because we want to INCREASE weights when error is positive
                 error_col = layer_error.unsqueeze(1)
 
-                # Set gradients (Muon will apply momentum and adaptive learning)
+                # Set gradients (optimizer will apply its update rule)
                 layer.neurons.W_basal.grad = -(error_col @ input_from_below.unsqueeze(0))
                 layer.neurons.W_apical.grad = -(error_col @ input_from_above.unsqueeze(0))
             else:
@@ -314,12 +331,12 @@ class BackboneNetwork(nn.Module):
                     weight_decay=weight_decay
                 )
 
-        # Apply Muon optimizer step if using it
-        if self.use_muon and self.optimizer is not None:
+        # Apply optimizer step if using one
+        if self.optimizer is not None:
             # Add activity regularization (prevent saturation/coma)
             self._add_activity_regularization(activations)
 
-            # Muon step (handles momentum, weight decay internally)
+            # Optimizer step (handles momentum, adaptive LR, weight decay internally)
             self.optimizer.step()
             self.optimizer.zero_grad()
 
