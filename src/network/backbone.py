@@ -226,6 +226,11 @@ class BackboneNetwork(nn.Module):
                 noise = torch.randn_like(new_state) * (self.temperature ** 0.5)
                 new_state = new_state + noise
 
+            # Prevent saturation: clip activations to safe range
+            # This prevents saturation feedback loop (high activations → strong weights → higher activations)
+            # Clipping to ±0.85 leaves headroom for tanh to remain in sensitive region (tanh' ≈ 0.3)
+            new_state = new_state.clamp(-0.85, 0.85)
+
             layer.state.copy_(new_state)
 
     def compute_reconstruction(self) -> torch.Tensor:
