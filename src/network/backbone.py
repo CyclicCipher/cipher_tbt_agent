@@ -194,19 +194,21 @@ class BackboneNetwork(nn.Module):
             layer.error = layer_error
 
             # Get inputs for weight update
+            # CRITICAL: Must use the SAME inputs that were used during forward pass
+            # Otherwise Hebbian rule ΔW = lr * error * input is inconsistent
             if i == 0:
                 # First layer receives sensory input from below
                 input_from_below = self.input_buffer
             else:
-                # Higher layers receive signal from layer below
-                input_from_below = self.layers[i - 1].get_state()
+                # Higher layers receive transformed signal from layer below
+                input_from_below = self.layers[i - 1].compute_signal_for_above()
 
             if i == len(self.layers) - 1:
-                # Top layer: use own state as apical input (or could use zeros)
+                # Top layer: use own state as apical input (matches inference)
                 input_from_above = layer.get_state()
             else:
-                # Other layers receive state from layer above
-                input_from_above = self.layers[i + 1].get_state()
+                # Other layers receive prediction from layer above
+                input_from_above = self.layers[i + 1].compute_prediction_for_below()
 
             # Update weights using local learning rule
             # ΔW_apical = lr * error * input_from_above
