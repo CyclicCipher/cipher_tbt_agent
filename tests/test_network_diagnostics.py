@@ -27,14 +27,15 @@ def test_learning_diagnostics():
         neurons_per_layer=100,
         input_size=input_size,
         dtype=torch.float32,
-        device="cpu"
+        device="cpu",
+        inference_lr=0.1  # Higher LR for inference (state updates)
     )
 
     # Create fixed input pattern
     sensory_input = torch.randn(input_size)
 
-    inference_iters = 20
-    learning_rate = 0.01  # Conservative for nonlinear network
+    inference_iters = 50  # Increased from 20 - need more iterations for proper convergence
+    learning_rate = 0.005  # Reduced from 0.01 - Song et al. use 0.001 for weights
 
     print(f"\nTraining on fixed input for 50 iterations...")
     print(f"Learning rate: {learning_rate}")

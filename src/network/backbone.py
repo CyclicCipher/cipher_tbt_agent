@@ -32,7 +32,8 @@ class BackboneNetwork(nn.Module):
         input_size: int,
         initial_gate: float = 0.5,
         dtype: torch.dtype = torch.float16,
-        device: str = "cuda"
+        device: str = "cuda",
+        inference_lr: float = 0.1
     ):
         """
         Initialize backbone network.
@@ -44,6 +45,7 @@ class BackboneNetwork(nn.Module):
             initial_gate: Initial gate parameter for all neurons
             dtype: Data type for computations
             device: Device to run on ("cuda" or "cpu")
+            inference_lr: Learning rate for inference phase (state updates)
         """
         super().__init__()
 
@@ -53,6 +55,7 @@ class BackboneNetwork(nn.Module):
         self.initial_gate = initial_gate
         self.dtype = dtype
         self.device = device
+        self.inference_lr = inference_lr
 
         # Build layer stack
         self.layers = nn.ModuleList()
@@ -110,32 +113,58 @@ class BackboneNetwork(nn.Module):
 
     def _inference_step(self) -> None:
         """
-        Single step of inference: update all layer states.
+        Single step of inference: update states via gradient descent on free energy.
 
-        Updates proceed in both directions:
-        - Bottom-up: signals flow from input to top
-        - Top-down: predictions flow from top to input
+        Implements proper predictive coding dynamics from Millidge et al. (2022), Eq. 1:
+        ẋ_l = -∂F/∂x_l = -ε_l + ε_{l+1} · f'(W_{l+1}x_l)W^T_{l+1}
+
+        Where ε_l = x_l - f(W_l x_{l-1}) is the bottom-up prediction error.
+
+        Note: W_l in paper corresponds to layer[l].neurons.W_basal in our code
+        (both connect layer l-1 to layer l).
         """
-        # Bottom-up pass
+        # Compute prediction errors for all layers
+        # ε_l = x_l - f(W_basal @ x_{l-1})
+        errors = []
         for i, layer in enumerate(self.layers):
             if i == 0:
-                # First layer receives sensory input
                 input_below = self.input_buffer
             else:
-                # Receive RAW state from layer below
-                # The neuron's W_basal will transform it internally
                 input_below = self.layers[i - 1].get_state()
 
-            if i == len(self.layers) - 1:
-                # Top layer predicts itself (self-prediction)
-                input_above = layer.get_state()
-            else:
-                # Receive RAW state from layer above
-                # The neuron's W_apical will transform it internally
-                input_above = self.layers[i + 1].get_state()
+            # Bottom-up prediction: f(W_basal @ x_{l-1})
+            bottom_up_prediction = torch.tanh(layer.neurons.W_basal @ input_below)
 
-            # Update layer state
-            layer(input_below, input_above)
+            # Prediction error: ε_l = x_l - bottom_up_prediction
+            error = layer.get_state() - bottom_up_prediction
+            errors.append(error)
+
+        # Update states via gradient descent: ẋ_l = -∂F/∂x_l
+        for i, layer in enumerate(self.layers):
+            # Gradient term 1: -ε_l (local error)
+            gradient = -errors[i]
+
+            # Gradient term 2: +ε_{l+1} · f'(W_{l+1}x_l) · W^T_{l+1} (feedback from above)
+            if i < len(self.layers) - 1:
+                current_state = layer.get_state()
+
+                # W_{l+1} @ x_l (forward connection from this layer to next)
+                weighted_input = self.layers[i + 1].neurons.W_basal @ current_state
+
+                # f'(W_{l+1} @ x_l) where f = tanh
+                tanh_derivative = 1 - torch.tanh(weighted_input) ** 2
+
+                # ε_{l+1} · f'(...) (element-wise)
+                error_times_deriv = errors[i + 1] * tanh_derivative
+
+                # Project back through W^T_{l+1}
+                feedback = error_times_deriv @ self.layers[i + 1].neurons.W_basal
+                gradient += feedback
+
+            # Update: x_l += lr * (gradient of -F) = x_l -= lr * (gradient of F)
+            # Since gradient = -∂F/∂x_l, we do: x_l += lr * gradient
+            new_state = layer.get_state() + self.inference_lr * gradient
+            layer.state.copy_(new_state)
 
     def compute_reconstruction(self) -> torch.Tensor:
         """
