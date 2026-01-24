@@ -119,18 +119,20 @@ class BackboneNetwork(nn.Module):
         # Bottom-up pass
         for i, layer in enumerate(self.layers):
             if i == 0:
-                # First layer receives input
+                # First layer receives sensory input
                 input_below = self.input_buffer
             else:
-                # Receive signal from layer below
-                input_below = self.layers[i - 1].compute_signal_for_above()
+                # Receive RAW state from layer below
+                # The neuron's W_basal will transform it internally
+                input_below = self.layers[i - 1].get_state()
 
             if i == len(self.layers) - 1:
                 # Top layer predicts itself (self-prediction)
                 input_above = layer.get_state()
             else:
-                # Receive prediction from layer above
-                input_above = self.layers[i + 1].compute_prediction_for_below()
+                # Receive RAW state from layer above
+                # The neuron's W_apical will transform it internally
+                input_above = self.layers[i + 1].get_state()
 
             # Update layer state
             layer(input_below, input_above)
@@ -194,21 +196,22 @@ class BackboneNetwork(nn.Module):
             layer.error = layer_error
 
             # Get inputs for weight update
-            # CRITICAL: Must use the SAME inputs that were used during forward pass
-            # Otherwise Hebbian rule ΔW = lr * error * input is inconsistent
+            # CRITICAL: Use RAW STATES for Hebbian learning (per architecture doc)
+            # ΔW_apical = lr * error * layer_above_state (RAW, not transformed)
+            # ΔW_basal = lr * error * layer_below_state (RAW, not transformed)
             if i == 0:
                 # First layer receives sensory input from below
                 input_from_below = self.input_buffer
             else:
-                # Higher layers receive transformed signal from layer below
-                input_from_below = self.layers[i - 1].compute_signal_for_above()
+                # Higher layers: use RAW state from layer below
+                input_from_below = self.layers[i - 1].get_state()
 
             if i == len(self.layers) - 1:
-                # Top layer: use own state as apical input (matches inference)
+                # Top layer: use own state (no layer above)
                 input_from_above = layer.get_state()
             else:
-                # Other layers receive prediction from layer above
-                input_from_above = self.layers[i + 1].compute_prediction_for_below()
+                # Other layers: use RAW state from layer above
+                input_from_above = self.layers[i + 1].get_state()
 
             # Update weights using local learning rule
             # ΔW_apical = lr * error * input_from_above
