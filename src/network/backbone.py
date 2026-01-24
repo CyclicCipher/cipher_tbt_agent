@@ -33,7 +33,8 @@ class BackboneNetwork(nn.Module):
         initial_gate: float = 0.5,
         dtype: torch.dtype = torch.float16,
         device: str = "cuda",
-        inference_lr: float = 0.1
+        inference_lr: float = 0.1,
+        temperature: float = 0.0
     ):
         """
         Initialize backbone network.
@@ -46,6 +47,7 @@ class BackboneNetwork(nn.Module):
             dtype: Data type for computations
             device: Device to run on ("cuda" or "cpu")
             inference_lr: Learning rate for inference phase (state updates)
+            temperature: Noise level for Langevin dynamics (0.0 = no noise, >0 = simulated annealing)
         """
         super().__init__()
 
@@ -56,6 +58,7 @@ class BackboneNetwork(nn.Module):
         self.dtype = dtype
         self.device = device
         self.inference_lr = inference_lr
+        self.temperature = temperature
 
         # Build layer stack
         self.layers = nn.ModuleList()
@@ -158,12 +161,20 @@ class BackboneNetwork(nn.Module):
                 error_times_deriv = errors[i + 1] * tanh_derivative
 
                 # Project back through W^T_{l+1}
-                feedback = error_times_deriv @ self.layers[i + 1].neurons.W_basal
+                # Shape: (num_neurons_l, num_neurons_l+1) @ (num_neurons_l+1,) = (num_neurons_l,)
+                feedback = self.layers[i + 1].neurons.W_basal.T @ error_times_deriv
                 gradient += feedback
 
             # Update: x_l += lr * (gradient of -F) = x_l -= lr * (gradient of F)
             # Since gradient = -∂F/∂x_l, we do: x_l += lr * gradient
             new_state = layer.get_state() + self.inference_lr * gradient
+
+            # Add Langevin noise for simulated annealing / escape from local minima
+            # Analogous to "heating" the system like protein denaturation
+            if self.temperature > 0:
+                noise = torch.randn_like(new_state) * (self.temperature ** 0.5)
+                new_state = new_state + noise
+
             layer.state.copy_(new_state)
 
     def compute_reconstruction(self) -> torch.Tensor:
