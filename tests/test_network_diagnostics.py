@@ -5,7 +5,11 @@ Tests learning with more iterations and detailed logging to identify issues.
 """
 
 import sys
-sys.path.insert(0, '/home/user/predictive-coding-agent')
+from pathlib import Path
+
+# Add project root to path (works on Windows and Linux)
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 import torch
 from src.network.backbone import BackboneNetwork
