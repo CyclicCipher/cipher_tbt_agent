@@ -33,9 +33,12 @@ def test_learning_diagnostics():
     # Create fixed input pattern
     sensory_input = torch.randn(input_size)
 
+    inference_iters = 20
+    learning_rate = 0.01
+
     print(f"\nTraining on fixed input for 50 iterations...")
-    print(f"Learning rate: 0.01")
-    print(f"Inference iterations per update: 5\n")
+    print(f"Learning rate: {learning_rate}")
+    print(f"Inference iterations per update: {inference_iters}\n")
 
     errors = []
     reconstruction_errors = []
@@ -44,7 +47,7 @@ def test_learning_diagnostics():
 
     for iteration in range(50):
         # Forward pass
-        network.forward(sensory_input, num_iterations=5)
+        network.forward(sensory_input, num_iterations=inference_iters)
 
         # Compute errors
         total_error = network.compute_total_error()
@@ -66,7 +69,7 @@ def test_learning_diagnostics():
             weight_norms[i]['basal'].append(w_basal_norm)
 
         # Update weights
-        network.update_weights(lr=0.01)
+        network.update_weights(lr=learning_rate)
 
         # Print progress every 5 iterations
         if iteration % 5 == 0 or iteration < 10:
