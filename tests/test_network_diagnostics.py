@@ -34,7 +34,7 @@ def test_learning_diagnostics():
     sensory_input = torch.randn(input_size)
 
     inference_iters = 20
-    learning_rate = 0.01
+    learning_rate = 0.1  # Increased 10x - weights barely changing at 0.01
 
     print(f"\nTraining on fixed input for 50 iterations...")
     print(f"Learning rate: {learning_rate}")
