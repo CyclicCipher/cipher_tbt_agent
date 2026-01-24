@@ -216,17 +216,18 @@ class BackboneNetwork(nn.Module):
 
         return (input_error + layer_errors).item()
 
-    def update_weights(self, lr: float) -> None:
+    def update_weights(self, lr: float, weight_decay: float = 0.01) -> None:
         """
         Update all weights using local learning rules from prospective learning.
 
         In prospective learning/predictive coding:
         1. Each layer's error = its state - prediction from layer above (value error)
-        2. Weights updated using local Hebbian rules: ΔW = lr * error * input
+        2. Weights updated using local Hebbian rules: ΔW = lr * error * input - decay * W
         3. No backpropagation or error projection through weights
 
         Args:
             lr: Learning rate
+            weight_decay: L2 regularization coefficient (default 0.01, critical for stability)
         """
         # Update each layer using value error (state - prediction_from_above)
         for i in range(len(self.layers)):
@@ -264,13 +265,14 @@ class BackboneNetwork(nn.Module):
                 # Other layers: use RAW state from layer above
                 input_from_above = self.layers[i + 1].get_state()
 
-            # Update weights using local learning rule
-            # ΔW_apical = lr * error * input_from_above
-            # ΔW_basal = lr * error * input_from_below
+            # Update weights using local learning rule with L2 regularization
+            # ΔW_apical = lr * error * input_from_above - weight_decay * W_apical
+            # ΔW_basal = lr * error * input_from_below - weight_decay * W_basal
             layer.update_weights(
                 input_from_below=input_from_below,
                 input_from_above=input_from_above,
-                lr=lr
+                lr=lr,
+                weight_decay=weight_decay
             )
 
     def reset_states(self) -> None:

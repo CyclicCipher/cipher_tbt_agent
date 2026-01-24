@@ -133,21 +133,24 @@ class PredictiveCodingLayer(nn.Module):
         self,
         input_from_below: torch.Tensor,
         input_from_above: torch.Tensor,
-        lr: float
+        lr: float,
+        weight_decay: float = 0.01
     ) -> None:
         """
-        Update weights using current error.
+        Update weights using current error with L2 regularization.
 
         Args:
             input_from_below: Basal input used in forward pass
             input_from_above: Apical input used in forward pass
             lr: Learning rate
+            weight_decay: L2 regularization coefficient (default 0.01)
         """
         self.neurons.update_weights(
             apical_input=input_from_above,
             basal_input=input_from_below,
             error=self.error,
-            lr=lr
+            lr=lr,
+            weight_decay=weight_decay
         )
 
     def reset_state(self) -> None:

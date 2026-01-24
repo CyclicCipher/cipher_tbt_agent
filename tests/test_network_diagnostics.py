@@ -35,7 +35,7 @@ def test_learning_diagnostics():
     sensory_input = torch.randn(input_size)
 
     inference_iters = 50  # Increased from 20 - need more iterations for proper convergence
-    learning_rate = 0.001  # Balanced for Xavier init - Song et al. use 0.001
+    learning_rate = 0.0005  # Reduced to prevent divergence (was 0.001, caused instability)
 
     print(f"\nTraining on fixed input for 50 iterations...")
     print(f"Learning rate: {learning_rate}")

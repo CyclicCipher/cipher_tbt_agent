@@ -115,27 +115,31 @@ class TwoCompartmentNeuron(nn.Module):
         apical_input: torch.Tensor,
         basal_input: torch.Tensor,
         error: torch.Tensor,
-        lr: float
+        lr: float,
+        weight_decay: float = 0.01
     ) -> None:
         """
-        Update weights using local learning rules.
+        Update weights using local learning rules with L2 regularization.
 
         Args:
             apical_input: Apical input used in forward pass
             basal_input: Basal input used in forward pass
             error: Prediction error from compute_error()
             lr: Learning rate
+            weight_decay: L2 regularization coefficient (default 0.01, prevents divergence)
         """
-        # Update weights via gradient descent on energy function
-        # Energy minimization: ΔW = -η * ∂E/∂W
+        # Update weights to minimize prediction error with L2 regularization
+        # ΔW = +η * error * input - λ * W (Hebbian learning + weight decay)
+        # If error = state - prediction is positive, increase weights to strengthen prediction
         with torch.no_grad():
             # Reshape error to (num_neurons, 1) for broadcasting
             error_col = error.unsqueeze(1)
 
             # Outer product: error (N,1) @ input (1,M) -> (N,M)
-            # Using SUBTRACTION for gradient descent (not addition)
-            self.W_apical -= lr * error_col * apical_input.unsqueeze(0)
-            self.W_basal -= lr * error_col * basal_input.unsqueeze(0)
+            # Hebbian term: +lr * error * input
+            # Regularization term: -weight_decay * W (prevents unbounded growth)
+            self.W_apical += lr * error_col * apical_input.unsqueeze(0) - weight_decay * self.W_apical
+            self.W_basal += lr * error_col * basal_input.unsqueeze(0) - weight_decay * self.W_basal
 
             # Update gate: move toward compartment that was more accurate
             apical_activity = torch.tanh(self.W_apical @ apical_input)
