@@ -122,14 +122,16 @@ class TwoCompartmentNeuron(nn.Module):
             error: Prediction error from compute_error()
             lr: Learning rate
         """
-        # Update apical weights: ΔW = lr * error * input
+        # Update weights via gradient descent on energy function
+        # Energy minimization: ΔW = -η * ∂E/∂W
         with torch.no_grad():
             # Reshape error to (num_neurons, 1) for broadcasting
             error_col = error.unsqueeze(1)
 
             # Outer product: error (N,1) @ input (1,M) -> (N,M)
-            self.W_apical += lr * error_col * apical_input.unsqueeze(0)
-            self.W_basal += lr * error_col * basal_input.unsqueeze(0)
+            # Using SUBTRACTION for gradient descent (not addition)
+            self.W_apical -= lr * error_col * apical_input.unsqueeze(0)
+            self.W_basal -= lr * error_col * basal_input.unsqueeze(0)
 
             # Update gate: move toward compartment that was more accurate
             apical_activity = torch.tanh(self.W_apical @ apical_input)
