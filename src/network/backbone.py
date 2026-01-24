@@ -108,6 +108,17 @@ class BackboneNetwork(nn.Module):
         # Set input buffer
         self.input_buffer.copy_(sensory_input)
 
+        # Initialize states with feedforward pass (critical for higher layers to activate)
+        # Without this, states start at zero and higher layers receive zero input
+        for i, layer in enumerate(self.layers):
+            if i == 0:
+                input_below = self.input_buffer
+            else:
+                input_below = self.layers[i - 1].get_state()
+
+            # Initialize state to bottom-up prediction
+            layer.state.copy_(torch.tanh(layer.neurons.W_basal @ input_below))
+
         # Iterative inference to reach equilibrium
         for _ in range(num_iterations):
             self._inference_step()

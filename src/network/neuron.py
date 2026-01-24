@@ -49,13 +49,17 @@ class TwoCompartmentNeuron(nn.Module):
         self.dtype = dtype
 
         # Apical weights (top-down predictions)
+        # Xavier initialization for tanh: scale = sqrt(1 / fan_in)
+        apical_scale = (1.0 / apical_size) ** 0.5
         self.W_apical = nn.Parameter(
-            torch.randn(num_neurons, apical_size, dtype=dtype) * 0.01
+            torch.randn(num_neurons, apical_size, dtype=dtype) * apical_scale
         )
 
         # Basal weights (bottom-up signals)
+        # Xavier initialization for tanh: scale = sqrt(1 / fan_in)
+        basal_scale = (1.0 / basal_size) ** 0.5
         self.W_basal = nn.Parameter(
-            torch.randn(num_neurons, basal_size, dtype=dtype) * 0.01
+            torch.randn(num_neurons, basal_size, dtype=dtype) * basal_scale
         )
 
         # Gate parameter (learnable)
