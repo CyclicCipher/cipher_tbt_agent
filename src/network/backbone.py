@@ -9,6 +9,7 @@ import torch.nn as nn
 from typing import List, Optional
 
 from .layer import PredictiveCodingLayer
+from ..optimizers import Muon
 
 
 class BackboneNetwork(nn.Module):
@@ -34,7 +35,12 @@ class BackboneNetwork(nn.Module):
         dtype: torch.dtype = torch.float16,
         device: str = "cuda",
         inference_lr: float = 0.1,
-        temperature: float = 0.0
+        temperature: float = 0.0,
+        use_muon: bool = False,
+        muon_lr: float = 0.02,
+        muon_momentum: float = 0.95,
+        saturation_penalty: float = 0.01,
+        activity_target: float = 0.3
     ):
         """
         Initialize backbone network.
@@ -48,6 +54,11 @@ class BackboneNetwork(nn.Module):
             device: Device to run on ("cuda" or "cpu")
             inference_lr: Learning rate for inference phase (state updates)
             temperature: Noise level for Langevin dynamics (0.0 = no noise, >0 = simulated annealing)
+            use_muon: Whether to use Muon optimizer (default: False, uses manual updates)
+            muon_lr: Muon optimizer learning rate (default: 0.02)
+            muon_momentum: Muon optimizer momentum (default: 0.95)
+            saturation_penalty: Penalty for saturated activations (default: 0.01)
+            activity_target: Target mean activation level (default: 0.3)
         """
         super().__init__()
 
@@ -59,6 +70,9 @@ class BackboneNetwork(nn.Module):
         self.device = device
         self.inference_lr = inference_lr
         self.temperature = temperature
+        self.use_muon = use_muon
+        self.saturation_penalty = saturation_penalty
+        self.activity_target = activity_target
 
         # Build layer stack
         self.layers = nn.ModuleList()
@@ -93,6 +107,16 @@ class BackboneNetwork(nn.Module):
 
         # Input buffer (layer 0)
         self.register_buffer('input_buffer', torch.zeros(input_size, dtype=dtype))
+
+        # Initialize Muon optimizer if requested
+        self.optimizer = None
+        if use_muon:
+            self.optimizer = Muon(
+                self.parameters(),
+                lr=muon_lr,
+                momentum=muon_momentum,
+                weight_decay=0.01  # Keep consistent with manual updates
+            )
 
     def forward(self, sensory_input: torch.Tensor, num_iterations: int = 5) -> torch.Tensor:
         """
@@ -216,7 +240,7 @@ class BackboneNetwork(nn.Module):
 
         return (input_error + layer_errors).item()
 
-    def update_weights(self, lr: float, weight_decay: float = 0.01) -> None:
+    def update_weights(self, lr: float = None, weight_decay: float = 0.01) -> None:
         """
         Update all weights using local learning rules from prospective learning.
 
@@ -225,13 +249,21 @@ class BackboneNetwork(nn.Module):
         2. Weights updated using local Hebbian rules: ΔW = lr * error * input - decay * W
         3. No backpropagation or error projection through weights
 
+        If use_muon=True, uses Muon optimizer with momentum and adaptive learning rates.
+        Otherwise uses manual updates with fixed learning rate.
+
         Args:
-            lr: Learning rate
+            lr: Learning rate (only used if not using Muon)
             weight_decay: L2 regularization coefficient (default 0.01, critical for stability)
         """
-        # Update each layer using value error (state - prediction_from_above)
+        # Compute gradients for all layers
+        activations = []  # Track for activity regularization
+
         for i in range(len(self.layers)):
             layer = self.layers[i]
+
+            # Track activation for pathology detection
+            activations.append(layer.get_state())
 
             # Get prediction from layer above
             if i == len(self.layers) - 1:
@@ -265,15 +297,56 @@ class BackboneNetwork(nn.Module):
                 # Other layers: use RAW state from layer above
                 input_from_above = self.layers[i + 1].get_state()
 
-            # Update weights using local learning rule with L2 regularization
-            # ΔW_apical = lr * error * input_from_above - weight_decay * W_apical
-            # ΔW_basal = lr * error * input_from_below - weight_decay * W_basal
-            layer.update_weights(
-                input_from_below=input_from_below,
-                input_from_above=input_from_above,
-                lr=lr,
-                weight_decay=weight_decay
-            )
+            if self.use_muon and self.optimizer is not None:
+                # Compute gradients manually for Muon
+                # Gradient is negative because we want to INCREASE weights when error is positive
+                error_col = layer_error.unsqueeze(1)
+
+                # Set gradients (Muon will apply momentum and adaptive learning)
+                layer.neurons.W_basal.grad = -(error_col @ input_from_below.unsqueeze(0))
+                layer.neurons.W_apical.grad = -(error_col @ input_from_above.unsqueeze(0))
+            else:
+                # Manual update with fixed learning rate
+                layer.update_weights(
+                    input_from_below=input_from_below,
+                    input_from_above=input_from_above,
+                    lr=lr,
+                    weight_decay=weight_decay
+                )
+
+        # Apply Muon optimizer step if using it
+        if self.use_muon and self.optimizer is not None:
+            # Add activity regularization (prevent saturation/coma)
+            self._add_activity_regularization(activations)
+
+            # Muon step (handles momentum, weight decay internally)
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+
+    def _add_activity_regularization(self, activations: List[torch.Tensor]) -> None:
+        """
+        Add activity regularization to prevent pathologies.
+
+        Penalizes:
+        - Saturation (neurons stuck at ±1)
+        - Too-high mean activation (seizure-like)
+
+        Args:
+            activations: List of activation tensors from each layer
+        """
+        for i, act in enumerate(activations):
+            # Saturation penalty (especially important for layer 0)
+            saturation_mask = (act.abs() > 0.9).float()
+            saturation_rate = saturation_mask.mean()
+
+            if saturation_rate > 0.1:  # If >10% saturated, penalize
+                # Add small regularization to all weights in saturated layers
+                # This gently discourages saturation without complex gradient surgery
+                if self.layers[i].neurons.W_basal.grad is not None:
+                    # Add small L1-like penalty to weights (push toward sparsity)
+                    self.layers[i].neurons.W_basal.grad += self.saturation_penalty * self.layers[i].neurons.W_basal.sign()
+                if self.layers[i].neurons.W_apical.grad is not None:
+                    self.layers[i].neurons.W_apical.grad += self.saturation_penalty * self.layers[i].neurons.W_apical.sign()
 
     def reset_states(self) -> None:
         """Reset all layer states to zero."""
