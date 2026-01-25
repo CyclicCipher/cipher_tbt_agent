@@ -50,10 +50,15 @@ class TwoCompartmentNeuron(nn.Module):
 
         # Apical weights (top-down predictions)
         # Xavier initialization for tanh: scale = sqrt(1 / fan_in)
-        apical_scale = (1.0 / apical_size) ** 0.5
-        self.W_apical = nn.Parameter(
-            torch.randn(num_neurons, apical_size, dtype=dtype) * apical_scale
-        )
+        # Top layer has no layer above (apical_size=0), so no apical weights
+        if apical_size > 0:
+            apical_scale = (1.0 / apical_size) ** 0.5
+            self.W_apical = nn.Parameter(
+                torch.randn(num_neurons, apical_size, dtype=dtype) * apical_scale
+            )
+        else:
+            # Top layer: no apical weights
+            self.W_apical = None
 
         # Basal weights (bottom-up signals)
         # Xavier initialization for tanh: scale = sqrt(1 / fan_in)
@@ -100,14 +105,18 @@ class TwoCompartmentNeuron(nn.Module):
             Neuron state (num_neurons,)
         """
         # Compute compartment activities
-        apical_activity = torch.tanh(self.W_apical @ apical_input)
         basal_activity = torch.tanh(self.W_basal @ basal_input)
 
-        # Gate parameter (clamp to [0, 1])
-        gate = torch.clamp(self.gate, 0.0, 1.0)
-
-        # Integrate spatial inputs: gate * apical + (1 - gate) * basal
-        spatial_state = gate * apical_activity + (1 - gate) * basal_activity
+        # Top layer has no apical input (no layer above)
+        if self.W_apical is not None:
+            apical_activity = torch.tanh(self.W_apical @ apical_input)
+            # Gate parameter (clamp to [0, 1])
+            gate = torch.clamp(self.gate, 0.0, 1.0)
+            # Integrate spatial inputs: gate * apical + (1 - gate) * basal
+            spatial_state = gate * apical_activity + (1 - gate) * basal_activity
+        else:
+            # Top layer: only basal activity (no top-down prediction)
+            spatial_state = basal_activity
 
         # Add temporal/recurrent contribution
         if use_temporal:
