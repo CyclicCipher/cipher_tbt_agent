@@ -160,23 +160,41 @@ class BackboneNetwork(nn.Module):
                 patience=50
             )
 
-    def forward(self, sensory_input: torch.Tensor, num_iterations: int = 5) -> torch.Tensor:
+    def forward(self, sensory_input: torch.Tensor, num_iterations: int = 5,
+                input_layer: int = 0, clamp_input: bool = True) -> torch.Tensor:
         """
         Forward pass with iterative inference.
 
         Args:
-            sensory_input: Sensory input tensor (input_size,)
+            sensory_input: Sensory input tensor (size depends on input_layer)
             num_iterations: Number of inference iterations to reach equilibrium
+            input_layer: Which layer to inject input (0=bottom/motor, -1 or num_layers-1=top/sensory)
+            clamp_input: If True, clamp input layer to sensory_input during inference
 
         Returns:
             Final state of top layer
         """
-        # Set input buffer
-        self.input_buffer.copy_(sensory_input)
+        # Handle negative indexing
+        if input_layer < 0:
+            input_layer = len(self.layers) + input_layer
+
+        # Validate input layer
+        if input_layer == 0:
+            # Input at layer 0 uses input_buffer (legacy behavior)
+            self.input_buffer.copy_(sensory_input)
+        elif 0 < input_layer < len(self.layers):
+            # Input at hidden layers: initialize that layer's state
+            self.layers[input_layer].state.copy_(sensory_input)
+        else:
+            raise ValueError(f"Invalid input_layer {input_layer}. Must be 0 to {len(self.layers)-1}")
 
         # Initialize states with feedforward pass (critical for higher layers to activate)
         # Without this, states start at zero and higher layers receive zero input
         for i, layer in enumerate(self.layers):
+            # Skip initialization for the input layer (already set)
+            if i == input_layer:
+                continue
+
             if i == 0:
                 input_below = self.input_buffer
             else:
@@ -186,12 +204,18 @@ class BackboneNetwork(nn.Module):
             layer.state.copy_(torch.tanh(layer.neurons.W_basal @ input_below))
 
         # Iterative inference to reach equilibrium
+        # Only clamp if input is injected at non-zero layer
+        clamp_during_inference = (clamp_input and input_layer > 0)
         for _ in range(num_iterations):
-            self._inference_step()
+            self._inference_step(
+                clamp_layer=input_layer if clamp_during_inference else None,
+                clamp_value=sensory_input if clamp_during_inference else None
+            )
 
         return self.layers[-1].get_state()
 
-    def _inference_step(self) -> None:
+    def _inference_step(self, clamp_layer: Optional[int] = None,
+                       clamp_value: Optional[torch.Tensor] = None) -> None:
         """
         Single step of inference: update states via gradient descent on free energy.
 
@@ -202,6 +226,10 @@ class BackboneNetwork(nn.Module):
 
         Note: W_l in paper corresponds to layer[l].neurons.W_basal in our code
         (both connect layer l-1 to layer l).
+
+        Args:
+            clamp_layer: Optional layer index to clamp (keep fixed)
+            clamp_value: Value to clamp the layer to
         """
         # Compute prediction errors for all layers
         # ε_l = x_l - f(W_basal @ x_{l-1})
@@ -221,6 +249,11 @@ class BackboneNetwork(nn.Module):
 
         # Update states via gradient descent: ẋ_l = -∂F/∂x_l
         for i, layer in enumerate(self.layers):
+            # Skip update if this layer is clamped
+            if clamp_layer is not None and i == clamp_layer:
+                layer.state.copy_(clamp_value)
+                continue
+
             # Gradient term 1: -ε_l (local error)
             gradient = -errors[i]
 
@@ -287,7 +320,7 @@ class BackboneNetwork(nn.Module):
 
         return (input_error + layer_errors).item()
 
-    def update_weights(self, lr: float = None, weight_decay: float = 0.01) -> None:
+    def update_weights(self, lr: float = None, weight_decay: float = 0.01, motor_target: torch.Tensor = None) -> None:
         """
         Update all weights using local learning rules from prospective learning.
 
@@ -296,6 +329,11 @@ class BackboneNetwork(nn.Module):
         2. Weights updated using local Hebbian rules: ΔW = lr * error * input - decay * W
         3. No backpropagation or error projection through weights
 
+        For supervised motor pre-training:
+        - If motor_target is provided, clamp layer 0 (motor output) to target
+        - Network learns sensory input -> motor output mapping
+        - This is supervised pre-training before full predictive coding
+
         If use_muon=True, uses Muon optimizer (momentum in neuron space).
         If use_adam=True, uses Adam optimizer (per-parameter adaptive learning rates).
         Otherwise uses manual updates with fixed learning rate.
@@ -303,7 +341,12 @@ class BackboneNetwork(nn.Module):
         Args:
             lr: Learning rate (only used if not using Muon)
             weight_decay: L2 regularization coefficient (default 0.01, critical for stability)
+            motor_target: Optional motor output target for supervised pre-training (shape: neurons_per_layer,)
         """
+        # Supervised pre-training: clamp motor output (layer 0) to target
+        if motor_target is not None:
+            self.layers[0].state.copy_(motor_target)
+
         # Compute gradients for all layers
         activations = []  # Track for activity regularization
 
