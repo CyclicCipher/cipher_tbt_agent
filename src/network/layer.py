@@ -74,7 +74,8 @@ class PredictiveCodingLayer(nn.Module):
     def forward(
         self,
         input_from_below: torch.Tensor,
-        input_from_above: torch.Tensor
+        input_from_above: torch.Tensor,
+        use_temporal: bool = True
     ) -> torch.Tensor:
         """
         Update layer state based on inputs from adjacent layers.
@@ -82,12 +83,13 @@ class PredictiveCodingLayer(nn.Module):
         Args:
             input_from_below: Signal from layer below (basal input)
             input_from_above: Prediction from layer above (apical input)
+            use_temporal: Whether to use temporal/recurrent connections (default: True)
 
         Returns:
             Updated layer state
         """
-        # Compute new state via neuron integration
-        self.state = self.neurons(input_from_above, input_from_below)
+        # Compute new state via neuron integration (includes temporal if enabled)
+        self.state = self.neurons(input_from_above, input_from_below, use_temporal=use_temporal)
         return self.state
 
     def compute_prediction_for_below(self) -> torch.Tensor:
@@ -153,11 +155,19 @@ class PredictiveCodingLayer(nn.Module):
             weight_decay=weight_decay
         )
 
+    def update_temporal_state(self) -> None:
+        """Update temporal state buffer for next timestep (call after each timestep)."""
+        self.neurons.update_temporal_state()
+
     def reset_state(self) -> None:
         """Reset layer state and error to zero."""
         self.state.zero_()
         self.error.zero_()
         self.neurons.reset_state()
+
+    def reset_temporal_state(self) -> None:
+        """Reset temporal state buffer (call when starting new sequence)."""
+        self.neurons.reset_temporal_state()
 
     def get_state(self) -> torch.Tensor:
         """Get current layer state."""

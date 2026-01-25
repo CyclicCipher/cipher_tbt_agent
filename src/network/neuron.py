@@ -62,6 +62,14 @@ class TwoCompartmentNeuron(nn.Module):
             torch.randn(num_neurons, basal_size, dtype=dtype) * basal_scale
         )
 
+        # Recurrent weights (temporal/lateral connections)
+        # For temporal convolution: current state depends on previous state
+        # Smaller initialization (0.1x) to prevent initial instability
+        recurrent_scale = (1.0 / num_neurons) ** 0.5 * 0.1
+        self.W_recurrent = nn.Parameter(
+            torch.randn(num_neurons, num_neurons, dtype=dtype) * recurrent_scale
+        )
+
         # Gate parameter (learnable)
         # Initialized to initial_gate, clamped to [0, 1] during forward pass
         self.gate = nn.Parameter(
@@ -71,17 +79,22 @@ class TwoCompartmentNeuron(nn.Module):
         # Neuron state (maintained across inference iterations)
         self.register_buffer('state', torch.zeros(num_neurons, dtype=dtype))
 
+        # Previous state for temporal processing (maintained across timesteps)
+        self.register_buffer('prev_state', torch.zeros(num_neurons, dtype=dtype))
+
     def forward(
         self,
         apical_input: torch.Tensor,
-        basal_input: torch.Tensor
+        basal_input: torch.Tensor,
+        use_temporal: bool = True
     ) -> torch.Tensor:
         """
-        Compute neuron state from apical and basal inputs.
+        Compute neuron state from apical, basal, and recurrent inputs.
 
         Args:
             apical_input: Top-down prediction from layer above (apical_size,)
             basal_input: Bottom-up signal from layer below (basal_size,)
+            use_temporal: Whether to include recurrent/temporal connections (default: True)
 
         Returns:
             Neuron state (num_neurons,)
@@ -93,8 +106,17 @@ class TwoCompartmentNeuron(nn.Module):
         # Gate parameter (clamp to [0, 1])
         gate = torch.clamp(self.gate, 0.0, 1.0)
 
-        # Integrate: state = gate * apical + (1 - gate) * basal
-        self.state = gate * apical_activity + (1 - gate) * basal_activity
+        # Integrate spatial inputs: gate * apical + (1 - gate) * basal
+        spatial_state = gate * apical_activity + (1 - gate) * basal_activity
+
+        # Add temporal/recurrent contribution
+        if use_temporal:
+            # Recurrent influence from previous timestep
+            recurrent_activity = torch.tanh(self.W_recurrent @ self.prev_state)
+            # Combine spatial and temporal (80% current, 20% temporal for stability)
+            self.state = 0.8 * spatial_state + 0.2 * recurrent_activity
+        else:
+            self.state = spatial_state
 
         return self.state
 
@@ -116,7 +138,8 @@ class TwoCompartmentNeuron(nn.Module):
         basal_input: torch.Tensor,
         error: torch.Tensor,
         lr: float,
-        weight_decay: float = 0.01
+        weight_decay: float = 0.01,
+        update_recurrent: bool = True
     ) -> None:
         """
         Update weights using local learning rules with L2 regularization.
@@ -127,6 +150,7 @@ class TwoCompartmentNeuron(nn.Module):
             error: Prediction error from compute_error()
             lr: Learning rate
             weight_decay: L2 regularization coefficient (default 0.01, prevents divergence)
+            update_recurrent: Whether to update recurrent weights (default True)
         """
         # Update weights to minimize prediction error with L2 regularization
         # ΔW = +η * error * input - λ * W (Hebbian learning + weight decay)
@@ -141,6 +165,11 @@ class TwoCompartmentNeuron(nn.Module):
             self.W_apical += lr * error_col * apical_input.unsqueeze(0) - weight_decay * self.W_apical
             self.W_basal += lr * error_col * basal_input.unsqueeze(0) - weight_decay * self.W_basal
 
+            # Update recurrent weights (temporal learning)
+            if update_recurrent:
+                # Learn temporal dependencies: error @ prev_state^T
+                self.W_recurrent += lr * error_col * self.prev_state.unsqueeze(0) - weight_decay * self.W_recurrent
+
             # Update gate: move toward compartment that was more accurate
             apical_activity = torch.tanh(self.W_apical @ apical_input)
             basal_activity = torch.tanh(self.W_basal @ basal_input)
@@ -150,9 +179,21 @@ class TwoCompartmentNeuron(nn.Module):
             self.gate += lr * gate_update
             self.gate.clamp_(0.0, 1.0)
 
+    def update_temporal_state(self) -> None:
+        """
+        Update temporal state buffer for next timestep.
+
+        Call this after processing each timestep to maintain temporal continuity.
+        """
+        self.prev_state.copy_(self.state)
+
     def reset_state(self) -> None:
         """Reset neuron state to zero."""
         self.state.zero_()
+
+    def reset_temporal_state(self) -> None:
+        """Reset temporal state buffer (call when starting new sequence)."""
+        self.prev_state.zero_()
 
     def get_state(self) -> torch.Tensor:
         """Get current neuron state."""
