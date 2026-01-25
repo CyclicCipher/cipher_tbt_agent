@@ -9,7 +9,7 @@ import torch.nn as nn
 from typing import List, Optional
 
 from .layer import PredictiveCodingLayer
-from ..optimizers import Muon
+from ..optimizers import Muon, StableProspectiveLearning
 
 
 class BackboneNetwork(nn.Module):
@@ -42,6 +42,12 @@ class BackboneNetwork(nn.Module):
         use_adam: bool = False,
         adam_lr: float = 0.001,
         adam_betas: tuple = (0.9, 0.999),
+        use_stable: bool = False,
+        stable_lr: float = 0.001,
+        stable_max_iterations: int = 400,
+        stable_lr_schedule: str = "cosine",
+        stable_decay_strong: float = 0.01,
+        stable_decay_weak: float = 0.001,
         saturation_penalty: float = 0.01,
         activity_target: float = 0.3
     ):
@@ -63,6 +69,12 @@ class BackboneNetwork(nn.Module):
             use_adam: Whether to use Adam optimizer (default: False)
             adam_lr: Adam optimizer learning rate (default: 0.001)
             adam_betas: Adam optimizer beta parameters (default: (0.9, 0.999))
+            use_stable: Whether to use StableProspectiveLearning optimizer (default: False)
+            stable_lr: StableProspectiveLearning initial learning rate (default: 0.001)
+            stable_max_iterations: Max iterations for LR scheduling (default: 400)
+            stable_lr_schedule: LR schedule type - "cosine", "linear", "exponential" (default: "cosine")
+            stable_decay_strong: Weight decay far from solution (default: 0.01)
+            stable_decay_weak: Weight decay near solution (default: 0.001)
             saturation_penalty: Penalty for saturated activations (default: 0.01)
             activity_target: Target mean activation level (default: 0.3)
         """
@@ -78,6 +90,7 @@ class BackboneNetwork(nn.Module):
         self.temperature = temperature
         self.use_muon = use_muon
         self.use_adam = use_adam
+        self.use_stable = use_stable
         self.saturation_penalty = saturation_penalty
         self.activity_target = activity_target
 
@@ -117,8 +130,9 @@ class BackboneNetwork(nn.Module):
 
         # Initialize optimizer if requested
         self.optimizer = None
-        if use_muon and use_adam:
-            raise ValueError("Cannot use both Muon and Adam optimizers simultaneously. Choose one.")
+        num_optimizers = sum([use_muon, use_adam, use_stable])
+        if num_optimizers > 1:
+            raise ValueError("Cannot use multiple optimizers simultaneously. Choose one.")
         elif use_muon:
             self.optimizer = Muon(
                 self.parameters(),
@@ -132,6 +146,18 @@ class BackboneNetwork(nn.Module):
                 lr=adam_lr,
                 betas=adam_betas,
                 weight_decay=0.01
+            )
+        elif use_stable:
+            self.optimizer = StableProspectiveLearning(
+                self.parameters(),
+                lr=stable_lr,
+                max_iterations=stable_max_iterations,
+                lr_schedule=stable_lr_schedule,
+                weight_decay_strong=stable_decay_strong,
+                weight_decay_weak=stable_decay_weak,
+                stability_threshold=1.2,
+                early_stopping=False,
+                patience=50
             )
 
     def forward(self, sensory_input: torch.Tensor, num_iterations: int = 5) -> torch.Tensor:
@@ -342,7 +368,12 @@ class BackboneNetwork(nn.Module):
             self._add_activity_regularization(activations)
 
             # Optimizer step (handles momentum, adaptive LR, weight decay internally)
-            self.optimizer.step()
+            # For StableProspectiveLearning, pass current error for adaptive decay
+            if self.use_stable:
+                current_error = ((self.input_buffer - self.compute_reconstruction())**2).sum().item()
+                self.optimizer.step(current_error=current_error)
+            else:
+                self.optimizer.step()
             self.optimizer.zero_grad()
 
     def _add_activity_regularization(self, activations: List[torch.Tensor]) -> None:
