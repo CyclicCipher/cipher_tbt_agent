@@ -158,6 +158,24 @@ class ModularNetwork(nn.Module):
         # Store all sub-networks as ModuleList for proper registration
         self.all_subnetworks = nn.ModuleList(subnetworks)
 
+        # Cross-position prediction weights (position N → position N-1)
+        # This allows higher positions to send top-down predictions to lower positions
+        self.cross_position_predictions = nn.ParameterDict()
+
+        # Create prediction weights from position 1 to position 0
+        if 1 in self.subnetworks_by_position and 0 in self.subnetworks_by_position:
+            for subnet_pos1 in self.subnetworks_by_position[1]:
+                for subnet_pos0 in self.subnetworks_by_position[0]:
+                    # Higher position predicts bottom layer of lower position subnet
+                    key = f"{subnet_pos1.name}_to_{subnet_pos0.name}"
+                    pred_size = subnet_pos0.layers[0].size  # Target: bottom layer
+                    source_size = subnet_pos1.layers[-1].size  # Source: top layer
+
+                    # Initialize with small random weights
+                    self.cross_position_predictions[key] = nn.Parameter(
+                        torch.randn(pred_size, source_size, dtype=dtype, device=device) * 0.01
+                    )
+
         # Validate architecture
         self._validate_architecture()
 
@@ -338,6 +356,23 @@ class ModularNetwork(nn.Module):
                 feedback = subnet.layers[i + 1].neurons.W_basal.T @ error_times_deriv
                 gradient += feedback
 
+            # Gradient term 3: cross-position feedback from higher position
+            # For layer 0 of position 0 subnets, add feedback from position 1
+            if i == 0 and subnet.position == 0 and 1 in self.subnetworks_by_position:
+                for subnet_pos1 in self.subnetworks_by_position[1]:
+                    key = f"{subnet_pos1.name}_to_{subnet.name}"
+                    if key in self.cross_position_predictions:
+                        # Get top-down prediction from position 1
+                        assoc_top_state = subnet_pos1.layers[-1].get_state()
+                        top_down_pred = self.cross_position_predictions[key] @ assoc_top_state
+
+                        # Error between current state and top-down prediction
+                        cross_pos_error = layer.get_state() - top_down_pred
+
+                        # Add feedback (push toward top-down prediction)
+                        gradient += -cross_pos_error
+                        break
+
             # Update state
             new_state = layer.get_state() + self.inference_lr * gradient
 
@@ -398,6 +433,34 @@ class ModularNetwork(nn.Module):
                         subnet, concat_input, lr, weight_decay
                     )
                     activations.extend(subnet_activations)
+
+        # Update cross-position prediction weights (position 1 → position 0)
+        if 1 in self.subnetworks_by_position and 0 in self.subnetworks_by_position:
+            for subnet_pos1 in self.subnetworks_by_position[1]:
+                for subnet_pos0 in self.subnetworks_by_position[0]:
+                    key = f"{subnet_pos1.name}_to_{subnet_pos0.name}"
+                    if key in self.cross_position_predictions:
+                        # Get states
+                        target_layer = subnet_pos0.layers[0]  # Bottom layer of position 0
+                        source_layer = subnet_pos1.layers[-1]  # Top layer of position 1
+
+                        # Compute prediction error
+                        prediction = self.cross_position_predictions[key] @ source_layer.get_state()
+                        error = target_layer.get_state() - prediction
+
+                        # Hebbian weight update: ΔW = lr * error * source
+                        error_col = error.unsqueeze(1)
+                        source_row = source_layer.get_state().unsqueeze(0)
+
+                        if self.optimizer is not None:
+                            # Set gradient for optimizer
+                            self.cross_position_predictions[key].grad = -(error_col @ source_row)
+                        else:
+                            # Manual update
+                            self.cross_position_predictions[key].data += (
+                                lr * (error_col @ source_row) -
+                                weight_decay * self.cross_position_predictions[key].data
+                            )
 
         # Apply optimizer step if using one
         if self.optimizer is not None:
