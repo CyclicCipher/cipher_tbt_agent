@@ -68,25 +68,26 @@ vision_subnet = SubNetwork(
 )
 print(f"  Vision subnet: {vision_input_size} input → {vision_subnet.layer_sizes}")
 
-# Motor subnet: Generates character outputs
+# Motor subnet: Generates character outputs with latent motor primitives
 # For Phase 1: Just digits 0-9
 num_digits = 10
+num_motor_latent = 32  # Latent layer for motor primitives/synergies
 motor_subnet = SubNetwork(
     name="motor",
-    layer_sizes=[32, num_digits],  # Small - just executes predictions from above
+    layer_sizes=[num_digits, num_motor_latent],  # Bottom->Top: output->latent primitives
     input_size=num_digits,  # Self-prediction (active inference)
     position=0,
     dtype=dtype,
     device=device
 )
-print(f"  Motor subnet: {num_digits} chars → {motor_subnet.layer_sizes}")
+print(f"  Motor subnet: {num_digits} output → {motor_subnet.layer_sizes} (with latent primitives)")
 
 # Position 1: Association (integrates vision, predicts motor)
 print("\nPosition 1 (Association):")
-# Input = concatenation of Position 0 outputs
+# Input = concatenation of Position 0 outputs (top layers)
 vision_output_size = vision_subnet.layer_sizes[-1]  # 64
-motor_output_size = motor_subnet.layer_sizes[-1]    # 10
-association_input_size = vision_output_size + motor_output_size  # 64 + 10 = 74
+motor_output_size = motor_subnet.layer_sizes[-1]    # 32 (latent layer)
+association_input_size = vision_output_size + motor_output_size  # 64 + 32 = 96
 association_subnet = SubNetwork(
     name="association",
     layer_sizes=[256, 128, 64, num_digits],  # Predicts which digit
@@ -226,9 +227,9 @@ print(f"    Iterations used: {iterations_used} / 50 (saved {50 - iterations_used
 print(f"    Output shape: {output.shape}")
 
 # 6. Decode motor output (active inference)
-# Motor subnet's TOP layer state = action prediction (not bottom!)
-# Motor subnet: [32, 10] → layers[0]=32 neurons, layers[-1]=10 neurons
-motor_state = motor_subnet.layers[-1].get_state()
+# Motor subnet: [10, 32] → layers[0]=10 output neurons, layers[-1]=32 latent neurons
+# Read from BOTTOM layer (layers[0]) = actual motor output
+motor_state = motor_subnet.layers[0].get_state()
 digit_probs = torch.softmax(motor_state, dim=0)
 predicted_digit = torch.argmax(digit_probs).item()
 

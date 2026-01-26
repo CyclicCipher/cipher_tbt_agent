@@ -57,9 +57,10 @@ vision_subnet = SubNetwork(
 )
 
 num_digits = 10
+num_motor_latent = 32  # Latent layer for motor primitives
 motor_subnet = SubNetwork(
     name="motor",
-    layer_sizes=[32, num_digits],
+    layer_sizes=[num_digits, num_motor_latent],  # Bottom->Top: output->latent
     input_size=num_digits,
     position=0,
     dtype=dtype,
@@ -67,7 +68,7 @@ motor_subnet = SubNetwork(
 )
 
 # Position 1: Association
-association_input_size = 64 + num_digits  # vision + motor outputs
+association_input_size = 64 + num_motor_latent  # vision + motor latent outputs
 association_subnet = SubNetwork(
     name="association",
     layer_sizes=[128, 64, num_digits],
@@ -151,8 +152,9 @@ for epoch in range(num_epochs):
             verbose=False
         )
 
-        # Get motor prediction (CORRECTED: use last layer, not first!)
-        motor_prediction = motor_subnet.layers[-1].get_state()
+        # Get motor prediction from BOTTOM layer (output neurons)
+        # Motor subnet: [10, 32] → layers[0]=output, layers[-1]=latent
+        motor_prediction = motor_subnet.layers[0].get_state()
 
         # Compute loss (cross-entropy)
         target = torch.tensor(label, dtype=torch.long, device=device)
@@ -202,7 +204,7 @@ for epoch in range(num_epochs):
                 verbose=False
             )
 
-            motor_prediction = motor_subnet.layers[-1].get_state()
+            motor_prediction = motor_subnet.layers[0].get_state()  # Bottom layer = output
             predicted = torch.argmax(motor_prediction).item()
 
             if predicted == label:
@@ -262,7 +264,7 @@ for digit in [0, 1, 5, 9]:
             verbose=False
         )
 
-        motor_prediction = motor_subnet.layers[-1].get_state()
+        motor_prediction = motor_subnet.layers[0].get_state()  # Bottom layer = output
         probs = torch.softmax(motor_prediction, dim=0)
         predicted = torch.argmax(probs).item()
         confidence = probs[predicted].item()
