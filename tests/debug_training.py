@@ -6,13 +6,13 @@ Prints intermediate values to understand what's happening.
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
 import numpy as np
-from network.modular import ModularNetwork, SubNetwork
-from vision.retinal_preprocessing import retinal_preprocessing
-from pretraining.grounded_math_curriculum import GroundedMathCurriculum
+from src.network.modular import ModularNetwork, SubNetwork
+from src.vision.retinal_preprocessing import retinal_preprocessing
+from src.pretraining.grounded_math_curriculum import GroundedMathCurriculum
 
 # Setup
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
