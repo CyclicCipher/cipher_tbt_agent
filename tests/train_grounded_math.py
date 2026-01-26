@@ -143,26 +143,29 @@ for epoch in range(num_epochs):
         visual_input = torch.from_numpy(features.flatten()).to(dtype).to(device)
         motor_input = torch.zeros(num_digits, dtype=dtype, device=device)
 
-        # Forward pass (inference to equilibrium)
-        output, iters_used = optimized_inference(
-            network,
+        # Supervised learning: Create target for clamping
+        target_one_hot = torch.zeros(num_digits, dtype=dtype, device=device)
+        target_one_hot[label] = 1.0
+
+        # Forward pass with CLAMPING during inference (prevents trivial zero solution)
+        # Clamp vision input AND motor target during all inference iterations
+        clamp_layers = {
+            "vision": visual_input,      # Sensory clamping: force to observe input
+            "motor": target_one_hot       # Motor clamping: supervised learning signal
+        }
+
+        output = network.forward(
             {"vision": visual_input, "motor": motor_input},
-            max_iterations=inference_iterations,
-            early_stopping=early_stop,
-            verbose=False
+            num_iterations=inference_iterations,
+            clamp_layers=clamp_layers  # Key: clamp during ALL iterations
         )
 
         # Get motor prediction from BOTTOM layer (output neurons)
         motor_prediction = motor_subnet.layers[0].get_state()
 
-        # Supervised learning: Clamp motor output to target
-        target_one_hot = torch.zeros(num_digits, dtype=dtype, device=device)
-        target_one_hot[label] = 1.0
-
-        # Update weights using predictive coding rules (not standard backprop!)
-        # Motor clamping: Set motor state to target for supervised learning
-        motor_targets = {"motor": target_one_hot}
-        network.update_weights(lr=0.001, weight_decay=0.01, motor_targets=motor_targets)
+        # Update weights using predictive coding rules
+        # No explicit motor_targets needed - already clamped during inference
+        network.update_weights(lr=0.01, weight_decay=0.01)
 
         # Track metrics
         # Compute loss for monitoring (not for backprop) - detach to avoid gradient issues
@@ -200,13 +203,16 @@ for epoch in range(num_epochs):
         motor_input = torch.zeros(num_digits, dtype=dtype, device=device)
 
         # Forward pass (no gradients)
+        # ONLY clamp vision input - let motor emerge from learned mapping
         with torch.no_grad():
-            output, _ = optimized_inference(
-                network,
+            clamp_layers = {
+                "vision": visual_input  # Only sensory clamping, motor free to predict
+            }
+
+            output = network.forward(
                 {"vision": visual_input, "motor": motor_input},
-                max_iterations=inference_iterations,
-                early_stopping=early_stop,
-                verbose=False
+                num_iterations=inference_iterations,
+                clamp_layers=clamp_layers
             )
 
             motor_prediction = motor_subnet.layers[0].get_state()  # Bottom layer = output
@@ -261,12 +267,13 @@ for digit in [0, 1, 5, 9]:
 
     # Predict
     with torch.no_grad():
-        output, _ = optimized_inference(
-            network,
+        # Only clamp vision - let motor emerge
+        clamp_layers = {"vision": visual_input}
+
+        output = network.forward(
             {"vision": visual_input, "motor": motor_input},
-            max_iterations=inference_iterations,
-            early_stopping=early_stop,
-            verbose=False
+            num_iterations=inference_iterations,
+            clamp_layers=clamp_layers
         )
 
         motor_prediction = motor_subnet.layers[0].get_state()  # Bottom layer = output

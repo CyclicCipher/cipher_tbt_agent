@@ -226,13 +226,23 @@ class ModularNetwork(nn.Module):
         ]
         return torch.cat(outputs, dim=0)
 
-    def forward(self, position0_inputs: Dict[str, torch.Tensor], num_iterations: int = 20) -> torch.Tensor:
+    def forward(
+        self,
+        position0_inputs: Dict[str, torch.Tensor],
+        num_iterations: int = 20,
+        clamp_layers: Optional[Dict[str, torch.Tensor]] = None
+    ) -> torch.Tensor:
         """
-        Forward pass with iterative inference.
+        Forward pass with iterative inference and optional clamping.
 
         Args:
             position0_inputs: Dict of inputs for position 0 sub-networks
             num_iterations: Number of inference iterations
+            clamp_layers: Optional dict mapping subnet names to tensors that should be
+                         clamped during ALL inference iterations. Used for:
+                         - Sensory clamping (always): Force sensory input to observed values
+                         - Motor clamping (training): Force motor output to target for supervised learning
+                         - Motor free (testing): Let motor emerge from sensory input
 
         Returns:
             Output from highest position (typically reasoning output)
@@ -243,9 +253,18 @@ class ModularNetwork(nn.Module):
         # Initialize all sub-network states with feedforward pass
         self._initialize_states()
 
-        # Iterative inference to equilibrium
+        # Iterative inference to equilibrium with clamping
         for _ in range(num_iterations):
             self._inference_step()
+
+            # CLAMP: Re-apply clamped values after each inference step
+            # This prevents trivial zero solution
+            if clamp_layers is not None:
+                for subnet_name, clamped_value in clamp_layers.items():
+                    subnet = self.get_subnet(subnet_name)
+                    if subnet is not None:
+                        # Clamp bottom layer (layer 0) of this subnet
+                        subnet.layers[0].state.copy_(clamped_value)
 
         # Return output from highest position
         return self._get_concatenated_output(self.max_position)
