@@ -1,24 +1,23 @@
 # GPT-2 Scale Predictive Coding Network Configuration
 # Target: ~117M parameters (GPT-2 Small scale)
 #
-# Architecture:
-# - 20 layers (vs GPT-2's 12)
-# - 2,560 neurons/layer (vs GPT-2's 768 embedding dim)
-# - Token vocabulary: 50,257 (same as GPT-2)
-# - Context window: 1,024 tokens (same as GPT-2)
+# VRAM Requirements:
+# - GPT-2 Small (115M):  ~4 GB  (RTX 3050 Ti, RTX 3060)
+# - GPT-2 Medium (345M): ~8 GB  (RTX 3070, RTX 4060 Ti)
+# - GPT-2 Large (774M):  ~16 GB (RTX 4080, A100 40GB)
+# - GPT-2 XL (1.5B):     ~32 GB (A100 80GB, Multi-GPU)
 #
-# Parameter count calculation:
-# - Input embedding: 50,257 * 256 = 12.9M
-# - Layer 1: W_basal (2560, 256) + W_apical (2560, 2560) = 0.7M + 6.6M = 7.3M
-# - Layers 2-19: [W_basal (2560, 2560) + W_apical (2560, 2560)] * 18 = 236.9M
-# - Layer 20: W_basal (2560, 2560) + W_apical (2560, 2560) = 13.1M
-# - Output projection: 2560 * 50,257 = 128.7M
-# TOTAL: ~399M parameters (3.4x GPT-2 Small)
+# Memory breakdown for GPT-2 Small (115M params, FP16):
+# - Parameters:     115M × 2 bytes = 230 MB
+# - Gradients:      115M × 2 bytes = 230 MB
+# - Optimizer (Adam): 2 × 230 MB  = 460 MB
+# - Activations (batch=32, seq=1024): ~1.6 GB
+# - Total: ~2.5 GB + overhead = ~4 GB VRAM
 #
-# To match GPT-2 Small exactly (~117M), reduce to:
-# - 12 layers, 2,048 neurons/layer = ~101M parameters
+# To match GPT-2 Small exactly (~117M):
+# - 10 layers × 1,792 neurons/layer = ~115M parameters
 
-# Hardware (requires high-end GPU or multi-GPU)
+# Hardware
 device: "cuda"
 dtype: "float16"  # FP16 for memory efficiency (BF16 better if supported)
 
@@ -135,7 +134,7 @@ distributed:
   world_size: 1
   rank: 0
 
-# Model size summary (for verification)
+# Model size summary (for current config: 12 layers × 2048 neurons)
 # ================================================
 # LAYER CONFIGURATION:
 # - Input embedding: 50,257 × 256 = 12,865,792 params
@@ -144,41 +143,43 @@ distributed:
 # - Layer 12: (2048 × 2048) + (2048 × 2048) = 8,388,608 params
 # - Output projection: 2048 × 50,257 = 102,926,336 params
 #
-# TOTAL: ~213M parameters
+# TOTAL: ~213M parameters (~8 GB VRAM required)
 #
-# To reduce to ~117M (GPT-2 Small):
-# Option 1: Reduce layers to 8: ~141M params
-# Option 2: Reduce neurons to 1536: ~94M params
-# Option 3: Reduce embedding projection overhead
+# To match GPT-2 Small (~117M, 4GB VRAM):
+# RECOMMENDED: 10 layers × 1792 neurons = ~115M params
 #
-# RECOMMENDED: Use 10 layers × 1792 neurons = ~115M params
+# VRAM scaling (FP16 training):
+# - 115M params: ~4 GB   (RTX 3050 Ti works!)
+# - 213M params: ~8 GB   (RTX 3070, RTX 4060 Ti)
+# - 345M params: ~12 GB  (RTX 3080, RTX 4070)
+# - 774M params: ~20 GB  (RTX 4090, A100)
 # ================================================
 
 # Alternative configurations (uncomment to use)
 # ================================================
 
-# # GPT-2 SMALL (117M params) - EXACT MATCH
+# # GPT-2 SMALL (117M params) - EXACT MATCH - 4GB VRAM
 # network:
 #   num_layers: 10
 #   neurons_per_layer: 1792
 #   embedding_dim: 256
 #   vocab_size: 50257
 
-# # GPT-2 MEDIUM (345M params)
+# # GPT-2 MEDIUM (345M params) - 8GB VRAM
 # network:
 #   num_layers: 16
 #   neurons_per_layer: 2560
 #   embedding_dim: 512
 #   vocab_size: 50257
 
-# # GPT-2 LARGE (774M params)
+# # GPT-2 LARGE (774M params) - 16GB VRAM
 # network:
 #   num_layers: 24
 #   neurons_per_layer: 3072
 #   embedding_dim: 768
 #   vocab_size: 50257
 
-# # GPT-2 XL (1.5B params)
+# # GPT-2 XL (1.5B params) - 32GB VRAM
 # network:
 #   num_layers: 36
 #   neurons_per_layer: 4096

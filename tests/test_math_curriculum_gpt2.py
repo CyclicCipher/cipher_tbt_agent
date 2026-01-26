@@ -99,22 +99,37 @@ print(f"  Top layer: {top_layer_params:,}")
 print(f"  Output projection: {output_params:,}")
 print(f"  TOTAL: {total_params:,} ({total_params/1e6:.1f}M)")
 
-# Memory estimate
+# Memory estimate (FP16 training)
 param_memory_mb = (total_params * 2) / (1024 * 1024)  # FP16 = 2 bytes/param
-activation_memory_mb = (num_layers * neurons_per_layer * 2) / (1024 * 1024)
-total_memory_mb = param_memory_mb + activation_memory_mb
+gradient_memory_mb = param_memory_mb  # Gradients same size as params
+optimizer_memory_mb = param_memory_mb * 2  # Adam has 2 states per param
+# Activation memory (rough estimate for batch_size=32, seq_len=1024)
+activation_memory_mb = (num_layers * neurons_per_layer * 32 * 1024 * 2) / (1024 * 1024)
+total_memory_mb = param_memory_mb + gradient_memory_mb + optimizer_memory_mb + activation_memory_mb
 
-print(f"\nMemory estimate:")
-print(f"  Parameters: {param_memory_mb:.1f} MB")
+print(f"\nMemory estimate (FP16 training):")
+print(f"  Parameters:  {param_memory_mb:.1f} MB")
+print(f"  Gradients:   {gradient_memory_mb:.1f} MB")
+print(f"  Optimizer:   {optimizer_memory_mb:.1f} MB")
 print(f"  Activations: {activation_memory_mb:.1f} MB")
-print(f"  Total: {total_memory_mb:.1f} MB")
+print(f"  ─────────────────────────────")
+print(f"  Total:       {total_memory_mb:.1f} MB ({total_memory_mb/1024:.2f} GB)")
 
 if device == 'cuda':
     gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-    print(f"  Available GPU memory: {gpu_memory_gb:.1f} GB")
-    if total_memory_mb / 1024 > gpu_memory_gb * 0.8:
-        print(f"  WARNING: Network may not fit in GPU memory!")
-        print(f"  Consider reducing num_layers or neurons_per_layer")
+    print(f"\n  Available GPU memory: {gpu_memory_gb:.1f} GB")
+    required_gb = total_memory_mb / 1024
+    if required_gb > gpu_memory_gb * 0.9:
+        print(f"  ⚠ WARNING: Network requires ~{required_gb:.1f} GB but only {gpu_memory_gb:.1f} GB available!")
+        print(f"  Recommended configs for your GPU:")
+        if gpu_memory_gb < 6:
+            print(f"    - 10 layers × 1,792 neurons (~115M params, ~4 GB)")
+        elif gpu_memory_gb < 12:
+            print(f"    - 12 layers × 2,048 neurons (~213M params, ~8 GB)")
+        else:
+            print(f"    - 16 layers × 2,560 neurons (~345M params, ~12 GB)")
+    else:
+        print(f"  ✓ Network should fit comfortably ({required_gb:.1f} GB / {gpu_memory_gb:.1f} GB = {100*required_gb/gpu_memory_gb:.0f}% usage)")
 
 print("\n" + "=" * 70)
 print("BUILDING MODULAR NETWORK")

@@ -98,18 +98,22 @@ Network configuration for GPT-2 scale (~117M parameters):
 
 **Architecture Options:**
 
-| Configuration | Layers | Neurons/Layer | Params | Notes |
-|---------------|--------|---------------|--------|-------|
-| **GPT-2 Small** | 10 | 1,792 | ~115M | Recommended |
-| GPT-2 Medium | 16 | 2,560 | ~345M | Requires 32GB+ VRAM |
-| GPT-2 Large | 24 | 3,072 | ~774M | Multi-GPU |
-| GPT-2 XL | 36 | 4,096 | ~1.5B | Research cluster |
+| Configuration | Layers | Neurons/Layer | Params | VRAM | GPU Examples |
+|---------------|--------|---------------|--------|------|--------------|
+| **GPT-2 Small** | 10 | 1,792 | ~115M | **~4 GB** | RTX 3050 Ti, RTX 3060 |
+| GPT-2 Medium | 16 | 2,560 | ~345M | ~8 GB | RTX 3070, RTX 4060 Ti |
+| GPT-2 Large | 24 | 3,072 | ~774M | ~16 GB | RTX 4080, A100 40GB |
+| GPT-2 XL | 36 | 4,096 | ~1.5B | ~32 GB | A100 80GB, Multi-GPU |
 
-**Default Config (Recommended):**
-- 12 layers × 2,048 neurons = ~101M parameters
+**Default Config:**
+- 12 layers × 2,048 neurons = ~213M parameters (~8 GB VRAM)
 - Input embedding: 50,257 tokens × 256 dim
 - Context window: 1,024 tokens (matches GPT-2)
 - FP16 precision for memory efficiency
+
+**Recommended Config (for 4GB GPUs like RTX 3050 Ti):**
+- 10 layers × 1,792 neurons = ~115M parameters (~4 GB VRAM)
+- Same vocab and context window as default
 
 **Optimizer Settings:**
 - StableProspectiveLearning (REQUIRED)
@@ -248,7 +252,7 @@ $ python tests/test_modular_architecture.py
 
 ### Medium-term (Weeks 5-8)
 5. **Scale up to GPT-2 Small (115M params)**
-   - Requires 16GB+ VRAM GPU
+   - Requires 4GB VRAM GPU (RTX 3050 Ti works!)
    - Full math curriculum (10k problems/domain)
    - Test on all three domains
 
