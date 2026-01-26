@@ -267,3 +267,39 @@ def get_visual_input_size(fovea_size: int, periphery_size: int, channels: int = 
     fovea_features = fovea_size * fovea_size * channels
     periphery_features = periphery_size * periphery_size * channels
     return fovea_features + periphery_features
+
+
+def retinal_preprocessing(rgb_patch: np.ndarray) -> np.ndarray:
+    """
+    Simple preprocessing for a single RGB patch (for testing).
+
+    Applies edge detection, no movement (static patch).
+    Returns 3-channel output: [edges, zeros, intensity]
+
+    Args:
+        rgb_patch: RGB image (H, W, 3), values in [0, 255]
+
+    Returns:
+        Processed features (H, W, 3), values in [0, 1]
+    """
+    # Normalize to [0, 1]
+    if rgb_patch.max() > 1.0:
+        rgb_patch = rgb_patch / 255.0
+
+    # Convert to grayscale
+    gray = 0.299 * rgb_patch[:, :, 0] + 0.587 * rgb_patch[:, :, 1] + 0.114 * rgb_patch[:, :, 2]
+
+    # Edge detection (Sobel)
+    gray_uint8 = (gray * 255).astype(np.uint8)
+    sobelx = cv2.Sobel(gray_uint8, cv2.CV_64F, 1, 0, ksize=3)
+    sobely = cv2.Sobel(gray_uint8, cv2.CV_64F, 0, 1, ksize=3)
+    edges = np.sqrt(sobelx**2 + sobely**2)
+    edges = np.clip(edges / 255.0, 0, 1).astype(np.float32)
+
+    # No movement detection (static image)
+    movement = np.zeros_like(gray, dtype=np.float32)
+
+    # Stack: [edges, movement, intensity]
+    features = np.stack([edges, movement, gray], axis=-1)
+
+    return features
