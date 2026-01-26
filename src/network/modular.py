@@ -70,6 +70,9 @@ class SubNetwork(nn.Module):
         # Input buffer for layer 0
         self.input_buffer = torch.zeros(input_size, dtype=dtype, device=device)
 
+        # Move all layers to device
+        self.to(device)
+
         # Parameters for inference
         self.inference_lr = 0.1
         self.temperature = 0.0
