@@ -83,7 +83,10 @@ print(f"  Motor subnet: {num_digits} chars → {motor_subnet.layer_sizes}")
 
 # Position 1: Association (integrates vision, predicts motor)
 print("\nPosition 1 (Association):")
-association_input_size = 64  # From vision top layer
+# Input = concatenation of Position 0 outputs
+vision_output_size = vision_subnet.layer_sizes[-1]  # 64
+motor_output_size = motor_subnet.layer_sizes[-1]    # 10
+association_input_size = vision_output_size + motor_output_size  # 64 + 10 = 74
 association_subnet = SubNetwork(
     name="association",
     layer_sizes=[256, 128, 64, num_digits],  # Predicts which digit
