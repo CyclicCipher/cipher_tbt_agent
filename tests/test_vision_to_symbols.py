@@ -226,8 +226,9 @@ print(f"    Iterations used: {iterations_used} / 50 (saved {50 - iterations_used
 print(f"    Output shape: {output.shape}")
 
 # 6. Decode motor output (active inference)
-# Motor subnet's bottom layer state = action prediction
-motor_state = motor_subnet.layers[0].get_state()
+# Motor subnet's TOP layer state = action prediction (not bottom!)
+# Motor subnet: [32, 10] → layers[0]=32 neurons, layers[-1]=10 neurons
+motor_state = motor_subnet.layers[-1].get_state()
 digit_probs = torch.softmax(motor_state, dim=0)
 predicted_digit = torch.argmax(digit_probs).item()
 
