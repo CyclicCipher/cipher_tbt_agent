@@ -168,8 +168,8 @@ class ModularNetwork(nn.Module):
                 for subnet_pos0 in self.subnetworks_by_position[0]:
                     # Higher position predicts bottom layer of lower position subnet
                     key = f"{subnet_pos1.name}_to_{subnet_pos0.name}"
-                    pred_size = subnet_pos0.layers[0].size  # Target: bottom layer
-                    source_size = subnet_pos1.layers[-1].size  # Source: top layer
+                    pred_size = subnet_pos0.layers[0].num_neurons  # Target: bottom layer
+                    source_size = subnet_pos1.layers[-1].num_neurons  # Source: top layer
 
                     # Initialize with small random weights
                     self.cross_position_predictions[key] = nn.Parameter(
