@@ -5,7 +5,8 @@ Prints intermediate values to understand what's happening.
 """
 
 import sys
-sys.path.append('/home/user/predictive-coding-agent/src')
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 import torch
 import numpy as np
