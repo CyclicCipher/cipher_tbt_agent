@@ -232,7 +232,7 @@ digit_probs = torch.softmax(motor_state, dim=0)
 predicted_digit = torch.argmax(digit_probs).item()
 
 print(f"\n  Motor output (active inference):")
-print(f"    Digit probabilities: {digit_probs.cpu().numpy()}")
+print(f"    Digit probabilities: {digit_probs.detach().cpu().numpy()}")
 print(f"    Predicted digit: {predicted_digit}")
 print(f"    Correct answer: {test_problem.output}")
 print(f"    Match: {str(predicted_digit) == test_problem.output}")
