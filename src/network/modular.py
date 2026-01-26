@@ -263,8 +263,8 @@ class ModularNetwork(nn.Module):
                 for subnet_name, clamped_value in clamp_layers.items():
                     subnet = self.get_subnet(subnet_name)
                     if subnet is not None:
-                        # Clamp bottom layer (layer 0) of this subnet
-                        subnet.layers[0].state.copy_(clamped_value)
+                        # Clamp input buffer (raw input to subnet)
+                        subnet.input_buffer.copy_(clamped_value)
 
         # Return output from highest position
         return self._get_concatenated_output(self.max_position)
