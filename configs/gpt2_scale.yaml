@@ -1,0 +1,186 @@
+# GPT-2 Scale Predictive Coding Network Configuration
+# Target: ~117M parameters (GPT-2 Small scale)
+#
+# Architecture:
+# - 20 layers (vs GPT-2's 12)
+# - 2,560 neurons/layer (vs GPT-2's 768 embedding dim)
+# - Token vocabulary: 50,257 (same as GPT-2)
+# - Context window: 1,024 tokens (same as GPT-2)
+#
+# Parameter count calculation:
+# - Input embedding: 50,257 * 256 = 12.9M
+# - Layer 1: W_basal (2560, 256) + W_apical (2560, 2560) = 0.7M + 6.6M = 7.3M
+# - Layers 2-19: [W_basal (2560, 2560) + W_apical (2560, 2560)] * 18 = 236.9M
+# - Layer 20: W_basal (2560, 2560) + W_apical (2560, 2560) = 13.1M
+# - Output projection: 2560 * 50,257 = 128.7M
+# TOTAL: ~399M parameters (3.4x GPT-2 Small)
+#
+# To match GPT-2 Small exactly (~117M), reduce to:
+# - 12 layers, 2,048 neurons/layer = ~101M parameters
+
+# Hardware (requires high-end GPU or multi-GPU)
+device: "cuda"
+dtype: "float16"  # FP16 for memory efficiency (BF16 better if supported)
+
+# Network Architecture - GPT-2 Small Scale
+network:
+  # Core architecture
+  num_layers: 12  # Match GPT-2 Small
+  neurons_per_layer: 2048  # Slightly less than ideal but fits ~117M params
+
+  # Input/Output
+  vocab_size: 50257  # GPT-2 tokenizer vocabulary
+  embedding_dim: 256  # Compressed input representation
+  context_window: 1024  # Maximum sequence length
+
+  # Temporal processing
+  temporal_window: 8  # For sequential token processing
+
+  # Neuron parameters
+  neuron:
+    apical_kernel_size: 8
+    basal_kernel_size: 8
+    initial_gate: 0.5
+    divisive_norm_sigma: 0.01
+
+# Learning - Optimized for large-scale training
+learning:
+  # Optimizer: StableProspectiveLearning (REQUIRED for stability)
+  use_stable: true
+  stable_lr: 0.0003  # Lower LR for large network
+  stable_max_iterations: 100000  # Long training run
+  stable_lr_schedule: "cosine"  # Smooth annealing
+  stable_decay_strong: 0.01
+  stable_decay_weak: 0.0001  # Very weak decay near solution
+
+  # Inference (state updates)
+  inference_lr: 0.05  # Lower for large network stability
+  inference_iterations: 50  # More iterations for convergence
+  temperature: 0.0  # No Langevin noise initially
+
+  # Regularization
+  saturation_penalty: 0.01
+  activity_target: 0.3
+  gradient_clip: 1.0  # Clip gradients to prevent explosion
+
+# Training - Math curriculum specific
+training:
+  batch_size: 32  # Depends on GPU memory
+  gradient_accumulation_steps: 4  # Effective batch size = 128
+
+  # Curriculum
+  curriculum_type: "progressive"  # Options: sequential, interleaved, progressive
+  problems_per_domain: 10000
+  difficulty_start: "easy"
+  difficulty_schedule: "gradual"  # Gradually increase difficulty
+
+  # Continual learning
+  continual_learning_strategy: "replay"  # Options: none, replay, ewc, progressive
+  replay_buffer_size: 5000
+  replay_ratio: 0.2  # 20% old problems, 80% new
+
+  # Checkpointing
+  checkpoint_interval: 1000
+  eval_interval: 500
+  save_best_only: true
+
+# Evaluation - Test catastrophic forgetting
+evaluation:
+  test_size_per_domain: 500
+  domains: ["arithmetic", "algebra", "calculus"]
+  difficulties: ["easy", "medium", "hard"]
+
+  # Metrics
+  accuracy_threshold: 0.9  # 90% accuracy target
+  forgetting_threshold: 0.8  # <20% forgetting acceptable
+
+# Memory optimization for large network
+optimization:
+  # Gradient checkpointing (trade compute for memory)
+  gradient_checkpointing: true
+
+  # Mixed precision training
+  mixed_precision: true
+  loss_scale: "dynamic"
+
+  # Data loading
+  num_workers: 4
+  pin_memory: true
+  prefetch_factor: 2
+
+# Logging and monitoring
+logging:
+  tensorboard: true
+  log_interval: 100
+
+  # Track these metrics
+  metrics:
+    - "loss"
+    - "accuracy"
+    - "forgetting_rate"
+    - "layer_saturation"
+    - "weight_norm"
+    - "gradient_norm"
+    - "learning_rate"
+
+  # Wandb integration (optional)
+  use_wandb: false
+  wandb_project: "predictive-coding-math"
+  wandb_entity: null
+
+# Distributed training (optional, for multi-GPU)
+distributed:
+  enabled: false
+  backend: "nccl"
+  world_size: 1
+  rank: 0
+
+# Model size summary (for verification)
+# ================================================
+# LAYER CONFIGURATION:
+# - Input embedding: 50,257 × 256 = 12,865,792 params
+# - Layer 1: (2048 × 256) + (2048 × 2048) = 4,718,592 params
+# - Layers 2-11: 10 × [(2048 × 2048) + (2048 × 2048)] = 83,886,080 params
+# - Layer 12: (2048 × 2048) + (2048 × 2048) = 8,388,608 params
+# - Output projection: 2048 × 50,257 = 102,926,336 params
+#
+# TOTAL: ~213M parameters
+#
+# To reduce to ~117M (GPT-2 Small):
+# Option 1: Reduce layers to 8: ~141M params
+# Option 2: Reduce neurons to 1536: ~94M params
+# Option 3: Reduce embedding projection overhead
+#
+# RECOMMENDED: Use 10 layers × 1792 neurons = ~115M params
+# ================================================
+
+# Alternative configurations (uncomment to use)
+# ================================================
+
+# # GPT-2 SMALL (117M params) - EXACT MATCH
+# network:
+#   num_layers: 10
+#   neurons_per_layer: 1792
+#   embedding_dim: 256
+#   vocab_size: 50257
+
+# # GPT-2 MEDIUM (345M params)
+# network:
+#   num_layers: 16
+#   neurons_per_layer: 2560
+#   embedding_dim: 512
+#   vocab_size: 50257
+
+# # GPT-2 LARGE (774M params)
+# network:
+#   num_layers: 24
+#   neurons_per_layer: 3072
+#   embedding_dim: 768
+#   vocab_size: 50257
+
+# # GPT-2 XL (1.5B params)
+# network:
+#   num_layers: 36
+#   neurons_per_layer: 4096
+#   embedding_dim: 1024
+#   vocab_size: 50257

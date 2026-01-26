@@ -50,13 +50,19 @@ association_subnet = SubNetwork(
     device='cpu'
 )
 
-# Create modular network
+# Create modular network with StableProspectiveLearning optimizer
 network = ModularNetwork(
     subnetworks=[vision_subnet, keyboard_subnet, association_subnet],
     inference_lr=0.1,
     temperature=0.0,
     dtype=torch.float32,
-    device='cpu'
+    device='cpu',
+    use_stable=True,  # Enable StableProspectiveLearning optimizer
+    stable_lr=0.001,
+    stable_max_iterations=400,
+    stable_lr_schedule="cosine",
+    stable_decay_strong=0.01,
+    stable_decay_weak=0.001
 )
 
 # Print architecture

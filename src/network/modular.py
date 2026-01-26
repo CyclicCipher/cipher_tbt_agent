@@ -118,7 +118,15 @@ class ModularNetwork(nn.Module):
         inference_lr: float = 0.1,
         temperature: float = 0.0,
         dtype: torch.dtype = torch.float32,
-        device: str = 'cpu'
+        device: str = 'cpu',
+        use_stable: bool = False,
+        stable_lr: float = 0.001,
+        stable_max_iterations: int = 400,
+        stable_lr_schedule: str = "cosine",
+        stable_decay_strong: float = 0.01,
+        stable_decay_weak: float = 0.001,
+        saturation_penalty: float = 0.01,
+        activity_target: float = 0.3
     ):
         super().__init__()
 
@@ -126,6 +134,9 @@ class ModularNetwork(nn.Module):
         self.device = device
         self.inference_lr = inference_lr
         self.temperature = temperature
+        self.use_stable = use_stable
+        self.saturation_penalty = saturation_penalty
+        self.activity_target = activity_target
 
         # Organize sub-networks by position
         self.subnetworks_by_position: Dict[int, List[SubNetwork]] = {}
@@ -146,6 +157,22 @@ class ModularNetwork(nn.Module):
 
         # Validate architecture
         self._validate_architecture()
+
+        # Initialize optimizer if requested
+        self.optimizer = None
+        if use_stable:
+            from ..optimizers import StableProspectiveLearning
+            self.optimizer = StableProspectiveLearning(
+                self.parameters(),
+                lr=stable_lr,
+                max_iterations=stable_max_iterations,
+                lr_schedule=stable_lr_schedule,
+                weight_decay_strong=stable_decay_strong,
+                weight_decay_weak=stable_decay_weak,
+                stability_threshold=1.2,
+                early_stopping=False,
+                patience=50
+            )
 
     def _validate_architecture(self) -> None:
         """Validate that architecture is properly configured."""
@@ -309,11 +336,19 @@ class ModularNetwork(nn.Module):
         motor_targets: Optional[Dict[str, torch.Tensor]] = None
     ) -> None:
         """
-        Update weights for all sub-networks.
+        Update weights for all sub-networks using proper predictive coding.
+
+        Implements FULL predictive coding learning:
+        1. Each layer's error = state - prediction from above (value error)
+        2. Updates BOTH W_basal (bottom-up) and W_apical (top-down) weights
+        3. Uses local Hebbian rules: ΔW = lr * error * input - decay * W
+
+        If use_stable=True, uses StableProspectiveLearning optimizer.
+        Otherwise uses manual updates with fixed learning rate.
 
         Args:
-            lr: Learning rate
-            weight_decay: L2 regularization
+            lr: Learning rate (only used if not using optimizer)
+            weight_decay: L2 regularization coefficient
             motor_targets: Optional dict of motor targets for supervised learning
                           Keys are sub-network names at position 0
         """
@@ -324,38 +359,151 @@ class ModularNetwork(nn.Module):
                     # Clamp layer 0 of this sub-network
                     subnet.layers[0].state.copy_(motor_targets[subnet.name])
 
-        # Update weights for all sub-networks
+        # Compute gradients for all sub-networks
+        activations = []  # Track for activity regularization
+
         for pos in range(self.max_position + 1):
             if pos == 0:
                 for subnet in self.subnetworks_by_position[pos]:
-                    self._update_subnet_weights(subnet, subnet.input_buffer, lr, weight_decay)
+                    subnet_activations = self._compute_subnet_gradients(
+                        subnet, subnet.input_buffer, lr, weight_decay
+                    )
+                    activations.extend(subnet_activations)
             else:
                 concat_input = self._get_concatenated_output(pos - 1)
                 for subnet in self.subnetworks_by_position[pos]:
-                    self._update_subnet_weights(subnet, concat_input, lr, weight_decay)
+                    subnet_activations = self._compute_subnet_gradients(
+                        subnet, concat_input, lr, weight_decay
+                    )
+                    activations.extend(subnet_activations)
 
-    def _update_subnet_weights(
+        # Apply optimizer step if using one
+        if self.optimizer is not None:
+            # Add activity regularization (prevent saturation/coma)
+            self._add_activity_regularization(activations)
+
+            # Optimizer step (handles momentum, adaptive LR, weight decay internally)
+            # For StableProspectiveLearning, pass current error for adaptive decay
+            if self.use_stable:
+                # Compute total reconstruction error
+                total_error = sum(
+                    ((subnet.input_buffer - self._compute_subnet_reconstruction(subnet)) ** 2).sum().item()
+                    for subnet in self.subnetworks_by_position[0]
+                )
+                self.optimizer.step(current_error=total_error)
+            else:
+                self.optimizer.step()
+            self.optimizer.zero_grad()
+
+    def _compute_subnet_reconstruction(self, subnet: SubNetwork) -> torch.Tensor:
+        """Compute reconstruction (bottom-up prediction) for subnet input."""
+        if len(subnet.layers) > 0:
+            return subnet.layers[0].compute_prediction_for_below()
+        return torch.zeros_like(subnet.input_buffer)
+
+    def _compute_subnet_gradients(
         self,
         subnet: SubNetwork,
         subnet_input: torch.Tensor,
         lr: float,
         weight_decay: float
-    ) -> None:
-        """Update weights for a single sub-network."""
+    ) -> List[torch.Tensor]:
+        """
+        Compute gradients for a single sub-network.
+
+        Implements proper predictive coding weight updates:
+        - Updates BOTH W_basal and W_apical
+        - Uses value error (state - prediction from above)
+        - Local Hebbian learning rules
+
+        Returns:
+            List of activation tensors (for activity regularization)
+        """
+        activations = []
+
         for i, layer in enumerate(subnet.layers):
+            # Track activation for pathology detection
+            activations.append(layer.get_state())
+
+            # Get inputs from below and above
             if i == 0:
-                input_below = subnet_input
+                input_from_below = subnet_input
             else:
-                input_below = subnet.layers[i - 1].get_state()
+                input_from_below = subnet.layers[i - 1].get_state()
 
-            # Compute error
-            bottom_up_prediction = torch.tanh(layer.neurons.W_basal @ input_below)
-            error = layer.get_state() - bottom_up_prediction
+            if i == len(subnet.layers) - 1:
+                # Top layer: no layer above, use zeros or self-prediction
+                prediction_from_above = torch.zeros_like(layer.get_state())
+                input_from_above = layer.get_state()
+            else:
+                # Get prediction from layer above (top-down)
+                prediction_from_above = subnet.layers[i + 1].compute_prediction_for_below()
+                input_from_above = subnet.layers[i + 1].get_state()
 
-            # Update basal weights (Hebbian rule with decay)
-            error_col = error.unsqueeze(1)
-            input_row = input_below.unsqueeze(0)
-            layer.neurons.W_basal.data += lr * (error_col @ input_row) - weight_decay * layer.neurons.W_basal.data
+            # Value error: difference between actual state and prediction from above
+            # This is the LOCAL error signal at this layer (proper PC learning)
+            layer_error = layer.get_state() - prediction_from_above
+            layer.error = layer_error
+
+            if self.optimizer is not None:
+                # Compute gradients manually for optimizer
+                # Gradient is negative because we want to INCREASE weights when error is positive
+                error_col = layer_error.unsqueeze(1)
+
+                # Set gradients (optimizer will apply its update rule)
+                layer.neurons.W_basal.grad = -(error_col @ input_from_below.unsqueeze(0))
+
+                # Update W_apical only if it exists (not None) and has correct size
+                if (hasattr(layer.neurons, 'W_apical') and
+                    layer.neurons.W_apical is not None and
+                    input_from_above.size(0) == layer.neurons.W_apical.size(1)):
+                    layer.neurons.W_apical.grad = -(error_col @ input_from_above.unsqueeze(0))
+            else:
+                # Manual update with fixed learning rate
+                # Update both W_basal and W_apical
+                error_col = layer_error.unsqueeze(1)
+
+                # Update W_basal (bottom-up weights)
+                input_row = input_from_below.unsqueeze(0)
+                layer.neurons.W_basal.data += lr * (error_col @ input_row) - weight_decay * layer.neurons.W_basal.data
+
+                # Update W_apical (top-down weights) if it exists
+                if (hasattr(layer.neurons, 'W_apical') and
+                    layer.neurons.W_apical is not None and
+                    input_from_above.size(0) == layer.neurons.W_apical.size(1)):
+                    input_above_row = input_from_above.unsqueeze(0)
+                    layer.neurons.W_apical.data += lr * (error_col @ input_above_row) - weight_decay * layer.neurons.W_apical.data
+
+        return activations
+
+    def _add_activity_regularization(self, activations: List[torch.Tensor]) -> None:
+        """
+        Add activity regularization to prevent pathologies.
+
+        Penalizes:
+        - Saturation (neurons stuck at ±1)
+        - Too-high mean activation (seizure-like)
+
+        Args:
+            activations: List of activation tensors from all layers
+        """
+        for act in activations:
+            # Saturation penalty
+            saturation_mask = (act.abs() > 0.9).float()
+            saturation_rate = saturation_mask.mean()
+
+            if saturation_rate > 0.1:  # If >10% saturated, penalize
+                # Find corresponding layer and add penalty to gradients
+                for subnet in self.all_subnetworks:
+                    for layer in subnet.layers:
+                        if layer.get_state() is act:
+                            # Add small L1-like penalty to weights (push toward sparsity)
+                            if layer.neurons.W_basal.grad is not None:
+                                layer.neurons.W_basal.grad += self.saturation_penalty * layer.neurons.W_basal.sign()
+                            if (hasattr(layer.neurons, 'W_apical') and
+                                layer.neurons.W_apical is not None and
+                                layer.neurons.W_apical.grad is not None):
+                                layer.neurons.W_apical.grad += self.saturation_penalty * layer.neurons.W_apical.sign()
 
     def reset_temporal_state(self) -> None:
         """Reset temporal state for all sub-networks."""
