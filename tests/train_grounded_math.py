@@ -153,21 +153,26 @@ for epoch in range(num_epochs):
         )
 
         # Get motor prediction from BOTTOM layer (output neurons)
-        # Motor subnet: [10, 32] → layers[0]=output, layers[-1]=latent
         motor_prediction = motor_subnet.layers[0].get_state()
 
-        # Compute loss (cross-entropy)
-        target = torch.tensor(label, dtype=torch.long, device=device)
-        loss = F.cross_entropy(motor_prediction.unsqueeze(0), target.unsqueeze(0))
+        # Supervised learning: Clamp motor output to target
+        target_one_hot = torch.zeros(num_digits, dtype=dtype, device=device)
+        target_one_hot[label] = 1.0
 
-        # Backward pass
-        network.optimizer.zero_grad()
-        loss.backward()
-        network.optimizer.step()
+        # Update weights using predictive coding rules (not standard backprop!)
+        # Motor clamping: Set motor state to target for supervised learning
+        motor_targets = {"motor": target_one_hot}
+        network.update_weights(lr=0.001, weight_decay=0.01, motor_targets=motor_targets)
 
         # Track metrics
+        # Compute loss for monitoring (not for backprop) - detach to avoid gradient issues
+        loss = F.cross_entropy(
+            motor_prediction.detach().unsqueeze(0),
+            torch.tensor([label], device=device)
+        )
         total_loss += loss.item()
-        predicted = torch.argmax(motor_prediction).item()
+
+        predicted = torch.argmax(motor_prediction.detach()).item()
         if predicted == label:
             correct += 1
 
