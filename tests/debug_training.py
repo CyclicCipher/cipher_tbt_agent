@@ -20,8 +20,8 @@ dtype = torch.float32
 print(f"Device: {device}")
 
 # Create simple 2-digit test
-curriculum = GroundedMathCurriculum(patch_size=(100, 100))
-phase1_train, _ = curriculum.generate_phase1(num_train=2, num_test=0)
+curriculum = GroundedMathCurriculum(seed=42)
+train_dataset = curriculum.generate_digit_recognition_dataset(samples_per_digit=1)
 
 # Build network
 vision_subnet = SubNetwork(
@@ -62,7 +62,7 @@ network = ModularNetwork(
 )
 
 print("\nTesting on first training sample...")
-img, label = phase1_train[0]
+img, label = train_dataset[0]
 print(f"Label: {label}")
 
 # Preprocess
