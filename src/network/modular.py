@@ -345,8 +345,8 @@ class ModularNetwork(nn.Module):
 
         # Update states via gradient descent
         for i, layer in enumerate(subnet.layers):
-            if i == 0:
-                # Layer 0: Clamp to input (nothing below to predict)
+            if i == 0 and layer.num_neurons == subnet_input.size(0):
+                # Layer 0: Clamp to input if dimensions match (nothing below to predict)
                 layer.state.copy_(subnet_input)
             else:
                 # Higher layers: Update via gradient descent
