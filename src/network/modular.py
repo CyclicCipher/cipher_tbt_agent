@@ -332,24 +332,35 @@ class ModularNetwork(nn.Module):
         errors = []
         for i, layer in enumerate(subnet.layers):
             if i == 0:
-                input_below = subnet_input
+                # Layer 0: No prediction error (input buffer drives it)
+                # We'll handle layer 0 separately in state update
+                errors.append(None)
             else:
                 input_below = subnet.layers[i - 1].get_state()
-
-            # Bottom-up prediction
-            bottom_up_prediction = torch.tanh(layer.neurons.W_basal @ input_below)
-
-            # Prediction error
-            error = layer.get_state() - bottom_up_prediction
-            errors.append(error)
+                # Bottom-up prediction
+                bottom_up_prediction = torch.tanh(layer.neurons.W_basal @ input_below)
+                # Prediction error
+                error = layer.get_state() - bottom_up_prediction
+                errors.append(error)
 
         # Update states via gradient descent
         for i, layer in enumerate(subnet.layers):
-            if i == 0 and layer.num_neurons == subnet_input.size(0):
-                # Layer 0: Clamp to input if dimensions match (nothing below to predict)
-                layer.state.copy_(subnet_input)
+            if i == 0:
+                # Layer 0: Input buffer actively drives it (not passively predicted)
+                # Gradient pushes layer 0 toward encoding of input
+                input_encoding = torch.tanh(layer.neurons.W_basal @ subnet_input)
+                gradient = input_encoding - layer.get_state()
+
+                # Top-down feedback from layer 1 (if exists)
+                if len(subnet.layers) > 1:
+                    current_state = layer.get_state()
+                    weighted_input = subnet.layers[1].neurons.W_basal @ current_state
+                    tanh_derivative = 1 - torch.tanh(weighted_input) ** 2
+                    error_times_deriv = errors[1] * tanh_derivative
+                    feedback = subnet.layers[1].neurons.W_basal.T @ error_times_deriv
+                    gradient += feedback
             else:
-                # Higher layers: Update via gradient descent
+                # Higher layers: Standard predictive coding
                 # Gradient term 1: -error_l (local error)
                 gradient = -errors[i]
 
@@ -379,18 +390,18 @@ class ModularNetwork(nn.Module):
                             gradient += -cross_pos_error
                             break
 
-                # Update state
-                new_state = layer.get_state() + self.inference_lr * gradient
+            # Update state (applies to all layers)
+            new_state = layer.get_state() + self.inference_lr * gradient
 
-                # Add Langevin noise
-                if self.temperature > 0:
-                    noise = torch.randn_like(new_state) * (self.temperature ** 0.5)
-                    new_state = new_state + noise
+            # Add Langevin noise
+            if self.temperature > 0:
+                noise = torch.randn_like(new_state) * (self.temperature ** 0.5)
+                new_state = new_state + noise
 
-                # Prevent saturation
-                new_state = new_state.clamp(-0.85, 0.85)
+            # Prevent saturation
+            new_state = new_state.clamp(-0.85, 0.85)
 
-                layer.state.copy_(new_state)
+            layer.state.copy_(new_state)
 
     def update_weights(
         self,
