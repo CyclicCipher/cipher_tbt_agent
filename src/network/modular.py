@@ -163,13 +163,14 @@ class ModularNetwork(nn.Module):
         self.cross_position_predictions = nn.ParameterDict()
 
         # Create prediction weights from position 1 to position 0
+        # Position 1 BOTTOM layer predicts Position 0 TOP layer (adjacent layers)
         if 1 in self.subnetworks_by_position and 0 in self.subnetworks_by_position:
             for subnet_pos1 in self.subnetworks_by_position[1]:
                 for subnet_pos0 in self.subnetworks_by_position[0]:
-                    # Higher position predicts bottom layer of lower position subnet
+                    # Adjacent layer connection: pos1 bottom → pos0 top
                     key = f"{subnet_pos1.name}_to_{subnet_pos0.name}"
-                    pred_size = subnet_pos0.layers[0].num_neurons  # Target: bottom layer
-                    source_size = subnet_pos1.layers[-1].num_neurons  # Source: top layer
+                    pred_size = subnet_pos0.layers[-1].num_neurons  # Target: TOP layer of pos 0
+                    source_size = subnet_pos1.layers[0].num_neurons  # Source: BOTTOM layer of pos 1
 
                     # Initialize with small random weights
                     self.cross_position_predictions[key] = nn.Parameter(
@@ -273,7 +274,7 @@ class ModularNetwork(nn.Module):
 
         # Iterative inference to equilibrium with clamping
         for _ in range(num_iterations):
-            self._inference_step(clamped_subnets=clamp_layers)
+            self._inference_step()
 
             # CLAMP: Re-apply clamped values after each inference step
             # This prevents trivial zero solution
@@ -312,21 +313,20 @@ class ModularNetwork(nn.Module):
             # Initialize to bottom-up prediction
             layer.state.copy_(torch.tanh(layer.neurons.W_basal @ input_below))
 
-    def _inference_step(self, clamped_subnets: Optional[Dict[str, torch.Tensor]] = None) -> None:
+    def _inference_step(self) -> None:
         """Single inference step across all sub-networks."""
         for pos in range(self.max_position + 1):
             if pos == 0:
                 # Position 0: each sub-network uses its input_buffer
                 for subnet in self.subnetworks_by_position[pos]:
-                    is_clamped = clamped_subnets is not None and subnet.name in clamped_subnets
-                    self._inference_step_subnet(subnet, subnet.input_buffer, is_clamped=is_clamped)
+                    self._inference_step_subnet(subnet, subnet.input_buffer)
             else:
                 # Position > 0: use concatenated output from previous position
                 concat_input = self._get_concatenated_output(pos - 1)
                 for subnet in self.subnetworks_by_position[pos]:
-                    self._inference_step_subnet(subnet, concat_input, is_clamped=False)
+                    self._inference_step_subnet(subnet, concat_input)
 
-    def _inference_step_subnet(self, subnet: SubNetwork, subnet_input: torch.Tensor, is_clamped: bool = False) -> None:
+    def _inference_step_subnet(self, subnet: SubNetwork, subnet_input: torch.Tensor) -> None:
         """Inference step for a single sub-network."""
         # Compute prediction errors for all layers
         errors = []
@@ -358,15 +358,14 @@ class ModularNetwork(nn.Module):
                 gradient += feedback
 
             # Gradient term 3: cross-position feedback from higher position
-            # For layer 0 of position 0 subnets, add feedback from position 1
-            # BUT: Skip if this subnet is clamped (supervised learning)
-            if i == 0 and subnet.position == 0 and not is_clamped and 1 in self.subnetworks_by_position:
+            # For TOP layer of position 0 subnets, add feedback from position 1 BOTTOM layer
+            if i == len(subnet.layers) - 1 and subnet.position == 0 and 1 in self.subnetworks_by_position:
                 for subnet_pos1 in self.subnetworks_by_position[1]:
                     key = f"{subnet_pos1.name}_to_{subnet.name}"
                     if key in self.cross_position_predictions:
-                        # Get top-down prediction from position 1
-                        assoc_top_state = subnet_pos1.layers[-1].get_state()
-                        top_down_pred = self.cross_position_predictions[key] @ assoc_top_state
+                        # Get top-down prediction from position 1 bottom layer
+                        assoc_bottom_state = subnet_pos1.layers[0].get_state()
+                        top_down_pred = self.cross_position_predictions[key] @ assoc_bottom_state
 
                         # Error between current state and top-down prediction
                         cross_pos_error = layer.get_state() - top_down_pred
@@ -437,14 +436,15 @@ class ModularNetwork(nn.Module):
                     activations.extend(subnet_activations)
 
         # Update cross-position prediction weights (position 1 → position 0)
+        # Position 1 bottom layer predicts position 0 top layer (adjacent layers)
         if 1 in self.subnetworks_by_position and 0 in self.subnetworks_by_position:
             for subnet_pos1 in self.subnetworks_by_position[1]:
                 for subnet_pos0 in self.subnetworks_by_position[0]:
                     key = f"{subnet_pos1.name}_to_{subnet_pos0.name}"
                     if key in self.cross_position_predictions:
-                        # Get states
-                        target_layer = subnet_pos0.layers[0]  # Bottom layer of position 0
-                        source_layer = subnet_pos1.layers[-1]  # Top layer of position 1
+                        # Get states from adjacent layers
+                        target_layer = subnet_pos0.layers[-1]  # TOP layer of position 0
+                        source_layer = subnet_pos1.layers[0]  # BOTTOM layer of position 1
 
                         # Compute prediction error
                         prediction = self.cross_position_predictions[key] @ source_layer.get_state()
