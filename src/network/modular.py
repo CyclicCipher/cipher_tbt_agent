@@ -273,7 +273,7 @@ class ModularNetwork(nn.Module):
 
         # Iterative inference to equilibrium with clamping
         for _ in range(num_iterations):
-            self._inference_step()
+            self._inference_step(clamped_subnets=clamp_layers)
 
             # CLAMP: Re-apply clamped values after each inference step
             # This prevents trivial zero solution
@@ -312,20 +312,21 @@ class ModularNetwork(nn.Module):
             # Initialize to bottom-up prediction
             layer.state.copy_(torch.tanh(layer.neurons.W_basal @ input_below))
 
-    def _inference_step(self) -> None:
+    def _inference_step(self, clamped_subnets: Optional[Dict[str, torch.Tensor]] = None) -> None:
         """Single inference step across all sub-networks."""
         for pos in range(self.max_position + 1):
             if pos == 0:
                 # Position 0: each sub-network uses its input_buffer
                 for subnet in self.subnetworks_by_position[pos]:
-                    self._inference_step_subnet(subnet, subnet.input_buffer)
+                    is_clamped = clamped_subnets is not None and subnet.name in clamped_subnets
+                    self._inference_step_subnet(subnet, subnet.input_buffer, is_clamped=is_clamped)
             else:
                 # Position > 0: use concatenated output from previous position
                 concat_input = self._get_concatenated_output(pos - 1)
                 for subnet in self.subnetworks_by_position[pos]:
-                    self._inference_step_subnet(subnet, concat_input)
+                    self._inference_step_subnet(subnet, concat_input, is_clamped=False)
 
-    def _inference_step_subnet(self, subnet: SubNetwork, subnet_input: torch.Tensor) -> None:
+    def _inference_step_subnet(self, subnet: SubNetwork, subnet_input: torch.Tensor, is_clamped: bool = False) -> None:
         """Inference step for a single sub-network."""
         # Compute prediction errors for all layers
         errors = []
@@ -358,7 +359,8 @@ class ModularNetwork(nn.Module):
 
             # Gradient term 3: cross-position feedback from higher position
             # For layer 0 of position 0 subnets, add feedback from position 1
-            if i == 0 and subnet.position == 0 and 1 in self.subnetworks_by_position:
+            # BUT: Skip if this subnet is clamped (supervised learning)
+            if i == 0 and subnet.position == 0 and not is_clamped and 1 in self.subnetworks_by_position:
                 for subnet_pos1 in self.subnetworks_by_position[1]:
                     key = f"{subnet_pos1.name}_to_{subnet.name}"
                     if key in self.cross_position_predictions:
