@@ -347,9 +347,15 @@ class ModularNetwork(nn.Module):
         for i, layer in enumerate(subnet.layers):
             if i == 0:
                 # Layer 0: Input buffer actively drives it (not passively predicted)
-                # Gradient pushes layer 0 toward encoding of input
-                input_encoding = torch.tanh(layer.neurons.W_basal @ subnet_input)
-                gradient = input_encoding - layer.get_state()
+                if layer.num_neurons == subnet_input.size(0):
+                    # Dimensions match: layer 0 directly represents input (no encoding)
+                    # This is for motor (10→10) where input IS the desired output
+                    gradient = subnet_input - layer.get_state()
+                else:
+                    # Dimensions mismatch: layer 0 encodes input (compression/expansion)
+                    # This is for vision (30000→256) where layer 0 learns features
+                    input_encoding = torch.tanh(layer.neurons.W_basal @ subnet_input)
+                    gradient = input_encoding - layer.get_state()
 
                 # Top-down feedback from layer 1 (if exists)
                 if len(subnet.layers) > 1:
