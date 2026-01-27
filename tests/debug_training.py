@@ -106,51 +106,60 @@ print(f"  Motor prediction: {motor_pred_clamp.detach().cpu().numpy()}")
 print(f"  Motor input_buffer: {motor_subnet.input_buffer.detach().cpu().numpy()}")
 print(f"  Predicted digit: {torch.argmax(motor_pred_clamp).item()}")
 
-# Check layer errors before weight update
-print("\n--- Errors before weight update ---")
-for i, layer in enumerate(motor_subnet.layers):
-    if hasattr(layer, 'error') and layer.error is not None:
-        print(f"  Motor layer {i} error: mean={layer.error.abs().mean().item():.6f}, max={layer.error.abs().max().item():.6f}")
+# Track 10 weight updates
+print("\n" + "="*70)
+print("TRAINING OVER 10 UPDATES")
+print("="*70)
 
-# Weight update
-print("\n--- Weight update ---")
-network.update_weights(lr=0.01, weight_decay=0.01)
+for update_i in range(10):
+    print(f"\n--- Update {update_i + 1}/10 ---")
 
-# Check if weights changed
-final_w = motor_subnet.layers[0].neurons.W_basal.data
-weight_change = (final_w - initial_w).abs().max().item()
-print(f"  Max weight change: {weight_change:.6f}")
+    # Forward pass with clamping
+    output = network.forward(
+        {"vision": visual_input, "motor": motor_input},
+        num_iterations=30,
+        clamp_layers=clamp_layers
+    )
 
-# Check layer errors after weight update
-print("\n--- Errors after weight update ---")
-for i, layer in enumerate(motor_subnet.layers):
-    if hasattr(layer, 'error') and layer.error is not None:
-        print(f"  Motor layer {i} error: mean={layer.error.abs().mean().item():.6f}, max={layer.error.abs().max().item():.6f}")
+    # Get prediction
+    motor_pred = motor_subnet.layers[0].get_state()
+    predicted = torch.argmax(motor_pred).item()
+    correct = "✓" if predicted == label else "✗"
 
-# Forward pass again to see if prediction improved
-print("\n--- Forward after weight update (with clamping) ---")
-output_after = network.forward(
+    # Weight update with motor supervision
+    network.update_weights(
+        lr=0.01,
+        weight_decay=0.01,
+        motor_targets={"motor": target_one_hot}
+    )
+
+    # Check weight change
+    current_w = motor_subnet.layers[0].neurons.W_basal.data
+    weight_change = (current_w - initial_w).abs().max().item()
+
+    print(f"  Predicted: {predicted} (target: {label}) {correct}")
+    print(f"  Motor output: {motor_pred.detach().cpu().numpy()[:5]}...")  # First 5 values
+    print(f"  Total weight change: {weight_change:.6f}")
+
+print("\n" + "="*70)
+print("FINAL RESULTS")
+print("="*70)
+
+# Final forward pass
+output_final = network.forward(
     {"vision": visual_input, "motor": motor_input},
     num_iterations=30,
     clamp_layers=clamp_layers
 )
-motor_pred_after = motor_subnet.layers[0].get_state()
-print(f"  Motor prediction: {motor_pred_after.detach().cpu().numpy()}")
-print(f"  Predicted digit: {torch.argmax(motor_pred_after).item()}")
+motor_pred_final = motor_subnet.layers[0].get_state()
+predicted_final = torch.argmax(motor_pred_final).item()
 
-print("\n" + "="*70)
-print("ANALYSIS")
-print("="*70)
-if weight_change < 1e-6:
-    print("⚠ WARNING: Weights barely changed!")
-    print("   Possible causes:")
-    print("   - Gradients are zero")
-    print("   - Errors are zero")
-    print("   - Optimizer isn't working")
-else:
-    print(f"✓ Weights changed by {weight_change:.6f}")
+print(f"Final prediction: {predicted_final}")
+print(f"Target: {label}")
+print(f"Motor output: {motor_pred_final.detach().cpu().numpy()}")
+print(f"Total weight change: {weight_change:.6f}")
 
-if torch.argmax(motor_pred_after).item() == label:
-    print(f"✓ Correct prediction after 1 update!")
+if predicted_final == label:
+    print(f"\n✓ SUCCESS: Learned correct prediction after 10 updates!")
 else:
-    print(f"✗ Still incorrect after 1 update")
+    print(f"\n✗ FAILURE: Still predicting {predicted_final} instead of {label}")

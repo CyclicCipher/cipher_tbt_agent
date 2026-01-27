@@ -163,9 +163,12 @@ for epoch in range(num_epochs):
         # Get motor prediction from BOTTOM layer (output neurons)
         motor_prediction = motor_subnet.layers[0].get_state()
 
-        # Update weights using predictive coding rules
-        # No explicit motor_targets needed - already clamped during inference
-        network.update_weights(lr=0.01, weight_decay=0.01)
+        # Update weights using predictive coding rules with motor supervision
+        network.update_weights(
+            lr=0.01,
+            weight_decay=0.01,
+            motor_targets={"motor": target_one_hot}
+        )
 
         # Track metrics
         # Compute loss for monitoring (not for backprop) - detach to avoid gradient issues

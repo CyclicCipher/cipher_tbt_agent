@@ -345,47 +345,52 @@ class ModularNetwork(nn.Module):
 
         # Update states via gradient descent
         for i, layer in enumerate(subnet.layers):
-            # Gradient term 1: -error_l (local error)
-            gradient = -errors[i]
+            if i == 0:
+                # Layer 0: Clamp to input (nothing below to predict)
+                layer.state.copy_(subnet_input)
+            else:
+                # Higher layers: Update via gradient descent
+                # Gradient term 1: -error_l (local error)
+                gradient = -errors[i]
 
-            # Gradient term 2: feedback from layer above (if exists)
-            if i < len(subnet.layers) - 1:
-                current_state = layer.get_state()
-                weighted_input = subnet.layers[i + 1].neurons.W_basal @ current_state
-                tanh_derivative = 1 - torch.tanh(weighted_input) ** 2
-                error_times_deriv = errors[i + 1] * tanh_derivative
-                feedback = subnet.layers[i + 1].neurons.W_basal.T @ error_times_deriv
-                gradient += feedback
+                # Gradient term 2: feedback from layer above (if exists)
+                if i < len(subnet.layers) - 1:
+                    current_state = layer.get_state()
+                    weighted_input = subnet.layers[i + 1].neurons.W_basal @ current_state
+                    tanh_derivative = 1 - torch.tanh(weighted_input) ** 2
+                    error_times_deriv = errors[i + 1] * tanh_derivative
+                    feedback = subnet.layers[i + 1].neurons.W_basal.T @ error_times_deriv
+                    gradient += feedback
 
-            # Gradient term 3: cross-position feedback from higher position
-            # For TOP layer of position 0 subnets, add feedback from position 1 BOTTOM layer
-            if i == len(subnet.layers) - 1 and subnet.position == 0 and 1 in self.subnetworks_by_position:
-                for subnet_pos1 in self.subnetworks_by_position[1]:
-                    key = f"{subnet_pos1.name}_to_{subnet.name}"
-                    if key in self.cross_position_predictions:
-                        # Get top-down prediction from position 1 bottom layer
-                        assoc_bottom_state = subnet_pos1.layers[0].get_state()
-                        top_down_pred = self.cross_position_predictions[key] @ assoc_bottom_state
+                # Gradient term 3: cross-position feedback from higher position
+                # For TOP layer of position 0 subnets, add feedback from position 1 BOTTOM layer
+                if i == len(subnet.layers) - 1 and subnet.position == 0 and 1 in self.subnetworks_by_position:
+                    for subnet_pos1 in self.subnetworks_by_position[1]:
+                        key = f"{subnet_pos1.name}_to_{subnet.name}"
+                        if key in self.cross_position_predictions:
+                            # Get top-down prediction from position 1 bottom layer
+                            assoc_bottom_state = subnet_pos1.layers[0].get_state()
+                            top_down_pred = self.cross_position_predictions[key] @ assoc_bottom_state
 
-                        # Error between current state and top-down prediction
-                        cross_pos_error = layer.get_state() - top_down_pred
+                            # Error between current state and top-down prediction
+                            cross_pos_error = layer.get_state() - top_down_pred
 
-                        # Add feedback (push toward top-down prediction)
-                        gradient += -cross_pos_error
-                        break
+                            # Add feedback (push toward top-down prediction)
+                            gradient += -cross_pos_error
+                            break
 
-            # Update state
-            new_state = layer.get_state() + self.inference_lr * gradient
+                # Update state
+                new_state = layer.get_state() + self.inference_lr * gradient
 
-            # Add Langevin noise
-            if self.temperature > 0:
-                noise = torch.randn_like(new_state) * (self.temperature ** 0.5)
-                new_state = new_state + noise
+                # Add Langevin noise
+                if self.temperature > 0:
+                    noise = torch.randn_like(new_state) * (self.temperature ** 0.5)
+                    new_state = new_state + noise
 
-            # Prevent saturation
-            new_state = new_state.clamp(-0.85, 0.85)
+                # Prevent saturation
+                new_state = new_state.clamp(-0.85, 0.85)
 
-            layer.state.copy_(new_state)
+                layer.state.copy_(new_state)
 
     def update_weights(
         self,
