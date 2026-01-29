@@ -13,12 +13,12 @@ import torch
 import torch.nn as nn
 import sys
 import os
-
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'src'))
-
-from network.modular import ModularNetwork, SubNetwork
 from typing import List, Dict, Optional
+
+# Add project root to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+
+from src.network.modular import ModularNetwork, SubNetwork
 
 
 class CategoricalNetwork(ModularNetwork):

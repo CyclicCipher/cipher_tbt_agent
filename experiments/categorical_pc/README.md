@@ -77,9 +77,11 @@ python compare_networks.py
 
 This will:
 1. Create two networks with identical architectures
-2. Train both on MNIST digit recognition (300 samples)
+2. Train both on **synthetic digit recognition** (300 samples)
 3. Compare test accuracy and composition error
 4. Generate comparison plots
+
+**Note:** We're using synthetically generated digit images (via `GroundedMathCurriculum`), not actual MNIST dataset files. The curriculum programmatically renders digits 0-9 with variations in style, size, and position - similar to MNIST but without requiring dataset downloads.
 
 ### Expected Runtime
 - ~5-10 minutes on CPU
