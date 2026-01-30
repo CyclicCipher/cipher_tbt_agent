@@ -74,16 +74,10 @@ class VisionPCClassifier(nn.Module):
             dtype=dtype
         )
 
-        # Classifier head
-        if self.use_4bit and HAS_4BIT:
-            import bitsandbytes as bnb
-            self.classifier = bnb.nn.Linear4bit(
-                256, num_classes,
-                bias=True,
-                compute_dtype=torch.float16
-            )
-        else:
-            self.classifier = nn.Linear(256, num_classes)
+        # Classifier head (keep in FP32/FP16, not 4-bit)
+        # Only 2560 params (256*10), so quantization not needed
+        # 4-bit can have gradient issues with bias in small layers
+        self.classifier = nn.Linear(256, num_classes)
 
     def forward(self, x: torch.Tensor, num_iterations: int = 10) -> torch.Tensor:
         """
