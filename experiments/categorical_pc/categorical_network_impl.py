@@ -306,12 +306,13 @@ class CategoricalPCNetwork(nn.Module):
     def __init__(
         self,
         use_4bit: bool = True,
-        dtype: torch.dtype = torch.float16  # FP16 for 4-bit compute
+        dtype: torch.dtype = torch.float32  # FP32 default, FP16 only when 4-bit available
     ):
         super().__init__()
 
-        self.use_4bit = use_4bit
-        self.dtype = dtype
+        self.use_4bit = use_4bit and HAS_4BIT
+        # Use FP16 for compute only when 4-bit is actually available
+        self.dtype = torch.float16 if self.use_4bit else dtype
 
         # === POSITION 0: SENSORY ===
 
@@ -322,8 +323,8 @@ class CategoricalPCNetwork(nn.Module):
             layer1_size=512,
             layer2_size=768,  # Ventral (512) + Dorsal (256)
             is_granular=True,
-            use_4bit=use_4bit,
-            dtype=dtype
+            use_4bit=self.use_4bit,
+            dtype=self.dtype
         )
 
         # Audio (temporal processing)
@@ -333,8 +334,8 @@ class CategoricalPCNetwork(nn.Module):
             layer1_size=256,
             layer2_size=512,
             is_granular=True,
-            use_4bit=use_4bit,
-            dtype=dtype
+            use_4bit=self.use_4bit,
+            dtype=self.dtype
         )
 
         # Proprioception (cursor, gaze)
@@ -344,8 +345,8 @@ class CategoricalPCNetwork(nn.Module):
             layer1_size=64,
             layer2_size=64,
             is_granular=True,
-            use_4bit=use_4bit,
-            dtype=dtype
+            use_4bit=self.use_4bit,
+            dtype=self.dtype
         )
 
         # === POSITION 1: ASSOCIATION ===
@@ -358,8 +359,8 @@ class CategoricalPCNetwork(nn.Module):
             layer1_size=256,
             layer2_size=256,
             is_granular=False,  # Agranular (processed input)
-            use_4bit=use_4bit,
-            dtype=dtype
+            use_4bit=self.use_4bit,
+            dtype=self.dtype
         )
 
         # === POSITION 2: ABSTRACT ===
@@ -371,8 +372,8 @@ class CategoricalPCNetwork(nn.Module):
             layer1_size=512,
             layer2_size=256,
             is_granular=False,
-            use_4bit=use_4bit,
-            dtype=dtype
+            use_4bit=self.use_4bit,
+            dtype=self.dtype
         )
 
         # Value system (compositional action model)
@@ -382,8 +383,8 @@ class CategoricalPCNetwork(nn.Module):
             layer1_size=128,
             layer2_size=64,  # Motor predictions
             is_granular=False,
-            use_4bit=use_4bit,
-            dtype=dtype
+            use_4bit=self.use_4bit,
+            dtype=self.dtype
         )
 
         # === MOTOR (Active Inference) ===
@@ -392,7 +393,7 @@ class CategoricalPCNetwork(nn.Module):
             prediction_size=64,  # From value system
             proprioception_size=64,  # Current state
             action_space_size=100,  # Keyboard + mouse + gaze
-            use_4bit=use_4bit
+            use_4bit=self.use_4bit
         )
 
     def forward(
