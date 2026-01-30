@@ -100,7 +100,9 @@ class VisionPCClassifier(nn.Module):
             # PC inference
             pc_features = self.pc_inference(conv_features, num_iterations)  # (256,)
 
-            # Classification
+            # Classification (cast to FP32 if needed for classifier)
+            if pc_features.dtype == torch.float16:
+                pc_features = pc_features.float()
             logits = self.classifier(pc_features)  # (10,)
             logits_list.append(logits)
 
