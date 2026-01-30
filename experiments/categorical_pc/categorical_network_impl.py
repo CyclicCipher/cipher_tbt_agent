@@ -445,12 +445,21 @@ if __name__ == "__main__":
     print("Testing Categorical PC Network with 4-bit training")
     print(f"4-bit available: {HAS_4BIT}")
 
+    # Check CUDA availability
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
     model = CategoricalPCNetwork(use_4bit=True)
 
+    # Move model to CUDA if using 4-bit (required for quantization)
+    if HAS_4BIT and torch.cuda.is_available():
+        model = model.to(device)
+        print("Model moved to CUDA for 4-bit quantization")
+
     # Dummy inputs
-    vision = torch.randn(30000)
-    audio = torch.randn(48000)
-    proprio = torch.randn(15)
+    vision = torch.randn(30000, device=device)
+    audio = torch.randn(48000, device=device)
+    proprio = torch.randn(15, device=device)
 
     # Forward pass
     output = model(vision, audio, proprio, num_iterations=5)
