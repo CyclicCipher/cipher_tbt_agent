@@ -25,6 +25,98 @@ except ImportError:
     print("Warning: bitsandbytes not available, falling back to FP32")
 
 
+class ConvolutionalVisionPreprocessor(nn.Module):
+    """
+    Convolutional preprocessor for vision that provides proper inductive biases.
+
+    Implements V1-like processing:
+    - Weight sharing (convolution)
+    - Locality (small kernels)
+    - Translation invariance (pooling)
+    - Hierarchical composition (multiple layers)
+
+    All dimensions aligned to 64 for bitsandbytes efficiency.
+    """
+
+    def __init__(self, use_4bit: bool = True, dtype: torch.dtype = torch.float32):
+        super().__init__()
+
+        self.use_4bit = use_4bit and HAS_4BIT
+
+        # Layer 0: V1 Simple cells (edge/orientation detection)
+        # Input: 100×100×3 → 50×50×64
+        self.conv0 = nn.Conv2d(
+            in_channels=3,
+            out_channels=64,
+            kernel_size=7,
+            stride=2,
+            padding=3
+        )
+        # Adaptive pool to 16×16 → 16×16×64 = 16384 dims (multiple of 64)
+        self.pool0 = nn.AdaptiveAvgPool2d((16, 16))
+
+        # Layer 1: V1 Complex cells (texture/pattern detection)
+        # 16×16×64 → 8×8×128
+        self.conv1 = nn.Conv2d(
+            in_channels=64,
+            out_channels=128,
+            kernel_size=3,
+            stride=2,
+            padding=1
+        )
+        # Adaptive pool to 4×4 → 4×4×128 = 2048 dims (multiple of 64)
+        self.pool1 = nn.AdaptiveAvgPool2d((4, 4))
+
+        # Layer 2: V2/V4 features (object parts)
+        # 4×4×128 → 2×2×256
+        self.conv2 = nn.Conv2d(
+            in_channels=128,
+            out_channels=256,
+            kernel_size=3,
+            stride=2,
+            padding=1
+        )
+        # Adaptive pool to 2×2 → 2×2×256 = 1024 dims (multiple of 64)
+        self.pool2 = nn.AdaptiveAvgPool2d((2, 2))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: (30000,) flattened RGB image OR (3, 100, 100) image tensor
+
+        Returns:
+            (1024,) vision features (aligned to 64)
+        """
+        # Reshape flattened input to image
+        if x.dim() == 1:
+            if x.size(0) == 30000:
+                x = x.view(3, 100, 100)
+            else:
+                raise ValueError(f"Expected 30000 dims for flattened image, got {x.size(0)}")
+
+        # Add batch dimension if needed
+        if x.dim() == 3:
+            x = x.unsqueeze(0)  # (1, 3, 100, 100)
+
+        # Layer 0: Simple cells
+        x = torch.tanh(self.conv0(x))  # (1, 64, 50, 50)
+        x = self.pool0(x)               # (1, 64, 16, 16)
+
+        # Layer 1: Complex cells
+        x = torch.tanh(self.conv1(x))  # (1, 128, 8, 8)
+        x = self.pool1(x)               # (1, 128, 4, 4)
+
+        # Layer 2: Higher-level features
+        x = torch.tanh(self.conv2(x))  # (1, 256, 2, 2)
+        x = self.pool2(x)               # (1, 256, 2, 2)
+
+        # Flatten to 1024 dims
+        x = x.flatten(1)  # (1, 1024)
+
+        # Remove batch dimension
+        return x.squeeze(0)  # (1024,)
+
+
 class CanonicalPCLayer(nn.Module):
     """
     Single layer of canonical microcircuit with proper dendrite structure.
@@ -316,34 +408,42 @@ class CategoricalPCNetwork(nn.Module):
 
         # === POSITION 0: SENSORY ===
 
-        # Vision (will be conv in full implementation, dense for now)
+        # Vision: Convolutional preprocessor + canonical microcircuit
+        # 30000 (100×100×3) → 1024 (conv) → 768 (PC inference)
+        self.vision_preprocessor = ConvolutionalVisionPreprocessor(
+            use_4bit=self.use_4bit,
+            dtype=self.dtype
+        )
         self.vision = CanonicalMicrocircuit(
-            input_size=30000,  # Placeholder (will be conv)
-            layer0_size=768,
-            layer1_size=512,
-            layer2_size=768,  # Ventral (512) + Dorsal (256)
+            input_size=1024,  # From conv preprocessor (aligned to 64)
+            layer0_size=768,  # Aligned to 64: 768 = 12 * 64
+            layer1_size=512,  # Aligned to 64: 512 = 8 * 64
+            layer2_size=768,  # Ventral (512) + Dorsal (256), aligned to 64
             is_granular=True,
             use_4bit=self.use_4bit,
             dtype=self.dtype
         )
 
         # Audio (temporal processing)
+        # Note: 48000 aligned to 64 = 48000 (already 750 * 64)
         self.audio = CanonicalMicrocircuit(
-            input_size=48000,  # 1 second at 48kHz (placeholder)
-            layer0_size=512,
-            layer1_size=256,
-            layer2_size=512,
+            input_size=48000,  # 1 second at 48kHz, aligned to 64
+            layer0_size=512,   # 8 * 64
+            layer1_size=256,   # 4 * 64
+            layer2_size=512,   # 8 * 64
             is_granular=True,
             use_4bit=self.use_4bit,
             dtype=self.dtype
         )
 
-        # Proprioception (cursor, gaze)
+        # Proprioception (cursor, gaze) - padded to 64 for efficiency
+        # Input: [cursor_x, cursor_y, left_click, right_click, middle_click,
+        #         gaze_x, gaze_y, scroll_x, scroll_y, ... padded to 64]
         self.proprioception = CanonicalMicrocircuit(
-            input_size=15,  # (cursor_x, cursor_y, click, gaze_x, gaze_y, ...)
-            layer0_size=64,
-            layer1_size=64,
-            layer2_size=64,
+            input_size=64,     # Padded from 15 → 64 (1 * 64)
+            layer0_size=64,    # 1 * 64
+            layer1_size=64,    # 1 * 64
+            layer2_size=64,    # 1 * 64
             is_granular=True,
             use_4bit=self.use_4bit,
             dtype=self.dtype
@@ -352,12 +452,13 @@ class CategoricalPCNetwork(nn.Module):
         # === POSITION 1: ASSOCIATION ===
 
         # Multimodal integration (product: vision × audio × proprio)
-        association_input = 768 + 512 + 64  # 1344 dims
+        # 768 + 512 + 64 = 1344, aligned to 64 = 1344 (21 * 64)
+        association_input = 768 + 512 + 64  # 1344 dims (aligned to 64)
         self.association = CanonicalMicrocircuit(
-            input_size=association_input,
-            layer0_size=512,
-            layer1_size=256,
-            layer2_size=256,
+            input_size=association_input,  # 1344 = 21 * 64
+            layer0_size=512,               # 8 * 64
+            layer1_size=256,               # 4 * 64
+            layer2_size=256,               # 4 * 64
             is_granular=False,  # Agranular (processed input)
             use_4bit=self.use_4bit,
             dtype=self.dtype
@@ -389,10 +490,12 @@ class CategoricalPCNetwork(nn.Module):
 
         # === MOTOR (Active Inference) ===
 
+        # Action space: Keyboard (26 letters + modifiers) + mouse (x, y, clicks) + gaze
+        # Padded to 128 for efficiency (2 * 64)
         self.motor = ActiveInferenceMotor(
-            prediction_size=64,  # From value system
-            proprioception_size=64,  # Current state
-            action_space_size=100,  # Keyboard + mouse + gaze
+            prediction_size=64,      # From value system (1 * 64)
+            proprioception_size=64,  # Current state (1 * 64)
+            action_space_size=128,   # Actions padded to 2 * 64
             use_4bit=self.use_4bit
         )
 
@@ -408,7 +511,9 @@ class CategoricalPCNetwork(nn.Module):
         """
 
         # Position 0: Sensory processing
-        vision_features = self.vision(vision_input, num_iterations)
+        # Vision: Conv preprocessing → PC inference
+        vision_conv_features = self.vision_preprocessor(vision_input)  # 30000 → 1024
+        vision_features = self.vision(vision_conv_features, num_iterations)  # 1024 → 768
         audio_features = self.audio(audio_input, num_iterations)
         proprio_features = self.proprioception(proprio_input, num_iterations)
 
@@ -456,15 +561,15 @@ if __name__ == "__main__":
         model = model.to(device)
         print("Model moved to CUDA for 4-bit quantization")
 
-    # Dummy inputs
-    vision = torch.randn(30000, device=device)
-    audio = torch.randn(48000, device=device)
-    proprio = torch.randn(15, device=device)
+    # Dummy inputs (all dimensions aligned to 64)
+    vision = torch.randn(30000, device=device)  # 100×100×3 flattened
+    audio = torch.randn(48000, device=device)   # 1 sec at 48kHz
+    proprio = torch.randn(64, device=device)    # Padded from 15 → 64
 
     # Forward pass
     output = model(vision, audio, proprio, num_iterations=5)
 
-    print(f"\nOutput action shape: {output['action'].shape}")
+    print(f"\nOutput action shape: {output['action'].shape}")  # Should be 128
     print(f"Memory state shape: {output['memory_state'].shape}")
     print(f"Value shape: {output['value'].shape}")
 
