@@ -88,12 +88,7 @@ class VisionPCClassifier(nn.Module):
         Returns:
             (1, num_classes) logits
         """
-        # Reset PC network state before each forward pass
-        # This prevents gradient graph conflicts from state reuse
-        self.pc_inference.layer0.state.zero_()
-        self.pc_inference.layer1.state.zero_()
-        self.pc_inference.layer2.state.zero_()
-
+        # State is already reset to zero after each training step
         # Conv preprocessing
         conv_features = self.conv_preprocess(x)  # (1, 1024)
         conv_features = conv_features.squeeze(0)  # (1024,)
@@ -120,11 +115,19 @@ def train_epoch(model, train_loader, optimizer, device, num_iterations=10):
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
 
-        optimizer.zero_grad()
+        # Clear any lingering gradients and computation graph
+        optimizer.zero_grad(set_to_none=True)
+
         output = model(data, num_iterations=num_iterations)
         loss = F.cross_entropy(output, target)
         loss.backward()
         optimizer.step()
+
+        # Explicitly detach state buffers after backward to prevent graph accumulation
+        with torch.no_grad():
+            model.pc_inference.layer0.state.data.zero_()
+            model.pc_inference.layer1.state.data.zero_()
+            model.pc_inference.layer2.state.data.zero_()
 
         total_loss += loss.item()
         pred = output.argmax(dim=1, keepdim=True)
