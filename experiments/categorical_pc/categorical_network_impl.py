@@ -287,7 +287,8 @@ class CanonicalMicrocircuit(nn.Module):
             error_0 = self.layer0.state - target_0
 
             # Update state (gradient descent on free energy)
-            self.layer0.state -= self.inference_lr * error_0
+            # Use .data to avoid tracking these updates in autograd graph
+            self.layer0.state.data -= self.inference_lr * error_0.data
 
             # === LAYER 1: Middle ===
             ff_1 = self.layer1.compute_feedforward(self.layer0.get_state())
@@ -296,7 +297,7 @@ class CanonicalMicrocircuit(nn.Module):
             target_1 = ff_1 + fb_1
             error_1 = self.layer1.state - target_1
 
-            self.layer1.state -= self.inference_lr * error_1
+            self.layer1.state.data -= self.inference_lr * error_1.data
 
             # === LAYER 2: Deep ===
             ff_2 = self.layer2.compute_feedforward(self.layer1.get_state())
@@ -304,7 +305,7 @@ class CanonicalMicrocircuit(nn.Module):
             target_2 = ff_2  # No feedback (top layer)
             error_2 = self.layer2.state - target_2
 
-            self.layer2.state -= self.inference_lr * error_2
+            self.layer2.state.data -= self.inference_lr * error_2.data
 
         return self.layer2.get_state()
 
