@@ -207,6 +207,56 @@ class CanonicalPCLayer(nn.Module):
             return torch.tanh(self.W_feedback(input_above))
         return torch.zeros_like(self.state)
 
+    def update_weights_local(
+        self,
+        input_below: torch.Tensor,
+        error: torch.Tensor,
+        state_above: torch.Tensor = None,
+        learning_rate: float = 0.01
+    ):
+        """
+        Update weights using local Hebbian-like predictive coding learning rule.
+
+        Key principle: Δw ∝ pre-synaptic × post-synaptic error
+
+        This is biologically plausible - no backprop needed!
+        """
+        with torch.no_grad():
+            # Feedforward weights: learn to predict this layer from input below
+            # Δw_ff = lr * outer(error, input_below)
+            # But we need to account for the weight matrix shape
+            if input_below.dim() == 1:
+                input_below = input_below.unsqueeze(0)  # (1, input_size)
+            if error.dim() == 1:
+                error = error.unsqueeze(1)  # (num_neurons, 1)
+
+            # For 4-bit weights, update the underlying data
+            # Shape: W is (num_neurons, input_size)
+            # We want: W += lr * error @ input_below
+            delta_ff = learning_rate * (error @ input_below)  # (num_neurons, input_size)
+
+            if self.use_4bit:
+                # For 4-bit layers, we need to update the weight data directly
+                # This is tricky with bitsandbytes - for now use small updates
+                pass  # TODO: Figure out 4-bit weight updates
+            else:
+                self.W_feedforward.weight.data += delta_ff
+
+            # Lateral weights: learn lateral predictions
+            if self.W_lateral is not None:
+                state_for_lateral = self.state.unsqueeze(0)  # (1, num_neurons)
+                delta_lat = learning_rate * (error @ state_for_lateral)
+                if not self.use_4bit:
+                    self.W_lateral.weight.data += delta_lat
+
+            # Feedback weights: learn top-down predictions
+            if self.W_feedback is not None and state_above is not None:
+                if state_above.dim() == 1:
+                    state_above = state_above.unsqueeze(0)  # (1, state_above_size)
+                delta_fb = learning_rate * (error @ state_above)
+                if not self.use_4bit:
+                    self.W_feedback.weight.data += delta_fb
+
 
 class CanonicalMicrocircuit(nn.Module):
     """
@@ -308,6 +358,91 @@ class CanonicalMicrocircuit(nn.Module):
             self.layer2.state.data -= self.inference_lr * error_2.data
 
         return self.layer2.get_state()
+
+    def forward_with_errors(
+        self,
+        input_data: torch.Tensor,
+        num_iterations: int = 20,
+        target_output: torch.Tensor = None
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Run inference and return final state + errors for learning.
+
+        If target_output is provided, clamps top layer for supervised learning.
+
+        Returns:
+            (output, error_0, error_1, error_2)
+        """
+        # Run inference iterations
+        for iteration in range(num_iterations):
+            # === LAYER 0: Superficial ===
+            ff_0 = self.layer0.compute_feedforward(input_data)
+            lat_0 = self.layer0.compute_lateral()
+            fb_0 = self.layer0.compute_feedback(self.layer1.get_state())
+
+            target_0 = ff_0 + 0.5 * lat_0 + fb_0
+            error_0 = self.layer0.state - target_0
+            self.layer0.state.data -= self.inference_lr * error_0.data
+
+            # === LAYER 1: Middle ===
+            ff_1 = self.layer1.compute_feedforward(self.layer0.get_state())
+            fb_1 = self.layer1.compute_feedback(self.layer2.get_state())
+
+            target_1 = ff_1 + fb_1
+            error_1 = self.layer1.state - target_1
+            self.layer1.state.data -= self.inference_lr * error_1.data
+
+            # === LAYER 2: Deep ===
+            if target_output is not None:
+                # Supervised learning: clamp output to target
+                self.layer2.state.data = target_output.data
+                ff_2 = self.layer2.compute_feedforward(self.layer1.get_state())
+                error_2 = target_output - ff_2  # Error is target - prediction
+            else:
+                # Unsupervised: minimize prediction error
+                ff_2 = self.layer2.compute_feedforward(self.layer1.get_state())
+                target_2 = ff_2
+                error_2 = self.layer2.state - target_2
+                self.layer2.state.data -= self.inference_lr * error_2.data
+
+        return self.layer2.get_state(), error_0, error_1, error_2
+
+    def update_weights_pc(
+        self,
+        input_data: torch.Tensor,
+        error_0: torch.Tensor,
+        error_1: torch.Tensor,
+        error_2: torch.Tensor,
+        learning_rate: float = 0.01
+    ):
+        """
+        Update all weights using local predictive coding learning rules.
+
+        No backprop needed - pure local Hebbian learning!
+        """
+        # Layer 0: learns from input and layer 1
+        self.layer0.update_weights_local(
+            input_below=input_data,
+            error=error_0,
+            state_above=self.layer1.get_state(),
+            learning_rate=learning_rate
+        )
+
+        # Layer 1: learns from layer 0 and layer 2
+        self.layer1.update_weights_local(
+            input_below=self.layer0.get_state(),
+            error=error_1,
+            state_above=self.layer2.get_state(),
+            learning_rate=learning_rate
+        )
+
+        # Layer 2: learns from layer 1
+        self.layer2.update_weights_local(
+            input_below=self.layer1.get_state(),
+            error=error_2,
+            state_above=None,  # Top layer
+            learning_rate=learning_rate
+        )
 
 
 class ActiveInferenceMotor(nn.Module):
