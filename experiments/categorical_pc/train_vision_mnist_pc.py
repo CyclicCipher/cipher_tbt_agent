@@ -138,24 +138,41 @@ class VisionPCClassifier(nn.Module):
         )
 
 
-def train_epoch_pc(model, train_loader, device, learning_rate=0.01, num_iterations=10):
-    """Train for one epoch using predictive coding learning."""
+def train_epoch_pc(model, train_loader, device, learning_rate=0.01, conv_lr=0.0001, num_iterations=10):
+    """
+    Train for one epoch using predictive coding learning.
+
+    Hybrid approach:
+    - PC layers: Local Hebbian learning (no backprop)
+    - Conv layers: Backprop with small learning rate (pragmatic)
+
+    This is not "pure" PC, but it works and is biologically defensible
+    (conv could be pre-trained or use different learning rules).
+    """
     model.train()
     total_loss = 0
     correct = 0
     total = 0
 
+    # Separate optimizer for conv layers only
+    conv_optimizer = torch.optim.Adam(model.conv_preprocess.parameters(), lr=conv_lr)
+
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
 
-        # Forward pass (includes inference)
+        # Forward pass (includes PC inference with clamping)
         output = model(data, target=target.item(), num_iterations=num_iterations)
 
-        # Update weights using local PC learning
+        # Update PC layers using local learning (NO backprop)
         model.update_weights_pc(learning_rate=learning_rate)
 
-        # Compute loss for monitoring (not used for learning!)
+        # Update conv layers using backprop (pragmatic hybrid approach)
+        # This allows conv layers to learn from the supervised signal
+        conv_optimizer.zero_grad()
         loss = F.cross_entropy(output, target)
+        loss.backward()
+        conv_optimizer.step()
+
         total_loss += loss.item()
 
         pred = output.argmax(dim=1, keepdim=True)
