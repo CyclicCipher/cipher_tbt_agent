@@ -82,31 +82,32 @@ class VisionPCClassifier(nn.Module):
     def forward(self, x: torch.Tensor, num_iterations: int = 10) -> torch.Tensor:
         """
         Args:
-            x: (batch, 1, 28, 28) MNIST images
+            x: (1, 1, 28, 28) MNIST image (batch_size must be 1)
             num_iterations: PC inference iterations
 
         Returns:
-            (batch, num_classes) logits
+            (1, num_classes) logits
         """
-        batch_size = x.size(0)
+        # Reset PC network state before each forward pass
+        # This prevents gradient graph conflicts from state reuse
+        self.pc_inference.layer0.state.zero_()
+        self.pc_inference.layer1.state.zero_()
+        self.pc_inference.layer2.state.zero_()
 
-        # Process each image in batch
-        logits_list = []
-        for i in range(batch_size):
-            # Conv preprocessing
-            conv_features = self.conv_preprocess(x[i:i+1])  # (1, 1024)
-            conv_features = conv_features.squeeze(0)  # (1024,)
+        # Conv preprocessing
+        conv_features = self.conv_preprocess(x)  # (1, 1024)
+        conv_features = conv_features.squeeze(0)  # (1024,)
 
-            # PC inference
-            pc_features = self.pc_inference(conv_features, num_iterations)  # (256,)
+        # PC inference
+        pc_features = self.pc_inference(conv_features, num_iterations)  # (256,)
 
-            # Classification (cast to FP32 if needed for classifier)
-            if pc_features.dtype == torch.float16:
-                pc_features = pc_features.float()
-            logits = self.classifier(pc_features)  # (10,)
-            logits_list.append(logits)
+        # Classification (cast to FP32 if needed for classifier)
+        if pc_features.dtype == torch.float16:
+            pc_features = pc_features.float()
+        logits = self.classifier(pc_features)  # (10,)
 
-        return torch.stack(logits_list, dim=0)  # (batch, 10)
+        # Return with batch dimension
+        return logits.unsqueeze(0)  # (1, 10)
 
 
 def train_epoch(model, train_loader, optimizer, device, num_iterations=10):
@@ -174,7 +175,7 @@ def main():
     print(f"Device: {device}")
 
     # Hyperparameters
-    batch_size = 32
+    batch_size = 1  # Must be 1 due to PC network state reuse issues
     num_epochs = 5
     learning_rate = 0.001
     num_iterations = 10  # PC inference iterations
