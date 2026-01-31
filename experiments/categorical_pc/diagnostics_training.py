@@ -19,8 +19,6 @@ from torchvision import datasets, transforms
 import numpy as np
 from sklearn.metrics import pairwise_distances
 
-from train_vision_mnist_pc import VisionPCClassifier
-
 
 class TrainingDiagnostics:
     """
