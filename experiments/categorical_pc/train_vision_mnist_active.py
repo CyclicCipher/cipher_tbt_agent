@@ -249,13 +249,20 @@ class VisionPCClassifier(nn.Module):
         This is biologically plausible - error flows from higher areas to lower areas.
 
         Key idea:
-        - PC Layer 0 has prediction error
-        - This error indicates what conv features should have been
+        - PC Layer 0 has prediction error at its state (512 dims)
+        - Propagate this error back to conv features (1024 dims)
         - Update conv to produce better features for PC layer
 
         Mathematically: Δw_conv ∝ error_PC × activation
         """
         error_0, _, _ = self.last_errors
+        # error_0 is at PC layer 0 STATE (512 dims)
+        # We need error at PC layer 0 INPUT (conv features, 1024 dims)
+
+        # Propagate error backward through PC layer 0's feedforward weights
+        # error_at_conv_features = W_feedforward.T @ error_at_state
+        # W_feedforward shape: (512, 1024) → W.T shape: (1024, 512)
+        error_at_conv_features = self.pc_inference.layer0.W_feedforward.weight.T @ error_0  # (1024,)
 
         with torch.no_grad():
             # Get intermediate conv activations (we need to do another forward pass)
@@ -290,19 +297,19 @@ class VisionPCClassifier(nn.Module):
             # Final linear layer: 4096 → 1024
             act_before_final = x.squeeze(0)  # Remove batch dim: (1, 4096) → (4096,)
 
-            # Now we have error_0 from PC (1024 dims) and need to propagate backward
+            # Now we have error_at_conv_features (1024 dims) to propagate backward
 
             # Update final linear layer (4096 → 1024)
             # Δw = lr * error ⊗ input
             # Weight shape: (1024, 4096)
-            # error_0 shape: (1024,)
+            # error_at_conv_features shape: (1024,)
             # act_before_final shape: (4096,)
-            delta_final = conv_learning_rate * torch.outer(error_0, act_before_final)
+            delta_final = conv_learning_rate * torch.outer(error_at_conv_features, act_before_final)
             self.conv_preprocess[-2].weight.data += delta_final
 
             # Propagate error backward through final layer
-            # error_before_final = W^T @ error_0
-            error_before_final = self.conv_preprocess[-2].weight.T @ error_0  # (4096,)
+            # error_before_final = W^T @ error_at_conv_features
+            error_before_final = self.conv_preprocess[-2].weight.T @ error_at_conv_features  # (4096,)
 
             # Reshape to spatial: (256, 4, 4)
             error_spatial = error_before_final.view(256, 4, 4).unsqueeze(0)  # (1, 256, 4, 4)
@@ -330,6 +337,15 @@ class VisionPCClassifier(nn.Module):
             # NOTE: Full conv weight updates would require computing correlations
             # For now, we're only updating the final linear layer
             # This is still error-driven and local!
+
+            # TODO: Implement Option 4 - Full PC Hierarchy for Conv Layers
+            # This would be the most biologically plausible approach:
+            # - Each conv layer becomes a PC layer with its own state
+            # - States minimize prediction error locally
+            # - Weights updated via local Hebbian rules
+            # - Enables top-down generation and dreaming
+            # - Fully unified PC framework from pixels to output
+            # See: Rao & Ballard (1999) "Predictive Coding in the Visual Cortex"
 
     def get_total_error(self) -> float:
         """
