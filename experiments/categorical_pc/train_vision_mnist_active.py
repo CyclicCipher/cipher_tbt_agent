@@ -288,7 +288,7 @@ class VisionPCClassifier(nn.Module):
             act_flat = x.clone()
 
             # Final linear layer: 4096 → 1024
-            act_before_final = x.clone()
+            act_before_final = x.squeeze(0)  # Remove batch dim: (1, 4096) → (4096,)
 
             # Now we have error_0 from PC (1024 dims) and need to propagate backward
 
