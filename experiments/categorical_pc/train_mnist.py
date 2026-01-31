@@ -68,11 +68,13 @@ class PCConvClassifier(nn.Module):
         error_injection_strength: float = 1.0
     ) -> torch.Tensor:
         """Forward pass through full PC hierarchy."""
+        # Verify input shape
+        assert x.dim() == 3, f"Expected 3D input (C,H,W), got shape {x.shape}"
+        assert x.shape[0] == 3, f"Expected 3 channels, got {x.shape[0]}"
+        assert x.shape[1] == 100 and x.shape[2] == 100, f"Expected 100x100 input, got {x.shape[1]}x{x.shape[2]}"
+
         # Store input for weight updates
-        if x.dim() == 3:
-            self.last_input_image = x.unsqueeze(0)
-        elif x.dim() == 1:
-            self.last_input_image = x.view(3, 100, 100).unsqueeze(0)
+        self.last_input_image = x.unsqueeze(0)
 
         # PC conv inference
         conv_features = self.pc_conv_preprocessor.forward(
@@ -229,7 +231,7 @@ def train_epoch(
 
         # Forward pass with error injection
         output = model(
-            image.view(3, 100, 100),
+            image,  # Already (3, 100, 100) from transform
             target=target,
             num_conv_iterations=20,
             num_inference_iterations=20,
@@ -276,7 +278,7 @@ def test(model, test_loader, device):
                 model.reset_states()
 
                 output = model(
-                    image.view(3, 100, 100),
+                    image,  # Already (3, 100, 100) from transform
                     target=None,
                     num_conv_iterations=20,
                     num_inference_iterations=20
@@ -320,6 +322,7 @@ def main():
     transform = transforms.Compose([
         transforms.Resize((100, 100)),
         transforms.ToTensor(),
+        transforms.Lambda(lambda x: x.repeat(3, 1, 1))  # Convert 1ch→3ch (grayscale→RGB-like)
     ])
 
     train_dataset = datasets.MNIST(
