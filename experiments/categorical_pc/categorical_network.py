@@ -288,9 +288,13 @@ class PCConvVisionPreprocessor(nn.Module):
 
     def init_states(self, batch_size: int, device: torch.device):
         """Initialize state buffers for all layers."""
+        # Compute actual spatial dimensions from forward pass
+        # conv0: 100x100 -> stride 2 -> 50x50
+        # conv1: 50x50 -> stride 2 -> 25x25
+        # conv2: 25x25 -> stride 2 -> 13x13
         self.pc_conv0.init_state(batch_size, 50, 50, device)
-        self.pc_conv1.init_state(batch_size, 8, 8, device)
-        self.pc_conv2.init_state(batch_size, 2, 2, device)
+        self.pc_conv1.init_state(batch_size, 25, 25, device)
+        self.pc_conv2.init_state(batch_size, 13, 13, device)
 
     def forward(
         self,
@@ -353,7 +357,7 @@ class PCConvVisionPreprocessor(nn.Module):
             )
 
         # Extract features
-        features = self.pool2(self.pc_conv2.state)  # (B, 256, 2, 2)
+        features = self.pool2(self.pc_conv2.state)  # (B, 256, 13, 13) -> (B, 256, 2, 2)
         features = features.flatten(1)  # (B, 1024)
 
         if batch_size == 1:

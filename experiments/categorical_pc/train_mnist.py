@@ -349,7 +349,7 @@ def main():
     # Active curriculum
     curriculum_manager = ActiveCurriculumManager(
         num_samples=train_size,
-        strategy='learning_progress',
+        sampling_strategy='learning_progress',
         window_size=10,
         mastery_threshold=0.01,
         noise_threshold=-0.005
