@@ -25,6 +25,9 @@ from categorical_network_impl import (
     HAS_4BIT
 )
 
+# Import diagnostics
+from diagnostics_training import TrainingDiagnostics
+
 
 class VisionPCClassifier(nn.Module):
     """
@@ -138,7 +141,7 @@ class VisionPCClassifier(nn.Module):
         )
 
 
-def train_epoch_pc(model, train_loader, device, learning_rate=0.01, conv_lr=0.0001, num_iterations=10):
+def train_epoch_pc(model, train_loader, device, learning_rate=0.01, conv_lr=0.0001, num_iterations=10, diagnostics=None, epoch=None):
     """
     Train for one epoch using predictive coding learning.
 
@@ -171,6 +174,11 @@ def train_epoch_pc(model, train_loader, device, learning_rate=0.01, conv_lr=0.00
         conv_optimizer.zero_grad()
         loss = F.cross_entropy(output, target)
         loss.backward()
+
+        # DIAGNOSTIC: Check gradient flow on first batch
+        if diagnostics is not None and batch_idx == 0:
+            diagnostics.check_gradient_flow(model, loss)
+
         conv_optimizer.step()
 
         total_loss += loss.item()
@@ -262,6 +270,28 @@ def main():
     # NO OPTIMIZER - using local PC learning!
     print("Using local predictive coding learning (no backprop)")
 
+    # Initialize diagnostics
+    print("\nInitializing diagnostics...")
+    diagnostics = TrainingDiagnostics(model)
+
+    # Pre-training diagnostics
+    print("\n" + "=" * 60)
+    print("PRE-TRAINING DIAGNOSTICS")
+    print("=" * 60)
+
+    # Get a sample for diagnostics
+    sample_data, _ = next(iter(train_loader))
+    sample_data = sample_data.to(device)
+
+    # CRITICAL: Check device placement (GPU vs CPU)
+    gpu_ok = diagnostics.check_device_placement(sample_data)
+
+    # Check if PC inference is working correctly
+    diagnostics.check_pc_inference_quality(model, sample_data, device)
+
+    # Check for learning conflicts between PC and backprop
+    diagnostics.check_learning_conflicts()
+
     # Training loop
     print("\n" + "=" * 60)
     print("TRAINING WITH PREDICTIVE CODING")
@@ -274,7 +304,8 @@ def main():
         print("-" * 40)
 
         train_loss, train_acc = train_epoch_pc(
-            model, train_loader, device, learning_rate, num_iterations
+            model, train_loader, device, learning_rate, num_iterations=num_iterations,
+            diagnostics=diagnostics, epoch=epoch
         )
         test_loss, test_acc = test(
             model, test_loader, device, num_iterations
@@ -287,6 +318,10 @@ def main():
 
         if test_acc > best_test_acc:
             best_test_acc = test_acc
+
+        # Post-epoch diagnostics
+        diagnostics.check_weight_changes(epoch)
+        diagnostics.check_feature_quality(model, train_loader, device)
 
     print("\n" + "=" * 60)
     print("FINAL RESULTS")
@@ -306,6 +341,9 @@ def main():
         print("\n✗ Vision encoder still BROKEN - test accuracy < 50%")
 
     print("=" * 60)
+
+    # Final diagnostic summary
+    diagnostics.summary_report()
 
     # Return metrics for diagnostics
     return {
