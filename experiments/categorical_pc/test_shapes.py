@@ -31,7 +31,7 @@ print(f"✓ Shape assertion passed: {image.shape}")
 
 # Test model can accept it
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-preprocessor = PCConvVisionPreprocessor(dtype=torch.float32, precisions=[1.0, 10.0, 100.0])
+preprocessor = PCConvVisionPreprocessor(dtype=torch.float32)
 preprocessor = preprocessor.to(device)
 
 image = image.to(device)

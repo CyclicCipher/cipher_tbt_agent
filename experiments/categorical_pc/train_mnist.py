@@ -39,8 +39,7 @@ class PCConvClassifier(nn.Module):
 
         # PC convolutional preprocessor
         self.pc_conv_preprocessor = PCConvVisionPreprocessor(
-            dtype=dtype,
-            precisions=[1.0, 10.0, 100.0]
+            dtype=dtype
         )
 
         # PC inference layers

@@ -41,7 +41,6 @@ class PCConvLayer(nn.Module):
         kernel_size: int = 3,
         stride: int = 1,
         padding: int = 1,
-        precision: float = 1.0,
         output_padding: int = None,
         dtype: torch.dtype = torch.float32
     ):
@@ -56,8 +55,11 @@ class PCConvLayer(nn.Module):
         self.padding = padding
         self.dtype = dtype
 
-        # Precision weight (higher = stronger error signal)
-        self.precision = nn.Parameter(torch.tensor(precision, dtype=dtype))
+        # Precision as inverse variance (Π = 1/σ²)
+        # Initialize with moderate value, will be updated based on error variance
+        self.register_buffer('error_variance', torch.tensor(1.0, dtype=dtype))
+        self.register_buffer('precision', torch.tensor(1.0, dtype=dtype))
+        self.variance_momentum = 0.9  # EMA coefficient for running variance
 
         # Bottom-up prediction weights
         self.W_bottom_up = nn.Conv2d(
@@ -170,11 +172,29 @@ class PCConvLayer(nn.Module):
         input_above: Optional[torch.Tensor] = None,
         use_lateral: bool = True
     ) -> torch.Tensor:
-        """Compute precision-weighted prediction error."""
+        """Compute precision-weighted prediction error.
+
+        Precision weighting implements attention by adjusting error signal
+        strength based on reliability (inverse variance). This is the core
+        mechanism in Friston's free energy principle.
+        """
         prediction = self.compute_prediction(input_below, input_above, use_lateral)
         raw_error = self.state - prediction
-        precision = torch.clamp(self.precision, min=0.1, max=100.0)
-        self.error = precision * raw_error
+
+        # Update running variance estimate (EMA)
+        # Compute variance across batch and spatial dimensions
+        current_var = raw_error.var(dim=(0, 2, 3), keepdim=False).mean()
+        self.error_variance.mul_(self.variance_momentum).add_(
+            current_var * (1 - self.variance_momentum)
+        )
+
+        # Precision = inverse variance (with numerical stability)
+        # Clamp variance to prevent division by zero or extreme values
+        stable_var = torch.clamp(self.error_variance, min=1e-4, max=1e2)
+        self.precision.copy_(1.0 / stable_var)
+
+        # Apply precision weighting: ξ = Π * ε
+        self.error = self.precision * raw_error
         return self.error
 
     def update_state(
@@ -199,16 +219,20 @@ class PCConvLayer(nn.Module):
         """Update weights using local Hebbian learning."""
         with torch.no_grad():
             if input_below is not None:
-                grad_bottom_up = F.conv2d(
-                    input_below.transpose(0, 1),
-                    self.error.transpose(0, 1),
+                # Compute gradient using PyTorch's internal conv2d_weight function
+                # This correctly computes: grad_W[i,j] = correlation(input[j], error[i])
+                # Shape: [out_channels, in_channels, kernel_h, kernel_w]
+                grad_bottom_up = torch.nn.grad.conv2d_weight(
+                    input_below,
+                    self.W_bottom_up.weight.shape,
+                    self.error,
                     stride=self.stride,
                     padding=self.padding
-                ).transpose(0, 1)
+                )
 
-                grad_bottom_up = grad_bottom_up.mean(dim=0, keepdim=True)
+                # Average over batch dimension
                 self.W_bottom_up.weight.data += learning_rate * (
-                    grad_bottom_up.squeeze(0) - weight_decay * self.W_bottom_up.weight.data
+                    grad_bottom_up - weight_decay * self.W_bottom_up.weight.data
                 )
 
             if self.prev_state is not None:
@@ -256,8 +280,7 @@ class PCConvVisionPreprocessor(nn.Module):
 
     def __init__(
         self,
-        dtype: torch.dtype = torch.float32,
-        precisions: List[float] = [1.0, 10.0, 100.0]
+        dtype: torch.dtype = torch.float32
     ):
         super().__init__()
 
@@ -269,7 +292,7 @@ class PCConvVisionPreprocessor(nn.Module):
         self.pc_conv0 = PCConvLayer(
             layer_index=0, in_channels=3, out_channels=64,
             channels_above=128, kernel_size=7, stride=2, padding=3,
-            precision=precisions[0], output_padding=1, dtype=dtype
+            output_padding=1, dtype=dtype
         )
         self.pool0 = nn.AdaptiveAvgPool2d((16, 16))
 
@@ -279,7 +302,7 @@ class PCConvVisionPreprocessor(nn.Module):
         self.pc_conv1 = PCConvLayer(
             layer_index=1, in_channels=64, out_channels=128,
             channels_above=256, kernel_size=3, stride=2, padding=1,
-            precision=precisions[1], output_padding=0, dtype=dtype
+            output_padding=0, dtype=dtype
         )
         self.pool1 = nn.AdaptiveAvgPool2d((4, 4))
 
@@ -287,7 +310,7 @@ class PCConvVisionPreprocessor(nn.Module):
         self.pc_conv2 = PCConvLayer(
             layer_index=2, in_channels=128, out_channels=256,
             channels_above=0, kernel_size=3, stride=2, padding=1,
-            precision=precisions[2], dtype=dtype
+            dtype=dtype
         )
         self.pool2 = nn.AdaptiveAvgPool2d((2, 2))
 
