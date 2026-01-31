@@ -93,6 +93,11 @@ class VisionPCClassifier(nn.Module):
 
         self.num_classes = num_classes
 
+        # PURE PC LEARNING: Disable gradients on conv layers
+        # Conv layers will learn via their own local rules (or stay fixed)
+        for param in self.conv_preprocess.parameters():
+            param.requires_grad = False
+
     def forward(
         self,
         x: torch.Tensor,
@@ -176,7 +181,6 @@ def train_epoch_active(
     curriculum_manager,
     device,
     learning_rate=0.01,
-    conv_lr=0.0001,
     num_iterations=10,
     diagnostics=None,
     epoch=None,
@@ -188,13 +192,14 @@ def train_epoch_active(
     Instead of random sampling, the curriculum manager selects samples
     based on learning progress.
 
+    PURE PC LEARNING - No backprop, only local learning rules!
+
     Args:
         model: The PC classifier
         train_dataset: Full training dataset (not DataLoader)
         curriculum_manager: Active curriculum manager
         device: torch device
         learning_rate: PC learning rate
-        conv_lr: Conv layer learning rate
         num_iterations: PC inference iterations
         diagnostics: Diagnostics tracker
         epoch: Current epoch number
@@ -207,9 +212,6 @@ def train_epoch_active(
     total_loss = 0
     correct = 0
     total = 0
-
-    # Separate optimizer for conv layers only
-    conv_optimizer = torch.optim.Adam(model.conv_preprocess.parameters(), lr=conv_lr)
 
     # Get epoch indices from curriculum manager
     curriculum_manager.start_epoch()
@@ -232,19 +234,12 @@ def train_epoch_active(
         # Forward pass (includes PC inference with clamping)
         output = model(data, target=target.item(), num_iterations=num_iterations)
 
-        # Update PC layers using local learning (NO backprop)
+        # Update weights using ONLY PC local learning rules (NO backprop!)
         model.update_weights_pc(learning_rate=learning_rate)
 
-        # Update conv layers using backprop (pragmatic hybrid approach)
-        conv_optimizer.zero_grad()
-        loss = F.cross_entropy(output, target)
-        loss.backward()
-
-        # DIAGNOSTIC: Check gradient flow on first batch
-        if diagnostics is not None and step_idx == 0:
-            diagnostics.check_gradient_flow(model, loss)
-
-        conv_optimizer.step()
+        # Compute loss for monitoring only (no backward pass)
+        with torch.no_grad():
+            loss = F.cross_entropy(output, target)
 
         # Get prediction error for curriculum manager
         prediction_error = model.get_total_error()
@@ -360,7 +355,10 @@ def main():
     model = VisionPCClassifier(num_classes=10, use_4bit=False)
     model = model.to(device)
 
-    print("Using local predictive coding learning (no backprop on PC layers)")
+    print("Using PURE predictive coding learning:")
+    print("  - PC layers: Local Hebbian learning rules")
+    print("  - Conv layers: Frozen (no learning)")
+    print("  - NO backprop anywhere!")
 
     # Initialize Active Curriculum Manager
     print("\nInitializing Active Curriculum Manager...")
