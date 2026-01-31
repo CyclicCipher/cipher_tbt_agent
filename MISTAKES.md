@@ -53,6 +53,22 @@
 **Fix**: Add `assert not torch.isnan(x).any()` after critical operations (precision computation, divisions, log operations)
 **Lesson**: Detect numerical issues immediately at their source, not downstream.
 
+### 6. Excessive Logging Making Output Unusable
+**Context**: train_mnist_optimized.py - progress logging
+**Mistake**: Logging progress every 10 samples creates multi-gigabyte log files that are impossible to review
+**Fix**: Log every 100-500 samples for long training runs. Use conditional logging: `if idx % 100 == 0`
+**Lesson**: Consider log file size in long-running experiments. More frequent logging ≠ better debugging.
+
+### 7. Insufficient Diagnostics for Training Failures
+**Context**: Training stuck at 9-10% accuracy with no clear reason why
+**Mistake**: Not logging weight statistics, gradient magnitudes, or NaN/Inf checks during training
+**Fix**: Add comprehensive diagnostics:
+  - Weight statistics (mean, std, min, max) after each epoch
+  - NaN/Inf detection in outputs, errors, gradients
+  - Learning progress warnings when accuracy is too low
+  - Early returns in update functions when NaN detected
+**Lesson**: When debugging "silent failures" (no error but no learning), you need exhaustive diagnostics to identify the root cause.
+
 ---
 
 ## ARCHITECTURAL MISTAKES
