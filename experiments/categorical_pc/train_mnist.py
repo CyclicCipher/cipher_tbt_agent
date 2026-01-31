@@ -254,7 +254,7 @@ def train_epoch(
         )
 
         # Update curriculum
-        curriculum_manager.update_sample(sample_idx, error, epoch)
+        curriculum_manager.update(sample_idx, error)
 
     accuracy = 100. * correct / total
     mean_error = np.mean(epoch_errors)
