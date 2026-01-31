@@ -273,8 +273,8 @@ def train_epoch(
         sample_time = time.time() - sample_start
         sample_times.append(sample_time)
 
-        # Progress indicator (CRITICAL for user feedback)
-        if idx % 10 == 0 or idx < 5:
+        # Progress indicator - log every 100 samples (not every 10!)
+        if idx % 100 == 0 or idx < 5:
             elapsed = time.time() - start_time
             avg_time = sum(sample_times) / len(sample_times)
             eta_seconds = avg_time * (len(epoch_indices) - idx)
@@ -283,8 +283,15 @@ def train_epoch(
             print(f"  Sample {idx+1}/{len(epoch_indices)} | "
                   f"Time: {sample_time:.2f}s (avg: {avg_time:.2f}s) | "
                   f"Acc: {100.*correct/total:.1f}% | "
+                  f"Error: {error:.4f} | "
                   f"ETA: {eta_minutes:.1f}min",
                   flush=True)
+
+            # Diagnostic: Check for NaN in output
+            if torch.isnan(output).any():
+                print(f"  WARNING: NaN detected in output at sample {idx}!")
+            if torch.isinf(output).any():
+                print(f"  WARNING: Inf detected in output at sample {idx}!")
 
         # Periodic garbage collection (CRITICAL for memory management)
         if idx % 50 == 0 and idx > 0:
@@ -298,6 +305,28 @@ def train_epoch(
     total_time = time.time() - start_time
     print(f"\nEpoch completed in {total_time/60:.1f} minutes")
     print(f"Average time per sample: {sum(sample_times)/len(sample_times):.2f}s")
+
+    # CRITICAL DIAGNOSTICS: Check weight update status
+    print("\nWeight Update Diagnostics:")
+    conv_stats = model.pc_conv_preprocessor.get_weight_stats()
+    for layer_name, stats in conv_stats.items():
+        print(f"  {layer_name}:")
+        print(f"    mean={stats['mean']:.6f}, std={stats['std']:.6f}")
+        print(f"    abs_mean={stats['abs_mean']:.6f}, precision={stats['precision']:.2f}")
+        if stats['std'] == 0.0 or np.isnan(stats['std']):
+            print(f"    WARNING: Weights not updating or NaN detected!")
+
+    # Check inference layer weights
+    print("\nInference Layer Diagnostics:")
+    for layer_name in ['layer0', 'layer1', 'layer2']:
+        layer = getattr(model.pc_inference, layer_name)
+        w = layer.W_feedforward.weight.data
+        print(f"  {layer_name}:")
+        print(f"    W_ff: mean={w.mean():.6f}, std={w.std():.6f}")
+        if torch.isnan(w).any():
+            print(f"    WARNING: NaN in feedforward weights!")
+        if w.std() < 1e-8:
+            print(f"    WARNING: Weights not updating (std too small)!")
 
     return accuracy, mean_error
 
@@ -429,11 +458,24 @@ def main():
         print(f"\nEpoch {epoch} Results:")
         print(f"  Train Accuracy: {train_acc:.2f}%")
         print(f"  Test Accuracy: {test_acc:.2f}%")
-        print(f"  Train Error: {train_error:.4f}")
+        print(f"  Train Error: {train_error}")
+
+        # Enhanced diagnostics
         print("\n  PC Conv Layer Stats:")
         for layer_name, stats in conv_stats.items():
+            std_str = f"{stats['std']:.6f}" if not np.isnan(stats['std']) else "NaN"
             print(f"    {layer_name}: precision={stats['precision']:.2f}, "
-                  f"weight_std={stats['std']:.4f}")
+                  f"weight_std={std_str}, mean={stats['mean']:.6f}")
+
+        # Check if model is learning
+        if train_acc < 15.0 and epoch > 1:
+            print(f"\n  WARNING: Training accuracy is very low ({train_acc:.2f}%)!")
+            print(f"  This suggests the model is not learning properly.")
+            print(f"  Possible causes:")
+            print(f"    - Weights not updating (check std values above)")
+            print(f"    - NaN in computations (check for NaN warnings)")
+            print(f"    - Learning rates too small or too large")
+            print(f"    - Gradient flow issues")
 
     print("\n" + "=" * 80)
     print("Training Complete")

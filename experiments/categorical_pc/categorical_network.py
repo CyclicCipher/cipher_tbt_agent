@@ -192,7 +192,20 @@ class PCConvLayer(nn.Module):
     ) -> torch.Tensor:
         """Update state to minimize prediction error."""
         error = self.compute_error(input_below, input_above, use_lateral)
+
+        # Check for NaN in error before state update
+        if torch.isnan(error).any():
+            print(f"WARNING: NaN in error for layer {self.layer_index} during state update!")
+            print(f"  State range: [{self.state.min():.4f}, {self.state.max():.4f}]")
+            return self.state
+
         self.state = self.state - inference_lr * error
+
+        # Check state after update
+        if torch.isnan(self.state).any():
+            print(f"ERROR: NaN in state after update for layer {self.layer_index}!")
+            print(f"  Error range: [{error.min():.4f}, {error.max():.4f}]")
+
         return self.state
 
     def update_weights(
@@ -204,7 +217,17 @@ class PCConvLayer(nn.Module):
     ) -> None:
         """Update weights using local Hebbian learning."""
         with torch.no_grad():
+            # Check for NaN in error before updating
+            if torch.isnan(self.error).any():
+                print(f"WARNING: NaN in error for layer {self.layer_index} before weight update!")
+                return
+
             if input_below is not None:
+                # Check input validity
+                if torch.isnan(input_below).any():
+                    print(f"WARNING: NaN in input_below for layer {self.layer_index}!")
+                    return
+
                 # Compute gradient using PyTorch's internal conv2d_weight function
                 # This correctly computes: grad_W[i,j] = correlation(input[j], error[i])
                 # Shape: [out_channels, in_channels, kernel_h, kernel_w]
@@ -216,14 +239,28 @@ class PCConvLayer(nn.Module):
                     padding=self.padding
                 )
 
-                # Average over batch dimension
+                # Check gradient validity
+                if torch.isnan(grad_bottom_up).any():
+                    print(f"WARNING: NaN in gradient for layer {self.layer_index}!")
+                    return
+
+                # Average over batch dimension and update
                 self.W_bottom_up.weight.data += learning_rate * (
                     grad_bottom_up - weight_decay * self.W_bottom_up.weight.data
                 )
 
+                # Check weights after update
+                if torch.isnan(self.W_bottom_up.weight.data).any():
+                    print(f"ERROR: NaN in weights after update for layer {self.layer_index}!")
+
             if self.prev_state is not None:
                 error_flat = self.error.mean(dim=(0, 2, 3))
                 state_flat = self.prev_state.mean(dim=(0, 2, 3))
+
+                if torch.isnan(error_flat).any() or torch.isnan(state_flat).any():
+                    print(f"WARNING: NaN in lateral update for layer {self.layer_index}!")
+                    return
+
                 delta_lateral = learning_rate * torch.outer(error_flat, state_flat)
                 self.W_lateral.weight.data[:, :, 0, 0] += (
                     delta_lateral - weight_decay * self.W_lateral.weight.data[:, :, 0, 0]
@@ -389,11 +426,25 @@ class PCConvVisionPreprocessor(nn.Module):
         stats = {}
         for i, layer in enumerate(self.pc_layers):
             w = layer.W_bottom_up.weight.data
+
+            # Check for NaN/Inf
+            has_nan = torch.isnan(w).any().item()
+            has_inf = torch.isinf(w).any().item()
+
+            # Compute std, handling edge cases
+            w_std = w.std().item()
+            if torch.isnan(torch.tensor(w_std)):
+                w_std = float('nan')
+
             stats[f'pc_conv{i}'] = {
                 'mean': w.mean().item(),
-                'std': w.std().item(),
+                'std': w_std,
                 'abs_mean': w.abs().mean().item(),
-                'precision': layer.precision.item()
+                'min': w.min().item(),
+                'max': w.max().item(),
+                'precision': layer.precision.item(),
+                'has_nan': has_nan,
+                'has_inf': has_inf
             }
         return stats
 
