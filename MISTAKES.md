@@ -69,6 +69,20 @@
   - Early returns in update functions when NaN detected
 **Lesson**: When debugging "silent failures" (no error but no learning), you need exhaustive diagnostics to identify the root cause.
 
+### 8. Catastrophic Numerical Explosion from Precision × Learning Rate
+**Context**: Model exploded to NaN within seconds, states reaching ±10^33
+**Mistake**: Used VERSES precision values [1.0, 10.0, 100.0] with inference_lr=0.1 without considering multiplicative effect
+**Root Cause**: `state_update = inference_lr × (precision × raw_error) = 0.1 × 100 × raw_error = 10 × raw_error`
+  - This 10x amplification creates runaway positive feedback loop
+  - State explosion → larger errors → larger updates → faster explosion
+**Fix**:
+  - Reduced precision from [1.0, 10.0, 100.0] to [1.0, 2.0, 5.0]
+  - Reduced inference_lr from 0.1 to 0.01
+  - Added error clipping (max ±10.0) to prevent unbounded growth
+  - Added state explosion detection and reset (if |state| > 1e6)
+  - Added NaN/Inf circuit breaker with early returns
+**Lesson**: ALWAYS analyze the multiplicative effect of hyperparameters. precision × lr must be calibrated together, not independently. What works in one codebase may cause explosion in another due to different scaling conventions.
+
 ---
 
 ## ARCHITECTURAL MISTAKES
