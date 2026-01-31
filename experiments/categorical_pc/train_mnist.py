@@ -315,7 +315,7 @@ def main():
     print(f"  Epochs: {num_epochs}")
     print(f"  PC Layer LR: {learning_rate}")
     print(f"  PC Conv Layer LR: {conv_learning_rate}")
-    print(f"  Precision Weighting: [1.0, 10.0, 100.0]")
+    print(f"  Precision Weighting: Dynamic (inverse variance)")
 
     # Load MNIST
     transform = transforms.Compose([
