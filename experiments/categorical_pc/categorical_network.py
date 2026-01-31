@@ -42,6 +42,7 @@ class PCConvLayer(nn.Module):
         stride: int = 1,
         padding: int = 1,
         output_padding: int = None,
+        fixed_precision: float = 1.0,
         dtype: torch.dtype = torch.float32
     ):
         super().__init__()
@@ -55,11 +56,9 @@ class PCConvLayer(nn.Module):
         self.padding = padding
         self.dtype = dtype
 
-        # Precision as inverse variance (Π = 1/σ²)
-        # Initialize with moderate value, will be updated based on error variance
-        self.register_buffer('error_variance', torch.tensor(1.0, dtype=dtype))
-        self.register_buffer('precision', torch.tensor(1.0, dtype=dtype))
-        self.variance_momentum = 0.9  # EMA coefficient for running variance
+        # Fixed precision (VERSES approach: [1.0, 10.0, 100.0] for layers 0, 1, 2)
+        # Prevents error decay in deep networks
+        self.register_buffer('precision', torch.tensor(fixed_precision, dtype=dtype))
 
         # Bottom-up prediction weights
         self.W_bottom_up = nn.Conv2d(
@@ -174,26 +173,13 @@ class PCConvLayer(nn.Module):
     ) -> torch.Tensor:
         """Compute precision-weighted prediction error.
 
-        Precision weighting implements attention by adjusting error signal
-        strength based on reliability (inverse variance). This is the core
-        mechanism in Friston's free energy principle.
+        Uses fixed precision values (VERSES approach) to prevent error decay
+        in deep networks. Precision increases with layer depth.
         """
         prediction = self.compute_prediction(input_below, input_above, use_lateral)
         raw_error = self.state - prediction
 
-        # Update running variance estimate (EMA)
-        # Compute variance across batch and spatial dimensions
-        current_var = raw_error.var(dim=(0, 2, 3), keepdim=False).mean()
-        self.error_variance.mul_(self.variance_momentum).add_(
-            current_var * (1 - self.variance_momentum)
-        )
-
-        # Precision = inverse variance (with numerical stability)
-        # Clamp variance to prevent division by zero or extreme values
-        stable_var = torch.clamp(self.error_variance, min=1e-4, max=1e2)
-        self.precision.copy_(1.0 / stable_var)
-
-        # Apply precision weighting: ξ = Π * ε
+        # Apply fixed precision weighting: ξ = Π * ε
         self.error = self.precision * raw_error
         return self.error
 
@@ -289,28 +275,31 @@ class PCConvVisionPreprocessor(nn.Module):
         # Layer 0: V1 simple cells (3→64, 100×100→50×50)
         # W_top_down must upsample from 25×25 (layer 1) to 50×50
         # output = (25-1)*2 - 2*3 + 7 + out_pad = 49 + out_pad = 50 → out_pad = 1
+        # Fixed precision = 1.0 (VERSES approach)
         self.pc_conv0 = PCConvLayer(
             layer_index=0, in_channels=3, out_channels=64,
             channels_above=128, kernel_size=7, stride=2, padding=3,
-            output_padding=1, dtype=dtype
+            output_padding=1, fixed_precision=1.0, dtype=dtype
         )
         self.pool0 = nn.AdaptiveAvgPool2d((16, 16))
 
         # Layer 1: V1 complex cells (64→128, 16×16→8×8)
         # W_top_down must upsample from 13×13 (layer 2) to 25×25
         # output = (13-1)*2 - 2*1 + 3 + out_pad = 25 + out_pad = 25 → out_pad = 0
+        # Fixed precision = 10.0 (VERSES approach)
         self.pc_conv1 = PCConvLayer(
             layer_index=1, in_channels=64, out_channels=128,
             channels_above=256, kernel_size=3, stride=2, padding=1,
-            output_padding=0, dtype=dtype
+            output_padding=0, fixed_precision=10.0, dtype=dtype
         )
         self.pool1 = nn.AdaptiveAvgPool2d((4, 4))
 
         # Layer 2: V2/V4 features (128→256, 4×4→2×2)
+        # Fixed precision = 100.0 (VERSES approach)
         self.pc_conv2 = PCConvLayer(
             layer_index=2, in_channels=128, out_channels=256,
             channels_above=0, kernel_size=3, stride=2, padding=1,
-            dtype=dtype
+            fixed_precision=100.0, dtype=dtype
         )
         self.pool2 = nn.AdaptiveAvgPool2d((2, 2))
 
