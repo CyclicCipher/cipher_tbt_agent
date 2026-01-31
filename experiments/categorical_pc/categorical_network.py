@@ -193,18 +193,38 @@ class PCConvLayer(nn.Module):
         """Update state to minimize prediction error."""
         error = self.compute_error(input_below, input_above, use_lateral)
 
-        # Check for NaN in error before state update
-        if torch.isnan(error).any():
-            print(f"WARNING: NaN in error for layer {self.layer_index} during state update!")
-            print(f"  State range: [{self.state.min():.4f}, {self.state.max():.4f}]")
+        # CRITICAL: Check for NaN/Inf BEFORE update and halt if detected
+        if torch.isnan(error).any() or torch.isinf(error).any():
+            # Don't spam - only print once per layer per batch
+            if not hasattr(self, '_nan_warned'):
+                print(f"CRITICAL: NaN/Inf in error for layer {self.layer_index}! Halting updates.")
+                self._nan_warned = True
             return self.state
 
+        # CRITICAL: Clip error to prevent explosion
+        # The precision weighting can amplify errors to huge values
+        # Typical errors should be ~0.1-1.0, never 10^30
+        max_error_magnitude = 10.0
+        error = torch.clamp(error, -max_error_magnitude, max_error_magnitude)
+
+        # CRITICAL: Check if state has already exploded
+        state_max_abs = self.state.abs().max()
+        if state_max_abs > 1e6:
+            if not hasattr(self, '_explosion_warned'):
+                print(f"CRITICAL: State exploded in layer {self.layer_index} (max={state_max_abs:.2e})! Resetting.")
+                self._explosion_warned = True
+            self.state.zero_()
+            return self.state
+
+        # Update state
         self.state = self.state - inference_lr * error
 
-        # Check state after update
-        if torch.isnan(self.state).any():
-            print(f"ERROR: NaN in state after update for layer {self.layer_index}!")
-            print(f"  Error range: [{error.min():.4f}, {error.max():.4f}]")
+        # CRITICAL: Verify state didn't explode or become NaN after update
+        if torch.isnan(self.state).any() or torch.isinf(self.state).any():
+            if not hasattr(self, '_nan_post_warned'):
+                print(f"CRITICAL: State became NaN/Inf after update in layer {self.layer_index}! Resetting.")
+                self._nan_post_warned = True
+            self.state.zero_()
 
         return self.state
 
@@ -312,7 +332,8 @@ class PCConvVisionPreprocessor(nn.Module):
         # Layer 0: V1 simple cells (3→64, 100×100→50×50)
         # W_top_down must upsample from 25×25 (layer 1) to 50×50
         # output = (25-1)*2 - 2*3 + 7 + out_pad = 49 + out_pad = 50 → out_pad = 1
-        # Fixed precision = 1.0 (VERSES approach)
+        # CRITICAL: Reduced precision from VERSES [1, 10, 100] to [1, 2, 5] to prevent explosion
+        # The original values caused state explosion when combined with inference_lr
         self.pc_conv0 = PCConvLayer(
             layer_index=0, in_channels=3, out_channels=64,
             channels_above=128, kernel_size=7, stride=2, padding=3,
@@ -323,20 +344,21 @@ class PCConvVisionPreprocessor(nn.Module):
         # Layer 1: V1 complex cells (64→128, 16×16→8×8)
         # W_top_down must upsample from 13×13 (layer 2) to 25×25
         # output = (13-1)*2 - 2*1 + 3 + out_pad = 25 + out_pad = 25 → out_pad = 0
-        # Fixed precision = 10.0 (VERSES approach)
+        # CRITICAL: Reduced from 10.0 to 2.0 for stability
         self.pc_conv1 = PCConvLayer(
             layer_index=1, in_channels=64, out_channels=128,
             channels_above=256, kernel_size=3, stride=2, padding=1,
-            output_padding=0, fixed_precision=10.0, dtype=dtype
+            output_padding=0, fixed_precision=2.0, dtype=dtype
         )
         self.pool1 = nn.AdaptiveAvgPool2d((4, 4))
 
         # Layer 2: V2/V4 features (128→256, 4×4→2×2)
-        # Fixed precision = 100.0 (VERSES approach)
+        # CRITICAL: Reduced from 100.0 to 5.0 for stability
+        # The original 100x amplification caused immediate state explosion
         self.pc_conv2 = PCConvLayer(
             layer_index=2, in_channels=128, out_channels=256,
             channels_above=0, kernel_size=3, stride=2, padding=1,
-            fixed_precision=100.0, dtype=dtype
+            fixed_precision=5.0, dtype=dtype
         )
         self.pool2 = nn.AdaptiveAvgPool2d((2, 2))
 

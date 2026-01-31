@@ -65,8 +65,8 @@ class PCConvClassifier(nn.Module):
         target: Optional[torch.Tensor] = None,
         num_conv_iterations: int = 5,  # REDUCED from 20
         num_inference_iterations: int = 5,  # REDUCED from 20
-        conv_inference_lr: float = 0.1,
-        pc_inference_lr: float = 0.1,
+        conv_inference_lr: float = 0.01,  # CRITICAL: Reduced from 0.1 to prevent explosion
+        pc_inference_lr: float = 0.01,   # CRITICAL: Reduced from 0.1 to prevent explosion
         error_injection_strength: float = 1.0
     ) -> torch.Tensor:
         """Forward pass through full PC hierarchy."""
@@ -115,7 +115,7 @@ class PCConvClassifier(nn.Module):
         self,
         input_data: torch.Tensor,
         num_iterations: int = 5,
-        inference_lr: float = 0.1
+        inference_lr: float = 0.01  # CRITICAL: Reduced from 0.1 to prevent explosion
     ) -> torch.Tensor:
         """Pure PC inference with NO supervision."""
         for iteration in range(num_iterations):
@@ -247,6 +247,8 @@ def train_epoch(
             target=target,
             num_conv_iterations=5,  # REDUCED from 20
             num_inference_iterations=5,  # REDUCED from 20
+            conv_inference_lr=0.01,  # CRITICAL: Reduced to prevent explosion
+            pc_inference_lr=0.01,    # CRITICAL: Reduced to prevent explosion
             error_injection_strength=1.0
         )
 
@@ -349,7 +351,9 @@ def test(model, test_loader, device):
                     image,  # Already (3, 100, 100) from transform
                     target=None,
                     num_conv_iterations=5,  # REDUCED from 20
-                    num_inference_iterations=5  # REDUCED from 20
+                    num_inference_iterations=5,  # REDUCED from 20
+                    conv_inference_lr=0.01,  # CRITICAL: Reduced to prevent explosion
+                    pc_inference_lr=0.01     # CRITICAL: Reduced to prevent explosion
                 )
 
                 pred = output.squeeze().argmax().item()
@@ -386,9 +390,10 @@ def main():
     print(f"  Epochs: {num_epochs}")
     print(f"  PC Layer LR: {learning_rate}")
     print(f"  PC Conv Layer LR: {conv_learning_rate}")
-    print(f"  Precision Weighting: Fixed [1.0, 10.0, 100.0] (VERSES approach)")
+    print(f"  Precision Weighting: Fixed [1.0, 2.0, 5.0] (REDUCED for stability)")
     print(f"  Conv Iterations: 5 (OPTIMIZED from 20)")
     print(f"  Inference Iterations: 5 (OPTIMIZED from 20)")
+    print(f"  Inference LR: 0.01 (REDUCED from 0.1 for stability)")
 
     # Load MNIST
     transform = transforms.Compose([
