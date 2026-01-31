@@ -42,6 +42,7 @@ class PCConvLayer(nn.Module):
         stride: int = 1,
         padding: int = 1,
         precision: float = 1.0,
+        output_padding: int = None,
         dtype: torch.dtype = torch.float32
     ):
         super().__init__()
@@ -68,10 +69,12 @@ class PCConvLayer(nn.Module):
         # Top-down prediction weights
         if channels_above > 0:
             if stride > 1:
+                # Use provided output_padding or default to stride - 1
+                out_pad = output_padding if output_padding is not None else stride - 1
                 self.W_top_down = nn.ConvTranspose2d(
                     channels_above, out_channels,
                     kernel_size=kernel_size, stride=stride, padding=padding,
-                    output_padding=stride - 1, bias=True, dtype=dtype
+                    output_padding=out_pad, bias=True, dtype=dtype
                 )
             else:
                 self.W_top_down = nn.Conv2d(
@@ -261,18 +264,22 @@ class PCConvVisionPreprocessor(nn.Module):
         self.dtype = dtype
 
         # Layer 0: V1 simple cells (3→64, 100×100→50×50)
+        # W_top_down must upsample from 25×25 (layer 1) to 50×50
+        # output = (25-1)*2 - 2*3 + 7 + out_pad = 49 + out_pad = 50 → out_pad = 1
         self.pc_conv0 = PCConvLayer(
             layer_index=0, in_channels=3, out_channels=64,
             channels_above=128, kernel_size=7, stride=2, padding=3,
-            precision=precisions[0], dtype=dtype
+            precision=precisions[0], output_padding=1, dtype=dtype
         )
         self.pool0 = nn.AdaptiveAvgPool2d((16, 16))
 
         # Layer 1: V1 complex cells (64→128, 16×16→8×8)
+        # W_top_down must upsample from 13×13 (layer 2) to 25×25
+        # output = (13-1)*2 - 2*1 + 3 + out_pad = 25 + out_pad = 25 → out_pad = 0
         self.pc_conv1 = PCConvLayer(
             layer_index=1, in_channels=64, out_channels=128,
             channels_above=256, kernel_size=3, stride=2, padding=1,
-            precision=precisions[1], dtype=dtype
+            precision=precisions[1], output_padding=0, dtype=dtype
         )
         self.pool1 = nn.AdaptiveAvgPool2d((4, 4))
 
