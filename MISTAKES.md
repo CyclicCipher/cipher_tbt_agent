@@ -141,14 +141,26 @@
 
 ---
 
+## RECENT CHANGES
+
+### Fixed Precision Implementation (2026-01-31)
+**Change**: Switched from dynamic variance-based precision to fixed precision [1.0, 10.0, 100.0]
+**Rationale**: VERSES research shows fixed precision schedules are effective and simpler
+**Files Modified**:
+- categorical_network.py: Removed EMA variance computation, added fixed_precision parameter
+- train_mnist.py: Updated to reflect fixed precision approach
+**Status**: Implemented, ready for testing
+
+---
+
 ## INVESTIGATION QUEUE
 
 ### Current Questions to Resolve:
 
-1. **Why isn't the current implementation working?**
-   - Is the gradient sign correct? (target - prediction vs prediction - target)
-   - Are the shapes broadcasting correctly?
-   - Are precision values reasonable or creating numerical issues?
+1. **Does the fixed precision implementation work?**
+   - Need to test with actual training run
+   - Compare learning curves with previous attempts
+   - Verify numerical stability
 
 ---
 
