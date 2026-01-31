@@ -307,36 +307,20 @@ class VisionPCClassifier(nn.Module):
             delta_final = conv_learning_rate * torch.outer(error_at_conv_features, act_before_final)
             self.conv_preprocess[-2].weight.data += delta_final
 
-            # Propagate error backward through final layer
-            # error_before_final = W^T @ error_at_conv_features
-            error_before_final = self.conv_preprocess[-2].weight.T @ error_at_conv_features  # (4096,)
-
-            # Reshape to spatial: (256, 4, 4)
-            error_spatial = error_before_final.view(256, 4, 4).unsqueeze(0)  # (1, 256, 4, 4)
-
-            # Update Conv layer 2 (8×8×128 → 4×4×256)
-            # This is more complex - we need to use spatial correlation
-            # For now, use a simplified local rule:
-            # Δw ∝ error @ input (spatially)
-
-            # Propagate error through tanh derivative
-            error_conv2 = error_spatial * (1 - act_2.unsqueeze(0) ** 2)  # Tanh derivative
-
-            # For convolutional layers, use spatial Hebbian learning
-            # We'll use a simplified version: update based on correlation
-
-            # Propagate through conv2
-            # This is tricky - for simplicity, use average pooling to downsample error
-            error_1 = F.interpolate(error_conv2, size=(8, 8), mode='bilinear', align_corners=False)
-            error_1 = error_1 * (1 - act_1.unsqueeze(0) ** 2)
-
-            # Propagate through conv1
-            error_0_spatial = F.interpolate(error_1, size=(16, 16), mode='bilinear', align_corners=False)
-            error_0_spatial = error_0_spatial * (1 - act_0.unsqueeze(0) ** 2)
-
-            # NOTE: Full conv weight updates would require computing correlations
-            # For now, we're only updating the final linear layer
-            # This is still error-driven and local!
+            # NOTE: For full conv weight updates, we would need to:
+            # 1. Propagate error backward through final layer → spatial error
+            # 2. Use transposed convolutions or conv_transpose to properly backprop
+            # 3. Handle channel dimension mismatches carefully
+            # 4. Compute spatial correlations for conv weight updates
+            #
+            # This is complex and requires careful implementation of:
+            # - Transposed convolutions for proper error backpropagation
+            # - Spatial Hebbian learning rules (correlation-based)
+            # - Handling different channel sizes at each layer
+            #
+            # For now, we're only updating the final linear layer (4096 → 1024).
+            # This is still error-driven and biologically plausible!
+            # The error signal comes from PC layer 0 and flows backward to conv.
 
             # TODO: Implement Option 4 - Full PC Hierarchy for Conv Layers
             # This would be the most biologically plausible approach:
