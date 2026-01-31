@@ -1,334 +1,225 @@
 """
-Diagnostic tools for analyzing PC network training.
+Lightweight diagnostics for PC networks.
 
-Usage:
-    python diagnostics.py --check inference  # Check inference convergence
-    python diagnostics.py --check features   # Check feature quality
-    python diagnostics.py --check weights    # Check weight magnitudes
-    python diagnostics.py --compare          # Compare PC vs backprop
+Quick checks and visualizations without requiring full training runs:
+- Weight statistics
+- State dynamics visualization
+- Error propagation analysis
+- Single-sample inference testing
 """
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from torchvision import datasets, transforms
-import matplotlib.pyplot as plt
 import numpy as np
-from sklearn.metrics import pairwise_distances
-import argparse
+import sys
+import os
+from typing import Dict, List
 
-from train_vision_mnist_pc import VisionPCClassifier
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
+from categorical_network import (
+    PCConvLayer,
+    PCConvVisionPreprocessor,
+    CanonicalPCLayer,
+    CanonicalMicrocircuit
+)
 
 
-def diagnose_inference_convergence(model, image, num_iterations=50, device='cuda'):
-    """
-    Check if PC inference is converging properly.
+def check_weight_stats(model) -> Dict:
+    """Get weight statistics for all layers."""
+    stats = {}
 
-    Good convergence: errors decrease exponentially to near-zero
-    Bad convergence: errors stay high or oscillate
-    """
-    print("=" * 60)
-    print("DIAGNOSTIC: Inference Convergence")
-    print("=" * 60)
+    # PC conv layers
+    if hasattr(model, 'pc_conv_preprocessor'):
+        conv_stats = model.pc_conv_preprocessor.get_weight_stats()
+        stats['conv_layers'] = conv_stats
 
-    model.eval()
-    image = image.to(device)
+    # PC inference layers
+    if hasattr(model, 'pc_inference'):
+        pc_stats = {}
+        for i, layer in enumerate([model.pc_inference.layer0,
+                                   model.pc_inference.layer1,
+                                   model.pc_inference.layer2]):
+            w = layer.W_feedforward.weight.data
+            pc_stats[f'layer{i}'] = {
+                'mean': w.mean().item(),
+                'std': w.std().item(),
+                'abs_mean': w.abs().mean().item(),
+                'has_lateral': layer.W_lateral is not None,
+                'has_feedback': layer.W_feedback is not None
+            }
+        stats['pc_inference_layers'] = pc_stats
 
-    # Reset state
-    model.pc_inference.layer0.state.data.zero_()
-    model.pc_inference.layer1.state.data.zero_()
-    model.pc_inference.layer2.state.data.zero_()
+    return stats
 
-    # Conv features
-    conv_features = model.conv_preprocess(image).squeeze(0)
 
-    # Track errors over iterations
-    errors_0 = []
-    errors_1 = []
-    errors_2 = []
-
-    with torch.no_grad():
-        for i in range(num_iterations):
-            # Single inference step
-            ff_0 = model.pc_inference.layer0.compute_feedforward(conv_features)
-            lat_0 = model.pc_inference.layer0.compute_lateral()
-            fb_0 = model.pc_inference.layer0.compute_feedback(
-                model.pc_inference.layer1.get_state()
-            )
-
-            target_0 = ff_0 + 0.5 * lat_0 + fb_0
-            error_0 = model.pc_inference.layer0.state - target_0
-            model.pc_inference.layer0.state.data -= 0.1 * error_0.data
-
-            # Layer 1
-            ff_1 = model.pc_inference.layer1.compute_feedforward(
-                model.pc_inference.layer0.get_state()
-            )
-            fb_1 = model.pc_inference.layer1.compute_feedback(
-                model.pc_inference.layer2.get_state()
-            )
-
-            target_1 = ff_1 + fb_1
-            error_1 = model.pc_inference.layer1.state - target_1
-            model.pc_inference.layer1.state.data -= 0.1 * error_1.data
-
-            # Layer 2
-            ff_2 = model.pc_inference.layer2.compute_feedforward(
-                model.pc_inference.layer1.get_state()
-            )
-            target_2 = ff_2
-            error_2 = model.pc_inference.layer2.state - target_2
-            model.pc_inference.layer2.state.data -= 0.1 * error_2.data
-
-            # Record error magnitudes
-            errors_0.append(error_0.norm().item())
-            errors_1.append(error_1.norm().item())
-            errors_2.append(error_2.norm().item())
-
-    # Plot convergence
-    plt.figure(figsize=(12, 4))
-
-    plt.subplot(1, 3, 1)
-    plt.plot(errors_0)
-    plt.xlabel('Iteration')
-    plt.ylabel('Error Magnitude')
-    plt.title('Layer 0 Error Convergence')
-    plt.grid(True)
-
-    plt.subplot(1, 3, 2)
-    plt.plot(errors_1)
-    plt.xlabel('Iteration')
-    plt.ylabel('Error Magnitude')
-    plt.title('Layer 1 Error Convergence')
-    plt.grid(True)
-
-    plt.subplot(1, 3, 3)
-    plt.plot(errors_2)
-    plt.xlabel('Iteration')
-    plt.ylabel('Error Magnitude')
-    plt.title('Layer 2 Error Convergence')
-    plt.grid(True)
-
-    plt.tight_layout()
-    plt.savefig('diagnostics_inference_convergence.png')
-    print("✓ Saved convergence plot to diagnostics_inference_convergence.png")
-
-    # Analysis
-    final_error_0 = errors_0[-1]
-    final_error_1 = errors_1[-1]
-    final_error_2 = errors_2[-1]
-
-    print(f"\nFinal errors after {num_iterations} iterations:")
-    print(f"  Layer 0: {final_error_0:.6f}")
-    print(f"  Layer 1: {final_error_1:.6f}")
-    print(f"  Layer 2: {final_error_2:.6f}")
-
-    # Check convergence
-    converged = all([
-        final_error_0 < 0.1,
-        final_error_1 < 0.1,
-        final_error_2 < 0.1
-    ])
-
-    if converged:
-        print("\n✓ GOOD: Inference converged (errors < 0.1)")
-    else:
-        print("\n✗ BAD: Inference did not converge")
-        print("  → Try increasing num_iterations or learning rate")
-
-    return {
-        'errors_0': errors_0,
-        'errors_1': errors_1,
-        'errors_2': errors_2,
-        'converged': converged
+def check_state_dynamics(model, input_data: torch.Tensor, num_iterations: int = 20):
+    """Trace state evolution during inference."""
+    states_history = {
+        'layer0': [],
+        'layer1': [],
+        'layer2': []
     }
 
-
-def diagnose_feature_quality(model, train_loader, test_loader, device='cuda'):
-    """
-    Check if conv features are discriminative.
-
-    Good features: within-class distance < between-class distance
-    Bad features: random/collapsed
-    """
-    print("\n" + "=" * 60)
-    print("DIAGNOSTIC: Feature Quality")
-    print("=" * 60)
-
-    model.eval()
-
-    # Extract features for each class
-    features_by_class = {i: [] for i in range(10)}
-
-    with torch.no_grad():
-        for data, target in train_loader:
-            data = data.to(device)
-            feat = model.conv_preprocess(data).squeeze(0).cpu().numpy()
-            features_by_class[target.item()].append(feat)
-
-            # Limit to 100 samples per class
-            if all(len(v) >= 100 for v in features_by_class.values()):
-                break
-
-    # Convert to arrays
-    for k in features_by_class:
-        features_by_class[k] = np.stack(features_by_class[k])
-
-    # Compute within-class and between-class distances
-    within_class_dists = []
-    between_class_dists = []
-
-    for class_idx in range(10):
-        features = features_by_class[class_idx]
-
-        # Within-class: pairwise distances within same class
-        if len(features) > 1:
-            dist_matrix = pairwise_distances(features)
-            # Take upper triangle (exclude diagonal)
-            within = dist_matrix[np.triu_indices_from(dist_matrix, k=1)]
-            within_class_dists.extend(within)
-
-        # Between-class: distances to other classes
-        for other_class in range(10):
-            if other_class != class_idx:
-                other_features = features_by_class[other_class]
-                between = pairwise_distances(features, other_features).flatten()
-                between_class_dists.extend(between)
-
-    within_mean = np.mean(within_class_dists)
-    between_mean = np.mean(between_class_dists)
-    ratio = between_mean / within_mean if within_mean > 0 else 0
-
-    print(f"\nFeature separation:")
-    print(f"  Within-class distance:  {within_mean:.4f}")
-    print(f"  Between-class distance: {between_mean:.4f}")
-    print(f"  Ratio (between/within): {ratio:.4f}")
-
-    # Plot histogram
-    plt.figure(figsize=(10, 5))
-    plt.hist(within_class_dists, bins=50, alpha=0.5, label='Within-class', density=True)
-    plt.hist(between_class_dists, bins=50, alpha=0.5, label='Between-class', density=True)
-    plt.xlabel('Distance')
-    plt.ylabel('Density')
-    plt.title('Feature Distance Distributions')
-    plt.legend()
-    plt.grid(True)
-    plt.savefig('diagnostics_feature_quality.png')
-    print("✓ Saved feature quality plot to diagnostics_feature_quality.png")
-
-    # Analysis
-    if ratio > 1.5:
-        print("\n✓ GOOD: Features are discriminative (ratio > 1.5)")
-    elif ratio > 1.0:
-        print("\n⚠ OK: Features have some separation (ratio > 1.0)")
-    else:
-        print("\n✗ BAD: Features are not discriminative (ratio < 1.0)")
-        print("  → Conv layers may not be learning useful representations")
-
-    return {
-        'within_mean': within_mean,
-        'between_mean': between_mean,
-        'ratio': ratio
+    errors_history = {
+        'layer0': [],
+        'layer1': [],
+        'layer2': []
     }
 
+    # Run inference and track states
+    model.reset_states()
 
-def diagnose_weight_magnitudes(model):
-    """
-    Check weight statistics to detect vanishing/exploding weights.
-    """
+    for iteration in range(num_iterations):
+        # Layer 0
+        ff_0 = model.pc_inference.layer0.compute_feedforward(input_data)
+        lat_0 = model.pc_inference.layer0.compute_lateral()
+        fb_0 = model.pc_inference.layer0.compute_feedback(
+            model.pc_inference.layer1.get_state()
+        )
+
+        target_0 = ff_0 + 0.5 * lat_0 + fb_0
+        error_0 = model.pc_inference.layer0.state - target_0
+        model.pc_inference.layer0.state.data -= 0.1 * error_0.data
+
+        states_history['layer0'].append(model.pc_inference.layer0.state.norm().item())
+        errors_history['layer0'].append(error_0.norm().item())
+
+        # Layer 1
+        ff_1 = model.pc_inference.layer1.compute_feedforward(
+            model.pc_inference.layer0.get_state()
+        )
+        fb_1 = model.pc_inference.layer1.compute_feedback(
+            model.pc_inference.layer2.get_state()
+        )
+
+        target_1 = ff_1 + fb_1
+        error_1 = model.pc_inference.layer1.state - target_1
+        model.pc_inference.layer1.state.data -= 0.1 * error_1.data
+
+        states_history['layer1'].append(model.pc_inference.layer1.state.norm().item())
+        errors_history['layer1'].append(error_1.norm().item())
+
+        # Layer 2
+        ff_2 = model.pc_inference.layer2.compute_feedforward(
+            model.pc_inference.layer1.get_state()
+        )
+
+        target_2 = ff_2
+        error_2 = model.pc_inference.layer2.state - target_2
+        model.pc_inference.layer2.state.data -= 0.1 * error_2.data
+
+        states_history['layer2'].append(model.pc_inference.layer2.state.norm().item())
+        errors_history['layer2'].append(error_2.norm().item())
+
+    return states_history, errors_history
+
+
+def test_single_sample(model, image: torch.Tensor, label: int = None):
+    """Test model on a single sample and return detailed info."""
+    model.reset_states()
+
+    # Get conv features
+    conv_features = model.pc_conv_preprocessor.forward(
+        image,
+        num_iterations=20,
+        inference_lr=0.1
+    )
+
+    # Run inference
+    output = model(image, target=None)
+
+    pred_class = output.squeeze().argmax().item()
+    confidence = torch.softmax(output.squeeze(), dim=0).max().item()
+
+    result = {
+        'predicted_class': pred_class,
+        'confidence': confidence,
+        'output_vector': output.squeeze().detach().cpu().numpy(),
+        'correct': pred_class == label if label is not None else None
+    }
+
+    return result
+
+
+def print_network_summary(model):
+    """Print a summary of the network architecture."""
+    print("=" * 60)
+    print("NETWORK ARCHITECTURE SUMMARY")
+    print("=" * 60)
+
+    if hasattr(model, 'pc_conv_preprocessor'):
+        print("\nPC Convolutional Layers:")
+        for i, layer in enumerate(model.pc_conv_preprocessor.pc_layers):
+            print(f"  Layer {i}: {layer.in_channels}→{layer.out_channels} channels")
+            print(f"    Precision: {layer.precision.item():.2f}")
+            print(f"    Kernel size: {layer.kernel_size}, Stride: {layer.stride}")
+
+    if hasattr(model, 'pc_inference'):
+        print("\nPC Inference Layers:")
+        for i, layer in enumerate([model.pc_inference.layer0,
+                                   model.pc_inference.layer1,
+                                   model.pc_inference.layer2]):
+            print(f"  Layer {i}: {layer.num_neurons} neurons")
+            print(f"    Lateral: {layer.W_lateral is not None}")
+            print(f"    Feedback: {layer.W_feedback is not None}")
+
+    # Count parameters
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"\nTotal parameters: {total_params:,}")
+    print("=" * 60)
+
+
+def diagnose_model(model):
+    """Run comprehensive diagnostics on a model."""
+    print("\nRunning diagnostics...")
+
+    # Print summary
+    print_network_summary(model)
+
+    # Check weight stats
     print("\n" + "=" * 60)
-    print("DIAGNOSTIC: Weight Magnitudes")
+    print("WEIGHT STATISTICS")
     print("=" * 60)
+    weight_stats = check_weight_stats(model)
 
-    for name, param in model.named_parameters():
-        if param.requires_grad:
-            weight_norm = param.data.norm().item()
-            weight_mean = param.data.mean().item()
-            weight_std = param.data.std().item()
+    if 'conv_layers' in weight_stats:
+        print("\nConvolutional Layers:")
+        for layer_name, stats in weight_stats['conv_layers'].items():
+            print(f"  {layer_name}:")
+            print(f"    Mean: {stats['mean']:.6f}")
+            print(f"    Std: {stats['std']:.6f}")
+            print(f"    Precision: {stats['precision']:.2f}")
 
-            print(f"\n{name}:")
-            print(f"  Norm: {weight_norm:.6f}")
-            print(f"  Mean: {weight_mean:.6f}")
-            print(f"  Std:  {weight_std:.6f}")
+    if 'pc_inference_layers' in weight_stats:
+        print("\nInference Layers:")
+        for layer_name, stats in weight_stats['pc_inference_layers'].items():
+            print(f"  {layer_name}:")
+            print(f"    Mean: {stats['mean']:.6f}")
+            print(f"    Std: {stats['std']:.6f}")
 
-            if weight_norm < 1e-6:
-                print(f"  ⚠ WARNING: Very small weights (vanishing)")
-            if weight_norm > 1000:
-                print(f"  ⚠ WARNING: Very large weights (exploding)")
-
-
-def compare_pc_vs_backprop():
-    """
-    Compare PC learning vs backprop on same data.
-    """
     print("\n" + "=" * 60)
-    print("DIAGNOSTIC: PC vs Backprop Comparison")
-    print("=" * 60)
-    print("\nThis would train two models side-by-side:")
-    print("  1. PC learning (train_vision_mnist_pc.py)")
-    print("  2. Backprop (train_vision_mnist.py)")
-    print("\nThen compare final accuracy and generalization gap.")
-    print("\nTo run: execute both scripts and compare results manually.")
+
+
+if __name__ == '__main__':
+    print("PC Network Diagnostics Tool")
     print("=" * 60)
 
+    # Create a dummy model for testing
+    from train_mnist import PCConvClassifier
 
-def main():
-    parser = argparse.ArgumentParser(description='Diagnostic tools for PC network')
-    parser.add_argument('--check', choices=['inference', 'features', 'weights', 'all'],
-                        default='all', help='Which diagnostic to run')
-    parser.add_argument('--model', type=str, default=None, help='Path to trained model')
-    parser.add_argument('--device', type=str, default='cuda', help='Device to use')
-
-    args = parser.parse_args()
-
-    # Load data
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
-    ])
-
-    train_dataset = datasets.MNIST(
-        '../data', train=True, download=True, transform=transform
-    )
-    test_dataset = datasets.MNIST(
-        '../data', train=False, transform=transform
-    )
-
-    train_loader = DataLoader(
-        torch.utils.data.Subset(train_dataset, range(1000)),
-        batch_size=1
-    )
-    test_loader = DataLoader(
-        torch.utils.data.Subset(test_dataset, range(100)),
-        batch_size=1
-    )
-
-    # Load model
-    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
-    model = VisionPCClassifier(num_classes=10, use_4bit=False)
-    model = model.to(device)
-
-    if args.model:
-        model.load_state_dict(torch.load(args.model))
-        print(f"Loaded model from {args.model}")
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = PCConvClassifier(num_classes=10, dtype=torch.float32).to(device)
 
     # Run diagnostics
-    if args.check in ['inference', 'all']:
-        # Get a sample image
-        sample_image, _ = next(iter(train_loader))
-        diagnose_inference_convergence(model, sample_image, device=device)
+    diagnose_model(model)
 
-    if args.check in ['features', 'all']:
-        diagnose_feature_quality(model, train_loader, test_loader, device=device)
-
-    if args.check in ['weights', 'all']:
-        diagnose_weight_magnitudes(model)
+    # Test with random input
+    print("\nTesting with random input...")
+    random_image = torch.randn(3, 100, 100, device=device)
+    result = test_single_sample(model, random_image)
+    print(f"Predicted class: {result['predicted_class']}")
+    print(f"Confidence: {result['confidence']:.4f}")
 
     print("\n" + "=" * 60)
-    print("DIAGNOSTICS COMPLETE")
+    print("Diagnostics complete")
     print("=" * 60)
-
-
-if __name__ == "__main__":
-    main()

@@ -1,230 +1,609 @@
 """
-Categorical Predictive Coding Network.
+Categorical Predictive Coding Network - Complete Implementation
 
-Extends ModularNetwork with categorical constraints:
-1. Compositional predictions: W_i→j = W_i→k ∘ W_k→j enforced via regularization
-2. (Future) Functorial cross-network mappings
-3. (Future) Universal properties for architecture
+Contains all network logic for PC-based learning:
+- PCConvLayer: Convolutional layers with predictive coding dynamics
+- PCConvVisionPreprocessor: Hierarchical PC vision processing
+- CanonicalPCLayer: Dense PC layers with dendrite structure
+- CanonicalMicrocircuit: 3-layer canonical microcircuit
 
-This is EXPERIMENTAL. We don't know if these constraints help or hurt learning.
+All components use local learning rules (no backpropagation).
 """
 
 import torch
 import torch.nn as nn
-import sys
-import os
-from typing import List, Dict, Optional
-
-# Add project root to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
-
-from src.network.modular import ModularNetwork, SubNetwork
+import torch.nn.functional as F
+from typing import Optional, List, Tuple
 
 
-class CategoricalNetwork(ModularNetwork):
+# ============================================================================
+# PC CONVOLUTIONAL LAYER
+# ============================================================================
+
+class PCConvLayer(nn.Module):
     """
-    Predictive coding network with categorical constraints.
+    Predictive Coding Convolutional Layer with local learning.
 
-    Additional parameters beyond ModularNetwork:
-        lambda_composition: Strength of compositional constraint (default: 0.1)
-                           0 = no constraint (vanilla PC)
-                           Higher = stronger enforcement
+    Features:
+    - State neurons updated through inference
+    - Precision-weighted errors (prevents decay in deep networks)
+    - Bi-directional predictions (predict both up and down)
+    - Lateral/temporal connections
+    - Local Hebbian weight updates
     """
 
     def __init__(
         self,
-        subnetworks: List[SubNetwork],
-        inference_lr: float = 0.1,
-        temperature: float = 0.0,
-        dtype: torch.dtype = torch.float32,
-        device: str = 'cpu',
-        use_stable: bool = False,
-        stable_lr: float = 0.001,
-        stable_max_iterations: int = 400,
-        stable_lr_schedule: str = "cosine",
-        stable_decay_strong: float = 0.01,
-        stable_decay_weak: float = 0.001,
-        saturation_penalty: float = 0.01,
-        activity_target: float = 0.3,
-        lambda_composition: float = 0.1
+        layer_index: int,
+        in_channels: int,
+        out_channels: int,
+        channels_above: int,
+        kernel_size: int = 3,
+        stride: int = 1,
+        padding: int = 1,
+        precision: float = 1.0,
+        dtype: torch.dtype = torch.float32
     ):
-        # Initialize parent
-        super().__init__(
-            subnetworks=subnetworks,
-            inference_lr=inference_lr,
-            temperature=temperature,
-            dtype=dtype,
-            device=device,
-            use_stable=use_stable,
-            stable_lr=stable_lr,
-            stable_max_iterations=stable_max_iterations,
-            stable_lr_schedule=stable_lr_schedule,
-            stable_decay_strong=stable_decay_strong,
-            stable_decay_weak=stable_decay_weak,
-            saturation_penalty=saturation_penalty,
-            activity_target=activity_target
+        super().__init__()
+
+        self.layer_index = layer_index
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.channels_above = channels_above
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        self.dtype = dtype
+
+        # Precision weight (higher = stronger error signal)
+        self.precision = nn.Parameter(torch.tensor(precision, dtype=dtype))
+
+        # Bottom-up prediction weights
+        self.W_bottom_up = nn.Conv2d(
+            in_channels, out_channels,
+            kernel_size=kernel_size, stride=stride, padding=padding,
+            bias=True, dtype=dtype
         )
 
-        self.lambda_composition = lambda_composition
+        # Top-down prediction weights
+        if channels_above > 0:
+            if stride > 1:
+                self.W_top_down = nn.ConvTranspose2d(
+                    channels_above, out_channels,
+                    kernel_size=kernel_size, stride=stride, padding=padding,
+                    output_padding=stride - 1, bias=True, dtype=dtype
+                )
+            else:
+                self.W_top_down = nn.Conv2d(
+                    channels_above, out_channels,
+                    kernel_size=kernel_size, stride=1, padding=padding,
+                    bias=True, dtype=dtype
+                )
+        else:
+            self.W_top_down = None
 
-        # Track composition violations for analysis
-        self.composition_error = 0.0
+        # Backward prediction (predict layer below)
+        if stride > 1:
+            self.W_predict_below = nn.ConvTranspose2d(
+                out_channels, in_channels,
+                kernel_size=kernel_size, stride=stride, padding=padding,
+                output_padding=stride - 1, bias=True, dtype=dtype
+            )
+        else:
+            self.W_predict_below = nn.Conv2d(
+                out_channels, in_channels,
+                kernel_size=kernel_size, stride=1, padding=padding,
+                bias=True, dtype=dtype
+            )
+
+        # Forward prediction (predict layer above)
+        if channels_above > 0:
+            if stride > 1:
+                self.W_predict_above = nn.Conv2d(
+                    out_channels, channels_above,
+                    kernel_size=kernel_size, stride=stride, padding=padding,
+                    bias=True, dtype=dtype
+                )
+            else:
+                self.W_predict_above = nn.Conv2d(
+                    out_channels, channels_above,
+                    kernel_size=kernel_size, stride=1, padding=padding,
+                    bias=True, dtype=dtype
+                )
+        else:
+            self.W_predict_above = None
+
+        # Lateral connections
+        self.W_lateral = nn.Conv2d(
+            out_channels, out_channels,
+            kernel_size=1, stride=1, padding=0, bias=False, dtype=dtype
+        )
+        nn.init.normal_(self.W_lateral.weight, mean=0.0, std=0.01)
+
+        # State buffers
+        self.state = None
+        self.error = None
+        self.prev_state = None
+
+    def init_state(self, batch_size: int, height: int, width: int, device: torch.device):
+        """Initialize state buffers."""
+        self.state = torch.zeros(
+            batch_size, self.out_channels, height, width,
+            dtype=self.dtype, device=device
+        )
+        self.error = torch.zeros_like(self.state)
+        self.prev_state = torch.zeros_like(self.state)
+
+    def compute_prediction(
+        self,
+        input_below: Optional[torch.Tensor] = None,
+        input_above: Optional[torch.Tensor] = None,
+        use_lateral: bool = True
+    ) -> torch.Tensor:
+        """Compute prediction from adjacent layers."""
+        prediction = 0.0
+        count = 0
+
+        if input_below is not None:
+            prediction = prediction + self.W_bottom_up(input_below)
+            count += 1
+
+        if input_above is not None and self.W_top_down is not None:
+            prediction = prediction + self.W_top_down(input_above)
+            count += 1
+
+        if use_lateral and self.prev_state is not None:
+            prediction = prediction + 0.5 * self.W_lateral(self.prev_state)
+            count += 0.5
+
+        if count > 0:
+            prediction = prediction / count
+
+        return prediction
+
+    def compute_error(
+        self,
+        input_below: Optional[torch.Tensor] = None,
+        input_above: Optional[torch.Tensor] = None,
+        use_lateral: bool = True
+    ) -> torch.Tensor:
+        """Compute precision-weighted prediction error."""
+        prediction = self.compute_prediction(input_below, input_above, use_lateral)
+        raw_error = self.state - prediction
+        precision = torch.clamp(self.precision, min=0.1, max=100.0)
+        self.error = precision * raw_error
+        return self.error
+
+    def update_state(
+        self,
+        input_below: Optional[torch.Tensor] = None,
+        input_above: Optional[torch.Tensor] = None,
+        inference_lr: float = 0.1,
+        use_lateral: bool = True
+    ) -> torch.Tensor:
+        """Update state to minimize prediction error."""
+        error = self.compute_error(input_below, input_above, use_lateral)
+        self.state = self.state - inference_lr * error
+        return self.state
 
     def update_weights(
         self,
-        lr: float = 0.001,
-        weight_decay: float = 0.01,
-        motor_targets: Optional[Dict[str, torch.Tensor]] = None
+        input_below: Optional[torch.Tensor] = None,
+        input_above: Optional[torch.Tensor] = None,
+        learning_rate: float = 0.001,
+        weight_decay: float = 0.0001
     ) -> None:
+        """Update weights using local Hebbian learning."""
+        with torch.no_grad():
+            if input_below is not None:
+                grad_bottom_up = F.conv2d(
+                    input_below.transpose(0, 1),
+                    self.error.transpose(0, 1),
+                    stride=self.stride,
+                    padding=self.padding
+                ).transpose(0, 1)
+
+                grad_bottom_up = grad_bottom_up.mean(dim=0, keepdim=True)
+                self.W_bottom_up.weight.data += learning_rate * (
+                    grad_bottom_up.squeeze(0) - weight_decay * self.W_bottom_up.weight.data
+                )
+
+            if self.prev_state is not None:
+                error_flat = self.error.mean(dim=(0, 2, 3))
+                state_flat = self.prev_state.mean(dim=(0, 2, 3))
+                delta_lateral = learning_rate * torch.outer(error_flat, state_flat)
+                self.W_lateral.weight.data[:, :, 0, 0] += (
+                    delta_lateral - weight_decay * self.W_lateral.weight.data[:, :, 0, 0]
+                )
+
+    def update_temporal_state(self) -> None:
+        """Update temporal state buffer."""
+        if self.state is not None:
+            self.prev_state = self.state.clone()
+
+    def reset_state(self) -> None:
+        """Reset state and error to zero."""
+        if self.state is not None:
+            self.state.zero_()
+            self.error.zero_()
+            self.prev_state.zero_()
+
+    def get_state(self) -> torch.Tensor:
+        return self.state
+
+    def get_error(self) -> torch.Tensor:
+        return self.error
+
+
+# ============================================================================
+# PC CONVOLUTIONAL VISION PREPROCESSOR
+# ============================================================================
+
+class PCConvVisionPreprocessor(nn.Module):
+    """
+    Hierarchical PC vision preprocessor.
+
+    3-layer hierarchy:
+    - Layer 0: V1 simple cells (edge detection) - 3→64 channels
+    - Layer 1: V1 complex cells (texture) - 64→128 channels
+    - Layer 2: V2/V4 features (object parts) - 128→256 channels
+
+    All layers learn through local PC dynamics (no backprop).
+    """
+
+    def __init__(
+        self,
+        dtype: torch.dtype = torch.float32,
+        precisions: List[float] = [1.0, 10.0, 100.0]
+    ):
+        super().__init__()
+
+        self.dtype = dtype
+
+        # Layer 0: V1 simple cells (3→64, 100×100→50×50)
+        self.pc_conv0 = PCConvLayer(
+            layer_index=0, in_channels=3, out_channels=64,
+            channels_above=128, kernel_size=7, stride=2, padding=3,
+            precision=precisions[0], dtype=dtype
+        )
+        self.pool0 = nn.AdaptiveAvgPool2d((16, 16))
+
+        # Layer 1: V1 complex cells (64→128, 16×16→8×8)
+        self.pc_conv1 = PCConvLayer(
+            layer_index=1, in_channels=64, out_channels=128,
+            channels_above=256, kernel_size=3, stride=2, padding=1,
+            precision=precisions[1], dtype=dtype
+        )
+        self.pool1 = nn.AdaptiveAvgPool2d((4, 4))
+
+        # Layer 2: V2/V4 features (128→256, 4×4→2×2)
+        self.pc_conv2 = PCConvLayer(
+            layer_index=2, in_channels=128, out_channels=256,
+            channels_above=0, kernel_size=3, stride=2, padding=1,
+            precision=precisions[2], dtype=dtype
+        )
+        self.pool2 = nn.AdaptiveAvgPool2d((2, 2))
+
+        self.pc_layers = [self.pc_conv0, self.pc_conv1, self.pc_conv2]
+
+    def init_states(self, batch_size: int, device: torch.device):
+        """Initialize state buffers for all layers."""
+        self.pc_conv0.init_state(batch_size, 50, 50, device)
+        self.pc_conv1.init_state(batch_size, 8, 8, device)
+        self.pc_conv2.init_state(batch_size, 2, 2, device)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        num_iterations: int = 20,
+        inference_lr: float = 0.1,
+        use_lateral: bool = True
+    ) -> torch.Tensor:
         """
-        Update weights with categorical constraints.
+        Forward pass through PC conv hierarchy.
 
-        Adds compositional constraint: For layers i > k > j,
-        the prediction W_i→j should equal W_k→j ∘ W_i→k
+        Args:
+            x: Input image (30000,) flattened or (3, 100, 100)
+            num_iterations: Number of inference iterations
+            inference_lr: Learning rate for state updates
+            use_lateral: Whether to use lateral connections
+
+        Returns:
+            (1024,) flattened features
         """
-        # Standard PC weight update
-        super().update_weights(lr=lr, weight_decay=weight_decay, motor_targets=motor_targets)
+        # Reshape input
+        if x.dim() == 1:
+            if x.size(0) == 30000:
+                x = x.view(3, 100, 100)
+            else:
+                raise ValueError(f"Expected 30000 dims, got {x.size(0)}")
 
-        # Add categorical constraints
-        if self.lambda_composition > 0:
-            self._enforce_composition(lr, weight_decay)
+        if x.dim() == 3:
+            x = x.unsqueeze(0)  # (1, 3, 100, 100)
 
-    def _enforce_composition(self, lr: float, weight_decay: float) -> None:
-        """
-        Enforce compositional structure: W_i→j = W_k→j ∘ W_i→k
+        device = x.device
+        batch_size = x.size(0)
 
-        For each subnet, enforce that long-range predictions are compositions
-        of intermediate predictions.
+        # Initialize states if needed
+        if self.pc_conv0.state is None:
+            self.init_states(batch_size, device)
 
-        This is implemented as a soft constraint (regularization), not hard constraint.
-        """
-        total_composition_error = 0.0
-        num_constraints = 0
+        # PC inference iterations
+        for iteration in range(num_iterations):
+            # Update from top to bottom
+            self.pc_conv2.update_state(
+                input_below=self.pc_conv1.state,
+                input_above=None,
+                inference_lr=inference_lr,
+                use_lateral=use_lateral
+            )
 
-        for subnet in self.all_subnetworks:
-            num_layers = len(subnet.layers)
+            self.pc_conv1.update_state(
+                input_below=self.pc_conv0.state,
+                input_above=self.pc_conv2.state,
+                inference_lr=inference_lr,
+                use_lateral=use_lateral
+            )
 
-            # For each triple of layers (i > k > j), enforce composition
-            for i in range(2, num_layers):  # Start at layer 2 (need at least 3 layers)
-                for j in range(i - 1):  # j < i
-                    for k in range(j + 1, i):  # j < k < i
-                        # Get prediction weights
-                        # W_k→j: layer k predicts layer j
-                        W_k_to_j = subnet.layers[k].neurons.W_apical  # Top-down from k
+            self.pc_conv0.update_state(
+                input_below=x,
+                input_above=self.pc_conv1.state,
+                inference_lr=inference_lr,
+                use_lateral=use_lateral
+            )
 
-                        # W_i→k: layer i predicts layer k
-                        W_i_to_k = subnet.layers[i].neurons.W_apical  # Top-down from i
+        # Extract features
+        features = self.pool2(self.pc_conv2.state)  # (B, 256, 2, 2)
+        features = features.flatten(1)  # (B, 1024)
 
-                        # Check if both exist (some layers may not have apical weights)
-                        if W_k_to_j is None or W_i_to_k is None:
-                            continue
+        if batch_size == 1:
+            features = features.squeeze(0)  # (1024,)
 
-                        # Also need W_i→j to compare against
-                        # For now, we don't explicitly store long-range predictions
-                        # So we'll enforce composition on the basal weights instead
-                        #
-                        # Alternative interpretation: bottom-up predictions should compose
-                        # W_j→k: layer j predicts layer k (basal)
-                        W_j_to_k = subnet.layers[k].neurons.W_basal
+        return features
 
-                        # W_k→i: layer k predicts layer i (basal)
-                        W_k_to_i = subnet.layers[i].neurons.W_basal
+    def get_weight_stats(self) -> dict:
+        """Get weight statistics for debugging."""
+        stats = {}
+        for i, layer in enumerate(self.pc_layers):
+            w = layer.W_bottom_up.weight.data
+            stats[f'pc_conv{i}'] = {
+                'mean': w.mean().item(),
+                'std': w.std().item(),
+                'abs_mean': w.abs().mean().item(),
+                'precision': layer.precision.item()
+            }
+        return stats
 
-                        # Composed prediction: j → k → i should equal j → i
-                        # (k → i) ∘ (j → k)
-                        composed = W_k_to_i @ W_j_to_k
+    def reset_states(self) -> None:
+        """Reset states for all layers."""
+        for layer in self.pc_layers:
+            layer.reset_state()
 
-                        # We don't have explicit j → i weights, but we can enforce
-                        # that intermediate layer k mediates the relationship
-                        #
-                        # Actually, let's take a simpler approach for now:
-                        # Just enforce consistency between adjacent layers
+    def update_temporal_states(self) -> None:
+        """Update temporal states for all layers."""
+        for layer in self.pc_layers:
+            layer.update_temporal_state()
 
-            # SIMPLIFIED APPROACH: Enforce composition for adjacent pairs
-            # For layers 0, 1, 2: enforce that 0→2 = (1→2) ∘ (0→1)
-            if num_layers >= 3:
-                # Bottom-up composition: layer 0 → layer 1 → layer 2
-                # Should be consistent with direct 0 → 2 prediction
 
-                # Get weights
-                W_0_to_1 = subnet.layers[1].neurons.W_basal  # Layer 1 predicts from layer 0
-                W_1_to_2 = subnet.layers[2].neurons.W_basal  # Layer 2 predicts from layer 1
+# ============================================================================
+# CANONICAL PC LAYER (DENSE)
+# ============================================================================
 
-                # Composed prediction from layer 0 to layer 2
-                # This is what layer 2 would predict if driven by layer 0 through layer 1
-                # state_2 = tanh(W_1_to_2 @ tanh(W_0_to_1 @ state_0))
-                #
-                # For linear approximation (small activations):
-                # state_2 ≈ (W_1_to_2 @ W_0_to_1) @ state_0
+class CanonicalPCLayer(nn.Module):
+    """
+    Dense PC layer with proper dendrite structure.
 
-                # The composition is: W_1_to_2 @ W_0_to_1
-                # This should equal a direct 0→2 prediction if it existed
-                #
-                # But we don't have direct 0→2 weights in standard PC
-                # So instead, enforce that the factorization is stable:
-                # Minimize ||W_1_to_2 @ W_0_to_1 - (W_1_to_2 @ W_0_to_1)_prev||
-                #
-                # Actually, better approach: Use the ACTUAL activations to enforce composition
+    Dendrites:
+    - Feedforward (bottom-up from layer below)
+    - Lateral (within same layer)
+    - Feedback (top-down from layer above)
+    """
 
-                # Get layer states
-                state_0 = subnet.layers[0].get_state()
-                state_1 = subnet.layers[1].get_state()
-                state_2 = subnet.layers[2].get_state()
+    def __init__(
+        self,
+        num_neurons: int,
+        input_size_below: int,
+        input_size_above: int = 0,
+        has_lateral: bool = False,
+        dtype: torch.dtype = torch.float32
+    ):
+        super().__init__()
 
-                # Direct prediction: layer 1 from layer 0
-                pred_1_from_0 = torch.tanh(W_0_to_1 @ state_0)
+        self.num_neurons = num_neurons
+        self.dtype = dtype
 
-                # Composed prediction: layer 2 from layer 0 via layer 1
-                pred_2_from_0_via_1 = torch.tanh(W_1_to_2 @ pred_1_from_0)
+        # Feedforward connections
+        self.W_feedforward = nn.Linear(input_size_below, num_neurons, bias=False)
 
-                # Actual prediction: layer 2 from layer 1
-                pred_2_from_1 = torch.tanh(W_1_to_2 @ state_1)
-
-                # Composition constraint:
-                # If layer 1 accurately represents layer 0 (pred_1_from_0 ≈ state_1),
-                # then pred_2_from_0_via_1 should equal pred_2_from_1
-                #
-                # Error: How much does composition fail?
-                composition_error = (pred_2_from_0_via_1 - pred_2_from_1).pow(2).sum()
-
-                total_composition_error += composition_error.item()
-                num_constraints += 1
-
-                # Apply penalty to encourage composition
-                # Gradient: push W_1_to_2 and W_0_to_1 to maintain composition
-                if self.optimizer is not None:
-                    # Add gradient penalty
-                    # ∂L/∂W_1_to_2 from composition constraint
-                    error_vec = pred_2_from_0_via_1 - pred_2_from_1
-
-                    # Gradient through tanh
-                    tanh_deriv = 1 - pred_2_from_0_via_1.pow(2)
-                    weighted_error = error_vec * tanh_deriv
-
-                    # Gradient for W_1_to_2
-                    grad_W_1_to_2 = weighted_error.unsqueeze(1) @ pred_1_from_0.unsqueeze(0)
-
-                    # Add to existing gradient
-                    if subnet.layers[2].neurons.W_basal.grad is not None:
-                        subnet.layers[2].neurons.W_basal.grad += self.lambda_composition * grad_W_1_to_2
-                    else:
-                        subnet.layers[2].neurons.W_basal.grad = self.lambda_composition * grad_W_1_to_2
-                else:
-                    # Manual update
-                    error_vec = pred_2_from_0_via_1 - pred_2_from_1
-                    tanh_deriv = 1 - pred_2_from_0_via_1.pow(2)
-                    weighted_error = error_vec * tanh_deriv
-                    grad_W_1_to_2 = weighted_error.unsqueeze(1) @ pred_1_from_0.unsqueeze(0)
-
-                    # Update W_1_to_2 to reduce composition error
-                    subnet.layers[2].neurons.W_basal.data -= lr * self.lambda_composition * grad_W_1_to_2
-
-        # Track composition error for analysis
-        if num_constraints > 0:
-            self.composition_error = total_composition_error / num_constraints
+        # Lateral connections
+        if has_lateral:
+            self.W_lateral = nn.Linear(num_neurons, num_neurons, bias=False)
         else:
-            self.composition_error = 0.0
+            self.W_lateral = None
 
-    def get_composition_error(self) -> float:
-        """Return current composition error for monitoring."""
-        return self.composition_error
+        # Feedback connections
+        if input_size_above > 0:
+            self.W_feedback = nn.Linear(input_size_above, num_neurons, bias=False)
+        else:
+            self.W_feedback = None
+
+        # State
+        self.register_buffer('state', torch.zeros(num_neurons, dtype=dtype))
+
+    def get_state(self) -> torch.Tensor:
+        return self.state
+
+    def compute_feedforward(self, input_below: torch.Tensor) -> torch.Tensor:
+        return torch.tanh(self.W_feedforward(input_below))
+
+    def compute_lateral(self) -> torch.Tensor:
+        if self.W_lateral is not None:
+            return torch.tanh(self.W_lateral(self.state))
+        return torch.zeros_like(self.state)
+
+    def compute_feedback(self, input_above: torch.Tensor) -> torch.Tensor:
+        if self.W_feedback is not None:
+            return torch.tanh(self.W_feedback(input_above))
+        return torch.zeros_like(self.state)
+
+    def update_weights_local(
+        self,
+        input_below: torch.Tensor,
+        error: torch.Tensor,
+        state_above: torch.Tensor = None,
+        learning_rate: float = 0.01
+    ):
+        """Update weights using local Hebbian-like PC learning."""
+        with torch.no_grad():
+            if input_below.dim() == 1:
+                input_below = input_below.unsqueeze(0)
+            if error.dim() == 1:
+                error = error.unsqueeze(1)
+
+            delta_ff = learning_rate * (error @ input_below)
+            self.W_feedforward.weight.data += delta_ff
+
+            if self.W_lateral is not None:
+                state_for_lateral = self.state.unsqueeze(0)
+                delta_lat = learning_rate * (error @ state_for_lateral)
+                self.W_lateral.weight.data += delta_lat
+
+            if self.W_feedback is not None and state_above is not None:
+                if state_above.dim() == 1:
+                    state_above = state_above.unsqueeze(0)
+                delta_fb = learning_rate * (error @ state_above)
+                self.W_feedback.weight.data += delta_fb
+
+
+# ============================================================================
+# CANONICAL MICROCIRCUIT
+# ============================================================================
+
+class CanonicalMicrocircuit(nn.Module):
+    """
+    3-layer canonical microcircuit for PC inference.
+
+    Layer 0 (Superficial): Input processing, lateral connections
+    Layer 1 (Middle): Integration
+    Layer 2 (Deep): Output generation
+    """
+
+    def __init__(
+        self,
+        num_classes: int,
+        input_features: int,
+        layer0_size: int,
+        layer1_size: int,
+        layer2_size: int,
+        use_4bit: bool = False,
+        dtype: torch.dtype = torch.float32
+    ):
+        super().__init__()
+
+        self.num_classes = num_classes
+
+        # Layer 0: Superficial (has lateral)
+        self.layer0 = CanonicalPCLayer(
+            num_neurons=layer0_size,
+            input_size_below=input_features,
+            input_size_above=layer1_size,
+            has_lateral=True,
+            dtype=dtype
+        )
+
+        # Layer 1: Middle
+        self.layer1 = CanonicalPCLayer(
+            num_neurons=layer1_size,
+            input_size_below=layer0_size,
+            input_size_above=layer2_size,
+            has_lateral=False,
+            dtype=dtype
+        )
+
+        # Layer 2: Deep (output)
+        self.layer2 = CanonicalPCLayer(
+            num_neurons=layer2_size,
+            input_size_below=layer1_size,
+            input_size_above=0,
+            has_lateral=False,
+            dtype=dtype
+        )
+
+        self.inference_lr = 0.1
+
+    def forward(self, input_data: torch.Tensor, num_iterations: int = 20) -> torch.Tensor:
+        """Run PC inference to minimize prediction errors."""
+        for _ in range(num_iterations):
+            # Layer 0
+            ff_0 = self.layer0.compute_feedforward(input_data)
+            lat_0 = self.layer0.compute_lateral()
+            fb_0 = self.layer0.compute_feedback(self.layer1.get_state())
+
+            target_0 = ff_0 + 0.5 * lat_0 + fb_0
+            error_0 = self.layer0.state - target_0
+            self.layer0.state.data -= self.inference_lr * error_0.data
+
+            # Layer 1
+            ff_1 = self.layer1.compute_feedforward(self.layer0.get_state())
+            fb_1 = self.layer1.compute_feedback(self.layer2.get_state())
+
+            target_1 = ff_1 + fb_1
+            error_1 = self.layer1.state - target_1
+            self.layer1.state.data -= self.inference_lr * error_1.data
+
+            # Layer 2
+            ff_2 = self.layer2.compute_feedforward(self.layer1.get_state())
+
+            target_2 = ff_2
+            error_2 = self.layer2.state - target_2
+            self.layer2.state.data -= self.inference_lr * error_2.data
+
+        return self.layer2.get_state()
+
+    def update_weights(
+        self,
+        input_data: torch.Tensor,
+        learning_rate: float = 0.01,
+        weight_decay: float = 0.01
+    ):
+        """Update all weights using local PC learning."""
+        # Compute final errors
+        ff_0 = self.layer0.compute_feedforward(input_data)
+        lat_0 = self.layer0.compute_lateral()
+        fb_0 = self.layer0.compute_feedback(self.layer1.get_state())
+        error_0 = self.layer0.state - (ff_0 + 0.5 * lat_0 + fb_0)
+
+        ff_1 = self.layer1.compute_feedforward(self.layer0.get_state())
+        fb_1 = self.layer1.compute_feedback(self.layer2.get_state())
+        error_1 = self.layer1.state - (ff_1 + fb_1)
+
+        ff_2 = self.layer2.compute_feedforward(self.layer1.get_state())
+        error_2 = self.layer2.state - ff_2
+
+        # Update weights
+        self.layer0.update_weights_local(
+            input_below=input_data,
+            error=error_0,
+            state_above=self.layer1.get_state(),
+            learning_rate=learning_rate
+        )
+
+        self.layer1.update_weights_local(
+            input_below=self.layer0.get_state(),
+            error=error_1,
+            state_above=self.layer2.get_state(),
+            learning_rate=learning_rate
+        )
+
+        self.layer2.update_weights_local(
+            input_below=self.layer1.get_state(),
+            error=error_2,
+            state_above=None,
+            learning_rate=learning_rate
+        )
+
+    def reset_states(self):
+        """Reset all layer states."""
+        self.layer0.state.zero_()
+        self.layer1.state.zero_()
+        self.layer2.state.zero_()

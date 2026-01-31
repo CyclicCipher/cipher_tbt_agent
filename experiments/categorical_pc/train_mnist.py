@@ -1,15 +1,15 @@
 """
-MNIST Training with FULL PC Conv Hierarchy + Active Inference
+MNIST Training with PC Convolutional Hierarchy + Active Inference
 
-Implements Option 4: Full PC Conv Hierarchy
-+ VERSES Optimizations (Precision Weighting + Bi-directional Propagation)
-+ Direct Error Injection (replaces teaching signal)
+Architecture:
+- PC Conv Layers: 3→64→128→256 (local learning, no backprop)
+- PC Inference Layers: 1024→512→1024→10 (local learning, no backprop)
 
-Key Changes from Previous Approach:
-1. ALL conv layers are PC layers with state and local learning
-2. NO teaching signal blending - use direct error injection
-3. Precision-weighted errors prevent decay in deep networks
-4. Bi-directional predictions create richer error signals
+Features:
+- Precision-weighted errors ([1.0, 10.0, 100.0])
+- Bi-directional predictions
+- Direct error injection (no teaching signal blending)
+- Active curriculum learning
 """
 
 import torch
@@ -24,23 +24,12 @@ from typing import Optional
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from pc_conv_preprocessor import PCConvVisionPreprocessor
-from categorical_network_impl import CanonicalMicrocircuit
-from diagnostics_training import TrainingDiagnostics
-from src.active_inference import ActiveCurriculumManager, LearningProgressTracker
+from categorical_network import PCConvVisionPreprocessor, CanonicalMicrocircuit
+from src.active_inference import ActiveCurriculumManager
 
 
 class PCConvClassifier(nn.Module):
-    """
-    Full PC vision classifier with PC conv layers + PC inference layers.
-
-    Architecture:
-    - Input: 100×100×3 image
-    - PC Conv Layers (Option 4): 3→64→128→256
-    - PC Inference Layers: 1024→512→1024→10
-
-    NO backprop, NO teaching signal - pure predictive coding!
-    """
+    """PC vision classifier with PC conv + PC inference layers."""
 
     def __init__(self, num_classes=10, dtype=torch.float32):
         super().__init__()
@@ -48,19 +37,16 @@ class PCConvClassifier(nn.Module):
         self.num_classes = num_classes
         self.dtype = dtype
 
-        # === PC CONVOLUTIONAL PREPROCESSOR ===
-        # Precision weights: layer 0 = 1.0, layer 1 = 10.0, layer 2 = 100.0
-        # Higher precisions prevent error decay in deeper layers
+        # PC convolutional preprocessor
         self.pc_conv_preprocessor = PCConvVisionPreprocessor(
             dtype=dtype,
             precisions=[1.0, 10.0, 100.0]
         )
 
-        # === PC INFERENCE LAYERS ===
-        # 3-layer canonical microcircuit on top of conv features
+        # PC inference layers
         self.pc_inference = CanonicalMicrocircuit(
             num_classes=num_classes,
-            input_features=1024,  # From conv preprocessor
+            input_features=1024,
             layer0_size=512,
             layer1_size=1024,
             layer2_size=num_classes,
@@ -68,10 +54,8 @@ class PCConvClassifier(nn.Module):
             dtype=dtype
         )
 
-        # Store last inputs for weight updates
         self.last_input_image = None
         self.last_conv_features = None
-        self.last_target = None
 
     def forward(
         self,
@@ -83,29 +67,14 @@ class PCConvClassifier(nn.Module):
         pc_inference_lr: float = 0.1,
         error_injection_strength: float = 1.0
     ) -> torch.Tensor:
-        """
-        Forward pass through full PC hierarchy.
-
-        Args:
-            x: Input image (3, 100, 100) or (30000,)
-            target: Target class (one-hot), optional
-            num_conv_iterations: PC inference iterations for conv layers
-            num_inference_iterations: PC inference iterations for output layers
-            conv_inference_lr: Learning rate for conv state updates
-            pc_inference_lr: Learning rate for PC layer state updates
-            error_injection_strength: How strongly to inject output error
-
-        Returns:
-            Output (num_classes,) class predictions
-        """
+        """Forward pass through full PC hierarchy."""
         # Store input for weight updates
         if x.dim() == 3:
-            self.last_input_image = x.unsqueeze(0)  # (1, 3, 100, 100)
+            self.last_input_image = x.unsqueeze(0)
         elif x.dim() == 1:
             self.last_input_image = x.view(3, 100, 100).unsqueeze(0)
 
-        # === PHASE 1: PC CONV INFERENCE ===
-        # Run PC inference through convolutional layers
+        # PC conv inference
         conv_features = self.pc_conv_preprocessor.forward(
             x,
             num_iterations=num_conv_iterations,
@@ -115,31 +84,22 @@ class PCConvClassifier(nn.Module):
 
         self.last_conv_features = conv_features
 
-        # === PHASE 2: PC OUTPUT INFERENCE (NO teaching signal!) ===
-        # Run pure PC inference to equilibrium
-        output, error_0, error_1, error_2 = self._pc_inference_pure(
+        # PC output inference
+        output = self._pc_inference_pure(
             conv_features,
             num_iterations=num_inference_iterations,
             inference_lr=pc_inference_lr
         )
 
-        # === PHASE 3: ERROR INJECTION (if supervised) ===
+        # Error injection (if supervised)
         if target is not None:
-            self.last_target = target
-
-            # Direct error injection at output layer
-            # This is the proper PC way to provide supervision!
-            # Instead of blending predictions, we inject a "surprise" error
             output_error = error_injection_strength * (target - output)
-
-            # Store injected error for weight learning
             self.pc_inference.layer2.state.data += output_error.data
 
-            # Let error propagate backward through one more inference iteration
-            # This updates intermediate layer states based on the injected error
-            output, error_0, error_1, error_2 = self._pc_inference_pure(
+            # Propagate error backward
+            output = self._pc_inference_pure(
                 conv_features,
-                num_iterations=5,  # Just a few iterations to propagate error
+                num_iterations=5,
                 inference_lr=pc_inference_lr
             )
 
@@ -150,14 +110,10 @@ class PCConvClassifier(nn.Module):
         input_data: torch.Tensor,
         num_iterations: int = 20,
         inference_lr: float = 0.1
-    ) -> tuple:
-        """
-        Pure PC inference with NO supervision.
-
-        Just minimize prediction errors using bottom-up, top-down, and lateral predictions.
-        """
+    ) -> torch.Tensor:
+        """Pure PC inference with NO supervision."""
         for iteration in range(num_iterations):
-            # === LAYER 0: Superficial ===
+            # Layer 0
             ff_0 = self.pc_inference.layer0.compute_feedforward(input_data)
             lat_0 = self.pc_inference.layer0.compute_lateral()
             fb_0 = self.pc_inference.layer0.compute_feedback(
@@ -168,7 +124,7 @@ class PCConvClassifier(nn.Module):
             error_0 = self.pc_inference.layer0.state - target_0
             self.pc_inference.layer0.state.data -= inference_lr * error_0.data
 
-            # === LAYER 1: Middle ===
+            # Layer 1
             ff_1 = self.pc_inference.layer1.compute_feedforward(
                 self.pc_inference.layer0.get_state()
             )
@@ -180,7 +136,7 @@ class PCConvClassifier(nn.Module):
             error_1 = self.pc_inference.layer1.state - target_1
             self.pc_inference.layer1.state.data -= inference_lr * error_1.data
 
-            # === LAYER 2: Output (pure bottom-up, NO supervision yet) ===
+            # Layer 2
             ff_2 = self.pc_inference.layer2.compute_feedforward(
                 self.pc_inference.layer1.get_state()
             )
@@ -189,36 +145,10 @@ class PCConvClassifier(nn.Module):
             error_2 = self.pc_inference.layer2.state - target_2
             self.pc_inference.layer2.state.data -= inference_lr * error_2.data
 
-        # Compute final errors after equilibrium
-        final_ff_0 = self.pc_inference.layer0.compute_feedforward(input_data)
-        final_lat_0 = self.pc_inference.layer0.compute_lateral()
-        final_fb_0 = self.pc_inference.layer0.compute_feedback(
-            self.pc_inference.layer1.get_state()
-        )
-        final_error_0 = self.pc_inference.layer0.state - (
-            final_ff_0 + 0.5 * final_lat_0 + final_fb_0
-        )
-
-        final_ff_1 = self.pc_inference.layer1.compute_feedforward(
-            self.pc_inference.layer0.get_state()
-        )
-        final_fb_1 = self.pc_inference.layer1.compute_feedback(
-            self.pc_inference.layer2.get_state()
-        )
-        final_error_1 = self.pc_inference.layer1.state - (final_ff_1 + final_fb_1)
-
-        final_ff_2 = self.pc_inference.layer2.compute_feedforward(
-            self.pc_inference.layer1.get_state()
-        )
-        final_error_2 = self.pc_inference.layer2.state - final_ff_2
-
-        output = self.pc_inference.layer2.get_state()
-
-        return output, final_error_0, final_error_1, final_error_2
+        return self.pc_inference.layer2.get_state()
 
     def update_weights_pc(self, learning_rate=0.01, weight_decay=0.01):
-        """Update PC inference layer weights using local learning."""
-        # Update PC output layers
+        """Update PC inference layer weights."""
         self.pc_inference.update_weights(
             input_data=self.last_conv_features,
             learning_rate=learning_rate,
@@ -231,19 +161,13 @@ class PCConvClassifier(nn.Module):
         conv_learning_rate: float = 0.001,
         weight_decay: float = 0.0001
     ):
-        """
-        Update PC conv layer weights using local Hebbian learning.
-
-        This is where Option 4 shines - ALL conv layers update locally!
-        """
-        # Ensure input has batch dimension
+        """Update PC conv layer weights."""
         if input_image.dim() == 3:
             input_image = input_image.unsqueeze(0)
         elif input_image.dim() == 1:
             input_image = input_image.view(1, 3, 100, 100)
 
-        # Update each PC conv layer with its local error and input
-        # Layer 0: updates based on error_0 and input image
+        # Update each PC conv layer
         self.pc_conv_preprocessor.pc_conv0.update_weights(
             input_below=input_image,
             input_above=self.pc_conv_preprocessor.pc_conv1.state,
@@ -251,7 +175,6 @@ class PCConvClassifier(nn.Module):
             weight_decay=weight_decay
         )
 
-        # Layer 1: updates based on error_1 and layer 0 state
         self.pc_conv_preprocessor.pc_conv1.update_weights(
             input_below=self.pc_conv_preprocessor.pc_conv0.state,
             input_above=self.pc_conv_preprocessor.pc_conv2.state,
@@ -259,16 +182,15 @@ class PCConvClassifier(nn.Module):
             weight_decay=weight_decay
         )
 
-        # Layer 2: updates based on error_2 and layer 1 state
         self.pc_conv_preprocessor.pc_conv2.update_weights(
             input_below=self.pc_conv_preprocessor.pc_conv1.state,
-            input_above=None,  # No layer above
+            input_above=None,
             learning_rate=conv_learning_rate,
             weight_decay=weight_decay
         )
 
     def reset_states(self):
-        """Reset all layer states (call between samples)."""
+        """Reset all layer states."""
         self.pc_conv_preprocessor.reset_states()
         self.pc_inference.reset_states()
 
@@ -286,7 +208,6 @@ def train_epoch(
     """Train for one epoch with active curriculum."""
     model.train()
 
-    # Get sample ordering from curriculum manager
     epoch_indices = curriculum_manager.get_epoch_indices(
         prioritize_learnable=prioritize_learnable
     )
@@ -296,7 +217,6 @@ def train_epoch(
     epoch_errors = []
 
     for sample_idx in epoch_indices:
-        # Get sample
         image, label = train_dataset[sample_idx]
         image = image.to(device)
 
@@ -325,16 +245,14 @@ def train_epoch(
         correct += (pred == label)
         total += 1
 
-        # Update PC layer weights
+        # Update weights
         model.update_weights_pc(learning_rate=learning_rate)
-
-        # Update PC conv weights (Option 4!)
         model.update_conv_weights_pc(
             input_image=image.view(3, 100, 100),
             conv_learning_rate=conv_learning_rate
         )
 
-        # Update curriculum with sample error
+        # Update curriculum
         curriculum_manager.update_sample(sample_idx, error, epoch)
 
     accuracy = 100. * correct / total
@@ -351,15 +269,12 @@ def test(model, test_loader, device):
 
     with torch.no_grad():
         for batch_idx, (data, target) in enumerate(test_loader):
-            # Process one sample at a time
             for i in range(data.size(0)):
                 image = data[i].to(device)
                 label = target[i].item()
 
-                # Reset states
                 model.reset_states()
 
-                # Forward (no target = unsupervised inference)
                 output = model(
                     image.view(3, 100, 100),
                     target=None,
@@ -371,7 +286,7 @@ def test(model, test_loader, device):
                 correct += (pred == label)
                 total += 1
 
-                if total >= 1000:  # Test on 1000 samples
+                if total >= 1000:
                     break
 
             if total >= 1000:
@@ -383,26 +298,23 @@ def test(model, test_loader, device):
 
 def main():
     print("=" * 80)
-    print("MNIST Training with FULL PC Conv Hierarchy + Active Inference")
-    print("Implements: Option 4 + VERSES Optimizations + Direct Error Injection")
+    print("MNIST Training with PC Conv Hierarchy + Active Inference")
     print("=" * 80)
 
     # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
+    print(f"Device: {device}")
 
     # Hyperparameters
     num_epochs = 5
-    learning_rate = 0.01  # PC layer learning rate
-    conv_learning_rate = 0.001  # PC conv layer learning rate (10x smaller)
+    learning_rate = 0.01
+    conv_learning_rate = 0.001
 
     print(f"\nHyperparameters:")
     print(f"  Epochs: {num_epochs}")
     print(f"  PC Layer LR: {learning_rate}")
     print(f"  PC Conv Layer LR: {conv_learning_rate}")
-    print(f"  Error Injection: Direct (NO teaching signal!)")
     print(f"  Precision Weighting: [1.0, 10.0, 100.0]")
-    print(f"  Bi-directional Propagation: Enabled")
 
     # Load MNIST
     transform = transforms.Compose([
@@ -432,10 +344,9 @@ def main():
 
     # Create model
     model = PCConvClassifier(num_classes=10, dtype=torch.float32).to(device)
-    print(f"\nModel: {model.pc_conv_preprocessor}")
-    print(f"PC Conv Layers: {len(model.pc_conv_preprocessor.pc_layers)}")
+    print(f"\nModel created with {len(model.pc_conv_preprocessor.pc_layers)} PC conv layers")
 
-    # Active curriculum manager
+    # Active curriculum
     curriculum_manager = ActiveCurriculumManager(
         num_samples=train_size,
         strategy='learning_progress',
@@ -443,9 +354,6 @@ def main():
         mastery_threshold=0.01,
         noise_threshold=-0.005
     )
-
-    # Training diagnostics
-    diagnostics = TrainingDiagnostics()
 
     # Training loop
     print("\n" + "=" * 80)
@@ -456,7 +364,6 @@ def main():
         print(f"\nEpoch {epoch}/{num_epochs}")
         print("-" * 40)
 
-        # Train
         train_acc, train_error = train_epoch(
             model,
             train_dataset,
@@ -467,10 +374,8 @@ def main():
             conv_learning_rate=conv_learning_rate
         )
 
-        # Test
         test_acc = test(model, test_loader, device)
 
-        # Get conv weight stats
         conv_stats = model.pc_conv_preprocessor.get_weight_stats()
 
         print(f"Train Accuracy: {train_acc:.2f}%")
@@ -481,20 +386,16 @@ def main():
             print(f"  {layer_name}: precision={stats['precision']:.2f}, "
                   f"weight_std={stats['std']:.4f}")
 
-        # Log diagnostics
-        diagnostics.log_epoch(epoch, train_acc, test_acc, train_error)
-
     print("\n" + "=" * 80)
-    print("Training Complete!")
+    print("Training Complete")
     print("=" * 80)
 
-    # Get curriculum statistics
+    # Curriculum stats
     curriculum_stats = curriculum_manager.get_statistics()
     print("\nCurriculum Statistics:")
     print(f"  Mastered: {curriculum_stats['mastered_count']} samples")
     print(f"  Learnable: {curriculum_stats['learnable_count']} samples")
     print(f"  Noise: {curriculum_stats['noise_count']} samples")
-    print(f"  Unvisited: {curriculum_stats['unvisited_count']} samples")
 
 
 if __name__ == '__main__':
