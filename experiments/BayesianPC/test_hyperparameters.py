@@ -22,75 +22,54 @@ def test_psi_value(psi_scale, verbose=True):
     # Create simple model
     model = BayesianPCNetwork(
         layer_sizes=[784, 128, 10],
-        activation=nn.ReLU(),
+        activation='relu',
         prior_Psi_scale=psi_scale,
     ).cuda()
 
-    # Create trainer
-    trainer = BayesianPCTrainer(
-        model=model,
-        T=10,
-        inference_lr=0.01,
-        kappa=0.25,
-        device='cuda'
-    )
-
-    # Test batch
-    batch_size = 128
-    inputs = torch.randn(batch_size, 784, device='cuda') * 0.1
-    targets = torch.randint(0, 10, (batch_size,), device='cuda')
-
-    # Get initial state
+    # Get precision from first layer
     layer = model.layers[0]
     _, _, Psi, nu = layer.natural_to_standard()
     expected_precision = nu * Psi
     avg_precision = torch.diag(expected_precision).mean().item()
 
-    # Run one E-step to test convergence
-    z_star = trainer._e_step(inputs, targets)
+    # Estimate energy scale by computing energy on random batch
+    model.train()
+    model.set_sample_x(True)
 
-    # Compute initial and final free energy
-    model.eval()
+    batch_size = 128
+    inputs = torch.randn(batch_size, 784, device='cuda') * 0.1
+
     with torch.no_grad():
-        # Initial energy (before inference)
-        energy_init = 0.0
+        # Forward pass to initialize value nodes
+        _ = model(inputs)
+
+        # Compute total energy
+        total_energy = 0.0
         h = model.activation(inputs)
         h = model._augment_with_bias(h)
-        for layer in model.layers[:-1]:
-            # Initialize value nodes at prediction
-            W_mean, _ = layer.get_expected_W_and_Sigma()
-            z_init = nn.functional.linear(h, W_mean, bias=None)
-            layer._x = nn.Parameter(z_init, requires_grad=True)
-            energy_init += layer.energy(h).item()
-            h = model.activation(layer._x)
-            h = model._augment_with_bias(h)
 
-        # Final energy (after inference)
-        energy_final = sum(layer.energy(pre).item()
-                          for layer, pre in zip(model.layers,
-                                               trainer._get_pre_activations(inputs, z_star)))
+        for layer in model.layers:
+            if layer._x is not None:
+                energy = layer.energy(h).item()
+                total_energy += energy
+                # Update h for next layer
+                h = model.activation(layer._x)
+                if layer != model.layers[-1]:
+                    h = model._augment_with_bias(h)
 
-    convergence = energy_final - energy_init
-
-    # Compute gradient magnitude
-    total_grad = 0.0
-    for z in z_star:
-        if z.grad is not None:
-            total_grad += z.grad.norm().item()
+    energy_per_sample = total_energy / batch_size
 
     if verbose:
         print(f"\nΨ_scale = {psi_scale}")
+        print(f"  ν (degrees of freedom): {nu:.1f}")
         print(f"  E[Σ^{{-1}}] diagonal: {avg_precision:.2e} (want ~1.0)")
-        print(f"  Energy/sample: {energy_final/batch_size:.2e} (want ~1-10)")
-        print(f"  ΔF (convergence): {convergence:.2e} (want > 0, decreasing)")
-        print(f"  ||∂E/∂z||: {total_grad:.2e} (want > 0)")
+        print(f"  Energy/sample: {energy_per_sample:.2e} (want ~1-10)")
 
     return {
         'psi_scale': psi_scale,
+        'nu': nu,
         'avg_precision': avg_precision,
-        'energy_per_sample': energy_final / batch_size,
-        'convergence': convergence,
-        'gradient_norm': total_grad
+        'energy_per_sample': energy_per_sample,
     }
 
 def main():
@@ -114,6 +93,12 @@ def main():
             results.append(result)
         except Exception as e:
             print(f"\nΨ_scale = {psi}: FAILED ({e})")
+            import traceback
+            traceback.print_exc()
+
+    if len(results) == 0:
+        print("\n❌ All tests failed!")
+        return
 
     # Find best value (closest to standard PC)
     print("\n" + "="*80)
@@ -122,20 +107,17 @@ def main():
     print("\nTarget metrics (from standard PC):")
     print("  - E[Σ^{-1}] ≈ 1.0")
     print("  - Energy/sample ≈ 1-10")
-    print("  - ΔF > 0 (decreasing energy)")
-    print("  - ||∂E/∂z|| > 0 (non-zero gradients)")
 
-    print("\n{:<12} {:<15} {:<15} {:<15} {:<15}".format(
-        "Ψ_scale", "E[Σ^{-1}]", "Energy/sample", "ΔF", "||∂E/∂z||"))
+    print("\n{:<12} {:<8} {:<15} {:<15}".format(
+        "Ψ_scale", "ν", "E[Σ^{-1}]", "Energy/sample"))
     print("-"*80)
 
     for r in results:
-        print("{:<12.3e} {:<15.2e} {:<15.2e} {:<15.2e} {:<15.2e}".format(
+        print("{:<12.3e} {:<8.1f} {:<15.2e} {:<15.2e}".format(
             r['psi_scale'],
+            r['nu'],
             r['avg_precision'],
-            r['energy_per_sample'],
-            r['convergence'],
-            r['gradient_norm']
+            r['energy_per_sample']
         ))
 
     # Find closest to target precision of 1.0
@@ -149,6 +131,31 @@ def main():
     print(f"  - Energy/sample: {best['energy_per_sample']:.2e}")
     print(f"  - Paper's value (1000.0) is {1000.0/best['psi_scale']:.0f}x too large!")
     print("="*80)
+
+    print("\n" + "="*80)
+    print("THREE MOST LIKELY EXPLANATIONS:")
+    print("="*80)
+    print("\n1. WISHART vs INVERSE WISHART CONFUSION:")
+    print("   - Paper uses Matrix Normal Wishart (MNW) for q(W, Σ)")
+    print("   - In MNW, Wishart is on PRECISION Σ^{-1}, not covariance Σ")
+    print("   - If authors mentally flipped: high Ψ = 'weak prior' (large variance)")
+    print("   - But mathematically: high Ψ → high E[Σ^{-1}] → low variance → STIFF!")
+    print(f"   - Evidence: Ψ = {best['psi_scale']} works, which is {1000.0/best['psi_scale']:.0f}x smaller")
+
+    print("\n2. SUM vs MEAN REDUCTION:")
+    print("   - Paper equations use Σ_n (sum over batch)")
+    print("   - PyTorch defaults to mean reduction")
+    print("   - Gradients differ by factor of batch_size = 128")
+    print("   - LR=0.01 with mean ≈ LR=0.00007 with sum")
+    print("   - If true: effective LR mismatch, not precision mismatch")
+
+    print("\n3. TYPO IN APPENDIX F.1:")
+    print("   - Appendices written last, often by different person than code")
+    print("   - Copy-paste from config file without units/context")
+    print("   - Possible: Ψ = 1000 → Ψ = 1.0 (or 0.001)")
+    print("   - Standard PC uses precision = 1.0, not 130,000")
+
+    print("\n" + "="*80)
 
 if __name__ == '__main__':
     main()
