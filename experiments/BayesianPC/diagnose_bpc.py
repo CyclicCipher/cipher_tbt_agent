@@ -188,6 +188,8 @@ def test_architecture_correctness():
     print(f"\n  Layer 0 (input): {list(x.shape)}")
     h = model.activation(x)
     print(f"    After activation: {list(h.shape)}")
+    h = model._augment_with_bias(h)  # Augment for first layer
+    print(f"    After augmentation: {list(h.shape)}")
 
     for i, layer in enumerate(model.layers):
         print(f"  Layer {i+1}: input {list(h.shape)}")
@@ -196,6 +198,8 @@ def test_architecture_correctness():
         if i < len(model.layers) - 1:
             h = model.activation(h)
             print(f"    After activation: {list(h.shape)}")
+            h = model._augment_with_bias(h)  # Augment for next layer
+            print(f"    After augmentation: {list(h.shape)}")
 
     print(f"\n  ✓  Architecture appears correct")
 
