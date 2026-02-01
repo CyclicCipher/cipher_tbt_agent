@@ -34,7 +34,7 @@ class BayesianPCLayer(nn.Module):
         out_features: int,
         prior_M_scale: float = 0.0,      # Prior mean scale
         prior_V_scale: float = 10.0,     # Prior column covariance scale
-        prior_Psi_scale: float = 1000.0, # Prior Wishart scale
+        prior_Psi_scale: float = 1.0,    # Prior Wishart scale (paper uses 1000, but causes 258k precision!)
         prior_nu: Optional[int] = None,  # Prior degrees of freedom
     ):
         super().__init__()
@@ -75,12 +75,13 @@ class BayesianPCLayer(nn.Module):
         self.register_buffer('eta3_prior', eta3_prior)
         self.register_buffer('eta4_prior', torch.tensor(eta4_prior, dtype=torch.float32))
 
-        # Initialize posterior natural parameters (learnable)
-        # Start at prior
-        self.eta1 = nn.Parameter(eta1_prior.clone())
-        self.eta2 = nn.Parameter(eta2_prior.clone())
-        self.eta3 = nn.Parameter(eta3_prior.clone())
-        self.eta4 = nn.Parameter(self.eta4_prior.clone())
+        # Initialize posterior natural parameters (BUFFERS not Parameters!)
+        # These are updated via closed-form Bayesian updates, NOT gradient descent
+        # CRITICAL: Must be buffers to avoid gradient accumulation during inference
+        self.register_buffer('eta1', eta1_prior.clone())
+        self.register_buffer('eta2', eta2_prior.clone())
+        self.register_buffer('eta3', eta3_prior.clone())
+        self.register_buffer('eta4', self.eta4_prior.clone())
 
         # Bias term (standard point estimate for simplicity)
         self.bias = nn.Parameter(torch.zeros(out_features))
