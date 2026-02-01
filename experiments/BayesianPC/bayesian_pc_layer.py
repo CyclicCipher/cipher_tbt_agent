@@ -138,10 +138,10 @@ class BayesianPCLayer(nn.Module):
     def get_expected_precision(self) -> torch.Tensor:
         """Get expected precision matrix E[Σ^{-1}].
 
-        For Wishart distribution: E[Σ^{-1}] = ν·Ψ^{-1}
+        For Wishart distribution W(Ψ, ν): E[Σ^{-1}] = ν·Ψ
         """
         _, _, Psi, nu = self.natural_to_standard()
-        return nu * torch.inverse(Psi)
+        return nu * Psi
 
     def forward(self, x: torch.Tensor, sample_x: bool = True) -> torch.Tensor:
         """Forward pass with value node optimization.
@@ -186,32 +186,25 @@ class BayesianPCLayer(nn.Module):
         # Get posterior parameters
         M, V, Psi, nu = self.natural_to_standard()
 
-        # Expected precision: E[Σ^{-1}] = ν·Ψ^{-1}  (from Wishart)
-        Sigma_inv_mean = nu * torch.inverse(Psi)
+        # Expected precision: E[Σ^{-1}] = ν·Ψ  (from Wishart W(Ψ, ν))
+        Sigma_inv_mean = nu * Psi
 
         # Prediction error: z - E[W]·x
-        # Note: Using E[W] for the mean, but need to account for weight uncertainty
+        # Using E[W] = M for the mean prediction
         error = self._x - F.linear(x, M, self.bias)  # [batch_size, out_features]
 
-        # Precision-weighted error
-        # E[(z - Wx)^T Σ^{-1} (z - Wx)] =
-        #   (z - E[W]x)^T E[Σ^{-1}] (z - E[W]x) + Tr(E[Σ^{-1}] E[WW^T]) - ...
-        #
-        # Simplified using Equations 17-18:
-        # E[Σ^{-1}W] = ν·Ψ^{-1}·M
-        # E[W^T Σ^{-1} W] = M^T·ν·Ψ^{-1}·M + d_l·V
-
-        # Approximate with mean (exact would require full quadratic form)
-        # This is the dominant term for well-learned posteriors
+        # Precision-weighted error (dominant term)
+        # (z - Mx)^T E[Σ^{-1}] (z - Mx)
         energy = 0.5 * torch.sum(
             error @ Sigma_inv_mean * error,  # Precision-weighted squared error
             dim=1  # Sum over output dimensions
         ).sum()  # Sum over batch
 
-        # Add weight uncertainty term: 0.5 * Tr(E[Σ^{-1}]·V)·||x||^2
-        # This encourages posterior concentration
-        x_norm_sq = (x ** 2).sum(dim=1).sum()  # Sum over features and batch
-        uncertainty_term = 0.5 * torch.trace(Sigma_inv_mean @ V) * x_norm_sq
+        # Weight uncertainty term from E[W^T Σ^{-1} W] = M^T ν Ψ M + d_y V
+        # This adds: 0.5 * Tr(d_y V) * ||x||^2 = 0.5 * d_y * Tr(V) * ||x||^2
+        # (encourages posterior concentration)
+        x_norm_sq = (x ** 2).sum()  # Sum over batch and features
+        uncertainty_term = 0.5 * self.out_features * torch.trace(V) * x_norm_sq
 
         self._energy = energy + uncertainty_term
 
