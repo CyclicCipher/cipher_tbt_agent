@@ -66,7 +66,35 @@ This file catalogues all mistakes made during development - both code bugs and a
 
 ## Code Implementation Mistakes
 
-### 7. Optimizer Conflating Value Nodes and Network Parameters (CRITICAL BUG)
+### 7. Import Errors in Non-Root Files (RECURRING ISSUE)
+
+**Problem:** `ModuleNotFoundError: No module named 'src'` when running files in subdirectories
+
+**Why it happens:**
+- Python imports are relative to the script's location
+- Files in `tests/` or `experiments/` can't find `src/` module
+- Happens every time we create files outside the root directory
+
+**Solution:** Add path manipulation at the top of every non-root script
+```python
+import sys
+import os
+# Add parent directory (or root) to path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Now imports work
+from src.network import PCNetwork
+```
+
+**Fixed in:**
+- `tests/test_pc_basic.py`
+- `experiments/BayesianPC/train_mnist_bayesian.py`
+
+**Status:** RECURRING - must remember for every new subdirectory file
+
+---
+
+### 8. Optimizer Conflating Value Nodes and Network Parameters (CRITICAL BUG)
 
 **What we did wrong:** Created weight optimizer with `model.parameters()` which includes BOTH network weights AND value nodes
 ```python
@@ -110,11 +138,11 @@ self.optimizer_p = optimizer_p_fn(
 - `src/network/pc_trainer.py`: Changed optimizer_p to use filtered parameters
 - `tests/test_pc_basic.py`: Fixed gradient test to check network parameters only
 
-**Status:** Attempted fix had no effect - see mistake #8
+**Status:** Attempted fix had no effect - see mistake #9
 
 ---
 
-### 8. Detaching Computational Graph (THE ACTUAL BUG - CRITICAL)
+### 9. Detaching Computational Graph (THE ACTUAL BUG - CRITICAL)
 
 **What we did wrong:** Used `mu.detach()` when initializing value nodes and computing energy
 ```python

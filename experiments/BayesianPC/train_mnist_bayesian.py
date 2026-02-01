@@ -1,9 +1,14 @@
 """
-Train 7-layer Predictive Coding Network on MNIST
+Train Bayesian PC Network on MNIST
 
-Tests the minimal PC implementation with comprehensive diagnostics.
-Monitors for vanishing errors, convergence, and compares to backprop baseline.
+Tests Bayesian inference with uncertainty quantification.
+Compares to baseline PC (point estimates).
 """
+
+import sys
+import os
+# Add parent directory to path so we can import from experiments
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 import torch
 import torch.nn as nn
@@ -12,10 +17,11 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 import matplotlib.pyplot as plt
 import numpy as np
-import os
 from tqdm import tqdm
 
-from src.network import PCNetwork, PCTrainer
+# Import Bayesian PC implementation from this experiment folder
+from experiments.BayesianPC.bayesian_pc_layer import BayesianPCNetwork
+from experiments.BayesianPC.bayesian_pc_trainer import PCTrainer
 
 
 def get_mnist_loaders(batch_size=64, data_dir='./data'):
@@ -56,10 +62,11 @@ class Diagnostics:
         self.test_losses = []
         self.test_accs = []
         self.layer_energies = [[] for _ in range(self.num_layers)]
+        self.layer_uncertainties = [[] for _ in range(self.num_layers)]  # NEW: track variance
         self.inference_convergence = []
         self.gradient_norms = []
 
-    def update_train(self, loss, acc, layer_energies, convergence):
+    def update_train(self, loss, acc, layer_energies, convergence, uncertainties=None):
         """Update training statistics."""
         self.train_losses.append(loss)
         self.train_accs.append(acc)
@@ -68,6 +75,12 @@ class Diagnostics:
         for i, energy in enumerate(layer_energies):
             if i < len(self.layer_energies):
                 self.layer_energies[i].append(energy)
+
+        # Track uncertainties (Bayesian PC only)
+        if uncertainties is not None:
+            for i, unc in enumerate(uncertainties):
+                if i < len(self.layer_uncertainties):
+                    self.layer_uncertainties[i].append(unc)
 
     def update_test(self, loss, acc):
         """Update test statistics."""
@@ -225,11 +238,15 @@ def train_epoch(model, trainer, train_loader, epoch, diagnostics):
             if energy is not None:
                 layer_energies.append(energy.item())
 
+        # Get per-layer uncertainties (Bayesian PC)
+        uncertainties = model.get_uncertainties()
+
         diagnostics.update_train(
             loss=results['loss'],
             acc=acc,
             layer_energies=layer_energies,
             convergence=convergence,
+            uncertainties=uncertainties,
         )
 
         # Update progress bar
@@ -279,14 +296,15 @@ def test(model, trainer, test_loader):
 
 def main():
     """Main training loop."""
-    # Hyperparameters from NETWORK_PROPOSAL.md
-    layer_sizes = [784, 256, 256, 256, 256, 256, 128, 10]  # 7 layers
+    # Hyperparameters - smaller network for faster experimentation
+    layer_sizes = [784, 256, 256, 10]  # 3 layers (faster than 7)
     activation = 'relu'
-    T_inference = 35  # 5 * 7 layers
+    T_inference = 20  # 5 * 3 layers (adjusted for smaller network)
     inference_lr = 0.1
     weight_lr = 0.001
     batch_size = 64
     num_epochs = 10
+    prior_variance = 1.0  # Bayesian prior
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Using device: {device}")
@@ -297,7 +315,7 @@ def main():
         return
 
     print("\n" + "="*80)
-    print("7-Layer Predictive Coding Network on MNIST")
+    print("Bayesian Predictive Coding Network on MNIST")
     print("="*80)
     print(f"Architecture: {layer_sizes}")
     print(f"Activation: {activation}")
@@ -305,15 +323,20 @@ def main():
     print(f"Inference LR: {inference_lr}")
     print(f"Weight LR: {weight_lr}")
     print(f"Batch size: {batch_size}")
+    print(f"Prior variance: {prior_variance}")
     print("="*80 + "\n")
 
     # Load data
     print("Loading MNIST...")
     train_loader, test_loader = get_mnist_loaders(batch_size=batch_size)
 
-    # Create model
-    print("Creating model...")
-    model = PCNetwork(layer_sizes=layer_sizes, activation=activation)
+    # Create Bayesian model
+    print("Creating Bayesian PC model...")
+    model = BayesianPCNetwork(
+        layer_sizes=layer_sizes,
+        activation=activation,
+        prior_variance=prior_variance
+    )
     print(f"Number of parameters: {sum(p.numel() for p in model.parameters()):,}")
     print(f"Number of PC layers: {len(model.get_pc_layers())}")
 
