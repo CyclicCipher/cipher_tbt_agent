@@ -66,6 +66,54 @@ This file catalogues all mistakes made during development - both code bugs and a
 
 ## Code Implementation Mistakes
 
+### 7. Optimizer Conflating Value Nodes and Network Parameters (CRITICAL BUG)
+
+**What we did wrong:** Created weight optimizer with `model.parameters()` which includes BOTH network weights AND value nodes
+```python
+# WRONG - includes value nodes!
+self.optimizer_p = optimizer_p_fn(self.model.parameters(), lr=weight_lr)
+```
+
+**Why it failed catastrophically:**
+- Value nodes (`_x`) were optimized by TWO conflicting optimizers:
+  - `optimizer_x` during inference (correct)
+  - `optimizer_p` during learning (WRONG)
+- Contradictory gradient updates destroyed the energy landscape
+- Network could not learn - stuck at random guessing (8% accuracy on MNIST)
+- Loss and accuracy completely flat across all epochs
+
+**How we found it:**
+- User reported training stuck at 8.35% accuracy (random baseline for 10 classes)
+- Zero improvement over 5 epochs
+- Train and test metrics identical and unchanging
+- Traced through optimizer creation in pc_trainer.py line 55-57
+
+**Correct approach:**
+```python
+# Separate parameters: exclude value nodes from weight optimizer
+self.optimizer_p = optimizer_p_fn(
+    self.model.get_network_parameters(),  # Only Linear weights/biases
+    lr=weight_lr
+)
+```
+
+**Implementation:**
+- Added `get_network_parameters()` method to PCNetwork
+- Filters out value nodes from parameter list
+- Only yields Linear layer weights and biases
+- Weight optimizer now correctly optimizes ONLY network parameters
+
+**Root principle violated:** In PC, value nodes and weights are optimized in SEPARATE phases, never simultaneously. Mixing them breaks the algorithm.
+
+**Files fixed:**
+- `src/network/pc_layer.py`: Added `get_network_parameters()` method
+- `src/network/pc_trainer.py`: Changed optimizer_p to use filtered parameters
+- `tests/test_pc_basic.py`: Fixed gradient test to check network parameters only
+
+**Status:** FIXED (2026-02-01) - awaiting retraining validation
+
+---
+
 ### Successful Implementation (2026-02-01)
 
 **Approach:** Minimal custom implementation based on standard PC algorithm
@@ -113,3 +161,4 @@ This file catalogues all mistakes made during development - both code bugs and a
 - 2026-02-01 (implementation): Fixed mistake #2 (custom neurons) with standard PCLayer implementation
 - 2026-02-01 (documentation): Fixed mistake #6 (context loss) with persistent documentation system
 - 2026-02-01 (code complete): Added successful implementation section with all PC network code
+- 2026-02-01 (CRITICAL FIX): Found and fixed mistake #7 - optimizer was conflating value nodes with network parameters, causing complete learning failure. Training was stuck at 8% (random guessing). Fixed by separating parameter lists.

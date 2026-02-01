@@ -52,8 +52,10 @@ class PCTrainer:
         self.device = device
 
         # Create optimizer for weights (parameters)
+        # CRITICAL: Use get_network_parameters() to exclude value nodes
+        # Value nodes should ONLY be optimized by optimizer_x, not optimizer_p
         self.optimizer_p = optimizer_p_fn(
-            self.model.parameters(),
+            self.model.get_network_parameters(),
             lr=weight_lr
         )
 

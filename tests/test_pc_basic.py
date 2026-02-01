@@ -100,9 +100,14 @@ def test_gradient_flow():
 
     model.train()
 
-    # Get initial weights
+    # Do a forward pass first to initialize all parameters (including value nodes)
+    dummy_input = torch.randn(4, 10)
+    _ = model(dummy_input)
+
+    # Now get initial NETWORK weights (excluding value nodes)
+    # This is what the optimizer_p actually optimizes
     initial_weights = []
-    for param in model.parameters():
+    for param in model.get_network_parameters():
         initial_weights.append(param.clone().detach())
 
     # Train one batch
@@ -111,17 +116,17 @@ def test_gradient_flow():
 
     trainer.train_on_batch(inputs, F.cross_entropy, targets)
 
-    # Check weights changed
+    # Check network weights changed (not value nodes, just Linear weights)
     changed = False
-    for i, param in enumerate(model.parameters()):
+    for i, param in enumerate(model.get_network_parameters()):
         if not torch.allclose(param, initial_weights[i]):
             changed = True
             break
 
     if changed:
-        print("✓ Weights updated during training")
+        print("✓ Network weights updated during training")
     else:
-        print("✗ WARNING: Weights did not change!")
+        print("✗ WARNING: Network weights did not change!")
 
     print("="*60)
 

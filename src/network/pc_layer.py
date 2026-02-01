@@ -176,3 +176,20 @@ class PCNetwork(nn.Module):
         """Clear all accumulated energies."""
         for pc_layer in self.get_pc_layers():
             pc_layer.clear_energy()
+
+    def get_network_parameters(self):
+        """Get only the actual network parameters (weights/biases), excluding value nodes.
+
+        This is critical for the weight optimizer - it should NOT optimize value nodes,
+        only the Linear layer parameters.
+
+        Returns:
+            Generator of parameters (excludes PCLayer value nodes)
+        """
+        # Get all value nodes to exclude
+        value_node_set = set(self.get_value_nodes())
+
+        # Yield only parameters that are NOT value nodes
+        for param in self.parameters():
+            if not any(param is x for x in value_node_set):
+                yield param
