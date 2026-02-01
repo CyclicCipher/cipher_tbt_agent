@@ -34,7 +34,7 @@ class BayesianPCLayer(nn.Module):
         out_features: int,
         prior_M_scale: float = 0.0,      # Prior mean scale
         prior_V_scale: float = 10.0,     # Prior column covariance scale
-        prior_Psi_scale: float = 1.0,    # Prior Wishart scale (paper uses 1000, but causes 258k precision!)
+        prior_Psi_scale: float = 1000.0, # Prior Wishart scale (paper default)
         prior_nu: Optional[int] = None,  # Prior degrees of freedom
     ):
         super().__init__()
@@ -202,10 +202,12 @@ class BayesianPCLayer(nn.Module):
         ).sum()  # Sum over batch
 
         # Weight uncertainty term from E[W^T Σ^{-1} W] = M^T ν Ψ M + d_y V
-        # This adds: 0.5 * Tr(d_y V) * ||x||^2 = 0.5 * d_y * Tr(V) * ||x||^2
-        # (encourages posterior concentration)
-        x_norm_sq = (x ** 2).sum()  # Sum over batch and features
-        uncertainty_term = 0.5 * self.out_features * torch.trace(V) * x_norm_sq
+        # For each sample n: 0.5 * f(z_n)^T (d_y V) f(z_n)
+        # If V ≈ (Tr(V)/d_x) * I, then: f^T (d_y V) f ≈ d_y * (Tr(V)/d_x) * ||f||^2
+        # Sum over batch: Σ_n [d_y * (Tr(V)/d_x) * ||f_n||^2]
+        x_norm_sq_per_sample = (x ** 2).sum(dim=1)  # [batch_size]
+        avg_V_entry = torch.trace(V) / self.in_features
+        uncertainty_term = 0.5 * self.out_features * avg_V_entry * x_norm_sq_per_sample.sum()
 
         self._energy = energy + uncertainty_term
 
