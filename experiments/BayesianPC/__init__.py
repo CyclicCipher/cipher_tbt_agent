@@ -1,15 +1,17 @@
 """
-Bayesian Predictive Coding Experiment
+Bayesian Predictive Coding
 
-Tests Bayesian inference with uncertainty quantification on MNIST.
+Correct implementation following Algorithm 1 from:
+"Bayesian Predictive Coding" (Tschantz et al., 2025, arXiv:2503.24016)
 
-Key questions:
-1. Does KL divergence improve generalization?
-2. Does uncertainty tracking help with data efficiency?
-3. How does uncertainty evolve during training?
-4. Can we detect when the model is uncertain (for active learning)?
+Key features:
+- Value nodes: MAP estimates (point values), optimized via gradient descent
+- Weights: Matrix Normal Wishart posterior distributions
+- Learning: Closed-form Hebbian updates (Equation 7)
+- Architecture: Weights OUTSIDE activation function for conjugacy
 """
 
 from .bayesian_pc_layer import BayesianPCLayer, BayesianPCNetwork
+from .bayesian_pc_trainer import BayesianPCTrainer
 
-__all__ = ['BayesianPCLayer', 'BayesianPCNetwork']
+__all__ = ['BayesianPCLayer', 'BayesianPCNetwork', 'BayesianPCTrainer']

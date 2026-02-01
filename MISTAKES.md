@@ -267,6 +267,125 @@ T_inference = 20  # 5 * 3 layers
 
 ---
 
+### 12. Fundamental Bayesian PC Conceptual Error - Wrong Thing Made Bayesian (CRITICAL)
+
+**What we did wrong:** Put posterior distributions over **value nodes** (hidden states) instead of **weights** (parameters)
+
+```python
+# WRONG IMPLEMENTATION (experiments/BayesianPC/ - INCORRECT)
+class BayesianPCLayer:
+    def __init__(self):
+        # Made value nodes Bayesian (mean + log_variance)
+        self._x_mean = nn.Parameter(...)
+        self._x_log_var = nn.Parameter(...)
+        # Weights stayed as point estimates
+        self.linear = nn.Linear(...)
+
+    def energy(self):
+        # KL divergence on value nodes
+        kl = KL[q(x) || p(x)]  # WRONG!
+        return accuracy + kl
+```
+
+**Why it's completely wrong:**
+1. **Value nodes are ephemeral** - optimized fresh every forward pass for current input
+   - They represent posterior beliefs about the CURRENT observation
+   - Making them Bayesian doesn't capture epistemic uncertainty
+   - They reset every batch - no knowledge accumulation
+
+2. **Weights are what accumulate knowledge** - updated across all training data
+   - Epistemic uncertainty is "what do we know about the true parameters?"
+   - Weight posteriors capture uncertainty that decreases with more data
+   - This is what Bayesian deep learning means
+
+3. **Breaks conjugacy** - my approach had no closed-form updates
+   - Used gradient descent on variance parameters (slow, unstable)
+   - Real BPC uses Matrix Normal Wishart conjugate priors
+   - Enables closed-form Hebbian weight updates (Equation 7 in paper)
+
+4. **Architecture was wrong** - I had weights INSIDE activation
+   - My implementation: `mu = f(linear(x))` → weights inside f()
+   - Required for conjugacy: `mu = linear(f(x))` → weights outside f()
+   - This architectural constraint is essential for closed-form updates
+
+**What BPC actually does (from Tschantz et al. 2025, arXiv:2503.24016):**
+
+```python
+# CORRECT IMPLEMENTATION (from Algorithm 1)
+class BayesianPCLayer:
+    def __init__(self):
+        # Value nodes as MAP estimates (point values, optimized during inference)
+        self._x = None  # Created during forward, scalar per node
+
+        # Weights as Matrix Normal Wishart posterior
+        self.weight_posterior = {
+            'M': ...,    # Mean matrix
+            'V': ...,    # Column covariance
+            'Ψ': ...,    # Scale matrix (Wishart)
+            'ν': ...,    # Degrees of freedom
+        }
+
+    def inference_step(self, mu):
+        # E-step: Optimize value nodes (same as standard PC)
+        error = <Σ^(-1)(z - Wf(z_{l-1}))>_q(W,Σ)
+        self._x -= α * error  # Gradient descent on x
+
+    def learning_step(self, z_star):
+        # M-step: Closed-form Bayesian update on weight posterior
+        # Equation 7: Hebbian function of pre/post-synaptic activity
+        η* = η_prior + Σ_n [f(z*_{l-1})f(z*_{l-1})^T,
+                             f(z*_{l-1})z*_l^T,
+                             z*_l z*_l^T, 1]
+        # Update natural parameters (closed form!)
+```
+
+**Key differences:**
+| Aspect | My Wrong Implementation | Correct BPC |
+|--------|------------------------|-------------|
+| **Bayesian treatment** | Value nodes (hidden states) | Weights (parameters) |
+| **Value nodes** | Distributions N(μ, σ²) | MAP estimates (scalars) |
+| **Weights** | Point estimates | Matrix Normal Wishart posterior |
+| **Learning** | Gradient descent on variance | Closed-form Bayesian update (Eq 7) |
+| **Weight updates** | Backprop-style | Hebbian (pre/post activity) |
+| **Architecture** | Weights inside f() | Weights outside f() (conjugacy) |
+| **Convergence** | Slow (gradient descent) | Fast (closed-form) |
+| **Uncertainty** | Wrong (on ephemeral states) | Correct (on parameters) |
+
+**What the paper says explicitly:**
+- Page 1: "estimates a posterior distribution over **network parameters**" (not hidden states!)
+- Page 2: "latent variables Z are represented via maximum a posteriori (MAP) estimates" (point values!)
+- Page 2: "parameters Θ are represented...posterior distribution" (this is what's Bayesian!)
+- Page 3, Equation 7: "Hebbian function of pre- and post-synaptic activity" (closed-form weight update)
+- Page 2: "placed the parameters W_l **outside** of the non-linear activation function f(·), which is essential for enabling the closed-form updates"
+
+**User feedback:**
+- "I don't entirely buy the explanation that what we have is already close but I'll humor the idea"
+- Provided paper: "Bayesian Predictive Coding" (Tschantz et al., 2025)
+- After NaN results: "There are still some glaring problems in your code. In any case, I don't think that your assumptions going into the code were correct."
+
+**Correct approach:**
+1. Keep value nodes as MAP estimates (point values, optimized via gradient descent)
+2. Represent weights as Matrix Normal Wishart distributions q(W_l, Σ_l | M_l, V_l, Ψ_l, ν_l)
+3. Use conjugate priors for closed-form updates
+4. Move weights outside activation: z_l = W_l · f(z_{l-1})
+5. Implement Equation 7 for Hebbian weight updates
+6. Natural parameters accumulate sufficient statistics across batches
+
+**Files to archive (INCORRECT IMPLEMENTATION):**
+- `experiments/BayesianPC/bayesian_pc_layer.py` - wrong Bayesian treatment
+- `experiments/BayesianPC/bayesian_pc_trainer.py` - gradient descent on wrong things
+- `experiments/BayesianPC/train_mnist_bayesian.py` - uses wrong implementation
+- All fixes to mistakes #10 and #11 were fixing bugs in fundamentally wrong code
+
+**Root cause:** Misunderstood what "Bayesian" means in "Bayesian Predictive Coding"
+- I assumed: make the inference Bayesian (distributions over hidden states)
+- Actually: make the learning Bayesian (distributions over weights)
+- This is the difference between Bayesian inference and Bayesian learning
+
+**Status:** IDENTIFIED (2026-02-01) - current BayesianPC implementation is architecturally wrong and must be completely rewritten
+
+---
+
 ### Successful Implementation (2026-02-01)
 
 **Approach:** Minimal custom implementation based on standard PC algorithm
@@ -317,3 +436,4 @@ T_inference = 20  # 5 * 3 layers
 - 2026-02-01 (CRITICAL FIX): Found and fixed mistake #8 - optimizer was conflating value nodes with network parameters, causing complete learning failure. Training was stuck at 8% (random guessing). Fixed by separating parameter lists.
 - 2026-02-01 (THE REAL BUG): Mistake #8 fix had ZERO effect. Debug script showed weights never changed. Found actual bug (mistake #9): mu.detach() broke computational graph so NO gradients reached weights. Removed detach calls. This is the real fix.
 - 2026-02-01 (BAYESIAN PC BUGS): Fixed mistakes #10 and #11 - Bayesian PC had NaN catastrophe from variance collapse (min_variance=1e-6 too low, no max bound) and broke experimental control by changing from 7 to 3 layers. Fixed by setting min_variance=0.01, max_variance=10.0, and restoring 7-layer architecture.
+- 2026-02-01 (FUNDAMENTAL ERROR): Identified mistake #12 - entire BayesianPC implementation is conceptually wrong. Put Bayesian posteriors over VALUE NODES (hidden states) instead of WEIGHTS (parameters). User provided paper (Tschantz et al. 2025) showing BPC uses Matrix Normal Wishart weight posteriors with closed-form Hebbian updates, not distributions over hidden states. All code in experiments/BayesianPC/ must be archived and rewritten from scratch following Algorithm 1 from the paper.

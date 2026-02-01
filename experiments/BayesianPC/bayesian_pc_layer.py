@@ -1,268 +1,328 @@
 """
-Bayesian Predictive Coding Layer Implementation
+Bayesian Predictive Coding Layer
 
-Extends standard PC with uncertainty quantification and KL divergence.
+Implements BPC following Algorithm 1 from:
+"Bayesian Predictive Coding" (Tschantz et al., 2025, arXiv:2503.24016)
 
-Key additions:
-- Value nodes are distributions: (mean, variance)
-- Energy = Accuracy (precision-weighted error) + Complexity (KL divergence)
-- Implements variational Bayesian inference
-- Approximates full Bayesian posterior
-
-Based on:
-- Friston's Free Energy Principle
-- Variational inference in neural networks
-- Rao & Ballard (1999) predictive coding
+Key differences from standard PC:
+- Value nodes: MAP estimates (scalars), optimized via gradient descent
+- Weights: Matrix Normal Wishart posterior q(W, Σ | M, V, Ψ, ν)
+- Learning: Closed-form Bayesian updates (Equation 7)
+- Architecture: z = W·f(z_{l-1}) [weights OUTSIDE activation]
 """
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import math
+from typing import Optional, Tuple
 
 
 class BayesianPCLayer(nn.Module):
-    """Bayesian Predictive Coding Layer - value nodes with uncertainty."""
+    """Bayesian PC layer with Matrix Normal Wishart weight posterior.
 
-    def __init__(self, prior_variance=1.0, min_variance=0.01, max_variance=10.0):
-        """Initialize Bayesian PCLayer.
+    Architecture: z_l = W_l · f(z_{l-1}) + noise
+    Note: Weights are OUTSIDE activation function (required for conjugacy)
 
-        Args:
-            prior_variance: Prior variance for value nodes (regularization strength)
-            min_variance: Minimum variance to prevent numerical instability (0.01, not 1e-6!)
-            max_variance: Maximum variance to prevent precision collapse
-        """
+    Weight posterior: q(W, Σ) = MatrixNormalWishart(W, Σ | M, V, Ψ, ν)
+    Natural parameters: η = [V^{-1}, MV^{-1}, Ψ^{-1} + MV^{-1}M^T, ν - d_y + d_x - 1]
+    """
+
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        prior_M_scale: float = 0.0,      # Prior mean scale
+        prior_V_scale: float = 10.0,     # Prior column covariance scale
+        prior_Psi_scale: float = 1000.0, # Prior Wishart scale
+        prior_nu: Optional[int] = None,  # Prior degrees of freedom
+    ):
         super().__init__()
 
-        # Value node mean (what we're uncertain about)
-        self._x_mean = None
+        self.in_features = in_features
+        self.out_features = out_features
 
-        # Value node variance (how uncertain we are)
-        # Using log variance for numerical stability (always positive)
-        self._x_log_var = None
+        # Set prior degrees of freedom
+        if prior_nu is None:
+            prior_nu = out_features + 2
+        self.prior_nu = prior_nu
 
-        # Prior parameters (for KL divergence)
-        self.prior_mean = 0.0  # Centered prior
-        self.prior_variance = prior_variance
-        self.min_variance = min_variance
-        self.max_variance = max_variance
+        # Initialize prior natural parameters η^(0)
+        # Following paper: M^(0) = zeros, V^(0) = scale*I, Ψ^(0) = scale*I, ν^(0) = d_y + 2
 
-        # Energy accumulator
+        # Prior mean matrix M^(0) (out_features x in_features)
+        M_prior = torch.zeros(out_features, in_features) + prior_M_scale
+
+        # Prior column covariance V^(0) (in_features x in_features)
+        V_prior = torch.eye(in_features) * prior_V_scale
+        V_inv_prior = torch.eye(in_features) / prior_V_scale
+
+        # Prior Wishart scale Ψ^(0) (out_features x out_features)
+        Psi_prior = torch.eye(out_features) * prior_Psi_scale
+        Psi_inv_prior = torch.eye(out_features) / prior_Psi_scale
+
+        # Convert to natural parameters (Equation 27)
+        # η = [V^{-1}, MV^{-1}, Φ + MV^{-1}M^T, ν - d_y + d_x - 1]
+        # where Φ = Ψ^{-1}
+        eta1_prior = V_inv_prior  # V^{-1}
+        eta2_prior = M_prior @ V_inv_prior  # MV^{-1}
+        eta3_prior = Psi_inv_prior + M_prior @ V_inv_prior @ M_prior.T  # Φ + MV^{-1}M^T
+        eta4_prior = prior_nu - out_features + in_features - 1  # ν - d_y + d_x - 1
+
+        # Store prior natural parameters (not learnable)
+        self.register_buffer('eta1_prior', eta1_prior)
+        self.register_buffer('eta2_prior', eta2_prior)
+        self.register_buffer('eta3_prior', eta3_prior)
+        self.register_buffer('eta4_prior', torch.tensor(eta4_prior, dtype=torch.float32))
+
+        # Initialize posterior natural parameters (learnable)
+        # Start at prior
+        self.eta1 = nn.Parameter(eta1_prior.clone())
+        self.eta2 = nn.Parameter(eta2_prior.clone())
+        self.eta3 = nn.Parameter(eta3_prior.clone())
+        self.eta4 = nn.Parameter(self.eta4_prior.clone())
+
+        # Bias term (standard point estimate for simplicity)
+        self.bias = nn.Parameter(torch.zeros(out_features))
+
+        # Value nodes (created during forward pass)
+        self._x = None  # Will be nn.Parameter during training
         self._energy = None
 
-        # Flag to re-initialize at start of batch
-        self._is_sample_x = False
+    def natural_to_standard(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
+        """Convert natural parameters η to standard parameters (M, V, Ψ, ν).
 
-    def energy(self):
-        """Get the free energy held by this layer."""
-        return self._energy
-
-    def clear_energy(self):
-        """Clear accumulated energy."""
-        self._energy = None
-
-    def get_x(self):
-        """Get value node mean (for compatibility with optimizer)."""
-        return self._x_mean
-
-    def get_x_mean(self):
-        """Get value node mean."""
-        return self._x_mean
-
-    def get_x_variance(self):
-        """Get value node variance."""
-        if self._x_log_var is None:
-            return None
-        return torch.exp(self._x_log_var).clamp(min=self.min_variance, max=self.max_variance)
-
-    def get_statistics(self):
-        """Get both mean and variance."""
-        return self._x_mean, self.get_x_variance()
-
-    def set_is_sample_x(self, value: bool):
-        """Set flag to re-sample x on next forward pass."""
-        self._is_sample_x = value
-
-    def forward(self, mu: torch.Tensor) -> torch.Tensor:
-        """Forward pass with uncertainty.
-
-        Args:
-            mu: Prediction from layer below (point estimate for now)
+        From Equation 27:
+        η = [V^{-1}, MV^{-1}, Φ + MV^{-1}M^T, ν - d_y + d_x - 1]
 
         Returns:
-            During training: value node mean
-            During eval: pass-through (mu)
+            M: Mean matrix (out_features x in_features)
+            V: Column covariance (in_features x in_features)
+            Ψ: Wishart scale (out_features x out_features)
+            ν: Degrees of freedom (scalar)
         """
-        if not self.training:
-            # Eval mode: just pass through
-            return mu
+        # V^{-1} = eta1
+        V_inv = self.eta1
+        V = torch.inverse(V_inv)
 
-        # Training mode: Bayesian predictive coding
+        # MV^{-1} = eta2
+        M = self.eta2 @ V
 
-        # Initialize or re-initialize if needed
-        if self._x_mean is None or self._is_sample_x or mu.shape != self._x_mean.shape:
-            # Initialize mean from prediction
-            self._x_mean = nn.Parameter(mu.clone(), requires_grad=True)
+        # Φ + MV^{-1}M^T = eta3
+        # Φ = Ψ^{-1}, so Ψ = (eta3 - MV^{-1}M^T)^{-1}
+        Phi = self.eta3 - M @ V_inv @ M.T
+        Psi = torch.inverse(Phi)
 
-            # Initialize variance (log scale)
-            # Start with moderate uncertainty
-            initial_log_var = math.log(0.1)
-            self._x_log_var = nn.Parameter(
-                torch.full_like(mu, initial_log_var),
-                requires_grad=True
-            )
+        # ν - d_y + d_x - 1 = eta4
+        nu = self.eta4.item() + self.out_features - self.in_features + 1
 
-            self._is_sample_x = False
+        return M, V, Psi, nu
 
-        # Get variance (clamped for stability)
-        x_var = self.get_x_variance()
+    def get_expected_W_and_Sigma(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Get expected weight matrix and covariance under posterior.
 
-        # Compute precision-weighted prediction error (ACCURACY term)
-        # E_accuracy = 0.5 * precision * (mu - x_mean)^2 + 0.5 * log(variance)
-        error = mu - self._x_mean
-        precision = 1.0 / x_var  # x_var already clamped to [min_variance, max_variance]
+        Returns:
+            E[W]: Expected weight matrix (out_features x in_features)
+            E[Σ]: Expected observation covariance (out_features x out_features)
+        """
+        M, V, Psi, nu = self.natural_to_standard()
 
-        accuracy_term = 0.5 * (precision * error ** 2).sum()
-        entropy_term = 0.5 * torch.log(x_var).sum()
+        # E[W] = M
+        W_mean = M
 
-        # Compute KL divergence from prior (COMPLEXITY term)
-        # KL[q(x) || p(x)] for Gaussians:
-        # 0.5 * (log(var_prior/var_post) + var_post/var_prior + (mean_post - mean_prior)^2/var_prior - 1)
+        # E[Σ] = Ψ / (ν - d_y - 1) for Wishart distribution
+        Sigma_mean = Psi / (nu - self.out_features - 1)
 
-        var_ratio = x_var / self.prior_variance
-        mean_diff = (self._x_mean - self.prior_mean) ** 2
+        return W_mean, Sigma_mean
 
-        kl_divergence = 0.5 * (
-            math.log(self.prior_variance) - torch.log(x_var) +  # x_var already clamped
-            var_ratio +
-            mean_diff / self.prior_variance -
-            1.0
-        ).sum()
+    def get_expected_precision(self) -> torch.Tensor:
+        """Get expected precision matrix E[Σ^{-1}].
 
-        # Total variational free energy = Accuracy + Complexity
-        self._energy = accuracy_term + entropy_term + kl_divergence
+        For Wishart distribution: E[Σ^{-1}] = ν·Ψ^{-1}
+        """
+        _, _, Psi, nu = self.natural_to_standard()
+        return nu * torch.inverse(Psi)
 
-        # Return mean estimate
-        return self._x_mean
+    def forward(self, x: torch.Tensor, sample_x: bool = True) -> torch.Tensor:
+        """Forward pass with value node optimization.
+
+        Args:
+            x: Input activations f(z_{l-1}) [batch_size, in_features]
+               NOTE: Input is AFTER activation function (weights outside activation)
+            sample_x: If True, initialize/use value nodes (training)
+                     If False, use expected weights (testing)
+
+        Returns:
+            Output (value nodes during training, deterministic during testing)
+        """
+        batch_size = x.size(0)
+
+        if self.training and sample_x:
+            # Training: Initialize value nodes if needed
+            if self._x is None or self._x.size(0) != batch_size:
+                # Initialize at E[W] @ x + bias
+                W_mean, _ = self.get_expected_W_and_Sigma()
+                mu = F.linear(x, W_mean, self.bias)
+                self._x = nn.Parameter(mu.clone().detach(), requires_grad=True)
+
+            # Compute energy
+            self._compute_energy(x)
+
+            return self._x
+        else:
+            # Testing: Use expected weights
+            W_mean, _ = self.get_expected_W_and_Sigma()
+            return F.linear(x, W_mean, self.bias)
+
+    def _compute_energy(self, x: torch.Tensor):
+        """Compute precision-weighted prediction error (Equation 5).
+
+        E_l = 0.5 * <(z - Wf(z_{l-1}))^T Σ^{-1} (z - Wf(z_{l-1}))>_{q(W,Σ)}
+
+        Using Equations 17-18 for expectations under Matrix Normal Wishart.
+        """
+        batch_size = x.size(0)
+
+        # Get posterior parameters
+        M, V, Psi, nu = self.natural_to_standard()
+
+        # Expected precision: E[Σ^{-1}] = ν·Ψ^{-1}  (from Wishart)
+        Sigma_inv_mean = nu * torch.inverse(Psi)
+
+        # Prediction error: z - E[W]·x
+        # Note: Using E[W] for the mean, but need to account for weight uncertainty
+        error = self._x - F.linear(x, M, self.bias)  # [batch_size, out_features]
+
+        # Precision-weighted error
+        # E[(z - Wx)^T Σ^{-1} (z - Wx)] =
+        #   (z - E[W]x)^T E[Σ^{-1}] (z - E[W]x) + Tr(E[Σ^{-1}] E[WW^T]) - ...
+        #
+        # Simplified using Equations 17-18:
+        # E[Σ^{-1}W] = ν·Ψ^{-1}·M
+        # E[W^T Σ^{-1} W] = M^T·ν·Ψ^{-1}·M + d_l·V
+
+        # Approximate with mean (exact would require full quadratic form)
+        # This is the dominant term for well-learned posteriors
+        energy = 0.5 * torch.sum(
+            error @ Sigma_inv_mean * error,  # Precision-weighted squared error
+            dim=1  # Sum over output dimensions
+        ).sum()  # Sum over batch
+
+        # Add weight uncertainty term: 0.5 * Tr(E[Σ^{-1}]·V)·||x||^2
+        # This encourages posterior concentration
+        x_norm_sq = (x ** 2).sum(dim=1).sum()  # Sum over features and batch
+        uncertainty_term = 0.5 * torch.trace(Sigma_inv_mean @ V) * x_norm_sq
+
+        self._energy = energy + uncertainty_term
+
+    def energy(self) -> Optional[torch.Tensor]:
+        """Get current energy value."""
+        return self._energy
+
+    def get_value_nodes(self):
+        """Get value node parameters for optimizer."""
+        if self._x is not None:
+            return [self._x]
+        return []
+
+    def set_sample_x(self, mode: bool):
+        """Enable/disable value node sampling."""
+        if not mode:
+            self._x = None
+            self._energy = None
 
 
 class BayesianPCNetwork(nn.Module):
-    """Bayesian Predictive Coding Network with uncertainty quantification."""
+    """Bayesian PC network with multiple layers.
 
-    def __init__(self, layer_sizes, activation='relu', prior_variance=1.0):
-        """Initialize Bayesian PC Network.
+    Architecture: z_l = W_l · f(z_{l-1})
+    Weights are OUTSIDE activation function for conjugacy.
+    """
 
-        Args:
-            layer_sizes: List of layer dimensions
-            activation: Activation function
-            prior_variance: Prior variance for regularization
-        """
+    def __init__(
+        self,
+        layer_sizes: list,
+        activation: str = 'relu',
+        prior_M_scale: float = 0.0,
+        prior_V_scale: float = 10.0,
+        prior_Psi_scale: float = 1000.0,
+    ):
         super().__init__()
 
-        self.prior_variance = prior_variance
+        self.layer_sizes = layer_sizes
+        self.num_layers = len(layer_sizes) - 1
 
-        # Create layers
-        layers = []
-        for i in range(len(layer_sizes) - 1):
-            # Add linear transformation
-            layers.append(nn.Linear(layer_sizes[i], layer_sizes[i+1]))
+        # Activation function
+        if activation == 'relu':
+            self.activation = F.relu
+        elif activation == 'tanh':
+            self.activation = torch.tanh
+        else:
+            raise ValueError(f"Unknown activation: {activation}")
 
-            # Add Bayesian PC layer
-            layers.append(BayesianPCLayer(prior_variance=prior_variance))
+        # Create Bayesian PC layers
+        self.layers = nn.ModuleList()
+        for i in range(self.num_layers):
+            layer = BayesianPCLayer(
+                in_features=layer_sizes[i],
+                out_features=layer_sizes[i+1],
+                prior_M_scale=prior_M_scale,
+                prior_V_scale=prior_V_scale,
+                prior_Psi_scale=prior_Psi_scale,
+            )
+            self.layers.append(layer)
 
-            # Add activation (except after last layer)
-            if i < len(layer_sizes) - 2:
-                if activation == 'relu':
-                    layers.append(nn.ReLU())
-                elif activation == 'tanh':
-                    layers.append(nn.Tanh())
-                else:
-                    raise ValueError(f"Unknown activation: {activation}")
+    def forward(self, x: torch.Tensor, sample_x: bool = True) -> torch.Tensor:
+        """Forward pass through network.
 
-        self.model = nn.Sequential(*layers)
+        Args:
+            x: Input [batch_size, input_dim]
+            sample_x: Whether to use value nodes (training) or expected weights (testing)
 
-        # Initialize weights
-        self._initialize_weights(activation)
+        Returns:
+            Output [batch_size, output_dim]
+        """
+        # Apply activation to input (weights are outside activation)
+        h = self.activation(x)
 
-    def _initialize_weights(self, activation):
-        """Initialize weights properly for deep networks."""
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                if activation == 'relu':
-                    nn.init.kaiming_normal_(module.weight, mode='fan_in', nonlinearity='relu')
-                elif activation == 'tanh':
-                    nn.init.xavier_normal_(module.weight)
-                if module.bias is not None:
-                    nn.init.constant_(module.bias, 0)
+        # Forward through layers
+        for i, layer in enumerate(self.layers[:-1]):
+            h = layer(h, sample_x=sample_x)
+            h = self.activation(h)  # Apply activation after layer
 
-    def forward(self, x):
-        """Forward pass through network."""
-        return self.model(x)
+        # Final layer (no activation after)
+        output = self.layers[-1](h, sample_x=sample_x)
 
-    def get_pc_layers(self):
-        """Get all Bayesian PCLayers in the network."""
-        pc_layers = []
-        for module in self.modules():
-            if isinstance(module, BayesianPCLayer):
-                pc_layers.append(module)
-        return pc_layers
+        return output
 
     def get_energies(self):
-        """Get free energies from all PC layers."""
-        energies = []
-        for pc_layer in self.get_pc_layers():
-            energy = pc_layer.energy()
-            if energy is not None:
-                energies.append(energy)
-        return energies
+        """Get energy values from all layers."""
+        return [layer.energy() for layer in self.layers if layer.energy() is not None]
 
     def get_value_nodes(self):
-        """Get value node means from all PC layers."""
-        value_nodes = []
-        for pc_layer in self.get_pc_layers():
-            x = pc_layer.get_x()
-            if x is not None:
-                value_nodes.append(x)
+        """Get all value node parameters."""
+        nodes = []
+        for layer in self.layers:
+            nodes.extend(layer.get_value_nodes())
+        return nodes
 
-        # Also get variance parameters
-        for pc_layer in self.get_pc_layers():
-            if pc_layer._x_log_var is not None:
-                value_nodes.append(pc_layer._x_log_var)
+    def get_natural_parameters(self):
+        """Get all natural parameters (for learning)."""
+        params = []
+        for layer in self.layers:
+            params.extend([layer.eta1, layer.eta2, layer.eta3, layer.eta4])
+        return params
 
-        return value_nodes
+    def set_sample_x(self, mode: bool):
+        """Enable/disable value node sampling for all layers."""
+        for layer in self.layers:
+            layer.set_sample_x(mode)
 
     def get_uncertainties(self):
-        """Get uncertainty (variance) from each layer.
-
-        Returns:
-            List of average variance per layer
-        """
+        """Get weight uncertainties from all layers."""
         uncertainties = []
-        for pc_layer in self.get_pc_layers():
-            var = pc_layer.get_x_variance()
-            if var is not None:
-                uncertainties.append(var.mean().item())
+        for layer in self.layers:
+            _, V, _, _ = layer.natural_to_standard()
+            # Use trace of V as uncertainty measure
+            uncertainties.append(torch.trace(V).item())
         return uncertainties
-
-    def set_sample_x(self, value: bool):
-        """Set all PC layers to re-sample x on next forward."""
-        for pc_layer in self.get_pc_layers():
-            pc_layer.set_is_sample_x(value)
-
-    def clear_energies(self):
-        """Clear all accumulated energies."""
-        for pc_layer in self.get_pc_layers():
-            pc_layer.clear_energy()
-
-    def get_network_parameters(self):
-        """Get only network parameters (weights/biases), excluding value nodes.
-
-        Returns:
-            Generator of parameters (excludes value node means and variances)
-        """
-        # Get all value nodes to exclude
-        value_node_set = set(self.get_value_nodes())
-
-        # Yield only parameters that are NOT value nodes
-        for param in self.parameters():
-            if not any(param is x for x in value_node_set):
-                yield param
