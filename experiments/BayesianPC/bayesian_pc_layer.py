@@ -102,12 +102,10 @@ class BayesianPCLayer(nn.Module):
         self.register_buffer('eta3', eta3_init)
         self.register_buffer('eta4', torch.tensor(eta4_init, dtype=torch.float32))
 
-        # Bias term (standard point estimate for simplicity)
-        # From Appendix F.1: "Similarly, the bias b of shape (out_features)
-        # is initialized from U(−√k, √k)"
-        bias_init = torch.zeros(out_features).uniform_(-torch.sqrt(torch.tensor(k)),
-                                                        torch.sqrt(torch.tensor(k)))
-        self.bias = nn.Parameter(bias_init)
+        # NOTE: No separate bias parameter
+        # Bias is handled by augmenting input with a column of 1s
+        # This makes bias part of the weight matrix W, enabling Bayesian treatment
+        # The last column of W acts as the bias vector
 
         # Value nodes (created during forward pass)
         self._x = None  # Will be nn.Parameter during training
@@ -184,9 +182,9 @@ class BayesianPCLayer(nn.Module):
         if self.training and sample_x:
             # Training: Initialize value nodes if needed
             if self._x is None or self._x.size(0) != batch_size:
-                # Initialize at E[W] @ x + bias
+                # Initialize at E[W] @ x (x is augmented with 1, so bias is included)
                 W_mean, _ = self.get_expected_W_and_Sigma()
-                mu = F.linear(x, W_mean, self.bias)
+                mu = F.linear(x, W_mean, bias=None)
                 self._x = nn.Parameter(mu.clone().detach(), requires_grad=True)
 
             # Compute energy
@@ -196,7 +194,7 @@ class BayesianPCLayer(nn.Module):
         else:
             # Testing: Use expected weights
             W_mean, _ = self.get_expected_W_and_Sigma()
-            return F.linear(x, W_mean, self.bias)
+            return F.linear(x, W_mean, bias=None)
 
     def _compute_energy(self, x: torch.Tensor):
         """Compute precision-weighted prediction error (Equation 5).
@@ -215,7 +213,8 @@ class BayesianPCLayer(nn.Module):
 
         # Prediction error: z - E[W]·x
         # Using E[W] = M for the mean prediction
-        error = self._x - F.linear(x, M, self.bias)  # [batch_size, out_features]
+        # x is augmented with 1, so bias is included in W (no separate bias)
+        error = self._x - F.linear(x, M, bias=None)  # [batch_size, out_features]
 
         # Precision-weighted error (dominant term)
         # (z - Mx)^T E[Σ^{-1}] (z - Mx)
@@ -280,16 +279,33 @@ class BayesianPCNetwork(nn.Module):
             raise ValueError(f"Unknown activation: {activation}")
 
         # Create Bayesian PC layers
+        # NOTE: Input is augmented with +1 for bias, so in_features is +1
         self.layers = nn.ModuleList()
         for i in range(self.num_layers):
+            # After activation and augmentation, input dimension is layer_sizes[i] + 1
+            # Output is non-augmented (before next activation)
             layer = BayesianPCLayer(
-                in_features=layer_sizes[i],
+                in_features=layer_sizes[i] + 1,  # +1 for bias augmentation
                 out_features=layer_sizes[i+1],
                 prior_M_scale=prior_M_scale,
                 prior_V_scale=prior_V_scale,
                 prior_Psi_scale=prior_Psi_scale,
             )
             self.layers.append(layer)
+
+    @staticmethod
+    def _augment_with_bias(x: torch.Tensor) -> torch.Tensor:
+        """Augment input with column of 1s for bias.
+
+        Args:
+            x: Input [batch_size, features]
+
+        Returns:
+            Augmented input [batch_size, features+1]
+        """
+        batch_size = x.size(0)
+        ones = torch.ones(batch_size, 1, device=x.device, dtype=x.dtype)
+        return torch.cat([x, ones], dim=1)
 
     def forward(self, x: torch.Tensor, sample_x: bool = True) -> torch.Tensor:
         """Forward pass through network.
@@ -304,10 +320,14 @@ class BayesianPCNetwork(nn.Module):
         # Apply activation to input (weights are outside activation)
         h = self.activation(x)
 
+        # Augment with 1 for bias (first layer)
+        h = self._augment_with_bias(h)
+
         # Forward through layers
         for i, layer in enumerate(self.layers[:-1]):
             h = layer(h, sample_x=sample_x)
             h = self.activation(h)  # Apply activation after layer
+            h = self._augment_with_bias(h)  # Augment for next layer
 
         # Final layer (no activation after)
         output = self.layers[-1](h, sample_x=sample_x)

@@ -93,10 +93,13 @@ class BayesianPCTrainer:
         kappa_t = self.num_updates ** (-self.kappa)
 
         # Build list of pre-synaptic activations (input + hidden layers after activation)
-        pre_activations = [self.model.activation(inputs)]  # f(z_0)
+        # NOTE: Augment with 1 for bias (same as forward pass)
+        h0 = self.model.activation(inputs)  # f(z_0)
+        pre_activations = [self.model._augment_with_bias(h0)]
 
         for z in z_star[:-1]:  # All layers except last
-            pre_activations.append(self.model.activation(z.detach()))  # f(z_l)
+            h = self.model.activation(z.detach())  # f(z_l)
+            pre_activations.append(self.model._augment_with_bias(h))
 
         # Update each layer
         for i, layer in enumerate(self.model.layers):
@@ -105,25 +108,18 @@ class BayesianPCTrainer:
 
             # Compute sufficient statistics (Equation 28)
             # Sum over batch dimension n
+            # VECTORIZED - no Python loops for GPU efficiency
 
             # SS1 = Σ_n f(z_{l-1})f(z_{l-1})^T  [in_features, in_features]
-            ss1 = torch.zeros(layer.in_features, layer.in_features, device=self.device)
-            for b in range(batch_size):
-                f_b = f_pre[b:b+1].T  # [in_features, 1]
-                ss1 += f_b @ f_b.T
+            # f_pre is [batch, in_features], so f_pre.T @ f_pre gives the sum
+            ss1 = f_pre.T @ f_pre  # [in_features, in_features]
 
             # SS2 = Σ_n f(z_{l-1})z_l^T  [out_features, in_features]
-            ss2 = torch.zeros(layer.out_features, layer.in_features, device=self.device)
-            for b in range(batch_size):
-                z_b = z_post[b:b+1].T  # [out_features, 1]
-                f_b = f_pre[b:b+1].T   # [in_features, 1]
-                ss2 += z_b @ f_b.T
+            # z_post is [batch, out_features], f_pre is [batch, in_features]
+            ss2 = z_post.T @ f_pre  # [out_features, in_features]
 
             # SS3 = Σ_n z_l z_l^T  [out_features, out_features]
-            ss3 = torch.zeros(layer.out_features, layer.out_features, device=self.device)
-            for b in range(batch_size):
-                z_b = z_post[b:b+1].T  # [out_features, 1]
-                ss3 += z_b @ z_b.T
+            ss3 = z_post.T @ z_post  # [out_features, out_features]
 
             # SS4 = Σ_n 1 = batch_size
             ss4 = float(batch_size)
