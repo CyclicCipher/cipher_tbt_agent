@@ -35,7 +35,14 @@ def test_energy_computation():
     expected_precision = layer.get_expected_precision()
     print(f"\nE[Σ^{{-1}}] = ν·Ψ:")
     print(f"  Tr(E[Σ^{{-1}}]) = {torch.trace(expected_precision):.2e}")
-    print(f"  ⚠️  This is HUGE! Implies noise variance ~ {1.0/torch.trace(expected_precision).item():.2e}")
+    print(f"  Average diagonal: {torch.trace(expected_precision).item() / layer.out_features:.2e}")
+
+    # Optimal inference learning rate (from Appendix B)
+    optimal_alpha = layer.get_optimal_inference_lr()
+    print(f"\nOptimal inference learning rate (Appendix B):")
+    print(f"  α_optimal ≈ 1 / λ_max(A_l) = {optimal_alpha:.2e}")
+    print(f"  With configured α = 0.01, step size is {0.01 / optimal_alpha:.1f}x too large!")
+    print(f"  ⚠️  This explains inference divergence!")
 
     # Simulate forward pass
     x = torch.randn(64, 784) * 0.1  # Small input like normalized MNIST
