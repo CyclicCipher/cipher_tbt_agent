@@ -72,13 +72,15 @@ class PCLayer(nn.Module):
 
         # Initialize or re-initialize x if needed
         if self._x is None or self._is_sample_x or mu.shape != self._x.shape:
-            # Initialize x as detached copy of mu
-            self._x = nn.Parameter(mu.detach().clone(), requires_grad=True)
+            # Initialize x from mu - keep in computational graph!
+            # The optimizer separation (optimizer_x vs optimizer_p) handles
+            # which parameters update when, not graph disconnection
+            self._x = nn.Parameter(mu.clone(), requires_grad=True)
             self._is_sample_x = False
 
         # Compute prediction error energy: E = 0.5 * (mu - x)^2
-        # Note: mu.detach() prevents gradients flowing through bottom-up pathway
-        error = mu.detach() - self._x
+        # Keep mu in graph so gradients flow to network weights
+        error = mu - self._x
         self._energy = 0.5 * (error ** 2).sum()
 
         # Return value nodes (not prediction)

@@ -110,7 +110,57 @@ self.optimizer_p = optimizer_p_fn(
 - `src/network/pc_trainer.py`: Changed optimizer_p to use filtered parameters
 - `tests/test_pc_basic.py`: Fixed gradient test to check network parameters only
 
-**Status:** FIXED (2026-02-01) - awaiting retraining validation
+**Status:** Attempted fix had no effect - see mistake #8
+
+---
+
+### 8. Detaching Computational Graph (THE ACTUAL BUG - CRITICAL)
+
+**What we did wrong:** Used `mu.detach()` when initializing value nodes and computing energy
+```python
+# WRONG - breaks gradient flow!
+self._x = nn.Parameter(mu.detach().clone(), requires_grad=True)
+error = mu.detach() - self._x
+```
+
+**Why it completely prevented learning:**
+- Value nodes (x) were detached from predictions (mu)
+- mu is detached from network weights
+- Computational graph: input → weights → mu [BREAK] x → loss
+- NO gradients reach network weights from ANY source:
+  - Loss gradients: loss → x (but x detached from mu) → STOP
+  - Energy gradients: energy → x and mu (but mu detached) → STOP
+- Weights receive ZERO gradients
+- Cannot learn at all
+
+**Symptoms:**
+- Debug showed: "Weights changed: False, Max weight change: 0.000000"
+- Inference works (free energy decreases)
+- But weights never update
+- Accuracy stays at random guessing forever
+
+**Root cause:** Misunderstanding of how PC separation works
+- I thought: detach graph to separate inference/learning phases
+- Actually: optimizer separation handles which params update when
+- Graph must stay connected for gradients to flow
+
+**Correct approach:**
+```python
+# Keep in computational graph!
+self._x = nn.Parameter(mu.clone(), requires_grad=True)  # No detach
+error = mu - self._x  # No detach
+```
+
+**Why this works:**
+- Gradients computed for ALL parameters (x and weights)
+- optimizer_x.step() only updates x (its param group)
+- optimizer_p.step() only updates weights (its param group)
+- Each optimizer updates its own params, graph stays connected
+
+**Files fixed:**
+- `src/network/pc_layer.py`: Removed mu.detach() calls (lines 76, 81)
+
+**Status:** FIXED (2026-02-01) - the REAL fix this time
 
 ---
 
@@ -162,3 +212,4 @@ self.optimizer_p = optimizer_p_fn(
 - 2026-02-01 (documentation): Fixed mistake #6 (context loss) with persistent documentation system
 - 2026-02-01 (code complete): Added successful implementation section with all PC network code
 - 2026-02-01 (CRITICAL FIX): Found and fixed mistake #7 - optimizer was conflating value nodes with network parameters, causing complete learning failure. Training was stuck at 8% (random guessing). Fixed by separating parameter lists.
+- 2026-02-01 (THE REAL BUG): Mistake #7 fix had ZERO effect. Debug script showed weights never changed. Found actual bug: mu.detach() broke computational graph so NO gradients reached weights. Removed detach calls. This is the real fix.
