@@ -3,6 +3,11 @@ Basic functionality test for PC implementation.
 Verifies the core mechanisms work before full training.
 """
 
+import sys
+import os
+# Add parent directory to path so we can import src
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import torch
 import torch.nn.functional as F
 from src.network import PCNetwork, PCTrainer
