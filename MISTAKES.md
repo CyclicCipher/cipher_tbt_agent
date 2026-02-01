@@ -192,6 +192,81 @@ error = mu - self._x  # No detach
 
 ---
 
+### 10. Bayesian PC Variance Collapse and NaN Catastrophe (CRITICAL)
+
+**What we did wrong:** Set min_variance too low (1e-6) causing numerical instability
+```python
+# WRONG - variance collapses to 1e-6, precision explodes to 1e6
+min_variance = 1e-6
+precision = 1.0 / (x_var + min_variance)  # → 1e6 → NaN gradients
+```
+
+**Symptoms:**
+- loss=nan, acc=9.38% (random guessing)
+- All diagnostics show NaN
+- Variance collapses to minimum, precision explodes
+- Network cannot learn at all
+
+**Why it failed:**
+- Variance clamped at [1e-6, ∞) collapses to 1e-6
+- Precision = 1/variance → 1e6 (massive number)
+- Precision * error^2 → overflow → NaN
+- Gradients become NaN, weights get NaN, everything breaks
+- No upper bound on variance means no protection from collapse
+
+**Correct approach:**
+```python
+# Proper numerical bounds
+min_variance = 0.01  # Not 1e-6!
+max_variance = 10.0  # Prevents precision collapse
+x_var = torch.exp(x_log_var).clamp(min=min_variance, max=max_variance)
+precision = 1.0 / x_var  # Safe, bounded to [0.1, 100]
+```
+
+**Files fixed:**
+- `experiments/BayesianPC/bayesian_pc_layer.py`: Changed min_variance to 0.01, added max_variance=10.0
+- Updated get_x_variance() to clamp with both min and max
+- Removed redundant min_variance additions in energy computation
+
+**Status:** FIXED (2026-02-01) - proper variance bounds prevent NaN
+
+---
+
+### 11. Breaking Experimental Control Variables
+
+**What we did wrong:** Changed architecture from 7 to 3 layers without justification
+```python
+# WRONG - can't compare to baseline!
+layer_sizes = [784, 256, 256, 10]  # 3 layers
+T_inference = 20  # 5 * 3 layers
+
+# Baseline was:
+# layer_sizes = [784, 256, 256, 256, 256, 256, 128, 10]  # 7 layers
+# T_inference = 35  # 5 * 7 layers
+```
+
+**Why it's wrong:**
+- Experiment compares Bayesian PC to baseline PC
+- Changed network architecture between treatments
+- Can't isolate effect of Bayesian inference from effect of network size
+- Violates basic experimental design: control all variables except the one being tested
+
+**User feedback:** "why are there only 3 layers when the vanilla MNIST experiment had 7? You clearly have not managed your control variables well."
+
+**Correct approach:**
+- Keep ALL hyperparameters identical except the treatment variable
+- Treatment variable: Bayesian inference (mean+variance) vs point estimates
+- Control variables: architecture, T, learning rates, batch size, etc.
+
+**Files fixed:**
+- `experiments/BayesianPC/train_mnist_bayesian.py`: Restored 7-layer architecture and T=35
+
+**Root principle violated:** Scientific experiments require controlled variables. Can't test effect of X while simultaneously changing Y.
+
+**Status:** FIXED (2026-02-01) - experimental control restored
+
+---
+
 ### Successful Implementation (2026-02-01)
 
 **Approach:** Minimal custom implementation based on standard PC algorithm
@@ -239,5 +314,6 @@ error = mu - self._x  # No detach
 - 2026-02-01 (implementation): Fixed mistake #2 (custom neurons) with standard PCLayer implementation
 - 2026-02-01 (documentation): Fixed mistake #6 (context loss) with persistent documentation system
 - 2026-02-01 (code complete): Added successful implementation section with all PC network code
-- 2026-02-01 (CRITICAL FIX): Found and fixed mistake #7 - optimizer was conflating value nodes with network parameters, causing complete learning failure. Training was stuck at 8% (random guessing). Fixed by separating parameter lists.
-- 2026-02-01 (THE REAL BUG): Mistake #7 fix had ZERO effect. Debug script showed weights never changed. Found actual bug: mu.detach() broke computational graph so NO gradients reached weights. Removed detach calls. This is the real fix.
+- 2026-02-01 (CRITICAL FIX): Found and fixed mistake #8 - optimizer was conflating value nodes with network parameters, causing complete learning failure. Training was stuck at 8% (random guessing). Fixed by separating parameter lists.
+- 2026-02-01 (THE REAL BUG): Mistake #8 fix had ZERO effect. Debug script showed weights never changed. Found actual bug (mistake #9): mu.detach() broke computational graph so NO gradients reached weights. Removed detach calls. This is the real fix.
+- 2026-02-01 (BAYESIAN PC BUGS): Fixed mistakes #10 and #11 - Bayesian PC had NaN catastrophe from variance collapse (min_variance=1e-6 too low, no max bound) and broke experimental control by changing from 7 to 3 layers. Fixed by setting min_variance=0.01, max_variance=10.0, and restoring 7-layer architecture.

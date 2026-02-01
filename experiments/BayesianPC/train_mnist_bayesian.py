@@ -296,10 +296,10 @@ def test(model, trainer, test_loader):
 
 def main():
     """Main training loop."""
-    # Hyperparameters - smaller network for faster experimentation
-    layer_sizes = [784, 256, 256, 10]  # 3 layers (faster than 7)
+    # Hyperparameters - MUST match baseline for experimental control
+    layer_sizes = [784, 256, 256, 256, 256, 256, 128, 10]  # 7 layers (same as baseline)
     activation = 'relu'
-    T_inference = 20  # 5 * 3 layers (adjusted for smaller network)
+    T_inference = 35  # 5 * 7 layers (same as baseline)
     inference_lr = 0.1
     weight_lr = 0.001
     batch_size = 64

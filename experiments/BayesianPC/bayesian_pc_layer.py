@@ -23,12 +23,13 @@ import math
 class BayesianPCLayer(nn.Module):
     """Bayesian Predictive Coding Layer - value nodes with uncertainty."""
 
-    def __init__(self, prior_variance=1.0, min_variance=1e-6):
+    def __init__(self, prior_variance=1.0, min_variance=0.01, max_variance=10.0):
         """Initialize Bayesian PCLayer.
 
         Args:
             prior_variance: Prior variance for value nodes (regularization strength)
-            min_variance: Minimum variance to prevent numerical instability
+            min_variance: Minimum variance to prevent numerical instability (0.01, not 1e-6!)
+            max_variance: Maximum variance to prevent precision collapse
         """
         super().__init__()
 
@@ -43,6 +44,7 @@ class BayesianPCLayer(nn.Module):
         self.prior_mean = 0.0  # Centered prior
         self.prior_variance = prior_variance
         self.min_variance = min_variance
+        self.max_variance = max_variance
 
         # Energy accumulator
         self._energy = None
@@ -70,7 +72,7 @@ class BayesianPCLayer(nn.Module):
         """Get value node variance."""
         if self._x_log_var is None:
             return None
-        return torch.exp(self._x_log_var).clamp(min=self.min_variance)
+        return torch.exp(self._x_log_var).clamp(min=self.min_variance, max=self.max_variance)
 
     def get_statistics(self):
         """Get both mean and variance."""
@@ -117,10 +119,10 @@ class BayesianPCLayer(nn.Module):
         # Compute precision-weighted prediction error (ACCURACY term)
         # E_accuracy = 0.5 * precision * (mu - x_mean)^2 + 0.5 * log(variance)
         error = mu - self._x_mean
-        precision = 1.0 / (x_var + self.min_variance)
+        precision = 1.0 / x_var  # x_var already clamped to [min_variance, max_variance]
 
         accuracy_term = 0.5 * (precision * error ** 2).sum()
-        entropy_term = 0.5 * torch.log(x_var + self.min_variance).sum()
+        entropy_term = 0.5 * torch.log(x_var).sum()
 
         # Compute KL divergence from prior (COMPLEXITY term)
         # KL[q(x) || p(x)] for Gaussians:
@@ -130,7 +132,7 @@ class BayesianPCLayer(nn.Module):
         mean_diff = (self._x_mean - self.prior_mean) ** 2
 
         kl_divergence = 0.5 * (
-            math.log(self.prior_variance) - torch.log(x_var + self.min_variance) +
+            math.log(self.prior_variance) - torch.log(x_var) +  # x_var already clamped
             var_ratio +
             mean_diff / self.prior_variance -
             1.0
