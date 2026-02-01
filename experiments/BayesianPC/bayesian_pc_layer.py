@@ -78,13 +78,36 @@ class BayesianPCLayer(nn.Module):
         # Initialize posterior natural parameters (BUFFERS not Parameters!)
         # These are updated via closed-form Bayesian updates, NOT gradient descent
         # CRITICAL: Must be buffers to avoid gradient accumulation during inference
-        self.register_buffer('eta1', eta1_prior.clone())
-        self.register_buffer('eta2', eta2_prior.clone())
-        self.register_buffer('eta3', eta3_prior.clone())
-        self.register_buffer('eta4', self.eta4_prior.clone())
+        #
+        # From Appendix F.1: "All initial estimates of the posterior natural parameters η
+        # were set to the same as the prior, besides M which uses the initialisation described for W."
+        #
+        # W initialization: "We initialized the linear weights W of shape (out_features, in_features)
+        # from a uniform distribution U(−√k, √k), where k = 1/in_features"
+
+        # Initialize posterior M from uniform distribution (NOT zeros like prior)
+        k = 1.0 / in_features
+        M_init = torch.zeros(out_features, in_features).uniform_(-torch.sqrt(torch.tensor(k)),
+                                                                   torch.sqrt(torch.tensor(k)))
+
+        # Convert initialized (M_init, V_prior, Psi_prior, prior_nu) to natural parameters
+        # η = [V^{-1}, MV^{-1}, Φ + MV^{-1}M^T, ν - d_y + d_x - 1]
+        eta1_init = V_inv_prior  # Same as prior (V^{-1})
+        eta2_init = M_init @ V_inv_prior  # MV^{-1} with initialized M
+        eta3_init = Psi_inv_prior + M_init @ V_inv_prior @ M_init.T  # Φ + MV^{-1}M^T with initialized M
+        eta4_init = prior_nu - out_features + in_features - 1  # Same as prior
+
+        self.register_buffer('eta1', eta1_init)
+        self.register_buffer('eta2', eta2_init)
+        self.register_buffer('eta3', eta3_init)
+        self.register_buffer('eta4', torch.tensor(eta4_init, dtype=torch.float32))
 
         # Bias term (standard point estimate for simplicity)
-        self.bias = nn.Parameter(torch.zeros(out_features))
+        # From Appendix F.1: "Similarly, the bias b of shape (out_features)
+        # is initialized from U(−√k, √k)"
+        bias_init = torch.zeros(out_features).uniform_(-torch.sqrt(torch.tensor(k)),
+                                                        torch.sqrt(torch.tensor(k)))
+        self.bias = nn.Parameter(bias_init)
 
         # Value nodes (created during forward pass)
         self._x = None  # Will be nn.Parameter during training

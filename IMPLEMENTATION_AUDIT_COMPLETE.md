@@ -10,34 +10,50 @@ Systematic verification against BPC_COMPLETE_CHECKLIST.md
 
 ## DETAILED FINDINGS
 
-### ❌ CRITICAL BUG #1: Weight Initialization
+### ✓ FIXED: Weight Initialization
 
 **Paper requirement (Appendix F.1, lines 426-429):**
 > "We initialized the linear weights W of shape (out_features, in_features) from a uniform distribution U(−√k, √k), where k = 1/in_features"
 >
 > "All initial estimates of the posterior natural parameters η were set to the same as the prior, besides **M which uses the initialisation described for W**."
 
-**My implementation (bayesian_pc_layer.py:54):**
+**Previous implementation (WRONG):**
 ```python
 M_prior = torch.zeros(out_features, in_features) + prior_M_scale
+# Posterior copied from prior (all zeros)
+self.register_buffer('eta2', eta2_prior.clone())
 ```
 
-**What's wrong:**
-- M is initialized to zeros (or small constant)
-- Should be initialized from U(-√k, √k) where k = 1/in_features
-- This is used for posterior initialization, not just prior
+**What was wrong:**
+- Prior M^(0) = zeros (correct)
+- But posterior M was also initialized to zeros (wrong!)
+- Should initialize posterior M from U(-√k, √k) where k = 1/in_features
 
-**Impact:**
-- Network starts with all weights at zero
-- This could severely impact learning dynamics
-- May explain poor convergence
-
-**Fix required:**
+**Fixed implementation (bayesian_pc_layer.py:87-99):**
 ```python
-# Should be:
+# Initialize posterior M from uniform distribution (NOT zeros like prior)
 k = 1.0 / in_features
-M_init = torch.zeros(out_features, in_features).uniform_(-math.sqrt(k), math.sqrt(k))
+M_init = torch.zeros(out_features, in_features).uniform_(-torch.sqrt(torch.tensor(k)),
+                                                           torch.sqrt(torch.tensor(k)))
+
+# Convert initialized (M_init, V_prior, Psi_prior, prior_nu) to natural parameters
+eta2_init = M_init @ V_inv_prior  # MV^{-1} with initialized M
+eta3_init = Psi_inv_prior + M_init @ V_inv_prior @ M_init.T  # With initialized M
+
+self.register_buffer('eta2', eta2_init)
+self.register_buffer('eta3', eta3_init)
 ```
+
+**Also fixed bias initialization (bayesian_pc_layer.py:102-106):**
+```python
+# From Appendix F.1: "Similarly, the bias b of shape (out_features)
+# is initialized from U(−√k, √k)"
+bias_init = torch.zeros(out_features).uniform_(-torch.sqrt(torch.tensor(k)),
+                                                torch.sqrt(torch.tensor(k)))
+self.bias = nn.Parameter(bias_init)
+```
+
+**Status:** ✓ FIXED (2026-02-01)
 
 ---
 
@@ -295,7 +311,8 @@ uncertainty_term = 0.5 * self.out_features * avg_V_entry * x_norm_sq_per_sample.
 
 | Component | Paper Requirement | My Implementation | Status |
 |-----------|-------------------|-------------------|--------|
-| **Weight Init** | U(-√k, √k) | zeros | ❌ **BUG** |
+| **Weight Init** | U(-√k, √k) | U(-√k, √k) | ✓ **FIXED** |
+| **Bias Init** | U(-√k, √k) | U(-√k, √k) | ✓ **FIXED** |
 | Optimizer | Adam | Adam | ✓ |
 | Inference LR | 0.01 | 0.01 | ✓ |
 | Iterations | T=10 | T=10 | ✓ |
@@ -315,33 +332,28 @@ uncertainty_term = 0.5 * self.out_features * avg_V_entry * x_norm_sq_per_sample.
 
 ---
 
-## CRITICAL ACTION REQUIRED
+## FIXED (2026-02-01)
 
-**Fix weight initialization in bayesian_pc_layer.py**
+**Weight and bias initialization corrected in bayesian_pc_layer.py**
 
-The posterior M should be initialized from the same distribution as W, NOT zeros.
+**Changes made:**
+1. Lines 87-99: Initialize posterior M from U(-√k, √k) instead of zeros
+2. Lines 102-106: Initialize bias from U(-√k, √k) instead of zeros
+3. Prior M^(0) remains zeros as specified in paper
+4. Natural parameters eta2 and eta3 now correctly computed from initialized M
 
-**Current code (WRONG):**
-```python
-# Line 54
-M_prior = torch.zeros(out_features, in_features) + prior_M_scale
-```
-
-**Should be:**
-```python
-# Initialize M with same distribution as W (Appendix F.1)
-k = 1.0 / in_features
-M_init = torch.zeros(out_features, in_features).uniform_(-math.sqrt(k), math.sqrt(k))
-```
-
-And then use this for posterior initialization, NOT for the prior (prior stays zeros as per paper).
+**Verification:**
+- ✓ Posterior M uses U(-√k, √k) initialization
+- ✓ Bias uses U(-√k, √k) initialization
+- ✓ Prior M^(0) = zeros (unchanged)
+- ✓ All other priors unchanged (V^(0)=10I, Ψ^(0)=1000I, ν^(0)=d_y+2)
 
 ---
 
 ## CONFIDENCE LEVEL
 
-**Overall implementation:** 95% correct (15/16 items)
+**Overall implementation:** 100% correct (17/17 items)
 
-**Critical bug:** 1 (weight initialization)
+**Critical bugs:** 0 (fixed)
 
-**This bug likely explains why the network isn't learning.**
+**Implementation now matches Appendix F.1 exactly.**
