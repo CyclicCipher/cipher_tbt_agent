@@ -56,12 +56,34 @@ class BayesianPCTrainer:
         self.num_updates = 0
 
     def _create_optimizer_x(self):
-        """Create optimizer for value nodes."""
+        """Create optimizer for value nodes with adaptive learning rate.
+
+        From Appendix B (page 10-11):
+        The optimal inference LR is approximately α ≈ 1 / λ_max(A_l)
+        where A_l = Σ^{-1} + W^T Σ^{-1} W.
+
+        We compute this per layer and use the minimum (most conservative).
+        """
         value_nodes = self.model.get_value_nodes()
         if len(value_nodes) > 0:
+            # Compute adaptive learning rate based on precision spectrum
+            # Use minimum across all layers (most conservative)
+            min_alpha = float('inf')
+            for layer in self.model.layers:
+                layer_alpha = layer.get_optimal_inference_lr()
+                min_alpha = min(min_alpha, layer_alpha)
+
+            # Use adaptive LR if computed, otherwise fall back to configured LR
+            if min_alpha < float('inf'):
+                adaptive_lr = min_alpha
+                print(f"Using adaptive inference LR: {adaptive_lr:.2e} (configured: {self.inference_lr:.2e})")
+            else:
+                adaptive_lr = self.inference_lr
+                print(f"Using configured inference LR: {adaptive_lr:.2e}")
+
             self.optimizer_x = self.optimizer_x_fn(
                 value_nodes,
-                lr=self.inference_lr
+                lr=adaptive_lr
             )
 
     def _bayesian_update_weights(self, inputs: torch.Tensor, z_star: List[torch.Tensor]):
