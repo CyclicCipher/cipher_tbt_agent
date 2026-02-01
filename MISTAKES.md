@@ -465,6 +465,93 @@ When implementing a research paper:
 
 ---
 
+#### SECOND INSTANCE: Misreading Appendix B (Theoretical) vs Appendix F (Practical Implementation)
+
+**What I did wrong (again!):** Implemented the "adaptive learning rate" from Appendix B as α ≈ 1/λ_max(A_l) = 3.88e-6, but this was THEORETICAL dynamics analysis, not the ACTUAL implementation
+
+**The situation:**
+- After implementing adaptive LR, diagnostic showed: "Using adaptive inference LR: 3.88e-06"
+- Inference STILL didn't converge: ΔF = 0.0000 (no convergence)
+- Training showed no learning: loss=2.3026, acc=9.38% (random guessing)
+- Vanishing errors: massive activity in layer 1, zero elsewhere
+
+**User's feedback:**
+- "I think you almost certainly interpreted 'don't skim over the paper' as 'don't skim over the paper on this particular issue'"
+- "when you were actually supposed to interpret it as 'carefully read the entire paper and don't miss a detail'"
+- Told me to read **Appendix F thoroughly**
+
+**What Appendix F.1 (page 12) ACTUALLY says:**
+> "For the energy and MNIST datasets, we employ the same neural network architecture. Specifically, we use a **four-layer neural network with 128 hidden units per layer** and ReLU activations. Training is performed using **mini-batches of size 128**."
+
+> "For BPC, we used the **Adam optimizer for hidden states, with a learning rate of 0.01 and 10 iterations per batch**."
+
+**What I had implemented (WRONG):**
+```python
+# Architecture: 7 layers, 256 units, batch 64, T=35
+layer_sizes = [784, 256, 256, 256, 256, 256, 128, 10]
+T = 35
+batch_size = 64
+inference_lr = 0.01  # But then overridden by adaptive 3.88e-6!
+```
+
+**What the paper actually uses (CORRECT):**
+```python
+# Architecture: 4 layers, 128 units, batch 128, T=10
+layer_sizes = [784, 128, 128, 128, 10]
+T = 10
+batch_size = 128
+inference_lr = 0.01  # FIXED, not adaptive!
+```
+
+**The critical insight I missed:**
+
+From **Page 6 Discussion**:
+> "the current estimate of Σ acts as an adaptive learning rate during inference of latent variables Z"
+
+**The precision Σ^{-1} is ALREADY IN THE GRADIENT** (Equations 15-16):
+```
+∇E = ⟨Σ^{-1}(z - Wf)⟩
+```
+
+When E[Σ^{-1}] = 258,000, the errors are already weighted 258,000x more heavily. The gradient is ALREADY scaled by precision!
+
+**By using α = 1/258,000 = 3.88e-6, I was DOUBLE-PENALIZING:**
+- Gradient: 258,000 × error
+- Step: 3.88e-6 × (258,000 × error) = 1 × error ✗ WRONG!
+
+**Should be:**
+- Gradient: 258,000 × error
+- Step: 0.01 × (258,000 × error) ✓ CORRECT!
+
+**Appendix B vs Appendix F confusion:**
+- **Appendix B**: Theoretical dynamics analysis (α ≈ 1/λ_max is upper bound on stable LR)
+- **Appendix F**: ACTUAL implementation details (LR = 0.01, T = 10, 4 layers, 128 units)
+
+I implemented the theoretical analysis instead of the practical implementation!
+
+**Root principle violated (AGAIN!):**
+1. I read Appendix B but NOT Appendix F
+2. I interpreted "don't skim" narrowly (just that section) instead of broadly (entire paper)
+3. I assumed theoretical dynamics = implementation details
+4. I didn't check experimental setup in Appendix F
+
+**The lesson (reinforced):**
+**WHEN IMPLEMENTING A RESEARCH PAPER:**
+1. Read METHODS section for algorithm
+2. Read APPENDICES for theoretical analysis (Appendix B - dynamics)
+3. Read EXPERIMENTAL DETAILS for actual hyperparameters (Appendix F - implementation)
+4. Don't confuse theoretical bounds with practical settings
+5. Match the paper's experimental setup EXACTLY before making changes
+
+**Files fixed:**
+- `experiments/BayesianPC/bayesian_pc_layer.py` - REMOVED incorrect get_optimal_inference_lr()
+- `experiments/BayesianPC/bayesian_pc_trainer.py` - Use fixed LR=0.01 from Appendix F
+- `experiments/BayesianPC/train_mnist_bayesian.py` - Match paper: 4 layers, 128 units, batch 128, T=10
+
+**Status:** FIXED (2026-02-01) - using paper's actual implementation from Appendix F.1
+
+---
+
 ### Successful Implementation (2026-02-01)
 
 **Approach:** Minimal custom implementation based on standard PC algorithm

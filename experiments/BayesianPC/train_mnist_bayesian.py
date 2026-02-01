@@ -270,13 +270,13 @@ def test(model, trainer, test_loader):
 
 def main():
     """Main training loop."""
-    # Hyperparameters - MUST match baseline for experimental control
-    layer_sizes = [784, 256, 256, 256, 256, 256, 128, 10]  # 7 layers (same as baseline)
+    # Hyperparameters - From Appendix F.1 (page 12)
+    layer_sizes = [784, 128, 128, 128, 10]  # 4 layers, 128 units per hidden layer
     activation = 'relu'
-    T_inference = 35  # 5 * 7 layers (same as baseline)
-    inference_lr = 0.01  # BPC uses Adam, not SGD
+    T_inference = 10  # 10 iterations per batch (Appendix F.1)
+    inference_lr = 0.01  # Adam with LR=0.01 (Appendix F.1)
     kappa = 0.25  # Learning rate decay for natural params
-    batch_size = 64
+    batch_size = 128  # Batch size 128 (Appendix F.1)
     num_epochs = 10
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'

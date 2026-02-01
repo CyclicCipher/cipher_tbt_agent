@@ -144,31 +144,6 @@ class BayesianPCLayer(nn.Module):
         _, _, Psi, nu = self.natural_to_standard()
         return nu * Psi
 
-    def get_optimal_inference_lr(self) -> float:
-        """Compute optimal inference learning rate based on precision spectrum.
-
-        From Appendix B (page 10-11):
-        "the dynamics dominated by the spectrum of A_l = Σ_l^{-1} + W^T_{l+1} Σ^{-1}_{l+1} W_{l+1}"
-        "upper bound on the maximum learning rate parameter as approximately given by
-         the inverse of the maximum eigenvalue of the A_l"
-
-        For simplicity, we approximate λ_max(A_l) ≈ average diagonal of E[Σ^{-1}]
-        (assuming W^T Σ^{-1} W is relatively small compared to Σ^{-1})
-
-        Returns:
-            Optimal learning rate α ≈ 1 / λ_max(A_l)
-        """
-        Sigma_inv = self.get_expected_precision()
-
-        # Average diagonal precision (approximates dominant eigenvalue)
-        avg_precision = torch.trace(Sigma_inv) / self.out_features
-
-        # Optimal LR is inverse of max eigenvalue
-        # Add small epsilon for numerical stability
-        alpha = 1.0 / (avg_precision.item() + 1e-8)
-
-        return alpha
-
     def forward(self, x: torch.Tensor, sample_x: bool = True) -> torch.Tensor:
         """Forward pass with value node optimization.
 

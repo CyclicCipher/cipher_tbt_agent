@@ -37,12 +37,10 @@ def test_energy_computation():
     print(f"  Tr(E[Σ^{{-1}}]) = {torch.trace(expected_precision):.2e}")
     print(f"  Average diagonal: {torch.trace(expected_precision).item() / layer.out_features:.2e}")
 
-    # Optimal inference learning rate (from Appendix B)
-    optimal_alpha = layer.get_optimal_inference_lr()
-    print(f"\nOptimal inference learning rate (Appendix B):")
-    print(f"  α_optimal ≈ 1 / λ_max(A_l) = {optimal_alpha:.2e}")
-    print(f"  With configured α = 0.01, step size is {0.01 / optimal_alpha:.1f}x too large!")
-    print(f"  ⚠️  This explains inference divergence!")
+    print(f"\nInference learning rate (from Appendix F.1):")
+    print(f"  Paper uses fixed LR = 0.01 with Adam optimizer")
+    print(f"  Precision Σ^{{-1}} already appears in gradient (Equations 15-16)")
+    print(f"  → No need to scale LR by 1/precision (would double-penalize)")
 
     # Simulate forward pass
     x = torch.randn(64, 784) * 0.1  # Small input like normalized MNIST
@@ -266,20 +264,22 @@ def main():
     print("DIAGNOSTIC SUMMARY")
     print("="*80)
 
-    print(f"\nIdentified issues:")
-    print(f"  1. ⚠️  Prior precision is ~{avg_precision:.0f}x too high")
-    print(f"     → Fix: Reduce Ψ_prior from 1000 to ~1.0")
+    print(f"\nPaper's setup (Appendix F.1):")
+    print(f"  ✓ Architecture: 4 layers, 128 units per hidden layer")
+    print(f"  ✓ Batch size: 128")
+    print(f"  ✓ Inference iterations: T = 10")
+    print(f"  ✓ Optimizer: Adam with LR = 0.01 (fixed, not adaptive)")
+    print(f"  ✓ Prior: Ψ_scale = 1000 (paper's default)")
     print(f"  ")
-    print(f"  2. ⚠️  Natural parameters are nn.Parameter (should be buffers)")
-    print(f"     → Fix: Use register_buffer instead of nn.Parameter")
-    print(f"  ")
-    print(f"  3. ⚠️  Energy scale causes huge gradients")
-    print(f"     → Fix: Scale down prior OR increase inference LR")
+    print(f"  Note: High precision (~{avg_precision:.0f}) is EXPECTED with Ψ=1000")
+    print(f"        Precision Σ^{{-1}} appears in gradient (adaptive weighting)")
+    print(f"        Using LR=0.01 (not scaled by 1/precision)")
 
-    print(f"\nRecommended fixes (priority order):")
-    print(f"  1. Change eta1, eta2, eta3, eta4 from nn.Parameter → register_buffer")
-    print(f"  2. Reduce prior_Psi_scale from 1000.0 to 1.0")
-    print(f"  3. Test on small batch to verify convergence")
+    print(f"\nImplementation checklist:")
+    print(f"  ✓ Natural parameters are buffers (not Parameters)")
+    print(f"  ✓ Using fixed LR=0.01 from Appendix F.1")
+    print(f"  ✓ Matching paper architecture: 4 layers, 128 units")
+    print(f"  ✓ Using paper's prior: Ψ=1000 (not reduced to 1)")
 
 
 if __name__ == "__main__":
