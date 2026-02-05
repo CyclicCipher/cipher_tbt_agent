@@ -40,22 +40,15 @@ def test_psi_value(psi_scale, verbose=True):
     inputs = torch.randn(batch_size, 784, device='cuda') * 0.1
 
     with torch.no_grad():
-        # Forward pass to initialize value nodes
+        # Forward pass to initialize value nodes and compute energies
         _ = model(inputs)
 
-        # Compute total energy
+        # Collect energies computed during forward pass
         total_energy = 0.0
-        h = model.activation(inputs)
-        h = model._augment_with_bias(h)
-
         for layer in model.layers:
-            if layer._x is not None:
-                energy = layer.energy(h).item()
-                total_energy += energy
-                # Update h for next layer
-                h = model.activation(layer._x)
-                if layer != model.layers[-1]:
-                    h = model._augment_with_bias(h)
+            e = layer.energy()
+            if e is not None:
+                total_energy += e.item()
 
     energy_per_sample = total_energy / batch_size
 
