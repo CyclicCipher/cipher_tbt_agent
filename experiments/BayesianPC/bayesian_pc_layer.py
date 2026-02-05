@@ -9,6 +9,19 @@ Key differences from standard PC:
 - Weights: Matrix Normal Wishart posterior q(W, Σ | M, V, Ψ, ν)
 - Learning: Closed-form Bayesian updates (Equation 7)
 - Architecture: z = W·f(z_{l-1}) [weights OUTSIDE activation]
+
+Psi convention note:
+    The paper specifies Ψ=1000 (Appendix F.1), but this uses Inverse Wishart
+    semantics where large Ψ = vague prior on covariance Σ. The MNW formulation
+    actually places a Wishart on the PRECISION Σ^{-1}, where E[Σ^{-1}] = νΨ.
+    With Ψ=1000 and ν=130 this gives E[Σ^{-1}]=130,000 (catastrophically stiff).
+
+    We accept Ψ in the paper's IW convention (large = vague) and convert
+    internally: Ψ_wishart = 1/(ν * Ψ_iw) so that E[Σ^{-1}] = 1/Ψ_iw.
+    With the paper's Ψ_iw=1000, this gives E[Σ^{-1}] = 0.001*I (very vague).
+
+    We MUST keep Wishart on precision internally because it is conjugate to the
+    Gaussian likelihood — this is what enables the closed-form Hebbian updates.
 """
 
 import torch
@@ -32,23 +45,27 @@ class BayesianPCLayer(nn.Module):
         self,
         in_features: int,
         out_features: int,
-        prior_M_scale: float = 0.0,      # Prior mean scale
-        prior_V_scale: float = 10.0,     # Prior column covariance scale
-        prior_Psi_scale: float = 0.01,   # Corrected: paper's 1000 is Inverse Wishart convention
-        prior_nu: Optional[int] = None,  # Prior degrees of freedom
+        prior_M_scale: float = 0.0,        # Prior mean scale
+        prior_V_scale: float = 10.0,       # Prior column covariance scale
+        prior_Psi_iw_scale: float = 1000.0, # Inverse Wishart convention (paper default)
+        prior_nu: Optional[int] = None,    # Prior degrees of freedom
     ):
         super().__init__()
 
         self.in_features = in_features
         self.out_features = out_features
 
-        # Set prior degrees of freedom
+        # Set prior degrees of freedom: ν = d_y + 2 (paper default)
         if prior_nu is None:
             prior_nu = out_features + 2
         self.prior_nu = prior_nu
 
-        # Initialize prior natural parameters η^(0)
-        # Following paper: M^(0) = zeros, V^(0) = scale*I, Ψ^(0) = scale*I, ν^(0) = d_y + 2
+        # Convert Ψ from Inverse Wishart convention to Wishart-on-precision
+        # Paper says Ψ_iw=1000 meaning "vague prior on covariance Σ"
+        # Internally we need Ψ_w for Wishart on Σ^{-1} where E[Σ^{-1}] = ν·Ψ_w
+        # We want E[Σ^{-1}] ≈ 1/Ψ_iw (large Ψ_iw → low precision → vague)
+        # So Ψ_w = 1/(ν * Ψ_iw)
+        prior_Psi_w_scale = 1.0 / (prior_nu * prior_Psi_iw_scale)
 
         # Prior mean matrix M^(0) (out_features x in_features)
         M_prior = torch.zeros(out_features, in_features) + prior_M_scale
@@ -58,8 +75,9 @@ class BayesianPCLayer(nn.Module):
         V_inv_prior = torch.eye(in_features) / prior_V_scale
 
         # Prior Wishart scale Ψ^(0) (out_features x out_features)
-        Psi_prior = torch.eye(out_features) * prior_Psi_scale
-        Psi_inv_prior = torch.eye(out_features) / prior_Psi_scale
+        # Using converted Wishart scale internally
+        Psi_prior = torch.eye(out_features) * prior_Psi_w_scale
+        Psi_inv_prior = torch.eye(out_features) / prior_Psi_w_scale
 
         # Convert to natural parameters (Equation 27)
         # η = [V^{-1}, MV^{-1}, Φ + MV^{-1}M^T, ν - d_y + d_x - 1]
@@ -262,7 +280,7 @@ class BayesianPCNetwork(nn.Module):
         activation: str = 'relu',
         prior_M_scale: float = 0.0,
         prior_V_scale: float = 10.0,
-        prior_Psi_scale: float = 0.01,
+        prior_Psi_iw_scale: float = 1000.0,  # Inverse Wishart convention (paper default)
     ):
         super().__init__()
 
@@ -281,14 +299,12 @@ class BayesianPCNetwork(nn.Module):
         # NOTE: Input is augmented with +1 for bias, so in_features is +1
         self.layers = nn.ModuleList()
         for i in range(self.num_layers):
-            # After activation and augmentation, input dimension is layer_sizes[i] + 1
-            # Output is non-augmented (before next activation)
             layer = BayesianPCLayer(
                 in_features=layer_sizes[i] + 1,  # +1 for bias augmentation
                 out_features=layer_sizes[i+1],
                 prior_M_scale=prior_M_scale,
                 prior_V_scale=prior_V_scale,
-                prior_Psi_scale=prior_Psi_scale,
+                prior_Psi_iw_scale=prior_Psi_iw_scale,
             )
             self.layers.append(layer)
 
