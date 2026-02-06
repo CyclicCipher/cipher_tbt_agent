@@ -5,12 +5,17 @@ Implements Algorithm 1 from:
 "Bayesian Predictive Coding" (Tschantz et al., 2025, arXiv:2503.24016)
 
 Two-phase algorithm:
-1. E-step (Inference): Optimize value nodes z via gradient descent
+1. E-step (Inference): Optimize hidden value nodes z via gradient descent
 2. M-step (Learning): Closed-form Bayesian update of weight posterior (Equation 7)
+
+Supervised training: "fixes the input nodes to z_0 = x and the output nodes to z_L = y" (page 3).
+The output layer is CLAMPED to the target — there is no separate task loss.
+The prediction errors at all layers (including the output) are the ONLY learning signal.
 """
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from typing import Callable, Dict, List
 
@@ -19,8 +24,10 @@ class BayesianPCTrainer:
     """Trainer for Bayesian Predictive Coding networks.
 
     Implements the EM algorithm on variational free energy:
-    - E-step: Optimize value nodes z* via gradient descent on E(Z, λ)
+    - E-step: Optimize hidden value nodes z* via gradient descent on E(Z, λ)
     - M-step: Closed-form Bayesian update of natural parameters η (Equation 7)
+
+    Output layer is clamped to the target (supervised PC, page 3 of paper).
     """
 
     def __init__(
@@ -32,40 +39,25 @@ class BayesianPCTrainer:
         optimizer_x_fn: Callable = optim.Adam,  # Optimizer for value nodes
         device: str = "cpu",
     ):
-        """Initialize Bayesian PC Trainer.
-
-        Args:
-            model: BayesianPCNetwork to train
-            T: Number of inference iterations per batch
-            inference_lr: Learning rate for inference (updating value nodes)
-            kappa: Learning rate decay for natural parameter updates (κ_t = t^{-κ})
-            optimizer_x_fn: Optimizer class for value nodes
-            device: Device to train on
-        """
         self.model = model.to(device)
         self.T = T
         self.device = device
         self.inference_lr = inference_lr
         self.kappa = kappa
 
-        # Optimizer for value nodes (created fresh each batch)
         self.optimizer_x_fn = optimizer_x_fn
         self.optimizer_x = None
 
-        # Track number of parameter updates for learning rate schedule
         self.num_updates = 0
 
     def _create_optimizer_x(self):
-        """Create optimizer for value nodes.
+        """Create optimizer for HIDDEN value nodes only.
 
-        From Appendix F.1 (page 12):
-        "For BPC, we used the Adam optimizer for hidden states,
-         with a learning rate of 0.01 and 10 iterations per batch."
-
-        The precision matrix Σ^{-1} already appears in the gradient (Equations 15-16),
-        providing adaptive weighting. No need to scale the learning rate.
+        Output layer is clamped to target (not optimized).
         """
-        value_nodes = self.model.get_value_nodes()
+        value_nodes = []
+        for layer in self.model.layers[:-1]:  # Exclude output layer
+            value_nodes.extend(layer.get_value_nodes())
         if len(value_nodes) > 0:
             self.optimizer_x = self.optimizer_x_fn(
                 value_nodes,
@@ -80,59 +72,39 @@ class BayesianPCTrainer:
                                z*_l z*_l^T,
                                1]
 
-        This is a Hebbian update based on pre- and post-synaptic activity.
-
-        Args:
-            inputs: Original input to network [batch_size, input_dim]
-            z_star: Converged value nodes from all layers
+        For the output layer, z*_L = target (clamped).
         """
         batch_size = inputs.size(0)
 
-        # Learning rate schedule: κ_t = t^{-epsilon}
         self.num_updates += 1
         kappa_t = self.num_updates ** (-self.kappa)
 
-        # Build list of pre-synaptic activations (input + hidden layers after activation)
-        # NOTE: Augment with 1 for bias (same as forward pass)
-        h0 = self.model.activation(inputs)  # f(z_0)
+        # Build list of pre-synaptic activations
+        h0 = self.model.activation(inputs)
         pre_activations = [self.model._augment_with_bias(h0)]
 
         for z in z_star[:-1]:  # All layers except last
-            h = self.model.activation(z.detach())  # f(z_l)
+            h = self.model.activation(z.detach())
             pre_activations.append(self.model._augment_with_bias(h))
 
         # Update each layer
         for i, layer in enumerate(self.model.layers):
-            f_pre = pre_activations[i]  # f(z_{l-1}) [batch, in_features]
-            z_post = z_star[i].detach()  # z_l [batch, out_features]
+            f_pre = pre_activations[i]
+            z_post = z_star[i].detach()
 
-            # Compute sufficient statistics (Equation 28)
-            # Sum over batch dimension n
-            # VECTORIZED - no Python loops for GPU efficiency
-
-            # SS1 = Σ_n f(z_{l-1})f(z_{l-1})^T  [in_features, in_features]
-            # f_pre is [batch, in_features], so f_pre.T @ f_pre gives the sum
-            ss1 = f_pre.T @ f_pre  # [in_features, in_features]
-
-            # SS2 = Σ_n f(z_{l-1})z_l^T  [out_features, in_features]
-            # z_post is [batch, out_features], f_pre is [batch, in_features]
-            ss2 = z_post.T @ f_pre  # [out_features, in_features]
-
-            # SS3 = Σ_n z_l z_l^T  [out_features, out_features]
-            ss3 = z_post.T @ z_post  # [out_features, out_features]
-
-            # SS4 = Σ_n 1 = batch_size
+            # Sufficient statistics (Equation 7)
+            ss1 = f_pre.T @ f_pre
+            ss2 = z_post.T @ f_pre
+            ss3 = z_post.T @ z_post
             ss4 = float(batch_size)
 
-            # Compute optimal natural parameters (Equation 28)
-            # η* = η_prior + sufficient_statistics
+            # Optimal natural parameters
             eta1_new = layer.eta1_prior + ss1
             eta2_new = layer.eta2_prior + ss2
             eta3_new = layer.eta3_prior + ss3
             eta4_new = layer.eta4_prior + ss4
 
-            # Minibatch update with learning rate schedule (bottom of page 3)
-            # η ← (1 - κ_t)·η + κ_t·η*
+            # Minibatch update: η ← (1 - κ_t)·η + κ_t·η*
             with torch.no_grad():
                 layer.eta1.data = (1 - kappa_t) * layer.eta1.data + kappa_t * eta1_new
                 layer.eta2.data = (1 - kappa_t) * layer.eta2.data + kappa_t * eta2_new
@@ -142,74 +114,77 @@ class BayesianPCTrainer:
     def train_on_batch(
         self,
         inputs: torch.Tensor,
-        loss_fn: Callable,
-        targets: torch.Tensor = None,
+        targets: torch.Tensor,
     ) -> Dict:
-        """Train on a single batch using Bayesian PC algorithm.
+        """Train on a single batch using Algorithm 1.
+
+        Supervised PC: clamp z_0 = inputs, z_L = one_hot(targets).
+        Optimize hidden value nodes z_1,...,z_{L-1} via gradient descent on
+        prediction error energy E(Z, λ). No separate task loss.
 
         Args:
-            inputs: Input data [batch_size, ...]
-            loss_fn: Loss function (outputs, targets) -> scalar
-            targets: Target labels
+            inputs: Input data [batch_size, input_dim]
+            targets: Target class labels [batch_size]
 
         Returns:
             Dictionary with training statistics
         """
         assert self.model.training, "Call model.train() before training"
 
-        # Move to device
         inputs = inputs.to(self.device)
-        if targets is not None:
-            targets = targets.to(self.device)
+        targets = targets.to(self.device)
 
-        # Initialize value nodes
+        # One-hot encode targets for output clamping
+        num_classes = self.model.layers[-1].out_features
+        target_one_hot = F.one_hot(targets, num_classes).float()
+
+        # Reset value nodes for new batch
         self.model.set_sample_x(True)
 
-        # Statistics
         losses = []
         energies = []
         free_energies = []
 
         # ===== E-STEP: INFERENCE =====
-        # Optimize value nodes z to minimize free energy E(Z, λ)
         for t in range(self.T):
-            # Forward pass (initializes or uses value nodes)
+            # Forward pass (initializes value nodes on t=0)
             outputs = self.model(inputs, sample_x=True)
 
-            # Compute task loss
-            if targets is not None:
-                loss = loss_fn(outputs, targets)
-            else:
-                loss = loss_fn(outputs)
+            if t == 0:
+                # Clamp output layer: z_L = y (page 3 of paper)
+                with torch.no_grad():
+                    self.model.layers[-1]._x.data.copy_(target_one_hot)
+                # Recompute output energy with clamped target
+                self.model.layers[-1]._compute_energy(self.model._last_layer_input)
 
-            # Compute total energy from all layers
+            # Free energy = sum of prediction errors only (Equation 5)
             layer_energies = self.model.get_energies()
             total_energy = sum(layer_energies) if layer_energies else torch.tensor(0.0, device=self.device)
+            free_energy = total_energy
 
-            # Free energy = task loss + prediction errors
-            free_energy = loss + total_energy
+            # Compute cross-entropy loss for LOGGING only (not used in optimization)
+            with torch.no_grad():
+                M, _, _, _ = self.model.layers[-1].natural_to_standard()
+                predicted = F.linear(self.model._last_layer_input.detach(), M)
+                loss = F.cross_entropy(predicted, targets)
 
-            # Record statistics
             losses.append(loss.item())
             energies.append(total_energy.item() if isinstance(total_energy, torch.Tensor) else total_energy)
             free_energies.append(free_energy.item())
 
-            # Create optimizer on first iteration
             if t == 0:
                 self._create_optimizer_x()
 
-            # Gradient descent on value nodes
+            # Gradient descent on HIDDEN value nodes only
             if self.optimizer_x is not None:
                 self.optimizer_x.zero_grad()
                 free_energy.backward()
                 self.optimizer_x.step()
 
         # ===== M-STEP: LEARNING =====
-        # Closed-form Bayesian update of weight posterior
-        # Collect converged value nodes from all layers
+        # Collect converged value nodes (output = clamped target)
         z_star = [layer._x.detach() for layer in self.model.layers]
 
-        # Update natural parameters using Equation 7
         self._bayesian_update_weights(inputs, z_star)
 
         return {
@@ -229,22 +204,14 @@ class BayesianPCTrainer:
     ) -> Dict:
         """Evaluate on a batch (no training).
 
-        Args:
-            inputs: Input data
-            loss_fn: Loss function
-            targets: Target labels
-
-        Returns:
-            Dictionary with evaluation statistics
+        Uses expected weights for a deterministic forward pass (Equation 9).
         """
         assert not self.model.training, "Call model.eval() before evaluation"
 
-        # Move to device
         inputs = inputs.to(self.device)
         if targets is not None:
             targets = targets.to(self.device)
 
-        # Forward pass with expected weights (no value nodes)
         with torch.no_grad():
             outputs = self.model(inputs, sample_x=False)
 

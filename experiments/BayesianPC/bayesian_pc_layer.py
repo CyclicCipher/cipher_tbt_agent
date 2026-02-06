@@ -354,6 +354,9 @@ class BayesianPCNetwork(nn.Module):
             h = self.activation(h)  # Apply activation after layer
             h = self._augment_with_bias(h)  # Augment for next layer
 
+        # Save input to last layer (needed for output clamping)
+        self._last_layer_input = h
+
         # Final layer (no activation after)
         output = self.layers[-1](h, sample_x=sample_x)
 

@@ -186,10 +186,9 @@ def train_epoch(model, trainer, train_loader, epoch, diagnostics):
         # Flatten images
         data = data.view(data.size(0), -1)
 
-        # Train on batch
+        # Train on batch (output clamped to target, no separate task loss)
         results = trainer.train_on_batch(
             inputs=data,
-            loss_fn=F.cross_entropy,
             targets=target,
         )
 
