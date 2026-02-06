@@ -593,6 +593,39 @@ I implemented the theoretical analysis instead of the practical implementation!
 
 ---
 
+### 14. Adding Cross-Entropy Task Loss That Paper Never Specified (CRITICAL)
+
+**What I did wrong:** Added `F.cross_entropy(outputs, targets)` as a separate task loss in the free energy, combined as `free_energy = loss + total_energy`. The paper never uses a separate task loss.
+
+**What the paper actually says (page 3):**
+> "trains models in a discriminative manner by **fixing the input nodes to z₀ = x⁽ⁱ⁾ and the output nodes to z_L = y⁽ⁱ⁾**"
+
+The output is **clamped** to the target (one-hot encoded). The prediction errors at all layers (including the output) are the ONLY learning signal. There is NO separate cross-entropy loss.
+
+**Why this was catastrophic:**
+- Cross-entropy (~2.3) drowned out prediction error energy (~10⁻⁶)
+- The BPC machinery (Bayesian posteriors, Hebbian updates, prediction errors) contributed NOTHING
+- The model was effectively doing backprop through value nodes via cross-entropy
+- Ψ had no effect because the energy terms were negligible
+- 88% accuracy came entirely from output-layer backprop, not PC
+
+**The correct approach:**
+1. Clamp z₀ = input, z_L = one_hot(target) (both observed, not optimized)
+2. Optimize ONLY hidden value nodes z₁,...,z_{L-1} via prediction error energy
+3. Free energy = Σ_l E_l (sum of prediction errors, NO task loss)
+4. The large prediction error at the output layer (target vs prediction) drives learning
+
+**Root principle violated:** Implement what the paper says, not what seems convenient. PC doesn't need a separate task loss — the clamped output IS the supervisory signal.
+
+**Files fixed:**
+- `experiments/BayesianPC/bayesian_pc_trainer.py` — clamp output, remove task loss, exclude output from optimizer
+- `experiments/BayesianPC/bayesian_pc_layer.py` — save last layer input for energy recomputation
+- `experiments/BayesianPC/train_mnist_bayesian.py` — remove loss_fn from training call
+
+**Status:** FIXED (2026-02-06) - output clamping per paper's Algorithm 1
+
+---
+
 ## Update Log
 
 - 2026-02-01 (initial): Initial file created with 6 major mistakes catalogued
