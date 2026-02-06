@@ -128,6 +128,7 @@ class BayesianPCLayer(nn.Module):
         # Value nodes (created during forward pass)
         self._x = None  # Will be nn.Parameter during training
         self._energy = None
+        self._uncertainty_term = None
 
     def natural_to_standard(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
         """Convert natural parameters η to standard parameters (M, V, Ψ, ν).
@@ -198,9 +199,10 @@ class BayesianPCLayer(nn.Module):
         batch_size = x.size(0)
 
         if self.training and sample_x:
-            # Training: Initialize value nodes if needed
-            if self._x is None or self._x.size(0) != batch_size:
-                # Initialize at E[W] @ x (x is augmented with 1, so bias is included)
+            # Training: Initialize value nodes at prediction E[W] @ x
+            # Re-initialize every forward call so the optimizer in the trainer
+            # creates a fresh optimizer each batch (see _create_optimizer_x at t==0).
+            if self._x is None:
                 W_mean, _ = self.get_expected_W_and_Sigma()
                 mu = F.linear(x, W_mean, bias=None)
                 self._x = nn.Parameter(mu.clone().detach(), requires_grad=True)
@@ -217,9 +219,14 @@ class BayesianPCLayer(nn.Module):
     def _compute_energy(self, x: torch.Tensor):
         """Compute precision-weighted prediction error (Equation 5).
 
-        E_l = 0.5 * <(z - Wf(z_{l-1}))^T Σ^{-1} (z - Wf(z_{l-1}))>_{q(W,Σ)}
+        E_l = (1/N) * Σ_n [0.5 * (z_n - Mf_n)^T (νΨ) (z_n - Mf_n) + 0.5 * d_y * f_n^T V f_n]
 
-        Using Equations 17-18 for expectations under Matrix Normal Wishart.
+        Normalized to per-sample mean so it's on the same scale as F.cross_entropy(reduction='mean').
+
+        The uncertainty term (0.5 * d_y * f^T V f) depends on the INPUT x, not the
+        value node self._x. Its gradient w.r.t. self._x is zero, so it does not
+        contribute to inference. We store it separately for diagnostics but exclude
+        it from the energy used for inference gradient computation.
         """
         batch_size = x.size(0)
 
@@ -230,25 +237,23 @@ class BayesianPCLayer(nn.Module):
         Sigma_inv_mean = nu * Psi
 
         # Prediction error: z - E[W]·x
-        # Using E[W] = M for the mean prediction
-        # x is augmented with 1, so bias is included in W (no separate bias)
         error = self._x - F.linear(x, M, bias=None)  # [batch_size, out_features]
 
-        # Precision-weighted error (dominant term)
-        # (z - Mx)^T E[Σ^{-1}] (z - Mx)
+        # Precision-weighted error: (1/N) Σ_n (z_n - Mx_n)^T E[Σ^{-1}] (z_n - Mx_n)
+        # Mean over batch to match F.cross_entropy(reduction='mean')
         energy = 0.5 * torch.sum(
-            error @ Sigma_inv_mean * error,  # Precision-weighted squared error
+            error @ Sigma_inv_mean * error,
             dim=1  # Sum over output dimensions
-        ).sum()  # Sum over batch
+        ).mean()  # MEAN over batch (not sum!)
 
-        # Weight uncertainty term from E[W^T Σ^{-1} W] = M^T ν Ψ M + d_y V
-        # For each sample n: 0.5 * f(z_n)^T (d_y V) f(z_n)
-        # Exact computation: d_y * Σ_n f_n^T V f_n
-        # x is [batch_size, in_features], V is [in_features, in_features]
-        Vx = x @ V  # [batch_size, in_features]
-        uncertainty_term = 0.5 * self.out_features * (Vx * x).sum()
+        # Weight uncertainty term: (1/N) Σ_n 0.5 * d_y * f_n^T V f_n
+        # This has ZERO gradient w.r.t. self._x (depends on input x only).
+        # Stored separately — not included in energy for inference.
+        Vx = x @ V
+        self._uncertainty_term = 0.5 * self.out_features * (Vx * x).sum() / batch_size
 
-        self._energy = energy + uncertainty_term
+        # Energy for inference only includes the term with gradient w.r.t. z
+        self._energy = energy
 
     def energy(self) -> Optional[torch.Tensor]:
         """Get current energy value."""
@@ -261,10 +266,15 @@ class BayesianPCLayer(nn.Module):
         return []
 
     def set_sample_x(self, mode: bool):
-        """Enable/disable value node sampling."""
-        if not mode:
-            self._x = None
-            self._energy = None
+        """Enable/disable value node sampling.
+
+        When enabling (True): Reset value nodes so they get re-initialized
+        on the next forward pass. This prevents stale values from a previous batch.
+        When disabling (False): Clear value nodes for eval mode.
+        """
+        self._x = None
+        self._energy = None
+        self._uncertainty_term = None
 
 
 class BayesianPCNetwork(nn.Module):

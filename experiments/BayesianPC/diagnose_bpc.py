@@ -47,12 +47,12 @@ def test_energy_computation():
     layer.train()
     z = layer(x, sample_x=True)
 
-    # Compute energy
+    # Compute energy (now per-sample mean, uncertainty excluded)
     energy = layer.energy()
-    print(f"\nEnergy on random input:")
-    print(f"  Total energy: {energy.item():.2e}")
-    print(f"  Energy per sample: {energy.item()/64:.2e}")
-    print(f"  ⚠️  Baseline PC has energy ~1-10, this is {energy.item()/64:.0f}x larger!")
+    print(f"\nEnergy on random input (per-sample mean, uncertainty excluded):")
+    print(f"  Energy: {energy.item():.2e}")
+    print(f"  Uncertainty term (excluded): {layer._uncertainty_term.item():.2e}")
+    print(f"  Baseline PC has energy ~1-10 per sample")
 
     # Check gradients
     energy.backward()
