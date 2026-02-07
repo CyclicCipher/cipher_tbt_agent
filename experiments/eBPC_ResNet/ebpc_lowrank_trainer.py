@@ -78,18 +78,6 @@ class LowRankeBPCTrainer:
 
         return E
 
-    def _diagonal_only_update(self, layer, f_pre, kappa_t):
-        """Fallback: update only the diagonal of η1, zero out U."""
-        ss1_diag = (f_pre ** 2).sum(dim=0)
-        with torch.no_grad():
-            layer.eta1_d.data = (1 - kappa_t) * layer.eta1_d + kappa_t * (layer.eta1_d_prior + ss1_diag)
-            layer.eta1_d.data = torch.clamp(layer.eta1_d.data, min=1e-8)
-            # Fold old U into diagonal before zeroing
-            if layer.eta1_U.abs().max() > 1e-10:
-                old_U_diag = (layer.eta1_U ** 2).sum(dim=1) * (1 - kappa_t)
-                layer.eta1_d.data += old_U_diag
-            layer.eta1_U.data.zero_()
-
     def _update_eta1_lowrank(self, layer, f_pre, kappa_t):
         """Update η1 = diag(d) + U·U^T with new batch data.
 
@@ -99,6 +87,9 @@ class LowRankeBPCTrainer:
         Decomposed as: d_new + U_new·U_new^T where:
           A·A^T = (1-κ)·U_old·U_old^T + κ·F^T·F  (all off-diagonal + some diagonal)
           d_new = (1-κ)·d_old + κ·d_prior + residual_diag  (pure diagonal part)
+
+        Uses eigendecomposition of the Gram matrix B = A^T·A instead of SVD.
+        torch.linalg.eigh is much more numerically stable than SVD on CUDA.
         """
         in_features = layer.in_features
         rank_k = layer.rank_k
@@ -111,43 +102,53 @@ class LowRankeBPCTrainer:
 
         A = torch.cat([A_old, A_new], dim=1)  # [in, k + N]
 
-        # Truncated SVD using torch.svd_lowrank (randomized, CUDA-stable)
-        # This directly computes rank-k approximation without full SVD
-        P = None
-        S = None
-        try:
-            P, S, Qt = torch.svd_lowrank(A, q=rank_k)
-            # P: [in, k], S: [k], Qt: [k, k+N]
-        except Exception:
-            pass
+        # Eigendecomposition of Gram matrix B = A^T·A  [k+N, k+N]
+        # This avoids torch.linalg.svd which has CUDA convergence issues.
+        # eigh is designed for symmetric PSD matrices — much more stable.
+        B = A.T @ A  # [k+N, k+N]
 
-        # Check for NaN in SVD output
-        if P is None or S is None or torch.isnan(P).any() or torch.isnan(S).any():
-            # Fallback: full SVD on CPU
+        try:
+            eigenvalues, eigenvectors = torch.linalg.eigh(B)  # sorted ascending
+        except torch.linalg.LinAlgError:
+            # Fallback: CPU eigh
             try:
-                A_cpu = A.float().cpu()
-                P_full, S_full, Qt_full = torch.linalg.svd(A_cpu, full_matrices=False)
-                P = P_full[:, :rank_k].to(self.device)
-                S = S_full[:rank_k].to(self.device)
+                eigenvalues, eigenvectors = torch.linalg.eigh(B.float().cpu())
+                eigenvalues = eigenvalues.to(self.device)
+                eigenvectors = eigenvectors.to(self.device)
             except Exception:
-                self._diagonal_only_update(layer, f_pre, kappa_t)
+                # Total failure — just update diagonal, keep old U
+                ss1_diag = (f_pre ** 2).sum(dim=0)
+                with torch.no_grad():
+                    layer.eta1_d.data = (1 - kappa_t) * layer.eta1_d + kappa_t * (layer.eta1_d_prior + ss1_diag)
+                    layer.eta1_d.data = torch.clamp(layer.eta1_d.data, min=1e-8)
                 return
 
-        # Final NaN check
-        if torch.isnan(P).any() or torch.isnan(S).any():
-            self._diagonal_only_update(layer, f_pre, kappa_t)
+        # Take top-k eigenvalues (last k, since eigh sorts ascending)
+        actual_k = min(rank_k, len(eigenvalues))
+        top_eigenvalues = eigenvalues[-actual_k:]  # [k]
+        top_eigenvectors = eigenvectors[:, -actual_k:]  # [k+N, k]
+
+        # Clamp negative eigenvalues (numerical noise in PSD matrix)
+        top_eigenvalues = torch.clamp(top_eigenvalues, min=0.0)
+
+        # U_new = A @ Q_topk  [in, k]
+        # This gives U_new such that U_new·U_new^T ≈ top-k of A·A^T
+        # (since A·A^T = A·Q·Λ·Q^T·A^T, and U_new = A·Q_topk,
+        #  so U_new·U_new^T = A·Q_topk·Q_topk^T·A^T ≈ top-k of A·A^T)
+        U_new = A @ top_eigenvectors  # [in, k]
+
+        # NaN check
+        if torch.isnan(U_new).any():
+            ss1_diag = (f_pre ** 2).sum(dim=0)
+            with torch.no_grad():
+                layer.eta1_d.data = (1 - kappa_t) * layer.eta1_d + kappa_t * (layer.eta1_d_prior + ss1_diag)
+                layer.eta1_d.data = torch.clamp(layer.eta1_d.data, min=1e-8)
             return
 
-        # U_new = P · diag(S)  [in, k]
-        actual_k = min(rank_k, len(S))
-        U_new = P[:, :actual_k] * S[:actual_k].unsqueeze(0)
-
-        # Residual: A·A^T - U_new·U_new^T contributes to diagonal
-        # Exact: residual_diag = diag(A·A^T) - diag(U_new·U_new^T)
-        # diag(A·A^T) = row-wise sum of A² = (1-κ)·(U_old²).sum(1) + κ·(f_pre²).sum(0)
+        # Residual: diag(A·A^T) - diag(U_new·U_new^T)
         AA_diag = (A ** 2).sum(dim=1)  # [in]
         UU_diag = (U_new ** 2).sum(dim=1)  # [in]
-        residual_diag = torch.clamp(AA_diag - UU_diag, min=0.0)  # clamp for numerical safety
+        residual_diag = torch.clamp(AA_diag - UU_diag, min=0.0)
 
         # d_new = (1-κ)·d_old + κ·d_prior + residual_diag
         d_final = (1 - kappa_t) * layer.eta1_d + kappa_t * layer.eta1_d_prior + residual_diag
