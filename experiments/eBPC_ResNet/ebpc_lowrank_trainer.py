@@ -131,17 +131,23 @@ class LowRankeBPCTrainer:
         # Quadratic constraint preservation:
         # The MNW block matrix [[η1, η2^T], [η2, η3]] must be PSD.
         # When we truncate η1 to rank-k, the residual R = AA^T - U_new·U_new^T
-        # has spectral norm = largest dropped eigenvalue.
-        # Using only diag(R) gives η1_approx < η1_true (violates constraint).
-        # Instead, inflate diagonal by spectral norm of R so η1_approx ≥ η1_true:
-        #   λ_max(R)·I - R ≥ 0  (all eigenvalues of R ≤ λ_max(R))
+        # must be dominated by the diagonal inflation: diag(d_inflation) ≥ R.
+        #
+        # Gershgorin per-element bound: d_i ≥ Σ_j |R_ij| guarantees diag(d) - R ≥ 0.
+        # This is non-uniform — dimensions with small off-diagonal coupling get less
+        # inflation, allowing V (and therefore M) to be larger for those dimensions.
         if actual_k < len(eigenvalues):
-            max_dropped_eigenvalue = torch.clamp(eigenvalues[-(actual_k + 1)], min=0.0)
+            Q_drop = eigenvectors[:, :-actual_k]  # [k+N, n_dropped]
+            A_drop = A @ Q_drop  # [in, n_dropped]
+            # Materialize R = A_drop @ A_drop^T for Gershgorin row sums
+            # Cost: O(in² · n_dropped) — fine for in ≤ ~2000
+            R = A_drop @ A_drop.T  # [in, in]
+            gershgorin_d = R.abs().sum(dim=1)  # [in] per-element bound
         else:
-            max_dropped_eigenvalue = torch.tensor(0.0, device=self.device)
+            gershgorin_d = torch.zeros(in_features, device=self.device)
 
-        # d_new = (1-κ)·d_old + κ·d_prior + λ_max(R) (spectral norm inflation)
-        d_final = (1 - kappa_t) * layer.eta1_d + kappa_t * layer.eta1_d_prior + max_dropped_eigenvalue
+        # d_new = (1-κ)·d_old + κ·d_prior + Gershgorin inflation (per-element)
+        d_final = (1 - kappa_t) * layer.eta1_d + kappa_t * layer.eta1_d_prior + gershgorin_d
 
         # Ensure d stays positive
         d_final = torch.clamp(d_final, min=1e-8)

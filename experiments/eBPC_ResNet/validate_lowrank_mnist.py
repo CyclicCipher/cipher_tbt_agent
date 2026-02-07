@@ -302,7 +302,12 @@ def test(model, trainer, test_loader):
 def main():
     layer_sizes = [784, 128, 128, 128, 10]
     activation = 'relu'
-    rank_k = 20
+    rank_k = 20            # Minimum rank per layer
+    rank_k_ratio = 8       # Option 3: k = max(rank_k, in_features // ratio)
+                           #   Layer 1 (in=785): k=98, Layers 2-4 (in=129): k=20
+    prior_Psi_iw_scale = 1.0  # Reduced from 1000: with diagonal Ψ, a large prior
+                               # makes η3_prior dominate (130,000), freezing Phi at prior.
+                               # At 1.0: η3_prior ≈ 130, so ss3 ≈ 40 is significant.
     T = 5
     e_lr = 0.01
     kappa = 0.25
@@ -316,9 +321,11 @@ def main():
     print("Low-Rank eBPC Validation on MNIST")
     print("="*80)
     print(f"Architecture: {layer_sizes}")
-    print(f"Low-rank V: diag(d) + U·U^T with rank k={rank_k}")
+    print(f"Low-rank V: diag(d) + U·U^T with min rank k={rank_k}, ratio=1/{rank_k_ratio}")
     print(f"Inference: ePC (T={T}, e_lr={e_lr}, Adam, adaptive T)")
     print(f"Learning: BPC low-rank Hebbian (kappa={kappa})")
+    print(f"Gershgorin per-element inflation (Option 1)")
+    print(f"prior_Psi_iw_scale: {prior_Psi_iw_scale}")
     print(f"Mixed precision: {'bfloat16' if device != 'cpu' else 'disabled (CPU)'}")
     print(f"Batch size: {batch_size}")
     print("="*80 + "\n")
@@ -326,7 +333,9 @@ def main():
     train_loader, test_loader = get_mnist_loaders(batch_size=batch_size)
 
     model = LowRankeBPCNetwork(
-        layer_sizes=layer_sizes, activation=activation, rank_k=rank_k,
+        layer_sizes=layer_sizes, activation=activation,
+        rank_k=rank_k, rank_k_ratio=rank_k_ratio,
+        prior_Psi_iw_scale=prior_Psi_iw_scale,
     )
     n_params = sum(p.numel() for p in model.get_natural_parameters())
     print(f"Natural parameters: {n_params:,}")
@@ -340,7 +349,7 @@ def main():
         eta3_params = layer.eta3_diag.numel()
         total = d_params + U_params + eta2_params + eta3_params + 1
         print(f"  Layer {i+1}: d={d_params}, U={U_params}, η2={eta2_params}, "
-              f"η3={eta3_params}, total={total}")
+              f"η3={eta3_params}, k={layer.rank_k}, total={total}")
 
     trainer = LowRankeBPCTrainer(
         model=model, T=T, e_lr=e_lr, kappa=kappa,
@@ -363,7 +372,8 @@ def main():
         # Rank info
         rank_info = model.get_rank_info()
         for i, ri in enumerate(rank_info):
-            print(f"  Layer {i+1} rank: effective={ri['effective_rank']}/{rank_k}, "
+            layer_k = model.layers[i].rank_k
+            print(f"  Layer {i+1} rank: effective={ri['effective_rank']}/{layer_k}, "
                   f"sv_ratio={ri['sv_ratio']:.1f}")
 
         if test_acc > best_test_acc:

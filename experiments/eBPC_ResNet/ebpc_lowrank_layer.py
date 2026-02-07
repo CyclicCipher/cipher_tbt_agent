@@ -243,9 +243,16 @@ class LowRankeBPCNetwork(nn.Module):
         layer_sizes: list,
         activation: str = 'relu',
         rank_k: int = 20,
+        rank_k_ratio: int = 0,
         prior_V_scale: float = 10.0,
         prior_Psi_iw_scale: float = 1000.0,
     ):
+        """
+        Args:
+            rank_k: Fixed rank for all layers (used when rank_k_ratio=0).
+            rank_k_ratio: If > 0, compute per-layer k = max(rank_k, in_features // rank_k_ratio).
+                          E.g., rank_k_ratio=8 gives layer 1 (in=785) k=98, layers 2-4 (in=129) k=20.
+        """
         super().__init__()
 
         self.layer_sizes = layer_sizes
@@ -259,10 +266,15 @@ class LowRankeBPCNetwork(nn.Module):
 
         self.layers = nn.ModuleList()
         for i in range(self.num_layers):
+            in_feat = layer_sizes[i] + 1  # +1 for bias augmentation
+            if rank_k_ratio > 0:
+                layer_k = max(rank_k, in_feat // rank_k_ratio)
+            else:
+                layer_k = rank_k
             layer = LowRankeBPCLayer(
-                in_features=layer_sizes[i] + 1,  # +1 for bias augmentation
+                in_features=in_feat,
                 out_features=layer_sizes[i + 1],
-                rank_k=rank_k,
+                rank_k=layer_k,
                 prior_V_scale=prior_V_scale,
                 prior_Psi_iw_scale=prior_Psi_iw_scale,
             )
