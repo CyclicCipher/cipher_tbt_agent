@@ -128,13 +128,20 @@ class LowRankeBPCTrainer:
                 layer.eta1_d.data = torch.clamp(layer.eta1_d.data, min=1e-8)
             return
 
-        # Residual: diag(A·A^T) - diag(U_new·U_new^T)
-        AA_diag = (A ** 2).sum(dim=1)  # [in]
-        UU_diag = (U_new ** 2).sum(dim=1)  # [in]
-        residual_diag = torch.clamp(AA_diag - UU_diag, min=0.0)
+        # Quadratic constraint preservation:
+        # The MNW block matrix [[η1, η2^T], [η2, η3]] must be PSD.
+        # When we truncate η1 to rank-k, the residual R = AA^T - U_new·U_new^T
+        # has spectral norm = largest dropped eigenvalue.
+        # Using only diag(R) gives η1_approx < η1_true (violates constraint).
+        # Instead, inflate diagonal by spectral norm of R so η1_approx ≥ η1_true:
+        #   λ_max(R)·I - R ≥ 0  (all eigenvalues of R ≤ λ_max(R))
+        if actual_k < len(eigenvalues):
+            max_dropped_eigenvalue = torch.clamp(eigenvalues[-(actual_k + 1)], min=0.0)
+        else:
+            max_dropped_eigenvalue = torch.tensor(0.0, device=self.device)
 
-        # d_new = (1-κ)·d_old + κ·d_prior + residual_diag
-        d_final = (1 - kappa_t) * layer.eta1_d + kappa_t * layer.eta1_d_prior + residual_diag
+        # d_new = (1-κ)·d_old + κ·d_prior + λ_max(R) (spectral norm inflation)
+        d_final = (1 - kappa_t) * layer.eta1_d + kappa_t * layer.eta1_d_prior + max_dropped_eigenvalue
 
         # Ensure d stays positive
         d_final = torch.clamp(d_final, min=1e-8)

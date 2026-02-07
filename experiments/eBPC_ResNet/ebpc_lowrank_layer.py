@@ -14,6 +14,10 @@ Key design: We store diag(η3) and compute diag(Φ) = diag(η3) - diag(M·η1·M
   parameters (η1, η2, η3, η4) are updated jointly from the same sufficient
   statistics, providing self-correcting negative feedback on M growth.
 
+  Quadratic constraint: The MNW block matrix [[η1, η2^T], [η2, η3]] must be PSD.
+  Low-rank truncation of η1 can violate this (η1_approx < η1_true → Φ goes negative).
+  Fix: inflate diagonal by spectral norm of dropped component so η1_approx ≥ η1_true.
+
   Efficient Schur complement diagonal:
     diag(M · η1 · M^T) = (M² @ d) + ((M @ U)²).sum(dim=1)
   Cost: O(out·in + out·k) — trivially fast.
@@ -206,8 +210,9 @@ class LowRankeBPCLayer(nn.Module):
         M = self._M_cache
 
         phi_diag = self._compute_schur_diag(M)
-        # Clamp to prevent negativity from approximation noise
-        phi_diag = torch.clamp(phi_diag, min=1e-6)
+        # With spectral norm inflation, η1_approx ≥ η1_true guarantees Phi > 0.
+        # Tiny safety floor for numerical noise only (not load-bearing).
+        phi_diag = torch.clamp(phi_diag, min=1e-30)
         Psi_diag = 1.0 / phi_diag  # [out_features]
 
         nu = self.eta4.item() + self.out_features - self.in_features + 1
