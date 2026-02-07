@@ -47,12 +47,12 @@ def test_energy_computation():
     layer.train()
     z = layer(x, sample_x=True)
 
-    # Compute energy
+    # Compute energy (now per-sample mean, uncertainty excluded)
     energy = layer.energy()
-    print(f"\nEnergy on random input:")
-    print(f"  Total energy: {energy.item():.2e}")
-    print(f"  Energy per sample: {energy.item()/64:.2e}")
-    print(f"  ⚠️  Baseline PC has energy ~1-10, this is {energy.item()/64:.0f}x larger!")
+    print(f"\nEnergy on random input (per-sample mean, uncertainty excluded):")
+    print(f"  Energy: {energy.item():.2e}")
+    print(f"  Uncertainty term (excluded): {layer._uncertainty_term.item():.2e}")
+    print(f"  Baseline PC has energy ~1-10 per sample")
 
     # Check gradients
     energy.backward()
@@ -125,17 +125,24 @@ def test_inference_dynamics():
     model.train()
     model.set_sample_x(True)
 
-    # Run inference for a few steps
-    print(f"\nRunning {trainer.T} inference iterations:")
+    # Run inference with output clamping (as per paper)
+    target_one_hot = F.one_hot(y, num_classes=10).float()
+    print(f"\nRunning {trainer.T} inference iterations (output clamped to target):")
     energies = []
 
     for t in range(trainer.T):
         # Forward
         outputs = model(x, sample_x=True)
-        loss = F.cross_entropy(outputs, y)
+
+        if t == 0:
+            # Clamp output layer to target
+            with torch.no_grad():
+                model.layers[-1]._x.data.copy_(target_one_hot)
+            model.layers[-1]._compute_energy(model._last_layer_input)
+
         layer_energies = model.get_energies()
         total_energy = sum(layer_energies) if layer_energies else torch.tensor(0.0)
-        free_energy = loss + total_energy
+        free_energy = total_energy
 
         energies.append(free_energy.item())
 
@@ -143,7 +150,7 @@ def test_inference_dynamics():
             trainer._create_optimizer_x()
             print(f"  Iter 0: F = {free_energy.item():.4f} (initial)")
 
-        # Optimize
+        # Optimize hidden value nodes only
         if trainer.optimizer_x is not None:
             trainer.optimizer_x.zero_grad()
             free_energy.backward()

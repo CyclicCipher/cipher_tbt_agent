@@ -9,6 +9,19 @@ Key differences from standard PC:
 - Weights: Matrix Normal Wishart posterior q(W, Σ | M, V, Ψ, ν)
 - Learning: Closed-form Bayesian updates (Equation 7)
 - Architecture: z = W·f(z_{l-1}) [weights OUTSIDE activation]
+
+Psi convention note:
+    The paper specifies Ψ=1000 (Appendix F.1), but this uses Inverse Wishart
+    semantics where large Ψ = vague prior on covariance Σ. The MNW formulation
+    actually places a Wishart on the PRECISION Σ^{-1}, where E[Σ^{-1}] = νΨ.
+    With Ψ=1000 and ν=130 this gives E[Σ^{-1}]=130,000 (catastrophically stiff).
+
+    We accept Ψ in the paper's IW convention (large = vague) and convert
+    internally: Ψ_wishart = 1/(ν * Ψ_iw) so that E[Σ^{-1}] = 1/Ψ_iw.
+    With the paper's Ψ_iw=1000, this gives E[Σ^{-1}] = 0.001*I (very vague).
+
+    We MUST keep Wishart on precision internally because it is conjugate to the
+    Gaussian likelihood — this is what enables the closed-form Hebbian updates.
 """
 
 import torch
@@ -32,23 +45,27 @@ class BayesianPCLayer(nn.Module):
         self,
         in_features: int,
         out_features: int,
-        prior_M_scale: float = 0.0,      # Prior mean scale
-        prior_V_scale: float = 10.0,     # Prior column covariance scale
-        prior_Psi_scale: float = 1000.0, # Prior Wishart scale (paper default)
-        prior_nu: Optional[int] = None,  # Prior degrees of freedom
+        prior_M_scale: float = 0.0,        # Prior mean scale
+        prior_V_scale: float = 10.0,       # Prior column covariance scale
+        prior_Psi_iw_scale: float = 1000.0, # Inverse Wishart convention (paper default)
+        prior_nu: Optional[int] = None,    # Prior degrees of freedom
     ):
         super().__init__()
 
         self.in_features = in_features
         self.out_features = out_features
 
-        # Set prior degrees of freedom
+        # Set prior degrees of freedom: ν = d_y + 2 (paper default)
         if prior_nu is None:
             prior_nu = out_features + 2
         self.prior_nu = prior_nu
 
-        # Initialize prior natural parameters η^(0)
-        # Following paper: M^(0) = zeros, V^(0) = scale*I, Ψ^(0) = scale*I, ν^(0) = d_y + 2
+        # Convert Ψ from Inverse Wishart convention to Wishart-on-precision
+        # Paper says Ψ_iw=1000 meaning "vague prior on covariance Σ"
+        # Internally we need Ψ_w for Wishart on Σ^{-1} where E[Σ^{-1}] = ν·Ψ_w
+        # We want E[Σ^{-1}] ≈ 1/Ψ_iw (large Ψ_iw → low precision → vague)
+        # So Ψ_w = 1/(ν * Ψ_iw)
+        prior_Psi_w_scale = 1.0 / (prior_nu * prior_Psi_iw_scale)
 
         # Prior mean matrix M^(0) (out_features x in_features)
         M_prior = torch.zeros(out_features, in_features) + prior_M_scale
@@ -58,8 +75,9 @@ class BayesianPCLayer(nn.Module):
         V_inv_prior = torch.eye(in_features) / prior_V_scale
 
         # Prior Wishart scale Ψ^(0) (out_features x out_features)
-        Psi_prior = torch.eye(out_features) * prior_Psi_scale
-        Psi_inv_prior = torch.eye(out_features) / prior_Psi_scale
+        # Using converted Wishart scale internally
+        Psi_prior = torch.eye(out_features) * prior_Psi_w_scale
+        Psi_inv_prior = torch.eye(out_features) / prior_Psi_w_scale
 
         # Convert to natural parameters (Equation 27)
         # η = [V^{-1}, MV^{-1}, Φ + MV^{-1}M^T, ν - d_y + d_x - 1]
@@ -110,6 +128,7 @@ class BayesianPCLayer(nn.Module):
         # Value nodes (created during forward pass)
         self._x = None  # Will be nn.Parameter during training
         self._energy = None
+        self._uncertainty_term = None
 
     def natural_to_standard(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
         """Convert natural parameters η to standard parameters (M, V, Ψ, ν).
@@ -180,9 +199,10 @@ class BayesianPCLayer(nn.Module):
         batch_size = x.size(0)
 
         if self.training and sample_x:
-            # Training: Initialize value nodes if needed
-            if self._x is None or self._x.size(0) != batch_size:
-                # Initialize at E[W] @ x (x is augmented with 1, so bias is included)
+            # Training: Initialize value nodes at prediction E[W] @ x
+            # Re-initialize every forward call so the optimizer in the trainer
+            # creates a fresh optimizer each batch (see _create_optimizer_x at t==0).
+            if self._x is None:
                 W_mean, _ = self.get_expected_W_and_Sigma()
                 mu = F.linear(x, W_mean, bias=None)
                 self._x = nn.Parameter(mu.clone().detach(), requires_grad=True)
@@ -199,9 +219,14 @@ class BayesianPCLayer(nn.Module):
     def _compute_energy(self, x: torch.Tensor):
         """Compute precision-weighted prediction error (Equation 5).
 
-        E_l = 0.5 * <(z - Wf(z_{l-1}))^T Σ^{-1} (z - Wf(z_{l-1}))>_{q(W,Σ)}
+        E_l = (1/N) * Σ_n [0.5 * (z_n - Mf_n)^T (νΨ) (z_n - Mf_n) + 0.5 * d_y * f_n^T V f_n]
 
-        Using Equations 17-18 for expectations under Matrix Normal Wishart.
+        Normalized to per-sample mean so it's on the same scale as F.cross_entropy(reduction='mean').
+
+        The uncertainty term (0.5 * d_y * f^T V f) depends on the INPUT x, not the
+        value node self._x. Its gradient w.r.t. self._x is zero, so it does not
+        contribute to inference. We store it separately for diagnostics but exclude
+        it from the energy used for inference gradient computation.
         """
         batch_size = x.size(0)
 
@@ -212,26 +237,23 @@ class BayesianPCLayer(nn.Module):
         Sigma_inv_mean = nu * Psi
 
         # Prediction error: z - E[W]·x
-        # Using E[W] = M for the mean prediction
-        # x is augmented with 1, so bias is included in W (no separate bias)
         error = self._x - F.linear(x, M, bias=None)  # [batch_size, out_features]
 
-        # Precision-weighted error (dominant term)
-        # (z - Mx)^T E[Σ^{-1}] (z - Mx)
+        # Precision-weighted error: (1/N) Σ_n (z_n - Mx_n)^T E[Σ^{-1}] (z_n - Mx_n)
+        # Mean over batch to match F.cross_entropy(reduction='mean')
         energy = 0.5 * torch.sum(
-            error @ Sigma_inv_mean * error,  # Precision-weighted squared error
+            error @ Sigma_inv_mean * error,
             dim=1  # Sum over output dimensions
-        ).sum()  # Sum over batch
+        ).mean()  # MEAN over batch (not sum!)
 
-        # Weight uncertainty term from E[W^T Σ^{-1} W] = M^T ν Ψ M + d_y V
-        # For each sample n: 0.5 * f(z_n)^T (d_y V) f(z_n)
-        # If V ≈ (Tr(V)/d_x) * I, then: f^T (d_y V) f ≈ d_y * (Tr(V)/d_x) * ||f||^2
-        # Sum over batch: Σ_n [d_y * (Tr(V)/d_x) * ||f_n||^2]
-        x_norm_sq_per_sample = (x ** 2).sum(dim=1)  # [batch_size]
-        avg_V_entry = torch.trace(V) / self.in_features
-        uncertainty_term = 0.5 * self.out_features * avg_V_entry * x_norm_sq_per_sample.sum()
+        # Weight uncertainty term: (1/N) Σ_n 0.5 * d_y * f_n^T V f_n
+        # This has ZERO gradient w.r.t. self._x (depends on input x only).
+        # Stored separately — not included in energy for inference.
+        Vx = x @ V
+        self._uncertainty_term = 0.5 * self.out_features * (Vx * x).sum() / batch_size
 
-        self._energy = energy + uncertainty_term
+        # Energy for inference only includes the term with gradient w.r.t. z
+        self._energy = energy
 
     def energy(self) -> Optional[torch.Tensor]:
         """Get current energy value."""
@@ -244,10 +266,15 @@ class BayesianPCLayer(nn.Module):
         return []
 
     def set_sample_x(self, mode: bool):
-        """Enable/disable value node sampling."""
-        if not mode:
-            self._x = None
-            self._energy = None
+        """Enable/disable value node sampling.
+
+        When enabling (True): Reset value nodes so they get re-initialized
+        on the next forward pass. This prevents stale values from a previous batch.
+        When disabling (False): Clear value nodes for eval mode.
+        """
+        self._x = None
+        self._energy = None
+        self._uncertainty_term = None
 
 
 class BayesianPCNetwork(nn.Module):
@@ -263,7 +290,7 @@ class BayesianPCNetwork(nn.Module):
         activation: str = 'relu',
         prior_M_scale: float = 0.0,
         prior_V_scale: float = 10.0,
-        prior_Psi_scale: float = 1000.0,
+        prior_Psi_iw_scale: float = 1000.0,  # Inverse Wishart convention (paper default)
     ):
         super().__init__()
 
@@ -282,14 +309,12 @@ class BayesianPCNetwork(nn.Module):
         # NOTE: Input is augmented with +1 for bias, so in_features is +1
         self.layers = nn.ModuleList()
         for i in range(self.num_layers):
-            # After activation and augmentation, input dimension is layer_sizes[i] + 1
-            # Output is non-augmented (before next activation)
             layer = BayesianPCLayer(
                 in_features=layer_sizes[i] + 1,  # +1 for bias augmentation
                 out_features=layer_sizes[i+1],
                 prior_M_scale=prior_M_scale,
                 prior_V_scale=prior_V_scale,
-                prior_Psi_scale=prior_Psi_scale,
+                prior_Psi_iw_scale=prior_Psi_iw_scale,
             )
             self.layers.append(layer)
 
@@ -328,6 +353,9 @@ class BayesianPCNetwork(nn.Module):
             h = layer(h, sample_x=sample_x)
             h = self.activation(h)  # Apply activation after layer
             h = self._augment_with_bias(h)  # Augment for next layer
+
+        # Save input to last layer (needed for output clamping)
+        self._last_layer_input = h
 
         # Final layer (no activation after)
         output = self.layers[-1](h, sample_x=sample_x)
