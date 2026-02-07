@@ -78,6 +78,18 @@ class LowRankeBPCTrainer:
 
         return E
 
+    def _diagonal_only_update(self, layer, f_pre, kappa_t):
+        """Fallback: update only the diagonal of η1, zero out U."""
+        ss1_diag = (f_pre ** 2).sum(dim=0)
+        with torch.no_grad():
+            layer.eta1_d.data = (1 - kappa_t) * layer.eta1_d + kappa_t * (layer.eta1_d_prior + ss1_diag)
+            layer.eta1_d.data = torch.clamp(layer.eta1_d.data, min=1e-8)
+            # Fold old U into diagonal before zeroing
+            if layer.eta1_U.abs().max() > 1e-10:
+                old_U_diag = (layer.eta1_U ** 2).sum(dim=1) * (1 - kappa_t)
+                layer.eta1_d.data += old_U_diag
+            layer.eta1_U.data.zero_()
+
     def _update_eta1_lowrank(self, layer, f_pre, kappa_t):
         """Update η1 = diag(d) + U·U^T with new batch data.
 
@@ -99,40 +111,45 @@ class LowRankeBPCTrainer:
 
         A = torch.cat([A_old, A_new], dim=1)  # [in, k + N]
 
-        # Truncated SVD of A
-        # Use try/except for CUDA SVD robustness
+        # Truncated SVD using torch.svd_lowrank (randomized, CUDA-stable)
+        # This directly computes rank-k approximation without full SVD
+        P = None
+        S = None
         try:
-            P, S, Qt = torch.linalg.svd(A, full_matrices=False)
-        except torch.linalg.LinAlgError:
-            # Fallback: try on CPU
+            P, S, Qt = torch.svd_lowrank(A, q=rank_k)
+            # P: [in, k], S: [k], Qt: [k, k+N]
+        except Exception:
+            pass
+
+        # Check for NaN in SVD output
+        if P is None or S is None or torch.isnan(P).any() or torch.isnan(S).any():
+            # Fallback: full SVD on CPU
             try:
-                A_cpu = A.cpu()
-                P_cpu, S_cpu, Qt_cpu = torch.linalg.svd(A_cpu, full_matrices=False)
-                P = P_cpu.to(self.device)
-                S = S_cpu.to(self.device)
-            except torch.linalg.LinAlgError:
-                # Total failure — just update diagonal, keep old U
-                ss1_diag = (f_pre ** 2).sum(dim=0)
-                with torch.no_grad():
-                    layer.eta1_d.data = (1 - kappa_t) * layer.eta1_d + kappa_t * (layer.eta1_d_prior + ss1_diag)
-                    layer.eta1_d.data = torch.clamp(layer.eta1_d.data, min=1e-8)
+                A_cpu = A.float().cpu()
+                P_full, S_full, Qt_full = torch.linalg.svd(A_cpu, full_matrices=False)
+                P = P_full[:, :rank_k].to(self.device)
+                S = S_full[:rank_k].to(self.device)
+            except Exception:
+                self._diagonal_only_update(layer, f_pre, kappa_t)
                 return
 
-        # Keep top-k modes in U, fold rest into diagonal
-        actual_k = min(rank_k, len(S))
-        U_new = P[:, :actual_k] * S[:actual_k].unsqueeze(0)  # [in, k]
+        # Final NaN check
+        if torch.isnan(P).any() or torch.isnan(S).any():
+            self._diagonal_only_update(layer, f_pre, kappa_t)
+            return
 
-        # Residual modes → diagonal contribution
-        if len(S) > actual_k:
-            residual_P = P[:, actual_k:]
-            residual_S = S[actual_k:]
-            residual_diag = (residual_P ** 2 * (residual_S ** 2).unsqueeze(0)).sum(dim=1)
-        else:
-            residual_diag = torch.zeros(in_features, device=self.device)
+        # U_new = P · diag(S)  [in, k]
+        actual_k = min(rank_k, len(S))
+        U_new = P[:, :actual_k] * S[:actual_k].unsqueeze(0)
+
+        # Residual: A·A^T - U_new·U_new^T contributes to diagonal
+        # Exact: residual_diag = diag(A·A^T) - diag(U_new·U_new^T)
+        # diag(A·A^T) = row-wise sum of A² = (1-κ)·(U_old²).sum(1) + κ·(f_pre²).sum(0)
+        AA_diag = (A ** 2).sum(dim=1)  # [in]
+        UU_diag = (U_new ** 2).sum(dim=1)  # [in]
+        residual_diag = torch.clamp(AA_diag - UU_diag, min=0.0)  # clamp for numerical safety
 
         # d_new = (1-κ)·d_old + κ·d_prior + residual_diag
-        # (The full A·A^T accounts for (1-κ)·U·U^T + κ·ss1;
-        #  the top-k go into U_new, residual goes into d alongside the diagonal terms)
         d_final = (1 - kappa_t) * layer.eta1_d + kappa_t * layer.eta1_d_prior + residual_diag
 
         # Ensure d stays positive

@@ -122,16 +122,39 @@ class LowRankeBPCLayer(nn.Module):
             d_inv_U: diag(1/d) @ U  [in_features, k]
         """
         d_inv = 1.0 / self.eta1_d  # [in]
+
+        # If U is all zeros (e.g., initialization), skip Woodbury — V = diag(1/d)
+        if self.eta1_U.abs().max() < 1e-10:
+            C_inv = torch.eye(self.rank_k, device=self.eta1_d.device, dtype=self.eta1_d.dtype)
+            d_inv_U = torch.zeros_like(self.eta1_U)
+            return d_inv, C_inv, d_inv_U
+
         d_inv_U = d_inv.unsqueeze(1) * self.eta1_U  # [in, k]
+        # C = I_k + U^T diag(1/d) U, regularized for numerical safety
         C = torch.eye(self.rank_k, device=self.eta1_d.device, dtype=self.eta1_d.dtype)
         C = C + self.eta1_U.T @ d_inv_U  # [k, k]
-        # Use Cholesky for numerical stability (C is PD since I + PSD)
+
+        # Handle NaN in C (from NaN in U after bad SVD)
+        if torch.isnan(C).any() or torch.isinf(C).any():
+            # Reset U to zero — fall back to diagonal-only for this layer
+            self.eta1_U.data.zero_()
+            C_inv = torch.eye(self.rank_k, device=self.eta1_d.device, dtype=self.eta1_d.dtype)
+            d_inv_U = torch.zeros_like(self.eta1_U)
+            return d_inv, C_inv, d_inv_U
+
         try:
             L = torch.linalg.cholesky(C)
             C_inv = torch.cholesky_inverse(L)
         except torch.linalg.LinAlgError:
-            # Fallback to standard inverse if Cholesky fails
-            C_inv = torch.inverse(C)
+            # Regularize and retry
+            C = C + 1e-6 * torch.eye(self.rank_k, device=C.device, dtype=C.dtype)
+            try:
+                C_inv = torch.inverse(C)
+            except torch.linalg.LinAlgError:
+                # Complete failure — fall back to diagonal
+                self.eta1_U.data.zero_()
+                C_inv = torch.eye(self.rank_k, device=self.eta1_d.device, dtype=self.eta1_d.dtype)
+                d_inv_U = torch.zeros_like(self.eta1_U)
         return d_inv, C_inv, d_inv_U
 
     def _compute_M(self) -> torch.Tensor:
