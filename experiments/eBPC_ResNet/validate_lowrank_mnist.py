@@ -302,7 +302,7 @@ def test(model, trainer, test_loader):
 def main():
     layer_sizes = [784, 128, 128, 128, 10]
     activation = 'relu'
-    rank_k = 20
+    rank_k = 128  # Must match batch_size to capture ALL modes per batch
     T = 5
     e_lr = 0.01
     kappa = 0.25
