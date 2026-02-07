@@ -337,10 +337,10 @@ def main():
         d_params = layer.eta1_d.numel()
         U_params = layer.eta1_U.numel()
         eta2_params = layer.eta2.numel()
-        eta3_params = layer.eta3.numel()
-        total = d_params + U_params + eta2_params + eta3_params + 1
+        psi_params = layer.psi_inv_diag.numel()
+        total = d_params + U_params + eta2_params + psi_params + 1
         print(f"  Layer {i+1}: d={d_params}, U={U_params}, η2={eta2_params}, "
-              f"η3={eta3_params}, total={total}")
+              f"Ψ⁻¹={psi_params}, total={total}")
 
     trainer = LowRankeBPCTrainer(
         model=model, T=T, e_lr=e_lr, kappa=kappa,
