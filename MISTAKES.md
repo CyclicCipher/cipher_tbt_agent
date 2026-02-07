@@ -713,6 +713,33 @@ error_optim = optim.Adam(errors, lr=0.01)  # Not SGD!
 
 ---
 
+### 18. Low-Rank η1 Violates MNW Quadratic Constraint (CRITICAL)
+
+**What we did wrong:** When truncating η1 = diag(d) + U·U^T to rank-k, absorbed only `diag(R)` (diagonal of residual matrix R = AA^T - U_new·U_new^T) into d.
+
+**Why it broke:**
+- The MNW block matrix `[[η1, η2^T], [η2, η3]]` must be PSD (the "quadratic constraint")
+- Equivalent to Schur complement Φ = η3 - η2·η1⁻¹·η2^T > 0
+- `diag(diag(R))` is NOT ≥ R in PSD ordering (off-diagonal elements of R are lost)
+- So η1_approx < η1_true → η1_approx⁻¹ > η1_true⁻¹ → Schur complement goes negative
+- Negative Φ → negative precision → energy explosion → NaN
+
+**Two wrong approaches tried first:**
+1. **Residual-based Ψ** — replaced η3 with residual-based psi_inv. Broke MNW conjugacy, created positive feedback (M↑ → r↑ → psi_inv↑ → precision↑ → M↑)
+2. **Schur complement with diag(R) absorption** — correct formula but η1_approx < η1_true, so Phi went to -2.31e+31
+
+**Correct approach: Spectral norm inflation**
+- λ_max(R) = largest dropped eigenvalue from eigendecomposition
+- Set d_inflation = λ_max(R) for ALL diagonal entries (not per-element diag(R))
+- Then η1_approx - η1_true = λ_max(R)·I - R ≥ 0 (since all eigenvalues of R ≤ λ_max(R))
+- This guarantees η1_approx ≥ η1_true → η1_approx⁻¹ ≤ η1_true⁻¹ → Φ stays positive
+
+**Root principle:** When approximating a component of a joint distribution, the approximation must preserve the **validity constraints** of the full distribution. For MNW, this is the PSD constraint on the block natural parameter matrix — a quadratic matrix inequality.
+
+**Status:** FIX IMPLEMENTED (2026-02-07) — spectral norm inflation in `_update_eta1_lowrank`
+
+---
+
 ## Update Log
 
 - 2026-02-01 (initial): Initial file created with 6 major mistakes catalogued
