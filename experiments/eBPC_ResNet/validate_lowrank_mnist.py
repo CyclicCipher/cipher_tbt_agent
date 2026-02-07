@@ -212,14 +212,14 @@ class Diagnostics:
 
 
 def get_phi_diagnostics(model):
-    """Extract Ψ^{-1} min and M max per layer for monitoring."""
+    """Extract Schur complement diag(Φ) min and M max per layer for monitoring."""
     phi_mins = []
     M_maxes = []
     with torch.no_grad():
         for layer in model.layers:
             M, Psi_diag, nu = layer.natural_to_standard()
-            # psi_inv_diag is stored directly — always positive
-            phi_mins.append(layer.psi_inv_diag.min().item())
+            phi_diag = layer._compute_schur_diag(M)
+            phi_mins.append(phi_diag.min().item())
             M_maxes.append(M.abs().max().item())
     return phi_mins, M_maxes
 
@@ -302,7 +302,7 @@ def test(model, trainer, test_loader):
 def main():
     layer_sizes = [784, 128, 128, 128, 10]
     activation = 'relu'
-    rank_k = 128  # Must match batch_size to capture ALL modes per batch
+    rank_k = 20
     T = 5
     e_lr = 0.01
     kappa = 0.25
@@ -337,10 +337,10 @@ def main():
         d_params = layer.eta1_d.numel()
         U_params = layer.eta1_U.numel()
         eta2_params = layer.eta2.numel()
-        psi_params = layer.psi_inv_diag.numel()
-        total = d_params + U_params + eta2_params + psi_params + 1
+        eta3_params = layer.eta3_diag.numel()
+        total = d_params + U_params + eta2_params + eta3_params + 1
         print(f"  Layer {i+1}: d={d_params}, U={U_params}, η2={eta2_params}, "
-              f"Ψ⁻¹={psi_params}, total={total}")
+              f"η3={eta3_params}, total={total}")
 
     trainer = LowRankeBPCTrainer(
         model=model, T=T, e_lr=e_lr, kappa=kappa,

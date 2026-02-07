@@ -1,28 +1,22 @@
 """
 Low-Rank eBPC Trainer — Error-based Bayesian Predictive Coding with Low-Rank V
 
-E-step: ePC error optimization (same as diagonal — Adam on errors, precision-weighted energy)
+E-step: ePC error optimization (Adam on errors, precision-weighted energy)
 M-step: Hebbian update with low-rank η1 structure
 
-Key difference from diagonal trainer:
-  η1 = diag(d) + U·U^T requires special handling in the M-step.
-
-  Full sufficient statistic: ss1 = F^T @ F  [in, in]  (outer product of pre-activations)
-  This is a rank-B matrix (B = batch size). We can't store it as full [in, in],
-  but we CAN extract its top-k modes via truncated SVD.
+Key difference from full eBPC trainer:
+  η1 = diag(d) + U·U^T requires eigendecomposition-based update.
 
   Update strategy:
     1. Form combined low-rank factor: A = [sqrt(1-κ) · U_old | sqrt(κ) · F^T]
-    2. Truncated SVD of A → keep top-k singular vectors → new U
-    3. Fold residual singular values into the diagonal d
+    2. Eigendecomposition of Gram matrix A^T·A → keep top-k eigenvectors → new U
+    3. Fold residual into the diagonal d
     4. η2 updated with standard moving average
-    5. Ψ^{-1} updated from regression RESIDUALS (always ≥ 0, guarantees positivity)
+    5. diag(η3) updated with standard moving average from ss3_diag = (z²).sum(0)
     6. η4 updated with standard moving average
 
-  Critical design choice: Ψ^{-1} is computed from residuals r = z - M·f,
-  NOT from η3 = Ψ^{-1} + M·η1·M^T. The Schur complement Φ = η3 - M·η1·M^T
-  amplifies approximation error in η1, potentially making Φ negative.
-  Direct residual computation avoids this entirely.
+  All four natural parameters (η1, η2, η3, η4) updated jointly from conjugate
+  sufficient statistics, maintaining MNW consistency and self-correcting feedback.
 """
 
 import torch
@@ -84,11 +78,7 @@ class LowRankeBPCTrainer:
         Target: η1_target = (1-κ)·η1_old + κ·(η1_prior + ss1)
         where ss1 = F^T @ F [in, in].
 
-        Decomposed as: d_new + U_new·U_new^T where:
-          A·A^T = (1-κ)·U_old·U_old^T + κ·F^T·F  (all off-diagonal + some diagonal)
-          d_new = (1-κ)·d_old + κ·d_prior + residual_diag  (pure diagonal part)
-
-        Uses eigendecomposition of the Gram matrix B = A^T·A instead of SVD.
+        Uses eigendecomposition of the Gram matrix B = A^T·A.
         torch.linalg.eigh is much more numerically stable than SVD on CUDA.
         """
         in_features = layer.in_features
@@ -103,20 +93,16 @@ class LowRankeBPCTrainer:
         A = torch.cat([A_old, A_new], dim=1)  # [in, k + N]
 
         # Eigendecomposition of Gram matrix B = A^T·A  [k+N, k+N]
-        # This avoids torch.linalg.svd which has CUDA convergence issues.
-        # eigh is designed for symmetric PSD matrices — much more stable.
         B = A.T @ A  # [k+N, k+N]
 
         try:
             eigenvalues, eigenvectors = torch.linalg.eigh(B)  # sorted ascending
         except torch.linalg.LinAlgError:
-            # Fallback: CPU eigh
             try:
                 eigenvalues, eigenvectors = torch.linalg.eigh(B.float().cpu())
                 eigenvalues = eigenvalues.to(self.device)
                 eigenvectors = eigenvectors.to(self.device)
             except Exception:
-                # Total failure — just update diagonal, keep old U
                 ss1_diag = (f_pre ** 2).sum(dim=0)
                 with torch.no_grad():
                     layer.eta1_d.data = (1 - kappa_t) * layer.eta1_d + kappa_t * (layer.eta1_d_prior + ss1_diag)
@@ -132,9 +118,6 @@ class LowRankeBPCTrainer:
         top_eigenvalues = torch.clamp(top_eigenvalues, min=0.0)
 
         # U_new = A @ Q_topk  [in, k]
-        # This gives U_new such that U_new·U_new^T ≈ top-k of A·A^T
-        # (since A·A^T = A·Q·Λ·Q^T·A^T, and U_new = A·Q_topk,
-        #  so U_new·U_new^T = A·Q_topk·Q_topk^T·A^T ≈ top-k of A·A^T)
         U_new = A @ top_eigenvectors  # [in, k]
 
         # NaN check
@@ -166,15 +149,15 @@ class LowRankeBPCTrainer:
             layer.eta1_U.data = U_new
 
     def _bayesian_update_weights_lowrank(self, inputs, z_star):
-        """Low-rank Hebbian update.
+        """Low-rank Hebbian update with conjugate MNW sufficient statistics.
 
-        Order of operations (critical for consistency):
-        1. Update η1 (low-rank SVD)
-        2. Update η2 (moving average)
-        3. Recompute M from updated η1, η2
-        4. Compute residuals r = z - M·f using the NEW M
-        5. Update Ψ^{-1} from residuals (always non-negative!)
-        6. Update η4 (moving average)
+        All four natural parameters updated jointly:
+        1. η1 (low-rank eigendecomposition)
+        2. η2 (moving average from ss2 = z^T·f)
+        3. diag(η3) (moving average from ss3_diag = (z²).sum(0))
+        4. η4 (moving average from ss4 = N)
+
+        Then recompute M = η2 @ V for the cache.
         """
         self.num_updates += 1
         kappa_t = self.num_updates ** (-self.kappa)
@@ -194,34 +177,27 @@ class LowRankeBPCTrainer:
             # 1. Update η1 with low-rank structure
             self._update_eta1_lowrank(layer, f_pre, kappa_t)
 
-            # 2. Update η2 (standard moving average)
+            # 2. Update η2 (standard moving average, conjugate ss2 = z^T·f)
             ss2 = z_post.T @ f_pre  # [out, in]
             eta2_new = layer.eta2_prior + ss2
             with torch.no_grad():
                 layer.eta2.data = (1 - kappa_t) * layer.eta2.data + kappa_t * eta2_new
 
-            # 3. Recompute M from updated η1, η2
-            layer._cache_valid = False
-            layer._update_M_cache()
-            M_new = layer._M_cache  # [out, in]
-
-            # 4. Compute residuals using NEW M
-            # r = z_post - f_pre @ M^T  [batch, out]
+            # 3. Update diag(η3) (standard moving average, conjugate ss3_diag = (z²).sum(0))
+            ss3_diag = (z_post ** 2).sum(dim=0)  # [out]
+            eta3_diag_new = layer.eta3_diag_prior + ss3_diag
             with torch.no_grad():
-                residuals = z_post - f_pre @ M_new.T  # [batch, out]
-                # Residual sum of squares (always ≥ 0)
-                ss_psi = (residuals ** 2).sum(dim=0)  # [out]
+                layer.eta3_diag.data = (1 - kappa_t) * layer.eta3_diag.data + kappa_t * eta3_diag_new
 
-            # 5. Update Ψ^{-1} from residuals (guaranteed positive!)
-            psi_inv_new = layer.psi_inv_prior + ss_psi
-            with torch.no_grad():
-                layer.psi_inv_diag.data = (1 - kappa_t) * layer.psi_inv_diag.data + kappa_t * psi_inv_new
-
-            # 6. Update η4 (moving average)
+            # 4. Update η4 (moving average)
             ss4 = float(inputs.size(0))
             eta4_new = layer.eta4_prior + ss4
             with torch.no_grad():
                 layer.eta4.data = (1 - kappa_t) * layer.eta4.data + kappa_t * eta4_new
+
+            # Recompute M cache from updated η1, η2
+            layer._cache_valid = False
+            layer._update_M_cache()
 
     def train_on_batch(self, inputs, targets):
         """Train on one batch: ePC inference + low-rank BPC Hebbian update."""
