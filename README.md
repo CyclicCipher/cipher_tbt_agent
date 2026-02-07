@@ -92,29 +92,35 @@ hippocampus:
 
 ## Current Status
 
-### ✅ Phase 1 Complete: Sensorimotor Wrapper
+### Phase 1: Sensorimotor Wrapper — DONE
+- Screen capture (foveal + peripheral), motor control, gameplay logging
+- **Performance: 29 FPS @ 34ms latency** (exceeds targets)
 
-- Gaze position control system
-- Screen capture (foveal + peripheral vision)
-- Window-specific capture (safety feature)
-- Audio capture with soundcard integration
-- Motor control (mouse + keyboard + emergency stop)
-- Gameplay logging and replay (HDF5 format)
-- Comprehensive test suite
-- **Performance: 29 FPS @ 34ms latency** (exceeds 20 FPS / 50ms targets)
+### Phase 2: Baseline Predictive Coding — DONE
+- Standard PC network: 7 layers, 95.14% MNIST test accuracy
+- See `src/network/` and `train_mnist_pc.py`
 
-### 📋 Phase 2: Minimal Viable Network (Next)
+### Phase 3: Bayesian Predictive Coding (BPC) — DONE
+- Matrix Normal Wishart weight posteriors with Hebbian closed-form updates
+- 4 layers, 93.5% MNIST test accuracy (1 epoch)
+- See `experiments/BayesianPC/`
 
-- 5-layer predictive coding backbone
-- Two-compartment neurons with temporal processing
-- Prospective learning implementation
-- Network-wrapper integration
+### Phase 4: Error-based Bayesian Predictive Coding (eBPC) — DONE
+- Combines ePC error reparameterization with BPC Bayesian weight updates
+- 4 layers, **95.74% MNIST test accuracy** (3 epochs) — exceeds both baselines
+- See `experiments/eBPC/`
 
-### 📋 Future Phases
+### Phase 5: eBPC-ResNet with Optimizations — IN PROGRESS
+- Diagonal V/Psi approximation (6x parameter reduction) — debugging NaN
+- ResNet-18 with ePC skip connections — pending
+- bfloat16 mixed precision, adaptive T — pending
+- CIFAR-10 target: ePC's 92.17%
+- See `experiments/eBPC_ResNet/`
 
-- Hippocampal memory system (Phase 5)
-- Text pretraining pipeline (Phase 6)
-- Experimental comparison Models A, B, C (Phase 7)
+### Future Phases
+- JEPA integration
+- Network-wrapper integration for game interaction
+- Experimental comparison Models A, B, C
 
 ## Testing
 
@@ -221,70 +227,38 @@ with GameplayPlayer('logs/gameplay/session_20260123_120000.h5') as player:
 
 ## Documentation
 
-- `docs/planning/` - Project planning and specifications
-- `docs/notes/` - Development notes and issues
-- `src/wrapper/ARCHITECTURE.md` - Detailed wrapper architecture
-- `tests/README.md` - Test suite documentation
+- `MISTAKES.md` - Catalogued mistakes and lessons learned (critical reference)
+- `experiments/eBPC_ResNet/TODO.md` - Current roadmap (Phase 1 core + Phase 2 research)
+- `src/wrapper/ARCHITECTURE.md` - Sensorimotor wrapper architecture
 
 ## Project Structure
 
 ```
 predictive-coding-agent/
-├── configs/              # Configuration files
-│   └── default.yaml
-├── docs/                 # Documentation
-│   ├── notes/
-│   └── planning/
-├── logs/                 # Gameplay logs (created at runtime)
-├── src/                  # Source code
-│   ├── control/          # Control interface (hotkeys)
-│   ├── hippocampus/      # Episodic memory (future)
-│   ├── network/          # Neural network (future)
-│   ├── pretraining/      # Text pretraining (future)
-│   └── wrapper/          # Sensorimotor wrapper ✅
-│       ├── gaze.py
-│       ├── sensory.py
-│       ├── motor.py
-│       ├── logger.py
-│       └── wrapper.py
-├── tests/                # Test suite
-│   ├── test_screen_capture.py
-│   ├── test_motor_control.py
-│   └── test_integration.py
-├── requirements.txt
+├── experiments/
+│   ├── BayesianPC/       # BPC implementation (93.5% MNIST)
+│   ├── eBPC/             # eBPC implementation (95.74% MNIST)
+│   └── eBPC_ResNet/      # Diagonal eBPC + ResNet (in progress)
+├── src/
+│   ├── network/          # Baseline PC network (95.14% MNIST)
+│   ├── active_inference/ # Active inference module
+│   ├── control/          # Hotkey control
+│   └── wrapper/          # Sensorimotor wrapper (29 FPS)
+├── tests/
+├── MISTAKES.md           # Lessons learned (17 documented mistakes)
 └── README.md
 ```
 
 ## Development Phases
 
-**Phase 1: Sensorimotor Wrapper** ✅ (Current)
-- Screen and audio capture
-- Motor control
-- Logging system
-
-**Phase 2: Minimal Viable Network** (Next)
-- 5-layer backbone
-- Simple two-compartment neurons
-- Prospective learning
-
-**Phase 3: Temporal and Multimodal** (Week 6-9)
-- Temporal convolution
-- Multimodal integration
-
-**Phase 4: Motor Integration** (Week 10-12)
-- Active inference motor control
-- Gaze and click learning
-
-**Phase 5: Hippocampus** (Week 13-17)
-- Episodic memory
-- Sparse overlay connections
-
-**Phase 6: Text Pretraining** (Week 18-22)
-- Semantic, glyph, and phonetic grounding
-
-**Phase 7: Experiments** (Week 23+)
-- Train Models A, B, C
-- Comparative analysis
+1. **Sensorimotor Wrapper** — DONE
+2. **Baseline PC** — DONE (95.14% MNIST)
+3. **Bayesian PC (BPC)** — DONE (93.5% MNIST)
+4. **Error-based BPC (eBPC)** — DONE (95.74% MNIST)
+5. **eBPC-ResNet + Optimizations** — IN PROGRESS
+6. **JEPA Integration** — Planned
+7. **Network-Wrapper Integration** — Planned
+8. **Experimental Comparison (Models A, B, C)** — Planned
 
 ## Contributing
 
