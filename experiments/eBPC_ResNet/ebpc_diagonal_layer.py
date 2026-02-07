@@ -96,6 +96,14 @@ class DiagonaleBPCLayer(nn.Module):
         # Posterior η4 = prior η4
         self.register_buffer('eta4', torch.tensor(eta4_prior, dtype=torch.float32))
 
+        # Store minimum Phi for clamping (prevents precision explosion)
+        # The diagonal approximation can produce Phi < 0 when sum of squared
+        # correlations (R²) between inputs and outputs exceeds 1. This is
+        # guaranteed to happen as the model learns. Full MNW avoids this via
+        # positive definiteness of Y^T(I-H)Y, but diagonal breaks that guarantee.
+        # Clamp at prior value: precision can't exceed its prior level per dim.
+        self.register_buffer('_min_phi', psi_inv_prior.clone())
+
     def natural_to_standard(self) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, float]:
         """Convert natural parameters to standard (M, V_diag, Psi_diag, nu).
 
@@ -108,8 +116,10 @@ class DiagonaleBPCLayer(nn.Module):
         M = self.eta2 * V_diag.unsqueeze(0)  # [out, in]
 
         # Ψ_diag = 1 / (η3 - sum(η2² / η1, dim=1))
-        # = 1 / (η3 - sum(M · η2, dim=1))
-        Phi_diag = self.eta3 - (M * self.eta2).sum(dim=1)  # [out_features]
+        # CLAMP: diagonal approximation can make Phi negative when R² > 1.
+        # Full MNW guarantees Phi = Y^T(I-H)Y is PD; diagonal loses this.
+        raw_Phi = self.eta3 - (M * self.eta2).sum(dim=1)  # [out_features]
+        Phi_diag = torch.clamp(raw_Phi, min=self._min_phi)
         Psi_diag = 1.0 / Phi_diag  # [out_features]
 
         # ν = η4 + d_y - d_x + 1
