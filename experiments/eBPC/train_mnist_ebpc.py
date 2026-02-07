@@ -70,8 +70,10 @@ class Diagnostics:
         if self.train_accs:
             ax.plot(self.train_accs, label='Train', alpha=0.7)
         if self.test_accs:
-            test_x = np.linspace(0, len(self.train_accs), len(self.test_accs))
-            ax.plot(test_x, self.test_accs, label='Test', linewidth=2)
+            n_train = len(self.train_accs)
+            n_test = len(self.test_accs)
+            test_x = [(i + 1) * n_train / n_test for i in range(n_test)]
+            ax.plot(test_x, self.test_accs, label='Test', linewidth=2, marker='o')
         ax.set_xlabel('Batch')
         ax.set_ylabel('Accuracy')
         ax.set_title('Accuracy')
@@ -82,8 +84,10 @@ class Diagnostics:
         if self.train_losses:
             ax.plot(self.train_losses, label='Train', alpha=0.7)
         if self.test_losses:
-            test_x = np.linspace(0, len(self.train_losses), len(self.test_losses))
-            ax.plot(test_x, self.test_losses, label='Test', linewidth=2)
+            n_train = len(self.train_losses)
+            n_test = len(self.test_losses)
+            test_x = [(i + 1) * n_train / n_test for i in range(n_test)]
+            ax.plot(test_x, self.test_losses, label='Test', linewidth=2, marker='o')
         ax.set_xlabel('Batch')
         ax.set_ylabel('Loss')
         ax.set_title('Cross-Entropy Loss (logging only)')
@@ -206,7 +210,7 @@ def main():
     layer_sizes = [784, 128, 128, 128, 10]  # Same as BPC (Appendix F.1)
     activation = 'relu'
     T = 5                  # ePC needs fewer iterations (paper: T=4-5)
-    e_lr = 0.001           # ePC default error LR
+    e_lr = 0.01            # Adam LR (BPC Appendix F.1)
     kappa = 0.25           # BPC Hebbian decay
     batch_size = 128       # Same as BPC
     num_epochs = 3
@@ -218,7 +222,7 @@ def main():
     print("eBPC: Error-based Bayesian Predictive Coding on MNIST")
     print("="*80)
     print(f"Architecture: {layer_sizes}")
-    print(f"Inference: ePC error optimization (T={T}, e_lr={e_lr}, SGD)")
+    print(f"Inference: ePC error optimization (T={T}, e_lr={e_lr}, Adam)")
     print(f"Learning: BPC Hebbian update (kappa={kappa})")
     print(f"Batch size: {batch_size}")
     print("="*80 + "\n")

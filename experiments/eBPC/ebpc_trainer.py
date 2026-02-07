@@ -32,7 +32,7 @@ class eBPCTrainer:
         self,
         model: nn.Module,
         T: int = 5,              # Inference iterations (ePC needs fewer than sPC)
-        e_lr: float = 0.001,     # Error learning rate (ePC default)
+        e_lr: float = 0.01,      # Error learning rate (BPC Appendix F.1: Adam LR=0.01)
         kappa: float = 0.25,     # Hebbian update decay exponent
         device: str = "cpu",
     ):
@@ -134,8 +134,10 @@ class eBPCTrainer:
         # 1. Initialize errors to zero
         errors = self.model.init_errors(inputs)
 
-        # 2. Optimize errors via SGD (ePC uses SGD, not Adam)
-        error_optim = optim.SGD(errors, lr=self.e_lr)
+        # 2. Optimize errors via Adam (BPC Appendix F.1 uses Adam for hidden states;
+        #    ePC uses SGD but with identity precision. With BPC's precision weighting
+        #    E[Σ^{-1}]=0.001, gradients are 1000x smaller — Adam adapts to this scale)
+        error_optim = optim.Adam(errors, lr=self.e_lr)
 
         energy_history = []
         for t in range(self.T):
