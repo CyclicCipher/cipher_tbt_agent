@@ -626,6 +626,93 @@ The output is **clamped** to the target (one-hot encoded). The prediction errors
 
 ---
 
+### 15. Using SGD for ePC Error Optimization with Precision-Weighted Gradients (CRITICAL)
+
+**What we did wrong:** Used SGD with lr=0.001 for error optimization in eBPC, matching the ePC paper's hyperparameters.
+
+**Why it failed catastrophically:**
+- BPC precision E[Σ^{-1}] = νΨ ≈ 0.001 (from posterior updates) scales ALL error gradients down ~1000x
+- SGD lr=0.001 gives effective step size ~1e-6 (lr × gradient_scale)
+- Errors stay at ~0 throughout inference → hidden states un-inferred
+- Un-inferred states → garbage sufficient statistics → Hebbian updates corrupt weights
+- Accuracy DEGRADED from ~90% (epoch start) to 38% (epoch end)
+- Per-layer energies at 10^{-16} (effectively zero)
+
+**Symptoms:**
+- Accuracy degrading within first epoch (not stagnant — actively getting worse)
+- All per-layer energies near zero
+- Inference convergence at ~1e-8 (nothing moving)
+- Error optimization doing nothing visible
+
+**Why ePC paper used SGD but we can't:**
+- Standard ePC uses identity precision (Σ^{-1} = I) — gradients are unit scale
+- BPC's learned precision can be orders of magnitude different from 1
+- The gradient scale mismatch makes fixed-LR SGD useless
+
+**Correct approach:**
+```python
+# Use Adam — its adaptive normalization compensates for gradient scale
+error_optim = optim.Adam(errors, lr=0.01)  # Not SGD!
+```
+
+**Why Adam works here:**
+- Adam normalizes by running variance of gradients
+- Even if gradients are scaled down 1000x, Adam adapts its effective step
+- lr=0.01 matches BPC Appendix F.1 (which also uses Adam for inference)
+
+**Result:** 95.74% test accuracy with Adam (up from 38% with SGD), exceeding both BPC (93.5%) and standard PC (95.14%)
+
+**Root principle:** When combining two methods (ePC + BPC), don't blindly copy hyperparameters from one — understand how they interact.
+
+**Status:** FIXED (2026-02-07) — use Adam lr=0.01 for error optimization in eBPC
+
+---
+
+### 16. Diagonal MNW Approximation Breaks Positive Definiteness (ACTIVE)
+
+**What we did wrong:** Replaced full V (in×in) and Ψ (out×out) matrices with diagonal vectors, assuming the math would "just work."
+
+**Why it broke:**
+- Full MNW: Φ = η₃ - η₂ η₁⁻¹ η₂ᵀ is guaranteed PD (Schur complement of PD matrix)
+- Diagonal approximation: Φ_diag = η₃ - Σᵢ(η₂ᵢ²/η₁ᵢ) can go negative
+- When R² > 1 (sum of squared correlations exceeds 1), Φ_diag becomes negative
+- Negative Φ → negative Ψ → negative precision → energy explosion → NaN
+
+**Symptoms:**
+- 9.8% test accuracy (random chance)
+- NaN losses
+- Layer 4 (output) energy at 10^{11}
+- Explosion within first 4-5 batches
+
+**First fix attempt:** Clamp Φ_diag at prior value (psi_inv_prior). **DID NOT WORK** — identical broken results.
+
+**Diagnostic script created:** `experiments/eBPC_ResNet/diagnose_diagonal.py` — traces all natural parameters, standard parameters, raw Phi, precision at each batch. Not yet run.
+
+**Hypotheses still to test:**
+1. Is the Φ clamp code path actually executing?
+2. Is M (weight mean) exploding? (η₂/η₁ ratio)
+3. Are output predictions exploding?
+4. Is NaN originating from somewhere other than precision?
+5. Are the sufficient statistics (ss1, ss2, ss3) computed correctly for diagonal case?
+
+**Root principle:** Mathematical guarantees of full-matrix formulations don't automatically transfer to diagonal approximations. Verify PD guarantees analytically before implementing.
+
+**Status:** ACTIVE — diagnostic script created, awaiting results
+
+---
+
+### 17. Python Cannot Import from Hyphenated Directory Names
+
+**What we did wrong:** Named a directory `eBPC-ResNet` (with hyphen).
+
+**Why it broke:** Python interprets hyphens as minus operators in import statements. `from experiments.eBPC-ResNet import ...` is parsed as `experiments.eBPC` minus `ResNet`.
+
+**Correct approach:** Use underscores: `eBPC_ResNet`
+
+**Status:** FIXED (2026-02-07) — renamed to eBPC_ResNet
+
+---
+
 ## Update Log
 
 - 2026-02-01 (initial): Initial file created with 6 major mistakes catalogued
@@ -637,3 +724,6 @@ The output is **clamped** to the target (one-hot encoded). The prediction errors
 - 2026-02-01 (BAYESIAN PC BUGS): Fixed mistakes #10 and #11 - Bayesian PC had NaN catastrophe from variance collapse (min_variance=1e-6 too low, no max bound) and broke experimental control by changing from 7 to 3 layers. Fixed by setting min_variance=0.01, max_variance=10.0, and restoring 7-layer architecture.
 - 2026-02-01 (FUNDAMENTAL ERROR): Identified mistake #12 - entire BayesianPC implementation is conceptually wrong. Put Bayesian posteriors over VALUE NODES (hidden states) instead of WEIGHTS (parameters). User provided paper (Tschantz et al. 2025) showing BPC uses Matrix Normal Wishart weight posteriors with closed-form Hebbian updates, not distributions over hidden states. All code in experiments/BayesianPC/ must be archived and rewritten from scratch following Algorithm 1 from the paper.
 - 2026-02-01 (CRITICAL PROCESS ERROR): Mistake #13 - Skimmed paper instead of reading thoroughly. Made lazy speculations about "energy normalization" when paper explicitly covered adaptive learning rate in Appendix B/C. NEVER SKIM PAPERS.
+- 2026-02-07 (eBPC SGD FAILURE): Mistake #15 - Used SGD for error optimization when BPC precision scaled gradients 1000x down. Switched to Adam lr=0.01 → 95.74% test accuracy.
+- 2026-02-07 (DIAGONAL BREAKAGE): Mistake #16 - Diagonal MNW approximation breaks PD guarantee. Phi_diag can go negative → NaN. Active debugging.
+- 2026-02-07 (NAMING): Mistake #17 - Python can't import from hyphenated directories. Use underscores.
