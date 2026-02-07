@@ -3,25 +3,19 @@ Low-Rank eBPC Layer — Scalable Bayesian Predictive Coding with Off-Diagonal Re
 
 Uses low-rank V + diagonal Ψ approximation for MNW posterior:
 - V^{-1} = diag(d) + U·U^T   [in_features] diagonal + [in_features, k] low-rank factor
-- Ψ^{-1}: out_features vector (diagonal, same as diagonal version)
+- Ψ^{-1}: out_features vector (diagonal, stored directly)
 - η2 (MV^{-1}): out×in matrix (same as full)
 
 The low-rank factor U captures the top-k input correlation modes, recovering
 off-diagonal benefits that pure diagonal V loses. This fixes the diagonal
 approximation's fatal flaw: Φ_diag going negative due to multicollinearity.
 
-With low-rank V:
-  V = inv(diag(d) + U·U^T)  via Woodbury identity
-  M = η2 @ V                captures correlated inputs correctly
-  Φ_diag = η3 - diag(M @ η1 @ M^T)  guaranteed positive when η1 is PD
-
-Why Φ stays positive:
-  η1 = diag(d) + U·U^T is PD when d > 0 (sum of PD + PSD).
-  Φ = η3 - diag(η2 @ η1^{-1} @ η2^T) = diag(Ψ^{-1}) + diag(M @ η1 @ M^T) - diag(M @ η1 @ M^T)
-    = diag(Ψ^{-1}) > 0, which holds as long as the prior Ψ^{-1} > 0.
-  More precisely: Φ = η3 - diag(η2 @ V @ η2^T) where V = η1^{-1}.
-  Since η3 = Ψ^{-1}_prior + diag(Z^T Z) and η2 @ V @ η2^T = diag(M @ η1 @ M^T),
-  and η3 = Ψ^{-1} + diag(M @ η1 @ M^T), we get Φ = Ψ^{-1} > 0.
+Key design choice: We store Ψ^{-1}_diag DIRECTLY instead of η3.
+  In the full MNW, η3 = Ψ^{-1} + M·V^{-1}·M^T, and Φ = η3 - M·η1·M^T = Ψ^{-1}.
+  But when η1 is approximate (low-rank), computing Φ from η3 amplifies the
+  approximation error, potentially making Φ negative (same bug as diagonal).
+  By storing Ψ^{-1} directly and updating it from regression residuals
+  (always non-negative), we guarantee Ψ^{-1} > 0 at all times.
 
 Cost: O(k·in²) for Woodbury instead of O(in³) for full inverse.
 Parameters: O(k·in + in + out·in + out) vs O(in² + out² + out·in) for full.
@@ -36,17 +30,18 @@ from typing import Optional, Tuple
 class LowRankeBPCLayer(nn.Module):
     """eBPC layer with low-rank V + diagonal Ψ MNW posterior.
 
-    Natural parameters:
-      η1 = diag(d) + U·U^T       [stored as d vector + U matrix]
-      η2 = M · V^{-1}            [out_features, in_features]
-      η3 = diag(Ψ^{-1} + M·V^{-1}·M^T)  [out_features]
-      η4 = ν - d_y + d_x - 1     [scalar]
+    Stored parameters:
+      eta1_d:       diag part of V^{-1}           [in_features]
+      eta1_U:       low-rank part of V^{-1}       [in_features, rank_k]
+      eta2:         M · V^{-1}                    [out_features, in_features]
+      psi_inv_diag: Ψ^{-1} diagonal (DIRECT)      [out_features]
+      eta4:         ν - d_y + d_x - 1             [scalar]
 
     Standard parameters recovered via Woodbury:
       V = (diag(d) + U·U^T)^{-1}
         = diag(1/d) - diag(1/d)·U·(I_k + U^T·diag(1/d)·U)^{-1}·U^T·diag(1/d)
       M = η2 @ V
-      Φ_diag = η3 - diag(M @ η1 @ M^T) = diag(Ψ^{-1})  [guaranteed positive]
+      Ψ_diag = 1 / psi_inv_diag  (direct, no Schur complement needed)
     """
 
     def __init__(
@@ -84,8 +79,8 @@ class LowRankeBPCLayer(nn.Module):
         eta2_prior = torch.zeros(out_features, in_features)
         self.register_buffer('eta2_prior', eta2_prior)
 
-        # η3_prior = diag(Ψ^{-1}_prior) (since M_prior = 0)
-        self.register_buffer('eta3_prior', psi_inv_prior)
+        # Ψ^{-1}_prior (stored directly)
+        self.register_buffer('psi_inv_prior', psi_inv_prior)
 
         # η4_prior = ν - d_y + d_x - 1
         eta4_prior = prior_nu - out_features + in_features - 1
@@ -105,10 +100,8 @@ class LowRankeBPCLayer(nn.Module):
         # (Since U_prior = 0, V^{-1}_prior = diag(d_prior))
         self.register_buffer('eta2', M_init * d_prior.unsqueeze(0))
 
-        # Posterior η3 = diag(Ψ^{-1}_prior) + diag(M_init · diag(d_prior) · M_init^T)
-        # = psi_inv_prior + sum(M_init² · d_prior, dim=1)
-        eta3_init = psi_inv_prior + (M_init ** 2 * d_prior.unsqueeze(0)).sum(dim=1)
-        self.register_buffer('eta3', eta3_init)
+        # Posterior Ψ^{-1} = prior (no data seen yet)
+        self.register_buffer('psi_inv_diag', psi_inv_prior.clone())
 
         # Posterior η4 = prior η4
         self.register_buffer('eta4', torch.tensor(eta4_prior, dtype=torch.float32))
@@ -132,7 +125,13 @@ class LowRankeBPCLayer(nn.Module):
         d_inv_U = d_inv.unsqueeze(1) * self.eta1_U  # [in, k]
         C = torch.eye(self.rank_k, device=self.eta1_d.device, dtype=self.eta1_d.dtype)
         C = C + self.eta1_U.T @ d_inv_U  # [k, k]
-        C_inv = torch.inverse(C)  # [k, k] — small, cheap
+        # Use Cholesky for numerical stability (C is PD since I + PSD)
+        try:
+            L = torch.linalg.cholesky(C)
+            C_inv = torch.cholesky_inverse(L)
+        except torch.linalg.LinAlgError:
+            # Fallback to standard inverse if Cholesky fails
+            C_inv = torch.inverse(C)
         return d_inv, C_inv, d_inv_U
 
     def _compute_M(self) -> torch.Tensor:
@@ -152,7 +151,6 @@ class LowRankeBPCLayer(nn.Module):
         eta2_dinv_U = eta2_dinv @ self.eta1_U  # [out, k]
 
         # M = eta2_dinv - eta2_dinv_U @ C_inv @ d_inv_U^T
-        # eta2_dinv_U @ C_inv: [out, k]
         correction = (eta2_dinv_U @ C_inv) @ d_inv_U.T  # [out, in]
         M = eta2_dinv - correction
 
@@ -164,35 +162,23 @@ class LowRankeBPCLayer(nn.Module):
         self._cache_valid = True
 
     def natural_to_standard(self) -> Tuple[torch.Tensor, torch.Tensor, float]:
-        """Convert natural parameters to standard (M, Psi_diag, nu).
+        """Convert to standard parameters (M, Psi_diag, nu).
 
-        Returns:
-            M: Expected weights [out_features, in_features]
-            Psi_diag: Output noise scale [out_features]
-            nu: Degrees of freedom (scalar)
+        Psi_diag is read directly from psi_inv_diag — no Schur complement needed.
+        This guarantees Ψ > 0 regardless of η1 approximation quality.
         """
         if not self._cache_valid:
             self._update_M_cache()
         M = self._M_cache
 
-        # Φ_diag = η3 - diag(M @ η1 @ M^T)
-        # = η3 - diag(M @ (diag(d) + U·U^T) @ M^T)
-        # = η3 - (M² @ d) - ((M @ U)² summed over k)
-        Md = (M ** 2) @ self.eta1_d  # [out]
-        MU = M @ self.eta1_U  # [out, k]
-        MU_sq = (MU ** 2).sum(dim=1)  # [out]
-        Phi_diag = self.eta3 - Md - MU_sq  # [out]
-
-        # Phi should be positive by construction. Clamp as safety net.
-        Phi_diag = torch.clamp(Phi_diag, min=1e-8)
-        Psi_diag = 1.0 / Phi_diag  # [out_features]
+        Psi_diag = 1.0 / self.psi_inv_diag  # [out_features], always positive
 
         nu = self.eta4.item() + self.out_features - self.in_features + 1
 
         return M, Psi_diag, nu
 
     def get_expected_precision_diag(self) -> torch.Tensor:
-        """E[Σ^{-1}] diagonal = ν · Ψ_diag."""
+        """E[Σ^{-1}] diagonal = ν · Ψ_diag = ν / Ψ^{-1}_diag."""
         _, Psi_diag, nu = self.natural_to_standard()
         return nu * Psi_diag  # [out_features]
 
@@ -288,7 +274,8 @@ class LowRankeBPCNetwork(nn.Module):
     def get_natural_parameters(self):
         params = []
         for layer in self.layers:
-            params.extend([layer.eta1_d, layer.eta1_U, layer.eta2, layer.eta3, layer.eta4])
+            params.extend([layer.eta1_d, layer.eta1_U, layer.eta2,
+                          layer.psi_inv_diag, layer.eta4])
         return params
 
     def get_uncertainties(self):
@@ -296,8 +283,7 @@ class LowRankeBPCNetwork(nn.Module):
         uncertainties = []
         for layer in self.layers:
             d_inv, C_inv, d_inv_U = layer._woodbury_V()
-            # diag(V) = 1/d - diag(diag(1/d)·U·C^{-1}·U^T·diag(1/d))
-            # = 1/d - row-wise sum of (d_inv_U @ C_inv) * d_inv_U
+            # diag(V) = 1/d - row-wise sum of (d_inv_U @ C_inv) * d_inv_U
             correction = (d_inv_U @ C_inv) * d_inv_U  # [in, k]
             V_diag = d_inv - correction.sum(dim=1)  # [in]
             uncertainties.append(V_diag.sum().item())

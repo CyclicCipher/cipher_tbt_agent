@@ -12,13 +12,17 @@ Key difference from diagonal trainer:
   but we CAN extract its top-k modes via truncated SVD.
 
   Update strategy:
-    1. Form combined low-rank factor: A = [sqrt(1-κ) · U_old | sqrt(κ) · F^T_normalized]
-       where F^T_normalized accounts for the prior and batch contributions
+    1. Form combined low-rank factor: A = [sqrt(1-κ) · U_old | sqrt(κ) · F^T]
     2. Truncated SVD of A → keep top-k singular vectors → new U
     3. Fold residual singular values into the diagonal d
-    4. η2, η3, η4 updated with standard moving average (same as diagonal)
+    4. η2 updated with standard moving average
+    5. Ψ^{-1} updated from regression RESIDUALS (always ≥ 0, guarantees positivity)
+    6. η4 updated with standard moving average
 
-  This ensures η1 maintains its low-rank + diagonal structure across updates.
+  Critical design choice: Ψ^{-1} is computed from residuals r = z - M·f,
+  NOT from η3 = Ψ^{-1} + M·η1·M^T. The Schur complement Φ = η3 - M·η1·M^T
+  amplifies approximation error in η1, potentially making Φ negative.
+  Direct residual computation avoids this entirely.
 """
 
 import torch
@@ -77,124 +81,61 @@ class LowRankeBPCTrainer:
     def _update_eta1_lowrank(self, layer, f_pre, kappa_t):
         """Update η1 = diag(d) + U·U^T with new batch data.
 
-        The full sufficient statistic is ss1 = F^T @ F [in, in].
-        The new η1 should be: (1-κ)·η1_old + κ·(η1_prior + ss1)
+        Target: η1_target = (1-κ)·η1_old + κ·(η1_prior + ss1)
+        where ss1 = F^T @ F [in, in].
 
-        We decompose this into diagonal + low-rank:
-          (1-κ)·(d_old + U_old·U_old^T) + κ·(d_prior + ss1)
-          = [(1-κ)·d_old + κ·d_prior + κ·diag(ss1)] + (1-κ)·U_old·U_old^T + κ·(ss1 - diag(ss1))
-
-        The off-diagonal part of ss1 is captured by F^T's low-rank structure.
-        Strategy: form combined matrix, truncated SVD, fold residual into diagonal.
+        Decomposed as: d_new + U_new·U_new^T where:
+          A·A^T = (1-κ)·U_old·U_old^T + κ·F^T·F  (all off-diagonal + some diagonal)
+          d_new = (1-κ)·d_old + κ·d_prior + residual_diag  (pure diagonal part)
         """
-        N = f_pre.size(0)
         in_features = layer.in_features
         rank_k = layer.rank_k
 
-        # Diagonal part of ss1 = sum of f^2 over batch
-        ss1_diag = (f_pre ** 2).sum(dim=0)  # [in]
-
-        # Update diagonal: (1-κ)·d_old + κ·(d_prior + ss1_diag)
-        d_new_base = (1 - kappa_t) * layer.eta1_d + kappa_t * (layer.eta1_d_prior + ss1_diag)
-
-        # Off-diagonal contributions come from two sources:
-        # 1. Old U: scaled by sqrt(1-κ)
-        # 2. New batch: F^T captures the off-diagonal structure of ss1 = F^T @ F
-        #    We need sqrt(κ) · F^T so that (sqrt(κ)·F^T)(sqrt(κ)·F^T)^T = κ · F^T·F = κ · ss1
-
-        # But ss1 includes the diagonal part too. We want only the off-diagonal
-        # contribution in U. However, the SVD naturally handles this:
-        # we'll combine everything into a matrix, SVD it, and put the top-k
-        # modes into U while folding the rest into d.
-
-        # Form combined matrix of all low-rank contributions:
-        # A = [ sqrt(1-κ)·U_old | sqrt(κ)·F^T ]
-        # Then A·A^T = (1-κ)·U_old·U_old^T + κ·F^T·F = (1-κ)·U_old·U_old^T + κ·ss1
-        # This is the total off-diagonal + some diagonal contribution from ss1
-
-        sqrt_1mk = torch.sqrt(torch.tensor(1.0 - kappa_t, device=self.device))
+        sqrt_1mk = torch.sqrt(torch.clamp(torch.tensor(1.0 - kappa_t, device=self.device), min=0.0))
         sqrt_k = torch.sqrt(torch.tensor(kappa_t, device=self.device))
 
         A_old = sqrt_1mk * layer.eta1_U  # [in, k]
         A_new = sqrt_k * f_pre.T  # [in, N]
 
-        # Also add the prior U contribution (though prior U is 0 initially)
-        # η1_prior contribution: κ · U_prior · U_prior^T (zero if U_prior = 0)
-        # Skip if U_prior is zero
-        has_prior_U = layer.eta1_U_prior.abs().max() > 0
-        if has_prior_U:
-            A_prior = sqrt_k * layer.eta1_U_prior  # [in, k]
-            A = torch.cat([A_old, A_new, A_prior], dim=1)  # [in, k + N + k]
-        else:
-            A = torch.cat([A_old, A_new], dim=1)  # [in, k + N]
+        A = torch.cat([A_old, A_new], dim=1)  # [in, k + N]
 
-        # Truncated SVD of A → top-k singular vectors
-        # A = P·S·Q^T, so A·A^T = P·S²·P^T
-        # We want U_new such that U_new·U_new^T ≈ A·A^T (rank-k approximation)
-        # → U_new = P[:, :k] · S[:k]
-
-        # For numerical stability, use SVD of A (not A·A^T)
-        # A is [in_features, k+N] — tall and thin when N < in, or fat when N > in
+        # Truncated SVD of A
+        # Use try/except for CUDA SVD robustness
         try:
             P, S, Qt = torch.linalg.svd(A, full_matrices=False)
         except torch.linalg.LinAlgError:
-            # SVD failed — keep old values (rare edge case)
-            with torch.no_grad():
-                layer.eta1_d.data = d_new_base
-            return
+            # Fallback: try on CPU
+            try:
+                A_cpu = A.cpu()
+                P_cpu, S_cpu, Qt_cpu = torch.linalg.svd(A_cpu, full_matrices=False)
+                P = P_cpu.to(self.device)
+                S = S_cpu.to(self.device)
+            except torch.linalg.LinAlgError:
+                # Total failure — just update diagonal, keep old U
+                ss1_diag = (f_pre ** 2).sum(dim=0)
+                with torch.no_grad():
+                    layer.eta1_d.data = (1 - kappa_t) * layer.eta1_d + kappa_t * (layer.eta1_d_prior + ss1_diag)
+                    layer.eta1_d.data = torch.clamp(layer.eta1_d.data, min=1e-8)
+                return
 
-        # Keep top-k modes in U, fold the rest into diagonal
+        # Keep top-k modes in U, fold rest into diagonal
         actual_k = min(rank_k, len(S))
         U_new = P[:, :actual_k] * S[:actual_k].unsqueeze(0)  # [in, k]
 
-        # The residual modes (k+1, k+2, ...) contribute to the diagonal:
-        # residual = Σ_{j>k} s_j² · p_j · p_j^T → diagonal contribution = Σ_{j>k} s_j² · p_j²
+        # Residual modes → diagonal contribution
         if len(S) > actual_k:
-            residual_P = P[:, actual_k:]  # [in, remaining]
-            residual_S = S[actual_k:]  # [remaining]
-            residual_diag = (residual_P ** 2 * (residual_S ** 2).unsqueeze(0)).sum(dim=1)  # [in]
+            residual_P = P[:, actual_k:]
+            residual_S = S[actual_k:]
+            residual_diag = (residual_P ** 2 * (residual_S ** 2).unsqueeze(0)).sum(dim=1)
         else:
             residual_diag = torch.zeros(in_features, device=self.device)
 
-        # But d_new_base already includes κ·ss1_diag, and A·A^T already includes
-        # the full κ·ss1 (including diagonal). So we need to subtract the diagonal
-        # part that's now captured by U_new·U_new^T and residual:
-        # Total from A·A^T diagonal = U_new contribution + residual
-        U_diag_contribution = (U_new ** 2).sum(dim=1)  # [in]
-        total_AA_diag = U_diag_contribution + residual_diag  # [in]
-
-        # The diagonal we want: d_new_base captures (1-κ)·d_old + κ·(d_prior + ss1_diag)
-        # But (1-κ)·d_old is part of (1-κ)·η1_old_diagonal, and we also moved
-        # (1-κ)·U_old·U_old^T into A. The diagonal of A·A^T includes the diagonal
-        # of (1-κ)·U_old·U_old^T which shouldn't be in d.
-        #
-        # Clean accounting:
-        #   η1_new = d_new + U_new·U_new^T
-        #   where η1_new should equal (1-κ)·d_old + κ·(d_prior + ss1_diag)  [diagonal]
-        #                           + (1-κ)·U_old·U_old^T + κ·(ss1 - diag(ss1)·I)  [off-diagonal + extra diag]
-        #
-        # Actually, let's think more carefully. We want:
-        #   d_new + U_new·U_new^T ≈ d_new_base + A·A^T - κ·diag(ss1)·I
-        #
-        # Wait, d_new_base already has κ·ss1_diag. And A·A^T = (1-κ)·U·U^T + κ·ss1.
-        # The diagonal of A·A^T includes κ·diag(ss1).
-        # So: d_final = d_new_base - diagonal(A·A^T captured in U + residual) + residual_diag
-        #             = d_new_base - U_diag_contribution
-        # No wait. Let me redo this cleanly.
-        #
-        # Target: η1_target = (1-κ)·η1_old + κ·(η1_prior + ss1_full)
-        #   = (1-κ)·(d_old + U_old·U_old^T) + κ·(d_prior + U_prior·U_prior^T + ss1_full)
-        #   = [(1-κ)·d_old + κ·d_prior] + [(1-κ)·U_old·U_old^T + κ·U_prior·U_prior^T + κ·ss1_full]
-        #
-        # We approximate this as d_new + U_new·U_new^T where:
-        #   A·A^T = (1-κ)·U_old·U_old^T + κ·ss1_full + [κ·U_prior·U_prior^T if applicable]
-        #   U_new·U_new^T ≈ top-k of A·A^T
-        #   residual ≈ A·A^T - U_new·U_new^T (folded into diagonal)
-        #
-        # So: d_new = [(1-κ)·d_old + κ·d_prior] + residual_diag
+        # d_new = (1-κ)·d_old + κ·d_prior + residual_diag
+        # (The full A·A^T accounts for (1-κ)·U·U^T + κ·ss1;
+        #  the top-k go into U_new, residual goes into d alongside the diagonal terms)
         d_final = (1 - kappa_t) * layer.eta1_d + kappa_t * layer.eta1_d_prior + residual_diag
 
-        # Ensure d stays positive (PD guarantee for η1)
+        # Ensure d stays positive
         d_final = torch.clamp(d_final, min=1e-8)
 
         # Pad U_new if actual_k < rank_k
@@ -209,8 +150,13 @@ class LowRankeBPCTrainer:
     def _bayesian_update_weights_lowrank(self, inputs, z_star):
         """Low-rank Hebbian update.
 
-        η1: low-rank update via SVD (see _update_eta1_lowrank)
-        η2, η3, η4: standard moving average (same as diagonal)
+        Order of operations (critical for consistency):
+        1. Update η1 (low-rank SVD)
+        2. Update η2 (moving average)
+        3. Recompute M from updated η1, η2
+        4. Compute residuals r = z - M·f using the NEW M
+        5. Update Ψ^{-1} from residuals (always non-negative!)
+        6. Update η4 (moving average)
         """
         self.num_updates += 1
         kappa_t = self.num_updates ** (-self.kappa)
@@ -227,26 +173,37 @@ class LowRankeBPCTrainer:
             f_pre = pre_activations[i]   # [batch, in]
             z_post = z_star[i]           # [batch, out]
 
-            # Update η1 with low-rank structure
+            # 1. Update η1 with low-rank structure
             self._update_eta1_lowrank(layer, f_pre, kappa_t)
 
-            # Standard sufficient statistics for η2, η3, η4
-            ss2 = z_post.T @ f_pre                  # [out, in]
-            ss3 = (z_post ** 2).sum(dim=0)          # [out]
-            ss4 = float(inputs.size(0))
-
+            # 2. Update η2 (standard moving average)
+            ss2 = z_post.T @ f_pre  # [out, in]
             eta2_new = layer.eta2_prior + ss2
-            eta3_new = layer.eta3_prior + ss3
-            eta4_new = layer.eta4_prior + ss4
-
             with torch.no_grad():
                 layer.eta2.data = (1 - kappa_t) * layer.eta2.data + kappa_t * eta2_new
-                layer.eta3.data = (1 - kappa_t) * layer.eta3.data + kappa_t * eta3_new
-                layer.eta4.data = (1 - kappa_t) * layer.eta4.data + kappa_t * eta4_new
 
-            # Invalidate and recompute M cache
+            # 3. Recompute M from updated η1, η2
             layer._cache_valid = False
             layer._update_M_cache()
+            M_new = layer._M_cache  # [out, in]
+
+            # 4. Compute residuals using NEW M
+            # r = z_post - f_pre @ M^T  [batch, out]
+            with torch.no_grad():
+                residuals = z_post - f_pre @ M_new.T  # [batch, out]
+                # Residual sum of squares (always ≥ 0)
+                ss_psi = (residuals ** 2).sum(dim=0)  # [out]
+
+            # 5. Update Ψ^{-1} from residuals (guaranteed positive!)
+            psi_inv_new = layer.psi_inv_prior + ss_psi
+            with torch.no_grad():
+                layer.psi_inv_diag.data = (1 - kappa_t) * layer.psi_inv_diag.data + kappa_t * psi_inv_new
+
+            # 6. Update η4 (moving average)
+            ss4 = float(inputs.size(0))
+            eta4_new = layer.eta4_prior + ss4
+            with torch.no_grad():
+                layer.eta4.data = (1 - kappa_t) * layer.eta4.data + kappa_t * eta4_new
 
     def train_on_batch(self, inputs, targets):
         """Train on one batch: ePC inference + low-rank BPC Hebbian update."""

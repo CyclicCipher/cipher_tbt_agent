@@ -157,8 +157,8 @@ class Diagnostics:
                 ax.plot(pmins, label=f'Layer {i+1}', alpha=0.7)
         ax.axhline(y=0, color='r', linestyle='--', alpha=0.5, label='Zero line')
         ax.set_xlabel('Batch')
-        ax.set_ylabel('min(Φ_diag)')
-        ax.set_title('Phi Minimum (must stay > 0)')
+        ax.set_ylabel('min(Ψ^{-1}_diag)')
+        ax.set_title('Psi_inv Minimum (must stay > 0)')
         ax.legend()
         ax.grid(True, alpha=0.3)
 
@@ -212,18 +212,14 @@ class Diagnostics:
 
 
 def get_phi_diagnostics(model):
-    """Extract Phi min and M max per layer for monitoring."""
+    """Extract Ψ^{-1} min and M max per layer for monitoring."""
     phi_mins = []
     M_maxes = []
     with torch.no_grad():
         for layer in model.layers:
             M, Psi_diag, nu = layer.natural_to_standard()
-            # Recompute raw Phi (before clamp) for monitoring
-            Md = (M ** 2) @ layer.eta1_d
-            MU = M @ layer.eta1_U
-            MU_sq = (MU ** 2).sum(dim=1)
-            raw_Phi = layer.eta3 - Md - MU_sq
-            phi_mins.append(raw_Phi.min().item())
+            # psi_inv_diag is stored directly — always positive
+            phi_mins.append(layer.psi_inv_diag.min().item())
             M_maxes.append(M.abs().max().item())
     return phi_mins, M_maxes
 
