@@ -128,26 +128,26 @@ class LowRankeBPCTrainer:
                 layer.eta1_d.data = torch.clamp(layer.eta1_d.data, min=1e-8)
             return
 
-        # Quadratic constraint preservation:
-        # The MNW block matrix [[η1, η2^T], [η2, η3]] must be PSD.
-        # When we truncate η1 to rank-k, the residual R = AA^T - U_new·U_new^T
-        # must be dominated by the diagonal inflation: diag(d_inflation) ≥ R.
+        # FITC diagonal correction (Snelson & Ghahramani 2006, Quiñonero-Candela
+        # & Rasmussen 2005): absorb only diag(R) of the dropped residual, not a
+        # conservative PSD upper bound like Gershgorin or spectral-norm inflation.
         #
-        # Gershgorin per-element bound: d_i ≥ Σ_j |R_ij| guarantees diag(d) - R ≥ 0.
-        # This is non-uniform — dimensions with small off-diagonal coupling get less
-        # inflation, allowing V (and therefore M) to be larger for those dimensions.
+        # diag(R) = diag(A_drop @ A_drop^T) = row-wise squared norms of A_drop.
+        # This preserves the exact diagonal of η1 while using low-rank off-diagonal.
+        # No need to materialize R — O(in × n_dropped) instead of O(in²).
+        #
+        # Does NOT guarantee η1_approx ≥ η1_true in PSD sense; the Schur complement
+        # Φ might dip slightly. A safety clamp on Φ (in the layer) handles this.
+        # With proportional k, the residual is prior-dominated → diag(R) ≈ R.
         if actual_k < len(eigenvalues):
             Q_drop = eigenvectors[:, :-actual_k]  # [k+N, n_dropped]
             A_drop = A @ Q_drop  # [in, n_dropped]
-            # Materialize R = A_drop @ A_drop^T for Gershgorin row sums
-            # Cost: O(in² · n_dropped) — fine for in ≤ ~2000
-            R = A_drop @ A_drop.T  # [in, in]
-            gershgorin_d = R.abs().sum(dim=1)  # [in] per-element bound
+            fitc_d = (A_drop ** 2).sum(dim=1)  # [in] diagonal of residual
         else:
-            gershgorin_d = torch.zeros(in_features, device=self.device)
+            fitc_d = torch.zeros(in_features, device=self.device)
 
-        # d_new = (1-κ)·d_old + κ·d_prior + Gershgorin inflation (per-element)
-        d_final = (1 - kappa_t) * layer.eta1_d + kappa_t * layer.eta1_d_prior + gershgorin_d
+        # d_new = (1-κ)·d_old + κ·d_prior + FITC diagonal correction
+        d_final = (1 - kappa_t) * layer.eta1_d + kappa_t * layer.eta1_d_prior + fitc_d
 
         # Ensure d stays positive
         d_final = torch.clamp(d_final, min=1e-8)

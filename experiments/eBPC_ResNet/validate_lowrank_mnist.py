@@ -324,7 +324,7 @@ def main():
     print(f"Low-rank V: diag(d) + U·U^T with min rank k={rank_k}, ratio=1/{rank_k_ratio}")
     print(f"Inference: ePC (T={T}, e_lr={e_lr}, Adam, adaptive T)")
     print(f"Learning: BPC low-rank Hebbian (kappa={kappa})")
-    print(f"Gershgorin per-element inflation (Option 1)")
+    print(f"FITC diagonal correction (Snelson & Ghahramani 2006)")
     print(f"prior_Psi_iw_scale: {prior_Psi_iw_scale}")
     print(f"Mixed precision: {'bfloat16' if device != 'cpu' else 'disabled (CPU)'}")
     print(f"Batch size: {batch_size}")
