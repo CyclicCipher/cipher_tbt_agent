@@ -713,6 +713,74 @@ error_optim = optim.Adam(errors, lr=0.01)  # Not SGD!
 
 ---
 
+### 18. Low-Rank η1 Violates MNW Quadratic Constraint (CRITICAL)
+
+**What we did wrong:** When truncating η1 = diag(d) + U·U^T to rank-k, absorbed only `diag(R)` (diagonal of residual matrix R = AA^T - U_new·U_new^T) into d.
+
+**Why it broke:**
+- The MNW block matrix `[[η1, η2^T], [η2, η3]]` must be PSD (the "quadratic constraint")
+- Equivalent to Schur complement Φ = η3 - η2·η1⁻¹·η2^T > 0
+- `diag(diag(R))` is NOT ≥ R in PSD ordering (off-diagonal elements of R are lost)
+- So η1_approx < η1_true → η1_approx⁻¹ > η1_true⁻¹ → Schur complement goes negative
+- Negative Φ → negative precision → energy explosion → NaN
+
+**Two wrong approaches tried first:**
+1. **Residual-based Ψ** — replaced η3 with residual-based psi_inv. Broke MNW conjugacy, created positive feedback (M↑ → r↑ → psi_inv↑ → precision↑ → M↑)
+2. **Schur complement with diag(R) absorption** — correct formula but η1_approx < η1_true, so Phi went to -2.31e+31
+
+**Correct approach: Spectral norm inflation**
+- λ_max(R) = largest dropped eigenvalue from eigendecomposition
+- Set d_inflation = λ_max(R) for ALL diagonal entries (not per-element diag(R))
+- Then η1_approx - η1_true = λ_max(R)·I - R ≥ 0 (since all eigenvalues of R ≤ λ_max(R))
+- This guarantees η1_approx ≥ η1_true → η1_approx⁻¹ ≤ η1_true⁻¹ → Φ stays positive
+
+**Root principle:** When approximating a component of a joint distribution, the approximation must preserve the **validity constraints** of the full distribution. For MNW, this is the PSD constraint on the block natural parameter matrix — a quadratic matrix inequality.
+
+**Status:** FIX IMPLEMENTED (2026-02-07) — spectral norm inflation in `_update_eta1_lowrank`
+
+---
+
+### 19. FITC Diagonal Correction Fails When k << data_rank (CRITICAL)
+
+**What we did wrong:** Replaced conservative Gershgorin inflation (d_i = Σ_j |R_ij|) with FITC diagonal correction (d_i = R_ii) from GP literature, assuming the residual was "prior-dominated" for all layers.
+
+**Why it broke catastrophically:**
+- FITC absorbs only diag(R) of the dropped residual — exact diagonal, NO PSD upper bound
+- This does NOT guarantee η1_approx ≥ η1_true (missing off-diagonal of R)
+- When off-diagonal R is large, V = η1_approx⁻¹ is too large → M = η2·V explodes
+- Runaway feedback: larger V → larger M → larger ss2 → larger η2 → even larger M
+- Result: M reaches 1.75e17 within 15 batches, Phi goes to -9.76e+35, NaN
+
+**The critical condition: FITC only works when k > data_rank for that layer.**
+
+Layer analysis with proportional k (ratio=8), batch_size=128:
+- Layer 1 (in=785, k=98): data rank ≤ 128, k=98 captures most directions. Residual is prior-dominated (diagonal prior has no off-diag). diag(R) ≈ R. FITC is safe.
+- Layers 2-4 (in=129, k=20): data rank ≤ 128 ≈ 129! Data can fill the ENTIRE space. k=20 drops 109 eigenvalues that are heavily data-driven with strong off-diagonal coupling. diag(R) << R by orders of magnitude. FITC fails.
+
+**Phi mins by layer:** L1: -3.43e+13, L2: -2.67e+26, L3: -9.76e+35, L4: +5.55
+Layer 4 (out=10, smallest) survived. Layers 2-3 exploded worst.
+
+**Why the Phi clamp at 1.0 didn't save us:**
+The clamp limits precision, but the explosion happens in M (via V), not in the precision pathway. By the time we compute Phi, M is already at 1e17. Clamping Phi can't un-explode M.
+
+**What Gershgorin got right (despite being too conservative):**
+- Gershgorin guarantees diag(d) ≥ R in PSD sense
+- This makes η1_approx ≥ η1_true → V_approx ≤ V_true → M is bounded
+- Too conservative for Layer 1 (over-regularized, 82.59%) but STABLE
+
+**Correct approach (not yet implemented):**
+Need a hybrid:
+1. FITC (diag(R)) for layers where residual is prior-dominated (k ≈ data_rank)
+2. Conservative bound (Gershgorin or spectral) for layers where data fills the space
+3. Or: increase k so ALL layers have prior-dominated residuals (k > batch_size)
+4. Or: use full η1 for small layers (in ≤ ~256) and low-rank only for large ones
+
+**Root principle:** An approximation's validity depends on the REGIME, not just the formula. FITC is a principled approximation that works beautifully when the low-rank component captures most of the data's structure. It fails when significant data-driven correlation is dumped into the residual. Always verify the preconditions of an approximation match the actual operating regime.
+
+**Status:** ACTIVE (2026-02-08) — FITC reverted to NaN. Need hybrid approach or increased k.
+
+---
+
 ## Update Log
 
 - 2026-02-01 (initial): Initial file created with 6 major mistakes catalogued
@@ -727,3 +795,5 @@ error_optim = optim.Adam(errors, lr=0.01)  # Not SGD!
 - 2026-02-07 (eBPC SGD FAILURE): Mistake #15 - Used SGD for error optimization when BPC precision scaled gradients 1000x down. Switched to Adam lr=0.01 → 95.74% test accuracy.
 - 2026-02-07 (DIAGONAL BREAKAGE): Mistake #16 - Diagonal MNW approximation breaks PD guarantee. Phi_diag can go negative → NaN. Active debugging.
 - 2026-02-07 (NAMING): Mistake #17 - Python can't import from hyphenated directories. Use underscores.
+- 2026-02-08 (QUADRATIC CONSTRAINT): Mistake #18 - Low-rank η1 truncation violates MNW quadratic constraint. Fixed via spectral norm inflation. Stable at 82.59%.
+- 2026-02-08 (FITC FAILURE): Mistake #19 - FITC diag(R) correction fails for Layers 2-4 where k=20 << data_rank≈128. V explodes → M reaches 1e17 → NaN at batch 15. FITC only works when residual is prior-dominated (k > data_rank).
