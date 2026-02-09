@@ -31,6 +31,7 @@ from tqdm import tqdm
 
 from experiments.ePC_ResNet.epc_model import PCESkipConnection
 from experiments.ePC_ResNet.architectures import get_resnet18_cifar10
+from src.optimizers.kronos import KRONOS
 
 
 def get_cifar10_loaders(batch_size=256, data_dir='./data', num_workers=2):
@@ -362,12 +363,23 @@ def main():
     iters = 2           # Error optimization steps (Newton needs only 1-2)
     damping = 0.1       # Newton damping (lower = more aggressive)
     e_lr = 0.001        # Learning rate for errors (SGD/Adam only)
-    w_lr = 0.0001       # Base learning rate for weights (Adam)
+    w_lr = 0.0001       # Base learning rate for weights
     w_decay = 0.0       # Weight decay
     batch_size = 256
     num_epochs = 50
     output_loss = 'mse'
     chart_interval = 10  # Save diagnostic chart every N epochs
+
+    # Weight optimizer: 'adam' or 'kronos'
+    weight_optim_type = 'adam'
+
+    # KRONOS-specific hyperparameters
+    kronos_rank = 32         # LRPD rank for Kronecker factors
+    kronos_damping = 0.01    # Tikhonov damping
+    kronos_ema = 0.95        # EMA decay for factor updates
+    kronos_momentum = 0.9    # SGD momentum on preconditioned gradients
+    kronos_update_freq = 10  # Steps between factor updates
+    kronos_grad_clip = 1.0   # Per-layer gradient norm clip
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
@@ -376,7 +388,11 @@ def main():
     print("ePC ResNet-18 on CIFAR-10")
     print(f"Inference: {error_optim} errors, T={iters}, "
           f"{'damping='+str(damping) if error_optim == 'newton' else 'e_lr='+str(e_lr)}")
-    print(f"Learning: Adam, w_lr={w_lr}, w_decay={w_decay}")
+    print(f"Learning: {weight_optim_type.upper()}, w_lr={w_lr}, w_decay={w_decay}")
+    if weight_optim_type == 'kronos':
+        print(f"  KRONOS: rank={kronos_rank}, damping={kronos_damping}, "
+              f"ema={kronos_ema}, momentum={kronos_momentum}, "
+              f"update_freq={kronos_update_freq}")
     print(f"Output loss: {output_loss}")
     print(f"LR schedule: warmup 10% + cosine decay")
     print(f"Batch size: {batch_size}, Epochs: {num_epochs}")
@@ -396,10 +412,18 @@ def main():
     print(f"Parameters: {num_params:,}")
     print(f"Error layers: {num_error_layers}")
 
-    # Adam with lr=1.0 (actual LR controlled by scheduler)
-    weight_optim = torch.optim.Adam(
-        model.parameters(), lr=1.0, weight_decay=w_decay,
-    )
+    if weight_optim_type == 'kronos':
+        weight_optim = KRONOS(
+            model, lr=1.0, momentum=kronos_momentum,
+            damping=kronos_damping, rank=kronos_rank,
+            ema_decay=kronos_ema, update_freq=kronos_update_freq,
+            weight_decay=w_decay, grad_clip=kronos_grad_clip,
+        )
+    else:
+        # Adam with lr=1.0 (actual LR controlled by scheduler)
+        weight_optim = torch.optim.Adam(
+            model.parameters(), lr=1.0, weight_decay=w_decay,
+        )
     total_steps = len(train_loader) * num_epochs
     lr_scheduler = make_lr_schedule(weight_optim, total_steps, base_lr=w_lr)
 

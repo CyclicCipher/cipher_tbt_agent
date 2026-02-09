@@ -24,6 +24,7 @@ from tqdm import tqdm
 
 from experiments.ePC_ResNet.epc_model import PCE
 from experiments.ePC_ResNet.architectures import get_mlp_mnist
+from src.optimizers.kronos import KRONOS
 
 
 def get_mnist_loaders(batch_size=128, data_dir='./data'):
@@ -285,9 +286,12 @@ def main():
     # Hyperparameters
     iters = 5          # Error optimization steps
     e_lr = 0.01        # SGD learning rate for errors
-    w_lr = 0.001       # Adam learning rate for weights
+    w_lr = 0.001       # Learning rate for weights
     batch_size = 128
     num_epochs = 3
+
+    # Weight optimizer: 'adam' or 'kronos'
+    weight_optim_type = 'adam'
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
@@ -296,7 +300,7 @@ def main():
     print("ePC MNIST Validation")
     print(f"Architecture: [784, 128, 128, 128, 10], ReLU")
     print(f"Inference: SGD errors, T={iters}, e_lr={e_lr}")
-    print(f"Learning: Adam weights, w_lr={w_lr}")
+    print(f"Learning: {weight_optim_type.upper()} weights, w_lr={w_lr}")
     print(f"Output loss: cross-entropy")
     print(f"Batch size: {batch_size}, Epochs: {num_epochs}")
     print("=" * 60)
@@ -310,7 +314,11 @@ def main():
     num_error_layers = len(model.layers) - 1
     print(f"Parameters: {num_params:,}")
 
-    weight_optim = torch.optim.Adam(model.parameters(), lr=w_lr)
+    if weight_optim_type == 'kronos':
+        weight_optim = KRONOS(model, lr=w_lr, damping=0.01, rank=32,
+                              ema_decay=0.95, update_freq=10, momentum=0.9)
+    else:
+        weight_optim = torch.optim.Adam(model.parameters(), lr=w_lr)
     diagnostics = Diagnostics(num_error_layers)
 
     best_test_acc = 0.0

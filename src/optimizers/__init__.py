@@ -1,6 +1,5 @@
 """Optimizers for predictive coding networks."""
 
-from .muon import Muon, MuonWithActivityReg
-from .stable_prospective import StableProspectiveLearning
+from .kronos import KRONOS
 
-__all__ = ['Muon', 'MuonWithActivityReg', 'StableProspectiveLearning']
+__all__ = ['KRONOS']
