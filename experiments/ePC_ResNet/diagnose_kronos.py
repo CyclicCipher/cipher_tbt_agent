@@ -9,8 +9,8 @@ Tests 6 hypotheses about KRONOS A-only preconditioning performance:
   H5: LRPD approximation error compounds over streaming updates
   H6: Preconditioning effect (preconditioned vs raw gradient norm ratio)
 
-Uses A-only KRONOS: Newton T=2, r=32, lr=3e-3, damping=0.01.
-G factor disabled (degenerate for ePC).
+Uses A-only KRONOS: Newton T=2, r=32, lr=0.3, damping=0.01, no clipping.
+G factor disabled (degenerate for ePC). LR compensates for removed G^{-1}.
 """
 
 import sys
@@ -70,8 +70,8 @@ def run_diagnostics(train_loader, test_loader, device, num_epochs=3):
     ).to(device)
 
     kronos = KRONOS(
-        model, lr=0.003, damping=0.01, rank=32,
-        ema_decay=0.95, update_freq=10, momentum=0.9, grad_clip=1.0,
+        model, lr=0.3, damping=0.01, rank=32,
+        ema_decay=0.95, update_freq=10, momentum=0.9, grad_clip=0.0,
     )
 
     # ---------------------------------------------------------------
@@ -408,7 +408,7 @@ def plot_diagnostics(diag, save_path='diagnose_kronos.png'):
     ax.grid(True, alpha=0.3)
     ax.set_yscale('log')
 
-    plt.suptitle('KRONOS Diagnostics — A-only r=32 lr=3e-3 (MNIST)',
+    plt.suptitle('KRONOS Diagnostics — A-only r=32 lr=0.3 no-clip (MNIST)',
                  fontsize=13, fontweight='bold')
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -546,7 +546,7 @@ def print_summary(diag):
 def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
-    print("Running KRONOS diagnostics (A-only, Newton T=2, r=32, lr=3e-3, damping=0.01)")
+    print("Running KRONOS diagnostics (A-only, Newton T=2, r=32, lr=0.3, damping=0.01, no clip)")
     print("Training 3 epochs with detailed instrumentation...\n")
 
     train_loader, test_loader = get_mnist_loaders(batch_size=128)

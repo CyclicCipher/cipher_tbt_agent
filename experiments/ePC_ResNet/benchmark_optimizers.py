@@ -271,11 +271,14 @@ def main():
          'weight_optim': 'adam', 'w_lr': 0.001},
 
         # KRONOS A-only preconditioning (no G factor — degenerate for ePC)
+        # LR increased to compensate for removed G^{-1} ≈ 100*I amplification.
+        # Clipping disabled — precond/raw ratios are healthy (1.7-27x).
         {**newton_base,
          'name': 'Newton + KRONOS A-only r=32',
-         'weight_optim': 'kronos', 'w_lr': 0.003,
+         'weight_optim': 'kronos', 'w_lr': 0.3,
          'kronos_rank': 32, 'kronos_damping': 0.01,
-         'kronos_ema': 0.95, 'kronos_update_freq': 10},
+         'kronos_ema': 0.95, 'kronos_update_freq': 10,
+         'kronos_grad_clip': 0.0},
     ]
 
     all_results = []
