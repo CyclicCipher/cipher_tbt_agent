@@ -76,6 +76,7 @@ def run_experiment(config, train_loader, test_loader, device, num_epochs=3):
             ema_decay=config.get('kronos_ema', 0.95),
             update_freq=config.get('kronos_update_freq', 10),
             momentum=config.get('kronos_momentum', 0.9),
+            grad_clip=config.get('kronos_grad_clip', 1.0),
         )
     else:
         weight_optim = torch.optim.Adam(

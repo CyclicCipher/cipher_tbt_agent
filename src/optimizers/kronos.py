@@ -17,8 +17,8 @@ ePC-adapted damping:
     to a scaled identity. Instead, KRONOS uses flat damping (same λ for both)
     which preserves A's curvature structure. G^{-1} becomes approximately
     constant scaling, and the useful curvature comes from A^{-1} (input
-    whitening). The arbitrary scale from G^{-1} is neutralized by normalizing
-    the preconditioned gradient to match the raw gradient's norm.
+    whitening). The G^{-1} amplification is controlled by per-layer gradient
+    clipping, which preserves the curvature-corrected direction.
 
 KRONOS decomposes A and G into LRPD form (diag(d) + UU^T) and uses the
 Woodbury identity for O(n*k^2) inversion instead of O(n^3). Factor estimates
@@ -229,8 +229,8 @@ class _KronosState:
         Uses flat damping (same λ for both factors) instead of pi-correction.
         For ePC's E_local, G is degenerate (tiny output gradients after
         inference), so G^{-1} ≈ (1/λ)*I (constant scaling). The useful
-        curvature comes from A^{-1} (input whitening). The scale mismatch
-        is handled by gradient normalization in step(), not by damping.
+        curvature comes from A^{-1} (input whitening). The G^{-1} scaling
+        is controlled by gradient clipping in step().
 
         Args:
             grad_w: [out_dim, in_features] or [out, in, kH, kW] for Conv2d
@@ -299,12 +299,11 @@ class KRONOS(torch.optim.Optimizer):
     pass of compute_weight_loss (E_local). During inference (minimize_error_energy),
     hooks are inactive because layer parameters have requires_grad=False.
 
-    Gradient normalization: after KFAC preconditioning, each layer's gradient
-    is normalized to match its raw gradient norm. This preserves the curvature-
-    corrected DIRECTION (the valuable part: input whitening from A^{-1}) while
-    keeping step magnitudes at the same scale as first-order optimizers. This
-    is necessary because G^{-1} ≈ (1/damping)*I for ePC (degenerate G factor),
-    which otherwise creates arbitrary magnitude scaling.
+    Per-layer gradient clipping controls step magnitude after preconditioning.
+    Since G^{-1} ≈ (1/damping)*I for ePC (degenerate G factor), the
+    preconditioned gradient is amplified by ~1/damping. Clipping at a fixed
+    norm preserves the curvature-corrected DIRECTION from A^{-1} while
+    capping the step magnitude.
 
     Args:
         model: nn.Module with Linear and/or Conv2d layers.
@@ -319,17 +318,19 @@ class KRONOS(torch.optim.Optimizer):
         update_freq: Steps between factor LRPD updates. Factors are also
             always updated on the first step.
         weight_decay: L2 regularization.
+        grad_clip: Per-layer gradient norm clipping (0 to disable).
         max_samples: Maximum activation/gradient samples per update.
             Controls memory for Conv2d layers with large spatial dims.
     """
 
     def __init__(self, model, lr=0.001, momentum=0.9, damping=0.01,
                  rank=32, ema_decay=0.95, update_freq=10,
-                 weight_decay=0.0, max_samples=1024):
+                 weight_decay=0.0, grad_clip=1.0, max_samples=1024):
         self._states = {}
         self._hooks = []
         self._step_count = 0
         self._update_freq = update_freq
+        self._grad_clip = grad_clip
 
         # Find all parametric layers and register hooks
         kfac_params = []
@@ -459,26 +460,20 @@ class KRONOS(torch.optim.Optimizer):
             grad_w = w.grad
             grad_b = b.grad if b is not None else None
 
-            # Precondition with KFAC + gradient normalization
+            # Precondition with KFAC
             if state.initialized:
-                # Save raw gradient norm before preconditioning
-                raw_norm = grad_w.norm()
-                if grad_b is not None:
-                    raw_norm = (raw_norm ** 2 + grad_b.norm() ** 2) ** 0.5
-
                 grad_w, grad_b = state.precondition(grad_w, grad_b)
 
-                # Normalize preconditioned gradient to match raw gradient norm.
-                # Preserves curvature-corrected DIRECTION from A^{-1} while
-                # keeping magnitude comparable to first-order optimizers.
-                precond_norm = grad_w.norm()
+            # Per-layer gradient norm clipping
+            if self._grad_clip > 0:
+                grad_norm = grad_w.norm()
                 if grad_b is not None:
-                    precond_norm = (precond_norm ** 2 + grad_b.norm() ** 2) ** 0.5
-                if precond_norm > 1e-8 and raw_norm > 1e-8:
-                    scale = raw_norm / precond_norm
-                    grad_w = grad_w * scale
+                    grad_norm = (grad_norm ** 2 + grad_b.norm() ** 2) ** 0.5
+                clip_coef = self._grad_clip / (grad_norm + 1e-6)
+                if clip_coef < 1.0:
+                    grad_w = grad_w * clip_coef
                     if grad_b is not None:
-                        grad_b = grad_b * scale
+                        grad_b = grad_b * clip_coef
 
             # Weight decay
             if wd > 0:

@@ -70,7 +70,7 @@ def run_diagnostics(train_loader, test_loader, device, num_epochs=3):
 
     kronos = KRONOS(
         model, lr=0.003, damping=0.01, rank=32,
-        ema_decay=0.95, update_freq=10, momentum=0.9,
+        ema_decay=0.95, update_freq=10, momentum=0.9, grad_clip=1.0,
     )
 
     # ---------------------------------------------------------------
