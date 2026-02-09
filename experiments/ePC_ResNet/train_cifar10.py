@@ -20,6 +20,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 import math
 import torch
+import torch.nn.functional as F
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
@@ -66,7 +71,241 @@ def make_lr_schedule(optimizer, total_steps, base_lr=0.0001, warmup_fraction=0.1
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
 
-def train_epoch(model, weight_optim, lr_scheduler, train_loader, device, epoch):
+class Diagnostics:
+    """Collect and plot training diagnostics for ePC ResNet."""
+
+    def __init__(self, num_error_layers):
+        self.num_error_layers = num_error_layers
+        self.reset()
+
+    def reset(self):
+        self.train_accs = []
+        self.train_losses = []
+        self.test_accs = []
+        self.test_losses = []
+        self.layer_energies = [[] for _ in range(self.num_error_layers)]
+        self.inference_convergence = []
+        self.error_norms = [[] for _ in range(self.num_error_layers)]
+        self.learning_rates = []
+        self.weight_magnitudes = {}  # layer_name -> list
+
+    def update_train(self, acc, loss, diagnostics, lr, weight_mags):
+        self.train_accs.append(acc)
+        self.train_losses.append(loss)
+        self.inference_convergence.append(diagnostics['convergence'])
+        self.learning_rates.append(lr)
+
+        for i, energy in enumerate(diagnostics['layer_energies']):
+            if i < self.num_error_layers:
+                self.layer_energies[i].append(energy)
+
+        for i, norm in enumerate(diagnostics['error_norms']):
+            if i < self.num_error_layers:
+                self.error_norms[i].append(norm)
+
+        for name, mag in weight_mags.items():
+            if name not in self.weight_magnitudes:
+                self.weight_magnitudes[name] = []
+            self.weight_magnitudes[name].append(mag)
+
+    def update_test(self, acc, loss):
+        self.test_accs.append(acc)
+        self.test_losses.append(loss)
+
+    def plot(self, save_path, epoch=None, num_epochs=None):
+        fig, axes = plt.subplots(3, 3, figsize=(18, 14))
+
+        # [0,0] Accuracy
+        ax = axes[0, 0]
+        if self.train_accs:
+            ax.plot(self.train_accs, alpha=0.4, linewidth=0.5, label='Train (batch)')
+            # Moving average for readability
+            if len(self.train_accs) > 50:
+                window = min(50, len(self.train_accs) // 5)
+                ma = np.convolve(self.train_accs, np.ones(window)/window, mode='valid')
+                ax.plot(range(window-1, len(self.train_accs)), ma,
+                        linewidth=1.5, label=f'Train (MA-{window})')
+        if self.test_accs:
+            n_train = len(self.train_accs)
+            n_test = len(self.test_accs)
+            if n_test > 0:
+                test_x = [(i + 1) * n_train / n_test for i in range(n_test)]
+                ax.plot(test_x, self.test_accs, 'o-', linewidth=2,
+                        markersize=4, label='Test')
+        ax.set_xlabel('Batch')
+        ax.set_ylabel('Accuracy')
+        ax.set_title('Accuracy')
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+        # [0,1] Output Loss
+        ax = axes[0, 1]
+        if self.train_losses:
+            ax.plot(self.train_losses, alpha=0.4, linewidth=0.5, label='Train (batch)')
+            if len(self.train_losses) > 50:
+                window = min(50, len(self.train_losses) // 5)
+                ma = np.convolve(self.train_losses, np.ones(window)/window, mode='valid')
+                ax.plot(range(window-1, len(self.train_losses)), ma,
+                        linewidth=1.5, label=f'Train (MA-{window})')
+        if self.test_losses:
+            n_train = len(self.train_losses)
+            n_test = len(self.test_losses)
+            if n_test > 0:
+                test_x = [(i + 1) * n_train / n_test for i in range(n_test)]
+                ax.plot(test_x, self.test_losses, 'o-', linewidth=2,
+                        markersize=4, label='Test')
+        ax.set_xlabel('Batch')
+        ax.set_ylabel('Loss')
+        ax.set_title('Output Loss (MSE)')
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+        # [0,2] Per-Layer Energies
+        ax = axes[0, 2]
+        for i, energies in enumerate(self.layer_energies):
+            if energies:
+                ax.plot(energies, label=f'Layer {i+1}', alpha=0.7, linewidth=0.8)
+        ax.set_xlabel('Batch')
+        ax.set_ylabel('Energy')
+        ax.set_title('Per-Layer Energies (0.5 ||e_i||^2)')
+        ax.legend(fontsize=7, ncol=2)
+        ax.grid(True, alpha=0.3)
+        ax.set_yscale('log')
+
+        # [1,0] Inference Convergence
+        ax = axes[1, 0]
+        if self.inference_convergence:
+            ax.plot(self.inference_convergence, alpha=0.5, linewidth=0.5)
+            if len(self.inference_convergence) > 50:
+                window = min(50, len(self.inference_convergence) // 5)
+                ma = np.convolve(self.inference_convergence,
+                                 np.ones(window)/window, mode='valid')
+                ax.plot(range(window-1, len(self.inference_convergence)), ma,
+                        linewidth=1.5, color='red', label=f'MA-{window}')
+                ax.legend(fontsize=8)
+        ax.set_xlabel('Batch')
+        ax.set_ylabel('E_initial - E_final')
+        ax.set_title('Inference Convergence (E_0 - E_T)')
+        ax.grid(True, alpha=0.3)
+
+        # [1,1] Error Magnitudes
+        ax = axes[1, 1]
+        for i, norms in enumerate(self.error_norms):
+            if norms:
+                ax.plot(norms, label=f'Layer {i+1}', alpha=0.7, linewidth=0.8)
+        ax.set_xlabel('Batch')
+        ax.set_ylabel('||e_i||')
+        ax.set_title('Error Magnitudes (per layer)')
+        ax.legend(fontsize=7, ncol=2)
+        ax.grid(True, alpha=0.3)
+        ax.set_yscale('log')
+
+        # [1,2] Learning Rate Schedule
+        ax = axes[1, 2]
+        if self.learning_rates:
+            ax.plot(self.learning_rates, linewidth=1.5)
+        ax.set_xlabel('Batch')
+        ax.set_ylabel('Learning Rate')
+        ax.set_title('Learning Rate Schedule')
+        ax.grid(True, alpha=0.3)
+        ax.ticklabel_format(style='sci', axis='y', scilimits=(-4, -4))
+
+        # [2,0] Weight Magnitudes
+        ax = axes[2, 0]
+        for name, mags in self.weight_magnitudes.items():
+            if mags:
+                ax.plot(mags, label=name, alpha=0.7, linewidth=0.8)
+        ax.set_xlabel('Batch')
+        ax.set_ylabel('max|W|')
+        ax.set_title('Weight Magnitudes (per layer)')
+        ax.legend(fontsize=7, ncol=2)
+        ax.grid(True, alpha=0.3)
+
+        # [2,1] Summary
+        ax = axes[2, 1]
+        ax.axis('off')
+        lines = []
+        if self.test_accs:
+            lines.append(f"Best Test Acc: {max(self.test_accs):.2%}")
+            lines.append(f"Final Test Acc: {self.test_accs[-1]:.2%}")
+        if self.train_accs:
+            lines.append(f"Final Train Acc (batch): {self.train_accs[-1]:.2%}")
+        if epoch is not None and num_epochs is not None:
+            lines.append(f"\nEpoch: {epoch}/{num_epochs}")
+        if self.inference_convergence:
+            avg_conv = np.mean(self.inference_convergence[-100:])
+            lines.append(f"Avg Convergence (last 100): {avg_conv:.2f}")
+        lines.append(f"\nePC paper target: 92.17%")
+        lines.append(f"Backprop baseline: 92.36%")
+        ax.text(0.1, 0.5, '\n'.join(lines), fontsize=11,
+                verticalalignment='center', family='monospace')
+
+        # [2,2] Per-layer error stats
+        ax = axes[2, 2]
+        ax.axis('off')
+        lines = []
+        for i, norms in enumerate(self.error_norms):
+            if norms:
+                recent = norms[-100:] if len(norms) >= 100 else norms
+                lines.append(f"Layer {i+1}: ||e|| mean={np.mean(recent):.3f}, "
+                             f"max={np.max(recent):.3f}")
+        if self.inference_convergence:
+            recent = self.inference_convergence[-100:]
+            lines.append(f"\nConvergence: mean={np.mean(recent):.2f}, "
+                         f"min={np.min(recent):.2f}")
+        ax.text(0.05, 0.5, '\n'.join(lines), fontsize=9,
+                verticalalignment='center', family='monospace')
+
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Diagnostics saved to {save_path}")
+        plt.close()
+
+
+def get_weight_magnitudes(model):
+    """Extract max absolute weight per named parameter group."""
+    mags = {}
+    layer_idx = 0
+    for i, layer in enumerate(model.layers):
+        has_params = False
+        max_val = 0.0
+        for p in layer.parameters():
+            max_val = max(max_val, p.data.abs().max().item())
+            has_params = True
+        if has_params:
+            layer_idx += 1
+            mags[f'L{layer_idx}'] = max_val
+    return mags
+
+
+def evaluate_with_loss(model, test_loader, device, output_loss='mse'):
+    """Evaluate model returning both accuracy and loss."""
+    model.eval()
+    total_correct = 0
+    total_samples = 0
+    total_loss = 0.0
+
+    with torch.no_grad():
+        for data, target in test_loader:
+            data, target = data.to(device), target.to(device)
+            outputs = model(data)
+            preds = outputs.argmax(dim=1)
+            total_correct += (preds == target).sum().item()
+            total_samples += data.size(0)
+
+            if output_loss == 'mse':
+                y_onehot = F.one_hot(target, num_classes=outputs.shape[-1]).float()
+                total_loss += 0.5 * F.mse_loss(
+                    outputs, y_onehot, reduction='sum').item()
+            else:
+                total_loss += F.cross_entropy(
+                    outputs, target, reduction='sum').item()
+
+    return total_correct / total_samples, total_loss / total_samples
+
+
+def train_epoch(model, weight_optim, lr_scheduler, train_loader,
+                device, epoch, diagnostics):
     model.train()
     total_correct = 0
     total_samples = 0
@@ -79,6 +318,9 @@ def train_epoch(model, weight_optim, lr_scheduler, train_loader, device, epoch):
 
         # Phase 1: Inference (optimize errors)
         energy = model(data, target)
+
+        # Collect diagnostics before weight update
+        diag = model.get_diagnostics()
 
         # Phase 2: Weight update (local learning via E_local)
         weight_optim.zero_grad()
@@ -97,28 +339,21 @@ def train_epoch(model, weight_optim, lr_scheduler, train_loader, device, epoch):
             total_correct += correct
             total_samples += batch_size
 
+        acc = correct / batch_size
+        lr = lr_scheduler.get_last_lr()[0]
+        weight_mags = get_weight_magnitudes(model)
+
+        diagnostics.update_train(
+            acc=acc, loss=energy / batch_size,
+            diagnostics=diag, lr=lr, weight_mags=weight_mags,
+        )
+
         pbar.set_postfix(
-            acc=f"{correct/batch_size:.1%}",
-            lr=f"{lr_scheduler.get_last_lr()[0]:.2e}",
+            acc=f"{acc:.1%}",
+            lr=f"{lr:.2e}",
         )
 
     return total_correct / total_samples, total_energy / len(train_loader)
-
-
-def evaluate(model, test_loader, device):
-    model.eval()
-    total_correct = 0
-    total_samples = 0
-
-    with torch.no_grad():
-        for data, target in test_loader:
-            data, target = data.to(device), target.to(device)
-            outputs = model(data)
-            preds = outputs.argmax(dim=1)
-            total_correct += (preds == target).sum().item()
-            total_samples += data.size(0)
-
-    return total_correct / total_samples
 
 
 def main():
@@ -130,6 +365,7 @@ def main():
     batch_size = 256
     num_epochs = 50
     output_loss = 'mse'
+    chart_interval = 10  # Save diagnostic chart every N epochs
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
@@ -152,7 +388,9 @@ def main():
     ).to(device)
 
     num_params = sum(p.numel() for p in model.parameters())
+    num_error_layers = len(model.layers) - 1
     print(f"Parameters: {num_params:,}")
+    print(f"Error layers: {num_error_layers}")
 
     # Adam with lr=1.0 (actual LR controlled by scheduler)
     weight_optim = torch.optim.Adam(
@@ -161,12 +399,18 @@ def main():
     total_steps = len(train_loader) * num_epochs
     lr_scheduler = make_lr_schedule(weight_optim, total_steps, base_lr=w_lr)
 
+    diagnostics = Diagnostics(num_error_layers)
+
     best_test_acc = 0.0
     for epoch in range(num_epochs):
         train_acc, avg_energy = train_epoch(
-            model, weight_optim, lr_scheduler, train_loader, device, epoch,
+            model, weight_optim, lr_scheduler, train_loader,
+            device, epoch, diagnostics,
         )
-        test_acc = evaluate(model, test_loader, device)
+        test_acc, test_loss = evaluate_with_loss(
+            model, test_loader, device, output_loss,
+        )
+        diagnostics.update_test(test_acc, test_loss)
 
         if test_acc > best_test_acc:
             best_test_acc = test_acc
@@ -175,9 +419,20 @@ def main():
               f"Train {train_acc:.2%}, Test {test_acc:.2%}, "
               f"Energy {avg_energy:.1f}, Best {best_test_acc:.2%}")
 
+        # Save diagnostic chart periodically
+        if (epoch + 1) % chart_interval == 0 or epoch == num_epochs - 1:
+            diagnostics.plot(
+                f'diagnostics_cifar10_epoch_{epoch+1}.png',
+                epoch=epoch + 1, num_epochs=num_epochs,
+            )
+
     print(f"\nBest test accuracy: {best_test_acc:.2%}")
     print(f"ePC paper target: 92.17%")
     print(f"Backprop baseline: 92.36%")
+
+    # Final chart
+    diagnostics.plot('diagnostics_cifar10_final.png',
+                     epoch=num_epochs, num_epochs=num_epochs)
 
 
 if __name__ == "__main__":

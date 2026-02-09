@@ -13,6 +13,11 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 import torch
+import torch.nn.functional as F
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
@@ -34,7 +39,182 @@ def get_mnist_loaders(batch_size=128, data_dir='./data'):
     )
 
 
-def train_epoch(model, weight_optim, train_loader, device, epoch):
+class Diagnostics:
+    """Collect and plot training diagnostics for ePC MNIST."""
+
+    def __init__(self, num_error_layers):
+        self.num_error_layers = num_error_layers
+        self.reset()
+
+    def reset(self):
+        self.train_accs = []
+        self.train_losses = []
+        self.test_accs = []
+        self.test_losses = []
+        self.layer_energies = [[] for _ in range(self.num_error_layers)]
+        self.inference_convergence = []
+        self.error_norms = [[] for _ in range(self.num_error_layers)]
+        self.weight_magnitudes = {}
+
+    def update_train(self, acc, loss, diagnostics, weight_mags):
+        self.train_accs.append(acc)
+        self.train_losses.append(loss)
+        self.inference_convergence.append(diagnostics['convergence'])
+
+        for i, energy in enumerate(diagnostics['layer_energies']):
+            if i < self.num_error_layers:
+                self.layer_energies[i].append(energy)
+
+        for i, norm in enumerate(diagnostics['error_norms']):
+            if i < self.num_error_layers:
+                self.error_norms[i].append(norm)
+
+        for name, mag in weight_mags.items():
+            if name not in self.weight_magnitudes:
+                self.weight_magnitudes[name] = []
+            self.weight_magnitudes[name].append(mag)
+
+    def update_test(self, acc, loss):
+        self.test_accs.append(acc)
+        self.test_losses.append(loss)
+
+    def plot(self, save_path):
+        fig, axes = plt.subplots(3, 3, figsize=(18, 14))
+
+        # [0,0] Accuracy
+        ax = axes[0, 0]
+        if self.train_accs:
+            ax.plot(self.train_accs, alpha=0.5, linewidth=0.5, label='Train (batch)')
+        if self.test_accs:
+            n_train = len(self.train_accs)
+            n_test = len(self.test_accs)
+            if n_test > 0:
+                test_x = [(i + 1) * n_train / n_test for i in range(n_test)]
+                ax.plot(test_x, self.test_accs, 'o-', linewidth=2,
+                        markersize=6, label='Test')
+        ax.set_xlabel('Batch')
+        ax.set_ylabel('Accuracy')
+        ax.set_title('Accuracy')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # [0,1] Cross-Entropy Loss
+        ax = axes[0, 1]
+        if self.train_losses:
+            ax.plot(self.train_losses, alpha=0.5, linewidth=0.5, label='Train (batch)')
+        if self.test_losses:
+            n_train = len(self.train_losses)
+            n_test = len(self.test_losses)
+            if n_test > 0:
+                test_x = [(i + 1) * n_train / n_test for i in range(n_test)]
+                ax.plot(test_x, self.test_losses, 'o-', linewidth=2,
+                        markersize=6, label='Test')
+        ax.set_xlabel('Batch')
+        ax.set_ylabel('Loss')
+        ax.set_title('Cross-Entropy Loss (logging only)')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # [0,2] Per-Layer Energies
+        ax = axes[0, 2]
+        for i, energies in enumerate(self.layer_energies):
+            if energies:
+                ax.plot(energies, label=f'Layer {i+1}', alpha=0.7)
+        ax.set_xlabel('Batch')
+        ax.set_ylabel('Energy')
+        ax.set_title('Per-Layer Energies')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_yscale('log')
+
+        # [1,0] Inference Convergence
+        ax = axes[1, 0]
+        if self.inference_convergence:
+            ax.plot(self.inference_convergence, alpha=0.7)
+        ax.set_xlabel('Batch')
+        ax.set_ylabel('E_initial - E_final')
+        ax.set_title('Inference Convergence (E_0 - E_T)')
+        ax.grid(True, alpha=0.3)
+
+        # [1,1] Error Magnitudes
+        ax = axes[1, 1]
+        for i, norms in enumerate(self.error_norms):
+            if norms:
+                ax.plot(norms, label=f'Layer {i+1}', alpha=0.7)
+        ax.set_xlabel('Batch')
+        ax.set_ylabel('||e_i||')
+        ax.set_title('Error Magnitudes (per layer)')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_yscale('log')
+
+        # [1,2] Weight Magnitudes
+        ax = axes[1, 2]
+        for name, mags in self.weight_magnitudes.items():
+            if mags:
+                ax.plot(mags, label=name, alpha=0.7)
+        ax.set_xlabel('Batch')
+        ax.set_ylabel('max|W|')
+        ax.set_title('Weight Magnitudes (per layer)')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # [2,0] Summary
+        ax = axes[2, 0]
+        ax.axis('off')
+        lines = []
+        if self.test_accs:
+            lines.append(f"Best Test Acc: {max(self.test_accs):.2%}")
+            lines.append(f"Final Test Acc: {self.test_accs[-1]:.2%}")
+        if self.train_accs:
+            lines.append(f"Final Train Acc (batch): {self.train_accs[-1]:.2%}")
+        if self.inference_convergence:
+            avg_conv = np.mean(self.inference_convergence[-100:])
+            lines.append(f"\nAvg Convergence (last 100): {avg_conv:.2f}")
+        lines.append(f"\neBPC baseline: 95.74% (3 epochs)")
+        lines.append(f"ePC target: ~95%")
+        ax.text(0.1, 0.5, '\n'.join(lines), fontsize=12,
+                verticalalignment='center', family='monospace')
+
+        # [2,1] Per-layer stats
+        ax = axes[2, 1]
+        ax.axis('off')
+        lines = []
+        for i, norms in enumerate(self.error_norms):
+            if norms:
+                recent = norms[-100:] if len(norms) >= 100 else norms
+                lines.append(f"Layer {i+1}: ||e|| mean={np.mean(recent):.4f}, "
+                             f"max={np.max(recent):.4f}")
+        if self.inference_convergence:
+            recent = self.inference_convergence[-100:]
+            lines.append(f"\nConvergence: mean={np.mean(recent):.3f}")
+        ax.text(0.05, 0.5, '\n'.join(lines), fontsize=10,
+                verticalalignment='center', family='monospace')
+
+        # [2,2] Empty
+        axes[2, 2].axis('off')
+
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"Diagnostics saved to {save_path}")
+        plt.close()
+
+
+def get_weight_magnitudes(model):
+    """Extract max absolute weight per layer."""
+    mags = {}
+    for i, layer in enumerate(model.layers):
+        max_val = 0.0
+        has_params = False
+        for p in layer.parameters():
+            max_val = max(max_val, p.data.abs().max().item())
+            has_params = True
+        if has_params:
+            mags[f'Layer {i+1}'] = max_val
+    return mags
+
+
+def train_epoch(model, weight_optim, train_loader, device, epoch, diagnostics):
     model.train()
     total_correct = 0
     total_samples = 0
@@ -46,7 +226,10 @@ def train_epoch(model, weight_optim, train_loader, device, epoch):
         batch_size = data.size(0)
 
         # Phase 1: Inference (optimize errors)
-        model(data, target)
+        energy = model(data, target)
+
+        # Collect diagnostics
+        diag = model.get_diagnostics()
 
         # Phase 2: Weight update (local learning via E_local)
         weight_optim.zero_grad()
@@ -62,7 +245,19 @@ def train_epoch(model, weight_optim, train_loader, device, epoch):
             total_correct += correct
             total_samples += batch_size
 
-        pbar.set_postfix(acc=f"{correct/batch_size:.2%}")
+        acc = correct / batch_size
+        weight_mags = get_weight_magnitudes(model)
+
+        # Compute CE loss for logging (ePC energy is the real objective)
+        with torch.no_grad():
+            ce_loss = F.cross_entropy(model(data), target).item()
+
+        diagnostics.update_train(
+            acc=acc, loss=ce_loss,
+            diagnostics=diag, weight_mags=weight_mags,
+        )
+
+        pbar.set_postfix(acc=f"{acc:.2%}")
 
     return total_correct / total_samples
 
@@ -71,6 +266,7 @@ def evaluate(model, test_loader, device):
     model.eval()
     total_correct = 0
     total_samples = 0
+    total_loss = 0.0
 
     with torch.no_grad():
         for data, target in test_loader:
@@ -80,8 +276,9 @@ def evaluate(model, test_loader, device):
             preds = outputs.argmax(dim=1)
             total_correct += (preds == target).sum().item()
             total_samples += data.size(0)
+            total_loss += F.cross_entropy(outputs, target, reduction='sum').item()
 
-    return total_correct / total_samples
+    return total_correct / total_samples, total_loss / total_samples
 
 
 def main():
@@ -110,14 +307,19 @@ def main():
     model = PCE(architecture, iters=iters, e_lr=e_lr, output_loss='ce').to(device)
 
     num_params = sum(p.numel() for p in model.parameters())
+    num_error_layers = len(model.layers) - 1
     print(f"Parameters: {num_params:,}")
 
     weight_optim = torch.optim.Adam(model.parameters(), lr=w_lr)
+    diagnostics = Diagnostics(num_error_layers)
 
     best_test_acc = 0.0
     for epoch in range(num_epochs):
-        train_acc = train_epoch(model, weight_optim, train_loader, device, epoch)
-        test_acc = evaluate(model, test_loader, device)
+        train_acc = train_epoch(
+            model, weight_optim, train_loader, device, epoch, diagnostics,
+        )
+        test_acc, test_loss = evaluate(model, test_loader, device)
+        diagnostics.update_test(test_acc, test_loss)
 
         if test_acc > best_test_acc:
             best_test_acc = test_acc
@@ -125,9 +327,13 @@ def main():
         print(f"Epoch {epoch+1}/{num_epochs}: "
               f"Train {train_acc:.2%}, Test {test_acc:.2%}")
 
+        diagnostics.plot(f'diagnostics_epc_mnist_epoch_{epoch+1}.png')
+
     print(f"\nBest test accuracy: {best_test_acc:.2%}")
     print(f"eBPC baseline: 95.74% (3 epochs, Hebbian updates)")
     print(f"Target: ~95%")
+
+    diagnostics.plot('diagnostics_epc_mnist_final.png')
 
 
 if __name__ == "__main__":
