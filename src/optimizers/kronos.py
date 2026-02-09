@@ -7,11 +7,19 @@ For a layer y = Wx, the Fisher Information Matrix is:
     F_W ≈ A ⊗ G
 where A = E[aa^T] (input covariance) and G = E[gg^T] (output gradient
 covariance). The preconditioned (natural) gradient is:
-    ΔW = G^{-1} @ ∇W @ A^{-1}
+    ΔW = (G + λ_g I)^{-1} @ ∇W @ (A + λ_a I)^{-1}
+
+Damping uses the factored Tikhonov approach with pi-correction (Martens &
+Grosse 2015): λ_a = sqrt(eps * pi), λ_g = sqrt(eps / pi), where
+    pi = (trace(A) * dim(G)) / (trace(G) * dim(A))
+This balances damping proportionally to each factor's scale, so neither
+A nor G is over-/under-damped. Research shows KFAC's performance depends
+critically on this heuristic (Clarke & Hernandez-Lobato, ICML 2024).
 
 KRONOS decomposes A and G into LRPD form (diag(d) + UU^T) and uses the
 Woodbury identity for O(n*k^2) inversion instead of O(n^3). Factor estimates
-are maintained via streaming LRPD updates (EMA blending).
+are maintained via streaming LRPD updates (EMA blending). Damping is applied
+at inversion time (not baked into the factors), enabling adaptive correction.
 
 Scalability:
     Memory: O(n*k) per factor instead of O(n^2)
@@ -42,11 +50,17 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 from lrpd import lrpd_solve, online_lrpd_update, alt_decompose
 
 
+# Small floor for numerical stability (NOT damping)
+_EPS_FLOOR = 1e-6
+
+
 class _KronosState:
     """Per-layer KFAC state with LRPD factor decomposition.
 
     Maintains LRPD estimates of the input covariance A = E[aa^T] and
     output gradient covariance G = E[gg^T] for a single parametric layer.
+    Factors store PURE curvature (no damping). Damping is applied at
+    inversion time with pi-correction.
 
     Attributes:
         d_a, U_a: LRPD factors for A [in_dim], [in_dim, rank_a]
@@ -106,9 +120,17 @@ class _KronosState:
             g = g[idx]
         self._cached_g = g.detach()
 
+    def _lrpd_trace(self, d, U):
+        """Compute trace(diag(d) + UU^T) = sum(d) + ||U||_F^2."""
+        return d.sum() + (U ** 2).sum()
+
     @torch.no_grad()
     def update_factors(self):
-        """Update LRPD estimates of A and G from cached hook data."""
+        """Update LRPD estimates of A and G from cached hook data.
+
+        Factors store pure curvature (no damping). Uses FITC residual mode
+        for exact diagonal preservation without over-inflation.
+        """
         a = self._cached_a
         g = self._cached_g
         if a is None or g is None:
@@ -119,11 +141,15 @@ class _KronosState:
         device = a.device
         dtype = a.dtype
 
+        # Small numerical floor (NOT damping)
+        floor_a = torch.full((self.aug_in_dim,), _EPS_FLOOR,
+                             device=device, dtype=dtype)
+        floor_g = torch.full((self.out_dim,), _EPS_FLOOR,
+                             device=device, dtype=dtype)
+
         if not self.initialized:
-            # First update: full weight on batch data, plus damping
-            # Use online_lrpd_update with beta=0 (no old estimate)
-            d_a_init = torch.full((self.aug_in_dim,), self.damping,
-                                  device=device, dtype=dtype)
+            # First update: full weight on batch data
+            d_a_init = floor_a.clone()
             U_a_init = torch.zeros(self.aug_in_dim, self.rank_a,
                                    device=device, dtype=dtype)
 
@@ -131,14 +157,13 @@ class _KronosState:
             self.d_a, self.U_a = online_lrpd_update(
                 d_a_init, U_a_init, F_a,
                 alpha=1.0, beta=0.0,
-                d_prior=torch.full_like(d_a_init, self.damping),
+                d_prior=floor_a,
                 alpha_prior=1.0,
-                residual_mode='spectral',
+                residual_mode='fitc',
                 rank_k=self.rank_a,
             )
 
-            d_g_init = torch.full((self.out_dim,), self.damping,
-                                  device=device, dtype=dtype)
+            d_g_init = floor_g.clone()
             U_g_init = torch.zeros(self.out_dim, self.rank_g,
                                    device=device, dtype=dtype)
 
@@ -146,23 +171,23 @@ class _KronosState:
             self.d_g, self.U_g = online_lrpd_update(
                 d_g_init, U_g_init, F_g,
                 alpha=1.0, beta=0.0,
-                d_prior=torch.full_like(d_g_init, self.damping),
+                d_prior=floor_g,
                 alpha_prior=1.0,
-                residual_mode='spectral',
+                residual_mode='fitc',
                 rank_k=self.rank_g,
             )
 
             self.initialized = True
         else:
-            # Streaming EMA update
+            # Streaming EMA update (pure curvature, no damping)
             F_a = a / (n_a ** 0.5)
             self.d_a, self.U_a = online_lrpd_update(
                 self.d_a, self.U_a, F_a,
                 alpha=1.0 - self.ema_decay,
                 beta=self.ema_decay,
-                d_prior=torch.full_like(self.d_a, self.damping),
+                d_prior=floor_a,
                 alpha_prior=1.0 - self.ema_decay,
-                residual_mode='spectral',
+                residual_mode='fitc',
                 rank_k=self.rank_a,
             )
 
@@ -171,9 +196,9 @@ class _KronosState:
                 self.d_g, self.U_g, F_g,
                 alpha=1.0 - self.ema_decay,
                 beta=self.ema_decay,
-                d_prior=torch.full_like(self.d_g, self.damping),
+                d_prior=floor_g,
                 alpha_prior=1.0 - self.ema_decay,
-                residual_mode='spectral',
+                residual_mode='fitc',
                 rank_k=self.rank_g,
             )
 
@@ -183,7 +208,15 @@ class _KronosState:
 
     @torch.no_grad()
     def precondition(self, grad_w, grad_b=None):
-        """Apply KFAC preconditioning: ΔW = G^{-1} @ ∇W @ A^{-1}.
+        """Apply KFAC preconditioning with pi-corrected factored damping.
+
+        Computes: ΔW = (G + λ_g I)^{-1} @ ∇W @ (A + λ_a I)^{-1}
+
+        Pi-correction balances damping between A and G:
+            pi = (trace(A) * dim(G)) / (trace(G) * dim(A))
+            λ_a = sqrt(damping * pi)
+            λ_g = sqrt(damping / pi)
+        So λ_a * λ_g = damping, and the ratio follows factor scales.
 
         Args:
             grad_w: [out_dim, in_features] or [out, in, kH, kW] for Conv2d
@@ -202,22 +235,36 @@ class _KronosState:
 
         # Build augmented gradient matrix [out, aug_in]
         if self.has_bias and grad_b is not None:
-            G = torch.cat([grad_w, grad_b.unsqueeze(1)], dim=1)
+            M = torch.cat([grad_w, grad_b.unsqueeze(1)], dim=1)
         else:
-            G = grad_w
+            M = grad_w
 
-        # Right-multiply: G @ A^{-1}
-        G = lrpd_solve(self.d_a, self.U_a, G)
+        # Pi-correction: balance damping between A and G
+        trace_a = self._lrpd_trace(self.d_a, self.U_a)
+        trace_g = self._lrpd_trace(self.d_g, self.U_g)
 
-        # Left-multiply: G_cov^{-1} @ G  =  (G^T @ G_cov^{-1})^T
-        G = lrpd_solve(self.d_g, self.U_g, G.T).T
+        pi = (trace_a * self.out_dim) / (trace_g * self.aug_in_dim + 1e-8)
+        pi = torch.clamp(pi, min=1e-4, max=1e4)  # prevent extreme ratios
+
+        damping_a = (self.damping * pi) ** 0.5
+        damping_g = (self.damping / pi) ** 0.5
+
+        # Damped factors: add damping to diagonal at inversion time
+        d_a_damped = self.d_a + damping_a
+        d_g_damped = self.d_g + damping_g
+
+        # Right-multiply: M @ (A + λ_a I)^{-1}
+        M = lrpd_solve(d_a_damped, self.U_a, M)
+
+        # Left-multiply: (G + λ_g I)^{-1} @ M = (M^T @ (G + λ_g I)^{-1})^T
+        M = lrpd_solve(d_g_damped, self.U_g, M.T).T
 
         # Split augmented gradient back
         if self.has_bias and grad_b is not None:
-            grad_w_out = G[:, :-1]
-            grad_b_out = G[:, -1]
+            grad_w_out = M[:, :-1]
+            grad_b_out = M[:, -1]
         else:
-            grad_w_out = G
+            grad_w_out = M
             grad_b_out = grad_b
 
         # Restore conv shape
@@ -252,7 +299,8 @@ class KRONOS(torch.optim.Optimizer):
         model: nn.Module with Linear and/or Conv2d layers.
         lr: Learning rate for preconditioned updates.
         momentum: SGD momentum on preconditioned gradients.
-        damping: Tikhonov damping (λI added to Kronecker factors).
+        damping: Tikhonov damping (eps). Distributed between factors via
+            pi-correction: λ_a = sqrt(eps * pi), λ_g = sqrt(eps / pi).
         rank: LRPD rank for factor decomposition. Capped at dim-1 per layer.
         ema_decay: Exponential moving average decay for factor updates.
         update_freq: Steps between factor LRPD updates. Factors are also
@@ -471,8 +519,8 @@ class KRONOS(torch.optim.Optimizer):
         """Return per-layer curvature diagnostics.
 
         Returns:
-            dict mapping layer description to {rank_a, rank_g, d_a_range,
-            d_g_range, steps, initialized}.
+            dict mapping layer description to curvature info including
+            pi-correction values and damping distribution.
         """
         diag = {}
         for i, (module, state) in enumerate(self._states.items()):
@@ -484,11 +532,17 @@ class KRONOS(torch.optim.Optimizer):
                 'rank_g': state.rank_g,
             }
             if state.initialized:
+                trace_a = state._lrpd_trace(state.d_a, state.U_a).item()
+                trace_g = state._lrpd_trace(state.d_g, state.U_g).item()
+                pi = (trace_a * state.out_dim) / (trace_g * state.aug_in_dim + 1e-8)
+                info['trace_a'] = trace_a
+                info['trace_g'] = trace_g
+                info['pi'] = pi
+                info['damping_a'] = (state.damping * pi) ** 0.5
+                info['damping_g'] = (state.damping / pi) ** 0.5
                 info['d_a_range'] = (state.d_a.min().item(),
                                      state.d_a.max().item())
                 info['d_g_range'] = (state.d_g.min().item(),
                                      state.d_g.max().item())
-                info['U_a_norm'] = state.U_a.norm().item()
-                info['U_g_norm'] = state.U_g.norm().item()
             diag[name] = info
         return diag
