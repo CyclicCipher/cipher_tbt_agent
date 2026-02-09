@@ -9,16 +9,18 @@ where A = E[aa^T] (input covariance) and G = E[gg^T] (output gradient
 covariance). The preconditioned (natural) gradient is:
     ΔW = (G + λ I)^{-1} @ ∇W @ (A + λ I)^{-1}
 
-ePC-adapted damping:
+ePC-adapted A-only preconditioning:
     ePC's E_local detaches states between layers and uses local MSE losses.
     After good inference (Newton T=2), prediction errors are small, making
-    the output gradient covariance G degenerate (trace(G) << trace(A)).
-    Pi-correction would push all damping onto A, collapsing the preconditioner
-    to a scaled identity. Instead, KRONOS uses flat damping (same λ for both)
-    which preserves A's curvature structure. G^{-1} becomes approximately
-    constant scaling, and the useful curvature comes from A^{-1} (input
-    whitening). The G^{-1} amplification is controlled by per-layer gradient
-    clipping, which preserves the curvature-corrected direction.
+    the output gradient covariance G degenerate (trace(G) << trace(A) by
+    ~40,000:1). This means G^{-1} ≈ (1/λ)*I regardless of damping strategy
+    — it contributes only constant scaling, not curvature information.
+    KRONOS therefore uses A-only preconditioning by default:
+        ΔW = ∇W @ (A + λ I)^{-1}
+    This preserves A's curvature (input whitening) while avoiding the
+    arbitrary G^{-1} amplification that gradient clipping would need to
+    control. The G factor can be optionally enabled (use_g=True) for
+    models where output gradients carry meaningful curvature information.
 
 KRONOS decomposes A and G into LRPD form (diag(d) + UU^T) and uses the
 Woodbury identity for O(n*k^2) inversion instead of O(n^3). Factor estimates
@@ -71,11 +73,12 @@ class _KronosState:
         d_g, U_g: LRPD factors for G [out_dim], [out_dim, rank_g]
     """
 
-    def __init__(self, module, rank, damping, ema_decay, max_samples):
+    def __init__(self, module, rank, damping, ema_decay, max_samples, use_g=False):
         self.module = module
         self.damping = damping
         self.ema_decay = ema_decay
         self.max_samples = max_samples
+        self.use_g = use_g
 
         # Determine layer dimensions
         if isinstance(module, nn.Linear):
@@ -130,7 +133,7 @@ class _KronosState:
 
     @torch.no_grad()
     def update_factors(self):
-        """Update LRPD estimates of A and G from cached hook data.
+        """Update LRPD estimates of A (and optionally G) from cached hook data.
 
         Factors store pure curvature (no damping). Uses FITC residual mode
         for exact diagonal preservation without over-inflation.
@@ -146,19 +149,18 @@ class _KronosState:
                 = (1/B) sum g_true g_true^T.
         """
         a = self._cached_a
-        g = self._cached_g
-        if a is None or g is None:
+        if a is None:
+            return
+        # G factor is optional (degenerate for ePC)
+        if self.use_g and self._cached_g is None:
             return
 
         n_a = a.shape[0]
-        n_g = g.shape[0]
         device = a.device
         dtype = a.dtype
 
         # Small numerical floor (NOT damping)
         floor_a = torch.full((self.aug_in_dim,), _EPS_FLOOR,
-                             device=device, dtype=dtype)
-        floor_g = torch.full((self.out_dim,), _EPS_FLOOR,
                              device=device, dtype=dtype)
 
         if not self.initialized:
@@ -177,19 +179,24 @@ class _KronosState:
                 rank_k=self.rank_a,
             )
 
-            d_g_init = floor_g.clone()
-            U_g_init = torch.zeros(self.out_dim, self.rank_g,
-                                   device=device, dtype=dtype)
+            if self.use_g:
+                g = self._cached_g
+                n_g = g.shape[0]
+                floor_g = torch.full((self.out_dim,), _EPS_FLOOR,
+                                     device=device, dtype=dtype)
+                d_g_init = floor_g.clone()
+                U_g_init = torch.zeros(self.out_dim, self.rank_g,
+                                       device=device, dtype=dtype)
 
-            F_g = g * (n_g ** 0.5)  # G = n * g^T g (undo batch-mean scaling)
-            self.d_g, self.U_g = online_lrpd_update(
-                d_g_init, U_g_init, F_g,
-                alpha=1.0, beta=0.0,
-                d_prior=floor_g,
-                alpha_prior=1.0,
-                residual_mode='fitc',
-                rank_k=self.rank_g,
-            )
+                F_g = g * (n_g ** 0.5)  # G = n * g^T g (undo batch-mean scaling)
+                self.d_g, self.U_g = online_lrpd_update(
+                    d_g_init, U_g_init, F_g,
+                    alpha=1.0, beta=0.0,
+                    d_prior=floor_g,
+                    alpha_prior=1.0,
+                    residual_mode='fitc',
+                    rank_k=self.rank_g,
+                )
 
             self.initialized = True
         else:
@@ -205,16 +212,21 @@ class _KronosState:
                 rank_k=self.rank_a,
             )
 
-            F_g = g * (n_g ** 0.5)  # G = n * g^T g (undo batch-mean scaling)
-            self.d_g, self.U_g = online_lrpd_update(
-                self.d_g, self.U_g, F_g,
-                alpha=1.0 - self.ema_decay,
-                beta=self.ema_decay,
-                d_prior=floor_g,
-                alpha_prior=1.0 - self.ema_decay,
-                residual_mode='fitc',
-                rank_k=self.rank_g,
-            )
+            if self.use_g:
+                g = self._cached_g
+                n_g = g.shape[0]
+                floor_g = torch.full((self.out_dim,), _EPS_FLOOR,
+                                     device=device, dtype=dtype)
+                F_g = g * (n_g ** 0.5)  # G = n * g^T g (undo batch-mean scaling)
+                self.d_g, self.U_g = online_lrpd_update(
+                    self.d_g, self.U_g, F_g,
+                    alpha=1.0 - self.ema_decay,
+                    beta=self.ema_decay,
+                    d_prior=floor_g,
+                    alpha_prior=1.0 - self.ema_decay,
+                    residual_mode='fitc',
+                    rank_k=self.rank_g,
+                )
 
         self._cached_a = None
         self._cached_g = None
@@ -222,15 +234,15 @@ class _KronosState:
 
     @torch.no_grad()
     def precondition(self, grad_w, grad_b=None):
-        """Apply KFAC preconditioning with flat damping.
+        """Apply KFAC preconditioning.
 
-        Computes: ΔW = (G + λ I)^{-1} @ ∇W @ (A + λ I)^{-1}
+        A-only mode (default, use_g=False):
+            ΔW = ∇W @ (A + λ I)^{-1}
+            Input whitening only. Optimal for ePC where G is degenerate.
 
-        Uses flat damping (same λ for both factors) instead of pi-correction.
-        For ePC's E_local, G is degenerate (tiny output gradients after
-        inference), so G^{-1} ≈ (1/λ)*I (constant scaling). The useful
-        curvature comes from A^{-1} (input whitening). The G^{-1} scaling
-        is controlled by gradient clipping in step().
+        Full KFAC mode (use_g=True):
+            ΔW = (G + λ I)^{-1} @ ∇W @ (A + λ I)^{-1}
+            Standard KFAC with flat damping on both factors.
 
         Args:
             grad_w: [out_dim, in_features] or [out, in, kH, kW] for Conv2d
@@ -253,15 +265,14 @@ class _KronosState:
         else:
             M = grad_w
 
-        # Flat damping: same value for both A and G
-        d_a_damped = self.d_a + self.damping
-        d_g_damped = self.d_g + self.damping
-
         # Right-multiply: M @ (A + λ I)^{-1}
+        d_a_damped = self.d_a + self.damping
         M = lrpd_solve(d_a_damped, self.U_a, M)
 
-        # Left-multiply: (G + λ I)^{-1} @ M = (M^T @ (G + λ I)^{-1})^T
-        M = lrpd_solve(d_g_damped, self.U_g, M.T).T
+        # Left-multiply: (G + λ I)^{-1} @ M (only if G factor is enabled)
+        if self.use_g and self.d_g is not None:
+            d_g_damped = self.d_g + self.damping
+            M = lrpd_solve(d_g_damped, self.U_g, M.T).T
 
         # Split augmented gradient back
         if self.has_bias and grad_b is not None:
@@ -300,19 +311,14 @@ class KRONOS(torch.optim.Optimizer):
     hooks are inactive because layer parameters have requires_grad=False.
 
     Per-layer gradient clipping controls step magnitude after preconditioning.
-    Since G^{-1} ≈ (1/damping)*I for ePC (degenerate G factor), the
-    preconditioned gradient is amplified by ~1/damping. Clipping at a fixed
-    norm preserves the curvature-corrected DIRECTION from A^{-1} while
-    capping the step magnitude.
 
     Args:
         model: nn.Module with Linear and/or Conv2d layers.
         lr: Learning rate for preconditioned updates.
         momentum: SGD momentum on preconditioned gradients.
-        damping: Tikhonov damping (λ). Same value applied to both A and G
-            factors (flat damping, no pi-correction). Should be small enough
-            to not dominate A's eigenvalues (e.g., 0.01 for typical A with
-            eigenvalues 0.01-0.5).
+        damping: Tikhonov damping (λ) for A factor (and G if use_g=True).
+            Should be small enough to not dominate A's eigenvalues
+            (e.g., 0.01 for typical A with eigenvalues 0.01-0.5).
         rank: LRPD rank for factor decomposition. Capped at dim-1 per layer.
         ema_decay: Exponential moving average decay for factor updates.
         update_freq: Steps between factor LRPD updates. Factors are also
@@ -321,16 +327,22 @@ class KRONOS(torch.optim.Optimizer):
         grad_clip: Per-layer gradient norm clipping (0 to disable).
         max_samples: Maximum activation/gradient samples per update.
             Controls memory for Conv2d layers with large spatial dims.
+        use_g: Whether to compute and use the G (output gradient) factor.
+            Default False for ePC where G is degenerate. Set True for
+            standard neural networks with meaningful output gradient
+            curvature.
     """
 
     def __init__(self, model, lr=0.001, momentum=0.9, damping=0.01,
                  rank=32, ema_decay=0.95, update_freq=10,
-                 weight_decay=0.0, grad_clip=1.0, max_samples=1024):
+                 weight_decay=0.0, grad_clip=1.0, max_samples=1024,
+                 use_g=False):
         self._states = {}
         self._hooks = []
         self._step_count = 0
         self._update_freq = update_freq
         self._grad_clip = grad_clip
+        self._use_g = use_g
 
         # Find all parametric layers and register hooks
         kfac_params = []
@@ -339,13 +351,14 @@ class KRONOS(torch.optim.Optimizer):
         for module in model.modules():
             if isinstance(module, (nn.Linear, nn.Conv2d)):
                 state = _KronosState(module, rank, damping, ema_decay,
-                                     max_samples)
+                                     max_samples, use_g=use_g)
                 self._states[module] = state
 
                 self._hooks.append(
                     module.register_forward_hook(self._fwd_hook))
-                self._hooks.append(
-                    module.register_full_backward_hook(self._bwd_hook))
+                if use_g:
+                    self._hooks.append(
+                        module.register_full_backward_hook(self._bwd_hook))
 
                 for p in module.parameters():
                     kfac_params.append(p)
@@ -369,7 +382,8 @@ class KRONOS(torch.optim.Optimizer):
         n_other = len(other_params)
         total_kfac = sum(p.numel() for p in kfac_params)
         total_other = sum(p.numel() for p in other_params)
-        print(f"KRONOS: {n_kfac} KFAC layers ({total_kfac:,} params), "
+        mode = "A+G" if use_g else "A-only"
+        print(f"KRONOS ({mode}): {n_kfac} KFAC layers ({total_kfac:,} params), "
               f"{n_other} first-order params ({total_other:,})")
         for module, state in self._states.items():
             name = module.__class__.__name__
@@ -545,14 +559,16 @@ class KRONOS(torch.optim.Optimizer):
             }
             if state.initialized:
                 trace_a = state._lrpd_trace(state.d_a, state.U_a).item()
-                trace_g = state._lrpd_trace(state.d_g, state.U_g).item()
                 info['trace_a'] = trace_a
-                info['trace_g'] = trace_g
                 info['damping'] = state.damping
                 info['damping_vs_median_d_a'] = state.damping / (state.d_a.median().item() + 1e-8)
                 info['d_a_range'] = (state.d_a.min().item(),
                                      state.d_a.max().item())
-                info['d_g_range'] = (state.d_g.min().item(),
-                                     state.d_g.max().item())
+                info['use_g'] = state.use_g
+                if state.use_g and state.d_g is not None:
+                    trace_g = state._lrpd_trace(state.d_g, state.U_g).item()
+                    info['trace_g'] = trace_g
+                    info['d_g_range'] = (state.d_g.min().item(),
+                                         state.d_g.max().item())
             diag[name] = info
         return diag

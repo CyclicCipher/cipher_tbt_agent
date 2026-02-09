@@ -1,15 +1,16 @@
 """
-KRONOS Diagnostics Script.
+KRONOS Diagnostics Script (A-only mode).
 
-Tests 6 hypotheses about why KRONOS underperforms Adam:
+Tests 6 hypotheses about KRONOS A-only preconditioning performance:
   H1: Gradient clipping fires too often, undoing preconditioning
   H2: SGD+momentum is a poor match for KFAC-preconditioned gradients
-  H3: LRPD rank captures too little variance (especially layer 1)
-  H4: Damping dominates factor eigenvalues (preconditioner ≈ scaled identity)
+  H3: LRPD rank captures too little A-factor variance
+  H4: Damping dominates A-factor eigenvalues (preconditioner ≈ scaled identity)
   H5: LRPD approximation error compounds over streaming updates
-  H6: Factor staleness (10-step update lag) causes outdated preconditioning
+  H6: Preconditioning effect (preconditioned vs raw gradient norm ratio)
 
-Uses the best KRONOS config: Newton T=2, r=32, lr=3e-3, damping=0.01.
+Uses A-only KRONOS: Newton T=2, r=32, lr=3e-3, damping=0.01.
+G factor disabled (degenerate for ePC).
 """
 
 import sys
@@ -158,12 +159,16 @@ def run_diagnostics(train_loader, test_loader, device, num_epochs=3):
                     ).item()
                     momentum_alignment_log.append((step_count, layer_idx, cos_sim))
 
-                # H4: Damping dominance (flat damping: same value for A and G)
+                # H4: Damping dominance (A-only mode: only A factor)
                 damping = state.damping
                 median_d_a = state.d_a.median().item()
-                median_d_g = state.d_g.median().item()
                 frac_dom_a = (state.d_a < damping).float().mean().item()
-                frac_dom_g = (state.d_g < damping).float().mean().item()
+                if state.use_g and state.d_g is not None:
+                    median_d_g = state.d_g.median().item()
+                    frac_dom_g = (state.d_g < damping).float().mean().item()
+                else:
+                    median_d_g = 0.0
+                    frac_dom_g = 0.0
                 damping_log.append((step_count, layer_idx, damping, damping,
                                     median_d_a, median_d_g, frac_dom_a, frac_dom_g))
 
@@ -184,20 +189,25 @@ def run_diagnostics(train_loader, test_loader, device, num_epochs=3):
                     trace_captured_a = (U_a_norms ** 2).sum()
                     trace_total_a = d_a.sum() + trace_captured_a
 
-                    d_g = state.d_g.cpu().numpy()
-                    U_g = state.U_g.cpu()
-                    U_g_norms = (U_g ** 2).sum(dim=0).sqrt().numpy()
-                    trace_captured_g = (U_g_norms ** 2).sum()
-                    trace_total_g = d_g.sum() + trace_captured_g
-
-                    spectra_log.append((step_count, layer_idx, {
+                    info = {
                         'd_a_stats': (d_a.min(), np.median(d_a), d_a.max(), d_a.mean()),
-                        'd_g_stats': (d_g.min(), np.median(d_g), d_g.max(), d_g.mean()),
                         'U_a_col_norms': sorted(U_a_norms.tolist(), reverse=True),
-                        'U_g_col_norms': sorted(U_g_norms.tolist(), reverse=True),
                         'variance_captured_a': trace_captured_a / (trace_total_a + 1e-8),
-                        'variance_captured_g': trace_captured_g / (trace_total_g + 1e-8),
-                    }))
+                    }
+
+                    if state.use_g and state.d_g is not None:
+                        d_g = state.d_g.cpu().numpy()
+                        U_g = state.U_g.cpu()
+                        U_g_norms = (U_g ** 2).sum(dim=0).sqrt().numpy()
+                        trace_captured_g = (U_g_norms ** 2).sum()
+                        trace_total_g = d_g.sum() + trace_captured_g
+                        info['d_g_stats'] = (d_g.min(), np.median(d_g), d_g.max(), d_g.mean())
+                        info['U_g_col_norms'] = sorted(U_g_norms.tolist(), reverse=True)
+                        info['variance_captured_g'] = trace_captured_g / (trace_total_g + 1e-8)
+                    else:
+                        info['variance_captured_g'] = 0.0
+
+                    spectra_log.append((step_count, layer_idx, info))
 
                     # H5: LRPD approximation quality
                     # Reconstruct LRPD matrix and compare to truth from cached data
@@ -308,15 +318,17 @@ def plot_diagnostics(diag, save_path='diagnose_kronos.png'):
     # H3: Variance captured by LRPD [0,2]
     # ---------------------------------------------------------------
     ax = axes[0, 2]
-    ax.set_title('H3: Variance Captured by Low-Rank\n(trace(UU^T) / trace(A) per factor)', fontsize=10)
+    ax.set_title('H3: Variance Captured by Low-Rank\n(trace(UU^T) / trace(A))', fontsize=10)
     for l in range(n_layers):
         entries = [(s, info) for s, li, info in diag['spectra_log'] if li == l]
         if entries:
             steps = [e[0] for e in entries]
             var_a = [e[1]['variance_captured_a'] for e in entries]
-            var_g = [e[1]['variance_captured_g'] for e in entries]
             ax.plot(steps, var_a, '-', color=colors[l], label=f'{layer_names[l]} A', linewidth=1.5)
-            ax.plot(steps, var_g, '--', color=colors[l], label=f'{layer_names[l]} G', linewidth=1.0)
+            # Only plot G if data exists
+            var_g = [e[1].get('variance_captured_g', 0) for e in entries]
+            if any(v > 0 for v in var_g):
+                ax.plot(steps, var_g, '--', color=colors[l], label=f'{layer_names[l]} G', linewidth=1.0)
     ax.set_xlabel('Step')
     ax.set_ylabel('Fraction of Trace in UU^T')
     ax.set_ylim(-0.05, 1.05)
@@ -327,7 +339,7 @@ def plot_diagnostics(diag, save_path='diagnose_kronos.png'):
     # H4: Damping dominance [1,0]
     # ---------------------------------------------------------------
     ax = axes[1, 0]
-    ax.set_title('H4: Damping Dominance\n(fraction of d_i < damping_factor)', fontsize=10)
+    ax.set_title('H4: Damping Dominance\n(fraction of d_i < damping)', fontsize=10)
     for l in range(n_layers):
         entries = [(s, fa, fg) for s, li, da, dg, mda, mdg, fa, fg
                    in diag['damping_log'] if li == l]
@@ -336,11 +348,13 @@ def plot_diagnostics(diag, save_path='diagnose_kronos.png'):
             window = 50
             if len(frac_a) > window:
                 ma_a = np.convolve(frac_a, np.ones(window)/window, mode='valid')
-                ma_g = np.convolve(frac_g, np.ones(window)/window, mode='valid')
                 ax.plot(range(window, len(frac_a)+1), ma_a, '-',
                         color=colors[l], label=f'{layer_names[l]} A', linewidth=1.5)
-                ax.plot(range(window, len(frac_g)+1), ma_g, '--',
-                        color=colors[l], label=f'{layer_names[l]} G', linewidth=1.0)
+                # Only plot G if data exists (non-zero)
+                if any(fg > 0 for fg in frac_g):
+                    ma_g = np.convolve(frac_g, np.ones(window)/window, mode='valid')
+                    ax.plot(range(window, len(frac_g)+1), ma_g, '--',
+                            color=colors[l], label=f'{layer_names[l]} G', linewidth=1.0)
     ax.set_xlabel('Step')
     ax.set_ylabel('Fraction Dominated (rolling 50)')
     ax.set_ylim(-0.05, 1.05)
@@ -394,7 +408,7 @@ def plot_diagnostics(diag, save_path='diagnose_kronos.png'):
     ax.grid(True, alpha=0.3)
     ax.set_yscale('log')
 
-    plt.suptitle('KRONOS Diagnostics — Newton T=2 + KRONOS r=32 lr=3e-3 (MNIST)',
+    plt.suptitle('KRONOS Diagnostics — A-only r=32 lr=3e-3 (MNIST)',
                  fontsize=13, fontweight='bold')
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -443,15 +457,20 @@ def print_summary(diag):
         entries = [(s, info) for s, li, info in diag['spectra_log'] if li == l]
         if entries:
             last = entries[-1][1]
-            print(f"  {layer_names[l]}: var_captured_A={last['variance_captured_a']:.1%}, "
-                  f"var_captured_G={last['variance_captured_g']:.1%}")
+            line = f"  {layer_names[l]}: var_captured_A={last['variance_captured_a']:.1%}"
+            if 'variance_captured_g' in last and last['variance_captured_g'] > 0:
+                line += f", var_captured_G={last['variance_captured_g']:.1%}"
+            else:
+                line += " (G disabled — A-only mode)"
+            print(line)
             print(f"    d_A stats: min={last['d_a_stats'][0]:.6f}, "
                   f"median={last['d_a_stats'][1]:.6f}, max={last['d_a_stats'][2]:.6f}")
-            print(f"    d_G stats: min={last['d_g_stats'][0]:.6f}, "
-                  f"median={last['d_g_stats'][1]:.6f}, max={last['d_g_stats'][2]:.6f}")
+            if 'd_g_stats' in last:
+                print(f"    d_G stats: min={last['d_g_stats'][0]:.6f}, "
+                      f"median={last['d_g_stats'][1]:.6f}, max={last['d_g_stats'][2]:.6f}")
 
     # H4: Damping dominance
-    print(f"\n--- H4: Damping Dominance ---")
+    print(f"\n--- H4: Damping Dominance (A-factor) ---")
     for l in range(n_layers):
         entries = [(da, dg, mda, mdg, fa, fg)
                    for _, li, da, dg, mda, mdg, fa, fg in diag['damping_log'] if li == l]
@@ -459,16 +478,11 @@ def print_summary(diag):
             # Last 100 steps average
             last_n = entries[-100:]
             avg_da = np.mean([e[0] for e in last_n])
-            avg_dg = np.mean([e[1] for e in last_n])
             avg_mda = np.mean([e[2] for e in last_n])
-            avg_mdg = np.mean([e[3] for e in last_n])
             avg_fa = np.mean([e[4] for e in last_n])
-            avg_fg = np.mean([e[5] for e in last_n])
             print(f"  {layer_names[l]}:")
-            print(f"    damping_a={avg_da:.6f}, median_d_a={avg_mda:.6f}, "
+            print(f"    damping={avg_da:.6f}, median_d_a={avg_mda:.6f}, "
                   f"frac_dominated_a={avg_fa:.1%}")
-            print(f"    damping_g={avg_dg:.6f}, median_d_g={avg_mdg:.6f}, "
-                  f"frac_dominated_g={avg_fg:.1%}")
 
     # H5: Approximation error
     print(f"\n--- H5: LRPD Approximation Quality ---")
@@ -512,8 +526,6 @@ def print_summary(diag):
             last = entries[-1][1]
             if last['variance_captured_a'] < 0.5:
                 verdicts.append(f"H3 STRONG: {layer_names[l]} A-factor captures only {last['variance_captured_a']:.0%} of variance")
-            if last['variance_captured_g'] < 0.5:
-                verdicts.append(f"H3 STRONG: {layer_names[l]} G-factor captures only {last['variance_captured_g']:.0%} of variance")
 
     # H4 check
     for l in range(n_layers):
@@ -521,11 +533,8 @@ def print_summary(diag):
         if entries:
             last_n = entries[-100:]
             avg_fa = np.mean([e[0] for e in last_n])
-            avg_fg = np.mean([e[1] for e in last_n])
             if avg_fa > 0.8:
                 verdicts.append(f"H4 STRONG: {layer_names[l]} A-factor {avg_fa:.0%} dominated by damping")
-            if avg_fg > 0.8:
-                verdicts.append(f"H4 STRONG: {layer_names[l]} G-factor {avg_fg:.0%} dominated by damping")
 
     if not verdicts:
         print("  No strong signals detected — issue may be subtle or multi-causal.")
@@ -537,7 +546,7 @@ def print_summary(diag):
 def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
-    print("Running KRONOS diagnostics (Newton T=2, r=32, lr=3e-3, damping=0.01)")
+    print("Running KRONOS diagnostics (A-only, Newton T=2, r=32, lr=3e-3, damping=0.01)")
     print("Training 3 epochs with detailed instrumentation...\n")
 
     train_loader, test_loader = get_mnist_loaders(batch_size=128)

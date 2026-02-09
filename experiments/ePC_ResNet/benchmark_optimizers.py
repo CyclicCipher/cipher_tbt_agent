@@ -1,13 +1,12 @@
 """
 Benchmark weight optimizers for ePC on MNIST.
 
-Compares Adam vs KRONOS for weight updates, both using Newton T=2 for
-error optimization (the established best inference method).
+Compares Adam vs KRONOS (A-only) for weight updates, both using Newton T=2
+for error optimization (the established best inference method).
 
 Key questions:
-1. Does KRONOS (KFAC + LRPD preconditioning) improve accuracy over Adam?
+1. Does KRONOS A-only (input whitening via LRPD) improve accuracy over Adam?
 2. What's the wall-clock cost of the curvature estimation overhead?
-3. How do different KRONOS hyperparameters affect convergence?
 """
 
 import sys
@@ -245,7 +244,7 @@ def plot_comparison(all_results, save_path='benchmark_optimizers.png'):
             verticalalignment='center', family='monospace',
             transform=ax.transAxes)
 
-    plt.suptitle('ePC Weight Optimizer Benchmark — Newton T=2 + Adam vs KRONOS (MNIST)',
+    plt.suptitle('ePC Weight Optimizer Benchmark — Newton T=2 + Adam vs KRONOS A-only (MNIST)',
                  fontsize=13, fontweight='bold')
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -271,30 +270,9 @@ def main():
          'name': 'Newton + Adam (baseline)',
          'weight_optim': 'adam', 'w_lr': 0.001},
 
-        # KRONOS default
+        # KRONOS A-only preconditioning (no G factor — degenerate for ePC)
         {**newton_base,
-         'name': 'Newton + KRONOS r=32',
-         'weight_optim': 'kronos', 'w_lr': 0.001,
-         'kronos_rank': 32, 'kronos_damping': 0.01,
-         'kronos_ema': 0.95, 'kronos_update_freq': 10},
-
-        # KRONOS lower rank (faster, less curvature info)
-        {**newton_base,
-         'name': 'Newton + KRONOS r=8',
-         'weight_optim': 'kronos', 'w_lr': 0.001,
-         'kronos_rank': 8, 'kronos_damping': 0.01,
-         'kronos_ema': 0.95, 'kronos_update_freq': 10},
-
-        # KRONOS more frequent updates (fresher curvature)
-        {**newton_base,
-         'name': 'Newton + KRONOS r=32 freq=1',
-         'weight_optim': 'kronos', 'w_lr': 0.001,
-         'kronos_rank': 32, 'kronos_damping': 0.01,
-         'kronos_ema': 0.95, 'kronos_update_freq': 1},
-
-        # KRONOS higher LR (natural gradient allows larger steps)
-        {**newton_base,
-         'name': 'Newton + KRONOS r=32 lr=3e-3',
+         'name': 'Newton + KRONOS A-only r=32',
          'weight_optim': 'kronos', 'w_lr': 0.003,
          'kronos_rank': 32, 'kronos_damping': 0.01,
          'kronos_ema': 0.95, 'kronos_update_freq': 10},
