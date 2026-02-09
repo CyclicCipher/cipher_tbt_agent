@@ -130,6 +130,16 @@ class _KronosState:
 
         Factors store pure curvature (no damping). Uses FITC residual mode
         for exact diagonal preservation without over-inflation.
+
+        Scaling:
+            A = E[a a^T]: activations are raw, so F_a = a / sqrt(n)
+                gives F_a^T F_a = a^T a / n = (1/B) sum a_i a_i^T.
+
+            G = E[g_per_sample g_per_sample^T]: but PyTorch backward gives
+                g_batch_mean = g_per_sample / B (from batch-mean loss).
+                To recover the per-sample Fisher: F_g = g * sqrt(n)
+                gives F_g^T F_g = n * g^T g = n * sum (g_true/B)^2
+                = (1/B) sum g_true g_true^T.
         """
         a = self._cached_a
         g = self._cached_g
@@ -153,7 +163,7 @@ class _KronosState:
             U_a_init = torch.zeros(self.aug_in_dim, self.rank_a,
                                    device=device, dtype=dtype)
 
-            F_a = a / (n_a ** 0.5)  # F^T F = a^T a / n_a
+            F_a = a / (n_a ** 0.5)  # A = a^T a / n (activations: raw)
             self.d_a, self.U_a = online_lrpd_update(
                 d_a_init, U_a_init, F_a,
                 alpha=1.0, beta=0.0,
@@ -167,7 +177,7 @@ class _KronosState:
             U_g_init = torch.zeros(self.out_dim, self.rank_g,
                                    device=device, dtype=dtype)
 
-            F_g = g / (n_g ** 0.5)
+            F_g = g * (n_g ** 0.5)  # G = n * g^T g (undo batch-mean scaling)
             self.d_g, self.U_g = online_lrpd_update(
                 d_g_init, U_g_init, F_g,
                 alpha=1.0, beta=0.0,
@@ -191,7 +201,7 @@ class _KronosState:
                 rank_k=self.rank_a,
             )
 
-            F_g = g / (n_g ** 0.5)
+            F_g = g * (n_g ** 0.5)  # G = n * g^T g (undo batch-mean scaling)
             self.d_g, self.U_g = online_lrpd_update(
                 self.d_g, self.U_g, F_g,
                 alpha=1.0 - self.ema_decay,
