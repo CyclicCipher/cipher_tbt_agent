@@ -24,8 +24,15 @@ ePC-adapted A-only preconditioning:
 
 KRONOS decomposes A and G into LRPD form (diag(d) + UU^T) and uses the
 Woodbury identity for O(n*k^2) inversion instead of O(n^3). Factor estimates
-are maintained via streaming LRPD updates (EMA blending). Damping is applied
-at inversion time (not baked into the factors).
+are maintained via streaming LRPD updates (EMA blending).
+
+Adaptive per-layer damping:
+    λ_layer = damping * mean(d_a)
+    Damping scales with each layer's actual eigenvalue magnitude. Deep layers
+    with small activations (and thus small A eigenvalues) get proportionally
+    smaller damping, preventing the preconditioner from collapsing to a
+    scaled identity. The `damping` parameter controls the fraction of the
+    mean diagonal that is added (e.g., damping=0.1 means 10% of mean(d_a)).
 
 Scalability:
     Memory: O(n*k) per factor instead of O(n^2)
@@ -265,13 +272,19 @@ class _KronosState:
         else:
             M = grad_w
 
+        # Adaptive per-layer damping: λ = damping * mean(d_a)
+        # This ensures damping scales with each layer's eigenvalue magnitude,
+        # preventing deep layers (small activations) from being overwhelmed.
+        effective_damping = self.damping * self.d_a.mean()
+        d_a_damped = self.d_a + effective_damping
+
         # Right-multiply: M @ (A + λ I)^{-1}
-        d_a_damped = self.d_a + self.damping
         M = lrpd_solve(d_a_damped, self.U_a, M)
 
         # Left-multiply: (G + λ I)^{-1} @ M (only if G factor is enabled)
         if self.use_g and self.d_g is not None:
-            d_g_damped = self.d_g + self.damping
+            effective_damping_g = self.damping * self.d_g.mean()
+            d_g_damped = self.d_g + effective_damping_g
             M = lrpd_solve(d_g_damped, self.U_g, M.T).T
 
         # Split augmented gradient back
@@ -316,9 +329,10 @@ class KRONOS(torch.optim.Optimizer):
         model: nn.Module with Linear and/or Conv2d layers.
         lr: Learning rate for preconditioned updates.
         momentum: SGD momentum on preconditioned gradients.
-        damping: Tikhonov damping (λ) for A factor (and G if use_g=True).
-            Should be small enough to not dominate A's eigenvalues
-            (e.g., 0.01 for typical A with eigenvalues 0.01-0.5).
+        damping: Damping fraction. Effective per-layer damping is
+            λ_layer = damping * mean(d_a). Controls the regularization
+            strength relative to each layer's eigenvalue scale.
+            E.g., damping=0.1 means 10% of mean diagonal added.
         rank: LRPD rank for factor decomposition. Capped at dim-1 per layer.
         ema_decay: Exponential moving average decay for factor updates.
         update_freq: Steps between factor LRPD updates. Factors are also
@@ -560,8 +574,10 @@ class KRONOS(torch.optim.Optimizer):
             if state.initialized:
                 trace_a = state._lrpd_trace(state.d_a, state.U_a).item()
                 info['trace_a'] = trace_a
-                info['damping'] = state.damping
-                info['damping_vs_median_d_a'] = state.damping / (state.d_a.median().item() + 1e-8)
+                effective_damping = state.damping * state.d_a.mean().item()
+                info['damping'] = effective_damping
+                info['damping_fraction'] = state.damping
+                info['damping_vs_median_d_a'] = effective_damping / (state.d_a.median().item() + 1e-8)
                 info['d_a_range'] = (state.d_a.min().item(),
                                      state.d_a.max().item())
                 info['use_g'] = state.use_g

@@ -15,7 +15,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 import time
 import torch
-import torch.nn.functional as F
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -53,7 +52,9 @@ def run_experiment(config, train_loader, test_loader, device, num_epochs=3):
         print(f"    rank={config.get('kronos_rank', 32)}, "
               f"damping={config.get('kronos_damping', 0.01)}, "
               f"ema={config.get('kronos_ema', 0.95)}, "
-              f"update_freq={config.get('kronos_update_freq', 10)}")
+              f"update_freq={config.get('kronos_update_freq', 10)}, "
+              f"momentum={config.get('kronos_momentum', 0.0)}, "
+              f"grad_clip={config.get('kronos_grad_clip', 0.0)}")
     print(f"{'='*60}")
 
     architecture = get_mlp_mnist(hidden_size=128, num_hidden=3)
@@ -74,8 +75,8 @@ def run_experiment(config, train_loader, test_loader, device, num_epochs=3):
             rank=config.get('kronos_rank', 32),
             ema_decay=config.get('kronos_ema', 0.95),
             update_freq=config.get('kronos_update_freq', 10),
-            momentum=config.get('kronos_momentum', 0.9),
-            grad_clip=config.get('kronos_grad_clip', 1.0),
+            momentum=config.get('kronos_momentum', 0.0),
+            grad_clip=config.get('kronos_grad_clip', 0.0),
         )
     else:
         weight_optim = torch.optim.Adam(
@@ -271,14 +272,15 @@ def main():
          'weight_optim': 'adam', 'w_lr': 0.001},
 
         # KRONOS A-only preconditioning (no G factor — degenerate for ePC)
-        # LR increased to compensate for removed G^{-1} ≈ 100*I amplification.
-        # Clipping disabled — precond/raw ratios are healthy (1.7-27x).
+        # No momentum (destructive interference with rotating A^{-1} basis).
+        # No clipping (precond/raw ratios are healthy at 1.7-27x).
+        # Adaptive damping per-layer (deep layers have small A eigenvalues).
         {**newton_base,
          'name': 'Newton + KRONOS A-only r=32',
          'weight_optim': 'kronos', 'w_lr': 0.3,
          'kronos_rank': 32, 'kronos_damping': 0.01,
          'kronos_ema': 0.95, 'kronos_update_freq': 10,
-         'kronos_grad_clip': 0.0},
+         'kronos_grad_clip': 0.0, 'kronos_momentum': 0.0},
     ]
 
     all_results = []

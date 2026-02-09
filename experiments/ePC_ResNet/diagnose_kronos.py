@@ -71,7 +71,7 @@ def run_diagnostics(train_loader, test_loader, device, num_epochs=3):
 
     kronos = KRONOS(
         model, lr=0.3, damping=0.01, rank=32,
-        ema_decay=0.95, update_freq=10, momentum=0.9, grad_clip=0.0,
+        ema_decay=0.95, update_freq=10, momentum=0.0, grad_clip=0.0,
     )
 
     # ---------------------------------------------------------------
@@ -159,17 +159,20 @@ def run_diagnostics(train_loader, test_loader, device, num_epochs=3):
                     ).item()
                     momentum_alignment_log.append((step_count, layer_idx, cos_sim))
 
-                # H4: Damping dominance (A-only mode: only A factor)
-                damping = state.damping
+                # H4: Damping dominance (adaptive: λ = damping * mean(d_a))
+                effective_damping_a = state.damping * state.d_a.mean().item()
                 median_d_a = state.d_a.median().item()
-                frac_dom_a = (state.d_a < damping).float().mean().item()
+                frac_dom_a = (state.d_a < effective_damping_a).float().mean().item()
                 if state.use_g and state.d_g is not None:
+                    effective_damping_g = state.damping * state.d_g.mean().item()
                     median_d_g = state.d_g.median().item()
-                    frac_dom_g = (state.d_g < damping).float().mean().item()
+                    frac_dom_g = (state.d_g < effective_damping_g).float().mean().item()
                 else:
+                    effective_damping_g = 0.0
                     median_d_g = 0.0
                     frac_dom_g = 0.0
-                damping_log.append((step_count, layer_idx, damping, damping,
+                damping_log.append((step_count, layer_idx,
+                                    effective_damping_a, effective_damping_g,
                                     median_d_a, median_d_g, frac_dom_a, frac_dom_g))
 
                 # H6: Factor staleness
