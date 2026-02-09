@@ -357,9 +357,11 @@ def train_epoch(model, weight_optim, lr_scheduler, train_loader,
 
 
 def main():
-    # Hyperparameters (matching ePC paper)
-    iters = 5           # Error optimization steps
-    e_lr = 0.001        # SGD learning rate for errors
+    # Hyperparameters
+    error_optim = 'newton'  # 'sgd', 'adam', or 'newton'
+    iters = 2           # Error optimization steps (Newton needs only 1-2)
+    damping = 0.1       # Newton damping (lower = more aggressive)
+    e_lr = 0.001        # Learning rate for errors (SGD/Adam only)
     w_lr = 0.0001       # Base learning rate for weights (Adam)
     w_decay = 0.0       # Weight decay
     batch_size = 256
@@ -372,7 +374,8 @@ def main():
 
     print("=" * 60)
     print("ePC ResNet-18 on CIFAR-10")
-    print(f"Inference: SGD errors, T={iters}, e_lr={e_lr}")
+    print(f"Inference: {error_optim} errors, T={iters}, "
+          f"{'damping='+str(damping) if error_optim == 'newton' else 'e_lr='+str(e_lr)}")
     print(f"Learning: Adam, w_lr={w_lr}, w_decay={w_decay}")
     print(f"Output loss: {output_loss}")
     print(f"LR schedule: warmup 10% + cosine decay")
@@ -385,6 +388,7 @@ def main():
     architecture = get_resnet18_cifar10()
     model = PCESkipConnection(
         architecture, iters=iters, e_lr=e_lr, output_loss=output_loss,
+        error_optim=error_optim, damping=damping,
     ).to(device)
 
     num_params = sum(p.numel() for p in model.parameters())
