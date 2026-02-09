@@ -283,15 +283,17 @@ def evaluate(model, test_loader, device):
 
 
 def main():
-    # Hyperparameters
-    iters = 5          # Error optimization steps
-    e_lr = 0.01        # SGD learning rate for errors
-    w_lr = 0.001       # Learning rate for weights
+    # Hyperparameters — Error optimization (inference phase)
+    error_optim = 'newton'  # 'sgd', 'adam', or 'newton'
+    iters = 2               # Error optimization steps (Newton needs only 1-2)
+    e_lr = 0.01             # Learning rate for errors (SGD/Adam only)
+    e_damping = 0.1         # Newton damping (lower = more aggressive)
+
+    # Hyperparameters — Weight optimization (learning phase)
+    weight_optim_type = 'adam'  # 'adam' or 'kronos'
+    w_lr = 0.001
     batch_size = 128
     num_epochs = 3
-
-    # Weight optimizer: 'adam' or 'kronos'
-    weight_optim_type = 'adam'
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
@@ -299,7 +301,8 @@ def main():
     print("=" * 60)
     print("ePC MNIST Validation")
     print(f"Architecture: [784, 128, 128, 128, 10], ReLU")
-    print(f"Inference: SGD errors, T={iters}, e_lr={e_lr}")
+    print(f"Inference: {error_optim} errors, T={iters}, "
+          f"{'damping='+str(e_damping) if error_optim == 'newton' else 'e_lr='+str(e_lr)}")
     print(f"Learning: {weight_optim_type.upper()} weights, w_lr={w_lr}")
     print(f"Output loss: cross-entropy")
     print(f"Batch size: {batch_size}, Epochs: {num_epochs}")
@@ -308,7 +311,10 @@ def main():
     train_loader, test_loader = get_mnist_loaders(batch_size)
 
     architecture = get_mlp_mnist(hidden_size=128, num_hidden=3)
-    model = PCE(architecture, iters=iters, e_lr=e_lr, output_loss='ce').to(device)
+    model = PCE(
+        architecture, iters=iters, e_lr=e_lr, output_loss='ce',
+        error_optim=error_optim, damping=e_damping,
+    ).to(device)
 
     num_params = sum(p.numel() for p in model.parameters())
     num_error_layers = len(model.layers) - 1

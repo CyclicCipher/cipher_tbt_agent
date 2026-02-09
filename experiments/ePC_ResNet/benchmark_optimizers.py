@@ -1,14 +1,13 @@
 """
-Benchmark error optimizers for ePC on MNIST.
+Benchmark weight optimizers for ePC on MNIST.
 
-Compares SGD, Adam, and LRPD Newton for error optimization to determine:
-1. Can Newton reduce T (inference iterations) from 5 to 1-2?
-2. What's the wall-clock speedup?
-3. Does accuracy hold up with fewer iterations?
+Compares Adam vs KRONOS for weight updates, both using Newton T=2 for
+error optimization (the established best inference method).
 
-The key hypothesis: the error Hessian H = I + J^T H_L J is LRPD
-with rank <= n_output (10 for MNIST), so Woodbury-based Newton steps
-should converge much faster than first-order methods.
+Key questions:
+1. Does KRONOS (KFAC + LRPD preconditioning) improve accuracy over Adam?
+2. What's the wall-clock cost of the curvature estimation overhead?
+3. How do different KRONOS hyperparameters affect convergence?
 """
 
 import sys
@@ -27,6 +26,7 @@ from torchvision import datasets, transforms
 
 from experiments.ePC_ResNet.epc_model import PCE
 from experiments.ePC_ResNet.architectures import get_mlp_mnist
+from src.optimizers.kronos import KRONOS
 
 
 def get_mnist_loaders(batch_size=128, data_dir='./data'):
@@ -47,8 +47,14 @@ def run_experiment(config, train_loader, test_loader, device, num_epochs=3):
     name = config['name']
     print(f"\n{'='*60}")
     print(f"Running: {name}")
-    print(f"  error_optim={config['error_optim']}, iters={config['iters']}, "
-          f"e_lr={config.get('e_lr', 'N/A')}, damping={config.get('damping', 'N/A')}")
+    print(f"  error: {config['error_optim']} T={config['iters']} "
+          f"damping={config.get('e_damping', 'N/A')}")
+    print(f"  weight: {config['weight_optim']}")
+    if config['weight_optim'] == 'kronos':
+        print(f"    rank={config.get('kronos_rank', 32)}, "
+              f"damping={config.get('kronos_damping', 0.01)}, "
+              f"ema={config.get('kronos_ema', 0.95)}, "
+              f"update_freq={config.get('kronos_update_freq', 10)}")
     print(f"{'='*60}")
 
     architecture = get_mlp_mnist(hidden_size=128, num_hidden=3)
@@ -58,10 +64,23 @@ def run_experiment(config, train_loader, test_loader, device, num_epochs=3):
         e_lr=config.get('e_lr', 0.01),
         output_loss='ce',
         error_optim=config['error_optim'],
-        damping=config.get('damping', 1.0),
+        damping=config.get('e_damping', 1.0),
     ).to(device)
 
-    weight_optim = torch.optim.Adam(model.parameters(), lr=0.001)
+    if config['weight_optim'] == 'kronos':
+        weight_optim = KRONOS(
+            model,
+            lr=config.get('w_lr', 0.001),
+            damping=config.get('kronos_damping', 0.01),
+            rank=config.get('kronos_rank', 32),
+            ema_decay=config.get('kronos_ema', 0.95),
+            update_freq=config.get('kronos_update_freq', 10),
+            momentum=config.get('kronos_momentum', 0.9),
+            grad_clip=config.get('kronos_grad_clip', 1.0),
+        )
+    else:
+        weight_optim = torch.optim.Adam(
+            model.parameters(), lr=config.get('w_lr', 0.001))
 
     results = {
         'name': name,
@@ -70,6 +89,7 @@ def run_experiment(config, train_loader, test_loader, device, num_epochs=3):
         'convergences': [],
         'error_norms': [],
         'epoch_times': [],
+        'batch_train_accs': [],
     }
 
     for epoch in range(num_epochs):
@@ -102,8 +122,10 @@ def run_experiment(config, train_loader, test_loader, device, num_epochs=3):
             with torch.no_grad():
                 outputs = model(data)
                 preds = outputs.argmax(dim=1)
-                epoch_correct += (preds == target).sum().item()
+                correct = (preds == target).sum().item()
+                epoch_correct += correct
                 epoch_total += batch_size
+                results['batch_train_accs'].append(correct / batch_size)
 
         epoch_time = time.time() - start
         train_acc = epoch_correct / epoch_total
@@ -139,7 +161,7 @@ def plot_comparison(all_results, save_path='benchmark_optimizers.png'):
     """Plot comparison of all optimizer configurations."""
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
 
-    colors = plt.cm.tab10(np.linspace(0, 1, len(all_results)))
+    colors = plt.cm.tab10(np.linspace(0, 1, max(len(all_results), 2)))
 
     # [0,0] Test Accuracy by Epoch
     ax = axes[0, 0]
@@ -152,7 +174,7 @@ def plot_comparison(all_results, save_path='benchmark_optimizers.png'):
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # [0,1] Training Time
+    # [0,1] Training Time per Epoch
     ax = axes[0, 1]
     for i, r in enumerate(all_results):
         ax.plot(range(1, len(r['epoch_times'])+1), r['epoch_times'],
@@ -163,7 +185,7 @@ def plot_comparison(all_results, save_path='benchmark_optimizers.png'):
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # [0,2] Accuracy vs Time (efficiency frontier)
+    # [0,2] Accuracy vs Wall-Clock Time
     ax = axes[0, 2]
     for i, r in enumerate(all_results):
         cum_time = np.cumsum(r['epoch_times'])
@@ -175,55 +197,56 @@ def plot_comparison(all_results, save_path='benchmark_optimizers.png'):
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # [1,0] Convergence
+    # [1,0] Batch-level Training Accuracy (learning curves)
     ax = axes[1, 0]
     for i, r in enumerate(all_results):
-        ax.plot(range(1, len(r['convergences'])+1), r['convergences'],
-                'o-', color=colors[i], label=r['name'], linewidth=2, markersize=6)
+        accs = r['batch_train_accs']
+        if accs:
+            ax.plot(accs, alpha=0.3, color=colors[i], linewidth=0.5)
+            # Moving average
+            if len(accs) > 50:
+                window = min(50, len(accs) // 5)
+                ma = np.convolve(accs, np.ones(window)/window, mode='valid')
+                ax.plot(range(window-1, len(accs)), ma,
+                        color=colors[i], linewidth=1.5, label=r['name'])
+    ax.set_xlabel('Batch')
+    ax.set_ylabel('Train Accuracy')
+    ax.set_title('Batch-level Training Accuracy')
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    # [1,1] Inference Convergence
+    ax = axes[1, 1]
+    for i, r in enumerate(all_results):
+        if r['convergences']:
+            ax.plot(range(1, len(r['convergences'])+1), r['convergences'],
+                    'o-', color=colors[i], label=r['name'], linewidth=2, markersize=6)
     ax.set_xlabel('Epoch')
     ax.set_ylabel('Avg E_0 - E_T')
     ax.set_title('Inference Convergence (avg per epoch)')
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # [1,1] Error Norms
-    ax = axes[1, 1]
-    for i, r in enumerate(all_results):
-        if r['error_norms']:
-            ax.plot(range(1, len(r['error_norms'])+1), r['error_norms'],
-                    'o-', color=colors[i], label=r['name'], linewidth=2, markersize=6)
-    ax.set_xlabel('Epoch')
-    ax.set_ylabel('Avg sum(||e_i||)')
-    ax.set_title('Error Magnitudes (avg per epoch)')
-    ax.legend(fontsize=8)
-    ax.grid(True, alpha=0.3)
-
     # [1,2] Summary Table
     ax = axes[1, 2]
     ax.axis('off')
-    lines = [f"{'Config':<25} {'Best Test':>10} {'Time/ep':>10} {'Speedup':>10}"]
-    lines.append("-" * 57)
+    lines = [f"{'Config':<30} {'Best Test':>10} {'Time/ep':>10} {'Speedup':>10}"]
+    lines.append("-" * 62)
 
-    # Find baseline time (SGD T=5)
-    baseline_time = None
-    for r in all_results:
-        if 'SGD T=5' in r['name']:
-            baseline_time = np.mean(r['epoch_times'])
-            break
-    if baseline_time is None and all_results:
-        baseline_time = np.mean(all_results[0]['epoch_times'])
+    baseline_time = np.mean(all_results[0]['epoch_times']) if all_results else 1.0
 
     for r in all_results:
         best = max(r['test_accs']) if r['test_accs'] else 0
         avg_time = np.mean(r['epoch_times'])
         speedup = baseline_time / avg_time if avg_time > 0 else 0
-        lines.append(f"{r['name']:<25} {best:>9.2%} {avg_time:>9.1f}s {speedup:>9.2f}x")
+        lines.append(f"{r['name']:<30} {best:>9.2%} {avg_time:>9.1f}s {speedup:>9.2f}x")
 
     ax.text(0.05, 0.5, '\n'.join(lines), fontsize=9,
             verticalalignment='center', family='monospace',
             transform=ax.transAxes)
 
-    plt.suptitle('ePC Error Optimizer Benchmark (MNIST)', fontsize=14, fontweight='bold')
+    plt.suptitle('ePC Weight Optimizer Benchmark — Newton T=2 + Adam vs KRONOS (MNIST)',
+                 fontsize=13, fontweight='bold')
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     print(f"\nBenchmark chart saved to {save_path}")
@@ -237,34 +260,44 @@ def main():
     train_loader, test_loader = get_mnist_loaders(batch_size=128)
     num_epochs = 3
 
+    # All configs use Newton T=2 d=0.1 for error optimization (established best)
+    newton_base = {
+        'error_optim': 'newton', 'iters': 2, 'e_damping': 0.1,
+    }
+
     configs = [
-        # Baseline: SGD T=5 (reference ePC paper)
-        {'name': 'SGD T=5 (baseline)',
-         'error_optim': 'sgd', 'iters': 5, 'e_lr': 0.01},
+        # Baseline: Newton errors + Adam weights
+        {**newton_base,
+         'name': 'Newton + Adam (baseline)',
+         'weight_optim': 'adam', 'w_lr': 0.001},
 
-        # SGD T=2 (can we get away with fewer iters?)
-        {'name': 'SGD T=2',
-         'error_optim': 'sgd', 'iters': 2, 'e_lr': 0.01},
+        # KRONOS default
+        {**newton_base,
+         'name': 'Newton + KRONOS r=32',
+         'weight_optim': 'kronos', 'w_lr': 0.001,
+         'kronos_rank': 32, 'kronos_damping': 0.01,
+         'kronos_ema': 0.95, 'kronos_update_freq': 10},
 
-        # Adam T=5
-        {'name': 'Adam T=5',
-         'error_optim': 'adam', 'iters': 5, 'e_lr': 0.01},
+        # KRONOS lower rank (faster, less curvature info)
+        {**newton_base,
+         'name': 'Newton + KRONOS r=8',
+         'weight_optim': 'kronos', 'w_lr': 0.001,
+         'kronos_rank': 8, 'kronos_damping': 0.01,
+         'kronos_ema': 0.95, 'kronos_update_freq': 10},
 
-        # Adam T=2
-        {'name': 'Adam T=2',
-         'error_optim': 'adam', 'iters': 2, 'e_lr': 0.01},
+        # KRONOS more frequent updates (fresher curvature)
+        {**newton_base,
+         'name': 'Newton + KRONOS r=32 freq=1',
+         'weight_optim': 'kronos', 'w_lr': 0.001,
+         'kronos_rank': 32, 'kronos_damping': 0.01,
+         'kronos_ema': 0.95, 'kronos_update_freq': 1},
 
-        # Newton T=2 (damping=1.0, conservative)
-        {'name': 'Newton T=2 d=1.0',
-         'error_optim': 'newton', 'iters': 2, 'damping': 1.0},
-
-        # Newton T=2 (damping=0.1, aggressive)
-        {'name': 'Newton T=2 d=0.1',
-         'error_optim': 'newton', 'iters': 2, 'damping': 0.1},
-
-        # Newton T=1 (single step, maximum speedup)
-        {'name': 'Newton T=1 d=0.1',
-         'error_optim': 'newton', 'iters': 1, 'damping': 0.1},
+        # KRONOS higher LR (natural gradient allows larger steps)
+        {**newton_base,
+         'name': 'Newton + KRONOS r=32 lr=3e-3',
+         'weight_optim': 'kronos', 'w_lr': 0.003,
+         'kronos_rank': 32, 'kronos_damping': 0.01,
+         'kronos_ema': 0.95, 'kronos_update_freq': 10},
     ]
 
     all_results = []
@@ -283,7 +316,7 @@ def main():
         best = max(r['test_accs']) if r['test_accs'] else 0
         avg_time = np.mean(r['epoch_times'])
         speedup = baseline_time / avg_time
-        print(f"  {r['name']:<25}: {best:.2%} test, "
+        print(f"  {r['name']:<35}: {best:.2%} test, "
               f"{avg_time:.1f}s/epoch, {speedup:.2f}x speedup")
 
 
