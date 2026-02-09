@@ -70,7 +70,7 @@ def run_diagnostics(train_loader, test_loader, device, num_epochs=3):
 
     kronos = KRONOS(
         model, lr=0.003, damping=0.01, rank=32,
-        ema_decay=0.95, update_freq=10, momentum=0.9, grad_clip=1.0,
+        ema_decay=0.95, update_freq=10, momentum=0.9,
     )
 
     # ---------------------------------------------------------------
@@ -141,9 +141,12 @@ def run_diagnostics(train_loader, test_loader, device, num_epochs=3):
                     precond_norm = (precond_w.norm() ** 2 + precond_b.norm() ** 2).sqrt().item()
                 precond_grad_norms.append((step_count, layer_idx, precond_norm))
 
-                # H1: Would clipping fire?
-                clip_coef = 1.0 / (precond_norm + 1e-6)  # grad_clip=1.0
-                clip_log.append((step_count, layer_idx, precond_norm, min(clip_coef, 1.0)))
+                # H1: Normalization ratio (precond_norm / raw_norm)
+                # With gradient normalization, this ratio is what the preconditioned
+                # gradient gets scaled by. Ratios >> 1 mean preconditioning amplifies
+                # (direction change is significant). Ratio ≈ 1 means no change.
+                norm_ratio = precond_norm / (raw_norm + 1e-8)
+                clip_log.append((step_count, layer_idx, precond_norm, norm_ratio))
 
                 # H2: Momentum alignment
                 p_state = kronos.state.get(module.weight, {})
@@ -155,17 +158,13 @@ def run_diagnostics(train_loader, test_loader, device, num_epochs=3):
                     ).item()
                     momentum_alignment_log.append((step_count, layer_idx, cos_sim))
 
-                # H4: Damping dominance
-                trace_a = state._lrpd_trace(state.d_a, state.U_a).item()
-                trace_g = state._lrpd_trace(state.d_g, state.U_g).item()
-                pi = (trace_a * state.out_dim) / (trace_g * state.aug_in_dim + 1e-8)
-                damping_a = (state.damping * pi) ** 0.5
-                damping_g = (state.damping / pi) ** 0.5
+                # H4: Damping dominance (flat damping: same value for A and G)
+                damping = state.damping
                 median_d_a = state.d_a.median().item()
                 median_d_g = state.d_g.median().item()
-                frac_dom_a = (state.d_a < damping_a).float().mean().item()
-                frac_dom_g = (state.d_g < damping_g).float().mean().item()
-                damping_log.append((step_count, layer_idx, damping_a, damping_g,
+                frac_dom_a = (state.d_a < damping).float().mean().item()
+                frac_dom_g = (state.d_g < damping).float().mean().item()
+                damping_log.append((step_count, layer_idx, damping, damping,
                                     median_d_a, median_d_g, frac_dom_a, frac_dom_g))
 
                 # H6: Factor staleness
@@ -268,24 +267,22 @@ def plot_diagnostics(diag, save_path='diagnose_kronos.png'):
     # H1: Gradient clipping [0,0]
     # ---------------------------------------------------------------
     ax = axes[0, 0]
-    ax.set_title('H1: Gradient Clipping\n(precond norm > 1.0 triggers clip)', fontsize=10)
+    ax.set_title('H1: Normalization Ratio\n(precond_norm / raw_norm, log scale)', fontsize=10)
     for l in range(n_layers):
-        entries = [(s, norm, coef) for s, li, norm, coef in diag['clip_log'] if li == l]
+        entries = [(s, ratio) for s, li, _, ratio in diag['clip_log'] if li == l]
         if entries:
-            steps, norms, coefs = zip(*entries)
-            clipped = [1 if c < 1.0 else 0 for c in coefs]
-            # Moving average of clip frequency
+            steps, ratios = zip(*entries)
             window = 50
-            if len(clipped) > window:
-                clip_rate = np.convolve(clipped, np.ones(window)/window, mode='valid')
-                ax.plot(range(window, len(clipped)+1), clip_rate,
+            if len(ratios) > window:
+                ma = np.convolve(ratios, np.ones(window)/window, mode='valid')
+                ax.plot(range(window, len(ratios)+1), ma,
                         color=colors[l], label=f'{layer_names[l]}', linewidth=1.5)
     ax.set_xlabel('Step')
-    ax.set_ylabel('Clip Frequency (rolling 50)')
-    ax.set_ylim(-0.05, 1.05)
+    ax.set_ylabel('Precond / Raw Norm (rolling 50)')
+    ax.set_yscale('log')
     ax.legend(fontsize=7)
     ax.grid(True, alpha=0.3)
-    ax.axhline(y=0.5, color='red', linestyle='--', alpha=0.5, label='50% threshold')
+    ax.axhline(y=1.0, color='red', linestyle='--', alpha=0.5)
 
     # ---------------------------------------------------------------
     # H2: Momentum alignment [0,1]
@@ -419,17 +416,14 @@ def print_summary(diag):
     for epoch, acc in diag['test_accs']:
         print(f"  Epoch {epoch}: {acc:.2%}")
 
-    # H1: Clip frequency
-    print(f"\n--- H1: Gradient Clipping ---")
+    # H1: Normalization ratio
+    print(f"\n--- H1: Gradient Normalization ---")
     for l in range(n_layers):
-        entries = [coef for _, li, _, coef in diag['clip_log'] if li == l]
+        entries = [ratio for _, li, _, ratio in diag['clip_log'] if li == l]
         if entries:
-            n_clipped = sum(1 for c in entries if c < 1.0)
-            clip_rate = n_clipped / len(entries)
-            avg_clip = np.mean([c for c in entries if c < 1.0]) if n_clipped > 0 else 1.0
-            max_precond_norm = max(norm for _, li, norm, _ in diag['clip_log'] if li == l)
-            print(f"  {layer_names[l]}: clip_rate={clip_rate:.1%}, "
-                  f"avg_clip_coef={avg_clip:.4f}, max_precond_norm={max_precond_norm:.2f}")
+            print(f"  {layer_names[l]}: median_ratio={np.median(entries):.2f}, "
+                  f"mean_ratio={np.mean(entries):.2f}, "
+                  f"max_ratio={max(entries):.2f}")
 
     # H2: Momentum alignment
     print(f"\n--- H2: Momentum-Gradient Alignment ---")
@@ -501,13 +495,15 @@ def print_summary(diag):
     # Auto-detect strongest signals
     verdicts = []
 
-    # H1 check
+    # H1 check: large normalization ratios mean preconditioning is mostly scaling
     for l in range(n_layers):
-        entries = [coef for _, li, _, coef in diag['clip_log'] if li == l]
+        entries = [ratio for _, li, _, ratio in diag['clip_log'] if li == l]
         if entries:
-            clip_rate = sum(1 for c in entries if c < 1.0) / len(entries)
-            if clip_rate > 0.5:
-                verdicts.append(f"H1 STRONG: {layer_names[l]} clipped {clip_rate:.0%} of the time")
+            median_ratio = np.median(entries)
+            if median_ratio > 10:
+                verdicts.append(f"H1 INFO: {layer_names[l]} precond/raw ratio={median_ratio:.0f}x (preconditioning reshaping gradient)")
+            elif median_ratio < 1.5:
+                verdicts.append(f"H1 WARN: {layer_names[l]} precond/raw ratio={median_ratio:.1f}x (preconditioner ≈ identity)")
 
     # H3 check
     for l in range(n_layers):

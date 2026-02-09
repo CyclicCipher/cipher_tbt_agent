@@ -379,7 +379,7 @@ def main():
     kronos_ema = 0.95        # EMA decay for factor updates
     kronos_momentum = 0.9    # SGD momentum on preconditioned gradients
     kronos_update_freq = 10  # Steps between factor updates
-    kronos_grad_clip = 1.0   # Per-layer gradient norm clip
+    # grad_clip removed: KRONOS v3 uses gradient normalization instead
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
@@ -417,7 +417,7 @@ def main():
             model, lr=1.0, momentum=kronos_momentum,
             damping=kronos_damping, rank=kronos_rank,
             ema_decay=kronos_ema, update_freq=kronos_update_freq,
-            weight_decay=w_decay, grad_clip=kronos_grad_clip,
+            weight_decay=w_decay,
         )
     else:
         # Adam with lr=1.0 (actual LR controlled by scheduler)

@@ -7,19 +7,23 @@ For a layer y = Wx, the Fisher Information Matrix is:
     F_W ≈ A ⊗ G
 where A = E[aa^T] (input covariance) and G = E[gg^T] (output gradient
 covariance). The preconditioned (natural) gradient is:
-    ΔW = (G + λ_g I)^{-1} @ ∇W @ (A + λ_a I)^{-1}
+    ΔW = (G + λ I)^{-1} @ ∇W @ (A + λ I)^{-1}
 
-Damping uses the factored Tikhonov approach with pi-correction (Martens &
-Grosse 2015): λ_a = sqrt(eps * pi), λ_g = sqrt(eps / pi), where
-    pi = (trace(A) * dim(G)) / (trace(G) * dim(A))
-This balances damping proportionally to each factor's scale, so neither
-A nor G is over-/under-damped. Research shows KFAC's performance depends
-critically on this heuristic (Clarke & Hernandez-Lobato, ICML 2024).
+ePC-adapted damping:
+    ePC's E_local detaches states between layers and uses local MSE losses.
+    After good inference (Newton T=2), prediction errors are small, making
+    the output gradient covariance G degenerate (trace(G) << trace(A)).
+    Pi-correction would push all damping onto A, collapsing the preconditioner
+    to a scaled identity. Instead, KRONOS uses flat damping (same λ for both)
+    which preserves A's curvature structure. G^{-1} becomes approximately
+    constant scaling, and the useful curvature comes from A^{-1} (input
+    whitening). The arbitrary scale from G^{-1} is neutralized by normalizing
+    the preconditioned gradient to match the raw gradient's norm.
 
 KRONOS decomposes A and G into LRPD form (diag(d) + UU^T) and uses the
 Woodbury identity for O(n*k^2) inversion instead of O(n^3). Factor estimates
 are maintained via streaming LRPD updates (EMA blending). Damping is applied
-at inversion time (not baked into the factors), enabling adaptive correction.
+at inversion time (not baked into the factors).
 
 Scalability:
     Memory: O(n*k) per factor instead of O(n^2)
@@ -59,8 +63,8 @@ class _KronosState:
 
     Maintains LRPD estimates of the input covariance A = E[aa^T] and
     output gradient covariance G = E[gg^T] for a single parametric layer.
-    Factors store PURE curvature (no damping). Damping is applied at
-    inversion time with pi-correction.
+    Factors store PURE curvature (no damping). Flat damping is applied at
+    inversion time (no pi-correction — see module docstring for rationale).
 
     Attributes:
         d_a, U_a: LRPD factors for A [in_dim], [in_dim, rank_a]
@@ -218,15 +222,15 @@ class _KronosState:
 
     @torch.no_grad()
     def precondition(self, grad_w, grad_b=None):
-        """Apply KFAC preconditioning with pi-corrected factored damping.
+        """Apply KFAC preconditioning with flat damping.
 
-        Computes: ΔW = (G + λ_g I)^{-1} @ ∇W @ (A + λ_a I)^{-1}
+        Computes: ΔW = (G + λ I)^{-1} @ ∇W @ (A + λ I)^{-1}
 
-        Pi-correction balances damping between A and G:
-            pi = (trace(A) * dim(G)) / (trace(G) * dim(A))
-            λ_a = sqrt(damping * pi)
-            λ_g = sqrt(damping / pi)
-        So λ_a * λ_g = damping, and the ratio follows factor scales.
+        Uses flat damping (same λ for both factors) instead of pi-correction.
+        For ePC's E_local, G is degenerate (tiny output gradients after
+        inference), so G^{-1} ≈ (1/λ)*I (constant scaling). The useful
+        curvature comes from A^{-1} (input whitening). The scale mismatch
+        is handled by gradient normalization in step(), not by damping.
 
         Args:
             grad_w: [out_dim, in_features] or [out, in, kH, kW] for Conv2d
@@ -249,24 +253,14 @@ class _KronosState:
         else:
             M = grad_w
 
-        # Pi-correction: balance damping between A and G
-        trace_a = self._lrpd_trace(self.d_a, self.U_a)
-        trace_g = self._lrpd_trace(self.d_g, self.U_g)
+        # Flat damping: same value for both A and G
+        d_a_damped = self.d_a + self.damping
+        d_g_damped = self.d_g + self.damping
 
-        pi = (trace_a * self.out_dim) / (trace_g * self.aug_in_dim + 1e-8)
-        pi = torch.clamp(pi, min=1e-4, max=1e4)  # prevent extreme ratios
-
-        damping_a = (self.damping * pi) ** 0.5
-        damping_g = (self.damping / pi) ** 0.5
-
-        # Damped factors: add damping to diagonal at inversion time
-        d_a_damped = self.d_a + damping_a
-        d_g_damped = self.d_g + damping_g
-
-        # Right-multiply: M @ (A + λ_a I)^{-1}
+        # Right-multiply: M @ (A + λ I)^{-1}
         M = lrpd_solve(d_a_damped, self.U_a, M)
 
-        # Left-multiply: (G + λ_g I)^{-1} @ M = (M^T @ (G + λ_g I)^{-1})^T
+        # Left-multiply: (G + λ I)^{-1} @ M = (M^T @ (G + λ I)^{-1})^T
         M = lrpd_solve(d_g_damped, self.U_g, M.T).T
 
         # Split augmented gradient back
@@ -305,30 +299,37 @@ class KRONOS(torch.optim.Optimizer):
     pass of compute_weight_loss (E_local). During inference (minimize_error_energy),
     hooks are inactive because layer parameters have requires_grad=False.
 
+    Gradient normalization: after KFAC preconditioning, each layer's gradient
+    is normalized to match its raw gradient norm. This preserves the curvature-
+    corrected DIRECTION (the valuable part: input whitening from A^{-1}) while
+    keeping step magnitudes at the same scale as first-order optimizers. This
+    is necessary because G^{-1} ≈ (1/damping)*I for ePC (degenerate G factor),
+    which otherwise creates arbitrary magnitude scaling.
+
     Args:
         model: nn.Module with Linear and/or Conv2d layers.
         lr: Learning rate for preconditioned updates.
         momentum: SGD momentum on preconditioned gradients.
-        damping: Tikhonov damping (eps). Distributed between factors via
-            pi-correction: λ_a = sqrt(eps * pi), λ_g = sqrt(eps / pi).
+        damping: Tikhonov damping (λ). Same value applied to both A and G
+            factors (flat damping, no pi-correction). Should be small enough
+            to not dominate A's eigenvalues (e.g., 0.01 for typical A with
+            eigenvalues 0.01-0.5).
         rank: LRPD rank for factor decomposition. Capped at dim-1 per layer.
         ema_decay: Exponential moving average decay for factor updates.
         update_freq: Steps between factor LRPD updates. Factors are also
             always updated on the first step.
         weight_decay: L2 regularization.
-        grad_clip: Per-layer gradient norm clipping (0 to disable).
         max_samples: Maximum activation/gradient samples per update.
             Controls memory for Conv2d layers with large spatial dims.
     """
 
     def __init__(self, model, lr=0.001, momentum=0.9, damping=0.01,
                  rank=32, ema_decay=0.95, update_freq=10,
-                 weight_decay=0.0, grad_clip=1.0, max_samples=1024):
+                 weight_decay=0.0, max_samples=1024):
         self._states = {}
         self._hooks = []
         self._step_count = 0
         self._update_freq = update_freq
-        self._grad_clip = grad_clip
 
         # Find all parametric layers and register hooks
         kfac_params = []
@@ -458,20 +459,26 @@ class KRONOS(torch.optim.Optimizer):
             grad_w = w.grad
             grad_b = b.grad if b is not None else None
 
-            # Precondition with KFAC
+            # Precondition with KFAC + gradient normalization
             if state.initialized:
+                # Save raw gradient norm before preconditioning
+                raw_norm = grad_w.norm()
+                if grad_b is not None:
+                    raw_norm = (raw_norm ** 2 + grad_b.norm() ** 2) ** 0.5
+
                 grad_w, grad_b = state.precondition(grad_w, grad_b)
 
-            # Per-layer gradient norm clipping
-            if self._grad_clip > 0:
-                grad_norm = grad_w.norm()
+                # Normalize preconditioned gradient to match raw gradient norm.
+                # Preserves curvature-corrected DIRECTION from A^{-1} while
+                # keeping magnitude comparable to first-order optimizers.
+                precond_norm = grad_w.norm()
                 if grad_b is not None:
-                    grad_norm = (grad_norm ** 2 + grad_b.norm() ** 2) ** 0.5
-                clip_coef = self._grad_clip / (grad_norm + 1e-6)
-                if clip_coef < 1.0:
-                    grad_w = grad_w * clip_coef
+                    precond_norm = (precond_norm ** 2 + grad_b.norm() ** 2) ** 0.5
+                if precond_norm > 1e-8 and raw_norm > 1e-8:
+                    scale = raw_norm / precond_norm
+                    grad_w = grad_w * scale
                     if grad_b is not None:
-                        grad_b = grad_b * clip_coef
+                        grad_b = grad_b * scale
 
             # Weight decay
             if wd > 0:
@@ -530,7 +537,7 @@ class KRONOS(torch.optim.Optimizer):
 
         Returns:
             dict mapping layer description to curvature info including
-            pi-correction values and damping distribution.
+            factor traces, damping, and eigenvalue ranges.
         """
         diag = {}
         for i, (module, state) in enumerate(self._states.items()):
@@ -544,12 +551,10 @@ class KRONOS(torch.optim.Optimizer):
             if state.initialized:
                 trace_a = state._lrpd_trace(state.d_a, state.U_a).item()
                 trace_g = state._lrpd_trace(state.d_g, state.U_g).item()
-                pi = (trace_a * state.out_dim) / (trace_g * state.aug_in_dim + 1e-8)
                 info['trace_a'] = trace_a
                 info['trace_g'] = trace_g
-                info['pi'] = pi
-                info['damping_a'] = (state.damping * pi) ** 0.5
-                info['damping_g'] = (state.damping / pi) ** 0.5
+                info['damping'] = state.damping
+                info['damping_vs_median_d_a'] = state.damping / (state.d_a.median().item() + 1e-8)
                 info['d_a_range'] = (state.d_a.min().item(),
                                      state.d_a.max().item())
                 info['d_g_range'] = (state.d_g.min().item(),
