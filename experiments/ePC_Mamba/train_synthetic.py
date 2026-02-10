@@ -526,7 +526,7 @@ class Diagnostics:
         if epoch is not None and num_epochs is not None:
             lines.append(f"\nEpoch: {epoch}/{num_epochs}")
         lines.append(f"Task: {task}")
-        lines.append(f"Mode: {'ePC (T={iters}, damp={damping})' if use_epc else 'Backprop'}")
+        lines.append(f"Mode: ePC (T={iters}, damp={damping})" if use_epc else "Mode: Backprop")
         if use_epc and self.inference_convergence:
             avg_conv = np.mean(self.inference_convergence[-100:])
             lines.append(f"Avg Convergence (last 100): {avg_conv:.2f}")
@@ -798,7 +798,8 @@ def main():
     parser.add_argument('--d_model', type=int, default=128)
     parser.add_argument('--n_layer', type=int, default=2)
     parser.add_argument('--iters', type=int, default=2, help='Newton iterations (T)')
-    parser.add_argument('--damping', type=float, default=1.0)
+    parser.add_argument('--damping', type=float, default=0.1,
+                        help='Newton damping (0.1 matches ePC-ResNet)')
     parser.add_argument('--n_train', type=int, default=5000)
     parser.add_argument('--n_test', type=int, default=1000)
     parser.add_argument('--baseline', action='store_true',
@@ -948,26 +949,30 @@ def main():
 
                 loss_val = weight_loss.item()
 
+                # Collect diagnostics BEFORE accuracy eval (which resets errors)
+                diag = model.get_diagnostics()
+                weight_mags = get_weight_magnitudes(model, use_epc=True)
+
+                # Hypothesis diagnostics (every batch — lightweight)
+                # Must run while errors are still populated as tensors
+                x_detached = model.embedding(inputs).detach()
+                hyp_diag = model.pce.get_hypothesis_diagnostics(x_detached)
+                # Save full per-position snapshot every 50 batches
+                save_snap = (n_batches % 50 == 0)
+
                 # Get accuracy (feedforward without ePC for clean eval)
+                # NOTE: This sets pce.errors = [0.0, ...], destroying tensor errors.
+                # All diagnostics that need tensor errors must be collected above.
                 with torch.no_grad():
                     logits = model(inputs)
                     acc = compute_accuracy(logits, targets, task=args.task)
 
                 t_batch_end = time.perf_counter()
 
-                # Collect diagnostics
-                diag = model.get_diagnostics()
-                weight_mags = get_weight_magnitudes(model, use_epc=True)
                 diagnostics.update_train(
                     acc=acc, loss=loss_val, diagnostics=diag,
                     lr=args.lr, weight_mags=weight_mags,
                 )
-
-                # Hypothesis diagnostics (every batch — lightweight)
-                x_detached = model.embedding(inputs).detach()
-                hyp_diag = model.pce.get_hypothesis_diagnostics(x_detached)
-                # Save full per-position snapshot every 50 batches
-                save_snap = (n_batches % 50 == 0)
                 diagnostics.update_hypothesis(hyp_diag, save_snapshot=save_snap)
 
                 if prof:
