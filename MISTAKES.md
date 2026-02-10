@@ -887,6 +887,29 @@ The actual curvature structure is block-diagonal per layer, not low-rank globall
 
 ---
 
+### 23. Inference-Mode Forward Pass Overwrites ePC Errors Before Diagnostics (BUG)
+
+**What we did wrong:** In the ePC-Mamba training loop, called `model(inputs)` (without targets) for accuracy evaluation BEFORE collecting `get_diagnostics()`. The `forward(targets=None)` path sets `self.pce.errors = [0.0] * (n_layer - 1)`, replacing tensor errors with scalar floats. Then `get_diagnostics()` checks `isinstance(e, Tensor)` → `False`, and collects nothing.
+
+**Symptoms:**
+- Per-Layer Energies plot completely empty (x-axis 0.0 to 1.0 = no data)
+- Error Magnitudes plot completely empty
+- H2 causal asymmetry = 0.000 (falls to else branch returning 0.0)
+- Other diagnostics (convergence, weight magnitudes) worked because they read from saved attributes, not from error tensors
+
+**Why it was hard to spot:**
+- Convergence metric still worked (saved as `_E_initial` and `_E_final` during inference)
+- The error overwrite happens silently — no error or warning
+- The `isinstance(e, Tensor)` check was a correct guard but masked the data loss
+
+**Root principle:** When a model has ephemeral state (like ePC errors), any function that resets that state must not be called between state population and state consumption. Order of operations matters.
+
+**Fix:** Move `get_diagnostics()` and `get_hypothesis_diagnostics()` BEFORE `model(inputs)` for accuracy.
+
+**Status:** FIXED (2026-02-10) — diagnostics collected before accuracy eval
+
+---
+
 ## Update Log
 
 - 2026-02-01 (initial): Initial file created with 6 major mistakes catalogued
@@ -907,3 +930,4 @@ The actual curvature structure is block-diagonal per layer, not low-rank globall
 - 2026-02-10 (QAT FAILURE): Mistake #21 - INT8 fake quantization destroys ePC accuracy (57.09% vs 80.49%). ePC error optimization amplifies weight noise over T iterations.
 - 2026-02-10 (ADAWOODBURY INEFFECTIVE): Mistake #22 - Rank-1 Woodbury correction over Adam provides no convergence benefit. Global rank-1 curvature doesn't match ePC's block-diagonal per-layer structure. MNIST 96.74% (≈Adam), CIFAR-10 no improvement.
 - 2026-02-10 (BPC LRPD INTRACTABLE): MNW conjugacy rules are fundamentally hard to capture in any LRPD approximation. Multiple approaches attempted (diagonal, low-rank η1, FITC, spectral inflation) — all either break PD guarantees or over-regularize. The quadratic constraint (block PSD of [[η1,η2^T],[η2,η3]]) creates a tight coupling between the approximation of η1 and the validity of the Schur complement Φ. No known LRPD form preserves conjugacy + PD simultaneously at scale. Revisit only with fundamentally new approach.
+- 2026-02-10 (DIAGNOSTIC ORDERING): Mistake #23 - forward(targets=None) resets pce.errors to scalar [0.0], destroying tensor errors before get_diagnostics() could read them. Fix: collect all error-dependent diagnostics before accuracy eval.
