@@ -781,6 +781,112 @@ Need a hybrid:
 
 ---
 
+### 20. KFAC (KRONOS) Is Structurally Incompatible with ePC's E_local (CRITICAL)
+
+**What we tried:** Built KRONOS, a KFAC-family second-order weight optimizer using LRPD decomposition, to replace Adam for ePC weight updates. Spent 6+ versions (v1-v5.2) debugging.
+
+**Why it failed fundamentally:**
+
+ePC's E_local violates all three assumptions KFAC relies on:
+
+1. **G factor is degenerate**: After Newton inference (T=2), prediction errors are tiny → output gradients ≈ 0 → G = E[gg^T] has trace(G) << trace(A) by 40,000:1. Half the Kronecker factorization carries zero curvature information.
+
+2. **Raw gradients are tiny**: E_local divides by batch_size * energy_scale on small errors. Raw gradient magnitudes are ~1000x smaller than standard networks. Any approach that normalizes to or preserves raw magnitude (v3, v5.2) produces microscopic steps → 64-72% accuracy.
+
+3. **A eigenvalues span 750:1 across layers**: L1 median(d_a) = 0.15, L4 = 0.0003. Any uniform treatment (flat damping, uniform LR) creates cross-layer mismatch. Adaptive damping overcorrects (λ_L4 = 0.000002 → A^{-1} amplification explodes to 972x).
+
+**The catch-22 we couldn't escape:**
+
+| Fix | Problem it creates |
+|---|---|
+| Keep raw magnitude | Steps too small (64-72%) |
+| Amplify uniformly (high LR) | 100x cross-layer mismatch |
+| Clip to fixed norm | Destroys magnitude info → expensive direction-only modifier |
+| Drop momentum | Loses gradient smoothing, noisier optimization |
+| Adaptive damping | Overcorrects for deep layers → explosion |
+| Norm-preserving | Same as "keep raw magnitude" → tiny steps |
+
+Best result: v4 (full A+G, flat damping, clipping) at 95.4% — only 1.5% below Adam's 96.8%, but 30% slower and far more complex.
+
+**Root cause: ePC needs per-element MAGNITUDE adaptation (what Adam provides), not matrix DIRECTION rotation (what KFAC provides).** KFAC's value is rotating gradients via A^{-1} and G^{-1}. Adam's value is per-element scale normalization via running variance. ePC's tiny, scale-varying gradients need the latter.
+
+**What would have worked:**
+- Just use Adam (which is already a diagonal Fisher approximation)
+- Or diagonal Fisher/Hessian: F_diag = diag(A) ⊙ diag(G) (cheaper, no matrix rotation)
+- KFAC may work for non-ePC architectures where G carries real curvature
+
+**LRPD library value:** The LRPD library (woodbury, schur, log_det, online_update, alt_decompose) remains valuable for future work (JEPA sparse GP, Mamba state covariance) where full-rank covariance matrices appear naturally. The library is sound — the application was wrong.
+
+**Status:** ARCHIVED (2026-02-10) — KRONOS moved to experiments/archived_kronos/, Newton+Adam adopted for all ePC experiments
+
+---
+
+### 21. INT8 QAT Destroys ePC Accuracy (CRITICAL)
+
+**What we tried:** Fake INT8 weight quantization (QAT) during training using `torch.nn.utils.parametrize` with Straight-Through Estimator.
+
+**Why it failed:**
+- ePC's error optimization is highly sensitive to weight precision
+- Fake quantization adds quantization noise to weights every forward pass
+- The Newton error step converges based on the EXACT current weights
+- INT8 noise (127 discrete levels per tensor) corrupts the energy landscape
+- Result: 57.09% at epoch 10 vs 80.49% without QAT — 23% accuracy loss
+
+**Symptoms:**
+- Learning proceeds but much slower than without QAT
+- All other metrics look normal (energies, error magnitudes, convergence)
+- The accuracy simply plateaus much lower
+
+**Why this is specific to ePC:**
+- Standard backprop networks tolerate QAT because gradients adapt to the quantized weights
+- ePC runs T iterations of error optimization on FIXED (quantized) weights per batch
+- The quantization noise creates a noisy energy landscape that errors can't optimize well
+- Each batch sees a DIFFERENT quantization (weights change → new quantization grid)
+
+**Root principle:** ePC's inference loop amplifies weight noise because it optimizes errors against fixed weights for multiple iterations. Any noise in weights gets amplified by T iterations of optimization against that noise. Standard networks don't have this problem because they do a single forward pass.
+
+**Status:** DISABLED (2026-02-10) — quantize_bits=0 in both training scripts. QAT code retained for reference.
+
+---
+
+### 22. AdaWoodbury Rank-1 Correction Provides No Benefit Over Adam
+
+**What we tried:** AdaWoodbury — Adam's diagonal second moment + a rank-1 Woodbury curvature correction via online PCA of the gradient stream. Theory: capture cross-parameter curvature that diagonal Adam misses, using H ≈ diag(√v+ε) + α·uu^T and Woodbury inversion.
+
+**Algorithm:**
+- Online PCA: u tracks top eigenvector of E[gg^T] via streaming power iteration
+- Adaptive α: measures excess curvature along u vs diagonal prediction
+- After warmup (100 steps): applies rank-1 Woodbury correction to Adam step
+- Memory: 50% over Adam (3n vs 2n per param). Compute: 3 extra dot products/step.
+
+**Results:**
+- MNIST: 96.74% test (3 epochs) — matches Adam's 97.07% within noise. Not remarkable.
+- CIFAR-10: 41.75% test epoch 1, 42.41% epoch 2 — same or slightly worse than Adam baseline (~42% epoch 1, 80.49% epoch 10). No convergence speedup visible.
+
+**Why it failed:**
+- Rank-1 correction is too weak: one direction of curvature correction across millions of parameters is a drop in the ocean
+- The dominant eigenvector of E[gg^T] captures gradient VARIANCE, not loss curvature — these are related but not the same thing
+- ePC gradients come from E_local (sum of local layer energies), which already decomposes curvature across layers. The global gradient's top eigenvector doesn't align with any meaningful per-layer curvature direction
+- The adaptive α mechanism correctly detects when diagonal is sufficient (ratio ≈ 1) — it self-disables, making AdaWoodbury equivalent to Adam in practice
+- Fundamentally: if the diagonal (Adam) already explains 99%+ of the curvature structure, a rank-1 off-diagonal correction explains ~0.001% of what's left
+
+**Lesson:** Second-order methods need to match the problem's curvature structure. ePC's curvature is:
+1. **Per-element scale variation** (handled well by Adam's v)
+2. **Cross-layer scale mismatch** (handled by Adam's per-parameter normalization)
+3. **Block-diagonal** (each layer's E_local is independent)
+The actual curvature structure is block-diagonal per layer, not low-rank globally. A global rank-1 correction addresses none of these.
+
+**What might actually work for faster convergence:**
+- Layer-wise learning rate adaptation (each layer's E_local has different scale)
+- Larger batch size + linear scaling rule (more signal per step)
+- Better LR schedules (warmup already helps significantly)
+- Architectural changes (error-gated inference for speed, not optimizer changes for convergence)
+- Accept that ePC's convergence rate IS the convergence rate — the error optimization loop is the bottleneck, not the weight optimizer
+
+**Status:** IMPLEMENTED but INEFFECTIVE (2026-02-10) — Code retained in ada_woodbury.py. train_cifar10.py defaults to adawoodbury but can switch back to 'adam'. Recommend reverting to Adam.
+
+---
+
 ## Update Log
 
 - 2026-02-01 (initial): Initial file created with 6 major mistakes catalogued
@@ -797,3 +903,6 @@ Need a hybrid:
 - 2026-02-07 (NAMING): Mistake #17 - Python can't import from hyphenated directories. Use underscores.
 - 2026-02-08 (QUADRATIC CONSTRAINT): Mistake #18 - Low-rank η1 truncation violates MNW quadratic constraint. Fixed via spectral norm inflation. Stable at 82.59%.
 - 2026-02-08 (FITC FAILURE): Mistake #19 - FITC diag(R) correction fails for Layers 2-4 where k=20 << data_rank≈128. V explodes → M reaches 1e17 → NaN at batch 15. FITC only works when residual is prior-dominated (k > data_rank).
+- 2026-02-10 (KRONOS ARCHIVED): Mistake #20 - KFAC structurally incompatible with ePC. G factor degenerate (40,000:1 trace ratio), raw gradients tiny, cross-layer A eigenvalue spread 750:1. ePC needs Adam, not KFAC.
+- 2026-02-10 (QAT FAILURE): Mistake #21 - INT8 fake quantization destroys ePC accuracy (57.09% vs 80.49%). ePC error optimization amplifies weight noise over T iterations.
+- 2026-02-10 (ADAWOODBURY INEFFECTIVE): Mistake #22 - Rank-1 Woodbury correction over Adam provides no convergence benefit. Global rank-1 curvature doesn't match ePC's block-diagonal per-layer structure. MNIST 96.74% (≈Adam), CIFAR-10 no improvement.

@@ -1,6 +1,6 @@
-"""Optimizers for predictive coding networks."""
+"""Optimizers for predictive coding networks.
 
-from .muon import Muon, MuonWithActivityReg
-from .stable_prospective import StableProspectiveLearning
-
-__all__ = ['Muon', 'MuonWithActivityReg', 'StableProspectiveLearning']
+KRONOS (KFAC + LRPD) was archived — structurally incompatible with ePC's
+E_local (degenerate G factor, tiny gradients). See MISTAKES.md #20.
+Use Adam for ePC weight updates.
+"""
