@@ -210,36 +210,41 @@ class PCE(nn.Module):
         where d = 1 + damping.
 
         Cost: zero extra backward passes (reuses the gradient).
+
+        Optimized: streams per-layer to avoid concatenating all errors into
+        a single 250MB+ vector. Uses decomposed dot products:
+          uTg = gTg - gTe,  uTu = gTg - 2*gTe + eTe
+        and in-place update:
+          e_new = e*(1-c) + g*(c - 1/d)  where c = uTg/(d^2 + d*uTu)
         """
         with torch.no_grad():
-            # Collect gradients and error values, upcast to fp32 for
-            # numerical stability (dot products lose precision in fp16)
-            all_g = []
-            all_e = []
-            for e in self.errors:
-                all_g.append(e.grad.float().flatten())
-                all_e.append(e.data.float().flatten())
-
-            g = torch.cat(all_g)
-            e_vec = torch.cat(all_e)
-
-            # Output-driven component: u = g - e = J^T(dL/dy)
-            u = g - e_vec
-
-            # Rank-1 Woodbury Newton step
             d = 1.0 + self.damping
-            uTg = torch.dot(u, g)
-            uTu = torch.dot(u, u)
 
-            # H^{-1} g = g/d - (u^T g)/(d^2 + d*||u||^2) * u
-            step = g / d - (uTg / (d * d + d * uTu)) * u
-
-            # Apply step to individual errors (cast back to error dtype)
-            offset = 0
+            # Accumulate dot products per-layer (no concatenation needed).
+            # Decompose: uTg = gTg - gTe, uTu = gTg - 2*gTe + eTe
+            # where u = g - e. This avoids creating the u vector entirely.
+            gTg = 0.0
+            gTe = 0.0
+            eTe = 0.0
             for e in self.errors:
-                numel = e.numel()
-                e.data -= step[offset:offset + numel].view_as(e).to(e.dtype)
-                offset += numel
+                g_flat = e.grad.reshape(-1)
+                e_flat = e.data.reshape(-1)
+                gTg += torch.dot(g_flat, g_flat).item()
+                gTe += torch.dot(g_flat, e_flat).item()
+                eTe += torch.dot(e_flat, e_flat).item()
+
+            uTg = gTg - gTe
+            uTu = gTg - 2.0 * gTe + eTe
+
+            # Woodbury coefficient
+            coeff = uTg / (d * d + d * uTu)
+
+            # Apply step in-place: e_new = e*(1-coeff) + g*(coeff - 1/d)
+            # Derived from: e_new = e - (g/d - coeff*(g - e))
+            c1 = 1.0 - coeff
+            c2 = coeff - 1.0 / d
+            for e in self.errors:
+                e.data.mul_(c1).add_(e.grad, alpha=c2)
 
     def minimize_error_energy(self, x, y):
         """Inference phase: optimize errors to minimize energy.
