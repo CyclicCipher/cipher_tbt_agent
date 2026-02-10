@@ -402,21 +402,18 @@ and exact diagonal minimization (decoupled, trivially parallel).
    points by gradient descent on marginal likelihood. For Mamba: learn what
    the state dimensions should be sensitive to (their "selectivity profiles").
 
-### Bayesian Predictive Coding (Tschantz et al. 2025)
+### Bayesian Predictive Coding (Tschantz et al. 2025) — BLOCKED
 
 **What**: Full Bayesian posterior over PC network weights via Matrix Normal-
 Wishart conjugate prior. Closed-form M-step (Hebbian). Converges in 1-3
 epochs (full-batch) vs dozens for PC/BP+Adam.
 
-**Why it matters**:
-1. **Could replace Adam for weight updates** — closed-form conjugate update
-   instead of gradient-based optimization. Fewer epochs to convergence.
-2. **Uncertainty quantification** — distinguishes epistemic vs aleatoric
-   uncertainty. Could inform adaptive precision weighting in ePC.
-3. **Limitation**: Full MNW posterior stores V_l of size d_x × d_x per layer.
-   Needs LR+D approximation (from LRPD papers!) to scale beyond small nets.
-4. **Natural fit with Mamba projections**: Mamba's linear projections (in_proj,
-   out_proj) are linear-before-nonlinear, matching BPC's generative model.
+**Status: INTRACTABLE for LRPD approximation.** Multiple approaches tried
+(diagonal, low-rank η1, FITC, spectral inflation) — all break PD guarantees
+or over-regularize. The MNW quadratic constraint (block PSD of natural
+parameters) creates tight coupling that no known LRPD form preserves.
+See MISTAKES.md entries #16, #18, #19 for full details. Do NOT attempt
+BPC weight updates without a fundamentally new approach to the MNW problem.
 
 ### TinyLoRA: Learning to Reason in 13 Parameters (Morris et al. 2026)
 
@@ -470,7 +467,6 @@ SVD-based merging is gradient-free and data-free.
                     │ + fp32 errors, shape caching       │
                     │                                    │
                     │ Weight updates: Adam (proven)      │
-                    │   or BPC conjugate (§BayesianPC)   │
                     │ + structure-aware LR for BTT       │
                     │                                    │
                     │ Scaling: Share subspaces (§Share)   │
@@ -485,7 +481,64 @@ SVD-based merging is gradient-free and data-free.
 4. BTT projections → compute savings (when d_model ≥ 256)
 5. PPCA curvature for Newton → faster convergence (T=2 → T=1)
 6. Share subspaces → continual learning across task progression
-7. BPC conjugate weight updates → eventual Adam replacement
+
+---
+
+## Discretization Rules: Options Beyond Trapezoidal
+
+**Default: Mamba3's trapezoidal rule** (2nd order, data-dependent λ_t).
+Architecture should support swappable discretization for experimentation.
+
+The continuous SSM: `h'(t) = A(t)h(t) + B(t)x(t)`. Since `exp(dt*A)` is
+computed exactly (scalar per head), only the input coupling integral is
+approximated:
+
+```
+h(t+dt) = exp(dt*A)*h(t) + ∫₀ᵈᵗ exp(A*(dt-s)) * B(t+s)*x(t+s) ds
+                              ↑ this integral is what we approximate
+```
+
+### Option 1: ETD with ψ₁ correction (most promising novel approach)
+```
+h_t = exp(dt*A)*h_{t-1} + ψ₁(dt*A) * dt*B_t*x_t
+where ψ₁(z) = (exp(z) - 1) / z
+```
+Physically more correct than trapezoidal: accounts for exponential decay
+DURING input injection. Fast-decaying states (large |A|) automatically
+weight recent input more. Trivial to implement (one extra division per head).
+Nobody has done this for Mamba.
+
+### Option 2: Adams-Bashforth 3 (3rd order, fully causal)
+```
+h_t = exp(dt*A)*h_{t-1} + dt*(23/12*f_{t-1} - 4/3*f_{t-2} + 5/12*f_{t-3})
+where f_t = B_t*x_t
+```
+3-tap causal filter integrated into discretization. Stores 2-3 extra B*x
+terms at chunk boundaries. Higher order but fixed coefficients.
+
+### Option 3: Data-dependent multi-step (learned integration)
+```
+h_t = exp(dt*A)*h_{t-1} + Σᵢ wᵢ(x_t) * B_{t-i}*x_{t-i}
+```
+Generalize trapezoidal's λ_t to N previous steps with learned coefficients.
+Initialize from AB3/AM3 for stability, let training adjust. Most expressive.
+
+### Option 4: Predictor-corrector (natural ePC connection)
+Predict h_t via Adams-Bashforth (explicit), correct via Adams-Moulton
+(using predicted value). The ePC inference loop IS a correction step —
+this unifies numerical integration with error optimization.
+
+### Implementation approach
+```python
+class DiscretizationRule(Enum):
+    EULER = "euler"           # Mamba2 baseline
+    TRAPEZOIDAL = "trapez"    # Mamba3 (default)
+    ETD = "etd"               # Exponential time differencing
+    AB3 = "ab3"               # Adams-Bashforth 3rd order
+    LEARNED = "learned"       # Data-dependent multi-step
+```
+Each rule defines how to compute the input coupling term given (dt, A, B, x)
+and any required previous-step state.
 
 ---
 
