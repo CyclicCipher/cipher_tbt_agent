@@ -53,6 +53,7 @@ class Diagnostics:
         self.test_losses = []
         self.layer_energies = [[] for _ in range(self.num_error_layers)]
         self.inference_convergence = []
+        self.iters_used = []
         self.error_norms = [[] for _ in range(self.num_error_layers)]
         self.weight_magnitudes = {}
 
@@ -60,6 +61,7 @@ class Diagnostics:
         self.train_accs.append(acc)
         self.train_losses.append(loss)
         self.inference_convergence.append(diagnostics['convergence'])
+        self.iters_used.append(diagnostics.get('iters_used', 0))
 
         for i, energy in enumerate(diagnostics['layer_energies']):
             if i < self.num_error_layers:
@@ -191,8 +193,24 @@ class Diagnostics:
         ax.text(0.05, 0.5, '\n'.join(lines), fontsize=10,
                 verticalalignment='center', family='monospace')
 
-        # [2,2] Empty
-        axes[2, 2].axis('off')
+        # [2,2] Early stopping stats
+        ax = axes[2, 2]
+        ax.axis('off')
+        lines = []
+        if self.iters_used:
+            recent = self.iters_used[-100:] if len(self.iters_used) >= 100 else self.iters_used
+            lines.append(f"Avg iters used: {np.mean(recent):.2f}")
+            max_iters = max(self.iters_used)
+            early_stop_rate = sum(1 for i in recent if i < max_iters) / len(recent)
+            lines.append(f"Early stop rate: {early_stop_rate:.0%}")
+            lines.append(f"Max iters (T): {max_iters}")
+            lines.append(f"\nAll iters distribution:")
+            from collections import Counter
+            counts = Counter(self.iters_used)
+            for k in sorted(counts.keys()):
+                lines.append(f"  T={k}: {counts[k]} ({counts[k]/len(self.iters_used):.0%})")
+        ax.text(0.05, 0.5, '\n'.join(lines), fontsize=10,
+                verticalalignment='center', family='monospace')
 
         plt.tight_layout()
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
@@ -253,7 +271,7 @@ def train_epoch(model, weight_optim, train_loader, device, epoch, diagnostics):
             diagnostics=diag, weight_mags=weight_mags,
         )
 
-        pbar.set_postfix(acc=f"{acc:.2%}")
+        pbar.set_postfix(acc=f"{acc:.2%}", T=diag.get('iters_used', '?'))
 
     return total_correct / total_samples
 
@@ -337,6 +355,15 @@ def main():
     print(f"\nBest test accuracy: {best_test_acc:.2%}")
     print(f"eBPC baseline: 95.74% (3 epochs, Hebbian updates)")
     print(f"Target: ~95%")
+
+    # Early stopping summary
+    if diagnostics.iters_used:
+        from collections import Counter
+        counts = Counter(diagnostics.iters_used)
+        total = len(diagnostics.iters_used)
+        print(f"\nEarly stopping: avg iters={np.mean(diagnostics.iters_used):.2f}")
+        for k in sorted(counts.keys()):
+            print(f"  T={k}: {counts[k]}/{total} ({counts[k]/total:.0%})")
 
     diagnostics.plot('diagnostics_epc_mnist_final.png')
 
