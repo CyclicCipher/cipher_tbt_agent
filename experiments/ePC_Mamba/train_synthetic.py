@@ -877,12 +877,6 @@ def main():
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-    # LR schedule: cosine annealing to stabilize late training
-    n_batches_total = len(train_loader) * args.epochs
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=n_batches_total, eta_min=args.lr * 0.01,
-    )
-
     # Diagnostics
     num_error_layers = config.n_layer - 1 if use_epc else 0
     diagnostics = Diagnostics(num_error_layers, task=args.task)
@@ -941,6 +935,7 @@ def main():
                     _tw = _t2
 
                 weight_loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
                 if prof:
                     _t2 = _sync_time()
@@ -948,14 +943,12 @@ def main():
                     _tw = _t2
 
                 optimizer.step()
-                scheduler.step()
 
                 if prof:
                     _t2 = _sync_time()
                     t_optim = (_t2 - _tw) * 1000
 
                 loss_val = weight_loss.item()
-                current_lr = scheduler.get_last_lr()[0]
 
                 # Collect diagnostics BEFORE accuracy eval (which resets errors)
                 diag = model.get_diagnostics()
@@ -979,7 +972,7 @@ def main():
 
                 diagnostics.update_train(
                     acc=acc, loss=loss_val, diagnostics=diag,
-                    lr=current_lr, weight_mags=weight_mags,
+                    lr=args.lr, weight_mags=weight_mags,
                 )
                 diagnostics.update_hypothesis(hyp_diag, save_snapshot=save_snap)
 
@@ -1011,11 +1004,10 @@ def main():
                     loss = F.cross_entropy(
                         logits.reshape(b * l, v), targets.reshape(b * l))
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
-                scheduler.step()
 
                 loss_val = loss.item()
-                current_lr = scheduler.get_last_lr()[0]
                 with torch.no_grad():
                     acc = compute_accuracy(logits, targets, task=args.task)
 
@@ -1023,7 +1015,7 @@ def main():
                 weight_mags = get_weight_magnitudes(model, use_epc=False)
                 diagnostics.update_train_baseline(
                     acc=acc, loss=loss_val,
-                    lr=current_lr, weight_mags=weight_mags,
+                    lr=args.lr, weight_mags=weight_mags,
                 )
                 epoch_time += (t_batch_end - t_batch_start)
 
