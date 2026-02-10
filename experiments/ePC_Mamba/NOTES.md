@@ -87,17 +87,62 @@ Per SwiGLU MLP block:
 **~80%+ of parameters are in dense linear projections.** This is where BTT
 can help.
 
+### Mamba3 Specifics
+
+**Trapezoidal discretization:**
+```
+Mamba2 (Euler):   h_t = exp(dt*A) * h_{t-1} + dt * B_t * x_t
+Mamba3 (Trapez):  h_t = exp(dt*A) * h_{t-1} + (1-λ_t)*dt*exp(dt*A)*B_{t-1}*x_{t-1} + λ_t*dt*B_t*x_t
+```
+Second-order (O(dt²) cumulative error vs O(dt)). λ_t is data-dependent (learned,
+not fixed 0.5). State depends on current AND previous input → effectively a
+size-2 convolution, making the explicit conv1d redundant.
+
+**Complex-valued states via data-dependent RoPE:**
+Mamba2's real scalar A cannot solve parity (proven). Mamba3 adds complex
+eigenvalues: `h_t = exp(dt*A) * R_t * h_{t-1} + dt * B_t * x_t` where R_t
+is a rotation matrix from data-dependent θ_t. Crucially: this is equivalent
+to applying RoPE to B and C before the SSD scan — **no complex arithmetic
+needed at runtime.** Result: 0.9% → 100% on parity.
+
+**MIMO:** Rank-r matrix projections instead of rank-1 outer products. Increases
+arithmetic intensity for inference. Training benefit is smaller. Skip for now.
+
+### Mamba2 Block Anatomy (What We're Building From)
+
+```
+in_proj: d_model → [z, x, B, C, dt]   ← DOMINANT (e.g., 256→1160, ~297K params)
+conv1d: depthwise causal, kernel=4      ← removed by trapezoidal
+SSD scan: segsum → 4-step chunked algo  ← core SSM, ~30 lines of einsums
+out_proj: d_inner → d_model             ← DOMINANT (e.g., 512→256, ~131K params)
+```
+
+For d_model=256: in_proj + out_proj ≈ 428K params, everything else ≈ 20K.
+**80%+ of params in dense projections. BTT directly applicable here.**
+
 ### Implementation Status
 - Paper: under review at ICLR 2026 (anonymous)
 - Code: NOT released yet (as of Feb 2026)
-- Mamba2 code: available at github.com/state-spaces/mamba
-- **Plan: start with Mamba2, upgrade to Mamba3 when code drops**
+- Mamba2 code: available at github.com/state-spaces/mamba (v2.2.6)
+- Pure PyTorch reference: tommyip/mamba2-minimal (~200 lines)
+- **Plan: build custom Mamba2 block in pure PyTorch, then incrementally add
+  Mamba3's data-dependent RoPE (easy) and our own discretization rule**
+
+### Replication Path for Mamba3 Components
+1. **Start with Mamba2** — pure PyTorch SSD, no CUDA kernel dependency
+2. **Add data-dependent RoPE** (easy) — just preprocess B, C before SSD scan.
+   Biggest quality gain. Enables state tracking (parity, counting, etc.)
+3. **Add custom discretization** (medium) — modify SSD kernel to include
+   previous-step term. Removes conv1d. User has own rule idea.
+4. **Skip MIMO** — inference optimization, not training priority
 
 ### Key Properties for ePC
 - Fixed-size recurrent state (unlike Transformer KV cache)
 - Sub-quadratic in sequence length
 - Selective gating ↔ precision-weighted prediction errors (natural PC analogy)
 - Dense projections dominate compute → BTT directly applicable
+- Pure PyTorch SSD is ~3-5x slower than fused CUDA, but acceptable at small
+  scale on 3050 Ti for proof-of-concept
 
 ---
 
@@ -267,13 +312,236 @@ Sparse matmul FLOPs scale with non-zeros, not matrix size.
 
 ---
 
+## Research Paper Analysis: What Applies to ePC-Mamba
+
+### The "Low-Rank + Diagonal" Unifying Motif
+
+A single structural pattern appears across ALL the research papers: **low-rank
+plus diagonal (LR+D)**. It shows up in:
+- Sparse GPs: Q + Λ (Nyström low-rank covariance + diagonal correction)
+- BTT: block tensor decomposition of weight matrices (≡ block LR)
+- LRPD Riccati: Y = URU^T + ψ for evolving covariance under state dynamics
+- Mamba SSM: low-rank state update (B*x is rank-1) + diagonal decay (A)
+- ePC Newton: Hessian H = I + J^T H_L J is identity + low-rank
+
+**Key insight from sparse GP papers**: The diagonal Λ is NOT optional decoration.
+Without it, gradients for the low-rank factors vanish in regions far from the
+current "support." With Λ, every data point contributes meaningful gradients.
+**This directly explains why naive dense LR on BTT kills performance** — and
+suggests BTT + diagonal correction could have even better gradient flow than
+BTT alone.
+
+### LRPD for Riccati-like Matrix DEs (Bonnabel, Lambert, Bach 2024)
+
+**What**: Evolve large PSD matrices (covariances, precisions) under differential
+equations while constraining them to low-rank + diagonal form. Two forms:
+- PPCA: Y = URU^T + s(I - UU^T), s > 0 scalar (cheapest)
+- FA: Y = URU^T + diag(ψ), per-dimension diagonal (more expressive)
+
+**Key technique**: Tangent-space projection on structured matrix manifolds.
+Project the ODE vector field onto T_Y(M) at each step to stay in the
+structured subset. Closed-form projections via Woodbury identity: O(dp²).
+
+**Why it matters for us**:
+1. **SSM covariance tracking**: If we want uncertainty over Mamba's hidden state
+   h(t) (for Bayesian ePC or precision-weighted errors), the covariance of the
+   belief satisfies a discrete Riccati equation. PPCA approximation: O(n*p)
+   instead of O(n²), where n = d_state.
+2. **Curvature estimation for Newton step**: Our Newton step approximates
+   H⁻¹ via rank-1 Woodbury. PPCA gives a rank-p approximation that evolves
+   smoothly across batches (warm-startable! — curvature structure is stable
+   even when errors/inputs change). Could improve T=2 → T=1 convergence.
+3. **Invertibility guarantee**: Pure low-rank covariance is singular → Kalman
+   filter diverges (proven in their Prop 7). PPCA is always full-rank. Same
+   applies to precision matrices in predictive coding.
+4. **The U equation resembles the Oja flow** (tracks dominant eigenspace).
+   U naturally aligns with the top curvature directions over training.
+
+### LRPD Spectral Approach (Yeon & Anitescu 2025)
+
+**What**: Fast algorithm to decompose any PSD matrix as low-rank + diagonal.
+Alternating spectral projection: top-k eigendecomposition of residual, then
+closed-form diagonal update. Converges to machine precision in ~20 iterations.
+
+**Key technique**: Alternate between Eckart-Young (optimal low-rank of residual)
+and exact diagonal minimization (decoupled, trivially parallel).
+
+**Why it matters**:
+1. **Stochastic variant needs only matrix-vector products** — could decompose
+   the Hessian (accessed via Hessian-vector products) into LR+D form cheaply.
+2. **Dynamic rank adaptation**: computable error bounds at O(d) cost per step.
+   Know when to increase/decrease rank of any structured approximation.
+3. **Block-diagonal generalization**: replace scalar diagonal with block-diagonal
+   (e.g., per-layer blocks, per-head blocks in Mamba). Even better fit.
+
+### Sparse GP Papers (Quinonero-Candela & Rasmussen 2005; Snelson & Ghahramani 2006)
+
+**What**: Unified framework for sparse GP regression. All methods reduce to
+"exact inference with approximate prior" using m inducing variables (m << n).
+
+**Taxonomy**: SoR < DTC < FITC < PITC (quality ranking, same O(nm²) cost)
+- FITC = low-rank + diagonal correction (= Snelson's SPGP)
+- PITC = low-rank + block-diagonal correction (best quality)
+
+**Critical insight for us**:
+1. **Inducing variables ↔ Mamba hidden state**: The hidden state h_t mediates
+   input→output mapping through a low-dimensional bottleneck (d_state << L).
+   This IS the inducing variable framework. FITC/PITC suggest: don't just use
+   a deterministic state bottleneck — add a diagonal correction capturing what
+   the bottleneck misses.
+2. **Λ makes gradient-based learning of low-rank factors tractable**: SPGP's
+   input-dependent noise Λ(x) = K_xx - k_x^T K_M^{-1} k_x creates gradients
+   even far from inducing points. Without it (DTC/SoR), pseudo-input gradients
+   vanish → they get stuck. **This is the GP perspective on why BTT needs
+   structure-aware LR.**
+3. **Mamba's selective Δ ↔ SPGP's Λ**: Mamba's input-dependent step size Δ_t
+   controls how much each timestep trusts input vs state. This IS analogous
+   to SPGP's input-dependent noise variance. The GP framework gives a
+   principled probabilistic interpretation of Mamba's selectivity.
+4. **Continuous pseudo-input optimization**: SPGP learns WHERE to place inducing
+   points by gradient descent on marginal likelihood. For Mamba: learn what
+   the state dimensions should be sensitive to (their "selectivity profiles").
+
+### Bayesian Predictive Coding (Tschantz et al. 2025)
+
+**What**: Full Bayesian posterior over PC network weights via Matrix Normal-
+Wishart conjugate prior. Closed-form M-step (Hebbian). Converges in 1-3
+epochs (full-batch) vs dozens for PC/BP+Adam.
+
+**Why it matters**:
+1. **Could replace Adam for weight updates** — closed-form conjugate update
+   instead of gradient-based optimization. Fewer epochs to convergence.
+2. **Uncertainty quantification** — distinguishes epistemic vs aleatoric
+   uncertainty. Could inform adaptive precision weighting in ePC.
+3. **Limitation**: Full MNW posterior stores V_l of size d_x × d_x per layer.
+   Needs LR+D approximation (from LRPD papers!) to scale beyond small nets.
+4. **Natural fit with Mamba projections**: Mamba's linear projections (in_proj,
+   out_proj) are linear-before-nonlinear, matching BPC's generative model.
+
+### TinyLoRA: Learning to Reason in 13 Parameters (Morris et al. 2026)
+
+**What**: RL fine-tuning with vanishingly few parameters. 13 params push
+Qwen2.5-7B from 76% to 91% on GSM8K. Uses SVD decomposition + random
+projection: W' = W + U Σ (Σ_i v_i P_i) V^T.
+
+**Why it matters**:
+1. **RL makes denser updates than SFT** — the search/resampling phase filters
+   noise. ePC's iterative inference is analogous: it "searches" before updating
+   weights. Prediction: ePC can learn effectively with very compact parameter
+   updates (like BTT with tiny rank).
+2. **fp32 matters at extreme compression** — even 13 parameters need fp32.
+   Confirms our finding that precision is critical for ePC.
+3. **Larger models need fewer parameters**: scaling law suggests our eventual
+   1B model might need very few trainable dimensions per task.
+
+### Shared LoRA Subspaces (Kaushik et al. 2026)
+
+**What**: Continual learning via evolving shared low-rank subspace across tasks.
+100x parameter reduction, 281x memory savings vs separate LoRA per task.
+SVD-based merging is gradient-free and data-free.
+
+**Why it matters for long-term plan (ePC-Mamba → ePC-JEPA → math)**:
+1. **Continual task adaptation** — synthetic → text → code → math without
+   catastrophic forgetting, without replay buffers.
+2. **Universal Weight Subspace Hypothesis**: LoRA adapters for different tasks
+   converge to a shared subspace. Our Mamba projections (BTT-structured) might
+   exhibit the same: a shared subspace of BTT cores across tasks.
+3. **Backward transfer observed**: CoLA improved after learning later tasks.
+   The evolving subspace helps earlier tasks — exactly what we want when
+   progressing through increasingly complex reasoning tasks.
+
+---
+
+## Synthesis: How It All Fits Together
+
+```
+                    ┌──────────────────────────────────┐
+                    │      ePC-Mamba Architecture       │
+                    ├──────────────────────────────────┤
+                    │ Dense projections → BTT (§BTT)    │
+                    │ + diagonal correction (§Sparse GP) │
+                    │                                    │
+                    │ SSM: Mamba2 SSD scan               │
+                    │ + data-dependent RoPE (Mamba3)     │
+                    │ + custom discretization rule       │
+                    │                                    │
+                    │ Error optimization: Newton (ePC)   │
+                    │ + PPCA curvature tracking (§LRPD)  │
+                    │ + fp32 errors, shape caching       │
+                    │                                    │
+                    │ Weight updates: Adam (proven)      │
+                    │   or BPC conjugate (§BayesianPC)   │
+                    │ + structure-aware LR for BTT       │
+                    │                                    │
+                    │ Scaling: Share subspaces (§Share)   │
+                    │ for continual task progression     │
+                    └──────────────────────────────────┘
+```
+
+**Priority order for implementation:**
+1. Mamba2 block (pure PyTorch) + ePC wrapper → synthetic tasks
+2. Data-dependent RoPE (Mamba3 feature #2) → state tracking
+3. Custom discretization rule → replace conv1d
+4. BTT projections → compute savings (when d_model ≥ 256)
+5. PPCA curvature for Newton → faster convergence (T=2 → T=1)
+6. Share subspaces → continual learning across task progression
+7. BPC conjugate weight updates → eventual Adam replacement
+
+---
+
+## Dataset Notes
+
+### WikiText-2
+- **~2M tokens, ~12MB raw text on disk** — easily fits in memory
+- 33K vocabulary (word-level) or ~256 (character-level)
+- Good for benchmarking: standard perplexity comparisons available
+- Full articles → tests long-range dependency modeling
+
+### Synthetic Tasks (for validation)
+- **Copy**: input → delay → reproduce (tests state memory)
+- **Parity**: running XOR of binary input (tests state tracking — Mamba2 fails,
+  data-dependent RoPE needed)
+- **Sorting**: sort a short sequence (tests comparison/reordering)
+- **Selective copy**: copy only certain tokens based on markers
+
+### Character-level Text
+- **Shakespeare** (~1MB) — good for quick iteration
+- Can also use WikiText-2 raw for character-level
+
+### Memory Budget (RTX 3050 Ti, 4GB VRAM)
+- Model: d_model=256, 4 layers → ~10M params → ~40MB fp32
+- Errors: 4 layers × batch × seqlen × d_model × fp32 → ~4MB at batch=16, L=512
+- Activations for backprop: ~100-200MB (depends on sequence length)
+- **Comfortable at batch=16, seqlen=256-512. Tight at seqlen=1024+.**
+
+---
+
 ## References
+
+### Architecture
 - Mamba3: OpenReview HwCvaJOiCj (ICLR 2026 submission, anonymous)
 - Mamba2: Gu & Dao, arXiv:2405.21060
 - Mamba1: Gu & Dao, arXiv:2312.00752
+- mamba2-minimal: github.com/tommyip/mamba2-minimal (pure PyTorch reference)
+- mamba2-torch: github.com/vasqu/mamba2-torch (HuggingFace-compatible)
+
+### Predictive Coding
 - ePC: Goemaere et al., arXiv:2505.20137
-- BTT: Qiu et al., ICML 2024 (in docs/research/BTT paper.pdf)
+- BPC: Tschantz et al., arXiv:2503.24016
 - tPC: Millidge et al., PLOS Comp Bio 2024
 - BIM: Qin, arXiv:2409.11263
-- RigL: Evci et al., ICML 2020
+
+### Structured Matrices & Optimization
+- BTT: Qiu et al., ICML 2024 (in docs/research/BTT paper.pdf)
+- LRPD Riccati: Bonnabel, Lambert, Bach, arXiv:2407.03373
+- LRPD Spectral: Yeon & Anitescu, arXiv:2512.17120
 - CoLA: Potapczynski et al., NeurIPS 2024
+
+### Sparse GPs & Inducing Variables
+- Unified Sparse GP: Quinonero-Candela & Rasmussen, JMLR 2005
+- SPGP: Snelson & Ghahramani, NeurIPS 2006
+
+### Efficient Adaptation
+- TinyLoRA: Morris et al., arXiv:2602.04118
+- Share: Kaushik et al., arXiv:2602.06043
+- RigL: Evci et al., ICML 2020
