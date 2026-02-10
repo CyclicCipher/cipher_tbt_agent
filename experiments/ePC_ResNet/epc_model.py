@@ -172,11 +172,20 @@ class PCE(nn.Module):
 
     @torch.no_grad()
     def init_zero_errors(self, x):
-        """Initialize zero errors by running a feedforward pass."""
-        self.errors = [
-            torch.zeros_like(x := layer_i(x), requires_grad=True)
-            for layer_i in self.layers[:-1]
-        ]
+        """Initialize zero errors by running a feedforward pass.
+
+        Errors are always fp32 regardless of autocast context. fp16 rounds
+        small Newton corrections to zero, which defeats early stopping and
+        degrades inference quality. fp32 errors are cheap (just vectors added
+        between layers); the expensive ops (conv, linear) still run in fp16.
+        """
+        self.errors = []
+        for layer_i in self.layers[:-1]:
+            x = layer_i(x)
+            self.errors.append(
+                torch.zeros(x.shape, dtype=torch.float32,
+                            device=x.device, requires_grad=True)
+            )
 
     def _newton_step(self):
         """Rank-1 LRPD Newton step for error optimization.
@@ -351,4 +360,7 @@ class PCESkipConnection(PCE):
         s_i = (x, 0.0)
         for layer_i in self.layers[:-1]:
             s_i = layer_i(s_i)
-            self.errors.append(torch.zeros_like(s_i[0], requires_grad=True))
+            self.errors.append(
+                torch.zeros(s_i[0].shape, dtype=torch.float32,
+                            device=s_i[0].device, requires_grad=True)
+            )
