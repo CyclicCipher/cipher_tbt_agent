@@ -24,7 +24,6 @@ from tqdm import tqdm
 
 from experiments.ePC_ResNet.epc_model import PCE
 from experiments.ePC_ResNet.architectures import get_mlp_mnist
-from src.optimizers.kronos import KRONOS
 
 
 def get_mnist_loaders(batch_size=128, data_dir='./data'):
@@ -290,7 +289,6 @@ def main():
     e_damping = 0.1         # Newton damping (lower = more aggressive)
 
     # Hyperparameters — Weight optimization (learning phase)
-    weight_optim_type = 'adam'  # 'adam' or 'kronos'
     w_lr = 0.001
     batch_size = 128
     num_epochs = 3
@@ -303,7 +301,7 @@ def main():
     print(f"Architecture: [784, 128, 128, 128, 10], ReLU")
     print(f"Inference: {error_optim} errors, T={iters}, "
           f"{'damping='+str(e_damping) if error_optim == 'newton' else 'e_lr='+str(e_lr)}")
-    print(f"Learning: {weight_optim_type.upper()} weights, w_lr={w_lr}")
+    print(f"Learning: Adam weights, w_lr={w_lr}")
     print(f"Output loss: cross-entropy")
     print(f"Batch size: {batch_size}, Epochs: {num_epochs}")
     print("=" * 60)
@@ -320,11 +318,7 @@ def main():
     num_error_layers = len(model.layers) - 1
     print(f"Parameters: {num_params:,}")
 
-    if weight_optim_type == 'kronos':
-        weight_optim = KRONOS(model, lr=w_lr, damping=0.01, rank=32,
-                              ema_decay=0.95, update_freq=10, momentum=0.9)
-    else:
-        weight_optim = torch.optim.Adam(model.parameters(), lr=w_lr)
+    weight_optim = torch.optim.Adam(model.parameters(), lr=w_lr)
     diagnostics = Diagnostics(num_error_layers)
 
     best_test_acc = 0.0

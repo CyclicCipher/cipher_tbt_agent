@@ -781,6 +781,46 @@ Need a hybrid:
 
 ---
 
+### 20. KFAC (KRONOS) Is Structurally Incompatible with ePC's E_local (CRITICAL)
+
+**What we tried:** Built KRONOS, a KFAC-family second-order weight optimizer using LRPD decomposition, to replace Adam for ePC weight updates. Spent 6+ versions (v1-v5.2) debugging.
+
+**Why it failed fundamentally:**
+
+ePC's E_local violates all three assumptions KFAC relies on:
+
+1. **G factor is degenerate**: After Newton inference (T=2), prediction errors are tiny → output gradients ≈ 0 → G = E[gg^T] has trace(G) << trace(A) by 40,000:1. Half the Kronecker factorization carries zero curvature information.
+
+2. **Raw gradients are tiny**: E_local divides by batch_size * energy_scale on small errors. Raw gradient magnitudes are ~1000x smaller than standard networks. Any approach that normalizes to or preserves raw magnitude (v3, v5.2) produces microscopic steps → 64-72% accuracy.
+
+3. **A eigenvalues span 750:1 across layers**: L1 median(d_a) = 0.15, L4 = 0.0003. Any uniform treatment (flat damping, uniform LR) creates cross-layer mismatch. Adaptive damping overcorrects (λ_L4 = 0.000002 → A^{-1} amplification explodes to 972x).
+
+**The catch-22 we couldn't escape:**
+
+| Fix | Problem it creates |
+|---|---|
+| Keep raw magnitude | Steps too small (64-72%) |
+| Amplify uniformly (high LR) | 100x cross-layer mismatch |
+| Clip to fixed norm | Destroys magnitude info → expensive direction-only modifier |
+| Drop momentum | Loses gradient smoothing, noisier optimization |
+| Adaptive damping | Overcorrects for deep layers → explosion |
+| Norm-preserving | Same as "keep raw magnitude" → tiny steps |
+
+Best result: v4 (full A+G, flat damping, clipping) at 95.4% — only 1.5% below Adam's 96.8%, but 30% slower and far more complex.
+
+**Root cause: ePC needs per-element MAGNITUDE adaptation (what Adam provides), not matrix DIRECTION rotation (what KFAC provides).** KFAC's value is rotating gradients via A^{-1} and G^{-1}. Adam's value is per-element scale normalization via running variance. ePC's tiny, scale-varying gradients need the latter.
+
+**What would have worked:**
+- Just use Adam (which is already a diagonal Fisher approximation)
+- Or diagonal Fisher/Hessian: F_diag = diag(A) ⊙ diag(G) (cheaper, no matrix rotation)
+- KFAC may work for non-ePC architectures where G carries real curvature
+
+**LRPD library value:** The LRPD library (woodbury, schur, log_det, online_update, alt_decompose) remains valuable for future work (JEPA sparse GP, Mamba state covariance) where full-rank covariance matrices appear naturally. The library is sound — the application was wrong.
+
+**Status:** ARCHIVED (2026-02-10) — KRONOS moved to experiments/archived_kronos/, Newton+Adam adopted for all ePC experiments
+
+---
+
 ## Update Log
 
 - 2026-02-01 (initial): Initial file created with 6 major mistakes catalogued
