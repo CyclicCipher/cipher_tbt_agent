@@ -30,9 +30,18 @@ Reference: Goemaere et al. 2025, arXiv:2505.20137
 Code reference: https://github.com/cgoemaere/error_based_PC (Apache 2.0)
 """
 
+import time
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+def _sync_time():
+    """Synchronize CUDA and return wall-clock time for profiling."""
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    return time.perf_counter()
 
 
 # --- Quantization-Aware Training (QAT) utilities ---
@@ -115,6 +124,8 @@ class PCE(nn.Module):
         self.early_stop_threshold = early_stop_threshold
         self._iters_used = 0
         self._weight_phase_prediction = None
+        self.profiling = False
+        self._profile = {}
 
         if output_loss == 'mse':
             def _mse_loss(y_pred, y):
@@ -237,10 +248,22 @@ class PCE(nn.Module):
         energy improvement drops below the threshold. This avoids wasted
         computation on batches that converge quickly.
         """
+        prof = self.profiling
+
+        if prof:
+            _t = _sync_time()
+
         for p in self.layers.parameters():
             p.requires_grad_(False)
 
         self.init_zero_errors(x)
+
+        if prof:
+            _t2 = _sync_time()
+            prof_init = (_t2 - _t) * 1000
+            prof_fwd = 0.0
+            prof_bwd = 0.0
+            prof_step = 0.0
 
         # Create first-order optimizer if needed
         if self.error_optim_mode == 'sgd':
@@ -261,8 +284,15 @@ class PCE(nn.Module):
                         e.grad.zero_()
 
             # Compute energy and gradients
+            if prof:
+                _t = _sync_time()
+
             E = self.E(x, y)
             E_val = E.item()
+
+            if prof:
+                _t2 = _sync_time()
+                prof_fwd += (_t2 - _t) * 1000
 
             if t == 0:
                 self._E_initial = E_val
@@ -276,13 +306,25 @@ class PCE(nn.Module):
                     break
 
             E_prev = E_val
+
+            if prof:
+                _t = _sync_time()
+
             E.backward()
+
+            if prof:
+                _t2 = _sync_time()
+                prof_bwd += (_t2 - _t) * 1000
+                _t = _t2
 
             # Take optimization step
             if optim is not None:
                 optim.step()
             else:
                 self._newton_step()
+
+            if prof:
+                prof_step += (_sync_time() - _t) * 1000
         else:
             # Loop completed without break
             self._E_final = E_val
@@ -290,6 +332,14 @@ class PCE(nn.Module):
 
         for p in self.layers.parameters():
             p.requires_grad_(True)
+
+        if prof:
+            self._profile = {
+                'init_ms': prof_init,
+                'forward_ms': prof_fwd,
+                'backward_ms': prof_bwd,
+                'step_ms': prof_step,
+            }
 
         return self._E_final
 

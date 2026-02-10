@@ -19,6 +19,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 import math
+import time
 import torch
 import torch.nn.functional as F
 from torch.amp import autocast, GradScaler
@@ -30,7 +31,7 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
 
-from experiments.ePC_ResNet.epc_model import PCESkipConnection, quantize_model_weights
+from experiments.ePC_ResNet.epc_model import PCESkipConnection, quantize_model_weights, _sync_time
 from experiments.ePC_ResNet.architectures import get_resnet18_cifar10
 from experiments.ePC_ResNet.ada_woodbury import AdaWoodbury
 
@@ -100,6 +101,18 @@ class Diagnostics:
         self.error_norms = [[] for _ in range(self.num_error_layers)]
         self.learning_rates = []
         self.weight_magnitudes = {}  # layer_name -> list
+        # Profiling (ms per batch)
+        self.timing = {
+            'data_transfer': [],
+            'inference': [],
+            'inference_init': [],
+            'inference_forward': [],
+            'inference_backward': [],
+            'inference_step': [],
+            'weight_forward': [],
+            'weight_backward': [],
+            'optimizer_step': [],
+        }
 
     def update_train(self, acc, loss, diagnostics, lr, weight_mags):
         self.train_accs.append(acc)
@@ -125,8 +138,67 @@ class Diagnostics:
         self.test_accs.append(acc)
         self.test_losses.append(loss)
 
+    def update_timing(self, timing_dict):
+        for key, val in timing_dict.items():
+            if key in self.timing:
+                self.timing[key].append(val)
+
+    def has_timing(self):
+        return len(self.timing['inference']) > 0
+
+    def print_performance_report(self, epoch):
+        """Print a performance breakdown table."""
+        if not self.has_timing():
+            return
+
+        n = len(self.timing['inference'])
+        def avg(key):
+            vals = self.timing.get(key, [])
+            return np.mean(vals) if vals else 0.0
+
+        # Compute averages
+        t_data = avg('data_transfer')
+        t_inf = avg('inference')
+        t_init = avg('inference_init')
+        t_fwd = avg('inference_forward')
+        t_bwd = avg('inference_backward')
+        t_step = avg('inference_step')
+        t_wfwd = avg('weight_forward')
+        t_wbwd = avg('weight_backward')
+        t_opt = avg('optimizer_step')
+        t_total = t_data + t_inf + t_wfwd + t_wbwd + t_opt
+
+        def pct(v):
+            return v / t_total * 100 if t_total > 0 else 0
+
+        batches_per_epoch = n // max(epoch, 1)
+        throughput = 256 / (t_total / 1000) if t_total > 0 else 0  # samples/sec
+
+        print()
+        print("=" * 66)
+        print(f"  PERFORMANCE REPORT (Epoch {epoch}, {n} batches profiled)")
+        print("=" * 66)
+        print(f"  {'Phase':<24} {'Avg (ms)':>9} {'%':>6} {'Per-epoch (s)':>14}")
+        print("-" * 66)
+        print(f"  {'Data transfer':<24} {t_data:>9.1f} {pct(t_data):>5.1f}% {t_data*batches_per_epoch/1000:>13.1f}")
+        print(f"  {'Inference (total)':<24} {t_inf:>9.1f} {pct(t_inf):>5.1f}% {t_inf*batches_per_epoch/1000:>13.1f}")
+        print(f"    {'Error init':<22} {t_init:>9.1f} {pct(t_init):>5.1f}%")
+        print(f"    {'Forward (E)':<22} {t_fwd:>9.1f} {pct(t_fwd):>5.1f}%")
+        print(f"    {'Backward':<22} {t_bwd:>9.1f} {pct(t_bwd):>5.1f}%")
+        print(f"    {'Newton/optim step':<22} {t_step:>9.1f} {pct(t_step):>5.1f}%")
+        print(f"  {'Weight forward':<24} {t_wfwd:>9.1f} {pct(t_wfwd):>5.1f}% {t_wfwd*batches_per_epoch/1000:>13.1f}")
+        print(f"  {'Weight backward':<24} {t_wbwd:>9.1f} {pct(t_wbwd):>5.1f}% {t_wbwd*batches_per_epoch/1000:>13.1f}")
+        print(f"  {'Optimizer step':<24} {t_opt:>9.1f} {pct(t_opt):>5.1f}% {t_opt*batches_per_epoch/1000:>13.1f}")
+        print("-" * 66)
+        print(f"  {'TOTAL per batch':<24} {t_total:>9.1f}")
+        print(f"  {'Throughput':<24} {throughput:>9.0f} samples/sec")
+        avg_T = np.mean(self.iters_used) if self.iters_used else 0
+        print(f"  {'Avg T (iters used)':<24} {avg_T:>9.2f}")
+        print("=" * 66)
+
     def plot(self, save_path, epoch=None, num_epochs=None):
-        fig, axes = plt.subplots(3, 3, figsize=(18, 14))
+        nrows = 4 if self.has_timing() else 3
+        fig, axes = plt.subplots(nrows, 3, figsize=(18, 5 * nrows))
 
         # [0,0] Accuracy
         ax = axes[0, 0]
@@ -274,6 +346,102 @@ class Diagnostics:
         ax.text(0.05, 0.5, '\n'.join(lines), fontsize=9,
                 verticalalignment='center', family='monospace')
 
+        # Row 3: Profiling (only when timing data collected)
+        if self.has_timing():
+            # [3,0] Time breakdown over training (stacked area)
+            ax = axes[3, 0]
+            # Define phases in bottom-to-top stacking order
+            phase_keys = [
+                ('data_transfer', 'Data xfer', '#e0e0e0'),
+                ('inference_init', 'Error init', '#1f77b4'),
+                ('inference_forward', 'Inf forward', '#ff7f0e'),
+                ('inference_backward', 'Inf backward', '#2ca02c'),
+                ('inference_step', 'Newton step', '#d62728'),
+                ('weight_forward', 'Wt forward', '#9467bd'),
+                ('weight_backward', 'Wt backward', '#8c564b'),
+                ('optimizer_step', 'Optim step', '#e377c2'),
+            ]
+            n_timing = min(len(v) for v in self.timing.values() if v)
+            if n_timing > 0:
+                x_vals = np.arange(n_timing)
+                # Smooth with moving average for readability
+                window = max(1, min(20, n_timing // 10))
+                smoothed = {}
+                for key, _, _ in phase_keys:
+                    vals = np.array(self.timing[key][:n_timing], dtype=np.float64)
+                    if window > 1 and len(vals) >= window:
+                        kernel = np.ones(window) / window
+                        smoothed[key] = np.convolve(vals, kernel, mode='valid')
+                    else:
+                        smoothed[key] = vals
+                n_smooth = min(len(v) for v in smoothed.values())
+                x_smooth = np.arange(n_smooth)
+                bottoms = np.zeros(n_smooth)
+                for key, label, color in phase_keys:
+                    vals = smoothed[key][:n_smooth]
+                    ax.fill_between(x_smooth, bottoms, bottoms + vals,
+                                    alpha=0.7, label=label, color=color)
+                    bottoms += vals
+            ax.set_xlabel('Batch')
+            ax.set_ylabel('Time (ms)')
+            ax.set_title(f'Per-Batch Timing (MA-{window})')
+            ax.legend(fontsize=6, ncol=2, loc='upper right')
+            ax.grid(True, alpha=0.3)
+
+            # [3,1] Average breakdown (horizontal bar)
+            ax = axes[3, 1]
+            last_n = min(200, n_timing) if n_timing > 0 else 0
+            if last_n > 0:
+                labels = []
+                values = []
+                colors = []
+                for key, label, color in phase_keys:
+                    vals = self.timing[key][-last_n:]
+                    avg_val = np.mean(vals) if vals else 0
+                    labels.append(label)
+                    values.append(avg_val)
+                    colors.append(color)
+                y_pos = np.arange(len(labels))
+                ax.barh(y_pos, values, color=colors, alpha=0.8)
+                ax.set_yticks(y_pos)
+                ax.set_yticklabels(labels, fontsize=8)
+                ax.set_xlabel('Avg time (ms)')
+                ax.set_title(f'Avg Phase Timing (last {last_n} batches)')
+                # Add value labels
+                for i, v in enumerate(values):
+                    if v > 0:
+                        ax.text(v + 0.5, i, f'{v:.1f}ms', va='center', fontsize=7)
+                ax.grid(True, alpha=0.3, axis='x')
+
+            # [3,2] Performance summary text
+            ax = axes[3, 2]
+            ax.axis('off')
+            if last_n > 0:
+                def tavg(key):
+                    v = self.timing.get(key, [])[-last_n:]
+                    return np.mean(v) if v else 0
+                t_total = sum(tavg(k) for k, _, _ in phase_keys)
+                t_inf = tavg('inference')
+                t_wt = tavg('weight_forward') + tavg('weight_backward')
+                throughput = 256 / (t_total / 1000) if t_total > 0 else 0
+                plines = [
+                    f"Avg batch:    {t_total:.0f} ms",
+                    f"Throughput:   {throughput:.0f} samples/sec",
+                    f"",
+                    f"Inference:    {tavg('inference'):.0f} ms "
+                    f"({tavg('inference')/t_total*100:.0f}%)" if t_total > 0 else "",
+                    f"  Init:       {tavg('inference_init'):.0f} ms",
+                    f"  Forward:    {tavg('inference_forward'):.0f} ms",
+                    f"  Backward:   {tavg('inference_backward'):.0f} ms",
+                    f"  Newton:     {tavg('inference_step'):.0f} ms",
+                    f"",
+                    f"Weight phase: {t_wt:.0f} ms "
+                    f"({t_wt/t_total*100:.0f}%)" if t_total > 0 else "",
+                    f"Optim step:   {tavg('optimizer_step'):.0f} ms",
+                ]
+                ax.text(0.05, 0.5, '\n'.join(plines), fontsize=9,
+                        verticalalignment='center', family='monospace')
+
         plt.tight_layout()
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f"Diagnostics saved to {save_path}")
@@ -332,27 +500,55 @@ def train_epoch(model, weight_optim, lr_scheduler, scaler, train_loader,
     total_samples = 0
     total_energy = 0.0
     use_amp = device == 'cuda'
+    prof = model.profiling
 
     pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}")
     weight_optim.zero_grad()
     accum_count = 0
 
     for data, target in pbar:
+        if prof:
+            _t = _sync_time()
+
         data = data.to(device, non_blocking=True)
         target = target.to(device, non_blocking=True)
         batch_size = data.size(0)
+
+        if prof:
+            _t2 = _sync_time()
+            t_data = (_t2 - _t) * 1000
+            _t = _t2
 
         # Phase 1: Inference (optimize errors) — fp16 forward, fp32 Newton step
         with autocast('cuda', enabled=use_amp):
             energy = model(data, target)
 
+        if prof:
+            _t2 = _sync_time()
+            t_inference = (_t2 - _t) * 1000
+            _t = _t2
+
         # Collect diagnostics before weight update
         diag = model.get_diagnostics()
 
         # Phase 2: Weight gradient accumulation — fp16 + GradScaler
+        if prof:
+            _t = _sync_time()
+
         with autocast('cuda', enabled=use_amp):
             loss = model.compute_weight_loss(data, target, batch_size)
+
+        if prof:
+            _t2 = _sync_time()
+            t_wfwd = (_t2 - _t) * 1000
+            _t = _t2
+
         scaler.scale(loss / accum_steps).backward()
+
+        if prof:
+            _t2 = _sync_time()
+            t_wbwd = (_t2 - _t) * 1000
+            _t = _t2
 
         accum_count += 1
         if accum_count >= accum_steps:
@@ -361,6 +557,9 @@ def train_epoch(model, weight_optim, lr_scheduler, scaler, train_loader,
             lr_scheduler.step()
             weight_optim.zero_grad()
             accum_count = 0
+
+        if prof:
+            t_optim = (_sync_time() - _t) * 1000
 
         total_energy += energy
 
@@ -378,6 +577,19 @@ def train_epoch(model, weight_optim, lr_scheduler, scaler, train_loader,
             acc=acc, loss=energy / batch_size,
             diagnostics=diag, lr=lr, weight_mags=weight_mags,
         )
+
+        if prof:
+            diagnostics.update_timing({
+                'data_transfer': t_data,
+                'inference': t_inference,
+                'weight_forward': t_wfwd,
+                'weight_backward': t_wbwd,
+                'optimizer_step': t_optim,
+                'inference_init': model._profile.get('init_ms', 0),
+                'inference_forward': model._profile.get('forward_ms', 0),
+                'inference_backward': model._profile.get('backward_ms', 0),
+                'inference_step': model._profile.get('step_ms', 0),
+            })
 
         pbar.set_postfix(
             acc=f"{acc:.1%}",
@@ -448,6 +660,9 @@ def main():
     print(f"Parameters: {num_params:,}")
     print(f"Error layers: {num_error_layers}")
 
+    # Enable profiling for performance analysis
+    model.profiling = True
+
     if quantize_bits > 0:
         n_quantized = quantize_model_weights(model, num_bits=quantize_bits)
         print(f"QAT: {n_quantized} layers fake-quantized to INT{quantize_bits}")
@@ -491,7 +706,11 @@ def main():
               f"Train {train_acc:.2%}, Test {test_acc:.2%}, "
               f"Energy {avg_energy:.1f}, Best {best_test_acc:.2%}")
 
-        # Save diagnostic chart periodically
+        # Performance report at epoch 10
+        if epoch + 1 == 10:
+            diagnostics.print_performance_report(epoch=10)
+
+        # Save diagnostic chart periodically (includes profiling panels)
         if (epoch + 1) % chart_interval == 0 or epoch == num_epochs - 1:
             diagnostics.plot(
                 f'diagnostics_cifar10_epoch_{epoch+1}.png',
