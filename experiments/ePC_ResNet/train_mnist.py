@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 import torch
 import torch.nn.functional as F
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -254,7 +254,7 @@ def train_epoch(model, weight_optim, scaler, train_loader, device, epoch, diagno
         batch_size = data.size(0)
 
         # Phase 1: Inference (optimize errors) — fp16 forward, fp32 Newton step
-        with autocast(enabled=use_amp):
+        with autocast('cuda', enabled=use_amp):
             energy = model(data, target)
 
         # Collect diagnostics
@@ -262,7 +262,7 @@ def train_epoch(model, weight_optim, scaler, train_loader, device, epoch, diagno
 
         # Phase 2: Weight update (local learning via E_local) — fp16 + GradScaler
         weight_optim.zero_grad()
-        with autocast(enabled=use_amp):
+        with autocast('cuda', enabled=use_amp):
             loss = model.compute_weight_loss(data, target, batch_size)
         scaler.scale(loss).backward()
         scaler.step(weight_optim)
@@ -300,7 +300,7 @@ def evaluate(model, test_loader, device):
         for data, target in test_loader:
             data = data.view(data.size(0), -1).to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
-            with autocast(enabled=use_amp):
+            with autocast('cuda', enabled=use_amp):
                 outputs = model(data)
             preds = outputs.argmax(dim=1)
             total_correct += (preds == target).sum().item()
@@ -331,7 +331,7 @@ def main():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
-    scaler = GradScaler(enabled=(device == 'cuda'))
+    scaler = GradScaler('cuda', enabled=(device == 'cuda'))
 
     optim_name = '8-bit Adam (bnb)' if HAS_BNB else 'Adam'
     quant_str = f'INT{quantize_bits} QAT' if quantize_bits > 0 else 'none'

@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 import math
 import torch
 import torch.nn.functional as F
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -307,7 +307,7 @@ def evaluate_with_loss(model, test_loader, device, output_loss='mse'):
         for data, target in test_loader:
             data = data.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
-            with autocast(enabled=use_amp):
+            with autocast('cuda', enabled=use_amp):
                 outputs = model(data)
             preds = outputs.argmax(dim=1)
             total_correct += (preds == target).sum().item()
@@ -342,14 +342,14 @@ def train_epoch(model, weight_optim, lr_scheduler, scaler, train_loader,
         batch_size = data.size(0)
 
         # Phase 1: Inference (optimize errors) — fp16 forward, fp32 Newton step
-        with autocast(enabled=use_amp):
+        with autocast('cuda', enabled=use_amp):
             energy = model(data, target)
 
         # Collect diagnostics before weight update
         diag = model.get_diagnostics()
 
         # Phase 2: Weight gradient accumulation — fp16 + GradScaler
-        with autocast(enabled=use_amp):
+        with autocast('cuda', enabled=use_amp):
             loss = model.compute_weight_loss(data, target, batch_size)
         scaler.scale(loss / accum_steps).backward()
 
@@ -410,7 +410,7 @@ def main():
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
         torch.backends.cudnn.benchmark = True
-    scaler = GradScaler(enabled=(device == 'cuda'))
+    scaler = GradScaler('cuda', enabled=(device == 'cuda'))
 
     optim_name = '8-bit Adam (bnb)' if HAS_BNB else 'Adam'
     quant_str = f'INT{quantize_bits} QAT' if quantize_bits > 0 else 'none'
