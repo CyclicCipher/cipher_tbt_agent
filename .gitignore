@@ -65,3 +65,9 @@ data/cifar-10-batches-py/data_batch_2
 data/cifar-10-batches-py/data_batch_1
 data/cifar-10-batches-py/batches.meta
 diagnostics_cifar10_epoch_10.png
+experiments/ePC_Mamba/diagnostics_copy_epc_epoch_10.png
+experiments/ePC_Mamba/diagnostics_copy_epc_epoch_20.png
+experiments/ePC_Mamba/diagnostics_copy_epc_epoch_30.png
+experiments/ePC_Mamba/diagnostics_copy_epc_epoch_40.png
+experiments/ePC_Mamba/diagnostics_copy_epc_epoch_50.png
+experiments/ePC_Mamba/diagnostics_copy_epc_final.png
