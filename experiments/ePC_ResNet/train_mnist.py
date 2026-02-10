@@ -23,8 +23,14 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
 
-from experiments.ePC_ResNet.epc_model import PCE
+from experiments.ePC_ResNet.epc_model import PCE, quantize_model_weights
 from experiments.ePC_ResNet.architectures import get_mlp_mnist
+
+try:
+    import bitsandbytes as bnb
+    HAS_BNB = True
+except ImportError:
+    HAS_BNB = False
 
 
 def get_mnist_loaders(batch_size=128, data_dir='./data'):
@@ -34,9 +40,11 @@ def get_mnist_loaders(batch_size=128, data_dir='./data'):
     ])
     train = datasets.MNIST(data_dir, train=True, download=True, transform=transform)
     test = datasets.MNIST(data_dir, train=False, download=True, transform=transform)
+    pin = torch.cuda.is_available()
     return (
-        DataLoader(train, batch_size=batch_size, shuffle=True, drop_last=True),
-        DataLoader(test, batch_size=batch_size, shuffle=False),
+        DataLoader(train, batch_size=batch_size, shuffle=True, drop_last=True,
+                   pin_memory=pin),
+        DataLoader(test, batch_size=batch_size, shuffle=False, pin_memory=pin),
     )
 
 
@@ -241,8 +249,8 @@ def train_epoch(model, weight_optim, scaler, train_loader, device, epoch, diagno
 
     pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}")
     for data, target in pbar:
-        data = data.view(data.size(0), -1).to(device)
-        target = target.to(device)
+        data = data.view(data.size(0), -1).to(device, non_blocking=True)
+        target = target.to(device, non_blocking=True)
         batch_size = data.size(0)
 
         # Phase 1: Inference (optimize errors) — fp16 forward, fp32 Newton step
@@ -288,10 +296,10 @@ def evaluate(model, test_loader, device):
     total_loss = 0.0
     use_amp = device == 'cuda'
 
-    with torch.no_grad():
+    with torch.inference_mode():
         for data, target in test_loader:
-            data = data.view(data.size(0), -1).to(device)
-            target = target.to(device)
+            data = data.view(data.size(0), -1).to(device, non_blocking=True)
+            target = target.to(device, non_blocking=True)
             with autocast(enabled=use_amp):
                 outputs = model(data)
             preds = outputs.argmax(dim=1)
@@ -313,23 +321,29 @@ def main():
     w_lr = 0.001
     batch_size = 128
     num_epochs = 3
+    quantize_bits = 8       # QAT: fake INT8 weight quantization (0 = disabled)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
 
-    # Enable TF32 for fp32 matmuls (Ampere+), FP16 AMP for mixed precision
+    # Enable TF32 + cuDNN autotuning (Ampere+), FP16 AMP for mixed precision
     if device == 'cuda':
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True
     scaler = GradScaler(enabled=(device == 'cuda'))
+
+    optim_name = '8-bit Adam (bnb)' if HAS_BNB else 'Adam'
+    quant_str = f'INT{quantize_bits} QAT' if quantize_bits > 0 else 'none'
 
     print("=" * 60)
     print("ePC MNIST Validation")
     print(f"Architecture: [784, 128, 128, 128, 10], ReLU")
     print(f"Mixed precision: FP16 autocast + GradScaler" if device == 'cuda' else "No AMP (CPU)")
+    print(f"Weight quantization: {quant_str}")
     print(f"Inference: {error_optim} errors, T={iters}, "
           f"{'damping='+str(e_damping) if error_optim == 'newton' else 'e_lr='+str(e_lr)}")
-    print(f"Learning: Adam weights, w_lr={w_lr}")
+    print(f"Learning: {optim_name}, w_lr={w_lr}")
     print(f"Output loss: cross-entropy")
     print(f"Batch size: {batch_size}, Epochs: {num_epochs}")
     print("=" * 60)
@@ -347,7 +361,14 @@ def main():
     num_error_layers = len(model.layers) - 1
     print(f"Parameters: {num_params:,}")
 
-    weight_optim = torch.optim.Adam(model.parameters(), lr=w_lr)
+    if quantize_bits > 0:
+        n_quantized = quantize_model_weights(model, num_bits=quantize_bits)
+        print(f"QAT: {n_quantized} layers fake-quantized to INT{quantize_bits}")
+
+    if HAS_BNB:
+        weight_optim = bnb.optim.Adam8bit(model.parameters(), lr=w_lr)
+    else:
+        weight_optim = torch.optim.Adam(model.parameters(), lr=w_lr)
     diagnostics = Diagnostics(num_error_layers)
 
     best_test_acc = 0.0

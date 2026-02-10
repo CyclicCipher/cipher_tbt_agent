@@ -30,8 +30,14 @@ from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
 
-from experiments.ePC_ResNet.epc_model import PCESkipConnection
+from experiments.ePC_ResNet.epc_model import PCESkipConnection, quantize_model_weights
 from experiments.ePC_ResNet.architectures import get_resnet18_cifar10
+
+try:
+    import bitsandbytes as bnb
+    HAS_BNB = True
+except ImportError:
+    HAS_BNB = False
 
 
 def get_cifar10_loaders(batch_size=256, data_dir='./data', num_workers=2):
@@ -47,11 +53,14 @@ def get_cifar10_loaders(batch_size=256, data_dir='./data', num_workers=2):
     ])
     train = datasets.CIFAR10(data_dir, train=True, download=True, transform=train_transform)
     test = datasets.CIFAR10(data_dir, train=False, download=True, transform=test_transform)
+    pin = torch.cuda.is_available()
     return (
         DataLoader(train, batch_size=batch_size, shuffle=True,
-                   drop_last=True, num_workers=num_workers),
+                   drop_last=True, num_workers=num_workers,
+                   pin_memory=pin, persistent_workers=(num_workers > 0)),
         DataLoader(test, batch_size=batch_size, shuffle=False,
-                   num_workers=num_workers),
+                   num_workers=num_workers,
+                   pin_memory=pin, persistent_workers=(num_workers > 0)),
     )
 
 
@@ -294,9 +303,10 @@ def evaluate_with_loss(model, test_loader, device, output_loss='mse'):
     total_loss = 0.0
     use_amp = device == 'cuda'
 
-    with torch.no_grad():
+    with torch.inference_mode():
         for data, target in test_loader:
-            data, target = data.to(device), target.to(device)
+            data = data.to(device, non_blocking=True)
+            target = target.to(device, non_blocking=True)
             with autocast(enabled=use_amp):
                 outputs = model(data)
             preds = outputs.argmax(dim=1)
@@ -315,7 +325,7 @@ def evaluate_with_loss(model, test_loader, device, output_loss='mse'):
 
 
 def train_epoch(model, weight_optim, lr_scheduler, scaler, train_loader,
-                device, epoch, diagnostics):
+                device, epoch, diagnostics, accum_steps=1):
     model.train()
     total_correct = 0
     total_samples = 0
@@ -323,8 +333,12 @@ def train_epoch(model, weight_optim, lr_scheduler, scaler, train_loader,
     use_amp = device == 'cuda'
 
     pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}")
+    weight_optim.zero_grad()
+    accum_count = 0
+
     for data, target in pbar:
-        data, target = data.to(device), target.to(device)
+        data = data.to(device, non_blocking=True)
+        target = target.to(device, non_blocking=True)
         batch_size = data.size(0)
 
         # Phase 1: Inference (optimize errors) — fp16 forward, fp32 Newton step
@@ -334,14 +348,18 @@ def train_epoch(model, weight_optim, lr_scheduler, scaler, train_loader,
         # Collect diagnostics before weight update
         diag = model.get_diagnostics()
 
-        # Phase 2: Weight update (local learning via E_local) — fp16 + GradScaler
-        weight_optim.zero_grad()
+        # Phase 2: Weight gradient accumulation — fp16 + GradScaler
         with autocast(enabled=use_amp):
             loss = model.compute_weight_loss(data, target, batch_size)
-        scaler.scale(loss).backward()
-        scaler.step(weight_optim)
-        scaler.update()
-        lr_scheduler.step()
+        scaler.scale(loss / accum_steps).backward()
+
+        accum_count += 1
+        if accum_count >= accum_steps:
+            scaler.step(weight_optim)
+            scaler.update()
+            lr_scheduler.step()
+            weight_optim.zero_grad()
+            accum_count = 0
 
         total_energy += energy
 
@@ -381,25 +399,33 @@ def main():
     num_epochs = 50
     output_loss = 'mse'
     chart_interval = 10  # Save diagnostic chart every N epochs
+    quantize_bits = 8   # QAT: fake INT8 weight quantization (0 = disabled)
+    accum_steps = 1     # Gradient accumulation (increase to 2/4 if OOM)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
 
-    # Enable TF32 for fp32 matmuls (Ampere+), FP16 AMP for mixed precision
+    # Enable TF32 + cuDNN autotuning (Ampere+), FP16 AMP for mixed precision
     if device == 'cuda':
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cudnn.benchmark = True
     scaler = GradScaler(enabled=(device == 'cuda'))
+
+    optim_name = '8-bit Adam (bnb)' if HAS_BNB else 'Adam'
+    quant_str = f'INT{quantize_bits} QAT' if quantize_bits > 0 else 'none'
 
     print("=" * 60)
     print("ePC ResNet-18 on CIFAR-10")
     print(f"Inference: {error_optim} errors, T={iters}, "
           f"{'damping='+str(damping) if error_optim == 'newton' else 'e_lr='+str(e_lr)}")
-    print(f"Learning: Adam, w_lr={w_lr}, w_decay={w_decay}")
+    print(f"Learning: {optim_name}, w_lr={w_lr}, w_decay={w_decay}")
     print(f"Output loss: {output_loss}")
     print(f"Mixed precision: FP16 autocast + GradScaler" if device == 'cuda' else "No AMP (CPU)")
+    print(f"Weight quantization: {quant_str}")
     print(f"LR schedule: warmup 10% + cosine decay")
-    print(f"Batch size: {batch_size}, Epochs: {num_epochs}")
+    print(f"Batch size: {batch_size}, Epochs: {num_epochs}"
+          f"{f', accum={accum_steps}' if accum_steps > 1 else ''}")
     print(f"Target: 92.17% (ePC paper)")
     print("=" * 60)
 
@@ -417,11 +443,22 @@ def main():
     print(f"Parameters: {num_params:,}")
     print(f"Error layers: {num_error_layers}")
 
+    if quantize_bits > 0:
+        n_quantized = quantize_model_weights(model, num_bits=quantize_bits)
+        print(f"QAT: {n_quantized} layers fake-quantized to INT{quantize_bits}")
+
     # Adam with lr=1.0 (actual LR controlled by scheduler)
-    weight_optim = torch.optim.Adam(
-        model.parameters(), lr=1.0, weight_decay=w_decay,
-    )
-    total_steps = len(train_loader) * num_epochs
+    if HAS_BNB:
+        weight_optim = bnb.optim.Adam8bit(
+            model.parameters(), lr=1.0, weight_decay=w_decay,
+        )
+    else:
+        weight_optim = torch.optim.Adam(
+            model.parameters(), lr=1.0, weight_decay=w_decay,
+        )
+    # LR schedule accounts for gradient accumulation (fewer optimizer steps)
+    steps_per_epoch = len(train_loader) // accum_steps
+    total_steps = steps_per_epoch * num_epochs
     lr_scheduler = make_lr_schedule(weight_optim, total_steps, base_lr=w_lr)
 
     diagnostics = Diagnostics(num_error_layers)
@@ -430,7 +467,7 @@ def main():
     for epoch in range(num_epochs):
         train_acc, avg_energy = train_epoch(
             model, weight_optim, lr_scheduler, scaler, train_loader,
-            device, epoch, diagnostics,
+            device, epoch, diagnostics, accum_steps=accum_steps,
         )
         test_acc, test_loss = evaluate_with_loss(
             model, test_loader, device, output_loss,

@@ -35,6 +35,58 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+# --- Quantization-Aware Training (QAT) utilities ---
+
+class FakeQuantize(torch.autograd.Function):
+    """Symmetric per-tensor fake quantization with Straight-Through Estimator.
+
+    Simulates INT8 (or any bit-width) quantization during forward pass.
+    Backward pass uses STE: gradients pass through unchanged to FP32 weights.
+    """
+
+    @staticmethod
+    def forward(ctx, x, num_bits):
+        qmax = 2 ** (num_bits - 1) - 1
+        scale = x.abs().max().clamp(min=1e-8) / qmax
+        return torch.clamp(torch.round(x / scale), -qmax - 1, qmax) * scale
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output, None
+
+
+class _FakeQuantParametrization(nn.Module):
+    """Weight parametrization that applies fake quantization during forward."""
+
+    def __init__(self, num_bits=8):
+        super().__init__()
+        self.num_bits = num_bits
+
+    def forward(self, weight):
+        return FakeQuantize.apply(weight, self.num_bits)
+
+
+def quantize_model_weights(model, num_bits=8):
+    """Apply fake quantization to Conv2d/Linear weights for QAT.
+
+    Uses torch.nn.utils.parametrize to intercept weight access. The original
+    FP32 weights are preserved for optimizer updates; only the forward pass
+    sees quantized weights. STE passes gradients through unchanged.
+
+    Does NOT quantize biases or BatchNorm parameters.
+
+    Returns the number of layers quantized.
+    """
+    count = 0
+    for module in model.modules():
+        if isinstance(module, (nn.Conv2d, nn.Linear)):
+            nn.utils.parametrize.register_parametrization(
+                module, 'weight', _FakeQuantParametrization(num_bits)
+            )
+            count += 1
+    return count
+
+
 class PCE(nn.Module):
     """Error-based Predictive Coding model.
 
