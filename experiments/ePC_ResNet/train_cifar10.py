@@ -85,6 +85,7 @@ class Diagnostics:
         self.test_losses = []
         self.layer_energies = [[] for _ in range(self.num_error_layers)]
         self.inference_convergence = []
+        self.iters_used = []
         self.error_norms = [[] for _ in range(self.num_error_layers)]
         self.learning_rates = []
         self.weight_magnitudes = {}  # layer_name -> list
@@ -93,6 +94,7 @@ class Diagnostics:
         self.train_accs.append(acc)
         self.train_losses.append(loss)
         self.inference_convergence.append(diagnostics['convergence'])
+        self.iters_used.append(diagnostics.get('iters_used', 0))
         self.learning_rates.append(lr)
 
         for i, energy in enumerate(diagnostics['layer_energies']):
@@ -253,6 +255,11 @@ class Diagnostics:
             recent = self.inference_convergence[-100:]
             lines.append(f"\nConvergence: mean={np.mean(recent):.2f}, "
                          f"min={np.min(recent):.2f}")
+        if self.iters_used:
+            recent_iters = self.iters_used[-100:] if len(self.iters_used) >= 100 else self.iters_used
+            lines.append(f"Avg iters used: {np.mean(recent_iters):.2f}")
+            early_stop_rate = sum(1 for i in recent_iters if i < max(recent_iters)) / len(recent_iters)
+            lines.append(f"Early stop rate: {early_stop_rate:.0%}")
         ax.text(0.05, 0.5, '\n'.join(lines), fontsize=9,
                 verticalalignment='center', family='monospace')
 
@@ -331,13 +338,11 @@ def train_epoch(model, weight_optim, lr_scheduler, train_loader,
 
         total_energy += energy
 
-        # Track accuracy
-        with torch.no_grad():
-            outputs = model(data)
-            preds = outputs.argmax(dim=1)
-            correct = (preds == target).sum().item()
-            total_correct += correct
-            total_samples += batch_size
+        # Track accuracy from cached E_local prediction (no extra forward pass)
+        preds = model._weight_phase_prediction.argmax(dim=1)
+        correct = (preds == target).sum().item()
+        total_correct += correct
+        total_samples += batch_size
 
         acc = correct / batch_size
         lr = lr_scheduler.get_last_lr()[0]
@@ -351,6 +356,7 @@ def train_epoch(model, weight_optim, lr_scheduler, train_loader,
         pbar.set_postfix(
             acc=f"{acc:.1%}",
             lr=f"{lr:.2e}",
+            T=f"{diag.get('iters_used', '?')}",
         )
 
     return total_correct / total_samples, total_energy / len(train_loader)
@@ -389,6 +395,7 @@ def main():
     model = PCESkipConnection(
         architecture, iters=iters, e_lr=e_lr, output_loss=output_loss,
         error_optim=error_optim, damping=damping,
+        early_stop_threshold=0.02,
     ).to(device)
 
     num_params = sum(p.numel() for p in model.parameters())

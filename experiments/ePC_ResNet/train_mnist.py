@@ -237,20 +237,16 @@ def train_epoch(model, weight_optim, train_loader, device, epoch, diagnostics):
         loss.backward()
         weight_optim.step()
 
-        # Track accuracy
-        with torch.no_grad():
-            outputs = model(data)
-            preds = outputs.argmax(dim=1)
-            correct = (preds == target).sum().item()
-            total_correct += correct
-            total_samples += batch_size
+        # Track accuracy + CE loss from cached E_local prediction (no extra forward pass)
+        preds = model._weight_phase_prediction.argmax(dim=1)
+        correct = (preds == target).sum().item()
+        total_correct += correct
+        total_samples += batch_size
 
         acc = correct / batch_size
         weight_mags = get_weight_magnitudes(model)
 
-        # Compute CE loss for logging (ePC energy is the real objective)
-        with torch.no_grad():
-            ce_loss = F.cross_entropy(model(data), target).item()
+        ce_loss = F.cross_entropy(model._weight_phase_prediction, target).item()
 
         diagnostics.update_train(
             acc=acc, loss=ce_loss,
@@ -312,6 +308,7 @@ def main():
     model = PCE(
         architecture, iters=iters, e_lr=e_lr, output_loss='ce',
         error_optim=error_optim, damping=e_damping,
+        early_stop_threshold=0.02,
     ).to(device)
 
     num_params = sum(p.numel() for p in model.parameters())

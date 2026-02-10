@@ -52,7 +52,7 @@ class PCE(nn.Module):
     """
 
     def __init__(self, layers, iters=5, e_lr=0.001, output_loss='ce',
-                 error_optim='sgd', damping=1.0):
+                 error_optim='sgd', damping=1.0, early_stop_threshold=0.0):
         super().__init__()
         self.layers = nn.ModuleList(layers)
         self.iters = iters
@@ -60,6 +60,9 @@ class PCE(nn.Module):
         self.errors = None
         self.error_optim_mode = error_optim
         self.damping = damping
+        self.early_stop_threshold = early_stop_threshold
+        self._iters_used = 0
+        self._weight_phase_prediction = None
 
         if output_loss == 'mse':
             def _mse_loss(y_pred, y):
@@ -112,6 +115,7 @@ class PCE(nn.Module):
             s_i = (e_i + s_i_pred).detach()
             E += 0.5 * F.mse_loss(s_i_pred, s_i, reduction='sum')
         y_pred = self.layers[-1](s_i)
+        self._weight_phase_prediction = y_pred.detach()
         return E + self._output_loss(y_pred, y)
 
     @torch.no_grad()
@@ -165,7 +169,12 @@ class PCE(nn.Module):
                 offset += numel
 
     def minimize_error_energy(self, x, y):
-        """Inference phase: optimize errors to minimize energy."""
+        """Inference phase: optimize errors to minimize energy.
+
+        With early_stop_threshold > 0, stops iterating when the relative
+        energy improvement drops below the threshold. This avoids wasted
+        computation on batches that converge quickly.
+        """
         for p in self.layers.parameters():
             p.requires_grad_(False)
 
@@ -179,6 +188,7 @@ class PCE(nn.Module):
         else:
             optim = None  # Newton mode
 
+        E_prev = None
         for t in range(self.iters):
             # Zero gradients
             if optim is not None:
@@ -190,8 +200,20 @@ class PCE(nn.Module):
 
             # Compute energy and gradients
             E = self.E(x, y)
+            E_val = E.item()
+
             if t == 0:
-                self._E_initial = E.item()
+                self._E_initial = E_val
+
+            # Adaptive early stopping: if energy barely decreased, stop
+            if t > 0 and self.early_stop_threshold > 0 and E_prev is not None:
+                rel_improvement = (E_prev - E_val) / max(abs(E_prev), 1e-8)
+                if rel_improvement < self.early_stop_threshold:
+                    self._E_final = E_val
+                    self._iters_used = t
+                    break
+
+            E_prev = E_val
             E.backward()
 
             # Take optimization step
@@ -199,13 +221,15 @@ class PCE(nn.Module):
                 optim.step()
             else:
                 self._newton_step()
-
-        self._E_final = E.item()
+        else:
+            # Loop completed without break
+            self._E_final = E_val
+            self._iters_used = self.iters
 
         for p in self.layers.parameters():
             p.requires_grad_(True)
 
-        return E.item()
+        return self._E_final
 
     def get_diagnostics(self):
         """Collect per-layer diagnostics after inference.
@@ -217,6 +241,7 @@ class PCE(nn.Module):
             'E_initial': getattr(self, '_E_initial', 0.0),
             'E_final': getattr(self, '_E_final', 0.0),
             'convergence': getattr(self, '_E_initial', 0.0) - getattr(self, '_E_final', 0.0),
+            'iters_used': getattr(self, '_iters_used', self.iters),
             'error_norms': [],
             'layer_energies': [],
         }
@@ -264,6 +289,7 @@ class PCESkipConnection(PCE):
             E += 0.5 * F.mse_loss(s_i_pred[0], s_i, reduction='sum')
             s_i = (s_i, s_i_pred[1])
         y_pred = self.layers[-1](s_i)[0]
+        self._weight_phase_prediction = y_pred.detach()
         return E + self._output_loss(y_pred, y)
 
     @torch.no_grad()
