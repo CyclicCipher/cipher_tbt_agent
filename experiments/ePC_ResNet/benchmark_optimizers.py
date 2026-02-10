@@ -271,13 +271,12 @@ def main():
          'name': 'Newton + Adam (baseline)',
          'weight_optim': 'adam', 'w_lr': 0.001},
 
-        # KRONOS A-only preconditioning (no G factor — degenerate for ePC)
+        # KRONOS A-only with norm-preserving preconditioning
+        # Direction from A^{-1} (input whitening), magnitude from raw gradient.
         # No momentum (destructive interference with rotating A^{-1} basis).
-        # No clipping (precond/raw ratios are healthy at 1.7-27x).
-        # Adaptive damping per-layer (deep layers have small A eigenvalues).
         {**newton_base,
          'name': 'Newton + KRONOS A-only r=32',
-         'weight_optim': 'kronos', 'w_lr': 0.3,
+         'weight_optim': 'kronos', 'w_lr': 0.1,
          'kronos_rank': 32, 'kronos_damping': 0.01,
          'kronos_ema': 0.95, 'kronos_update_freq': 10,
          'kronos_grad_clip': 0.0, 'kronos_momentum': 0.0},

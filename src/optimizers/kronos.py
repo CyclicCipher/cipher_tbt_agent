@@ -26,13 +26,10 @@ KRONOS decomposes A and G into LRPD form (diag(d) + UU^T) and uses the
 Woodbury identity for O(n*k^2) inversion instead of O(n^3). Factor estimates
 are maintained via streaming LRPD updates (EMA blending).
 
-Adaptive per-layer damping:
-    λ_layer = damping * mean(d_a)
-    Damping scales with each layer's actual eigenvalue magnitude. Deep layers
-    with small activations (and thus small A eigenvalues) get proportionally
-    smaller damping, preventing the preconditioner from collapsing to a
-    scaled identity. The `damping` parameter controls the fraction of the
-    mean diagonal that is added (e.g., damping=0.1 means 10% of mean(d_a)).
+Flat damping:
+    Same λ for all layers, applied at inversion time (not baked into factors).
+    Deep layers with small A eigenvalues will be partially damping-dominated,
+    but this provides consistent regularization across the network.
 
 Scalability:
     Memory: O(n*k) per factor instead of O(n^2)
@@ -272,19 +269,15 @@ class _KronosState:
         else:
             M = grad_w
 
-        # Adaptive per-layer damping: λ = damping * mean(d_a)
-        # This ensures damping scales with each layer's eigenvalue magnitude,
-        # preventing deep layers (small activations) from being overwhelmed.
-        effective_damping = self.damping * self.d_a.mean()
-        d_a_damped = self.d_a + effective_damping
+        # Flat damping applied at inversion time
+        d_a_damped = self.d_a + self.damping
 
         # Right-multiply: M @ (A + λ I)^{-1}
         M = lrpd_solve(d_a_damped, self.U_a, M)
 
         # Left-multiply: (G + λ I)^{-1} @ M (only if G factor is enabled)
         if self.use_g and self.d_g is not None:
-            effective_damping_g = self.damping * self.d_g.mean()
-            d_g_damped = self.d_g + effective_damping_g
+            d_g_damped = self.d_g + self.damping
             M = lrpd_solve(d_g_damped, self.U_g, M.T).T
 
         # Split augmented gradient back
@@ -323,16 +316,21 @@ class KRONOS(torch.optim.Optimizer):
     pass of compute_weight_loss (E_local). During inference (minimize_error_energy),
     hooks are inactive because layer parameters have requires_grad=False.
 
-    Per-layer gradient clipping controls step magnitude after preconditioning.
+    Norm-preserving preconditioning: after A^{-1}, each layer's preconditioned
+    gradient is rescaled to match the raw gradient's norm. This preserves the
+    curvature-corrected DIRECTION (input whitening) from A^{-1} while using
+    the raw gradient's MAGNITUDE. This prevents deep layers (small A eigenvalues)
+    from getting wildly different step sizes than shallow layers.
+
+    Per-layer gradient clipping is also available for additional step control.
 
     Args:
         model: nn.Module with Linear and/or Conv2d layers.
         lr: Learning rate for preconditioned updates.
         momentum: SGD momentum on preconditioned gradients.
-        damping: Damping fraction. Effective per-layer damping is
-            λ_layer = damping * mean(d_a). Controls the regularization
-            strength relative to each layer's eigenvalue scale.
-            E.g., damping=0.1 means 10% of mean diagonal added.
+        damping: Tikhonov damping (λ). Same value applied to all layers.
+            Should be small enough to preserve curvature in early layers
+            (e.g., 0.01 for typical L1 with eigenvalues 0.01-0.5).
         rank: LRPD rank for factor decomposition. Capped at dim-1 per layer.
         ema_decay: Exponential moving average decay for factor updates.
         update_freq: Steps between factor LRPD updates. Factors are also
@@ -488,9 +486,24 @@ class KRONOS(torch.optim.Optimizer):
             grad_w = w.grad
             grad_b = b.grad if b is not None else None
 
-            # Precondition with KFAC
+            # Precondition with KFAC + norm preservation
+            # A^{-1} provides curvature-corrected direction (input whitening)
+            # but amplifies by 1/(d_i + λ), which varies wildly across layers.
+            # Norm preservation keeps A^{-1}'s direction but uses raw magnitude,
+            # preventing deep layers from getting 100x larger steps than shallow ones.
             if state.initialized:
+                raw_norm = grad_w.norm()
+                if grad_b is not None:
+                    raw_norm = (raw_norm ** 2 + grad_b.norm() ** 2) ** 0.5
                 grad_w, grad_b = state.precondition(grad_w, grad_b)
+                if raw_norm > 1e-8:
+                    precond_norm = grad_w.norm()
+                    if grad_b is not None:
+                        precond_norm = (precond_norm ** 2 + grad_b.norm() ** 2) ** 0.5
+                    scale = raw_norm / (precond_norm + 1e-8)
+                    grad_w = grad_w * scale
+                    if grad_b is not None:
+                        grad_b = grad_b * scale
 
             # Per-layer gradient norm clipping
             if self._grad_clip > 0:
@@ -574,10 +587,8 @@ class KRONOS(torch.optim.Optimizer):
             if state.initialized:
                 trace_a = state._lrpd_trace(state.d_a, state.U_a).item()
                 info['trace_a'] = trace_a
-                effective_damping = state.damping * state.d_a.mean().item()
-                info['damping'] = effective_damping
-                info['damping_fraction'] = state.damping
-                info['damping_vs_median_d_a'] = effective_damping / (state.d_a.median().item() + 1e-8)
+                info['damping'] = state.damping
+                info['damping_vs_median_d_a'] = state.damping / (state.d_a.median().item() + 1e-8)
                 info['d_a_range'] = (state.d_a.min().item(),
                                      state.d_a.max().item())
                 info['use_g'] = state.use_g
