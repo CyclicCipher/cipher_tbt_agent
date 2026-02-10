@@ -239,6 +239,15 @@ class PCESequence(nn.Module):
             for e in self.errors:
                 e.data.mul_(c1).add_(e.grad, alpha=c2)
 
+            # Save Newton quality metrics for hypothesis testing
+            self._newton_diag = {
+                'gTg': gTg,           # ||gradient||^2
+                'uTu': uTu,           # ||output-driven component||^2
+                'eTe': eTe,           # ||current errors||^2
+                'coeff': coeff,        # Woodbury coefficient
+                'rank1_ratio': uTu / max(gTg, 1e-10),  # How much curvature rank-1 captures
+            }
+
     def minimize_error_energy(self, x: Tensor, y: Tensor,
                               output_proj: nn.Module) -> float:
         """Inference phase: optimize errors to minimize energy.
@@ -362,6 +371,92 @@ class PCESequence(nn.Module):
                     diag['error_norms'].append(norm)
                     diag['layer_energies'].append(0.5 * norm ** 2)
         return diag
+
+    def get_hypothesis_diagnostics(self, x: Tensor) -> dict:
+        """Collect diagnostics for testing ePC-Mamba hypotheses.
+
+        Tests each risk factor from NOTES.md:
+        1. Newton quality: Is rank-1 capturing the curvature?
+        2. Causal asymmetry: Are early-position errors dominating?
+        3. RMSNorm rescaling: How much does the norm change error magnitude?
+        5. SiLU gating: Are gates near zero (killing SSM output)?
+
+        Call AFTER minimize_error_energy (errors must be populated).
+        Args:
+            x: (batch, seqlen, d_model) detached input embeddings.
+        """
+        hyp = {}
+
+        # --- Hypothesis 1: Newton quality ---
+        newton = getattr(self, '_newton_diag', {})
+        hyp['newton_gTg'] = newton.get('gTg', 0.0)
+        hyp['newton_uTu'] = newton.get('uTu', 0.0)
+        hyp['newton_coeff'] = newton.get('coeff', 0.0)
+        hyp['newton_rank1_ratio'] = newton.get('rank1_ratio', 0.0)
+
+        # --- Hypothesis 2: Per-position error norms ---
+        # For each error tensor [batch, seqlen, d_model], compute
+        # mean error norm per position → [seqlen]
+        per_pos_norms = []
+        if self.errors is not None:
+            for e in self.errors:
+                if isinstance(e, Tensor) and e.dim() == 3:
+                    # ||e||_2 per position, averaged over batch
+                    pos_norms = e.detach().norm(dim=-1).mean(dim=0)  # [seqlen]
+                    per_pos_norms.append(pos_norms.cpu().numpy())
+        hyp['per_position_error_norms'] = per_pos_norms
+
+        # Early vs late ratio: mean norm of first quarter vs last quarter
+        if per_pos_norms:
+            all_pos = per_pos_norms[0]  # use first error layer
+            q = len(all_pos) // 4
+            if q > 0:
+                early = all_pos[:q].mean()
+                late = all_pos[-q:].mean()
+                hyp['causal_early_late_ratio'] = float(early / max(late, 1e-10))
+            else:
+                hyp['causal_early_late_ratio'] = 1.0
+        else:
+            hyp['causal_early_late_ratio'] = 0.0
+
+        # --- Hypothesis 3: RMSNorm rescaling ---
+        # Run a forward pass and check how RMSNorm changes the signal
+        with torch.no_grad():
+            s_i = x
+            rms_ratios = []
+            for e_i, layer_i in zip(self.errors + [0.0], self.layers):
+                pre_norm = s_i
+                post_norm = layer_i.norm(s_i)  # Just the RMSNorm part
+                pre_rms = pre_norm.norm(dim=-1).mean().item()
+                post_rms = post_norm.norm(dim=-1).mean().item()
+                rms_ratios.append(post_rms / max(pre_rms, 1e-10))
+                s_i = e_i + layer_i(s_i)
+            hyp['rmsnorm_ratios'] = rms_ratios
+
+        # --- Hypothesis 5: SiLU gate statistics ---
+        # Run through blocks and capture gate (z) activations
+        with torch.no_grad():
+            s_i = x
+            gate_stats = []
+            for e_i, layer_i in zip(self.errors + [0.0], self.layers):
+                normed = layer_i.norm(s_i)
+                # Extract z from in_proj (z is the first d_inner elements)
+                zxbcdt = layer_i.mamba.in_proj(normed)
+                z = zxbcdt[:, :, :layer_i.mamba.config.d_inner]
+                silu_z = torch.nn.functional.silu(z)
+                # Fraction of gate activations near zero (< 0.01)
+                frac_near_zero = (silu_z.abs() < 0.01).float().mean().item()
+                gate_mean = silu_z.mean().item()
+                gate_std = silu_z.std().item()
+                gate_stats.append({
+                    'frac_near_zero': frac_near_zero,
+                    'mean': gate_mean,
+                    'std': gate_std,
+                })
+                s_i = e_i + layer_i(s_i)
+            hyp['gate_stats'] = gate_stats
+
+        return hyp
 
 
 class ePCMambaLM(nn.Module):

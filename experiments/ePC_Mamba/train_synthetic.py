@@ -259,6 +259,13 @@ class Diagnostics:
         self.error_norms = [[] for _ in range(self.num_error_layers)]
         self.learning_rates = []
         self.weight_magnitudes = {}
+        # Hypothesis diagnostics
+        self.newton_rank1_ratio = []    # H1: How much curvature rank-1 captures
+        self.newton_coeff = []          # H1: Woodbury coefficient magnitude
+        self.causal_early_late = []     # H2: Early/late position error ratio
+        self.rmsnorm_ratios = [[] for _ in range(self.num_error_layers + 1)]  # H3
+        self.gate_frac_near_zero = [[] for _ in range(self.num_error_layers + 1)]  # H5
+        self.per_position_snapshots = []  # H2: occasional full snapshots
         self.timing = {
             'data_transfer': [],
             'inference': [],
@@ -300,6 +307,25 @@ class Diagnostics:
             if name not in self.weight_magnitudes:
                 self.weight_magnitudes[name] = []
             self.weight_magnitudes[name].append(mag)
+
+    def update_hypothesis(self, hyp_diag, save_snapshot=False):
+        """Update hypothesis-specific diagnostics."""
+        self.newton_rank1_ratio.append(hyp_diag.get('newton_rank1_ratio', 0))
+        self.newton_coeff.append(hyp_diag.get('newton_coeff', 0))
+        self.causal_early_late.append(hyp_diag.get('causal_early_late_ratio', 0))
+
+        for i, ratio in enumerate(hyp_diag.get('rmsnorm_ratios', [])):
+            if i < len(self.rmsnorm_ratios):
+                self.rmsnorm_ratios[i].append(ratio)
+
+        for i, gs in enumerate(hyp_diag.get('gate_stats', [])):
+            if i < len(self.gate_frac_near_zero):
+                self.gate_frac_near_zero[i].append(gs['frac_near_zero'])
+
+        if save_snapshot and hyp_diag.get('per_position_error_norms'):
+            self.per_position_snapshots.append(
+                hyp_diag['per_position_error_norms']
+            )
 
     def update_test(self, acc, loss):
         self.test_accs.append(acc)
@@ -367,7 +393,12 @@ class Diagnostics:
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
 
-        nrows = 4 if self.has_timing() else 3
+        has_hyp = use_epc and len(self.newton_rank1_ratio) > 0
+        nrows = 3
+        if self.has_timing():
+            nrows = 4
+        if has_hyp:
+            nrows += 1
         fig, axes = plt.subplots(nrows, 3, figsize=(18, 5 * nrows))
 
         # --- Row 0 ---
@@ -619,6 +650,97 @@ class Diagnostics:
                 ax.text(0.05, 0.5, '\n'.join(plines), fontsize=9,
                         verticalalignment='center', family='monospace')
 
+        # --- Hypothesis row (when ePC data available) ---
+        if has_hyp:
+            hyp_row = nrows - 1  # always the last row
+
+            # [hyp,0] Newton quality: rank-1 ratio + Woodbury coefficient
+            ax = axes[hyp_row, 0]
+            ax2 = ax.twinx()
+            if self.newton_rank1_ratio:
+                ax.plot(self.newton_rank1_ratio, alpha=0.5, linewidth=0.5,
+                        color='blue', label='||u||^2/||g||^2')
+                if len(self.newton_rank1_ratio) > 50:
+                    window = min(50, len(self.newton_rank1_ratio) // 5)
+                    ma = np.convolve(self.newton_rank1_ratio,
+                                     np.ones(window)/window, mode='valid')
+                    ax.plot(range(window-1, len(self.newton_rank1_ratio)), ma,
+                            linewidth=1.5, color='blue')
+            if self.newton_coeff:
+                ax2.plot(self.newton_coeff, alpha=0.3, linewidth=0.5,
+                         color='red', label='Woodbury coeff')
+                if len(self.newton_coeff) > 50:
+                    window = min(50, len(self.newton_coeff) // 5)
+                    ma = np.convolve(self.newton_coeff,
+                                     np.ones(window)/window, mode='valid')
+                    ax2.plot(range(window-1, len(self.newton_coeff)), ma,
+                             linewidth=1.5, color='red')
+                ax2.set_ylabel('Woodbury coeff', color='red', fontsize=8)
+                ax2.tick_params(axis='y', labelcolor='red', labelsize=7)
+            ax.set_xlabel('Batch')
+            ax.set_ylabel('||u||^2 / ||g||^2', color='blue', fontsize=8)
+            ax.tick_params(axis='y', labelcolor='blue', labelsize=7)
+            ax.set_title('H1: Newton Quality (rank-1 capture)')
+            ax.grid(True, alpha=0.3)
+
+            # [hyp,1] Causal asymmetry + per-position snapshot
+            ax = axes[hyp_row, 1]
+            if self.causal_early_late:
+                ax.plot(self.causal_early_late, alpha=0.5, linewidth=0.5, color='green')
+                if len(self.causal_early_late) > 50:
+                    window = min(50, len(self.causal_early_late) // 5)
+                    ma = np.convolve(self.causal_early_late,
+                                     np.ones(window)/window, mode='valid')
+                    ax.plot(range(window-1, len(self.causal_early_late)), ma,
+                            linewidth=1.5, color='green', label=f'MA-{window}')
+                ax.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5,
+                           label='Symmetric (1.0)')
+                ax.legend(fontsize=7)
+            ax.set_xlabel('Batch')
+            ax.set_ylabel('Early / Late error norm')
+            ax.set_title('H2: Causal Asymmetry (early/late ratio)')
+            ax.grid(True, alpha=0.3)
+
+            # [hyp,2] Summary of all hypotheses
+            ax = axes[hyp_row, 2]
+            ax.axis('off')
+            lines = ['HYPOTHESIS STATUS:']
+            # H1
+            if self.newton_rank1_ratio:
+                recent = self.newton_rank1_ratio[-100:]
+                r1 = np.mean(recent)
+                status = 'OK' if r1 < 2.0 else 'CONCERN' if r1 < 10.0 else 'BAD'
+                lines.append(f"\nH1 Newton rank-1: ratio={r1:.3f} [{status}]")
+                lines.append(f"   (>2 means rank-1 misses curvature)")
+            if self.newton_coeff:
+                recent = self.newton_coeff[-100:]
+                lines.append(f"   Woodbury coeff: {np.mean(recent):.4f}")
+            # H2
+            if self.causal_early_late:
+                recent = self.causal_early_late[-100:]
+                ratio = np.mean(recent)
+                status = 'OK' if 0.5 < ratio < 2.0 else 'CONCERN'
+                lines.append(f"\nH2 Causal asym: ratio={ratio:.3f} [{status}]")
+                lines.append(f"   (>>1 = early dominates, <<1 = late)")
+            # H3
+            for i, ratios in enumerate(self.rmsnorm_ratios):
+                if ratios:
+                    recent = ratios[-100:]
+                    r = np.mean(recent)
+                    status = 'OK' if 0.5 < r < 2.0 else 'CONCERN'
+                    lines.append(f"\nH3 RMSNorm L{i+1}: ratio={r:.3f} [{status}]")
+            # H5
+            for i, fracs in enumerate(self.gate_frac_near_zero):
+                if fracs:
+                    recent = fracs[-100:]
+                    f = np.mean(recent)
+                    status = 'OK' if f < 0.1 else 'CONCERN' if f < 0.3 else 'BAD'
+                    lines.append(f"\nH5 SiLU gate L{i+1}: {f:.1%} near-zero [{status}]")
+
+            ax.text(0.02, 0.95, '\n'.join(lines), fontsize=8,
+                    verticalalignment='top', family='monospace',
+                    transform=ax.transAxes)
+
         plt.tight_layout()
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f"  Diagnostics saved to {save_path}")
@@ -840,6 +962,13 @@ def main():
                     acc=acc, loss=loss_val, diagnostics=diag,
                     lr=args.lr, weight_mags=weight_mags,
                 )
+
+                # Hypothesis diagnostics (every batch — lightweight)
+                x_detached = model.embedding(inputs).detach()
+                hyp_diag = model.pce.get_hypothesis_diagnostics(x_detached)
+                # Save full per-position snapshot every 50 batches
+                save_snap = (n_batches % 50 == 0)
+                diagnostics.update_hypothesis(hyp_diag, save_snapshot=save_snap)
 
                 if prof:
                     inf_profile = model.pce._profile if hasattr(model.pce, '_profile') else {}
