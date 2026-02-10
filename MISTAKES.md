@@ -821,6 +821,34 @@ Best result: v4 (full A+G, flat damping, clipping) at 95.4% — only 1.5% below 
 
 ---
 
+### 21. INT8 QAT Destroys ePC Accuracy (CRITICAL)
+
+**What we tried:** Fake INT8 weight quantization (QAT) during training using `torch.nn.utils.parametrize` with Straight-Through Estimator.
+
+**Why it failed:**
+- ePC's error optimization is highly sensitive to weight precision
+- Fake quantization adds quantization noise to weights every forward pass
+- The Newton error step converges based on the EXACT current weights
+- INT8 noise (127 discrete levels per tensor) corrupts the energy landscape
+- Result: 57.09% at epoch 10 vs 80.49% without QAT — 23% accuracy loss
+
+**Symptoms:**
+- Learning proceeds but much slower than without QAT
+- All other metrics look normal (energies, error magnitudes, convergence)
+- The accuracy simply plateaus much lower
+
+**Why this is specific to ePC:**
+- Standard backprop networks tolerate QAT because gradients adapt to the quantized weights
+- ePC runs T iterations of error optimization on FIXED (quantized) weights per batch
+- The quantization noise creates a noisy energy landscape that errors can't optimize well
+- Each batch sees a DIFFERENT quantization (weights change → new quantization grid)
+
+**Root principle:** ePC's inference loop amplifies weight noise because it optimizes errors against fixed weights for multiple iterations. Any noise in weights gets amplified by T iterations of optimization against that noise. Standard networks don't have this problem because they do a single forward pass.
+
+**Status:** DISABLED (2026-02-10) — quantize_bits=0 in both training scripts. QAT code retained for reference.
+
+---
+
 ## Update Log
 
 - 2026-02-01 (initial): Initial file created with 6 major mistakes catalogued

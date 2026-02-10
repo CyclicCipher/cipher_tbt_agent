@@ -32,6 +32,7 @@ from tqdm import tqdm
 
 from experiments.ePC_ResNet.epc_model import PCESkipConnection, quantize_model_weights
 from experiments.ePC_ResNet.architectures import get_resnet18_cifar10
+from experiments.ePC_ResNet.ada_woodbury import AdaWoodbury
 
 try:
     import bitsandbytes as bnb
@@ -395,11 +396,12 @@ def main():
     e_lr = 0.001        # Learning rate for errors (SGD/Adam only)
     w_lr = 0.0001       # Base learning rate for weights
     w_decay = 0.0       # Weight decay
+    w_optim = 'adawoodbury'  # 'adam', 'adam8bit', or 'adawoodbury'
     batch_size = 256
     num_epochs = 50
     output_loss = 'mse'
     chart_interval = 10  # Save diagnostic chart every N epochs
-    quantize_bits = 8   # QAT: fake INT8 weight quantization (0 = disabled)
+    quantize_bits = 0   # QAT disabled — INT8 too destructive for ePC error optimization
     accum_steps = 1     # Gradient accumulation (increase to 2/4 if OOM)
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -412,7 +414,9 @@ def main():
         torch.backends.cudnn.benchmark = True
     scaler = GradScaler('cuda', enabled=(device == 'cuda'))
 
-    optim_name = '8-bit Adam (bnb)' if HAS_BNB else 'Adam'
+    optim_name = w_optim
+    if w_optim == 'adam8bit' and not HAS_BNB:
+        optim_name = 'adam (bnb unavailable)'
     quant_str = f'INT{quantize_bits} QAT' if quantize_bits > 0 else 'none'
 
     print("=" * 60)
@@ -422,7 +426,8 @@ def main():
     print(f"Learning: {optim_name}, w_lr={w_lr}, w_decay={w_decay}")
     print(f"Output loss: {output_loss}")
     print(f"Mixed precision: FP16 autocast + GradScaler" if device == 'cuda' else "No AMP (CPU)")
-    print(f"Weight quantization: {quant_str}")
+    if quantize_bits > 0:
+        print(f"Weight quantization: {quant_str}")
     print(f"LR schedule: warmup 10% + cosine decay")
     print(f"Batch size: {batch_size}, Epochs: {num_epochs}"
           f"{f', accum={accum_steps}' if accum_steps > 1 else ''}")
@@ -447,8 +452,13 @@ def main():
         n_quantized = quantize_model_weights(model, num_bits=quantize_bits)
         print(f"QAT: {n_quantized} layers fake-quantized to INT{quantize_bits}")
 
-    # Adam with lr=1.0 (actual LR controlled by scheduler)
-    if HAS_BNB:
+    # Weight optimizer (lr=1.0, actual LR controlled by scheduler)
+    if w_optim == 'adawoodbury':
+        weight_optim = AdaWoodbury(
+            model.parameters(), lr=1.0, weight_decay=w_decay,
+            alpha=1.0, warmup_steps=100,
+        )
+    elif w_optim == 'adam8bit' and HAS_BNB:
         weight_optim = bnb.optim.Adam8bit(
             model.parameters(), lr=1.0, weight_decay=w_decay,
         )

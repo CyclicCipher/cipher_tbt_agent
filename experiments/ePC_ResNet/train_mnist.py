@@ -25,6 +25,7 @@ from tqdm import tqdm
 
 from experiments.ePC_ResNet.epc_model import PCE, quantize_model_weights
 from experiments.ePC_ResNet.architectures import get_mlp_mnist
+from experiments.ePC_ResNet.ada_woodbury import AdaWoodbury
 
 try:
     import bitsandbytes as bnb
@@ -319,9 +320,10 @@ def main():
 
     # Hyperparameters — Weight optimization (learning phase)
     w_lr = 0.001
+    w_optim = 'adam'        # 'adam', 'adam8bit', or 'adawoodbury'
     batch_size = 128
     num_epochs = 3
-    quantize_bits = 8       # QAT: fake INT8 weight quantization (0 = disabled)
+    quantize_bits = 0       # QAT disabled — INT8 too destructive for ePC error optimization
 
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
@@ -333,7 +335,9 @@ def main():
         torch.backends.cudnn.benchmark = True
     scaler = GradScaler('cuda', enabled=(device == 'cuda'))
 
-    optim_name = '8-bit Adam (bnb)' if HAS_BNB else 'Adam'
+    optim_name = w_optim
+    if w_optim == 'adam8bit' and not HAS_BNB:
+        optim_name = 'adam (bnb unavailable)'
     quant_str = f'INT{quantize_bits} QAT' if quantize_bits > 0 else 'none'
 
     print("=" * 60)
@@ -365,7 +369,11 @@ def main():
         n_quantized = quantize_model_weights(model, num_bits=quantize_bits)
         print(f"QAT: {n_quantized} layers fake-quantized to INT{quantize_bits}")
 
-    if HAS_BNB:
+    if w_optim == 'adawoodbury':
+        weight_optim = AdaWoodbury(
+            model.parameters(), lr=w_lr, alpha=1.0, warmup_steps=100,
+        )
+    elif w_optim == 'adam8bit' and HAS_BNB:
         weight_optim = bnb.optim.Adam8bit(model.parameters(), lr=w_lr)
     else:
         weight_optim = torch.optim.Adam(model.parameters(), lr=w_lr)
