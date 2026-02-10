@@ -183,13 +183,29 @@ class PCE(nn.Module):
 
     @torch.no_grad()
     def init_zero_errors(self, x):
-        """Initialize zero errors by running a feedforward pass.
+        """Initialize zero errors, caching shapes to skip redundant forward passes.
+
+        On first call (or when input shape changes), runs a full forward pass
+        to discover error shapes. On subsequent calls with the same input shape,
+        creates zero tensors directly from cached shapes — saving one full
+        forward pass per batch (~26ms on ResNet-18).
 
         Errors are always fp32 regardless of autocast context. fp16 rounds
         small Newton corrections to zero, which defeats early stopping and
         degrades inference quality. fp32 errors are cheap (just vectors added
         between layers); the expensive ops (conv, linear) still run in fp16.
         """
+        input_shape = x.shape
+        if (hasattr(self, '_cached_error_shapes')
+                and self._cached_input_shape == input_shape):
+            device = x.device
+            self.errors = [
+                torch.zeros(shape, dtype=torch.float32,
+                            device=device, requires_grad=True)
+                for shape in self._cached_error_shapes
+            ]
+            return
+
         self.errors = []
         for layer_i in self.layers[:-1]:
             x = layer_i(x)
@@ -197,6 +213,8 @@ class PCE(nn.Module):
                 torch.zeros(x.shape, dtype=torch.float32,
                             device=x.device, requires_grad=True)
             )
+        self._cached_input_shape = input_shape
+        self._cached_error_shapes = [e.shape for e in self.errors]
 
     def _newton_step(self):
         """Rank-1 LRPD Newton step for error optimization.
@@ -411,6 +429,17 @@ class PCESkipConnection(PCE):
 
     @torch.no_grad()
     def init_zero_errors(self, x):
+        input_shape = x.shape
+        if (hasattr(self, '_cached_error_shapes')
+                and self._cached_input_shape == input_shape):
+            device = x.device
+            self.errors = [
+                torch.zeros(shape, dtype=torch.float32,
+                            device=device, requires_grad=True)
+                for shape in self._cached_error_shapes
+            ]
+            return
+
         self.errors = []
         s_i = (x, 0.0)
         for layer_i in self.layers[:-1]:
@@ -419,3 +448,5 @@ class PCESkipConnection(PCE):
                 torch.zeros(s_i[0].shape, dtype=torch.float32,
                             device=s_i[0].device, requires_grad=True)
             )
+        self._cached_input_shape = input_shape
+        self._cached_error_shapes = [e.shape for e in self.errors]
