@@ -396,7 +396,7 @@ def main():
     e_lr = 0.001        # Learning rate for errors (SGD/Adam only)
     w_lr = 0.0001       # Base learning rate for weights
     w_decay = 0.0       # Weight decay
-    w_optim = 'adawoodbury'  # 'adam', 'adam8bit', or 'adawoodbury'
+    w_optim = 'adam'  # 'adam', 'adam8bit', or 'adawoodbury'
     batch_size = 256
     num_epochs = 50
     output_loss = 'mse'
