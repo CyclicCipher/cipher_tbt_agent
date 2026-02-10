@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 import math
 import torch
 import torch.nn.functional as F
+from torch.cuda.amp import autocast, GradScaler
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -291,11 +292,13 @@ def evaluate_with_loss(model, test_loader, device, output_loss='mse'):
     total_correct = 0
     total_samples = 0
     total_loss = 0.0
+    use_amp = device == 'cuda'
 
     with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
-            outputs = model(data)
+            with autocast(enabled=use_amp):
+                outputs = model(data)
             preds = outputs.argmax(dim=1)
             total_correct += (preds == target).sum().item()
             total_samples += data.size(0)
@@ -303,37 +306,41 @@ def evaluate_with_loss(model, test_loader, device, output_loss='mse'):
             if output_loss == 'mse':
                 y_onehot = F.one_hot(target, num_classes=outputs.shape[-1]).float()
                 total_loss += 0.5 * F.mse_loss(
-                    outputs, y_onehot, reduction='sum').item()
+                    outputs.float(), y_onehot, reduction='sum').item()
             else:
                 total_loss += F.cross_entropy(
-                    outputs, target, reduction='sum').item()
+                    outputs.float(), target, reduction='sum').item()
 
     return total_correct / total_samples, total_loss / total_samples
 
 
-def train_epoch(model, weight_optim, lr_scheduler, train_loader,
+def train_epoch(model, weight_optim, lr_scheduler, scaler, train_loader,
                 device, epoch, diagnostics):
     model.train()
     total_correct = 0
     total_samples = 0
     total_energy = 0.0
+    use_amp = device == 'cuda'
 
     pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}")
     for data, target in pbar:
         data, target = data.to(device), target.to(device)
         batch_size = data.size(0)
 
-        # Phase 1: Inference (optimize errors)
-        energy = model(data, target)
+        # Phase 1: Inference (optimize errors) — fp16 forward, fp32 Newton step
+        with autocast(enabled=use_amp):
+            energy = model(data, target)
 
         # Collect diagnostics before weight update
         diag = model.get_diagnostics()
 
-        # Phase 2: Weight update (local learning via E_local)
+        # Phase 2: Weight update (local learning via E_local) — fp16 + GradScaler
         weight_optim.zero_grad()
-        loss = model.compute_weight_loss(data, target, batch_size)
-        loss.backward()
-        weight_optim.step()
+        with autocast(enabled=use_amp):
+            loss = model.compute_weight_loss(data, target, batch_size)
+        scaler.scale(loss).backward()
+        scaler.step(weight_optim)
+        scaler.update()
         lr_scheduler.step()
 
         total_energy += energy
@@ -378,12 +385,19 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
 
+    # Enable TF32 for fp32 matmuls (Ampere+), FP16 AMP for mixed precision
+    if device == 'cuda':
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+    scaler = GradScaler(enabled=(device == 'cuda'))
+
     print("=" * 60)
     print("ePC ResNet-18 on CIFAR-10")
     print(f"Inference: {error_optim} errors, T={iters}, "
           f"{'damping='+str(damping) if error_optim == 'newton' else 'e_lr='+str(e_lr)}")
     print(f"Learning: Adam, w_lr={w_lr}, w_decay={w_decay}")
     print(f"Output loss: {output_loss}")
+    print(f"Mixed precision: FP16 autocast + GradScaler" if device == 'cuda' else "No AMP (CPU)")
     print(f"LR schedule: warmup 10% + cosine decay")
     print(f"Batch size: {batch_size}, Epochs: {num_epochs}")
     print(f"Target: 92.17% (ePC paper)")
@@ -415,7 +429,7 @@ def main():
     best_test_acc = 0.0
     for epoch in range(num_epochs):
         train_acc, avg_energy = train_epoch(
-            model, weight_optim, lr_scheduler, train_loader,
+            model, weight_optim, lr_scheduler, scaler, train_loader,
             device, epoch, diagnostics,
         )
         test_acc, test_loss = evaluate_with_loss(

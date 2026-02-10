@@ -140,12 +140,13 @@ class PCE(nn.Module):
         Cost: zero extra backward passes (reuses the gradient).
         """
         with torch.no_grad():
-            # Collect gradients and error values
+            # Collect gradients and error values, upcast to fp32 for
+            # numerical stability (dot products lose precision in fp16)
             all_g = []
             all_e = []
             for e in self.errors:
-                all_g.append(e.grad.flatten())
-                all_e.append(e.data.flatten())
+                all_g.append(e.grad.float().flatten())
+                all_e.append(e.data.float().flatten())
 
             g = torch.cat(all_g)
             e_vec = torch.cat(all_e)
@@ -161,11 +162,11 @@ class PCE(nn.Module):
             # H^{-1} g = g/d - (u^T g)/(d^2 + d*||u||^2) * u
             step = g / d - (uTg / (d * d + d * uTu)) * u
 
-            # Apply step to individual errors
+            # Apply step to individual errors (cast back to error dtype)
             offset = 0
             for e in self.errors:
                 numel = e.numel()
-                e.data -= step[offset:offset + numel].view_as(e)
+                e.data -= step[offset:offset + numel].view_as(e).to(e.dtype)
                 offset += numel
 
     def minimize_error_energy(self, x, y):

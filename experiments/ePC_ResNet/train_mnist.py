@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 import torch
 import torch.nn.functional as F
+from torch.cuda.amp import autocast, GradScaler
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -232,10 +233,11 @@ def get_weight_magnitudes(model):
     return mags
 
 
-def train_epoch(model, weight_optim, train_loader, device, epoch, diagnostics):
+def train_epoch(model, weight_optim, scaler, train_loader, device, epoch, diagnostics):
     model.train()
     total_correct = 0
     total_samples = 0
+    use_amp = device == 'cuda'
 
     pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}")
     for data, target in pbar:
@@ -243,17 +245,20 @@ def train_epoch(model, weight_optim, train_loader, device, epoch, diagnostics):
         target = target.to(device)
         batch_size = data.size(0)
 
-        # Phase 1: Inference (optimize errors)
-        energy = model(data, target)
+        # Phase 1: Inference (optimize errors) — fp16 forward, fp32 Newton step
+        with autocast(enabled=use_amp):
+            energy = model(data, target)
 
         # Collect diagnostics
         diag = model.get_diagnostics()
 
-        # Phase 2: Weight update (local learning via E_local)
+        # Phase 2: Weight update (local learning via E_local) — fp16 + GradScaler
         weight_optim.zero_grad()
-        loss = model.compute_weight_loss(data, target, batch_size)
-        loss.backward()
-        weight_optim.step()
+        with autocast(enabled=use_amp):
+            loss = model.compute_weight_loss(data, target, batch_size)
+        scaler.scale(loss).backward()
+        scaler.step(weight_optim)
+        scaler.update()
 
         # Track accuracy + CE loss from cached E_local prediction (no extra forward pass)
         preds = model._weight_phase_prediction.argmax(dim=1)
@@ -264,7 +269,7 @@ def train_epoch(model, weight_optim, train_loader, device, epoch, diagnostics):
         acc = correct / batch_size
         weight_mags = get_weight_magnitudes(model)
 
-        ce_loss = F.cross_entropy(model._weight_phase_prediction, target).item()
+        ce_loss = F.cross_entropy(model._weight_phase_prediction.float(), target).item()
 
         diagnostics.update_train(
             acc=acc, loss=ce_loss,
@@ -281,16 +286,18 @@ def evaluate(model, test_loader, device):
     total_correct = 0
     total_samples = 0
     total_loss = 0.0
+    use_amp = device == 'cuda'
 
     with torch.no_grad():
         for data, target in test_loader:
             data = data.view(data.size(0), -1).to(device)
             target = target.to(device)
-            outputs = model(data)
+            with autocast(enabled=use_amp):
+                outputs = model(data)
             preds = outputs.argmax(dim=1)
             total_correct += (preds == target).sum().item()
             total_samples += data.size(0)
-            total_loss += F.cross_entropy(outputs, target, reduction='sum').item()
+            total_loss += F.cross_entropy(outputs.float(), target, reduction='sum').item()
 
     return total_correct / total_samples, total_loss / total_samples
 
@@ -310,9 +317,16 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"Device: {device}")
 
+    # Enable TF32 for fp32 matmuls (Ampere+), FP16 AMP for mixed precision
+    if device == 'cuda':
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+    scaler = GradScaler(enabled=(device == 'cuda'))
+
     print("=" * 60)
     print("ePC MNIST Validation")
     print(f"Architecture: [784, 128, 128, 128, 10], ReLU")
+    print(f"Mixed precision: FP16 autocast + GradScaler" if device == 'cuda' else "No AMP (CPU)")
     print(f"Inference: {error_optim} errors, T={iters}, "
           f"{'damping='+str(e_damping) if error_optim == 'newton' else 'e_lr='+str(e_lr)}")
     print(f"Learning: Adam weights, w_lr={w_lr}")
@@ -339,7 +353,7 @@ def main():
     best_test_acc = 0.0
     for epoch in range(num_epochs):
         train_acc = train_epoch(
-            model, weight_optim, train_loader, device, epoch, diagnostics,
+            model, weight_optim, scaler, train_loader, device, epoch, diagnostics,
         )
         test_acc, test_loss = evaluate(model, test_loader, device)
         diagnostics.update_test(test_acc, test_loss)
