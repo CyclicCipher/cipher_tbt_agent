@@ -849,6 +849,44 @@ Best result: v4 (full A+G, flat damping, clipping) at 95.4% — only 1.5% below 
 
 ---
 
+### 22. AdaWoodbury Rank-1 Correction Provides No Benefit Over Adam
+
+**What we tried:** AdaWoodbury — Adam's diagonal second moment + a rank-1 Woodbury curvature correction via online PCA of the gradient stream. Theory: capture cross-parameter curvature that diagonal Adam misses, using H ≈ diag(√v+ε) + α·uu^T and Woodbury inversion.
+
+**Algorithm:**
+- Online PCA: u tracks top eigenvector of E[gg^T] via streaming power iteration
+- Adaptive α: measures excess curvature along u vs diagonal prediction
+- After warmup (100 steps): applies rank-1 Woodbury correction to Adam step
+- Memory: 50% over Adam (3n vs 2n per param). Compute: 3 extra dot products/step.
+
+**Results:**
+- MNIST: 96.74% test (3 epochs) — matches Adam's 97.07% within noise. Not remarkable.
+- CIFAR-10: 41.75% test epoch 1, 42.41% epoch 2 — same or slightly worse than Adam baseline (~42% epoch 1, 80.49% epoch 10). No convergence speedup visible.
+
+**Why it failed:**
+- Rank-1 correction is too weak: one direction of curvature correction across millions of parameters is a drop in the ocean
+- The dominant eigenvector of E[gg^T] captures gradient VARIANCE, not loss curvature — these are related but not the same thing
+- ePC gradients come from E_local (sum of local layer energies), which already decomposes curvature across layers. The global gradient's top eigenvector doesn't align with any meaningful per-layer curvature direction
+- The adaptive α mechanism correctly detects when diagonal is sufficient (ratio ≈ 1) — it self-disables, making AdaWoodbury equivalent to Adam in practice
+- Fundamentally: if the diagonal (Adam) already explains 99%+ of the curvature structure, a rank-1 off-diagonal correction explains ~0.001% of what's left
+
+**Lesson:** Second-order methods need to match the problem's curvature structure. ePC's curvature is:
+1. **Per-element scale variation** (handled well by Adam's v)
+2. **Cross-layer scale mismatch** (handled by Adam's per-parameter normalization)
+3. **Block-diagonal** (each layer's E_local is independent)
+The actual curvature structure is block-diagonal per layer, not low-rank globally. A global rank-1 correction addresses none of these.
+
+**What might actually work for faster convergence:**
+- Layer-wise learning rate adaptation (each layer's E_local has different scale)
+- Larger batch size + linear scaling rule (more signal per step)
+- Better LR schedules (warmup already helps significantly)
+- Architectural changes (error-gated inference for speed, not optimizer changes for convergence)
+- Accept that ePC's convergence rate IS the convergence rate — the error optimization loop is the bottleneck, not the weight optimizer
+
+**Status:** IMPLEMENTED but INEFFECTIVE (2026-02-10) — Code retained in ada_woodbury.py. train_cifar10.py defaults to adawoodbury but can switch back to 'adam'. Recommend reverting to Adam.
+
+---
+
 ## Update Log
 
 - 2026-02-01 (initial): Initial file created with 6 major mistakes catalogued
@@ -865,3 +903,6 @@ Best result: v4 (full A+G, flat damping, clipping) at 95.4% — only 1.5% below 
 - 2026-02-07 (NAMING): Mistake #17 - Python can't import from hyphenated directories. Use underscores.
 - 2026-02-08 (QUADRATIC CONSTRAINT): Mistake #18 - Low-rank η1 truncation violates MNW quadratic constraint. Fixed via spectral norm inflation. Stable at 82.59%.
 - 2026-02-08 (FITC FAILURE): Mistake #19 - FITC diag(R) correction fails for Layers 2-4 where k=20 << data_rank≈128. V explodes → M reaches 1e17 → NaN at batch 15. FITC only works when residual is prior-dominated (k > data_rank).
+- 2026-02-10 (KRONOS ARCHIVED): Mistake #20 - KFAC structurally incompatible with ePC. G factor degenerate (40,000:1 trace ratio), raw gradients tiny, cross-layer A eigenvalue spread 750:1. ePC needs Adam, not KFAC.
+- 2026-02-10 (QAT FAILURE): Mistake #21 - INT8 fake quantization destroys ePC accuracy (57.09% vs 80.49%). ePC error optimization amplifies weight noise over T iterations.
+- 2026-02-10 (ADAWOODBURY INEFFECTIVE): Mistake #22 - Rank-1 Woodbury correction over Adam provides no convergence benefit. Global rank-1 curvature doesn't match ePC's block-diagonal per-layer structure. MNIST 96.74% (≈Adam), CIFAR-10 no improvement.
