@@ -144,6 +144,69 @@ For d_model=256: in_proj + out_proj ≈ 428K params, everything else ≈ 20K.
 - Pure PyTorch SSD is ~3-5x slower than fused CUDA, but acceptable at small
   scale on 3050 Ti for proof-of-concept
 
+### ePC-Specific Concerns for Mamba (Risk-Ordered)
+
+**1. Selectivity makes errors multiplicative (HIGH RISK)**
+In ResNet, errors are purely additive (shift activations between layers). In
+Mamba, the block input is projected into B, C, dt (SSM parameters) AND x (data).
+When an error shifts block input, it changes both the signal and the dynamics —
+multiplicative, not additive. The energy landscape will be more non-convex than
+ResNet's. If T=2 Newton doesn't converge, may need T=3 or stronger damping.
+
+**2. Causal error propagation (MEDIUM RISK)**
+ResNet errors affect all spatial positions equally. Mamba is causal: an error
+perturbation at position t propagates to positions ≥t but NOT <t. Early-position
+errors have outsized influence (shift the entire downstream state trajectory).
+The rank-1 Hessian approximation assumes relatively uniform error interactions —
+causal asymmetry may degrade it. Monitor per-position error norms during dev.
+
+**3. Error placement relative to RMSNorm (MEDIUM RISK — design choice)**
+Architecture has `RMSNorm → Mamba Block → + error`. RMSNorm rescales including
+the error, which can amplify/dampen corrections unpredictably. Place errors
+AFTER the next layer's RMSNorm instead: norm operates on "clean" signal, error
+is an unscaled correction. Matches ePC-ResNet pattern.
+
+**4. VRAM budget for sequence-length errors (LOW NOW, HIGH AT SCALE)**
+ResNet errors shrink through pooling. Mamba errors stay at full seqlen:
+- Phase 1 (32×64×128×4 = 1MB/error, 1 error): fine
+- Phase 2 (16×256×256×4 = 4MB/error, 3 errors = 12MB): fine
+- Scale (8×1024×1024×4 = 32MB/error, 23 errors = 736MB): significant
+fp32 requirement means we can't halve with fp16.
+
+**5. SiLU gating sharp transitions (LOW RISK)**
+`output = SiLU(z) * SSM_output` — if error pushes z near zero, entire SSM
+output gets suppressed. Near-discontinuities in energy landscape. Sufficient
+damping should handle this.
+
+**6. Trapezoidal tightens temporal coupling (LOW RISK — Phase 2)**
+Trapezoidal uses previous timestep's B*x, so errors at t-1 directly affect
+coupling at t (not just through state). Denser error interaction pattern than
+Euler. Verify convergence on Euler (Mamba2) first.
+
+### Prior Work: PC + Mamba Literature Review (Feb 2026)
+
+**No published work combines any form of predictive coding with Mamba.** Confirmed
+via exhaustive search. ePC-Mamba is genuinely novel. Adjacent works:
+
+| Work | What | Relation to ePC-Mamba |
+|------|------|-----------------------|
+| BIM (Qin 2024) | STDP+RTRL for Mamba (bioplausible) | Different learning rule entirely. Temporal locality, not spatial. |
+| tPC (Millidge 2024) | Temporal PC on linear SSMs (1-2 layers) | Different PC variant, shallow, Hebbian. No Newton, no depth. |
+| DPC (Jiang & Rao 2024) | Hierarchical PC on RNNs (2-3 levels) | Neuroscience model, not DL-scale. |
+| PAM (Mounir, NeurIPS 2024) | Free energy + custom SSM + Hebbian | Validates SSM+free-energy concept, but simple dynamics. |
+| MPS-SSM (Wang 2025) | Info-theoretic regularizer for Mamba | Orthogonal (backprop+regularizer, not PC). |
+| ePC (Goemaere 2025) | Error-based PC + Newton on feedforward | Our base algorithm. Only covers feedforward. |
+
+**Confirmed gaps (no published work):**
+1. ePC + Mamba (or any selective SSM) — our work
+2. Any form of PC + Mamba — not even standard sPC
+3. Energy-based learning + Mamba — no equilibrium propagation either
+4. ePC + ANY recurrent/sequence architecture — novel regardless of base
+
+**Unexploited analogy:** Mamba's input-dependent Δ_t is functionally analogous
+to precision weighting in PC. Both gate information based on input-dependent
+reliability estimates. Nobody has formalized this connection.
+
 ---
 
 ## BTT (Block Tensor-Train) Analysis
