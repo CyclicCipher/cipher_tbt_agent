@@ -251,6 +251,13 @@ class PCESequence(nn.Module):
         Returns:
             Final energy value.
         """
+        # Detach input from upstream graph (e.g. embedding). ePC only
+        # optimizes errors during inference. Without this, the second
+        # E.backward() fails because the embedding's saved tensors were
+        # freed by the first backward. The weight phase (E_local) re-embeds
+        # from scratch, so detaching here is safe.
+        x = x.detach()
+
         prof = self.profiling
 
         if prof:
