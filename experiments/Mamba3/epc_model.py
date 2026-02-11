@@ -26,7 +26,8 @@ updates only the output projection (weight-tied with embedding).
 Empirical findings:
   - N-1 errors + no precision: 7% (random chance)
   - N-1 errors + geometric precision: 38% (learning but slow)
-  - N errors + precision: TBD (should improve inference quality)
+  - N errors + geometric precision + damping=0.1: 99.3% in 44 epochs!
+    Phase transition at epoch 28-32: 15% → 77% in 4 epochs.
 
 Reference: Goemaere et al. 2025, arXiv:2505.20137
 Precision weighting: Salvatori et al. 2025, arXiv:2506.23800
