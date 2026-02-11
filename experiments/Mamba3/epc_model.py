@@ -451,5 +451,96 @@ class ePCMamba3LM(nn.Module):
         x = self.embedding(input_ids)
         return self.pce.E_local(x, targets, self.out_proj) / (batch_size * self.pce.energy_scale)
 
+    def ipc_train_step(self, input_ids: Tensor, targets: Tensor,
+                       weight_optimizer, batch_size: int,
+                       w_clip: float = 1.0) -> float:
+        """Incremental PC: interleave error and weight updates.
+
+        Each Newton/SGD step on errors is immediately followed by a weight
+        update via E_local. This increases the rate of weight change by T×,
+        helping break through the deadlock phase where the Jacobian dy/de
+        is too small for errors to be informative.
+
+        Standard ePC: T error steps → 1 weight step (per batch)
+        iPC:          T × (1 error step → 1 weight step) (per batch)
+
+        Returns:
+            Final energy value.
+        """
+        x = self.embedding(input_ids).detach()
+        pce = self.pce
+        out_proj = self.out_proj
+
+        # --- Setup: freeze weights, init errors ---
+        for p in pce.layers.parameters():
+            p.requires_grad_(False)
+        for p in pce.out_norm.parameters():
+            p.requires_grad_(False)
+        out_proj.requires_grad_(False)
+
+        pce.init_zero_errors(x)
+
+        # Error optimizer if needed
+        if pce.error_optim_mode == 'sgd':
+            e_optim = torch.optim.SGD(pce.errors, lr=pce.e_lr)
+        elif pce.error_optim_mode == 'adam':
+            e_optim = torch.optim.Adam(pce.errors, lr=pce.e_lr)
+        else:
+            e_optim = None
+
+        E_val = 0.0
+        for t in range(pce.iters):
+            # --- Error step ---
+            if e_optim is not None:
+                e_optim.zero_grad()
+            else:
+                for e in pce.errors:
+                    if e.grad is not None:
+                        e.grad.zero_()
+
+            E = pce.E(x, targets, out_proj)
+            E_val = E.item()
+            if t == 0:
+                pce._E_initial = E_val
+            E.backward()
+
+            if e_optim is not None:
+                e_optim.step()
+            else:
+                pce._newton_step()
+
+            # --- Weight step (iPC) ---
+            for p in pce.layers.parameters():
+                p.requires_grad_(True)
+            for p in pce.out_norm.parameters():
+                p.requires_grad_(True)
+            out_proj.requires_grad_(True)
+
+            weight_optimizer.zero_grad()
+            w_loss = pce.E_local(x, targets, out_proj) / (batch_size * pce.energy_scale)
+            w_loss.backward()
+            if w_clip > 0:
+                torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=w_clip)
+            weight_optimizer.step()
+
+            # Re-freeze for next error step
+            for p in pce.layers.parameters():
+                p.requires_grad_(False)
+            for p in pce.out_norm.parameters():
+                p.requires_grad_(False)
+            out_proj.requires_grad_(False)
+
+        pce._E_final = E_val
+        pce._iters_used = pce.iters
+
+        # Final unfreeze
+        for p in pce.layers.parameters():
+            p.requires_grad_(True)
+        for p in pce.out_norm.parameters():
+            p.requires_grad_(True)
+        out_proj.requires_grad_(True)
+
+        return E_val
+
     def get_diagnostics(self) -> dict:
         return self.pce.get_diagnostics()

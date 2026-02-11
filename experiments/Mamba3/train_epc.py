@@ -344,6 +344,8 @@ def main():
                         help='Base for geometric precision (ignored if not geometric)')
     parser.add_argument('--w_clip', type=float, default=1.0,
                         help='Weight gradient clipping max norm (0 to disable)')
+    parser.add_argument('--ipc', action='store_true',
+                        help='Incremental PC: weight update every Newton step')
     parser.add_argument('--n_train', type=int, default=5000)
     parser.add_argument('--n_test', type=int, default=1000)
     parser.add_argument('--baseline', action='store_true',
@@ -409,6 +411,8 @@ def main():
         else:
             print(f"Model: ePC-Mamba3 (T={args.iters}, {optim_str}, e_lr={args.e_lr}, "
                   f"energy_scale={model.pce.energy_scale:.4f})")
+        if args.ipc:
+            print(f"  Mode: iPC (weight update every Newton step, {args.iters}x faster)")
         if args.precision_mode != 'none':
             pi_str = ', '.join(f'{p:.2f}' for p in model.pce.precisions)
             print(f"Precisions ({args.precision_mode}): [{pi_str}]")
