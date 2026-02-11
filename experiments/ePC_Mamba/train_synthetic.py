@@ -815,8 +815,10 @@ def main():
                         default='newton', help='Error optimization method')
     parser.add_argument('--damping', type=float, default=0.1,
                         help='Newton damping (0.1 matches ePC-ResNet)')
-    parser.add_argument('--output_loss', choices=['ce', 'mse'], default='mse',
-                        help='Output loss function (mse matches ePC paper)')
+    parser.add_argument('--output_loss', choices=['ce', 'mse'], default='ce',
+                        help='Output loss function (ce default, mse available)')
+    parser.add_argument('--w_clip', type=float, default=1.0,
+                        help='Weight gradient clipping max norm (0 to disable)')
     parser.add_argument('--n_train', type=int, default=5000)
     parser.add_argument('--n_test', type=int, default=1000)
     parser.add_argument('--baseline', action='store_true',
@@ -958,6 +960,12 @@ def main():
                     _tw = _t2
 
                 weight_loss.backward()
+
+                # Clip weight gradients to prevent catastrophic forgetting.
+                # E_local gradient imbalance (490:1 L2/L1) means Layer 2
+                # can make outsized updates that destabilize the model.
+                if args.w_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=args.w_clip)
 
                 if prof:
                     _t2 = _sync_time()
