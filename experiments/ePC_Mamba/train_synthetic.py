@@ -103,7 +103,8 @@ class ePCMambaSynthetic(nn.Module):
     def __init__(self, config: Mamba2Config, vocab_size: int,
                  task: str = 'copy', n_classes: int = 4,
                  iters: int = 2, e_lr: float = 0.01,
-                 error_optim: str = 'newton', damping: float = 1.0):
+                 error_optim: str = 'newton', damping: float = 1.0,
+                 output_loss: str = 'mse'):
         super().__init__()
         self.config = config
         self.task = task
@@ -113,13 +114,13 @@ class ePCMambaSynthetic(nn.Module):
         if task in ('copy', 'selective'):
             self.pce = PCESequence(
                 config, iters=iters, e_lr=e_lr, error_optim=error_optim,
-                damping=damping, output_loss='ce',
+                damping=damping, output_loss=output_loss,
             )
             self.out_proj = nn.Linear(config.d_model, vocab_size, bias=False)
         elif task == 'classify':
             self.pce = PCESequence(
                 config, iters=iters, e_lr=e_lr, error_optim=error_optim,
-                damping=damping, output_loss='ce',
+                damping=damping, output_loss=output_loss,
             )
             self.out_proj = nn.Linear(config.d_model, n_classes)
         else:
@@ -814,6 +815,8 @@ def main():
                         default='newton', help='Error optimization method')
     parser.add_argument('--damping', type=float, default=0.1,
                         help='Newton damping (0.1 matches ePC-ResNet)')
+    parser.add_argument('--output_loss', choices=['ce', 'mse'], default='mse',
+                        help='Output loss function (mse matches ePC paper)')
     parser.add_argument('--n_train', type=int, default=5000)
     parser.add_argument('--n_test', type=int, default=1000)
     parser.add_argument('--baseline', action='store_true',
@@ -878,6 +881,7 @@ def main():
             config, vocab_size=args.vocab_size, task=args.task,
             iters=args.iters, e_lr=args.e_lr,
             error_optim=args.error_optim, damping=args.damping,
+            output_loss=args.output_loss,
         ).to(device)
         model.pce.profiling = args.profile
         eopt = args.error_optim

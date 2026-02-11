@@ -104,6 +104,10 @@ class PCESequence(nn.Module):
         # Loss function
         if output_loss == 'mse':
             def _mse_loss(y_pred, y):
+                # y_pred is (batch, seqlen, vocab), y is (batch, seqlen) indices
+                # Convert to one-hot for MSE
+                if y.dtype in (torch.long, torch.int):
+                    y = F.one_hot(y, num_classes=y_pred.shape[-1]).float()
                 return 0.5 * F.mse_loss(y_pred, y, reduction='sum')
             self._output_loss = _mse_loss
         elif output_loss == 'ce':
