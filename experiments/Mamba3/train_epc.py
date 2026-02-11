@@ -346,6 +346,8 @@ def main():
                         help='Weight gradient clipping max norm (0 to disable)')
     parser.add_argument('--ipc', action='store_true',
                         help='Incremental PC: weight update every Newton step')
+    parser.add_argument('--init_scale', type=float, default=1.0,
+                        help='Scale block output projections for larger initial Jacobian')
     parser.add_argument('--n_train', type=int, default=5000)
     parser.add_argument('--n_test', type=int, default=1000)
     parser.add_argument('--baseline', action='store_true',
@@ -413,6 +415,12 @@ def main():
                   f"energy_scale={model.pce.energy_scale:.4f})")
         if args.ipc:
             print(f"  Mode: iPC (weight update every Newton step, {args.iters}x faster)")
+        if args.init_scale != 1.0:
+            with torch.no_grad():
+                for block in model.pce.layers:
+                    block.mixer.out_proj.weight.mul_(args.init_scale)
+                    block.mlp.down_proj.weight.mul_(args.init_scale)
+            print(f"  Init scale: {args.init_scale}x on mixer/MLP output projections")
         if args.precision_mode != 'none':
             pi_str = ', '.join(f'{p:.2f}' for p in model.pce.precisions)
             print(f"Precisions ({args.precision_mode}): [{pi_str}]")
