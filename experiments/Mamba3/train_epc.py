@@ -337,15 +337,17 @@ def main():
                         help='Error learning rate (for sgd/adam)')
     parser.add_argument('--damping', type=float, default=0.1,
                         help='Newton damping factor')
-    parser.add_argument('--precision_mode', type=str, default='none',
+    parser.add_argument('--precision_mode', type=str, default='geometric',
                         choices=['none', 'linear', 'geometric'],
                         help='Per-layer precision weighting mode')
     parser.add_argument('--precision_base', type=float, default=3.0,
                         help='Base for geometric precision (ignored if not geometric)')
     parser.add_argument('--w_clip', type=float, default=1.0,
                         help='Weight gradient clipping max norm (0 to disable)')
-    parser.add_argument('--ipc', action='store_true',
+    parser.add_argument('--ipc', action='store_true', default=True,
                         help='Incremental PC: weight update every Newton step')
+    parser.add_argument('--no_ipc', action='store_true',
+                        help='Disable iPC (standard ePC: T error steps then 1 weight step)')
     parser.add_argument('--init_scale', type=float, default=1.0,
                         help='Scale block output projections for larger initial Jacobian')
     parser.add_argument('--mhc', action='store_true',
@@ -362,6 +364,9 @@ def main():
     parser.add_argument('--plot_every', type=int, default=10,
                         help='Save diagnostic plots every N epochs')
     args = parser.parse_args()
+
+    if args.no_ipc:
+        args.ipc = False
 
     if args.device == 'auto':
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
