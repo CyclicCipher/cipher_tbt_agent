@@ -88,15 +88,25 @@ class PCEMamba3(nn.Module):
     """
 
     def __init__(self, config: Mamba3Config, iters: int = 2,
+                 e_lr: float = 0.02, error_optim: str = 'newton',
                  damping: float = 1.0):
         super().__init__()
         self.config = config
         self.iters = iters
+        self.e_lr = e_lr
+        self.error_optim_mode = error_optim
         self.damping = damping
         self._iters_used = 0
         self._weight_phase_prediction = None
         self.profiling = False
         self._profile = {}
+
+        # Scale factor to compensate for small errors from limited SGD/Adam
+        # iterations. Newton converges better so errors are larger.
+        if error_optim == 'newton':
+            self.energy_scale = 1.0
+        else:
+            self.energy_scale = min(1.0, e_lr * iters)
 
         # Layers: Mamba3Layers WITHOUT block-level residuals
         # (ePC errors serve the residual role)
@@ -266,11 +276,22 @@ class PCEMamba3(nn.Module):
             prof_bwd = 0.0
             prof_step = 0.0
 
+        # Create first-order optimizer if needed
+        if self.error_optim_mode == 'sgd':
+            optim = torch.optim.SGD(self.errors, lr=self.e_lr)
+        elif self.error_optim_mode == 'adam':
+            optim = torch.optim.Adam(self.errors, lr=self.e_lr)
+        else:
+            optim = None  # Newton mode
+
         E_val = 0.0
         for t in range(self.iters):
-            for e in self.errors:
-                if e.grad is not None:
-                    e.grad.zero_()
+            if optim is not None:
+                optim.zero_grad()
+            else:
+                for e in self.errors:
+                    if e.grad is not None:
+                        e.grad.zero_()
 
             if prof:
                 _t = _sync_time()
@@ -295,7 +316,10 @@ class PCEMamba3(nn.Module):
                 prof_bwd += (_t2 - _t) * 1000
                 _t = _t2
 
-            self._newton_step()
+            if optim is not None:
+                optim.step()
+            else:
+                self._newton_step()
 
             if prof:
                 prof_step += (_sync_time() - _t) * 1000
@@ -357,13 +381,15 @@ class ePCMamba3LM(nn.Module):
     """
 
     def __init__(self, config: Mamba3Config, vocab_size: int,
-                 iters: int = 2, damping: float = 1.0):
+                 iters: int = 2, e_lr: float = 0.02,
+                 error_optim: str = 'newton', damping: float = 1.0):
         super().__init__()
         self.config = config
         self.vocab_size = vocab_size
 
         self.embedding = nn.Embedding(vocab_size, config.d_model)
-        self.pce = PCEMamba3(config, iters=iters, damping=damping)
+        self.pce = PCEMamba3(config, iters=iters, e_lr=e_lr,
+                             error_optim=error_optim, damping=damping)
         self.out_proj = nn.Linear(config.d_model, vocab_size, bias=False)
 
         # Weight tying
@@ -394,7 +420,7 @@ class ePCMamba3LM(nn.Module):
                             batch_size: int) -> Tensor:
         """Compute E_local for weight optimizer (call after forward with targets)."""
         x = self.embedding(input_ids)
-        return self.pce.E_local(x, targets, self.out_proj) / batch_size
+        return self.pce.E_local(x, targets, self.out_proj) / (batch_size * self.pce.energy_scale)
 
     def get_diagnostics(self) -> dict:
         return self.pce.get_diagnostics()

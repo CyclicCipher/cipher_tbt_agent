@@ -330,6 +330,11 @@ def main():
     parser.add_argument('--n_layer', type=int, default=4)
     parser.add_argument('--iters', type=int, default=2,
                         help='Error optimization iterations (T)')
+    parser.add_argument('--error_optim', type=str, default='newton',
+                        choices=['sgd', 'adam', 'newton'],
+                        help='Error optimizer: sgd, adam, or newton')
+    parser.add_argument('--e_lr', type=float, default=0.02,
+                        help='Error learning rate (for sgd/adam)')
     parser.add_argument('--damping', type=float, default=1.0,
                         help='Newton damping factor')
     parser.add_argument('--w_clip', type=float, default=1.0,
@@ -388,9 +393,15 @@ def main():
     if use_epc:
         model = ePCMamba3LM(
             config, vocab_size=args.vocab_size,
-            iters=args.iters, damping=args.damping,
+            iters=args.iters, e_lr=args.e_lr,
+            error_optim=args.error_optim, damping=args.damping,
         ).to(device)
-        print(f"Model: ePC-Mamba3 (T={args.iters}, Newton, damping={args.damping})")
+        optim_str = args.error_optim.upper()
+        if args.error_optim == 'newton':
+            print(f"Model: ePC-Mamba3 (T={args.iters}, Newton, damping={args.damping})")
+        else:
+            print(f"Model: ePC-Mamba3 (T={args.iters}, {optim_str}, e_lr={args.e_lr}, "
+                  f"energy_scale={model.pce.energy_scale:.4f})")
     else:
         model = Mamba3LM(config, vocab_size=args.vocab_size).to(device)
         print("Model: Backprop Mamba3 (baseline)")
@@ -512,7 +523,13 @@ def main():
         # Save plot
         if epoch % args.plot_every == 0 or epoch == args.epochs:
             mode = 'epc' if use_epc else 'baseline'
-            config_str = f'(T={args.iters}, damp={args.damping})' if use_epc else ''
+            if use_epc:
+                if args.error_optim == 'newton':
+                    config_str = f'(T={args.iters}, Newton, damp={args.damping})'
+                else:
+                    config_str = f'(T={args.iters}, {args.error_optim.upper()}, e_lr={args.e_lr})'
+            else:
+                config_str = ''
             chart_path = os.path.join(
                 save_dir, f'mamba3_{mode}_epoch_{epoch:03d}.png')
             diagnostics.plot(chart_path, epoch, config_str)
