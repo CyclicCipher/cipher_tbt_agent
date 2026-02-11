@@ -205,18 +205,25 @@ class PCESequence(nn.Module):
         self._cached_error_shapes = [e.shape for e in self.errors]
 
     def _newton_step(self):
-        """Rank-1 LRPD Newton step for error optimization.
+        """Error optimization step.
 
-        H = I + J^T H_L J, g = e + J^T(dL/dy), u = g - e.
-        Rank-1: H ≈ (1+damping)I + u*u^T.
-        Woodbury: H^{-1}g = g/d - (u^T g)/(d^2 + d*||u||^2) * u
+        The Hessian is H = I + J^T H_L J. For high-dimensional errors
+        (dim >> rank(J^T H_L J)), most eigenvalues of H are ≈ 1. The
+        diagonal approximation H ≈ dI gives step size 1/d in every
+        direction, which is correct for the majority of directions.
 
-        Uses streaming per-layer dot products (no concatenation).
+        The rank-1 LRPD approximation (H ≈ dI + uu^T) concentrates all
+        curvature into ||u||^2, giving step size 1/(d + ||g||^2) ≈ 1/dim.
+        This is catastrophically conservative: 262,000x too small for our
+        error tensors. See diagnose_newton.py Test D for evidence.
+
+        We retain the rank-1 diagnostics for monitoring but use the
+        diagonal step for the actual update.
         """
         with torch.no_grad():
             d = 1.0 + self.damping
 
-            # Accumulate decomposed dot products per-layer
+            # Collect diagnostics (same dot products as before)
             gTg = 0.0
             gTe = 0.0
             eTe = 0.0
@@ -227,25 +234,19 @@ class PCESequence(nn.Module):
                 gTe += torch.dot(g_flat, e_flat).item()
                 eTe += torch.dot(e_flat, e_flat).item()
 
-            uTg = gTg - gTe
             uTu = gTg - 2.0 * gTe + eTe
 
-            # Woodbury coefficient
-            coeff = uTg / (d * d + d * uTu)
-
-            # In-place update: e_new = e*(1-coeff) + grad*(coeff - 1/d)
-            c1 = 1.0 - coeff
-            c2 = coeff - 1.0 / d
+            # Diagonal Hessian step: e_new = e - g/d
             for e in self.errors:
-                e.data.mul_(c1).add_(e.grad, alpha=c2)
+                e.data.sub_(e.grad, alpha=1.0 / d)
 
-            # Save Newton quality metrics for hypothesis testing
+            # Save diagnostics for hypothesis testing
             self._newton_diag = {
-                'gTg': gTg,           # ||gradient||^2
-                'uTu': uTu,           # ||output-driven component||^2
-                'eTe': eTe,           # ||current errors||^2
-                'coeff': coeff,        # Woodbury coefficient
-                'rank1_ratio': uTu / max(gTg, 1e-10),  # How much curvature rank-1 captures
+                'gTg': gTg,
+                'uTu': uTu,
+                'eTe': eTe,
+                'coeff': 1.0 / d,  # effective step size
+                'rank1_ratio': uTu / max(gTg, 1e-10),
             }
 
     def minimize_error_energy(self, x: Tensor, y: Tensor,

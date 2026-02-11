@@ -935,7 +935,6 @@ def main():
                     _tw = _t2
 
                 weight_loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
                 if prof:
                     _t2 = _sync_time()
@@ -1004,7 +1003,6 @@ def main():
                     loss = F.cross_entropy(
                         logits.reshape(b * l, v), targets.reshape(b * l))
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
 
                 loss_val = loss.item()
