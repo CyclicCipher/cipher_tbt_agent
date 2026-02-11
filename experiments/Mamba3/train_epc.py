@@ -452,24 +452,29 @@ def main():
             if use_epc:
                 t0 = time.perf_counter()
 
-                # Phase 1: Inference (optimize errors)
-                model(inputs, targets)
+                if args.ipc:
+                    # iPC: interleaved error + weight steps
+                    E_val = model.ipc_train_step(
+                        inputs, targets, optimizer, batch_size, args.w_clip)
+                    loss_val = E_val
+                else:
+                    # Standard ePC: Phase 1 inference, Phase 2 weight update
+                    model(inputs, targets)
+
+                    optimizer.zero_grad()
+                    weight_loss = model.compute_weight_loss(
+                        inputs, targets, batch_size)
+                    weight_loss.backward()
+
+                    if args.w_clip > 0:
+                        torch.nn.utils.clip_grad_norm_(
+                            model.parameters(), max_norm=args.w_clip)
+
+                    optimizer.step()
+                    loss_val = weight_loss.item()
 
                 # Collect diagnostics BEFORE accuracy eval (#23)
                 diag = model.get_diagnostics()
-
-                # Phase 2: Weight update via E_local
-                optimizer.zero_grad()
-                weight_loss = model.compute_weight_loss(inputs, targets, batch_size)
-                weight_loss.backward()
-
-                if args.w_clip > 0:
-                    torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), max_norm=args.w_clip)
-
-                optimizer.step()
-
-                loss_val = weight_loss.item()
 
                 # Get accuracy (feedforward — resets errors)
                 with torch.no_grad():
