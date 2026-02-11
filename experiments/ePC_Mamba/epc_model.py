@@ -67,17 +67,22 @@ class PCESequence(nn.Module):
     Args:
         config: Mamba2Config defining the block architecture.
         iters: Number of error optimization steps per batch (T).
+        e_lr: Learning rate for error optimization (SGD/Adam).
+        error_optim: 'sgd', 'adam', or 'newton'.
         damping: Damping factor for Newton mode (higher = more conservative).
         early_stop_threshold: Stop when relative energy improvement < this.
         output_loss: 'ce' for cross-entropy, 'mse' for mean squared error.
     """
 
     def __init__(self, config: Mamba2Config, iters: int = 2,
+                 e_lr: float = 0.01, error_optim: str = 'newton',
                  damping: float = 1.0, early_stop_threshold: float = 0.0,
                  output_loss: str = 'ce'):
         super().__init__()
         self.config = config
         self.iters = iters
+        self.e_lr = e_lr
+        self.error_optim_mode = error_optim
         self.damping = damping
         self.early_stop_threshold = early_stop_threshold
         self._iters_used = 0
@@ -205,60 +210,49 @@ class PCESequence(nn.Module):
         self._cached_error_shapes = [e.shape for e in self.errors]
 
     def _newton_step(self):
-        """Error optimization step with dimension-normalized step size.
+        """Rank-1 LRPD Newton step for error optimization.
 
-        The key insight: the Hessian is H = I + J^T H_L J. For the rank-1
-        LRPD approximation, the step size becomes 1/(d + ||g||^2) ≈ 1/dim(e),
-        which is catastrophically conservative for high-dimensional errors.
-        The pure diagonal H≈dI gives step 1/d ≈ 0.91, which overshoots.
+        The error Hessian is H = I + J^T H_L J where J = dy/de.
+        The gradient decomposes as g = e + J^T(dL/dy), so
+        u = g - e = J^T(dL/dy) is the output-driven component.
 
-        The fix: normalize ||g||^2 by the number of error elements to get
-        mean squared gradient. This gives:
+        Rank-1 approximation: H ≈ (1+damping)I + u*u^T
+        Woodbury inverse: H^{-1}g = g/d - (u^T g)/(d^2 + d*||u||^2) * u
+        where d = 1 + damping.
 
-            α = 1 / (d + ||g||^2 / n)
-
-        where n = total number of error elements. This is:
-        - At random init (each g_i ≈ 1): α ≈ 1/(d + 1) ≈ 0.48
-        - With large gradients (each g_i ≈ 10): α ≈ 1/(d + 100) ≈ 0.01
-        - Naturally adaptive and dimension-independent
-        - Equivalent to rank-1 with per-element (not total) curvature
-
-        See diagnose_newton.py Test D for evidence that the old rank-1
-        step was 80-150x too conservative.
+        Cost: zero extra backward passes (reuses the gradient).
         """
         with torch.no_grad():
             d = 1.0 + self.damping
 
-            # Collect diagnostics
             gTg = 0.0
             gTe = 0.0
             eTe = 0.0
-            n = 0  # total number of error elements
             for e in self.errors:
                 g_flat = e.grad.reshape(-1)
                 e_flat = e.data.reshape(-1)
                 gTg += torch.dot(g_flat, g_flat).item()
                 gTe += torch.dot(g_flat, e_flat).item()
                 eTe += torch.dot(e_flat, e_flat).item()
-                n += e.numel()
 
+            uTg = gTg - gTe
             uTu = gTg - 2.0 * gTe + eTe
 
-            # Dimension-normalized step: α = 1/(d + mean_sq_grad)
-            mean_sq_grad = gTg / max(n, 1)
-            alpha = 1.0 / (d + mean_sq_grad)
+            # Woodbury coefficient
+            coeff = uTg / (d * d + d * uTu)
 
+            # Apply step in-place: e_new = e*(1-coeff) + g*(coeff - 1/d)
+            c1 = 1.0 - coeff
+            c2 = coeff - 1.0 / d
             for e in self.errors:
-                e.data.sub_(e.grad, alpha=alpha)
+                e.data.mul_(c1).add_(e.grad, alpha=c2)
 
-            # Save diagnostics for hypothesis testing
+            # Save diagnostics
             self._newton_diag = {
                 'gTg': gTg,
                 'uTu': uTu,
                 'eTe': eTe,
-                'n_elements': n,
-                'mean_sq_grad': mean_sq_grad,
-                'coeff': alpha,  # effective step size
+                'coeff': coeff,
                 'rank1_ratio': uTu / max(gTg, 1e-10),
             }
 
@@ -302,13 +296,24 @@ class PCESequence(nn.Module):
             prof_bwd = 0.0
             prof_step = 0.0
 
+        # Create first-order optimizer if needed
+        if self.error_optim_mode == 'sgd':
+            optim = torch.optim.SGD(self.errors, lr=self.e_lr)
+        elif self.error_optim_mode == 'adam':
+            optim = torch.optim.Adam(self.errors, lr=self.e_lr)
+        else:
+            optim = None  # Newton mode
+
         E_prev = None
         E_val = 0.0
         for t in range(self.iters):
             # Zero error gradients
-            for e in self.errors:
-                if e.grad is not None:
-                    e.grad.zero_()
+            if optim is not None:
+                optim.zero_grad()
+            else:
+                for e in self.errors:
+                    if e.grad is not None:
+                        e.grad.zero_()
 
             if prof:
                 _t = _sync_time()
@@ -343,7 +348,11 @@ class PCESequence(nn.Module):
                 prof_bwd += (_t2 - _t) * 1000
                 _t = _t2
 
-            self._newton_step()
+            # Take optimization step
+            if optim is not None:
+                optim.step()
+            else:
+                self._newton_step()
 
             if prof:
                 prof_step += (_sync_time() - _t) * 1000
@@ -482,13 +491,16 @@ class ePCMambaLM(nn.Module):
     Args:
         config: Mamba2Config.
         vocab_size: Number of tokens.
-        iters: Newton iterations for error optimization.
+        iters: Error optimization steps per batch.
+        e_lr: Learning rate for error optimization (SGD/Adam).
+        error_optim: 'sgd', 'adam', or 'newton'.
         damping: Newton damping factor.
         early_stop_threshold: Early stopping for inference.
     """
 
     def __init__(self, config: Mamba2Config, vocab_size: int,
-                 iters: int = 2, damping: float = 1.0,
+                 iters: int = 2, e_lr: float = 0.01,
+                 error_optim: str = 'newton', damping: float = 1.0,
                  early_stop_threshold: float = 0.0):
         super().__init__()
         self.config = config
@@ -496,8 +508,8 @@ class ePCMambaLM(nn.Module):
 
         self.embedding = nn.Embedding(vocab_size, config.d_model)
         self.pce = PCESequence(
-            config, iters=iters, damping=damping,
-            early_stop_threshold=early_stop_threshold,
+            config, iters=iters, e_lr=e_lr, error_optim=error_optim,
+            damping=damping, early_stop_threshold=early_stop_threshold,
             output_loss='ce',
         )
         self.out_proj = nn.Linear(config.d_model, vocab_size, bias=False)

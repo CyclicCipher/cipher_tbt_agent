@@ -102,7 +102,8 @@ class ePCMambaSynthetic(nn.Module):
 
     def __init__(self, config: Mamba2Config, vocab_size: int,
                  task: str = 'copy', n_classes: int = 4,
-                 iters: int = 2, damping: float = 1.0):
+                 iters: int = 2, e_lr: float = 0.01,
+                 error_optim: str = 'newton', damping: float = 1.0):
         super().__init__()
         self.config = config
         self.task = task
@@ -111,12 +112,14 @@ class ePCMambaSynthetic(nn.Module):
 
         if task in ('copy', 'selective'):
             self.pce = PCESequence(
-                config, iters=iters, damping=damping, output_loss='ce',
+                config, iters=iters, e_lr=e_lr, error_optim=error_optim,
+                damping=damping, output_loss='ce',
             )
             self.out_proj = nn.Linear(config.d_model, vocab_size, bias=False)
         elif task == 'classify':
             self.pce = PCESequence(
-                config, iters=iters, damping=damping, output_loss='ce',
+                config, iters=iters, e_lr=e_lr, error_optim=error_optim,
+                damping=damping, output_loss='ce',
             )
             self.out_proj = nn.Linear(config.d_model, n_classes)
         else:
@@ -388,7 +391,8 @@ class Diagnostics:
         print("=" * 66)
 
     def plot(self, save_path, epoch=None, num_epochs=None, use_epc=True,
-             batch_size=32, task='copy', iters=2, damping=1.0):
+             batch_size=32, task='copy', iters=2, error_optim='newton',
+             e_lr=0.01, damping=1.0):
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
@@ -526,7 +530,13 @@ class Diagnostics:
         if epoch is not None and num_epochs is not None:
             lines.append(f"\nEpoch: {epoch}/{num_epochs}")
         lines.append(f"Task: {task}")
-        lines.append(f"Mode: ePC (T={iters}, damp={damping})" if use_epc else "Mode: Backprop")
+        if use_epc:
+            if error_optim == 'newton':
+                lines.append(f"Mode: ePC (T={iters}, {error_optim}, damp={damping})")
+            else:
+                lines.append(f"Mode: ePC (T={iters}, {error_optim}, e_lr={e_lr})")
+        else:
+            lines.append("Mode: Backprop")
         if use_epc and self.inference_convergence:
             avg_conv = np.mean(self.inference_convergence[-100:])
             lines.append(f"Avg Convergence (last 100): {avg_conv:.2f}")
@@ -797,7 +807,11 @@ def main():
     parser.add_argument('--vocab_size', type=int, default=16)
     parser.add_argument('--d_model', type=int, default=128)
     parser.add_argument('--n_layer', type=int, default=2)
-    parser.add_argument('--iters', type=int, default=2, help='Newton iterations (T)')
+    parser.add_argument('--iters', type=int, default=2, help='Error optimization iterations (T)')
+    parser.add_argument('--e_lr', type=float, default=0.01,
+                        help='Error optimization learning rate (SGD/Adam)')
+    parser.add_argument('--error_optim', choices=['newton', 'adam', 'sgd'],
+                        default='newton', help='Error optimization method')
     parser.add_argument('--damping', type=float, default=0.1,
                         help='Newton damping (0.1 matches ePC-ResNet)')
     parser.add_argument('--n_train', type=int, default=5000)
@@ -862,10 +876,15 @@ def main():
     if use_epc:
         model = ePCMambaSynthetic(
             config, vocab_size=args.vocab_size, task=args.task,
-            iters=args.iters, damping=args.damping,
+            iters=args.iters, e_lr=args.e_lr,
+            error_optim=args.error_optim, damping=args.damping,
         ).to(device)
         model.pce.profiling = args.profile
-        print(f"Model: ePC-Mamba (T={args.iters}, damping={args.damping})")
+        eopt = args.error_optim
+        if eopt == 'newton':
+            print(f"Model: ePC-Mamba (T={args.iters}, {eopt}, damping={args.damping})")
+        else:
+            print(f"Model: ePC-Mamba (T={args.iters}, {eopt}, e_lr={args.e_lr})")
     else:
         model = BackpropMambaBaseline(
             config, vocab_size=args.vocab_size, task=args.task,
@@ -1058,7 +1077,8 @@ def main():
             diagnostics.plot(
                 chart_path, epoch=epoch, num_epochs=args.epochs,
                 use_epc=use_epc, batch_size=args.batch_size,
-                task=args.task, iters=args.iters, damping=args.damping,
+                task=args.task, iters=args.iters, error_optim=args.error_optim,
+                e_lr=args.e_lr, damping=args.damping,
             )
 
         # Early success
@@ -1080,7 +1100,8 @@ def main():
     diagnostics.plot(
         chart_path, epoch=args.epochs, num_epochs=args.epochs,
         use_epc=use_epc, batch_size=args.batch_size,
-        task=args.task, iters=args.iters, damping=args.damping,
+        task=args.task, iters=args.iters, error_optim=args.error_optim,
+        e_lr=args.e_lr, damping=args.damping,
     )
 
 
