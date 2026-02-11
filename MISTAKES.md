@@ -1015,4 +1015,18 @@ Layer 1 received 490x less gradient than Layer 2 (from E_local's detach). ||e|| 
 
 **Status:** ABANDONED (2026-02-11) — mHC overhead and instability outweigh benefits
 
-**Status:** DOCUMENTED (2026-02-11) — moving to backprop for shallow Mamba networks
+**Status:** DOCUMENTED (2026-02-11)
+
+---
+
+### 29. muPC (Depth-muP) Crushes the Jacobian — Opposite of Init Scale
+
+**What we tried:** Applied Depth-muP scaling (Innocenti et al. 2025, arXiv:2505.13124) to each Mamba3Block's non-residual contributions. Each mixer and MLP output was scaled by alpha = 1/sqrt(d_model * 2*n_layer) ≈ 0.031 for our 4-layer d=128 model.
+
+**Results:** Stuck at 7-8% accuracy (random chance) for 14+ epochs. Loss plateaued at ~2780 (same as init_scale failure). Initial loss 175565 (catastrophically high). Newton convergence only 1.29 (vs ~2700 normally). Error norms were tiny (Layer 1: 0.004, Layer 4: 0.12).
+
+**Why it failed:** Alpha = 0.031 means each sub-layer contributes only ~3% to the residual stream. This crushed the Jacobian dy/de to near-zero, making Newton corrections negligible. The muPC paper explicitly admits it doesn't fix PC inference landscape conditioning — it only stabilizes the forward pass, which doesn't help when the bottleneck is the Jacobian being too small for Newton to work.
+
+**Root principle:** Init_scale (#27) and muPC (#29) are two sides of the same coin. Init_scale made the Jacobian too large (blew up activations). muPC made it too small (crushed non-residual contributions). Both break Newton. The Jacobian needs to be in a specific range for Newton's rank-1 approximation to cross the critical threshold that triggers the phase transition.
+
+**Status:** ABANDONED (2026-02-11) — muPC designed for SGD/Adam error optimization, not Newton
