@@ -62,7 +62,8 @@ class PCEMamba3(nn.Module):
 
     def __init__(self, config: Mamba3Config, iters: int = 2,
                  e_lr: float = 0.02, error_optim: str = 'newton',
-                 damping: float = 1.0):
+                 damping: float = 1.0, precision_mode: str = 'none',
+                 precision_base: float = 3.0):
         super().__init__()
         self.config = config
         self.iters = iters
@@ -80,6 +81,28 @@ class PCEMamba3(nn.Module):
             self.energy_scale = 1.0
         else:
             self.energy_scale = min(1.0, e_lr * iters)
+
+        # Per-layer precision weighting (Salvatori et al. 2025).
+        # Amplifies early-layer error contributions to counteract the
+        # natural error decay (Layer 1 >> Layer N in error magnitude,
+        # but E_local terms are ||e||^2 so early layers are starved).
+        # Precisions are normalized to mean=1 to preserve the error-vs-output
+        # loss balance.
+        n_errors = config.n_layer - 1
+        if precision_mode == 'none':
+            self.precisions = [1.0] * n_errors
+        elif precision_mode == 'linear':
+            # Layer 0 (earliest) gets highest precision
+            raw = [float(n_errors - i) for i in range(n_errors)]
+            mean_p = sum(raw) / len(raw)
+            self.precisions = [p / mean_p for p in raw]
+        elif precision_mode == 'geometric':
+            # Exponential scaling: base^(N-1-i) for layer i
+            raw = [precision_base ** (n_errors - 1 - i) for i in range(n_errors)]
+            mean_p = sum(raw) / len(raw)
+            self.precisions = [p / mean_p for p in raw]
+        else:
+            raise ValueError(f"Unknown precision_mode: {precision_mode}")
 
         # Layers: Mamba3Blocks WITH block-level residuals
         self.layers = nn.ModuleList([
@@ -118,11 +141,15 @@ class PCEMamba3(nn.Module):
     def E(self, x: Tensor, y: Tensor, output_proj: nn.Module) -> Tensor:
         """Energy using errors (global graph — for error optimization).
 
+        Precision-weighted: E = sum(pi_l * 0.5 * ||e_l||^2) + output_loss.
+        Higher precision on early layers amplifies their contribution,
+        encouraging Newton/SGD to find larger errors where they matter most.
+
         DO NOT use for weight optimization (would be standard backprop).
         """
         E_errors = 0.5 * sum(
-            torch.linalg.vector_norm(e, ord=2, dim=None) ** 2
-            for e in self.errors
+            pi * torch.linalg.vector_norm(e, ord=2, dim=None) ** 2
+            for pi, e in zip(self.precisions, self.errors)
         )
         logits = output_proj(self.y_pred(x))
         return E_errors + self._output_loss(logits, y)
@@ -130,15 +157,16 @@ class PCEMamba3(nn.Module):
     def E_local(self, x: Tensor, y: Tensor, output_proj: nn.Module) -> Tensor:
         """Energy using local interactions (detached — for weight optimization).
 
+        Precision-weighted: early layers get amplified E_local gradients.
         Same value as E, but the computational graph enforces local weight
         updates by detaching states between layers.
         """
         E = 0.0
         s_i = x
-        for e_i, layer_i in zip(self.errors, self.layers[:-1]):
+        for pi, e_i, layer_i in zip(self.precisions, self.errors, self.layers[:-1]):
             s_i_pred = layer_i(s_i)
             s_i = (e_i + s_i_pred).detach()
-            E += 0.5 * F.mse_loss(s_i_pred, s_i, reduction='sum')
+            E += pi * 0.5 * F.mse_loss(s_i_pred, s_i, reduction='sum')
         # Last layer + output
         s_last_pred = self.layers[-1](s_i)
         s_last = self.out_norm(s_last_pred)
@@ -178,44 +206,64 @@ class PCEMamba3(nn.Module):
         self._cached_error_shapes = [e.shape for e in self.errors]
 
     def _newton_step(self):
-        """Rank-1 LRPD Newton step for error optimization.
+        """Precision-aware rank-1 LRPD Newton step for error optimization.
 
-        The error Hessian is H = I + J^T H_L J where J = dy/de.
-        Rank-1 approximation: H ≈ (1+damping)I + u*u^T
-        where u = g - e = J^T(dL/dy).
+        With per-layer precisions pi_l, the energy is:
+          E = sum(pi_l * 0.5 * ||e_l||^2) + L(y_pred, y)
 
-        Woodbury inverse: H^{-1}g = g/d - (u^T g)/(d^2 + d*||u||^2) * u
-        Cost: zero extra backward passes (reuses the gradient).
+        Gradient: g_l = pi_l * e_l + J_l^T(dL/dy)
+        Output component: u_l = g_l - pi_l * e_l = J_l^T(dL/dy)
+        Hessian: H = D + u*u^T where D = diag(pi_l * (1+damping) * I)
+
+        Woodbury: (D + u*u^T)^{-1} g = D^{-1}g - D^{-1}u (u^T D^{-1} g)/(1 + u^T D^{-1} u)
+
+        Per-layer update:
+          e_l_new = e_l * c1 + g_l * c2_l
+        where c1 = 1 - c/(1+damp) is global,
+              c2_l = -(1-c)/(pi_l*(1+damp)) varies by layer.
+
+        When all precisions = 1, reduces to the original Newton step.
         """
         with torch.no_grad():
-            d = 1.0 + self.damping
+            damp = self.damping
 
-            gTg = 0.0
-            gTe = 0.0
-            eTe = 0.0
-            for e in self.errors:
+            # Per-layer dot products
+            uTDinv_g = 0.0  # u^T D^{-1} g
+            uTDinv_u = 0.0  # u^T D^{-1} u
+            gTg_total = 0.0
+
+            for pi, e in zip(self.precisions, self.errors):
                 g_flat = e.grad.reshape(-1)
                 e_flat = e.data.reshape(-1)
-                gTg += torch.dot(g_flat, g_flat).item()
-                gTe += torch.dot(g_flat, e_flat).item()
-                eTe += torch.dot(e_flat, e_flat).item()
+                d_l = pi * (1.0 + damp)
 
-            uTg = gTg - gTe
-            uTu = gTg - 2.0 * gTe + eTe
+                gTg_l = torch.dot(g_flat, g_flat).item()
+                gTe_l = torch.dot(g_flat, e_flat).item()
+                eTe_l = torch.dot(e_flat, e_flat).item()
 
-            coeff = uTg / (d * d + d * uTu)
+                # u_l = g_l - pi*e_l
+                # u_l^T g_l = gTg_l - pi*gTe_l
+                # ||u_l||^2 = gTg_l - 2*pi*gTe_l + pi^2*eTe_l
+                uTDinv_g += (gTg_l - pi * gTe_l) / d_l
+                uTDinv_u += (gTg_l - 2.0 * pi * gTe_l + pi * pi * eTe_l) / d_l
+                gTg_total += gTg_l
 
-            c1 = 1.0 - coeff
-            c2 = coeff - 1.0 / d
-            for e in self.errors:
-                e.data.mul_(c1).add_(e.grad, alpha=c2)
+            # Woodbury coefficient
+            c = uTDinv_g / (1.0 + uTDinv_u) if (1.0 + uTDinv_u) != 0 else 0.0
+
+            # Global and per-layer update coefficients
+            c1 = 1.0 - c / (1.0 + damp)
+
+            for pi, e in zip(self.precisions, self.errors):
+                c2_l = -(1.0 - c) / (pi * (1.0 + damp))
+                e.data.mul_(c1).add_(e.grad, alpha=c2_l)
 
             self._newton_diag = {
-                'gTg': gTg,
-                'uTu': uTu,
-                'eTe': eTe,
-                'coeff': coeff,
-                'rank1_ratio': uTu / max(gTg, 1e-10),
+                'gTg': gTg_total,
+                'uTDinv_u': uTDinv_u,
+                'uTDinv_g': uTDinv_g,
+                'coeff': c,
+                'rank1_ratio': uTDinv_u / max(uTDinv_g, 1e-10),
             }
 
     def minimize_error_energy(self, x: Tensor, y: Tensor,
@@ -336,6 +384,7 @@ class PCEMamba3(nn.Module):
         newton = getattr(self, '_newton_diag', {})
         diag['newton_rank1_ratio'] = newton.get('rank1_ratio', 0.0)
         diag['newton_coeff'] = newton.get('coeff', 0.0)
+        diag['precisions'] = self.precisions
 
         return diag
 
@@ -354,14 +403,17 @@ class ePCMamba3LM(nn.Module):
 
     def __init__(self, config: Mamba3Config, vocab_size: int,
                  iters: int = 2, e_lr: float = 0.02,
-                 error_optim: str = 'newton', damping: float = 1.0):
+                 error_optim: str = 'newton', damping: float = 1.0,
+                 precision_mode: str = 'none', precision_base: float = 3.0):
         super().__init__()
         self.config = config
         self.vocab_size = vocab_size
 
         self.embedding = nn.Embedding(vocab_size, config.d_model)
         self.pce = PCEMamba3(config, iters=iters, e_lr=e_lr,
-                             error_optim=error_optim, damping=damping)
+                             error_optim=error_optim, damping=damping,
+                             precision_mode=precision_mode,
+                             precision_base=precision_base)
         self.out_proj = nn.Linear(config.d_model, vocab_size, bias=False)
 
         # Weight tying

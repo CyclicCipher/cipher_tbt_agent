@@ -337,6 +337,11 @@ def main():
                         help='Error learning rate (for sgd/adam)')
     parser.add_argument('--damping', type=float, default=1.0,
                         help='Newton damping factor')
+    parser.add_argument('--precision_mode', type=str, default='none',
+                        choices=['none', 'linear', 'geometric'],
+                        help='Per-layer precision weighting mode')
+    parser.add_argument('--precision_base', type=float, default=3.0,
+                        help='Base for geometric precision (ignored if not geometric)')
     parser.add_argument('--w_clip', type=float, default=1.0,
                         help='Weight gradient clipping max norm (0 to disable)')
     parser.add_argument('--n_train', type=int, default=5000)
@@ -395,6 +400,8 @@ def main():
             config, vocab_size=args.vocab_size,
             iters=args.iters, e_lr=args.e_lr,
             error_optim=args.error_optim, damping=args.damping,
+            precision_mode=args.precision_mode,
+            precision_base=args.precision_base,
         ).to(device)
         optim_str = args.error_optim.upper()
         if args.error_optim == 'newton':
@@ -402,6 +409,9 @@ def main():
         else:
             print(f"Model: ePC-Mamba3 (T={args.iters}, {optim_str}, e_lr={args.e_lr}, "
                   f"energy_scale={model.pce.energy_scale:.4f})")
+        if args.precision_mode != 'none':
+            pi_str = ', '.join(f'{p:.2f}' for p in model.pce.precisions)
+            print(f"Precisions ({args.precision_mode}): [{pi_str}]")
     else:
         model = Mamba3LM(config, vocab_size=args.vocab_size).to(device)
         print("Model: Backprop Mamba3 (baseline)")
@@ -528,6 +538,8 @@ def main():
                     config_str = f'(T={args.iters}, Newton, damp={args.damping})'
                 else:
                     config_str = f'(T={args.iters}, {args.error_optim.upper()}, e_lr={args.e_lr})'
+                if args.precision_mode != 'none':
+                    config_str += f', prec={args.precision_mode}'
             else:
                 config_str = ''
             chart_path = os.path.join(
