@@ -35,6 +35,7 @@ Empirical findings:
 Reference: Goemaere et al. 2025, arXiv:2505.20137
 Precision weighting: Salvatori et al. 2025, arXiv:2506.23800
 Hyperconnections: DeepSeek arXiv:2512.24880
+muPC (Depth-muP for PC): Innocenti et al. 2025, arXiv:2505.13124
 """
 
 import math
@@ -197,6 +198,36 @@ class mHCMamba3Block(nn.Module):
         return streams
 
 
+# ---------------------------------------------------------------------------
+# muPC: Depth-muP for Predictive Coding (Innocenti et al. 2025)
+# Based on arXiv:2505.13124, adapting Bordelon et al. 2023 (arXiv:2309.16620)
+# ---------------------------------------------------------------------------
+
+class muPCMamba3Block(nn.Module):
+    """Mamba3Block with Depth-muP scaling on non-residual contributions.
+
+    Scales mixer and MLP outputs by alpha = 1/sqrt(d_model * L) where L
+    is the total number of residual sub-layers across the network (2 per
+    block: mixer + MLP). This prevents signal variance from growing with
+    depth by shrinking each residual branch contribution.
+
+    At alpha=1.0, equivalent to standard Mamba3Block.
+    """
+
+    def __init__(self, config: Mamba3Config, alpha: float = 1.0):
+        super().__init__()
+        self.mixer_norm = RMSNorm(config.d_model)
+        self.mixer = Mamba3Mixer(config)
+        self.mlp_norm = RMSNorm(config.d_model)
+        self.mlp = SwiGLUMLP(config.d_model, config.d_model * config.mlp_expand)
+        self.alpha = alpha
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = x + self.alpha * self.mixer(self.mixer_norm(x))
+        x = x + self.alpha * self.mlp(self.mlp_norm(x))
+        return x
+
+
 def _sync_time():
     """Synchronize CUDA and return wall-clock time for profiling."""
     if torch.cuda.is_available():
@@ -223,7 +254,8 @@ class PCEMamba3(nn.Module):
                  e_lr: float = 0.02, error_optim: str = 'newton',
                  damping: float = 0.1, precision_mode: str = 'none',
                  precision_base: float = 3.0,
-                 use_mhc: bool = False, n_streams: int = 2):
+                 use_mhc: bool = False, n_streams: int = 2,
+                 use_mupc: bool = False):
         super().__init__()
         self.config = config
         self.iters = iters
@@ -231,6 +263,7 @@ class PCEMamba3(nn.Module):
         self.error_optim_mode = error_optim
         self.damping = damping
         self.use_mhc = use_mhc
+        self.use_mupc = use_mupc
         self.n_streams = n_streams if use_mhc else 1
         self._iters_used = 0
         self._weight_phase_prediction = None
@@ -263,11 +296,19 @@ class PCEMamba3(nn.Module):
         else:
             raise ValueError(f"Unknown precision_mode: {precision_mode}")
 
-        # Layers: standard Mamba3Blocks or mHC Mamba3Blocks
+        # Layers: standard, mHC, or muPC Mamba3Blocks
         if use_mhc:
             self.layers = nn.ModuleList([
                 mHCMamba3Block(config, n_streams=n_streams, layer_index=i)
                 for i in range(config.n_layer)
+            ])
+        elif use_mupc:
+            # Depth-muP: alpha = 1/sqrt(d_model * L), L = 2*n_layer sub-layers
+            n_sublayers = 2 * config.n_layer  # mixer + MLP per block
+            self.mupc_alpha = 1.0 / math.sqrt(config.d_model * n_sublayers)
+            self.layers = nn.ModuleList([
+                muPCMamba3Block(config, alpha=self.mupc_alpha)
+                for _ in range(config.n_layer)
             ])
         else:
             self.layers = nn.ModuleList([
@@ -596,7 +637,8 @@ class ePCMamba3LM(nn.Module):
                  iters: int = 2, e_lr: float = 0.02,
                  error_optim: str = 'newton', damping: float = 0.1,
                  precision_mode: str = 'none', precision_base: float = 3.0,
-                 use_mhc: bool = False, n_streams: int = 2):
+                 use_mhc: bool = False, n_streams: int = 2,
+                 use_mupc: bool = False):
         super().__init__()
         self.config = config
         self.vocab_size = vocab_size
@@ -606,7 +648,8 @@ class ePCMamba3LM(nn.Module):
                              error_optim=error_optim, damping=damping,
                              precision_mode=precision_mode,
                              precision_base=precision_base,
-                             use_mhc=use_mhc, n_streams=n_streams)
+                             use_mhc=use_mhc, n_streams=n_streams,
+                             use_mupc=use_mupc)
         self.out_proj = nn.Linear(config.d_model, vocab_size, bias=False)
 
         # Weight tying

@@ -354,6 +354,8 @@ def main():
                         help='Use manifold-constrained hyperconnections (mHC)')
     parser.add_argument('--n_streams', type=int, default=2,
                         help='Number of parallel residual streams for mHC')
+    parser.add_argument('--mupc', action='store_true',
+                        help='Use Depth-muP scaling (muPC, Innocenti 2025)')
     parser.add_argument('--n_train', type=int, default=5000)
     parser.add_argument('--n_test', type=int, default=1000)
     parser.add_argument('--baseline', action='store_true',
@@ -417,6 +419,7 @@ def main():
             precision_mode=args.precision_mode,
             precision_base=args.precision_base,
             use_mhc=args.mhc, n_streams=args.n_streams,
+            use_mupc=args.mupc,
         ).to(device)
         optim_str = args.error_optim.upper()
         if args.error_optim == 'newton':
@@ -428,6 +431,10 @@ def main():
             print(f"  Mode: iPC (weight update every Newton step, {args.iters}x faster)")
         if args.mhc:
             print(f"  mHC: {args.n_streams} streams, Sinkhorn-constrained mixing")
+        if args.mupc:
+            alpha = model.pce.mupc_alpha
+            print(f"  muPC: Depth-muP alpha={alpha:.4f} "
+                  f"(1/sqrt({args.d_model}*{2*args.n_layer}))")
         if args.init_scale != 1.0:
             with torch.no_grad():
                 for block in model.pce.layers:
