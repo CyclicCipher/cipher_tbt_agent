@@ -33,6 +33,7 @@ Reference: Goemaere et al. 2025, arXiv:2505.20137
 Precision weighting: Salvatori et al. 2025, arXiv:2506.23800
 """
 
+import math
 import time
 
 import torch
@@ -40,7 +41,53 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from .mamba3_block import Mamba3Config, Mamba3Block, RMSNorm
+from .mamba3_block import Mamba3Config, Mamba3Block, Mamba3Mixer, SwiGLUMLP, RMSNorm
+
+
+_SQRT2 = math.sqrt(2)
+
+
+class HyperMamba3Block(nn.Module):
+    """Mamba3Block with manifold-constrained hyperconnections.
+
+    Replaces the standard residual ``x + f(norm(x))`` with a learnable
+    constrained mixing:
+
+        x = alpha * x + beta * f(norm(x))
+
+    where alpha = sqrt(2)*cos(theta), beta = sqrt(2)*sin(theta).
+
+    The constraint alpha^2 + beta^2 = 2 is always satisfied, matching
+    the variance of a standard residual connection. This prevents the
+    activation blowup that naive output-projection scaling causes, while
+    still allowing the Jacobian to shift away from near-identity.
+
+    At theta = pi/4: alpha = beta = 1 (standard residual).
+    At theta > pi/4: beta > 1, alpha < 1 → larger Jacobian for ePC.
+
+    Inspired by DeepSeek's manifold-constrained hyperconnections.
+    """
+
+    def __init__(self, config: Mamba3Config, theta_init: float = math.pi / 4):
+        super().__init__()
+        self.mixer_norm = RMSNorm(config.d_model)
+        self.mixer = Mamba3Mixer(config)
+        self.mlp_norm = RMSNorm(config.d_model)
+        self.mlp = SwiGLUMLP(config.d_model, config.d_model * config.mlp_expand)
+
+        self.mixer_theta = nn.Parameter(torch.tensor(theta_init))
+        self.mlp_theta = nn.Parameter(torch.tensor(theta_init))
+
+    def forward(self, x: Tensor) -> Tensor:
+        m_a = _SQRT2 * torch.cos(self.mixer_theta)
+        m_b = _SQRT2 * torch.sin(self.mixer_theta)
+        x = m_a * x + m_b * self.mixer(self.mixer_norm(x))
+
+        p_a = _SQRT2 * torch.cos(self.mlp_theta)
+        p_b = _SQRT2 * torch.sin(self.mlp_theta)
+        x = p_a * x + p_b * self.mlp(self.mlp_norm(x))
+
+        return x
 
 
 def _sync_time():
@@ -68,7 +115,9 @@ class PCEMamba3(nn.Module):
     def __init__(self, config: Mamba3Config, iters: int = 2,
                  e_lr: float = 0.02, error_optim: str = 'newton',
                  damping: float = 0.1, precision_mode: str = 'none',
-                 precision_base: float = 3.0):
+                 precision_base: float = 3.0,
+                 use_hyperconnect: bool = False,
+                 hyper_theta: float = math.pi / 4):
         super().__init__()
         self.config = config
         self.iters = iters
@@ -106,10 +155,16 @@ class PCEMamba3(nn.Module):
         else:
             raise ValueError(f"Unknown precision_mode: {precision_mode}")
 
-        # Layers: Mamba3Blocks WITH block-level residuals
-        self.layers = nn.ModuleList([
-            Mamba3Block(config) for _ in range(config.n_layer)
-        ])
+        # Layers: standard Mamba3Blocks or HyperMamba3Blocks
+        if use_hyperconnect:
+            self.layers = nn.ModuleList([
+                HyperMamba3Block(config, theta_init=hyper_theta)
+                for _ in range(config.n_layer)
+            ])
+        else:
+            self.layers = nn.ModuleList([
+                Mamba3Block(config) for _ in range(config.n_layer)
+            ])
 
         # Output head: final norm
         self.out_norm = RMSNorm(config.d_model)
@@ -409,7 +464,9 @@ class ePCMamba3LM(nn.Module):
     def __init__(self, config: Mamba3Config, vocab_size: int,
                  iters: int = 2, e_lr: float = 0.02,
                  error_optim: str = 'newton', damping: float = 0.1,
-                 precision_mode: str = 'none', precision_base: float = 3.0):
+                 precision_mode: str = 'none', precision_base: float = 3.0,
+                 use_hyperconnect: bool = False,
+                 hyper_theta: float = math.pi / 4):
         super().__init__()
         self.config = config
         self.vocab_size = vocab_size
@@ -418,7 +475,9 @@ class ePCMamba3LM(nn.Module):
         self.pce = PCEMamba3(config, iters=iters, e_lr=e_lr,
                              error_optim=error_optim, damping=damping,
                              precision_mode=precision_mode,
-                             precision_base=precision_base)
+                             precision_base=precision_base,
+                             use_hyperconnect=use_hyperconnect,
+                             hyper_theta=hyper_theta)
         self.out_proj = nn.Linear(config.d_model, vocab_size, bias=False)
 
         # Weight tying
