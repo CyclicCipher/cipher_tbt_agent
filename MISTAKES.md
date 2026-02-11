@@ -987,4 +987,32 @@ Layer 1 received 490x less gradient than Layer 2 (from E_local's detach). ||e|| 
 
 **Root principle:** ePC's biologically-plausible local learning comes at a cost: gradient flows only through local error terms. With few layers, this creates severe imbalance. The architecture must have enough layers for E_local to provide useful gradients to all layers.
 
+---
+
+### 27. Init Scale: Naive Output Projection Scaling Destroys Training
+
+**What we tried:** Scaling `mixer.out_proj.weight` and `mlp.down_proj.weight` by 2x at initialization (`--init_scale 2.0`) to increase the Jacobian dy/de from epoch 1, hoping to bypass the 28-epoch deadlock phase.
+
+**Why it failed:** The 2x scaling blew up activations (initial loss 4846 vs 290 for standard), and Newton went catastrophically unstable (convergence went to -60000). The model got stuck at 7% for 30 epochs — worse than standard ePC. Scaling output projections couples Jacobian magnitude with activation magnitude. You can't increase one without the other.
+
+**Root principle:** Forward dynamics and Jacobian magnitude are coupled through the weights. Scaling weights to get larger Jacobians also scales activations, putting the model in a high-loss region where E_local gradients are unhelpful and Newton's rank-1 approximation breaks down.
+
+**Status:** ABANDONED (2026-02-11) — init_scale doesn't work for ePC
+
+---
+
+### 28. mHC (Manifold-Constrained Hyperconnections) Too Slow and Unstable
+
+**What we tried:** Proper implementation of DeepSeek's mHC (arXiv:2512.24880) with 2 parallel residual streams, Sinkhorn-Knopp doubly stochastic mixing (H_res), softmax aggregation (H_pre), and softmax distribution (H_post). The manifold constraint prevents signal blowup while giving Newton 2x more error degrees of freedom.
+
+**Results:** ~3x slower (267 ms/batch vs 98 ms), reached 98.2% best accuracy but wildly unstable — test accuracy swung between 94% and 9% across epochs, final test acc was 32%. Convergence went negative (-32 mean). Newton's rank-1 Hessian approximation couldn't handle the richer stream-space landscape.
+
+**Why it partially worked:** No deadlock plateau (30% by epoch 13 vs 7% for standard ePC). The stream mixing gave errors more paths to influence the output.
+
+**Why it ultimately failed:** (1) Sinkhorn overhead: 80 calls per forward pass on tiny 2x2 matrices, but PyTorch dispatch adds up. (2) Stream summing at output dilutes each stream's error contribution. (3) Newton's rank-1 approximation breaks in the 2x larger error space.
+
+**Root principle:** More degrees of freedom for Newton is not better when the Hessian approximation is fixed at rank-1. The approximation quality degrades as the problem dimension grows.
+
+**Status:** ABANDONED (2026-02-11) — mHC overhead and instability outweigh benefits
+
 **Status:** DOCUMENTED (2026-02-11) — moving to backprop for shallow Mamba networks
