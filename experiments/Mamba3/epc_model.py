@@ -3,29 +3,33 @@ Error-based Predictive Coding wrapper for Mamba-3 (ePC-Mamba3).
 
 Adapts the ePC framework for a stack of Mamba3 blocks. Each block
 is a pre-norm Mixer + pre-norm MLP with block-level residual
-connections. Errors are fp32 tensors placed between blocks.
+connections. Errors are fp32 tensors placed after EVERY block,
+including the last one (N errors for N blocks).
 
 Architecture:
   Embedding → Mamba3Block 0 → + e_0 (fp32)
             → Mamba3Block 1 → + e_1 (fp32)
             → ...
-            → Mamba3Block N-1 → (no error)
+            → Mamba3Block N-1 → + e_{N-1} (fp32)
             → RMSNorm → Output projection
 
-Empirical findings on residuals:
-  - Mamba3Block (WITH residuals): 7% accuracy — errors too small
-  - Mamba3Layer (WITHOUT residuals): 4% accuracy — even worse
-  - SGD errors without residuals: loss explodes to 94M
-  - Residuals are NOT the problem. Using Mamba3Block.
+The final error e_{N-1} sits right before the output norm/projection,
+giving Newton a direct lever on the output loss. Without it, the last
+block's output had no error correction, and Newton had to influence
+the output indirectly through earlier errors — severely limiting
+inference quality (convergence=1.0 out of 2000+).
 
-Key lessons applied (from MISTAKES.md):
-  - Errors ALWAYS fp32 (fp16 rounds Newton corrections to zero)
-  - 4+ layers required (2-layer pathological — #26)
-  - Weight gradient clipping prevents catastrophic forgetting
-  - CE > MSE for sequence tasks
-  - Collect diagnostics BEFORE accuracy eval (#23)
+With N errors, E_local becomes fully local: every block's weights are
+updated only from its local MSE prediction error. The CE output loss
+updates only the output projection (weight-tied with embedding).
+
+Empirical findings:
+  - N-1 errors + no precision: 7% (random chance)
+  - N-1 errors + geometric precision: 38% (learning but slow)
+  - N errors + precision: TBD (should improve inference quality)
 
 Reference: Goemaere et al. 2025, arXiv:2505.20137
+Precision weighting: Salvatori et al. 2025, arXiv:2506.23800
 """
 
 import time
@@ -62,7 +66,7 @@ class PCEMamba3(nn.Module):
 
     def __init__(self, config: Mamba3Config, iters: int = 2,
                  e_lr: float = 0.02, error_optim: str = 'newton',
-                 damping: float = 1.0, precision_mode: str = 'none',
+                 damping: float = 0.1, precision_mode: str = 'none',
                  precision_base: float = 3.0):
         super().__init__()
         self.config = config
@@ -83,12 +87,9 @@ class PCEMamba3(nn.Module):
             self.energy_scale = min(1.0, e_lr * iters)
 
         # Per-layer precision weighting (Salvatori et al. 2025).
-        # Amplifies early-layer error contributions to counteract the
-        # natural error decay (Layer 1 >> Layer N in error magnitude,
-        # but E_local terms are ||e||^2 so early layers are starved).
-        # Precisions are normalized to mean=1 to preserve the error-vs-output
-        # loss balance.
-        n_errors = config.n_layer - 1
+        # N errors for N layers (one after each block, including last).
+        # Precisions normalized to mean=1 to preserve error-vs-output balance.
+        n_errors = config.n_layer
         if precision_mode == 'none':
             self.precisions = [1.0] * n_errors
         elif precision_mode == 'linear':
@@ -127,6 +128,10 @@ class PCEMamba3(nn.Module):
     def y_pred(self, x: Tensor) -> Tensor:
         """Forward pass with current errors.
 
+        N errors for N layers: each error is added after its block's output.
+        The last error sits right before RMSNorm, giving it direct influence
+        on the output logits.
+
         Args:
             x: (batch, seqlen, d_model) input embeddings.
 
@@ -134,8 +139,8 @@ class PCEMamba3(nn.Module):
             (batch, seqlen, d_model) pre-projection output.
         """
         s_i = x
-        for e_i, layer_i in zip(self.errors + [0.0], self.layers):
-            s_i = e_i + layer_i(s_i)
+        for e_i, layer_i in zip(self.errors, self.layers):
+            s_i = layer_i(s_i) + e_i
         return self.out_norm(s_i)
 
     def E(self, x: Tensor, y: Tensor, output_proj: nn.Module) -> Tensor:
@@ -158,19 +163,18 @@ class PCEMamba3(nn.Module):
         """Energy using local interactions (detached — for weight optimization).
 
         Precision-weighted: early layers get amplified E_local gradients.
-        Same value as E, but the computational graph enforces local weight
-        updates by detaching states between layers.
+        With N errors for N layers, ALL blocks learn from local MSE terms.
+        The CE output loss updates only output_proj (weight-tied embedding).
         """
         E = 0.0
         s_i = x
-        for pi, e_i, layer_i in zip(self.precisions, self.errors, self.layers[:-1]):
+        for pi, e_i, layer_i in zip(self.precisions, self.errors, self.layers):
             s_i_pred = layer_i(s_i)
-            s_i = (e_i + s_i_pred).detach()
+            s_i = (s_i_pred + e_i).detach()
             E += pi * 0.5 * F.mse_loss(s_i_pred, s_i, reduction='sum')
-        # Last layer + output
-        s_last_pred = self.layers[-1](s_i)
-        s_last = self.out_norm(s_last_pred)
-        logits = output_proj(s_last)
+        # Output (s_i is detached — CE only updates output_proj/embedding)
+        s_out = self.out_norm(s_i)
+        logits = output_proj(s_out)
         self._weight_phase_prediction = logits.detach()
         return E + self._output_loss(logits, y)
 
@@ -192,10 +196,10 @@ class PCEMamba3(nn.Module):
             ]
             return
 
-        # Forward pass to discover shapes (N-1 errors for N layers)
+        # Forward pass to discover shapes (N errors for N layers)
         self.errors = []
         s_i = x
-        for layer_i in self.layers[:-1]:
+        for layer_i in self.layers:
             s_i = layer_i(s_i)
             self.errors.append(
                 torch.zeros(s_i.shape, dtype=torch.float32,
@@ -403,7 +407,7 @@ class ePCMamba3LM(nn.Module):
 
     def __init__(self, config: Mamba3Config, vocab_size: int,
                  iters: int = 2, e_lr: float = 0.02,
-                 error_optim: str = 'newton', damping: float = 1.0,
+                 error_optim: str = 'newton', damping: float = 0.1,
                  precision_mode: str = 'none', precision_base: float = 3.0):
         super().__init__()
         self.config = config
@@ -436,7 +440,7 @@ class ePCMamba3LM(nn.Module):
         if targets is not None:
             return self.pce.minimize_error_energy(x, targets, self.out_proj)
         else:
-            self.pce.errors = [0.0] * (len(self.pce.layers) - 1)
+            self.pce.errors = [0.0] * len(self.pce.layers)
             hidden = self.pce.y_pred(x)
             return self.out_proj(hidden)
 

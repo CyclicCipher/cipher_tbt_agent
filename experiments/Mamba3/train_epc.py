@@ -335,7 +335,7 @@ def main():
                         help='Error optimizer: sgd, adam, or newton')
     parser.add_argument('--e_lr', type=float, default=0.02,
                         help='Error learning rate (for sgd/adam)')
-    parser.add_argument('--damping', type=float, default=1.0,
+    parser.add_argument('--damping', type=float, default=0.1,
                         help='Newton damping factor')
     parser.add_argument('--precision_mode', type=str, default='none',
                         choices=['none', 'linear', 'geometric'],
@@ -422,7 +422,7 @@ def main():
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     # Diagnostics
-    num_error_layers = config.n_layer - 1 if use_epc else 0
+    num_error_layers = config.n_layer if use_epc else 0
     diagnostics = Diagnostics(num_error_layers, use_epc=use_epc)
 
     save_dir = os.path.join(os.path.dirname(__file__), 'results')
