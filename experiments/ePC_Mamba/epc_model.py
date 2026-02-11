@@ -205,47 +205,60 @@ class PCESequence(nn.Module):
         self._cached_error_shapes = [e.shape for e in self.errors]
 
     def _newton_step(self):
-        """Error optimization step.
+        """Error optimization step with dimension-normalized step size.
 
-        The Hessian is H = I + J^T H_L J. For high-dimensional errors
-        (dim >> rank(J^T H_L J)), most eigenvalues of H are ≈ 1. The
-        diagonal approximation H ≈ dI gives step size 1/d in every
-        direction, which is correct for the majority of directions.
+        The key insight: the Hessian is H = I + J^T H_L J. For the rank-1
+        LRPD approximation, the step size becomes 1/(d + ||g||^2) ≈ 1/dim(e),
+        which is catastrophically conservative for high-dimensional errors.
+        The pure diagonal H≈dI gives step 1/d ≈ 0.91, which overshoots.
 
-        The rank-1 LRPD approximation (H ≈ dI + uu^T) concentrates all
-        curvature into ||u||^2, giving step size 1/(d + ||g||^2) ≈ 1/dim.
-        This is catastrophically conservative: 262,000x too small for our
-        error tensors. See diagnose_newton.py Test D for evidence.
+        The fix: normalize ||g||^2 by the number of error elements to get
+        mean squared gradient. This gives:
 
-        We retain the rank-1 diagnostics for monitoring but use the
-        diagonal step for the actual update.
+            α = 1 / (d + ||g||^2 / n)
+
+        where n = total number of error elements. This is:
+        - At random init (each g_i ≈ 1): α ≈ 1/(d + 1) ≈ 0.48
+        - With large gradients (each g_i ≈ 10): α ≈ 1/(d + 100) ≈ 0.01
+        - Naturally adaptive and dimension-independent
+        - Equivalent to rank-1 with per-element (not total) curvature
+
+        See diagnose_newton.py Test D for evidence that the old rank-1
+        step was 80-150x too conservative.
         """
         with torch.no_grad():
             d = 1.0 + self.damping
 
-            # Collect diagnostics (same dot products as before)
+            # Collect diagnostics
             gTg = 0.0
             gTe = 0.0
             eTe = 0.0
+            n = 0  # total number of error elements
             for e in self.errors:
                 g_flat = e.grad.reshape(-1)
                 e_flat = e.data.reshape(-1)
                 gTg += torch.dot(g_flat, g_flat).item()
                 gTe += torch.dot(g_flat, e_flat).item()
                 eTe += torch.dot(e_flat, e_flat).item()
+                n += e.numel()
 
             uTu = gTg - 2.0 * gTe + eTe
 
-            # Diagonal Hessian step: e_new = e - g/d
+            # Dimension-normalized step: α = 1/(d + mean_sq_grad)
+            mean_sq_grad = gTg / max(n, 1)
+            alpha = 1.0 / (d + mean_sq_grad)
+
             for e in self.errors:
-                e.data.sub_(e.grad, alpha=1.0 / d)
+                e.data.sub_(e.grad, alpha=alpha)
 
             # Save diagnostics for hypothesis testing
             self._newton_diag = {
                 'gTg': gTg,
                 'uTu': uTu,
                 'eTe': eTe,
-                'coeff': 1.0 / d,  # effective step size
+                'n_elements': n,
+                'mean_sq_grad': mean_sq_grad,
+                'coeff': alpha,  # effective step size
                 'rank1_ratio': uTu / max(gTg, 1e-10),
             }
 
