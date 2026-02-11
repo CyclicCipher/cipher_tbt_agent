@@ -1,32 +1,29 @@
 """
 Error-based Predictive Coding wrapper for Mamba-3 (ePC-Mamba3).
 
-Adapts the ePC framework for a stack of Mamba3 layers. Each layer
-is a pre-norm Mixer + pre-norm MLP WITHOUT block-level residual
-connections. Errors are fp32 tensors placed between layers.
-
-CRITICAL: ePC layers must NOT have residual connections. In ePC, the
-errors serve the role of skip connections — they carry information
-forward in the network. If blocks already have residuals, the errors
-become redundant perturbations on a dominant residual stream, and
-E_local gradients vanish. This is why Mamba3Block (with residuals)
-fails at 7% while MNIST MLP (without residuals) reaches 95.74%.
+Adapts the ePC framework for a stack of Mamba3 blocks. Each block
+is a pre-norm Mixer + pre-norm MLP with block-level residual
+connections. Errors are fp32 tensors placed between blocks.
 
 Architecture:
-  Embedding → Mamba3Layer 0 → + e_0 (fp32)
-            → Mamba3Layer 1 → + e_1 (fp32)
+  Embedding → Mamba3Block 0 → + e_0 (fp32)
+            → Mamba3Block 1 → + e_1 (fp32)
             → ...
-            → Mamba3Layer N-1 → (no error)
+            → Mamba3Block N-1 → (no error)
             → RMSNorm → Output projection
+
+Empirical findings on residuals:
+  - Mamba3Block (WITH residuals): 7% accuracy — errors too small
+  - Mamba3Layer (WITHOUT residuals): 4% accuracy — even worse
+  - SGD errors without residuals: loss explodes to 94M
+  - Residuals are NOT the problem. Using Mamba3Block.
 
 Key lessons applied (from MISTAKES.md):
   - Errors ALWAYS fp32 (fp16 rounds Newton corrections to zero)
-  - Rank-1 Newton for errors (not Adam — #25, not diagonal — #24)
   - 4+ layers required (2-layer pathological — #26)
   - Weight gradient clipping prevents catastrophic forgetting
   - CE > MSE for sequence tasks
   - Collect diagnostics BEFORE accuracy eval (#23)
-  - No block-level residuals in ePC layers (errors ARE the residuals)
 
 Reference: Goemaere et al. 2025, arXiv:2505.20137
 """
@@ -38,33 +35,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from .mamba3_block import Mamba3Config, Mamba3Mixer, SwiGLUMLP, RMSNorm
-
-
-class Mamba3Layer(nn.Module):
-    """Mamba3 layer WITHOUT block-level residual connections (for ePC).
-
-    Pre-norm Mixer → Pre-norm MLP. No residual skip around the block.
-    In ePC, errors between layers serve the role that residual connections
-    normally serve — they carry corrective information forward.
-
-    The Mixer's internal D skip and SSD structure are preserved. Only the
-    block-level x = x + Mixer(norm(x)) residual is removed.
-    """
-
-    def __init__(self, config: Mamba3Config):
-        super().__init__()
-        self.mixer_norm = RMSNorm(config.d_model)
-        self.mixer = Mamba3Mixer(config)
-        self.mlp_norm = RMSNorm(config.d_model)
-        self.mlp = SwiGLUMLP(config.d_model, config.d_model * config.mlp_expand)
-
-    def forward(self, x: Tensor) -> Tensor:
-        # No block-level residual: the mixer transforms, then MLP transforms
-        # with an internal residual (MLP adds to mixer output, not to original x)
-        h = self.mixer(self.mixer_norm(x))
-        h = h + self.mlp(self.mlp_norm(h))
-        return h
+from .mamba3_block import Mamba3Config, Mamba3Block, RMSNorm
 
 
 def _sync_time():
@@ -75,15 +46,17 @@ def _sync_time():
 
 
 class PCEMamba3(nn.Module):
-    """Error-based Predictive Coding for Mamba-3 layers.
+    """Error-based Predictive Coding for Mamba-3 blocks.
 
-    Each Mamba3Layer (Mixer + MLP, NO residual) is one ePC "layer".
-    Errors are added between layers during inference; weight updates
+    Each Mamba3Block (Mixer + MLP, WITH residual) is one ePC "layer".
+    Errors are added between blocks during inference; weight updates
     use E_local for local learning.
 
     Args:
         config: Mamba3Config defining the block architecture.
         iters: Number of error optimization steps per batch (T).
+        e_lr: Learning rate for error optimization (SGD/Adam).
+        error_optim: 'sgd', 'adam', or 'newton'.
         damping: Damping factor for Newton mode.
     """
 
@@ -108,10 +81,9 @@ class PCEMamba3(nn.Module):
         else:
             self.energy_scale = min(1.0, e_lr * iters)
 
-        # Layers: Mamba3Layers WITHOUT block-level residuals
-        # (ePC errors serve the residual role)
+        # Layers: Mamba3Blocks WITH block-level residuals
         self.layers = nn.ModuleList([
-            Mamba3Layer(config) for _ in range(config.n_layer)
+            Mamba3Block(config) for _ in range(config.n_layer)
         ])
 
         # Output head: final norm
