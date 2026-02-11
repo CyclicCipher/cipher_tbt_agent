@@ -348,10 +348,10 @@ def main():
                         help='Incremental PC: weight update every Newton step')
     parser.add_argument('--init_scale', type=float, default=1.0,
                         help='Scale block output projections for larger initial Jacobian')
-    parser.add_argument('--hyperconnect', action='store_true',
-                        help='Use manifold-constrained hyperconnections')
-    parser.add_argument('--hyper_theta', type=float, default=None,
-                        help='Hyperconnection angle in degrees (45=standard, >45=larger Jacobian)')
+    parser.add_argument('--mhc', action='store_true',
+                        help='Use manifold-constrained hyperconnections (mHC)')
+    parser.add_argument('--n_streams', type=int, default=2,
+                        help='Number of parallel residual streams for mHC')
     parser.add_argument('--n_train', type=int, default=5000)
     parser.add_argument('--n_test', type=int, default=1000)
     parser.add_argument('--baseline', action='store_true',
@@ -404,14 +404,6 @@ def main():
     # Model
     use_epc = not args.baseline
 
-    # Hyperconnection setup
-    import math
-    use_hyper = args.hyperconnect if hasattr(args, 'hyperconnect') else False
-    if args.hyper_theta is not None:
-        hyper_theta_rad = math.radians(args.hyper_theta)
-    else:
-        hyper_theta_rad = math.pi / 4  # 45° = standard
-
     if use_epc:
         model = ePCMamba3LM(
             config, vocab_size=args.vocab_size,
@@ -419,8 +411,7 @@ def main():
             error_optim=args.error_optim, damping=args.damping,
             precision_mode=args.precision_mode,
             precision_base=args.precision_base,
-            use_hyperconnect=use_hyper,
-            hyper_theta=hyper_theta_rad,
+            use_mhc=args.mhc, n_streams=args.n_streams,
         ).to(device)
         optim_str = args.error_optim.upper()
         if args.error_optim == 'newton':
@@ -430,11 +421,8 @@ def main():
                   f"energy_scale={model.pce.energy_scale:.4f})")
         if args.ipc:
             print(f"  Mode: iPC (weight update every Newton step, {args.iters}x faster)")
-        if use_hyper:
-            alpha = math.sqrt(2) * math.cos(hyper_theta_rad)
-            beta = math.sqrt(2) * math.sin(hyper_theta_rad)
-            print(f"  Hyperconnect: theta={math.degrees(hyper_theta_rad):.1f}° "
-                  f"(alpha={alpha:.3f}, beta={beta:.3f})")
+        if args.mhc:
+            print(f"  mHC: {args.n_streams} streams, Sinkhorn-constrained mixing")
         if args.init_scale != 1.0:
             with torch.no_grad():
                 for block in model.pce.layers:

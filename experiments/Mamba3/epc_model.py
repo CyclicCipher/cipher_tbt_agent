@@ -6,31 +6,35 @@ is a pre-norm Mixer + pre-norm MLP with block-level residual
 connections. Errors are fp32 tensors placed after EVERY block,
 including the last one (N errors for N blocks).
 
-Architecture:
+Standard architecture:
   Embedding → Mamba3Block 0 → + e_0 (fp32)
             → Mamba3Block 1 → + e_1 (fp32)
             → ...
             → Mamba3Block N-1 → + e_{N-1} (fp32)
             → RMSNorm → Output projection
 
-The final error e_{N-1} sits right before the output norm/projection,
-giving Newton a direct lever on the output loss. Without it, the last
-block's output had no error correction, and Newton had to influence
-the output indirectly through earlier errors — severely limiting
-inference quality (convergence=1.0 out of 2000+).
+With mHC (manifold-constrained hyperconnections, DeepSeek arXiv:2512.24880):
+  Embedding → expand to n streams
+            → mHCMamba3Block 0 → + e_0 (b, n, seq, d, fp32)
+            → mHCMamba3Block 1 → + e_1
+            → ...
+            → mHCMamba3Block N-1 → + e_{N-1}
+            → sum streams → RMSNorm → Output projection
 
-With N errors, E_local becomes fully local: every block's weights are
-updated only from its local MSE prediction error. The CE output loss
-updates only the output projection (weight-tied with embedding).
+  Each mHCMamba3Block replaces standard residuals with Sinkhorn-constrained
+  stream mixing (H_res on the Birkhoff polytope), softmax aggregation (H_pre),
+  and softmax distribution (H_post). At init, equivalent to standard residual.
+  Errors are in the multi-stream space, giving Newton more degrees of freedom.
 
 Empirical findings:
   - N-1 errors + no precision: 7% (random chance)
   - N-1 errors + geometric precision: 38% (learning but slow)
   - N errors + geometric precision + damping=0.1: 99.3% in 44 epochs!
-    Phase transition at epoch 28-32: 15% → 77% in 4 epochs.
+  - iPC + N errors + geometric precision: 99.2% in 36 epochs
 
 Reference: Goemaere et al. 2025, arXiv:2505.20137
 Precision weighting: Salvatori et al. 2025, arXiv:2506.23800
+Hyperconnections: DeepSeek arXiv:2512.24880
 """
 
 import math
@@ -44,50 +48,153 @@ from torch import Tensor
 from .mamba3_block import Mamba3Config, Mamba3Block, Mamba3Mixer, SwiGLUMLP, RMSNorm
 
 
-_SQRT2 = math.sqrt(2)
+# ---------------------------------------------------------------------------
+# Manifold-constrained Hyper-Connections (mHC)
+# Based on DeepSeek arXiv:2512.24880
+# ---------------------------------------------------------------------------
+
+def sinkhorn_log(logits: Tensor, num_iters: int = 10, tau: float = 0.05) -> Tensor:
+    """Project logits to doubly stochastic matrix via log-domain Sinkhorn-Knopp.
+
+    The result lies on the Birkhoff polytope: all entries >= 0, every row
+    and column sums to 1. Composing doubly stochastic matrices across
+    layers keeps spectral radius <= 1, preventing signal blowup.
+
+    Args:
+        logits: (n, n) unconstrained parameter matrix.
+        num_iters: Sinkhorn iterations (10 is sufficient for small n).
+        tau: Temperature (lower = sharper, closer to permutation).
+
+    Returns:
+        (n, n) doubly stochastic matrix.
+    """
+    n = logits.shape[0]
+    Z = logits / tau
+    log_marginal = -math.log(n)
+
+    u = torch.zeros(n, device=Z.device, dtype=Z.dtype)
+    v = torch.zeros(n, device=Z.device, dtype=Z.dtype)
+
+    for _ in range(num_iters):
+        u = log_marginal - torch.logsumexp(Z + v.unsqueeze(0), dim=1)
+        v = log_marginal - torch.logsumexp(Z + u.unsqueeze(1), dim=0)
+
+    return torch.exp(Z + u.unsqueeze(1) + v.unsqueeze(0)) * n
 
 
-class HyperMamba3Block(nn.Module):
-    """Mamba3Block with manifold-constrained hyperconnections.
+class mHCModule(nn.Module):
+    """One manifold-constrained hyperconnection module.
 
-    Replaces the standard residual ``x + f(norm(x))`` with a learnable
-    constrained mixing:
+    Wraps a branch (Mixer or MLP) with three constrained operations:
+      - H_res: doubly stochastic stream mixing (Birkhoff polytope via Sinkhorn)
+      - H_pre: branch input aggregation (probability simplex via softmax)
+      - H_post: branch output distribution (probability simplex via softmax)
 
-        x = alpha * x + beta * f(norm(x))
+    Per-layer flow:
+        mixed = H_res @ streams           (doubly stochastic mixing)
+        branch_in = H_pre @ streams       (aggregate to single stream)
+        branch_out = F(branch_in)         (run Mixer or MLP)
+        output = mixed + H_post * branch_out  (distribute back)
 
-    where alpha = sqrt(2)*cos(theta), beta = sqrt(2)*sin(theta).
+    At initialization:
+      - H_res ≈ identity (streams don't mix)
+      - H_pre selects one designated stream
+      - H_post distributes uniformly to all streams
+    This is equivalent to standard Pre-Norm residual connections.
 
-    The constraint alpha^2 + beta^2 = 2 is always satisfied, matching
-    the variance of a standard residual connection. This prevents the
-    activation blowup that naive output-projection scaling causes, while
-    still allowing the Jacobian to shift away from near-identity.
-
-    At theta = pi/4: alpha = beta = 1 (standard residual).
-    At theta > pi/4: beta > 1, alpha < 1 → larger Jacobian for ePC.
-
-    Inspired by DeepSeek's manifold-constrained hyperconnections.
+    Reference: DeepSeek arXiv:2512.24880
     """
 
-    def __init__(self, config: Mamba3Config, theta_init: float = math.pi / 4):
+    def __init__(self, n_streams: int = 2, init_stream: int = 0,
+                 sinkhorn_iters: int = 10, sinkhorn_tau: float = 0.05):
+        super().__init__()
+        self.n_streams = n_streams
+        self.sinkhorn_iters = sinkhorn_iters
+        self.sinkhorn_tau = sinkhorn_tau
+
+        # H_res: logits -> Sinkhorn -> doubly stochastic (near-identity at init)
+        # Off-diagonal = -8.0, diagonal = 0.0
+        # With tau=0.05: exp(-8/0.05) = exp(-160) ≈ 0, so off-diagonal ≈ 0
+        H_res_init = torch.full((n_streams, n_streams), -8.0)
+        H_res_init.fill_diagonal_(0.0)
+        self.H_res_logits = nn.Parameter(H_res_init)
+
+        # H_pre: logits -> softmax (selects init_stream at init)
+        H_pre_init = torch.full((n_streams,), -8.0)
+        H_pre_init[init_stream] = 0.0
+        self.H_pre_logits = nn.Parameter(H_pre_init)
+
+        # H_post: logits -> softmax (uniform at init)
+        self.H_post_logits = nn.Parameter(torch.zeros(n_streams))
+
+    def forward(self, streams: Tensor, branch_fn) -> Tensor:
+        """Apply hyperconnection around a branch function.
+
+        Args:
+            streams: (batch, n_streams, seq, d_model)
+            branch_fn: callable (batch, seq, d) -> (batch, seq, d)
+
+        Returns:
+            (batch, n_streams, seq, d_model)
+        """
+        # H_res: doubly stochastic stream mixing
+        H_res = sinkhorn_log(
+            self.H_res_logits, self.sinkhorn_iters, self.sinkhorn_tau)
+        mixed = torch.einsum('st, bsld -> btld', H_res, streams)
+
+        # H_pre: aggregate streams into single branch input
+        H_pre = F.softmax(self.H_pre_logits, dim=0)
+        branch_in = torch.einsum('s, bsld -> bld', H_pre, streams)
+
+        # Run branch (Mixer or MLP)
+        branch_out = branch_fn(branch_in)
+
+        # H_post: distribute branch output back to streams
+        H_post = F.softmax(self.H_post_logits, dim=0)
+        distributed = branch_out.unsqueeze(1) * H_post.view(1, -1, 1, 1)
+
+        return mixed + distributed
+
+
+class mHCMamba3Block(nn.Module):
+    """Mamba3 block with manifold-constrained hyperconnections.
+
+    Replaces the standard ``x + Mixer(norm(x)); x + MLP(norm(x))``
+    with mHC stream mixing around each sub-block. The block operates
+    on multi-stream tensors (b, n, seq, d) and maintains n parallel
+    residual streams.
+
+    Each sub-block (mixer, MLP) has its own mHC module. The init_stream
+    cycles through streams: mixer of layer i uses stream 2i % n,
+    MLP uses stream (2i+1) % n.
+    """
+
+    def __init__(self, config: Mamba3Config, n_streams: int = 2,
+                 layer_index: int = 0):
         super().__init__()
         self.mixer_norm = RMSNorm(config.d_model)
         self.mixer = Mamba3Mixer(config)
         self.mlp_norm = RMSNorm(config.d_model)
         self.mlp = SwiGLUMLP(config.d_model, config.d_model * config.mlp_expand)
 
-        self.mixer_theta = nn.Parameter(torch.tensor(theta_init))
-        self.mlp_theta = nn.Parameter(torch.tensor(theta_init))
+        self.hc_mixer = mHCModule(
+            n_streams, init_stream=(2 * layer_index) % n_streams)
+        self.hc_mlp = mHCModule(
+            n_streams, init_stream=(2 * layer_index + 1) % n_streams)
 
-    def forward(self, x: Tensor) -> Tensor:
-        m_a = _SQRT2 * torch.cos(self.mixer_theta)
-        m_b = _SQRT2 * torch.sin(self.mixer_theta)
-        x = m_a * x + m_b * self.mixer(self.mixer_norm(x))
+    def forward(self, streams: Tensor) -> Tensor:
+        """Forward pass on multi-stream input.
 
-        p_a = _SQRT2 * torch.cos(self.mlp_theta)
-        p_b = _SQRT2 * torch.sin(self.mlp_theta)
-        x = p_a * x + p_b * self.mlp(self.mlp_norm(x))
-
-        return x
+        Args:
+            streams: (batch, n_streams, seq, d_model)
+        Returns:
+            (batch, n_streams, seq, d_model)
+        """
+        streams = self.hc_mixer(
+            streams, lambda x: self.mixer(self.mixer_norm(x)))
+        streams = self.hc_mlp(
+            streams, lambda x: self.mlp(self.mlp_norm(x)))
+        return streams
 
 
 def _sync_time():
@@ -116,14 +223,15 @@ class PCEMamba3(nn.Module):
                  e_lr: float = 0.02, error_optim: str = 'newton',
                  damping: float = 0.1, precision_mode: str = 'none',
                  precision_base: float = 3.0,
-                 use_hyperconnect: bool = False,
-                 hyper_theta: float = math.pi / 4):
+                 use_mhc: bool = False, n_streams: int = 2):
         super().__init__()
         self.config = config
         self.iters = iters
         self.e_lr = e_lr
         self.error_optim_mode = error_optim
         self.damping = damping
+        self.use_mhc = use_mhc
+        self.n_streams = n_streams if use_mhc else 1
         self._iters_used = 0
         self._weight_phase_prediction = None
         self.profiling = False
@@ -155,11 +263,11 @@ class PCEMamba3(nn.Module):
         else:
             raise ValueError(f"Unknown precision_mode: {precision_mode}")
 
-        # Layers: standard Mamba3Blocks or HyperMamba3Blocks
-        if use_hyperconnect:
+        # Layers: standard Mamba3Blocks or mHC Mamba3Blocks
+        if use_mhc:
             self.layers = nn.ModuleList([
-                HyperMamba3Block(config, theta_init=hyper_theta)
-                for _ in range(config.n_layer)
+                mHCMamba3Block(config, n_streams=n_streams, layer_index=i)
+                for i in range(config.n_layer)
             ])
         else:
             self.layers = nn.ModuleList([
@@ -188,6 +296,9 @@ class PCEMamba3(nn.Module):
         The last error sits right before RMSNorm, giving it direct influence
         on the output logits.
 
+        With mHC: x is expanded to n streams before the first block, and
+        reduced (summed) after the last block before RMSNorm.
+
         Args:
             x: (batch, seqlen, d_model) input embeddings.
 
@@ -195,8 +306,14 @@ class PCEMamba3(nn.Module):
             (batch, seqlen, d_model) pre-projection output.
         """
         s_i = x
+        if self.use_mhc:
+            # (b, seq, d) -> (b, n, seq, d)
+            s_i = s_i.unsqueeze(1).expand(
+                -1, self.n_streams, -1, -1).contiguous()
         for e_i, layer_i in zip(self.errors, self.layers):
             s_i = layer_i(s_i) + e_i
+        if self.use_mhc:
+            s_i = s_i.sum(dim=1)  # (b, n, seq, d) -> (b, seq, d)
         return self.out_norm(s_i)
 
     def E(self, x: Tensor, y: Tensor, output_proj: nn.Module) -> Tensor:
@@ -221,14 +338,22 @@ class PCEMamba3(nn.Module):
         Precision-weighted: early layers get amplified E_local gradients.
         With N errors for N layers, ALL blocks learn from local MSE terms.
         The CE output loss updates only output_proj (weight-tied embedding).
+
+        With mHC: local MSE is computed in the stream space (b, n, seq, d).
+        Stream reduction happens at the output before CE.
         """
         E = 0.0
         s_i = x
+        if self.use_mhc:
+            s_i = s_i.unsqueeze(1).expand(
+                -1, self.n_streams, -1, -1).contiguous()
         for pi, e_i, layer_i in zip(self.precisions, self.errors, self.layers):
             s_i_pred = layer_i(s_i)
             s_i = (s_i_pred + e_i).detach()
             E += pi * 0.5 * F.mse_loss(s_i_pred, s_i, reduction='sum')
         # Output (s_i is detached — CE only updates output_proj/embedding)
+        if self.use_mhc:
+            s_i = s_i.sum(dim=1)
         s_out = self.out_norm(s_i)
         logits = output_proj(s_out)
         self._weight_phase_prediction = logits.detach()
@@ -240,6 +365,9 @@ class PCEMamba3(nn.Module):
 
         Errors are ALWAYS fp32. fp16 rounds Newton corrections to zero,
         defeating early stopping (see MISTAKES.md).
+
+        With mHC: errors are (b, n_streams, seq, d) to match the
+        multi-stream representation between blocks.
         """
         input_shape = x.shape
         if (hasattr(self, '_cached_error_shapes')
@@ -255,6 +383,9 @@ class PCEMamba3(nn.Module):
         # Forward pass to discover shapes (N errors for N layers)
         self.errors = []
         s_i = x
+        if self.use_mhc:
+            s_i = s_i.unsqueeze(1).expand(
+                -1, self.n_streams, -1, -1).contiguous()
         for layer_i in self.layers:
             s_i = layer_i(s_i)
             self.errors.append(
@@ -465,8 +596,7 @@ class ePCMamba3LM(nn.Module):
                  iters: int = 2, e_lr: float = 0.02,
                  error_optim: str = 'newton', damping: float = 0.1,
                  precision_mode: str = 'none', precision_base: float = 3.0,
-                 use_hyperconnect: bool = False,
-                 hyper_theta: float = math.pi / 4):
+                 use_mhc: bool = False, n_streams: int = 2):
         super().__init__()
         self.config = config
         self.vocab_size = vocab_size
@@ -476,8 +606,7 @@ class ePCMamba3LM(nn.Module):
                              error_optim=error_optim, damping=damping,
                              precision_mode=precision_mode,
                              precision_base=precision_base,
-                             use_hyperconnect=use_hyperconnect,
-                             hyper_theta=hyper_theta)
+                             use_mhc=use_mhc, n_streams=n_streams)
         self.out_proj = nn.Linear(config.d_model, vocab_size, bias=False)
 
         # Weight tying
