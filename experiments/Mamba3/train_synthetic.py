@@ -22,6 +22,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 from experiments.Mamba3.mamba3_block import Mamba3Config, Mamba3LM
 
@@ -114,6 +117,64 @@ def evaluate(model, test_loader, device):
 
 
 # ---------------------------------------------------------------------------
+# Plotting
+# ---------------------------------------------------------------------------
+
+def save_diagnostics(history, save_dir, epoch):
+    """Save diagnostic plots every N epochs."""
+    os.makedirs(save_dir, exist_ok=True)
+    epochs = list(range(1, len(history['train_loss']) + 1))
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    fig.suptitle(f'Mamba-3 Training — Epoch {epoch}', fontsize=14)
+
+    # Top-left: Loss
+    ax = axes[0, 0]
+    ax.plot(epochs, history['train_loss'], 'b-', label='Train')
+    ax.plot(epochs, history['test_loss'], 'r--', label='Test')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Loss (CE)')
+    ax.set_title('Loss')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    # Top-right: Accuracy
+    ax = axes[0, 1]
+    ax.plot(epochs, history['train_acc'], 'b-', label='Train')
+    ax.plot(epochs, history['test_acc'], 'r--', label='Test')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Accuracy')
+    ax.set_title('Token Accuracy')
+    ax.set_ylim(0, 1.05)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+    # Bottom-left: ms/batch
+    ax = axes[1, 0]
+    ax.plot(epochs, history['ms_per_batch'], 'g-')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('ms/batch')
+    ax.set_title('Speed')
+    ax.grid(True, alpha=0.3)
+
+    # Bottom-right: Train-Test gap
+    ax = axes[1, 1]
+    gap = [tr - te for tr, te in zip(history['train_acc'], history['test_acc'])]
+    ax.plot(epochs, gap, 'm-')
+    ax.axhline(y=0, color='k', linestyle=':', alpha=0.5)
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Train - Test Acc')
+    ax.set_title('Generalization Gap')
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    path = os.path.join(save_dir, f'diagnostics_epoch_{epoch:03d}.png')
+    plt.savefig(path, dpi=100)
+    plt.close(fig)
+    print(f"  [Saved {path}]")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -133,6 +194,8 @@ def main():
     parser.add_argument('--use_conv', action='store_true',
                         help='Enable optional short causal convolution')
     parser.add_argument('--device', type=str, default='auto')
+    parser.add_argument('--plot_every', type=int, default=10,
+                        help='Save diagnostic plots every N epochs')
     args = parser.parse_args()
 
     if args.device == 'auto':
@@ -183,6 +246,13 @@ def main():
 
     # Training loop
     best_test_acc = 0.0
+    save_dir = os.path.join(os.path.dirname(__file__), 'results')
+    history = {
+        'train_loss': [], 'test_loss': [],
+        'train_acc': [], 'test_acc': [],
+        'ms_per_batch': [],
+    }
+
     print(f"\n{'Epoch':>5} {'Loss':>10} {'Train Acc':>10} {'Test Acc':>10} {'ms/batch':>10}")
     print("-" * 50)
 
@@ -192,11 +262,21 @@ def main():
         test_acc, test_loss = evaluate(model, test_loader, device)
         best_test_acc = max(best_test_acc, test_acc)
 
+        history['train_loss'].append(avg_loss)
+        history['test_loss'].append(test_loss)
+        history['train_acc'].append(avg_acc)
+        history['test_acc'].append(test_acc)
+        history['ms_per_batch'].append(avg_time)
+
         print(f"{epoch:5d} {avg_loss:10.4f} {avg_acc:10.4f} "
               f"{test_acc:10.4f} {avg_time:10.1f}")
 
+        if epoch % args.plot_every == 0 or epoch == args.epochs:
+            save_diagnostics(history, save_dir, epoch)
+
         if best_test_acc >= 0.99 and epoch >= 5:
             print(f"\nSuccess! Test accuracy {best_test_acc:.4f} >= 99% at epoch {epoch}")
+            save_diagnostics(history, save_dir, epoch)
             break
 
     print(f"\nBest test accuracy: {best_test_acc:.4f}")
