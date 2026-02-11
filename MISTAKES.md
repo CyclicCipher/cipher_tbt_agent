@@ -931,3 +931,60 @@ The actual curvature structure is block-diagonal per layer, not low-rank globall
 - 2026-02-10 (ADAWOODBURY INEFFECTIVE): Mistake #22 - Rank-1 Woodbury correction over Adam provides no convergence benefit. Global rank-1 curvature doesn't match ePC's block-diagonal per-layer structure. MNIST 96.74% (≈Adam), CIFAR-10 no improvement.
 - 2026-02-10 (BPC LRPD INTRACTABLE): MNW conjugacy rules are fundamentally hard to capture in any LRPD approximation. Multiple approaches attempted (diagonal, low-rank η1, FITC, spectral inflation) — all either break PD guarantees or over-regularize. The quadratic constraint (block PSD of [[η1,η2^T],[η2,η3]]) creates a tight coupling between the approximation of η1 and the validity of the Schur complement Φ. No known LRPD form preserves conjugacy + PD simultaneously at scale. Revisit only with fundamentally new approach.
 - 2026-02-10 (DIAGNOSTIC ORDERING): Mistake #23 - forward(targets=None) resets pce.errors to scalar [0.0], destroying tensor errors before get_diagnostics() could read them. Fix: collect all error-dependent diagnostics before accuracy eval.
+- 2026-02-11 (NEWTON STEP DEBUGGING SPIRAL): Mistakes #24-26 - Three failed attempts to "fix" Newton step for ePC-Mamba. Original rank-1 was working (86%) but we declared it broken and spent hours making it worse. See individual entries below.
+
+---
+
+### 24. Replacing a Working Newton Step with Broken Alternatives (DEBUGGING SPIRAL)
+
+**What we tried:** The rank-1 LRPD Newton step gave convergence ≈ 1.0 (barely moved errors). We diagnosed this as "too conservative" and tried two replacements:
+1. **Pure diagonal step** (H≈dI, step=1/d=0.91): Energy INCREASED 70x, accuracy dropped to 10%
+2. **Dimension-normalized step** (α=1/(d+||g||²/n)): Still too aggressive, loss increased, 10% accuracy
+
+**Why both broke:** The rank-1 step from zero errors degenerates to `α ≈ 1/(d+||g||²) ≈ 1/dim`, which IS tiny. But the replacement step sizes (0.91 and 0.48) were 100,000x larger — way past the stability boundary. The energy landscape through Mamba's SSD computation is highly non-quadratic; large steps overshoot catastrophically.
+
+**What we should have done:** The rank-1 Newton WAS working — the model reached 86% accuracy with it. Convergence ≈ 1.0 looked bad but the small errors still provided useful (if weak) E_local gradient signal. The real problems were instability (weight dynamics) and slow learning (E_local gradient imbalance), not the Newton step itself.
+
+**Root principle:** When a component works but looks suboptimal, diagnose whether it's actually the bottleneck before replacing it. A working solution replaced by a "better" one that breaks everything is a net loss.
+
+**Status:** REVERTED (2026-02-11) — original rank-1 restored
+
+---
+
+### 25. Adam for Error Optimization Over-Optimizes, Killing E_local Signal (CRITICAL)
+
+**What we tried:** Used `torch.optim.Adam(errors, lr=0.01)` with T=5 for error optimization, based on diagnose_newton.py showing Adam T=5 dropped energy by 334 (vs Newton's 2.0).
+
+**Results:** 7.5% accuracy (random chance) despite excellent energy convergence (E_init=16722 → E_final=544). Errors were beautifully optimized but the model couldn't learn.
+
+**Why it failed:** Adam-optimized errors perfectly compensate for the current (bad) weights. E_local computes `0.5 * ||f(x) - (f(x) + e)||² = 0.5 * ||e||²` per layer. When errors are large and precisely tuned to fix outputs, the local prediction error LOOKS small from each layer's perspective — the error was "placed" exactly where needed. So E_local gives each layer a gradient that says "everything is fine locally" even though the weights are wrong. No useful weight updates happen.
+
+**The paradox:** Better error optimization → worse weight learning. ePC NEEDS imperfect error optimization so that E_local's local terms provide meaningful gradient signal.
+
+**Root principle:** In a two-phase algorithm (inference + learning), optimizing Phase 1 too well can destroy Phase 2's signal. The phases are coupled — don't optimize them independently.
+
+**Status:** ABANDONED (2026-02-11) — Adam for errors doesn't work with ePC's E_local
+
+---
+
+### 26. ePC Needs Many Layers — 2-Layer Networks Are Pathological
+
+**What we observed:** On the copy task with 2 Mamba layers:
+- Backprop: 93.5% in 50 epochs (12ms/batch)
+- ePC (Newton T=2): 85.6% in 50 epochs (44ms/batch)
+- ePC (Newton T=10): 52% in 10 epochs (103ms/batch)
+
+Layer 1 received 490x less gradient than Layer 2 (from E_local's detach). ||e|| ≈ 0.002, so Layer 1's gradient ∝ ||e|| ≈ 0.002 while Layer 2 gets full CE gradient.
+
+**Why 2 layers is pathological for ePC:**
+- E_local detaches between layers, so each layer only gets gradient from its LOCAL prediction error
+- With only 1 error between 2 layers, Layer 1's only gradient source is `||e_1||²`
+- When Newton gives tiny errors (||e|| ≈ 0.002), Layer 1 is effectively frozen
+- Layer 2 learns from CE gradient; Layer 1 drifts on noise
+- With 8+ layers (like ResNet), gradient is distributed across 7+ error terms — no single layer starves
+
+**Comparison:** MNIST MLP (4 layers, 3 errors) got 95.74%. CIFAR-10 ResNet (10 layers, 8 errors) got ~82%. The more layers/errors, the more gradient signal E_local distributes.
+
+**Root principle:** ePC's biologically-plausible local learning comes at a cost: gradient flows only through local error terms. With few layers, this creates severe imbalance. The architecture must have enough layers for E_local to provide useful gradients to all layers.
+
+**Status:** DOCUMENTED (2026-02-11) — moving to backprop for shallow Mamba networks
