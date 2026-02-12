@@ -332,8 +332,8 @@ def main():
     parser.add_argument('--iters', type=int, default=2,
                         help='Error optimization iterations (T)')
     parser.add_argument('--error_optim', type=str, default='newton',
-                        choices=['sgd', 'adam', 'newton'],
-                        help='Error optimizer: sgd, adam, or newton')
+                        choices=['sgd', 'adam', 'newton', 'cg'],
+                        help='Error optimizer: sgd, adam, newton, or cg')
     parser.add_argument('--e_lr', type=float, default=0.02,
                         help='Error learning rate (for sgd/adam)')
     parser.add_argument('--damping', type=float, default=0.1,
@@ -439,9 +439,15 @@ def main():
         optim_str = args.error_optim.upper()
         if args.error_optim == 'newton':
             print(f"Model: ePC-Mamba3 (T={args.iters}, Newton, damping={args.damping})")
+        elif args.error_optim == 'cg':
+            print(f"Model: ePC-Mamba3 (K={args.iters}, CG, "
+                  f"α=gᵀg/gᵀHg via HVP)")
         else:
             print(f"Model: ePC-Mamba3 (T={args.iters}, {optim_str}, e_lr={args.e_lr}, "
                   f"energy_scale={model.pce.energy_scale:.4f})")
+        if args.ipc and args.error_optim == 'cg':
+            print("  Warning: iPC not supported with CG. Using standard ePC.")
+            args.ipc = False
         if args.ipc:
             print(f"  Mode: iPC (weight update every Newton step, {args.iters}x faster)")
         if args.mhc:
@@ -593,6 +599,8 @@ def main():
             if d['error_norms']:
                 norms_str = ', '.join(f'{n:.4f}' for n in d['error_norms'])
                 print(f"  Error norms: [{norms_str}]")
+            if args.error_optim == 'cg' and d.get('cg_alpha', 0) > 0:
+                print(f"  CG: α={d['cg_alpha']:.6f}, dᵀHd={d['cg_dTHd']:.2f}")
 
         # Save plot
         if epoch % args.plot_every == 0 or epoch == args.epochs:
@@ -600,6 +608,8 @@ def main():
             if use_epc:
                 if args.error_optim == 'newton':
                     config_str = f'(T={args.iters}, Newton, damp={args.damping})'
+                elif args.error_optim == 'cg':
+                    config_str = f'(K={args.iters}, CG)'
                 else:
                     config_str = f'(T={args.iters}, {args.error_optim.upper()}, e_lr={args.e_lr})'
                 if args.precision_mode != 'none':
