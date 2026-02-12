@@ -932,6 +932,7 @@ The actual curvature structure is block-diagonal per layer, not low-rank globall
 - 2026-02-10 (BPC LRPD INTRACTABLE): MNW conjugacy rules are fundamentally hard to capture in any LRPD approximation. Multiple approaches attempted (diagonal, low-rank η1, FITC, spectral inflation) — all either break PD guarantees or over-regularize. The quadratic constraint (block PSD of [[η1,η2^T],[η2,η3]]) creates a tight coupling between the approximation of η1 and the validity of the Schur complement Φ. No known LRPD form preserves conjugacy + PD simultaneously at scale. Revisit only with fundamentally new approach.
 - 2026-02-10 (DIAGNOSTIC ORDERING): Mistake #23 - forward(targets=None) resets pce.errors to scalar [0.0], destroying tensor errors before get_diagnostics() could read them. Fix: collect all error-dependent diagnostics before accuracy eval.
 - 2026-02-11 (NEWTON STEP DEBUGGING SPIRAL): Mistakes #24-26 - Three failed attempts to "fix" Newton step for ePC-Mamba. Original rank-1 was working (86%) but we declared it broken and spent hours making it worse. See individual entries below.
+- 2026-02-12 (ADAPTIVE DAMPING REGRESSION): Mistake #30 - Adaptive Newton damping from prospective configuration paper caused complete regression (99.2% → 7.75%). Reverted.
 
 ---
 
@@ -1030,3 +1031,19 @@ Layer 1 received 490x less gradient than Layer 2 (from E_local's detach). ||e|| 
 **Root principle:** Init_scale (#27) and muPC (#29) are two sides of the same coin. Init_scale made the Jacobian too large (blew up activations). muPC made it too small (crushed non-residual contributions). Both break Newton. The Jacobian needs to be in a specific range for Newton's rank-1 approximation to cross the critical threshold that triggers the phase transition.
 
 **Status:** ABANDONED (2026-02-11) — muPC designed for SGD/Adam error optimization, not Newton
+
+---
+
+### 30. Adaptive Newton Damping Broke Default Training — Complete Regression
+
+**What we tried:** Implemented adaptive Newton damping inspired by Song et al. 2024 (prospective configuration, Nature Neuroscience). If a Newton step increased energy, the damping was doubled for the next step within the same batch. Also added convergence-based early stopping for error optimization.
+
+**Results:** COMPLETE REGRESSION. Default `python experiments/Mamba3/train_epc.py` went from 99.2% at epoch 36 to 7.75% over 50 epochs. Loss stuck at ~2780 for all 50 epochs. The phase transition at epoch ~28 NEVER occurred. Speed also regressed (134ms vs ~98ms per batch). With `--iters 8 --conv_threshold 0.01`, speed was 482-502 ms/batch (5x slower), cancelled after 2 epochs.
+
+**Why it failed:** The adaptive damping check (`if E_val > E_prev: effective_damp *= 2.0`) combined with the code restructuring introduced a subtle regression. The inference convergence chart showed massive negative spikes (-45000) early on, indicating Newton was massively overshooting. Despite damping resetting per batch, the doubled damping (0.2 vs 0.1) during those critical early batches appears to have prevented the system from building up the Jacobian magnitude needed for the phase transition at epoch ~28. The convergence values (mean=1.15) matched the muPC failure pattern (1.29), suggesting the Newton step was effectively neutered.
+
+**Key insight:** The prospective configuration paper used γ=0.1 with T=128 iterations and SGD/gradient-descent-style error optimization. Their adaptive step reduction (halving γ on overshoot) works in that regime because SGD takes many small steps. Newton's rank-1 step in T=2 iterations is a fundamentally different regime — there's no room for the damping to recover within a 2-step loop. The doubled damping on step 1 makes step 2 too conservative, and that's all you get.
+
+**Root principle:** Don't "improve" a working system based on insights from a paper that uses a fundamentally different optimization method. The prospective configuration paper uses SGD with T=128; we use Newton with T=2. The adaptive damping strategy doesn't transfer across these regimes.
+
+**Status:** REVERTED (2026-02-12) — all adaptive damping code removed, defaults restored

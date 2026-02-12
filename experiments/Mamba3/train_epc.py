@@ -356,9 +356,6 @@ def main():
                         help='Number of parallel residual streams for mHC')
     parser.add_argument('--mupc', action='store_true',
                         help='Use Depth-muP scaling (muPC, Innocenti 2025)')
-    parser.add_argument('--conv_threshold', type=float, default=0.0,
-                        help='Convergence threshold for early stopping error optimization '
-                             '(0=disabled). Stops when relative energy change < threshold.')
     parser.add_argument('--n_train', type=int, default=5000)
     parser.add_argument('--n_test', type=int, default=1000)
     parser.add_argument('--baseline', action='store_true',
@@ -423,7 +420,6 @@ def main():
             precision_base=args.precision_base,
             use_mhc=args.mhc, n_streams=args.n_streams,
             use_mupc=args.mupc,
-            convergence_threshold=args.conv_threshold,
         ).to(device)
         optim_str = args.error_optim.upper()
         if args.error_optim == 'newton':
@@ -445,9 +441,6 @@ def main():
                     block.mixer.out_proj.weight.mul_(args.init_scale)
                     block.mlp.down_proj.weight.mul_(args.init_scale)
             print(f"  Init scale: {args.init_scale}x on mixer/MLP output projections")
-        print(f"  Adaptive damping: enabled (doubles on energy overshoot)")
-        if args.conv_threshold > 0:
-            print(f"  Convergence early stopping: threshold={args.conv_threshold}")
         if args.precision_mode != 'none':
             pi_str = ', '.join(f'{p:.2f}' for p in model.pce.precisions)
             print(f"Precisions ({args.precision_mode}): [{pi_str}]")
@@ -567,13 +560,9 @@ def main():
         # Periodic ePC diagnostics
         if use_epc and epoch % 10 == 0:
             d = model.get_diagnostics()
-            eff_damp = d.get('effective_damping', args.damping)
-            damp_str = f", eff_damp={eff_damp:.2f}" if eff_damp != args.damping else ""
-            iters_str = f", iters={d['iters_used']}" if d['iters_used'] != args.iters else ""
             print(f"  ePC: E_init={d['E_initial']:.2f}, "
                   f"E_final={d['E_final']:.2f}, "
-                  f"convergence={d['convergence']:.2f}"
-                  f"{damp_str}{iters_str}")
+                  f"convergence={d['convergence']:.2f}")
             if d['error_norms']:
                 norms_str = ', '.join(f'{n:.4f}' for n in d['error_norms'])
                 print(f"  Error norms: [{norms_str}]")

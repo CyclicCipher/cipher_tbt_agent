@@ -255,19 +255,16 @@ class PCEMamba3(nn.Module):
                  damping: float = 0.1, precision_mode: str = 'none',
                  precision_base: float = 3.0,
                  use_mhc: bool = False, n_streams: int = 2,
-                 use_mupc: bool = False,
-                 convergence_threshold: float = 0.0):
+                 use_mupc: bool = False):
         super().__init__()
         self.config = config
         self.iters = iters
         self.e_lr = e_lr
         self.error_optim_mode = error_optim
         self.damping = damping
-        self.convergence_threshold = convergence_threshold
         self.use_mhc = use_mhc
         self.use_mupc = use_mupc
         self.n_streams = n_streams if use_mhc else 1
-        self._iters_used = 0
         self._weight_phase_prediction = None
         self.profiling = False
         self._profile = {}
@@ -439,7 +436,7 @@ class PCEMamba3(nn.Module):
         self._cached_input_shape = input_shape
         self._cached_error_shapes = [e.shape for e in self.errors]
 
-    def _newton_step(self, damping_override=None):
+    def _newton_step(self):
         """Precision-aware rank-1 LRPD Newton step for error optimization.
 
         With per-layer precisions pi_l, the energy is:
@@ -457,13 +454,9 @@ class PCEMamba3(nn.Module):
               c2_l = -(1-c)/(pi_l*(1+damp)) varies by layer.
 
         When all precisions = 1, reduces to the original Newton step.
-
-        Args:
-            damping_override: If provided, overrides self.damping. Used by
-                adaptive damping to increase damping on energy overshoot.
         """
         with torch.no_grad():
-            damp = damping_override if damping_override is not None else self.damping
+            damp = self.damping
 
             # Per-layer dot products
             uTDinv_g = 0.0  # u^T D^{-1} g
@@ -542,16 +535,7 @@ class PCEMamba3(nn.Module):
         else:
             optim = None  # Newton mode
 
-        # Adaptive damping: doubles when Newton overshoots (energy increases).
-        # This implements the step-reduction from Song et al. 2024 (prospective
-        # configuration, Nature Neuroscience) adapted for Newton: if the step
-        # increased energy, increase damping to make the next step more
-        # conservative. No extra forward pass needed — we already compute E
-        # at the start of each iteration.
         E_val = 0.0
-        E_prev = None
-        effective_damp = self.damping
-        self._iters_used = self.iters
 
         for t in range(self.iters):
             if optim is not None:
@@ -574,20 +558,6 @@ class PCEMamba3(nn.Module):
             if t == 0:
                 self._E_initial = E_val
 
-            # Adaptive step control (for t > 0, compare with previous energy)
-            if E_prev is not None:
-                if E_val > E_prev:
-                    # Energy increased — Newton overshot, double damping
-                    effective_damp *= 2.0
-                elif self.convergence_threshold > 0:
-                    # Check convergence: relative energy change below threshold
-                    rel_change = (E_prev - E_val) / (abs(E_prev) + 1e-8)
-                    if rel_change < self.convergence_threshold:
-                        self._iters_used = t
-                        break
-
-            E_prev = E_val
-
             if prof:
                 _t = _sync_time()
 
@@ -601,13 +571,12 @@ class PCEMamba3(nn.Module):
             if optim is not None:
                 optim.step()
             else:
-                self._newton_step(damping_override=effective_damp)
+                self._newton_step()
 
             if prof:
                 prof_step += (_sync_time() - _t) * 1000
 
         self._E_final = E_val
-        self._effective_damping = effective_damp
 
         # Unfreeze weights
         for p in self.layers.parameters():
@@ -632,7 +601,6 @@ class PCEMamba3(nn.Module):
             'E_initial': getattr(self, '_E_initial', 0.0),
             'E_final': getattr(self, '_E_final', 0.0),
             'convergence': getattr(self, '_E_initial', 0.0) - getattr(self, '_E_final', 0.0),
-            'iters_used': getattr(self, '_iters_used', self.iters),
             'error_norms': [],
             'layer_energies': [],
         }
@@ -647,7 +615,6 @@ class PCEMamba3(nn.Module):
         diag['newton_rank1_ratio'] = newton.get('rank1_ratio', 0.0)
         diag['newton_coeff'] = newton.get('coeff', 0.0)
         diag['precisions'] = self.precisions
-        diag['effective_damping'] = getattr(self, '_effective_damping', self.damping)
 
         return diag
 
@@ -669,8 +636,7 @@ class ePCMamba3LM(nn.Module):
                  error_optim: str = 'newton', damping: float = 0.1,
                  precision_mode: str = 'none', precision_base: float = 3.0,
                  use_mhc: bool = False, n_streams: int = 2,
-                 use_mupc: bool = False,
-                 convergence_threshold: float = 0.0):
+                 use_mupc: bool = False):
         super().__init__()
         self.config = config
         self.vocab_size = vocab_size
@@ -681,8 +647,7 @@ class ePCMamba3LM(nn.Module):
                              precision_mode=precision_mode,
                              precision_base=precision_base,
                              use_mhc=use_mhc, n_streams=n_streams,
-                             use_mupc=use_mupc,
-                             convergence_threshold=convergence_threshold)
+                             use_mupc=use_mupc)
         self.out_proj = nn.Linear(config.d_model, vocab_size, bias=False)
 
         # Weight tying
@@ -752,14 +717,7 @@ class ePCMamba3LM(nn.Module):
         else:
             e_optim = None
 
-        # Adaptive damping for iPC: if a Newton step increases energy,
-        # double the damping to make subsequent steps more conservative.
-        # Weight updates between error steps change the landscape, so
-        # energy can increase legitimately; we only react to large jumps.
         E_val = 0.0
-        E_prev = None
-        effective_damp = pce.damping
-        pce._iters_used = pce.iters
 
         for t in range(pce.iters):
             # --- Error step ---
@@ -775,19 +733,12 @@ class ePCMamba3LM(nn.Module):
             if t == 0:
                 pce._E_initial = E_val
 
-            # Adaptive damping: if energy increased from previous error
-            # measurement, the Newton step or weight update destabilized.
-            # Double damping to be more conservative.
-            if E_prev is not None and E_val > E_prev:
-                effective_damp *= 2.0
-
-            E_prev = E_val
             E.backward()
 
             if e_optim is not None:
                 e_optim.step()
             else:
-                pce._newton_step(damping_override=effective_damp)
+                pce._newton_step()
 
             # --- Weight step (iPC) ---
             for p in pce.layers.parameters():
@@ -811,7 +762,6 @@ class ePCMamba3LM(nn.Module):
             out_proj.requires_grad_(False)
 
         pce._E_final = E_val
-        pce._effective_damping = effective_damp
 
         # Final unfreeze
         for p in pce.layers.parameters():
