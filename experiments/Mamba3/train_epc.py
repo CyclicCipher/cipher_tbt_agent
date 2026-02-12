@@ -363,12 +363,21 @@ def main():
     parser.add_argument('--use_conv', action='store_true',
                         help='Enable optional short causal convolution')
     parser.add_argument('--device', type=str, default='auto')
+    parser.add_argument('--seed', type=int, default=42,
+                        help='Random seed for reproducibility (0 to disable)')
     parser.add_argument('--plot_every', type=int, default=10,
                         help='Save diagnostic plots every N epochs')
     args = parser.parse_args()
 
     if args.no_ipc:
         args.ipc = False
+
+    # Reproducibility
+    if args.seed > 0:
+        torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(args.seed)
+        print(f"Seed: {args.seed}")
 
     if args.device == 'auto':
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
