@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+from contextlib import nullcontext
 import os
 import sys
 import time
@@ -331,8 +332,8 @@ def main():
     parser.add_argument('--iters', type=int, default=2,
                         help='Error optimization iterations (T)')
     parser.add_argument('--error_optim', type=str, default='newton',
-                        choices=['sgd', 'adam', 'newton'],
-                        help='Error optimizer: sgd, adam, or newton')
+                        choices=['sgd', 'adam', 'newton', 'cg'],
+                        help='Error optimizer: sgd, adam, newton, or cg')
     parser.add_argument('--e_lr', type=float, default=0.02,
                         help='Error learning rate (for sgd/adam)')
     parser.add_argument('--damping', type=float, default=0.1,
@@ -367,6 +368,11 @@ def main():
                         help='Random seed for reproducibility (0 to disable)')
     parser.add_argument('--plot_every', type=int, default=10,
                         help='Save diagnostic plots every N epochs')
+    parser.add_argument('--no_amp', action='store_true',
+                        help='Disable automatic mixed precision (fp16 autocast)')
+    parser.add_argument('--early_stop_rtol', type=float, default=1e-3,
+                        help='Relative energy reduction threshold for early stopping '
+                             'in error optimization (0 to disable)')
     args = parser.parse_args()
 
     if args.no_ipc:
@@ -433,9 +439,15 @@ def main():
         optim_str = args.error_optim.upper()
         if args.error_optim == 'newton':
             print(f"Model: ePC-Mamba3 (T={args.iters}, Newton, damping={args.damping})")
+        elif args.error_optim == 'cg':
+            print(f"Model: ePC-Mamba3 (K={args.iters}, CG, "
+                  f"α=gᵀg/gᵀHg via HVP)")
         else:
             print(f"Model: ePC-Mamba3 (T={args.iters}, {optim_str}, e_lr={args.e_lr}, "
                   f"energy_scale={model.pce.energy_scale:.4f})")
+        if args.ipc and args.error_optim == 'cg':
+            print("  Warning: iPC not supported with CG. Using standard ePC.")
+            args.ipc = False
         if args.ipc:
             print(f"  Mode: iPC (weight update every Newton step, {args.iters}x faster)")
         if args.mhc:
@@ -459,6 +471,14 @@ def main():
 
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Parameters: {num_params:,}")
+
+    # Mixed precision: bfloat16 autocast for matmuls, errors stay fp32.
+    # bfloat16 has same exponent range as fp32 (±3.4e38), avoiding overflow
+    # in SSD's log-space cumsum→exp (segsum). fp16 overflows at ±65504.
+    use_amp = (not args.no_amp) and device.type == 'cuda'
+    if use_amp:
+        print("Mixed precision: bfloat16 autocast enabled")
+    autocast_ctx = torch.amp.autocast(device.type, dtype=torch.bfloat16) if use_amp else nullcontext()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
@@ -489,26 +509,29 @@ def main():
             if use_epc:
                 t0 = time.perf_counter()
 
-                if args.ipc:
-                    # iPC: interleaved error + weight steps
-                    E_val = model.ipc_train_step(
-                        inputs, targets, optimizer, batch_size, args.w_clip)
-                    loss_val = E_val
-                else:
-                    # Standard ePC: Phase 1 inference, Phase 2 weight update
-                    model(inputs, targets)
+                with autocast_ctx:
+                    if args.ipc:
+                        # iPC: interleaved error + weight steps
+                        E_val = model.ipc_train_step(
+                            inputs, targets, optimizer, batch_size, args.w_clip)
+                        loss_val = E_val
+                    else:
+                        # Standard ePC: Phase 1 inference, Phase 2 weight update
+                        model.pce.minimize_error_energy(
+                            model.embedding(inputs), targets, model.out_proj,
+                            early_stop_rtol=args.early_stop_rtol)
 
-                    optimizer.zero_grad()
-                    weight_loss = model.compute_weight_loss(
-                        inputs, targets, batch_size)
-                    weight_loss.backward()
+                        optimizer.zero_grad()
+                        weight_loss = model.compute_weight_loss(
+                            inputs, targets, batch_size)
+                        weight_loss.backward()
 
-                    if args.w_clip > 0:
-                        torch.nn.utils.clip_grad_norm_(
-                            model.parameters(), max_norm=args.w_clip)
+                        if args.w_clip > 0:
+                            torch.nn.utils.clip_grad_norm_(
+                                model.parameters(), max_norm=args.w_clip)
 
-                    optimizer.step()
-                    loss_val = weight_loss.item()
+                        optimizer.step()
+                        loss_val = weight_loss.item()
 
                 # Collect diagnostics BEFORE accuracy eval (#23)
                 diag = model.get_diagnostics()
@@ -528,10 +551,11 @@ def main():
                 t0 = time.perf_counter()
 
                 optimizer.zero_grad()
-                logits = model(inputs)
-                b, l, v = logits.shape
-                loss = F.cross_entropy(
-                    logits.reshape(b * l, v), targets.reshape(b * l))
+                with autocast_ctx:
+                    logits = model(inputs)
+                    b, l, v = logits.shape
+                    loss = F.cross_entropy(
+                        logits.reshape(b * l, v), targets.reshape(b * l))
                 loss.backward()
 
                 torch.nn.utils.clip_grad_norm_(
@@ -575,6 +599,8 @@ def main():
             if d['error_norms']:
                 norms_str = ', '.join(f'{n:.4f}' for n in d['error_norms'])
                 print(f"  Error norms: [{norms_str}]")
+            if args.error_optim == 'cg' and d.get('cg_alpha', 0) > 0:
+                print(f"  CG: α={d['cg_alpha']:.6f}, dᵀHd={d['cg_dTHd']:.2f}")
 
         # Save plot
         if epoch % args.plot_every == 0 or epoch == args.epochs:
@@ -582,6 +608,8 @@ def main():
             if use_epc:
                 if args.error_optim == 'newton':
                     config_str = f'(T={args.iters}, Newton, damp={args.damping})'
+                elif args.error_optim == 'cg':
+                    config_str = f'(K={args.iters}, CG)'
                 else:
                     config_str = f'(T={args.iters}, {args.error_optim.upper()}, e_lr={args.e_lr})'
                 if args.precision_mode != 'none':
