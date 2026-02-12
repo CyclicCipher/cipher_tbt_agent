@@ -30,9 +30,18 @@ Reference: Goemaere et al. 2025, arXiv:2505.20137
 Code reference: https://github.com/cgoemaere/error_based_PC (Apache 2.0)
 """
 
+import time
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+def _sync_time():
+    """Synchronize CUDA and return wall-clock time for profiling."""
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    return time.perf_counter()
 
 
 # --- Quantization-Aware Training (QAT) utilities ---
@@ -115,6 +124,8 @@ class PCE(nn.Module):
         self.early_stop_threshold = early_stop_threshold
         self._iters_used = 0
         self._weight_phase_prediction = None
+        self.profiling = False
+        self._profile = {}
 
         if output_loss == 'mse':
             def _mse_loss(y_pred, y):
@@ -172,11 +183,38 @@ class PCE(nn.Module):
 
     @torch.no_grad()
     def init_zero_errors(self, x):
-        """Initialize zero errors by running a feedforward pass."""
-        self.errors = [
-            torch.zeros_like(x := layer_i(x), requires_grad=True)
-            for layer_i in self.layers[:-1]
-        ]
+        """Initialize zero errors, caching shapes to skip redundant forward passes.
+
+        On first call (or when input shape changes), runs a full forward pass
+        to discover error shapes. On subsequent calls with the same input shape,
+        creates zero tensors directly from cached shapes — saving one full
+        forward pass per batch (~26ms on ResNet-18).
+
+        Errors are always fp32 regardless of autocast context. fp16 rounds
+        small Newton corrections to zero, which defeats early stopping and
+        degrades inference quality. fp32 errors are cheap (just vectors added
+        between layers); the expensive ops (conv, linear) still run in fp16.
+        """
+        input_shape = x.shape
+        if (hasattr(self, '_cached_error_shapes')
+                and self._cached_input_shape == input_shape):
+            device = x.device
+            self.errors = [
+                torch.zeros(shape, dtype=torch.float32,
+                            device=device, requires_grad=True)
+                for shape in self._cached_error_shapes
+            ]
+            return
+
+        self.errors = []
+        for layer_i in self.layers[:-1]:
+            x = layer_i(x)
+            self.errors.append(
+                torch.zeros(x.shape, dtype=torch.float32,
+                            device=x.device, requires_grad=True)
+            )
+        self._cached_input_shape = input_shape
+        self._cached_error_shapes = [e.shape for e in self.errors]
 
     def _newton_step(self):
         """Rank-1 LRPD Newton step for error optimization.
@@ -190,36 +228,41 @@ class PCE(nn.Module):
         where d = 1 + damping.
 
         Cost: zero extra backward passes (reuses the gradient).
+
+        Optimized: streams per-layer to avoid concatenating all errors into
+        a single 250MB+ vector. Uses decomposed dot products:
+          uTg = gTg - gTe,  uTu = gTg - 2*gTe + eTe
+        and in-place update:
+          e_new = e*(1-c) + g*(c - 1/d)  where c = uTg/(d^2 + d*uTu)
         """
         with torch.no_grad():
-            # Collect gradients and error values, upcast to fp32 for
-            # numerical stability (dot products lose precision in fp16)
-            all_g = []
-            all_e = []
-            for e in self.errors:
-                all_g.append(e.grad.float().flatten())
-                all_e.append(e.data.float().flatten())
-
-            g = torch.cat(all_g)
-            e_vec = torch.cat(all_e)
-
-            # Output-driven component: u = g - e = J^T(dL/dy)
-            u = g - e_vec
-
-            # Rank-1 Woodbury Newton step
             d = 1.0 + self.damping
-            uTg = torch.dot(u, g)
-            uTu = torch.dot(u, u)
 
-            # H^{-1} g = g/d - (u^T g)/(d^2 + d*||u||^2) * u
-            step = g / d - (uTg / (d * d + d * uTu)) * u
-
-            # Apply step to individual errors (cast back to error dtype)
-            offset = 0
+            # Accumulate dot products per-layer (no concatenation needed).
+            # Decompose: uTg = gTg - gTe, uTu = gTg - 2*gTe + eTe
+            # where u = g - e. This avoids creating the u vector entirely.
+            gTg = 0.0
+            gTe = 0.0
+            eTe = 0.0
             for e in self.errors:
-                numel = e.numel()
-                e.data -= step[offset:offset + numel].view_as(e).to(e.dtype)
-                offset += numel
+                g_flat = e.grad.reshape(-1)
+                e_flat = e.data.reshape(-1)
+                gTg += torch.dot(g_flat, g_flat).item()
+                gTe += torch.dot(g_flat, e_flat).item()
+                eTe += torch.dot(e_flat, e_flat).item()
+
+            uTg = gTg - gTe
+            uTu = gTg - 2.0 * gTe + eTe
+
+            # Woodbury coefficient
+            coeff = uTg / (d * d + d * uTu)
+
+            # Apply step in-place: e_new = e*(1-coeff) + g*(coeff - 1/d)
+            # Derived from: e_new = e - (g/d - coeff*(g - e))
+            c1 = 1.0 - coeff
+            c2 = coeff - 1.0 / d
+            for e in self.errors:
+                e.data.mul_(c1).add_(e.grad, alpha=c2)
 
     def minimize_error_energy(self, x, y):
         """Inference phase: optimize errors to minimize energy.
@@ -228,10 +271,22 @@ class PCE(nn.Module):
         energy improvement drops below the threshold. This avoids wasted
         computation on batches that converge quickly.
         """
+        prof = self.profiling
+
+        if prof:
+            _t = _sync_time()
+
         for p in self.layers.parameters():
             p.requires_grad_(False)
 
         self.init_zero_errors(x)
+
+        if prof:
+            _t2 = _sync_time()
+            prof_init = (_t2 - _t) * 1000
+            prof_fwd = 0.0
+            prof_bwd = 0.0
+            prof_step = 0.0
 
         # Create first-order optimizer if needed
         if self.error_optim_mode == 'sgd':
@@ -252,8 +307,15 @@ class PCE(nn.Module):
                         e.grad.zero_()
 
             # Compute energy and gradients
+            if prof:
+                _t = _sync_time()
+
             E = self.E(x, y)
             E_val = E.item()
+
+            if prof:
+                _t2 = _sync_time()
+                prof_fwd += (_t2 - _t) * 1000
 
             if t == 0:
                 self._E_initial = E_val
@@ -267,13 +329,25 @@ class PCE(nn.Module):
                     break
 
             E_prev = E_val
+
+            if prof:
+                _t = _sync_time()
+
             E.backward()
+
+            if prof:
+                _t2 = _sync_time()
+                prof_bwd += (_t2 - _t) * 1000
+                _t = _t2
 
             # Take optimization step
             if optim is not None:
                 optim.step()
             else:
                 self._newton_step()
+
+            if prof:
+                prof_step += (_sync_time() - _t) * 1000
         else:
             # Loop completed without break
             self._E_final = E_val
@@ -281,6 +355,14 @@ class PCE(nn.Module):
 
         for p in self.layers.parameters():
             p.requires_grad_(True)
+
+        if prof:
+            self._profile = {
+                'init_ms': prof_init,
+                'forward_ms': prof_fwd,
+                'backward_ms': prof_bwd,
+                'step_ms': prof_step,
+            }
 
         return self._E_final
 
@@ -347,8 +429,24 @@ class PCESkipConnection(PCE):
 
     @torch.no_grad()
     def init_zero_errors(self, x):
+        input_shape = x.shape
+        if (hasattr(self, '_cached_error_shapes')
+                and self._cached_input_shape == input_shape):
+            device = x.device
+            self.errors = [
+                torch.zeros(shape, dtype=torch.float32,
+                            device=device, requires_grad=True)
+                for shape in self._cached_error_shapes
+            ]
+            return
+
         self.errors = []
         s_i = (x, 0.0)
         for layer_i in self.layers[:-1]:
             s_i = layer_i(s_i)
-            self.errors.append(torch.zeros_like(s_i[0], requires_grad=True))
+            self.errors.append(
+                torch.zeros(s_i[0].shape, dtype=torch.float32,
+                            device=s_i[0].device, requires_grad=True)
+            )
+        self._cached_input_shape = input_shape
+        self._cached_error_shapes = [e.shape for e in self.errors]

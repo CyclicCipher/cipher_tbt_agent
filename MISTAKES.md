@@ -887,6 +887,29 @@ The actual curvature structure is block-diagonal per layer, not low-rank globall
 
 ---
 
+### 23. Inference-Mode Forward Pass Overwrites ePC Errors Before Diagnostics (BUG)
+
+**What we did wrong:** In the ePC-Mamba training loop, called `model(inputs)` (without targets) for accuracy evaluation BEFORE collecting `get_diagnostics()`. The `forward(targets=None)` path sets `self.pce.errors = [0.0] * (n_layer - 1)`, replacing tensor errors with scalar floats. Then `get_diagnostics()` checks `isinstance(e, Tensor)` → `False`, and collects nothing.
+
+**Symptoms:**
+- Per-Layer Energies plot completely empty (x-axis 0.0 to 1.0 = no data)
+- Error Magnitudes plot completely empty
+- H2 causal asymmetry = 0.000 (falls to else branch returning 0.0)
+- Other diagnostics (convergence, weight magnitudes) worked because they read from saved attributes, not from error tensors
+
+**Why it was hard to spot:**
+- Convergence metric still worked (saved as `_E_initial` and `_E_final` during inference)
+- The error overwrite happens silently — no error or warning
+- The `isinstance(e, Tensor)` check was a correct guard but masked the data loss
+
+**Root principle:** When a model has ephemeral state (like ePC errors), any function that resets that state must not be called between state population and state consumption. Order of operations matters.
+
+**Fix:** Move `get_diagnostics()` and `get_hypothesis_diagnostics()` BEFORE `model(inputs)` for accuracy.
+
+**Status:** FIXED (2026-02-10) — diagnostics collected before accuracy eval
+
+---
+
 ## Update Log
 
 - 2026-02-01 (initial): Initial file created with 6 major mistakes catalogued
@@ -906,3 +929,160 @@ The actual curvature structure is block-diagonal per layer, not low-rank globall
 - 2026-02-10 (KRONOS ARCHIVED): Mistake #20 - KFAC structurally incompatible with ePC. G factor degenerate (40,000:1 trace ratio), raw gradients tiny, cross-layer A eigenvalue spread 750:1. ePC needs Adam, not KFAC.
 - 2026-02-10 (QAT FAILURE): Mistake #21 - INT8 fake quantization destroys ePC accuracy (57.09% vs 80.49%). ePC error optimization amplifies weight noise over T iterations.
 - 2026-02-10 (ADAWOODBURY INEFFECTIVE): Mistake #22 - Rank-1 Woodbury correction over Adam provides no convergence benefit. Global rank-1 curvature doesn't match ePC's block-diagonal per-layer structure. MNIST 96.74% (≈Adam), CIFAR-10 no improvement.
+- 2026-02-10 (BPC LRPD INTRACTABLE): MNW conjugacy rules are fundamentally hard to capture in any LRPD approximation. Multiple approaches attempted (diagonal, low-rank η1, FITC, spectral inflation) — all either break PD guarantees or over-regularize. The quadratic constraint (block PSD of [[η1,η2^T],[η2,η3]]) creates a tight coupling between the approximation of η1 and the validity of the Schur complement Φ. No known LRPD form preserves conjugacy + PD simultaneously at scale. Revisit only with fundamentally new approach.
+- 2026-02-10 (DIAGNOSTIC ORDERING): Mistake #23 - forward(targets=None) resets pce.errors to scalar [0.0], destroying tensor errors before get_diagnostics() could read them. Fix: collect all error-dependent diagnostics before accuracy eval.
+- 2026-02-11 (NEWTON STEP DEBUGGING SPIRAL): Mistakes #24-26 - Three failed attempts to "fix" Newton step for ePC-Mamba. Original rank-1 was working (86%) but we declared it broken and spent hours making it worse. See individual entries below.
+- 2026-02-12 (ADAPTIVE DAMPING REGRESSION): Mistake #30 - Adaptive Newton damping from prospective configuration paper caused complete regression (99.2% → 7.75%). Reverted.
+- 2026-02-12 (IPC NEVER WORKED): Mistake #31 - The "99.2% iPC" result was standard ePC. `--ipc` flag was added to parser/print at f417cb8 but NOT wired into training loop until 7fcb4de. Proof: 97ms speed = standard ePC, loss 290 = E_local/32. Real iPC = 126ms, loss 6834. 6 hours wasted on "non-reproducibility crisis." Standard ePC confirmed working: 99.03% at epoch 27 (seed=0).
+
+---
+
+### 24. Replacing a Working Newton Step with Broken Alternatives (DEBUGGING SPIRAL)
+
+**What we tried:** The rank-1 LRPD Newton step gave convergence ≈ 1.0 (barely moved errors). We diagnosed this as "too conservative" and tried two replacements:
+1. **Pure diagonal step** (H≈dI, step=1/d=0.91): Energy INCREASED 70x, accuracy dropped to 10%
+2. **Dimension-normalized step** (α=1/(d+||g||²/n)): Still too aggressive, loss increased, 10% accuracy
+
+**Why both broke:** The rank-1 step from zero errors degenerates to `α ≈ 1/(d+||g||²) ≈ 1/dim`, which IS tiny. But the replacement step sizes (0.91 and 0.48) were 100,000x larger — way past the stability boundary. The energy landscape through Mamba's SSD computation is highly non-quadratic; large steps overshoot catastrophically.
+
+**What we should have done:** The rank-1 Newton WAS working — the model reached 86% accuracy with it. Convergence ≈ 1.0 looked bad but the small errors still provided useful (if weak) E_local gradient signal. The real problems were instability (weight dynamics) and slow learning (E_local gradient imbalance), not the Newton step itself.
+
+**Root principle:** When a component works but looks suboptimal, diagnose whether it's actually the bottleneck before replacing it. A working solution replaced by a "better" one that breaks everything is a net loss.
+
+**Status:** REVERTED (2026-02-11) — original rank-1 restored
+
+---
+
+### 25. Adam for Error Optimization Over-Optimizes, Killing E_local Signal (CRITICAL)
+
+**What we tried:** Used `torch.optim.Adam(errors, lr=0.01)` with T=5 for error optimization, based on diagnose_newton.py showing Adam T=5 dropped energy by 334 (vs Newton's 2.0).
+
+**Results:** 7.5% accuracy (random chance) despite excellent energy convergence (E_init=16722 → E_final=544). Errors were beautifully optimized but the model couldn't learn.
+
+**Why it failed:** Adam-optimized errors perfectly compensate for the current (bad) weights. E_local computes `0.5 * ||f(x) - (f(x) + e)||² = 0.5 * ||e||²` per layer. When errors are large and precisely tuned to fix outputs, the local prediction error LOOKS small from each layer's perspective — the error was "placed" exactly where needed. So E_local gives each layer a gradient that says "everything is fine locally" even though the weights are wrong. No useful weight updates happen.
+
+**The paradox:** Better error optimization → worse weight learning. ePC NEEDS imperfect error optimization so that E_local's local terms provide meaningful gradient signal.
+
+**Root principle:** In a two-phase algorithm (inference + learning), optimizing Phase 1 too well can destroy Phase 2's signal. The phases are coupled — don't optimize them independently.
+
+**Status:** ABANDONED (2026-02-11) — Adam for errors doesn't work with ePC's E_local
+
+---
+
+### 26. ePC Needs Many Layers — 2-Layer Networks Are Pathological
+
+**What we observed:** On the copy task with 2 Mamba layers:
+- Backprop: 93.5% in 50 epochs (12ms/batch)
+- ePC (Newton T=2): 85.6% in 50 epochs (44ms/batch)
+- ePC (Newton T=10): 52% in 10 epochs (103ms/batch)
+
+Layer 1 received 490x less gradient than Layer 2 (from E_local's detach). ||e|| ≈ 0.002, so Layer 1's gradient ∝ ||e|| ≈ 0.002 while Layer 2 gets full CE gradient.
+
+**Why 2 layers is pathological for ePC:**
+- E_local detaches between layers, so each layer only gets gradient from its LOCAL prediction error
+- With only 1 error between 2 layers, Layer 1's only gradient source is `||e_1||²`
+- When Newton gives tiny errors (||e|| ≈ 0.002), Layer 1 is effectively frozen
+- Layer 2 learns from CE gradient; Layer 1 drifts on noise
+- With 8+ layers (like ResNet), gradient is distributed across 7+ error terms — no single layer starves
+
+**Comparison:** MNIST MLP (4 layers, 3 errors) got 95.74%. CIFAR-10 ResNet (10 layers, 8 errors) got ~82%. The more layers/errors, the more gradient signal E_local distributes.
+
+**Root principle:** ePC's biologically-plausible local learning comes at a cost: gradient flows only through local error terms. With few layers, this creates severe imbalance. The architecture must have enough layers for E_local to provide useful gradients to all layers.
+
+---
+
+### 27. Init Scale: Naive Output Projection Scaling Destroys Training
+
+**What we tried:** Scaling `mixer.out_proj.weight` and `mlp.down_proj.weight` by 2x at initialization (`--init_scale 2.0`) to increase the Jacobian dy/de from epoch 1, hoping to bypass the 28-epoch deadlock phase.
+
+**Why it failed:** The 2x scaling blew up activations (initial loss 4846 vs 290 for standard), and Newton went catastrophically unstable (convergence went to -60000). The model got stuck at 7% for 30 epochs — worse than standard ePC. Scaling output projections couples Jacobian magnitude with activation magnitude. You can't increase one without the other.
+
+**Root principle:** Forward dynamics and Jacobian magnitude are coupled through the weights. Scaling weights to get larger Jacobians also scales activations, putting the model in a high-loss region where E_local gradients are unhelpful and Newton's rank-1 approximation breaks down.
+
+**Status:** ABANDONED (2026-02-11) — init_scale doesn't work for ePC
+
+---
+
+### 28. mHC (Manifold-Constrained Hyperconnections) Too Slow and Unstable
+
+**What we tried:** Proper implementation of DeepSeek's mHC (arXiv:2512.24880) with 2 parallel residual streams, Sinkhorn-Knopp doubly stochastic mixing (H_res), softmax aggregation (H_pre), and softmax distribution (H_post). The manifold constraint prevents signal blowup while giving Newton 2x more error degrees of freedom.
+
+**Results:** ~3x slower (267 ms/batch vs 98 ms), reached 98.2% best accuracy but wildly unstable — test accuracy swung between 94% and 9% across epochs, final test acc was 32%. Convergence went negative (-32 mean). Newton's rank-1 Hessian approximation couldn't handle the richer stream-space landscape.
+
+**Why it partially worked:** No deadlock plateau (30% by epoch 13 vs 7% for standard ePC). The stream mixing gave errors more paths to influence the output.
+
+**Why it ultimately failed:** (1) Sinkhorn overhead: 80 calls per forward pass on tiny 2x2 matrices, but PyTorch dispatch adds up. (2) Stream summing at output dilutes each stream's error contribution. (3) Newton's rank-1 approximation breaks in the 2x larger error space.
+
+**Root principle:** More degrees of freedom for Newton is not better when the Hessian approximation is fixed at rank-1. The approximation quality degrades as the problem dimension grows.
+
+**Status:** ABANDONED (2026-02-11) — mHC overhead and instability outweigh benefits
+
+**Status:** DOCUMENTED (2026-02-11)
+
+---
+
+### 29. muPC (Depth-muP) Crushes the Jacobian — Opposite of Init Scale
+
+**What we tried:** Applied Depth-muP scaling (Innocenti et al. 2025, arXiv:2505.13124) to each Mamba3Block's non-residual contributions. Each mixer and MLP output was scaled by alpha = 1/sqrt(d_model * 2*n_layer) ≈ 0.031 for our 4-layer d=128 model.
+
+**Results:** Stuck at 7-8% accuracy (random chance) for 14+ epochs. Loss plateaued at ~2780 (same as init_scale failure). Initial loss 175565 (catastrophically high). Newton convergence only 1.29 (vs ~2700 normally). Error norms were tiny (Layer 1: 0.004, Layer 4: 0.12).
+
+**Why it failed:** Alpha = 0.031 means each sub-layer contributes only ~3% to the residual stream. This crushed the Jacobian dy/de to near-zero, making Newton corrections negligible. The muPC paper explicitly admits it doesn't fix PC inference landscape conditioning — it only stabilizes the forward pass, which doesn't help when the bottleneck is the Jacobian being too small for Newton to work.
+
+**Root principle:** Init_scale (#27) and muPC (#29) are two sides of the same coin. Init_scale made the Jacobian too large (blew up activations). muPC made it too small (crushed non-residual contributions). Both break Newton. The Jacobian needs to be in a specific range for Newton's rank-1 approximation to cross the critical threshold that triggers the phase transition.
+
+**Status:** ABANDONED (2026-02-11) — muPC designed for SGD/Adam error optimization, not Newton
+
+---
+
+### 30. Adaptive Newton Damping Broke Default Training — Complete Regression
+
+**What we tried:** Implemented adaptive Newton damping inspired by Song et al. 2024 (prospective configuration, Nature Neuroscience). If a Newton step increased energy, the damping was doubled for the next step within the same batch. Also added convergence-based early stopping for error optimization.
+
+**Results:** COMPLETE REGRESSION. Default `python experiments/Mamba3/train_epc.py` went from 99.2% at epoch 36 to 7.75% over 50 epochs. Loss stuck at ~2780 for all 50 epochs. The phase transition at epoch ~28 NEVER occurred. Speed also regressed (134ms vs ~98ms per batch). With `--iters 8 --conv_threshold 0.01`, speed was 482-502 ms/batch (5x slower), cancelled after 2 epochs.
+
+**Why it failed:** The adaptive damping check (`if E_val > E_prev: effective_damp *= 2.0`) combined with the code restructuring introduced a subtle regression. The inference convergence chart showed massive negative spikes (-45000) early on, indicating Newton was massively overshooting. Despite damping resetting per batch, the doubled damping (0.2 vs 0.1) during those critical early batches appears to have prevented the system from building up the Jacobian magnitude needed for the phase transition at epoch ~28. The convergence values (mean=1.15) matched the muPC failure pattern (1.29), suggesting the Newton step was effectively neutered.
+
+**Key insight:** The prospective configuration paper used γ=0.1 with T=128 iterations and SGD/gradient-descent-style error optimization. Their adaptive step reduction (halving γ on overshoot) works in that regime because SGD takes many small steps. Newton's rank-1 step in T=2 iterations is a fundamentally different regime — there's no room for the damping to recover within a 2-step loop. The doubled damping on step 1 makes step 2 too conservative, and that's all you get.
+
+**Root principle:** Don't "improve" a working system based on insights from a paper that uses a fundamentally different optimization method. The prospective configuration paper uses SGD with T=128; we use Newton with T=2. The adaptive damping strategy doesn't transfer across these regimes.
+
+**Status:** REVERTED (2026-02-12) — all adaptive damping code removed, defaults restored
+
+**CORRECTION (2026-02-12):** The "99.2% at epoch 36" baseline this was compared against was NEVER iPC — it was standard ePC (see Mistake #31). The adaptive damping regression may have been partly real but was confounded by the iPC flag being newly wired up at the same time. The true baseline for standard ePC is 99.3% at epoch 44 (or 99.03% at epoch 27 with seed=0).
+
+---
+
+### 31. iPC Flag Was Not Wired Up — "99.2% iPC" Was Actually Standard ePC (CRITICAL)
+
+**What happened:** At commit f417cb8 ("Add iPC method and --ipc CLI flag"):
+- `--ipc` was added to argparse
+- `print("Mode: iPC ...")` was added
+- `ipc_train_step()` was added to epc_model.py
+- **BUT the training loop was NOT updated** — it always ran standard ePC
+
+The training loop was only updated at 7fcb4de ("Wire up iPC mode in training loop"), which added `if args.ipc:` to the batch processing code.
+
+**The experiment that produced 99.2% was run between these commits.** It printed "Mode: IPC" but executed standard ePC. We spent an entire debugging session (~6 hours) trying to reproduce "iPC's 99.2%" — running the exact commit, testing 50 seeds, checking TF32, checking driver versions — when the result was never iPC to begin with.
+
+**Evidence that it was standard ePC:**
+1. **Speed**: 97ms/batch = standard ePC speed. Real iPC runs at 126ms (adds weight update per Newton step)
+2. **Loss scale**: 290 at epoch 1 = E_local/32 (standard ePC reports `weight_loss.item()`). Real iPC reports raw energy (~6834)
+3. **Convergence pattern**: Matches standard ePC's known plateau → phase transition behavior
+
+**Impact of misdiagnosis:**
+- Wasted ~6 hours debugging a "non-reproducibility crisis"
+- Incorrectly blamed adaptive damping (#30), TF32, NVIDIA drivers, environment
+- Added unnecessary TF32 disable code (removed)
+- Created seed sweep and environment diagnostic scripts (useful but misdirected)
+- Multiple incorrect entries in MEMORY.md and MISTAKES.md
+
+**Root principle:** When a CLI flag is added to the parser but not to the execution path, it creates a silent failure — the user sees correct output messages but the feature isn't active. Always verify that a flag actually reaches the code that implements it. Add integration tests or at minimum run a smoke test with observable behavioral difference (e.g., timing or loss scale change).
+
+**Verified working results (2026-02-12):**
+- Standard ePC (seed=0): 99.03% at epoch 27 (phase transition at epoch 19)
+- Standard ePC (no seed, historical): 99.3% at epoch 44
+- Standard ePC (no seed, historical, mislabeled "iPC"): 99.2% at epoch 36
+- iPC has NEVER been validated — it may or may not work
+
+**Status:** FIXED (2026-02-12) — iPC disabled by default, defaults corrected
