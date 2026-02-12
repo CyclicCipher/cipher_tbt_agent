@@ -534,7 +534,20 @@ class PCEMamba3(nn.Module):
             self._cg_diag = {}
             return E_val
 
+        _cg_debug = getattr(self, '_cg_debug_count', 0)
+        _do_debug = _cg_debug < 5
+        self._cg_debug_count = _cg_debug + 1
+
+        if _do_debug:
+            print(f"  [CG debug] E_initial={E_val:.4f}, "
+                  f"E_nan={math.isnan(E_val)}")
+
         g = torch.autograd.grad(E, self.errors, create_graph=True)
+
+        if _do_debug:
+            g_norms = [torch.linalg.vector_norm(gl).item() for gl in g]
+            g_nans = [torch.isnan(gl).any().item() for gl in g]
+            print(f"  [CG debug] g norms={g_norms}, g_has_nan={g_nans}")
 
         # CG state: r = -g (residual), d = r (search direction)
         r = [(-gl).detach() for gl in g]
@@ -585,7 +598,16 @@ class PCEMamba3(nn.Module):
             d_det = [dl.detach() for dl in d]
             s = sum(torch.sum(gl * dl)
                     for gl, dl in zip(g, d_det))
+
+            if _do_debug:
+                print(f"  [CG debug] s={s.item():.6f}, s_nan={math.isnan(s.item())}")
+
             Hd = torch.autograd.grad(s, self.errors)
+
+            if _do_debug:
+                hd_norms = [torch.linalg.vector_norm(h).item() for h in Hd]
+                hd_nans = [torch.isnan(h).any().item() for h in Hd]
+                print(f"  [CG debug] Hd norms={hd_norms}, Hd_has_nan={hd_nans}")
 
             dTHd = sum(
                 torch.dot(dl.reshape(-1), hdl.reshape(-1)).item()
@@ -600,10 +622,21 @@ class PCEMamba3(nn.Module):
                 alpha = rTr / dTHd
             alpha_val = alpha
 
+            if _do_debug:
+                print(f"  [CG debug] rTr={rTr:.6f}, dTHd={dTHd:.6f}, "
+                      f"alpha={alpha:.6f}")
+
             # Update errors: e ← e + α·d
             with torch.no_grad():
                 for e, dl in zip(self.errors, d):
                     e.data.add_(dl.detach(), alpha=alpha)
+
+            if _do_debug:
+                e_norms = [torch.linalg.vector_norm(e).item()
+                           for e in self.errors]
+                e_nans = [torch.isnan(e).any().item() for e in self.errors]
+                print(f"  [CG debug] post-step error norms={e_norms}, "
+                      f"has_nan={e_nans}")
 
             # Detach d for next iteration
             d = [dl.detach() for dl in d]
