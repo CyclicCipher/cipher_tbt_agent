@@ -498,8 +498,17 @@ class PCEMamba3(nn.Module):
             }
 
     def minimize_error_energy(self, x: Tensor, y: Tensor,
-                              output_proj: nn.Module) -> float:
+                              output_proj: nn.Module,
+                              early_stop_rtol: float = 1e-3) -> float:
         """Inference phase: optimize errors to minimize energy.
+
+        Args:
+            x: Input embeddings.
+            y: Target tokens.
+            output_proj: Output projection module.
+            early_stop_rtol: Stop early when relative energy reduction
+                between consecutive iterations falls below this threshold.
+                Set to 0 to disable. Default 1e-3.
 
         Returns:
             Final energy value.
@@ -536,6 +545,8 @@ class PCEMamba3(nn.Module):
             optim = None  # Newton mode
 
         E_val = 0.0
+        E_prev = float('inf')
+        actual_iters = self.iters
 
         for t in range(self.iters):
             if optim is not None:
@@ -558,6 +569,16 @@ class PCEMamba3(nn.Module):
             if t == 0:
                 self._E_initial = E_val
 
+            # Adaptive early stopping: skip remaining iterations when
+            # energy reduction is negligible relative to current energy.
+            if early_stop_rtol > 0 and t > 0:
+                rel_reduction = (E_prev - E_val) / (abs(E_prev) + 1e-10)
+                if rel_reduction < early_stop_rtol:
+                    actual_iters = t + 1
+                    break
+
+            E_prev = E_val
+
             if prof:
                 _t = _sync_time()
 
@@ -577,6 +598,7 @@ class PCEMamba3(nn.Module):
                 prof_step += (_sync_time() - _t) * 1000
 
         self._E_final = E_val
+        self._actual_iters = actual_iters
 
         # Unfreeze weights
         for p in self.layers.parameters():
@@ -610,6 +632,8 @@ class PCEMamba3(nn.Module):
                     norm = torch.linalg.vector_norm(e, ord=2, dim=None).item()
                     diag['error_norms'].append(norm)
                     diag['layer_energies'].append(0.5 * norm ** 2)
+
+        diag['actual_iters'] = getattr(self, '_actual_iters', self.iters)
 
         newton = getattr(self, '_newton_diag', {})
         diag['newton_rank1_ratio'] = newton.get('rank1_ratio', 0.0)

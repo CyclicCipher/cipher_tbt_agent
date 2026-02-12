@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+from contextlib import nullcontext
 import os
 import sys
 import time
@@ -367,6 +368,11 @@ def main():
                         help='Random seed for reproducibility (0 to disable)')
     parser.add_argument('--plot_every', type=int, default=10,
                         help='Save diagnostic plots every N epochs')
+    parser.add_argument('--no_amp', action='store_true',
+                        help='Disable automatic mixed precision (fp16 autocast)')
+    parser.add_argument('--early_stop_rtol', type=float, default=1e-3,
+                        help='Relative energy reduction threshold for early stopping '
+                             'in error optimization (0 to disable)')
     args = parser.parse_args()
 
     if args.no_ipc:
@@ -460,6 +466,13 @@ def main():
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Parameters: {num_params:,}")
 
+    # Mixed precision: fp16 autocast for matmuls, errors stay fp32
+    # (init_zero_errors already forces fp32 on error tensors)
+    use_amp = (not args.no_amp) and device.type == 'cuda'
+    if use_amp:
+        print("Mixed precision: fp16 autocast enabled")
+    autocast_ctx = torch.amp.autocast(device.type, dtype=torch.float16) if use_amp else nullcontext()
+
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     # Diagnostics
@@ -489,26 +502,29 @@ def main():
             if use_epc:
                 t0 = time.perf_counter()
 
-                if args.ipc:
-                    # iPC: interleaved error + weight steps
-                    E_val = model.ipc_train_step(
-                        inputs, targets, optimizer, batch_size, args.w_clip)
-                    loss_val = E_val
-                else:
-                    # Standard ePC: Phase 1 inference, Phase 2 weight update
-                    model(inputs, targets)
+                with autocast_ctx:
+                    if args.ipc:
+                        # iPC: interleaved error + weight steps
+                        E_val = model.ipc_train_step(
+                            inputs, targets, optimizer, batch_size, args.w_clip)
+                        loss_val = E_val
+                    else:
+                        # Standard ePC: Phase 1 inference, Phase 2 weight update
+                        model.pce.minimize_error_energy(
+                            model.embedding(inputs), targets, model.out_proj,
+                            early_stop_rtol=args.early_stop_rtol)
 
-                    optimizer.zero_grad()
-                    weight_loss = model.compute_weight_loss(
-                        inputs, targets, batch_size)
-                    weight_loss.backward()
+                        optimizer.zero_grad()
+                        weight_loss = model.compute_weight_loss(
+                            inputs, targets, batch_size)
+                        weight_loss.backward()
 
-                    if args.w_clip > 0:
-                        torch.nn.utils.clip_grad_norm_(
-                            model.parameters(), max_norm=args.w_clip)
+                        if args.w_clip > 0:
+                            torch.nn.utils.clip_grad_norm_(
+                                model.parameters(), max_norm=args.w_clip)
 
-                    optimizer.step()
-                    loss_val = weight_loss.item()
+                        optimizer.step()
+                        loss_val = weight_loss.item()
 
                 # Collect diagnostics BEFORE accuracy eval (#23)
                 diag = model.get_diagnostics()
@@ -528,10 +544,11 @@ def main():
                 t0 = time.perf_counter()
 
                 optimizer.zero_grad()
-                logits = model(inputs)
-                b, l, v = logits.shape
-                loss = F.cross_entropy(
-                    logits.reshape(b * l, v), targets.reshape(b * l))
+                with autocast_ctx:
+                    logits = model(inputs)
+                    b, l, v = logits.shape
+                    loss = F.cross_entropy(
+                        logits.reshape(b * l, v), targets.reshape(b * l))
                 loss.backward()
 
                 torch.nn.utils.clip_grad_norm_(
