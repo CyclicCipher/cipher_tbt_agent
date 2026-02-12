@@ -329,12 +329,12 @@ def main():
     parser.add_argument('--d_model', type=int, default=128)
     parser.add_argument('--d_state', type=int, default=64)
     parser.add_argument('--n_layer', type=int, default=4)
-    parser.add_argument('--iters', type=int, default=2,
+    parser.add_argument('--iters', type=int, default=5,
                         help='Error optimization iterations (T)')
-    parser.add_argument('--error_optim', type=str, default='newton',
+    parser.add_argument('--error_optim', type=str, default='sgd',
                         choices=['sgd', 'adam', 'newton', 'cg'],
                         help='Error optimizer: sgd, adam, newton, or cg')
-    parser.add_argument('--e_lr', type=float, default=0.02,
+    parser.add_argument('--e_lr', type=float, default=0.001,
                         help='Error learning rate (for sgd/adam)')
     parser.add_argument('--damping', type=float, default=0.1,
                         help='Newton damping factor')

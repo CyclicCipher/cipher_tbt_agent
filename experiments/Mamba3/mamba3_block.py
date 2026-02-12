@@ -122,17 +122,17 @@ def ssd_trapz(x_curr: Tensor, x_prev: Tensor,
     The trapezoidal rule adds a dependence on the PREVIOUS timestep's B*x:
         h_t = exp(Δ*A)*h_{t-1} + (1-λ)*Δ*exp(Δ*A)*B_{t-1}*x_{t-1} + λ*Δ*B_t*x_t
 
-    For the chunked SSD algorithm, we handle this by treating the effective
-    input as a convex combination:
-        input_eff_t = (1-λ_t)*exp(Δ_t*A)*B_{t-1}*x_{t-1} + λ_t*B_t*x_t
+    The effective input at each position is a sum of two outer products:
+        input_t = λ_t * (B_t ⊗ x_t) + (1-λ_t) * exp(A_t) * (B_{t-1} ⊗ x_{t-1})
 
-    The exp(Δ*A) on the previous term rotates/decays it by one step before
-    combining. Within the SSD framework, we approximate by computing both
-    terms and letting the chunked scan handle the recurrence.
+    Because B and x have different shapes (B is head-shared, x is per-head),
+    blending them separately and then multiplying creates spurious cross-terms.
+    Instead, we run the SSD einsums twice — once for the Euler (current) term
+    and once for the trapezoidal (previous) correction — and sum the results.
+    This is exact: no cross-terms, no head-averaging.
 
-    For simplicity and correctness in the pure-PyTorch implementation,
-    we blend the two input contributions before passing to the standard
-    SSD scan.
+    The per-head decay exp(A_t) is absorbed into x_prev, correctly applying
+    head-specific temporal dynamics to the previous-step contribution.
 
     Args:
         x_curr: (batch, seqlen, nheads, headdim) — current input (dt-scaled)
@@ -151,55 +151,41 @@ def ssd_trapz(x_curr: Tensor, x_prev: Tensor,
     batch, seqlen, nheads, headdim = x_curr.shape
     assert seqlen % chunk_size == 0
 
-    # Blend inputs using trapezoidal coefficients:
-    # The Euler contribution (lambda=1): just B_curr * x_curr
-    # The trapezoidal correction: (1-lambda) * decay * B_prev * x_prev
-    # We compute both terms in the B-weighted space inside the SSD scan.
-
-    # For the SSD chunked algorithm, we need to pass through the standard
-    # 4-step procedure. The trapezoidal correction modifies the effective
-    # "B*x" input at each position.
-
-    # Compute per-step decay factor exp(A_t) for the previous-step term
+    # Pre-weight x with trapezoidal coefficients.
+    # Euler term: λ * x_curr (current B/x contribution)
+    # Trapz term: (1-λ) * exp(A) * x_prev (previous B/x, decayed one step)
+    # lam: (batch, seqlen, 1, 1) broadcasts over (nheads, headdim)
+    # Per-head decay applied to x_prev (B is head-shared so doesn't need it)
     step_decay = torch.exp(A)  # (batch, seqlen, nheads)
+    x_euler = lam * x_curr
+    x_trapz = (1.0 - lam) * step_decay.unsqueeze(-1) * x_prev
 
-    # Effective B*x contribution from previous step (decayed by one step)
-    # B_prev * x_prev: need to compute in the right space
-    # Standard SSD computes Bx implicitly via einsum. Here we blend before.
-
-    # Blend x: x_eff = lambda * x_curr + (1-lambda) * decay * x_prev
-    # This is an approximation that works when B_curr ≈ B_prev
-    # For the full trapezoidal with different B_curr/B_prev, we'd need
-    # to modify the SSD scan itself. We use this blend as a practical
-    # approximation.
-    decay_expand = step_decay.unsqueeze(-1)  # (batch, seqlen, nheads, 1)
-    x_eff = lam * x_curr + (1.0 - lam) * decay_expand * x_prev
-
-    # Similarly blend B
-    decay_b = step_decay.unsqueeze(-1).unsqueeze(1)  # need broadcast shape
-    # B is (batch, seqlen, 1, d_state), decay is (batch, seqlen, nheads)
-    # B doesn't have head dim, so decay along B is just scalar per position
-    decay_for_b = torch.exp(A.mean(dim=-1, keepdim=True)).unsqueeze(-1)  # (batch, seqlen, 1, 1)
-    B_eff = lam * B_curr + (1.0 - lam) * decay_for_b * B_prev
-
-    # Now run standard SSD with blended inputs
     def _chunk(t):
         return t.reshape(batch, seqlen // chunk_size, chunk_size, *t.shape[2:])
 
-    x_c, A_c, B_c, C_c = _chunk(x_eff), _chunk(A), _chunk(B_eff), _chunk(C)
+    xE_c, xT_c = _chunk(x_euler), _chunk(x_trapz)
+    A_c = _chunk(A)
+    BE_c, BT_c = _chunk(B_curr), _chunk(B_prev)
+    C_c = _chunk(C)
 
     A_c = A_c.permute(0, 3, 1, 2)  # (batch, nheads, chunks, chunk_size)
     A_cumsum = torch.cumsum(A_c, dim=-1)
 
-    # Step 1: Intra-chunk (diagonal blocks)
+    # Step 1: Intra-chunk (diagonal blocks) — two terms, summed
     L = torch.exp(segsum(A_c))
-    Y_diag = torch.einsum("bclhn, bcshn, bhcls, bcshp -> bclhp", C_c, B_c, L, x_c)
+    Y_diag = (
+        torch.einsum("bclhn, bcshn, bhcls, bcshp -> bclhp", C_c, BE_c, L, xE_c)
+        + torch.einsum("bclhn, bcshn, bhcls, bcshp -> bclhp", C_c, BT_c, L, xT_c)
+    )
 
-    # Step 2: State accumulation
+    # Step 2: State accumulation — two terms, summed
     decay_states = torch.exp(A_cumsum[:, :, :, -1:] - A_cumsum)
-    states = torch.einsum("bclhn, bhcl, bclhp -> bchpn", B_c, decay_states, x_c)
+    states = (
+        torch.einsum("bclhn, bhcl, bclhp -> bchpn", BE_c, decay_states, xE_c)
+        + torch.einsum("bclhn, bhcl, bclhp -> bchpn", BT_c, decay_states, xT_c)
+    )
 
-    # Step 3: Inter-chunk recurrence
+    # Step 3: Inter-chunk recurrence (operates on accumulated states, unchanged)
     initial_states = torch.zeros_like(states[:, :1])
     states = torch.cat([initial_states, states], dim=1)
     decay_chunk = torch.exp(
@@ -208,7 +194,7 @@ def ssd_trapz(x_curr: Tensor, x_prev: Tensor,
     new_states = torch.einsum("bhzc, bchpn -> bzhpn", decay_chunk, states)
     states, final_state = new_states[:, :-1], new_states[:, -1]
 
-    # Step 4: State-to-output
+    # Step 4: State-to-output (operates on accumulated states, unchanged)
     state_decay_out = torch.exp(A_cumsum)
     Y_off = torch.einsum("bclhn, bchpn, bhcl -> bclhp", C_c, states, state_decay_out)
 
