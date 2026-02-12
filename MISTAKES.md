@@ -1086,3 +1086,32 @@ The training loop was only updated at 7fcb4de ("Wire up iPC mode in training loo
 - iPC has NEVER been validated — it may or may not work
 
 **Status:** FIXED (2026-02-12) — iPC disabled by default, defaults corrected
+
+### 32. Autograd HVP Through CE + Multiple Error Nodes Produces NaN (CRITICAL)
+
+**What happened:** CG optimizer's Hessian-vector product (HVP) produced all-NaN results, making CG unusable.
+
+**Root cause:** PyTorch's autograd double-backward through `F.cross_entropy` (internally `log_softmax`) is numerically unstable when **multiple error leaf nodes** simultaneously participate in the computation graph. The NaN arises from the interaction of:
+1. Second derivatives through the CE backward (∂²CE/∂logits² involves softmax Jacobian)
+2. Multiple error paths converging at the same CE loss, creating cross-Hessian terms
+3. Large intermediate values from second derivatives through Mamba3's exp(segsum(...)) chain
+
+The Hessian itself is **mathematically finite** — finite-difference HVP confirms this (diag_hvp.py Part 8h). The NaN is purely an autograd numerical artifact.
+
+**Diagnostic evidence (diag_hvp.py):**
+- Parts 1-6: Every individual component (SSD, Mixer, Block) has valid HVP — OK
+- Part 7: Per-layer error HVP in full ePC model — NaN (all errors in graph via `pce.E`)
+- Part 8e: Single error through all blocks + CE — OK (only one leaf node)
+- Part 8f: All errors in graph + CE — NaN (multiple leaf nodes)
+- Part 8g: All errors in graph + `.sum()` loss — OK (no CE double backward)
+- Part 8h: Numerical (finite-difference) HVP — OK (Hessian is finite)
+
+**Fix:** Replaced autograd HVP (`create_graph=True` + double backward) with finite-difference HVP in `_cg_loop`: `Hd ≈ (g(e+εd) - g(e)) / ε` where ε=1e-4. This:
+- Avoids `create_graph=True` entirely (also saves memory)
+- Has comparable cost (1 extra fwd+bwd vs 1 expensive create_graph bwd + 1 bwd-through-bwd)
+- Is provably correct for the quadratic error terms (exact for any ε)
+- Matches numerical HVP ground truth for the CE terms
+
+**Never do:** Use autograd double-backward (`create_graph=True` → `grad(grad(...))`) through cross-entropy loss when multiple leaf nodes contribute to the same loss. This is a known PyTorch numerical instability.
+
+**Status:** FIXED (2026-02-12) — `_fd_hvp()` method + updated `_cg_loop()` in epc_model.py

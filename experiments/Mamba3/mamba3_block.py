@@ -95,7 +95,12 @@ def apply_rope(x: Tensor, theta: Tensor) -> Tensor:
 # ---------------------------------------------------------------------------
 
 def segsum(x: Tensor) -> Tensor:
-    """Stable segment sum in log-space (same as Mamba2)."""
+    """Stable segment sum in log-space (same as Mamba2).
+
+    Uses a large finite negative instead of -inf for the upper-triangle mask.
+    exp(-1e10) = 0 in fp32/bf16, same as exp(-inf), but -1e10 is finite so
+    second-order autograd (HVP in CG) won't produce 0 * (-inf) = NaN.
+    """
     T = x.size(-1)
     x = x.unsqueeze(-1).expand(*x.shape, T)
     mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=x.device),
@@ -104,7 +109,7 @@ def segsum(x: Tensor) -> Tensor:
     x_segsum = torch.cumsum(x, dim=-2)
     mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=x.device),
                       diagonal=0)
-    x_segsum = x_segsum.masked_fill(~mask, -torch.inf)
+    x_segsum = x_segsum.masked_fill(~mask, -1e10)
     return x_segsum
 
 
