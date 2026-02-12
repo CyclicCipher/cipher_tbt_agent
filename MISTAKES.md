@@ -933,6 +933,7 @@ The actual curvature structure is block-diagonal per layer, not low-rank globall
 - 2026-02-10 (DIAGNOSTIC ORDERING): Mistake #23 - forward(targets=None) resets pce.errors to scalar [0.0], destroying tensor errors before get_diagnostics() could read them. Fix: collect all error-dependent diagnostics before accuracy eval.
 - 2026-02-11 (NEWTON STEP DEBUGGING SPIRAL): Mistakes #24-26 - Three failed attempts to "fix" Newton step for ePC-Mamba. Original rank-1 was working (86%) but we declared it broken and spent hours making it worse. See individual entries below.
 - 2026-02-12 (ADAPTIVE DAMPING REGRESSION): Mistake #30 - Adaptive Newton damping from prospective configuration paper caused complete regression (99.2% → 7.75%). Reverted.
+- 2026-02-12 (IPC NEVER WORKED): Mistake #31 - The "99.2% iPC" result was standard ePC. `--ipc` flag was added to parser/print at f417cb8 but NOT wired into training loop until 7fcb4de. Proof: 97ms speed = standard ePC, loss 290 = E_local/32. Real iPC = 126ms, loss 6834. 6 hours wasted on "non-reproducibility crisis." Standard ePC confirmed working: 99.03% at epoch 27 (seed=0).
 
 ---
 
@@ -1047,3 +1048,41 @@ Layer 1 received 490x less gradient than Layer 2 (from E_local's detach). ||e|| 
 **Root principle:** Don't "improve" a working system based on insights from a paper that uses a fundamentally different optimization method. The prospective configuration paper uses SGD with T=128; we use Newton with T=2. The adaptive damping strategy doesn't transfer across these regimes.
 
 **Status:** REVERTED (2026-02-12) — all adaptive damping code removed, defaults restored
+
+**CORRECTION (2026-02-12):** The "99.2% at epoch 36" baseline this was compared against was NEVER iPC — it was standard ePC (see Mistake #31). The adaptive damping regression may have been partly real but was confounded by the iPC flag being newly wired up at the same time. The true baseline for standard ePC is 99.3% at epoch 44 (or 99.03% at epoch 27 with seed=0).
+
+---
+
+### 31. iPC Flag Was Not Wired Up — "99.2% iPC" Was Actually Standard ePC (CRITICAL)
+
+**What happened:** At commit f417cb8 ("Add iPC method and --ipc CLI flag"):
+- `--ipc` was added to argparse
+- `print("Mode: iPC ...")` was added
+- `ipc_train_step()` was added to epc_model.py
+- **BUT the training loop was NOT updated** — it always ran standard ePC
+
+The training loop was only updated at 7fcb4de ("Wire up iPC mode in training loop"), which added `if args.ipc:` to the batch processing code.
+
+**The experiment that produced 99.2% was run between these commits.** It printed "Mode: IPC" but executed standard ePC. We spent an entire debugging session (~6 hours) trying to reproduce "iPC's 99.2%" — running the exact commit, testing 50 seeds, checking TF32, checking driver versions — when the result was never iPC to begin with.
+
+**Evidence that it was standard ePC:**
+1. **Speed**: 97ms/batch = standard ePC speed. Real iPC runs at 126ms (adds weight update per Newton step)
+2. **Loss scale**: 290 at epoch 1 = E_local/32 (standard ePC reports `weight_loss.item()`). Real iPC reports raw energy (~6834)
+3. **Convergence pattern**: Matches standard ePC's known plateau → phase transition behavior
+
+**Impact of misdiagnosis:**
+- Wasted ~6 hours debugging a "non-reproducibility crisis"
+- Incorrectly blamed adaptive damping (#30), TF32, NVIDIA drivers, environment
+- Added unnecessary TF32 disable code (removed)
+- Created seed sweep and environment diagnostic scripts (useful but misdirected)
+- Multiple incorrect entries in MEMORY.md and MISTAKES.md
+
+**Root principle:** When a CLI flag is added to the parser but not to the execution path, it creates a silent failure — the user sees correct output messages but the feature isn't active. Always verify that a flag actually reaches the code that implements it. Add integration tests or at minimum run a smoke test with observable behavioral difference (e.g., timing or loss scale change).
+
+**Verified working results (2026-02-12):**
+- Standard ePC (seed=0): 99.03% at epoch 27 (phase transition at epoch 19)
+- Standard ePC (no seed, historical): 99.3% at epoch 44
+- Standard ePC (no seed, historical, mislabeled "iPC"): 99.2% at epoch 36
+- iPC has NEVER been validated — it may or may not work
+
+**Status:** FIXED (2026-02-12) — iPC disabled by default, defaults corrected
