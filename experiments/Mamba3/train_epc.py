@@ -367,10 +367,23 @@ def main():
                         help='Random seed for reproducibility (0 to disable)')
     parser.add_argument('--plot_every', type=int, default=10,
                         help='Save diagnostic plots every N epochs')
+    parser.add_argument('--allow_tf32', action='store_true',
+                        help='Allow TF32 matmul (default: disabled for Newton precision)')
     args = parser.parse_args()
 
     if args.no_ipc:
         args.ipc = False
+
+    # Precision: disable TF32 by default for Newton step accuracy.
+    # TF32 reduces float32 mantissa from 23 to 10 bits on Ampere GPUs,
+    # which can corrupt Newton's rank-1 Woodbury step via imprecise gradients.
+    if not args.allow_tf32:
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+        print("TF32 disabled (use --allow_tf32 to re-enable)")
+    else:
+        print(f"TF32: matmul={torch.backends.cuda.matmul.allow_tf32}, "
+              f"cudnn={torch.backends.cudnn.allow_tf32}")
 
     # Reproducibility
     if args.seed > 0:
