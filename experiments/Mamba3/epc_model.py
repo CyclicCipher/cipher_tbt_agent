@@ -271,7 +271,7 @@ class PCEMamba3(nn.Module):
 
         # Scale factor to compensate for small errors from limited SGD/Adam
         # iterations. Newton converges better so errors are larger.
-        if error_optim == 'newton':
+        if error_optim in ('newton', 'cg'):
             self.energy_scale = 1.0
         else:
             self.energy_scale = min(1.0, e_lr * iters)
@@ -497,9 +497,181 @@ class PCEMamba3(nn.Module):
                 'rank1_ratio': uTDinv_u / max(uTDinv_g, 1e-10),
             }
 
+    def _fd_hvp(self, x: Tensor, y: Tensor, output_proj: nn.Module,
+                g: list[Tensor], d: list[Tensor],
+                eps: float = 1e-4) -> list[Tensor]:
+        """Finite-difference Hessian-vector product: Hd ≈ (g(e+εd) - g(e)) / ε.
+
+        Autograd double-backward through CE loss with multiple error nodes
+        in the graph produces NaN (see diag_hvp.py Part 8f). The Hessian
+        itself is finite (numerical HVP confirms it in Part 8h), so this
+        is purely an autograd numerical instability in the second derivative
+        through log-softmax when multiple error leaf nodes interact.
+
+        Finite-difference HVP avoids create_graph entirely and has similar
+        cost: 1 extra fwd+bwd per HVP (vs 1 expensive create_graph bwd +
+        1 bwd-through-bwd for autograd HVP).
+        """
+        # Perturb: e ← e + ε·d
+        with torch.no_grad():
+            for e, dl in zip(self.errors, d):
+                e.data.add_(dl, alpha=eps)
+
+        E_plus = self.E(x, y, output_proj)
+        g_plus = torch.autograd.grad(E_plus, self.errors)
+
+        # Restore: e ← e - ε·d
+        with torch.no_grad():
+            for e, dl in zip(self.errors, d):
+                e.data.add_(dl, alpha=-eps)
+
+        return [(gp.detach() - gc) / eps for gp, gc in zip(g_plus, g)]
+
+    def _cg_loop(self, x: Tensor, y: Tensor, output_proj: nn.Module,
+                 early_stop_rtol: float) -> float:
+        """Conjugate Gradient error optimization.
+
+        CG is provably optimal for quadratic objectives: with K
+        Hessian-vector products (HVPs), it finds the best solution in the
+        K-dimensional Krylov subspace span{g, Hg, H²g, ...}.
+
+        CG-1 (iters=1) is steepest descent with exact line search:
+          α = gᵀg / gᵀHg,  e ← -α·g
+
+        This directly measures curvature along g via the HVP, instead of
+        estimating it from a rank-1 approximation (Newton). During the
+        plateau, Newton's rank-1 overestimates curvature by ||u||²
+        (dimension-dependent), producing steps that are orders of magnitude
+        too small. CG's α uses gᵀHg (exact curvature along g).
+
+        For K>1, uses nonlinear Polak-Ribière+ CG with gradient
+        recomputation at each step (handles non-quadratic E from Mamba).
+
+        Uses finite-difference HVP instead of autograd double-backward.
+        Autograd HVP through CE + multiple error nodes produces NaN (see
+        diag_hvp.py Part 8f); FD-HVP is numerically stable and has
+        comparable cost.
+
+        Cost: CG-1 ≈ 2 fwd + 2 bwd (same as Newton T=2).
+              CG-K ≈ (K+1) fwd + 2K bwd.
+
+        Returns:
+            Final energy value.
+        """
+        # Force fp32 for the entire CG loop.
+        x = x.float()
+        device_type = x.device.type
+
+        with torch.amp.autocast(device_type, enabled=False):
+            # Initial forward + gradient
+            E = self.E(x, y, output_proj)
+            E_val = E.item()
+            self._E_initial = E_val
+
+            if self.iters == 0:
+                self._E_final = E_val
+                self._actual_iters = 0
+                self._cg_diag = {}
+                return E_val
+
+            g = torch.autograd.grad(E, self.errors)
+            g = [gl.detach() for gl in g]
+
+            # CG state: r = -g (residual), d = r (search direction)
+            r = [-gl.clone() for gl in g]
+            d = [rl.clone() for rl in r]
+            rTr = sum(torch.dot(rl.reshape(-1), rl.reshape(-1)).item()
+                      for rl in r)
+
+            alpha_val = 0.0
+            dTHd_val = 0.0
+            actual_iters = self.iters
+            E_prev = E_val
+
+            for k in range(self.iters):
+                if k > 0:
+                    # Recompute gradient at updated e (nonlinear CG)
+                    E = self.E(x, y, output_proj)
+                    E_val = E.item()
+
+                    # Early stopping
+                    if early_stop_rtol > 0:
+                        rel_reduction = (E_prev - E_val) / (abs(E_prev) + 1e-10)
+                        if rel_reduction < early_stop_rtol:
+                            actual_iters = k
+                            break
+                    E_prev = E_val
+
+                    g = torch.autograd.grad(E, self.errors)
+                    g = [gl.detach() for gl in g]
+
+                    r_new = [-gl.clone() for gl in g]
+                    rTr_new = sum(
+                        torch.dot(rl.reshape(-1), rl.reshape(-1)).item()
+                        for rl in r_new)
+
+                    # Polak-Ribière+ beta (restart on negative beta)
+                    pr_num = sum(
+                        torch.dot(
+                            rn.reshape(-1), (rn - ro).reshape(-1)
+                        ).item()
+                        for rn, ro in zip(r_new, r))
+                    beta = max(0.0, pr_num / max(rTr, 1e-30))
+
+                    d = [rn + beta * do for rn, do in zip(r_new, d)]
+                    r = r_new
+                    rTr = rTr_new
+
+                # FD-HVP: Hd ≈ (g(e+εd) - g(e)) / ε
+                Hd = self._fd_hvp(x, y, output_proj, g, d)
+
+                dTHd = sum(
+                    torch.dot(dl.reshape(-1), hdl.reshape(-1)).item()
+                    for dl, hdl in zip(d, Hd))
+                dTHd_val = dTHd
+
+                # Step size: α = rᵀr / dᵀHd
+                if dTHd <= 0:
+                    # Negative curvature fallback
+                    alpha = self.e_lr
+                else:
+                    alpha = rTr / dTHd
+                alpha_val = alpha
+
+                # Update errors: e ← e + α·d
+                with torch.no_grad():
+                    for e, dl in zip(self.errors, d):
+                        e.data.add_(dl.detach(), alpha=alpha)
+
+                # Detach d for next iteration
+                d = [dl.detach() for dl in d]
+
+            # Final energy
+            with torch.no_grad():
+                E_final = self.E(x, y, output_proj)
+                self._E_final = E_final.item()
+
+        self._actual_iters = actual_iters
+        self._cg_diag = {
+            'rTr': rTr,
+            'alpha': alpha_val,
+            'dTHd': dTHd_val,
+        }
+
+        return self._E_final
+
     def minimize_error_energy(self, x: Tensor, y: Tensor,
-                              output_proj: nn.Module) -> float:
+                              output_proj: nn.Module,
+                              early_stop_rtol: float = 1e-3) -> float:
         """Inference phase: optimize errors to minimize energy.
+
+        Args:
+            x: Input embeddings.
+            y: Target tokens.
+            output_proj: Output projection module.
+            early_stop_rtol: Stop early when relative energy reduction
+                between consecutive iterations falls below this threshold.
+                Set to 0 to disable. Default 1e-3.
 
         Returns:
             Final energy value.
@@ -527,6 +699,16 @@ class PCEMamba3(nn.Module):
             prof_bwd = 0.0
             prof_step = 0.0
 
+        # CG has its own loop structure (needs HVPs via create_graph)
+        if self.error_optim_mode == 'cg':
+            E_val = self._cg_loop(x, y, output_proj, early_stop_rtol)
+            for p in self.layers.parameters():
+                p.requires_grad_(True)
+            for p in self.out_norm.parameters():
+                p.requires_grad_(True)
+            output_proj.requires_grad_(True)
+            return E_val
+
         # Create first-order optimizer if needed
         if self.error_optim_mode == 'sgd':
             optim = torch.optim.SGD(self.errors, lr=self.e_lr)
@@ -536,6 +718,8 @@ class PCEMamba3(nn.Module):
             optim = None  # Newton mode
 
         E_val = 0.0
+        E_prev = float('inf')
+        actual_iters = self.iters
 
         for t in range(self.iters):
             if optim is not None:
@@ -558,6 +742,16 @@ class PCEMamba3(nn.Module):
             if t == 0:
                 self._E_initial = E_val
 
+            # Adaptive early stopping: skip remaining iterations when
+            # energy reduction is negligible relative to current energy.
+            if early_stop_rtol > 0 and t > 0:
+                rel_reduction = (E_prev - E_val) / (abs(E_prev) + 1e-10)
+                if rel_reduction < early_stop_rtol:
+                    actual_iters = t + 1
+                    break
+
+            E_prev = E_val
+
             if prof:
                 _t = _sync_time()
 
@@ -577,6 +771,7 @@ class PCEMamba3(nn.Module):
                 prof_step += (_sync_time() - _t) * 1000
 
         self._E_final = E_val
+        self._actual_iters = actual_iters
 
         # Unfreeze weights
         for p in self.layers.parameters():
@@ -611,9 +806,16 @@ class PCEMamba3(nn.Module):
                     diag['error_norms'].append(norm)
                     diag['layer_energies'].append(0.5 * norm ** 2)
 
+        diag['actual_iters'] = getattr(self, '_actual_iters', self.iters)
+
         newton = getattr(self, '_newton_diag', {})
         diag['newton_rank1_ratio'] = newton.get('rank1_ratio', 0.0)
         diag['newton_coeff'] = newton.get('coeff', 0.0)
+
+        cg = getattr(self, '_cg_diag', {})
+        diag['cg_alpha'] = cg.get('alpha', 0.0)
+        diag['cg_dTHd'] = cg.get('dTHd', 0.0)
+
         diag['precisions'] = self.precisions
 
         return diag
