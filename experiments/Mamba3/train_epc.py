@@ -466,12 +466,13 @@ def main():
     num_params = sum(p.numel() for p in model.parameters())
     print(f"Parameters: {num_params:,}")
 
-    # Mixed precision: fp16 autocast for matmuls, errors stay fp32
-    # (init_zero_errors already forces fp32 on error tensors)
+    # Mixed precision: bfloat16 autocast for matmuls, errors stay fp32.
+    # bfloat16 has same exponent range as fp32 (±3.4e38), avoiding overflow
+    # in SSD's log-space cumsum→exp (segsum). fp16 overflows at ±65504.
     use_amp = (not args.no_amp) and device.type == 'cuda'
     if use_amp:
-        print("Mixed precision: fp16 autocast enabled")
-    autocast_ctx = torch.amp.autocast(device.type, dtype=torch.float16) if use_amp else nullcontext()
+        print("Mixed precision: bfloat16 autocast enabled")
+    autocast_ctx = torch.amp.autocast(device.type, dtype=torch.bfloat16) if use_amp else nullcontext()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
