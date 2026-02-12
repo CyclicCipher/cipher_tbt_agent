@@ -237,15 +237,12 @@ for step in range(T):
 This is gradient descent with noise. The gradient tells z which direction
 reduces energy. The noise helps escape local minima.
 
-### Noise Schedule (Annealing)
+### Noise Schedule (NOT Simple Annealing — See Below)
 
-```
-sigma_t = sigma_0 · (1 - t/T)
-```
-
-Early steps: high noise, broad exploration of the energy landscape.
-Late steps: low noise, convergence to a specific minimum.
-At test time: drop noise entirely for deterministic gradient descent.
+**The naive linear schedule `σ_t = σ_0·(1 - t/T)` is wrong.** It assumes
+we'll be at a good minimum by step T and doesn't respond to the actual
+state of the optimization. See the dedicated noise scheduling section
+below for the correct approach.
 
 ### Adaptive Stopping
 
@@ -571,3 +568,465 @@ If this fails, the failure mode tells us what to add:
 - Energy landscape too flat → add contrastive training
 - Too many Langevin steps → add encoder-informed initialization
 - Can't compose reasoning → add CTKG (Phase 3)
+
+---
+
+## Noise Scheduling: Why Linear Annealing Is Wrong
+
+### The Problem With `σ_t = σ_0 · (1 - t/T)`
+
+This schedule has three fatal assumptions:
+
+1. **Assumes we'll reach a good minimum by step T.** But we don't know T
+   in advance, and the energy landscape varies per input.
+
+2. **Doesn't respond to the optimization state.** If we're stuck in a bad
+   minimum at step T/2, we've already halved our noise — not enough to
+   escape.
+
+3. **Can't distinguish "converged well" from "stuck badly."** Both have
+   small gradients. Low gradient + low energy = success. Low gradient +
+   high energy = trapped. The schedule treats them identically.
+
+### The Core Dilemma
+
+The user identified this precisely: if gradient is steep, we don't need
+noise (just follow the gradient). If we've hit a minimum but energy is
+still high, we need MORE noise. But if we crank up noise to escape, how
+do we know when to turn it back down?
+
+The naive answer "reduce noise when gradient becomes steep again" fails
+because the gradient becomes steep as soon as we start climbing OUT of
+the bad minimum — before we've actually escaped. We'd reduce noise,
+lose momentum, and fall back into the same trap.
+
+### Three Approaches That Actually Work
+
+#### Approach 1: Cyclical Annealing (cSGLD)
+
+Don't try to detect when to change noise. Just CYCLE it periodically.
+
+```
+σ_t = σ_max · 0.5 · (1 + cos(π · (t mod T_cycle) / T_cycle))
+```
+
+Each cycle: noise starts high (explore), cosine-decays to near-zero
+(exploit), then RESETS to high (explore again). Multiple cycles give
+multiple escape opportunities.
+
+**Why this works:** You don't need to know when you're stuck. The
+periodic reheating ensures you'll get another chance to escape even if
+the current cycle converged to a bad minimum. Zhang et al. (ICLR 2020)
+showed a single cSGLD chain running 200 epochs outperformed 4 parallel
+SGLD chains at 100 epochs each on CIFAR-10.
+
+**Within each cycle, two phases:**
+1. **Exploration** (large σ): Move aggressively, escape local modes
+2. **Exploitation** (small σ): Characterize the current mode precisely
+
+This naturally addresses the "when to reduce noise" question: always
+reduce it on the same schedule, but always bring it back.
+
+**Recommended for Phase 1.** Simple to implement, no hyperparameter
+tuning for noise adaptation, proven effective.
+
+#### Approach 2: Energy-Dependent Noise (CSGLD)
+
+Make noise a function of the current energy level.
+
+The Contour SGLD method (Deng et al., NeurIPS 2020) learns the density
+of states (energy PDF) on-the-fly and uses it to flatten the energy
+landscape. The striking feature: CSGLD can produce NEGATIVE effective
+learning rates in low-energy regions, actively bouncing the particle
+OUT of local traps.
+
+Simplified version for our use case:
+
+```python
+# Adaptive noise based on energy and gradient
+grad_norm = torch.norm(grad_z)
+energy_ratio = E / (grad_norm + eps)
+
+if grad_norm > steep_threshold:
+    # Steep gradient: follow it, low noise
+    sigma = sigma_base
+elif E > good_energy_threshold:
+    # Flat + high energy: stuck in bad minimum, high noise
+    sigma = sigma_base * energy_ratio.clamp(max=sigma_max_ratio)
+else:
+    # Flat + low energy: good minimum, low noise
+    sigma = sigma_base * 0.1
+```
+
+The key diagnostic is the ratio E / ||∇E||:
+- High E / high grad → on a steep slope → σ low (follow gradient)
+- High E / low grad → stuck → σ high (escape)
+- Low E / low grad → good solution → σ low (converge)
+
+**More sophisticated but more effective.** Consider for Phase 2 if
+cyclical annealing proves insufficient.
+
+#### Approach 3: Gradient-Dependent Preconditioning (pSGLD)
+
+Instead of a scalar noise, use per-dimension adaptive noise via
+RMSProp-style preconditioning:
+
+```python
+V = alpha * V + (1 - alpha) * grad_z**2
+G = 1.0 / (sqrt(V) + lambda_reg)
+z = z - (eta/2) * G * grad_z + sqrt(eta * G) * noise
+```
+
+This automatically gives MORE noise to dimensions with historically
+small gradients (flat directions = stuck = need noise) and LESS noise to
+dimensions with large gradients (steep = making progress = don't perturb).
+
+**The elegance:** this solves the "when to reduce noise" problem
+PER-DIMENSION. Some dimensions of z might be converged (low noise) while
+others are still exploring (high noise). This is impossible with a scalar
+σ schedule.
+
+### Should Noise Be Dropped at Test Time?
+
+**No.** This is a stronger claim than what the document previously stated.
+
+Evidence from the literature:
+- **IREM** (Du et al., 2022): Maintained noise at test time with σ=65.
+  Running more noisy steps improved performance. Trained with 5 steps,
+  benefited from 30 at inference.
+- **IRED** (Du et al., ICML 2024): Uses annealed noise at inference.
+  More steps at each noise level improved harder problems.
+- **EBM-CoT** (Chen et al., 2025): Keeps the `√(2η)·ε` noise term
+  during inference. Only uses 3 steps but noise is present in all of them.
+
+**Why noise helps at test time:**
+
+1. **Exploration of equivalent solutions.** Many reasoning problems have
+   multiple valid approaches. Noise helps discover different solution
+   paths. Deterministic descent commits to whichever basin you start in.
+
+2. **Escaping spurious minima.** The learned energy landscape will have
+   artifacts — local minima that don't correspond to good solutions.
+   Noise helps escape these.
+
+3. **Calibration.** With noise, Langevin dynamics samples from
+   p(z) ∝ exp(-E(z)/T). This gives calibrated uncertainty. Without noise,
+   you get a point estimate (the mode), which is overconfident.
+
+4. **Reasoning requires backtracking.** Real reasoning involves trying
+   an approach, discovering it fails, and backtracking. Noise IS the
+   backtracking mechanism. Without it, you commit to the first approach.
+
+**Recommended approach for test time:**
+- Use cyclical annealing (Approach 1) with fewer, shorter cycles
+- OR use pSGLD (Approach 3) which naturally reduces noise in converged
+  dimensions while maintaining it in uncertain ones
+- Final 1-2 steps can use reduced noise for refinement, but don't
+  zero it out entirely
+
+### The Physics Analogy: Not Charcoal, but Tempering Steel
+
+The user asked about a phase-transition analogy. The right one isn't
+burning (irreversible destruction) — it's **tempering steel**:
+
+1. **Heat** the metal (high noise): atoms become mobile, crystal
+   structure breaks down, the system explores many configurations
+2. **Hold at temperature** (sustained noise): the system finds better
+   crystalline arrangements that it couldn't reach from the cold state
+3. **Cool slowly** (reduce noise): atoms lock into the improved
+   structure
+4. **Repeat** (cyclical): each tempering cycle further improves the
+   crystal, removing defects that survived the previous cycle
+
+The key insight: you don't need to know when the crystal is "good enough"
+to cool. You just cycle. Each cycle improves the material. The tempering
+schedule is fixed, not adaptive to the material's state. This is exactly
+cyclical annealing.
+
+Parallel tempering goes further: run multiple copies of the steel at
+different temperatures simultaneously. Swap configurations between them.
+The hot copies find new crystal structures, the cold copies refine them.
+This is even more effective but costs K× the compute.
+
+---
+
+## How Langevin Research Solves the ePC Plateau
+
+### The Plateau as a Cold-Start Problem
+
+The ePC plateau (documented in PHASE_TRANSITION_ANALYSIS.md) is caused by
+a circular dependency:
+
+```
+Newton effectiveness → error magnitude → E_local gradient quality
+        ↑                                          │
+        └── Jacobian structure ← weight updates ◄──┘
+```
+
+Newton can't find errors because the Jacobian is unstructured.
+Weights can't improve because errors are zero.
+The system is at a FIXED POINT with zero gradient — a cold start.
+
+Langevin noise is the physics solution to exactly this problem:
+**add thermal energy to escape a fixed point.**
+
+### The Specific Mechanism
+
+Replace Newton error optimization with Langevin during early training:
+
+```python
+# Current ePC: Newton on errors (fails when Jacobian is bad)
+e_i = newton_step(e_i, jacobian)  # ||e|| ≈ 10⁻⁶ during plateau
+
+# Proposed: Langevin on errors (works regardless of Jacobian)
+grad_e = autograd.grad(E_local, e_i)
+e_i = e_i - eta * grad_e + sigma * noise  # ||e|| ≈ sigma >> 10⁻⁶
+```
+
+Even with a terrible Jacobian, the noise term injects errors of magnitude
+σ. These noisy errors provide E_local gradients of magnitude ~σ, which
+drive weight learning. The weight learning improves the Jacobian. The
+improved Jacobian makes the gradient term `η·∇E` more useful. Positive
+feedback begins.
+
+### Why Noisy Errors Still Provide Signal
+
+Concern: if errors are mostly noise, don't the gradients cancel out?
+
+**Over a single batch: yes, mostly noise.**
+**Over many batches: the signal accumulates, noise averages out.**
+
+This is exactly SGLD theory (Welling & Teh, 2011). The gradient term
+points consistently toward the loss minimum. The noise term is i.i.d.
+and averages to zero. Over B batches:
+- Signal accumulates as O(B)
+- Noise accumulates as O(√B)
+- Signal-to-noise ratio grows as O(√B)
+
+The learning is SLOWER than post-transition Newton (which provides clean
+signal), but it's NONZERO learning during what was previously a dead
+plateau. Trading speed for breaking the deadlock.
+
+### The Bootstrap Strategy
+
+The ideal approach combines Langevin and Newton:
+
+```python
+# Detect whether Newton is effective
+newton_convergence = E_after_newton / E_before_newton
+
+if newton_convergence > 0.95:
+    # Newton barely helps — Jacobian is bad — use Langevin
+    e_i = langevin_step(e_i, grad_e, sigma=sigma_high)
+else:
+    # Newton is effective — Jacobian is good — use Newton
+    e_i = newton_step(e_i, jacobian)
+```
+
+During the plateau: newton_convergence ≈ 1.0 → Langevin mode.
+After transition: newton_convergence << 1.0 → Newton mode.
+The switch happens automatically.
+
+Noise schedule for the bootstrap: use CYCLICAL annealing on σ. Early
+cycles with high σ_max break the deadlock. As the Jacobian improves
+(detected by Newton convergence), the system spends more time in Newton
+mode and less in Langevin mode. Eventually Langevin is never triggered.
+
+### The Deeper Unification
+
+If ePC's error optimization becomes Langevin-capable, then the project
+has TWO levels of energy minimization using the SAME algorithm:
+
+```
+Outer loop: Langevin on z    (reasoning — finding good latent states)
+Inner loop: Langevin on e_i  (ePC — finding good error corrections)
+```
+
+Insights transfer bidirectionally:
+- Better noise schedules discovered for reasoning → apply to ePC
+- Bootstrap strategy from ePC → adaptive compute for reasoning
+- pSGLD preconditioning → per-dimension adaptation at both levels
+
+This unification also means the system has a single algorithmic primitive
+(Langevin dynamics) applied at different scales, which is elegant and
+testable.
+
+### Why This Matters: Catastrophic Forgetting
+
+The reason we want ePC to work (not just use backprop) is catastrophic
+forgetting. Backprop's weight updates for task B destroy features learned
+for task A because the global gradient doesn't respect local feature
+boundaries.
+
+ePC's local learning avoids this: each layer's update is driven by ITS
+OWN prediction error, not by a global gradient flowing through the
+entire network. When the task changes from A to B:
+- Backprop: gradients for B flow through all layers, overwriting A's features
+- ePC: each layer adjusts to its local prediction error, preserving
+  features that are still useful (because they still predict well locally)
+
+If Langevin can solve the plateau, we get ePC's continual learning
+benefits without the 19-epoch startup cost. This is the path from
+"backprop as stopgap" to "ePC as the real training algorithm."
+
+---
+
+## Open Question Resolution (4GB VRAM + Unsupervised Learning)
+
+Given the constraints:
+- GeForce RTX 3050 Ti, 4GB VRAM
+- No labeled datasets, unsupervised learning goal
+
+Here is the resolution of each open question:
+
+### Q1: How should z be initialized? → Pure Noise (Option A)
+
+**Resolution: z ~ N(0, I), no encoder-informed initialization.**
+
+Rationale under unsupervised constraint:
+- Without labels, the JEPA prediction loss is the only training signal
+- If z is initialized from s_context, the predictor can learn to IGNORE z
+  (since s_context already contains all information)
+- With labeled data, a strong supervised loss would force z to be used
+  even with warm initialization
+- Without labels, we need the architectural guarantee that z provides
+  DIFFERENT information than s_context — random initialization ensures this
+
+VRAM impact: Negligible. z ∈ R^{64} is 256 bytes.
+
+If convergence is too slow, the fix is NOT warm initialization — it's
+better noise scheduling (cyclical annealing) or more Langevin steps
+(we have VRAM headroom: the memory budget shows 200-800 MB used, leaving
+3+ GB).
+
+### Q2: What dimensionality for z? → 64
+
+**Resolution: d_z = 64.**
+
+Rationale: Half of d_model (128). Gives 64 semi-independent directions
+after VICReg decorrelation. Memory negligible at any reasonable d_z.
+
+The real constraint is Langevin convergence: higher d_z means searching
+a higher-dimensional space. With pSGLD's per-dimension adaptation, this
+is mitigated — each dimension gets its own effective step size. At d_z=64,
+convergence in 3-5 steps is feasible (EBM-CoT uses 3 steps at similar
+dimensionality).
+
+### Q3: E_pred at inference time? → Self-Prediction Consistency (Option A)
+
+**Resolution: Option A — self-prediction consistency.**
+
+This is the only option that works purely unsupervised:
+
+```python
+# Mask part of the sequence
+s_context = encoder(x_visible)
+
+# Predict the masked part
+s_pred = predictor(s_context, z)
+
+# E_pred measures: how well do predictions agree with each other?
+# Multiple masked positions should produce mutually consistent predictions
+E_pred = consistency_loss(s_pred)
+```
+
+Option B (decoder confidence) requires a decoder that produces
+meaningful logits, which implies some form of supervised signal.
+Option C (learned energy head) needs training signal to define "high"
+vs "low" energy, which is hard without labels.
+
+Option A needs NOTHING external. The model judges its own consistency.
+This is exactly what JEPA does: learn representations where self-
+prediction works, then use prediction quality as the energy signal.
+
+### Q4: How to train the energy function? → JEPA + VICReg
+
+**Resolution: JEPA training with VICReg regularization. No labels needed.**
+
+```python
+# Training step (fully self-supervised):
+x_context, x_target = mask_and_split(x)
+s_context = context_encoder(x_context)
+s_target = target_encoder(x_target)       # EMA of context encoder
+
+z = torch.randn(batch_size, d_z)           # Random z during training
+s_pred = predictor(s_context, z)
+
+L_pred = ||s_pred - s_target.detach()||²   # JEPA prediction loss
+L_vic = vicreg(s_context)                  # Anti-collapse
+L_total = L_pred + β_var·L_variance + β_cov·L_covariance
+```
+
+The energy landscape emerges implicitly: regions of z-space where
+the predictor produces good predictions have low E_pred. Training
+with VICReg ensures the landscape has meaningful structure (no collapse).
+
+If the landscape is too flat or has too many spurious minima (diagnosed
+by: Langevin steps don't reduce energy, or energy reduction doesn't
+improve output quality), add contrastive training:
+
+```python
+# Contrastive: corrupt z, train energy to be high for corrupted
+z_good = langevin_refine(z_init, s_context, T=3)
+z_bad = z_good + large_noise  # or shuffle z across batch
+L_contrast = max(0, E(z_good) - E(z_bad) + margin)
+```
+
+This is also unsupervised — "bad" configurations are generated by
+corruption, not from labels.
+
+### Q5: Gradient flow through Langevin? → None During Training
+
+**Resolution: No backprop through Langevin steps. Per the ROADMAP:
+"Training = backprop. Inference = energy minimization."**
+
+VRAM impact: This is the most important decision for 4GB. Backpropagating
+through T Langevin steps requires storing T sets of intermediate
+activations. At T=3 with the narrow predictor, this would cost
+~150-600 MB (per ROADMAP memory budget). Without backprop through
+Langevin, training costs only the normal JEPA forward+backward.
+
+Savings: ~150-600 MB VRAM, which we can use for larger batch size
+or longer sequences.
+
+If we later need end-to-end training through Langevin (because the
+energy landscape doesn't shape well from JEPA alone), options:
+- Implicit differentiation at z* (constant memory regardless of T)
+- Truncated backprop through last 1-2 steps only
+- Both fit in 4GB with T≤5
+
+### Q6: Connection to ePC? → Backprop Now, Langevin-ePC Later
+
+**Resolution: Option A (backprop) for Phase 1. Langevin-bootstrapped ePC
+as a future research direction.**
+
+Phase 1 goal: prove that JEPA + Langevin reasoning works at all. Using
+backprop for training is the simplest path to this proof. ePC adds
+complexity (the plateau problem) without adding capability for Phase 1.
+
+Future direction: once Langevin noise scheduling is proven to work for
+reasoning (Phase 2), apply the same techniques to solve the ePC plateau
+(see "How Langevin Research Solves the ePC Plateau" section above). This
+gives us ePC's local learning benefits (no catastrophic forgetting) with
+Langevin's plateau-breaking capability.
+
+The phased approach:
+1. Phase 1-2: Backprop training + Langevin inference (prove reasoning)
+2. Future: Langevin-bootstrapped ePC training + Langevin inference
+   (get continual learning)
+
+### Summary: Concrete Phase 1 Decisions
+
+| Question | Decision | Rationale |
+|----------|----------|-----------|
+| z structure | Dense z ∈ R^{64} | Minimal, no slot assumptions |
+| z initialization | z ~ N(0,I) | Forces z usage without labels |
+| z conditioning | Additive projection | Minimal realization |
+| Noise schedule | Cyclical annealing (cSGLD) | Robust, no adaptive tuning needed |
+| Test-time noise | Annealed but NOT dropped | Literature consensus; enables backtracking |
+| E_pred (inference) | Self-prediction consistency | Works unsupervised |
+| Training | JEPA + VICReg (backprop) | Simple, proven, low VRAM |
+| Backprop through Langevin | No | Saves 150-600 MB VRAM |
+| ePC integration | None (Phase 1) | Reduce complexity, prove concept first |
+| Validation task | Sorting or simple logic | Requires multi-step reasoning |
+| Memory budget | ~200-800 MB of 4096 MB | 3+ GB headroom for scaling |
