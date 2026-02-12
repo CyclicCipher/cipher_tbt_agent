@@ -54,11 +54,16 @@ def test_hvp(name, fn, x_shape, device, seed=42):
 
     d = -g.detach()
     s = torch.sum(g * d)
+
+    if not s.requires_grad:
+        print(f"  {name:55s}: OK   |g|={g_norm:.4g}  |Hd|=0 (H=0, linear fn)")
+        return False
+
     Hd_tuple = torch.autograd.grad(s, e, allow_unused=True)
     Hd = Hd_tuple[0]
 
     if Hd is None:
-        print(f"  {name:55s}: OK   |g|={g_norm:.4g}  |Hd|=0 (linear, no 2nd deriv)")
+        print(f"  {name:55s}: OK   |g|={g_norm:.4g}  |Hd|=0 (unused in graph)")
         return False
 
     hd_nan = torch.isnan(Hd).any().item()
@@ -405,10 +410,16 @@ def main():
 
         d = -g.detach()
         s = torch.sum(g * d)
+        g_norm = torch.linalg.vector_norm(g).item()
+
+        if not s.requires_grad:
+            print(f"  error[{idx}] HVP: OK   |g|={g_norm:.4g}  |Hd|=0 (H=0)")
+            pce.init_zero_errors(x)
+            continue
+
         Hd_tuple = torch.autograd.grad(s, [e], allow_unused=True)
         Hd = Hd_tuple[0]
 
-        g_norm = torch.linalg.vector_norm(g).item()
         if Hd is None:
             print(f"  error[{idx}] HVP: OK   |g|={g_norm:.4g}  |Hd|=0 (unused)")
             pce.init_zero_errors(x)
