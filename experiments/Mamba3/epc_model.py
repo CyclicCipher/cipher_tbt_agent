@@ -523,128 +523,103 @@ class PCEMamba3(nn.Module):
         Returns:
             Final energy value.
         """
-        # Initial forward + gradient (with graph for HVP)
-        E = self.E(x, y, output_proj)
-        E_val = E.item()
-        self._E_initial = E_val
+        # Force fp32 for the entire CG loop. The HVP (second derivative)
+        # through bfloat16 autocast operations produces NaN — SSD's
+        # log-space cumsum/exp chain is numerically unstable at second order
+        # in reduced precision.
+        x = x.float()
+        device_type = x.device.type
 
-        if self.iters == 0:
-            self._E_final = E_val
-            self._actual_iters = 0
-            self._cg_diag = {}
-            return E_val
+        with torch.amp.autocast(device_type, enabled=False):
+            # Initial forward + gradient (with graph for HVP)
+            E = self.E(x, y, output_proj)
+            E_val = E.item()
+            self._E_initial = E_val
 
-        _cg_debug = getattr(self, '_cg_debug_count', 0)
-        _do_debug = _cg_debug < 5
-        self._cg_debug_count = _cg_debug + 1
+            if self.iters == 0:
+                self._E_final = E_val
+                self._actual_iters = 0
+                self._cg_diag = {}
+                return E_val
 
-        if _do_debug:
-            print(f"  [CG debug] E_initial={E_val:.4f}, "
-                  f"E_nan={math.isnan(E_val)}")
+            g = torch.autograd.grad(E, self.errors, create_graph=True)
 
-        g = torch.autograd.grad(E, self.errors, create_graph=True)
+            # CG state: r = -g (residual), d = r (search direction)
+            r = [(-gl).detach() for gl in g]
+            d = [rl.clone() for rl in r]
+            rTr = sum(torch.dot(rl.reshape(-1), rl.reshape(-1)).item()
+                      for rl in r)
 
-        if _do_debug:
-            g_norms = [torch.linalg.vector_norm(gl).item() for gl in g]
-            g_nans = [torch.isnan(gl).any().item() for gl in g]
-            print(f"  [CG debug] g norms={g_norms}, g_has_nan={g_nans}")
+            alpha_val = 0.0
+            dTHd_val = 0.0
+            actual_iters = self.iters
+            E_prev = E_val
 
-        # CG state: r = -g (residual), d = r (search direction)
-        r = [(-gl).detach() for gl in g]
-        d = [rl.clone() for rl in r]
-        rTr = sum(torch.dot(rl.reshape(-1), rl.reshape(-1)).item()
-                  for rl in r)
+            for k in range(self.iters):
+                if k > 0:
+                    # Recompute gradient at updated e (nonlinear CG)
+                    E = self.E(x, y, output_proj)
+                    E_val = E.item()
 
-        alpha_val = 0.0
-        dTHd_val = 0.0
-        actual_iters = self.iters
-        E_prev = E_val
+                    # Early stopping
+                    if early_stop_rtol > 0:
+                        rel_reduction = (E_prev - E_val) / (abs(E_prev) + 1e-10)
+                        if rel_reduction < early_stop_rtol:
+                            actual_iters = k
+                            break
+                    E_prev = E_val
 
-        for k in range(self.iters):
-            if k > 0:
-                # Recompute gradient at updated e (nonlinear CG)
-                E = self.E(x, y, output_proj)
-                E_val = E.item()
+                    g = torch.autograd.grad(
+                        E, self.errors, create_graph=True)
 
-                # Early stopping
-                if early_stop_rtol > 0:
-                    rel_reduction = (E_prev - E_val) / (abs(E_prev) + 1e-10)
-                    if rel_reduction < early_stop_rtol:
-                        actual_iters = k
-                        break
-                E_prev = E_val
+                    r_new = [(-gl).detach() for gl in g]
+                    rTr_new = sum(
+                        torch.dot(rl.reshape(-1), rl.reshape(-1)).item()
+                        for rl in r_new)
 
-                g = torch.autograd.grad(
-                    E, self.errors, create_graph=True)
+                    # Polak-Ribière+ beta (restart on negative beta)
+                    pr_num = sum(
+                        torch.dot(
+                            rn.reshape(-1), (rn - ro).reshape(-1)
+                        ).item()
+                        for rn, ro in zip(r_new, r))
+                    beta = max(0.0, pr_num / max(rTr, 1e-30))
 
-                r_new = [(-gl).detach() for gl in g]
-                rTr_new = sum(
-                    torch.dot(rl.reshape(-1), rl.reshape(-1)).item()
-                    for rl in r_new)
+                    d = [rn + beta * do for rn, do in zip(r_new, d)]
+                    r = r_new
+                    rTr = rTr_new
 
-                # Polak-Ribière+ beta (restart on negative beta)
-                pr_num = sum(
-                    torch.dot(
-                        rn.reshape(-1), (rn - ro).reshape(-1)
-                    ).item()
-                    for rn, ro in zip(r_new, r))
-                beta = max(0.0, pr_num / max(rTr, 1e-30))
+                # HVP: H @ d
+                d_det = [dl.detach() for dl in d]
+                s = sum(torch.sum(gl * dl)
+                        for gl, dl in zip(g, d_det))
+                Hd = torch.autograd.grad(s, self.errors)
 
-                d = [rn + beta * do for rn, do in zip(r_new, d)]
-                r = r_new
-                rTr = rTr_new
+                dTHd = sum(
+                    torch.dot(dl.reshape(-1), hdl.reshape(-1)).item()
+                    for dl, hdl in zip(d, Hd))
+                dTHd_val = dTHd
 
-            # HVP: H @ d
-            d_det = [dl.detach() for dl in d]
-            s = sum(torch.sum(gl * dl)
-                    for gl, dl in zip(g, d_det))
+                # Step size: α = rᵀr / dᵀHd
+                if dTHd <= 0:
+                    # Negative curvature fallback
+                    alpha = self.e_lr
+                else:
+                    alpha = rTr / dTHd
+                alpha_val = alpha
 
-            if _do_debug:
-                print(f"  [CG debug] s={s.item():.6f}, s_nan={math.isnan(s.item())}")
+                # Update errors: e ← e + α·d
+                with torch.no_grad():
+                    for e, dl in zip(self.errors, d):
+                        e.data.add_(dl.detach(), alpha=alpha)
 
-            Hd = torch.autograd.grad(s, self.errors)
+                # Detach d for next iteration
+                d = [dl.detach() for dl in d]
 
-            if _do_debug:
-                hd_norms = [torch.linalg.vector_norm(h).item() for h in Hd]
-                hd_nans = [torch.isnan(h).any().item() for h in Hd]
-                print(f"  [CG debug] Hd norms={hd_norms}, Hd_has_nan={hd_nans}")
-
-            dTHd = sum(
-                torch.dot(dl.reshape(-1), hdl.reshape(-1)).item()
-                for dl, hdl in zip(d, Hd))
-            dTHd_val = dTHd
-
-            # Step size: α = rᵀr / dᵀHd
-            if dTHd <= 0:
-                # Negative curvature fallback
-                alpha = self.e_lr
-            else:
-                alpha = rTr / dTHd
-            alpha_val = alpha
-
-            if _do_debug:
-                print(f"  [CG debug] rTr={rTr:.6f}, dTHd={dTHd:.6f}, "
-                      f"alpha={alpha:.6f}")
-
-            # Update errors: e ← e + α·d
+            # Final energy
             with torch.no_grad():
-                for e, dl in zip(self.errors, d):
-                    e.data.add_(dl.detach(), alpha=alpha)
-
-            if _do_debug:
-                e_norms = [torch.linalg.vector_norm(e).item()
-                           for e in self.errors]
-                e_nans = [torch.isnan(e).any().item() for e in self.errors]
-                print(f"  [CG debug] post-step error norms={e_norms}, "
-                      f"has_nan={e_nans}")
-
-            # Detach d for next iteration
-            d = [dl.detach() for dl in d]
-
-        # Final energy
-        with torch.no_grad():
-            E_final = self.E(x, y, output_proj)
-            self._E_final = E_final.item()
+                E_final = self.E(x, y, output_proj)
+                self._E_final = E_final.item()
 
         self._actual_iters = actual_iters
         self._cg_diag = {
