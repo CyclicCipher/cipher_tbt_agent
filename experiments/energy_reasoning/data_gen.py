@@ -37,6 +37,37 @@ def generate_mask(batch_size: int, seq_len: int, mask_ratio: float = 0.2,
     return mask
 
 
+def generate_causal_mask(batch_size: int, seq_len: int, mask_ratio: float = 0.2,
+                         device: torch.device = torch.device('cpu')) -> Tensor:
+    """Generate mask biased toward later positions (causal-friendly).
+
+    Mamba3 is causal: position t only sees 0..t-1. Masking early
+    positions gives the predictor almost no context. This mask samples
+    from the latter half of the sequence, ensuring each masked position
+    has ample causal context.
+
+    Args:
+        batch_size: Number of samples.
+        seq_len: Sequence length.
+        mask_ratio: Fraction of positions to mask.
+        device: Target device.
+
+    Returns:
+        mask: (batch_size, seq_len) boolean tensor.
+    """
+    n_mask = max(1, int(seq_len * mask_ratio))
+    # Only mask from the second half of the sequence
+    start = seq_len // 2
+    candidates = seq_len - start
+    n_mask = min(n_mask, candidates)
+
+    mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=device)
+    for i in range(batch_size):
+        idx = torch.randperm(candidates, device=device)[:n_mask] + start
+        mask[i, idx] = True
+    return mask
+
+
 def generate_last_token_mask(batch_size: int, seq_len: int,
                              device: torch.device = torch.device('cpu')) -> Tensor:
     """Mask only the last position (for pattern induction answer)."""

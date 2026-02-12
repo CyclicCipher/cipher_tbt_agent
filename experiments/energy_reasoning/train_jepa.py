@@ -26,6 +26,7 @@ Usage:
 """
 
 import argparse
+import math
 import os
 import sys
 import time
@@ -45,7 +46,8 @@ from experiments.energy_reasoning.jepa_model import (
     JEPAModel, LangevinDynamics, vicreg_loss,
 )
 from experiments.energy_reasoning.data_gen import (
-    get_stage_data, generate_mask, generate_last_token_mask,
+    get_stage_data, generate_mask, generate_causal_mask,
+    generate_last_token_mask,
 )
 
 
@@ -70,7 +72,8 @@ def compute_masked_accuracy(logits, tokens, mask):
     return (preds[mask] == tokens[mask]).float().mean().item()
 
 
-def evaluate_stage1(model, test_loader, mask_ratio, device):
+def evaluate_stage1(model, test_loader, mask_ratio, device,
+                    mask_mode='causal'):
     """Evaluate Stage 1: masked prediction without z."""
     model.eval()
     total_jepa = 0.0
@@ -81,7 +84,12 @@ def evaluate_stage1(model, test_loader, mask_ratio, device):
     with torch.no_grad():
         for batch in test_loader:
             seqs = batch[0].to(device)
-            mask = generate_mask(seqs.shape[0], seqs.shape[1], mask_ratio, device)
+            if mask_mode == 'causal':
+                mask = generate_causal_mask(
+                    seqs.shape[0], seqs.shape[1], mask_ratio, device)
+            else:
+                mask = generate_mask(
+                    seqs.shape[0], seqs.shape[1], mask_ratio, device)
 
             result = model.forward_train(seqs, mask, z=None)
             total_jepa += result['L_jepa'].item()
@@ -254,7 +262,7 @@ class JEPADiagnostics:
             ax.plot(epochs[:len(train_avg)], train_avg, 'b-',
                     label='Train', linewidth=2)
         ax.set_xlabel('Epoch')
-        ax.set_ylabel('L2 Loss')
+        ax.set_ylabel('Loss')
         ax.set_title('JEPA Prediction Loss')
         ax.legend()
         ax.grid(True, alpha=0.3)
@@ -435,19 +443,30 @@ def main():
     # Training
     parser.add_argument('--epochs', type=int, default=30)
     parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--lr', type=float, default=1e-3,
+                        help='Peak learning rate')
+    parser.add_argument('--warmup_epochs', type=int, default=4,
+                        help='LR warmup epochs (linear ramp from lr/5 to lr)')
     parser.add_argument('--w_clip', type=float, default=1.0,
                         help='Gradient clipping max norm (0 to disable)')
 
     # JEPA / VICReg
-    parser.add_argument('--ema_tau', type=float, default=0.996,
-                        help='Target encoder EMA coefficient')
-    parser.add_argument('--lambda_decode', type=float, default=0.1,
-                        help='Decode CE loss weight')
+    parser.add_argument('--ema_tau_start', type=float, default=0.996,
+                        help='EMA tau at start of training')
+    parser.add_argument('--ema_tau_end', type=float, default=1.0,
+                        help='EMA tau at end of training (linear schedule)')
+    parser.add_argument('--jepa_loss', type=str, default='cosine',
+                        choices=['cosine', 'l2'],
+                        help='JEPA loss: cosine (scale-invariant) or l2')
+    parser.add_argument('--lambda_decode', type=float, default=1.0,
+                        help='Decode CE loss weight (LLM-JEPA: equal to JEPA)')
     parser.add_argument('--lambda_var', type=float, default=1.0,
                         help='VICReg variance loss weight')
     parser.add_argument('--lambda_cov', type=float, default=0.04,
                         help='VICReg covariance loss weight')
+    parser.add_argument('--mask_mode', type=str, default='causal',
+                        choices=['causal', 'random'],
+                        help='Mask mode: causal (latter half only) or random')
 
     # z / Langevin (Stage 2)
     parser.add_argument('--z_mode', type=str, default='none',
@@ -565,14 +584,30 @@ def main():
         pred_config=pred_config,
         vocab_size=args.vocab_size,
         d_z=args.d_z,
-        ema_tau=args.ema_tau,
+        ema_tau_start=args.ema_tau_start,
+        ema_tau_end=args.ema_tau_end,
+        jepa_loss_type=args.jepa_loss,
     ).to(device)
 
     num_params = sum(p.numel() for p in model.get_trainable_params())
     num_params_total = sum(p.numel() for p in model.parameters())
     print(f"Trainable params: {num_params:,} / Total: {num_params_total:,}")
+    print(f"JEPA loss: {args.jepa_loss}, EMA tau: {args.ema_tau_start}→{args.ema_tau_end}")
+    print(f"Mask mode: {args.mask_mode}, LR warmup: {args.warmup_epochs} epochs")
 
     optimizer = torch.optim.AdamW(model.get_trainable_params(), lr=args.lr)
+
+    # Cosine LR schedule with linear warmup
+    def lr_lambda(epoch):
+        if epoch < args.warmup_epochs:
+            # Linear warmup from lr/5 to lr
+            return 0.2 + 0.8 * epoch / max(args.warmup_epochs, 1)
+        # Cosine decay to lr/100
+        progress = (epoch - args.warmup_epochs) / max(
+            args.epochs - args.warmup_epochs, 1)
+        return 0.01 + 0.99 * 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     # Langevin sampler (Stage 2)
     langevin = LangevinDynamics(
@@ -616,6 +651,9 @@ def main():
             # --- Generate mask ---
             if args.stage == '2':
                 mask = generate_last_token_mask(B, seqs.shape[1], device)
+            elif args.mask_mode == 'causal':
+                mask = generate_causal_mask(
+                    B, seqs.shape[1], args.mask_ratio, device)
             else:
                 mask = generate_mask(B, seqs.shape[1], args.mask_ratio, device)
 
@@ -691,6 +729,10 @@ def main():
             ep_ms += ms
             n_batches += 1
 
+        # --- End-of-epoch: update schedules ---
+        scheduler.step()
+        model.set_ema_progress(epoch / args.epochs)
+
         # --- End-of-epoch evaluation ---
         if args.stage == '2':
             test_metrics = evaluate_stage2(
@@ -698,7 +740,8 @@ def main():
                 args.d_z, args.n_rules)
         else:
             test_metrics = evaluate_stage1(
-                model, test_loader, args.mask_ratio, device)
+                model, test_loader, args.mask_ratio, device,
+                mask_mode=args.mask_mode)
 
         diagnostics.update_test(test_metrics)
         best_test_acc = max(best_test_acc, test_metrics['accuracy'])

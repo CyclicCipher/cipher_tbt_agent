@@ -252,14 +252,19 @@ class JEPAModel(nn.Module):
         pred_config: Mamba3Config,
         vocab_size: int,
         d_z: int = 64,
-        ema_tau: float = 0.996,
+        ema_tau_start: float = 0.996,
+        ema_tau_end: float = 1.0,
+        jepa_loss_type: str = 'cosine',
     ):
         super().__init__()
         self.enc_config = enc_config
         self.pred_config = pred_config
         self.vocab_size = vocab_size
         self.d_z = d_z
-        self.ema_tau = ema_tau
+        self.ema_tau_start = ema_tau_start
+        self.ema_tau_end = ema_tau_end
+        self.ema_tau = ema_tau_start  # current tau, updated by set_ema_progress
+        self.jepa_loss_type = jepa_loss_type
 
         # Context encoder (trained via gradient descent)
         self.context_encoder = Mamba3Encoder(enc_config, vocab_size)
@@ -287,6 +292,15 @@ class JEPAModel(nn.Module):
                             self.context_encoder.parameters()):
             p_t.data.mul_(self.ema_tau).add_(p_c.data, alpha=1 - self.ema_tau)
 
+    def set_ema_progress(self, progress: float):
+        """Update EMA tau based on training progress (0.0 = start, 1.0 = end).
+
+        Linear schedule from ema_tau_start to ema_tau_end.
+        Early: lower tau → target tracks context faster (adapts to rapid changes).
+        Late: higher tau → target nearly frozen (stable prediction targets).
+        """
+        self.ema_tau = self.ema_tau_start + progress * (self.ema_tau_end - self.ema_tau_start)
+
     def encode(self, input_ids: Tensor, mask: Tensor = None) -> Tensor:
         """Encode with context encoder (mask applied)."""
         return self.context_encoder(input_ids, mask=mask)
@@ -305,22 +319,38 @@ class JEPAModel(nn.Module):
         return self.decoder(s)
 
     def compute_jepa_loss(self, s_pred: Tensor, s_target: Tensor,
-                          mask: Tensor) -> Tensor:
-        """L2 prediction loss on masked positions.
+                          mask: Tensor,
+                          loss_type: str = 'cosine') -> Tensor:
+        """Prediction loss on masked positions.
 
         Args:
             s_pred: (batch, seq_len, d_enc) predicted representations.
             s_target: (batch, seq_len, d_enc) target representations (detached).
             mask: (batch, seq_len) boolean.
+            loss_type: 'cosine' (1 - cos_sim, scale-invariant) or
+                       'l2' (mean squared error).
 
         Returns:
-            Scalar loss: mean squared error over masked positions.
+            Scalar loss over masked positions.
         """
-        diff = s_pred - s_target.detach()
-        mask_expanded = mask.unsqueeze(-1).float()  # (batch, seq_len, 1)
-        diff_masked = diff * mask_expanded
-        n_masked = mask.sum().clamp(min=1).float()
-        return diff_masked.pow(2).sum() / (n_masked * s_pred.shape[-1])
+        target = s_target.detach()
+        if loss_type == 'cosine':
+            # Cosine similarity loss on masked positions (LLM-JEPA finding:
+            # cosine >> L2 for sequence models). Scale-invariant, so immune
+            # to representation magnitude drift that causes L2 to rise.
+            pred_masked = s_pred[mask]      # (n_masked, d_enc)
+            tgt_masked = target[mask]       # (n_masked, d_enc)
+            if pred_masked.shape[0] == 0:
+                return torch.tensor(0.0, device=s_pred.device)
+            sim = F.cosine_similarity(pred_masked, tgt_masked, dim=-1)
+            return (1.0 - sim).mean()
+        else:
+            # L2 loss (original)
+            diff = s_pred - target
+            mask_expanded = mask.unsqueeze(-1).float()
+            diff_masked = diff * mask_expanded
+            n_masked = mask.sum().clamp(min=1).float()
+            return diff_masked.pow(2).sum() / (n_masked * s_pred.shape[-1])
 
     def compute_decode_loss(self, s_pred: Tensor, tokens: Tensor,
                             mask: Tensor) -> Tensor:
@@ -358,7 +388,8 @@ class JEPAModel(nn.Module):
         s_target = self.encode_target(input_ids)
         s_pred = self.predict(s_context, z)
 
-        L_jepa = self.compute_jepa_loss(s_pred, s_target, mask)
+        L_jepa = self.compute_jepa_loss(s_pred, s_target, mask,
+                                         loss_type=self.jepa_loss_type)
         L_decode = self.compute_decode_loss(s_pred, input_ids, mask)
         L_var, L_cov = vicreg_loss(s_context)
 
