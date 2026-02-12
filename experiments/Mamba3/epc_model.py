@@ -497,6 +497,36 @@ class PCEMamba3(nn.Module):
                 'rank1_ratio': uTDinv_u / max(uTDinv_g, 1e-10),
             }
 
+    def _fd_hvp(self, x: Tensor, y: Tensor, output_proj: nn.Module,
+                g: list[Tensor], d: list[Tensor],
+                eps: float = 1e-4) -> list[Tensor]:
+        """Finite-difference Hessian-vector product: Hd ≈ (g(e+εd) - g(e)) / ε.
+
+        Autograd double-backward through CE loss with multiple error nodes
+        in the graph produces NaN (see diag_hvp.py Part 8f). The Hessian
+        itself is finite (numerical HVP confirms it in Part 8h), so this
+        is purely an autograd numerical instability in the second derivative
+        through log-softmax when multiple error leaf nodes interact.
+
+        Finite-difference HVP avoids create_graph entirely and has similar
+        cost: 1 extra fwd+bwd per HVP (vs 1 expensive create_graph bwd +
+        1 bwd-through-bwd for autograd HVP).
+        """
+        # Perturb: e ← e + ε·d
+        with torch.no_grad():
+            for e, dl in zip(self.errors, d):
+                e.data.add_(dl, alpha=eps)
+
+        E_plus = self.E(x, y, output_proj)
+        g_plus = torch.autograd.grad(E_plus, self.errors)
+
+        # Restore: e ← e - ε·d
+        with torch.no_grad():
+            for e, dl in zip(self.errors, d):
+                e.data.add_(dl, alpha=-eps)
+
+        return [(gp.detach() - gc) / eps for gp, gc in zip(g_plus, g)]
+
     def _cg_loop(self, x: Tensor, y: Tensor, output_proj: nn.Module,
                  early_stop_rtol: float) -> float:
         """Conjugate Gradient error optimization.
@@ -517,21 +547,23 @@ class PCEMamba3(nn.Module):
         For K>1, uses nonlinear Polak-Ribière+ CG with gradient
         recomputation at each step (handles non-quadratic E from Mamba).
 
+        Uses finite-difference HVP instead of autograd double-backward.
+        Autograd HVP through CE + multiple error nodes produces NaN (see
+        diag_hvp.py Part 8f); FD-HVP is numerically stable and has
+        comparable cost.
+
         Cost: CG-1 ≈ 2 fwd + 2 bwd (same as Newton T=2).
               CG-K ≈ (K+1) fwd + 2K bwd.
 
         Returns:
             Final energy value.
         """
-        # Force fp32 for the entire CG loop. The HVP (second derivative)
-        # through bfloat16 autocast operations produces NaN — SSD's
-        # log-space cumsum/exp chain is numerically unstable at second order
-        # in reduced precision.
+        # Force fp32 for the entire CG loop.
         x = x.float()
         device_type = x.device.type
 
         with torch.amp.autocast(device_type, enabled=False):
-            # Initial forward + gradient (with graph for HVP)
+            # Initial forward + gradient
             E = self.E(x, y, output_proj)
             E_val = E.item()
             self._E_initial = E_val
@@ -542,10 +574,11 @@ class PCEMamba3(nn.Module):
                 self._cg_diag = {}
                 return E_val
 
-            g = torch.autograd.grad(E, self.errors, create_graph=True)
+            g = torch.autograd.grad(E, self.errors)
+            g = [gl.detach() for gl in g]
 
             # CG state: r = -g (residual), d = r (search direction)
-            r = [(-gl).detach() for gl in g]
+            r = [-gl.clone() for gl in g]
             d = [rl.clone() for rl in r]
             rTr = sum(torch.dot(rl.reshape(-1), rl.reshape(-1)).item()
                       for rl in r)
@@ -569,10 +602,10 @@ class PCEMamba3(nn.Module):
                             break
                     E_prev = E_val
 
-                    g = torch.autograd.grad(
-                        E, self.errors, create_graph=True)
+                    g = torch.autograd.grad(E, self.errors)
+                    g = [gl.detach() for gl in g]
 
-                    r_new = [(-gl).detach() for gl in g]
+                    r_new = [-gl.clone() for gl in g]
                     rTr_new = sum(
                         torch.dot(rl.reshape(-1), rl.reshape(-1)).item()
                         for rl in r_new)
@@ -589,11 +622,8 @@ class PCEMamba3(nn.Module):
                     r = r_new
                     rTr = rTr_new
 
-                # HVP: H @ d
-                d_det = [dl.detach() for dl in d]
-                s = sum(torch.sum(gl * dl)
-                        for gl, dl in zip(g, d_det))
-                Hd = torch.autograd.grad(s, self.errors)
+                # FD-HVP: Hd ≈ (g(e+εd) - g(e)) / ε
+                Hd = self._fd_hvp(x, y, output_proj, g, d)
 
                 dTHd = sum(
                     torch.dot(dl.reshape(-1), hdl.reshape(-1)).item()

@@ -666,6 +666,47 @@ def main():
     for e in pce.errors:
         e.data.zero_()
 
+    # ================================================================
+    print(f"\n{'=' * 70}")
+    print("PART 9: FD-HVP via PCEMamba3._fd_hvp (the fix)")
+    print("=" * 70)
+
+    # Test that _fd_hvp produces finite results where autograd HVP NaN'd
+    pce.init_zero_errors(x)
+    E = pce.E(x, targets, out_proj_fn)
+    g = torch.autograd.grad(E, pce.errors)
+    g = [gl.detach() for gl in g]
+    d = [-gl.clone() for gl in g]
+
+    Hd_fd2 = pce._fd_hvp(x, targets, out_proj_fn, g, d)
+    hd0 = Hd_fd2[0]
+    hd0_nan = torch.isnan(hd0).any().item()
+    hd0_norm = torch.linalg.vector_norm(hd0).item()
+    status = "NaN!" if hd0_nan else "OK"
+    print(f"  _fd_hvp (all errors, CE loss)             : {status:4s}"
+          f"  |Hd[0]|={hd0_norm:.4g}")
+
+    # Verify dTHd > 0 (positive curvature along steepest descent)
+    dTHd = sum(torch.dot(dl.reshape(-1), hdl.reshape(-1)).item()
+               for dl, hdl in zip(d, Hd_fd2))
+    print(f"  dTHd (curvature along -g)                 : {dTHd:.4g}"
+          f"  {'(positive - OK)' if dTHd > 0 else '(non-positive - WARNING)'}")
+
+    # Also test the full CG loop runs without error
+    pce.init_zero_errors(x)
+    try:
+        E_final = pce._cg_loop(x, targets, out_proj_fn, early_stop_rtol=0)
+        cg_diag = pce._cg_diag
+        print(f"  _cg_loop completed                        : OK"
+              f"   E={E_final:.4g}  alpha={cg_diag['alpha']:.4g}"
+              f"  dTHd={cg_diag['dTHd']:.4g}")
+    except Exception as ex:
+        print(f"  _cg_loop FAILED                           : {ex}")
+
+    # Reset errors to zero
+    for e in pce.errors:
+        e.data.zero_()
+
     # Unfreeze all
     for p in model.parameters():
         p.requires_grad_(True)
