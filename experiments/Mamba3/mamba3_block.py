@@ -43,6 +43,7 @@ class Mamba3Config:
     mlp_expand: int = 4      # SwiGLU MLP expansion (typical: 4x or 8/3x)
     use_conv: bool = False   # optional short convolution (Mamba3 removes it)
     d_conv: int = 4          # convolution kernel size (if use_conv=True)
+    use_pope: bool = False   # PoPE (Polar Positional Embeddings) instead of RoPE
 
     def __post_init__(self):
         self.d_inner = self.expand * self.d_model
@@ -88,6 +89,31 @@ def apply_rope(x: Tensor, theta: Tensor) -> Tensor:
     rx1 = x1 * cos_t - x2 * sin_t
     rx2 = x1 * sin_t + x2 * cos_t
     return torch.cat([rx1, rx2], dim=-1)
+
+
+def apply_pope(x: Tensor, theta: Tensor, delta: Tensor) -> Tensor:
+    """Apply Polar Coordinate Positional Embedding (PoPE).
+
+    Decouples content ("what") from position ("where") by encoding
+    content purely in magnitude (via softplus) and position purely
+    in phase (via rotation).  Each scalar feature becomes a 2D
+    (cos, sin) pair, so d features → 2d output.
+
+    Reference: Gopalakrishnan et al. 2024, "Decoupling the 'What'
+    and 'Where' With Polar Coordinate Positional Embeddings".
+
+    Args:
+        x: (..., d) raw features (pre-softplus).
+        theta: (..., d) rotation angles (one per feature).
+        delta: (d,) learnable bias added before softplus.
+
+    Returns:
+        (..., 2*d) polar-encoded tensor.
+    """
+    mu = F.softplus(x + delta)  # (..., d) positive magnitudes
+    cos_t = torch.cos(theta)
+    sin_t = torch.sin(theta)
+    return torch.cat([mu * cos_t, mu * sin_t], dim=-1)
 
 
 # ---------------------------------------------------------------------------
@@ -226,24 +252,34 @@ class Mamba3Mixer(nn.Module):
         d = config.d_inner
         n = config.d_state
 
+        # With PoPE, B/C are projected to half-size (n//2) then expanded
+        # to full d_state via polar encoding.  Theta dimension is the same.
+        d_bc = n // 2 if config.use_pope else n
+
         # Input projection: [z, x, B, C, dt, theta, lambda]
         # z: gating (d_inner)
         # x: SSM input (d_inner)
-        # B: input projection (d_state)
-        # C: output projection (d_state)
+        # B: input projection (d_bc)
+        # C: output projection (d_bc)
         # dt: timestep (nheads)
-        # theta: RoPE angles (d_state // 2)
+        # theta: rotation angles (d_state // 2)
         # lambda: trapezoidal mixing (1 scalar)
-        d_in_proj = 2 * d + 2 * n + config.nheads + n // 2 + 1
+        d_in_proj = 2 * d + 2 * d_bc + config.nheads + n // 2 + 1
         self.in_proj = nn.Linear(config.d_model, d_in_proj, bias=False)
 
         # BC bias (learnable, channel-wise)
-        self.B_bias = nn.Parameter(torch.zeros(n))
-        self.C_bias = nn.Parameter(torch.zeros(n))
+        # For PoPE these also serve as the learnable delta offset
+        self.B_bias = nn.Parameter(torch.zeros(d_bc))
+        self.C_bias = nn.Parameter(torch.zeros(d_bc))
 
-        # QK-norm on B, C
-        self.B_norm = RMSNorm(n)
-        self.C_norm = RMSNorm(n)
+        # QK-norm on B, C (applied on raw features before rotation/polar encoding)
+        self.B_norm = RMSNorm(d_bc)
+        self.C_norm = RMSNorm(d_bc)
+
+        # PoPE learnable phase bias (delta) — controls softplus operating point
+        if config.use_pope:
+            self.pope_delta_B = nn.Parameter(torch.zeros(d_bc))
+            self.pope_delta_C = nn.Parameter(torch.zeros(d_bc))
 
         # Optional short convolution
         if config.use_conv:
@@ -290,10 +326,11 @@ class Mamba3Mixer(nn.Module):
         A = -torch.exp(self.A_log)  # (nheads,)
 
         # Project input
+        d_bc = cfg.d_state // 2 if cfg.use_pope else cfg.d_state
         proj = self.in_proj(u)
         z, x, B, C, dt, theta, lam_logit = torch.split(
             proj,
-            [cfg.d_inner, cfg.d_inner, cfg.d_state, cfg.d_state,
+            [cfg.d_inner, cfg.d_inner, d_bc, d_bc,
              cfg.nheads, cfg.d_state // 2, 1],
             dim=-1,
         )
@@ -313,12 +350,18 @@ class Mamba3Mixer(nn.Module):
         B = self.B_norm(B + self.B_bias)
         C = self.C_norm(C + self.C_bias)
 
-        # Apply data-dependent RoPE to B and C
-        # theta: (batch, seqlen, d_state//2) — cumulative rotation angles
-        # Accumulate theta across positions for the rotation
+        # Accumulate theta across positions for positional encoding
         theta_cumsum = torch.cumsum(theta, dim=1)
-        B = apply_rope(B, theta_cumsum)
-        C = apply_rope(C, theta_cumsum)
+
+        if cfg.use_pope:
+            # PoPE: softplus magnitudes + phase-only rotation
+            # B, C: (batch, seqlen, d_state//2) → (batch, seqlen, d_state)
+            B = apply_pope(B, theta_cumsum, self.pope_delta_B)
+            C = apply_pope(C, theta_cumsum, self.pope_delta_C)
+        else:
+            # Standard data-dependent RoPE on B and C
+            B = apply_rope(B, theta_cumsum)
+            C = apply_rope(C, theta_cumsum)
 
         # Reshape for multi-head SSD
         x = x.reshape(batch, seqlen, cfg.nheads, cfg.headdim)
