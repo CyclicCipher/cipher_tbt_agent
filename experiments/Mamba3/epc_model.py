@@ -435,7 +435,8 @@ class PCEMamba3(nn.Module):
 
     def minimize_error_energy(self, x: Tensor, y: Tensor,
                               output_proj: nn.Module,
-                              early_stop_rtol: float = 1e-3) -> float:
+                              early_stop_rtol: float = 1e-3,
+                              min_iters: int = 2) -> float:
         """Inference phase: optimize errors to minimize energy.
 
         Args:
@@ -445,6 +446,7 @@ class PCEMamba3(nn.Module):
             early_stop_rtol: Stop early when relative energy reduction
                 between consecutive iterations falls below this threshold.
                 Set to 0 to disable. Default 1e-3.
+            min_iters: Minimum iterations before early stopping is checked.
 
         Returns:
             Final energy value.
@@ -500,7 +502,8 @@ class PCEMamba3(nn.Module):
 
             # Adaptive early stopping: skip remaining iterations when
             # energy reduction is negligible relative to current energy.
-            if early_stop_rtol > 0 and t > 0:
+            # Only check after min_iters full steps have completed.
+            if early_stop_rtol > 0 and t >= min_iters:
                 rel_reduction = (E_prev - E_val) / (abs(E_prev) + 1e-10)
                 if rel_reduction < early_stop_rtol:
                     actual_iters = t + 1

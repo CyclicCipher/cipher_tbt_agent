@@ -338,6 +338,11 @@ def main():
     parser.add_argument('--precision_mode', type=str, default='geometric',
                         choices=['none', 'linear', 'geometric'])
     parser.add_argument('--precision_base', type=float, default=3.0)
+    parser.add_argument('--early_stop_rtol', type=float, default=1e-3,
+                        help='Early stopping tolerance for error energy '
+                             '(0 to disable)')
+    parser.add_argument('--min_iters', type=int, default=2,
+                        help='Minimum error iterations before early stopping')
     parser.add_argument('--ipc', action='store_true',
                         help='Use incremental PC (interleaved steps)')
 
@@ -402,6 +407,8 @@ def main():
     print(f"Predictor: d={pred_config.d_model}, layers={pred_config.n_layer}")
     print(f"ePC: T={args.iters}, e_lr={args.e_lr}, "
           f"optim={args.error_optim}, prec={args.precision_mode}")
+    print(f"Early stop: rtol={args.early_stop_rtol}, "
+          f"min_iters={args.min_iters}")
 
     # -----------------------------------------------------------------------
     # Data
@@ -473,8 +480,8 @@ def main():
           f"T={args.iters} | e_lr={args.e_lr}")
     print(f"{'='*65}")
     print(f"{'Epoch':>5} {'E_init':>8} {'E_fin':>8} {'JEPA':>8} "
-          f"{'DecCE':>8} {'Acc':>8} {'TestAcc':>8} {'ms/b':>7}")
-    print("-" * 65)
+          f"{'DecCE':>8} {'Acc':>8} {'TestAcc':>8} {'ms/b':>7} {'iters':>5}")
+    print("-" * 70)
 
     best_test_acc = 0.0
 
@@ -490,6 +497,7 @@ def main():
         ep_dec = 0.0
         ep_acc = 0.0
         ep_ms = 0.0
+        ep_iters = 0.0
         n_batches = 0
 
         for batch in train_loader:
@@ -506,7 +514,10 @@ def main():
                     seqs, s_target, optimizer, B, w_clip=args.w_clip)
             else:
                 # Phase 1: error optimization
-                model.minimize_error_energy(seqs, s_target)
+                model.minimize_error_energy(
+                    seqs, s_target,
+                    early_stop_rtol=args.early_stop_rtol,
+                    min_iters=args.min_iters)
 
                 # Phase 2: weight optimization
                 optimizer.zero_grad()
@@ -560,6 +571,7 @@ def main():
             ep_dec += dec_l
             ep_acc += acc
             ep_ms += ms
+            ep_iters += diag['actual_iters']
             n_batches += 1
 
         # --- End-of-epoch ---
@@ -577,10 +589,11 @@ def main():
         avg_dec = ep_dec / n_batches
         avg_acc = ep_acc / n_batches
         avg_ms = ep_ms / n_batches
+        avg_it = ep_iters / n_batches
 
         print(f"{epoch:5d} {avg_ei:8.4f} {avg_ef:8.4f} {avg_jepa:8.4f} "
               f"{avg_dec:8.4f} {avg_acc:8.4f} {test_metrics['accuracy']:8.4f} "
-              f"{avg_ms:7.1f}")
+              f"{avg_ms:7.1f} {avg_it:5.1f}")
 
         # Plot
         if epoch % args.plot_every == 0 or epoch == args.epochs:

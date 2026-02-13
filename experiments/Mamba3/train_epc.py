@@ -404,6 +404,8 @@ def main():
     parser.add_argument('--early_stop_rtol', type=float, default=1e-3,
                         help='Relative energy reduction threshold for early stopping '
                              'in error optimization (0 to disable)')
+    parser.add_argument('--min_iters', type=int, default=2,
+                        help='Minimum error iterations before early stopping')
     args = parser.parse_args()
 
     if args.no_ipc:
@@ -561,7 +563,8 @@ def main():
                         # Standard ePC: Phase 1 inference, Phase 2 weight update
                         model.pce.minimize_error_energy(
                             model.embedding(inputs), targets, model.out_proj,
-                            early_stop_rtol=args.early_stop_rtol)
+                            early_stop_rtol=args.early_stop_rtol,
+                            min_iters=args.min_iters)
 
                         optimizer.zero_grad()
                         weight_loss = model.compute_weight_loss(

@@ -338,7 +338,8 @@ class ePCJEPAModel(nn.Module):
     def minimize_error_energy(self, input_ids: Tensor,
                                s_target: Tensor,
                                z: Tensor = None,
-                               early_stop_rtol: float = 1e-3) -> float:
+                               early_stop_rtol: float = 1e-3,
+                               min_iters: int = 2) -> float:
         """Phase 1: optimize errors to minimize energy.
 
         Freezes all weights. Runs T iterations of SGD/Adam on errors.
@@ -350,6 +351,7 @@ class ePCJEPAModel(nn.Module):
             s_target: (batch, seq_len, d) target encoder representations.
             z: Optional latent variable.
             early_stop_rtol: Stop if relative energy reduction < this.
+            min_iters: Minimum iterations before early stopping is checked.
 
         Returns:
             Final energy value.
@@ -376,7 +378,8 @@ class ePCJEPAModel(nn.Module):
             if t == 0:
                 self._E_initial = E_val
 
-            if early_stop_rtol > 0 and t > 0:
+            # Only check early stopping after min_iters full steps
+            if early_stop_rtol > 0 and t >= min_iters:
                 rel_reduction = (E_prev - E_val) / (abs(E_prev) + 1e-10)
                 if rel_reduction < early_stop_rtol:
                     actual_iters = t + 1
