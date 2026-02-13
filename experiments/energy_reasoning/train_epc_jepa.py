@@ -333,7 +333,7 @@ def main():
                         help='Error optimization iterations (T)')
     parser.add_argument('--e_lr', type=float, default=0.001,
                         help='Error learning rate')
-    parser.add_argument('--error_optim', type=str, default='sgd',
+    parser.add_argument('--error_optim', type=str, default='adam',
                         choices=['sgd', 'adam'])
     parser.add_argument('--precision_mode', type=str, default='geometric',
                         choices=['none', 'linear', 'geometric'])
@@ -360,6 +360,10 @@ def main():
     parser.add_argument('--jepa_loss', type=str, default='cosine',
                         choices=['cosine', 'l2'])
     parser.add_argument('--lambda_decode', type=float, default=1.0)
+    parser.add_argument('--lambda_var', type=float, default=1.0,
+                        help='VICReg variance loss weight')
+    parser.add_argument('--lambda_cov', type=float, default=0.04,
+                        help='VICReg covariance loss weight')
 
     # Misc
     parser.add_argument('--device', type=str, default='auto')
@@ -449,6 +453,8 @@ def main():
         ema_tau_end=args.ema_tau_end,
         jepa_loss_type=args.jepa_loss,
         lambda_decode=args.lambda_decode,
+        lambda_var=args.lambda_var,
+        lambda_cov=args.lambda_cov,
     ).to(device)
 
     trainable = sum(p.numel() for p in model.get_trainable_params())

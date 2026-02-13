@@ -80,6 +80,8 @@ class ePCJEPAModel(nn.Module):
         ema_tau_end: EMA tau at training end (1.0 = frozen target).
         jepa_loss_type: 'cosine' (scale-invariant) or 'l2'.
         lambda_decode: Weight for decode CE loss in E_local.
+        lambda_var: Weight for VICReg variance loss (anti-collapse).
+        lambda_cov: Weight for VICReg covariance loss (decorrelation).
     """
 
     def __init__(
@@ -90,13 +92,15 @@ class ePCJEPAModel(nn.Module):
         d_z: int = 64,
         iters: int = 5,
         e_lr: float = 0.001,
-        error_optim: str = 'sgd',
+        error_optim: str = 'adam',
         precision_mode: str = 'geometric',
         precision_base: float = 3.0,
         ema_tau_start: float = 0.996,
         ema_tau_end: float = 1.0,
         jepa_loss_type: str = 'cosine',
         lambda_decode: float = 1.0,
+        lambda_var: float = 1.0,
+        lambda_cov: float = 0.04,
     ):
         super().__init__()
         self.enc_config = enc_config
@@ -108,6 +112,8 @@ class ePCJEPAModel(nn.Module):
         self.energy_scale = min(1.0, e_lr * iters)
         self.jepa_loss_type = jepa_loss_type
         self.lambda_decode = lambda_decode
+        self.lambda_var = lambda_var
+        self.lambda_cov = lambda_cov
 
         d = enc_config.d_model
         n = enc_config.n_layer
@@ -314,6 +320,11 @@ class ePCJEPAModel(nn.Module):
                 input_ids[:, 1:].reshape(-1),
             )
             E += self.lambda_decode * decode_ce
+
+        # VICReg: prevent representation collapse
+        if self.lambda_var > 0 or self.lambda_cov > 0:
+            L_var, L_cov = vicreg_loss(s_context)
+            E += self.lambda_var * L_var + self.lambda_cov * L_cov
 
         return E
 
