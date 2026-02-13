@@ -67,20 +67,6 @@
 
 ---
 
-## 6. Sparse Connectivity (RigL)
-
-**What:** Dynamic sparse training — maintain sparse weight masks that evolve during training (grow useful connections, prune useless ones).
-
-**Why it might help:** Could allow larger effective d_model within the same VRAM budget by keeping only ~10% of connections active.
-
-**Cost:** GPU sparse ops currently slower than dense for training. Needs >90% sparsity for wall-clock speedup. Don't know which connections matter until training converges.
-
-**Reference:** `experiments/ePC_Mamba/NOTES.md` §Sparse Connectivity
-
-**Status:** LOW PRIORITY. Revisit when NVIDIA 2:4 sparsity hardware support matures.
-
----
-
 ## 7. PPCA Curvature Tracking for Error Optimization
 
 **What:** Low-rank plus diagonal (PPCA) approximation to the Hessian for error optimization. Instead of SGD, use a warm-startable approximate Newton step.
@@ -132,4 +118,3 @@ For improving Mamba3's memory on sequence tasks:
 5. **Higher-order discretization** — improves memory fidelity without parameter cost
 6. **BTT compression** — frees VRAM for options 1-3
 7. **PPCA curvature** — faster error convergence
-8. **Sparse connectivity** — hardware-dependent, premature
