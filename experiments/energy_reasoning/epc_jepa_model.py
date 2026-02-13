@@ -109,7 +109,6 @@ class ePCJEPAModel(nn.Module):
         self.iters = iters
         self.e_lr = e_lr
         self.error_optim_mode = error_optim
-        self.energy_scale = min(1.0, e_lr * iters)
         self.jepa_loss_type = jepa_loss_type
         self.lambda_decode = lambda_decode
         self.lambda_var = lambda_var
@@ -285,10 +284,11 @@ class ePCJEPAModel(nn.Module):
         The output loss flows through: errors -> encoder -> predictor -> loss.
         This is the signal that tells errors WHERE to push the encoder output.
         """
-        E_errors = 0.5 * sum(
-            torch.linalg.vector_norm(e, ord=2, dim=None) ** 2
-            for e in self.errors
-        )
+        # Mean-reduced error penalty to match mean-reduced output losses.
+        # Paper uses sum, but output losses (CE, cosine) use mean by default.
+        # Without matching reductions, the error penalty is ~1M× stronger
+        # than the output signal, crushing errors to near-zero.
+        E_errors = 0.5 * sum(e.pow(2).mean() for e in self.errors)
         s_context = self.encode_context(x_emb)
         s_pred = self.predictor(s_context, z)
 
@@ -326,7 +326,7 @@ class ePCJEPAModel(nn.Module):
         for e, layer in zip(self.errors, self.layers):
             s_pred_local = layer(s)
             s = (s_pred_local + e).detach()
-            E += 0.5 * F.mse_loss(s_pred_local, s, reduction='sum')
+            E += 0.5 * F.mse_loss(s_pred_local, s)  # mean reduction
 
         s_context = self.out_norm(s)
         s_pred = self.predictor(s_context, z)
@@ -430,7 +430,6 @@ class ePCJEPAModel(nn.Module):
 
     def compute_weight_loss(self, input_ids: Tensor,
                             s_target: Tensor,
-                            batch_size: int,
                             z: Tensor = None) -> Tensor:
         """Phase 2: compute E_local for weight optimizer.
 
@@ -438,14 +437,13 @@ class ePCJEPAModel(nn.Module):
         through block 0's local MSE.
 
         Returns:
-            Normalized E_local loss for backward().
+            E_local loss for backward() (already mean-reduced).
         """
         x_emb = self.embedding(input_ids)
-        return (self.E_local(x_emb, input_ids, s_target, z)
-                / (batch_size * self.energy_scale))
+        return self.E_local(x_emb, input_ids, s_target, z)
 
     def ipc_train_step(self, input_ids: Tensor, s_target: Tensor,
-                       weight_optimizer, batch_size: int,
+                       weight_optimizer,
                        z: Tensor = None,
                        w_clip: float = 1.0,
                        early_stop_rtol: float = 1e-3,
@@ -496,8 +494,7 @@ class ePCJEPAModel(nn.Module):
             weight_optimizer.zero_grad()
             # Recompute embedding WITH gradients for weight phase
             x_emb = self.embedding(input_ids)
-            w_loss = (self.E_local(x_emb, input_ids, s_target, z)
-                      / (batch_size * self.energy_scale))
+            w_loss = self.E_local(x_emb, input_ids, s_target, z)
             w_loss.backward()
             if w_clip > 0:
                 nn.utils.clip_grad_norm_(

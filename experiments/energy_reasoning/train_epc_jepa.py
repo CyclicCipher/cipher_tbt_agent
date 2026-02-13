@@ -465,7 +465,7 @@ def main():
     total = sum(p.numel() for p in model.parameters())
     print(f"Trainable params: {trainable:,} / Total: {total:,}")
     print(f"Precisions: {[f'{p:.2f}' for p in model.precisions]}")
-    print(f"Energy scale: {model.energy_scale:.4f}")
+    print(f"Reduction: mean (E and E_local)")
 
     optimizer = torch.optim.AdamW(model.get_trainable_params(), lr=args.lr)
 
@@ -521,7 +521,7 @@ def main():
             # --- Phase 1 + Phase 2 ---
             if args.ipc:
                 model.ipc_train_step(
-                    seqs, s_target, optimizer, B, w_clip=args.w_clip,
+                    seqs, s_target, optimizer, w_clip=args.w_clip,
                     early_stop_rtol=args.early_stop_rtol,
                     min_iters=args.min_iters)
             else:
@@ -533,7 +533,7 @@ def main():
 
                 # Phase 2: weight optimization
                 optimizer.zero_grad()
-                w_loss = model.compute_weight_loss(seqs, s_target, B)
+                w_loss = model.compute_weight_loss(seqs, s_target)
                 w_loss.backward()
                 if args.w_clip > 0:
                     torch.nn.utils.clip_grad_norm_(
