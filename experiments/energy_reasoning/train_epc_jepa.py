@@ -335,9 +335,9 @@ def main():
     # ePC parameters
     parser.add_argument('--iters', type=int, default=5,
                         help='Error optimization iterations (T)')
-    parser.add_argument('--e_lr', type=float, default=0.001,
-                        help='Error learning rate')
-    parser.add_argument('--error_optim', type=str, default='adam',
+    parser.add_argument('--e_lr', type=float, default=0.1,
+                        help='Error learning rate (PC literature uses 0.1-1.0)')
+    parser.add_argument('--error_optim', type=str, default='sgd',
                         choices=['sgd', 'adam'])
     parser.add_argument('--precision_mode', type=str, default='geometric',
                         choices=['none', 'linear', 'geometric'])
