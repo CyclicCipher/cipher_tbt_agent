@@ -632,8 +632,13 @@ class PCEMamba3(nn.Module):
 
                 # Step size: α = rᵀr / dᵀHd
                 if dTHd <= 0:
-                    # Negative curvature fallback
-                    alpha = self.e_lr
+                    # Negative curvature: use gradient-norm-scaled step
+                    # (e_lr is for SGD and may be too small for CG)
+                    grad_norm = max(rTr ** 0.5, 1e-10)
+                    alpha = min(1.0 / grad_norm, 1.0)
+                elif rTr < 1e-20:
+                    # Converged: gradient ≈ 0, skip update
+                    alpha = 0.0
                 else:
                     alpha = rTr / dTHd
                 alpha_val = alpha
