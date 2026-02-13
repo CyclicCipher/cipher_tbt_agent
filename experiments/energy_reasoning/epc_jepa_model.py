@@ -514,6 +514,13 @@ class ePCJEPAModel(nn.Module):
     # Inference (no ePC, for evaluation)
     # ------------------------------------------------------------------
 
+    def _encode_context_noerr(self, input_ids: Tensor) -> Tensor:
+        """Context encoder forward WITHOUT errors (for eval/Langevin)."""
+        x = self.embedding(input_ids)
+        for layer in self.layers:
+            x = layer(x)
+        return self.out_norm(x)
+
     @torch.no_grad()
     def forward_eval(self, input_ids: Tensor,
                      z: Tensor = None) -> Tensor:
@@ -521,12 +528,90 @@ class ePCJEPAModel(nn.Module):
 
         Returns: (batch, seq_len-1, vocab_size) logits for next-token.
         """
-        x = self.embedding(input_ids)
-        for layer in self.layers:
-            x = layer(x)
-        s_context = self.out_norm(x)
+        s_context = self._encode_context_noerr(input_ids)
         s_pred = self.predictor(s_context, z)
         return self.decoder(s_pred[:, :-1])
+
+    # ------------------------------------------------------------------
+    # Langevin dynamics for z inference (Stage 2+)
+    # ------------------------------------------------------------------
+
+    def prediction_energy(self, s_context: Tensor, s_target: Tensor,
+                          z: Tensor) -> Tensor:
+        """E_pred(z): prediction error energy for Langevin optimization.
+
+        Measures how well z enables the predictor to match the target
+        encoder's representations (next-step shifted).
+
+        Args:
+            s_context: (batch, seq_len, d) context encoder output (detached).
+            s_target: (batch, seq_len, d) target encoder output (detached).
+            z: (batch, d_z) latent variable (requires_grad=True).
+
+        Returns:
+            Scalar energy.
+        """
+        s_pred = self.predictor(s_context, z)
+        return self._jepa_loss_nextstep(s_pred, s_target)
+
+    def langevin_refine(self, input_ids: Tensor, s_target: Tensor,
+                        T: int = 5, eta: float = 0.01,
+                        sigma_max: float = 0.1,
+                        adaptive_threshold: float = 1e-3,
+                        noise_at_test: bool = False) -> tuple:
+        """Run Langevin dynamics to find z* minimizing prediction energy.
+
+        Encoders are frozen; only the predictor runs per step.
+        Uses cyclical noise annealing: sigma_t = sigma_max * 0.5 * (1 + cos(pi*t/T)).
+
+        Args:
+            input_ids: (batch, seq_len) tokens.
+            s_target: (batch, seq_len, d) target encoder output.
+            T: Number of Langevin steps.
+            eta: Step size.
+            sigma_max: Maximum noise scale.
+            adaptive_threshold: Stop if relative energy change < this.
+            noise_at_test: If False, drop noise (deterministic GD).
+
+        Returns:
+            z_star: (batch, d_z) optimized latent.
+            energies: List of energy values per step.
+        """
+        import math as _math
+
+        with torch.no_grad():
+            s_context = self._encode_context_noerr(input_ids)
+        s_context = s_context.detach()
+        s_target = s_target.detach()
+
+        B = input_ids.shape[0]
+        device = input_ids.device
+        z = torch.randn(B, self.d_z, device=device)
+        z.requires_grad_(True)
+
+        energies = []
+        for t in range(T):
+            E = self.prediction_energy(s_context, s_target, z)
+            energies.append(E.item())
+
+            grad_z = torch.autograd.grad(E, z)[0]
+
+            # Cyclical annealing noise
+            if noise_at_test:
+                sigma_t = sigma_max * 0.5 * (1 + _math.cos(_math.pi * t / max(T, 1)))
+                noise = torch.randn_like(z) * sigma_t
+            else:
+                noise = 0.0
+
+            z = (z - eta * grad_z + noise).detach().requires_grad_(True)
+
+            # Adaptive stopping
+            if len(energies) >= 2:
+                rel_change = abs(energies[-1] - energies[-2]) / (abs(energies[-2]) + 1e-8)
+                if rel_change < adaptive_threshold:
+                    break
+
+        return z.detach(), energies
 
     # ------------------------------------------------------------------
     # Utilities

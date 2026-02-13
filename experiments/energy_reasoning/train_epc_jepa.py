@@ -11,6 +11,19 @@ Stage 1 (--stage 1a/1b/1c): Sequence prediction validation.
   Validates that ePC can train an encoder to produce useful JEPA
   representations via local learning only.
 
+Stage 2 (--stage 2): Pattern induction with Langevin dynamics.
+  Few-shot function learning: given [x1,f(x1),...,xq,?], infer f
+  and predict f(xq). Introduces latent variable z and Langevin
+  energy minimization for hypothesis search.
+
+  Four ablation variants evaluated at test time:
+    1. no-z:      predictor alone (z=None)
+    2. random-z:  z ~ N(0,I), not optimized
+    3. langevin:  z refined by Langevin dynamics (full system)
+    4. oracle-z:  z = projection of true rule label (upper bound)
+
+  Key metric: Langevin gap = accuracy(langevin) - accuracy(no-z).
+
 Training modes:
   --ipc         : Incremental PC (interleave error + weight steps)
   (default)     : Standard ePC (T error steps, then 1 weight step)
@@ -19,8 +32,8 @@ Usage:
   # Stage 1b: multi-rule with ePC-JEPA
   python experiments/energy_reasoning/train_epc_jepa.py --stage 1b
 
-  # With iPC mode
-  python experiments/energy_reasoning/train_epc_jepa.py --stage 1b --ipc
+  # Stage 2: pattern induction with Langevin
+  python experiments/energy_reasoning/train_epc_jepa.py --stage 2 --epochs 50
 
   # Compare with standard JEPA baseline
   python experiments/energy_reasoning/train_jepa.py --stage 1b --prediction_mode next_step
@@ -45,11 +58,11 @@ import matplotlib.pyplot as plt
 from experiments.Mamba3.mamba3_block import Mamba3Config
 from experiments.energy_reasoning.epc_jepa_model import ePCJEPAModel
 from experiments.energy_reasoning.jepa_model import vicreg_loss
-from experiments.energy_reasoning.data_gen import get_stage_data
+from experiments.energy_reasoning.data_gen import get_stage_data, DEFAULT_RULES
 
 
 # ---------------------------------------------------------------------------
-# Evaluation
+# Evaluation — Stage 1 (next-step prediction)
 # ---------------------------------------------------------------------------
 
 def evaluate(model, test_loader, device):
@@ -96,6 +109,111 @@ def evaluate(model, test_loader, device):
         'accuracy': total_acc / n_batches,
         'jepa_loss': total_jepa / n_batches,
         'decode_loss': total_decode / n_batches,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Evaluation — Stage 2 (pattern induction, last-token accuracy)
+# ---------------------------------------------------------------------------
+
+def evaluate_stage2(model, test_loader, device, n_rules,
+                    langevin_T=5, langevin_eta=0.01,
+                    langevin_sigma=0.1):
+    """Evaluate pattern induction with four ablation variants.
+
+    Each batch contains (seqs, targets, rule_indices).
+    Accuracy is measured on the LAST token only (the answer).
+
+    Returns dict with per-variant accuracy and per-rule breakdown.
+    """
+    model.eval()
+
+    # Oracle z: learnable embedding per rule -> projected to d_z.
+    # We use a fixed random projection so oracle is deterministic.
+    oracle_proj = torch.randn(n_rules, model.d_z, device=device) * 0.5
+
+    # Accumulators per variant
+    variants = ['no_z', 'random_z', 'langevin', 'oracle']
+    correct = {v: 0 for v in variants}
+    total = 0
+    # Per-rule accuracy for langevin variant
+    rule_correct = {v: [0] * n_rules for v in variants}
+    rule_total = [0] * n_rules
+    # Langevin energy trajectories (collect from a few batches)
+    energy_trajectories = []
+
+    for batch in test_loader:
+        seqs = batch[0].to(device)
+        targets = batch[1].to(device)      # (B,) answer token
+        rule_idx = batch[2].to(device)     # (B,) which rule
+        B = seqs.shape[0]
+
+        with torch.no_grad():
+            s_target = model.encode_target(seqs)
+
+        # --- Variant 1: no z ---
+        with torch.no_grad():
+            logits = model.forward_eval(seqs, z=None)
+            # Last position prediction: logits[:, -1] predicts token at seq[-1]
+            # But forward_eval returns (B, seq_len-1, V) for next-step.
+            # The last position in logits corresponds to predicting seq[-1].
+            pred_no_z = logits[:, -1].argmax(dim=-1)
+
+        # --- Variant 2: random z ---
+        with torch.no_grad():
+            z_rand = torch.randn(B, model.d_z, device=device)
+            logits = model.forward_eval(seqs, z=z_rand)
+            pred_rand = logits[:, -1].argmax(dim=-1)
+
+        # --- Variant 3: Langevin-refined z ---
+        z_star, eng_traj = model.langevin_refine(
+            seqs, s_target,
+            T=langevin_T, eta=langevin_eta,
+            sigma_max=langevin_sigma,
+            noise_at_test=False,
+        )
+        if len(energy_trajectories) < 10:
+            energy_trajectories.append(eng_traj)
+        with torch.no_grad():
+            logits = model.forward_eval(seqs, z=z_star)
+            pred_lang = logits[:, -1].argmax(dim=-1)
+
+        # --- Variant 4: oracle z ---
+        with torch.no_grad():
+            z_oracle = oracle_proj[rule_idx]  # (B, d_z)
+            logits = model.forward_eval(seqs, z=z_oracle)
+            pred_oracle = logits[:, -1].argmax(dim=-1)
+
+        # Tally
+        preds = {
+            'no_z': pred_no_z, 'random_z': pred_rand,
+            'langevin': pred_lang, 'oracle': pred_oracle,
+        }
+        for v in variants:
+            c = (preds[v] == targets).long()
+            correct[v] += c.sum().item()
+            for r in range(n_rules):
+                mask_r = (rule_idx == r)
+                rule_correct[v][r] += (c * mask_r.long()).sum().item()
+
+        total += B
+        for r in range(n_rules):
+            rule_total[r] += (rule_idx == r).sum().item()
+
+    # Compute accuracies
+    acc = {v: correct[v] / max(total, 1) for v in variants}
+    rule_acc = {}
+    for v in variants:
+        rule_acc[v] = [
+            rule_correct[v][r] / max(rule_total[r], 1) for r in range(n_rules)
+        ]
+
+    return {
+        'accuracy': acc,
+        'rule_accuracy': rule_acc,
+        'rule_total': rule_total,
+        'langevin_gap': acc['langevin'] - acc['no_z'],
+        'energy_trajectories': energy_trajectories,
     }
 
 
@@ -305,6 +423,122 @@ class ePCJEPADiagnostics:
 
 
 # ---------------------------------------------------------------------------
+# Stage 2 Diagnostics Plot
+# ---------------------------------------------------------------------------
+
+def plot_stage2(save_path, epoch, config_str, history, last_metrics,
+                rule_names, args):
+    """Plot Stage 2 diagnostics: ablation comparison, per-rule, energy."""
+    fig, axes = plt.subplots(2, 3, figsize=(16, 10))
+    fig.suptitle(
+        f'ePC-JEPA Stage 2 (Pattern Induction) - Epoch {epoch} {config_str}',
+        fontsize=13)
+
+    epochs = list(range(1, len(history['no_z']) + 1))
+
+    # [0,0] Ablation accuracy over time
+    ax = axes[0, 0]
+    colors = {'no_z': 'blue', 'random_z': 'gray',
+              'langevin': 'red', 'oracle': 'green'}
+    labels = {'no_z': 'No z', 'random_z': 'Random z',
+              'langevin': 'Langevin', 'oracle': 'Oracle'}
+    for v in ['no_z', 'random_z', 'langevin', 'oracle']:
+        ax.plot(epochs, history[v], color=colors[v],
+                label=labels[v], linewidth=2)
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Test Accuracy')
+    ax.set_title('Ablation: Answer Accuracy')
+    ax.set_ylim(0, 1.05)
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    # [0,1] Langevin gap over time
+    ax = axes[0, 1]
+    ax.plot(epochs, history['gap'], 'red', linewidth=2)
+    ax.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+    ax.axhline(y=0.10, color='green', linestyle=':', alpha=0.5,
+               label='10% target')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Langevin - No z')
+    ax.set_title('Langevin Gap')
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    # [0,2] Per-rule accuracy (last epoch, Langevin variant)
+    ax = axes[0, 2]
+    ra = last_metrics['rule_accuracy']
+    x_pos = np.arange(len(rule_names))
+    width = 0.2
+    for i, v in enumerate(['no_z', 'langevin', 'oracle']):
+        vals = ra[v]
+        ax.bar(x_pos + i * width, vals, width, label=labels[v],
+               color=colors[v], alpha=0.8)
+    ax.set_xticks(x_pos + width)
+    ax.set_xticklabels(rule_names, rotation=30, ha='right', fontsize=8)
+    ax.set_ylabel('Accuracy')
+    ax.set_title('Per-Rule Accuracy')
+    ax.set_ylim(0, 1.05)
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    # [1,0] Energy trajectory (last epoch, single batch)
+    ax = axes[1, 0]
+    if history['energy_traj']:
+        traj = history['energy_traj'][-1]
+        ax.plot(range(len(traj)), traj, 'r-o', linewidth=2, markersize=4)
+    ax.set_xlabel('Langevin Step')
+    ax.set_ylabel('E_pred(z)')
+    ax.set_title('Energy Trajectory (Last Epoch)')
+    ax.grid(True, alpha=0.3)
+
+    # [1,1] Energy trajectories across epochs (overlay a few)
+    ax = axes[1, 1]
+    n_traj = len(history['energy_traj'])
+    indices = [0, n_traj // 4, n_traj // 2, 3 * n_traj // 4, n_traj - 1]
+    indices = sorted(set(max(0, min(i, n_traj - 1)) for i in indices))
+    for idx in indices:
+        traj = history['energy_traj'][idx]
+        ax.plot(range(len(traj)), traj, '-o', markersize=3,
+                label=f'Epoch {idx + 1}', alpha=0.8)
+    ax.set_xlabel('Langevin Step')
+    ax.set_ylabel('E_pred(z)')
+    ax.set_title('Energy Trajectories Over Training')
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    # [1,2] Summary text
+    ax = axes[1, 2]
+    ax.axis('off')
+    a = last_metrics['accuracy']
+    gap = last_metrics['langevin_gap']
+    lines = [
+        f"Stage 2 Results (Epoch {epoch})",
+        f"",
+        f"No z:      {a['no_z']:.4f}",
+        f"Random z:  {a['random_z']:.4f}",
+        f"Langevin:  {a['langevin']:.4f}",
+        f"Oracle:    {a['oracle']:.4f}",
+        f"",
+        f"Langevin gap: {gap:+.4f}",
+        f"",
+        f"Config:",
+        f"  Langevin T={args.langevin_T}",
+        f"  eta={args.langevin_eta}",
+        f"  sigma={args.langevin_sigma}",
+        f"  d_z={args.d_z}",
+        f"  Train w/ z: {args.train_with_z}",
+    ]
+    ax.text(0.1, 0.95, '\n'.join(lines), transform=ax.transAxes,
+            fontsize=10, verticalalignment='top', fontfamily='monospace',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=120)
+    plt.close(fig)
+    print(f'  [Saved {save_path}]')
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -314,7 +548,7 @@ def main():
 
     # Stage
     parser.add_argument('--stage', type=str, default='1b',
-                        choices=['1a', '1b', '1c'],
+                        choices=['1a', '1b', '1c', '2'],
                         help='Experiment stage')
 
     # Architecture
@@ -331,6 +565,26 @@ def main():
     parser.add_argument('--vocab_size', type=int, default=16)
     parser.add_argument('--n_train', type=int, default=5000)
     parser.add_argument('--n_test', type=int, default=1000)
+
+    # Stage 2 (pattern induction)
+    parser.add_argument('--n_examples', type=int, default=5,
+                        help='Number of (x, f(x)) example pairs per sample')
+    parser.add_argument('--n_rules', type=int, default=5,
+                        help='Number of rules to use (max 5)')
+
+    # Langevin dynamics (Stage 2 inference)
+    parser.add_argument('--langevin_T', type=int, default=5,
+                        help='Number of Langevin steps at inference')
+    parser.add_argument('--langevin_eta', type=float, default=0.01,
+                        help='Langevin step size')
+    parser.add_argument('--langevin_sigma', type=float, default=0.1,
+                        help='Langevin noise scale (max)')
+    parser.add_argument('--train_with_z', action='store_true', default=True,
+                        help='Train with oracle z (Stage 2, teaches predictor '
+                             'to use z)')
+    parser.add_argument('--no_train_with_z', dest='train_with_z',
+                        action='store_false',
+                        help='Train without z (Stage 2 baseline)')
 
     # ePC parameters
     parser.add_argument('--iters', type=int, default=20,
@@ -422,6 +676,16 @@ def main():
     # Data
     # -----------------------------------------------------------------------
 
+    is_stage2 = (args.stage == '2')
+    if is_stage2:
+        # Stage 2 defaults: more data, more epochs
+        if args.n_train == 5000:
+            args.n_train = 10000
+        if args.n_test == 1000:
+            args.n_test = 2000
+        if args.epochs == 30:
+            args.epochs = 50
+
     print(f"\nGenerating Stage {args.stage} data...")
     data = get_stage_data(
         stage=args.stage,
@@ -429,13 +693,34 @@ def main():
         n_test=args.n_test,
         seq_len=args.seq_len,
         vocab_size=args.vocab_size,
+        n_examples=args.n_examples,
+        n_rules=args.n_rules,
     )
-    train_loader = DataLoader(
-        TensorDataset(data['train_seqs']),
-        batch_size=args.batch_size, shuffle=True, drop_last=True)
-    test_loader = DataLoader(
-        TensorDataset(data['test_seqs']),
-        batch_size=args.batch_size, shuffle=False, drop_last=True)
+
+    if is_stage2:
+        train_loader = DataLoader(
+            TensorDataset(data['train_seqs'], data['train_targets'],
+                          data['train_rules']),
+            batch_size=args.batch_size, shuffle=True, drop_last=True)
+        test_loader = DataLoader(
+            TensorDataset(data['test_seqs'], data['test_targets'],
+                          data['test_rules']),
+            batch_size=args.batch_size, shuffle=False, drop_last=True)
+        # Oracle z projection (fixed random, shared across train/test)
+        torch.manual_seed(0)
+        oracle_proj = torch.randn(args.n_rules, args.d_z, device=device) * 0.5
+        if args.seed > 0:
+            torch.manual_seed(args.seed)
+        rule_names = [r[0] for r in DEFAULT_RULES[:args.n_rules]]
+        print(f"Rules: {rule_names}")
+        print(f"Train with z: {args.train_with_z}")
+    else:
+        train_loader = DataLoader(
+            TensorDataset(data['train_seqs']),
+            batch_size=args.batch_size, shuffle=True, drop_last=True)
+        test_loader = DataLoader(
+            TensorDataset(data['test_seqs']),
+            batch_size=args.batch_size, shuffle=False, drop_last=True)
 
     print(f"Train: {data['train_seqs'].shape}, Test: {data['test_seqs'].shape}")
 
@@ -489,148 +774,331 @@ def main():
     print(f"ePC-JEPA Stage {args.stage} | {mode_str} | "
           f"T={args.iters} | e_lr={args.e_lr}")
     print(f"{'='*65}")
-    print(f"{'Epoch':>5} {'E_init':>8} {'E_fin':>8} {'JEPA':>8} "
-          f"{'DecCE':>8} {'Acc':>8} {'TestAcc':>8} {'ms/b':>7} {'iters':>5}")
-    print("-" * 70)
 
     best_test_acc = 0.0
 
-    # -----------------------------------------------------------------------
-    # Training loop
-    # -----------------------------------------------------------------------
+    if is_stage2:
+        # ==================================================================
+        # Stage 2: Pattern Induction Training Loop
+        # ==================================================================
+        print(f"Langevin: T={args.langevin_T}, eta={args.langevin_eta}, "
+              f"sigma={args.langevin_sigma}")
+        print(f"{'Epoch':>5} {'E_init':>8} {'E_fin':>8} {'JEPA':>8} "
+              f"{'DecCE':>8} {'TrAcc':>7} {'NoZ':>7} {'RndZ':>7} "
+              f"{'Lang':>7} {'Orac':>7} {'Gap':>7} {'ms/b':>7}")
+        print("-" * 95)
 
-    for epoch in range(1, args.epochs + 1):
-        model.train()
-        ep_ei = 0.0
-        ep_ef = 0.0
-        ep_jepa = 0.0
-        ep_dec = 0.0
-        ep_acc = 0.0
-        ep_ms = 0.0
-        ep_iters = 0.0
-        n_batches = 0
+        # Track per-epoch stage2 test results for plotting
+        s2_history = {
+            'no_z': [], 'random_z': [], 'langevin': [], 'oracle': [],
+            'gap': [], 'energy_traj': [],
+        }
 
-        for batch in train_loader:
-            seqs = batch[0].to(device)
-            B = seqs.shape[0]
-            t0 = time.perf_counter()
+        for epoch in range(1, args.epochs + 1):
+            model.train()
+            ep_ei = ep_ef = ep_jepa = ep_dec = ep_acc = ep_ms = 0.0
+            ep_iters = 0.0
+            n_batches = 0
 
-            # --- Encode target (EMA, no grad) ---
-            s_target = model.encode_target(seqs)
+            for batch in train_loader:
+                seqs = batch[0].to(device)
+                targets = batch[1].to(device)
+                rule_idx = batch[2].to(device)
+                B = seqs.shape[0]
+                t0 = time.perf_counter()
 
-            # --- Phase 1 + Phase 2 ---
-            if args.ipc:
-                model.ipc_train_step(
-                    seqs, s_target, optimizer, w_clip=args.w_clip,
-                    early_stop_rtol=args.early_stop_rtol,
-                    min_iters=args.min_iters)
-            else:
-                # Phase 1: error optimization
-                model.minimize_error_energy(
-                    seqs, s_target,
-                    early_stop_rtol=args.early_stop_rtol,
-                    min_iters=args.min_iters)
+                # Oracle z for training (teaches predictor to USE z)
+                z_train = None
+                if args.train_with_z:
+                    z_train = oracle_proj[rule_idx]  # (B, d_z)
 
-                # Phase 2: weight optimization
-                optimizer.zero_grad()
-                w_loss = model.compute_weight_loss(seqs, s_target)
-                w_loss.backward()
-                if args.w_clip > 0:
-                    torch.nn.utils.clip_grad_norm_(
-                        model.get_trainable_params(), max_norm=args.w_clip)
-                optimizer.step()
+                # --- Encode target (EMA, no grad) ---
+                s_target = model.encode_target(seqs)
 
-            # --- Phase 3: EMA update ---
-            model.update_target()
+                # --- Phase 1 + Phase 2 (ePC with z) ---
+                if args.ipc:
+                    model.ipc_train_step(
+                        seqs, s_target, optimizer, z=z_train,
+                        w_clip=args.w_clip,
+                        early_stop_rtol=args.early_stop_rtol,
+                        min_iters=args.min_iters)
+                else:
+                    model.minimize_error_energy(
+                        seqs, s_target, z=z_train,
+                        early_stop_rtol=args.early_stop_rtol,
+                        min_iters=args.min_iters)
 
-            # --- Diagnostics ---
-            diag = model.get_diagnostics()
+                    optimizer.zero_grad()
+                    w_loss = model.compute_weight_loss(
+                        seqs, s_target, z=z_train)
+                    w_loss.backward()
+                    if args.w_clip > 0:
+                        torch.nn.utils.clip_grad_norm_(
+                            model.get_trainable_params(),
+                            max_norm=args.w_clip)
+                    optimizer.step()
 
-            with torch.no_grad():
-                # Accuracy
-                logits_shift = model.forward_eval(seqs)
-                tokens_shift = seqs[:, 1:]
-                preds = logits_shift.argmax(dim=-1)
-                acc = (preds == tokens_shift).float().mean().item()
+                # --- Phase 3: EMA update ---
+                model.update_target()
 
-                # JEPA loss (monitoring)
-                x = model.embedding(seqs)
-                for layer in model.layers:
-                    x = layer(x)
-                s_ctx = model.out_norm(x)
-                s_pred = model.predictor(s_ctx)
-                jepa_l = model._jepa_loss_nextstep(s_pred, s_target).item()
+                # --- Training diagnostics ---
+                diag = model.get_diagnostics()
+                with torch.no_grad():
+                    logits_shift = model.forward_eval(seqs, z=z_train)
+                    # Last-token accuracy (answer prediction)
+                    pred_last = logits_shift[:, -1].argmax(dim=-1)
+                    acc = (pred_last == targets).float().mean().item()
+                    # JEPA + decode for monitoring
+                    s_ctx = model._encode_context_noerr(seqs)
+                    s_pred = model.predictor(s_ctx, z_train)
+                    jepa_l = model._jepa_loss_nextstep(
+                        s_pred, s_target).item()
+                    dec_l = F.cross_entropy(
+                        logits_shift.reshape(-1, model.vocab_size),
+                        seqs[:, 1:].reshape(-1),
+                    ).item()
 
-                # Decode CE
-                dec_l = F.cross_entropy(
-                    logits_shift.reshape(-1, model.vocab_size),
-                    tokens_shift.reshape(-1),
-                ).item()
+                t1 = time.perf_counter()
+                ms = (t1 - t0) * 1000
 
-                # Representation std (collapse monitor)
-                std = torch.sqrt(
-                    s_ctx.reshape(-1, s_ctx.shape[-1]).var(dim=0) + 1e-4
-                ).mean().item()
+                ep_ei += diag['E_initial']
+                ep_ef += diag['E_final']
+                ep_jepa += jepa_l
+                ep_dec += dec_l
+                ep_acc += acc
+                ep_ms += ms
+                ep_iters += diag['actual_iters']
+                n_batches += 1
 
-                # VICReg components (monitoring)
-                L_var, L_cov = vicreg_loss(s_ctx)
-                L_var_val = L_var.item()
-                L_cov_val = L_cov.item()
+            # --- End-of-epoch ---
+            scheduler.step()
+            model.set_ema_progress(epoch / args.epochs)
 
-            t1 = time.perf_counter()
-            ms = (t1 - t0) * 1000
+            # Evaluate with all 4 ablation variants
+            s2_metrics = evaluate_stage2(
+                model, test_loader, device, args.n_rules,
+                langevin_T=args.langevin_T,
+                langevin_eta=args.langevin_eta,
+                langevin_sigma=args.langevin_sigma,
+            )
+            a = s2_metrics['accuracy']
+            gap = s2_metrics['langevin_gap']
 
-            diagnostics.update_train(diag, jepa_l, dec_l, acc, ms, std,
-                                     L_var_val, L_cov_val)
+            # Track for "best" using langevin variant
+            best_test_acc = max(best_test_acc, a['langevin'])
 
-            ep_ei += diag['E_initial']
-            ep_ef += diag['E_final']
-            ep_jepa += jepa_l
-            ep_dec += dec_l
-            ep_acc += acc
-            ep_ms += ms
-            ep_iters += diag['actual_iters']
-            n_batches += 1
+            for v in ['no_z', 'random_z', 'langevin', 'oracle']:
+                s2_history[v].append(a[v])
+            s2_history['gap'].append(gap)
+            if s2_metrics['energy_trajectories']:
+                s2_history['energy_traj'].append(
+                    s2_metrics['energy_trajectories'][0])
 
-        # --- End-of-epoch ---
-        scheduler.step()
-        model.set_ema_progress(epoch / args.epochs)
+            avg_ei = ep_ei / n_batches
+            avg_ef = ep_ef / n_batches
+            avg_jepa = ep_jepa / n_batches
+            avg_dec = ep_dec / n_batches
+            avg_acc = ep_acc / n_batches
+            avg_ms = ep_ms / n_batches
 
-        # Evaluate
-        test_metrics = evaluate(model, test_loader, device)
-        diagnostics.update_test(test_metrics)
-        best_test_acc = max(best_test_acc, test_metrics['accuracy'])
+            print(f"{epoch:5d} {avg_ei:8.4f} {avg_ef:8.4f} "
+                  f"{avg_jepa:8.4f} {avg_dec:8.4f} {avg_acc:7.4f} "
+                  f"{a['no_z']:7.4f} {a['random_z']:7.4f} "
+                  f"{a['langevin']:7.4f} {a['oracle']:7.4f} "
+                  f"{gap:+7.4f} {avg_ms:7.1f}")
 
-        avg_ei = ep_ei / n_batches
-        avg_ef = ep_ef / n_batches
-        avg_jepa = ep_jepa / n_batches
-        avg_dec = ep_dec / n_batches
-        avg_acc = ep_acc / n_batches
-        avg_ms = ep_ms / n_batches
-        avg_it = ep_iters / n_batches
+            # Plot
+            if epoch % args.plot_every == 0 or epoch == args.epochs:
+                config_str = (
+                    f'({mode_str}, Langevin T={args.langevin_T}, '
+                    f'eta={args.langevin_eta})')
+                chart_path = os.path.join(
+                    save_dir,
+                    f'epc_jepa_s2_{mode_str}_epoch_{epoch:03d}.png')
+                plot_stage2(chart_path, epoch, config_str, s2_history,
+                            s2_metrics, rule_names, args)
 
-        print(f"{epoch:5d} {avg_ei:8.4f} {avg_ef:8.4f} {avg_jepa:8.4f} "
-              f"{avg_dec:8.4f} {avg_acc:8.4f} {test_metrics['accuracy']:8.4f} "
-              f"{avg_ms:7.1f} {avg_it:5.1f}")
+        # --- Stage 2 Summary ---
+        print(f"\n{'='*65}")
+        print(f"Stage 2 Final Results (Epoch {args.epochs})")
+        print(f"{'='*65}")
+        a = s2_metrics['accuracy']
+        print(f"  No z:      {a['no_z']:.4f}")
+        print(f"  Random z:  {a['random_z']:.4f}")
+        print(f"  Langevin:  {a['langevin']:.4f}")
+        print(f"  Oracle:    {a['oracle']:.4f}")
+        print(f"  Langevin gap: {gap:+.4f}")
+        print()
+        # Per-rule breakdown
+        print(f"Per-rule accuracy (Langevin):")
+        for r, name in enumerate(rule_names):
+            ra = s2_metrics['rule_accuracy']['langevin'][r]
+            print(f"  {name:>12s}: {ra:.4f} "
+                  f"(n={s2_metrics['rule_total'][r]})")
+        print()
+        if gap > 0.10:
+            print("PASS: Langevin gap > 10% — energy minimization "
+                  "contributes meaningfully to reasoning!")
+        elif gap > 0.02:
+            print(f"PROMISING: Langevin gap {gap:.1%} — marginal benefit. "
+                  f"Investigate energy landscape.")
+        elif gap > 0:
+            print(f"MARGINAL: Langevin gap {gap:.1%} — z/Langevin "
+                  f"barely helps. Check conditioning mechanism.")
+        else:
+            print(f"NO EFFECT: Langevin gap {gap:.1%} — z is not "
+                  f"contributing. See VALIDATION_PLAN.md failure diagnosis.")
 
-        # Plot
-        if epoch % args.plot_every == 0 or epoch == args.epochs:
-            config_str = (f'({mode_str}, T={args.iters}, '
-                          f'e_lr={args.e_lr}, prec={args.precision_mode})')
-            chart_path = os.path.join(
-                save_dir,
-                f'epc_jepa_s{args.stage}_{mode_str}_epoch_{epoch:03d}.png')
-            diagnostics.plot(chart_path, epoch, config_str)
-
-    # --- Summary ---
-    print(f"\nBest test accuracy: {best_test_acc:.4f}")
-    if best_test_acc >= 0.80:
-        print(f"PASS: ePC-JEPA Stage {args.stage} works! "
-              f"Local learning produces useful JEPA representations.")
-    elif best_test_acc >= 0.40:
-        print(f"PROMISING: {best_test_acc:.1%} — learning but not converged")
     else:
-        print(f"Needs work: {best_test_acc:.1%}")
+        # ==================================================================
+        # Stage 1: Sequence Prediction Training Loop (unchanged)
+        # ==================================================================
+        print(f"{'Epoch':>5} {'E_init':>8} {'E_fin':>8} {'JEPA':>8} "
+              f"{'DecCE':>8} {'Acc':>8} {'TestAcc':>8} {'ms/b':>7} "
+              f"{'iters':>5}")
+        print("-" * 70)
+
+        for epoch in range(1, args.epochs + 1):
+            model.train()
+            ep_ei = 0.0
+            ep_ef = 0.0
+            ep_jepa = 0.0
+            ep_dec = 0.0
+            ep_acc = 0.0
+            ep_ms = 0.0
+            ep_iters = 0.0
+            n_batches = 0
+
+            for batch in train_loader:
+                seqs = batch[0].to(device)
+                B = seqs.shape[0]
+                t0 = time.perf_counter()
+
+                # --- Encode target (EMA, no grad) ---
+                s_target = model.encode_target(seqs)
+
+                # --- Phase 1 + Phase 2 ---
+                if args.ipc:
+                    model.ipc_train_step(
+                        seqs, s_target, optimizer, w_clip=args.w_clip,
+                        early_stop_rtol=args.early_stop_rtol,
+                        min_iters=args.min_iters)
+                else:
+                    # Phase 1: error optimization
+                    model.minimize_error_energy(
+                        seqs, s_target,
+                        early_stop_rtol=args.early_stop_rtol,
+                        min_iters=args.min_iters)
+
+                    # Phase 2: weight optimization
+                    optimizer.zero_grad()
+                    w_loss = model.compute_weight_loss(seqs, s_target)
+                    w_loss.backward()
+                    if args.w_clip > 0:
+                        torch.nn.utils.clip_grad_norm_(
+                            model.get_trainable_params(),
+                            max_norm=args.w_clip)
+                    optimizer.step()
+
+                # --- Phase 3: EMA update ---
+                model.update_target()
+
+                # --- Diagnostics ---
+                diag = model.get_diagnostics()
+
+                with torch.no_grad():
+                    # Accuracy
+                    logits_shift = model.forward_eval(seqs)
+                    tokens_shift = seqs[:, 1:]
+                    preds = logits_shift.argmax(dim=-1)
+                    acc = (preds == tokens_shift).float().mean().item()
+
+                    # JEPA loss (monitoring)
+                    x = model.embedding(seqs)
+                    for layer in model.layers:
+                        x = layer(x)
+                    s_ctx = model.out_norm(x)
+                    s_pred = model.predictor(s_ctx)
+                    jepa_l = model._jepa_loss_nextstep(
+                        s_pred, s_target).item()
+
+                    # Decode CE
+                    dec_l = F.cross_entropy(
+                        logits_shift.reshape(-1, model.vocab_size),
+                        tokens_shift.reshape(-1),
+                    ).item()
+
+                    # Representation std (collapse monitor)
+                    std = torch.sqrt(
+                        s_ctx.reshape(-1, s_ctx.shape[-1]).var(dim=0)
+                        + 1e-4
+                    ).mean().item()
+
+                    # VICReg components (monitoring)
+                    L_var, L_cov = vicreg_loss(s_ctx)
+                    L_var_val = L_var.item()
+                    L_cov_val = L_cov.item()
+
+                t1 = time.perf_counter()
+                ms = (t1 - t0) * 1000
+
+                diagnostics.update_train(diag, jepa_l, dec_l, acc, ms,
+                                         std, L_var_val, L_cov_val)
+
+                ep_ei += diag['E_initial']
+                ep_ef += diag['E_final']
+                ep_jepa += jepa_l
+                ep_dec += dec_l
+                ep_acc += acc
+                ep_ms += ms
+                ep_iters += diag['actual_iters']
+                n_batches += 1
+
+            # --- End-of-epoch ---
+            scheduler.step()
+            model.set_ema_progress(epoch / args.epochs)
+
+            # Evaluate
+            test_metrics = evaluate(model, test_loader, device)
+            diagnostics.update_test(test_metrics)
+            best_test_acc = max(best_test_acc,
+                                test_metrics['accuracy'])
+
+            avg_ei = ep_ei / n_batches
+            avg_ef = ep_ef / n_batches
+            avg_jepa = ep_jepa / n_batches
+            avg_dec = ep_dec / n_batches
+            avg_acc = ep_acc / n_batches
+            avg_ms = ep_ms / n_batches
+            avg_it = ep_iters / n_batches
+
+            print(f"{epoch:5d} {avg_ei:8.4f} {avg_ef:8.4f} "
+                  f"{avg_jepa:8.4f} {avg_dec:8.4f} {avg_acc:8.4f} "
+                  f"{test_metrics['accuracy']:8.4f} "
+                  f"{avg_ms:7.1f} {avg_it:5.1f}")
+
+            # Plot
+            if epoch % args.plot_every == 0 or epoch == args.epochs:
+                config_str = (f'({mode_str}, T={args.iters}, '
+                              f'e_lr={args.e_lr}, '
+                              f'prec={args.precision_mode})')
+                chart_path = os.path.join(
+                    save_dir,
+                    f'epc_jepa_s{args.stage}_{mode_str}'
+                    f'_epoch_{epoch:03d}.png')
+                diagnostics.plot(chart_path, epoch, config_str)
+
+        # --- Stage 1 Summary ---
+        print(f"\nBest test accuracy: {best_test_acc:.4f}")
+        if best_test_acc >= 0.80:
+            print(f"PASS: ePC-JEPA Stage {args.stage} works! "
+                  f"Local learning produces useful JEPA "
+                  f"representations.")
+        elif best_test_acc >= 0.40:
+            print(f"PROMISING: {best_test_acc:.1%} — learning but "
+                  f"not converged")
+        else:
+            print(f"Needs work: {best_test_acc:.1%}")
 
 
 if __name__ == '__main__':
