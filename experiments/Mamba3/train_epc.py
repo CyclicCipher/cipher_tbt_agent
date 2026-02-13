@@ -18,8 +18,7 @@ detection in 1b.
 
 Usage:
   python experiments/Mamba3/train_epc.py --task copy
-  python experiments/Mamba3/train_epc.py --task 1b --error_optim newton
-  python experiments/Mamba3/train_epc.py --task 1b --error_optim cg
+  python experiments/Mamba3/train_epc.py --task 1b
   python experiments/Mamba3/train_epc.py --task 1b --baseline
 """
 
@@ -148,16 +147,12 @@ class Diagnostics:
         self.layer_energies = [[] for _ in range(self.num_error_layers)]
         self.error_norms = [[] for _ in range(self.num_error_layers)]
         self.inference_convergence = []
-        self.newton_rank1_ratio = []
-        self.newton_coeff = []
 
     def update_train_epc(self, acc, loss, diagnostics, ms):
         self.train_accs.append(acc)
         self.train_losses.append(loss)
         self.ms_per_batch.append(ms)
         self.inference_convergence.append(diagnostics['convergence'])
-        self.newton_rank1_ratio.append(diagnostics.get('newton_rank1_ratio', 0))
-        self.newton_coeff.append(diagnostics.get('newton_coeff', 0))
         for i, energy in enumerate(diagnostics.get('layer_energies', [])):
             if i < self.num_error_layers:
                 self.layer_energies[i].append(energy)
@@ -370,12 +365,10 @@ def main():
     parser.add_argument('--iters', type=int, default=5,
                         help='Error optimization iterations (T)')
     parser.add_argument('--error_optim', type=str, default='sgd',
-                        choices=['sgd', 'adam', 'newton', 'cg'],
-                        help='Error optimizer: sgd, adam, newton, or cg')
+                        choices=['sgd', 'adam'],
+                        help='Error optimizer: sgd or adam')
     parser.add_argument('--e_lr', type=float, default=0.001,
-                        help='Error learning rate (for sgd/adam)')
-    parser.add_argument('--damping', type=float, default=0.1,
-                        help='Newton damping factor')
+                        help='Error learning rate')
     parser.add_argument('--precision_mode', type=str, default='geometric',
                         choices=['none', 'linear', 'geometric'],
                         help='Per-layer precision weighting mode')
@@ -384,7 +377,7 @@ def main():
     parser.add_argument('--w_clip', type=float, default=1.0,
                         help='Weight gradient clipping max norm (0 to disable)')
     parser.add_argument('--ipc', action='store_true',
-                        help='Incremental PC: weight update every Newton step (experimental)')
+                        help='Incremental PC: weight update every error step')
     parser.add_argument('--no_ipc', action='store_true',
                         help='Disable iPC (standard ePC: T error steps then 1 weight step)')
     parser.add_argument('--init_scale', type=float, default=1.0,
@@ -486,26 +479,17 @@ def main():
         model = ePCMamba3LM(
             config, vocab_size=args.vocab_size,
             iters=args.iters, e_lr=args.e_lr,
-            error_optim=args.error_optim, damping=args.damping,
+            error_optim=args.error_optim,
             precision_mode=args.precision_mode,
             precision_base=args.precision_base,
             use_mhc=args.mhc, n_streams=args.n_streams,
             use_mupc=args.mupc,
         ).to(device)
         optim_str = args.error_optim.upper()
-        if args.error_optim == 'newton':
-            print(f"Model: ePC-Mamba3 (T={args.iters}, Newton, damping={args.damping})")
-        elif args.error_optim == 'cg':
-            print(f"Model: ePC-Mamba3 (K={args.iters}, CG, "
-                  f"α=gᵀg/gᵀHg via HVP)")
-        else:
-            print(f"Model: ePC-Mamba3 (T={args.iters}, {optim_str}, e_lr={args.e_lr}, "
-                  f"energy_scale={model.pce.energy_scale:.4f})")
-        if args.ipc and args.error_optim == 'cg':
-            print("  Warning: iPC not supported with CG. Using standard ePC.")
-            args.ipc = False
+        print(f"Model: ePC-Mamba3 (T={args.iters}, {optim_str}, e_lr={args.e_lr}, "
+              f"energy_scale={model.pce.energy_scale:.4f})")
         if args.ipc:
-            print(f"  Mode: iPC (weight update every Newton step, {args.iters}x faster)")
+            print(f"  Mode: iPC (weight update every error step, {args.iters}x faster)")
         if args.mhc:
             print(f"  mHC: {args.n_streams} streams, Sinkhorn-constrained mixing")
         if args.mupc:
@@ -661,20 +645,12 @@ def main():
             if d['error_norms']:
                 norms_str = ', '.join(f'{n:.4f}' for n in d['error_norms'])
                 print(f"  Error norms: [{norms_str}]")
-            if args.error_optim == 'cg' and d.get('cg_alpha', 0) > 0:
-                print(f"  CG: α={d['cg_alpha']:.6f}, dᵀHd={d['cg_dTHd']:.2f}")
-
         # Save plot
         if epoch % args.plot_every == 0 or epoch == args.epochs:
             mode = 'epc' if use_epc else 'baseline'
             if use_epc:
-                if args.error_optim == 'newton':
-                    config_str = f'(task={args.task}, T={args.iters}, Newton, damp={args.damping})'
-                elif args.error_optim == 'cg':
-                    config_str = f'(task={args.task}, K={args.iters}, CG)'
-                else:
-                    config_str = (f'(task={args.task}, T={args.iters}, '
-                                  f'{args.error_optim.upper()}, e_lr={args.e_lr})')
+                config_str = (f'(task={args.task}, T={args.iters}, '
+                              f'{args.error_optim.upper()}, e_lr={args.e_lr})')
                 if args.precision_mode != 'none':
                     config_str += f', prec={args.precision_mode}'
             else:

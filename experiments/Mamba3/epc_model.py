@@ -24,7 +24,7 @@ With mHC (manifold-constrained hyperconnections, DeepSeek arXiv:2512.24880):
   Each mHCMamba3Block replaces standard residuals with Sinkhorn-constrained
   stream mixing (H_res on the Birkhoff polytope), softmax aggregation (H_pre),
   and softmax distribution (H_post). At init, equivalent to standard residual.
-  Errors are in the multi-stream space, giving Newton more degrees of freedom.
+  Errors are in the multi-stream space, giving the optimizer more degrees of freedom.
 
 Empirical findings:
   - N-1 errors + no precision: 7% (random chance)
@@ -246,22 +246,22 @@ class PCEMamba3(nn.Module):
         config: Mamba3Config defining the block architecture.
         iters: Number of error optimization steps per batch (T).
         e_lr: Learning rate for error optimization (SGD/Adam).
-        error_optim: 'sgd', 'adam', or 'newton'.
-        damping: Damping factor for Newton mode.
+        error_optim: 'sgd' or 'adam'.
     """
 
     def __init__(self, config: Mamba3Config, iters: int = 2,
-                 e_lr: float = 0.02, error_optim: str = 'newton',
-                 damping: float = 0.1, precision_mode: str = 'none',
+                 e_lr: float = 0.02, error_optim: str = 'sgd',
+                 precision_mode: str = 'none',
                  precision_base: float = 3.0,
                  use_mhc: bool = False, n_streams: int = 2,
-                 use_mupc: bool = False):
+                 use_mupc: bool = False,
+                 # Legacy kwargs (ignored, kept for compat)
+                 damping: float = 0.1, **_kwargs):
         super().__init__()
         self.config = config
         self.iters = iters
         self.e_lr = e_lr
         self.error_optim_mode = error_optim
-        self.damping = damping
         self.use_mhc = use_mhc
         self.use_mupc = use_mupc
         self.n_streams = n_streams if use_mhc else 1
@@ -270,11 +270,8 @@ class PCEMamba3(nn.Module):
         self._profile = {}
 
         # Scale factor to compensate for small errors from limited SGD/Adam
-        # iterations. Newton converges better so errors are larger.
-        if error_optim in ('newton', 'cg'):
-            self.energy_scale = 1.0
-        else:
-            self.energy_scale = min(1.0, e_lr * iters)
+        # iterations.
+        self.energy_scale = min(1.0, e_lr * iters)
 
         # Per-layer precision weighting (Salvatori et al. 2025).
         # N errors for N layers (one after each block, including last).
@@ -361,7 +358,7 @@ class PCEMamba3(nn.Module):
 
         Precision-weighted: E = sum(pi_l * 0.5 * ||e_l||^2) + output_loss.
         Higher precision on early layers amplifies their contribution,
-        encouraging Newton/SGD to find larger errors where they matter most.
+        encouraging SGD to find larger errors where they matter most.
 
         DO NOT use for weight optimization (would be standard backprop).
         """
@@ -403,7 +400,7 @@ class PCEMamba3(nn.Module):
     def init_zero_errors(self, x: Tensor):
         """Initialize zero errors with shape caching.
 
-        Errors are ALWAYS fp32. fp16 rounds Newton corrections to zero,
+        Errors are ALWAYS fp32. fp16 rounds small corrections to zero,
         defeating early stopping (see MISTAKES.md).
 
         With mHC: errors are (b, n_streams, seq, d) to match the
@@ -435,235 +432,6 @@ class PCEMamba3(nn.Module):
 
         self._cached_input_shape = input_shape
         self._cached_error_shapes = [e.shape for e in self.errors]
-
-    def _newton_step(self):
-        """Precision-aware rank-1 LRPD Newton step for error optimization.
-
-        With per-layer precisions pi_l, the energy is:
-          E = sum(pi_l * 0.5 * ||e_l||^2) + L(y_pred, y)
-
-        Gradient: g_l = pi_l * e_l + J_l^T(dL/dy)
-        Output component: u_l = g_l - pi_l * e_l = J_l^T(dL/dy)
-        Hessian: H = D + u*u^T where D = diag(pi_l * (1+damping) * I)
-
-        Woodbury: (D + u*u^T)^{-1} g = D^{-1}g - D^{-1}u (u^T D^{-1} g)/(1 + u^T D^{-1} u)
-
-        Per-layer update:
-          e_l_new = e_l * c1 + g_l * c2_l
-        where c1 = 1 - c/(1+damp) is global,
-              c2_l = -(1-c)/(pi_l*(1+damp)) varies by layer.
-
-        When all precisions = 1, reduces to the original Newton step.
-        """
-        with torch.no_grad():
-            damp = self.damping
-
-            # Per-layer dot products
-            uTDinv_g = 0.0  # u^T D^{-1} g
-            uTDinv_u = 0.0  # u^T D^{-1} u
-            gTg_total = 0.0
-
-            for pi, e in zip(self.precisions, self.errors):
-                g_flat = e.grad.reshape(-1)
-                e_flat = e.data.reshape(-1)
-                d_l = pi * (1.0 + damp)
-
-                gTg_l = torch.dot(g_flat, g_flat).item()
-                gTe_l = torch.dot(g_flat, e_flat).item()
-                eTe_l = torch.dot(e_flat, e_flat).item()
-
-                # u_l = g_l - pi*e_l
-                # u_l^T g_l = gTg_l - pi*gTe_l
-                # ||u_l||^2 = gTg_l - 2*pi*gTe_l + pi^2*eTe_l
-                uTDinv_g += (gTg_l - pi * gTe_l) / d_l
-                uTDinv_u += (gTg_l - 2.0 * pi * gTe_l + pi * pi * eTe_l) / d_l
-                gTg_total += gTg_l
-
-            # Woodbury coefficient
-            c = uTDinv_g / (1.0 + uTDinv_u) if (1.0 + uTDinv_u) != 0 else 0.0
-
-            # Global and per-layer update coefficients
-            c1 = 1.0 - c / (1.0 + damp)
-
-            for pi, e in zip(self.precisions, self.errors):
-                c2_l = -(1.0 - c) / (pi * (1.0 + damp))
-                e.data.mul_(c1).add_(e.grad, alpha=c2_l)
-
-            self._newton_diag = {
-                'gTg': gTg_total,
-                'uTDinv_u': uTDinv_u,
-                'uTDinv_g': uTDinv_g,
-                'coeff': c,
-                'rank1_ratio': uTDinv_u / max(uTDinv_g, 1e-10),
-            }
-
-    def _fd_hvp(self, x: Tensor, y: Tensor, output_proj: nn.Module,
-                g: list[Tensor], d: list[Tensor],
-                eps: float = 1e-4) -> list[Tensor]:
-        """Finite-difference Hessian-vector product: Hd ≈ (g(e+εd) - g(e)) / ε.
-
-        Autograd double-backward through CE loss with multiple error nodes
-        in the graph produces NaN (see diag_hvp.py Part 8f). The Hessian
-        itself is finite (numerical HVP confirms it in Part 8h), so this
-        is purely an autograd numerical instability in the second derivative
-        through log-softmax when multiple error leaf nodes interact.
-
-        Finite-difference HVP avoids create_graph entirely and has similar
-        cost: 1 extra fwd+bwd per HVP (vs 1 expensive create_graph bwd +
-        1 bwd-through-bwd for autograd HVP).
-        """
-        # Perturb: e ← e + ε·d
-        with torch.no_grad():
-            for e, dl in zip(self.errors, d):
-                e.data.add_(dl, alpha=eps)
-
-        E_plus = self.E(x, y, output_proj)
-        g_plus = torch.autograd.grad(E_plus, self.errors)
-
-        # Restore: e ← e - ε·d
-        with torch.no_grad():
-            for e, dl in zip(self.errors, d):
-                e.data.add_(dl, alpha=-eps)
-
-        return [(gp.detach() - gc) / eps for gp, gc in zip(g_plus, g)]
-
-    def _cg_loop(self, x: Tensor, y: Tensor, output_proj: nn.Module,
-                 early_stop_rtol: float) -> float:
-        """Conjugate Gradient error optimization.
-
-        CG is provably optimal for quadratic objectives: with K
-        Hessian-vector products (HVPs), it finds the best solution in the
-        K-dimensional Krylov subspace span{g, Hg, H²g, ...}.
-
-        CG-1 (iters=1) is steepest descent with exact line search:
-          α = gᵀg / gᵀHg,  e ← -α·g
-
-        This directly measures curvature along g via the HVP, instead of
-        estimating it from a rank-1 approximation (Newton). During the
-        plateau, Newton's rank-1 overestimates curvature by ||u||²
-        (dimension-dependent), producing steps that are orders of magnitude
-        too small. CG's α uses gᵀHg (exact curvature along g).
-
-        For K>1, uses nonlinear Polak-Ribière+ CG with gradient
-        recomputation at each step (handles non-quadratic E from Mamba).
-
-        Uses finite-difference HVP instead of autograd double-backward.
-        Autograd HVP through CE + multiple error nodes produces NaN (see
-        diag_hvp.py Part 8f); FD-HVP is numerically stable and has
-        comparable cost.
-
-        Cost: CG-1 ≈ 2 fwd + 2 bwd (same as Newton T=2).
-              CG-K ≈ (K+1) fwd + 2K bwd.
-
-        Returns:
-            Final energy value.
-        """
-        # Force fp32 for the entire CG loop.
-        x = x.float()
-        device_type = x.device.type
-
-        with torch.amp.autocast(device_type, enabled=False):
-            # Initial forward + gradient
-            E = self.E(x, y, output_proj)
-            E_val = E.item()
-            self._E_initial = E_val
-
-            if self.iters == 0:
-                self._E_final = E_val
-                self._actual_iters = 0
-                self._cg_diag = {}
-                return E_val
-
-            g = torch.autograd.grad(E, self.errors)
-            g = [gl.detach() for gl in g]
-
-            # CG state: r = -g (residual), d = r (search direction)
-            r = [-gl.clone() for gl in g]
-            d = [rl.clone() for rl in r]
-            rTr = sum(torch.dot(rl.reshape(-1), rl.reshape(-1)).item()
-                      for rl in r)
-
-            alpha_val = 0.0
-            dTHd_val = 0.0
-            actual_iters = self.iters
-            E_prev = E_val
-
-            for k in range(self.iters):
-                if k > 0:
-                    # Recompute gradient at updated e (nonlinear CG)
-                    E = self.E(x, y, output_proj)
-                    E_val = E.item()
-
-                    # Early stopping
-                    if early_stop_rtol > 0:
-                        rel_reduction = (E_prev - E_val) / (abs(E_prev) + 1e-10)
-                        if rel_reduction < early_stop_rtol:
-                            actual_iters = k
-                            break
-                    E_prev = E_val
-
-                    g = torch.autograd.grad(E, self.errors)
-                    g = [gl.detach() for gl in g]
-
-                    r_new = [-gl.clone() for gl in g]
-                    rTr_new = sum(
-                        torch.dot(rl.reshape(-1), rl.reshape(-1)).item()
-                        for rl in r_new)
-
-                    # Polak-Ribière+ beta (restart on negative beta)
-                    pr_num = sum(
-                        torch.dot(
-                            rn.reshape(-1), (rn - ro).reshape(-1)
-                        ).item()
-                        for rn, ro in zip(r_new, r))
-                    beta = max(0.0, pr_num / max(rTr, 1e-30))
-
-                    d = [rn + beta * do for rn, do in zip(r_new, d)]
-                    r = r_new
-                    rTr = rTr_new
-
-                # FD-HVP: Hd ≈ (g(e+εd) - g(e)) / ε
-                Hd = self._fd_hvp(x, y, output_proj, g, d)
-
-                dTHd = sum(
-                    torch.dot(dl.reshape(-1), hdl.reshape(-1)).item()
-                    for dl, hdl in zip(d, Hd))
-                dTHd_val = dTHd
-
-                # Step size: α = rᵀr / dᵀHd
-                if dTHd <= 0:
-                    # Negative curvature: use gradient-norm-scaled step
-                    # (e_lr is for SGD and may be too small for CG)
-                    grad_norm = max(rTr ** 0.5, 1e-10)
-                    alpha = min(1.0 / grad_norm, 1.0)
-                elif rTr < 1e-20:
-                    # Converged: gradient ≈ 0, skip update
-                    alpha = 0.0
-                else:
-                    alpha = rTr / dTHd
-                alpha_val = alpha
-
-                # Update errors: e ← e + α·d
-                with torch.no_grad():
-                    for e, dl in zip(self.errors, d):
-                        e.data.add_(dl.detach(), alpha=alpha)
-
-                # Detach d for next iteration
-                d = [dl.detach() for dl in d]
-
-            # Final energy
-            with torch.no_grad():
-                E_final = self.E(x, y, output_proj)
-                self._E_final = E_final.item()
-
-        self._actual_iters = actual_iters
-        self._cg_diag = {
-            'rTr': rTr,
-            'alpha': alpha_val,
-            'dTHd': dTHd_val,
-        }
-
-        return self._E_final
 
     def minimize_error_energy(self, x: Tensor, y: Tensor,
                               output_proj: nn.Module,
@@ -704,35 +472,18 @@ class PCEMamba3(nn.Module):
             prof_bwd = 0.0
             prof_step = 0.0
 
-        # CG has its own loop structure (needs HVPs via create_graph)
-        if self.error_optim_mode == 'cg':
-            E_val = self._cg_loop(x, y, output_proj, early_stop_rtol)
-            for p in self.layers.parameters():
-                p.requires_grad_(True)
-            for p in self.out_norm.parameters():
-                p.requires_grad_(True)
-            output_proj.requires_grad_(True)
-            return E_val
-
-        # Create first-order optimizer if needed
-        if self.error_optim_mode == 'sgd':
-            optim = torch.optim.SGD(self.errors, lr=self.e_lr)
-        elif self.error_optim_mode == 'adam':
+        # Create first-order optimizer
+        if self.error_optim_mode == 'adam':
             optim = torch.optim.Adam(self.errors, lr=self.e_lr)
         else:
-            optim = None  # Newton mode
+            optim = torch.optim.SGD(self.errors, lr=self.e_lr)
 
         E_val = 0.0
         E_prev = float('inf')
         actual_iters = self.iters
 
         for t in range(self.iters):
-            if optim is not None:
-                optim.zero_grad()
-            else:
-                for e in self.errors:
-                    if e.grad is not None:
-                        e.grad.zero_()
+            optim.zero_grad()
 
             if prof:
                 _t = _sync_time()
@@ -767,10 +518,7 @@ class PCEMamba3(nn.Module):
                 prof_bwd += (_t2 - _t) * 1000
                 _t = _t2
 
-            if optim is not None:
-                optim.step()
-            else:
-                self._newton_step()
+            optim.step()
 
             if prof:
                 prof_step += (_sync_time() - _t) * 1000
@@ -812,15 +560,6 @@ class PCEMamba3(nn.Module):
                     diag['layer_energies'].append(0.5 * norm ** 2)
 
         diag['actual_iters'] = getattr(self, '_actual_iters', self.iters)
-
-        newton = getattr(self, '_newton_diag', {})
-        diag['newton_rank1_ratio'] = newton.get('rank1_ratio', 0.0)
-        diag['newton_coeff'] = newton.get('coeff', 0.0)
-
-        cg = getattr(self, '_cg_diag', {})
-        diag['cg_alpha'] = cg.get('alpha', 0.0)
-        diag['cg_dTHd'] = cg.get('dTHd', 0.0)
-
         diag['precisions'] = self.precisions
 
         return diag
@@ -835,22 +574,23 @@ class ePCMamba3LM(nn.Module):
         config: Mamba3Config.
         vocab_size: Number of tokens.
         iters: Error optimization steps per batch.
-        damping: Newton damping factor.
+        e_lr: Error learning rate for SGD/Adam.
+        error_optim: 'sgd' or 'adam'.
     """
 
     def __init__(self, config: Mamba3Config, vocab_size: int,
                  iters: int = 2, e_lr: float = 0.02,
-                 error_optim: str = 'newton', damping: float = 0.1,
+                 error_optim: str = 'sgd',
                  precision_mode: str = 'none', precision_base: float = 3.0,
                  use_mhc: bool = False, n_streams: int = 2,
-                 use_mupc: bool = False):
+                 use_mupc: bool = False, **kwargs):
         super().__init__()
         self.config = config
         self.vocab_size = vocab_size
 
         self.embedding = nn.Embedding(vocab_size, config.d_model)
         self.pce = PCEMamba3(config, iters=iters, e_lr=e_lr,
-                             error_optim=error_optim, damping=damping,
+                             error_optim=error_optim,
                              precision_mode=precision_mode,
                              precision_base=precision_base,
                              use_mhc=use_mhc, n_streams=n_streams,
@@ -892,7 +632,7 @@ class ePCMamba3LM(nn.Module):
                        w_clip: float = 1.0) -> float:
         """Incremental PC: interleave error and weight updates.
 
-        Each Newton/SGD step on errors is immediately followed by a weight
+        Each SGD step on errors is immediately followed by a weight
         update via E_local. This increases the rate of weight change by T×,
         helping break through the deadlock phase where the Jacobian dy/de
         is too small for errors to be informative.
@@ -916,24 +656,16 @@ class ePCMamba3LM(nn.Module):
 
         pce.init_zero_errors(x)
 
-        # Error optimizer if needed
-        if pce.error_optim_mode == 'sgd':
-            e_optim = torch.optim.SGD(pce.errors, lr=pce.e_lr)
-        elif pce.error_optim_mode == 'adam':
+        if pce.error_optim_mode == 'adam':
             e_optim = torch.optim.Adam(pce.errors, lr=pce.e_lr)
         else:
-            e_optim = None
+            e_optim = torch.optim.SGD(pce.errors, lr=pce.e_lr)
 
         E_val = 0.0
 
         for t in range(pce.iters):
             # --- Error step ---
-            if e_optim is not None:
-                e_optim.zero_grad()
-            else:
-                for e in pce.errors:
-                    if e.grad is not None:
-                        e.grad.zero_()
+            e_optim.zero_grad()
 
             E = pce.E(x, targets, out_proj)
             E_val = E.item()
@@ -941,11 +673,7 @@ class ePCMamba3LM(nn.Module):
                 pce._E_initial = E_val
 
             E.backward()
-
-            if e_optim is not None:
-                e_optim.step()
-            else:
-                pce._newton_step()
+            e_optim.step()
 
             # --- Weight step (iPC) ---
             for p in pce.layers.parameters():
