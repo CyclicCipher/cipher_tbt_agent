@@ -6,6 +6,8 @@ A biologically-inspired AI system built on predictive coding (PC), targeting the
 
 Current focus: **ePC-JEPA** — combining energy-based predictive coding with JEPA-style latent prediction on a Mamba3 backbone. This is the `experiments/energy_reasoning/` directory.
 
+Current stage: **Stage 2 (pattern induction)** — 5-rule few-shot learning. Core finding: model memorizes (99% train) but doesn't generalize (~25% test). See `docs/hypotheses/generalization_vs_memorization.md` for our hypothesis on why.
+
 ## Critical Reference
 
 **ALWAYS read `MISTAKES.md` before making changes.** It has 35 documented mistakes with root causes. The most relevant active ones:
@@ -124,9 +126,34 @@ python experiments/ePC_ResNet/train_mnist.py
 python experiments/ePC_ResNet/train_cifar10.py
 ```
 
+## Stage 2 Status & Key Findings
+
+- **Stage 1 (1a, 1b, 1c):** PASSED. Single-rule tasks generalize immediately (~97% train ≈ ~97% test).
+- **Stage 2 (pattern induction, 5 rules):** FAILING TO GENERALIZE. 99% train, ~25% test.
+- **Oracle z ignored:** Providing the correct rule vector doesn't help. Predictor doesn't condition on z.
+- **Langevin gap negative:** Energy minimization over z actively hurts (~-5%).
+- **Hypothesis:** Model interprets 5 simple rules as 1 complex rule. See `docs/hypotheses/generalization_vs_memorization.md`.
+- **Profiling (GPU):** Error phase 46.7%, weight phase 23.3%, diagnostics 14.1%, eval 10.5%, target enc 4.9%, EMA 0.5%. ~17.5 s/epoch.
+
 ## Research Papers Implemented
 
 1. **Goemaere et al. 2025** — "Energy-based Predictive Coding" (ePC). Algorithm 4. T error steps → 1 weight step. Local learning via E_local.
 2. **Tschantz et al. 2025** — "Bayesian Predictive Coding" (BPC). Matrix Normal Wishart weight posteriors. Hebbian closed-form updates.
 3. **Assran et al. 2023** — I-JEPA. Latent prediction with EMA target encoder. VICReg regularization.
 4. **Dao & Gu 2024** — Mamba2/Mamba3. State Space Duality (SSD) for efficient sequence modeling.
+5. **Bardes et al. 2022** — VICReg. Variance-Invariance-Covariance regularization (used in JEPA training).
+
+## Research Papers Referenced (Generalization/Grokking)
+
+See `docs/research/` for PDFs, `docs/research/important research links.txt` for URLs.
+
+6. **Michaud et al. 2023** — "The Quantization Model of Neural Scaling". Skills learned as discrete quanta.
+7. **Power et al. 2022** — "Grokking: Generalization Beyond Overfitting on Small Algorithmic Datasets". Original grokking paper.
+8. **Liu et al. 2022** — "Towards Understanding Grokking". Representation learning theory of grokking.
+9. **Wang et al. 2024** — "Grokked Transformers are Implicit Reasoners". Memorizing→generalizing circuit transition.
+10. **Fan et al. 2024** — "Deep Grokking". Multi-stage grokking in deep networks.
+11. **deMoss et al. 2024** — "The Complexity Dynamics of Grokking". Complexity rises then falls at generalization.
+
+## Hypotheses & Research Notes
+
+- `docs/hypotheses/generalization_vs_memorization.md` — Multi-rule collapse hypothesis, empirical evidence, reasoning chain, supporting literature.
