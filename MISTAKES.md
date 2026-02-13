@@ -1289,30 +1289,24 @@ This maps directly to ePC's breakthrough insight:
 
 ---
 
-### Mistake #37: e_lr and T are 400× off from paper's tested values
+### Mistake #37: Blindly copying paper's hyperparameters across architectures
 
 **Date:** 2026-02-13
 
-**What happened:** We used `e_lr=0.1, T=20` (giving `λT=2.0`) for all ePC experiments. The Goemaere et al. 2025 paper uses `e_lr=0.001, T=5` (giving `λT=0.005`) for all VGG/ResNet results. Our `λT` is 400× larger than the paper's validated setting.
+**What happened:** We changed `e_lr` from 0.1→0.001 and `T` from 20→5 to match the Goemaere et al. 2025 paper. This completely broke Mamba3 (0% → 7% accuracy, no learning) and slowed ePC-JEPA.
 
-**Symptoms:**
-- Error phase converges in 3 iterations (early stopping minimum) with E_init ≈ E_final
-- Errors overshoot on iteration 1, then the `½||ε||²` penalty snaps them back (oscillatory damping)
-- Error norms are near-zero; E_local weight gradients from local ePC terms are negligible
-- The model learns almost entirely from output losses (CE, JEPA), not from local ePC learning
+**Why the paper's values don't work for us:** The paper uses `e_lr=0.001, T=5` (λT=0.005) for VGG/ResNet on CIFAR. At this λT, errors are ~0.001× the backprop gradient — extremely small. The local weight gradient `-(∂ŝ_j/∂θ_j)^T · ε_j` scales linearly with error magnitude. For VGG/ResNet, this is sufficient because the paper tunes `w_lr` to compensate and runs 25-50 epochs. For our Mamba3 architecture, the resulting gradients are ~1e-7, giving zero effective learning.
 
-**Root cause:** Mistake #13 (didn't read the paper carefully). The paper's Appendix E tables show e_lr=0.001 fixed (not tuned!) for all conv/ResNet experiments, with T=5. We assumed larger e_lr and T would give "more" PC learning, but the paper explicitly warns (Section C.2):
-
-> "ePC becomes mathematically equivalent to backpropagation when λ is sufficiently small relative to 1/T."
+**Key insight from the paper (Section C.2):** The paper DELIBERATELY operates near-backprop:
 > "In our experiments, we found that smaller values of λT generally performed best."
+> "ePC becomes mathematically equivalent to backpropagation when λ is sufficiently small relative to 1/T."
 
-The paper deliberately uses small λT (0.005) that keeps ePC NEAR but NOT AT backprop equivalence.
+The paper's "local learning" is a small perturbation on what is essentially scaled backprop. The weight update at small λT is: `∆θ_j ∝ λT × ∇_{θ_j} L(ŷ, y)`. They achieve 92% on ResNet-18 CIFAR-10 with this regime.
 
-**Correct values (from paper):**
-- `e_lr = 0.001` (fixed for all conv/ResNet)
-- `T = 5` (all conv/ResNet)
-- `λT = 0.005`
+**Our architecture needs larger errors:** With `e_lr=0.1, T=20`, errors are large enough for local MSE to provide meaningful gradients to Mamba blocks. The oscillatory convergence (overshoot → snap back in 3 iters) is not ideal but produces working results.
 
-**Important nuance:** Even with correct hyperparameters, the errors will still be near-zero and ePC operates close to backprop. The paper acknowledges this. The "local learning" benefit is a small perturbation — the primary learning comes from output losses. This is by design, not a bug.
+**Working values (for Mamba3/ePC-JEPA):** `e_lr=0.1, T=20`
+**Paper values (for VGG/ResNet):** `e_lr=0.001, T=5`
+**Lesson:** λT is architecture-dependent. Don't copy across architectures without testing.
 
-**Status:** ACTIVE — needs hyperparameter update in both Mamba3 and ePC-JEPA code
+**Status:** RESOLVED (2026-02-13) — reverted to e_lr=0.1, T=20

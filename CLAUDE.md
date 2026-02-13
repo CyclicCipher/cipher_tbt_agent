@@ -17,7 +17,7 @@ Current stage: **Stage 2 (pattern induction)** — 5-rule few-shot learning. Cor
 - **#34 (Next-step prediction):** Causal models (Mamba) need next-step prediction, not masked prediction.
 - **#13 (Read the paper):** Never skim a research paper you're implementing. Read every appendix.
 - **#36 (Don't run training):** Never run full training loops on Claude's CPU machine. Commit, push, let the user test on GPU.
-- **#37 (λT too large):** Paper uses e_lr=0.001, T=5 (λT=0.005). We had 0.1/20 (λT=2.0), 400× too large. Fixed in all variants 2026-02-13.
+- **#37 (λT is architecture-dependent):** Paper's e_lr=0.001/T=5 works for VGG/ResNet but kills Mamba3 learning (errors too small → zero local gradient). Our Mamba3 needs e_lr=0.1/T=20. Don't blindly copy paper hyperparameters across architectures.
 
 ## Architecture Overview
 
@@ -53,8 +53,8 @@ Key files:
 ## Hyperparameter Defaults (ePC-JEPA)
 
 ```
-T = 5           # Error optimization iterations (paper uses 5)
-e_lr = 0.001    # Error learning rate (paper uses 0.001, λT=0.005)
+T = 20          # Error optimization iterations (paper uses 5, but see Mistake #37)
+e_lr = 0.1      # Error learning rate (paper uses 0.001, but see Mistake #37)
 precision = none # Uniform (no layer weighting)
 reduction = mean # ALL energy terms use mean reduction
 ipc = false     # Standard ePC (not interleaved)
@@ -74,7 +74,7 @@ ipc = false     # Standard ePC (not interleaved)
 
 6. **Next-step prediction for causal models:** Mamba is causal — use next-step prediction, not masked prediction (Mistake #34).
 
-7. **Small λT (near-backprop regime):** Paper uses e_lr=0.001, T=5 giving λT=0.005. Large λT causes oscillatory damping where errors overshoot then snap back, wasting iterations. Even with correct λT, errors remain near-zero — this is by design (Mistake #37).
+7. **λT is architecture-dependent:** Paper uses e_lr=0.001, T=5 (λT=0.005) for VGG/ResNet on CIFAR. Our Mamba3 needs e_lr=0.1, T=20 (λT=2.0) — paper's values give near-zero errors and no learning signal for encoder blocks. The local MSE gradient `-(∂ŝ_j/∂θ_j)^T · ε_j` scales linearly with error magnitude (Mistake #37).
 
 ## Directory Structure
 
