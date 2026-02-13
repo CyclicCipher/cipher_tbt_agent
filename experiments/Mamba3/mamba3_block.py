@@ -43,7 +43,7 @@ class Mamba3Config:
     mlp_expand: int = 4      # SwiGLU MLP expansion (typical: 4x or 8/3x)
     use_conv: bool = False   # optional short convolution (Mamba3 removes it)
     d_conv: int = 4          # convolution kernel size (if use_conv=True)
-    use_pope: bool = False   # PoPE (Polar Positional Embeddings) instead of RoPE
+    use_pope: bool = True    # PoPE (Polar Positional Embeddings) instead of RoPE
 
     def __post_init__(self):
         self.d_inner = self.expand * self.d_model

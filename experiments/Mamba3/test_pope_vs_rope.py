@@ -66,6 +66,58 @@ def generate_where_data(n: int, seq_len: int = 16) -> tuple[Tensor, Tensor]:
     return data, targets
 
 
+def diagnose_where_by_position(model: nn.Module, seq_len: int, device: str,
+                                n_per_pos: int = 500) -> dict[int, float]:
+    """Per-position accuracy breakdown for the Where task.
+
+    Generates n_per_pos test examples for EACH query position (0..seq_len-2)
+    and measures accuracy separately.  This reveals whether the model can
+    only retrieve from recent positions (decay hypothesis).
+
+    Returns:
+        Dict mapping query_position -> accuracy (0-100%).
+    """
+    model.eval()
+    n_positions = seq_len - 1  # positions 0 .. seq_len-2
+    pos_accs = {}
+
+    with torch.no_grad():
+        for pos in range(n_positions):
+            data = torch.randint(0, VOCAB_SIZE, (n_per_pos, seq_len))
+            data[:, -1] = pos  # all queries ask for same position
+            targets = data[:, pos].clone()
+
+            data_d, targets_d = data.to(device), targets.to(device)
+            preds = model(data_d)[:, -1, :].argmax(-1)
+            acc = (preds == targets_d).float().mean().item() * 100
+            pos_accs[pos] = acc
+
+    return pos_accs
+
+
+def print_position_diagnosis(pos_accs: dict[int, float], mode_name: str,
+                             seq_len: int):
+    """Print per-position accuracy as a table and ASCII bar chart."""
+    n_positions = seq_len - 1
+    print(f"\n  {mode_name} — Per-position accuracy (query pos → accuracy):")
+    print(f"  {'Pos':>4} {'Dist':>5} {'Acc':>7}  Bar")
+    print(f"  {'----':>4} {'-----':>5} {'-------':>7}  ---")
+    for pos in range(n_positions):
+        acc = pos_accs.get(pos, 0.0)
+        dist = n_positions - pos  # distance from query (last) position
+        bar_len = int(acc / 2)  # 50 chars = 100%
+        bar = '#' * bar_len
+        print(f"  {pos:>4} {dist:>5} {acc:>6.1f}%  {bar}")
+
+    # Summary stats
+    accs = list(pos_accs.values())
+    near_accs = [pos_accs[p] for p in range(n_positions - 3, n_positions)]
+    far_accs = [pos_accs[p] for p in range(min(3, n_positions))]
+    print(f"  Overall: {sum(accs)/len(accs):.1f}%  "
+          f"Near(last 3): {sum(near_accs)/len(near_accs):.1f}%  "
+          f"Far(first 3): {sum(far_accs)/len(far_accs):.1f}%")
+
+
 def generate_what_data(n: int, seq_len: int = 16) -> tuple[Tensor, Tensor]:
     """What task: find the token after a MARKER.
 
@@ -172,7 +224,8 @@ def train_and_eval(model: nn.Module, train_data: Tensor, train_targets: Tensor,
 
 def run_comparison(task_name: str, gen_fn, epochs: int, device: str,
                    seq_len: int = 16, n_train: int = 5000,
-                   n_test: int = 1000, **gen_kwargs):
+                   n_test: int = 1000, diagnose_where: bool = False,
+                   **gen_kwargs):
     """Run RoPE vs PoPE on a task and report results."""
     print(f"\n{'='*60}")
     print(f"Task: {task_name}")
@@ -182,6 +235,7 @@ def run_comparison(task_name: str, gen_fn, epochs: int, device: str,
     test_data, test_targets = gen_fn(n_test, seq_len=seq_len, **gen_kwargs)
 
     results = {}
+    models = {}
     for mode_name, use_pope in [("RoPE", False), ("PoPE", True)]:
         print(f"\n--- {mode_name} ---")
         cfg = Mamba3Config(
@@ -201,6 +255,7 @@ def run_comparison(task_name: str, gen_fn, epochs: int, device: str,
         elapsed = time.perf_counter() - t0
         print(f"  time: {elapsed:.1f}s")
         results[mode_name] = res
+        models[mode_name] = model
 
     # Summary
     for mode_name in ["RoPE", "PoPE"]:
@@ -208,6 +263,18 @@ def run_comparison(task_name: str, gen_fn, epochs: int, device: str,
         print(f"  {mode_name}: final train={r['train_accs'][-1]:.1f}%  "
               f"test={r['test_accs'][-1]:.1f}%  "
               f"best_test={max(r['test_accs']):.1f}%")
+
+    # Per-position diagnosis for Where task
+    if diagnose_where:
+        print(f"\n{'- '*30}")
+        print("Per-position accuracy diagnosis (Where task)")
+        print(f"{'- '*30}")
+        for mode_name in ["RoPE", "PoPE"]:
+            pos_accs = diagnose_where_by_position(
+                models[mode_name], seq_len, device,
+            )
+            print_position_diagnosis(pos_accs, mode_name, seq_len)
+            results[mode_name]["pos_accs"] = pos_accs
 
     return results
 
@@ -225,6 +292,8 @@ def main():
     parser.add_argument("--n_test", type=int, default=1000)
     parser.add_argument("--task", type=str, default="all",
                         choices=["where", "what", "whatwhere", "all"])
+    parser.add_argument("--diagnose_where", action="store_true",
+                        help="Run per-position accuracy breakdown on Where task")
     args = parser.parse_args()
 
     print(f"Device: {args.device}")
@@ -237,6 +306,7 @@ def main():
             "Where (position-only matching)",
             generate_where_data, args.epochs, args.device,
             seq_len=args.seq_len, n_train=args.n_train, n_test=args.n_test,
+            diagnose_where=args.diagnose_where,
         )
 
     if args.task in ("what", "all"):
