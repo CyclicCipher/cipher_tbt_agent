@@ -10,13 +10,14 @@ Current stage: **Stage 2 (pattern induction)** — 5-rule few-shot learning. Cor
 
 ## Critical Reference
 
-**ALWAYS read `MISTAKES.md` before making changes.** It has 36 documented mistakes with root causes. The most relevant active ones:
+**ALWAYS read `MISTAKES.md` before making changes.** It has 37 documented mistakes with root causes. The most relevant active ones:
 
 - **#35 (Reduction mismatch):** Error penalty must use mean reduction, matching output losses. Sum reduction crushes errors to zero. Fixed in all variants 2026-02-13.
 - **#33 (SGD wins):** Don't use Newton or CG for error optimization. SGD is fastest, simplest, same accuracy.
 - **#34 (Next-step prediction):** Causal models (Mamba) need next-step prediction, not masked prediction.
 - **#13 (Read the paper):** Never skim a research paper you're implementing. Read every appendix.
 - **#36 (Don't run training):** Never run full training loops on Claude's CPU machine. Commit, push, let the user test on GPU.
+- **#37 (λT too large):** Paper uses e_lr=0.001, T=5 (λT=0.005). We had 0.1/20 (λT=2.0), 400× too large. Fixed in all variants 2026-02-13.
 
 ## Architecture Overview
 
@@ -52,8 +53,8 @@ Key files:
 ## Hyperparameter Defaults (ePC-JEPA)
 
 ```
-T = 20          # Error optimization iterations
-e_lr = 0.1      # Error learning rate (SGD)
+T = 5           # Error optimization iterations (paper uses 5)
+e_lr = 0.001    # Error learning rate (paper uses 0.001, λT=0.005)
 precision = none # Uniform (no layer weighting)
 reduction = mean # ALL energy terms use mean reduction
 ipc = false     # Standard ePC (not interleaved)
@@ -72,6 +73,8 @@ ipc = false     # Standard ePC (not interleaved)
 5. **Standard ePC, not iPC:** T error steps to convergence, then one weight update. Interleaved PC (iPC) prevents error convergence (paper Algorithm 4).
 
 6. **Next-step prediction for causal models:** Mamba is causal — use next-step prediction, not masked prediction (Mistake #34).
+
+7. **Small λT (near-backprop regime):** Paper uses e_lr=0.001, T=5 giving λT=0.005. Large λT causes oscillatory damping where errors overshoot then snap back, wasting iterations. Even with correct λT, errors remain near-zero — this is by design (Mistake #37).
 
 ## Directory Structure
 

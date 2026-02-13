@@ -1286,3 +1286,33 @@ This maps directly to ePC's breakthrough insight:
 **Correct approach:** Make code changes, commit, push — let the user run tests on their GPU. Only run quick sanity checks (imports, syntax) if needed, never full training loops.
 
 **Status:** ACTIVE
+
+---
+
+### Mistake #37: e_lr and T are 400× off from paper's tested values
+
+**Date:** 2026-02-13
+
+**What happened:** We used `e_lr=0.1, T=20` (giving `λT=2.0`) for all ePC experiments. The Goemaere et al. 2025 paper uses `e_lr=0.001, T=5` (giving `λT=0.005`) for all VGG/ResNet results. Our `λT` is 400× larger than the paper's validated setting.
+
+**Symptoms:**
+- Error phase converges in 3 iterations (early stopping minimum) with E_init ≈ E_final
+- Errors overshoot on iteration 1, then the `½||ε||²` penalty snaps them back (oscillatory damping)
+- Error norms are near-zero; E_local weight gradients from local ePC terms are negligible
+- The model learns almost entirely from output losses (CE, JEPA), not from local ePC learning
+
+**Root cause:** Mistake #13 (didn't read the paper carefully). The paper's Appendix E tables show e_lr=0.001 fixed (not tuned!) for all conv/ResNet experiments, with T=5. We assumed larger e_lr and T would give "more" PC learning, but the paper explicitly warns (Section C.2):
+
+> "ePC becomes mathematically equivalent to backpropagation when λ is sufficiently small relative to 1/T."
+> "In our experiments, we found that smaller values of λT generally performed best."
+
+The paper deliberately uses small λT (0.005) that keeps ePC NEAR but NOT AT backprop equivalence.
+
+**Correct values (from paper):**
+- `e_lr = 0.001` (fixed for all conv/ResNet)
+- `T = 5` (all conv/ResNet)
+- `λT = 0.005`
+
+**Important nuance:** Even with correct hyperparameters, the errors will still be near-zero and ePC operates close to backprop. The paper acknowledges this. The "local learning" benefit is a small perturbation — the primary learning comes from output losses. This is by design, not a bug.
+
+**Status:** ACTIVE — needs hyperparameter update in both Mamba3 and ePC-JEPA code
