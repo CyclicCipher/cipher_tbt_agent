@@ -936,6 +936,7 @@ The actual curvature structure is block-diagonal per layer, not low-rank globall
 - 2026-02-12 (IPC NEVER WORKED): Mistake #31 - The "99.2% iPC" result was standard ePC. `--ipc` flag was added to parser/print at f417cb8 but NOT wired into training loop until 7fcb4de. Proof: 97ms speed = standard ePC, loss 290 = E_local/32. Real iPC = 126ms, loss 6834. 6 hours wasted on "non-reproducibility crisis." Standard ePC confirmed working: 99.03% at epoch 27 (seed=0).
 - 2026-02-13 (SGD WINS): Mistake #33 - Newton and CG removed entirely. SGD achieves same final accuracy, converges faster (96% epoch 1), cheapest per batch. The "phase transition" was Newton-specific. ~1,300 lines of second-order optimizer code deleted.
 - 2026-02-13 (MASKED → NEXT-STEP): Mistake #34 - Masked prediction on causal Mamba model = 18.6% on Stage 1b. Next-step prediction = 97.05%. Complete error coverage at every position is critical. Maps to ePC's N-1→N error breakthrough.
+- 2026-02-13 (REDUCTION MISMATCH): Mistake #35 - Error penalty used sum reduction (~1M elements) while output losses used mean reduction (O(1)). Error penalty was ~1,000,000x stronger than output signal, crushing errors to near-zero. Present in ALL ePC variants (ePC_ResNet, ePC_Mamba, Mamba3, energy_reasoning). eBPC variants were unaffected (used .sum(dim=1).mean() correctly).
 
 ---
 
@@ -1160,6 +1161,75 @@ The entire saga of trying to "fix" Newton (mistakes #24-32) was solving the wron
 - `--error_optim` now accepts only `['sgd', 'adam']`
 
 **Status:** RESOLVED (2026-02-13) — Newton and CG removed. SGD is the only error optimizer.
+
+---
+
+### 35. Error Energy Reduction Mismatch — Errors Crushed to Near-Zero Across All ePC Variants (CRITICAL)
+
+**What we did wrong:** Used `torch.linalg.vector_norm(e, ord=2, dim=None) ** 2` (sum over ALL elements) for error penalty, while output losses (`F.cross_entropy`, `F.mse_loss`) used default mean reduction.
+
+**The math of why it failed:**
+
+Each error tensor has shape `(B, seq_len, d_model)` — e.g., `(32, 64, 128)` = 262,144 elements per layer, ~1M total across 4 layers.
+
+```
+E = ½Σ||ε_i||²_SUM  +  L_MEAN(output)
+  ≈ 1,000,000 × mean(ε²)  +  ~3.6
+```
+
+Any error element of magnitude 0.001 already created penalty comparable to the ENTIRE output loss. The quadratic error penalty was ~1,000,000x stronger than the gradient signal telling errors where to go. Errors couldn't grow — not because they had nowhere to go, but because the penalty for existing at all was overwhelming.
+
+**Symptoms:**
+- Error optimization early-stopped at 3 iterations (of T=20) every epoch
+- `E_init - E_final` gap negligible (0.0026 → 0.0001)
+- Error norms microscopic (0.001-0.02), decaying to ~0.0005
+- Model still trained to 96.75% — but entirely through predictor/decoder backprop
+- ePC mechanism was completely inert; encoder blocks barely updated
+
+**What we initially misdiagnosed:** "errors converge fast" — but they weren't converging to the right place. They were PINNED at zero by the penalty term.
+
+**Affected files (ALL ePC variants):**
+- `experiments/energy_reasoning/epc_jepa_model.py` — E(), E_local(), compute_weight_loss
+- `experiments/Mamba3/epc_model.py` — E(), E_local(), _output_loss, compute_weight_loss, ipc_train_step
+- `experiments/ePC_ResNet/epc_model.py` — E(), E_local(), PCESkipConnection.E_local(), _output_loss, compute_weight_loss
+- `experiments/ePC_Mamba/epc_model.py` — E(), E_local(), _output_loss, compute_weight_loss
+- `experiments/ePC_Mamba/train_synthetic.py` — compute_weight_loss wrapper
+- All associated training scripts (batch_size parameter, energy_scale hack)
+
+**NOT affected (correct from the start):**
+- `experiments/eBPC/ebpc_trainer.py` — uses `.sum(dim=1).mean()` (sum over features, mean over batch)
+- `experiments/eBPC_ResNet/ebpc_diagonal_trainer.py` — same correct pattern
+- `experiments/eBPC_ResNet/ebpc_lowrank_trainer.py` — same correct pattern
+
+The eBPC variants were correct because they compute the quadratic form `ε^T Σ^{-1} ε` per example (`.sum(dim=1)`) then average over the batch (`.mean()`), giving O(1) scale. No `energy_scale` or `batch_size` normalization was needed.
+
+**The fix:**
+```python
+# BEFORE (sum reduction — O(B*L*d) ~ 1M):
+E_errors = 0.5 * sum(
+    torch.linalg.vector_norm(e, ord=2, dim=None) ** 2
+    for e in self.errors
+)
+
+# AFTER (mean reduction — O(1), matching output losses):
+E_errors = 0.5 * sum(e.pow(2).mean() for e in self.errors)
+```
+
+Also fixed:
+- `F.mse_loss(s_pred, s, reduction='sum')` → `F.mse_loss(s_pred, s)` in E_local
+- `F.cross_entropy(..., reduction='sum')` → `F.cross_entropy(...)` in output loss
+- Removed `energy_scale` hack (was `min(1.0, e_lr * iters)`)
+- Removed `/ (batch_size * energy_scale)` from `compute_weight_loss`
+
+**Additional fixes applied simultaneously (paper alignment):**
+1. Unified E to include full output loss (JEPA + decode CE + VICReg) — paper: E includes L(ŷ,y)
+2. Removed precision weighting (default → 'none') — paper uses uniform ½||ε||²
+3. Increased default T from 5 to 20 — paper uses T=4-20
+4. Standard ePC (not iPC) as default — paper Algorithm 4
+
+**Root principle:** When combining sum-reduced and mean-reduced terms in an energy function, the scale mismatch can be catastrophic. Always ensure ALL terms in an energy/loss function use the SAME reduction semantics. A factor of 1,000,000x is not a hyperparameter issue — it's a bug.
+
+**Status:** FIXED (2026-02-13) — mean reduction everywhere, energy_scale removed, all 4 ePC variants fixed
 
 ---
 

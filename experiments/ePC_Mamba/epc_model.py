@@ -108,7 +108,7 @@ class PCESequence(nn.Module):
                 # Convert to one-hot for MSE
                 if y.dtype in (torch.long, torch.int):
                     y = F.one_hot(y, num_classes=y_pred.shape[-1]).float()
-                return 0.5 * F.mse_loss(y_pred, y, reduction='sum')
+                return 0.5 * F.mse_loss(y_pred, y)  # mean reduction
             self._output_loss = _mse_loss
         elif output_loss == 'ce':
             # For token-level CE: y_pred is (batch, seqlen, vocab),
@@ -118,8 +118,7 @@ class PCESequence(nn.Module):
                 b, l, v = y_pred.shape
                 return F.cross_entropy(
                     y_pred.reshape(b * l, v), y.reshape(b * l),
-                    reduction='sum'
-                )
+                )  # mean reduction
             self._output_loss = _ce_loss
         else:
             raise ValueError(f"Unknown output_loss: {output_loss}")
@@ -148,10 +147,7 @@ class PCESequence(nn.Module):
             y: target tensor (shape depends on task).
             output_proj: nn.Linear mapping d_model → output_dim.
         """
-        E_errors = 0.5 * sum(
-            torch.linalg.vector_norm(e, ord=2, dim=None) ** 2
-            for e in self.errors
-        )
+        E_errors = 0.5 * sum(e.pow(2).mean() for e in self.errors)
         logits = output_proj(self.y_pred(x))
         return E_errors + self._output_loss(logits, y)
 
@@ -171,7 +167,7 @@ class PCESequence(nn.Module):
         for e_i, layer_i in zip(self.errors, self.layers[:-1]):
             s_i_pred = layer_i(s_i)
             s_i = (e_i + s_i_pred).detach()
-            E += 0.5 * F.mse_loss(s_i_pred, s_i, reduction='sum')
+            E += 0.5 * F.mse_loss(s_i_pred, s_i)  # mean reduction
         # Last layer + output
         s_last_pred = self.layers[-1](s_i)
         s_last = self.out_norm(s_last_pred)
@@ -542,11 +538,10 @@ class ePCMambaLM(nn.Module):
             hidden = self.pce.y_pred(x)
             return self.out_proj(hidden)
 
-    def compute_weight_loss(self, input_ids: Tensor, targets: Tensor,
-                            batch_size: int) -> Tensor:
+    def compute_weight_loss(self, input_ids: Tensor, targets: Tensor) -> Tensor:
         """Compute E_local for weight optimizer (call after forward with targets)."""
         x = self.embedding(input_ids)
-        return self.pce.E_local(x, targets, self.out_proj) / batch_size
+        return self.pce.E_local(x, targets, self.out_proj)
 
     def get_diagnostics(self) -> dict:
         return self.pce.get_diagnostics()

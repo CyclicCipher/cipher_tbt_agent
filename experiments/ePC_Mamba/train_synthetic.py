@@ -149,7 +149,7 @@ class ePCMambaSynthetic(nn.Module):
                 return self.proj(x.mean(dim=1))
         return self.pce.minimize_error_energy(x, targets, _PooledProj(self.out_proj))
 
-    def compute_weight_loss(self, input_ids, targets, batch_size):
+    def compute_weight_loss(self, input_ids, targets):
         x = self.embedding(input_ids)
         if self.task == 'classify':
             class _PooledProj(nn.Module):
@@ -158,8 +158,8 @@ class ePCMambaSynthetic(nn.Module):
                     self.proj = proj
                 def forward(self, x):
                     return self.proj(x.mean(dim=1))
-            return self.pce.E_local(x, targets, _PooledProj(self.out_proj)) / batch_size
-        return self.pce.E_local(x, targets, self.out_proj) / batch_size
+            return self.pce.E_local(x, targets, _PooledProj(self.out_proj))
+        return self.pce.E_local(x, targets, self.out_proj)
 
     def get_diagnostics(self):
         return self.pce.get_diagnostics()
@@ -952,7 +952,7 @@ def main():
                 if prof:
                     _tw = _sync_time()
 
-                weight_loss = model.compute_weight_loss(inputs, targets, batch_size)
+                weight_loss = model.compute_weight_loss(inputs, targets)
 
                 if prof:
                     _t2 = _sync_time()
