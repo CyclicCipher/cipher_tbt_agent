@@ -372,7 +372,8 @@ class ePCJEPAModel(nn.Module):
                                s_target: Tensor,
                                z: Tensor = None,
                                early_stop_rtol: float = 1e-3,
-                               min_iters: int = 2) -> float:
+                               min_iters: int = 2,
+                               amp_ctx=None) -> float:
         """Phase 1: optimize errors to minimize energy (paper Algorithm 4).
 
         Freezes all weights. Runs T iterations of SGD on errors.
@@ -385,10 +386,15 @@ class ePCJEPAModel(nn.Module):
             z: Optional latent variable.
             early_stop_rtol: Stop if relative energy reduction < this.
             min_iters: Minimum iterations before early stopping is checked.
+            amp_ctx: Optional AMP autocast context manager factory.
 
         Returns:
             Final energy value.
         """
+        if amp_ctx is None:
+            from contextlib import nullcontext
+            amp_ctx = nullcontext
+
         x_emb = self.embedding(input_ids).detach()
 
         self._freeze_all_weights()
@@ -405,7 +411,8 @@ class ePCJEPAModel(nn.Module):
 
         for t in range(self.iters):
             optim.zero_grad()
-            E = self.E(x_emb, input_ids, s_target, z)
+            with amp_ctx():
+                E = self.E(x_emb, input_ids, s_target, z)
             E_val = E.item()
 
             if t == 0:
@@ -447,7 +454,8 @@ class ePCJEPAModel(nn.Module):
                        z: Tensor = None,
                        w_clip: float = 1.0,
                        early_stop_rtol: float = 1e-3,
-                       min_iters: int = 2) -> float:
+                       min_iters: int = 2,
+                       amp_ctx=None, scaler=None) -> float:
         """Incremental PC: interleave error and weight steps.
 
         Each error SGD step is immediately followed by a weight update.
@@ -456,6 +464,10 @@ class ePCJEPAModel(nn.Module):
         Returns:
             Final energy value.
         """
+        if amp_ctx is None:
+            from contextlib import nullcontext
+            amp_ctx = nullcontext
+
         x_emb_detached = self.embedding(input_ids).detach()
 
         self._freeze_all_weights()
@@ -473,7 +485,8 @@ class ePCJEPAModel(nn.Module):
         for t in range(self.iters):
             # --- Error step ---
             e_optim.zero_grad()
-            E = self.E(x_emb_detached, input_ids, s_target, z)
+            with amp_ctx():
+                E = self.E(x_emb_detached, input_ids, s_target, z)
             E_val = E.item()
             if t == 0:
                 self._E_initial = E_val
@@ -494,12 +507,22 @@ class ePCJEPAModel(nn.Module):
             weight_optimizer.zero_grad()
             # Recompute embedding WITH gradients for weight phase
             x_emb = self.embedding(input_ids)
-            w_loss = self.E_local(x_emb, input_ids, s_target, z)
-            w_loss.backward()
-            if w_clip > 0:
-                nn.utils.clip_grad_norm_(
-                    self.get_trainable_params(), max_norm=w_clip)
-            weight_optimizer.step()
+            with amp_ctx():
+                w_loss = self.E_local(x_emb, input_ids, s_target, z)
+            if scaler is not None:
+                scaler.scale(w_loss).backward()
+                if w_clip > 0:
+                    scaler.unscale_(weight_optimizer)
+                    nn.utils.clip_grad_norm_(
+                        self.get_trainable_params(), max_norm=w_clip)
+                scaler.step(weight_optimizer)
+                scaler.update()
+            else:
+                w_loss.backward()
+                if w_clip > 0:
+                    nn.utils.clip_grad_norm_(
+                        self.get_trainable_params(), max_norm=w_clip)
+                weight_optimizer.step()
 
             # Re-freeze for next error step
             self._freeze_all_weights()

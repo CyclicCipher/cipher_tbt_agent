@@ -494,12 +494,13 @@ def plot_stage2(save_path, epoch, config_str, history, last_metrics,
     # [1,1] Energy trajectories across epochs (overlay a few)
     ax = axes[1, 1]
     n_traj = len(history['energy_traj'])
-    indices = [0, n_traj // 4, n_traj // 2, 3 * n_traj // 4, n_traj - 1]
-    indices = sorted(set(max(0, min(i, n_traj - 1)) for i in indices))
-    for idx in indices:
-        traj = history['energy_traj'][idx]
-        ax.plot(range(len(traj)), traj, '-o', markersize=3,
-                label=f'Epoch {idx + 1}', alpha=0.8)
+    if n_traj > 0:
+        indices = [0, n_traj // 4, n_traj // 2, 3 * n_traj // 4, n_traj - 1]
+        indices = sorted(set(max(0, min(i, n_traj - 1)) for i in indices))
+        for idx in indices:
+            traj = history['energy_traj'][idx]
+            ax.plot(range(len(traj)), traj, '-o', markersize=3,
+                    label=f'Epoch {idx + 1}', alpha=0.8)
     ax.set_xlabel('Langevin Step')
     ax.set_ylabel('E_pred(z)')
     ax.set_title('Energy Trajectories Over Training')
@@ -623,6 +624,12 @@ def main():
     parser.add_argument('--lambda_cov', type=float, default=0.04,
                         help='VICReg covariance loss weight')
 
+    # Performance
+    parser.add_argument('--no_amp', action='store_true',
+                        help='Disable mixed precision (AMP)')
+    parser.add_argument('--compile', action='store_true',
+                        help='Use torch.compile (PyTorch 2+)')
+
     # Misc
     parser.add_argument('--device', type=str, default='auto')
     parser.add_argument('--seed', type=int, default=42)
@@ -642,6 +649,28 @@ def main():
     else:
         device = torch.device(args.device)
     print(f"Device: {device}")
+
+    # -----------------------------------------------------------------------
+    # Stage 2 defaults (before config, since they change seq_len/batch_size)
+    # -----------------------------------------------------------------------
+
+    is_stage2 = (args.stage == '2')
+    if is_stage2:
+        # Stage 2 defaults: more data, more epochs, shorter seq, larger batch
+        if args.n_train == 5000:
+            args.n_train = 10000
+        if args.n_test == 1000:
+            args.n_test = 2000
+        if args.epochs == 30:
+            args.epochs = 50
+        # Task is only 2*n_examples+2 = 12 tokens; seq_len=64 wastes 80%
+        # on padding. Use 16 unless user explicitly set seq_len.
+        if args.seq_len == 64:
+            task_len = 2 * args.n_examples + 2
+            args.seq_len = max(task_len, 16)
+        # Larger batches for better GPU utilization
+        if args.batch_size == 32:
+            args.batch_size = 128
 
     # -----------------------------------------------------------------------
     # Config
@@ -671,20 +700,12 @@ def main():
           f"optim={args.error_optim}, prec={args.precision_mode}")
     print(f"Early stop: rtol={args.early_stop_rtol}, "
           f"min_iters={args.min_iters}")
+    print(f"seq_len={args.seq_len}, batch_size={args.batch_size}, "
+          f"chunk_size={chunk_size}")
 
     # -----------------------------------------------------------------------
     # Data
     # -----------------------------------------------------------------------
-
-    is_stage2 = (args.stage == '2')
-    if is_stage2:
-        # Stage 2 defaults: more data, more epochs
-        if args.n_train == 5000:
-            args.n_train = 10000
-        if args.n_test == 1000:
-            args.n_test = 2000
-        if args.epochs == 30:
-            args.epochs = 50
 
     print(f"\nGenerating Stage {args.stage} data...")
     data = get_stage_data(
@@ -705,7 +726,7 @@ def main():
         test_loader = DataLoader(
             TensorDataset(data['test_seqs'], data['test_targets'],
                           data['test_rules']),
-            batch_size=args.batch_size, shuffle=False, drop_last=True)
+            batch_size=args.batch_size, shuffle=False, drop_last=False)
         # Oracle z projection (fixed random, shared across train/test)
         torch.manual_seed(0)
         oracle_proj = torch.randn(args.n_rules, args.d_z, device=device) * 0.5
@@ -720,7 +741,7 @@ def main():
             batch_size=args.batch_size, shuffle=True, drop_last=True)
         test_loader = DataLoader(
             TensorDataset(data['test_seqs']),
-            batch_size=args.batch_size, shuffle=False, drop_last=True)
+            batch_size=args.batch_size, shuffle=False, drop_last=False)
 
     print(f"Train: {data['train_seqs'].shape}, Test: {data['test_seqs'].shape}")
 
@@ -751,6 +772,27 @@ def main():
     print(f"Trainable params: {trainable:,} / Total: {total:,}")
     print(f"Precisions: {[f'{p:.2f}' for p in model.precisions]}")
     print(f"Reduction: mean (E and E_local)")
+
+    # --- AMP (mixed precision) ---
+    from contextlib import nullcontext
+    use_amp = (not args.no_amp and device.type == 'cuda')
+    scaler = torch.amp.GradScaler('cuda') if use_amp else None
+    if use_amp:
+        def amp_ctx():
+            return torch.amp.autocast('cuda', dtype=torch.float16)
+    else:
+        amp_ctx = nullcontext
+    print(f"AMP: {'ON' if use_amp else 'OFF'}")
+
+    # --- torch.compile ---
+    if args.compile:
+        try:
+            model = torch.compile(model)
+            print("torch.compile: ON")
+        except Exception as e:
+            print(f"torch.compile: FAILED ({e}), continuing without")
+    else:
+        print("torch.compile: OFF (use --compile to enable)")
 
     optimizer = torch.optim.AdamW(model.get_trainable_params(), lr=args.lr)
 
@@ -785,8 +827,9 @@ def main():
               f"sigma={args.langevin_sigma}")
         print(f"{'Epoch':>5} {'E_init':>8} {'E_fin':>8} {'JEPA':>8} "
               f"{'DecCE':>8} {'TrAcc':>7} {'NoZ':>7} {'RndZ':>7} "
-              f"{'Lang':>7} {'Orac':>7} {'Gap':>7} {'ms/b':>7}")
-        print("-" * 95)
+              f"{'Lang':>7} {'Orac':>7} {'Gap':>7} {'ms/b':>7} "
+              f"{'iters':>5}")
+        print("-" * 102)
 
         # Track per-epoch stage2 test results for plotting
         s2_history = {
@@ -821,22 +864,35 @@ def main():
                         seqs, s_target, optimizer, z=z_train,
                         w_clip=args.w_clip,
                         early_stop_rtol=args.early_stop_rtol,
-                        min_iters=args.min_iters)
+                        min_iters=args.min_iters,
+                        amp_ctx=amp_ctx, scaler=scaler)
                 else:
                     model.minimize_error_energy(
                         seqs, s_target, z=z_train,
                         early_stop_rtol=args.early_stop_rtol,
-                        min_iters=args.min_iters)
+                        min_iters=args.min_iters,
+                        amp_ctx=amp_ctx)
 
                     optimizer.zero_grad()
-                    w_loss = model.compute_weight_loss(
-                        seqs, s_target, z=z_train)
-                    w_loss.backward()
-                    if args.w_clip > 0:
-                        torch.nn.utils.clip_grad_norm_(
-                            model.get_trainable_params(),
-                            max_norm=args.w_clip)
-                    optimizer.step()
+                    with amp_ctx():
+                        w_loss = model.compute_weight_loss(
+                            seqs, s_target, z=z_train)
+                    if scaler is not None:
+                        scaler.scale(w_loss).backward()
+                        scaler.unscale_(optimizer)
+                        if args.w_clip > 0:
+                            torch.nn.utils.clip_grad_norm_(
+                                model.get_trainable_params(),
+                                max_norm=args.w_clip)
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        w_loss.backward()
+                        if args.w_clip > 0:
+                            torch.nn.utils.clip_grad_norm_(
+                                model.get_trainable_params(),
+                                max_norm=args.w_clip)
+                        optimizer.step()
 
                 # --- Phase 3: EMA update ---
                 model.update_target()
@@ -901,11 +957,12 @@ def main():
             avg_acc = ep_acc / n_batches
             avg_ms = ep_ms / n_batches
 
+            avg_it = ep_iters / n_batches
             print(f"{epoch:5d} {avg_ei:8.4f} {avg_ef:8.4f} "
                   f"{avg_jepa:8.4f} {avg_dec:8.4f} {avg_acc:7.4f} "
                   f"{a['no_z']:7.4f} {a['random_z']:7.4f} "
                   f"{a['langevin']:7.4f} {a['oracle']:7.4f} "
-                  f"{gap:+7.4f} {avg_ms:7.1f}")
+                  f"{gap:+7.4f} {avg_ms:7.1f} {avg_it:5.1f}")
 
             # Plot
             if epoch % args.plot_every == 0 or epoch == args.epochs:
@@ -982,23 +1039,37 @@ def main():
                     model.ipc_train_step(
                         seqs, s_target, optimizer, w_clip=args.w_clip,
                         early_stop_rtol=args.early_stop_rtol,
-                        min_iters=args.min_iters)
+                        min_iters=args.min_iters,
+                        amp_ctx=amp_ctx, scaler=scaler)
                 else:
                     # Phase 1: error optimization
                     model.minimize_error_energy(
                         seqs, s_target,
                         early_stop_rtol=args.early_stop_rtol,
-                        min_iters=args.min_iters)
+                        min_iters=args.min_iters,
+                        amp_ctx=amp_ctx)
 
                     # Phase 2: weight optimization
                     optimizer.zero_grad()
-                    w_loss = model.compute_weight_loss(seqs, s_target)
-                    w_loss.backward()
-                    if args.w_clip > 0:
-                        torch.nn.utils.clip_grad_norm_(
-                            model.get_trainable_params(),
-                            max_norm=args.w_clip)
-                    optimizer.step()
+                    with amp_ctx():
+                        w_loss = model.compute_weight_loss(
+                            seqs, s_target)
+                    if scaler is not None:
+                        scaler.scale(w_loss).backward()
+                        scaler.unscale_(optimizer)
+                        if args.w_clip > 0:
+                            torch.nn.utils.clip_grad_norm_(
+                                model.get_trainable_params(),
+                                max_norm=args.w_clip)
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        w_loss.backward()
+                        if args.w_clip > 0:
+                            torch.nn.utils.clip_grad_norm_(
+                                model.get_trainable_params(),
+                                max_norm=args.w_clip)
+                        optimizer.step()
 
                 # --- Phase 3: EMA update ---
                 model.update_target()
