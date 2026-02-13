@@ -521,7 +521,9 @@ def main():
             # --- Phase 1 + Phase 2 ---
             if args.ipc:
                 model.ipc_train_step(
-                    seqs, s_target, optimizer, B, w_clip=args.w_clip)
+                    seqs, s_target, optimizer, B, w_clip=args.w_clip,
+                    early_stop_rtol=args.early_stop_rtol,
+                    min_iters=args.min_iters)
             else:
                 # Phase 1: error optimization
                 model.minimize_error_energy(

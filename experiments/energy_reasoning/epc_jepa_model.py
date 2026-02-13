@@ -425,7 +425,9 @@ class ePCJEPAModel(nn.Module):
     def ipc_train_step(self, input_ids: Tensor, s_target: Tensor,
                        weight_optimizer, batch_size: int,
                        z: Tensor = None,
-                       w_clip: float = 1.0) -> float:
+                       w_clip: float = 1.0,
+                       early_stop_rtol: float = 1e-3,
+                       min_iters: int = 2) -> float:
         """Incremental PC: interleave error and weight steps.
 
         Each error SGD step is immediately followed by a weight update.
@@ -445,6 +447,8 @@ class ePCJEPAModel(nn.Module):
             e_optim = torch.optim.SGD(self.errors, lr=self.e_lr)
 
         E_val = 0.0
+        E_prev = float('inf')
+        actual_iters = self.iters
 
         for t in range(self.iters):
             # --- Error step ---
@@ -453,6 +457,15 @@ class ePCJEPAModel(nn.Module):
             E_val = E.item()
             if t == 0:
                 self._E_initial = E_val
+
+            # Early stopping: skip remaining iters if energy converged
+            if early_stop_rtol > 0 and t >= min_iters:
+                rel_reduction = (E_prev - E_val) / (abs(E_prev) + 1e-10)
+                if rel_reduction < early_stop_rtol:
+                    actual_iters = t + 1
+                    break
+
+            E_prev = E_val
             E.backward()
             e_optim.step()
 
@@ -473,6 +486,7 @@ class ePCJEPAModel(nn.Module):
             self._freeze_all_weights()
 
         self._E_final = E_val
+        self._actual_iters = actual_iters
         self._unfreeze_all_weights()
 
         return E_val
