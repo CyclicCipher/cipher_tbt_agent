@@ -170,12 +170,14 @@ class Diagnostics:
         self.layer_energies = [[] for _ in range(self.num_error_layers)]
         self.error_norms = [[] for _ in range(self.num_error_layers)]
         self.inference_convergence = []
+        self.actual_iters = []
 
     def update_train_epc(self, acc, loss, diagnostics, ms):
         self.train_accs.append(acc)
         self.train_losses.append(loss)
         self.ms_per_batch.append(ms)
         self.inference_convergence.append(diagnostics['convergence'])
+        self.actual_iters.append(diagnostics.get('actual_iters', 0))
         for i, energy in enumerate(diagnostics.get('layer_energies', [])):
             if i < self.num_error_layers:
                 self.layer_energies[i].append(energy)
@@ -558,14 +560,19 @@ def main():
     best_test_acc = 0.0
     mode_str = 'ePC' if use_epc else 'Backprop'
     print(f"\nTask: {task_names[args.task]}, Mode: {mode_str}")
-    print(f"{'Epoch':>5} {'Loss':>10} {'Train Acc':>10} {'Test Acc':>10} {'ms/batch':>10}")
-    print("-" * 50)
+    if use_epc:
+        print(f"{'Epoch':>5} {'Loss':>10} {'Train Acc':>10} {'Test Acc':>10} {'ms/batch':>10} {'iters':>5}")
+        print("-" * 55)
+    else:
+        print(f"{'Epoch':>5} {'Loss':>10} {'Train Acc':>10} {'Test Acc':>10} {'ms/batch':>10}")
+        print("-" * 50)
 
     for epoch in range(1, args.epochs + 1):
         model.train()
         epoch_loss = 0.0
         epoch_acc = 0.0
         epoch_time = 0.0
+        epoch_iters = 0.0
         n_batches = 0
 
         for batch in train_loader:
@@ -615,6 +622,7 @@ def main():
 
                 diagnostics.update_train_epc(
                     acc=acc, loss=loss_val, diagnostics=diag, ms=ms)
+                epoch_iters += diag.get('actual_iters', 0)
 
             else:
                 t0 = time.perf_counter()
@@ -658,9 +666,14 @@ def main():
         avg_loss = epoch_loss / n_batches
         avg_acc = epoch_acc / n_batches
         avg_time = epoch_time / n_batches
+        avg_iters = epoch_iters / n_batches if n_batches > 0 else 0
 
-        print(f"{epoch:5d} {avg_loss:10.4f} {avg_acc:10.4f} "
-              f"{test_acc:10.4f} {avg_time:10.1f}")
+        if use_epc:
+            print(f"{epoch:5d} {avg_loss:10.4f} {avg_acc:10.4f} "
+                  f"{test_acc:10.4f} {avg_time:10.1f} {avg_iters:5.1f}")
+        else:
+            print(f"{epoch:5d} {avg_loss:10.4f} {avg_acc:10.4f} "
+                  f"{test_acc:10.4f} {avg_time:10.1f}")
 
         # Periodic ePC diagnostics
         if use_epc and epoch % 10 == 0:
