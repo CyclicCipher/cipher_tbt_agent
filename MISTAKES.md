@@ -934,6 +934,9 @@ The actual curvature structure is block-diagonal per layer, not low-rank globall
 - 2026-02-11 (NEWTON STEP DEBUGGING SPIRAL): Mistakes #24-26 - Three failed attempts to "fix" Newton step for ePC-Mamba. Original rank-1 was working (86%) but we declared it broken and spent hours making it worse. See individual entries below.
 - 2026-02-12 (ADAPTIVE DAMPING REGRESSION): Mistake #30 - Adaptive Newton damping from prospective configuration paper caused complete regression (99.2% → 7.75%). Reverted.
 - 2026-02-12 (IPC NEVER WORKED): Mistake #31 - The "99.2% iPC" result was standard ePC. `--ipc` flag was added to parser/print at f417cb8 but NOT wired into training loop until 7fcb4de. Proof: 97ms speed = standard ePC, loss 290 = E_local/32. Real iPC = 126ms, loss 6834. 6 hours wasted on "non-reproducibility crisis." Standard ePC confirmed working: 99.03% at epoch 27 (seed=0).
+- 2026-02-13 (SGD WINS): Mistake #33 - Newton and CG removed entirely. SGD achieves same final accuracy, converges faster (96% epoch 1), cheapest per batch. The "phase transition" was Newton-specific. ~1,300 lines of second-order optimizer code deleted.
+- 2026-02-13 (MASKED → NEXT-STEP): Mistake #34 - Masked prediction on causal Mamba model = 18.6% on Stage 1b. Next-step prediction = 97.05%. Complete error coverage at every position is critical. Maps to ePC's N-1→N error breakthrough.
+- 2026-02-13 (REDUCTION MISMATCH): Mistake #35 - Error penalty used sum reduction (~1M elements) while output losses used mean reduction (O(1)). Error penalty was ~1,000,000x stronger than output signal, crushing errors to near-zero. Present in ALL ePC variants (ePC_ResNet, ePC_Mamba, Mamba3, energy_reasoning). eBPC variants were unaffected (used .sum(dim=1).mean() correctly).
 
 ---
 
@@ -1114,4 +1117,196 @@ The Hessian itself is **mathematically finite** — finite-difference HVP confir
 
 **Never do:** Use autograd double-backward (`create_graph=True` → `grad(grad(...))`) through cross-entropy loss when multiple leaf nodes contribute to the same loss. This is a known PyTorch numerical instability.
 
-**Status:** FIXED (2026-02-12) — `_fd_hvp()` method + updated `_cg_loop()` in epc_model.py
+**Status:** FIXED (2026-02-12) — `_fd_hvp()` method + updated `_cg_loop()` in epc_model.py.
+**UPDATE (2026-02-13):** CG and Newton entirely removed from codebase. SGD is the definitive error optimizer. See Mistake #33.
+
+---
+
+### 33. Newton and CG Were Never the Right Error Optimizers — SGD Wins on Every Metric (CRITICAL ARCHITECTURAL LESSON)
+
+**What we tried:** Months of work on second-order error optimization:
+- **Newton** (rank-1 LRPD Woodbury): the original error optimizer, required damping, had a 19-28 epoch phase transition plateau, needed careful Jacobian quality to work
+- **CG** (Polak-Ribiere+ with finite-difference HVP): more principled second-order, but NaN issues (#32), most expensive per-batch
+- **Adaptive damping** (#30): tried to improve Newton, caused complete regression
+- **mHC** (#28): tried to give Newton more error degrees of freedom, unstable and 3x slower
+- **muPC** (#29): tried to stabilize forward pass for Newton, crushed the Jacobian
+
+**The experiment that ended it all (2026-02-13):**
+
+Ran ePC-Mamba3 on task 1b (multi-rule regime change, next-step prediction) with all three optimizers:
+- **SGD** (lr=0.001): 96% test accuracy on EPOCH 1. Final: 97.01%. Cheapest per batch.
+- **Newton**: 97.10% final. Slower to converge (passed 96% at epoch 3). More expensive.
+- **CG**: 96.96% final. Slowest to converge. Most expensive per batch.
+
+**Every optimizer reached the same final accuracy. SGD learned the fastest and was multiple times faster per batch.**
+
+**Why Newton was never needed:**
+
+The "phase transition" documented in EPC_LEARNING_DYNAMICS.md was **Newton-specific, not ePC-specific**. Newton's rank-1 Hessian approximation required the Jacobian to reach a specific quality threshold before errors could grow — creating the circular dependency (Jacobian quality <-> error magnitude <-> weight learning). SGD has no such threshold: it simply follows the gradient. No phase transition, no plateau, no circular dependency.
+
+The entire saga of trying to "fix" Newton (mistakes #24-32) was solving the wrong problem. The problem wasn't "how to make Newton work better" — it was "Newton is unnecessary, use SGD."
+
+**What this means for ePC:**
+1. ePC's learning dynamics are simple with SGD: errors follow gradients, weights learn from E_local, convergence is smooth and fast
+2. The "phase transition" was Newton's artifact, not ePC's inherent property
+3. All the complexity we added (adaptive damping, CG, mHC, muPC) was workarounds for a problem that doesn't exist with SGD
+4. The real breakthroughs for ePC were architectural: N errors for N layers (#23), geometric precision weighting, and next-step prediction
+
+**Root principle:** Don't use a complex optimizer when a simple one works. SGD's simplicity is a feature, not a limitation. The error optimization problem in ePC is well-conditioned enough that gradient descent is optimal — second-order methods add cost and complexity without improving convergence.
+
+**Code removed (2026-02-13):** ~1,300 lines deleted:
+- `_newton_step()`, `_fd_hvp()`, `_cg_loop()` from epc_model.py
+- `diag_hvp.py`, `diag_cg.py` diagnostic scripts
+- Newton/CG CLI options, damping parameter, associated print/diagnostic code
+- `--error_optim` now accepts only `['sgd', 'adam']`
+
+**Status:** RESOLVED (2026-02-13) — Newton and CG removed. SGD is the only error optimizer.
+
+---
+
+### 35. Error Energy Reduction Mismatch — Errors Crushed to Near-Zero Across All ePC Variants (CRITICAL)
+
+**What we did wrong:** Used `torch.linalg.vector_norm(e, ord=2, dim=None) ** 2` (sum over ALL elements) for error penalty, while output losses (`F.cross_entropy`, `F.mse_loss`) used default mean reduction.
+
+**The math of why it failed:**
+
+Each error tensor has shape `(B, seq_len, d_model)` — e.g., `(32, 64, 128)` = 262,144 elements per layer, ~1M total across 4 layers.
+
+```
+E = ½Σ||ε_i||²_SUM  +  L_MEAN(output)
+  ≈ 1,000,000 × mean(ε²)  +  ~3.6
+```
+
+Any error element of magnitude 0.001 already created penalty comparable to the ENTIRE output loss. The quadratic error penalty was ~1,000,000x stronger than the gradient signal telling errors where to go. Errors couldn't grow — not because they had nowhere to go, but because the penalty for existing at all was overwhelming.
+
+**Symptoms:**
+- Error optimization early-stopped at 3 iterations (of T=20) every epoch
+- `E_init - E_final` gap negligible (0.0026 → 0.0001)
+- Error norms microscopic (0.001-0.02), decaying to ~0.0005
+- Model still trained to 96.75% — but entirely through predictor/decoder backprop
+- ePC mechanism was completely inert; encoder blocks barely updated
+
+**What we initially misdiagnosed:** "errors converge fast" — but they weren't converging to the right place. They were PINNED at zero by the penalty term.
+
+**Affected files (ALL ePC variants):**
+- `experiments/energy_reasoning/epc_jepa_model.py` — E(), E_local(), compute_weight_loss
+- `experiments/Mamba3/epc_model.py` — E(), E_local(), _output_loss, compute_weight_loss, ipc_train_step
+- `experiments/ePC_ResNet/epc_model.py` — E(), E_local(), PCESkipConnection.E_local(), _output_loss, compute_weight_loss
+- `experiments/ePC_Mamba/epc_model.py` — E(), E_local(), _output_loss, compute_weight_loss
+- `experiments/ePC_Mamba/train_synthetic.py` — compute_weight_loss wrapper
+- All associated training scripts (batch_size parameter, energy_scale hack)
+
+**NOT affected (correct from the start):**
+- `experiments/eBPC/ebpc_trainer.py` — uses `.sum(dim=1).mean()` (sum over features, mean over batch)
+- `experiments/eBPC_ResNet/ebpc_diagonal_trainer.py` — same correct pattern
+- `experiments/eBPC_ResNet/ebpc_lowrank_trainer.py` — same correct pattern
+
+The eBPC variants were correct because they compute the quadratic form `ε^T Σ^{-1} ε` per example (`.sum(dim=1)`) then average over the batch (`.mean()`), giving O(1) scale. No `energy_scale` or `batch_size` normalization was needed.
+
+**The fix:**
+```python
+# BEFORE (sum reduction — O(B*L*d) ~ 1M):
+E_errors = 0.5 * sum(
+    torch.linalg.vector_norm(e, ord=2, dim=None) ** 2
+    for e in self.errors
+)
+
+# AFTER (mean reduction — O(1), matching output losses):
+E_errors = 0.5 * sum(e.pow(2).mean() for e in self.errors)
+```
+
+Also fixed:
+- `F.mse_loss(s_pred, s, reduction='sum')` → `F.mse_loss(s_pred, s)` in E_local
+- `F.cross_entropy(..., reduction='sum')` → `F.cross_entropy(...)` in output loss
+- Removed `energy_scale` hack (was `min(1.0, e_lr * iters)`)
+- Removed `/ (batch_size * energy_scale)` from `compute_weight_loss`
+
+**Additional fixes applied simultaneously (paper alignment):**
+1. Unified E to include full output loss (JEPA + decode CE + VICReg) — paper: E includes L(ŷ,y)
+2. Removed precision weighting (default → 'none') — paper uses uniform ½||ε||²
+3. Increased default T from 5 to 20 — paper uses T=4-20
+4. Standard ePC (not iPC) as default — paper Algorithm 4
+
+**Root principle:** When combining sum-reduced and mean-reduced terms in an energy function, the scale mismatch can be catastrophic. Always ensure ALL terms in an energy/loss function use the SAME reduction semantics. A factor of 1,000,000x is not a hyperparameter issue — it's a bug.
+
+**Status:** FIXED (2026-02-13) — mean reduction everywhere, energy_scale removed, all 4 ePC variants fixed
+
+---
+
+### 34. Masked Prediction Fails for Causal Models — Next-Step Prediction is Required (CRITICAL)
+
+**What we tried:** Standard JEPA masked prediction (randomly mask positions, predict masked from unmasked) on a Mamba3-based model.
+
+**Results on Stage 1b (multi-rule regime change):**
+- Masked prediction: **18.6%** test accuracy (random chance for vocab_size=16 is 6.25%)
+- Next-step prediction: **97.05%** test accuracy
+
+A 78 percentage point improvement from changing only the prediction mode.
+
+**Why masked prediction fails for Mamba:**
+
+Mamba is causal — position t only sees positions 0..t-1 (never future positions). When early positions are masked, the predictor has almost no context:
+- Position 0 masked: predictor sees nothing → random guess (1/16 = 6.25%)
+- Position 1 masked: predictor sees only position 0 → insufficient context
+- Positions in second half masked: predictor sees most of the sequence → good prediction
+
+For Stage 1b specifically, the regime change happens at the midpoint. Masked prediction in the first half provides no signal about the first rule, and prediction in the second half gets confused by the rule change it can't see approaching.
+
+**Why next-step prediction works:**
+
+Next-step prediction: position t predicts token t+1, using full causal context 0..t. This gives EVERY position a loss signal with the maximum context available. Position 0 still has minimal context (explains the ~98.5% accuracy ceiling), but positions t >= 2 have enough context for deterministic prediction.
+
+**The principle: complete error coverage.**
+
+This maps directly to ePC's breakthrough insight:
+- JEPA masked → next-step (temporal): sparse → dense loss coverage
+- ePC N-1 errors → N errors (layer-wise): sparse → dense error coverage
+- Both reveal the same principle: **Mamba's dt parameter needs gradient signal at every critical transition point.** Sparse signals leave "dead zones" where dt can't learn.
+
+**Accuracy ceiling explained mathematically:**
+- Position 0 predicting position 1: ~6.25% (random, 1/vocab_size)
+- Positions 1+ predicting next: ~100% (deterministic for structured sequences)
+- Expected: (0.0625 + 62 * 1.0) / 63 ≈ 98.5% — matches observed 98.53%
+- This proves the model works PERFECTLY where prediction IS deterministic
+
+**Root principle:** Match your prediction mode to your model's inductive bias. Causal models need causal prediction objectives. Forcing a causal model to do bidirectional prediction (fill-in-the-blank) wastes the model's strength and starves it of useful gradients.
+
+**Status:** RESOLVED (2026-02-13) — next-step prediction adopted for all Mamba-based experiments
+
+---
+
+### Mistake #36: Running training/tests on Claude's machine
+
+**Date:** 2026-02-13
+
+**What happened:** Claude ran full training runs (e.g., `train_epc.py --epochs 10`) on its own CPU-only machine to verify fixes. These take minutes on CPU, blocking the session and wasting time when the user has a GPU available.
+
+**Root cause:** Defaulting to "verify before commit" when the user can verify much faster on their own hardware.
+
+**Correct approach:** Make code changes, commit, push — let the user run tests on their GPU. Only run quick sanity checks (imports, syntax) if needed, never full training loops.
+
+**Status:** ACTIVE
+
+---
+
+### Mistake #37: Blindly copying paper's hyperparameters across architectures
+
+**Date:** 2026-02-13
+
+**What happened:** We changed `e_lr` from 0.1→0.001 and `T` from 20→5 to match the Goemaere et al. 2025 paper. This completely broke Mamba3 (0% → 7% accuracy, no learning) and slowed ePC-JEPA.
+
+**Why the paper's values don't work for us:** The paper uses `e_lr=0.001, T=5` (λT=0.005) for VGG/ResNet on CIFAR. At this λT, errors are ~0.001× the backprop gradient — extremely small. The local weight gradient `-(∂ŝ_j/∂θ_j)^T · ε_j` scales linearly with error magnitude. For VGG/ResNet, this is sufficient because the paper tunes `w_lr` to compensate and runs 25-50 epochs. For our Mamba3 architecture, the resulting gradients are ~1e-7, giving zero effective learning.
+
+**Key insight from the paper (Section C.2):** The paper DELIBERATELY operates near-backprop:
+> "In our experiments, we found that smaller values of λT generally performed best."
+> "ePC becomes mathematically equivalent to backpropagation when λ is sufficiently small relative to 1/T."
+
+The paper's "local learning" is a small perturbation on what is essentially scaled backprop. The weight update at small λT is: `∆θ_j ∝ λT × ∇_{θ_j} L(ŷ, y)`. They achieve 92% on ResNet-18 CIFAR-10 with this regime.
+
+**Our architecture needs larger errors:** With `e_lr=0.1, T=20`, errors are large enough for local MSE to provide meaningful gradients to Mamba blocks. The oscillatory convergence (overshoot → snap back in 3 iters) is not ideal but produces working results.
+
+**Working values (for Mamba3/ePC-JEPA):** `e_lr=0.1, T=20`
+**Paper values (for VGG/ResNet):** `e_lr=0.001, T=5`
+**Lesson:** λT is architecture-dependent. Don't copy across architectures without testing.
+
+**Status:** RESOLVED (2026-02-13) — reverted to e_lr=0.1, T=20

@@ -264,7 +264,7 @@ def train_epoch(model, weight_optim, scaler, train_loader, device, epoch, diagno
         # Phase 2: Weight update (local learning via E_local) — fp16 + GradScaler
         weight_optim.zero_grad()
         with autocast('cuda', enabled=use_amp):
-            loss = model.compute_weight_loss(data, target, batch_size)
+            loss = model.compute_weight_loss(data, target)
         scaler.scale(loss).backward()
         scaler.step(weight_optim)
         scaler.update()

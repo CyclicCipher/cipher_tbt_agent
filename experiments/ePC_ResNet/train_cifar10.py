@@ -536,7 +536,7 @@ def train_epoch(model, weight_optim, lr_scheduler, scaler, train_loader,
             _t = _sync_time()
 
         with autocast('cuda', enabled=use_amp):
-            loss = model.compute_weight_loss(data, target, batch_size)
+            loss = model.compute_weight_loss(data, target)
 
         if prof:
             _t2 = _sync_time()

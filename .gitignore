@@ -51,6 +51,9 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Experiment results/plots (generated artifacts)
+experiments/*/results/
 diagnostics_epc_mnist_final.png
 diagnostics_epc_mnist_epoch_3.png
 diagnostics_epc_mnist_epoch_2.png

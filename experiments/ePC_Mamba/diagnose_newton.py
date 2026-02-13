@@ -126,7 +126,7 @@ def test_B_gradient_norms(device):
 
         # Phase 2: weight update
         optimizer.zero_grad()
-        weight_loss = model.compute_weight_loss(inputs, targets, 32)
+        weight_loss = model.compute_weight_loss(inputs, targets)
         weight_loss.backward()
 
         # Collect gradient norms per component

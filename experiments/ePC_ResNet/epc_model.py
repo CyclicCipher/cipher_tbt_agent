@@ -131,19 +131,14 @@ class PCE(nn.Module):
             def _mse_loss(y_pred, y):
                 if y.dim() == 1:
                     y = F.one_hot(y, num_classes=y_pred.shape[-1]).float()
-                return 0.5 * F.mse_loss(y_pred, y, reduction='sum')
+                return 0.5 * F.mse_loss(y_pred, y)  # mean reduction
             self._output_loss = _mse_loss
         elif output_loss == 'ce':
-            self._output_loss = lambda y_pred, y: F.cross_entropy(y_pred, y, reduction='sum')
+            self._output_loss = lambda y_pred, y: F.cross_entropy(y_pred, y)  # mean reduction
         else:
             raise ValueError(f"Unknown output_loss: {output_loss}")
 
-        # Scale factor to compensate for small errors from limited inference.
-        # Newton converges better, so errors are larger -> less scaling needed.
-        if error_optim == 'newton':
-            self.energy_scale = 1.0
-        else:
-            self.energy_scale = min(1.0, e_lr * iters)
+        # (energy_scale removed: mean reduction eliminates the need for it)
 
     def y_pred(self, x):
         """Forward pass with current errors."""
@@ -155,13 +150,13 @@ class PCE(nn.Module):
     def E(self, x, y):
         """Energy using errors (global graph — for error optimization).
 
+        E = 0.5 * sum(mean(e_i^2)) + output_loss.
+        Mean-reduced error penalty matches mean-reduced output loss.
+
         IMPORTANT: Do not use this for weight optimization, or you'll be
         doing standard backprop instead of local learning.
         """
-        E_errors = 0.5 * sum(
-            torch.linalg.vector_norm(e, ord=2, dim=None) ** 2
-            for e in self.errors
-        )
+        E_errors = 0.5 * sum(e.pow(2).mean() for e in self.errors)
         return E_errors + self._output_loss(self.y_pred(x), y)
 
     def E_local(self, x, y):
@@ -176,7 +171,7 @@ class PCE(nn.Module):
         for e_i, layer_i in zip(self.errors, self.layers[:-1]):
             s_i_pred = layer_i(s_i)
             s_i = (e_i + s_i_pred).detach()
-            E += 0.5 * F.mse_loss(s_i_pred, s_i, reduction='sum')
+            E += 0.5 * F.mse_loss(s_i_pred, s_i)  # mean reduction
         y_pred = self.layers[-1](s_i)
         self._weight_phase_prediction = y_pred.detach()
         return E + self._output_loss(y_pred, y)
@@ -395,9 +390,9 @@ class PCE(nn.Module):
         else:
             return self.minimize_error_energy(x, y)
 
-    def compute_weight_loss(self, x, y, batch_size):
+    def compute_weight_loss(self, x, y):
         """Compute loss for weight optimizer (call after forward with y)."""
-        return self.E_local(x, y) / (batch_size * self.energy_scale)
+        return self.E_local(x, y)
 
 
 class PCESkipConnection(PCE):
@@ -421,7 +416,7 @@ class PCESkipConnection(PCE):
         for e_i, layer_i in zip(self.errors, self.layers[:-1]):
             s_i_pred = layer_i(s_i)
             s_i = (e_i + s_i_pred[0]).detach()
-            E += 0.5 * F.mse_loss(s_i_pred[0], s_i, reduction='sum')
+            E += 0.5 * F.mse_loss(s_i_pred[0], s_i)  # mean reduction
             s_i = (s_i, s_i_pred[1])
         y_pred = self.layers[-1](s_i)[0]
         self._weight_phase_prediction = y_pred.detach()

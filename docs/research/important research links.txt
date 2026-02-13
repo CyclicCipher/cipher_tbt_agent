@@ -1,2 +1,36 @@
 Low-Rank Approximation Toolbox: Nyström Approximation:
 https://www.ethanepperly.com/index.php/2022/10/11/low-rank-approximation-toolbox-nystrom-approximation/
+
+The Complexity Dynamics of Grokking
+https://brantondemoss.com/research/grokking/
+
+## Papers NOT yet in docs/research/ (need manual download)
+
+# Core architecture papers
+Assran et al. 2023 — I-JEPA (Self-Supervised Learning from Images with a Joint-Embedding Predictive Architecture):
+https://arxiv.org/abs/2301.08243
+
+Dao & Gu 2024 — Mamba2/Mamba3 (Transformers are SSMs):
+https://arxiv.org/abs/2405.21060
+
+Bardes et al. 2022 — VICReg (Variance-Invariance-Covariance Regularization):
+https://arxiv.org/abs/2105.04906
+
+# Grokking and generalization research
+Michaud et al. 2023 — The Quantization Model of Neural Scaling:
+https://arxiv.org/abs/2303.13506
+
+Power et al. 2022 — Grokking: Generalization Beyond Overfitting on Small Algorithmic Datasets:
+https://arxiv.org/abs/2201.02177
+
+Liu et al. 2022 — Towards Understanding Grokking: An Effective Theory of Representation Learning:
+https://arxiv.org/abs/2205.10343
+
+Wang et al. 2024 — Grokked Transformers are Implicit Reasoners:
+https://arxiv.org/abs/2405.15071
+
+Fan et al. 2024 — Deep Grokking: Would Deep Neural Networks Generalize Better?:
+https://arxiv.org/abs/2405.19454
+
+deMoss et al. 2024 — The Complexity Dynamics of Grokking:
+https://www.sciencedirect.com/science/article/pii/S0167278925003367

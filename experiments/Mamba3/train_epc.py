@@ -5,10 +5,21 @@ Tests ePC with deeper Mamba3 architecture (4+ layers).
 Key difference from ePC_Mamba: Mamba3 blocks have internal residuals
 (Mixer + MLP), trapezoidal discretization, and data-dependent RoPE.
 
+Supported tasks:
+  --task copy  : Copy task (default). Input: [data, PAD], target: [PAD, data].
+  --task 1a    : Arithmetic sequences (next-step prediction).
+  --task 1b    : Multi-rule sequences with mid-sequence regime change.
+  --task 1c    : Interleaved sequences (two rules on even/odd positions).
+
+Tasks 1a/1b/1c use next-step prediction: model sees sequence[0..N-1] and
+predicts sequence[1..N]. This aligns with Mamba's causal nature (ARM, ICLR
+2025) and gives every position a loss signal — critical for regime change
+detection in 1b.
+
 Usage:
-  python experiments/Mamba3/train_epc.py
-  python experiments/Mamba3/train_epc.py --n_layer 8 --epochs 50
-  python experiments/Mamba3/train_epc.py --baseline  # backprop comparison
+  python experiments/Mamba3/train_epc.py --task copy
+  python experiments/Mamba3/train_epc.py --task 1b
+  python experiments/Mamba3/train_epc.py --task 1b --baseline
 """
 
 import argparse
@@ -30,44 +41,91 @@ import matplotlib.pyplot as plt
 
 from experiments.Mamba3.mamba3_block import Mamba3Config, Mamba3LM
 from experiments.Mamba3.epc_model import ePCMamba3LM
+from experiments.energy_reasoning.data_gen import (
+    generate_arithmetic, generate_multi_rule, generate_interleaved,
+)
 
 
 # ---------------------------------------------------------------------------
 # Synthetic data
 # ---------------------------------------------------------------------------
 
-def generate_copy_data(n_samples, seq_len, vocab_size, copy_len=None):
-    """Generate copy task data. PAD=0, data tokens in [1, vocab_size-1]."""
-    if copy_len is None:
-        copy_len = seq_len // 2
-    assert copy_len <= seq_len // 2
+def generate_copy_data(n_samples, seq_len, vocab_size):
+    """Generate copy task as next-step prediction (Mistake #34).
 
-    inputs = torch.zeros(n_samples, seq_len, dtype=torch.long)
-    targets = torch.zeros(n_samples, seq_len, dtype=torch.long)
+    Old masked format: input=[data, PAD], target=[PAD, data].
+    Mamba's state decays through the PAD gap with no new information,
+    making recall impossible for longer sequences.
 
-    data = torch.randint(1, vocab_size, (n_samples, copy_len))
-    inputs[:, :copy_len] = data
-    targets[:, seq_len - copy_len:] = data
+    New next-step format:
+      Full sequence: [d1, ..., dk, SEP=0, d1, ..., dk]  (2k+1 tokens)
+      Input:  seq[:-1]  (length 2k = seq_len)
+      Target: seq[1:]   (length 2k = seq_len)
+
+    The memorize phase (first k positions) is masked in targets with
+    -100 so CE loss and accuracy focus on the recall phase only.
+    After SEP, the model gets teacher-forced hints (previous token)
+    at each position — proper autoregressive prediction.
+    """
+    k = seq_len // 2
+    data = torch.randint(1, vocab_size, (n_samples, k))
+
+    full_seq = torch.zeros(n_samples, 2 * k + 1, dtype=torch.long)
+    full_seq[:, :k] = data
+    # full_seq[:, k] = 0  # SEP (already zero)
+    full_seq[:, k + 1:] = data
+
+    inputs = full_seq[:, :-1].contiguous()    # length 2k = seq_len
+    targets = full_seq[:, 1:].contiguous()    # length 2k = seq_len
+
+    # Mask memorize phase: targets[0..k-1] = [d2, ..., dk, SEP]
+    # These are unpredictable random tokens — don't penalize or measure them
+    targets[:, :k] = -100
 
     return inputs, targets
 
 
+def generate_nextstep_data(task, n_samples, seq_len, vocab_size):
+    """Generate next-step prediction data from structured sequences.
+
+    Generates sequences of length seq_len+1, then splits:
+      input  = seq[:-1]  (length seq_len)
+      target = seq[1:]   (length seq_len)
+
+    Every position in the target is a valid next-token prediction.
+    """
+    generators = {
+        '1a': generate_arithmetic,
+        '1b': generate_multi_rule,
+        '1c': generate_interleaved,
+    }
+    gen = generators[task]
+    seqs = gen(n_samples, seq_len + 1, vocab_size)
+    inputs = seqs[:, :-1].contiguous()
+    targets = seqs[:, 1:].contiguous()
+    return inputs, targets
+
+
 def compute_accuracy(logits, targets, ignore_pad=True):
-    """Compute token-level accuracy."""
+    """Compute token-level accuracy.
+
+    Always ignores target == -100 (CE ignore_index for masked positions).
+    With ignore_pad=True, also ignores target == 0 (PAD token).
+    """
     preds = logits.argmax(dim=-1)
+    mask = targets >= 0  # always ignore -100 masked positions
     if ignore_pad:
-        mask = targets != 0
-        if mask.sum() == 0:
-            return 0.0
-        return (preds[mask] == targets[mask]).float().mean().item()
-    return (preds == targets).float().mean().item()
+        mask = mask & (targets != 0)
+    if mask.sum() == 0:
+        return 0.0
+    return (preds[mask] == targets[mask]).float().mean().item()
 
 
 # ---------------------------------------------------------------------------
 # Evaluation
 # ---------------------------------------------------------------------------
 
-def evaluate(model, test_loader, device, use_epc=True):
+def evaluate(model, test_loader, device, use_epc=True, ignore_pad=True):
     """Evaluate returning both accuracy and loss."""
     model.eval()
     total_acc = 0.0
@@ -77,11 +135,8 @@ def evaluate(model, test_loader, device, use_epc=True):
     with torch.no_grad():
         for batch in test_loader:
             inputs, targets = batch[0].to(device), batch[1].to(device)
-            if use_epc:
-                logits = model(inputs)  # targets=None → feedforward
-            else:
-                logits = model(inputs)
-            acc = compute_accuracy(logits, targets)
+            logits = model(inputs)  # targets=None → feedforward
+            acc = compute_accuracy(logits, targets, ignore_pad=ignore_pad)
             b, l, v = logits.shape
             loss = F.cross_entropy(
                 logits.reshape(b * l, v), targets.reshape(b * l)
@@ -115,16 +170,14 @@ class Diagnostics:
         self.layer_energies = [[] for _ in range(self.num_error_layers)]
         self.error_norms = [[] for _ in range(self.num_error_layers)]
         self.inference_convergence = []
-        self.newton_rank1_ratio = []
-        self.newton_coeff = []
+        self.actual_iters = []
 
     def update_train_epc(self, acc, loss, diagnostics, ms):
         self.train_accs.append(acc)
         self.train_losses.append(loss)
         self.ms_per_batch.append(ms)
         self.inference_convergence.append(diagnostics['convergence'])
-        self.newton_rank1_ratio.append(diagnostics.get('newton_rank1_ratio', 0))
-        self.newton_coeff.append(diagnostics.get('newton_coeff', 0))
+        self.actual_iters.append(diagnostics.get('actual_iters', 0))
         for i, energy in enumerate(diagnostics.get('layer_energies', [])):
             if i < self.num_error_layers:
                 self.layer_energies[i].append(energy)
@@ -321,6 +374,11 @@ class Diagnostics:
 
 def main():
     parser = argparse.ArgumentParser(description='ePC-Mamba3 synthetic training')
+    parser.add_argument('--task', type=str, default='copy',
+                        choices=['copy', '1a', '1b', '1c'],
+                        help='Task: copy (delay copy), 1a (arithmetic), '
+                             '1b (multi-rule regime change), '
+                             '1c (interleaved)')
     parser.add_argument('--epochs', type=int, default=50)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=1e-3)
@@ -329,16 +387,14 @@ def main():
     parser.add_argument('--d_model', type=int, default=128)
     parser.add_argument('--d_state', type=int, default=64)
     parser.add_argument('--n_layer', type=int, default=4)
-    parser.add_argument('--iters', type=int, default=2,
+    parser.add_argument('--iters', type=int, default=20,
                         help='Error optimization iterations (T)')
-    parser.add_argument('--error_optim', type=str, default='newton',
-                        choices=['sgd', 'adam', 'newton', 'cg'],
-                        help='Error optimizer: sgd, adam, newton, or cg')
-    parser.add_argument('--e_lr', type=float, default=0.02,
-                        help='Error learning rate (for sgd/adam)')
-    parser.add_argument('--damping', type=float, default=0.1,
-                        help='Newton damping factor')
-    parser.add_argument('--precision_mode', type=str, default='geometric',
+    parser.add_argument('--error_optim', type=str, default='sgd',
+                        choices=['sgd', 'adam'],
+                        help='Error optimizer: sgd or adam')
+    parser.add_argument('--e_lr', type=float, default=0.1,
+                        help='Error learning rate')
+    parser.add_argument('--precision_mode', type=str, default='none',
                         choices=['none', 'linear', 'geometric'],
                         help='Per-layer precision weighting mode')
     parser.add_argument('--precision_base', type=float, default=3.0,
@@ -346,7 +402,7 @@ def main():
     parser.add_argument('--w_clip', type=float, default=1.0,
                         help='Weight gradient clipping max norm (0 to disable)')
     parser.add_argument('--ipc', action='store_true',
-                        help='Incremental PC: weight update every Newton step (experimental)')
+                        help='Incremental PC: weight update every error step')
     parser.add_argument('--no_ipc', action='store_true',
                         help='Disable iPC (standard ePC: T error steps then 1 weight step)')
     parser.add_argument('--init_scale', type=float, default=1.0,
@@ -373,6 +429,8 @@ def main():
     parser.add_argument('--early_stop_rtol', type=float, default=1e-3,
                         help='Relative energy reduction threshold for early stopping '
                              'in error optimization (0 to disable)')
+    parser.add_argument('--min_iters', type=int, default=2,
+                        help='Minimum error iterations before early stopping')
     args = parser.parse_args()
 
     if args.no_ipc:
@@ -407,12 +465,30 @@ def main():
           f"nheads={config.nheads}, n_layer={config.n_layer}, "
           f"d_state={config.d_state}")
 
-    # Data
-    print(f"\nGenerating copy task data...")
-    train_x, train_y = generate_copy_data(
-        args.n_train, args.seq_len, args.vocab_size)
-    test_x, test_y = generate_copy_data(
-        args.n_test, args.seq_len, args.vocab_size)
+    # Data — all tasks use next-step prediction (Mistake #34)
+    is_nextstep = True
+    task_names = {
+        'copy': 'Copy task (next-step)',
+        '1a': 'Arithmetic (next-step)',
+        '1b': 'Multi-rule regime change (next-step)',
+        '1c': 'Interleaved (next-step)',
+    }
+    print(f"\nGenerating {task_names[args.task]} data...")
+    if args.task == 'copy':
+        train_x, train_y = generate_copy_data(
+            args.n_train, args.seq_len, args.vocab_size)
+        test_x, test_y = generate_copy_data(
+            args.n_test, args.seq_len, args.vocab_size)
+    else:
+        train_x, train_y = generate_nextstep_data(
+            args.task, args.n_train, args.seq_len, args.vocab_size)
+        test_x, test_y = generate_nextstep_data(
+            args.task, args.n_test, args.seq_len, args.vocab_size)
+
+    print(f"Train: {train_x.shape}, Test: {test_x.shape}")
+    if is_nextstep:
+        print(f"Input:  {train_x[0].tolist()}")
+        print(f"Target: {train_y[0].tolist()}")
 
     train_loader = DataLoader(
         TensorDataset(train_x, train_y),
@@ -430,26 +506,17 @@ def main():
         model = ePCMamba3LM(
             config, vocab_size=args.vocab_size,
             iters=args.iters, e_lr=args.e_lr,
-            error_optim=args.error_optim, damping=args.damping,
+            error_optim=args.error_optim,
             precision_mode=args.precision_mode,
             precision_base=args.precision_base,
             use_mhc=args.mhc, n_streams=args.n_streams,
             use_mupc=args.mupc,
         ).to(device)
         optim_str = args.error_optim.upper()
-        if args.error_optim == 'newton':
-            print(f"Model: ePC-Mamba3 (T={args.iters}, Newton, damping={args.damping})")
-        elif args.error_optim == 'cg':
-            print(f"Model: ePC-Mamba3 (K={args.iters}, CG, "
-                  f"α=gᵀg/gᵀHg via HVP)")
-        else:
-            print(f"Model: ePC-Mamba3 (T={args.iters}, {optim_str}, e_lr={args.e_lr}, "
-                  f"energy_scale={model.pce.energy_scale:.4f})")
-        if args.ipc and args.error_optim == 'cg':
-            print("  Warning: iPC not supported with CG. Using standard ePC.")
-            args.ipc = False
+        print(f"Model: ePC-Mamba3 (T={args.iters}, {optim_str}, e_lr={args.e_lr}, "
+              f"reduction=mean)")
         if args.ipc:
-            print(f"  Mode: iPC (weight update every Newton step, {args.iters}x faster)")
+            print(f"  Mode: iPC (weight update every error step, {args.iters}x faster)")
         if args.mhc:
             print(f"  mHC: {args.n_streams} streams, Sinkhorn-constrained mixing")
         if args.mupc:
@@ -491,14 +558,21 @@ def main():
 
     # Training
     best_test_acc = 0.0
-    print(f"\n{'Epoch':>5} {'Loss':>10} {'Train Acc':>10} {'Test Acc':>10} {'ms/batch':>10}")
-    print("-" * 50)
+    mode_str = 'ePC' if use_epc else 'Backprop'
+    print(f"\nTask: {task_names[args.task]}, Mode: {mode_str}")
+    if use_epc:
+        print(f"{'Epoch':>5} {'Loss':>10} {'Train Acc':>10} {'Test Acc':>10} {'ms/batch':>10} {'iters':>5}")
+        print("-" * 55)
+    else:
+        print(f"{'Epoch':>5} {'Loss':>10} {'Train Acc':>10} {'Test Acc':>10} {'ms/batch':>10}")
+        print("-" * 50)
 
     for epoch in range(1, args.epochs + 1):
         model.train()
         epoch_loss = 0.0
         epoch_acc = 0.0
         epoch_time = 0.0
+        epoch_iters = 0.0
         n_batches = 0
 
         for batch in train_loader:
@@ -513,17 +587,18 @@ def main():
                     if args.ipc:
                         # iPC: interleaved error + weight steps
                         E_val = model.ipc_train_step(
-                            inputs, targets, optimizer, batch_size, args.w_clip)
+                            inputs, targets, optimizer, args.w_clip)
                         loss_val = E_val
                     else:
                         # Standard ePC: Phase 1 inference, Phase 2 weight update
                         model.pce.minimize_error_energy(
                             model.embedding(inputs), targets, model.out_proj,
-                            early_stop_rtol=args.early_stop_rtol)
+                            early_stop_rtol=args.early_stop_rtol,
+                            min_iters=args.min_iters)
 
                         optimizer.zero_grad()
                         weight_loss = model.compute_weight_loss(
-                            inputs, targets, batch_size)
+                            inputs, targets)
                         weight_loss.backward()
 
                         if args.w_clip > 0:
@@ -539,13 +614,15 @@ def main():
                 # Get accuracy (feedforward — resets errors)
                 with torch.no_grad():
                     logits = model(inputs)
-                    acc = compute_accuracy(logits, targets)
+                    acc = compute_accuracy(logits, targets,
+                                           ignore_pad=not is_nextstep)
 
                 t1 = time.perf_counter()
                 ms = (t1 - t0) * 1000
 
                 diagnostics.update_train_epc(
                     acc=acc, loss=loss_val, diagnostics=diag, ms=ms)
+                epoch_iters += diag.get('actual_iters', 0)
 
             else:
                 t0 = time.perf_counter()
@@ -565,7 +642,8 @@ def main():
 
                 loss_val = loss.item()
                 with torch.no_grad():
-                    acc = compute_accuracy(logits, targets)
+                    acc = compute_accuracy(logits, targets,
+                                           ignore_pad=not is_nextstep)
 
                 t1 = time.perf_counter()
                 ms = (t1 - t0) * 1000
@@ -579,16 +657,23 @@ def main():
             n_batches += 1
 
         # End-of-epoch evaluation
-        test_acc, test_loss = evaluate(model, test_loader, device, use_epc=use_epc)
+        test_acc, test_loss = evaluate(
+            model, test_loader, device, use_epc=use_epc,
+            ignore_pad=not is_nextstep)
         diagnostics.update_test(test_acc, test_loss)
         best_test_acc = max(best_test_acc, test_acc)
 
         avg_loss = epoch_loss / n_batches
         avg_acc = epoch_acc / n_batches
         avg_time = epoch_time / n_batches
+        avg_iters = epoch_iters / n_batches if n_batches > 0 else 0
 
-        print(f"{epoch:5d} {avg_loss:10.4f} {avg_acc:10.4f} "
-              f"{test_acc:10.4f} {avg_time:10.1f}")
+        if use_epc:
+            print(f"{epoch:5d} {avg_loss:10.4f} {avg_acc:10.4f} "
+                  f"{test_acc:10.4f} {avg_time:10.1f} {avg_iters:5.1f}")
+        else:
+            print(f"{epoch:5d} {avg_loss:10.4f} {avg_acc:10.4f} "
+                  f"{test_acc:10.4f} {avg_time:10.1f}")
 
         # Periodic ePC diagnostics
         if use_epc and epoch % 10 == 0:
@@ -599,25 +684,19 @@ def main():
             if d['error_norms']:
                 norms_str = ', '.join(f'{n:.4f}' for n in d['error_norms'])
                 print(f"  Error norms: [{norms_str}]")
-            if args.error_optim == 'cg' and d.get('cg_alpha', 0) > 0:
-                print(f"  CG: α={d['cg_alpha']:.6f}, dᵀHd={d['cg_dTHd']:.2f}")
-
         # Save plot
         if epoch % args.plot_every == 0 or epoch == args.epochs:
             mode = 'epc' if use_epc else 'baseline'
             if use_epc:
-                if args.error_optim == 'newton':
-                    config_str = f'(T={args.iters}, Newton, damp={args.damping})'
-                elif args.error_optim == 'cg':
-                    config_str = f'(K={args.iters}, CG)'
-                else:
-                    config_str = f'(T={args.iters}, {args.error_optim.upper()}, e_lr={args.e_lr})'
+                config_str = (f'(task={args.task}, T={args.iters}, '
+                              f'{args.error_optim.upper()}, e_lr={args.e_lr})')
                 if args.precision_mode != 'none':
                     config_str += f', prec={args.precision_mode}'
             else:
-                config_str = ''
+                config_str = f'(task={args.task})'
             chart_path = os.path.join(
-                save_dir, f'mamba3_{mode}_epoch_{epoch:03d}.png')
+                save_dir,
+                f'mamba3_{mode}_{args.task}_epoch_{epoch:03d}.png')
             diagnostics.plot(chart_path, epoch, config_str)
 
         # Early success
@@ -625,17 +704,18 @@ def main():
             print(f"\nSuccess! Test accuracy {best_test_acc:.4f} >= 99% at epoch {epoch}")
             mode = 'epc' if use_epc else 'baseline'
             chart_path = os.path.join(
-                save_dir, f'mamba3_{mode}_epoch_{epoch:03d}.png')
+                save_dir,
+                f'mamba3_{mode}_{args.task}_epoch_{epoch:03d}.png')
             diagnostics.plot(chart_path, epoch)
             break
 
     print(f"\nBest test accuracy: {best_test_acc:.4f}")
     if best_test_acc >= 0.95:
-        print("PASS: Works on copy task!")
-    elif best_test_acc >= 0.90:
-        print("PROMISING: 90%+ accuracy.")
+        print(f"PASS: Works on {task_names[args.task]}!")
+    elif best_test_acc >= 0.80:
+        print(f"PROMISING: {best_test_acc:.1%} on {task_names[args.task]}.")
     else:
-        print(f"Needs work: {best_test_acc:.1%} accuracy.")
+        print(f"Needs work: {best_test_acc:.1%} on {task_names[args.task]}.")
 
 
 if __name__ == '__main__':
