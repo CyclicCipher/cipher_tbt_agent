@@ -249,8 +249,8 @@ class PCEMamba3(nn.Module):
         error_optim: 'sgd' or 'adam'.
     """
 
-    def __init__(self, config: Mamba3Config, iters: int = 2,
-                 e_lr: float = 0.02, error_optim: str = 'sgd',
+    def __init__(self, config: Mamba3Config, iters: int = 20,
+                 e_lr: float = 0.1, error_optim: str = 'sgd',
                  precision_mode: str = 'none',
                  precision_base: float = 3.0,
                  use_mhc: bool = False, n_streams: int = 2,
@@ -573,7 +573,7 @@ class ePCMamba3LM(nn.Module):
     """
 
     def __init__(self, config: Mamba3Config, vocab_size: int,
-                 iters: int = 2, e_lr: float = 0.02,
+                 iters: int = 20, e_lr: float = 0.1,
                  error_optim: str = 'sgd',
                  precision_mode: str = 'none', precision_base: float = 3.0,
                  use_mhc: bool = False, n_streams: int = 2,
