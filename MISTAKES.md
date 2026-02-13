@@ -1272,3 +1272,17 @@ This maps directly to ePC's breakthrough insight:
 **Root principle:** Match your prediction mode to your model's inductive bias. Causal models need causal prediction objectives. Forcing a causal model to do bidirectional prediction (fill-in-the-blank) wastes the model's strength and starves it of useful gradients.
 
 **Status:** RESOLVED (2026-02-13) — next-step prediction adopted for all Mamba-based experiments
+
+---
+
+### Mistake #36: Running training/tests on Claude's machine
+
+**Date:** 2026-02-13
+
+**What happened:** Claude ran full training runs (e.g., `train_epc.py --epochs 10`) on its own CPU-only machine to verify fixes. These take minutes on CPU, blocking the session and wasting time when the user has a GPU available.
+
+**Root cause:** Defaulting to "verify before commit" when the user can verify much faster on their own hardware.
+
+**Correct approach:** Make code changes, commit, push — let the user run tests on their GPU. Only run quick sanity checks (imports, syntax) if needed, never full training loops.
+
+**Status:** ACTIVE

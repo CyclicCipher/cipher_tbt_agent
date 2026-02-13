@@ -10,12 +10,13 @@ Current stage: **Stage 2 (pattern induction)** — 5-rule few-shot learning. Cor
 
 ## Critical Reference
 
-**ALWAYS read `MISTAKES.md` before making changes.** It has 35 documented mistakes with root causes. The most relevant active ones:
+**ALWAYS read `MISTAKES.md` before making changes.** It has 36 documented mistakes with root causes. The most relevant active ones:
 
 - **#35 (Reduction mismatch):** Error penalty must use mean reduction, matching output losses. Sum reduction crushes errors to zero. Fixed in all variants 2026-02-13.
 - **#33 (SGD wins):** Don't use Newton or CG for error optimization. SGD is fastest, simplest, same accuracy.
 - **#34 (Next-step prediction):** Causal models (Mamba) need next-step prediction, not masked prediction.
 - **#13 (Read the paper):** Never skim a research paper you're implementing. Read every appendix.
+- **#36 (Don't run training):** Never run full training loops on Claude's CPU machine. Commit, push, let the user test on GPU.
 
 ## Architecture Overview
 
