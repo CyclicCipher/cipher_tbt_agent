@@ -121,13 +121,15 @@ class ePCJEPADiagnostics:
         self.ms_per_batch = []
         self.actual_iters = []
         self.rep_std = []  # representation std (collapse monitor)
+        self.train_var = []   # VICReg variance loss
+        self.train_cov = []   # VICReg covariance loss
         # Per-epoch
         self.test_acc = []
         self.test_jepa = []
         self.test_decode = []
 
     def update_train(self, diag, jepa_loss, decode_loss, acc, ms,
-                     rep_std=0.0):
+                     rep_std=0.0, L_var=0.0, L_cov=0.0):
         self.train_energy_init.append(diag['E_initial'])
         self.train_energy_final.append(diag['E_final'])
         self.train_jepa.append(jepa_loss)
@@ -137,6 +139,8 @@ class ePCJEPADiagnostics:
         self.ms_per_batch.append(ms)
         self.actual_iters.append(diag['actual_iters'])
         self.rep_std.append(rep_std)
+        self.train_var.append(L_var)
+        self.train_cov.append(L_cov)
 
     def update_test(self, metrics):
         self.test_acc.append(metrics['accuracy'])
@@ -277,22 +281,22 @@ class ePCJEPADiagnostics:
         ax.set_title('Error Convergence')
         ax.grid(True, alpha=0.3)
 
-        # [2,2] Summary
+        # [2,2] VICReg Components
         ax = axes[2, 2]
-        ax.axis('off')
-        lines = [
-            f'Stage: {self.stage}',
-            f'Mode: ePC-JEPA (local encoder learning)',
-        ]
-        if self.test_acc:
-            lines.append(f'Best Test Acc: {max(self.test_acc):.2%}')
-            lines.append(f'Final Test Acc: {self.test_acc[-1]:.2%}')
-        if self.ms_per_batch:
-            lines.append(f'Avg ms/batch: {np.mean(self.ms_per_batch):.1f}')
-        if self.rep_std:
-            lines.append(f'Final rep std: {self.rep_std[-1]:.4f}')
-        ax.text(0.1, 0.5, '\n'.join(lines), fontsize=12,
-                verticalalignment='center', family='monospace')
+        var_avg = _epoch_avg(self.train_var, n_ep)
+        cov_avg = _epoch_avg(self.train_cov, n_ep)
+        if var_avg:
+            ax.plot(epochs[:len(var_avg)], var_avg, 'b-',
+                    label='Variance', linewidth=2)
+        if cov_avg:
+            ax2 = ax.twinx()
+            ax2.plot(epochs[:len(cov_avg)], cov_avg, 'r-',
+                     label='Covariance', linewidth=2)
+            ax2.set_ylabel('L_cov', color='r')
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('L_var', color='b')
+        ax.set_title('VICReg Components')
+        ax.grid(True, alpha=0.3)
 
         plt.tight_layout()
         plt.savefig(save_path, dpi=120)
@@ -566,10 +570,16 @@ def main():
                     s_ctx.reshape(-1, s_ctx.shape[-1]).var(dim=0) + 1e-4
                 ).mean().item()
 
+                # VICReg components (monitoring)
+                L_var, L_cov = vicreg_loss(s_ctx)
+                L_var_val = L_var.item()
+                L_cov_val = L_cov.item()
+
             t1 = time.perf_counter()
             ms = (t1 - t0) * 1000
 
-            diagnostics.update_train(diag, jepa_l, dec_l, acc, ms, std)
+            diagnostics.update_train(diag, jepa_l, dec_l, acc, ms, std,
+                                     L_var_val, L_cov_val)
 
             ep_ei += diag['E_initial']
             ep_ef += diag['E_final']
