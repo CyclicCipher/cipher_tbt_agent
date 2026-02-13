@@ -50,18 +50,37 @@ from experiments.energy_reasoning.data_gen import (
 # Synthetic data
 # ---------------------------------------------------------------------------
 
-def generate_copy_data(n_samples, seq_len, vocab_size, copy_len=None):
-    """Generate copy task data. PAD=0, data tokens in [1, vocab_size-1]."""
-    if copy_len is None:
-        copy_len = seq_len // 2
-    assert copy_len <= seq_len // 2
+def generate_copy_data(n_samples, seq_len, vocab_size):
+    """Generate copy task as next-step prediction (Mistake #34).
 
-    inputs = torch.zeros(n_samples, seq_len, dtype=torch.long)
-    targets = torch.zeros(n_samples, seq_len, dtype=torch.long)
+    Old masked format: input=[data, PAD], target=[PAD, data].
+    Mamba's state decays through the PAD gap with no new information,
+    making recall impossible for longer sequences.
 
-    data = torch.randint(1, vocab_size, (n_samples, copy_len))
-    inputs[:, :copy_len] = data
-    targets[:, seq_len - copy_len:] = data
+    New next-step format:
+      Full sequence: [d1, ..., dk, SEP=0, d1, ..., dk]  (2k+1 tokens)
+      Input:  seq[:-1]  (length 2k = seq_len)
+      Target: seq[1:]   (length 2k = seq_len)
+
+    The memorize phase (first k positions) is masked in targets with
+    -100 so CE loss and accuracy focus on the recall phase only.
+    After SEP, the model gets teacher-forced hints (previous token)
+    at each position — proper autoregressive prediction.
+    """
+    k = seq_len // 2
+    data = torch.randint(1, vocab_size, (n_samples, k))
+
+    full_seq = torch.zeros(n_samples, 2 * k + 1, dtype=torch.long)
+    full_seq[:, :k] = data
+    # full_seq[:, k] = 0  # SEP (already zero)
+    full_seq[:, k + 1:] = data
+
+    inputs = full_seq[:, :-1].contiguous()    # length 2k = seq_len
+    targets = full_seq[:, 1:].contiguous()    # length 2k = seq_len
+
+    # Mask memorize phase: targets[0..k-1] = [d2, ..., dk, SEP]
+    # These are unpredictable random tokens — don't penalize or measure them
+    targets[:, :k] = -100
 
     return inputs, targets
 
@@ -88,14 +107,18 @@ def generate_nextstep_data(task, n_samples, seq_len, vocab_size):
 
 
 def compute_accuracy(logits, targets, ignore_pad=True):
-    """Compute token-level accuracy."""
+    """Compute token-level accuracy.
+
+    Always ignores target == -100 (CE ignore_index for masked positions).
+    With ignore_pad=True, also ignores target == 0 (PAD token).
+    """
     preds = logits.argmax(dim=-1)
+    mask = targets >= 0  # always ignore -100 masked positions
     if ignore_pad:
-        mask = targets != 0
-        if mask.sum() == 0:
-            return 0.0
-        return (preds[mask] == targets[mask]).float().mean().item()
-    return (preds == targets).float().mean().item()
+        mask = mask & (targets != 0)
+    if mask.sum() == 0:
+        return 0.0
+    return (preds[mask] == targets[mask]).float().mean().item()
 
 
 # ---------------------------------------------------------------------------
@@ -440,25 +463,25 @@ def main():
           f"nheads={config.nheads}, n_layer={config.n_layer}, "
           f"d_state={config.d_state}")
 
-    # Data
-    is_nextstep = args.task in ('1a', '1b', '1c')
+    # Data — all tasks use next-step prediction (Mistake #34)
+    is_nextstep = True
     task_names = {
-        'copy': 'Copy task',
+        'copy': 'Copy task (next-step)',
         '1a': 'Arithmetic (next-step)',
         '1b': 'Multi-rule regime change (next-step)',
         '1c': 'Interleaved (next-step)',
     }
     print(f"\nGenerating {task_names[args.task]} data...")
-    if is_nextstep:
-        train_x, train_y = generate_nextstep_data(
-            args.task, args.n_train, args.seq_len, args.vocab_size)
-        test_x, test_y = generate_nextstep_data(
-            args.task, args.n_test, args.seq_len, args.vocab_size)
-    else:
+    if args.task == 'copy':
         train_x, train_y = generate_copy_data(
             args.n_train, args.seq_len, args.vocab_size)
         test_x, test_y = generate_copy_data(
             args.n_test, args.seq_len, args.vocab_size)
+    else:
+        train_x, train_y = generate_nextstep_data(
+            args.task, args.n_train, args.seq_len, args.vocab_size)
+        test_x, test_y = generate_nextstep_data(
+            args.task, args.n_test, args.seq_len, args.vocab_size)
 
     print(f"Train: {train_x.shape}, Test: {test_x.shape}")
     if is_nextstep:
