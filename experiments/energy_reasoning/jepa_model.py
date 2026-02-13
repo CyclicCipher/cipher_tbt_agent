@@ -374,7 +374,7 @@ class JEPAModel(nn.Module):
 
     def forward_train(self, input_ids: Tensor, mask: Tensor,
                       z: Tensor = None) -> dict:
-        """Full training forward pass.
+        """Full training forward pass (masked prediction mode).
 
         Args:
             input_ids: (batch, seq_len) tokens.
@@ -403,13 +403,84 @@ class JEPAModel(nn.Module):
             s_pred=s_pred,
         )
 
+    def forward_train_nextstep(self, input_ids: Tensor,
+                                z: Tensor = None) -> dict:
+        """Training forward pass for next-step prediction mode.
+
+        Both encoders see the full input (no masking). The predictor
+        output at position t is trained to match the target encoder
+        output at position t+1. This aligns with Mamba's causal nature
+        (ARM, ICLR 2025) and gives every position a loss signal —
+        critical for learning regime transitions (Stage 1b).
+
+        JEPA loss:  cosine(s_pred[:, :-1], s_target[:, 1:])
+        Decode loss: CE(decoder(s_pred[:, :-1]), tokens[:, 1:])
+
+        Args:
+            input_ids: (batch, seq_len) tokens.
+            z: (batch, d_z) latent variable, or None.
+
+        Returns:
+            dict with losses and representations for diagnostics.
+        """
+        s_context = self.encode(input_ids, mask=None)  # no masking
+        s_target = self.encode_target(input_ids)
+        s_pred = self.predict(s_context, z)
+
+        # Shift: predict position t+1 from position t
+        s_pred_shift = s_pred[:, :-1]       # (batch, seq_len-1, d_enc)
+        s_target_shift = s_target[:, 1:]    # (batch, seq_len-1, d_enc)
+        tokens_shift = input_ids[:, 1:]     # (batch, seq_len-1)
+
+        # JEPA loss over all positions (no mask needed)
+        target = s_target_shift.detach()
+        if self.jepa_loss_type == 'cosine':
+            # Flatten to (batch*(seq_len-1), d_enc) for cosine similarity
+            pred_flat = s_pred_shift.reshape(-1, s_pred_shift.shape[-1])
+            tgt_flat = target.reshape(-1, target.shape[-1])
+            sim = F.cosine_similarity(pred_flat, tgt_flat, dim=-1)
+            L_jepa = (1.0 - sim).mean()
+        else:
+            L_jepa = (s_pred_shift - target).pow(2).mean()
+
+        # Decode loss: next-token prediction
+        logits_shift = self.decode(s_pred_shift)  # (batch, seq_len-1, vocab)
+        L_decode = F.cross_entropy(
+            logits_shift.reshape(-1, self.vocab_size),
+            tokens_shift.reshape(-1),
+        )
+
+        L_var, L_cov = vicreg_loss(s_context)
+
+        return dict(
+            L_jepa=L_jepa,
+            L_decode=L_decode,
+            L_var=L_var,
+            L_cov=L_cov,
+            s_context=s_context,
+            s_target=s_target,
+            s_pred=s_pred,
+        )
+
     @torch.no_grad()
     def forward_eval(self, input_ids: Tensor, mask: Tensor,
                      z: Tensor = None) -> Tensor:
-        """Evaluation forward pass. Returns logits."""
+        """Evaluation forward pass (masked mode). Returns logits."""
         s_context = self.encode(input_ids, mask=mask)
         s_pred = self.predict(s_context, z)
         return self.decode(s_pred)
+
+    @torch.no_grad()
+    def forward_eval_nextstep(self, input_ids: Tensor,
+                               z: Tensor = None) -> Tensor:
+        """Evaluation forward pass (next-step mode). Returns shifted logits.
+
+        Returns logits for positions 1..seq_len (predicting next token).
+        Shape: (batch, seq_len-1, vocab_size).
+        """
+        s_context = self.encode(input_ids, mask=None)
+        s_pred = self.predict(s_context, z)
+        return self.decode(s_pred[:, :-1])
 
     def get_trainable_params(self):
         """Parameters updated by gradient descent (everything except target encoder)."""

@@ -1,9 +1,14 @@
 """
 JEPA training for energy-based reasoning experiments.
 
-Stage 1 (--stage 1a/1b/1c): Masked prediction on structured sequences.
+Stage 1 (--stage 1a/1b/1c): Sequence prediction on structured sequences.
   Validates that the JEPA encoder learns useful representations.
   No z, no Langevin — pure self-supervised backbone training.
+  Supports two prediction modes:
+    --prediction_mode masked    : Masked prediction (predict masked positions)
+    --prediction_mode next_step : Next-step prediction (predict next token)
+  Next-step mode aligns with Mamba's causal nature (ARM, ICLR 2025) and
+  provides loss at every position, critical for regime change detection (1b).
 
 Stage 2 (--stage 2): Pattern induction (few-shot rule discovery).
   Validates that z + Langevin improve predictions beyond single-pass.
@@ -14,14 +19,13 @@ Stage 2 (--stage 2): Pattern induction (few-shot rule discovery).
     --z_mode oracle    : z = projected rule label (upper bound)
 
 Usage:
-  # Stage 1a: arithmetic sequences
+  # Stage 1a: arithmetic sequences (masked prediction)
   python experiments/energy_reasoning/train_jepa.py --stage 1a
 
-  # Stage 2: pattern induction with Langevin
-  python experiments/energy_reasoning/train_jepa.py --stage 2 --z_mode langevin
+  # Stage 1b: multi-rule with next-step prediction
+  python experiments/energy_reasoning/train_jepa.py --stage 1b --prediction_mode next_step
 
-  # Stage 2: ablation comparison
-  python experiments/energy_reasoning/train_jepa.py --stage 2 --z_mode none
+  # Stage 2: pattern induction with Langevin
   python experiments/energy_reasoning/train_jepa.py --stage 2 --z_mode langevin
 """
 
@@ -70,6 +74,47 @@ def compute_masked_accuracy(logits, tokens, mask):
     if mask.sum() == 0:
         return 0.0
     return (preds[mask] == tokens[mask]).float().mean().item()
+
+
+def compute_nextstep_accuracy(logits_shift, tokens_shift):
+    """Next-token prediction accuracy.
+
+    Args:
+        logits_shift: (batch, seq_len-1, vocab_size) shifted logits.
+        tokens_shift: (batch, seq_len-1) shifted ground truth.
+
+    Returns:
+        Accuracy (float).
+    """
+    preds = logits_shift.argmax(dim=-1)
+    return (preds == tokens_shift).float().mean().item()
+
+
+def evaluate_stage1_nextstep(model, test_loader, device):
+    """Evaluate Stage 1 with next-step prediction (no masking)."""
+    model.eval()
+    total_jepa = 0.0
+    total_decode = 0.0
+    total_acc = 0.0
+    n_batches = 0
+
+    with torch.no_grad():
+        for batch in test_loader:
+            seqs = batch[0].to(device)
+            result = model.forward_train_nextstep(seqs, z=None)
+            total_jepa += result['L_jepa'].item()
+            total_decode += result['L_decode'].item()
+
+            logits_shift = model.decode(result['s_pred'][:, :-1])
+            tokens_shift = seqs[:, 1:]
+            total_acc += compute_nextstep_accuracy(logits_shift, tokens_shift)
+            n_batches += 1
+
+    return {
+        'jepa_loss': total_jepa / n_batches,
+        'decode_loss': total_decode / n_batches,
+        'accuracy': total_acc / n_batches,
+    }
 
 
 def evaluate_stage1(model, test_loader, mask_ratio, device,
@@ -467,6 +512,10 @@ def main():
     parser.add_argument('--mask_mode', type=str, default='causal',
                         choices=['causal', 'random'],
                         help='Mask mode: causal (latter half only) or random')
+    parser.add_argument('--prediction_mode', type=str, default='masked',
+                        choices=['masked', 'next_step'],
+                        help='Prediction mode: masked (fill-in) or next_step '
+                             '(autoregressive in latent space, better for Mamba)')
 
     # z / Langevin (Stage 2)
     parser.add_argument('--z_mode', type=str, default='none',
@@ -592,8 +641,12 @@ def main():
     num_params = sum(p.numel() for p in model.get_trainable_params())
     num_params_total = sum(p.numel() for p in model.parameters())
     print(f"Trainable params: {num_params:,} / Total: {num_params_total:,}")
+    # Force next_step mode for Stage 1 if requested; Stage 2 always uses masked
+    prediction_mode = args.prediction_mode if args.stage != '2' else 'masked'
+
     print(f"JEPA loss: {args.jepa_loss}, EMA tau: {args.ema_tau_start}→{args.ema_tau_end}")
-    print(f"Mask mode: {args.mask_mode}, LR warmup: {args.warmup_epochs} epochs")
+    print(f"Prediction mode: {prediction_mode}, Mask mode: {args.mask_mode}, "
+          f"LR warmup: {args.warmup_epochs} epochs")
 
     optimizer = torch.optim.AdamW(model.get_trainable_params(), lr=args.lr)
 
@@ -627,7 +680,7 @@ def main():
     # Training loop
     # -----------------------------------------------------------------------
 
-    print(f"\nStage {args.stage}, z_mode={z_mode}")
+    print(f"\nStage {args.stage}, z_mode={z_mode}, prediction={prediction_mode}")
     print(f"{'Epoch':>5} {'JEPA':>10} {'Decode':>10} {'Acc':>10} "
           f"{'TestAcc':>10} {'ms/b':>8}")
     print("-" * 58)
@@ -648,18 +701,21 @@ def main():
 
             t0 = time.perf_counter()
 
-            # --- Generate mask ---
-            if args.stage == '2':
+            # --- Compute z ---
+            z = None
+            langevin_e = None
+            mask = None  # only needed for masked mode
+
+            if prediction_mode == 'next_step':
+                # Next-step mode: no masking needed
+                pass
+            elif args.stage == '2':
                 mask = generate_last_token_mask(B, seqs.shape[1], device)
             elif args.mask_mode == 'causal':
                 mask = generate_causal_mask(
                     B, seqs.shape[1], args.mask_ratio, device)
             else:
                 mask = generate_mask(B, seqs.shape[1], args.mask_ratio, device)
-
-            # --- Compute z ---
-            z = None
-            langevin_e = None
 
             if z_mode == 'random':
                 z = torch.randn(B, args.d_z, device=device)
@@ -682,7 +738,10 @@ def main():
                 z = one_hot @ model._oracle_proj
 
             # --- Forward pass ---
-            result = model.forward_train(seqs, mask, z)
+            if prediction_mode == 'next_step':
+                result = model.forward_train_nextstep(seqs, z)
+            else:
+                result = model.forward_train(seqs, mask, z)
             L_jepa = result['L_jepa']
             L_decode = result['L_decode']
             L_var = result['L_var']
@@ -706,12 +765,17 @@ def main():
 
             # --- Accuracy ---
             with torch.no_grad():
-                logits = model.decode(result['s_pred'])
-                if args.stage == '2':
+                if prediction_mode == 'next_step':
+                    logits_shift = model.decode(result['s_pred'][:, :-1])
+                    tokens_shift = seqs[:, 1:]
+                    acc = compute_nextstep_accuracy(logits_shift, tokens_shift)
+                elif args.stage == '2':
+                    logits = model.decode(result['s_pred'])
                     targets = batch[1].to(device)
                     pred_tok = logits[:, -1, :].argmax(dim=-1)
                     acc = (pred_tok == targets).float().mean().item()
                 else:
+                    logits = model.decode(result['s_pred'])
                     acc = compute_masked_accuracy(logits, seqs, mask)
 
             t1 = time.perf_counter()
@@ -738,6 +802,9 @@ def main():
             test_metrics = evaluate_stage2(
                 model, test_loader, langevin, z_mode, device,
                 args.d_z, args.n_rules)
+        elif prediction_mode == 'next_step':
+            test_metrics = evaluate_stage1_nextstep(
+                model, test_loader, device)
         else:
             test_metrics = evaluate_stage1(
                 model, test_loader, args.mask_ratio, device,
@@ -765,10 +832,11 @@ def main():
         # Save plot
         if epoch % args.plot_every == 0 or epoch == args.epochs:
             config_str = (f'(d={args.d_model}, pred_d={args.d_pred}, '
-                          f'z={z_mode})')
+                          f'z={z_mode}, pred={prediction_mode})')
             chart_path = os.path.join(
                 save_dir,
-                f'jepa_s{args.stage}_{z_mode}_epoch_{epoch:03d}.png')
+                f'jepa_s{args.stage}_{z_mode}_{prediction_mode}'
+                f'_epoch_{epoch:03d}.png')
             diagnostics.plot(chart_path, epoch, config_str)
 
     # --- Summary ---
