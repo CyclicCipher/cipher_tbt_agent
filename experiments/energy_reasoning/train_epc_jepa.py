@@ -540,6 +540,36 @@ def plot_stage2(save_path, epoch, config_str, history, last_metrics,
 
 
 # ---------------------------------------------------------------------------
+# Profiling
+# ---------------------------------------------------------------------------
+
+def _print_profile(prof):
+    """Print per-phase timing breakdown."""
+    total = sum(prof[k] for k in ['target_enc', 'error_phase',
+                                   'weight_phase', 'ema_update',
+                                   'diagnostics', 'eval'])
+    n = prof['n_batches']
+    ne = prof['n_epochs']
+    print(f"\n{'='*55}")
+    print(f"  PROFILE ({ne} epochs, {n} batches)")
+    print(f"{'='*55}")
+    for label, key in [('Target encoder', 'target_enc'),
+                       ('Error phase (Ph1)', 'error_phase'),
+                       ('Weight phase (Ph2)', 'weight_phase'),
+                       ('EMA update', 'ema_update'),
+                       ('Train diagnostics', 'diagnostics'),
+                       ('Evaluation', 'eval')]:
+        t = prof[key]
+        pct = 100 * t / max(total, 1e-9)
+        per_batch = 1000 * t / max(n, 1)
+        print(f"  {label:<20s} {t:7.2f}s  ({pct:5.1f}%)  "
+              f"{per_batch:6.1f} ms/b")
+    print(f"  {'TOTAL':<20s} {total:7.2f}s  "
+          f"{total/max(ne,1):6.1f} s/epoch")
+    print(f"{'='*55}\n")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -629,6 +659,8 @@ def main():
                         help='Disable mixed precision (AMP)')
     parser.add_argument('--compile', action='store_true',
                         help='Use torch.compile (PyTorch 2+)')
+    parser.add_argument('--profile', action='store_true',
+                        help='Run 5-epoch profiling with per-phase timing')
 
     # Misc
     parser.add_argument('--device', type=str, default='auto')
@@ -828,8 +860,13 @@ def main():
         print(f"{'Epoch':>5} {'E_init':>8} {'E_fin':>8} {'JEPA':>8} "
               f"{'DecCE':>8} {'TrAcc':>7} {'NoZ':>7} {'RndZ':>7} "
               f"{'Lang':>7} {'Orac':>7} {'Gap':>7} {'ms/b':>7} "
-              f"{'iters':>5}")
-        print("-" * 102)
+              f"{'iters':>5} {'ep_s':>6}")
+        print("-" * 110)
+
+        # Profiling accumulators (always tracked, printed if --profile)
+        prof = {'target_enc': 0, 'error_phase': 0, 'weight_phase': 0,
+                'ema_update': 0, 'diagnostics': 0, 'eval': 0,
+                'n_batches': 0, 'n_epochs': 0}
 
         # Track per-epoch stage2 test results for plotting
         s2_history = {
@@ -842,6 +879,7 @@ def main():
             ep_ei = ep_ef = ep_jepa = ep_dec = ep_acc = ep_ms = 0.0
             ep_iters = 0.0
             n_batches = 0
+            epoch_t0 = time.perf_counter()
 
             for batch in train_loader:
                 seqs = batch[0].to(device)
@@ -856,23 +894,30 @@ def main():
                     z_train = oracle_proj[rule_idx]  # (B, d_z)
 
                 # --- Encode target (EMA, no grad) ---
+                _t = time.perf_counter()
                 s_target = model.encode_target(seqs)
+                prof['target_enc'] += time.perf_counter() - _t
 
                 # --- Phase 1 + Phase 2 (ePC with z) ---
                 if args.ipc:
+                    _t = time.perf_counter()
                     model.ipc_train_step(
                         seqs, s_target, optimizer, z=z_train,
                         w_clip=args.w_clip,
                         early_stop_rtol=args.early_stop_rtol,
                         min_iters=args.min_iters,
                         amp_ctx=amp_ctx, scaler=scaler)
+                    prof['error_phase'] += time.perf_counter() - _t
                 else:
+                    _t = time.perf_counter()
                     model.minimize_error_energy(
                         seqs, s_target, z=z_train,
                         early_stop_rtol=args.early_stop_rtol,
                         min_iters=args.min_iters,
                         amp_ctx=amp_ctx)
+                    prof['error_phase'] += time.perf_counter() - _t
 
+                    _t = time.perf_counter()
                     optimizer.zero_grad()
                     with amp_ctx():
                         w_loss = model.compute_weight_loss(
@@ -893,11 +938,15 @@ def main():
                                 model.get_trainable_params(),
                                 max_norm=args.w_clip)
                         optimizer.step()
+                    prof['weight_phase'] += time.perf_counter() - _t
 
                 # --- Phase 3: EMA update ---
+                _t = time.perf_counter()
                 model.update_target()
+                prof['ema_update'] += time.perf_counter() - _t
 
                 # --- Training diagnostics ---
+                _t = time.perf_counter()
                 diag = model.get_diagnostics()
                 with torch.no_grad():
                     logits_shift = model.forward_eval(seqs, z=z_train)
@@ -913,6 +962,7 @@ def main():
                         logits_shift.reshape(-1, model.vocab_size),
                         seqs[:, 1:].reshape(-1),
                     ).item()
+                prof['diagnostics'] += time.perf_counter() - _t
 
                 t1 = time.perf_counter()
                 ms = (t1 - t0) * 1000
@@ -925,18 +975,23 @@ def main():
                 ep_ms += ms
                 ep_iters += diag['actual_iters']
                 n_batches += 1
+                prof['n_batches'] += 1
 
             # --- End-of-epoch ---
             scheduler.step()
             model.set_ema_progress(epoch / args.epochs)
 
             # Evaluate with all 4 ablation variants
+            _t = time.perf_counter()
             s2_metrics = evaluate_stage2(
                 model, test_loader, device, args.n_rules,
                 langevin_T=args.langevin_T,
                 langevin_eta=args.langevin_eta,
                 langevin_sigma=args.langevin_sigma,
             )
+            prof['eval'] += time.perf_counter() - _t
+            prof['n_epochs'] += 1
+            epoch_time = time.perf_counter() - epoch_t0
             a = s2_metrics['accuracy']
             gap = s2_metrics['langevin_gap']
 
@@ -962,7 +1017,14 @@ def main():
                   f"{avg_jepa:8.4f} {avg_dec:8.4f} {avg_acc:7.4f} "
                   f"{a['no_z']:7.4f} {a['random_z']:7.4f} "
                   f"{a['langevin']:7.4f} {a['oracle']:7.4f} "
-                  f"{gap:+7.4f} {avg_ms:7.1f} {avg_it:5.1f}")
+                  f"{gap:+7.4f} {avg_ms:7.1f} {avg_it:5.1f} "
+                  f"{epoch_time:6.1f}")
+
+            # Print profile after 5 epochs
+            if args.profile and epoch == 5:
+                _print_profile(prof)
+                print("(--profile mode: stopping after 5 epochs)")
+                break
 
             # Plot
             if epoch % args.plot_every == 0 or epoch == args.epochs:
@@ -976,8 +1038,9 @@ def main():
                             s2_metrics, rule_names, args)
 
         # --- Stage 2 Summary ---
+        final_epoch = min(epoch, args.epochs)
         print(f"\n{'='*65}")
-        print(f"Stage 2 Final Results (Epoch {args.epochs})")
+        print(f"Stage 2 Final Results (Epoch {final_epoch})")
         print(f"{'='*65}")
         a = s2_metrics['accuracy']
         print(f"  No z:      {a['no_z']:.4f}")
@@ -1012,11 +1075,12 @@ def main():
         # ==================================================================
         print(f"{'Epoch':>5} {'E_init':>8} {'E_fin':>8} {'JEPA':>8} "
               f"{'DecCE':>8} {'Acc':>8} {'TestAcc':>8} {'ms/b':>7} "
-              f"{'iters':>5}")
-        print("-" * 70)
+              f"{'iters':>5} {'ep_s':>6}")
+        print("-" * 78)
 
         for epoch in range(1, args.epochs + 1):
             model.train()
+            epoch_t0 = time.perf_counter()
             ep_ei = 0.0
             ep_ef = 0.0
             ep_jepa = 0.0
@@ -1143,10 +1207,12 @@ def main():
             avg_ms = ep_ms / n_batches
             avg_it = ep_iters / n_batches
 
+            epoch_time = time.perf_counter() - epoch_t0
             print(f"{epoch:5d} {avg_ei:8.4f} {avg_ef:8.4f} "
                   f"{avg_jepa:8.4f} {avg_dec:8.4f} {avg_acc:8.4f} "
                   f"{test_metrics['accuracy']:8.4f} "
-                  f"{avg_ms:7.1f} {avg_it:5.1f}")
+                  f"{avg_ms:7.1f} {avg_it:5.1f} "
+                  f"{epoch_time:6.1f}")
 
             # Plot
             if epoch % args.plot_every == 0 or epoch == args.epochs:
