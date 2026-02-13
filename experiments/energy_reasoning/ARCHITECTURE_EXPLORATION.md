@@ -750,62 +750,48 @@ This is even more effective but costs K× the compute.
 
 ---
 
-## How Langevin Research Solves the ePC Plateau
+## How Langevin Research Relates to ePC
 
-### The Plateau as a Cold-Start Problem
+### The Plateau Was Newton-Specific (Resolved 2026-02-13)
 
-The ePC plateau (documented in PHASE_TRANSITION_ANALYSIS.md) is caused by
-a circular dependency:
+The ePC plateau (originally documented in PHASE_TRANSITION_ANALYSIS.md, now
+EPC_LEARNING_DYNAMICS.md) was caused by Newton's rank-1 Hessian approximation
+requiring a structured Jacobian before errors could grow. **Replacing Newton
+with SGD eliminated the plateau entirely** — ePC with SGD reaches 96% on
+epoch 1 for structured sequence tasks.
 
-```
-Newton effectiveness → error magnitude → E_local gradient quality
-        ↑                                          │
-        └── Jacobian structure ← weight updates ◄──┘
-```
+The Langevin-as-plateau-breaker idea below is therefore unnecessary for ePC's
+error optimization. However, Langevin remains valuable for the JEPA inference
+loop (optimizing z at test time), which is a different use case.
 
-Newton can't find errors because the Jacobian is unstructured.
-Weights can't improve because errors are zero.
-The system is at a FIXED POINT with zero gradient — a cold start.
+### Historical Context: The Original Proposal (Superseded)
 
-Langevin noise is the physics solution to exactly this problem:
-**add thermal energy to escape a fixed point.**
-
-### The Specific Mechanism
-
-Replace Newton error optimization with Langevin during early training:
+The original idea was to use Langevin noise to break the Newton plateau:
 
 ```python
-# Current ePC: Newton on errors (fails when Jacobian is bad)
+# Newton on errors (had plateau with bad Jacobian):
 e_i = newton_step(e_i, jacobian)  # ||e|| ≈ 10⁻⁶ during plateau
 
-# Proposed: Langevin on errors (works regardless of Jacobian)
+# Langevin on errors (noise breaks the deadlock):
 grad_e = autograd.grad(E_local, e_i)
-e_i = e_i - eta * grad_e + sigma * noise  # ||e|| ≈ sigma >> 10⁻⁶
+e_i = e_i - eta * grad_e + sigma * noise
 ```
 
-Even with a terrible Jacobian, the noise term injects errors of magnitude
-σ. These noisy errors provide E_local gradients of magnitude ~σ, which
-drive weight learning. The weight learning improves the Jacobian. The
-improved Jacobian makes the gradient term `η·∇E` more useful. Positive
-feedback begins.
+This would have worked (Langevin noise injects errors of magnitude sigma,
+providing E_local signal), but it's unnecessary — SGD already follows the
+gradient without needing noise to escape a deadlock that doesn't exist.
 
-### Why Noisy Errors Still Provide Signal
+### Where Langevin IS Needed: JEPA Inference
 
-Concern: if errors are mostly noise, don't the gradients cancel out?
+Langevin dynamics remain essential for the energy-based reasoning system's
+inference loop, where z (the latent reasoning variable) is optimized at
+test time against E(z) = E_pred + E_constraint. This is a fundamentally
+different optimization problem from ePC's error optimization:
 
-**Over a single batch: yes, mostly noise.**
-**Over many batches: the signal accumulates, noise averages out.**
-
-This is exactly SGLD theory (Welling & Teh, 2011). The gradient term
-points consistently toward the loss minimum. The noise term is i.i.d.
-and averages to zero. Over B batches:
-- Signal accumulates as O(B)
-- Noise accumulates as O(√B)
-- Signal-to-noise ratio grows as O(√B)
-
-The learning is SLOWER than post-transition Newton (which provides clean
-signal), but it's NONZERO learning during what was previously a dead
-plateau. Trading speed for breaking the deadlock.
+- **ePC errors**: small corrections to a good forward pass, well-conditioned
+  energy landscape, SGD converges in 5 steps
+- **JEPA z**: search over a d-dimensional latent space, potentially
+  multimodal energy landscape, may need noise to explore
 
 ### The Bootstrap Strategy
 

@@ -319,7 +319,7 @@ essential constraint with less mechanism.
 - LSTMs: simple sequences (counting, XOR over time)
 - Transformers: machine translation (WMT)
 - Mamba: synthetic benchmarks (selective copying, induction heads)
-- ePC-Mamba (this project): copy task → 99.03%
+- ePC-Mamba (this project): copy task → 99.03%, task 1b (SGD) → 97.01% epoch 1
 
 The toy problem should be the SIMPLEST task that REQUIRES the constraint
 your architecture satisfies. If the toy problem can be solved without your
@@ -333,12 +333,13 @@ missing:
 
 - RNN fails on long sequences → missing: gradient preservation → add: LSTM
 - S4 fails on selective copying → missing: content-dependence → add: Mamba
-- ePC plateaus for 19 epochs → missing: ??? → add: ???
+- ePC with Newton plateaus for 19 epochs → missing: simple optimizer → fix: use SGD
+- JEPA masked prediction fails on 1b → missing: complete coverage → fix: next-step prediction
+- ePC with N-1 errors gets 7% → missing: last error node → fix: N errors for N layers
 
-The ePC plateau (PHASE_TRANSITION_ANALYSIS.md) is a precise bottleneck
-identification waiting to be exploited. The circular dependency between
-Newton effectiveness and Jacobian quality is exactly the kind of precise
-diagnosis that leads to architectural solutions.
+The ePC plateau was originally misdiagnosed as a fundamental ePC property.
+It was actually Newton-specific (see EPC_LEARNING_DYNAMICS.md). The real
+breakthroughs came from identifying the "complete error coverage" constraint.
 
 ---
 
@@ -414,6 +415,46 @@ Similarly, the choice of Mamba3 for the encoder/predictor, VICReg for
 anti-collapse, and JEPA for the training objective are engineering choices
 within the constraint-determined outer structure. They should be validated
 empirically, not derived from first principles.
+
+### Applied: The Complete Error Coverage Principle (2026-02-13)
+
+This project's first successful application of the discovery pattern:
+
+**Step 1 — Bottleneck (precise):**
+JEPA with masked prediction achieves 18.6% on Stage 1b (multi-rule
+regime change). The model can't detect where one rule ends and another
+begins. Separately, ePC-Mamba3 with N-1 errors achieves 7% (random).
+
+**Step 2 — Analogy:**
+Mamba is a causal model — position t sees only 0..t-1. This is like
+trying to fill in blanks on an exam where you can only read the page
+from top to bottom. Masking early positions gives you no context.
+Similarly, omitting the last error node in ePC is like having a
+teacher who never checks your final answer.
+
+**Step 3 — Constraint:**
+**Complete error coverage**: every computational unit (position,
+layer) must receive a gradient signal proportional to its prediction
+error. No dead zones. Formally: for a causal model with L layers and
+T positions, the learning signal must be defined at ALL L*T points,
+not a sparse subset.
+
+**Step 4 — Minimal realization:**
+- Temporal: replace masked prediction with next-step prediction
+  (predict token t+1 from representation at t)
+- Layer-wise: N errors for N blocks (not N-1)
+- Both: no new parameters, no new modules, just connecting existing
+  components differently
+
+**Result:** 18.6% -> 97.05% (JEPA Stage 1b), 7% -> 99.3% (ePC copy
+task). The constraint was precise, the realization was minimal, and
+the improvement was dramatic.
+
+**The meta-lesson:** The same constraint (complete coverage) was
+discovered independently in two different systems (JEPA temporal,
+ePC layer-wise). This convergence is exactly what the discovery
+pattern predicts — when the bottleneck is identified precisely, the
+solution is unique and applies universally.
 
 ### The Meta-Pattern Applied to Our Next Steps
 
