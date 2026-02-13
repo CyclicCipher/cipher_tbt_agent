@@ -90,10 +90,10 @@ class ePCJEPAModel(nn.Module):
         pred_config: Mamba3Config,
         vocab_size: int,
         d_z: int = 64,
-        iters: int = 5,
+        iters: int = 20,
         e_lr: float = 0.1,
         error_optim: str = 'sgd',
-        precision_mode: str = 'geometric',
+        precision_mode: str = 'none',
         precision_base: float = 3.0,
         ema_tau_start: float = 0.996,
         ema_tau_end: float = 1.0,
@@ -272,39 +272,61 @@ class ePCJEPAModel(nn.Module):
     # Energy functions
     # ------------------------------------------------------------------
 
-    def E(self, x_emb: Tensor, s_target: Tensor,
-          z: Tensor = None) -> Tensor:
+    def E(self, x_emb: Tensor, input_ids: Tensor,
+          s_target: Tensor, z: Tensor = None) -> Tensor:
         """Energy for error optimization (global graph).
 
-        E = sum(p_i * 0.5 * ||e_i||^2) + JEPA_loss
+        E = ½ Σ ||e_i||² + L(ŷ, y)
 
-        The JEPA loss flows through: errors -> encoder -> predictor -> loss.
+        where L is the full output loss (JEPA + decode CE + VICReg),
+        matching the paper's formulation: errors are optimized against
+        the same objective as weights.
+
+        The output loss flows through: errors -> encoder -> predictor -> loss.
         This is the signal that tells errors WHERE to push the encoder output.
         """
         E_errors = 0.5 * sum(
-            pi * torch.linalg.vector_norm(e, ord=2, dim=None) ** 2
-            for pi, e in zip(self.precisions, self.errors)
+            torch.linalg.vector_norm(e, ord=2, dim=None) ** 2
+            for e in self.errors
         )
         s_context = self.encode_context(x_emb)
         s_pred = self.predictor(s_context, z)
-        return E_errors + self._jepa_loss_nextstep(s_pred, s_target)
+
+        # Full output loss (same terms as E_local)
+        E_output = self._jepa_loss_nextstep(s_pred, s_target)
+
+        if self.lambda_decode > 0:
+            logits = self.decoder(s_pred[:, :-1])
+            E_output += self.lambda_decode * F.cross_entropy(
+                logits.reshape(-1, self.vocab_size),
+                input_ids[:, 1:].reshape(-1),
+            )
+
+        if self.lambda_var > 0 or self.lambda_cov > 0:
+            L_var, L_cov = vicreg_loss(s_context)
+            E_output += self.lambda_var * L_var + self.lambda_cov * L_cov
+
+        return E_errors + E_output
 
     def E_local(self, x_emb: Tensor, input_ids: Tensor,
                 s_target: Tensor, z: Tensor = None) -> Tensor:
         """Energy for weight optimization (local learning).
 
+        Paper Algorithm 4, line 17: ∇_θj E = -(∂ŝ_j/∂θ_j)^T · ε_j
+        Implemented as MSE(ŝ_j, ŝ_j + ε_j) which gives the same gradient.
+
         Block weights: gradient from local MSE (detached errors).
-        Predictor: gradient from JEPA loss + decode CE.
+        Predictor: gradient from JEPA loss + decode CE + VICReg.
         Decoder: gradient from decode CE.
         Embedding: gradient from block 0's local MSE.
-        out_norm: gradient from JEPA loss + decode CE.
+        out_norm: gradient from JEPA loss + decode CE + VICReg.
         """
         E = 0.0
         s = x_emb
-        for pi, e, layer in zip(self.precisions, self.errors, self.layers):
+        for e, layer in zip(self.errors, self.layers):
             s_pred_local = layer(s)
             s = (s_pred_local + e).detach()
-            E += pi * 0.5 * F.mse_loss(s_pred_local, s, reduction='sum')
+            E += 0.5 * F.mse_loss(s_pred_local, s, reduction='sum')
 
         s_context = self.out_norm(s)
         s_pred = self.predictor(s_context, z)
@@ -351,11 +373,11 @@ class ePCJEPAModel(nn.Module):
                                z: Tensor = None,
                                early_stop_rtol: float = 1e-3,
                                min_iters: int = 2) -> float:
-        """Phase 1: optimize errors to minimize energy.
+        """Phase 1: optimize errors to minimize energy (paper Algorithm 4).
 
-        Freezes all weights. Runs T iterations of SGD/Adam on errors.
-        Errors are optimized so that the predictor (applied to the
-        error-corrected encoder output) matches the target encoder.
+        Freezes all weights. Runs T iterations of SGD on errors.
+        Errors are optimized against the full output loss so that
+        they carry informative gradients for the local weight update.
 
         Args:
             input_ids: (batch, seq_len) token indices.
@@ -383,7 +405,7 @@ class ePCJEPAModel(nn.Module):
 
         for t in range(self.iters):
             optim.zero_grad()
-            E = self.E(x_emb, s_target, z)
+            E = self.E(x_emb, input_ids, s_target, z)
             E_val = E.item()
 
             if t == 0:
@@ -453,7 +475,7 @@ class ePCJEPAModel(nn.Module):
         for t in range(self.iters):
             # --- Error step ---
             e_optim.zero_grad()
-            E = self.E(x_emb_detached, s_target, z)
+            E = self.E(x_emb_detached, input_ids, s_target, z)
             E_val = E.item()
             if t == 0:
                 self._E_initial = E_val

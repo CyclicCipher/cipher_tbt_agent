@@ -333,13 +333,13 @@ def main():
     parser.add_argument('--n_test', type=int, default=1000)
 
     # ePC parameters
-    parser.add_argument('--iters', type=int, default=5,
+    parser.add_argument('--iters', type=int, default=20,
                         help='Error optimization iterations (T)')
     parser.add_argument('--e_lr', type=float, default=0.1,
                         help='Error learning rate (PC literature uses 0.1-1.0)')
     parser.add_argument('--error_optim', type=str, default='sgd',
                         choices=['sgd', 'adam'])
-    parser.add_argument('--precision_mode', type=str, default='geometric',
+    parser.add_argument('--precision_mode', type=str, default='none',
                         choices=['none', 'linear', 'geometric'])
     parser.add_argument('--precision_base', type=float, default=3.0)
     parser.add_argument('--early_stop_rtol', type=float, default=1e-3,
