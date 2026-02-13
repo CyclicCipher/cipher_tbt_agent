@@ -269,10 +269,6 @@ class PCEMamba3(nn.Module):
         self.profiling = False
         self._profile = {}
 
-        # Scale factor to compensate for small errors from limited SGD/Adam
-        # iterations.
-        self.energy_scale = min(1.0, e_lr * iters)
-
         # Per-layer precision weighting (Salvatori et al. 2025).
         # N errors for N layers (one after each block, including last).
         # Precisions normalized to mean=1 to preserve error-vs-output balance.
@@ -322,8 +318,7 @@ class PCEMamba3(nn.Module):
             b, l, v = y_pred.shape
             return F.cross_entropy(
                 y_pred.reshape(b * l, v), y.reshape(b * l),
-                reduction='sum'
-            )
+            )  # mean reduction (default)
         self._output_loss = _ce_loss
 
     def y_pred(self, x: Tensor) -> Tensor:
@@ -356,23 +351,19 @@ class PCEMamba3(nn.Module):
     def E(self, x: Tensor, y: Tensor, output_proj: nn.Module) -> Tensor:
         """Energy using errors (global graph — for error optimization).
 
-        Precision-weighted: E = sum(pi_l * 0.5 * ||e_l||^2) + output_loss.
-        Higher precision on early layers amplifies their contribution,
-        encouraging SGD to find larger errors where they matter most.
+        E = 0.5 * sum(mean(e_l^2)) + output_loss.
+        Mean-reduced error penalty matches mean-reduced output loss.
 
         DO NOT use for weight optimization (would be standard backprop).
         """
-        E_errors = 0.5 * sum(
-            pi * torch.linalg.vector_norm(e, ord=2, dim=None) ** 2
-            for pi, e in zip(self.precisions, self.errors)
-        )
+        E_errors = 0.5 * sum(e.pow(2).mean() for e in self.errors)
         logits = output_proj(self.y_pred(x))
         return E_errors + self._output_loss(logits, y)
 
     def E_local(self, x: Tensor, y: Tensor, output_proj: nn.Module) -> Tensor:
         """Energy using local interactions (detached — for weight optimization).
 
-        Precision-weighted: early layers get amplified E_local gradients.
+        All layers get uniform local MSE gradient (no precision weighting).
         With N errors for N layers, ALL blocks learn from local MSE terms.
         The CE output loss updates only output_proj (weight-tied embedding).
 
@@ -384,10 +375,10 @@ class PCEMamba3(nn.Module):
         if self.use_mhc:
             s_i = s_i.unsqueeze(1).expand(
                 -1, self.n_streams, -1, -1).contiguous()
-        for pi, e_i, layer_i in zip(self.precisions, self.errors, self.layers):
+        for e_i, layer_i in zip(self.errors, self.layers):
             s_i_pred = layer_i(s_i)
             s_i = (s_i_pred + e_i).detach()
-            E += pi * 0.5 * F.mse_loss(s_i_pred, s_i, reduction='sum')
+            E += 0.5 * F.mse_loss(s_i_pred, s_i)  # mean reduction
         # Output (s_i is detached — CE only updates output_proj/embedding)
         if self.use_mhc:
             s_i = s_i.sum(dim=1)
@@ -624,14 +615,13 @@ class ePCMamba3LM(nn.Module):
             hidden = self.pce.y_pred(x)
             return self.out_proj(hidden)
 
-    def compute_weight_loss(self, input_ids: Tensor, targets: Tensor,
-                            batch_size: int) -> Tensor:
+    def compute_weight_loss(self, input_ids: Tensor, targets: Tensor) -> Tensor:
         """Compute E_local for weight optimizer (call after forward with targets)."""
         x = self.embedding(input_ids)
-        return self.pce.E_local(x, targets, self.out_proj) / (batch_size * self.pce.energy_scale)
+        return self.pce.E_local(x, targets, self.out_proj)
 
     def ipc_train_step(self, input_ids: Tensor, targets: Tensor,
-                       weight_optimizer, batch_size: int,
+                       weight_optimizer,
                        w_clip: float = 1.0) -> float:
         """Incremental PC: interleave error and weight updates.
 
@@ -686,7 +676,7 @@ class ePCMamba3LM(nn.Module):
             out_proj.requires_grad_(True)
 
             weight_optimizer.zero_grad()
-            w_loss = pce.E_local(x, targets, out_proj) / (batch_size * pce.energy_scale)
+            w_loss = pce.E_local(x, targets, out_proj)
             w_loss.backward()
             if w_clip > 0:
                 torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=w_clip)

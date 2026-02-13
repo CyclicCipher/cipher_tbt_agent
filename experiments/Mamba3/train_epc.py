@@ -489,7 +489,7 @@ def main():
         ).to(device)
         optim_str = args.error_optim.upper()
         print(f"Model: ePC-Mamba3 (T={args.iters}, {optim_str}, e_lr={args.e_lr}, "
-              f"energy_scale={model.pce.energy_scale:.4f})")
+              f"reduction=mean)")
         if args.ipc:
             print(f"  Mode: iPC (weight update every error step, {args.iters}x faster)")
         if args.mhc:
@@ -557,7 +557,7 @@ def main():
                     if args.ipc:
                         # iPC: interleaved error + weight steps
                         E_val = model.ipc_train_step(
-                            inputs, targets, optimizer, batch_size, args.w_clip)
+                            inputs, targets, optimizer, args.w_clip)
                         loss_val = E_val
                     else:
                         # Standard ePC: Phase 1 inference, Phase 2 weight update
@@ -568,7 +568,7 @@ def main():
 
                         optimizer.zero_grad()
                         weight_loss = model.compute_weight_loss(
-                            inputs, targets, batch_size)
+                            inputs, targets)
                         weight_loss.backward()
 
                         if args.w_clip > 0:
