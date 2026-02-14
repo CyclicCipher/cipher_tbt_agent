@@ -97,11 +97,17 @@ predictive-coding-agent/
 ## Testing
 
 ```bash
-# JEPA backprop (energy_reasoning) — ACTIVE
+# JEPA backprop — Stage 1b (default, recommended starting point)
 python experiments/energy_reasoning/train_jepa.py --stage 1b --epochs 10
 
-# ePC ResNet MNIST validation (reference only)
-python experiments/ePC_ResNet/train_mnist.py
+# JEPA backprop — Stage 1b with compile + AMP (GPU, fastest)
+python experiments/energy_reasoning/train_jepa.py --stage 1b --epochs 10 --compile
+
+# JEPA backprop — Stage 2 (pattern induction, auto-defaults to 50 epochs)
+python experiments/energy_reasoning/train_jepa.py --stage 2
+
+# JEPA backprop — Profile (5 epochs, timing breakdown)
+python experiments/energy_reasoning/train_jepa.py --stage 1b --profile
 ```
 
 ## Stage 2 Status & Key Findings
