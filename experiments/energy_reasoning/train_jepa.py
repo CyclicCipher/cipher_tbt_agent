@@ -80,10 +80,10 @@ def evaluate_stage1_nextstep(model, test_loader, device, amp_ctx):
             seqs = batch[0].to(device)
             with amp_ctx():
                 result = model.forward_train_nextstep(seqs, z=None)
+                logits_shift = model.decode(result['s_pred'][:, :-1])
             total_jepa += result['L_jepa'].item()
             total_decode += result['L_decode'].item()
 
-            logits_shift = model.decode(result['s_pred'][:, :-1])
             tokens_shift = seqs[:, 1:]
             total_acc += compute_nextstep_accuracy(logits_shift, tokens_shift)
             n_batches += 1
@@ -116,10 +116,9 @@ def evaluate_stage1_masked(model, test_loader, mask_ratio, device, amp_ctx,
 
             with amp_ctx():
                 result = model.forward_train(seqs, mask, z=None)
+                logits = model.decode(result['s_pred'])
             total_jepa += result['L_jepa'].item()
             total_decode += result['L_decode'].item()
-
-            logits = model.decode(result['s_pred'])
             total_acc += compute_masked_accuracy(logits, seqs, mask)
             n_batches += 1
 
@@ -1038,7 +1037,7 @@ def main():
 
                 # --- Accuracy ---
                 _t = time.perf_counter()
-                with torch.no_grad():
+                with torch.no_grad(), amp_ctx():
                     if prediction_mode == 'next_step':
                         logits_shift = model.decode(
                             result['s_pred'][:, :-1])
