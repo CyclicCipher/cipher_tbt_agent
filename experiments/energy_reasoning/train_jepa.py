@@ -606,7 +606,7 @@ def main():
     # Misc
     parser.add_argument('--device', type=str, default='auto')
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--plot_every', type=int, default=5)
+    parser.add_argument('--plot_every', type=int, default=10)
     args = parser.parse_args()
 
     # Seed
