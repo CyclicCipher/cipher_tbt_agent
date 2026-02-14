@@ -482,6 +482,94 @@ class JEPAModel(nn.Module):
         s_pred = self.predict(s_context, z)
         return self.decode(s_pred[:, :-1])
 
+    def _jepa_loss_nextstep(self, s_pred: Tensor,
+                             s_target: Tensor) -> Tensor:
+        """JEPA loss for next-step prediction (standalone, for Langevin).
+
+        Args:
+            s_pred: (batch, seq_len, d) predictor output.
+            s_target: (batch, seq_len, d) target encoder output.
+
+        Returns:
+            Scalar loss: cosine or L2 between shifted sequences.
+        """
+        pred = s_pred[:, :-1]
+        target = s_target[:, 1:].detach()
+
+        if self.jepa_loss_type == 'cosine':
+            pred_flat = pred.reshape(-1, pred.shape[-1])
+            tgt_flat = target.reshape(-1, target.shape[-1])
+            sim = F.cosine_similarity(pred_flat, tgt_flat, dim=-1)
+            return (1.0 - sim).mean()
+        else:
+            return (pred - target).pow(2).mean()
+
+    def prediction_energy(self, s_context: Tensor, s_target: Tensor,
+                          z: Tensor) -> Tensor:
+        """Prediction energy E(z) = JEPA_loss(predictor(s_context, z), s_target).
+
+        Used by Langevin dynamics to refine z.
+        """
+        s_pred = self.predict(s_context, z)
+        return self._jepa_loss_nextstep(s_pred, s_target)
+
+    def langevin_refine(self, input_ids: Tensor, s_target: Tensor,
+                        T: int = 5, eta: float = 0.01,
+                        sigma_max: float = 0.1,
+                        adaptive_threshold: float = 1e-3,
+                        noise_at_test: bool = False) -> tuple:
+        """Run Langevin dynamics to find z* minimizing prediction energy.
+
+        Encoders are frozen; only the predictor runs per step.
+        Uses cyclical noise annealing.
+
+        Args:
+            input_ids: (batch, seq_len) tokens.
+            s_target: (batch, seq_len, d) target encoder output.
+            T: Number of Langevin steps.
+            eta: Step size.
+            sigma_max: Maximum noise scale.
+            adaptive_threshold: Stop if relative energy change < this.
+            noise_at_test: If False, drop noise (deterministic GD).
+
+        Returns:
+            z_star: (batch, d_z) optimized latent.
+            energies: List of energy values per step.
+        """
+        with torch.no_grad():
+            s_context = self.encode(input_ids, mask=None)
+        s_context = s_context.detach()
+        s_target = s_target.detach()
+
+        B = input_ids.shape[0]
+        device = input_ids.device
+        z = torch.randn(B, self.d_z, device=device)
+        z.requires_grad_(True)
+
+        energies = []
+        for t in range(T):
+            E = self.prediction_energy(s_context, s_target, z)
+            energies.append(E.item())
+
+            grad_z = torch.autograd.grad(E, z)[0]
+
+            if noise_at_test:
+                sigma_t = sigma_max * 0.5 * (
+                    1 + math.cos(math.pi * t / max(T, 1)))
+                noise = torch.randn_like(z) * sigma_t
+            else:
+                noise = 0.0
+
+            z = (z - eta * grad_z + noise).detach().requires_grad_(True)
+
+            if len(energies) >= 2:
+                rel_change = (abs(energies[-1] - energies[-2])
+                              / (abs(energies[-2]) + 1e-8))
+                if rel_change < adaptive_threshold:
+                    break
+
+        return z.detach(), energies
+
     def get_trainable_params(self):
         """Parameters updated by gradient descent (everything except target encoder)."""
         params = []

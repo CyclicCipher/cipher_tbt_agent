@@ -126,3 +126,57 @@ Measured network complexity through training and found a characteristic rise-and
 4. **Scaling rules gradually:** Test with 2 rules, 3 rules, 4 rules, 5 rules. If test accuracy degrades proportionally (50% → 33% → 25% → 20%), it confirms the "learns exactly one rule" pattern and rules out alternative explanations.
 
 5. **Data ratio manipulation:** Following Wang et al., vary the ratio of "easy" examples (many in-context pairs, making the rule obvious) to "hard" examples (few pairs). If more easy examples accelerate grokking, it confirms that rule identifiability is the bottleneck.
+
+## Task Fairness Investigation (2026-02-14)
+
+**Status:** Not yet investigated. Must be done before drawing strong conclusions.
+
+Before attributing ~25% test accuracy entirely to the model, we must verify
+that the task is solvable in principle. The question: **can a human (or an
+oracle) identify the correct rule from the in-context examples alone?**
+
+### What Could Make the Task Unfair
+
+1. **Ambiguous in-context examples.** If the same input-output pair is
+   consistent with multiple rules (e.g., input [1] → output [2] could be
+   "double" or "shift1"), the in-context examples don't uniquely determine
+   the rule. A perfect reasoner would still fail on ambiguous cases.
+
+2. **Tokenized representation.** The model sees tokenized sequences, not
+   symbolic math. The rule "double" on [3] produces [6], which the model
+   sees as token sequences. Recognizing "doubling" from token patterns may
+   be harder than from symbolic representations.
+
+3. **Insufficient examples.** How many in-context pairs are needed to
+   uniquely identify each rule? Some rules (e.g., "double") may be clear
+   from one example; others (e.g., distinguishing "shift3" from "shift7")
+   may require examples with specific input values.
+
+### Investigation Plan
+
+1. **Ambiguity analysis:** For every rule pair (i, j), find the set of
+   inputs where rule_i(input) = rule_j(input). If such inputs exist and
+   appear in in-context examples, those examples are ambiguous.
+
+2. **Human baseline:** Present 20-50 randomly sampled test examples to a
+   human (rule names hidden). Record: (a) accuracy, (b) time per example,
+   (c) which examples were ambiguous or confusing.
+
+3. **Information-theoretic bound:** Given the data generation parameters
+   (vocabulary size, sequence length, number of in-context pairs), compute
+   the theoretical minimum number of examples needed to distinguish all 5
+   rules with high probability.
+
+4. **Oracle analysis:** For each test example, check programmatically
+   whether the in-context examples are consistent with exactly one rule.
+   Report: fraction of unambiguous examples, and accuracy restricted to
+   unambiguous examples only.
+
+### Implications
+
+- If task is fair (human >80%): the model's failure is clear and the
+  multi-rule collapse hypothesis stands
+- If task is partially ambiguous: adjust theoretical ceiling and re-evaluate
+  whether ~25% is actually worse than expected
+- If task is fundamentally ambiguous: redesign data generation to ensure
+  unambiguous in-context examples before continuing experiments

@@ -620,8 +620,9 @@ def main():
     # ePC parameters
     parser.add_argument('--iters', type=int, default=20,
                         help='Error optimization iterations (T)')
-    parser.add_argument('--e_lr', type=float, default=0.1,
-                        help='Error learning rate')
+    parser.add_argument('--e_lr', type=float, default=None,
+                        help='Error learning rate (default: 0.1 for sgd, '
+                             '0.005 for adam)')
     parser.add_argument('--error_optim', type=str, default='sgd',
                         choices=['sgd', 'adam'])
     parser.add_argument('--precision_mode', type=str, default='none',
@@ -646,7 +647,7 @@ def main():
     # JEPA
     parser.add_argument('--ema_tau_start', type=float, default=0.996)
     parser.add_argument('--ema_tau_end', type=float, default=1.0)
-    parser.add_argument('--jepa_loss', type=str, default='cosine',
+    parser.add_argument('--jepa_loss', type=str, default='l2',
                         choices=['cosine', 'l2'])
     parser.add_argument('--lambda_decode', type=float, default=1.0)
     parser.add_argument('--lambda_var', type=float, default=1.0,
@@ -667,6 +668,15 @@ def main():
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--plot_every', type=int, default=5)
     args = parser.parse_args()
+
+    # Default e_lr depends on error optimizer:
+    # - SGD: lr=0.1 (gradient magnitude matters, need large lr to compensate
+    #   for tiny per-element gradients from mean-reduced sequence losses)
+    # - Adam: lr=0.005 (Adam normalizes per-element, so update ≈ lr*sign(grad);
+    #   after T=20 steps, per-element |ε| ≈ 0.1, error norm ≈ √N * 0.1 ≈ 36,
+    #   giving ~4% of hidden state norm — a meaningful correction)
+    if args.e_lr is None:
+        args.e_lr = 0.005 if args.error_optim == 'adam' else 0.1
 
     # Seed
     if args.seed > 0:

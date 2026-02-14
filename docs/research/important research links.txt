@@ -1,36 +1,92 @@
+## Reference links (blog posts, tools)
+
 Low-Rank Approximation Toolbox: Nyström Approximation:
 https://www.ethanepperly.com/index.php/2022/10/11/low-rank-approximation-toolbox-nystrom-approximation/
 
-The Complexity Dynamics of Grokking
+The Complexity Dynamics of Grokking (blog):
 https://brantondemoss.com/research/grokking/
 
 ## Papers NOT yet in docs/research/ (need manual download)
 
-# Core architecture papers
-Assran et al. 2023 — I-JEPA (Self-Supervised Learning from Images with a Joint-Embedding Predictive Architecture):
-https://arxiv.org/abs/2301.08243
+# Architecture papers (Naja lineage)
+StableSSM — Wang & Li, ICML 2024 (stable long-range memory via reparameterization):
+https://arxiv.org/abs/2311.14495
 
-Dao & Gu 2024 — Mamba2/Mamba3 (Transformers are SSMs):
-https://arxiv.org/abs/2405.21060
+Gated DeltaNet — Yang et al., ICLR 2025 (delta rule + gating for SSMs):
+https://arxiv.org/abs/2412.06464
 
-Bardes et al. 2022 — VICReg (Variance-Invariance-Covariance Regularization):
-https://arxiv.org/abs/2105.04906
+DeltaProduct — Siems et al., NeurIPS 2025 (Householder product chains for orthogonal state tracking):
+https://arxiv.org/abs/2502.10297
 
-# Grokking and generalization research
-Michaud et al. 2023 — The Quantization Model of Neural Scaling:
-https://arxiv.org/abs/2303.13506
+KDA / Kimi Linear — Kimi (per-channel decay + delta rule at scale):
+https://arxiv.org/abs/2510.26692
 
-Power et al. 2022 — Grokking: Generalization Beyond Overfitting on Small Algorithmic Datasets:
-https://arxiv.org/abs/2201.02177
+Epistemic Neural Networks — Osband et al., NeurIPS 2023 (epinet for uncertainty estimation):
+https://arxiv.org/abs/2107.08924
 
-Liu et al. 2022 — Towards Understanding Grokking: An Effective Theory of Representation Learning:
-https://arxiv.org/abs/2205.10343
+# Metacognition & self-modeling
+Unexpected Benefits of Self-Modeling in Neural Systems — Premakumar et al. 2024 (Graziano's group, self-prediction → regularization):
+https://arxiv.org/abs/2407.10188
 
-Wang et al. 2024 — Grokked Transformers are Implicit Reasoners:
-https://arxiv.org/abs/2405.15071
+Testing Attention Schema Theory in ANNs — Farrell, Ziman & Graziano 2024:
+https://arxiv.org/abs/2411.00983
 
-Fan et al. 2024 — Deep Grokking: Would Deep Neural Networks Generalize Better?:
-https://arxiv.org/abs/2405.19454
+Emergent Introspective Awareness in LLMs — Lindsey et al. (Anthropic) 2025:
+https://transformer-circuits.pub/2025/introspection/index.html
 
+Feeling the Strength but Not the Source: Partial Introspection — 2025:
+https://arxiv.org/abs/2512.12411
+
+Reasoning Models Know When They're Right — 2025 (hidden states encode correctness):
+https://arxiv.org/abs/2504.05419
+
+No Answer Needed: Question-Only Linear Probes — 2025 (predict answer quality from question activations):
+https://arxiv.org/abs/2509.10625
+
+Language Models (Mostly) Know What They Know — Kadavath et al. (Anthropic) 2022 (P(IK) framework):
+https://arxiv.org/abs/2207.05221
+
+Language Models Are Capable of Metacognitive Monitoring and Control — Li et al. 2025:
+https://arxiv.org/abs/2505.13763
+
+Evidence for Limited Metacognition in LLMs — Ackerman 2025:
+https://arxiv.org/abs/2509.21545
+
+Emergence of Self-Awareness in Artificial Systems — 2025:
+https://arxiv.org/abs/2502.06810
+
+Neuro-Symbolic AI Systematic Review (meta-cognition gap) — 2025:
+https://arxiv.org/abs/2501.05435
+
+Uncertainty of Thoughts (UoT) — Hu et al., NeurIPS 2024 (information-gain-based uncertainty modeling):
+https://github.com/zhiyuanhubj/UoT
+
+R-Tuning: Instructing LLMs to Say 'I Don't Know' — Zhang et al., NAACL 2024:
+https://arxiv.org/abs/2311.09677
+
+Self-Interpretability: LLMs Can Describe Internal Processes — 2025:
+https://arxiv.org/abs/2505.17120
+
+# Causal induction
+NOTEARS — Zheng et al. 2018 (differentiable DAG learning):
+https://arxiv.org/abs/1803.01422
+
+Neural Granger Causality — Tank et al. 2022:
+https://arxiv.org/abs/1802.05842
+
+# Grokking (supplementary — PDFs for core papers already in docs/research/)
 deMoss et al. 2024 — The Complexity Dynamics of Grokking:
 https://www.sciencedirect.com/science/article/pii/S0167278925003367
+
+## Papers already downloaded as PDFs in docs/research/
+# (These have been removed from the download queue above)
+# - I-JEPA (Assran et al. 2023) → self supervised JEPA.pdf
+# - Mamba2/Mamba3 (Dao & Gu 2024) → transformers are SSMs Mamba2.pdf, Mamba3 improved sequence modeling.pdf
+# - VICReg (Bardes et al. 2022) → VICReg.pdf
+# - PoPE (Gopalakrishnan et al. 2024) → PoPE decoupling what and where.pdf
+# - Quantization Model (Michaud et al. 2023) → quantization model of neural scaling.pdf
+# - Grokking (Power et al. 2022) → grokking generalization beyond overfitting.pdf
+# - Understanding Grokking (Liu et al. 2022) → understanding grokking representational learning.pdf
+# - Grokked Transformers (Wang et al. 2024) → grokked transformers are implicit reasoners.pdf
+# - Deep Grokking (Fan et al. 2024) → deep grokking.pdf
+# - EB-JEPA, MPPI, SIGReg, EBM-CoT, Kona → documented in docs/research/eb_jepa_and_related.md

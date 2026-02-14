@@ -392,8 +392,9 @@ def main():
     parser.add_argument('--error_optim', type=str, default='sgd',
                         choices=['sgd', 'adam'],
                         help='Error optimizer: sgd or adam')
-    parser.add_argument('--e_lr', type=float, default=0.1,
-                        help='Error learning rate')
+    parser.add_argument('--e_lr', type=float, default=None,
+                        help='Error learning rate (default: 0.1 for sgd, '
+                             '0.005 for adam)')
     parser.add_argument('--precision_mode', type=str, default='none',
                         choices=['none', 'linear', 'geometric'],
                         help='Per-layer precision weighting mode')
@@ -432,6 +433,10 @@ def main():
     parser.add_argument('--min_iters', type=int, default=2,
                         help='Minimum error iterations before early stopping')
     args = parser.parse_args()
+
+    # Default e_lr depends on error optimizer
+    if args.e_lr is None:
+        args.e_lr = 0.005 if args.error_optim == 'adam' else 0.1
 
     if args.no_ipc:
         args.ipc = False
