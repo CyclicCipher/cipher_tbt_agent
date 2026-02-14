@@ -2,94 +2,78 @@
 
 ## What This Project Is
 
-A biologically-inspired AI system built on predictive coding (PC), targeting the Danganronpa visual novel as an evaluation environment. The core research question: can energy-based local learning (ePC) replace backprop while enabling reasoning through energy minimization?
+A biologically-inspired AI system targeting the Danganronpa visual novel as an evaluation environment. Originally built on predictive coding (PC), now pivoting to backprop with potential modifications for local-learning-like benefits.
 
-Current focus: **ePC-JEPA** — combining energy-based predictive coding with JEPA-style latent prediction on a Mamba3 backbone. This is the `experiments/energy_reasoning/` directory.
+Current focus: **JEPA** — JEPA-style latent prediction on a Mamba3 backbone, trained with standard backprop. This is the `experiments/energy_reasoning/` directory.
 
 Current stage: **Stage 2 (pattern induction)** — 5-rule few-shot learning. Core finding: model memorizes (99% train) but doesn't generalize (~25% test). See `docs/hypotheses/generalization_vs_memorization.md` for our hypothesis on why.
 
+**ePC (energy-based predictive coding) has been archived.** After fixing all known bugs, ePC was 15x slower than backprop with zero accuracy benefit. See Mistake #38.
+
 ## Critical Reference
 
-**ALWAYS read `MISTAKES.md` before making changes.** It has 37 documented mistakes with root causes. The most relevant active ones:
+**ALWAYS read `MISTAKES.md` before making changes.** It has 38 documented mistakes with root causes. The most relevant active ones:
 
-- **#35 (Reduction mismatch):** Error penalty must use mean reduction, matching output losses. Sum reduction crushes errors to zero. Fixed in all variants 2026-02-13.
-- **#33 (SGD wins):** Don't use Newton or CG for error optimization. SGD is fastest, simplest, same accuracy.
+- **#38 (ePC archived):** ePC is 15x slower than backprop for identical accuracy. Don't resurrect it without a qualitatively new argument. The local learning promise didn't materialize on our tasks.
 - **#34 (Next-step prediction):** Causal models (Mamba) need next-step prediction, not masked prediction.
 - **#13 (Read the paper):** Never skim a research paper you're implementing. Read every appendix.
 - **#36 (Don't run training):** Never run full training loops on Claude's CPU machine. Commit, push, let the user test on GPU.
-- **#37 (λT is architecture-dependent):** Paper's e_lr=0.001/T=5 works for VGG/ResNet but kills Mamba3 learning (errors too small → zero local gradient). Our Mamba3 needs e_lr=0.1/T=20. Don't blindly copy paper hyperparameters across architectures.
 
 ## Architecture Overview
 
-### ePC-JEPA (experiments/energy_reasoning/)
+### JEPA (experiments/energy_reasoning/)
 
-Two-phase training per batch (Goemaere et al. 2025, "Energy-based Predictive Coding"):
+Standard backprop JEPA with Mamba3 backbone:
 
-1. **Error phase (Phase 1):** Freeze weights. Initialize errors to zero. Run T steps of SGD on errors to minimize `E = ½Σ mean(ε_i²) + L(output)`. Errors are the free variables.
+- **Encoder** (online): Mamba3 blocks, processes input sequences
+- **Target encoder** (EMA): Exponential moving average of online encoder
+- **Predictor**: Mamba3 blocks, predicts target encoder representations from online encoder + optional rule vector z
+- **Decoder**: Predicts next token from online encoder representations
 
-2. **Weight phase (Phase 2):** Freeze errors. Compute `E_local` with detached errors between layers. Each layer gets gradient only from its local MSE `½||f(s) - (f(s)+ε)||²`. Predictor/decoder get gradient from JEPA + decode CE + VICReg.
+Training: JEPA latent prediction loss + decode cross-entropy + VICReg regularization, all via standard backprop.
 
 Key files:
-- `epc_jepa_model.py` — Model with E(), E_local(), minimize_error_energy()
-- `train_epc_jepa.py` — Training loop, data generation, diagnostics
-- `jepa_model.py` — Backprop JEPA baseline (for comparison)
+- `jepa_model.py` — JEPA model with encoder, predictor, decoder
+- `train_jepa.py` — Training loop, data generation, diagnostics
 - `data_gen.py` — Synthetic sequence generation (stages 1a/1b/2)
 
-### Other ePC Variants
+### Mamba3 Backbone (experiments/Mamba3/)
+
+- `mamba3_block.py` — Mamba3 block implementation (SSD-based)
+
+### Archived ePC Variants
+
+All ePC code has been moved to `archived_epc/` subdirectories. These are retained for reference but are not actively developed.
 
 | Directory | Architecture | Task | Status |
 |-----------|-------------|------|--------|
-| `experiments/Mamba3/` | Mamba3 + ePC | Copy/sequence | Working (99%+) |
-| `experiments/ePC_ResNet/` | ResNet-18 + ePC | CIFAR-10 | Target: 92.17% |
+| `experiments/energy_reasoning/archived_epc/` | Mamba3 + ePC-JEPA | Sequence prediction | Archived (15x slower, no benefit) |
+| `experiments/Mamba3/archived_epc/` | Mamba3 + ePC | Copy/sequence | Archived (15x slower, no benefit) |
+| `experiments/ePC_ResNet/` | ResNet-18 + ePC | CIFAR-10 | Archived |
 | `experiments/ePC_Mamba/` | Mamba2 + ePC | Synthetic | Archived (superseded by Mamba3) |
-| `experiments/eBPC/` | MLP + eBPC | MNIST | Working (95.74%) |
-| `experiments/eBPC_ResNet/` | MLP + eBPC + low-rank V | MNIST | Debugging (NaN from PSD violations) |
-
-### Backprop Baselines
-
-- `experiments/energy_reasoning/jepa_model.py` + `train_jepa.py` — JEPA without ePC
-- `experiments/Mamba3/train_epc.py --backprop` — Standard backprop Mamba3
-
-## Hyperparameter Defaults (ePC-JEPA)
-
-```
-T = 20          # Error optimization iterations (paper uses 5, but see Mistake #37)
-e_lr = 0.1      # Error learning rate (paper uses 0.001, but see Mistake #37)
-precision = none # Uniform (no layer weighting)
-reduction = mean # ALL energy terms use mean reduction
-ipc = false     # Standard ePC (not interleaved)
-```
-
-## Key Design Rules
-
-1. **Reduction consistency:** Every term in E and E_local must use the same reduction (mean). Sum reduction on errors with mean on losses creates ~1Mx scale mismatch (Mistake #35).
-
-2. **E and E_local must optimize the same objective:** E (error phase) includes JEPA + decode CE + VICReg. E_local (weight phase) includes the same terms. Errors are optimized against the full loss so they carry informative gradients.
-
-3. **No precision weighting:** The paper uses uniform `½||ε||²`. Geometric precision (e.g., 2.7, 0.9, 0.3, 0.1) suppresses deep-layer errors — the exact pathology ePC fixes (Mistake #4).
-
-4. **SGD for errors, Adam for weights:** SGD is optimal for error optimization. Adam handles per-element scale variation in weight gradients. Don't use Newton, CG, or other second-order methods for errors (Mistake #33).
-
-5. **Standard ePC, not iPC:** T error steps to convergence, then one weight update. Interleaved PC (iPC) prevents error convergence (paper Algorithm 4).
-
-6. **Next-step prediction for causal models:** Mamba is causal — use next-step prediction, not masked prediction (Mistake #34).
-
-7. **λT is architecture-dependent:** Paper uses e_lr=0.001, T=5 (λT=0.005) for VGG/ResNet on CIFAR. Our Mamba3 needs e_lr=0.1, T=20 (λT=2.0) — paper's values give near-zero errors and no learning signal for encoder blocks. The local MSE gradient `-(∂ŝ_j/∂θ_j)^T · ε_j` scales linearly with error magnitude (Mistake #37).
+| `experiments/eBPC/` | MLP + eBPC | MNIST | Working (95.74%) but not actively developed |
+| `experiments/eBPC_ResNet/` | MLP + eBPC + low-rank V | MNIST | Abandoned (NaN from PSD violations) |
 
 ## Directory Structure
 
 ```
 predictive-coding-agent/
 ├── CLAUDE.md              # This file
-├── MISTAKES.md            # 35 documented mistakes (ALWAYS READ)
+├── MISTAKES.md            # 38 documented mistakes (ALWAYS READ)
 ├── experiments/
-│   ├── energy_reasoning/  # ePC-JEPA (ACTIVE DEVELOPMENT)
-│   ├── Mamba3/            # ePC-Mamba3 (working, 99%+)
-│   ├── ePC_ResNet/        # ePC ResNet-18 for CIFAR-10
+│   ├── energy_reasoning/  # JEPA backprop (ACTIVE DEVELOPMENT)
+│   │   ├── archived_epc/  # ePC-JEPA (archived 2026-02-14)
+│   │   ├── jepa_model.py  # Active JEPA model
+│   │   ├── train_jepa.py  # Active training script
+│   │   └── data_gen.py    # Synthetic data generation
+│   ├── Mamba3/            # Mamba3 block + archived ePC
+│   │   ├── archived_epc/  # ePC-Mamba3 (archived 2026-02-14)
+│   │   └── mamba3_block.py # Mamba3 block (shared dependency)
+│   ├── ePC_ResNet/        # ePC ResNet-18 (archived)
 │   ├── ePC_Mamba/         # ePC-Mamba2 (archived)
-│   ├── eBPC/              # Error-based Bayesian PC
-│   ├── eBPC_ResNet/       # eBPC with low-rank V (debugging)
-│   ├── BayesianPC/        # Original BPC (architecturally wrong, see #12)
+│   ├── eBPC/              # Error-based Bayesian PC (reference)
+│   ├── eBPC_ResNet/       # eBPC with low-rank V (abandoned)
+│   ├── BayesianPC/        # Original BPC (wrong, see #12)
 │   └── archived_kronos/   # KFAC optimizer (abandoned, see #20)
 ├── src/
 │   ├── network/           # Baseline PC (95.14% MNIST)
@@ -101,12 +85,8 @@ predictive-coding-agent/
 
 ## Known Issues & Gotchas
 
-- **ePC_Mamba/** is the OLD Mamba2 experiment. **Mamba3/** is the current one.
 - **BayesianPC/** has the wrong Bayesian treatment (posteriors over value nodes instead of weights). See Mistake #12. Don't use it.
-- **eBPC_ResNet/** has unresolved NaN from low-rank V approximation violating PSD constraints. See Mistakes #16-19.
-- **energy_scale** was a hack compensating for sum reduction. It's been removed everywhere. If you see it, it's a bug.
-- Errors must be fp32 even under AMP. fp16 rounds small Newton corrections to zero.
-- `forward(targets=None)` resets `pce.errors` to scalar `[0.0]`. Collect diagnostics BEFORE calling forward without targets (Mistake #23).
+- **energy_scale** was a hack compensating for sum reduction in ePC. It's been removed everywhere. If you see it, it's a bug.
 
 ## Hardware
 
@@ -117,17 +97,11 @@ predictive-coding-agent/
 ## Testing
 
 ```bash
-# ePC-JEPA (energy_reasoning)
-python experiments/energy_reasoning/train_epc_jepa.py --stage 1b --epochs 10
+# JEPA backprop (energy_reasoning) — ACTIVE
+python experiments/energy_reasoning/train_jepa.py --stage 1b --epochs 10
 
-# Mamba3
-python experiments/Mamba3/train_epc.py
-
-# ePC ResNet MNIST validation
+# ePC ResNet MNIST validation (reference only)
 python experiments/ePC_ResNet/train_mnist.py
-
-# ePC ResNet CIFAR-10
-python experiments/ePC_ResNet/train_cifar10.py
 ```
 
 ## Stage 2 Status & Key Findings
@@ -137,15 +111,30 @@ python experiments/ePC_ResNet/train_cifar10.py
 - **Oracle z ignored:** Providing the correct rule vector doesn't help. Predictor doesn't condition on z.
 - **Langevin gap negative:** Energy minimization over z actively hurts (~-5%).
 - **Hypothesis:** Model interprets 5 simple rules as 1 complex rule. See `docs/hypotheses/generalization_vs_memorization.md`.
-- **Profiling (GPU):** Error phase 46.7%, weight phase 23.3%, diagnostics 14.1%, eval 10.5%, target enc 4.9%, EMA 0.5%. ~17.5 s/epoch.
+
+## Next Direction: Backprop With Local-Learning-Like Benefits
+
+ePC's original goal was to achieve local learning as a path to:
+1. **Catastrophic forgetting resistance** — local updates don't overwrite unrelated circuits
+2. **Modular neural circuits** — each layer learns from its own local error signal
+3. **Energy-based reasoning** — inference-time optimization over latent variables
+
+These goals remain valid. Possible backprop-compatible approaches to explore:
+- **Gradient isolation / stop-gradient techniques** — selective detaching to create semi-local learning
+- **Auxiliary local losses** — per-layer prediction losses alongside global backprop
+- **EWC / SI / PackNet** — established continual learning methods for catastrophic forgetting
+- **Mixture of experts / modular networks** — architectural modularity without local learning
+- **Progressive training** — stage-wise freezing and expansion
+
+The Stage 2 generalization problem (5-rule induction) is the immediate priority. This is a representation problem, not a gradient problem.
 
 ## Research Papers Implemented
 
-1. **Goemaere et al. 2025** — "Energy-based Predictive Coding" (ePC). Algorithm 4. T error steps → 1 weight step. Local learning via E_local.
-2. **Tschantz et al. 2025** — "Bayesian Predictive Coding" (BPC). Matrix Normal Wishart weight posteriors. Hebbian closed-form updates.
-3. **Assran et al. 2023** — I-JEPA. Latent prediction with EMA target encoder. VICReg regularization.
-4. **Dao & Gu 2024** — Mamba2/Mamba3. State Space Duality (SSD) for efficient sequence modeling.
-5. **Bardes et al. 2022** — VICReg. Variance-Invariance-Covariance regularization (used in JEPA training).
+1. **Goemaere et al. 2025** — "Energy-based Predictive Coding" (ePC). Algorithm 4. ARCHIVED — 15x slower, no benefit over backprop.
+2. **Tschantz et al. 2025** — "Bayesian Predictive Coding" (BPC). Matrix Normal Wishart weight posteriors. ARCHIVED — fundamentally wrong implementation (#12).
+3. **Assran et al. 2023** — I-JEPA. Latent prediction with EMA target encoder. VICReg regularization. ACTIVE.
+4. **Dao & Gu 2024** — Mamba2/Mamba3. State Space Duality (SSD) for efficient sequence modeling. ACTIVE.
+5. **Bardes et al. 2022** — VICReg. Variance-Invariance-Covariance regularization (used in JEPA training). ACTIVE.
 
 ## Research Papers Referenced (Generalization/Grokking)
 

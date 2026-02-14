@@ -937,6 +937,7 @@ The actual curvature structure is block-diagonal per layer, not low-rank globall
 - 2026-02-13 (SGD WINS): Mistake #33 - Newton and CG removed entirely. SGD achieves same final accuracy, converges faster (96% epoch 1), cheapest per batch. The "phase transition" was Newton-specific. ~1,300 lines of second-order optimizer code deleted.
 - 2026-02-13 (MASKED → NEXT-STEP): Mistake #34 - Masked prediction on causal Mamba model = 18.6% on Stage 1b. Next-step prediction = 97.05%. Complete error coverage at every position is critical. Maps to ePC's N-1→N error breakthrough.
 - 2026-02-13 (REDUCTION MISMATCH): Mistake #35 - Error penalty used sum reduction (~1M elements) while output losses used mean reduction (O(1)). Error penalty was ~1,000,000x stronger than output signal, crushing errors to near-zero. Present in ALL ePC variants (ePC_ResNet, ePC_Mamba, Mamba3, energy_reasoning). eBPC variants were unaffected (used .sum(dim=1).mean() correctly).
+- 2026-02-14 (ePC ARCHIVED): Mistake #38 - After fixing all known bugs, ePC is 15x slower than backprop with zero accuracy benefit. All ePC code archived. Backprop JEPA is now the active training path. Exploring backprop modifications for local-learning-like benefits.
 
 ---
 
@@ -1310,3 +1311,45 @@ The paper's "local learning" is a small perturbation on what is essentially scal
 **Lesson:** λT is architecture-dependent. Don't copy across architectures without testing.
 
 **Status:** RESOLVED (2026-02-13) — reverted to e_lr=0.1, T=20
+
+---
+
+### Mistake #38: ePC Is 15x Slower Than Backprop For Zero Accuracy Benefit (CRITICAL — PROJECT PIVOT)
+
+**Date:** 2026-02-14
+
+**What happened:** After fixing every known bug (reduction mismatch #35, next-step prediction #34, SGD for errors #33, architecture-appropriate λT #37, Adam error optimizer), ran a clean comparison on Stage 1b:
+
+- **ePC-JEPA (Adam errors, T=20, e_lr=0.005):** ~153-176 s/epoch, 95.5% test by epoch 4
+- **Backprop JEPA baseline:** ~10 s/epoch, 95% test by epoch 2
+
+ePC was **15x slower per epoch** and provided **no accuracy benefit**. The error optimization phase (T=20 inner-loop SGD/Adam steps per batch) dominates runtime. Energy was consistently decreasing (E_init 2.19 → E_fin 0.59 by epoch 4), proving the error phase was WORKING correctly — it just contributed nothing useful beyond what backprop already provided for free.
+
+**Why ePC failed to add value on this task:**
+
+1. **Backprop already solves Stage 1b easily.** Single-rule tasks generalize at ~97% with pure backprop. ePC's local learning provides no additional learning signal when the global gradient is sufficient.
+
+2. **The error phase is pure overhead.** 20 inner-loop iterations per batch, each requiring a full forward pass through the energy function. For a model where backprop gradients are already informative, this is wasted computation.
+
+3. **Local learning didn't help generalization.** Stage 2 (5-rule induction) fails at ~25% test with both ePC and backprop — the generalization gap is a representation problem, not a gradient problem. ePC's local gradients don't solve it.
+
+4. **The theoretical promise didn't materialize:** ePC was supposed to create neural circuits robust to catastrophic forgetting through local learning. In practice, the local E_local gradients were either (a) redundant with backprop (when errors were small/well-optimized) or (b) noisy and uninformative (when errors were large/poorly-optimized). Neither regime produced circuits qualitatively different from backprop.
+
+**What ePC IS good for (in theory):**
+- Very deep networks where backprop gradients vanish (>50 layers)
+- Hardware with no global backward pass (neuromorphic chips)
+- Continual learning settings where local updates prevent catastrophic forgetting
+- None of these apply to our 4-layer Mamba3 on synthetic sequences
+
+**The sunk cost:**
+- ~2 weeks of development (mistakes #15-37 chronicle the journey)
+- ~1,300 lines of Newton/CG code written and deleted
+- Multiple optimizer attempts (Newton, CG, Adam, AdaWoodbury, KFAC/KRONOS)
+- Reduction mismatch that was present from day 1, masking all results
+- The reduction fix (#35) was the breakthrough that made ePC WORK — and working ePC proved it wasn't worth the cost
+
+**Decision:** Archive all ePC code. Return to backprop. Explore whether backprop can be modified to achieve local-learning-like benefits (catastrophic forgetting resistance, modular circuits) without the 15x overhead.
+
+**Root principle:** A biologically-plausible algorithm that produces identical results to backprop at 15x the cost is not a practical improvement — it's an expensive reimplementation. The value of local learning must come from qualitative differences (better generalization, forgetting resistance, modularity), not just theoretical elegance. If the qualitative differences don't materialize on your task, cut your losses.
+
+**Status:** ARCHIVED (2026-02-14) — ePC code moved to `archived_epc/` in both `experiments/energy_reasoning/` and `experiments/Mamba3/`. Backprop JEPA is now the active training path.
