@@ -456,30 +456,116 @@ This is a second-order phenomenon: representing representations.
 
 ### Proposed Architecture: Introspection Head
 
-A separate lightweight module that observes the main computation:
+A separate lightweight MLP that runs as a parallel pathway after the final
+Naja layer — NOT a sequential block inserted between layers:
 
 ```
-Main path:    h_t → predictor → y_t (prediction)
-                ↓
-Introspection: h_t → IntroHead → m_t (meta-state)
-                                   ↓
-Injection:     x_{t+1}' = [x_{t+1}, m_t]  (meta-state feeds back)
+x_t' = embed(token_t) + m_{t-1}     # inject previous meta-state
+h_t  = NajaModel(x_t')              # run all layers normally
+m_t  = IntroHead(h_t)               # small MLP on final hidden state
+y_t  = Decode(h_t)                  # output prediction
 ```
 
-**Critical:** The introspection head needs its own auxiliary loss, otherwise
-it has no gradient signal. Possible auxiliary objectives:
+The introspection head is a single MLP (d_model → d_intro → d_model) that
+reads the final hidden state, produces a meta-state m_t, and injects it
+into the next token's input via residual addition. Negligible VRAM cost.
 
-1. **Calibration loss:** Predict whether the next prediction will be correct.
-   L_cal = BCE(IntroHead(h_t)_correct, actual_correctness_{t+1})
+Per-layer introspection (running a separate head after each Mamba layer)
+is more powerful but can be explored later. Start with final-layer only,
+matching the Graziano group's experimental setup and the epinet architecture.
 
-2. **Confidence estimation:** Predict the magnitude of the next prediction
-   error. L_conf = MSE(IntroHead(h_t)_error, |y_{t+1} - target_{t+1}|)
+### Introspection Head Training Objectives
 
-3. **State stability:** Predict how much the state will change at the next
-   step. L_stab = MSE(IntroHead(h_t)_delta, ||h_{t+1} - h_t||)
+The introspection head needs its own auxiliary losses — without them it has
+no gradient signal. We use THREE complementary objectives, ordered by
+importance:
 
-4. **Hypothesis identification (MIMO):** Predict which MIMO column is most
-   active / most accurate. L_hyp = CE(IntroHead(h_t)_column, best_column)
+**Primary: Self-modeling loss (Graziano-style)**
+
+```
+L_self = MSE(IntroHead(h_t)_proj, sg(W_proj · h_t))
+```
+
+Predict a low-rank projection of own activations. This is the objective
+from Premakumar et al. 2024 that produced the surprising regularization
+benefits: networks trained to predict their own activations become simpler,
+more regularized, more parameter-efficient. The self-modeling objective
+reshapes the base network's representations to be more self-interpretable
+via gradient flow from the auxiliary loss. Without it, the base model has
+no incentive to organize its states in a metacognitively accessible way.
+
+This is the FOUNDATION — it provides the structural benefits that make
+the other objectives effective. The base model becomes more "readable"
+to its own introspection head.
+
+**Secondary: Confidence estimation**
+
+```
+L_conf = MSE(IntroHead(h_t)_error, sg(|y_{t+1} - target_{t+1}|))
+```
+
+Predict the magnitude of the next prediction error. Continuous signal,
+more informative than binary calibration. There is no evidence that
+current LLMs have access to their own loss/perplexity — this explicitly
+trains the model to have an internal "uncertainty meter."
+
+Combined with per-channel structure, this enables causal attribution of
+uncertainty: if confidence correlates with slow-decay channels (α≈1),
+the model is uncertain about long-range context; if it correlates with
+fast-decay channels (α≈0), it's uncertain about recent context; if it
+correlates with specific MIMO columns, it's uncertain about specific
+hypotheses.
+
+The architecture makes the "why" readable — the confidence head learns
+to read a structure that per-channel decay and MIMO diversity already
+provide. The introspection head doesn't need to discover causation from
+scratch.
+
+**Tertiary: Calibration loss**
+
+```
+L_cal = BCE(IntroHead(h_t)_correct, sg(actual_correctness_{t+1}))
+```
+
+Predict whether the next prediction will be correct. Binary companion
+to the continuous confidence estimate. Useful for hard strategy-switching
+decisions (e.g., "confident enough to commit" vs "should fall back").
+
+This differs from simply training the base model: the base model
+optimizes p(x_{t+1} | context) (tries to be RIGHT). The calibration
+head optimizes p(correct | h_t) (tries to KNOW WHEN it's right).
+These are first-order vs. second-order objectives. The calibration head
+learns a meta-model of what characterizes correct outputs — patterns
+in the internal state that predict success vs failure.
+
+**Optional: State stability prediction**
+
+```
+L_stab = MSE(IntroHead(h_t)_delta, sg(||h_{t+1} - h_t||))
+```
+
+Predict how much the state will change at the next step. Provides
+anticipatory surprise (forward-looking, not reactive like the basic
+surprise signal). If the model predicts large Δh, it expects the next
+input to be surprising and can prepare. Persistent mismatch (predict
+small Δh, observe large Δh) signals an unfamiliar regime — qualitatively
+different from single-step surprise.
+
+Predicting summary statistics of Δh (norm, per-channel magnitudes) is
+more useful and cheaper than predicting the full next state.
+
+**Optional: Hypothesis identification (MIMO)**
+
+```
+L_hyp = CE(IntroHead(h_t)_column, sg(best_column))
+```
+
+Predict which MIMO column is most accurate. Makes implicit hypothesis
+tracking explicit — the model can then reason about which hypothesis is
+active and why.
+
+Note: all targets are stop-gradiented (sg) to prevent circular
+optimization through the main model.
 
 ### Distinction from EB-JEPA's Multi-Hypothesis
 
