@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 from experiments.Naja.naja import (
     NajaConfig, NajaLM, NajaMixer, NajaBlock,
-    delta_recurrence, delta_recurrence_chunkwise,
+    delta_recurrence, delta_recurrence_chunkwise, delta_recurrence_wy,
     apply_pope, apply_pope_perp,
 )
 
@@ -126,16 +126,44 @@ def test_timing(device, batch=8, seq_len=64):
     t_fwdbwd_c, _ = time_fn(fwd_bwd_chunk, warmup=1, repeats=3, sync_cuda=use_cuda, device=device)
     print(f"  Fwd+bwd (chunkwise=16):  {fmt_time(t_fwdbwd_c)}")
 
+    # WY chunkwise (Phase 5a — real parallelism)
+    config_wy = NajaConfig(
+        d_model=128, d_state=64, n_layer=4, headdim=64,
+        use_delta_rule=True, use_pope_perp=False, per_channel_decay=True,
+        use_wy_chunkwise=True, chunk_size=seq_len,
+    )
+    model_wy = NajaLM(config_wy, vocab_size=16).to(device)
+
+    def fwd_wy():
+        return model_wy(x)
+    t_fwd_wy, _ = time_fn(fwd_wy, warmup=2, repeats=3, sync_cuda=use_cuda, device=device)
+    print(f"  Forward (WY chunkwise):  {fmt_time(t_fwd_wy)}")
+
+    def fwd_bwd_wy():
+        logits = model_wy(x)
+        loss = F.cross_entropy(
+            logits[:, :-1].reshape(-1, 16), x[:, 1:].reshape(-1))
+        loss.backward()
+        model_wy.zero_grad()
+        return loss.item()
+    t_fwdbwd_wy, _ = time_fn(fwd_bwd_wy, warmup=1, repeats=3, sync_cuda=use_cuda, device=device)
+    print(f"  Fwd+bwd (WY chunkwise):  {fmt_time(t_fwdbwd_wy)}")
+
     # Estimate epoch time
     n_train = 5000
     n_batches = n_train // batch
-    est_epoch = t_fwdbwd_c * n_batches
-    print(f"\n  Estimated epoch time (chunkwise, {n_batches} batches): {fmt_time(est_epoch)}")
-    if est_epoch > 60:
+    est_epoch_chunk = t_fwdbwd_c * n_batches
+    est_epoch_wy = t_fwdbwd_wy * n_batches
+    print(f"\n  Estimated epoch time (grad-checkpoint, {n_batches} batches): {fmt_time(est_epoch_chunk)}")
+    print(f"  Estimated epoch time (WY chunkwise, {n_batches} batches): {fmt_time(est_epoch_wy)}")
+    if est_epoch_wy < est_epoch_chunk:
+        speedup = est_epoch_chunk / max(est_epoch_wy, 1e-9)
+        print(f"  WY speedup vs grad-checkpoint: {speedup:.1f}x")
+    if est_epoch_chunk > 60:
         print(f"  WARNING: >1 min/epoch — this is why training appears to hang!")
         print(f"  The first epoch line won't print until all {n_batches} batches complete.")
 
-    return t_fwd, t_fwdbwd, t_fwdbwd_c
+    return t_fwd, t_fwdbwd, t_fwdbwd_c, t_fwdbwd_wy
 
 
 # ---------------------------------------------------------------------------
@@ -177,6 +205,15 @@ def test_recurrence_isolation(device, batch=8, seq_len=64):
             chunk_size=16)
     t_chunk, _ = time_fn(run_chunk, warmup=1, repeats=3, sync_cuda=use_cuda, device=device)
     print(f"  Chunkwise (chunk=16):                {fmt_time(t_chunk)}")
+
+    # WY chunkwise
+    def run_wy():
+        return delta_recurrence_wy(
+            x_write, x_write_prev, B1, B1_prev, None, C, alpha,
+            beta1, None, lam, use_trapezoidal=True, use_delta=True,
+            chunk_size=seq_len)
+    t_wy, _ = time_fn(run_wy, warmup=1, repeats=3, sync_cuda=use_cuda, device=device)
+    print(f"  WY chunkwise (chunk={seq_len}):          {fmt_time(t_wy)}")
 
     # Without delta rule
     def run_no_delta():
@@ -288,6 +325,90 @@ def test_architecture(device, batch=4, seq_len=32):
         diff < 1e-4,
         f"max_diff={diff:.2e}")
 
+    return all_pass
+
+
+# ---------------------------------------------------------------------------
+# Test 3b: WY chunkwise correctness (compare to naive sequential)
+# ---------------------------------------------------------------------------
+
+def test_wy_correctness(device, batch=4, seq_len=32):
+    section("WY CHUNKWISE CORRECTNESS")
+
+    all_pass = True
+    vocab_size = 16
+
+    # Test WY matches naive on a single-layer model without B2 (Phase 5a limitation)
+    # We use use_pope_perp=False since WY doesn't support B2 yet
+    config_naive = NajaConfig(
+        d_model=128, d_state=64, n_layer=1, headdim=64,
+        use_delta_rule=True, use_pope_perp=False, per_channel_decay=True,
+        use_chunkwise=False, use_wy_chunkwise=False,
+    )
+    config_wy = NajaConfig(
+        d_model=128, d_state=64, n_layer=1, headdim=64,
+        use_delta_rule=True, use_pope_perp=False, per_channel_decay=True,
+        use_chunkwise=False, use_wy_chunkwise=True, chunk_size=seq_len,
+    )
+
+    m_naive = NajaLM(config_naive, vocab_size).to(device)
+    m_wy = NajaLM(config_wy, vocab_size).to(device)
+    m_wy.load_state_dict(m_naive.state_dict())  # same weights
+
+    x = torch.randint(0, vocab_size, (batch, seq_len), device=device)
+
+    with torch.no_grad():
+        out_naive = m_naive(x)
+        out_wy = m_wy(x)
+
+    diff = (out_naive - out_wy).abs().max().item()
+    mean_diff = (out_naive - out_wy).abs().mean().item()
+    all_pass &= check("WY vs naive: max diff < 1e-2",
+        diff < 1e-2,
+        f"max_diff={diff:.2e}, mean_diff={mean_diff:.2e}")
+
+    all_pass &= check("WY vs naive: max diff < 1e-3",
+        diff < 1e-3,
+        f"max_diff={diff:.2e}")
+
+    all_pass &= check("WY vs naive: max diff < 1e-4",
+        diff < 1e-4,
+        f"max_diff={diff:.2e}")
+
+    # Also test with chunk_size < seq_len (multiple chunks)
+    if seq_len > 8:
+        config_wy_multi = NajaConfig(
+            d_model=128, d_state=64, n_layer=1, headdim=64,
+            use_delta_rule=True, use_pope_perp=False, per_channel_decay=True,
+            use_chunkwise=False, use_wy_chunkwise=True, chunk_size=8,
+        )
+        m_wy_multi = NajaLM(config_wy_multi, vocab_size).to(device)
+        m_wy_multi.load_state_dict(m_naive.state_dict())
+
+        with torch.no_grad():
+            out_wy_multi = m_wy_multi(x)
+
+        diff_multi = (out_naive - out_wy_multi).abs().max().item()
+        all_pass &= check("WY (multi-chunk, C=8) vs naive: max diff < 1e-2",
+            diff_multi < 1e-2,
+            f"max_diff={diff_multi:.2e}")
+
+    # Test gradient flow through WY
+    m_wy.zero_grad()
+    logits_wy = m_wy(x)
+    loss_wy = F.cross_entropy(
+        logits_wy[:, :-1].reshape(-1, vocab_size), x[:, 1:].reshape(-1))
+    loss_wy.backward()
+
+    n_grads = sum(1 for p in m_wy.parameters() if p.grad is not None and p.grad.norm() > 0)
+    all_pass &= check("WY backward: gradients flow",
+        n_grads > 0,
+        f"{n_grads} params with non-zero grad")
+
+    any_nan = any(torch.isnan(p.grad).any() for p in m_wy.parameters() if p.grad is not None)
+    all_pass &= check("WY backward: no NaN gradients", not any_nan)
+
+    m_wy.zero_grad()
     return all_pass
 
 
@@ -534,6 +655,7 @@ def main():
     results['timing'] = test_timing(device)
     results['recurrence'] = test_recurrence_isolation(device)
     results['architecture'] = test_architecture(device)
+    results['wy_correctness'] = test_wy_correctness(device)
     results['delta'] = test_delta_effect(device)
     results['pope'] = test_pope_orthogonality(device)
     results['decay'] = test_decay(device)
@@ -542,31 +664,34 @@ def main():
 
     # Summary
     section("SUMMARY")
-    t_fwd, t_fwdbwd, t_fwdbwd_chunk = results['timing']
+    t_fwd, t_fwdbwd, t_fwdbwd_chunk, t_fwdbwd_wy = results['timing']
     n_batches = 5000 // 8
-    est = t_fwdbwd_chunk * n_batches
+    est_chunk = t_fwdbwd_chunk * n_batches
+    est_wy = t_fwdbwd_wy * n_batches
     print(f"  Forward (naive):     {fmt_time(t_fwd)}")
     print(f"  Fwd+bwd (naive):     {fmt_time(t_fwdbwd)}")
-    print(f"  Fwd+bwd (chunkwise): {fmt_time(t_fwdbwd_chunk)}")
-    print(f"  Est. epoch time:     {fmt_time(est)}")
+    print(f"  Fwd+bwd (grad-ckpt): {fmt_time(t_fwdbwd_chunk)}")
+    print(f"  Fwd+bwd (WY chunk):  {fmt_time(t_fwdbwd_wy)}")
+    print(f"  Est. epoch (grad-ckpt): {fmt_time(est_chunk)}")
+    print(f"  Est. epoch (WY):        {fmt_time(est_wy)}")
+    if est_wy > 0:
+        speedup = est_chunk / max(est_wy, 1e-9)
+        print(f"  WY speedup:             {speedup:.1f}x")
     print()
 
-    if est > 120:
-        print("  DIAGNOSIS: Training is not hung — it's just very slow.")
-        print("  The sequential recurrence loop launches thousands of tiny")
-        print("  CUDA kernels per batch. GPU utilization reads 0% because")
-        print("  each kernel is too small to register in task manager.")
-        print()
-        print("  Options to fix:")
-        print("    1. Reduce n_train (--n_train 500) for quick iteration")
-        print("    2. Reduce seq_len (--seq_len 32)")
-        print("    3. Reduce n_layer (--n_layer 2)")
-        print("    4. Implement parallel scan / chunkwise WY (Phase 5)")
-        print("    5. Use torch.compile (--compile) for kernel fusion")
-    elif est > 30:
-        print("  Training is slow but workable (~1-2 min/epoch).")
+    if est_wy > 120:
+        print("  DIAGNOSIS: WY chunkwise is still slow on this hardware.")
+        print("  Consider reducing n_train, seq_len, or n_layer.")
+    elif est_wy > 30:
+        print("  WY chunkwise: slow but workable (~1-2 min/epoch).")
     else:
-        print("  Training speed looks reasonable.")
+        print("  WY chunkwise: training speed looks reasonable.")
+
+    if est_chunk > 120 and est_wy < est_chunk:
+        print()
+        print("  The naive/grad-checkpoint paths are very slow due to")
+        print("  sequential CUDA kernel launches. Use --use_wy_chunkwise")
+        print("  for real parallelism.")
 
 
 if __name__ == '__main__':

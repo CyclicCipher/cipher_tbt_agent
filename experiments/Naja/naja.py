@@ -56,7 +56,8 @@ class NajaConfig:
 
     # --- Phase 5: Chunkwise ---
     chunk_size: int = 64
-    use_chunkwise: bool = False  # gradient-checkpointed chunk processing
+    use_chunkwise: bool = False   # gradient-checkpointed chunk processing
+    use_wy_chunkwise: bool = False  # real WY chunkwise parallelism (Phase 5a)
 
     def __post_init__(self):
         self.d_inner = self.expand * self.d_model
@@ -342,6 +343,335 @@ def delta_recurrence_chunkwise(
         all_outputs.append(y_chunk)
 
     return torch.cat(all_outputs, dim=1)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5a: WY Chunkwise Delta Recurrence (Real Parallelism)
+# ---------------------------------------------------------------------------
+#
+# Implements the 4-step WY chunkwise algorithm from:
+#   Yang et al. 2024 — "Parallelizing Linear Transformers with the Delta Rule"
+#   (arXiv:2406.06484), Section 3 and Appendix B.
+#
+# Phase 5a simplifications (to be lifted in Phase 5b):
+#   - SISO only (r=1): single MIMO column for erase key
+#   - Single Householder (B1 only): no PoPE pair B2
+#   - Scalar decay: mean of per-channel α (not full diagonal)
+#   - Trapezoidal blending baked into V before WY transform
+#
+# The algorithm reduces sequential steps from L to L/C by computing
+# intra-chunk work via matrix multiplications (parallel on GPU).
+
+def _chunk_scaled_dot_kkt(K: Tensor, beta: Tensor) -> Tensor:
+    """Compute A = tril(diag(β) · K · K^T, -1) per chunk.
+
+    Args:
+        K: (batch, nheads, n_chunks, C, d_k) — keys within each chunk.
+        beta: (batch, nheads, n_chunks, C) — write gates.
+
+    Returns:
+        A: (batch, nheads, n_chunks, C, C) — strictly lower triangular.
+    """
+    # K K^T: (batch, nheads, n_chunks, C, C)
+    KKt = torch.einsum('bncid, bncjd -> bncij', K, K)
+    # Scale rows by beta: A[i,j] = beta[j] * K[j] · K[i]
+    # Columns scaled by beta_j
+    A = KKt * beta.unsqueeze(-2)  # broadcast beta over row dim
+    # Strictly lower triangular
+    C_sz = A.shape[-1]
+    mask = torch.tril(torch.ones(C_sz, C_sz, device=A.device, dtype=torch.bool), diagonal=-1)
+    A = A.masked_fill(~mask, 0.0)
+    return A
+
+
+def _solve_tril(A: Tensor, beta: Tensor) -> Tensor:
+    """Compute T = (I + A)^{-1} · diag(β) via forward substitution.
+
+    Args:
+        A: (batch, nheads, n_chunks, C, C) — strictly lower triangular.
+        beta: (batch, nheads, n_chunks, C) — write gates.
+
+    Returns:
+        T: (batch, nheads, n_chunks, C, C) — UT transform matrix.
+    """
+    C_sz = A.shape[-1]
+    # (I + A) is unit lower triangular — solve (I+A)T = diag(β)
+    # Use torch.linalg.solve_triangular for batched solve
+    # RHS is diag(beta): (batch, nheads, n_chunks, C, C)
+    eye_beta = torch.diag_embed(beta)  # (batch, nheads, n_chunks, C, C)
+    IpA = torch.eye(C_sz, device=A.device, dtype=A.dtype) + A
+    # solve_triangular: solve IpA @ T = eye_beta for T
+    # IpA is lower triangular, unitriangular=True
+    T = torch.linalg.solve_triangular(IpA, eye_beta, upper=False, unitriangular=True)
+    return T
+
+
+def _prepare_wy_repr(K: Tensor, V: Tensor, beta: Tensor) -> tuple:
+    """Full UT transform: compute pseudo-keys W and pseudo-values U.
+
+    Args:
+        K: (batch, nheads, n_chunks, C, d_k) — keys.
+        V: (batch, nheads, n_chunks, C, d_v) — values (write vectors).
+        beta: (batch, nheads, n_chunks, C) — write gates.
+
+    Returns:
+        W: (batch, nheads, n_chunks, C, d_k) — pseudo-keys.
+        U: (batch, nheads, n_chunks, C, d_v) — pseudo-values.
+        T: (batch, nheads, n_chunks, C, C) — UT matrix (for debugging).
+    """
+    A = _chunk_scaled_dot_kkt(K, beta)
+    T = _solve_tril(A, beta)  # (batch, nheads, n_chunks, C, C)
+    W = torch.einsum('bncij, bncjd -> bncid', T, K)  # pseudo-keys
+    U = torch.einsum('bncij, bncjd -> bncid', T, V)  # pseudo-values
+    return W, U, T
+
+
+def delta_recurrence_wy(
+    x_write: Tensor,       # (batch, seqlen, nheads, headdim, r) MIMO write input
+    x_write_prev: Tensor,  # (batch, seqlen, nheads, headdim, r) shifted for trapezoidal
+    B1: Tensor,            # (batch, seqlen, r, d_state) primary key (r MIMO columns)
+    B1_prev: Tensor,       # shifted B1 for trapezoidal
+    B2: Optional[Tensor],  # ignored in Phase 5a (single Householder only)
+    C: Tensor,             # (batch, seqlen, r, d_state)
+    alpha: Tensor,         # (batch, seqlen, nheads, d_state) per-channel decay
+    beta1: Optional[Tensor],  # (batch, seqlen, nheads, 1) write gate
+    beta2: Optional[Tensor],  # ignored in Phase 5a
+    lam: Tensor,           # (batch, seqlen, 1, 1) trapezoidal mixing
+    use_trapezoidal: bool = True,
+    use_delta: bool = True,
+    chunk_size: int = 64,
+) -> Tensor:
+    """WY chunkwise delta-rule recurrence (Phase 5a).
+
+    Implements the 4-step algorithm from Yang et al. 2024 with Naja's
+    specific parameterization. Same interface as delta_recurrence.
+
+    Phase 5a limitations:
+    - SISO only (uses first MIMO column r=0 for erase key)
+    - Single Householder (B1 only, B2 ignored)
+    - Scalar decay (mean of per-channel α within each chunk)
+
+    Returns:
+        (batch, seqlen, nheads, headdim, r) — same shape as delta_recurrence.
+    """
+    batch, seqlen, nheads, headdim, r = x_write.shape
+    d_state = B1.shape[-1]
+    device, dtype = x_write.device, x_write.dtype
+
+    # Pad sequence to multiple of chunk_size if needed
+    pad_len = (chunk_size - seqlen % chunk_size) % chunk_size
+    if pad_len > 0:
+        x_write = F.pad(x_write, (0, 0, 0, 0, 0, 0, 0, pad_len))
+        x_write_prev = F.pad(x_write_prev, (0, 0, 0, 0, 0, 0, 0, pad_len))
+        B1 = F.pad(B1, (0, 0, 0, 0, 0, pad_len))
+        B1_prev = F.pad(B1_prev, (0, 0, 0, 0, 0, pad_len))
+        C = F.pad(C, (0, 0, 0, 0, 0, pad_len))
+        alpha = F.pad(alpha, (0, 0, 0, 0, 0, pad_len), value=1.0)  # decay=1 for padding
+        if beta1 is not None:
+            beta1 = F.pad(beta1, (0, 0, 0, 0, 0, pad_len))
+        lam = F.pad(lam, (0, 0, 0, 0, 0, pad_len), value=0.5)
+    L = seqlen + pad_len
+    n_chunks = L // chunk_size
+    Cs = chunk_size
+
+    # =====================================================================
+    # Map Naja's parameterization to DeltaNet's (K, V, Q, beta)
+    # =====================================================================
+
+    # K = normalized first MIMO column of B1 (erase key direction)
+    # Shape: (batch, L, d_state)
+    k_raw = B1[:, :, 0, :]  # first MIMO column
+    K = F.normalize(k_raw, dim=-1)
+
+    # Q = first MIMO column of C (readout direction)
+    Q = C[:, :, 0, :]  # (batch, L, d_state)
+
+    # beta = write gate (scalar per head)
+    if beta1 is not None and use_delta:
+        beta_flat = beta1[:, :, :, 0]  # (batch, L, nheads)
+    else:
+        beta_flat = torch.ones(batch, L, nheads, device=device, dtype=dtype)
+
+    # V = write vector: the value written into state at each position
+    # For DeltaNet: V_t = write contribution (before delta correction)
+    # With trapezoidal: V_t = λ_t * (x_t ⊗ B1_t) + (1-λ_t) * (x_{t-1} ⊗ B1_{t-1})
+    # We need V as (batch, L, nheads, headdim) — the value that gets written
+
+    # Compute write vectors per timestep
+    # x_write: (batch, L, nheads, headdim, r), B1: (batch, L, r, d_state)
+    # write = einsum('bnpi,bid->bnpd', x_write_t, B1_t) → (batch, nheads, headdim, d_state)
+    # But for WY, V should be (batch, L, headdim) with K handling the d_state direction
+    # In DeltaNet: state update is S += β_t * (v_t - S @ k_t) ⊗ k_t
+    # Which expands to: S += β_t * v_t ⊗ k_t - β_t * (S @ k_t) ⊗ k_t
+    # The erase term is the Householder: S -= β_t * (S @ k_t) ⊗ k_t
+    # The write term is: S += β_t * v_t ⊗ k_t
+
+    # So V_t (per head) is the value vector written along key direction K_t:
+    # For SISO: v_t = x_write[:,:,:,:,0] contracted with B1 but separated as v ⊗ k
+    # Actually in DeltaNet formulation: the write is β * v ⊗ k where:
+    #   v_t is the "value" (headdim-dimensional)
+    #   k_t is the "key" (d_state-dimensional)
+    # So our x_write[:,:,:,:,0] IS the value vector (headdim-dim),
+    # and B1 normalized is the key.
+
+    # Simple SISO extraction:
+    V_euler = x_write[:, :, :, :, 0]  # (batch, L, nheads, headdim)
+
+    if use_trapezoidal:
+        V_prev = x_write_prev[:, :, :, :, 0]  # (batch, L, nheads, headdim)
+        lam_expanded = lam[:, :, :, 0].unsqueeze(1) if lam.dim() == 4 else lam
+        # lam: (batch, L, 1, 1) → (batch, L, 1, 1)
+        lam_v = lam.squeeze(-1)  # (batch, L, 1) → will broadcast over headdim
+        if lam_v.dim() == 3:
+            lam_v = lam_v.unsqueeze(-1)  # (batch, L, 1, 1) broadcast over nheads, headdim
+        V = lam_v * V_euler + (1.0 - lam_v) * V_prev
+    else:
+        V = V_euler
+
+    # Scalar decay: mean across d_state channels per chunk
+    # alpha: (batch, L, nheads, d_state) → scalar per (batch, L, nheads)
+    alpha_scalar = alpha.mean(dim=-1)  # (batch, L, nheads)
+
+    # =====================================================================
+    # Reshape into chunks: (batch, n_chunks, Cs, ...)
+    # Then permute to put nheads before n_chunks for batched ops
+    # =====================================================================
+
+    def to_chunks(t, name=""):
+        """Reshape (batch, L, ...) to (batch, nheads, n_chunks, Cs, ...) or
+           (batch, n_chunks, Cs, ...) depending on shape."""
+        return t.reshape(batch, n_chunks, Cs, *t.shape[2:])
+
+    K_c = to_chunks(K)                    # (batch, n_chunks, Cs, d_state)
+    Q_c = to_chunks(Q)                    # (batch, n_chunks, Cs, d_state)
+    V_c = to_chunks(V)                    # (batch, n_chunks, Cs, nheads, headdim)
+    beta_c = to_chunks(beta_flat)          # (batch, n_chunks, Cs, nheads)
+    alpha_c = to_chunks(alpha_scalar)      # (batch, n_chunks, Cs, nheads)
+
+    # For the WY algorithm, we need K, V, Q, beta all in the shape:
+    # (batch, nheads, n_chunks, Cs, feature_dim)
+    # K and Q are head-shared (B1, C are shared across heads in Naja)
+    # Expand K, Q to have nheads dim
+    K_c = K_c.unsqueeze(1).expand(-1, nheads, -1, -1, -1)  # (batch, nheads, n_chunks, Cs, d_state)
+    Q_c = Q_c.unsqueeze(1).expand(-1, nheads, -1, -1, -1)  # same
+
+    # V and beta need permutation from (batch, n_chunks, Cs, nheads, ...) to (batch, nheads, n_chunks, Cs, ...)
+    V_c = V_c.permute(0, 3, 1, 2, 4)      # (batch, nheads, n_chunks, Cs, headdim)
+    beta_c = beta_c.permute(0, 3, 1, 2)    # (batch, nheads, n_chunks, Cs)
+    alpha_c = alpha_c.permute(0, 3, 1, 2)  # (batch, nheads, n_chunks, Cs)
+
+    # =====================================================================
+    # Step 1: Intra-chunk WY transform
+    # =====================================================================
+    # Compute pseudo-keys W and pseudo-values U via UT transform
+    W, U, _T = _prepare_wy_repr(K_c, V_c, beta_c)
+    # W: (batch, nheads, n_chunks, Cs, d_state) — pseudo-keys
+    # U: (batch, nheads, n_chunks, Cs, headdim) — pseudo-values
+
+    # =====================================================================
+    # Step 2: Chunk state accumulation
+    # =====================================================================
+    # P_c = I - K_c^T · W_c — transition matrix per chunk, (d_state, d_state)
+    # H_c = K_c^T · U_c — state contribution per chunk, (d_state, headdim)
+    P = torch.eye(d_state, device=device, dtype=dtype) - \
+        torch.einsum('bncie, bncje -> bncij', K_c, W)
+    # P: (batch, nheads, n_chunks, d_state, d_state)
+
+    H = torch.einsum('bncie, bncje -> bncij', K_c, U)
+    # H: (batch, nheads, n_chunks, d_state, headdim)
+
+    # Cumulative scalar decay per chunk: product of alpha within each chunk
+    # gamma_c = prod_{t in chunk} alpha_t (scalar per head per chunk)
+    log_alpha_c = torch.log(alpha_c.clamp(min=1e-8))  # (batch, nheads, n_chunks, Cs)
+    log_gamma_c = log_alpha_c.sum(dim=-1)  # (batch, nheads, n_chunks)
+    gamma_c = torch.exp(log_gamma_c)  # cumulative decay for each chunk
+
+    # =====================================================================
+    # Step 3: Inter-chunk scan (sequential over n_chunks — small!)
+    # =====================================================================
+    # S_c = gamma_c * P_c @ S_{c-1} + H_c
+    # S: (batch, nheads, d_state, headdim) — running hidden state
+
+    states_list = []  # store S_{c-1} for each chunk (for Step 4)
+    S = torch.zeros(batch, nheads, d_state, headdim, device=device, dtype=dtype)
+
+    for c in range(n_chunks):
+        states_list.append(S.clone())
+        g = gamma_c[:, :, c].unsqueeze(-1).unsqueeze(-1)  # (batch, nheads, 1, 1)
+        S = g * torch.einsum('bnij, bnjk -> bnik', P[:, :, c], S) + H[:, :, c]
+
+    # Stack: (batch, nheads, n_chunks, d_state, headdim)
+    S_prev = torch.stack(states_list, dim=2)
+
+    # =====================================================================
+    # Step 4: Intra-chunk output
+    # =====================================================================
+    # O_c = Q_c @ S_{c-1} + tril(Q_c @ K_c^T) · (U_c - W_c @ S_{c-1})
+    #
+    # First term: each position reads from the inter-chunk state
+    # Q_c: (batch, nheads, n_chunks, Cs, d_state)
+    # S_prev: (batch, nheads, n_chunks, d_state, headdim)
+    Y_off = torch.einsum('bncid, bncde -> bncie', Q_c, S_prev)
+    # Y_off: (batch, nheads, n_chunks, Cs, headdim)
+
+    # Second term: intra-chunk corrections
+    # Q_c @ K_c^T: (batch, nheads, n_chunks, Cs, Cs) — attention-like matrix
+    QKt = torch.einsum('bncid, bncjd -> bncij', Q_c, K_c)
+
+    # Apply causal mask (lower triangular including diagonal)
+    causal_mask = torch.tril(torch.ones(Cs, Cs, device=device, dtype=dtype))
+    QKt = QKt * causal_mask
+
+    # Apply per-position decay within chunk:
+    # Position i reading from position j (j <= i) has cumulative decay
+    # prod_{k=j+1}^{i} alpha_k applied.
+    # For scalar decay: decay_ij = exp(sum_{k=j+1}^{i} log(alpha_k))
+    log_alpha_cumsum = torch.cumsum(log_alpha_c, dim=-1)  # (batch, nheads, n_chunks, Cs)
+    # decay_ij = exp(cumsum[i] - cumsum[j])
+    decay_matrix = torch.exp(
+        log_alpha_cumsum.unsqueeze(-1) - log_alpha_cumsum.unsqueeze(-2)
+    )  # (batch, nheads, n_chunks, Cs, Cs)
+    decay_matrix = decay_matrix * causal_mask  # zero out upper triangle
+    QKt = QKt * decay_matrix
+
+    # W_c @ S_{c-1}: correction for inter-chunk state
+    WS = torch.einsum('bncid, bncde -> bncie', W, S_prev)
+    # WS: (batch, nheads, n_chunks, Cs, headdim)
+
+    # Intra-chunk correction: (U - WS) represents the delta-corrected values
+    intra_correction = U - WS  # (batch, nheads, n_chunks, Cs, headdim)
+
+    Y_diag = torch.einsum('bncij, bncje -> bncie', QKt, intra_correction)
+    # Y_diag: (batch, nheads, n_chunks, Cs, headdim)
+
+    # Also apply decay to the off-diagonal term (state read decays from chunk boundary)
+    # decay from chunk start to each position within chunk
+    decay_from_start = torch.exp(log_alpha_cumsum)  # (batch, nheads, n_chunks, Cs)
+    Y_off = Y_off * decay_from_start.unsqueeze(-1)  # broadcast over headdim
+
+    # Combine
+    Y = Y_diag + Y_off
+    # Y: (batch, nheads, n_chunks, Cs, headdim)
+
+    # =====================================================================
+    # Reshape back to (batch, seqlen, nheads, headdim, r)
+    # =====================================================================
+    # Y: (batch, nheads, n_chunks, Cs, headdim) → (batch, L, nheads, headdim)
+    Y = Y.permute(0, 2, 3, 1, 4)  # (batch, n_chunks, Cs, nheads, headdim)
+    Y = Y.reshape(batch, L, nheads, headdim)
+
+    # Remove padding
+    if pad_len > 0:
+        Y = Y[:, :seqlen]
+
+    # Add MIMO rank dimension (r=1 for Phase 5a)
+    Y = Y.unsqueeze(-1)  # (batch, seqlen, nheads, headdim, 1)
+
+    # For r > 1, replicate the output (Phase 5b will handle proper MIMO)
+    if r > 1:
+        Y = Y.expand(-1, -1, -1, -1, r)
+
+    return Y
 
 
 # ---------------------------------------------------------------------------
@@ -647,7 +977,12 @@ class NajaMixer(nn.Module):
             B1_prev = torch.zeros_like(B1)
 
         # --- Run recurrence ---
-        recurrence_fn = delta_recurrence_chunkwise if cfg.use_chunkwise else delta_recurrence
+        if cfg.use_wy_chunkwise:
+            recurrence_fn = delta_recurrence_wy
+        elif cfg.use_chunkwise:
+            recurrence_fn = delta_recurrence_chunkwise
+        else:
+            recurrence_fn = delta_recurrence
         recurrence_kwargs = dict(
             x_write=x_write,
             x_write_prev=x_write_prev,
@@ -662,7 +997,7 @@ class NajaMixer(nn.Module):
             use_trapezoidal=cfg.use_trapezoidal,
             use_delta=cfg.use_delta_rule,
         )
-        if cfg.use_chunkwise:
+        if cfg.use_chunkwise or cfg.use_wy_chunkwise:
             recurrence_kwargs['chunk_size'] = cfg.chunk_size
         y = recurrence_fn(**recurrence_kwargs)
         # y: (batch, seqlen, nheads, headdim, r)

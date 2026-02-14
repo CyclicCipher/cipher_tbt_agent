@@ -129,6 +129,8 @@ def parse_args():
     p.add_argument('--stable_reparam', action='store_true', default=None)
     p.add_argument('--use_surprise_gate', action='store_true', default=None)
     p.add_argument('--use_chunkwise', action='store_true', default=False)
+    p.add_argument('--use_wy_chunkwise', action='store_true', default=False,
+                   help='Use real WY chunkwise parallelism (Phase 5a)')
     p.add_argument('--chunk_size', type=int, default=64)
 
     # Data
@@ -237,6 +239,7 @@ def build_config(args) -> NajaConfig:
         expand=args.expand,
         chunk_size=args.chunk_size,
         use_chunkwise=args.use_chunkwise,
+        use_wy_chunkwise=args.use_wy_chunkwise,
         **preset,
     )
 
@@ -419,7 +422,9 @@ def train(args):
         features.append('surprise')
     if config.mimo_rank > 1:
         features.append(f'mimo_r{config.mimo_rank}')
-    if config.use_chunkwise:
+    if config.use_wy_chunkwise:
+        features.append(f'wy_chunk{config.chunk_size}')
+    elif config.use_chunkwise:
         features.append(f'chunk{config.chunk_size}')
     feat_str = '+'.join(features) if features else 'base_mamba3'
 

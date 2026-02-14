@@ -115,22 +115,30 @@ For a first implementation, restrict to SISO (r=1) for the WY chunkwise path. Th
 
 ## Implementation Plan
 
-### Phase 5a: Pure PyTorch WY (No Triton)
+### Phase 5a: Pure PyTorch WY (No Triton) ✓ IMPLEMENTED
 
-Implement the WY chunkwise algorithm in pure PyTorch. Slower than Triton but correct and debuggable.
+Implemented the WY chunkwise algorithm in pure PyTorch.
 
-File to modify: `experiments/Naja/naja.py`
+File modified: `experiments/Naja/naja.py`
 
-**New functions to add:**
+**Functions added:**
 
-1. `chunk_scaled_dot_kkt(K, beta, chunk_size)` → Compute A = tril(diag(β)·K·K^T, -1) per chunk
-2. `solve_tril_torch(A)` → Forward substitution for (I+A)^{-1} using `torch.linalg.solve_triangular`
-3. `prepare_wy_repr(K, V, beta, chunk_size)` → Full UT transform: A → T → W, U
-4. `delta_recurrence_wy(x_write, ..., chunk_size)` → Complete 4-step chunkwise algorithm
+1. `_chunk_scaled_dot_kkt(K, beta)` → Compute A = tril(diag(β)·K·K^T, -1) per chunk ✓
+2. `_solve_tril(A, beta)` → Forward substitution for (I+A)^{-1}·diag(β) using `torch.linalg.solve_triangular` ✓
+3. `_prepare_wy_repr(K, V, beta)` → Full UT transform: A → T → W, U ✓
+4. `delta_recurrence_wy(x_write, ..., chunk_size)` → Complete 4-step chunkwise algorithm ✓
 
-**Wire into `NajaMixer.forward()`** as a new recurrence option (config flag `use_wy_chunkwise`).
+**Wired into `NajaMixer.forward()`** via `use_wy_chunkwise` config flag ✓
+**CLI flag:** `--use_wy_chunkwise` in train_naja.py ✓
+**Diagnostics:** `diagnose.py` updated with WY timing and correctness tests ✓
 
-**Verification:** Compare output of `delta_recurrence_wy()` vs `delta_recurrence()` on small inputs — must match to <1e-4.
+**Phase 5a simplifications (to be lifted in Phase 5b):**
+- SISO only (r=1 MIMO column for erase key)
+- Single Householder (B1 only, B2/PoPE pair ignored)
+- Scalar decay (mean of per-channel α, not full diagonal)
+- Trapezoidal blending baked into V before WY transform
+
+**Verification needed:** Run `diagnose.py` on GPU to compare `delta_recurrence_wy()` vs `delta_recurrence()` — target <1e-4 max diff.
 
 ### Phase 5b: Handle Naja Complications
 

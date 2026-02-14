@@ -228,10 +228,13 @@ From the Kimi Delta Attention paper:
 - Modify β₁, β₂ to incorporate stop-gradiented surprise ✓ (use_surprise_gate)
 - Test: does surprise gating reduce memory waste on predictable tokens?
 
-### Phase 5: Chunkwise Parallelism — IN PROGRESS
+### Phase 5: Chunkwise Parallelism — Phase 5a IMPLEMENTED
 - ~~Gradient-checkpointed chunk processing (delta_recurrence_chunkwise)~~ ← NOT real parallelism, just gradient checkpointing. See Mistake #39.
-- **Real WY chunkwise parallelism needed:** UT transform, forward substitution, matrix-form intra-chunk computation
-- See `CONTINUATION.md` for full implementation plan
+- **Phase 5a: Pure PyTorch WY chunkwise ✓** — `delta_recurrence_wy()` in naja.py, config flag `use_wy_chunkwise`, CLI `--use_wy_chunkwise`
+  - SISO only (r=1), single Householder (B1), scalar decay (mean of per-channel α)
+  - 4-step algorithm: UT transform → chunk state accumulation → inter-chunk scan → intra-chunk output
+- **Phase 5b: Handle Naja complications** — PoPE pair (B2), full diagonal decay, MIMO r>1
+- **Phase 5c: Triton kernels** — optional future optimization
 - Reference: Gated DeltaNet (Yang et al. 2025), DeltaProduct (Siems et al. 2025)
 - Reference code: `flash-linear-attention` library, `ssd_trapz()` in `mamba3_block.py`
 - Benchmark training speed vs Mamba3
