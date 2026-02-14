@@ -78,7 +78,12 @@ class ePCJEPAModel(nn.Module):
         precision_base: Base for geometric precision (e.g., 3.0).
         ema_tau_start: EMA tau at training start (lower = faster tracking).
         ema_tau_end: EMA tau at training end (1.0 = frozen target).
-        jepa_loss_type: 'cosine' (scale-invariant) or 'l2'.
+        jepa_loss_type: 'l2' (default, ePC-compatible) or 'cosine'.
+            L2/MSE provides gradient ∝ prediction error magnitude, which
+            ePC error nodes need to grow. Cosine has a 1/||z|| gradient
+            suppression factor that kills error optimization (see
+            Draganov et al. 2024, "Hidden Pitfalls of Cosine Similarity").
+            VICReg prevents L2 collapse. Original I-JEPA also uses L2.
         lambda_decode: Weight for decode CE loss in E_local.
         lambda_var: Weight for VICReg variance loss (anti-collapse).
         lambda_cov: Weight for VICReg covariance loss (decorrelation).
@@ -97,7 +102,7 @@ class ePCJEPAModel(nn.Module):
         precision_base: float = 3.0,
         ema_tau_start: float = 0.996,
         ema_tau_end: float = 1.0,
-        jepa_loss_type: str = 'cosine',
+        jepa_loss_type: str = 'l2',
         lambda_decode: float = 1.0,
         lambda_var: float = 1.0,
         lambda_cov: float = 0.04,

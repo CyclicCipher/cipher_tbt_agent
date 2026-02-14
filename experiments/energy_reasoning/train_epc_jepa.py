@@ -646,7 +646,7 @@ def main():
     # JEPA
     parser.add_argument('--ema_tau_start', type=float, default=0.996)
     parser.add_argument('--ema_tau_end', type=float, default=1.0)
-    parser.add_argument('--jepa_loss', type=str, default='cosine',
+    parser.add_argument('--jepa_loss', type=str, default='l2',
                         choices=['cosine', 'l2'])
     parser.add_argument('--lambda_decode', type=float, default=1.0)
     parser.add_argument('--lambda_var', type=float, default=1.0,
