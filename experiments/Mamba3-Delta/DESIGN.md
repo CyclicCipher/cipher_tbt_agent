@@ -525,6 +525,73 @@ hypothesis is active and why.
 - **Information gain as intrinsic reward:** reward_t = H(h_{t-1}) - H(h_t|x_t).
   Encourages seeking informative inputs.
 
+### MIMO Readout Diversity for Hypothesis Testing
+
+To use MIMO columns for hypothesis tracking WITHOUT losing MIMO's hardware
+efficiency benefit (rank-r write for FLOPs/byte), apply diversity only to
+the readout side:
+
+- **Write (keep unchanged):** All r columns contribute to the same state
+  H via rank-r update. This is the hardware benefit.
+- **Read (add diversity):** Encourage r readout columns C_i^T * H to extract
+  different information from the state.
+
+Auxiliary loss options:
+```
+L_diversity = Σ_{i≠j} |corr(readout_i, readout_j)|   # decorrelate readouts
+L_diversity = -H(column_id | readout)                  # each readout distinguishable
+```
+
+Bayesian reweighting operates on readout only, at inference time:
+```
+weight_i ∝ exp(-surprise_i)     # per-column posterior
+prediction = Σ_i weight_i * readout_i
+```
+
+This preserves rank-r write efficiency while gaining hypothesis diversity
+in the readouts. No architectural change — just an auxiliary loss.
+
+### Existing Research on Metacognition in Neural Networks
+
+**Self-modeling validates the introspection head approach:**
+- Premakumar et al. 2024 — "Unexpected Benefits of Self-Modeling in Neural
+  Systems" (arXiv:2407.10188). Graziano's group. Networks trained to predict
+  own activations become simpler, more regularized, more parameter-efficient.
+  Tested on MNIST/CIFAR-10/IMDB. Also argue self-modeling may reduce
+  catastrophic forgetting. Directly connected to Attention Schema Theory.
+- Farrell, Ziman & Graziano 2024 — "Testing Attention Schema Theory in ANNs"
+  (arXiv:2411.00983). Agents with learned self-models of attention are better
+  at interpreting other agents.
+
+**Internal states already encode metacognitive signals (but models don't exploit them):**
+- Lindsey et al. (Anthropic) 2025 — "Emergent Introspective Awareness in LLMs"
+  (transformer-circuits.pub). Concept injection shows models can detect injected
+  activations ~20% of the time. Multiple narrow circuits, not general.
+- "Reasoning Models Know When They're Right" 2025 (arXiv:2504.05419). Hidden
+  states encode correctness at intermediate reasoning steps. Probes enable 24%
+  token reduction via early exit.
+- "No Answer Needed" 2025 (arXiv:2509.10625). Linear probes on question-only
+  activations predict answer correctness. Model "knows" before generating.
+- "Feeling the Strength but Not the Source" 2025 (arXiv:2512.12411). Models
+  detect magnitude of internal activations but not semantic content.
+
+**Architecturally relevant to our introspection head:**
+- Osband et al. (NeurIPS 2023) — "Epistemic Neural Networks" (arXiv:2107.08924).
+  The epinet: lightweight supplementary module for epistemic uncertainty.
+  Architecturally similar to our introspection head. Outperforms ensembles.
+- "Emergence of Self-Awareness in Artificial Systems" 2025 (arXiv:2502.06810).
+  Multi-layered architecture with cognitive integration + predictive processing
+  + internal regulation layers.
+- Hu et al. (NeurIPS 2024) — "Uncertainty of Thoughts" (UoT). LLMs model
+  own uncertainty during reasoning using information-gain-based rewards.
+
+**Meta-cognition is the least explored frontier in AI:**
+- Neuro-symbolic AI systematic review 2025 (arXiv:2501.05435). Only 5% of
+  papers address meta-cognition. Critical gap identified.
+- Kadavath et al. (Anthropic 2022) — "Language Models (Mostly) Know What They
+  Know" (arXiv:2207.05221). The P(IK) framework: foundational work on LLM
+  self-knowledge.
+
 ## Ablation Testing Plan
 
 **Status:** To be implemented after Phase 6 is complete.
@@ -571,6 +638,7 @@ enabling fair r>1 comparisons.
 
 ## Key References
 
+### Architecture
 - Mamba3: ICLR 2026 submission, OpenReview HwCvaJOiCj
 - Gated DeltaNet: Yang et al., ICLR 2025, arXiv:2412.06464
 - DeltaProduct: Siems et al., NeurIPS 2025, arXiv:2502.10297
@@ -578,8 +646,28 @@ enabling fair r>1 comparisons.
 - StableSSM: Wang & Li, ICML 2024, arXiv:2311.14495
 - PoPE: Gopalakrishnan et al. 2024
 - EB-JEPA: Terver et al. 2026, arXiv:2602.03604
+- Epistemic Neural Networks: Osband et al., NeurIPS 2023, arXiv:2107.08924
+
+### Causal Induction
 - NOTEARS: Zheng et al. 2018, arXiv:1803.01422
 - Neural Granger Causality: Tank et al. 2022, arXiv:1802.05842
+- Directed Information: Massey 1990, IEEE Trans. Info. Theory
+- Transfer Entropy: Schreiber 2000, Physical Review Letters
+
+### Metacognition & Self-Modeling
+- Unexpected Benefits of Self-Modeling: Premakumar et al. 2024, arXiv:2407.10188
+- Testing Attention Schema Theory in ANNs: Farrell et al. 2024, arXiv:2411.00983
+- Emergent Introspective Awareness: Lindsey et al. (Anthropic) 2025
+- Reasoning Models Know When They're Right: 2025, arXiv:2504.05419
+- No Answer Needed (question-only probes): 2025, arXiv:2509.10625
+- Partial Introspection: 2025, arXiv:2512.12411
+- Uncertainty of Thoughts: Hu et al., NeurIPS 2024
+- P(IK) framework: Kadavath et al. (Anthropic) 2022, arXiv:2207.05221
+- Emergence of Self-Awareness: 2025, arXiv:2502.06810
+- Neuro-symbolic meta-cognition review: 2025, arXiv:2501.05435
+
+### Theories of Consciousness
 - Attention Schema Theory: Graziano 2013, "Consciousness and the Social Brain"
 - Global Workspace Theory: Baars 1988, "A Cognitive Theory of Consciousness"
 - Free Energy Principle: Friston 2010, Nature Reviews Neuroscience
+- Predictive Processing: Clark 2013, "Whatever Next?"
