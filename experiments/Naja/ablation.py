@@ -138,7 +138,7 @@ def make_train_args(config_name: str, task_name: str, task_type: str,
     # VRAM-aware: auto-enable chunkwise on small cards
     small_vram = False
     try:
-        vram_gb = torch.cuda.get_device_properties(0).total_mem / (1024**3)
+        vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         if vram_gb <= 6.0:
             args.use_chunkwise = True
             args.chunk_size = 16
