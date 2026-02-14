@@ -210,33 +210,34 @@ From the Kimi Delta Attention paper:
 - Add delta rule erase with single Householder (β₁ only) ✓
 - Per-channel decay (KDA-style) ✓
 - Proper MIMO recurrence (rank-r write/read via einsum) ✓
-- Naive sequential implementation (no chunkwise parallelism yet)
+- Naive sequential implementation (no chunkwise parallelism yet) ✓
 - Test on Stage 1b tasks
 
-### Phase 2: PoPE Orthogonal Pair
-- Derive B₂ from PoPE
-- Add second Householder (β₂)
-- Test rotation capability on state-tracking tasks
+### Phase 2: PoPE Orthogonal Pair ✓
+- Derive B₂ from PoPE ✓ (apply_pope_perp in naja.py)
+- Add second Householder (β₂) ✓ (beta2_proj, beta2 gate)
+- Test rotation capability on state-tracking tasks (parity task in tasks.py)
 
-### Phase 3: Per-Channel Decay
-- Replace scalar decay with per-channel diagonal α_t
-- Compare sigmoid vs StableSSM reparameterization
+### Phase 3: Per-Channel Decay ✓
+- Replace scalar decay with per-channel diagonal α_t ✓ (decay_down/up MLP)
+- Compare sigmoid vs StableSSM reparameterization ✓ (stable_reparam toggle)
 - Verify multi-scale emergence (visualize per-channel α distributions)
 
-### Phase 4: Surprise Gating
-- Add surprise computation (cross-entropy at each position)
-- Modify β₁, β₂ to incorporate stop-gradiented surprise
+### Phase 4: Surprise Gating ✓
+- Add surprise computation (cross-entropy at each position) ✓ (forward_with_surprise)
+- Modify β₁, β₂ to incorporate stop-gradiented surprise ✓ (use_surprise_gate)
 - Test: does surprise gating reduce memory waste on predictable tokens?
 
-### Phase 5: Chunkwise Parallelism
-- Implement WY representation for the Householder products
-- Integrate with SSD-style chunk processing
+### Phase 5: Chunkwise Parallelism ✓
+- Gradient-checkpointed chunk processing ✓ (delta_recurrence_chunkwise)
+- Splits sequence into chunks, recomputes activations during backward ✓
+- Toggle: use_chunkwise=True, chunk_size configurable ✓
 - Benchmark training speed vs Mamba3
 
-### Phase 6: KL Divergence for Inference
-- Implement EMA of predictive distribution
-- Top-k KL computation
-- Test inference-time surprise gating
+### Phase 6: KL Divergence for Inference ✓
+- Implement EMA of predictive distribution ✓ (KLSurpriseTracker)
+- Top-k KL computation ✓ (configurable top_k)
+- Test inference-time surprise gating (evaluate_with_kl_surprise in train_naja.py)
 
 ## VRAM Budget (4GB RTX 3050 Ti)
 

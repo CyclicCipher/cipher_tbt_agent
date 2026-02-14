@@ -23,6 +23,7 @@ from typing import Optional
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+from torch.utils.checkpoint import checkpoint
 
 
 @dataclass
@@ -52,6 +53,10 @@ class NajaConfig:
     # --- Mamba3 features ---
     use_pope: bool = True
     use_trapezoidal: bool = True
+
+    # --- Phase 5: Chunkwise ---
+    chunk_size: int = 64
+    use_chunkwise: bool = False  # gradient-checkpointed chunk processing
 
     def __post_init__(self):
         self.d_inner = self.expand * self.d_model
@@ -204,6 +209,204 @@ def delta_recurrence(
         outputs.append(y_t)
 
     return torch.stack(outputs, dim=1)  # (batch, seqlen, nheads, headdim, r)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: Chunkwise Recurrence with Gradient Checkpointing
+# ---------------------------------------------------------------------------
+
+def _process_chunk(
+    h: Tensor,
+    x_write: Tensor, x_write_prev: Tensor,
+    B1: Tensor, B1_prev: Tensor, B2: Optional[Tensor],
+    C: Tensor, alpha: Tensor,
+    beta1: Optional[Tensor], beta2: Optional[Tensor],
+    lam: Tensor,
+    use_trapezoidal: bool, use_delta: bool,
+    chunk_start: int,
+) -> tuple:
+    """Process one chunk of the recurrence. Designed for gradient checkpointing.
+
+    Args:
+        h: (batch, nheads, headdim, d_state) incoming state.
+        Remaining args: sliced to this chunk's time range.
+        chunk_start: absolute position of chunk start (for trapezoidal t>0 check).
+
+    Returns:
+        (y_chunk, h_out): chunk outputs and outgoing state.
+    """
+    chunk_len = x_write.shape[1]
+    outputs = []
+
+    for t in range(chunk_len):
+        abs_t = chunk_start + t
+
+        # Decay
+        a_t = alpha[:, t]
+        h = h * a_t.unsqueeze(2)
+
+        # Delta rule erase
+        if use_delta and beta1 is not None:
+            b1_key = B1[:, t, 0, :]
+            b1_hat = F.normalize(b1_key, dim=-1)
+            bt1 = beta1[:, t]
+            proj1 = torch.einsum('bnpd,bd->bnp', h, b1_hat)
+            h = h - bt1.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj1, b1_hat)
+
+            if B2 is not None and beta2 is not None:
+                b2_key = B2[:, t, 0, :]
+                b2_hat = F.normalize(b2_key, dim=-1)
+                bt2 = beta2[:, t]
+                proj2 = torch.einsum('bnpd,bd->bnp', h, b2_hat)
+                h = h - bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
+
+        # Write
+        xw_t = x_write[:, t]
+        b1_all = B1[:, t]
+
+        if use_trapezoidal and abs_t > 0:
+            xw_prev_t = x_write_prev[:, t]
+            b1_prev_t = B1_prev[:, t]
+            lam_t = lam[:, t]
+            write_euler = torch.einsum('bnpi,bid->bnpd', xw_t, b1_all)
+            write_trapz = torch.einsum('bnpi,bid->bnpd', xw_prev_t, b1_prev_t)
+            write = lam_t.unsqueeze(1) * write_euler + (1.0 - lam_t.unsqueeze(1)) * write_trapz
+        else:
+            write = torch.einsum('bnpi,bid->bnpd', xw_t, b1_all)
+
+        if use_delta and beta1 is not None:
+            write = beta1[:, t].unsqueeze(2) * write
+        h = h + write
+
+        if B2 is not None and beta2 is not None and use_delta:
+            b2_all = B2[:, t]
+            write2 = beta2[:, t].unsqueeze(2) * torch.einsum('bnpi,bid->bnpd', xw_t, b2_all)
+            h = h + write2
+
+        # Readout
+        c_all = C[:, t]
+        y_t = torch.einsum('bnpd,bid->bnpi', h, c_all)
+        outputs.append(y_t)
+
+    return torch.stack(outputs, dim=1), h
+
+
+def delta_recurrence_chunkwise(
+    x_write: Tensor, x_write_prev: Tensor,
+    B1: Tensor, B1_prev: Tensor, B2: Optional[Tensor],
+    C: Tensor, alpha: Tensor,
+    beta1: Optional[Tensor], beta2: Optional[Tensor],
+    lam: Tensor,
+    use_trapezoidal: bool = True, use_delta: bool = True,
+    chunk_size: int = 64,
+) -> Tensor:
+    """Chunkwise delta-rule recurrence with gradient checkpointing.
+
+    Splits the sequence into chunks and applies torch.utils.checkpoint
+    to each chunk, trading compute for memory during backward pass.
+    Activations within each chunk are recomputed during backward instead
+    of stored, reducing peak memory from O(seqlen) to O(chunk_size).
+
+    Same interface as delta_recurrence; drop-in replacement.
+    """
+    batch, seqlen, nheads, headdim, r = x_write.shape
+    d_state = B1.shape[-1]
+    device, dtype = x_write.device, x_write.dtype
+
+    h = torch.zeros(batch, nheads, headdim, d_state, device=device, dtype=dtype)
+    all_outputs = []
+
+    for start in range(0, seqlen, chunk_size):
+        end = min(start + chunk_size, seqlen)
+        sl = slice(start, end)
+
+        # Slice all inputs to this chunk
+        xw_c = x_write[:, sl]
+        xwp_c = x_write_prev[:, sl]
+        b1_c = B1[:, sl]
+        b1p_c = B1_prev[:, sl]
+        b2_c = B2[:, sl] if B2 is not None else None
+        c_c = C[:, sl]
+        a_c = alpha[:, sl]
+        bt1_c = beta1[:, sl] if beta1 is not None else None
+        bt2_c = beta2[:, sl] if beta2 is not None else None
+        lam_c = lam[:, sl]
+
+        # Gradient checkpoint: recompute activations during backward
+        y_chunk, h = checkpoint(
+            _process_chunk,
+            h, xw_c, xwp_c, b1_c, b1p_c, b2_c, c_c, a_c, bt1_c, bt2_c,
+            lam_c, use_trapezoidal, use_delta, start,
+            use_reentrant=False,
+        )
+        all_outputs.append(y_chunk)
+
+    return torch.cat(all_outputs, dim=1)
+
+
+# ---------------------------------------------------------------------------
+# Phase 6: KL Divergence Surprise (Inference-Time)
+# ---------------------------------------------------------------------------
+
+class KLSurpriseTracker(nn.Module):
+    """Tracks EMA of predictive distribution and computes KL divergence.
+
+    During inference, surprise = KL(p_t || p̄_t) where:
+    - p_t = current softmax prediction
+    - p̄_t = exponential moving average of past predictions
+
+    Only the top-k logits are used to keep computation tractable.
+    """
+
+    def __init__(self, vocab_size: int, ema_decay: float = 0.99, top_k: int = 16):
+        super().__init__()
+        self.vocab_size = vocab_size
+        self.ema_decay = ema_decay
+        self.top_k = min(top_k, vocab_size)
+        # EMA of full distribution (updated lazily)
+        self.register_buffer(
+            'ema_probs',
+            torch.ones(vocab_size) / vocab_size,
+        )
+
+    @torch.no_grad()
+    def update_ema(self, probs: Tensor):
+        """Update EMA with batch-averaged distribution.
+
+        Args:
+            probs: (batch, vocab_size) softmax probabilities.
+        """
+        mean_probs = probs.mean(dim=0)  # (vocab_size,)
+        self.ema_probs.mul_(self.ema_decay).add_(mean_probs, alpha=1.0 - self.ema_decay)
+
+    def forward(self, logits: Tensor) -> Tensor:
+        """Compute per-token KL surprise from logits.
+
+        Args:
+            logits: (batch, seqlen, vocab_size) raw logits.
+
+        Returns:
+            surprise: (batch, seqlen) KL divergence at each position.
+        """
+        batch, seqlen, V = logits.shape
+        # Top-k for efficiency
+        topk_logits, topk_idx = logits.topk(self.top_k, dim=-1)
+        p = F.softmax(topk_logits, dim=-1)  # (batch, seqlen, k)
+
+        # Gather EMA probs at top-k indices
+        ema_expanded = self.ema_probs.unsqueeze(0).unsqueeze(0).expand(batch, seqlen, -1)
+        q = ema_expanded.gather(-1, topk_idx)  # (batch, seqlen, k)
+        q = q.clamp(min=1e-8)  # numerical stability
+
+        # KL(p || q) = sum p * log(p/q)
+        kl = (p * (p.clamp(min=1e-8).log() - q.log())).sum(dim=-1)  # (batch, seqlen)
+
+        # Update EMA with current batch (no grad)
+        with torch.no_grad():
+            full_probs = F.softmax(logits.detach().reshape(-1, V), dim=-1)
+            self.update_ema(full_probs)
+
+        return kl
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +647,8 @@ class NajaMixer(nn.Module):
             B1_prev = torch.zeros_like(B1)
 
         # --- Run recurrence ---
-        y = delta_recurrence(
+        recurrence_fn = delta_recurrence_chunkwise if cfg.use_chunkwise else delta_recurrence
+        recurrence_kwargs = dict(
             x_write=x_write,
             x_write_prev=x_write_prev,
             B1=B1,
@@ -458,6 +662,9 @@ class NajaMixer(nn.Module):
             use_trapezoidal=cfg.use_trapezoidal,
             use_delta=cfg.use_delta_rule,
         )
+        if cfg.use_chunkwise:
+            recurrence_kwargs['chunk_size'] = cfg.chunk_size
+        y = recurrence_fn(**recurrence_kwargs)
         # y: (batch, seqlen, nheads, headdim, r)
 
         # --- MIMO contraction + skip connection ---
@@ -551,3 +758,48 @@ class NajaLM(nn.Module):
             x = layer(x, surprise=surprise)
         x = self.norm(x)
         return self.out_proj(x)
+
+    def forward_with_surprise(self, input_ids: Tensor) -> tuple:
+        """Two-pass forward for Phase 4 surprise gating during training.
+
+        Pass 1: Run without surprise to get logits, compute cross-entropy surprise.
+        Pass 2: Run with the stop-gradiented surprise signal.
+
+        Returns:
+            (logits, surprise): logits from the second pass, surprise from the first.
+        """
+        # Pass 1: no surprise → get per-token cross-entropy
+        with torch.no_grad():
+            logits_p1 = self.forward(input_ids, surprise=None)
+            # Surprise = -log p(x_t | x_{<t}) via next-step cross-entropy
+            # logits_p1[:, :-1] predicts input_ids[:, 1:]
+            ce = F.cross_entropy(
+                logits_p1[:, :-1].reshape(-1, self.vocab_size),
+                input_ids[:, 1:].reshape(-1),
+                reduction='none',
+            ).reshape(input_ids.shape[0], -1)  # (batch, seqlen-1)
+            # Pad position 0 with mean surprise (no context yet)
+            surprise = F.pad(ce, (1, 0), value=ce.mean().item())
+
+        # Pass 2: run with stop-gradiented surprise
+        logits = self.forward(input_ids, surprise=surprise.detach())
+        return logits, surprise
+
+
+def mamba3_base_config(**overrides) -> NajaConfig:
+    """Create a NajaConfig equivalent to base Mamba3 (no delta features).
+
+    Used as the ablation baseline: SISO, scalar decay, no delta rule,
+    no surprise gating, no chunkwise.
+    """
+    defaults = dict(
+        use_delta_rule=False,
+        use_pope_perp=False,
+        per_channel_decay=False,
+        stable_reparam=False,
+        use_surprise_gate=False,
+        mimo_rank=1,
+        use_chunkwise=False,
+    )
+    defaults.update(overrides)
+    return NajaConfig(**defaults)
