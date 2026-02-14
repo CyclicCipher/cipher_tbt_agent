@@ -1,4 +1,4 @@
-# Mamba3-Delta Design
+# Naja Design
 
 A hybrid architecture combining Mamba3's continuous-time SSM dynamics with
 the delta rule's targeted write/erase memory, MIMO for hardware efficiency,
@@ -18,7 +18,7 @@ has strengths the other lacks:
 | MIMO (higher arithmetic intensity) | Per-channel decay (via KDA variant) |
 | State tracking (parity, modular arith) | State tracking (via Householder products) |
 
-Mamba3-Delta unifies both lineages, keeping Mamba3's continuous-time core
+Naja unifies both lineages, keeping Mamba3's continuous-time core
 and adding the delta rule's memory management.
 
 ## Mathematical Formulation
@@ -38,7 +38,7 @@ does not grow the state.
 h_t = exp(Δ·A) · h_{t-1} + Δ · x_t ⊗ B_t
 ```
 
-**Mamba3-Delta (proposed):**
+**Naja (proposed):**
 ```
 h_t = Diag(α_t) · h_{t-1} · (I - β₁_t · B̂₁_t · B̂₁_t^T) · (I - β₂_t · B̂₂_t · B̂₂_t^T)
       + β₁_t · (Δ · x_t) ⊗ B₁_t + β₂_t · (Δ · x_t) ⊗ B₂_t
@@ -190,7 +190,7 @@ From the Kimi Delta Attention paper:
 
 ## Comparison to Alternatives
 
-| Property | Mamba3 | Gated DeltaNet | KDA | Mamba3-Delta |
+| Property | Mamba3 | Gated DeltaNet | KDA | Naja |
 |---|---|---|---|---|
 | Continuous-time dynamics | Yes | No | No | **Yes** |
 | Complex eigenvalues (PoPE) | Yes | No | No | **Yes** |
@@ -253,11 +253,7 @@ Per-channel α adds d_state parameters per layer.
 
 ## Naming
 
-**Codename: Naja** (pending final decision)
-
-"Mamba3-Delta" is descriptive but clunky. We considered "Mamba4" but it implies
-ownership of the Mamba lineage (Gu & Dao), which would be a breach of etiquette
-in the research community.
+**Name: Naja** (confirmed 2026-02-14)
 
 **Naja** is the genus of cobras, in the same family (Elapidae) as Dendroaspis
 (the mamba genus). It maintains the snake evolutionary lineage while being a
@@ -267,12 +263,11 @@ distinct identity. The name is:
 - Completely clean in ML namespace (no existing model/framework uses it)
 - Culturally neutral (no negative connotations)
 
-Runner-up was "Hydrus" (mythological water serpent), but Naja has a stronger
-biological connection. All other candidates (Hydra, Cobra, Taipan, Chimera,
-Mantis, Viper, Basilisk, Ouroboros) are taken by existing ML projects.
-
-Note: The codebase still uses `Mamba3Delta` / `mamba3_delta` internally.
-Rename to `Naja` / `naja` once the name is confirmed.
+We considered "Mamba4" but it implies ownership of the Mamba lineage (Gu & Dao),
+which would be a breach of etiquette in the research community. Runner-up was
+"Hydrus" (mythological water serpent), but Naja has a stronger biological
+connection. All other candidates (Hydra, Cobra, Taipan, Chimera, Mantis,
+Viper, Basilisk, Ouroboros) are taken by existing ML projects.
 
 ## Permutation Tracking Analysis
 

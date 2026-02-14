@@ -1,5 +1,5 @@
 """
-Mamba3-Delta: Mamba3 + Delta Rule + MIMO + PoPE orthogonal pair.
+Naja: Mamba3 + Delta Rule + MIMO + PoPE orthogonal pair.
 
 Combines Mamba3's continuous-time SSM dynamics with the delta rule's targeted
 write/erase memory.  See DESIGN.md for the full mathematical specification.
@@ -26,8 +26,8 @@ from torch import Tensor, nn
 
 
 @dataclass
-class Mamba3DeltaConfig:
-    """Configuration for Mamba3-Delta."""
+class NajaConfig:
+    """Configuration for Naja."""
     d_model: int = 128
     d_state: int = 64
     expand: int = 2
@@ -207,11 +207,11 @@ def delta_recurrence(
 
 
 # ---------------------------------------------------------------------------
-# Mamba3-Delta Mixer
+# Naja Mixer
 # ---------------------------------------------------------------------------
 
-class Mamba3DeltaMixer(nn.Module):
-    """Mamba3-Delta mixer block.
+class NajaMixer(nn.Module):
+    """Naja mixer block.
 
     Combines:
     - PoPE (content/position decoupling)
@@ -223,7 +223,7 @@ class Mamba3DeltaMixer(nn.Module):
     - Surprise-modulated beta gates (Phase 4 placeholder)
     """
 
-    def __init__(self, config: Mamba3DeltaConfig):
+    def __init__(self, config: NajaConfig):
         super().__init__()
         self.config = config
         d = config.d_inner
@@ -495,16 +495,16 @@ class SwiGLUMLP(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# Full Mamba3-Delta Block and Model
+# Full Naja Block and Model
 # ---------------------------------------------------------------------------
 
-class Mamba3DeltaBlock(nn.Module):
-    """One Mamba3-Delta layer: pre-norm Mixer + pre-norm MLP with residuals."""
+class NajaBlock(nn.Module):
+    """One Naja layer: pre-norm Mixer + pre-norm MLP with residuals."""
 
-    def __init__(self, config: Mamba3DeltaConfig):
+    def __init__(self, config: NajaConfig):
         super().__init__()
         self.mixer_norm = RMSNorm(config.d_model)
-        self.mixer = Mamba3DeltaMixer(config)
+        self.mixer = NajaMixer(config)
         self.mlp_norm = RMSNorm(config.d_model)
         self.mlp = SwiGLUMLP(config.d_model, config.d_model * config.mlp_expand)
 
@@ -514,21 +514,21 @@ class Mamba3DeltaBlock(nn.Module):
         return x
 
 
-class Mamba3DeltaLM(nn.Module):
-    """Complete Mamba3-Delta language model.
+class NajaLM(nn.Module):
+    """Complete Naja language model.
 
     Architecture:
-        Embedding -> N x Mamba3DeltaBlock -> RMSNorm -> Linear(vocab)
+        Embedding -> N x NajaBlock -> RMSNorm -> Linear(vocab)
     """
 
-    def __init__(self, config: Mamba3DeltaConfig, vocab_size: int):
+    def __init__(self, config: NajaConfig, vocab_size: int):
         super().__init__()
         self.config = config
         self.vocab_size = vocab_size
 
         self.embedding = nn.Embedding(vocab_size, config.d_model)
         self.layers = nn.ModuleList([
-            Mamba3DeltaBlock(config) for _ in range(config.n_layer)
+            NajaBlock(config) for _ in range(config.n_layer)
         ])
         self.norm = RMSNorm(config.d_model)
         self.out_proj = nn.Linear(config.d_model, vocab_size, bias=False)
