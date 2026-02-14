@@ -498,10 +498,198 @@ But it's the hardest to tune: per-layer auxiliary losses interact with
 each other and with the main loss through downstream gradient flow.
 Wait until approaches 1/3 are working before attempting this.
 
+### Higher-Order Metacognition: Temporal Unrolling, Not Stacked Heads
+
+A natural question: does higher-order metacognition (thinking about thinking
+about thinking) require stacking introspection heads — a meta-head to monitor
+the introspection head, a meta-meta-head to monitor that, etc.?
+
+**No. Higher-order metacognition emerges from temporal unrolling of a single
+introspection head.** The recurrence already provides this for free.
+
+Consider a concrete example of third-order reasoning (from a discussion about
+bias detection): "I concluded X. But I notice my conclusion might be biased
+because of Y. But wait — my belief that I'm biased might itself be a socially
+ingrained overcorrection, and my original conclusion might actually be
+impartial despite my bias prior making it hard to accept that."
+
+This is three levels deep, but each level happens at a different TIME STEP:
+
+```
+t=0: h_0 encodes conclusion X
+     m_0 = IntroHead(h_0)  →  "I believe X"
+
+t=1: h_1 = f(h_0, m_0)    →  state now includes self-awareness of X
+     m_1 = IntroHead(h_1)  →  "I notice bias Y influenced my belief in X"
+
+t=2: h_2 = f(h_1, m_1)    →  state now includes awareness of bias detection
+     m_2 = IntroHead(h_2)  →  "My bias detection might itself be biased —
+                                perhaps X is correct despite Y"
+```
+
+Each application of the SAME introspection head at the next time step
+naturally produces the next metacognitive level, because the meta-state m_t
+feeds back into the main state via residual addition. The recurrent state
+h_t accumulates all previous levels of self-reflection. No additional
+architectural machinery is needed — just more time steps.
+
+This is analogous to how humans experience higher-order reflection: not as
+parallel processes but as sequential re-examination of the same internal
+state. The "depth" of metacognition is bounded by sequence length, not by
+architectural depth. This is a key insight: **metacognitive depth is a
+runtime property, not an architectural property.**
+
+Implication for evaluation: tasks that require N-th order metacognition
+need sequences long enough to accommodate N reflection steps. The model
+must learn WHEN to re-examine its own meta-state (likely driven by the
+surprise signal — high surprise on m_t triggers another reflection step).
+
+### Counterfactual Self-Modeling
+
+The bias detection example above reveals a deeper requirement: the
+introspection head must be capable of **counterfactual self-modeling** —
+reasoning about what it WOULD think under different conditions.
+
+"If I weren't left-wing, would I still conclude X?" is not a question about
+the current state h_t. It's a question about a hypothetical state h_t' that
+would exist if the model's "priors" were different. This requires the
+introspection head to:
+
+1. **Identify which components of h_t correspond to "priors"** (long-timescale
+   channels with α≈1 that encode persistent biases)
+2. **Simulate perturbations** to those components (what would h_t look like
+   if those channels had different values?)
+3. **Predict the downstream effect** on the model's own output
+
+This is strictly more powerful than the self-modeling loss (which predicts
+current activations) and the confidence loss (which predicts error magnitude).
+It requires a **causal model of the self** — understanding not just "what am
+I thinking" but "why am I thinking it" and "what would I think otherwise."
+
+Proposed training objective:
+
+```
+L_cfact = MSE(IntroHead(h_t)_cfact, sg(f(perturb(h_t)) - f(h_t)))
+```
+
+Where perturb(h_t) applies small perturbations to specific channels of h_t,
+and f() runs the forward pass from that state. The introspection head learns
+to predict the EFFECT of internal perturbations on its own output — i.e.,
+which internal states are causally responsible for which outputs.
+
+This connects directly to the per-channel decay structure: slow-decay channels
+(α≈1) encode "priors" (persistent beliefs), fast-decay channels (α≈0) encode
+"evidence" (recent observations). Counterfactual self-modeling asks: "if my
+priors were different, would my conclusion change?" The architecture makes
+this question well-posed because priors and evidence are already separated
+by timescale.
+
+**Priority:** After the primary self-modeling and confidence losses are
+working. Counterfactual self-modeling is the most ambitious objective and
+requires the base introspection head to already be functional.
+
+**Connection to Death Note evaluation (see below):** Light's memory loss arc
+requires exactly this capability — acting as if certain memories don't exist
+while maintaining coherent behavior. This is counterfactual self-modeling
+applied to one's own memory state.
+
+### MIMO as Superhuman Cognitive Capability
+
+An important asymmetry between Naja and human cognition: **MIMO gives the
+model a cognitive ability that humans demonstrably lack.**
+
+Humans cannot genuinely evaluate multiple hypotheses in parallel. Introspection
+reveals that human "multi-hypothesis reasoning" is actually rapid serial
+task-switching — we consider hypothesis A, then switch to B, then back to A.
+We cannot update two independent mental models simultaneously unless a single
+operation happens to update both. At best, we can hold ~1 active hypothesis
+and ~3-4 in short-term memory for rapid switching.
+
+MIMO rank-r writes update r columns of the state matrix SIMULTANEOUSLY in a
+single operation. Each column can track a genuinely independent hypothesis
+about the current context. This is not task-switching — it is true parallel
+hypothesis maintenance within the recurrence itself.
+
+Implications:
+
+1. **Superhuman deduction:** A Naja model with mimo_rank=4 could maintain 4
+   independent causal theories about a mystery simultaneously, updating each
+   with every new piece of evidence. A human detective considers theories
+   serially. The model's Bayesian MIMO reweighting (see above) automatically
+   concentrates probability on the best theory as evidence accumulates.
+
+2. **Superhuman social modeling:** In adversarial social reasoning (like Death
+   Note's L vs Light), each MIMO column could maintain a different model of
+   the opponent's mental state. L could simultaneously track "Light is Kira",
+   "Light is not Kira but is being manipulated", "Light is Kira but has lost
+   his memories", and "Light is an unwitting accomplice" — genuinely in
+   parallel, not by switching between them.
+
+3. **Interaction with metacognition:** The introspection head observes ALL
+   MIMO columns simultaneously. It can detect when columns converge (growing
+   certainty), diverge (genuine ambiguity), or when one column is consistently
+   surprised (that hypothesis is failing). This gives the model a kind of
+   "peripheral awareness" of alternative interpretations that humans achieve
+   only through deliberate effort.
+
+4. **Testable prediction:** On tasks requiring simultaneous tracking of
+   independent state variables (e.g., monitoring multiple agents with
+   independent goals), Naja with mimo_rank>1 should show a qualitative
+   advantage over both mimo_rank=1 AND human performance, not just a
+   quantitative speed improvement. This would be evidence of a genuinely
+   novel cognitive capability rather than just faster human-like reasoning.
+
+### Evaluation Scenario: Death Note Reasoning
+
+The Death Note universe (specifically the L vs Light Yagami conflict) provides
+a rich evaluation scenario for metacognitive capabilities because both
+characters engage in deep recursive social modeling:
+
+- **Light's memory loss arc:** Light voluntarily surrenders his memories of
+  being Kira, then must behave consistently as an innocent person while his
+  past self's plan unfolds around him. This requires counterfactual
+  self-modeling — acting as the version of yourself that lacks certain
+  knowledge, while the narrative tests whether behavior is truly consistent
+  with that counterfactual state.
+
+- **L's abductive reasoning:** L maintains multiple hypotheses about Kira's
+  identity and designs experiments (social interactions, surveillance, rule
+  tests) to distinguish between them. Each interaction is simultaneously an
+  information-gathering action and a social performance. This requires
+  parallel hypothesis tracking (MIMO) plus metacognitive awareness of which
+  hypotheses are being tested by each action.
+
+- **Recursive social modeling:** Light models L's model of Light. L models
+  Light's model of L's model of Light. This is exactly the temporal unrolling
+  of metacognition described above — each additional level of "he thinks that
+  I think that he thinks" is another time step of introspective re-examination.
+
+**Concrete test:** Given a partial Death Note scenario, can the model:
+1. Maintain multiple hypotheses about character identities/motivations (MIMO)
+2. Identify which hypothesis best explains new evidence (Bayesian reweighting)
+3. Model what a character WOULD do if they lacked certain knowledge
+   (counterfactual self-modeling)
+4. Detect when its own reasoning is being manipulated by narrative framing
+   (higher-order metacognition via temporal unrolling)
+
+This scenario is aspirational — it requires a fully trained model with working
+metacognition. But it provides a concrete target that exercises every component
+of the architecture: per-channel memory (tracking long-range plot context),
+surprise gating (detecting plot twists), MIMO (parallel hypothesis tracking),
+introspection head (metacognitive self-monitoring), and counterfactual
+self-modeling (theory of mind).
+
+**Connection to Danganronpa:** The same capabilities apply directly to the
+project's primary evaluation environment. Danganronpa's class trials require
+exactly the same recursive social modeling, hypothesis tracking, and evidence
+evaluation — just in a different narrative wrapper. Death Note provides a
+useful SECOND evaluation domain with well-known ground truth.
+
 ### Introspection Head Training Objectives
 
 The introspection head needs its own auxiliary losses — without them it has
-no gradient signal. Two primary objectives, one optional tertiary:
+no gradient signal. Two primary objectives, one optional tertiary, plus the
+counterfactual objective described above:
 
 **Primary: Self-modeling loss (Graziano-style)**
 
