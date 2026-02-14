@@ -175,6 +175,29 @@ def parse_args():
             args.batch_size = 128
         args.seq_len = max(2 * args.n_examples + 2, args.seq_len)
 
+    # VRAM-aware defaults: the naive sequential recurrence stores
+    # intermediate tensors for every time step across all layers.
+    # On <=6GB cards this easily OOMs at batch_size=32.
+    if args.device == 'auto' or args.device.startswith('cuda'):
+        try:
+            import torch
+            if torch.cuda.is_available():
+                vram_gb = torch.cuda.get_device_properties(0).total_mem / (1024**3)
+                if vram_gb <= 6.0:
+                    if args.batch_size == 32:
+                        args.batch_size = 8
+                    if args.stage == '2' and args.batch_size == 128:
+                        args.batch_size = 32
+                    # Auto-enable gradient checkpointing to reduce activation memory
+                    if not args.use_chunkwise:
+                        args.use_chunkwise = True
+                        args.chunk_size = 16
+                    print(f"VRAM: {vram_gb:.1f}GB detected — "
+                          f"batch_size={args.batch_size}, "
+                          f"chunkwise=True (chunk_size={args.chunk_size})")
+        except ImportError:
+            pass
+
     return args
 
 

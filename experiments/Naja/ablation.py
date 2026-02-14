@@ -135,6 +135,17 @@ def make_train_args(config_name: str, task_name: str, task_type: str,
     args.use_chunkwise = False
     args.chunk_size = 64
 
+    # VRAM-aware: auto-enable chunkwise on small cards
+    small_vram = False
+    try:
+        vram_gb = torch.cuda.get_device_properties(0).total_mem / (1024**3)
+        if vram_gb <= 6.0:
+            args.use_chunkwise = True
+            args.chunk_size = 16
+            small_vram = True
+    except Exception:
+        pass
+
     # Data
     args.seq_len = 64
     args.vocab_size = 16
@@ -147,7 +158,7 @@ def make_train_args(config_name: str, task_name: str, task_type: str,
     if task_name == 'stage_2':
         args.n_train = 10000
         args.n_test = 2000
-        args.batch_size = 128
+        args.batch_size = 32 if small_vram else 128
         args.seq_len = max(2 * args.n_examples + 2, 16)
     elif task_name in ABLATION_TASKS:
         info = ABLATION_TASKS[task_name]
@@ -166,7 +177,7 @@ def make_train_args(config_name: str, task_name: str, task_type: str,
     }
     args.epochs = epochs if epochs is not None else task_epochs.get(task_name, 30)
     if not hasattr(args, 'batch_size'):
-        args.batch_size = 32
+        args.batch_size = 8 if small_vram else 32
     args.lr = 1e-3
     args.warmup_epochs = 4
     args.w_clip = 1.0
