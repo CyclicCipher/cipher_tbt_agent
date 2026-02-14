@@ -44,6 +44,7 @@ class Mamba3Config:
     use_conv: bool = False   # optional short convolution (Mamba3 removes it)
     d_conv: int = 4          # convolution kernel size (if use_conv=True)
     use_pope: bool = True    # PoPE (Polar Positional Embeddings) instead of RoPE
+    mimo_rank: int = 1       # r=1 is SISO (default), r>1 is MIMO
 
     def __post_init__(self):
         self.d_inner = self.expand * self.d_model
@@ -228,6 +229,63 @@ def ssd_trapz(x_curr: Tensor, x_prev: Tensor,
     return Y, final_state
 
 
+def mamba3_mimo_recurrence(
+    x_write: Tensor,       # (batch, seqlen, nheads, headdim, r) MIMO write input
+    x_write_prev: Tensor,  # (batch, seqlen, nheads, headdim, r) shifted for trapezoidal
+    A_dt: Tensor,          # (batch, seqlen, nheads) log-decay (dt * A, negative)
+    B: Tensor,             # (batch, seqlen, r, d_state)
+    B_prev: Tensor,        # (batch, seqlen, r, d_state) shifted for trapezoidal
+    C: Tensor,             # (batch, seqlen, r, d_state)
+    lam: Tensor,           # (batch, seqlen, 1, 1) trapezoidal mixing
+) -> Tensor:
+    """Sequential MIMO recurrence for Mamba3 (no delta rule).
+
+    Reference implementation for MIMO comparison. For SISO (r=1),
+    prefer ssd_trapz for speed.
+
+    Returns:
+        (batch, seqlen, nheads, headdim, r)
+    """
+    batch, seqlen, nheads, headdim, r = x_write.shape
+    d_state = B.shape[-1]
+    device, dtype = x_write.device, x_write.dtype
+
+    h = torch.zeros(batch, nheads, headdim, d_state, device=device, dtype=dtype)
+    outputs = []
+
+    for t in range(seqlen):
+        # Decay: scalar per head, broadcast to all channels
+        decay = torch.exp(A_dt[:, t])  # (batch, nheads)
+        h = h * decay[:, :, None, None]
+
+        # Write: rank-r MIMO outer product sum
+        xw_t = x_write[:, t]  # (batch, nheads, headdim, r)
+        b_t = B[:, t]         # (batch, r, d_state)
+
+        if t > 0:
+            xw_prev_t = x_write_prev[:, t]
+            b_prev_t = B_prev[:, t]
+            lam_t = lam[:, t]  # (batch, 1, 1)
+
+            write_euler = torch.einsum('bnpi,bid->bnpd', xw_t, b_t)
+            # Previous term gets this step's decay (trapezoidal rule)
+            write_trapz = decay[:, :, None, None] * torch.einsum(
+                'bnpi,bid->bnpd', xw_prev_t, b_prev_t)
+            write = lam_t.unsqueeze(1) * write_euler + (1.0 - lam_t.unsqueeze(1)) * write_trapz
+        else:
+            write = torch.einsum('bnpi,bid->bnpd', xw_t, b_t)
+
+        h = h + write
+
+        # Readout: rank-r
+        c_t = C[:, t]  # (batch, r, d_state)
+        y_t = torch.einsum('bnpd,bid->bnpi', h, c_t)  # (batch, nheads, headdim, r)
+
+        outputs.append(y_t)
+
+    return torch.stack(outputs, dim=1)
+
+
 # ---------------------------------------------------------------------------
 # Mamba-3 Mixer Block
 # ---------------------------------------------------------------------------
@@ -251,6 +309,7 @@ class Mamba3Mixer(nn.Module):
         self.config = config
         d = config.d_inner
         n = config.d_state
+        r = config.mimo_rank
 
         # With PoPE, B/C are projected to half-size (n//2) then expanded
         # to full d_state via polar encoding.  Theta dimension is the same.
@@ -259,24 +318,24 @@ class Mamba3Mixer(nn.Module):
         # Input projection: [z, x, B, C, dt, theta, lambda]
         # z: gating (d_inner)
         # x: SSM input (d_inner)
-        # B: input projection (d_bc)
-        # C: output projection (d_bc)
+        # B: input projection (d_bc * r for MIMO)
+        # C: output projection (d_bc * r for MIMO)
         # dt: timestep (nheads)
         # theta: rotation angles (d_state // 2)
         # lambda: trapezoidal mixing (1 scalar)
-        d_in_proj = 2 * d + 2 * d_bc + config.nheads + n // 2 + 1
+        d_in_proj = 2 * d + 2 * d_bc * r + config.nheads + n // 2 + 1
         self.in_proj = nn.Linear(config.d_model, d_in_proj, bias=False)
 
         # BC bias (learnable, channel-wise)
-        # For PoPE these also serve as the learnable delta offset
-        self.B_bias = nn.Parameter(torch.zeros(d_bc))
-        self.C_bias = nn.Parameter(torch.zeros(d_bc))
+        self.B_bias = nn.Parameter(torch.zeros(d_bc * r))
+        self.C_bias = nn.Parameter(torch.zeros(d_bc * r))
 
         # QK-norm on B, C (applied on raw features before rotation/polar encoding)
-        self.B_norm = RMSNorm(d_bc)
-        self.C_norm = RMSNorm(d_bc)
+        self.B_norm = RMSNorm(d_bc * r)
+        self.C_norm = RMSNorm(d_bc * r)
 
         # PoPE learnable phase bias (delta) — controls softplus operating point
+        # Shared across MIMO columns (position encoding is column-independent)
         if config.use_pope:
             self.pope_delta_B = nn.Parameter(torch.zeros(d_bc))
             self.pope_delta_C = nn.Parameter(torch.zeros(d_bc))
@@ -296,6 +355,11 @@ class Mamba3Mixer(nn.Module):
         self.dt_bias = nn.Parameter(torch.empty(config.nheads))
         self.A_log = nn.Parameter(torch.empty(config.nheads))
         self.D = nn.Parameter(torch.empty(config.nheads))
+
+        # MIMO projections
+        if r > 1:
+            self.mimo_x_proj = nn.Linear(d, d * r, bias=False)
+            self.mimo_out_proj = nn.Linear(d * r, d, bias=False)
 
         # Output
         self.out_norm = RMSNorm(d)
@@ -322,15 +386,16 @@ class Mamba3Mixer(nn.Module):
         """
         cfg = self.config
         batch, seqlen, _ = u.shape
+        r = cfg.mimo_rank
 
         A = -torch.exp(self.A_log)  # (nheads,)
 
         # Project input
         d_bc = cfg.d_state // 2 if cfg.use_pope else cfg.d_state
         proj = self.in_proj(u)
-        z, x, B, C, dt, theta, lam_logit = torch.split(
+        z, x, B_raw, C_raw, dt, theta, lam_logit = torch.split(
             proj,
-            [cfg.d_inner, cfg.d_inner, d_bc, d_bc,
+            [cfg.d_inner, cfg.d_inner, d_bc * r, d_bc * r,
              cfg.nheads, cfg.d_state // 2, 1],
             dim=-1,
         )
@@ -347,41 +412,76 @@ class Mamba3Mixer(nn.Module):
             x = F.silu(x)
 
         # Add BC bias + QK-norm
-        B = self.B_norm(B + self.B_bias)
-        C = self.C_norm(C + self.C_bias)
+        B_raw = self.B_norm(B_raw + self.B_bias)
+        C_raw = self.C_norm(C_raw + self.C_bias)
 
         # Accumulate theta across positions for positional encoding
         theta_cumsum = torch.cumsum(theta, dim=1)
 
+        # Apply PoPE/RoPE to B, C (per MIMO column if r > 1)
         if cfg.use_pope:
-            # PoPE: softplus magnitudes + phase-only rotation
-            # B, C: (batch, seqlen, d_state//2) → (batch, seqlen, d_state)
-            B = apply_pope(B, theta_cumsum, self.pope_delta_B)
-            C = apply_pope(C, theta_cumsum, self.pope_delta_C)
+            if r > 1:
+                B_res = B_raw.reshape(batch, seqlen, r, d_bc)
+                C_res = C_raw.reshape(batch, seqlen, r, d_bc)
+                B_list = [apply_pope(B_res[:, :, i], theta_cumsum, self.pope_delta_B) for i in range(r)]
+                C_list = [apply_pope(C_res[:, :, i], theta_cumsum, self.pope_delta_C) for i in range(r)]
+                B = torch.stack(B_list, dim=2)  # (batch, seqlen, r, d_state)
+                C = torch.stack(C_list, dim=2)
+            else:
+                B = apply_pope(B_raw, theta_cumsum, self.pope_delta_B)
+                C = apply_pope(C_raw, theta_cumsum, self.pope_delta_C)
         else:
-            # Standard data-dependent RoPE on B and C
-            B = apply_rope(B, theta_cumsum)
-            C = apply_rope(C, theta_cumsum)
+            if r > 1:
+                B_res = B_raw.reshape(batch, seqlen, r, d_bc)
+                C_res = C_raw.reshape(batch, seqlen, r, d_bc)
+                B_list = [apply_rope(B_res[:, :, i], theta_cumsum) for i in range(r)]
+                C_list = [apply_rope(C_res[:, :, i], theta_cumsum) for i in range(r)]
+                B = torch.stack(B_list, dim=2)
+                C = torch.stack(C_list, dim=2)
+            else:
+                B = apply_rope(B_raw, theta_cumsum)
+                C = apply_rope(C_raw, theta_cumsum)
 
-        # Reshape for multi-head SSD
+        # Reshape for multi-head
         x = x.reshape(batch, seqlen, cfg.nheads, cfg.headdim)
         x_dt = x * dt.unsqueeze(-1)  # scale by dt
 
-        # Create shifted (previous) versions for trapezoidal rule
-        x_prev = F.pad(x_dt[:, :-1], (0, 0, 0, 0, 1, 0))  # shift right, pad zeros
-        B_prev = F.pad(B[:, :-1].unsqueeze(2), (0, 0, 0, 0, 1, 0))  # (batch, seqlen, 1, d_state)
-        B_curr = B.unsqueeze(2)
-        C_curr = C.unsqueeze(2)
-        lam_expand = lam.unsqueeze(-1)  # (batch, seqlen, 1, 1)
+        if r > 1:
+            # --- MIMO path: sequential recurrence (reference implementation) ---
+            x_flat = x_dt.reshape(batch, seqlen, cfg.d_inner)
+            x_write = self.mimo_x_proj(x_flat).reshape(batch, seqlen, cfg.nheads, cfg.headdim, r)
 
-        # SSD with trapezoidal discretization
-        y, _ = ssd_trapz(
-            x_dt, x_prev,
-            A * dt,
-            B_curr, B_prev,
-            C_curr, lam_expand,
-            cfg.chunk_size,
-        )
+            x_write_prev = F.pad(x_write[:, :-1], (0, 0, 0, 0, 0, 0, 1, 0))
+            B_prev = F.pad(B[:, :-1], (0, 0, 0, 0, 1, 0))
+            lam_expand = lam.unsqueeze(-1)  # (batch, seqlen, 1, 1)
+
+            y = mamba3_mimo_recurrence(
+                x_write, x_write_prev,
+                A * dt,
+                B, B_prev, C,
+                lam_expand,
+            )
+            # y: (batch, seqlen, nheads, headdim, r)
+
+            # Contract MIMO output
+            y = y.reshape(batch, seqlen, cfg.d_inner * r)
+            y = self.mimo_out_proj(y)
+            y = y.reshape(batch, seqlen, cfg.nheads, cfg.headdim)
+        else:
+            # --- SISO path: SSD (fast, chunkwise parallel) ---
+            x_prev = F.pad(x_dt[:, :-1], (0, 0, 0, 0, 1, 0))
+            B_prev = F.pad(B[:, :-1].unsqueeze(2), (0, 0, 0, 0, 1, 0))
+            B_curr = B.unsqueeze(2)
+            C_curr = C.unsqueeze(2)
+            lam_expand = lam.unsqueeze(-1)  # (batch, seqlen, 1, 1)
+
+            y, _ = ssd_trapz(
+                x_dt, x_prev,
+                A * dt,
+                B_curr, B_prev,
+                C_curr, lam_expand,
+                cfg.chunk_size,
+            )
 
         # D skip connection
         y = y + x * self.D.unsqueeze(-1)
