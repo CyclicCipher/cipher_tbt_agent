@@ -107,118 +107,103 @@ def apply_rope(x: Tensor, theta: Tensor) -> Tensor:
 # ---------------------------------------------------------------------------
 
 def delta_recurrence(
-    x: Tensor,             # (batch, seqlen, nheads, headdim)
-    x_prev: Tensor,        # (batch, seqlen, nheads, headdim) shifted for trapezoidal
-    B1: Tensor,            # (batch, seqlen, nheads_bc, d_state) primary key
+    x_write: Tensor,       # (batch, seqlen, nheads, headdim, r) MIMO write input
+    x_write_prev: Tensor,  # (batch, seqlen, nheads, headdim, r) shifted for trapezoidal
+    B1: Tensor,            # (batch, seqlen, r, d_state) primary key (r MIMO columns)
     B1_prev: Tensor,       # shifted B1 for trapezoidal
-    B2: Optional[Tensor],  # (batch, seqlen, nheads_bc, d_state) orthogonal key (or None)
-    C: Tensor,             # (batch, seqlen, nheads_bc, d_state)
+    B2: Optional[Tensor],  # (batch, seqlen, r, d_state) orthogonal key (or None)
+    C: Tensor,             # (batch, seqlen, r, d_state)
     alpha: Tensor,         # (batch, seqlen, nheads, d_state) per-channel decay
-    beta1: Tensor,         # (batch, seqlen, nheads, 1) write gate
+    beta1: Optional[Tensor],  # (batch, seqlen, nheads, 1) write gate
     beta2: Optional[Tensor],  # (batch, seqlen, nheads, 1) rotation gate (or None)
     lam: Tensor,           # (batch, seqlen, 1, 1) trapezoidal mixing
-    D: Tensor,             # (nheads,) skip connection
     use_trapezoidal: bool = True,
     use_delta: bool = True,
 ) -> Tensor:
-    """Naive sequential delta-rule recurrence.
+    """Naive sequential delta-rule recurrence with MIMO support.
 
     This is the reference implementation for correctness. Not optimized.
     Chunkwise WY parallelism is Phase 5.
 
-    State shape per head: (headdim, d_state).
+    State shape per head: (headdim, d_state) — same for SISO and MIMO.
+    MIMO increases write/read rank without growing state size.
+
+    Write: rank-r outer product sum  Σ_i x_write[:,:,:,i] ⊗ B1[:,:,i,:]
+    Read:  rank-r readout            y[:,:,:,i] = h · C[:,:,i,:]
+    Erase: uses first MIMO column as Householder key direction.
+
+    Returns:
+        (batch, seqlen, nheads, headdim, r) — r readout columns.
+        Caller contracts r dimension (via mimo_out_proj or squeeze).
     """
-    batch, seqlen, nheads, headdim = x.shape
+    batch, seqlen, nheads, headdim, r = x_write.shape
     d_state = B1.shape[-1]
-    nheads_bc = B1.shape[2]
+    device, dtype = x_write.device, x_write.dtype
 
-    device = x.device
-    dtype = x.dtype
-
-    # Initialize state: (batch, nheads, headdim, d_state)
+    # State: (batch, nheads, headdim, d_state) — unchanged by MIMO
     h = torch.zeros(batch, nheads, headdim, d_state, device=device, dtype=dtype)
     outputs = []
 
     for t in range(seqlen):
         # --- Decay: per-channel diagonal ---
-        # alpha: (batch, nheads, d_state) applied to h: (batch, nheads, headdim, d_state)
         a_t = alpha[:, t]  # (batch, nheads, d_state)
         h = h * a_t.unsqueeze(2)  # broadcast over headdim
 
-        # --- Delta rule: Householder erase ---
-        if use_delta:
-            # B1 key for erase (broadcast over heads if nheads_bc < nheads)
-            b1_t = B1[:, t]  # (batch, nheads_bc, d_state)
-            if nheads_bc < nheads:
-                b1_t = b1_t.expand(-1, nheads, -1)
-
-            # L2 normalize for Householder
-            b1_hat = F.normalize(b1_t, dim=-1)  # (batch, nheads, d_state)
+        # --- Delta rule: Householder erase (first MIMO column as key) ---
+        if use_delta and beta1 is not None:
+            # Primary erase direction: first column of B1, shared across heads
+            b1_key = B1[:, t, 0, :]  # (batch, d_state)
+            b1_hat = F.normalize(b1_key, dim=-1)
             bt1 = beta1[:, t]  # (batch, nheads, 1)
 
-            # Householder 1: h = h · (I - β₁ · b̂₁ · b̂₁^T)
-            # Equivalent to: h = h - β₁ · (h · b̂₁) · b̂₁^T
-            proj1 = torch.einsum('bnpd,bnd->bnp', h, b1_hat)  # (batch, nheads, headdim)
-            h = h - bt1.unsqueeze(2) * torch.einsum('bnp,bnd->bnpd', proj1, b1_hat)
+            # Householder 1: h -= β₁ · (h · b̂₁) ⊗ b̂₁
+            proj1 = torch.einsum('bnpd,bd->bnp', h, b1_hat)
+            h = h - bt1.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj1, b1_hat)
 
-            # Householder 2 (PoPE orthogonal pair): h = h · (I - β₂ · b̂₂ · b̂₂^T)
+            # Householder 2: PoPE orthogonal pair
             if B2 is not None and beta2 is not None:
-                b2_t = B2[:, t]
-                if nheads_bc < nheads:
-                    b2_t = b2_t.expand(-1, nheads, -1)
-
-                b2_hat = F.normalize(b2_t, dim=-1)
+                b2_key = B2[:, t, 0, :]  # (batch, d_state)
+                b2_hat = F.normalize(b2_key, dim=-1)
                 bt2 = beta2[:, t]
 
-                proj2 = torch.einsum('bnpd,bnd->bnp', h, b2_hat)
-                h = h - bt2.unsqueeze(2) * torch.einsum('bnp,bnd->bnpd', proj2, b2_hat)
+                proj2 = torch.einsum('bnpd,bd->bnp', h, b2_hat)
+                h = h - bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
 
-        # --- Write: add new key-value associations ---
-        x_t = x[:, t]  # (batch, nheads, headdim)
-        b1_write = B1[:, t]  # (batch, nheads_bc, d_state)
-        if nheads_bc < nheads:
-            b1_write = b1_write.expand(-1, nheads, -1)
+        # --- Write: rank-r MIMO outer product sum ---
+        # Σ_i x_write[:,:,:,i] ⊗ B1[:,:,i,:] contracts over i (MIMO rank)
+        xw_t = x_write[:, t]  # (batch, nheads, headdim, r)
+        b1_all = B1[:, t]     # (batch, r, d_state) — shared across heads
 
         if use_trapezoidal and t > 0:
-            x_prev_t = x_prev[:, t]
-            b1_prev_t = B1_prev[:, t]
-            if nheads_bc < nheads:
-                b1_prev_t = b1_prev_t.expand(-1, nheads, -1)
+            xw_prev_t = x_write_prev[:, t]  # (batch, nheads, headdim, r)
+            b1_prev_t = B1_prev[:, t]        # (batch, r, d_state)
+            lam_t = lam[:, t]                # (batch, 1, 1)
 
-            lam_t = lam[:, t]  # (batch, 1, 1)
-            # Trapezoidal: blend current and previous input terms
-            write_euler = torch.einsum('bnp,bnd->bnpd', x_t, b1_write)
-            write_trapz = torch.einsum('bnp,bnd->bnpd', x_prev_t, b1_prev_t)
+            write_euler = torch.einsum('bnpi,bid->bnpd', xw_t, b1_all)
+            write_trapz = torch.einsum('bnpi,bid->bnpd', xw_prev_t, b1_prev_t)
             write = lam_t.unsqueeze(1) * write_euler + (1.0 - lam_t.unsqueeze(1)) * write_trapz
         else:
-            write = torch.einsum('bnp,bnd->bnpd', x_t, b1_write)
+            write = torch.einsum('bnpi,bid->bnpd', xw_t, b1_all)
 
-        if use_delta:
+        if use_delta and beta1 is not None:
             write = beta1[:, t].unsqueeze(2) * write
 
         h = h + write
 
-        # Write via B2 (orthogonal direction) if enabled
+        # Write via B2 (orthogonal direction, rank-r)
         if B2 is not None and beta2 is not None and use_delta:
-            b2_write = B2[:, t]
-            if nheads_bc < nheads:
-                b2_write = b2_write.expand(-1, nheads, -1)
-            write2 = beta2[:, t].unsqueeze(2) * torch.einsum('bnp,bnd->bnpd', x_t, b2_write)
+            b2_all = B2[:, t]  # (batch, r, d_state)
+            write2 = beta2[:, t].unsqueeze(2) * torch.einsum('bnpi,bid->bnpd', xw_t, b2_all)
             h = h + write2
 
-        # --- Readout ---
-        c_t = C[:, t]  # (batch, nheads_bc, d_state)
-        if nheads_bc < nheads:
-            c_t = c_t.expand(-1, nheads, -1)
-
-        y_t = torch.einsum('bnpd,bnd->bnp', h, c_t)  # (batch, nheads, headdim)
-
-        # Skip connection
-        y_t = y_t + x_t * D.unsqueeze(-1)
+        # --- Readout: rank-r ---
+        # Each MIMO column i gives a separate headdim-dimensional readout
+        c_all = C[:, t]  # (batch, r, d_state)
+        y_t = torch.einsum('bnpd,bid->bnpi', h, c_all)  # (batch, nheads, headdim, r)
 
         outputs.append(y_t)
 
-    return torch.stack(outputs, dim=1)  # (batch, seqlen, nheads, headdim)
+    return torch.stack(outputs, dim=1)  # (batch, seqlen, nheads, headdim, r)
 
 
 # ---------------------------------------------------------------------------
@@ -441,29 +426,27 @@ class Mamba3DeltaMixer(nn.Module):
         # --- Reshape x for multi-head ---
         x = x.reshape(batch, seqlen, cfg.nheads, cfg.headdim)
 
-        # --- MIMO: expand x to rank-r ---
+        # --- MIMO: create rank-r write input ---
         if r > 1:
             x_flat = x.reshape(batch, seqlen, cfg.d_inner)
-            x_mimo = self.mimo_x_proj(x_flat)  # (batch, seqlen, d_inner * r)
-            x_mimo = x_mimo.reshape(batch, seqlen, cfg.nheads, cfg.headdim, r)
-            # For the recurrence, we need x per MIMO column
-            # For now in Phase 1, sum across MIMO rank for simplicity
-            # Full MIMO: B_t · X_t^T is a rank-r matrix product
-            # TODO: implement proper MIMO recurrence in Phase 5
-            x = x_mimo.mean(dim=-1)  # placeholder: average across MIMO rank
+            x_write = self.mimo_x_proj(x_flat)  # (batch, seqlen, d_inner * r)
+            x_write = x_write.reshape(batch, seqlen, cfg.nheads, cfg.headdim, r)
+        else:
+            x_write = x.unsqueeze(-1)  # (batch, seqlen, nheads, headdim, 1)
 
         # --- Trapezoidal: create shifted versions ---
         if cfg.use_trapezoidal:
-            x_prev = F.pad(x[:, :-1], (0, 0, 0, 0, 1, 0))
+            # x_write is 5D: pad seqlen dim (dim -4 from the end)
+            x_write_prev = F.pad(x_write[:, :-1], (0, 0, 0, 0, 0, 0, 1, 0))
             B1_prev = F.pad(B1[:, :-1], (0, 0, 0, 0, 1, 0))
         else:
-            x_prev = torch.zeros_like(x)
+            x_write_prev = torch.zeros_like(x_write)
             B1_prev = torch.zeros_like(B1)
 
         # --- Run recurrence ---
         y = delta_recurrence(
-            x=x,
-            x_prev=x_prev,
+            x_write=x_write,
+            x_write_prev=x_write_prev,
             B1=B1,
             B1_prev=B1_prev,
             B2=B2,
@@ -472,18 +455,25 @@ class Mamba3DeltaMixer(nn.Module):
             beta1=beta1,
             beta2=beta2,
             lam=lam.unsqueeze(-1),  # (batch, seqlen, 1, 1)
-            D=self.D,
             use_trapezoidal=cfg.use_trapezoidal,
             use_delta=cfg.use_delta_rule,
         )
+        # y: (batch, seqlen, nheads, headdim, r)
 
-        # --- MIMO: contract output ---
-        y = y.reshape(batch, seqlen, cfg.d_inner)
+        # --- MIMO contraction + skip connection ---
         if r > 1:
-            # TODO: proper MIMO output contraction in Phase 5
-            pass
+            # Learned contraction: (batch, seqlen, d_inner * r) -> (batch, seqlen, d_inner)
+            y = y.reshape(batch, seqlen, cfg.d_inner * r)
+            y = self.mimo_out_proj(y)
+            y = y.reshape(batch, seqlen, cfg.nheads, cfg.headdim)
+        else:
+            y = y.squeeze(-1)  # (batch, seqlen, nheads, headdim)
+
+        # Skip connection: D scales per-head passthrough
+        y = y + x * self.D[None, None, :, None]
 
         # --- Gated output ---
+        y = y.reshape(batch, seqlen, cfg.d_inner)
         y = self.out_norm(y * F.silu(z))
         y = self.out_proj(y)
         return y

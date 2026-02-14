@@ -120,14 +120,18 @@ X_t  = W_X  · X'_t                      (headdim → headdim × r)
 
 Similarly for output down-projection and residual Z stream.
 
-**MIMO + delta rule interaction:** The Householder erase operates on the
-d_state dimension (right-multiplying the state). MIMO's rank-r B operates
-on the same dimension. The erase should apply to the full B matrix (all r
-columns). Each column of B is a separate "address" in the state; the
-Householder erases in the direction of the column mean or applies per-column.
+**MIMO + delta rule interaction:** The Householder erase uses the first
+MIMO column (B₁[:,0,:]) as the key direction. This keeps one clean erase
+direction regardless of MIMO rank — additional MIMO columns increase
+write/read rank, not erase directions. The erase is about removing old
+state in the key direction; MIMO's additional columns are about writing
+richer associations.
 
-**Simplification for Phase 1:** Start with SISO + delta rule, add MIMO later.
-The MIMO dimension r is orthogonal to the delta rule mechanism.
+**Implementation:** Write uses rank-r einsum `Σ_i x_write[:,:,:,i] ⊗ B[:,:,i,:]`
+that contracts over the MIMO rank. Read produces r separate readouts
+`y[:,:,:,i] = h · C[:,:,i,:]`, which are linearly contracted via
+`mimo_out_proj` back to d_inner. For SISO (r=1), the einsum degenerates
+correctly to the standard rank-1 outer product.
 
 ### Surprise-Modulated Write Gates
 
@@ -200,11 +204,12 @@ From the Kimi Delta Attention paper:
 
 ## Implementation Phases
 
-### Phase 1: Mamba3 + MIMO + Basic Delta Rule
-- Port mamba3_block.py to new file
-- Add MIMO projections (B, C, X as rank-r matrices)
-- Add delta rule erase with single Householder (β₁ only)
-- Keep scalar decay (exp(Δ·A)) initially
+### Phase 1: Mamba3 + MIMO + Basic Delta Rule ✓
+- Port mamba3_block.py to new file ✓
+- Add MIMO projections (B, C, X as rank-r matrices) ✓
+- Add delta rule erase with single Householder (β₁ only) ✓
+- Per-channel decay (KDA-style) ✓
+- Proper MIMO recurrence (rank-r write/read via einsum) ✓
 - Naive sequential implementation (no chunkwise parallelism yet)
 - Test on Stage 1b tasks
 
