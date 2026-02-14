@@ -228,10 +228,12 @@ From the Kimi Delta Attention paper:
 - Modify β₁, β₂ to incorporate stop-gradiented surprise ✓ (use_surprise_gate)
 - Test: does surprise gating reduce memory waste on predictable tokens?
 
-### Phase 5: Chunkwise Parallelism ✓
-- Gradient-checkpointed chunk processing ✓ (delta_recurrence_chunkwise)
-- Splits sequence into chunks, recomputes activations during backward ✓
-- Toggle: use_chunkwise=True, chunk_size configurable ✓
+### Phase 5: Chunkwise Parallelism — IN PROGRESS
+- ~~Gradient-checkpointed chunk processing (delta_recurrence_chunkwise)~~ ← NOT real parallelism, just gradient checkpointing. See Mistake #39.
+- **Real WY chunkwise parallelism needed:** UT transform, forward substitution, matrix-form intra-chunk computation
+- See `CONTINUATION.md` for full implementation plan
+- Reference: Gated DeltaNet (Yang et al. 2025), DeltaProduct (Siems et al. 2025)
+- Reference code: `flash-linear-attention` library, `ssd_trapz()` in `mamba3_block.py`
 - Benchmark training speed vs Mamba3
 
 ### Phase 6: KL Divergence for Inference ✓

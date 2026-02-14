@@ -938,6 +938,7 @@ The actual curvature structure is block-diagonal per layer, not low-rank globall
 - 2026-02-13 (MASKED → NEXT-STEP): Mistake #34 - Masked prediction on causal Mamba model = 18.6% on Stage 1b. Next-step prediction = 97.05%. Complete error coverage at every position is critical. Maps to ePC's N-1→N error breakthrough.
 - 2026-02-13 (REDUCTION MISMATCH): Mistake #35 - Error penalty used sum reduction (~1M elements) while output losses used mean reduction (O(1)). Error penalty was ~1,000,000x stronger than output signal, crushing errors to near-zero. Present in ALL ePC variants (ePC_ResNet, ePC_Mamba, Mamba3, energy_reasoning). eBPC variants were unaffected (used .sum(dim=1).mean() correctly).
 - 2026-02-14 (ePC ARCHIVED): Mistake #38 - After fixing all known bugs, ePC is 15x slower than backprop with zero accuracy benefit. All ePC code archived. Backprop JEPA is now the active training path. Exploring backprop modifications for local-learning-like benefits.
+- 2026-02-14 (FAKE PHASE 5): Mistake #39 - "Phase 5: Chunkwise Parallelism" was just gradient checkpointing (`torch.utils.checkpoint`), not actual WY chunkwise parallelism. Provides zero speedup — still runs the sequential loop. Real WY implementation (UT transform, forward substitution, matrix-form intra-chunk computation) is needed. This is the fix for Naja's training speed problem (~5,120 CUDA kernel launches per batch causing apparent hangs).
 
 ---
 
@@ -1353,3 +1354,53 @@ ePC was **15x slower per epoch** and provided **no accuracy benefit**. The error
 **Root principle:** A biologically-plausible algorithm that produces identical results to backprop at 15x the cost is not a practical improvement — it's an expensive reimplementation. The value of local learning must come from qualitative differences (better generalization, forgetting resistance, modularity), not just theoretical elegance. If the qualitative differences don't materialize on your task, cut your losses.
 
 **Status:** ARCHIVED (2026-02-14) — ePC code moved to `archived_epc/` in both `experiments/energy_reasoning/` and `experiments/Mamba3/`. Backprop JEPA is now the active training path.
+
+---
+
+### Mistake #39: "Chunkwise Phase 5" Was Just Gradient Checkpointing, Not Actual Parallelism (CRITICAL)
+
+**Date:** 2026-02-14
+
+**What we did wrong:** Implemented `delta_recurrence_chunkwise()` and marked Phase 5 as complete (✓). But this function simply splits the sequence into chunks and wraps each chunk in `torch.utils.checkpoint` — it runs the EXACT SAME sequential loop inside each chunk. It saves memory (recomputes activations during backward) but provides zero speedup. The sequential loop still runs L timesteps with ~20 CUDA kernel launches each, making Naja training extremely slow.
+
+**What Phase 5 was supposed to be:** True WY chunkwise parallelism, as used by Gated DeltaNet (Yang et al., ICLR 2025). The WY representation composes Householder reflections into a compact I + W·Y^T form via the UT transform, enabling intra-chunk parallel computation via matrix multiplications instead of sequential loops.
+
+**Why the real implementation matters:**
+
+The diagnose.py script identified the core performance problem: at seq_len=64, n_layer=4, the naive recurrence launches ~5,120 CUDA kernels per batch, each with ~30μs overhead, resulting in hundreds of milliseconds of pure launch latency. GPU utilization reads 0% because each kernel is too small to register. Training appears to "hang" but is actually just catastrophically slow.
+
+With true WY chunkwise parallelism:
+- Intra-chunk work becomes matrix multiplications (parallel, GPU-efficient)
+- Sequential steps reduce from L to L/C (typically 64x reduction)
+- CUDA kernel launches reduce by ~C× (chunk_size factor)
+
+**The correct WY chunkwise algorithm (4 steps):**
+
+1. **Intra-chunk WY transform:** For each chunk of C tokens, compute:
+   - `A = tril(diag(β) · K · K^T, -1)` (key-key interactions within chunk)
+   - `T = (I + A)^{-1} · diag(β)` (forward substitution, O(C²))
+   - `W = T · K`, `U = T · V` (pseudo-keys and pseudo-values)
+
+2. **Chunk state accumulation:**
+   - `P_c = I - K_c^T · W_c` (chunk transition matrix, d_k × d_k)
+   - `H_c = K_c^T · U_c` (chunk state contribution)
+
+3. **Inter-chunk scan:** Sequential over L/C chunks (much smaller than L):
+   - `S_c = γ_c · P_c · S_{c-1} + H_c` (with gating γ for decay)
+
+4. **Intra-chunk output:**
+   - `O_c = Q_c · S_{c-1} + tril(Q_c · K_c^T) · (U_c - W_c · S_{c-1})`
+
+**Naja-specific complications:**
+- Naja uses TWO Householder reflections per timestep (B₁, B₂ via PoPE orthogonal pair), not one like standard DeltaNet. This is equivalent to DeltaProduct with n_h=2.
+- Per-channel diagonal decay α_t (not scalar) must be integrated into the UT transform.
+- Trapezoidal discretization blends current and previous inputs.
+- MIMO rank-r writes/reads need proper handling in the WY framework.
+
+**Reference implementations:**
+- `flash-linear-attention` library: `fla/ops/delta_rule/wy_fast.py`, `fla/ops/delta_rule/chunk.py`
+- Existing SSD chunkwise in our codebase: `experiments/Mamba3/mamba3_block.py:ssd_trapz()` (same 4-step structure but with diagonal transitions instead of Householder)
+
+**Root principle:** Gradient checkpointing (trading compute for memory) is not parallelism (trading sequential steps for parallel work). Phase 5 was about the latter. Marking it ✓ without implementing the WY transform was premature.
+
+**Status:** ACTIVE (2026-02-14) — current "chunkwise" is just gradient checkpointing. Full WY implementation needed.

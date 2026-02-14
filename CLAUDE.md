@@ -4,16 +4,19 @@
 
 A biologically-inspired AI system targeting the Danganronpa visual novel as an evaluation environment. Originally built on predictive coding (PC), now pivoting to backprop with potential modifications for local-learning-like benefits.
 
-Current focus: **JEPA** — JEPA-style latent prediction on a Mamba3 backbone, trained with standard backprop. This is the `experiments/energy_reasoning/` directory.
+Current focus: **Naja** — A hybrid architecture combining Mamba3's continuous-time SSM dynamics with the delta rule's targeted write/erase memory, MIMO, PoPE orthogonal pairs, per-channel decay, and surprise gating. This is the `experiments/Naja/` directory.
 
-Current stage: **Stage 2 (pattern induction)** — 5-rule few-shot learning. Core finding: model memorizes (99% train) but doesn't generalize (~25% test). See `docs/hypotheses/generalization_vs_memorization.md` for our hypothesis on why.
+**Immediate priority: Naja is too slow.** The naive sequential recurrence launches ~5,120 CUDA kernels per batch (seq_len=64, n_layer=4). GPU utilization reads 0% because each kernel is too small. Training appears to hang. The fix is implementing real WY chunkwise parallelism (see `CONTINUATION.md` and Mistake #39).
+
+Previous focus: **JEPA** — JEPA-style latent prediction on Mamba3 backbone (still in `experiments/energy_reasoning/`).
 
 **ePC (energy-based predictive coding) has been archived.** After fixing all known bugs, ePC was 15x slower than backprop with zero accuracy benefit. See Mistake #38.
 
 ## Critical Reference
 
-**ALWAYS read `MISTAKES.md` before making changes.** It has 38 documented mistakes with root causes. The most relevant active ones:
+**ALWAYS read `MISTAKES.md` before making changes.** It has 39 documented mistakes with root causes. The most relevant active ones:
 
+- **#39 (Fake Phase 5):** Current `delta_recurrence_chunkwise()` is just gradient checkpointing — NOT real WY chunkwise parallelism. Zero speedup. Real WY implementation is the top priority for Naja. See `CONTINUATION.md` for implementation plan.
 - **#38 (ePC archived):** ePC is 15x slower than backprop for identical accuracy. Don't resurrect it without a qualitatively new argument. The local learning promise didn't materialize on our tasks.
 - **#34 (Next-step prediction):** Causal models (Mamba) need next-step prediction, not masked prediction.
 - **#13 (Read the paper):** Never skim a research paper you're implementing. Read every appendix.
@@ -37,9 +40,28 @@ Key files:
 - `train_jepa.py` — Training loop, data generation, diagnostics
 - `data_gen.py` — Synthetic sequence generation (stages 1a/1b/2)
 
+### Naja (experiments/Naja/) — ACTIVE PRIORITY
+
+Hybrid Mamba3 + Gated DeltaNet architecture with backprop training:
+
+- **Delta rule**: Householder erase before write (targeted memory management)
+- **PoPE orthogonal pair**: Two Householder reflections compose into rotation (B₁, B₂)
+- **Per-channel decay**: KDA-style diagonal α_t replaces scalar exp(Δ·A)
+- **MIMO**: Rank-r B, C, X projections for hardware efficiency
+- **Surprise gating**: β modulated by cross-entropy surprise (Phase 4)
+
+Key files:
+- `naja.py` — Full model (NajaLM, NajaMixer, delta_recurrence, KLSurpriseTracker)
+- `train_naja.py` — Training loop with preset ablation configs
+- `tasks.py` — Ablation task generators (associative recall, parity, etc.)
+- `diagnose.py` — Diagnostic suite (timing, correctness, memory)
+- `DESIGN.md` — Complete architecture specification
+
+**CRITICAL**: The `delta_recurrence_chunkwise()` function is NOT real parallelism — it's just gradient checkpointing over the same sequential loop. Real WY chunkwise parallelism is the top priority (Mistake #39).
+
 ### Mamba3 Backbone (experiments/Mamba3/)
 
-- `mamba3_block.py` — Mamba3 block implementation (SSD-based)
+- `mamba3_block.py` — Mamba3 block implementation (SSD-based, reference for chunkwise pattern)
 
 ### Archived ePC Variants
 
@@ -59,7 +81,8 @@ All ePC code has been moved to `archived_epc/` subdirectories. These are retaine
 ```
 predictive-coding-agent/
 ├── CLAUDE.md              # This file
-├── MISTAKES.md            # 38 documented mistakes (ALWAYS READ)
+├── MISTAKES.md            # 39 documented mistakes (ALWAYS READ)
+├── CONTINUATION.md        # WY chunkwise implementation plan (ACTIVE)
 ├── experiments/
 │   ├── energy_reasoning/  # JEPA backprop (ACTIVE DEVELOPMENT)
 │   │   ├── archived_epc/  # ePC-JEPA (archived 2026-02-14)
@@ -141,6 +164,13 @@ The Stage 2 generalization problem (5-rule induction) is the immediate priority.
 3. **Assran et al. 2023** — I-JEPA. Latent prediction with EMA target encoder. VICReg regularization. ACTIVE.
 4. **Dao & Gu 2024** — Mamba2/Mamba3. State Space Duality (SSD) for efficient sequence modeling. ACTIVE.
 5. **Bardes et al. 2022** — VICReg. Variance-Invariance-Covariance regularization (used in JEPA training). ACTIVE.
+
+## Research Papers Referenced (Naja Architecture)
+
+6. **Yang et al. 2024** — "Parallelizing Linear Transformers with the Delta Rule" (DeltaNet). WY chunkwise algorithm for Householder recurrence. arXiv:2406.06484. CRITICAL for Phase 5 implementation.
+7. **Yang et al. 2025** — "Gated Delta Networks" (Gated DeltaNet, ICLR 2025). Adds data-dependent decay to delta rule. arXiv:2412.06464. Direct ancestor of Naja's gated delta recurrence.
+8. **Siems et al. 2025** — "DeltaProduct" (NeurIPS 2025). Multiple Householder reflections per token via virtual token expansion. arXiv:2502.10297. Relevant: Naja's PoPE pair = DeltaProduct with n_h=2.
+9. **Gopalakrishnan et al. 2024** — PoPE (Polar Positional Embeddings). Decouples content from position.
 
 ## Research Papers Referenced (Generalization/Grokking)
 
