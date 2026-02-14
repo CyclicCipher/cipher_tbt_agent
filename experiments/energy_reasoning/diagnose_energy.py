@@ -45,6 +45,13 @@ from experiments.energy_reasoning.epc_jepa_model import ePCJEPAModel
 from experiments.energy_reasoning.data_gen import get_stage_data
 
 
+def _make_error_optim(model):
+    """Create error optimizer matching model config."""
+    if model.error_optim_mode == 'adam':
+        return torch.optim.Adam(model.errors, lr=model.e_lr)
+    return torch.optim.SGD(model.errors, lr=model.e_lr)
+
+
 # ---------------------------------------------------------------------------
 # Diagnostic: Error gradient decomposition
 # ---------------------------------------------------------------------------
@@ -66,7 +73,7 @@ def diagnose_error_gradient_decomposition(model, seqs, s_target, device):
 
     # --- t=0: errors are zero ---
     model.init_zero_errors(x_emb)
-    optim = torch.optim.SGD(model.errors, lr=model.e_lr)
+    optim = _make_error_optim(model)
 
     optim.zero_grad()
     E = model.E(x_emb, seqs, s_target)
@@ -475,7 +482,7 @@ def diagnose_energy_trajectory(model, data_loader, device, n_batches=3):
 
         model._freeze_all_weights()
         model.init_zero_errors(x_emb)
-        optim = torch.optim.SGD(model.errors, lr=model.e_lr)
+        optim = _make_error_optim(model)
 
         energy_trace = []
         penalty_trace = []
@@ -613,10 +620,17 @@ def main():
     parser.add_argument('--n_pred_layer', type=int, default=2)
     parser.add_argument('--d_z', type=int, default=64)
     parser.add_argument('--iters', type=int, default=20)
-    parser.add_argument('--e_lr', type=float, default=0.1)
+    parser.add_argument('--e_lr', type=float, default=None,
+                        help='Error learning rate (default: 0.1 for sgd, '
+                             '0.005 for adam)')
+    parser.add_argument('--error_optim', type=str, default='sgd',
+                        choices=['sgd', 'adam'])
     parser.add_argument('--device', type=str, default='auto')
     parser.add_argument('--seed', type=int, default=42)
     args = parser.parse_args()
+
+    if args.e_lr is None:
+        args.e_lr = 0.005 if args.error_optim == 'adam' else 0.1
 
     if args.seed > 0:
         torch.manual_seed(args.seed)
@@ -662,11 +676,13 @@ def main():
         enc_config=enc_config, pred_config=pred_config,
         vocab_size=args.vocab_size, d_z=args.d_z,
         iters=args.iters, e_lr=args.e_lr,
+        error_optim=args.error_optim,
     ).to(device)
 
     trainable = sum(p.numel() for p in model.get_trainable_params())
     total = sum(p.numel() for p in model.parameters())
-    print(f"Model: ePC-JEPA (T={args.iters}, e_lr={args.e_lr})")
+    print(f"Model: ePC-JEPA (T={args.iters}, e_lr={args.e_lr}, "
+          f"optim={args.error_optim})")
     print(f"Encoder: d={enc_config.d_model}, layers={enc_config.n_layer}")
     print(f"Predictor: d={pred_config.d_model}, layers={pred_config.n_layer}")
     print(f"Trainable: {trainable:,} / Total: {total:,}")
