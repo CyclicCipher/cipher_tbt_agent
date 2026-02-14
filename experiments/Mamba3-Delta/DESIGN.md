@@ -470,15 +470,42 @@ The introspection head is a single MLP (d_model → d_intro → d_model) that
 reads the final hidden state, produces a meta-state m_t, and injects it
 into the next token's input via residual addition. Negligible VRAM cost.
 
-Per-layer introspection (running a separate head after each Mamba layer)
-is more powerful but can be explored later. Start with final-layer only,
-matching the Graziano group's experimental setup and the epinet architecture.
+**Interface design:** The introspection head takes a generic tensor input,
+not a hardwired reference to the final layer. This means upgrading from
+approach 1 to approach 3 (below) is a drop-in replacement — change what
+you pass in, not the head itself.
+
+### Introspection Head: Upgrade Paths
+
+**Approach 1 — Single final-layer MLP (initial implementation):**
+What's described above. Start here. Matches the Graziano group's
+experimental setup and the epinet architecture. Empirically validated.
+
+**Approach 3 — Shared head, multi-layer input (first upgrade):**
+Same single MLP, but reads from all layers via learned layer-weights:
+```
+m_t = IntroHead(Σ_l α_l · h_t^l)    # α_l are learned scalars
+```
+One set of parameters, but visibility into all layers. The learned
+weights α are themselves interpretable — they reveal which layers are
+informative for metacognition. Cheap (one extra weighted sum), and a
+drop-in replacement because the head's input dimensionality doesn't
+change.
+
+**Approach 2 — Per-layer introspection heads (long-term goal):**
+Each layer gets its own small MLP: `m_t^l = IntroHead_l(h_t^l)`.
+Per-layer meta-states aggregated before injection. This is the most
+powerful option and the one that recovers the local-error-signal
+property we originally wanted from ePC — each layer gets its own
+metacognitive loss that reshapes that layer's representations locally.
+But it's the hardest to tune: per-layer auxiliary losses interact with
+each other and with the main loss through downstream gradient flow.
+Wait until approaches 1/3 are working before attempting this.
 
 ### Introspection Head Training Objectives
 
 The introspection head needs its own auxiliary losses — without them it has
-no gradient signal. We use THREE complementary objectives, ordered by
-importance:
+no gradient signal. Two primary objectives, one optional tertiary:
 
 **Primary: Self-modeling loss (Graziano-style)**
 
@@ -498,71 +525,60 @@ This is the FOUNDATION — it provides the structural benefits that make
 the other objectives effective. The base model becomes more "readable"
 to its own introspection head.
 
-**Secondary: Confidence estimation**
+**Secondary: Confidence estimation (continuous)**
 
 ```
 L_conf = MSE(IntroHead(h_t)_error, sg(|y_{t+1} - target_{t+1}|))
 ```
 
 Predict the magnitude of the next prediction error. Continuous signal,
-more informative than binary calibration. There is no evidence that
-current LLMs have access to their own loss/perplexity — this explicitly
-trains the model to have an internal "uncertainty meter."
+strictly more informative than binary calibration (which was dropped —
+binary correctness is just a threshold on this continuous estimate, and
+can be recovered at inference time without a separate loss).
+
+There is no evidence that current LLMs have access to their own
+loss/perplexity — this explicitly trains the model to have an internal
+"uncertainty meter." The base model optimizes p(x_{t+1} | context)
+(tries to be RIGHT). The confidence head optimizes a second-order
+objective: it learns what internal states characterize correct vs
+incorrect outputs (tries to KNOW WHEN it's right).
 
 Combined with per-channel structure, this enables causal attribution of
 uncertainty: if confidence correlates with slow-decay channels (α≈1),
 the model is uncertain about long-range context; if it correlates with
-fast-decay channels (α≈0), it's uncertain about recent context; if it
-correlates with specific MIMO columns, it's uncertain about specific
-hypotheses.
+fast-decay channels (α≈0), it's uncertain about recent context. The
+architecture makes the "why" readable — the confidence head learns to
+read a structure that per-channel decay already provides.
 
-The architecture makes the "why" readable — the confidence head learns
-to read a structure that per-channel decay and MIMO diversity already
-provide. The introspection head doesn't need to discover causation from
-scratch.
-
-**Tertiary: Calibration loss**
-
-```
-L_cal = BCE(IntroHead(h_t)_correct, sg(actual_correctness_{t+1}))
-```
-
-Predict whether the next prediction will be correct. Binary companion
-to the continuous confidence estimate. Useful for hard strategy-switching
-decisions (e.g., "confident enough to commit" vs "should fall back").
-
-This differs from simply training the base model: the base model
-optimizes p(x_{t+1} | context) (tries to be RIGHT). The calibration
-head optimizes p(correct | h_t) (tries to KNOW WHEN it's right).
-These are first-order vs. second-order objectives. The calibration head
-learns a meta-model of what characterizes correct outputs — patterns
-in the internal state that predict success vs failure.
-
-**Optional: State stability prediction**
+**Tertiary (optional): State stability prediction**
 
 ```
 L_stab = MSE(IntroHead(h_t)_delta, sg(||h_{t+1} - h_t||))
 ```
 
-Predict how much the state will change at the next step. Provides
-anticipatory surprise (forward-looking, not reactive like the basic
-surprise signal). If the model predicts large Δh, it expects the next
-input to be surprising and can prepare. Persistent mismatch (predict
-small Δh, observe large Δh) signals an unfamiliar regime — qualitatively
-different from single-step surprise.
+Predict how much the state will change at the next step. Genuinely
+different from confidence: the model might be confident in its output but
+expecting a large state change (e.g., a scene transition it predicted
+correctly). Provides anticipatory surprise (forward-looking, not reactive
+like the basic surprise signal). Persistent mismatch (predict small Δh,
+observe large Δh) signals an unfamiliar regime — qualitatively different
+from single-step surprise.
 
 Predicting summary statistics of Δh (norm, per-channel magnitudes) is
-more useful and cheaper than predicting the full next state.
+more useful and cheaper than predicting the full next state. Only add
+this if the two primary objectives plateau.
 
-**Optional: Hypothesis identification (MIMO)**
-
-```
-L_hyp = CE(IntroHead(h_t)_column, sg(best_column))
-```
-
-Predict which MIMO column is most accurate. Makes implicit hypothesis
-tracking explicit — the model can then reason about which hypothesis is
-active and why.
+**Dropped: Hypothesis identification (predict best MIMO column).** Our MIMO
+columns serve dual purpose — hardware-efficient rank-r write AND hypothesis
+diversity. Asking the introspection head to predict "which column is best"
+assumes columns have cleanly separated into distinct hypotheses, but the
+column↔hypothesis mapping can shift during training. The confidence head
+with per-channel structure already provides implicit hypothesis attribution.
+A separate L_hyp could also fight with the MIMO diversity loss over what
+the columns "should" mean. If explicit hypothesis tracking is needed later,
+it should come from the Bayesian reweighting on the readout side (see
+"Bayesian Hypothesis Testing via MIMO" below), not from the introspection
+head.
 
 Note: all targets are stop-gradiented (sg) to prevent circular
 optimization through the main model.
