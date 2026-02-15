@@ -128,9 +128,12 @@ def parse_args():
     p.add_argument('--no_per_channel_decay', action='store_true')
     p.add_argument('--stable_reparam', action='store_true', default=None)
     p.add_argument('--use_surprise_gate', action='store_true', default=None)
-    p.add_argument('--use_chunkwise', action='store_true', default=False)
-    p.add_argument('--use_wy_chunkwise', action='store_true', default=False,
-                   help='Use real WY chunkwise parallelism (Phase 5a)')
+    p.add_argument('--use_chunkwise', action='store_true', default=False,
+                   help='Legacy gradient-checkpointed chunking')
+    p.add_argument('--use_wy_chunkwise', action='store_true', default=True,
+                   help='WY chunkwise parallelism (default)')
+    p.add_argument('--no_wy_chunkwise', action='store_true',
+                   help='Disable WY chunkwise (use naive sequential)')
     p.add_argument('--chunk_size', type=int, default=64)
 
     # Data
@@ -177,9 +180,11 @@ def parse_args():
             args.batch_size = 128
         args.seq_len = max(2 * args.n_examples + 2, args.seq_len)
 
-    # VRAM-aware defaults: the naive sequential recurrence stores
-    # intermediate tensors for every time step across all layers.
-    # On <=6GB cards this easily OOMs at batch_size=32.
+    # Handle --no_wy_chunkwise
+    if args.no_wy_chunkwise:
+        args.use_wy_chunkwise = False
+
+    # VRAM-aware defaults for batch size
     if args.device == 'auto' or args.device.startswith('cuda'):
         try:
             import torch
@@ -190,13 +195,12 @@ def parse_args():
                         args.batch_size = 8
                     if args.stage == '2' and args.batch_size == 128:
                         args.batch_size = 32
-                    # Auto-enable WY chunkwise (parallel intra-chunk, lower memory)
-                    if not args.use_chunkwise and not args.use_wy_chunkwise:
-                        args.use_wy_chunkwise = True
+                    # Use smaller chunks on low-VRAM cards
+                    if args.use_wy_chunkwise and args.chunk_size == 64:
                         args.chunk_size = 16
                     print(f"VRAM: {vram_gb:.1f}GB detected — "
                           f"batch_size={args.batch_size}, "
-                          f"wy_chunkwise=True (chunk_size={args.chunk_size})")
+                          f"chunk_size={args.chunk_size}")
         except ImportError:
             pass
 

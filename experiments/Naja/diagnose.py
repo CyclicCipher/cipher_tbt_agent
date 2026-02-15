@@ -338,16 +338,16 @@ def test_wy_correctness(device, batch=4, seq_len=32):
     all_pass = True
     vocab_size = 16
 
-    # Test WY matches naive on a single-layer model without B2 (Phase 5a limitation)
-    # We use use_pope_perp=False since WY doesn't support B2 yet
+    # Test WY matches naive on a single-layer model with full feature set
+    # Phase 5c: WY supports B2 (PoPE pair) via virtual token expansion
     config_naive = NajaConfig(
         d_model=128, d_state=64, n_layer=1, headdim=64,
-        use_delta_rule=True, use_pope_perp=False, per_channel_decay=True,
+        use_delta_rule=True, use_pope_perp=True, per_channel_decay=True,
         use_chunkwise=False, use_wy_chunkwise=False,
     )
     config_wy = NajaConfig(
         d_model=128, d_state=64, n_layer=1, headdim=64,
-        use_delta_rule=True, use_pope_perp=False, per_channel_decay=True,
+        use_delta_rule=True, use_pope_perp=True, per_channel_decay=True,
         use_chunkwise=False, use_wy_chunkwise=True, chunk_size=seq_len,
     )
 

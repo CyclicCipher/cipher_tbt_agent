@@ -56,8 +56,8 @@ class NajaConfig:
 
     # --- Phase 5: Chunkwise ---
     chunk_size: int = 64
-    use_chunkwise: bool = False   # gradient-checkpointed chunk processing
-    use_wy_chunkwise: bool = False  # real WY chunkwise parallelism (Phase 5a)
+    use_chunkwise: bool = False   # gradient-checkpointed chunk processing (legacy)
+    use_wy_chunkwise: bool = True  # WY chunkwise parallelism (default)
 
     def __post_init__(self):
         self.d_inner = self.expand * self.d_model
@@ -417,15 +417,19 @@ def _solve_tril(A: Tensor, beta: Tensor) -> Tensor:
         T: (batch, nheads, n_chunks, C, C) — UT transform matrix.
     """
     C_sz = A.shape[-1]
+    orig_dtype = A.dtype
+
+    # solve_triangular doesn't support fp16/bf16 on CUDA — upcast to float32
+    if A.is_cuda and A.dtype in (torch.float16, torch.bfloat16):
+        A = A.float()
+        beta = beta.float()
+
     # (I + A) is unit lower triangular — solve (I+A)T = diag(β)
-    # Use torch.linalg.solve_triangular for batched solve
-    # RHS is diag(beta): (batch, nheads, n_chunks, C, C)
     eye_beta = torch.diag_embed(beta)  # (batch, nheads, n_chunks, C, C)
     IpA = torch.eye(C_sz, device=A.device, dtype=A.dtype) + A
-    # solve_triangular: solve IpA @ T = eye_beta for T
-    # IpA is lower triangular, unitriangular=True
     T = torch.linalg.solve_triangular(IpA, eye_beta, upper=False, unitriangular=True)
-    return T
+
+    return T.to(orig_dtype)
 
 
 def _prepare_wy_repr(K: Tensor, V: Tensor, beta: Tensor, log_alpha_cumsum: Tensor) -> tuple:
