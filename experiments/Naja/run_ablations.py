@@ -19,6 +19,9 @@ Usage:
   # Quick run (fewer epochs)
   python run_ablations.py --epochs 20
 
+  # Full model only (skip all ablated variants)
+  python run_ablations.py --full-only
+
   # Resume from a previous results file (skip completed runs)
   python run_ablations.py --resume
 """
@@ -84,6 +87,8 @@ def parse_args():
                    help='Results file (default: ablation_results.jsonl)')
     p.add_argument('--dry-run', action='store_true',
                    help='Print commands without executing')
+    p.add_argument('--full-only', action='store_true',
+                   help='Run only the naja_full preset (skip ablated variants)')
     p.add_argument('--resume', action='store_true',
                    help='Skip (preset, task) pairs already in results file')
     return p.parse_args()
@@ -193,7 +198,10 @@ def print_results_table(results_file: str):
 def main():
     args = parse_args()
 
-    presets = args.presets or ALL_PRESETS
+    if args.full_only:
+        presets = ['naja_full']
+    else:
+        presets = args.presets or ALL_PRESETS
     tasks = args.tasks or ALL_TASKS
     results_file = os.path.join(SCRIPT_DIR, args.results_file)
 
