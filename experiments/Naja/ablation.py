@@ -65,7 +65,6 @@ DEFAULT_TASKS = [
     ('stage_1b', 'stage', 'Sanity check — all configs should pass'),
     ('stage_2', 'stage', 'Multi-rule generalization — the hard test'),
     ('associative_recall', 'task', 'Tests delta rule'),
-    ('parity', 'task', 'Tests PoPE orthogonal pair'),
     ('multi_scale', 'task', 'Tests per-channel decay'),
     ('permutation_3', 'task', 'Tests full architecture (3 elements)'),
 ]
@@ -172,7 +171,7 @@ def make_train_args(config_name: str, task_name: str, task_type: str,
     task_epochs = {
         'stage_1b': 30, 'stage_1a': 30, 'stage_1c': 30,
         'stage_2': 50,
-        'associative_recall': 50, 'parity': 50,
+        'associative_recall': 50,
         'multi_scale': 50, 'permutation_3': 50, 'permutation_4': 80,
     }
     args.epochs = epochs if epochs is not None else task_epochs.get(task_name, 30)

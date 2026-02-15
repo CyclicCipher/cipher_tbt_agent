@@ -63,7 +63,6 @@ ALL_PRESETS = [
 
 ALL_TASKS = [
     'associative_recall',
-    'parity',
     'multi_scale',
     'permutation_3',
     'permutation_4',
