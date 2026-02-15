@@ -16,8 +16,9 @@ Previous focus: **JEPA** — JEPA-style latent prediction on Mamba3 backbone (st
 
 ## Critical Reference
 
-**ALWAYS read `MISTAKES.md` before making changes.** It has 40 documented mistakes with root causes. The most relevant active ones:
+**ALWAYS read `MISTAKES.md` before making changes.** It has 41 documented mistakes with root causes. The most relevant active ones:
 
+- **#41 (Ablation eval leak):** Answer token at seqs[:, -1] was visible to logits[:, -1]. All tasks scored ~100% via trivial copy. Fixed: use logits[:, -2] which genuinely predicts the answer.
 - **#40 (WY chunkwise bugs):** Three independent bugs in the initial WY implementation — decay convention, inter-chunk state formula, pseudo-key decay factor. All fixed. Key lesson: single-chunk tests are necessary but not sufficient; always test multi-chunk.
 - **#39 (Fake Phase 5):** The OLD `delta_recurrence_chunkwise()` was just gradient checkpointing. Now replaced by real `delta_recurrence_wy()` which is numerically correct.
 - **#38 (ePC archived):** ePC is 15x slower than backprop for identical accuracy. Don't resurrect it without a qualitatively new argument.

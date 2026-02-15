@@ -90,6 +90,22 @@ Where `K_fwd = K * exp(total_chunk_decay - cumsum)` ensures each position's cont
 
 ---
 
+### #41. Ablation Evaluation Leak: Answer Token Visible at Prediction Time (RESOLVED)
+
+**Date:** 2026-02-15
+
+All ablation task generators (associative recall, parity, multi-scale, permutation) placed the answer token at `seqs[:, -1]`. The evaluation used `logits[:, -1]` — which had already seen the answer in context. The model only needed to copy the last token for 100% accuracy. Every preset on every task hit ~100%, making ablations useless.
+
+**Root cause:** Confusion between "predict at position -1" and "predict the answer." In a causal LM, `logits[:, t]` predicts `seqs[:, t+1]`. So `logits[:, -1]` (after seeing the full sequence including the answer) predicts what comes AFTER the answer — and we compared it against the answer itself, which the model had trivially memorized from the input.
+
+**The genuine prediction** is at `logits[:, -2]`: the model has seen `[prefix..., Q]` but NOT the answer, and must predict the answer as the next token.
+
+**Fix:** Changed training loss and all evaluation functions from `logits[:, -1]` to `logits[:, -2]`.
+
+**Lesson:** When designing tasks with answer tokens in the sequence, always verify the evaluation position can't see the answer. Draw the causal attention mask on paper: if position p can attend to the answer, then `logits[:, p]` is trivially solvable.
+
+---
+
 ## Condensed Archive (Historical Reference)
 
 Below are condensed lessons from resolved/archived mistakes. Full debugging narratives have been removed.
@@ -158,3 +174,4 @@ Below are condensed lessons from resolved/archived mistakes. Full debugging narr
 - 2026-02-13: #33-37 (SGD wins, next-step prediction, reduction mismatch, don't run training, hyperparameter copying)
 - 2026-02-14: #38-39 (ePC archived, fake Phase 5 chunkwise)
 - 2026-02-15: #40 (three WY chunkwise bugs: decay convention, state update formula, pseudo-key decay)
+- 2026-02-15: #41 (ablation evaluation leak: answer in sequence, trivial copy instead of genuine prediction)

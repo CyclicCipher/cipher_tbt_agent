@@ -302,7 +302,13 @@ def evaluate_nextstep(model, loader, device, amp_ctx):
 
 
 def evaluate_last_token(model, loader, device, amp_ctx):
-    """Evaluate accuracy on the last token only (Stage 2 / tasks with targets)."""
+    """Evaluate accuracy predicting the answer token.
+
+    The answer is at seqs[:, -1], so the genuine prediction is at
+    logits[:, -2] (which sees everything up to and including the query
+    token but NOT the answer).  Using logits[:, -1] would be trivial
+    copy-last-token — see Mistake #41.
+    """
     model.eval()
     correct = 0
     total = 0
@@ -313,7 +319,7 @@ def evaluate_last_token(model, loader, device, amp_ctx):
             targets = batch[1].to(device)
             with amp_ctx():
                 logits = model(seqs)
-            pred_last = logits[:, -1].argmax(dim=-1)
+            pred_last = logits[:, -2].argmax(dim=-1)
             correct += (pred_last == targets).sum().item()
             total += targets.shape[0]
 
@@ -336,7 +342,7 @@ def evaluate_with_kl_surprise(model, loader, device, amp_ctx, kl_tracker):
                 surprise = kl_tracker(logits_p1)
                 # Re-run with surprise signal
                 logits = model(seqs, surprise=surprise.detach())
-            pred_last = logits[:, -1].argmax(dim=-1)
+            pred_last = logits[:, -2].argmax(dim=-1)
             correct += (pred_last == targets).sum().item()
             total += targets.shape[0]
 
@@ -682,9 +688,10 @@ def train(args):
 
                 # Loss: next-step prediction
                 if has_targets:
-                    # Use last-token CE for tasks with explicit targets
+                    # Predict the answer token: logits[:, -2] sees [prefix..., Q]
+                    # but NOT the answer at seqs[:, -1].  See Mistake #41.
                     targets = batch[1].to(device)
-                    loss = F.cross_entropy(logits[:, -1], targets)
+                    loss = F.cross_entropy(logits[:, -2], targets)
                     # Also add next-step CE on the full sequence for representation learning
                     loss_ns = F.cross_entropy(
                         logits[:, :-1].reshape(-1, vocab_size),
@@ -707,8 +714,8 @@ def train(args):
                 # Still count accuracy from valid logits
                 with torch.no_grad():
                     if has_targets:
-                        pred = logits[:, -1].argmax(dim=-1)
-                        valid = ~torch.isnan(logits[:, -1].sum(dim=-1))
+                        pred = logits[:, -2].argmax(dim=-1)
+                        valid = ~torch.isnan(logits[:, -2].sum(dim=-1))
                         epoch_correct += (pred[valid] == targets[valid]).sum().item()
                         epoch_total += valid.sum().item()
                     else:
@@ -749,7 +756,7 @@ def train(args):
             # --- Train accuracy ---
             with torch.no_grad():
                 if has_targets:
-                    pred = logits[:, -1].argmax(dim=-1)
+                    pred = logits[:, -2].argmax(dim=-1)
                     epoch_correct += (pred == targets).sum().item()
                     epoch_total += targets.shape[0]
                 else:
