@@ -52,7 +52,7 @@ class NajaConfig:
 
     # --- Mamba3 features ---
     use_pope: bool = True
-    use_trapezoidal: bool = True
+    use_trapezoidal: bool = False  # Euler only (trapezoidal incompatible with WY chunkwise)
 
     # --- Phase 5: Chunkwise ---
     chunk_size: int = 64
@@ -373,11 +373,13 @@ def delta_recurrence_chunkwise(
 # intra-chunk work via matrix multiplications (parallel on GPU).
 
 def _chunk_scaled_dot_kkt(K: Tensor, beta: Tensor, log_alpha_cumsum: Tensor) -> Tensor:
-    """Compute A = tril(diag(β) · Γ ⊙ (K · K^T), -1) per chunk.
+    """Compute A = tril(β_i · Γ ⊙ (K · K^T), -1) per chunk.
 
-    Supports per-channel decay: A_{i,j} = β_j · Σ_d k_i[d] · k_j[d] · γ_{i,j}[d]
+    Supports per-channel decay: A_{i,j} = β_i · Σ_d k_i[d] · k_j[d] · γ_{i,j}[d]
     where γ_{i,j}[d] = exp(cumsum_log_α[i,d] - cumsum_log_α[j,d]) is the
     per-channel cumulative decay from position j to position i within the chunk.
+
+    FLA convention: β scales the ROW index (the "erasing" position).
 
     Computed efficiently as K_pos @ K_neg^T where K_pos = K * exp(cumsum),
     K_neg = K * exp(-cumsum). The per-channel decay is absorbed into the
@@ -489,6 +491,11 @@ def delta_recurrence_wy(
     batch, seqlen, nheads, headdim, r = x_write.shape
     d_state = B1.shape[-1]
     device, dtype = x_write.device, x_write.dtype
+
+    # WY uses Euler discretization only. Trapezoidal blending mixes two
+    # outer products with different key directions (B_t and B_{t-1}), which
+    # can't be represented as a single WY step per token. Force Euler.
+    use_trapezoidal = False
 
     # Pad sequence to multiple of chunk_size if needed
     pad_len = (chunk_size - seqlen % chunk_size) % chunk_size

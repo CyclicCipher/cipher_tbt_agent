@@ -340,14 +340,17 @@ def test_wy_correctness(device, batch=4, seq_len=32):
 
     # Test WY matches naive on a single-layer model with full feature set
     # Phase 5c: WY supports B2 (PoPE pair) via virtual token expansion
+    # Both use Euler discretization (trapezoidal incompatible with WY)
     config_naive = NajaConfig(
         d_model=128, d_state=64, n_layer=1, headdim=64,
         use_delta_rule=True, use_pope_perp=True, per_channel_decay=True,
+        use_trapezoidal=False,
         use_chunkwise=False, use_wy_chunkwise=False,
     )
     config_wy = NajaConfig(
         d_model=128, d_state=64, n_layer=1, headdim=64,
         use_delta_rule=True, use_pope_perp=True, per_channel_decay=True,
+        use_trapezoidal=False,
         use_chunkwise=False, use_wy_chunkwise=True, chunk_size=seq_len,
     )
 
@@ -379,7 +382,7 @@ def test_wy_correctness(device, batch=4, seq_len=32):
     if seq_len > 8:
         config_wy_multi = NajaConfig(
             d_model=128, d_state=64, n_layer=1, headdim=64,
-            use_delta_rule=True, use_pope_perp=False, per_channel_decay=True,
+            use_delta_rule=True, use_pope_perp=True, per_channel_decay=True,
             use_chunkwise=False, use_wy_chunkwise=True, chunk_size=8,
         )
         m_wy_multi = NajaLM(config_wy_multi, vocab_size).to(device)
