@@ -158,7 +158,7 @@ def parse_args():
 
     # Training
     p.add_argument('--epochs', type=int, default=30)
-    p.add_argument('--batch_size', type=int, default=32)
+    p.add_argument('--batch_size', type=int, default=64)
     p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--warmup_epochs', type=int, default=4)
     p.add_argument('--w_clip', type=float, default=1.0, help='Gradient clipping max norm')
