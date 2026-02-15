@@ -63,6 +63,33 @@ ePC's error optimization (T=20 inner-loop steps per batch) is pure overhead when
 
 ---
 
+### #40. Three Independent Bugs in WY Chunkwise Implementation (RESOLVED)
+
+**Date:** 2026-02-15
+
+The first WY chunkwise implementation (Phase 5a) had three independent bugs that each caused multi-chunk numerical divergence. Single-chunk tests passed, masking the inter-chunk issues.
+
+**Bug 1 — Decay-before-erase convention mismatch:**
+The naive reference applies `h = alpha * h` THEN `h = h - beta * (h @ k) k^T`. The WY's A matrix must use cumulative decay `exp(cumsum[i] - cumsum[j])` matching this "decay first, then erase" convention. Initial implementation had the decay applied inconsistently.
+
+**Bug 2 — Wrong inter-chunk state update formula:**
+Used `S = P @ S + H` (transition-matrix form), which is wrong when decay is present. The correct formula is FLA-style:
+```
+v_new = U - W @ S          # corrected pseudo-values
+S = gamma * S + K_fwd^T @ v_new   # decay + accumulate
+```
+Where `K_fwd = K * exp(total_chunk_decay - cumsum)` ensures each position's contribution is properly forward-decayed to the chunk boundary.
+
+**Bug 3 — Pseudo-keys W missing cumulative decay factor:**
+`W = T @ K` was missing the cumulative decay from chunk boundary to each position. The state at position t has been decayed by `exp(cumsum[t])` from the chunk start, so the correction `U - W @ S` must account for this. Fix: `W_state = T @ (K * exp(cumsum))`. This matches FLA/KDA convention where W includes `k * beta * exp(G)`.
+
+**Lessons:**
+1. **Single-chunk tests are necessary but not sufficient.** Bug 2 and 3 only manifested with multiple chunks (S_prev ≠ 0). Always test with multi-chunk sequences.
+2. **The WY pseudo-keys must include all factors that affect how the state is seen at each position.** If the state is decayed, W must include that decay.
+3. **Read the FLA reference implementation carefully.** The naive reference (`fla/ops/delta_rule/naive.py`) and the chunkwise state update (`fla/ops/common/chunk_delta_h.py`) are the ground truth for the correct formulas.
+
+---
+
 ## Condensed Archive (Historical Reference)
 
 Below are condensed lessons from resolved/archived mistakes. Full debugging narratives have been removed.
@@ -130,3 +157,4 @@ Below are condensed lessons from resolved/archived mistakes. Full debugging narr
 - 2026-02-12: #30-32 (adaptive damping, iPC flag, autograd HVP)
 - 2026-02-13: #33-37 (SGD wins, next-step prediction, reduction mismatch, don't run training, hyperparameter copying)
 - 2026-02-14: #38-39 (ePC archived, fake Phase 5 chunkwise)
+- 2026-02-15: #40 (three WY chunkwise bugs: decay convention, state update formula, pseudo-key decay)

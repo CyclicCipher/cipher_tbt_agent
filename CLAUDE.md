@@ -6,7 +6,9 @@ A biologically-inspired AI system targeting the Danganronpa visual novel as an e
 
 Current focus: **Naja** — A hybrid architecture combining Mamba3's continuous-time SSM dynamics with the delta rule's targeted write/erase memory, MIMO, PoPE orthogonal pairs, per-channel decay, and surprise gating. This is the `experiments/Naja/` directory.
 
-**Immediate priority: Naja is too slow.** The naive sequential recurrence launches ~5,120 CUDA kernels per batch (seq_len=64, n_layer=4). GPU utilization reads 0% because each kernel is too small. Training appears to hang. The fix is implementing real WY chunkwise parallelism (see `CONTINUATION.md` and Mistake #39).
+**Phase 5a (scalar-decay WY chunkwise) is COMPLETE and numerically verified** (max diff ~1e-6 vs naive reference). Three bugs were found and fixed during verification (see Mistake #40). The WY algorithm is correct for single Householder, scalar decay, SISO.
+
+**Immediate priority: Phase 5b — per-channel decay in WY.** The A matrix and cumulative decay terms must become `d_state`-dimensional (diagonal matrices instead of scalars). This is required before ablation testing. See `CONTINUATION.md`.
 
 Previous focus: **JEPA** — JEPA-style latent prediction on Mamba3 backbone (still in `experiments/energy_reasoning/`).
 
@@ -14,10 +16,11 @@ Previous focus: **JEPA** — JEPA-style latent prediction on Mamba3 backbone (st
 
 ## Critical Reference
 
-**ALWAYS read `MISTAKES.md` before making changes.** It has 39 documented mistakes with root causes. The most relevant active ones:
+**ALWAYS read `MISTAKES.md` before making changes.** It has 40 documented mistakes with root causes. The most relevant active ones:
 
-- **#39 (Fake Phase 5):** Current `delta_recurrence_chunkwise()` is just gradient checkpointing — NOT real WY chunkwise parallelism. Zero speedup. Real WY implementation is the top priority for Naja. See `CONTINUATION.md` for implementation plan.
-- **#38 (ePC archived):** ePC is 15x slower than backprop for identical accuracy. Don't resurrect it without a qualitatively new argument. The local learning promise didn't materialize on our tasks.
+- **#40 (WY chunkwise bugs):** Three independent bugs in the initial WY implementation — decay convention, inter-chunk state formula, pseudo-key decay factor. All fixed. Key lesson: single-chunk tests are necessary but not sufficient; always test multi-chunk.
+- **#39 (Fake Phase 5):** The OLD `delta_recurrence_chunkwise()` was just gradient checkpointing. Now replaced by real `delta_recurrence_wy()` which is numerically correct.
+- **#38 (ePC archived):** ePC is 15x slower than backprop for identical accuracy. Don't resurrect it without a qualitatively new argument.
 - **#34 (Next-step prediction):** Causal models (Mamba) need next-step prediction, not masked prediction.
 - **#13 (Read the paper):** Never skim a research paper you're implementing. Read every appendix.
 - **#36 (Don't run training):** Never run full training loops on Claude's CPU machine. Commit, push, let the user test on GPU.
@@ -51,13 +54,14 @@ Hybrid Mamba3 + Gated DeltaNet architecture with backprop training:
 - **Surprise gating**: β modulated by cross-entropy surprise (Phase 4)
 
 Key files:
-- `naja.py` — Full model (NajaLM, NajaMixer, delta_recurrence, KLSurpriseTracker)
+- `naja.py` — Full model (NajaLM, NajaMixer, delta_recurrence, delta_recurrence_wy, KLSurpriseTracker)
 - `train_naja.py` — Training loop with preset ablation configs
 - `tasks.py` — Ablation task generators (associative recall, parity, etc.)
 - `diagnose.py` — Diagnostic suite (timing, correctness, memory)
+- `test_wy_minimal.py` — Standalone WY correctness test (5 test cases, all passing ~1e-6)
 - `DESIGN.md` — Complete architecture specification
 
-**CRITICAL**: The `delta_recurrence_chunkwise()` function is NOT real parallelism — it's just gradient checkpointing over the same sequential loop. Real WY chunkwise parallelism is the top priority (Mistake #39).
+**WY chunkwise status:** `delta_recurrence_wy()` is numerically verified (Phase 5a complete). Current simplifications: single Householder (no PoPE pair), scalar decay (not per-channel), SISO (r=1). Phase 5b will lift the scalar decay limitation.
 
 ### Mamba3 Backbone (experiments/Mamba3/)
 
@@ -171,6 +175,7 @@ The Stage 2 generalization problem (5-rule induction) is the immediate priority.
 7. **Yang et al. 2025** — "Gated Delta Networks" (Gated DeltaNet, ICLR 2025). Adds data-dependent decay to delta rule. arXiv:2412.06464. Direct ancestor of Naja's gated delta recurrence.
 8. **Siems et al. 2025** — "DeltaProduct" (NeurIPS 2025). Multiple Householder reflections per token via virtual token expansion. arXiv:2502.10297. Relevant: Naja's PoPE pair = DeltaProduct with n_h=2.
 9. **Gopalakrishnan et al. 2024** — PoPE (Polar Positional Embeddings). Decouples content from position.
+10. **Kimi Team (Moonshot AI) 2025** — "Kimi Linear: An Expressive, Efficient Attention Architecture" (KDA). arXiv:2510.26692. Per-channel diagonal decay with `a=b=k` DPLR constraint eliminates secondary chunking. FLA-style state update and decay-weighted pseudo-keys are the ground truth for WY correctness. Our Phase 5a bugs were found by comparing against KDA/FLA conventions.
 
 ## Research Papers Referenced (Generalization/Grokking)
 

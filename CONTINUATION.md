@@ -115,9 +115,9 @@ For a first implementation, restrict to SISO (r=1) for the WY chunkwise path. Th
 
 ## Implementation Plan
 
-### Phase 5a: Pure PyTorch WY (No Triton) ✓ IMPLEMENTED
+### Phase 5a: Pure PyTorch WY (No Triton) ✓ COMPLETE & VERIFIED
 
-Implemented the WY chunkwise algorithm in pure PyTorch.
+Implemented the WY chunkwise algorithm in pure PyTorch. **Numerically verified** on GPU: all 5 test cases pass at ~1e-6 max diff vs naive sequential reference.
 
 File modified: `experiments/Naja/naja.py`
 
@@ -127,6 +127,13 @@ File modified: `experiments/Naja/naja.py`
 2. `_solve_tril(A, beta)` → Forward substitution for (I+A)^{-1}·diag(β) using `torch.linalg.solve_triangular` ✓
 3. `_prepare_wy_repr(K, V, beta)` → Full UT transform: A → T → W, U ✓
 4. `delta_recurrence_wy(x_write, ..., chunk_size)` → Complete 4-step chunkwise algorithm ✓
+
+**Standalone test:** `test_wy_minimal.py` — 5 test cases (constant decay, no decay, no delta, multi-chunk, full strength). All passing.
+
+**Three bugs found and fixed during verification (Mistake #40):**
+1. Decay-before-erase convention mismatch in A matrix
+2. Wrong inter-chunk state update (used P@S+H instead of FLA-style v_new + K_fwd)
+3. Pseudo-keys W missing cumulative decay factor (need `W_state = T @ (K * exp(cumsum))`)
 
 **Wired into `NajaMixer.forward()`** via `use_wy_chunkwise` config flag ✓
 **CLI flag:** `--use_wy_chunkwise` in train_naja.py ✓
@@ -138,20 +145,41 @@ File modified: `experiments/Naja/naja.py`
 - Scalar decay (mean of per-channel α, not full diagonal)
 - Trapezoidal blending baked into V before WY transform
 
-**Verification needed:** Run `diagnose.py` on GPU to compare `delta_recurrence_wy()` vs `delta_recurrence()` — target <1e-4 max diff.
+### Phase 5b: Per-Channel Decay ← NEXT PRIORITY
 
-### Phase 5b: Handle Naja Complications
+Lift the scalar decay simplification. Per-channel decay means each of the `d_state` channels gets its own decay rate `alpha_t[k]`.
 
-1. Add virtual token expansion for PoPE orthogonal pair (B₁, B₂)
-2. Integrate per-channel decay into the UT transform
-3. Handle trapezoidal blending in the input values
-4. Update diagnose.py to compare all three recurrence paths
+**What changes:**
+- `log_alpha_cumsum` shape: `(batch, nheads, n_chunks, Cs)` → `(batch, nheads, n_chunks, Cs, d_state)`
+- A matrix: `A[i,j] = beta_j * decay(i,j) * (k_i · k_j)` becomes per-channel: `A[i,j,k] = beta_j * decay_k(i,j) * k_i[k] * k_j[k]`. This is no longer a simple CxC matrix but CxCxd_state.
+- Causal decay mask and forward-decay factors broadcast over `d_state`
+- The UT forward substitution becomes d_state independent scalar forward substitutions (one per channel), NOT a single matrix solve
 
-### Phase 5c: Triton Kernels (Optional, Future)
+**KDA reference:** KDA (arXiv:2510.26692) implements exactly this. Their A matrix is per-channel, and they handle it by solving d_state independent lower-triangular systems. The FLA implementation in `fla/ops/kda/` is the reference.
+
+**Note on A matrix convention:** Our A uses `beta_j` (column index) while FLA uses `beta_i` (row index). For constant beta these are equivalent. For variable beta, we may need to reconcile — but this doesn't affect per-channel decay, which is orthogonal to the beta convention.
+
+### Phase 5c: PoPE Pair (B₁, B₂)
+
+Add virtual token expansion for the second Householder (DeltaProduct with n_h=2). Each real token becomes 2 virtual tokens. Standard WY applies to the 2C-length virtual sequence.
+
+### Phase 5d: Ablation Testing
+
+Run ablation experiments on GPU to validate each Naja component:
+- Per-channel decay vs scalar decay
+- PoPE pair vs single Householder
+- Surprise gating vs fixed beta
+- MIMO rank-r vs SISO
+
+Complete all ablations before investing in Triton optimization.
+
+### Phase 5e: Triton Kernels (After Ablations)
 
 For maximum performance, either:
 - Port core operations to Triton (using `flash-linear-attention` as reference)
 - Or use `flash-linear-attention` as a dependency and import its kernels directly
+
+Expected gain: 3-10x over PyTorch WY (from fusing intra-chunk operations and eliminating intermediate memory traffic).
 
 ---
 
@@ -238,11 +266,20 @@ To map to DeltaNet's WY formulation:
 
 ## Success Criteria
 
-1. `delta_recurrence_wy()` produces outputs matching `delta_recurrence()` to <1e-4
-2. Training time per epoch drops by >5x on GPU (from ~minutes to ~seconds)
-3. GPU utilization rises from ~0% to >50%
-4. No accuracy regression on Stage 1b task
-5. diagnose.py updated to benchmark all three recurrence paths
+### Phase 5a ✓ ACHIEVED
+1. ✅ `delta_recurrence_wy()` matches `delta_recurrence()` to ~1e-6 (target was <1e-4)
+2. ⬜ Training time per epoch drops by >5x on GPU (not yet benchmarked with training)
+3. ⬜ GPU utilization rises from ~0% to >50% (not yet benchmarked with training)
+4. ⬜ No accuracy regression on Stage 1b task (needs training run)
+5. ✅ test_wy_minimal.py provides standalone correctness verification
+
+### Phase 5b
+6. Per-channel decay WY matches naive per-channel reference to <1e-4
+7. All test_wy_minimal.py tests updated and passing with per-channel decay
+
+### Phase 5d
+8. Ablation results documented for each Naja component
+9. Architecture decisions finalized based on empirical evidence
 
 ---
 
