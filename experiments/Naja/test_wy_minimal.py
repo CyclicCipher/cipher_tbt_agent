@@ -18,17 +18,18 @@ def naive_recurrence_debug(x_write, B1, C, alpha, beta, use_trapezoidal=False):
     outputs = []
 
     for t in range(seqlen):
+        # Erase projection from UN-decayed state (Gated DeltaNet convention)
+        b1_hat = F.normalize(B1[:, t], dim=-1)  # (batch, d_state)
+        bt = beta[:, t]  # (batch, nheads, 1)
+        proj = torch.einsum('bnpd,bd->bnp', h, b1_hat)
+        erase = bt.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj, b1_hat)
+
         # Decay
         a_t = alpha[:, t]  # (batch, nheads, d_state)
         h = h * a_t.unsqueeze(2)
 
-        # Erase (Householder)
-        b1_hat = F.normalize(B1[:, t], dim=-1)  # (batch, d_state)
-        bt = beta[:, t]  # (batch, nheads, 1)
-        proj = torch.einsum('bnpd,bd->bnp', h, b1_hat)
-        h = h - bt.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj, b1_hat)
-
-        # Write: beta * x_write ⊗ B1 (unnormalized)
+        # Apply erase (from un-decayed projection) + Write
+        h = h - erase
         write = torch.einsum('bnp,bd->bnpd', x_write[:, t], B1[:, t])
         h = h + bt.unsqueeze(2) * write
 
@@ -62,20 +63,19 @@ def wy_recurrence_debug(x_write, B1, C, alpha, beta,
     n_chunks = L // chunk_size
     Cs = chunk_size
 
-    # Map to DeltaNet (K, V, Q, beta_wy)
+    # Map to DeltaNet (K, V, Q, beta)
     K = F.normalize(B1, dim=-1)  # (batch, L, d_state)
     Q = C  # (batch, L, d_state)
 
     # Scalar decay
     alpha_scalar = alpha.mean(dim=-1)  # (batch, L, nheads)
 
-    # beta_wy = alpha * beta (decay-then-erase convention)
+    # Use original beta (decay handled by gamma in A matrix, not double-counted)
     beta_orig = beta[:, :, :, 0]  # (batch, L, nheads)
-    beta_wy = alpha_scalar * beta_orig
 
-    # V = x_write * ||B1|| / alpha (so beta_wy * V ⊗ K = beta * x_write ⊗ B1)
+    # V = x_write * ||B1|| (write value, no alpha rescaling needed)
     b1_norm = B1.norm(dim=-1, keepdim=True).unsqueeze(2)  # (batch, L, 1, 1)
-    V = x_write * b1_norm / alpha_scalar.unsqueeze(-1).clamp(min=1e-8)
+    V = x_write * b1_norm
 
     # Chunk
     def chunk(t):
@@ -84,7 +84,7 @@ def wy_recurrence_debug(x_write, B1, C, alpha, beta,
     K_c = chunk(K).unsqueeze(1).expand(-1, nheads, -1, -1, -1)
     Q_c = chunk(Q).unsqueeze(1).expand(-1, nheads, -1, -1, -1)
     V_c = chunk(V).permute(0, 3, 1, 2, 4) if V.dim() == 4 else None
-    beta_c = chunk(beta_wy).permute(0, 3, 1, 2)
+    beta_c = chunk(beta_orig).permute(0, 3, 1, 2)
     alpha_c = chunk(alpha_scalar).permute(0, 3, 1, 2)
 
     # Need V_c in (batch, nheads, n_chunks, Cs, headdim)
@@ -108,7 +108,7 @@ def wy_recurrence_debug(x_write, B1, C, alpha, beta,
     mask = torch.tril(torch.ones(Cs, Cs, device=device, dtype=dtype), diagonal=-1).bool()
     A = A.masked_fill(~mask, 0.0)
 
-    # T = (I + A)^{-1} diag(beta_wy)
+    # T = (I + A)^{-1} diag(beta_orig)
     IpA = torch.eye(Cs, device=device, dtype=dtype) + A
     eye_beta = torch.diag_embed(beta_c)
     T = torch.linalg.solve_triangular(IpA, eye_beta, upper=False, unitriangular=True)

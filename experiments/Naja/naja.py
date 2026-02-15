@@ -151,29 +151,39 @@ def delta_recurrence(
     outputs = []
 
     for t in range(seqlen):
-        # --- Decay: per-channel diagonal ---
-        a_t = alpha[:, t]  # (batch, nheads, d_state)
-        h = h * a_t.unsqueeze(2)  # broadcast over headdim
-
-        # --- Delta rule: Householder erase (first MIMO column as key) ---
+        # --- Delta rule: compute erase from UN-decayed state (Gated DeltaNet convention) ---
+        # Standard: S_t = α·S_{t-1} - β·(S_{t-1}@k̂)⊗k̂ + β·write
+        # Erase projection uses S_{t-1} (before decay), not α·S_{t-1}
+        erase1 = None
+        erase2 = None
         if use_delta and beta1 is not None:
-            # Primary erase direction: first column of B1, shared across heads
             b1_key = B1[:, t, 0, :]  # (batch, d_state)
             b1_hat = F.normalize(b1_key, dim=-1)
             bt1 = beta1[:, t]  # (batch, nheads, 1)
 
-            # Householder 1: h -= β₁ · (h · b̂₁) ⊗ b̂₁
+            # Householder 1: project from un-decayed state
             proj1 = torch.einsum('bnpd,bd->bnp', h, b1_hat)
-            h = h - bt1.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj1, b1_hat)
+            erase1 = bt1.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj1, b1_hat)
 
-            # Householder 2: PoPE orthogonal pair
+            # Householder 2: PoPE orthogonal pair (from B1-erased, un-decayed state)
             if B2 is not None and beta2 is not None:
                 b2_key = B2[:, t, 0, :]  # (batch, d_state)
                 b2_hat = F.normalize(b2_key, dim=-1)
                 bt2 = beta2[:, t]
 
-                proj2 = torch.einsum('bnpd,bd->bnp', h, b2_hat)
-                h = h - bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
+                h_after_b1 = h - erase1
+                proj2 = torch.einsum('bnpd,bd->bnp', h_after_b1, b2_hat)
+                erase2 = bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
+
+        # --- Decay: per-channel diagonal ---
+        a_t = alpha[:, t]  # (batch, nheads, d_state)
+        h = h * a_t.unsqueeze(2)  # broadcast over headdim
+
+        # --- Apply erase (computed from un-decayed state) ---
+        if erase1 is not None:
+            h = h - erase1
+        if erase2 is not None:
+            h = h - erase2
 
         # --- Write: rank-r MIMO outer product sum ---
         # Σ_i x_write[:,:,:,i] ⊗ B1[:,:,i,:] contracts over i (MIMO rank)
@@ -242,24 +252,33 @@ def _process_chunk(
     for t in range(chunk_len):
         abs_t = chunk_start + t
 
-        # Decay
-        a_t = alpha[:, t]
-        h = h * a_t.unsqueeze(2)
-
-        # Delta rule erase
+        # Delta rule: compute erase from UN-decayed state (Gated DeltaNet convention)
+        erase1 = None
+        erase2 = None
         if use_delta and beta1 is not None:
             b1_key = B1[:, t, 0, :]
             b1_hat = F.normalize(b1_key, dim=-1)
             bt1 = beta1[:, t]
             proj1 = torch.einsum('bnpd,bd->bnp', h, b1_hat)
-            h = h - bt1.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj1, b1_hat)
+            erase1 = bt1.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj1, b1_hat)
 
             if B2 is not None and beta2 is not None:
                 b2_key = B2[:, t, 0, :]
                 b2_hat = F.normalize(b2_key, dim=-1)
                 bt2 = beta2[:, t]
-                proj2 = torch.einsum('bnpd,bd->bnp', h, b2_hat)
-                h = h - bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
+                h_after_b1 = h - erase1
+                proj2 = torch.einsum('bnpd,bd->bnp', h_after_b1, b2_hat)
+                erase2 = bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
+
+        # Decay
+        a_t = alpha[:, t]
+        h = h * a_t.unsqueeze(2)
+
+        # Apply erase (computed from un-decayed state)
+        if erase1 is not None:
+            h = h - erase1
+        if erase2 is not None:
+            h = h - erase2
 
         # Write
         xw_t = x_write[:, t]
@@ -497,34 +516,26 @@ def delta_recurrence_wy(
     Q = C[:, :, 0, :]  # (batch, L, d_state)
 
     # =====================================================================
-    # Mapping Naja's decay-then-erase convention to DeltaNet WY
+    # Mapping Naja to standard Gated DeltaNet WY
     # =====================================================================
     #
-    # Naja naive does: decay(S), then erase(decayed_S), then write:
-    #   S_t = α_t * (I - β_t * k̂ k̂ᵀ) @ S_{t-1} + β_t * write_t
-    #       = α_t * S_{t-1} - α_t * β_t * (S_{t-1}@k̂)⊗k̂ + β_t * write_t
+    # Both naive and WY now use standard Gated DeltaNet convention:
+    #   S_t = α_t * S_{t-1} + β_t * (v_t ⊗ k_t - (S_{t-1} @ k_t) ⊗ k_t)
+    #       = α_t * S_{t-1} - β_t * (S_{t-1}@k)⊗k + β_t * v_t ⊗ k
     #
-    # Standard DeltaNet WY implements:
-    #   S_t = α_t * S_{t-1} + β_wy * (v_wy ⊗ k - S_{t-1}@k ⊗ k)
-    #       = α_t * S_{t-1} - β_wy * (S_{t-1}@k)⊗k + β_wy * v_wy ⊗ k
-    #
-    # Matching coefficients: β_wy = α_t * β_t, v_wy = write_t / α_t
-    # This way: β_wy*(v_wy⊗k) = α*β*(write/α)⊗k = β*write⊗k  ✓
-    #           β_wy*(S@k)⊗k  = α*β*(S@k)⊗k                    ✓
+    # Erase uses un-decayed S_{t-1}. Decay α appears in A's decay_matrix
+    # (gamma_{i,j}) but NOT in beta. Using original beta directly.
 
     # Scalar decay: mean across d_state channels
     alpha_scalar = alpha.mean(dim=-1)  # (batch, L, nheads)
 
-    # beta_write = original beta (for V scaling)
+    # Use original beta directly (decay handled by gamma in A matrix)
     if beta1 is not None and use_delta:
-        beta_write = beta1[:, :, :, 0]  # (batch, L, nheads)
+        beta_flat = beta1[:, :, :, 0]  # (batch, L, nheads)
     else:
-        beta_write = torch.ones(batch, L, nheads, device=device, dtype=dtype)
+        beta_flat = torch.ones(batch, L, nheads, device=device, dtype=dtype)
 
-    # beta_wy = alpha * beta (for WY's A matrix / UT transform)
-    beta_flat = alpha_scalar * beta_write  # (batch, L, nheads)
-
-    # V = write_t / alpha_t (so that beta_wy * V = beta * write)
+    # V = write value (no alpha rescaling needed)
     # write_t = x_write * ||B1|| (SISO, absorbing B1 norm into value)
     b1_norm = B1[:, :, 0, :].norm(dim=-1, keepdim=True)  # (batch, L, 1)
     b1_norm = b1_norm.unsqueeze(2)  # (batch, L, 1, 1)
@@ -542,10 +553,6 @@ def delta_recurrence_wy(
         V = lam_v * V_euler + (1.0 - lam_v) * V_prev
     else:
         V = V_euler
-
-    # Divide V by alpha to get v_wy (so beta_wy * v_wy ⊗ k = beta * write ⊗ k)
-    alpha_v = alpha_scalar.unsqueeze(-1)  # (batch, L, nheads, 1) for headdim broadcast
-    V = V / alpha_v.clamp(min=1e-8)
 
     # =====================================================================
     # Reshape into chunks: (batch, n_chunks, Cs, ...)
