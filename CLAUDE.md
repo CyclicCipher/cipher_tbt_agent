@@ -6,9 +6,9 @@ A biologically-inspired AI system targeting the Danganronpa visual novel as an e
 
 Current focus: **Naja** — A hybrid architecture combining Mamba3's continuous-time SSM dynamics with the delta rule's targeted write/erase memory, MIMO, PoPE orthogonal pairs, per-channel decay, and surprise gating. This is the `experiments/Naja/` directory.
 
-**Phase 5a+5b (per-channel decay WY chunkwise) is COMPLETE and numerically verified** (max diff ~2e-6 vs naive reference). The A matrix stays CxC because per-channel decay is absorbed into K_pos/K_neg weighting before contracting over d_state. Eight test cases pass including per-channel multi-chunk.
+**Phase 5a+5b+5c (WY chunkwise with per-channel decay and PoPE pair) is COMPLETE and numerically verified** (max diff ~2e-6 vs naive reference). Eleven test cases pass including B₂ virtual token expansion, per-channel multi-chunk, and aggressive beta.
 
-**Next priority: Phase 5c — PoPE pair (B2) in WY via virtual token expansion, then Phase 5d — ablation testing.** See `CONTINUATION.md`.
+**Next priority: Phase 5d — ablation testing.** Run `python run_ablations.py` on GPU. See `CONTINUATION.md`.
 
 Previous focus: **JEPA** — JEPA-style latent prediction on Mamba3 backbone (still in `experiments/energy_reasoning/`).
 
@@ -58,10 +58,11 @@ Key files:
 - `train_naja.py` — Training loop with preset ablation configs
 - `tasks.py` — Ablation task generators (associative recall, parity, etc.)
 - `diagnose.py` — Diagnostic suite (timing, correctness, memory)
-- `test_wy_minimal.py` — Standalone WY correctness test (5 test cases, all passing ~1e-6)
+- `test_wy_minimal.py` — Standalone WY correctness test (11 test cases, all passing ~1e-6)
+- `run_ablations.py` — Phase 5d ablation runner (preset × task grid)
 - `DESIGN.md` — Complete architecture specification
 
-**WY chunkwise status:** `delta_recurrence_wy()` is numerically verified (Phase 5a+5b complete). Per-channel decay fully supported. Remaining simplifications: single Householder (no PoPE pair), SISO (r=1). Phase 5c will add PoPE pair via virtual token expansion.
+**WY chunkwise status:** `delta_recurrence_wy()` is numerically verified (Phase 5a+5b+5c complete). Per-channel decay and PoPE pair (B₂ via virtual token expansion) fully supported. Remaining simplification: SISO (r=1).
 
 ### Mamba3 Backbone (experiments/Mamba3/)
 

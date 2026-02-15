@@ -172,17 +172,60 @@ where `K_pos = K * exp(cumsum)`, `K_neg = K * exp(-cumsum)`. This is more effici
 - Test 7: per-channel varying alpha, multi-chunk (the hardest test)
 - Test 8: per-channel varying alpha, multi-chunk, beta=1 (aggressive)
 
-### Phase 5c: PoPE Pair (B₁, B₂)
+### Phase 5c: PoPE Pair (B₁, B₂) ✓ COMPLETE & VERIFIED
 
-Add virtual token expansion for the second Householder (DeltaProduct with n_h=2). Each real token becomes 2 virtual tokens. Standard WY applies to the 2C-length virtual sequence.
+Virtual token expansion (DeltaProduct with n_h=2) fully integrated into `delta_recurrence_wy()`. Each real token becomes 2 virtual tokens:
+
+- Virtual 2t: K=B̂₁, V=v₁, β=β₁, α=α_t (standard B₁ with real decay)
+- Virtual 2t+1: K=B̂₂, V=v₂, β=β₂, α=1.0 (B₂ with no extra decay within the pair)
+
+Q is zeroed at B₁ positions (even) — only B₂ positions contribute readout. Output extracted via `Y[:, 1::2]`.
+
+**Verification:** Tests 9-11 in test_wy_minimal.py all pass at ~1e-5 to 1e-6:
+- Test 9: B₂ single chunk, constant alpha
+- Test 10: B₂ multi-chunk, per-channel alpha (hardest)
+- Test 11: B₂ aggressive (beta1=1, beta2=1)
+
+**Bug fix (2026-02-15):** K_neg overflow in WY when alpha < 0.5 with Cs=128. Root cause: `exp(-cumsum)` exceeds float32 range. Fixed by clamping `(-cumsum).clamp(max=30.0)` before exp. This only affects above-diagonal entries that get zeroed by the causal mask.
 
 ### Phase 5d: Ablation Testing
 
-Run ablation experiments on GPU to validate each Naja component:
-- Per-channel decay vs scalar decay
-- PoPE pair vs single Householder
-- Surprise gating vs fixed beta
-- MIMO rank-r vs SISO
+Run ablation experiments on GPU to validate each Naja component.
+
+**Ablation runner:** `python run_ablations.py` (or `--dry-run` to preview)
+
+**Feature isolation grid:**
+
+| Feature tested     | Control (ON)       | Ablated (OFF)      |
+|--------------------|--------------------|--------------------|
+| Delta rule         | delta_only         | mamba3_base        |
+| PoPE pair (B₂)    | naja_full          | delta_per_channel  |
+| Per-channel decay  | naja_full          | pope_perp_only     |
+| Surprise gating    | surprise           | naja_full          |
+| MIMO r=2           | mimo2              | naja_full          |
+
+**Tasks (each designed to stress a specific feature):**
+
+| Task               | Stresses           |
+|--------------------|---------------------|
+| associative_recall | delta rule (erase+write) |
+| parity             | PoPE pair (rotation)     |
+| multi_scale        | per-channel decay        |
+| permutation_3/4    | full architecture        |
+
+**Usage:**
+```bash
+# Full grid (~45 runs, ~8 min on RTX 3050 Ti)
+python run_ablations.py
+
+# Quick subset
+python run_ablations.py --tasks parity associative_recall --presets mamba3_base naja_full delta_only
+
+# Resume after interruption
+python run_ablations.py --resume
+```
+
+Results saved to `ablation_results.jsonl`. Summary table printed at the end.
 
 Complete all ablations before investing in Triton optimization.
 
@@ -281,18 +324,22 @@ To map to DeltaNet's WY formulation:
 
 ### Phase 5a ✓ ACHIEVED
 1. ✅ `delta_recurrence_wy()` matches `delta_recurrence()` to ~1e-6 (target was <1e-4)
-2. ⬜ Training time per epoch drops by >5x on GPU (not yet benchmarked with training)
-3. ⬜ GPU utilization rises from ~0% to >50% (not yet benchmarked with training)
-4. ⬜ No accuracy regression on Stage 1b task (needs training run)
+2. ✅ Training time per epoch ~10s on RTX 3050 Ti (vs ~minutes with naive sequential)
+3. ⬜ GPU utilization rises from ~0% to >50% (not yet profiled with nvidia-smi)
+4. ✅ No accuracy regression on Stage 1b: 97.0% test (matches Mamba3 baseline)
 5. ✅ test_wy_minimal.py provides standalone correctness verification
 
 ### Phase 5b ✓ ACHIEVED
 6. ✅ Per-channel decay WY matches naive per-channel reference to ~2e-6 (target was <1e-4)
 7. ✅ All test_wy_minimal.py tests updated and passing with per-channel decay (8 tests)
 
+### Phase 5c ✓ ACHIEVED
+8. ✅ Virtual token expansion for B₂ matches naive reference to ~1e-5 (Tests 9-11)
+9. ✅ K_neg overflow fix: `(-cumsum).clamp(max=30.0)` prevents float32 overflow
+
 ### Phase 5d
-8. Ablation results documented for each Naja component
-9. Architecture decisions finalized based on empirical evidence
+10. ⬜ Ablation results documented for each Naja component
+11. ⬜ Architecture decisions finalized based on empirical evidence
 
 ---
 

@@ -76,6 +76,10 @@ PRESETS = {
         use_delta_rule=False, use_pope_perp=False, per_channel_decay=True,
         stable_reparam=False, use_surprise_gate=False, mimo_rank=1,
     ),
+    'delta_per_channel': dict(
+        use_delta_rule=True, use_pope_perp=False, per_channel_decay=True,
+        stable_reparam=False, use_surprise_gate=False, mimo_rank=1,
+    ),
     'stable_reparam': dict(
         use_delta_rule=True, use_pope_perp=True, per_channel_decay=True,
         stable_reparam=True, use_surprise_gate=False, mimo_rank=1,
@@ -163,6 +167,10 @@ def parse_args():
                    help='Save diagnostic charts every N epochs (0 to disable)')
     p.add_argument('--diag_dir', type=str, default=None,
                    help='Directory for diagnostic charts (default: auto)')
+
+    # Output
+    p.add_argument('--results_file', type=str, default=None,
+                   help='Append JSON result line to this file after training')
 
     # Misc
     p.add_argument('--device', type=str, default='auto')
@@ -824,15 +832,25 @@ def train(args):
     if total_nan > 0:
         print(f"  WARNING: {total_nan} NaN batches across all epochs")
 
-    return {
+    result = {
         'train_acc': train_acc,
         'test_acc': test_acc,
         'kl_acc': kl_acc,
         'loss': avg_loss,
         'config': feat_str,
         'task': task_name,
+        'preset': args.preset,
         'n_params': n_params,
+        'epochs': args.epochs,
     }
+
+    # Append JSON line to results file if requested
+    if args.results_file:
+        import json
+        with open(args.results_file, 'a') as f:
+            f.write(json.dumps(result) + '\n')
+
+    return result
 
 
 # ---------------------------------------------------------------------------
