@@ -596,11 +596,14 @@ def delta_recurrence_wy(
     # =====================================================================
     # P_c = I - K_c^T · W_c — transition matrix per chunk, (d_state, d_state)
     # H_c = K_c^T · U_c — state contribution per chunk, (d_state, headdim)
+    # Contract over position-in-chunk (t), keep feature dims (d, e):
+    #   K_c: (b, n, c, t, d_state), W: (b, n, c, t, d_state) → P: (b, n, c, d_state, d_state)
     P = torch.eye(d_state, device=device, dtype=dtype) - \
-        torch.einsum('bncie, bncje -> bncij', K_c, W)
+        torch.einsum('bnctd, bncte -> bncde', K_c, W)
     # P: (batch, nheads, n_chunks, d_state, d_state)
 
-    H = torch.einsum('bncie, bncje -> bncij', K_c, U)
+    #   K_c: (b, n, c, t, d_state), U: (b, n, c, t, headdim) → H: (b, n, c, d_state, headdim)
+    H = torch.einsum('bnctd, bncte -> bncde', K_c, U)
     # H: (batch, nheads, n_chunks, d_state, headdim)
 
     # =====================================================================
