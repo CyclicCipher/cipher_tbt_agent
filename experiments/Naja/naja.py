@@ -396,8 +396,12 @@ def _chunk_scaled_dot_kkt(K: Tensor, beta: Tensor, log_alpha_cumsum: Tensor) -> 
     """
     # Per-channel decay-weighted key products:
     # A[i,j] = Σ_d K[i,d] * K[j,d] * exp(cumsum[i,d] - cumsum[j,d])
+    # Clamp -cumsum to prevent exp overflow. The clamped entries correspond
+    # to above-diagonal positions in the final tril mask (zeroed out anyway).
+    # When K_neg overflows, the corresponding K_pos is exponentially small,
+    # so the mathematical product is ≈ 0 in either case.
     K_pos = K * torch.exp(log_alpha_cumsum)
-    K_neg = K * torch.exp(-log_alpha_cumsum)
+    K_neg = K * torch.exp((-log_alpha_cumsum).clamp(max=30.0))
     KKt_decay = torch.einsum('bncid, bncjd -> bncij', K_pos, K_neg)
     # Scale rows by beta_i (FLA convention: A[i,j] = β_i * (k̂_i · k̂_j * decay))
     A = KKt_decay * beta.unsqueeze(-1)  # broadcast beta over column dim
@@ -734,7 +738,8 @@ def delta_recurrence_wy(
     # Per-channel decay-weighted QK^T: each entry contracts per-channel decay
     # into the d_state sum.  QKt[i,j] = Σ_d Q[i,d]*K[j,d]*exp(cumsum[i,d]-cumsum[j,d])
     # Computed as Q_pos @ K_neg^T where Q_pos = Q*exp(cumsum), K_neg = K*exp(-cumsum).
-    K_neg = K_c * torch.exp(-log_alpha_cumsum)  # (batch, nheads, n_chunks, Cs, d_state)
+    # Clamp to prevent overflow (same reasoning as _chunk_scaled_dot_kkt)
+    K_neg = K_c * torch.exp((-log_alpha_cumsum).clamp(max=30.0))  # (batch, nheads, n_chunks, Cs, d_state)
     QKt = torch.einsum('bncid, bncjd -> bncij', Q_decay, K_neg)
 
     # Apply causal mask (lower triangular including diagonal)
