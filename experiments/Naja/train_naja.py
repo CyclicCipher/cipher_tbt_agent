@@ -64,6 +64,11 @@ PRESETS = {
         use_delta_rule=False, use_pope_perp=False, per_channel_decay=False,
         stable_reparam=False, use_surprise_gate=False, mimo_rank=1,
     ),
+    'mamba3_rope': dict(
+        use_delta_rule=False, use_pope_perp=False, per_channel_decay=False,
+        stable_reparam=False, use_surprise_gate=False, mimo_rank=1,
+        use_pope=False,
+    ),
     'delta_only': dict(
         use_delta_rule=True, use_pope_perp=False, per_channel_decay=False,
         stable_reparam=False, use_surprise_gate=False, mimo_rank=1,
@@ -129,6 +134,8 @@ def parse_args():
     p.add_argument('--no_delta_rule', action='store_true')
     p.add_argument('--use_pope_perp', action='store_true', default=None)
     p.add_argument('--no_pope_perp', action='store_true')
+    p.add_argument('--no_pope', action='store_true',
+                   help='Use RoPE instead of PoPE for B/C encoding')
     p.add_argument('--per_channel_decay', action='store_true', default=None)
     p.add_argument('--no_per_channel_decay', action='store_true')
     p.add_argument('--stable_reparam', action='store_true', default=None)
@@ -246,6 +253,8 @@ def build_config(args) -> NajaConfig:
         preset['stable_reparam'] = True
     if args.use_surprise_gate is not None:
         preset['use_surprise_gate'] = True
+    if args.no_pope:
+        preset['use_pope'] = False
     if args.mimo_rank is not None:
         preset['mimo_rank'] = args.mimo_rank
 
@@ -616,6 +625,8 @@ def train(args):
 
     # --- Config summary ---
     features = []
+    if not config.use_pope:
+        features.append('rope')
     if config.use_delta_rule:
         features.append('delta')
     if config.use_pope_perp:

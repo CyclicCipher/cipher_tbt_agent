@@ -42,6 +42,7 @@ SCRIPT_DIR = Path(__file__).parent
 #
 #   Feature tested         | Control (ON)       | Ablated (OFF)
 #   -----------------------|--------------------|-----------------
+#   PoPE vs RoPE           | mamba3_base        | mamba3_rope
 #   Delta rule             | delta_only         | mamba3_base
 #   PoPE pair (B2)         | naja_full          | delta_per_channel
 #   Per-channel decay      | naja_full          | pope_perp_only
@@ -50,6 +51,7 @@ SCRIPT_DIR = Path(__file__).parent
 
 ALL_PRESETS = [
     'mamba3_base',
+    'mamba3_rope',
     'delta_only',
     'pope_perp_only',
     'per_channel_only',
@@ -168,6 +170,7 @@ def print_results_table(results_file: str):
     print("-" * 95)
 
     comparisons = [
+        ('PoPE vs RoPE',     'mamba3_base', 'mamba3_rope'),
         ('Delta rule',       'naja_full', 'mamba3_base'),
         ('PoPE pair (B2)',   'naja_full', 'delta_per_channel'),
         ('Per-ch decay',     'naja_full', 'pope_perp_only'),
