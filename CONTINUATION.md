@@ -139,25 +139,38 @@ File modified: `experiments/Naja/naja.py`
 **CLI flag:** `--use_wy_chunkwise` in train_naja.py ✓
 **Diagnostics:** `diagnose.py` updated with WY timing and correctness tests ✓
 
-**Phase 5a simplifications (to be lifted in Phase 5b):**
+**Remaining simplifications (Phase 5b lifted scalar decay):**
 - SISO only (r=1 MIMO column for erase key)
 - Single Householder (B1 only, B2/PoPE pair ignored)
-- Scalar decay (mean of per-channel α, not full diagonal)
 - Trapezoidal blending baked into V before WY transform
 
-### Phase 5b: Per-Channel Decay ← NEXT PRIORITY
+### Phase 5b: Per-Channel Decay ✓ COMPLETE & VERIFIED
 
-Lift the scalar decay simplification. Per-channel decay means each of the `d_state` channels gets its own decay rate `alpha_t[k]`.
+Lifted the scalar decay simplification. Per-channel decay means each of the `d_state` channels gets its own decay rate `alpha_t[d]`.
 
-**What changes:**
+**Key mathematical insight:** The A matrix stays CxC (NOT CxCxd_state) because the Householder projection contracts over d_state. Per-channel decay is absorbed into the key weighting:
+
+```
+A[i,j] = β_j * Σ_d k_i[d] * k_j[d] * exp(cumsum[i,d] - cumsum[j,d])
+       = β_j * K_pos[i] · K_neg[j]
+```
+
+where `K_pos = K * exp(cumsum)`, `K_neg = K * exp(-cumsum)`. This is more efficient than the original scalar implementation (no separate decay_matrix computation).
+
+**What changed:**
 - `log_alpha_cumsum` shape: `(batch, nheads, n_chunks, Cs)` → `(batch, nheads, n_chunks, Cs, d_state)`
-- A matrix: `A[i,j] = beta_j * decay(i,j) * (k_i · k_j)` becomes per-channel: `A[i,j,k] = beta_j * decay_k(i,j) * k_i[k] * k_j[k]`. This is no longer a simple CxC matrix but CxCxd_state.
-- Causal decay mask and forward-decay factors broadcast over `d_state`
-- The UT forward substitution becomes d_state independent scalar forward substitutions (one per channel), NOT a single matrix solve
+- `gamma_c` shape: `(batch, nheads, n_chunks)` → `(batch, nheads, n_chunks, d_state)`
+- A matrix: computed as `K_pos @ K_neg^T` instead of `KKt * scalar_decay_matrix`
+- T, W, U shapes: **UNCHANGED** (CxC, Cs×d_state, Cs×headdim) — no new forward substitution needed
+- K_fwd, W_state, decay_from_start: all now per-channel weighted
+- Step 4 output: Q_decay = Q * exp(cumsum) folds per-channel decay into readout
+- QKt: `Q_decay @ K_neg^T` absorbs per-channel decay into the attention-like matrix
 
-**KDA reference:** KDA (arXiv:2510.26692) implements exactly this. Their A matrix is per-channel, and they handle it by solving d_state independent lower-triangular systems. The FLA implementation in `fla/ops/kda/` is the reference.
-
-**Note on A matrix convention:** Our A uses `beta_j` (column index) while FLA uses `beta_i` (row index). For constant beta these are equivalent. For variable beta, we may need to reconcile — but this doesn't affect per-channel decay, which is orthogonal to the beta convention.
+**Verification:** 8 test cases all passing at ~2e-6 max diff vs naive reference:
+- Tests 1-5: original tests (constant alpha, no decay, no beta, multi-chunk, aggressive)
+- Test 6: per-channel varying alpha, single chunk
+- Test 7: per-channel varying alpha, multi-chunk (the hardest test)
+- Test 8: per-channel varying alpha, multi-chunk, beta=1 (aggressive)
 
 ### Phase 5c: PoPE Pair (B₁, B₂)
 
@@ -273,9 +286,9 @@ To map to DeltaNet's WY formulation:
 4. ⬜ No accuracy regression on Stage 1b task (needs training run)
 5. ✅ test_wy_minimal.py provides standalone correctness verification
 
-### Phase 5b
-6. Per-channel decay WY matches naive per-channel reference to <1e-4
-7. All test_wy_minimal.py tests updated and passing with per-channel decay
+### Phase 5b ✓ ACHIEVED
+6. ✅ Per-channel decay WY matches naive per-channel reference to ~2e-6 (target was <1e-4)
+7. ✅ All test_wy_minimal.py tests updated and passing with per-channel decay (8 tests)
 
 ### Phase 5d
 8. Ablation results documented for each Naja component

@@ -351,17 +351,21 @@ def delta_recurrence_chunkwise(
 
 
 # ---------------------------------------------------------------------------
-# Phase 5a: WY Chunkwise Delta Recurrence (Real Parallelism)
+# Phase 5a/5b: WY Chunkwise Delta Recurrence (Real Parallelism)
 # ---------------------------------------------------------------------------
 #
 # Implements the 4-step WY chunkwise algorithm from:
 #   Yang et al. 2024 — "Parallelizing Linear Transformers with the Delta Rule"
 #   (arXiv:2406.06484), Section 3 and Appendix B.
 #
-# Phase 5a simplifications (to be lifted in Phase 5b):
+# Phase 5b: Per-channel decay (KDA-style). The A matrix stays CxC because
+# the Householder projection contracts over d_state: A[i,j] = β_j * Σ_d
+# k_i[d] * k_j[d] * γ(i,j,d). Per-channel decay is absorbed into
+# K_pos/K_neg weighting before the contraction.
+#
+# Remaining simplifications:
 #   - SISO only (r=1): single MIMO column for erase key
 #   - Single Householder (B1 only): no PoPE pair B2
-#   - Scalar decay: mean of per-channel α (not full diagonal)
 #   - Trapezoidal blending baked into V before WY transform
 #
 # The algorithm reduces sequential steps from L to L/C by computing
@@ -370,27 +374,30 @@ def delta_recurrence_chunkwise(
 def _chunk_scaled_dot_kkt(K: Tensor, beta: Tensor, log_alpha_cumsum: Tensor) -> Tensor:
     """Compute A = tril(diag(β) · Γ ⊙ (K · K^T), -1) per chunk.
 
-    Includes intra-chunk decay: A_{i,j} = β_j · γ_{i,j} · (k_i · k_j)
-    where γ_{i,j} = exp(cumsum_log_α[i] - cumsum_log_α[j]) is the
-    cumulative decay from position j to position i within the chunk.
+    Supports per-channel decay: A_{i,j} = β_j · Σ_d k_i[d] · k_j[d] · γ_{i,j}[d]
+    where γ_{i,j}[d] = exp(cumsum_log_α[i,d] - cumsum_log_α[j,d]) is the
+    per-channel cumulative decay from position j to position i within the chunk.
+
+    Computed efficiently as K_pos @ K_neg^T where K_pos = K * exp(cumsum),
+    K_neg = K * exp(-cumsum). The per-channel decay is absorbed into the
+    key weighting before contracting over d_state.
 
     Args:
         K: (batch, nheads, n_chunks, C, d_k) — keys within each chunk.
         beta: (batch, nheads, n_chunks, C) — write gates.
-        log_alpha_cumsum: (batch, nheads, n_chunks, C) — cumulative log-decay.
+        log_alpha_cumsum: (batch, nheads, n_chunks, C, d_state) — per-channel
+            cumulative log-decay.
 
     Returns:
         A: (batch, nheads, n_chunks, C, C) — strictly lower triangular.
     """
-    # K K^T: (batch, nheads, n_chunks, C, C)
-    KKt = torch.einsum('bncid, bncjd -> bncij', K, K)
+    # Per-channel decay-weighted key products:
+    # A[i,j] = Σ_d K[i,d] * K[j,d] * exp(cumsum[i,d] - cumsum[j,d])
+    K_pos = K * torch.exp(log_alpha_cumsum)
+    K_neg = K * torch.exp(-log_alpha_cumsum)
+    KKt_decay = torch.einsum('bncid, bncjd -> bncij', K_pos, K_neg)
     # Scale columns by beta_j
-    A = KKt * beta.unsqueeze(-2)  # broadcast beta over row dim
-    # Intra-chunk decay matrix: γ_{i,j} = exp(cumsum[i] - cumsum[j])
-    decay_matrix = torch.exp(
-        log_alpha_cumsum.unsqueeze(-1) - log_alpha_cumsum.unsqueeze(-2)
-    )  # (batch, nheads, n_chunks, C, C)
-    A = A * decay_matrix
+    A = KKt_decay * beta.unsqueeze(-2)  # broadcast beta over row dim
     # Strictly lower triangular
     C_sz = A.shape[-1]
     mask = torch.tril(torch.ones(C_sz, C_sz, device=A.device, dtype=torch.bool), diagonal=-1)
@@ -456,15 +463,18 @@ def delta_recurrence_wy(
     use_delta: bool = True,
     chunk_size: int = 64,
 ) -> Tensor:
-    """WY chunkwise delta-rule recurrence (Phase 5a).
+    """WY chunkwise delta-rule recurrence (Phase 5a/5b).
 
     Implements the 4-step algorithm from Yang et al. 2024 with Naja's
     specific parameterization. Same interface as delta_recurrence.
 
-    Phase 5a limitations:
+    Phase 5b: Per-channel decay (KDA-style). Each d_state channel gets its
+    own decay rate. The A matrix stays CxC because the Householder projection
+    contracts over d_state, absorbing per-channel decay into the weighting.
+
+    Remaining limitations:
     - SISO only (uses first MIMO column r=0 for erase key)
     - Single Householder (B1 only, B2 ignored)
-    - Scalar decay (mean of per-channel α within each chunk)
 
     Returns:
         (batch, seqlen, nheads, headdim, r) — same shape as delta_recurrence.
@@ -510,11 +520,11 @@ def delta_recurrence_wy(
     #       = α_t * S_{t-1} - β_t * (α_t * S_{t-1} @ k̂) ⊗ k̂ + β_t * v ⊗ k
     #
     # Erase operates on the already-decayed state (α_t * S_{t-1}).
-    # Decay α appears in A's decay_matrix (gamma_{i,j}) and is factored
-    # into the WY transform. Using original beta directly.
+    # Per-channel decay α ∈ R^{d_state} is absorbed into the WY A matrix
+    # via K_pos/K_neg weighting: A[i,j] = β_j * Σ_d k_i[d]*k_j[d]*γ(i,j,d).
+    # The A matrix stays CxC — per-channel decay doesn't change its shape.
 
-    # Scalar decay: mean across d_state channels
-    alpha_scalar = alpha.mean(dim=-1)  # (batch, L, nheads)
+    # Per-channel decay: alpha is (batch, L, nheads, d_state) — use directly
 
     # Use original beta directly (decay handled by gamma in A matrix)
     if beta1 is not None and use_delta:
@@ -555,7 +565,7 @@ def delta_recurrence_wy(
     Q_c = to_chunks(Q)                    # (batch, n_chunks, Cs, d_state)
     V_c = to_chunks(V)                    # (batch, n_chunks, Cs, nheads, headdim)
     beta_c = to_chunks(beta_flat)          # (batch, n_chunks, Cs, nheads)
-    alpha_c = to_chunks(alpha_scalar)      # (batch, n_chunks, Cs, nheads)
+    alpha_c = to_chunks(alpha)             # (batch, n_chunks, Cs, nheads, d_state)
 
     # For the WY algorithm, we need K, V, Q, beta all in the shape:
     # (batch, nheads, n_chunks, Cs, feature_dim)
@@ -567,15 +577,16 @@ def delta_recurrence_wy(
     # V and beta need permutation from (batch, n_chunks, Cs, nheads, ...) to (batch, nheads, n_chunks, Cs, ...)
     V_c = V_c.permute(0, 3, 1, 2, 4)      # (batch, nheads, n_chunks, Cs, headdim)
     beta_c = beta_c.permute(0, 3, 1, 2)    # (batch, nheads, n_chunks, Cs)
-    alpha_c = alpha_c.permute(0, 3, 1, 2)  # (batch, nheads, n_chunks, Cs)
+    alpha_c = alpha_c.permute(0, 3, 1, 2, 4)  # (batch, nheads, n_chunks, Cs, d_state)
 
     # =====================================================================
     # Precompute decay quantities (needed by both Step 1 and Step 4)
     # =====================================================================
-    log_alpha_c = torch.log(alpha_c.clamp(min=1e-8))  # (batch, nheads, n_chunks, Cs)
-    log_alpha_cumsum = torch.cumsum(log_alpha_c, dim=-1)  # (batch, nheads, n_chunks, Cs)
-    log_gamma_c = log_alpha_c.sum(dim=-1)  # (batch, nheads, n_chunks)
-    gamma_c = torch.exp(log_gamma_c)  # cumulative decay for each chunk
+    # Per-channel: all decay quantities carry d_state dimension
+    log_alpha_c = torch.log(alpha_c.clamp(min=1e-8))  # (batch, nheads, n_chunks, Cs, d_state)
+    log_alpha_cumsum = torch.cumsum(log_alpha_c, dim=3)  # cumsum over Cs dim; (batch, nheads, n_chunks, Cs, d_state)
+    log_gamma_c = log_alpha_c.sum(dim=3)  # sum over Cs; (batch, nheads, n_chunks, d_state)
+    gamma_c = torch.exp(log_gamma_c)  # per-channel cumulative decay for each chunk
 
     # =====================================================================
     # Step 1: Intra-chunk WY transform
@@ -586,24 +597,23 @@ def delta_recurrence_wy(
     # U: (batch, nheads, n_chunks, Cs, headdim) — pseudo-values
 
     # Decay-weighted pseudo-keys: W_state = T @ (K * exp(cumsum))
-    # At position t, the incoming state has been decayed by exp(cumsum[t])
-    # from the chunk boundary.  W_state accounts for this so that
-    # v_new = U - W_state @ S correctly predicts the delta correction.
-    cumsum_exp = torch.exp(log_alpha_cumsum).unsqueeze(-1)  # (b, n, c, Cs, 1)
-    K_decay = K_c * cumsum_exp  # K scaled by cumulative decay per position
+    # At position t, the incoming state has been decayed by exp(cumsum[t,d])
+    # from the chunk boundary (per-channel).  W_state accounts for this so
+    # that v_new = U - W_state @ S correctly predicts the delta correction.
+    cumsum_exp = torch.exp(log_alpha_cumsum)  # (b, n, c, Cs, d_state)
+    K_decay = K_c * cumsum_exp  # K scaled by per-channel cumulative decay
     W_state = torch.einsum('bncij, bncjd -> bncid', _T, K_decay)
     # W_state: (batch, nheads, n_chunks, Cs, d_state)
 
     # =====================================================================
     # Step 2: Precompute forward-decayed keys for inter-chunk state update
     # =====================================================================
-    # K_fwd[c,t] = K[c,t] * exp(total_chunk_decay - cumsum[t])
-    # This is the decay each position's write must survive to reach the
-    # chunk boundary (end of chunk).  Last position gets factor 1.
+    # K_fwd[c,t,d] = K[c,t,d] * exp(total_chunk_decay[d] - cumsum[t,d])
+    # Per-channel: each position's write decays per-channel to the chunk boundary.
     fwd_decay = torch.exp(
-        log_gamma_c.unsqueeze(-1) - log_alpha_cumsum
-    )  # (batch, nheads, n_chunks, Cs)
-    K_fwd = K_c * fwd_decay.unsqueeze(-1)  # (batch, nheads, n_chunks, Cs, d_state)
+        log_gamma_c.unsqueeze(3) - log_alpha_cumsum
+    )  # (batch, nheads, n_chunks, Cs, d_state) — per-channel forward decay
+    K_fwd = K_c * fwd_decay  # (batch, nheads, n_chunks, Cs, d_state)
 
     # =====================================================================
     # Step 3: Inter-chunk scan (sequential over n_chunks — small!)
@@ -625,7 +635,8 @@ def delta_recurrence_wy(
         # v_new = U - WS: corrected pseudo-values
         v_new = U[:, :, c] - WS_c
         # State update: decay old + accumulate forward-decayed contributions
-        g = gamma_c[:, :, c].unsqueeze(-1).unsqueeze(-1)  # (batch, nheads, 1, 1)
+        # gamma_c[:,:,c] is (batch, nheads, d_state) — per-channel chunk decay
+        g = gamma_c[:, :, c].unsqueeze(-1)  # (batch, nheads, d_state, 1)
         S = g * S + torch.einsum('bnid, bnie -> bnde', K_fwd[:, :, c], v_new)
 
     # Stack: (batch, nheads, n_chunks, d_state, headdim)
@@ -636,30 +647,25 @@ def delta_recurrence_wy(
     # =====================================================================
     # O_c = Q_c @ S_{c-1} + tril(Q_c @ K_c^T) · (U_c - W_c @ S_{c-1})
     #
-    # First term: each position reads from the inter-chunk state
-    # Q_c: (batch, nheads, n_chunks, Cs, d_state)
-    # S_prev: (batch, nheads, n_chunks, d_state, headdim)
-    Y_off = torch.einsum('bncid, bncde -> bncie', Q_c, S_prev)
+    # First term: each position reads from the inter-chunk state, with
+    # per-channel decay from chunk start to each position.
+    # decay[t,d] goes INSIDE the sum over d (can't factor out like scalar).
+    # Q_decay = Q * exp(cumsum) folds per-channel decay into the readout.
+    decay_from_start = torch.exp(log_alpha_cumsum)  # (batch, nheads, n_chunks, Cs, d_state)
+    Q_decay = Q_c * decay_from_start  # (batch, nheads, n_chunks, Cs, d_state)
+    Y_off = torch.einsum('bncid, bncde -> bncie', Q_decay, S_prev)
     # Y_off: (batch, nheads, n_chunks, Cs, headdim)
 
     # Second term: intra-chunk corrections
-    # Q_c @ K_c^T: (batch, nheads, n_chunks, Cs, Cs) — attention-like matrix
-    QKt = torch.einsum('bncid, bncjd -> bncij', Q_c, K_c)
+    # Per-channel decay-weighted QK^T: each entry contracts per-channel decay
+    # into the d_state sum.  QKt[i,j] = Σ_d Q[i,d]*K[j,d]*exp(cumsum[i,d]-cumsum[j,d])
+    # Computed as Q_pos @ K_neg^T where Q_pos = Q*exp(cumsum), K_neg = K*exp(-cumsum).
+    K_neg = K_c * torch.exp(-log_alpha_cumsum)  # (batch, nheads, n_chunks, Cs, d_state)
+    QKt = torch.einsum('bncid, bncjd -> bncij', Q_decay, K_neg)
 
     # Apply causal mask (lower triangular including diagonal)
     causal_mask = torch.tril(torch.ones(Cs, Cs, device=device, dtype=dtype))
     QKt = QKt * causal_mask
-
-    # Apply per-position decay within chunk:
-    # Position i reading from position j (j <= i) has cumulative decay
-    # prod_{k=j+1}^{i} alpha_k applied.
-    # log_alpha_cumsum already computed above.
-    # decay_ij = exp(cumsum[i] - cumsum[j])
-    decay_matrix = torch.exp(
-        log_alpha_cumsum.unsqueeze(-1) - log_alpha_cumsum.unsqueeze(-2)
-    )  # (batch, nheads, n_chunks, Cs, Cs)
-    decay_matrix = decay_matrix * causal_mask  # zero out upper triangle
-    QKt = QKt * decay_matrix
 
     # W_state @ S_{c-1}: decay-weighted correction for inter-chunk state
     WS = torch.einsum('bncid, bncde -> bncie', W_state, S_prev)
@@ -670,11 +676,6 @@ def delta_recurrence_wy(
 
     Y_diag = torch.einsum('bncij, bncje -> bncie', QKt, intra_correction)
     # Y_diag: (batch, nheads, n_chunks, Cs, headdim)
-
-    # Also apply decay to the off-diagonal term (state read decays from chunk boundary)
-    # decay from chunk start to each position within chunk
-    decay_from_start = torch.exp(log_alpha_cumsum)  # (batch, nheads, n_chunks, Cs)
-    Y_off = Y_off * decay_from_start.unsqueeze(-1)  # broadcast over headdim
 
     # Combine
     Y = Y_diag + Y_off
@@ -691,10 +692,10 @@ def delta_recurrence_wy(
     if pad_len > 0:
         Y = Y[:, :seqlen]
 
-    # Add MIMO rank dimension (r=1 for Phase 5a)
+    # Add MIMO rank dimension (r=1 for Phase 5a/5b)
     Y = Y.unsqueeze(-1)  # (batch, seqlen, nheads, headdim, 1)
 
-    # For r > 1, replicate the output (Phase 5b will handle proper MIMO)
+    # For r > 1, replicate the output (MIMO WY is a future phase)
     if r > 1:
         Y = Y.expand(-1, -1, -1, -1, r)
 

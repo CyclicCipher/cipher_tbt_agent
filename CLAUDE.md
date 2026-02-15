@@ -6,9 +6,9 @@ A biologically-inspired AI system targeting the Danganronpa visual novel as an e
 
 Current focus: **Naja** — A hybrid architecture combining Mamba3's continuous-time SSM dynamics with the delta rule's targeted write/erase memory, MIMO, PoPE orthogonal pairs, per-channel decay, and surprise gating. This is the `experiments/Naja/` directory.
 
-**Phase 5a (scalar-decay WY chunkwise) is COMPLETE and numerically verified** (max diff ~1e-6 vs naive reference). Three bugs were found and fixed during verification (see Mistake #40). The WY algorithm is correct for single Householder, scalar decay, SISO.
+**Phase 5a+5b (per-channel decay WY chunkwise) is COMPLETE and numerically verified** (max diff ~2e-6 vs naive reference). The A matrix stays CxC because per-channel decay is absorbed into K_pos/K_neg weighting before contracting over d_state. Eight test cases pass including per-channel multi-chunk.
 
-**Immediate priority: Phase 5b — per-channel decay in WY.** The A matrix and cumulative decay terms must become `d_state`-dimensional (diagonal matrices instead of scalars). This is required before ablation testing. See `CONTINUATION.md`.
+**Next priority: Phase 5c — PoPE pair (B2) in WY via virtual token expansion, then Phase 5d — ablation testing.** See `CONTINUATION.md`.
 
 Previous focus: **JEPA** — JEPA-style latent prediction on Mamba3 backbone (still in `experiments/energy_reasoning/`).
 
@@ -61,7 +61,7 @@ Key files:
 - `test_wy_minimal.py` — Standalone WY correctness test (5 test cases, all passing ~1e-6)
 - `DESIGN.md` — Complete architecture specification
 
-**WY chunkwise status:** `delta_recurrence_wy()` is numerically verified (Phase 5a complete). Current simplifications: single Householder (no PoPE pair), scalar decay (not per-channel), SISO (r=1). Phase 5b will lift the scalar decay limitation.
+**WY chunkwise status:** `delta_recurrence_wy()` is numerically verified (Phase 5a+5b complete). Per-channel decay fully supported. Remaining simplifications: single Householder (no PoPE pair), SISO (r=1). Phase 5c will add PoPE pair via virtual token expansion.
 
 ### Mamba3 Backbone (experiments/Mamba3/)
 
