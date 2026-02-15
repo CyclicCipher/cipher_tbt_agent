@@ -151,20 +151,18 @@ def delta_recurrence(
     outputs = []
 
     for t in range(seqlen):
-        # --- Decay: per-channel diagonal ---
-        a_t = alpha[:, t]  # (batch, nheads, d_state)
-        h = h * a_t.unsqueeze(2)  # broadcast over headdim
-
-        # --- Delta rule: Householder erase (first MIMO column as key) ---
+        # --- Gated DeltaNet update (erase and decay are additive on S_{t-1}) ---
+        # S_t = alpha * S_{t-1} - beta * (S_{t-1} @ k_hat) ⊗ k_hat + beta * write
+        # Compute erase projection from un-decayed, un-erased state
+        erase = torch.zeros_like(h)
         if use_delta and beta1 is not None:
-            # Primary erase direction: first column of B1, shared across heads
             b1_key = B1[:, t, 0, :]  # (batch, d_state)
             b1_hat = F.normalize(b1_key, dim=-1)
             bt1 = beta1[:, t]  # (batch, nheads, 1)
 
-            # Householder 1: h -= β₁ · (h · b̂₁) ⊗ b̂₁
+            # Householder 1: compute erase from current h (un-decayed)
             proj1 = torch.einsum('bnpd,bd->bnp', h, b1_hat)
-            h = h - bt1.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj1, b1_hat)
+            erase = erase + bt1.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj1, b1_hat)
 
             # Householder 2: PoPE orthogonal pair
             if B2 is not None and beta2 is not None:
@@ -173,7 +171,11 @@ def delta_recurrence(
                 bt2 = beta2[:, t]
 
                 proj2 = torch.einsum('bnpd,bd->bnp', h, b2_hat)
-                h = h - bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
+                erase = erase + bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
+
+        # Apply decay and erase simultaneously (both operate on S_{t-1})
+        a_t = alpha[:, t]  # (batch, nheads, d_state)
+        h = h * a_t.unsqueeze(2) - erase  # alpha * S_{t-1} - beta * (S_{t-1} @ k) ⊗ k
 
         # --- Write: rank-r MIMO outer product sum ---
         # Σ_i x_write[:,:,:,i] ⊗ B1[:,:,i,:] contracts over i (MIMO rank)
@@ -242,24 +244,25 @@ def _process_chunk(
     for t in range(chunk_len):
         abs_t = chunk_start + t
 
-        # Decay
-        a_t = alpha[:, t]
-        h = h * a_t.unsqueeze(2)
-
-        # Delta rule erase
+        # Gated DeltaNet: erase and decay are additive on S_{t-1}
+        erase = torch.zeros_like(h)
         if use_delta and beta1 is not None:
             b1_key = B1[:, t, 0, :]
             b1_hat = F.normalize(b1_key, dim=-1)
             bt1 = beta1[:, t]
             proj1 = torch.einsum('bnpd,bd->bnp', h, b1_hat)
-            h = h - bt1.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj1, b1_hat)
+            erase = erase + bt1.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj1, b1_hat)
 
             if B2 is not None and beta2 is not None:
                 b2_key = B2[:, t, 0, :]
                 b2_hat = F.normalize(b2_key, dim=-1)
                 bt2 = beta2[:, t]
                 proj2 = torch.einsum('bnpd,bd->bnp', h, b2_hat)
-                h = h - bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
+                erase = erase + bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
+
+        # Apply decay and erase simultaneously
+        a_t = alpha[:, t]
+        h = h * a_t.unsqueeze(2) - erase
 
         # Write
         xw_t = x_write[:, t]
@@ -539,6 +542,9 @@ def delta_recurrence_wy(
         lam_v = lam.squeeze(-1)  # (batch, L, 1)
         if lam_v.dim() == 3:
             lam_v = lam_v.unsqueeze(-1)  # (batch, L, 1, 1)
+        # Force lam=1 at t=0 to match naive (which skips trapezoidal at t=0)
+        lam_v = lam_v.clone()
+        lam_v[:, 0] = 1.0
         V = lam_v * V_euler + (1.0 - lam_v) * V_prev
     else:
         V = V_euler
