@@ -490,12 +490,33 @@ def delta_recurrence_wy(
     """
     batch, seqlen, nheads, headdim, r = x_write.shape
     d_state = B1.shape[-1]
-    device, dtype = x_write.device, x_write.dtype
+    device = x_write.device
+    orig_dtype = x_write.dtype
 
     # WY uses Euler discretization only. Trapezoidal blending mixes two
     # outer products with different key directions (B_t and B_{t-1}), which
     # can't be represented as a single WY step per token. Force Euler.
     use_trapezoidal = False
+
+    # Force float32 for the entire WY computation. The WY transform
+    # involves solve_triangular, cumsum, exp, and many intermediate matrix
+    # products that overflow fp16 after a few training steps. This matches
+    # standard practice (FLA library runs recurrence kernels in float32).
+    if x_write.is_cuda and orig_dtype in (torch.float16, torch.bfloat16):
+        x_write = x_write.float()
+        x_write_prev = x_write_prev.float()
+        B1 = B1.float()
+        B1_prev = B1_prev.float()
+        if B2 is not None:
+            B2 = B2.float()
+        C = C.float()
+        alpha = alpha.float()
+        if beta1 is not None:
+            beta1 = beta1.float()
+        if beta2 is not None:
+            beta2 = beta2.float()
+        lam = lam.float()
+    dtype = x_write.dtype  # float32 after upcast
 
     # Pad sequence to multiple of chunk_size if needed
     pad_len = (chunk_size - seqlen % chunk_size) % chunk_size
@@ -756,7 +777,7 @@ def delta_recurrence_wy(
     if r > 1:
         Y = Y.expand(-1, -1, -1, -1, r)
 
-    return Y
+    return Y.to(orig_dtype)
 
 
 # ---------------------------------------------------------------------------
@@ -1084,7 +1105,15 @@ class NajaMixer(nn.Module):
         )
         if cfg.use_chunkwise or cfg.use_wy_chunkwise:
             recurrence_kwargs['chunk_size'] = cfg.chunk_size
-        y = recurrence_fn(**recurrence_kwargs)
+
+        # WY runs in float32 for numerical stability (fp16 overflows in the
+        # solve_triangular, cumsum, and intermediate matrix products).
+        # Disable autocast so float32 inputs aren't re-cast to fp16.
+        if cfg.use_wy_chunkwise and x.is_cuda:
+            with torch.amp.autocast(device_type='cuda', enabled=False):
+                y = recurrence_fn(**recurrence_kwargs)
+        else:
+            y = recurrence_fn(**recurrence_kwargs)
         # y: (batch, seqlen, nheads, headdim, r)
 
         # --- MIMO contraction + skip connection ---

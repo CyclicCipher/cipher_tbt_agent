@@ -54,6 +54,7 @@ Thumbs.db
 
 # Experiment results/plots (generated artifacts)
 experiments/*/results/
+experiments/*/diagnostics/
 diagnostics_epc_mnist_final.png
 diagnostics_epc_mnist_epoch_3.png
 diagnostics_epc_mnist_epoch_2.png

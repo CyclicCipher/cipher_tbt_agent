@@ -35,6 +35,7 @@ import os
 import sys
 import time
 from contextlib import nullcontext
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -157,6 +158,12 @@ def parse_args():
     p.add_argument('--compile', action='store_true', help='torch.compile the model')
     p.add_argument('--profile', action='store_true', help='Print timing breakdown (5 epochs)')
 
+    # Diagnostics
+    p.add_argument('--diag_every', type=int, default=5,
+                   help='Save diagnostic charts every N epochs (0 to disable)')
+    p.add_argument('--diag_dir', type=str, default=None,
+                   help='Directory for diagnostic charts (default: auto)')
+
     # Misc
     p.add_argument('--device', type=str, default='auto')
     p.add_argument('--seed', type=int, default=42)
@@ -190,14 +197,13 @@ def parse_args():
             import torch
             if torch.cuda.is_available():
                 vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                if vram_gb <= 6.0:
-                    if args.batch_size == 32:
-                        args.batch_size = 8
+                if vram_gb <= 4.0:
+                    # Naja is very memory-efficient (~200MB peak at batch=32).
+                    # Only reduce for very small GPUs (≤4GB).
                     if args.stage == '2' and args.batch_size == 128:
-                        args.batch_size = 32
-                    # Use smaller chunks on low-VRAM cards
-                    if args.use_wy_chunkwise and args.chunk_size == 64:
-                        args.chunk_size = 16
+                        args.batch_size = 64
+                    # chunk_size=64 is fine: with virtual tokens (Cs=128)
+                    # the WY matrices are only ~16MB per head.
                     print(f"VRAM: {vram_gb:.1f}GB detected — "
                           f"batch_size={args.batch_size}, "
                           f"chunk_size={args.chunk_size}")
@@ -330,6 +336,185 @@ def evaluate_with_kl_surprise(model, loader, device, amp_ctx, kl_tracker):
 
 
 # ---------------------------------------------------------------------------
+# Diagnostics
+# ---------------------------------------------------------------------------
+
+def collect_diagnostics(model, config, epoch, device, amp_ctx):
+    """Collect diagnostic snapshot from model state."""
+    diag = {'epoch': epoch}
+
+    # Alpha (decay) distribution
+    model.eval()
+    with torch.no_grad():
+        all_alpha = []
+        all_beta1 = []
+        all_beta2 = []
+        grad_norms = {}
+        weight_norms = {}
+
+        for i, layer in enumerate(model.layers):
+            mixer = layer.mixer
+            # Weight norms per layer
+            weight_norms[f'L{i}_in_proj'] = mixer.in_proj.weight.norm().item()
+            weight_norms[f'L{i}_out_proj'] = mixer.out_proj.weight.norm().item()
+
+            # Gradient norms (if available)
+            for name, p in mixer.named_parameters():
+                if p.grad is not None:
+                    grad_norms[f'L{i}_{name}'] = p.grad.norm().item()
+
+        diag['weight_norms'] = weight_norms
+        diag['grad_norms'] = grad_norms
+
+        # Run a forward pass to capture alpha/beta values
+        dummy = torch.randint(0, 16, (4, 64), device=device)
+        hooks = []
+        captured = {}
+
+        def make_hook(layer_idx):
+            def hook_fn(module, input, output):
+                # Access the mixer's internal state after forward
+                pass
+            return hook_fn
+
+        # Simpler: directly access the mixer parameters for alpha stats
+        for i, layer in enumerate(model.layers):
+            mixer = layer.mixer
+            if hasattr(mixer, 'decay_bias'):
+                # Per-channel decay: the bias determines typical alpha range
+                bias = mixer.decay_bias.detach()
+                if config.stable_reparam:
+                    alpha_approx = 1.0 - 1.0 / (bias.pow(2) + 0.5)
+                else:
+                    alpha_approx = torch.sigmoid(bias)
+                all_alpha.append(alpha_approx.cpu().flatten())
+
+            if hasattr(mixer, 'beta1_proj'):
+                # Beta1 bias gives typical gate value
+                b1_bias = mixer.beta1_proj.bias.detach() if mixer.beta1_proj.bias is not None else torch.zeros(1)
+                all_beta1.append(torch.sigmoid(b1_bias).cpu().flatten())
+
+            if hasattr(mixer, 'beta2_proj'):
+                b2_bias = mixer.beta2_proj.bias.detach() if mixer.beta2_proj.bias is not None else torch.zeros(1)
+                all_beta2.append(torch.sigmoid(b2_bias).cpu().flatten())
+
+        if all_alpha:
+            diag['alpha'] = torch.cat(all_alpha).numpy()
+        if all_beta1:
+            diag['beta1'] = torch.cat(all_beta1).numpy()
+        if all_beta2:
+            diag['beta2'] = torch.cat(all_beta2).numpy()
+
+    return diag
+
+
+def save_diagnostic_charts(history, diag, save_dir, epoch):
+    """Save diagnostic charts as PNG."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("  [diagnostics] matplotlib not available, skipping charts")
+        return
+
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+    fig.suptitle(f'Naja Diagnostics — Epoch {epoch}', fontsize=14)
+
+    # 1. Loss curve
+    ax = axes[0, 0]
+    epochs = [h['epoch'] for h in history]
+    losses = [h['loss'] for h in history]
+    ax.plot(epochs, losses, 'b-', linewidth=1.5)
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Loss')
+    ax.set_title('Training Loss')
+    ax.grid(True, alpha=0.3)
+    # Mark NaN losses
+    nan_epochs = [e for e, l in zip(epochs, losses) if math.isnan(l)]
+    if nan_epochs:
+        ax.axvline(x=nan_epochs[0], color='r', linestyle='--', label=f'NaN at epoch {nan_epochs[0]}')
+        ax.legend()
+
+    # 2. Accuracy curves
+    ax = axes[0, 1]
+    train_acc = [h['train_acc'] for h in history]
+    test_acc = [h['test_acc'] for h in history]
+    ax.plot(epochs, train_acc, 'b-', label='Train', linewidth=1.5)
+    ax.plot(epochs, test_acc, 'r--', label='Test', linewidth=1.5)
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Accuracy')
+    ax.set_title('Train / Test Accuracy')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(0, 1.05)
+
+    # 3. Alpha (decay) distribution
+    ax = axes[0, 2]
+    if 'alpha' in diag:
+        ax.hist(diag['alpha'], bins=50, color='steelblue', edgecolor='none', alpha=0.8)
+        ax.axvline(x=diag['alpha'].mean(), color='red', linestyle='--',
+                    label=f'mean={diag["alpha"].mean():.3f}')
+        ax.set_xlabel('Alpha (decay)')
+        ax.set_title('Per-Channel Decay Distribution')
+        ax.legend()
+    else:
+        ax.text(0.5, 0.5, 'N/A', ha='center', va='center', transform=ax.transAxes)
+    ax.grid(True, alpha=0.3)
+
+    # 4. Gradient norms per layer
+    ax = axes[1, 0]
+    if diag.get('grad_norms'):
+        names = list(diag['grad_norms'].keys())
+        values = list(diag['grad_norms'].values())
+        # Group by layer
+        layer_norms = {}
+        for n, v in zip(names, values):
+            layer = n.split('_')[0]  # "L0", "L1", etc.
+            layer_norms.setdefault(layer, []).append(v)
+        layer_means = {k: sum(v)/len(v) for k, v in layer_norms.items()}
+        ax.bar(list(layer_means.keys()), list(layer_means.values()), color='coral')
+        ax.set_xlabel('Layer')
+        ax.set_ylabel('Mean Gradient Norm')
+        ax.set_title('Gradient Norms by Layer')
+    else:
+        ax.text(0.5, 0.5, 'No gradients', ha='center', va='center', transform=ax.transAxes)
+    ax.grid(True, alpha=0.3)
+
+    # 5. Weight norms per layer
+    ax = axes[1, 1]
+    if diag.get('weight_norms'):
+        names = list(diag['weight_norms'].keys())
+        values = list(diag['weight_norms'].values())
+        ax.barh(names, values, color='mediumseagreen')
+        ax.set_xlabel('Weight Norm')
+        ax.set_title('Weight Norms')
+    ax.grid(True, alpha=0.3)
+
+    # 6. Gradient norm history
+    ax = axes[1, 2]
+    if any('grad_norm' in h for h in history):
+        gn_epochs = [h['epoch'] for h in history if 'grad_norm' in h]
+        gn_values = [h['grad_norm'] for h in history if 'grad_norm' in h]
+        ax.plot(gn_epochs, gn_values, 'g-', linewidth=1.5)
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Grad Norm (clipped)')
+        ax.set_title('Gradient Norm Over Time')
+    else:
+        ax.text(0.5, 0.5, 'N/A', ha='center', va='center', transform=ax.transAxes)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    path = save_dir / f'epoch_{epoch:03d}.png'
+    fig.savefig(path, dpi=100, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  [diagnostics] saved {path}")
+
+
+# ---------------------------------------------------------------------------
 # Training
 # ---------------------------------------------------------------------------
 
@@ -458,6 +643,11 @@ def train(args):
         prof = {'forward': 0.0, 'backward': 0.0, 'step': 0.0, 'eval': 0.0}
         profile_epochs = min(5, args.epochs)
 
+    # --- Diagnostics ---
+    history = []
+    diag_dir = args.diag_dir or os.path.join(
+        os.path.dirname(__file__), 'diagnostics', f'{task_name}_{feat_str}')
+
     # --- Training loop ---
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -465,6 +655,8 @@ def train(args):
         epoch_correct = 0
         epoch_total = 0
         n_batches = 0
+        n_nan_batches = 0
+        epoch_grad_norm = 0.0
         t_epoch = time.perf_counter()
 
         for batch in train_loader:
@@ -499,6 +691,27 @@ def train(args):
                         ignore_index=0,
                     )
 
+            # Skip NaN/Inf losses (log but don't crash)
+            loss_val = loss.item()
+            if not math.isfinite(loss_val):
+                n_nan_batches += 1
+                optimizer.zero_grad()
+                # Still count accuracy from valid logits
+                with torch.no_grad():
+                    if has_targets:
+                        pred = logits[:, -1].argmax(dim=-1)
+                        valid = ~torch.isnan(logits[:, -1].sum(dim=-1))
+                        epoch_correct += (pred[valid] == targets[valid]).sum().item()
+                        epoch_total += valid.sum().item()
+                    else:
+                        preds = logits[:, :-1].argmax(dim=-1)
+                        tgts = seqs[:, 1:]
+                        mask = (tgts != 0) & ~torch.isnan(logits[:, :-1].sum(dim=-1))
+                        epoch_correct += (preds[mask] == tgts[mask]).sum().item()
+                        epoch_total += mask.sum().item()
+                n_batches += 1
+                continue
+
             if args.profile and epoch <= profile_epochs:
                 torch.cuda.synchronize() if device.type == 'cuda' else None
                 prof['forward'] += time.perf_counter() - t0
@@ -510,13 +723,15 @@ def train(args):
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 if args.w_clip > 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.w_clip)
+                    gn = torch.nn.utils.clip_grad_norm_(model.parameters(), args.w_clip)
+                    epoch_grad_norm += gn.item()
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss.backward()
                 if args.w_clip > 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.w_clip)
+                    gn = torch.nn.utils.clip_grad_norm_(model.parameters(), args.w_clip)
+                    epoch_grad_norm += gn.item()
                 optimizer.step()
 
             if args.profile and epoch <= profile_epochs:
@@ -536,12 +751,14 @@ def train(args):
                     epoch_correct += (preds[mask] == tgts[mask]).sum().item()
                     epoch_total += mask.sum().item()
 
-            epoch_loss += loss.item()
+            epoch_loss += loss_val
             n_batches += 1
 
         scheduler.step()
         train_acc = epoch_correct / max(epoch_total, 1)
-        avg_loss = epoch_loss / max(n_batches, 1)
+        valid_batches = n_batches - n_nan_batches
+        avg_loss = epoch_loss / max(valid_batches, 1)
+        avg_grad_norm = epoch_grad_norm / max(valid_batches, 1)
         ms_per_batch = (time.perf_counter() - t_epoch) / max(n_batches, 1) * 1000
 
         # --- Evaluation ---
@@ -564,15 +781,29 @@ def train(args):
 
         ep_s = time.perf_counter() - t_epoch
 
+        # --- Record history ---
+        record = {
+            'epoch': epoch, 'loss': avg_loss, 'train_acc': train_acc,
+            'test_acc': test_acc, 'grad_norm': avg_grad_norm,
+            'nan_batches': n_nan_batches,
+        }
+        history.append(record)
+
         # --- Print ---
         if epoch % args.print_every == 0 or epoch == args.epochs:
+            nan_str = f" ({n_nan_batches} nan)" if n_nan_batches > 0 else ""
             if has_targets:
                 kl_str = f"{kl_acc:7.4f}" if kl_acc is not None else "    ---"
                 print(f"{epoch:5d}  {avg_loss:8.4f}  {train_acc:7.4f}  {test_acc:7.4f}  "
-                      f"{kl_str}  {ms_per_batch:6.1f}  {ep_s:6.1f}")
+                      f"{kl_str}  {ms_per_batch:6.1f}  {ep_s:6.1f}{nan_str}")
             else:
                 print(f"{epoch:5d}  {avg_loss:8.4f}  {train_acc:7.4f}  {test_acc:7.4f}  "
-                      f"{ms_per_batch:6.1f}  {ep_s:6.1f}")
+                      f"{ms_per_batch:6.1f}  {ep_s:6.1f}{nan_str}")
+
+        # --- Diagnostic charts ---
+        if args.diag_every > 0 and (epoch % args.diag_every == 0 or epoch == args.epochs):
+            diag = collect_diagnostics(model, config, epoch, device, amp_ctx)
+            save_diagnostic_charts(history, diag, diag_dir, epoch)
 
         # Profile breakdown after N epochs
         if args.profile and epoch == profile_epochs:
@@ -589,6 +820,9 @@ def train(args):
     if kl_acc is not None:
         print(f"  KL surprise test_acc={kl_acc:.4f}")
     print(f"Config: {feat_str}")
+    total_nan = sum(h['nan_batches'] for h in history)
+    if total_nan > 0:
+        print(f"  WARNING: {total_nan} NaN batches across all epochs")
 
     return {
         'train_acc': train_acc,
