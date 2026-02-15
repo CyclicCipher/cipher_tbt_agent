@@ -113,8 +113,12 @@ def wy_recurrence_debug(x_write, B1, C, alpha, beta,
     eye_beta = torch.diag_embed(beta_c)
     T = torch.linalg.solve_triangular(IpA, eye_beta, upper=False, unitriangular=True)
 
-    W = torch.einsum('bncij, bncjd -> bncid', T, K_c)
     U = torch.einsum('bncij, bncjd -> bncid', T, V_c)
+
+    # Decay-weighted pseudo-keys: W_state = T @ (K * exp(cumsum))
+    cumsum_exp = torch.exp(log_alpha_cumsum).unsqueeze(-1)
+    K_decay = K_c * cumsum_exp
+    W_state = torch.einsum('bncij, bncjd -> bncid', T, K_decay)
 
     # Step 2: Forward-decayed keys for state update
     fwd_decay = torch.exp(
@@ -122,12 +126,12 @@ def wy_recurrence_debug(x_write, B1, C, alpha, beta,
     )  # (batch, nheads, n_chunks, Cs)
     K_fwd = K_c * fwd_decay.unsqueeze(-1)
 
-    # Step 3: Inter-chunk scan (FLA-style: v_new = U - W@S, S = gamma*S + K_fwd^T @ v_new)
+    # Step 3: Inter-chunk scan (FLA-style: v_new = U - W_state@S, S = gamma*S + K_fwd^T @ v_new)
     states_list = []
     S = torch.zeros(batch, nheads, d_state, headdim, device=device, dtype=dtype)
     for c in range(n_chunks):
         states_list.append(S.clone())
-        WS_c = torch.einsum('bnid, bnde -> bnie', W[:, :, c], S)
+        WS_c = torch.einsum('bnid, bnde -> bnie', W_state[:, :, c], S)
         v_new = U[:, :, c] - WS_c
         g = gamma_c[:, :, c].unsqueeze(-1).unsqueeze(-1)
         S = g * S + torch.einsum('bnid, bnie -> bnde', K_fwd[:, :, c], v_new)
@@ -143,7 +147,7 @@ def wy_recurrence_debug(x_write, B1, C, alpha, beta,
     ) * causal
     QKt = QKt * decay_out
 
-    WS = torch.einsum('bncid, bncde -> bncie', W, S_prev)
+    WS = torch.einsum('bncid, bncde -> bncie', W_state, S_prev)
     intra = U - WS
     Y_diag = torch.einsum('bncij, bncje -> bncie', QKt, intra)
 

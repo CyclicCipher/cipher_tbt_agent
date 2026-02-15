@@ -582,8 +582,17 @@ def delta_recurrence_wy(
     # =====================================================================
     # Compute pseudo-keys W and pseudo-values U via UT transform
     W, U, _T = _prepare_wy_repr(K_c, V_c, beta_c, log_alpha_cumsum)
-    # W: (batch, nheads, n_chunks, Cs, d_state) — pseudo-keys
+    # W: (batch, nheads, n_chunks, Cs, d_state) — pseudo-keys (no decay)
     # U: (batch, nheads, n_chunks, Cs, headdim) — pseudo-values
+
+    # Decay-weighted pseudo-keys: W_state = T @ (K * exp(cumsum))
+    # At position t, the incoming state has been decayed by exp(cumsum[t])
+    # from the chunk boundary.  W_state accounts for this so that
+    # v_new = U - W_state @ S correctly predicts the delta correction.
+    cumsum_exp = torch.exp(log_alpha_cumsum).unsqueeze(-1)  # (b, n, c, Cs, 1)
+    K_decay = K_c * cumsum_exp  # K scaled by cumulative decay per position
+    W_state = torch.einsum('bncij, bncjd -> bncid', _T, K_decay)
+    # W_state: (batch, nheads, n_chunks, Cs, d_state)
 
     # =====================================================================
     # Step 2: Precompute forward-decayed keys for inter-chunk state update
@@ -611,8 +620,8 @@ def delta_recurrence_wy(
 
     for c in range(n_chunks):
         states_list.append(S.clone())
-        # W @ S: prediction of U from previous state, per position
-        WS_c = torch.einsum('bnid, bnde -> bnie', W[:, :, c], S)
+        # W_state @ S: decay-weighted prediction of U from previous state
+        WS_c = torch.einsum('bnid, bnde -> bnie', W_state[:, :, c], S)
         # v_new = U - WS: corrected pseudo-values
         v_new = U[:, :, c] - WS_c
         # State update: decay old + accumulate forward-decayed contributions
@@ -652,8 +661,8 @@ def delta_recurrence_wy(
     decay_matrix = decay_matrix * causal_mask  # zero out upper triangle
     QKt = QKt * decay_matrix
 
-    # W_c @ S_{c-1}: correction for inter-chunk state
-    WS = torch.einsum('bncid, bncde -> bncie', W, S_prev)
+    # W_state @ S_{c-1}: decay-weighted correction for inter-chunk state
+    WS = torch.einsum('bncid, bncde -> bncie', W_state, S_prev)
     # WS: (batch, nheads, n_chunks, Cs, headdim)
 
     # Intra-chunk correction: (U - WS) represents the delta-corrected values
