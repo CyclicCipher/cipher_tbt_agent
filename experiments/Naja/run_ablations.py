@@ -79,6 +79,8 @@ def parse_args():
     p.add_argument('--epochs', type=int, default=50,
                    help='Epochs per run (default: 50)')
     p.add_argument('--seed', type=int, default=42)
+    p.add_argument('--device', type=str, default='auto',
+                   help='Device for training (default: auto)')
     p.add_argument('--results_file', type=str, default='ablation_results.jsonl',
                    help='Results file (default: ablation_results.jsonl)')
     p.add_argument('--dry-run', action='store_true',
@@ -224,6 +226,7 @@ def main():
             cmd = (f"python {SCRIPT_DIR / 'train_naja.py'} "
                    f"--preset {preset} --task {task} "
                    f"--epochs {args.epochs} --seed {args.seed} "
+                   f"--device {args.device} "
                    f"--results_file {results_file} --diag_every 0")
             print(f"[{i}/{total}] {cmd}")
         print(f"\nTotal: {total} runs")
@@ -243,6 +246,7 @@ def main():
             '--task', task,
             '--epochs', str(args.epochs),
             '--seed', str(args.seed),
+            '--device', args.device,
             '--results_file', results_file,
             '--diag_every', '0',  # no charts during ablation
             '--print_every', str(max(args.epochs // 5, 1)),
