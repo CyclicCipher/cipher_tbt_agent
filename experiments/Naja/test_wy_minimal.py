@@ -18,18 +18,18 @@ def naive_recurrence_debug(x_write, B1, C, alpha, beta, use_trapezoidal=False):
     outputs = []
 
     for t in range(seqlen):
-        # Erase projection from UN-decayed state (Gated DeltaNet convention)
+        # Decay first (standard Gated DeltaNet convention)
+        a_t = alpha[:, t]  # (batch, nheads, d_state)
+        h = h * a_t.unsqueeze(2)
+
+        # Erase from already-decayed state
         b1_hat = F.normalize(B1[:, t], dim=-1)  # (batch, d_state)
         bt = beta[:, t]  # (batch, nheads, 1)
         proj = torch.einsum('bnpd,bd->bnp', h, b1_hat)
         erase = bt.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj, b1_hat)
-
-        # Decay
-        a_t = alpha[:, t]  # (batch, nheads, d_state)
-        h = h * a_t.unsqueeze(2)
-
-        # Apply erase (from un-decayed projection) + Write
         h = h - erase
+
+        # Write
         write = torch.einsum('bnp,bd->bnpd', x_write[:, t], B1[:, t])
         h = h + bt.unsqueeze(2) * write
 

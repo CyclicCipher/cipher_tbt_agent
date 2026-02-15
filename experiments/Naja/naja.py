@@ -151,39 +151,32 @@ def delta_recurrence(
     outputs = []
 
     for t in range(seqlen):
-        # --- Delta rule: compute erase from UN-decayed state (Gated DeltaNet convention) ---
-        # Standard: S_t = α·S_{t-1} - β·(S_{t-1}@k̂)⊗k̂ + β·write
-        # Erase projection uses S_{t-1} (before decay), not α·S_{t-1}
-        erase1 = None
-        erase2 = None
+        # --- Decay first: per-channel diagonal ---
+        # Standard Gated DeltaNet: S_t = α·S_{t-1}·(I - β·k̂k̂ᵀ) + β·v⊗k
+        # Decay is applied BEFORE erase, so erase projects from decayed state.
+        a_t = alpha[:, t]  # (batch, nheads, d_state)
+        h = h * a_t.unsqueeze(2)  # broadcast over headdim
+
+        # --- Delta rule: erase from already-decayed state ---
         if use_delta and beta1 is not None:
             b1_key = B1[:, t, 0, :]  # (batch, d_state)
             b1_hat = F.normalize(b1_key, dim=-1)
             bt1 = beta1[:, t]  # (batch, nheads, 1)
 
-            # Householder 1: project from un-decayed state
+            # Householder 1: project from decayed state
             proj1 = torch.einsum('bnpd,bd->bnp', h, b1_hat)
             erase1 = bt1.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj1, b1_hat)
+            h = h - erase1
 
-            # Householder 2: PoPE orthogonal pair (from B1-erased, un-decayed state)
+            # Householder 2: PoPE orthogonal pair (from B1-erased, decayed state)
             if B2 is not None and beta2 is not None:
                 b2_key = B2[:, t, 0, :]  # (batch, d_state)
                 b2_hat = F.normalize(b2_key, dim=-1)
                 bt2 = beta2[:, t]
 
-                h_after_b1 = h - erase1
-                proj2 = torch.einsum('bnpd,bd->bnp', h_after_b1, b2_hat)
+                proj2 = torch.einsum('bnpd,bd->bnp', h, b2_hat)
                 erase2 = bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
-
-        # --- Decay: per-channel diagonal ---
-        a_t = alpha[:, t]  # (batch, nheads, d_state)
-        h = h * a_t.unsqueeze(2)  # broadcast over headdim
-
-        # --- Apply erase (computed from un-decayed state) ---
-        if erase1 is not None:
-            h = h - erase1
-        if erase2 is not None:
-            h = h - erase2
+                h = h - erase2
 
         # --- Write: rank-r MIMO outer product sum ---
         # Σ_i x_write[:,:,:,i] ⊗ B1[:,:,i,:] contracts over i (MIMO rank)
@@ -252,33 +245,26 @@ def _process_chunk(
     for t in range(chunk_len):
         abs_t = chunk_start + t
 
-        # Delta rule: compute erase from UN-decayed state (Gated DeltaNet convention)
-        erase1 = None
-        erase2 = None
+        # Decay first (standard Gated DeltaNet convention)
+        a_t = alpha[:, t]
+        h = h * a_t.unsqueeze(2)
+
+        # Delta rule: erase from already-decayed state
         if use_delta and beta1 is not None:
             b1_key = B1[:, t, 0, :]
             b1_hat = F.normalize(b1_key, dim=-1)
             bt1 = beta1[:, t]
             proj1 = torch.einsum('bnpd,bd->bnp', h, b1_hat)
             erase1 = bt1.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj1, b1_hat)
+            h = h - erase1
 
             if B2 is not None and beta2 is not None:
                 b2_key = B2[:, t, 0, :]
                 b2_hat = F.normalize(b2_key, dim=-1)
                 bt2 = beta2[:, t]
-                h_after_b1 = h - erase1
-                proj2 = torch.einsum('bnpd,bd->bnp', h_after_b1, b2_hat)
+                proj2 = torch.einsum('bnpd,bd->bnp', h, b2_hat)
                 erase2 = bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
-
-        # Decay
-        a_t = alpha[:, t]
-        h = h * a_t.unsqueeze(2)
-
-        # Apply erase (computed from un-decayed state)
-        if erase1 is not None:
-            h = h - erase1
-        if erase2 is not None:
-            h = h - erase2
+                h = h - erase2
 
         # Write
         xw_t = x_write[:, t]
@@ -519,12 +505,13 @@ def delta_recurrence_wy(
     # Mapping Naja to standard Gated DeltaNet WY
     # =====================================================================
     #
-    # Both naive and WY now use standard Gated DeltaNet convention:
-    #   S_t = α_t * S_{t-1} + β_t * (v_t ⊗ k_t - (S_{t-1} @ k_t) ⊗ k_t)
-    #       = α_t * S_{t-1} - β_t * (S_{t-1}@k)⊗k + β_t * v_t ⊗ k
+    # Standard Gated DeltaNet convention (decay before erase):
+    #   S_t = α_t * S_{t-1} * (I - β_t * k̂ k̂ᵀ) + β_t * v_t ⊗ k
+    #       = α_t * S_{t-1} - β_t * (α_t * S_{t-1} @ k̂) ⊗ k̂ + β_t * v ⊗ k
     #
-    # Erase uses un-decayed S_{t-1}. Decay α appears in A's decay_matrix
-    # (gamma_{i,j}) but NOT in beta. Using original beta directly.
+    # Erase operates on the already-decayed state (α_t * S_{t-1}).
+    # Decay α appears in A's decay_matrix (gamma_{i,j}) and is factored
+    # into the WY transform. Using original beta directly.
 
     # Scalar decay: mean across d_state channels
     alpha_scalar = alpha.mean(dim=-1)  # (batch, L, nheads)
