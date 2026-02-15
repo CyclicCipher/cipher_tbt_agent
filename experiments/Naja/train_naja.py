@@ -190,13 +190,13 @@ def parse_args():
                         args.batch_size = 8
                     if args.stage == '2' and args.batch_size == 128:
                         args.batch_size = 32
-                    # Auto-enable gradient checkpointing to reduce activation memory
-                    if not args.use_chunkwise:
-                        args.use_chunkwise = True
+                    # Auto-enable WY chunkwise (parallel intra-chunk, lower memory)
+                    if not args.use_chunkwise and not args.use_wy_chunkwise:
+                        args.use_wy_chunkwise = True
                         args.chunk_size = 16
                     print(f"VRAM: {vram_gb:.1f}GB detected — "
                           f"batch_size={args.batch_size}, "
-                          f"chunkwise=True (chunk_size={args.chunk_size})")
+                          f"wy_chunkwise=True (chunk_size={args.chunk_size})")
         except ImportError:
             pass
 
@@ -394,11 +394,14 @@ def train(args):
 
     # --- torch.compile ---
     if args.compile:
-        try:
-            model = torch.compile(model)
-            print("torch.compile: ON")
-        except Exception as e:
-            print(f"torch.compile: FAILED ({e}), continuing without")
+        if config.use_wy_chunkwise:
+            print("torch.compile: SKIPPED (incompatible with WY chunkwise)")
+        else:
+            try:
+                model = torch.compile(model)
+                print("torch.compile: ON")
+            except Exception as e:
+                print(f"torch.compile: FAILED ({e}), continuing without")
 
     # --- Optimizer ---
     optimizer = torch.optim.AdamW(
