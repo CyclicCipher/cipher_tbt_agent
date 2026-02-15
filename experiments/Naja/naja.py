@@ -586,33 +586,38 @@ def delta_recurrence_wy(
     # U: (batch, nheads, n_chunks, Cs, headdim) — pseudo-values
 
     # =====================================================================
-    # Step 2: Chunk state accumulation
+    # Step 2: Precompute forward-decayed keys for inter-chunk state update
     # =====================================================================
-    # P_c = I - K_c^T · W_c — transition matrix per chunk, (d_state, d_state)
-    # H_c = K_c^T · U_c — state contribution per chunk, (d_state, headdim)
-    # Contract over position-in-chunk (t), keep feature dims (d, e):
-    #   K_c: (b, n, c, t, d_state), W: (b, n, c, t, d_state) → P: (b, n, c, d_state, d_state)
-    P = torch.eye(d_state, device=device, dtype=dtype) - \
-        torch.einsum('bnctd, bncte -> bncde', K_c, W)
-    # P: (batch, nheads, n_chunks, d_state, d_state)
-
-    #   K_c: (b, n, c, t, d_state), U: (b, n, c, t, headdim) → H: (b, n, c, d_state, headdim)
-    H = torch.einsum('bnctd, bncte -> bncde', K_c, U)
-    # H: (batch, nheads, n_chunks, d_state, headdim)
+    # K_fwd[c,t] = K[c,t] * exp(total_chunk_decay - cumsum[t])
+    # This is the decay each position's write must survive to reach the
+    # chunk boundary (end of chunk).  Last position gets factor 1.
+    fwd_decay = torch.exp(
+        log_gamma_c.unsqueeze(-1) - log_alpha_cumsum
+    )  # (batch, nheads, n_chunks, Cs)
+    K_fwd = K_c * fwd_decay.unsqueeze(-1)  # (batch, nheads, n_chunks, Cs, d_state)
 
     # =====================================================================
     # Step 3: Inter-chunk scan (sequential over n_chunks — small!)
     # =====================================================================
-    # S_c = gamma_c * P_c @ S_{c-1} + H_c
-    # S: (batch, nheads, d_state, headdim) — running hidden state
+    # FLA-style state update (not P@S + H, which is incorrect with decay):
+    #   v_new = U_c - W_c @ S_{c-1}    (corrected pseudo-values)
+    #   S_c = gamma_c * S_{c-1} + K_fwd_c^T @ v_new
+    #
+    # K_fwd has per-position forward decay so each write is properly
+    # propagated to the chunk boundary before accumulating into state.
 
     states_list = []  # store S_{c-1} for each chunk (for Step 4)
     S = torch.zeros(batch, nheads, d_state, headdim, device=device, dtype=dtype)
 
     for c in range(n_chunks):
         states_list.append(S.clone())
+        # W @ S: prediction of U from previous state, per position
+        WS_c = torch.einsum('bnid, bnde -> bnie', W[:, :, c], S)
+        # v_new = U - WS: corrected pseudo-values
+        v_new = U[:, :, c] - WS_c
+        # State update: decay old + accumulate forward-decayed contributions
         g = gamma_c[:, :, c].unsqueeze(-1).unsqueeze(-1)  # (batch, nheads, 1, 1)
-        S = g * torch.einsum('bnij, bnjk -> bnik', P[:, :, c], S) + H[:, :, c]
+        S = g * S + torch.einsum('bnid, bnie -> bnde', K_fwd[:, :, c], v_new)
 
     # Stack: (batch, nheads, n_chunks, d_state, headdim)
     S_prev = torch.stack(states_list, dim=2)

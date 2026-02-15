@@ -116,18 +116,21 @@ def wy_recurrence_debug(x_write, B1, C, alpha, beta,
     W = torch.einsum('bncij, bncjd -> bncid', T, K_c)
     U = torch.einsum('bncij, bncjd -> bncid', T, V_c)
 
-    # Step 2: Chunk state
-    P = torch.eye(d_state, device=device, dtype=dtype) - \
-        torch.einsum('bnctd, bncte -> bncde', K_c, W)
-    H = torch.einsum('bnctd, bncte -> bncde', K_c, U)
+    # Step 2: Forward-decayed keys for state update
+    fwd_decay = torch.exp(
+        log_gamma_c.unsqueeze(-1) - log_alpha_cumsum
+    )  # (batch, nheads, n_chunks, Cs)
+    K_fwd = K_c * fwd_decay.unsqueeze(-1)
 
-    # Step 3: Inter-chunk scan
+    # Step 3: Inter-chunk scan (FLA-style: v_new = U - W@S, S = gamma*S + K_fwd^T @ v_new)
     states_list = []
     S = torch.zeros(batch, nheads, d_state, headdim, device=device, dtype=dtype)
     for c in range(n_chunks):
         states_list.append(S.clone())
+        WS_c = torch.einsum('bnid, bnde -> bnie', W[:, :, c], S)
+        v_new = U[:, :, c] - WS_c
         g = gamma_c[:, :, c].unsqueeze(-1).unsqueeze(-1)
-        S = g * torch.einsum('bnij, bnjk -> bnik', P[:, :, c], S) + H[:, :, c]
+        S = g * S + torch.einsum('bnid, bnie -> bnde', K_fwd[:, :, c], v_new)
     S_prev = torch.stack(states_list, dim=2)
 
     # Step 4: Output
