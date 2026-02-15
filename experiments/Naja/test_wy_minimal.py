@@ -2,13 +2,20 @@
 
 Run on GPU: python experiments/Naja/test_wy_minimal.py
 Prints per-timestep state diffs to find where divergence starts.
+
+Tests 1-8: Phase 5a/5b (single Householder, per-channel decay)
+Tests 9-11: Phase 5c (PoPE pair B₂ via virtual token expansion)
 """
 import torch
 import torch.nn.functional as F
 
 
-def naive_recurrence_debug(x_write, B1, C, alpha, beta, use_trapezoidal=False):
-    """Naive sequential with per-step state tracking."""
+def naive_recurrence_debug(x_write, B1, C, alpha, beta1,
+                           B2=None, beta2=None, use_trapezoidal=False):
+    """Naive sequential with per-step state tracking.
+
+    DeltaProduct convention: erase₁+write₁ then erase₂+write₂.
+    """
     batch, seqlen, nheads, headdim = x_write.shape
     d_state = B1.shape[-1]
     device, dtype = x_write.device, x_write.dtype
@@ -22,16 +29,26 @@ def naive_recurrence_debug(x_write, B1, C, alpha, beta, use_trapezoidal=False):
         a_t = alpha[:, t]  # (batch, nheads, d_state)
         h = h * a_t.unsqueeze(2)
 
-        # Erase from already-decayed state
+        # Householder 1: erase + write (DeltaProduct convention)
         b1_hat = F.normalize(B1[:, t], dim=-1)  # (batch, d_state)
-        bt = beta[:, t]  # (batch, nheads, 1)
-        proj = torch.einsum('bnpd,bd->bnp', h, b1_hat)
-        erase = bt.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj, b1_hat)
-        h = h - erase
+        bt1 = beta1[:, t]  # (batch, nheads, 1)
+        proj1 = torch.einsum('bnpd,bd->bnp', h, b1_hat)
+        erase1 = bt1.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj1, b1_hat)
+        h = h - erase1
 
-        # Write
-        write = torch.einsum('bnp,bd->bnpd', x_write[:, t], B1[:, t])
-        h = h + bt.unsqueeze(2) * write
+        write1 = torch.einsum('bnp,bd->bnpd', x_write[:, t], B1[:, t])
+        h = h + bt1.unsqueeze(2) * write1
+
+        # Householder 2: erase + write (PoPE pair)
+        if B2 is not None and beta2 is not None:
+            b2_hat = F.normalize(B2[:, t], dim=-1)
+            bt2 = beta2[:, t]
+            proj2 = torch.einsum('bnpd,bd->bnp', h, b2_hat)
+            erase2 = bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
+            h = h - erase2
+
+            write2 = torch.einsum('bnp,bd->bnpd', x_write[:, t], B2[:, t])
+            h = h + bt2.unsqueeze(2) * write2
 
         # Readout
         y_t = torch.einsum('bnpd,bd->bnp', h, C[:, t])
@@ -41,9 +58,14 @@ def naive_recurrence_debug(x_write, B1, C, alpha, beta, use_trapezoidal=False):
     return torch.stack(outputs, dim=1), states
 
 
-def wy_recurrence_debug(x_write, B1, C, alpha, beta,
+def wy_recurrence_debug(x_write, B1, C, alpha, beta1,
+                        B2=None, beta2=None,
                         use_trapezoidal=False, chunk_size=None):
-    """WY chunkwise with per-channel decay (Phase 5b), matching delta_recurrence_wy."""
+    """WY chunkwise with per-channel decay and virtual token expansion.
+
+    Phase 5b: per-channel decay via K_pos/K_neg.
+    Phase 5c: B₂ via virtual token expansion (DeltaProduct n_h=2).
+    """
     batch, seqlen, nheads, headdim = x_write.shape
     d_state = B1.shape[-1]
     device, dtype = x_write.device, x_write.dtype
@@ -56,25 +78,56 @@ def wy_recurrence_debug(x_write, B1, C, alpha, beta,
     if pad_len > 0:
         x_write = F.pad(x_write, (0, 0, 0, 0, 0, pad_len))
         B1 = F.pad(B1, (0, 0, 0, pad_len))
+        if B2 is not None:
+            B2 = F.pad(B2, (0, 0, 0, pad_len))
         C = F.pad(C, (0, 0, 0, pad_len))
         alpha = F.pad(alpha, (0, 0, 0, 0, 0, pad_len), value=1.0)
-        beta = F.pad(beta, (0, 0, 0, 0, 0, pad_len))
+        beta1 = F.pad(beta1, (0, 0, 0, 0, 0, pad_len))
+        if beta2 is not None:
+            beta2 = F.pad(beta2, (0, 0, 0, 0, 0, pad_len))
     L = seqlen + pad_len
     n_chunks = L // chunk_size
-    Cs = chunk_size
 
     # Map to DeltaNet (K, V, Q, beta)
-    K = F.normalize(B1, dim=-1)  # (batch, L, d_state)
-    Q = C  # (batch, L, d_state)
+    K1 = F.normalize(B1, dim=-1)  # (batch, L, d_state)
+    Q_real = C  # (batch, L, d_state)
+    beta1_flat = beta1[:, :, :, 0]  # (batch, L, nheads)
 
-    # Per-channel decay: alpha is (batch, L, nheads, d_state) — use directly
-
-    # Use original beta (decay handled by gamma in A matrix, not double-counted)
-    beta_orig = beta[:, :, :, 0]  # (batch, L, nheads)
-
-    # V = x_write * ||B1|| (write value, no alpha rescaling needed)
+    # V1 = x_write * ||B1||
     b1_norm = B1.norm(dim=-1, keepdim=True).unsqueeze(2)  # (batch, L, 1, 1)
-    V = x_write * b1_norm
+    V1 = x_write * b1_norm
+
+    # Virtual token expansion for B₂
+    use_virtual = B2 is not None and beta2 is not None
+
+    if use_virtual:
+        K2 = F.normalize(B2, dim=-1)
+        b2_norm = B2.norm(dim=-1, keepdim=True).unsqueeze(2)
+        V2 = x_write * b2_norm
+        beta2_flat = beta2[:, :, :, 0]
+
+        def interleave(a, b):
+            stacked = torch.stack([a, b], dim=2)
+            return stacked.reshape(a.shape[0], 2 * a.shape[1], *a.shape[2:])
+
+        K = interleave(K1, K2)
+        V = interleave(V1, V2)
+        beta_flat = interleave(beta1_flat, beta2_flat)
+        Q_zeros = torch.zeros_like(Q_real)
+        Q = interleave(Q_zeros, Q_real)
+        alpha_ones = torch.ones_like(alpha)
+        alpha_eff = interleave(alpha, alpha_ones)
+
+        L_eff = 2 * L
+        Cs = 2 * chunk_size
+    else:
+        K = K1
+        V = V1
+        Q = Q_real
+        beta_flat = beta1_flat
+        alpha_eff = alpha
+        L_eff = L
+        Cs = chunk_size
 
     # Chunk
     def chunk(t):
@@ -84,8 +137,8 @@ def wy_recurrence_debug(x_write, B1, C, alpha, beta,
     Q_c = chunk(Q).unsqueeze(1).expand(-1, nheads, -1, -1, -1)
     V_chunked = chunk(V)  # (batch, n_chunks, Cs, nheads, headdim)
     V_c = V_chunked.permute(0, 3, 1, 2, 4)
-    beta_c = chunk(beta_orig).permute(0, 3, 1, 2)
-    alpha_c = chunk(alpha).permute(0, 3, 1, 2, 4)  # (batch, nheads, n_chunks, Cs, d_state)
+    beta_c = chunk(beta_flat).permute(0, 3, 1, 2)
+    alpha_c = chunk(alpha_eff).permute(0, 3, 1, 2, 4)  # (batch, nheads, n_chunks, Cs, d_state)
 
     # Per-channel decay quantities
     log_alpha_c = torch.log(alpha_c.clamp(min=1e-8))  # (batch, nheads, n_chunks, Cs, d_state)
@@ -97,11 +150,11 @@ def wy_recurrence_debug(x_write, B1, C, alpha, beta,
     # A matrix with per-channel decay: K_pos @ K_neg^T
     K_pos = K_c * torch.exp(log_alpha_cumsum)
     K_neg = K_c * torch.exp(-log_alpha_cumsum)
-    A = torch.einsum('bncid, bncjd -> bncij', K_pos, K_neg) * beta_c.unsqueeze(-2)
+    A = torch.einsum('bncid, bncjd -> bncij', K_pos, K_neg) * beta_c.unsqueeze(-1)
     mask = torch.tril(torch.ones(Cs, Cs, device=device, dtype=dtype), diagonal=-1).bool()
     A = A.masked_fill(~mask, 0.0)
 
-    # T = (I + A)^{-1} diag(beta_orig)
+    # T = (I + A)^{-1} diag(beta)
     IpA = torch.eye(Cs, device=device, dtype=dtype) + A
     eye_beta = torch.diag_embed(beta_c)
     T = torch.linalg.solve_triangular(IpA, eye_beta, upper=False, unitriangular=True)
@@ -131,12 +184,10 @@ def wy_recurrence_debug(x_write, B1, C, alpha, beta,
     S_prev = torch.stack(states_list, dim=2)
 
     # Step 4: Output with per-channel decay
-    # Y_off: Q reading from S_prev with per-channel decay from chunk start
-    decay_from_start = torch.exp(log_alpha_cumsum)  # (batch, nheads, n_chunks, Cs, d_state)
+    decay_from_start = torch.exp(log_alpha_cumsum)
     Q_decay = Q_c * decay_from_start
     Y_off = torch.einsum('bncid, bncde -> bncie', Q_decay, S_prev)
 
-    # QKt with per-channel decay: Q_pos @ K_neg^T
     QKt = torch.einsum('bncid, bncjd -> bncij', Q_decay, K_neg)
     causal = torch.tril(torch.ones(Cs, Cs, device=device, dtype=dtype))
     QKt = QKt * causal
@@ -146,7 +197,11 @@ def wy_recurrence_debug(x_write, B1, C, alpha, beta,
     Y_diag = torch.einsum('bncij, bncje -> bncie', QKt, intra)
 
     Y = Y_diag + Y_off
-    Y = Y.permute(0, 2, 3, 1, 4).reshape(batch, L, nheads, headdim)
+    Y = Y.permute(0, 2, 3, 1, 4).reshape(batch, L_eff, nheads, headdim)
+
+    # Extract odd positions if virtual expansion
+    if use_virtual:
+        Y = Y[:, 1::2]
 
     if pad_len > 0:
         Y = Y[:, :seqlen]
@@ -249,12 +304,64 @@ def main():
     diff8 = (out_naive8 - out_wy8).abs()
     print(f"  Max diff: {diff8.max().item():.6e}")
 
+    # =====================================================================
+    # Phase 5c tests: PoPE pair B₂ via virtual token expansion
+    # =====================================================================
+
+    print(f"\n{'='*60}")
+    print(f"Phase 5c: PoPE Pair (B₂) via Virtual Token Expansion")
+    print(f"{'='*60}")
+
+    torch.manual_seed(42)
+    # B2 orthogonal to B1 (simulate PoPE pair)
+    B2 = torch.randn(batch, seqlen, d_state, device=device)
+    beta2 = torch.full((batch, seqlen, nheads, 1), 0.3, device=device)
+
+    # Test 9: B₂ single chunk, constant alpha
+    print(f"\n=== Test 9: B₂ pair, single chunk, alpha={alpha_val} ===")
+    out_naive9, _ = naive_recurrence_debug(x_write, B1, C, alpha, beta,
+                                           B2=B2, beta2=beta2)
+    out_wy9 = wy_recurrence_debug(x_write, B1, C, alpha, beta,
+                                  B2=B2, beta2=beta2, chunk_size=seqlen)
+    diff9 = (out_naive9 - out_wy9).abs()
+    print(f"  Max diff: {diff9.max().item():.6e}")
+    for t in range(seqlen):
+        d = (out_naive9[:, t] - out_wy9[:, t]).abs().max().item()
+        print(f"    t={t}: max_diff={d:.6e}")
+
+    # Test 10: B₂ multi-chunk, per-channel alpha (the hard test)
+    print(f"\n=== Test 10: B₂ pair, multi-chunk, per-channel alpha ===")
+    torch.manual_seed(123)
+    alpha_pc = 0.5 + 0.49 * torch.rand(batch, seqlen, nheads, d_state, device=device)
+    out_naive10, _ = naive_recurrence_debug(x_write, B1, C, alpha_pc, beta,
+                                            B2=B2, beta2=beta2)
+    out_wy10 = wy_recurrence_debug(x_write, B1, C, alpha_pc, beta,
+                                   B2=B2, beta2=beta2, chunk_size=4)
+    diff10 = (out_naive10 - out_wy10).abs()
+    print(f"  Max diff: {diff10.max().item():.6e}")
+    for t in range(seqlen):
+        d = (out_naive10[:, t] - out_wy10[:, t]).abs().max().item()
+        print(f"    t={t}: max_diff={d:.6e}")
+
+    # Test 11: B₂ aggressive (beta1=1, beta2=1, per-channel alpha, multi-chunk)
+    print(f"\n=== Test 11: B₂ aggressive (beta1=1, beta2=1, per-ch, multi-chunk) ===")
+    beta2_one = torch.ones_like(beta2)
+    out_naive11, _ = naive_recurrence_debug(x_write, B1, C, alpha_pc, beta_one,
+                                            B2=B2, beta2=beta2_one)
+    out_wy11 = wy_recurrence_debug(x_write, B1, C, alpha_pc, beta_one,
+                                   B2=B2, beta2=beta2_one, chunk_size=4)
+    diff11 = (out_naive11 - out_wy11).abs()
+    print(f"  Max diff: {diff11.max().item():.6e}")
+
     # Summary
     print(f"\n=== Summary ===")
     all_pass = True
-    for name, d in [("T1 const", diff), ("T2 nodecay", diff2), ("T3 nobeta", diff3),
-                    ("T4 multi", diff4), ("T5 aggr", diff5), ("T6 perchan", diff6s),
-                    ("T7 perchan+multi", diff7), ("T8 perchan+multi+aggr", diff8)]:
+    for name, d in [("T1  const", diff), ("T2  nodecay", diff2),
+                    ("T3  nobeta", diff3), ("T4  multi", diff4),
+                    ("T5  aggr", diff5), ("T6  perchan", diff6s),
+                    ("T7  perchan+multi", diff7), ("T8  perchan+multi+aggr", diff8),
+                    ("T9  B2_single", diff9), ("T10 B2_perchan+multi", diff10),
+                    ("T11 B2_aggressive", diff11)]:
         status = "PASS" if d.max().item() < 1e-4 else "FAIL"
         if status == "FAIL":
             all_pass = False

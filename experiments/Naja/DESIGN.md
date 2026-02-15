@@ -236,7 +236,7 @@ From the Kimi Delta Attention paper:
 - **Phase 5b: Per-channel decay (KDA-style) ✓** — A matrix stays CxC via K_pos/K_neg weighting. Verified ~2e-6 accuracy on 8 test cases including per-channel multi-chunk.
 - **Phase 5c: PoPE pair (B2)** — virtual token expansion for second Householder
 - **Phase 5d: Ablation testing** — per-channel vs scalar, PoPE pair, surprise gating, MIMO
-- **Phase 5e: Triton kernels** — optional future optimization
+- **Phase 5e: Triton kernels** — see "Triton/FLA Integration Plan" section below
 - Reference: Gated DeltaNet (Yang et al. 2025), DeltaProduct (Siems et al. 2025)
 - Reference code: `flash-linear-attention` library, `ssd_trapz()` in `mamba3_block.py`
 - Benchmark training speed vs Mamba3
@@ -245,6 +245,86 @@ From the Kimi Delta Attention paper:
 - Implement EMA of predictive distribution ✓ (KLSurpriseTracker)
 - Top-k KL computation ✓ (configurable top_k)
 - Test inference-time surprise gating (evaluate_with_kl_surprise in train_naja.py)
+
+## Triton/FLA Integration Plan
+
+**Status:** Deferred until after Phase 5d ablation testing.
+
+### Why
+
+Our pure PyTorch WY implementation has a sequential inter-chunk scan (Step 3
+loops over n_chunks). For short sequences (hundreds of tokens), this is fine.
+For long sequences (thousands+), this becomes a bottleneck because:
+
+1. **Sequential loop:** `for c in range(n_chunks)` cannot be parallelized
+   because each chunk's state depends on the previous chunk's state via the
+   S-dependent correction `v_new = U - W_state @ S`.
+2. **Kernel launch overhead:** Each iteration launches multiple CUDA kernels
+   for the einsum operations.
+3. **No operator fusion:** Intra-chunk operations (Steps 1, 4) are separate
+   matmuls that could be fused into single Triton kernels.
+
+Mamba3's SSD inter-chunk scan IS parallelizable (scalar state transitions →
+prefix sum via segsum). Naja's WY inter-chunk scan is NOT (the Householder
+S-dependent correction term prevents associative scan reformulation).
+
+### Strategy: Use FLA's Triton Kernels
+
+The `flash-linear-attention` (FLA) library already has production-quality
+Triton kernels for gated delta rule chunkwise:
+
+```
+fla/ops/delta_rule/wy_fast.py           # Fused WY UT transform
+fla/ops/delta_rule/chunk.py             # Main orchestrator
+fla/ops/common/solve_tril.py            # Forward substitution
+fla/ops/common/chunk_scaled_dot_kkt.py  # K-K interaction
+fla/ops/common/chunk_delta_h.py         # Inter-chunk state propagation
+```
+
+These kernels support:
+- Gated (data-dependent decay) delta rule
+- Per-channel decay (KDA-style, via FLA's conventions)
+- Chunkwise WY with fused intra-chunk operations
+- The sequential inter-chunk scan (unavoidable, but with minimal overhead)
+
+### Integration Steps (When Ready)
+
+1. **Add `flash-linear-attention` as a dependency** (pip install flash-attn
+   or from source). Check version compatibility with our PyTorch/CUDA.
+
+2. **Map Naja's parameterization to FLA's interface:**
+   - Naja's K = normalized B̂₁ → FLA's `k`
+   - Naja's V = x_write * ||B₁|| → FLA's `v`
+   - Naja's Q = C → FLA's `q`
+   - Naja's β₁ → FLA's `beta`
+   - Naja's α (per-channel) → FLA's gating mechanism
+   - For B₂ (PoPE pair): use virtual token expansion BEFORE calling FLA,
+     same as our PyTorch implementation
+
+3. **Create a thin wrapper** (`naja_fla.py` or a flag in naja.py) that:
+   - Prepares inputs in FLA's expected format
+   - Calls FLA's `chunk_delta_rule` or equivalent
+   - Reshapes outputs back to Naja's format
+
+4. **Keep the pure PyTorch WY as a fallback** for:
+   - CPU testing and debugging
+   - Correctness verification (compare FLA output vs PyTorch WY)
+   - Environments without Triton (e.g., Apple Silicon)
+
+5. **Expected speedup:** 3-10× over our PyTorch WY from:
+   - Fused intra-chunk Triton kernels (eliminates intermediate tensors)
+   - Optimized memory access patterns
+   - Reduced kernel launch overhead
+
+### What NOT to Do
+
+- **Don't write our own Triton kernels from scratch.** FLA's kernels are
+  battle-tested and maintained by the DeltaNet authors themselves.
+- **Don't optimize the inter-chunk scan.** It's inherently sequential for
+  Householder-based recurrences. FLA handles it as efficiently as possible.
+- **Don't block on this for ablation testing.** Our PyTorch WY is correct
+  and fast enough for ablation-scale experiments (hundreds of tokens).
+  Triton matters for language modeling at scale (thousands+ tokens).
 
 ## VRAM Budget (4GB RTX 3050 Ti)
 

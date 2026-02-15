@@ -157,32 +157,24 @@ def delta_recurrence(
         a_t = alpha[:, t]  # (batch, nheads, d_state)
         h = h * a_t.unsqueeze(2)  # broadcast over headdim
 
-        # --- Delta rule: erase from already-decayed state ---
+        # --- Householder 1: erase + write (DeltaProduct convention) ---
+        # DeltaProduct order: erase₁+write₁ then erase₂+write₂.
+        # This matches virtual token expansion (each virtual token does
+        # a full DeltaNet step: erase then write).
+        xw_t = x_write[:, t]  # (batch, nheads, headdim, r)
+        b1_all = B1[:, t]     # (batch, r, d_state) — shared across heads
+
         if use_delta and beta1 is not None:
             b1_key = B1[:, t, 0, :]  # (batch, d_state)
             b1_hat = F.normalize(b1_key, dim=-1)
             bt1 = beta1[:, t]  # (batch, nheads, 1)
 
-            # Householder 1: project from decayed state
+            # Erase 1: project from decayed state
             proj1 = torch.einsum('bnpd,bd->bnp', h, b1_hat)
             erase1 = bt1.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj1, b1_hat)
             h = h - erase1
 
-            # Householder 2: PoPE orthogonal pair (from B1-erased, decayed state)
-            if B2 is not None and beta2 is not None:
-                b2_key = B2[:, t, 0, :]  # (batch, d_state)
-                b2_hat = F.normalize(b2_key, dim=-1)
-                bt2 = beta2[:, t]
-
-                proj2 = torch.einsum('bnpd,bd->bnp', h, b2_hat)
-                erase2 = bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
-                h = h - erase2
-
-        # --- Write: rank-r MIMO outer product sum ---
-        # Σ_i x_write[:,:,:,i] ⊗ B1[:,:,i,:] contracts over i (MIMO rank)
-        xw_t = x_write[:, t]  # (batch, nheads, headdim, r)
-        b1_all = B1[:, t]     # (batch, r, d_state) — shared across heads
-
+        # Write 1: rank-r MIMO outer product sum
         if use_trapezoidal and t > 0:
             xw_prev_t = x_write_prev[:, t]  # (batch, nheads, headdim, r)
             b1_prev_t = B1_prev[:, t]        # (batch, r, d_state)
@@ -199,8 +191,18 @@ def delta_recurrence(
 
         h = h + write
 
-        # Write via B2 (orthogonal direction, rank-r)
+        # --- Householder 2: erase + write (PoPE orthogonal pair) ---
         if B2 is not None and beta2 is not None and use_delta:
+            b2_key = B2[:, t, 0, :]  # (batch, d_state)
+            b2_hat = F.normalize(b2_key, dim=-1)
+            bt2 = beta2[:, t]
+
+            # Erase 2: from state that includes write₁
+            proj2 = torch.einsum('bnpd,bd->bnp', h, b2_hat)
+            erase2 = bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
+            h = h - erase2
+
+            # Write 2
             b2_all = B2[:, t]  # (batch, r, d_state)
             write2 = beta2[:, t].unsqueeze(2) * torch.einsum('bnpi,bid->bnpd', xw_t, b2_all)
             h = h + write2
@@ -249,7 +251,10 @@ def _process_chunk(
         a_t = alpha[:, t]
         h = h * a_t.unsqueeze(2)
 
-        # Delta rule: erase from already-decayed state
+        # Householder 1: erase + write (DeltaProduct convention)
+        xw_t = x_write[:, t]
+        b1_all = B1[:, t]
+
         if use_delta and beta1 is not None:
             b1_key = B1[:, t, 0, :]
             b1_hat = F.normalize(b1_key, dim=-1)
@@ -257,18 +262,6 @@ def _process_chunk(
             proj1 = torch.einsum('bnpd,bd->bnp', h, b1_hat)
             erase1 = bt1.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj1, b1_hat)
             h = h - erase1
-
-            if B2 is not None and beta2 is not None:
-                b2_key = B2[:, t, 0, :]
-                b2_hat = F.normalize(b2_key, dim=-1)
-                bt2 = beta2[:, t]
-                proj2 = torch.einsum('bnpd,bd->bnp', h, b2_hat)
-                erase2 = bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
-                h = h - erase2
-
-        # Write
-        xw_t = x_write[:, t]
-        b1_all = B1[:, t]
 
         if use_trapezoidal and abs_t > 0:
             xw_prev_t = x_write_prev[:, t]
@@ -284,7 +277,15 @@ def _process_chunk(
             write = beta1[:, t].unsqueeze(2) * write
         h = h + write
 
+        # Householder 2: erase + write (DeltaProduct convention)
         if B2 is not None and beta2 is not None and use_delta:
+            b2_key = B2[:, t, 0, :]
+            b2_hat = F.normalize(b2_key, dim=-1)
+            bt2 = beta2[:, t]
+            proj2 = torch.einsum('bnpd,bd->bnp', h, b2_hat)
+            erase2 = bt2.unsqueeze(2) * torch.einsum('bnp,bd->bnpd', proj2, b2_hat)
+            h = h - erase2
+
             b2_all = B2[:, t]
             write2 = beta2[:, t].unsqueeze(2) * torch.einsum('bnpi,bid->bnpd', xw_t, b2_all)
             h = h + write2
@@ -396,8 +397,8 @@ def _chunk_scaled_dot_kkt(K: Tensor, beta: Tensor, log_alpha_cumsum: Tensor) -> 
     K_pos = K * torch.exp(log_alpha_cumsum)
     K_neg = K * torch.exp(-log_alpha_cumsum)
     KKt_decay = torch.einsum('bncid, bncjd -> bncij', K_pos, K_neg)
-    # Scale columns by beta_j
-    A = KKt_decay * beta.unsqueeze(-2)  # broadcast beta over row dim
+    # Scale rows by beta_i (FLA convention: A[i,j] = β_i * (k̂_i · k̂_j * decay))
+    A = KKt_decay * beta.unsqueeze(-1)  # broadcast beta over column dim
     # Strictly lower triangular
     C_sz = A.shape[-1]
     mask = torch.tril(torch.ones(C_sz, C_sz, device=A.device, dtype=torch.bool), diagonal=-1)
@@ -453,28 +454,30 @@ def delta_recurrence_wy(
     x_write_prev: Tensor,  # (batch, seqlen, nheads, headdim, r) shifted for trapezoidal
     B1: Tensor,            # (batch, seqlen, r, d_state) primary key (r MIMO columns)
     B1_prev: Tensor,       # shifted B1 for trapezoidal
-    B2: Optional[Tensor],  # ignored in Phase 5a (single Householder only)
+    B2: Optional[Tensor],  # (batch, seqlen, r, d_state) orthogonal key (Phase 5c)
     C: Tensor,             # (batch, seqlen, r, d_state)
     alpha: Tensor,         # (batch, seqlen, nheads, d_state) per-channel decay
     beta1: Optional[Tensor],  # (batch, seqlen, nheads, 1) write gate
-    beta2: Optional[Tensor],  # ignored in Phase 5a
+    beta2: Optional[Tensor],  # (batch, seqlen, nheads, 1) rotation gate (Phase 5c)
     lam: Tensor,           # (batch, seqlen, 1, 1) trapezoidal mixing
     use_trapezoidal: bool = True,
     use_delta: bool = True,
     chunk_size: int = 64,
 ) -> Tensor:
-    """WY chunkwise delta-rule recurrence (Phase 5a/5b).
+    """WY chunkwise delta-rule recurrence (Phase 5a/5b/5c).
 
     Implements the 4-step algorithm from Yang et al. 2024 with Naja's
     specific parameterization. Same interface as delta_recurrence.
 
-    Phase 5b: Per-channel decay (KDA-style). Each d_state channel gets its
-    own decay rate. The A matrix stays CxC because the Householder projection
-    contracts over d_state, absorbing per-channel decay into the weighting.
+    Phase 5b: Per-channel decay (KDA-style).
+    Phase 5c: PoPE pair (B₂) via virtual token expansion (DeltaProduct
+    with n_h=2). Each real token becomes 2 virtual tokens: one for B₁
+    (erase+write), one for B₂ (erase+write). Standard WY runs on the
+    expanded 2×-length virtual sequence. Output is read at B₂ positions
+    (odd indices) for the final per-real-token readout.
 
     Remaining limitations:
     - SISO only (uses first MIMO column r=0 for erase key)
-    - Single Householder (B1 only, B2 ignored)
 
     Returns:
         (batch, seqlen, nheads, headdim, r) — same shape as delta_recurrence.
@@ -490,66 +493,106 @@ def delta_recurrence_wy(
         x_write_prev = F.pad(x_write_prev, (0, 0, 0, 0, 0, 0, 0, pad_len))
         B1 = F.pad(B1, (0, 0, 0, 0, 0, pad_len))
         B1_prev = F.pad(B1_prev, (0, 0, 0, 0, 0, pad_len))
+        if B2 is not None:
+            B2 = F.pad(B2, (0, 0, 0, 0, 0, pad_len))
         C = F.pad(C, (0, 0, 0, 0, 0, pad_len))
         alpha = F.pad(alpha, (0, 0, 0, 0, 0, pad_len), value=1.0)  # decay=1 for padding
         if beta1 is not None:
             beta1 = F.pad(beta1, (0, 0, 0, 0, 0, pad_len))
+        if beta2 is not None:
+            beta2 = F.pad(beta2, (0, 0, 0, 0, 0, pad_len))
         lam = F.pad(lam, (0, 0, 0, 0, 0, pad_len), value=0.5)
-    L = seqlen + pad_len
+    L = seqlen + pad_len  # real padded length
     n_chunks = L // chunk_size
-    Cs = chunk_size
 
     # =====================================================================
     # Map Naja's parameterization to DeltaNet's (K, V, Q, beta)
     # =====================================================================
-
-    # K = normalized first MIMO column of B1 (erase key direction)
-    # Shape: (batch, L, d_state)
-    k_raw = B1[:, :, 0, :]  # first MIMO column
-    K = F.normalize(k_raw, dim=-1)
-
-    # Q = first MIMO column of C (readout direction)
-    Q = C[:, :, 0, :]  # (batch, L, d_state)
-
-    # =====================================================================
-    # Mapping Naja to standard Gated DeltaNet WY
-    # =====================================================================
     #
     # Standard Gated DeltaNet convention (decay before erase):
     #   S_t = α_t * S_{t-1} * (I - β_t * k̂ k̂ᵀ) + β_t * v_t ⊗ k
-    #       = α_t * S_{t-1} - β_t * (α_t * S_{t-1} @ k̂) ⊗ k̂ + β_t * v ⊗ k
     #
-    # Erase operates on the already-decayed state (α_t * S_{t-1}).
     # Per-channel decay α ∈ R^{d_state} is absorbed into the WY A matrix
     # via K_pos/K_neg weighting: A[i,j] = β_j * Σ_d k_i[d]*k_j[d]*γ(i,j,d).
     # The A matrix stays CxC — per-channel decay doesn't change its shape.
 
-    # Per-channel decay: alpha is (batch, L, nheads, d_state) — use directly
+    # K1 = normalized first MIMO column of B1 (erase key direction)
+    K1 = F.normalize(B1[:, :, 0, :], dim=-1)  # (batch, L, d_state)
 
-    # Use original beta directly (decay handled by gamma in A matrix)
+    # Q = first MIMO column of C (readout direction)
+    Q_real = C[:, :, 0, :]  # (batch, L, d_state)
+
+    # Beta1 flat
     if beta1 is not None and use_delta:
-        beta_flat = beta1[:, :, :, 0]  # (batch, L, nheads)
+        beta1_flat = beta1[:, :, :, 0]  # (batch, L, nheads)
     else:
-        beta_flat = torch.ones(batch, L, nheads, device=device, dtype=dtype)
+        beta1_flat = torch.ones(batch, L, nheads, device=device, dtype=dtype)
 
-    # V = write value (no alpha rescaling needed)
-    # write_t = x_write * ||B1|| (SISO, absorbing B1 norm into value)
+    # V1 = write value for B1 (with trapezoidal blending)
     b1_norm = B1[:, :, 0, :].norm(dim=-1, keepdim=True)  # (batch, L, 1)
     b1_norm = b1_norm.unsqueeze(2)  # (batch, L, 1, 1)
-    V_euler = x_write[:, :, :, :, 0] * b1_norm  # (batch, L, nheads, headdim)
+    V1_euler = x_write[:, :, :, :, 0] * b1_norm  # (batch, L, nheads, headdim)
 
     if use_trapezoidal:
         b1_prev_norm = B1_prev[:, :, 0, :].norm(dim=-1, keepdim=True).unsqueeze(2)
-        V_prev = x_write_prev[:, :, :, :, 0] * b1_prev_norm
+        V1_prev = x_write_prev[:, :, :, :, 0] * b1_prev_norm
         lam_v = lam.squeeze(-1)  # (batch, L, 1)
         if lam_v.dim() == 3:
             lam_v = lam_v.unsqueeze(-1)  # (batch, L, 1, 1)
         # Force lam=1 at t=0 to match naive (which skips trapezoidal at t=0)
         lam_v = lam_v.clone()
         lam_v[:, 0] = 1.0
-        V = lam_v * V_euler + (1.0 - lam_v) * V_prev
+        V1 = lam_v * V1_euler + (1.0 - lam_v) * V1_prev
     else:
-        V = V_euler
+        V1 = V1_euler
+
+    # =====================================================================
+    # Virtual token expansion for B₂ (DeltaProduct with n_h=2)
+    # =====================================================================
+    # Each real token t becomes 2 virtual tokens:
+    #   Virtual 2t:   K=B̂₁, V=v₁, β=β₁, α=α_t  (real decay)
+    #   Virtual 2t+1: K=B̂₂, V=v₂, β=β₂, α=1.0  (no extra decay)
+    # Q is zero at B₁ positions (even), real C at B₂ positions (odd).
+    # Output is extracted from odd positions only.
+
+    use_virtual = B2 is not None and beta2 is not None and use_delta
+
+    if use_virtual:
+        K2 = F.normalize(B2[:, :, 0, :], dim=-1)  # (batch, L, d_state)
+        b2_norm = B2[:, :, 0, :].norm(dim=-1, keepdim=True).unsqueeze(2)
+        V2 = x_write[:, :, :, :, 0] * b2_norm  # no trapezoidal for B₂
+        beta2_flat = beta2[:, :, :, 0]  # (batch, L, nheads)
+
+        # Interleave: [B₁[0], B₂[0], B₁[1], B₂[1], ...]
+        def interleave(a, b):
+            """Interleave along dim=1: (batch, L, ...) → (batch, 2L, ...)"""
+            stacked = torch.stack([a, b], dim=2)  # (batch, L, 2, ...)
+            return stacked.reshape(a.shape[0], 2 * a.shape[1], *a.shape[2:])
+
+        K = interleave(K1, K2)                           # (batch, 2L, d_state)
+        V = interleave(V1, V2)                           # (batch, 2L, nheads, headdim)
+        beta_flat = interleave(beta1_flat, beta2_flat)   # (batch, 2L, nheads)
+
+        # Q: zero at B₁ positions (even), real Q at B₂ positions (odd)
+        Q_zeros = torch.zeros_like(Q_real)
+        Q = interleave(Q_zeros, Q_real)                  # (batch, 2L, d_state)
+
+        # Alpha: real decay at B₁ positions, 1.0 at B₂ positions
+        alpha_ones = torch.ones_like(alpha)
+        alpha_eff = interleave(alpha, alpha_ones)         # (batch, 2L, nheads, d_state)
+
+        # Update effective length and chunk size for virtual sequence
+        L_eff = 2 * L
+        Cs = 2 * chunk_size
+        # n_chunks stays the same: 2L / (2*chunk_size) = L / chunk_size
+    else:
+        K = K1
+        V = V1
+        Q = Q_real
+        beta_flat = beta1_flat
+        alpha_eff = alpha
+        L_eff = L
+        Cs = chunk_size
 
     # =====================================================================
     # Reshape into chunks: (batch, n_chunks, Cs, ...)
@@ -557,15 +600,14 @@ def delta_recurrence_wy(
     # =====================================================================
 
     def to_chunks(t, name=""):
-        """Reshape (batch, L, ...) to (batch, nheads, n_chunks, Cs, ...) or
-           (batch, n_chunks, Cs, ...) depending on shape."""
+        """Reshape (batch, L_eff, ...) to (batch, n_chunks, Cs, ...)."""
         return t.reshape(batch, n_chunks, Cs, *t.shape[2:])
 
     K_c = to_chunks(K)                    # (batch, n_chunks, Cs, d_state)
     Q_c = to_chunks(Q)                    # (batch, n_chunks, Cs, d_state)
     V_c = to_chunks(V)                    # (batch, n_chunks, Cs, nheads, headdim)
     beta_c = to_chunks(beta_flat)          # (batch, n_chunks, Cs, nheads)
-    alpha_c = to_chunks(alpha)             # (batch, n_chunks, Cs, nheads, d_state)
+    alpha_c = to_chunks(alpha_eff)         # (batch, n_chunks, Cs, nheads, d_state)
 
     # For the WY algorithm, we need K, V, Q, beta all in the shape:
     # (batch, nheads, n_chunks, Cs, feature_dim)
@@ -684,15 +726,19 @@ def delta_recurrence_wy(
     # =====================================================================
     # Reshape back to (batch, seqlen, nheads, headdim, r)
     # =====================================================================
-    # Y: (batch, nheads, n_chunks, Cs, headdim) → (batch, L, nheads, headdim)
+    # Y: (batch, nheads, n_chunks, Cs, headdim) → (batch, L_eff, nheads, headdim)
     Y = Y.permute(0, 2, 3, 1, 4)  # (batch, n_chunks, Cs, nheads, headdim)
-    Y = Y.reshape(batch, L, nheads, headdim)
+    Y = Y.reshape(batch, L_eff, nheads, headdim)
+
+    # Extract odd positions if using virtual expansion (B₂ readout positions)
+    if use_virtual:
+        Y = Y[:, 1::2]  # (batch, L, nheads, headdim)
 
     # Remove padding
     if pad_len > 0:
         Y = Y[:, :seqlen]
 
-    # Add MIMO rank dimension (r=1 for Phase 5a/5b)
+    # Add MIMO rank dimension (r=1 for Phase 5)
     Y = Y.unsqueeze(-1)  # (batch, seqlen, nheads, headdim, 1)
 
     # For r > 1, replicate the output (MIMO WY is a future phase)
