@@ -79,6 +79,18 @@ Model-agnostic framework for generating problems with structured work areas:
 Stages 5-6 ground addition/subtraction in counting: `3 + 4 WORK 4 5 6 7 = 0 7` (count up 4 from 3).
 Stages 7-8 use column-by-column scratchpad with counting-based column operations.
 
+### CTKG (experiments/ctkg/) — NEW, DESIGN PHASE
+
+Category Theory Knowledge Graph — a directed acyclic graph where nodes are concepts/skills and edges are prerequisite relationships. Four planned use cases:
+
+1. **Curriculum compiler** (immediate) — topological sort = valid curriculum, type checking catches missing prerequisites before training
+2. **Structured training data** (near-term) — graph structure determines training order, replay policy, format consistency
+3. **External knowledge store** (medium-term) — knowledge in system RAM, structure-aware retrieval (not similarity-based RAG), compensates for 4GB VRAM limit
+4. **Computational aid** (long-term) — deterministic solver for multi-step problems, model delegates computation to graph
+
+Key files:
+- `DESIGN.md` — Full architecture, data model, arithmetic domain graph, integration plan
+
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
 
 - `mamba3_block.py` — Mamba3 block implementation (SSD-based, backbone for arithmetic curriculum)
@@ -97,6 +109,9 @@ predictive-coding-agent/
 ├── MISTAKES.md            # 44 documented mistakes (ALWAYS READ)
 ├── CONTINUATION.md        # Compositional arithmetic curriculum plan (ACTIVE)
 ├── experiments/
+│   ├── ctkg/              # Category Theory Knowledge Graph (NEW)
+│   │   ├── DESIGN.md      # Architecture: 4 use cases, data model, arithmetic domain graph
+│   │   └── graph.py       # (planned) KnowledgeGraph, Concept, Prerequisite, validation
 │   ├── scratchpad/        # Scratchpad framework (model-agnostic)
 │   │   ├── framework.py   # Vocab, Problem, Step, Grader, ProblemGenerator
 │   │   ├── DESIGN_GUIDE.md # Curriculum design principles (category theory, prerequisites)

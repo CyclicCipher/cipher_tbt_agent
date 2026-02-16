@@ -1,0 +1,392 @@
+# Category Theory Knowledge Graph (CTKG) — Design Document
+
+**Date:** 2026-02-16
+**Status:** Initial design. No code yet.
+**Context:** Mistake #44 showed that missing prerequisites between counting and arithmetic caused the model to memorize instead of compose. A knowledge graph with structural constraints would have caught this automatically — like a compiler catching a missing import. This motivates building the CTKG as a general-purpose infrastructure component, not just a curriculum tool.
+
+---
+
+## What the CTKG Is
+
+A directed acyclic graph where:
+- **Nodes** = concepts/skills (objects in the category)
+- **Edges** = "is prerequisite for" relationships (morphisms)
+- **Each node** carries metadata: what it teaches, how to verify it's learned, what scratchpad format it uses, what tokens it produces/consumes
+- **Each edge** carries metadata: how the source skill is used by the target, codomain/domain type annotations
+
+The graph enforces **structural constraints** that prevent ill-formed curricula. The key insight: if the graph is correct, the curriculum is correct. Mistakes happen when the graph is incomplete (missing nodes/edges), not when the training procedure is wrong.
+
+---
+
+## Four Use Cases (Ordered by Implementation Priority)
+
+### 1. Curriculum Compiler (IMMEDIATE)
+
+The graph compiles into a valid training curriculum. This is analogous to a build system:
+
+- **Topological sort** of the graph = valid stage ordering
+- **Type checking** on edges = codomain/domain matching (the output format of skill A must match the input format of skill B)
+- **Completeness check** = every internal node has all prerequisite edges satisfied
+- **Cycle detection** = impossible dependencies are flagged
+- **Missing import** = a node references a concept not in the graph
+
+**What Mistake #44 would have looked like:**
+```
+CTKG validation error:
+  Node 'single_digit_addition' has no incoming edge for:
+    - ordinality (digits must have order for counting-up)
+    - comparison (digits must be comparable quantities)
+  Node 'single_digit_addition' is marked as fact_stage but has >20 entries (155).
+    Hint: decompose into sub-graph with counting-based derivation.
+```
+
+The "compiler" catches the bug before training runs. No wasted GPU hours.
+
+**Concrete deliverable:** `ctkg.validate()` that checks all structural constraints and reports errors in the format above.
+
+### 2. Structured Training Data Generator (NEAR-TERM)
+
+Each node in the graph is associated with a `ProblemGenerator` (from the scratchpad framework). The graph structure determines:
+
+- **What to train on:** The current frontier node + replay from ancestors
+- **In what order:** Topological sort, with advancement gates (>=95% test)
+- **With what replay:** When training node B, replay problems from all ancestors of B (weighted by recency and graph distance)
+- **Format consistency:** The scratchpad format for node B must literally contain the formats of its prerequisite nodes as sub-sequences
+
+This replaces the manual stage numbering in `train_arithmetic.py` with automatic curriculum generation from the graph.
+
+**Concrete deliverable:** `ctkg.generate_curriculum()` that returns an ordered list of `(stage_number, generator, replay_generators)` tuples.
+
+### 3. External Knowledge Store / Long-Term Memory (MEDIUM-TERM)
+
+The CTKG stores **knowledge** (structured relationships between concepts), not just text. At inference time, the relevant subgraph is prefetched and injected into the model's context. This differs from RAG in that retrieval is structure-aware:
+
+- For a problem of type X, the CTKG knows exactly which prerequisite concepts are relevant
+- The retrieval path follows the graph edges, not embedding similarity
+- The injected context includes not just facts but the **derivation structure** (how to reduce the problem to simpler sub-problems)
+
+This compensates for our 4GB VRAM constraint: the model's weights encode general reasoning patterns, while the CTKG in system RAM holds the specific knowledge. The model doesn't need to memorize arithmetic facts if the CTKG can provide the relevant subgraph at inference time.
+
+**Analogy to DeepSeek's Engram:** Both systems separate fast-access knowledge (GPU) from large-capacity knowledge (RAM/disk). The difference: Engram uses learned routing to select which knowledge to load; CTKG uses graph structure. Graph structure is deterministic and auditable — you can prove which knowledge is relevant without relying on a learned router that might hallucinate.
+
+**Concrete deliverable:** `ctkg.retrieve(problem_type)` that returns the relevant subgraph as a token sequence suitable for prepending to the model's input.
+
+### 4. Computational Aid / Deterministic Solver (LONG-TERM)
+
+For problems where the CTKG has a complete derivation path from axioms to answer, the graph can **execute the computation deterministically** instead of asking the neural network to predict it. This is computationally cheaper, more reliable, and produces provably correct results.
+
+Example: For a 50-step calculus problem, the CTKG:
+1. Identifies which rules apply (chain rule, product rule, etc.)
+2. Applies them in the correct order (following the graph structure)
+3. Returns the answer with a proof trace (the sequence of morphisms applied)
+
+The neural network's role shifts from "compute the answer" to "decide which subgraph to invoke" — a routing/planning task that's much easier than the computation itself.
+
+**Concrete deliverable:** `ctkg.solve(problem, max_steps)` that returns a `(answer, proof_trace)` if the problem is within the graph's coverage.
+
+---
+
+## Categorical Structure
+
+### Objects, Morphisms, Composition
+
+```
+Category ARITH:
+  Objects:
+    counting         -- count physical objects (DOTs, TENs) → digit
+    ordinality       -- digits have a natural order (successor/predecessor)
+    comparison       -- digits represent comparable quantities (GT/LT/EQ)
+    addition         -- a + b = count up b steps from a
+    subtraction      -- a - b = count down b steps from a
+    place_value      -- positional notation (ones, tens, hundreds)
+    column_addition  -- multi-digit addition via column-wise single-digit ops
+    column_subtraction -- multi-digit subtraction with borrowing
+
+  Morphisms:
+    counting → ordinality       -- counting defines digit ordering
+    ordinality → comparison     -- ordering enables comparison
+    ordinality → addition       -- successor function enables counting-up
+    ordinality → subtraction    -- predecessor function enables counting-down
+    addition → column_addition  -- single-digit addition is the column operation
+    subtraction → column_subtraction
+    place_value → column_addition   -- positional notation enables column decomposition
+    place_value → column_subtraction
+
+  Composition:
+    counting → ordinality → addition → column_addition
+    (transitive: counting is a prerequisite for column addition)
+```
+
+### Type System
+
+Each node has an **input type** (what tokens it consumes) and an **output type** (what tokens it produces). Edges are valid only when types match:
+
+```
+counting:
+  input:  [DOT/TEN tokens]
+  output: [digit]  -- digit-as-quantity-label
+
+ordinality:
+  input:  [digit, SUCC/PRED]
+  output: [digit]  -- digit-as-ordered-quantity
+
+comparison:
+  input:  [digit, digit]
+  output: [GT/LT/EQ]
+
+addition:
+  input:  [digit, +, digit]
+  output: [count-sequence, =, carry, digit]  -- digit-as-counted-quantity
+
+column_addition:
+  input:  [digit, digit, +, digit, digit]
+  output: [column_scratchpad]  -- contains addition sub-computations
+```
+
+The edge `ordinality → addition` is valid because:
+- ordinality output: `digit` (as ordered quantity)
+- addition input: `digit` (needs ordered quantity for counting-up)
+- Types match: the digit produced by ordinality IS the digit consumed by addition
+
+The old edge `counting → single_digit_addition_fact` was INVALID because:
+- counting output: `digit` (as quantity label)
+- fact addition input: `digit` (as arbitrary symbol in lookup table)
+- Types DON'T match: counting's digit-as-quantity ≠ fact table's digit-as-symbol
+
+### Functors (Cross-Domain Transfer)
+
+A **functor** maps an entire subgraph from one domain to another while preserving structure. Example:
+
+```
+F: ARITH → LOGIC
+  F(counting) = proposition_counting  -- count propositions satisfying a predicate
+  F(ordinality) = logical_ordering    -- partial order on propositions
+  F(addition) = disjunction           -- combining propositions
+  F(column_addition) = proof_composition  -- combining sub-proofs
+```
+
+The functor preserves composition: if `counting → addition` in ARITH, then `proposition_counting → disjunction` in LOGIC. This means a model trained on the arithmetic curriculum could transfer its compositional reasoning to logic.
+
+This is speculative and long-term, but the point is: the CTKG structure is domain-independent. The same graph operations (validate, compile, retrieve) work for any domain.
+
+---
+
+## Data Model
+
+### Node
+
+```python
+@dataclass
+class Concept:
+    name: str                          # unique identifier
+    description: str                   # what this concept teaches
+    domain: str                        # which category (e.g., 'arithmetic')
+
+    # Type annotations
+    input_type: List[str]              # token types consumed
+    output_type: List[str]             # token types produced
+
+    # Scratchpad integration
+    scratchpad_format: str             # template showing work area format
+    generator_class: Optional[str]     # ProblemGenerator subclass name
+    n_result: Union[int, str]          # fixed int or 'variable'
+
+    # Verification
+    pass_threshold: float = 0.95       # test accuracy to consider learned
+    max_epochs: int = 100              # budget before declaring failure
+
+    # Classification
+    is_atomic: bool = False            # True only for genuinely irreducible facts
+    # (no is_fact_stage — that's a design smell flag, not a classification)
+```
+
+### Edge
+
+```python
+@dataclass
+class Prerequisite:
+    source: str                        # prerequisite concept name
+    target: str                        # dependent concept name
+    role: str                          # how source is used ("successor for counting-up")
+    codomain_type: List[str]           # what source produces in this context
+    domain_type: List[str]             # what target expects in this context
+```
+
+### Graph
+
+```python
+class KnowledgeGraph:
+    concepts: Dict[str, Concept]
+    prerequisites: List[Prerequisite]
+
+    def add_concept(self, concept: Concept) -> None
+    def add_prerequisite(self, prereq: Prerequisite) -> None
+
+    # Curriculum compiler (Use Case 1)
+    def validate(self) -> List[ValidationError]
+    def topological_sort(self) -> List[str]
+    def generate_curriculum(self) -> List[CurriculumStage]
+
+    # Queries
+    def ancestors(self, name: str) -> Set[str]       # all transitive prereqs
+    def descendants(self, name: str) -> Set[str]      # all that depend on this
+    def frontier(self, learned: Set[str]) -> Set[str]  # next teachable concepts
+    def missing_for(self, name: str, learned: Set[str]) -> Set[str]
+
+    # Knowledge store (Use Case 3)
+    def retrieve(self, problem_type: str) -> SubGraph
+    def inject_context(self, problem_type: str, vocab: Vocab) -> List[int]
+```
+
+### Validation Rules
+
+```python
+class ValidationError:
+    """Base class for graph validation errors."""
+
+class MissingPrerequisite(ValidationError):
+    """Node X depends on concept Y, but Y has no node in the graph."""
+
+class TypeMismatch(ValidationError):
+    """Edge source.output_type doesn't match edge target.input_type."""
+
+class LargeFactTable(ValidationError):
+    """Node marked is_atomic=True but has >20 entries. Likely decomposable."""
+
+class OrphanNode(ValidationError):
+    """Internal node with no incoming edges (should be atomic or has missing prereqs)."""
+
+class CycleDetected(ValidationError):
+    """Circular dependency — impossible to teach in any order."""
+
+class FormatInconsistency(ValidationError):
+    """Target scratchpad doesn't contain source scratchpad as sub-sequence."""
+```
+
+---
+
+## The Arithmetic Domain Graph
+
+The first concrete instantiation. This replaces the manual stage list in CONTINUATION.md:
+
+```
+                    counting
+                   /        \
+          counting_dots    counting_tens
+                   \        /
+                combined_counting
+                       |
+                  ordinality (successor/predecessor)
+                  /         \
+          comparison       addition_as_counting
+                             |           \
+                    subtraction_as_counting  \
+                             |               |
+                     column_subtraction   column_addition
+                              \              /
+                          two_digit_arithmetic
+```
+
+Each node maps to a ProblemGenerator:
+
+| Node | Generator | Stage | Problem Count |
+|------|-----------|-------|---------------|
+| counting_dots | QueryCountingGenerator(query='DOT') | 1a | 100 |
+| counting_tens | QueryCountingGenerator(query='TEN') | 1b | 100 |
+| combined_counting | CombinedCountingGenerator | 2 | 100 |
+| ordinality | SuccessorGenerator | 3 | 20 |
+| comparison | ComparisonGenerator | 4 | 100 |
+| addition_as_counting | CountingAdditionGenerator | 5 | 100 |
+| subtraction_as_counting | CountingSubtractionGenerator | 6 | 55 |
+| column_addition | TwoDigitSingleGenerator(op='+') | 7a | 900 |
+| column_subtraction | TwoDigitSingleGenerator(op='-') | 7b | 900 |
+| two_digit_arithmetic | TwoDigitGenerator | 8 | ~12,195 |
+
+The topological sort produces a valid curriculum. Multiple valid orderings exist (e.g., comparison could come before or after addition), but the graph ensures no ordering violates prerequisites.
+
+---
+
+## Integration with Existing Code
+
+### With scratchpad framework
+
+The CTKG doesn't replace the scratchpad framework — it orchestrates it. Each `Concept` node references a `ProblemGenerator`. The CTKG's `generate_curriculum()` produces a list of generators in valid topological order, which `train_arithmetic.py` consumes.
+
+### With train_arithmetic.py
+
+Currently, `train_arithmetic.py` has a hardcoded stage list. The CTKG replaces this with:
+
+```python
+graph = build_arithmetic_graph()
+errors = graph.validate()
+if errors:
+    for e in errors:
+        print(f"CTKG ERROR: {e}")
+    sys.exit(1)
+
+curriculum = graph.generate_curriculum()
+for stage in curriculum:
+    train_stage(model, stage.generator, stage.replay_generators, ...)
+```
+
+### With future models
+
+The CTKG is model-agnostic. It produces curricula (ordered generators with replay policies), not model-specific training code. Any model that consumes token sequences can use it.
+
+---
+
+## Implementation Plan
+
+### Phase 1: Graph data structures + validation (Curriculum Compiler)
+
+- `graph.py` — `Concept`, `Prerequisite`, `KnowledgeGraph`, `ValidationError` subclasses
+- `validate()` — all six validation rules
+- `topological_sort()` — Kahn's algorithm
+- `arithmetic.py` — `build_arithmetic_graph()` instantiating the arithmetic domain
+- Tests: validate catches missing prerequisites, type mismatches, large fact tables
+
+### Phase 2: Curriculum generation
+
+- `generate_curriculum()` — topological sort + replay policy
+- `frontier()` — given learned concepts, which are next teachable?
+- Integration with `train_arithmetic.py` — replace hardcoded stage list
+
+### Phase 3: External knowledge store
+
+- `retrieve()` — given a problem type, return relevant subgraph
+- `inject_context()` — convert subgraph to token sequence for model input
+- Benchmark: does injecting the relevant subgraph improve generalization?
+
+### Phase 4: Deterministic solver
+
+- `solve()` — follow derivation path from axioms to answer
+- Proof trace generation — the sequence of morphisms applied
+- Hybrid mode: model plans, CTKG executes
+
+---
+
+## Open Questions
+
+1. **How to represent "variable n_result"?** Stages 5-8 have variable-length scratchpads. The `problems_to_tensors()` function pads to seq_len, but the graph needs to know the maximum length for validation.
+
+2. **Replay policy:** When training node B, how much to replay from ancestors? Options: uniform, distance-weighted, recency-weighted, loss-weighted. This is an empirical question.
+
+3. **Type checking granularity:** The current type system is coarse (list of token type names). Should we use a richer type system (e.g., dependent types where the type of the output depends on the input)?
+
+4. **Cross-domain functors:** The functor concept is elegant but speculative. Do we need it for the arithmetic domain, or is it only relevant when we add logic/language domains?
+
+5. **Engram-style prefetching:** The retrieval mechanism needs to be fast enough for inference. Graph traversal is O(V+E), which is fine for small graphs. For large graphs (thousands of concepts), we may need indexing.
+
+---
+
+## Key Principles
+
+1. **The graph is the source of truth.** If the graph says a prerequisite is missing, trust it. Don't work around it with more training epochs.
+
+2. **Validation before training.** Always run `validate()` before starting a training run. A clean validation = a structurally sound curriculum.
+
+3. **Nodes before edges.** Define all concepts before defining relationships. This forces explicit enumeration of what the model needs to know.
+
+4. **Types are contracts.** The input/output types on nodes and edges are contracts that the scratchpad format must satisfy. If the types don't match, the scratchpad is wrong.
+
+5. **Small atomic, large composite.** Atomic nodes should have <20 entries. Large collections are a signal to decompose into sub-graphs with compositional structure.
