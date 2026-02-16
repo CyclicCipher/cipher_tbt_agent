@@ -29,6 +29,7 @@ from experiments.Mamba3.mamba3_block import Mamba3Config, Mamba3LM
 from experiments.Mamba3.arithmetic_tasks import (
     VOCAB_SIZE, get_stage_data, decode_tokens,
 )
+from experiments.Mamba3.continual import EWC, DERPlusPlus, build_layer_lr_groups
 
 
 # ---------------------------------------------------------------------------
@@ -71,6 +72,22 @@ def parse_args():
                    help='Test accuracy to advance in curriculum mode')
     p.add_argument('--replay_fraction', type=float, default=0.25,
                    help='Fraction of previous-stage data mixed into current stage (0=off)')
+
+    # Continual learning
+    p.add_argument('--diff_lr', action='store_true',
+                   help='Enable differential learning rates by layer')
+    p.add_argument('--lr_decay', type=float, default=0.5,
+                   help='Layer LR decay factor (default 0.5, lower = more protection)')
+    p.add_argument('--ewc', action='store_true',
+                   help='Enable Elastic Weight Consolidation')
+    p.add_argument('--ewc_lambda', type=float, default=400.0,
+                   help='EWC penalty weight (default 400)')
+    p.add_argument('--der', action='store_true',
+                   help='Enable DER++ logit matching')
+    p.add_argument('--der_alpha', type=float, default=0.5,
+                   help='DER++ MSE weight (default 0.5)')
+    p.add_argument('--der_samples', type=int, default=500,
+                   help='DER++ samples per stage snapshot (default 500)')
 
     # Output
     p.add_argument('--results_file', type=str, default=None)
@@ -214,15 +231,24 @@ def _build_replay_loader(train_seqs, prev_train_seqs, replay_fraction, batch_siz
 
 def train_stage(model, train_seqs, test_loader, device, amp_ctx, scaler,
                 n_result_tokens, epochs, args, stage_label="",
-                prev_loaders=None, prev_train_seqs=None):
+                prev_loaders=None, prev_train_seqs=None,
+                ewc=None, der=None, param_groups=None):
     """Train one stage. Returns (history, passed) where passed indicates
     whether test accuracy reached the advance_threshold.
 
     If prev_train_seqs is provided, replay is resampled every epoch
     for better coverage of previous skills.
+
+    Optional CL methods:
+      param_groups: optimizer param groups (for differential LR)
+      ewc: EWC object (adds quadratic penalty to loss)
+      der: DERPlusPlus object (adds logit-matching loss)
     """
-    optimizer = torch.optim.AdamW(
-        model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    if param_groups is not None:
+        optimizer = torch.optim.AdamW(param_groups)
+    else:
+        optimizer = torch.optim.AdamW(
+            model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer, make_lr_lambda(args.warmup_epochs, epochs))
 
@@ -247,6 +273,12 @@ def train_stage(model, train_seqs, test_loader, device, amp_ctx, scaler,
                     seqs[:, 1:].reshape(-1),
                     ignore_index=0,
                 )
+
+            # Continual learning penalties
+            if ewc is not None:
+                loss = loss + ewc.penalty(model)
+            if der is not None:
+                loss = loss + der.loss(model, device, amp_ctx)
 
             optimizer.zero_grad()
             if scaler is not None:
@@ -358,6 +390,17 @@ def main():
 
     all_history = []
 
+    # --- CL method setup ---
+    ewc_obj = EWC(lambda_ewc=args.ewc_lambda) if args.ewc else None
+    der_obj = DERPlusPlus(alpha=args.der_alpha, n_snapshot=args.der_samples) if args.der else None
+
+    cl_tags = []
+    if args.diff_lr: cl_tags.append('diff_lr')
+    if args.ewc: cl_tags.append(f'ewc(λ={args.ewc_lambda})')
+    if args.der: cl_tags.append(f'der(α={args.der_alpha})')
+    if cl_tags:
+        print(f"CL methods: {', '.join(cl_tags)}")
+
     # --- Helper to build loaders for a stage ---
     def make_loaders(stage):
         data = get_stage_data(stage, n_train=args.n_train, n_test=args.n_test,
@@ -368,6 +411,11 @@ def main():
         te = DataLoader(TensorDataset(data['test_seqs']),
                         batch_size=args.batch_size, shuffle=False)
         return tr, te, data
+
+    def make_param_groups():
+        if args.diff_lr:
+            return build_layer_lr_groups(model, args.lr, args.lr_decay, args.weight_decay)
+        return None
 
     if args.curriculum:
         print(f"\nCurriculum 1 -> {args.target_stage}  "
@@ -413,7 +461,8 @@ def main():
                 model, data['train_seqs'], te, device, amp_ctx, scaler,
                 data['n_result_tokens'], args.epochs, args,
                 stage_label=f"S{stage}", prev_loaders=prev_loaders,
-                prev_train_seqs=prev_train_seqs)
+                prev_train_seqs=prev_train_seqs,
+                ewc=ewc_obj, der=der_obj, param_groups=make_param_groups())
             all_history.extend(history)
 
             if not passed:
@@ -424,6 +473,15 @@ def main():
 
             prev_loaders[stage] = (te, data['n_result_tokens'])
             prev_train_seqs.append(data['train_seqs'])
+
+            # Register with CL methods after a stage passes
+            if ewc_obj is not None:
+                ewc_obj.register_stage(model, data['train_seqs'],
+                                       device, amp_ctx)
+            if der_obj is not None:
+                der_obj.register_stage(model, data['train_seqs'],
+                                       device, amp_ctx,
+                                       data['n_result_tokens'])
 
             # Save checkpoint after each passed stage
             if args.checkpoint_dir:
@@ -442,7 +500,8 @@ def main():
         history, passed = train_stage(
             model, data['train_seqs'], te, device, amp_ctx, scaler,
             data['n_result_tokens'], args.epochs, args,
-            stage_label=f"S{stage}")
+            stage_label=f"S{stage}",
+            ewc=ewc_obj, der=der_obj, param_groups=make_param_groups())
         all_history.extend(history)
 
     # --- Save results ---
