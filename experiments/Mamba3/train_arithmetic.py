@@ -225,9 +225,10 @@ def main():
     args = parse_args()
     torch.manual_seed(args.seed)
 
-    device = (torch.device('cuda') if args.device == 'auto'
-              and torch.cuda.is_available() else
-              torch.device(args.device if args.device != 'auto' else 'cpu'))
+    if args.device == 'auto':
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    else:
+        device = torch.device(args.device)
 
     config = Mamba3Config(
         d_model=args.d_model, d_state=args.d_state,
