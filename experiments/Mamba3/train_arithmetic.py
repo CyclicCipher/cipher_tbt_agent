@@ -3,9 +3,9 @@
 Curriculum training script for compositional arithmetic on Mamba3.
 
 Modes:
-  Single-stage:  python train_arithmetic.py --stage 3 --epochs 50
-  Curriculum:    python train_arithmetic.py --curriculum --target_stage 4
-  Direct:        python train_arithmetic.py --stage 4 --epochs 200
+  Single-stage:  python train_arithmetic.py --stage 4 --epochs 50
+  Curriculum:    python train_arithmetic.py --curriculum --target_stage 6
+  Direct:        python train_arithmetic.py --stage 6 --epochs 200
 
 See CONTINUATION.md for experimental design.
 Do NOT run full training on CPU (Mistake #36).
@@ -39,12 +39,12 @@ def parse_args():
     p = argparse.ArgumentParser(description='Compositional Arithmetic Curriculum')
 
     # Mode
-    p.add_argument('--stage', type=int, choices=list(range(1, 9)), default=None,
+    p.add_argument('--stage', type=int, choices=list(range(1, 11)), default=None,
                    help='Single stage to train (direct mode)')
     p.add_argument('--curriculum', action='store_true',
                    help='Curriculum mode: train stages 1 -> target_stage')
-    p.add_argument('--target_stage', type=int, choices=list(range(2, 9)), default=7,
-                   help='Final stage for curriculum mode (default: 7 = two-digit arithmetic)')
+    p.add_argument('--target_stage', type=int, choices=list(range(2, 11)), default=9,
+                   help='Final stage for curriculum mode (default: 9 = two-digit arithmetic)')
 
     # Architecture
     p.add_argument('--d_model', type=int, default=128)
@@ -108,13 +108,18 @@ def make_lr_lambda(warmup: int, total: int):
 # ---------------------------------------------------------------------------
 
 def evaluate_result_accuracy(model, loader, device, amp_ctx, n_result_tokens):
-    """Exact-match accuracy on the last n_result_tokens positions.
+    """Exact-match and per-token accuracy on the last n_result_tokens positions.
 
     Per Mistake #41: prediction for position p uses logits[:, p-1],
     which has NOT seen the token at position p.
+
+    Returns dict:
+        exact: float     — fraction of samples where ALL result tokens match
+        per_token: list   — per-position accuracy (length n_result_tokens)
     """
     model.eval()
     correct = total = 0
+    token_correct = [0] * n_result_tokens
     with torch.no_grad():
         for (seqs,) in loader:
             seqs = seqs.to(device)
@@ -124,10 +129,14 @@ def evaluate_result_accuracy(model, loader, device, amp_ctx, n_result_tokens):
             for k in range(n_result_tokens):
                 pos = -(n_result_tokens - k)      # result token position
                 pred = logits[:, pos - 1].argmax(-1)
-                match &= (pred == seqs[:, pos])
+                tok_match = (pred == seqs[:, pos])
+                match &= tok_match
+                token_correct[k] += tok_match.sum().item()
             correct += match.sum().item()
             total += seqs.shape[0]
-    return correct / max(total, 1)
+    exact = correct / max(total, 1)
+    per_token = [tc / max(total, 1) for tc in token_correct]
+    return dict(exact=exact, per_token=per_token)
 
 
 # ---------------------------------------------------------------------------
@@ -137,13 +146,15 @@ def evaluate_result_accuracy(model, loader, device, amp_ctx, n_result_tokens):
 def train_stage(model, train_loader, test_loader, device, amp_ctx, scaler,
                 n_result_tokens, epochs, args, stage_label="",
                 prev_loaders=None):
-    """Train one stage. Returns list of per-epoch records."""
+    """Train one stage. Returns (history, passed) where passed indicates
+    whether test accuracy reached the advance_threshold."""
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer, make_lr_lambda(args.warmup_epochs, epochs))
 
     history = []
+    passed = False
     for epoch in range(1, epochs + 1):
         model.train()
         epoch_loss = 0.0
@@ -178,10 +189,13 @@ def train_stage(model, train_loader, test_loader, device, amp_ctx, scaler,
         scheduler.step()
         avg_loss = epoch_loss / max(n_batches, 1)
 
-        train_acc = evaluate_result_accuracy(
+        train_result = evaluate_result_accuracy(
             model, train_loader, device, amp_ctx, n_result_tokens)
-        test_acc = evaluate_result_accuracy(
+        test_result = evaluate_result_accuracy(
             model, test_loader, device, amp_ctx, n_result_tokens)
+
+        train_acc = train_result['exact']
+        test_acc = test_result['exact']
 
         ep_s = time.perf_counter() - t0
 
@@ -191,30 +205,41 @@ def train_stage(model, train_loader, test_loader, device, amp_ctx, scaler,
                       test_acc=round(test_acc, 4),
                       time=round(ep_s, 1))
 
+        if n_result_tokens > 1:
+            record['train_per_token'] = [round(x, 4) for x in train_result['per_token']]
+            record['test_per_token'] = [round(x, 4) for x in test_result['per_token']]
+
         # Catastrophic-forgetting check on previous stages
         if prev_loaders:
             for s, (ldr, nr) in prev_loaders.items():
-                acc = evaluate_result_accuracy(model, ldr, device, amp_ctx, nr)
-                record[f'stage{s}_acc'] = round(acc, 4)
+                prev_result = evaluate_result_accuracy(model, ldr, device, amp_ctx, nr)
+                record[f'stage{s}_acc'] = round(prev_result['exact'], 4)
 
         history.append(record)
 
         if epoch % args.print_every == 0 or epoch == 1 or epoch == epochs:
+            # Per-token diagnostic for multi-token results (test only)
+            tok_str = ""
+            if n_result_tokens > 1:
+                te_tok = '|'.join(f'{x:.2f}' for x in test_result['per_token'])
+                tok_str = f" [{te_tok}]"
+
             prev_str = ""
             if prev_loaders:
                 parts = [f"S{s}={record[f'stage{s}_acc']:.2f}"
                          for s in sorted(prev_loaders)]
                 prev_str = f"  prev=[{', '.join(parts)}]"
             print(f"  [{stage_label}] ep {epoch:3d}  loss={avg_loss:.4f}  "
-                  f"train={train_acc:.4f}  test={test_acc:.4f}  "
+                  f"train={train_acc:.4f}  test={test_acc:.4f}{tok_str}  "
                   f"{ep_s:.1f}s{prev_str}")
 
         if test_acc >= args.advance_threshold:
             print(f"  [{stage_label}] PASSED ep {epoch}  "
                   f"(test={test_acc:.4f} >= {args.advance_threshold})")
+            passed = True
             break
 
-    return history
+    return history, passed
 
 
 # ---------------------------------------------------------------------------
@@ -298,11 +323,17 @@ def main():
             for j in range(min(3, len(data['train_seqs']))):
                 print(f"  sample: {decode_tokens(data['train_seqs'][j])}")
 
-            history = train_stage(
+            history, passed = train_stage(
                 model, tr, te, device, amp_ctx, scaler,
                 data['n_result_tokens'], args.epochs, args,
                 stage_label=f"S{stage}", prev_loaders=prev_loaders)
             all_history.extend(history)
+
+            if not passed:
+                last_test = history[-1]['test_acc']
+                print(f"  Stage {stage} FAILED — test={last_test:.4f} "
+                      f"< {args.advance_threshold}.  Curriculum halted.\n")
+                break
 
             prev_loaders[stage] = (te, data['n_result_tokens'])
             prev_train_seqs.append(data['train_seqs'])
@@ -316,7 +347,7 @@ def main():
             print(f"  sample: {decode_tokens(data['train_seqs'][j])}")
         print()
 
-        history = train_stage(
+        history, passed = train_stage(
             model, tr, te, device, amp_ctx, scaler,
             data['n_result_tokens'], args.epochs, args,
             stage_label=f"S{stage}")

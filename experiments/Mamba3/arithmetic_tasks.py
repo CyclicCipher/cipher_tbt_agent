@@ -2,14 +2,16 @@
 Compositional arithmetic task generators for curriculum learning.
 
 Each stage builds on the previous:
-  Stage 1: Digit successor (ordering — what comes after 3?)
-  Stage 2: Counting / cardinality (DOT DOT DOT = 3)
-  Stage 3: Two-digit counting / place value (TEN TEN DOT DOT DOT = 2 3)
-  Stage 4: Magnitude comparison (digit ordering via > <)
-  Stage 5: Successor/predecessor (+1/-1 as arithmetic)
-  Stage 6: Single-digit arithmetic (+, -, *, /)
-  Stage 7: Two-digit arithmetic (compose place value + operation + carry)
-  Stage 8: PEMDAS (compose operations with precedence)
+  Stage 1:  Digit successor (ordering — what comes after 3?)
+  Stage 2:  Count DOTs / cardinality (DOT DOT DOT = 3)
+  Stage 3:  Count TENs (TEN TEN TEN = 3) — same skill, new token
+  Stage 4:  Two-digit counting / place value (TEN TEN DOT DOT DOT = 2 3)
+  Stage 5:  Magnitude comparison (digit ordering via > <)
+  Stage 6:  Digit distance (8 - 4 = 4, a >= b only — how far apart?)
+  Stage 7:  Successor/predecessor (+1/-1 as arithmetic)
+  Stage 8:  Single-digit arithmetic (+, -, *, /)
+  Stage 9:  Two-digit arithmetic (compose place value + operation + carry)
+  Stage 10: PEMDAS (compose operations with precedence)
 
 All generators return (n_samples, seq_len) long tensors, left-padded with PAD.
 Token encoding: digit d -> token d+1.  See VOCAB below.
@@ -92,7 +94,7 @@ def generate_digit_successor(n_samples: int, seq_len: int = 32,
 
 
 # ---------------------------------------------------------------------------
-# Stage 2: Single-Digit Counting (cardinality)
+# Stage 2: Count DOTs (cardinality)
 # ---------------------------------------------------------------------------
 
 def _enumerate_counting() -> List[Tuple]:
@@ -118,7 +120,36 @@ def generate_counting(n_samples: int, seq_len: int = 32,
 
 
 # ---------------------------------------------------------------------------
-# Stage 3: Two-Digit Counting (place value)
+# Stage 3: Count TENs (same counting skill, new token)
+# ---------------------------------------------------------------------------
+
+def _enumerate_count_tens() -> List[Tuple]:
+    """All single-digit TEN-counting problems (10 total: 0-9 TENs -> digit)."""
+    return [(d,) for d in range(10)]
+
+
+def generate_count_tens(n_samples: int, seq_len: int = 32,
+                        problems: Optional[List] = None) -> Tensor:
+    """[PAD..., TEN, ..., TEN, =, d]  where count(TEN) = d.
+
+    Identical format to Stage 2 but with TEN tokens.  Teaches the model
+    that counting is counting regardless of the token type — the same
+    skill transfers across DOT and TEN.  This is the prerequisite for
+    two-digit counting (Stage 4), where tens digit = count(TEN) and
+    ones digit = count(DOT).
+    """
+    if problems is None:
+        problems = _enumerate_count_tens()
+    seqs = torch.zeros(n_samples, seq_len, dtype=torch.long)
+    for i in range(n_samples):
+        (d,) = random.choice(problems)
+        tokens = [VOCAB['TEN']] * d + [VOCAB['='], digit_to_token(d)]
+        seqs[i] = torch.tensor(_pad_left(tokens, seq_len))
+    return seqs
+
+
+# ---------------------------------------------------------------------------
+# Stage 4: Two-Digit Counting (place value)
 # ---------------------------------------------------------------------------
 
 def _enumerate_two_digit_counting() -> List[Tuple]:
@@ -154,7 +185,7 @@ def generate_two_digit_counting(n_samples: int, seq_len: int = 32,
 
 
 # ---------------------------------------------------------------------------
-# Stage 4: Magnitude Comparison
+# Stage 5: Magnitude Comparison
 # ---------------------------------------------------------------------------
 
 def _enumerate_comparisons() -> List[Tuple]:
@@ -185,7 +216,42 @@ def generate_comparison(n_samples: int, seq_len: int = 32,
 
 
 # ---------------------------------------------------------------------------
-# Stage 5: Successor / Predecessor (arithmetic)
+# Stage 6: Digit Distance (magnitude awareness)
+# ---------------------------------------------------------------------------
+
+def _enumerate_digit_distance() -> List[Tuple]:
+    """All single-digit distance problems: a - b where a >= b.
+
+    55 total: (0,0), (1,0), (1,1), ..., (9,0), ..., (9,9).
+    Bridges comparison (which is bigger?) to arithmetic (by how much?).
+    """
+    problems = []
+    for a in range(10):
+        for b in range(a + 1):
+            problems.append((a, b, a - b))
+    return problems
+
+
+def generate_digit_distance(n_samples: int, seq_len: int = 32,
+                            problems: Optional[List] = None) -> Tensor:
+    """[PAD..., a, -, b, =, d]  where d = a - b, a >= b.
+
+    Teaches magnitude awareness: not just 'is 8 > 4?' but 'by how much?'
+    Restricted to non-negative results (0-9) to keep n_result=1.
+    """
+    if problems is None:
+        problems = _enumerate_digit_distance()
+    seqs = torch.zeros(n_samples, seq_len, dtype=torch.long)
+    for i in range(n_samples):
+        a, b, d = random.choice(problems)
+        tokens = [digit_to_token(a), VOCAB['-'], digit_to_token(b),
+                  VOCAB['='], digit_to_token(d)]
+        seqs[i] = torch.tensor(_pad_left(tokens, seq_len))
+    return seqs
+
+
+# ---------------------------------------------------------------------------
+# Stage 7: Successor / Predecessor (arithmetic)
 # ---------------------------------------------------------------------------
 
 def _enumerate_successors() -> List[Tuple]:
@@ -213,7 +279,7 @@ def generate_successor(n_samples: int, seq_len: int = 32,
 
 
 # ---------------------------------------------------------------------------
-# Stage 6: Single-Digit Arithmetic
+# Stage 8: Single-Digit Arithmetic
 # ---------------------------------------------------------------------------
 
 def _enumerate_single_digit(ops=None) -> List[Tuple]:
@@ -254,7 +320,7 @@ def generate_single_digit(n_samples: int, seq_len: int = 32,
 
 
 # ---------------------------------------------------------------------------
-# Stage 7: Two-Digit Arithmetic
+# Stage 9: Two-Digit Arithmetic
 # ---------------------------------------------------------------------------
 
 def _enumerate_two_digit(ops=None) -> List[Tuple]:
@@ -298,7 +364,7 @@ def generate_two_digit(n_samples: int, seq_len: int = 32,
 
 
 # ---------------------------------------------------------------------------
-# Stage 8: PEMDAS
+# Stage 10: PEMDAS
 # ---------------------------------------------------------------------------
 
 def _apply_op(a: int, op: str, b: int):
@@ -360,14 +426,16 @@ def generate_pemdas(n_samples: int, seq_len: int = 32,
 # ---------------------------------------------------------------------------
 
 STAGE_CONFIG = {
-    1: dict(name='digit_successor',      enumerate=_enumerate_digit_successors,    generate=generate_digit_successor,     n_result=1),
-    2: dict(name='counting',             enumerate=_enumerate_counting,            generate=generate_counting,            n_result=1),
-    3: dict(name='two_digit_counting',   enumerate=_enumerate_two_digit_counting,  generate=generate_two_digit_counting,  n_result=2),
-    4: dict(name='comparison',           enumerate=_enumerate_comparisons,         generate=generate_comparison,          n_result=1),
-    5: dict(name='successor',            enumerate=_enumerate_successors,          generate=generate_successor,           n_result=1),
-    6: dict(name='single_digit',         enumerate=_enumerate_single_digit,        generate=generate_single_digit,        n_result=2),
-    7: dict(name='two_digit',            enumerate=_enumerate_two_digit,           generate=generate_two_digit,           n_result=3),
-    8: dict(name='pemdas',               enumerate=_enumerate_pemdas,              generate=generate_pemdas,              n_result=3),
+    1:  dict(name='digit_successor',    enumerate=_enumerate_digit_successors,   generate=generate_digit_successor,    n_result=1),
+    2:  dict(name='count_dots',         enumerate=_enumerate_counting,           generate=generate_counting,           n_result=1),
+    3:  dict(name='count_tens',         enumerate=_enumerate_count_tens,         generate=generate_count_tens,          n_result=1),
+    4:  dict(name='two_digit_counting', enumerate=_enumerate_two_digit_counting, generate=generate_two_digit_counting,  n_result=2),
+    5:  dict(name='comparison',         enumerate=_enumerate_comparisons,        generate=generate_comparison,          n_result=1),
+    6:  dict(name='digit_distance',     enumerate=_enumerate_digit_distance,     generate=generate_digit_distance,      n_result=1),
+    7:  dict(name='successor',          enumerate=_enumerate_successors,         generate=generate_successor,           n_result=1),
+    8:  dict(name='single_digit',       enumerate=_enumerate_single_digit,       generate=generate_single_digit,        n_result=2),
+    9:  dict(name='two_digit',          enumerate=_enumerate_two_digit,          generate=generate_two_digit,           n_result=3),
+    10: dict(name='pemdas',             enumerate=_enumerate_pemdas,             generate=generate_pemdas,              n_result=3),
 }
 
 

@@ -8,7 +8,7 @@ Current focus: **Compositional Arithmetic Curriculum** — Testing whether a sta
 
 **Naja** (WY chunkwise) is complete and numerically verified (Phase 5a+5b+5c). Ablation testing (Phase 5d) showed all benchmarks are memorization, not generalization (Mistake #42). This motivated the compositionality pivot.
 
-**Next priority: Implement `arithmetic_tasks.py` and `train_arithmetic.py` in `experiments/Mamba3/`.** See `CONTINUATION.md`.
+**Active priority: Compositional arithmetic curriculum in `experiments/Mamba3/`.** See `CONTINUATION.md`.
 
 Previous focus: **JEPA** — JEPA-style latent prediction on Mamba3 backbone (still in `experiments/energy_reasoning/`).
 
@@ -67,8 +67,8 @@ Key files:
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
 
 - `mamba3_block.py` — Mamba3 block implementation (SSD-based, backbone for arithmetic curriculum)
-- `arithmetic_tasks.py` — Task generators for 8-stage arithmetic curriculum (25-token vocab incl. DOT, TEN, NEXT)
-- `train_arithmetic.py` — Curriculum training script (stages 1-8, curriculum/direct modes)
+- `arithmetic_tasks.py` — Task generators for 10-stage arithmetic curriculum (25-token vocab incl. DOT, TEN, NEXT)
+- `train_arithmetic.py` — Curriculum training script (stages 1-10, curriculum/direct modes, per-token diagnostics)
 
 ### Archived ePC Variants
 
@@ -146,15 +146,19 @@ The core generalization problem persists across all architectures (JEPA, Naja, M
 
 **Current experiment:** Compositional arithmetic on Mamba3 (see `CONTINUATION.md`):
 1. Digit successor (learn digit ordering: 3 → 4)
-2. Single-digit counting (learn cardinality: ●●● = 3)
-3. Two-digit counting (learn place value: ■■●●● = 25)
-4. Magnitude comparison (learn > < on digits)
-5. Successor/predecessor (learn +1/-1 as arithmetic)
-6. Single-digit arithmetic (learn +, -, ×, ÷)
-7. Two-digit arithmetic (compose place value + operation + carry)
-8. PEMDAS (compose operations with precedence)
+2. Count DOTs (learn cardinality: ●●● = 3)
+3. Count TENs (same counting skill, new token: ■■■ = 3)
+4. Two-digit counting (compose place value: ■■●●● = 2 5)
+5. Magnitude comparison (learn > < on digits)
+6. Digit distance (how far apart? 8 - 4 = 4, a >= b only)
+7. Successor/predecessor (learn +1/-1 as arithmetic)
+8. Single-digit arithmetic (learn +, -, ×, ÷)
+9. Two-digit arithmetic (compose place value + operation + carry)
+10. PEMDAS (compose operations with precedence)
 
-**Key test:** Does curriculum training (stages 1→7) produce better generalization on Stage 7 than direct training on Stage 7 alone?
+**Key test:** Does curriculum training (stages 1→9) produce better generalization on Stage 9 than direct training on Stage 9 alone?
+
+**Curriculum rules:** Stages advance only on ≥95% test accuracy. If a stage fails after max epochs, the curriculum halts. Per-token accuracy diagnostics show which result position is the bottleneck for multi-token stages.
 
 Previous goals (catastrophic forgetting, modular circuits, energy-based reasoning) remain valid but are secondary until the generalization problem is understood.
 
