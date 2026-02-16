@@ -2,17 +2,18 @@
 """
 Test continual learning on the arithmetic curriculum.
 
-Uses differential learning rates (lower LR for earlier layers) as the
-primary continual learning method. Replay buffer provides prior-stage
-examples.
+Replay buffer provides prior-stage examples. Optionally uses differential
+learning rates (lower LR for earlier layers) — pass --diff_lr to enable.
 
-EWC and DER++ were both tested and found counterproductive:
+Tested and rejected:
   - EWC: quadratic penalty makes the model rigid after a few stages.
   - DER++: logit matching loss fights task learning (failed Stage 4,
     a task that otherwise passes in 1 epoch). Also 3x slower.
+  - diff_lr: no measurable effect — replay alone prevents forgetting.
 
 Usage:
-  python experiments/Mamba3/test_continual.py                 # Full test (GPU)
+  python experiments/Mamba3/test_continual.py                 # Replay only (GPU)
+  python experiments/Mamba3/test_continual.py --diff_lr       # + diff learning rates
   python experiments/Mamba3/test_continual.py --epochs 3      # Quick sanity (CPU)
   python experiments/Mamba3/test_continual.py --target_stage 8 # Test further
 
@@ -47,7 +48,7 @@ from experiments.Mamba3.train_arithmetic import (
 # ---------------------------------------------------------------------------
 
 def run_experiment(base_args, device):
-    """Run curriculum with diff_lr. Returns dict of results."""
+    """Run curriculum with replay (+ optional diff_lr). Returns dict of results."""
     args = SimpleNamespace(
         lr=base_args.lr,
         weight_decay=0.01,
@@ -57,7 +58,7 @@ def run_experiment(base_args, device):
         advance_threshold=0.95,
         replay_fraction=0.25,
         print_every=base_args.print_every,
-        diff_lr=True,
+        diff_lr=base_args.diff_lr,
         lr_decay=base_args.lr_decay,
         ewc=False,
         ewc_lambda=0.0,
@@ -90,8 +91,10 @@ def run_experiment(base_args, device):
         return te, data
 
     def make_param_groups():
-        return build_layer_lr_groups(model, args.lr, args.lr_decay,
-                                     args.weight_decay)
+        if args.diff_lr:
+            return build_layer_lr_groups(model, args.lr, args.lr_decay,
+                                         args.weight_decay)
+        return None
 
     prev_loaders = {}
     prev_train_seqs = []
@@ -159,7 +162,7 @@ def run_experiment(base_args, device):
 # ---------------------------------------------------------------------------
 
 def main():
-    p = argparse.ArgumentParser(description='Test curriculum with diff_lr on arithmetic')
+    p = argparse.ArgumentParser(description='Test curriculum on arithmetic')
     p.add_argument('--target_stage', type=int, default=6)
     p.add_argument('--epochs', type=int, default=50)
     p.add_argument('--seed', type=int, default=42)
@@ -174,6 +177,8 @@ def main():
     p.add_argument('--seq_len', type=int, default=48)
     p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--lr_decay', type=float, default=0.5)
+    p.add_argument('--diff_lr', action='store_true',
+                   help='Enable differential learning rates by layer')
     p.add_argument('--print_every', type=int, default=10)
     p.add_argument('--device', type=str, default='auto')
     base_args = p.parse_args()
@@ -189,7 +194,8 @@ def main():
                        n_layer=base_args.n_layer, headdim=base_args.headdim),
                        VOCAB_SIZE).parameters())
 
-    print(f"Arithmetic Curriculum (diff_lr + replay)")
+    mode = "diff_lr + replay" if base_args.diff_lr else "replay only"
+    print(f"Arithmetic Curriculum ({mode})")
     print(f"  Model: {n_params:,} params | {device}")
     print(f"  Target: Stage {base_args.target_stage} | "
           f"{base_args.epochs} epochs/stage | seed={base_args.seed}")
