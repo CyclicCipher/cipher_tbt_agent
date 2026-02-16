@@ -75,6 +75,12 @@ def parse_args():
     # Output
     p.add_argument('--results_file', type=str, default=None)
 
+    # Checkpointing
+    p.add_argument('--checkpoint_dir', type=str, default=None,
+                   help='Directory for stage checkpoints (saves after each passed stage)')
+    p.add_argument('--no_resume', action='store_true',
+                   help='Start fresh even if checkpoints exist')
+
     # Performance
     p.add_argument('--no_amp', action='store_true')
     p.add_argument('--compile', action='store_true')
@@ -101,6 +107,45 @@ def make_lr_lambda(warmup: int, total: int):
         progress = (epoch - warmup) / max(total - warmup, 1)
         return 0.01 + 0.99 * 0.5 * (1.0 + math.cos(math.pi * progress))
     return lr_lambda
+
+
+# ---------------------------------------------------------------------------
+# Checkpointing
+# ---------------------------------------------------------------------------
+
+def save_checkpoint(checkpoint_dir, stage, model, prev_train_seqs, all_history):
+    """Save model + replay buffer after a passed stage."""
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    path = os.path.join(checkpoint_dir, f'stage_{stage}.pt')
+    torch.save({
+        'stage': stage,
+        'model_state_dict': model.state_dict(),
+        'prev_train_seqs': prev_train_seqs,
+        'all_history': all_history,
+    }, path)
+    print(f"  Checkpoint saved -> {path}")
+
+
+def load_latest_checkpoint(checkpoint_dir, model):
+    """Find and load the highest-stage checkpoint. Returns (start_stage, prev_train_seqs, all_history) or None."""
+    if not os.path.isdir(checkpoint_dir):
+        return None
+    checkpoints = []
+    for fname in os.listdir(checkpoint_dir):
+        if fname.startswith('stage_') and fname.endswith('.pt'):
+            try:
+                s = int(fname[len('stage_'):-len('.pt')])
+                checkpoints.append((s, os.path.join(checkpoint_dir, fname)))
+            except ValueError:
+                pass
+    if not checkpoints:
+        return None
+    checkpoints.sort()
+    best_stage, best_path = checkpoints[-1]
+    ckpt = torch.load(best_path, weights_only=False)
+    model.load_state_dict(ckpt['model_state_dict'])
+    print(f"  Resumed from checkpoint: {best_path} (stage {best_stage} passed)")
+    return best_stage, ckpt['prev_train_seqs'], ckpt['all_history']
 
 
 # ---------------------------------------------------------------------------
@@ -298,8 +343,21 @@ def main():
               f"  replay={args.replay_fraction}\n")
         prev_loaders = {}
         prev_train_seqs = []  # accumulate training tensors for replay
+        start_stage = 1
 
-        for stage in range(1, args.target_stage + 1):
+        # Resume from checkpoint if available
+        if args.checkpoint_dir and not args.no_resume:
+            resumed = load_latest_checkpoint(args.checkpoint_dir, model)
+            if resumed is not None:
+                last_passed, prev_train_seqs, all_history = resumed
+                start_stage = last_passed + 1
+                # Rebuild prev_loaders for catastrophic-forgetting checks
+                for s in range(1, last_passed + 1):
+                    _, te, data = make_loaders(s)
+                    prev_loaders[s] = (te, data['n_result_tokens'])
+                print(f"  Skipping stages 1-{last_passed} (already passed)\n")
+
+        for stage in range(start_stage, args.target_stage + 1):
             tr, te, data = make_loaders(stage)
 
             # Experience replay: mix previous-stage samples into train loader
@@ -337,6 +395,11 @@ def main():
 
             prev_loaders[stage] = (te, data['n_result_tokens'])
             prev_train_seqs.append(data['train_seqs'])
+
+            # Save checkpoint after each passed stage
+            if args.checkpoint_dir:
+                save_checkpoint(args.checkpoint_dir, stage, model,
+                                prev_train_seqs, all_history)
             print()
     else:
         stage = args.stage
