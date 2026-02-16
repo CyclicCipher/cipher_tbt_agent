@@ -212,8 +212,14 @@ def generate_count_tens_2d(n_samples: int, seq_len: int = 32,
 # ---------------------------------------------------------------------------
 
 def _enumerate_two_digit_counting() -> List[Tuple]:
-    """All two-digit counting problems (90 total: 10-99)."""
-    return [(n,) for n in range(10, 100)]
+    """All counting problems 0-99 (100 total).
+
+    Includes 0-9 (pure DOT counting, no TENs) as natural scaffolding —
+    these are identical to Stage 4 problems and serve as within-stage
+    anchors that help the model learn ones-digit counting transfers
+    to the mixed TEN+DOT context.
+    """
+    return [(n,) for n in range(100)]
 
 
 def generate_two_digit_counting(n_samples: int, seq_len: int = 32,
@@ -225,9 +231,12 @@ def generate_two_digit_counting(n_samples: int, seq_len: int = 32,
 
     Example: 23 -> TEN TEN DOT DOT DOT = 2 3
     Example: 10 -> TEN = 1 0
-    Example: 20 -> TEN TEN = 2 0
+    Example:  5 -> DOT DOT DOT DOT DOT = 0 5  (scaffold from Stage 4)
+    Example:  0 -> = 0 0
 
-    Teaches place value: two-digit numbers decompose into tens + ones.
+    Includes 0-9 as within-stage scaffolding: these pure-DOT problems
+    bridge from Stage 4, helping the model learn that DOT counting
+    works the same way regardless of whether TEN tokens precede the DOTs.
     Max sequence length: 9 TENs + 9 DOTs + = + 2 digits = 21 tokens.
     """
     if problems is None:

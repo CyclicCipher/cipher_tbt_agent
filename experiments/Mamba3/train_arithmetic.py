@@ -60,7 +60,7 @@ def parse_args():
     p.add_argument('--seq_len', type=int, default=32)
 
     # Training
-    p.add_argument('--epochs', type=int, default=50,
+    p.add_argument('--epochs', type=int, default=100,
                    help='Max epochs per stage (curriculum) or total (direct)')
     p.add_argument('--batch_size', type=int, default=64)
     p.add_argument('--lr', type=float, default=1e-3)
