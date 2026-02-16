@@ -2,11 +2,13 @@
 """
 Test continual learning methods on the arithmetic curriculum.
 
-Runs 4 configurations to Stage 6, comparing catastrophic forgetting:
+Runs 3 configurations to Stage 6, comparing catastrophic forgetting:
   1. diff_lr  -- Differential learning rates by layer
   2. der      -- DER++ logit matching
-  3. ewc      -- Elastic Weight Consolidation
-  4. all      -- All three combined
+  3. both     -- diff_lr + DER++ combined
+
+EWC was tested and found counterproductive: its quadratic penalty makes
+the model rigid after a few stages, causing training to fail. Removed.
 
 Usage:
   python experiments/Mamba3/test_continual.py                 # Full test (GPU)
@@ -33,7 +35,7 @@ from experiments.Mamba3.mamba3_block import Mamba3Config, Mamba3LM
 from experiments.Mamba3.arithmetic_tasks import (
     VOCAB_SIZE, get_stage_data, decode_tokens,
 )
-from experiments.Mamba3.continual import EWC, DERPlusPlus, build_layer_lr_groups
+from experiments.Mamba3.continual import DERPlusPlus, build_layer_lr_groups
 from experiments.Mamba3.train_arithmetic import (
     train_stage, evaluate_result_accuracy, make_lr_lambda,
 )
@@ -46,8 +48,7 @@ from experiments.Mamba3.train_arithmetic import (
 CONFIGS = {
     'diff_lr': dict(diff_lr=True, ewc=False, der=False),
     'der':     dict(diff_lr=False, ewc=False, der=True),
-    'ewc':     dict(diff_lr=False, ewc=True, der=False),
-    'all':     dict(diff_lr=True, ewc=True, der=True),
+    'both':    dict(diff_lr=True, ewc=False, der=True),
 }
 
 
@@ -66,7 +67,7 @@ def make_args(overrides, base_args):
         diff_lr=False,
         lr_decay=base_args.lr_decay,
         ewc=False,
-        ewc_lambda=base_args.ewc_lambda,
+        ewc_lambda=0.0,
         der=False,
         der_alpha=base_args.der_alpha,
         der_samples=base_args.der_samples,
@@ -97,7 +98,6 @@ def run_experiment(name, config_overrides, base_args, device):
     amp_ctx = (lambda: torch.amp.autocast('cuda', dtype=torch.float16)) if use_amp else nullcontext
 
     # CL objects
-    ewc_obj = EWC(lambda_ewc=args.ewc_lambda) if args.ewc else None
     der_obj = DERPlusPlus(alpha=args.der_alpha, n_snapshot=args.der_samples) if args.der else None
 
     def make_loaders(stage):
@@ -118,8 +118,7 @@ def run_experiment(name, config_overrides, base_args, device):
 
     tags = []
     if args.diff_lr: tags.append('diff_lr')
-    if args.ewc: tags.append(f'ewc')
-    if args.der: tags.append(f'der')
+    if args.der: tags.append('der')
     tag_str = '+'.join(tags) if tags else 'none'
 
     print(f"\n{'='*60}")
@@ -151,7 +150,7 @@ def run_experiment(name, config_overrides, base_args, device):
             data['n_result_tokens'], base_args.epochs, args,
             stage_label=f"S{stage}", prev_loaders=prev_loaders,
             prev_train_seqs=prev_train_seqs,
-            ewc=ewc_obj, der=der_obj, param_groups=make_param_groups())
+            ewc=None, der=der_obj, param_groups=make_param_groups())
         all_history.extend(history)
 
         if not passed:
@@ -165,9 +164,6 @@ def run_experiment(name, config_overrides, base_args, device):
         last_stage = stage
 
         # Register with CL methods
-        if ewc_obj is not None:
-            ewc_obj.register_stage(model, data['train_seqs'],
-                                   device, amp_ctx)
         if der_obj is not None:
             der_obj.register_stage(model, data['train_seqs'],
                                    device, amp_ctx,
@@ -217,7 +213,6 @@ def main():
     p.add_argument('--seq_len', type=int, default=48)
     p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--lr_decay', type=float, default=0.5)
-    p.add_argument('--ewc_lambda', type=float, default=400.0)
     p.add_argument('--der_alpha', type=float, default=0.5)
     p.add_argument('--der_samples', type=int, default=500)
     p.add_argument('--print_every', type=int, default=10)
