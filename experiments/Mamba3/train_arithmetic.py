@@ -68,6 +68,8 @@ GENERATORS = {
 def decode_tokens(tokens):
     """Compatibility shim: decode token IDs to readable string."""
     return VOCAB.decode_sequence(tokens)
+
+
 from experiments.Mamba3.continual import EWC, DERPlusPlus, build_layer_lr_groups
 
 
