@@ -57,7 +57,7 @@ def parse_args():
     p.add_argument('--n_train', type=int, default=5000)
     p.add_argument('--n_test', type=int, default=1000)
     p.add_argument('--test_fraction', type=float, default=0.2)
-    p.add_argument('--seq_len', type=int, default=32)
+    p.add_argument('--seq_len', type=int, default=48)
 
     # Training
     p.add_argument('--epochs', type=int, default=100,

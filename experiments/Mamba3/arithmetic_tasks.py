@@ -3,11 +3,11 @@ Compositional arithmetic task generators for curriculum learning.
 
 Each stage builds on the previous:
   Stage 1:  Digit successor (ordering — what comes after 3?)
-  Stage 2:  Count DOTs / cardinality (DOT DOT DOT = 3)
-  Stage 3:  Count TENs (TEN TEN TEN = 3) — same skill, new token
-  Stage 4:  Count DOTs, two-digit output (DOT DOT DOT = 0 3) — bridge to 2-token output
-  Stage 5:  Count TENs, two-digit output (TEN TEN TEN = 3 0) — bridge to 2-token output
-  Stage 6:  Two-digit counting / place value (TEN TEN DOT DOT DOT = 2 3)
+  Stage 2:  Count DOTs / cardinality (DOT 1 DOT 2 DOT 3 = 3)
+  Stage 3:  Count TENs (TEN 1 TEN 2 TEN 3 = 3) — same skill, new token
+  Stage 4:  Count DOTs, two-digit output (DOT 1 DOT 2 DOT 3 = 0 3)
+  Stage 5:  Count TENs, two-digit output (TEN 1 TEN 2 TEN 3 = 3 0)
+  Stage 6:  Two-digit counting (TEN 1 TEN 2 DOT 1 DOT 2 DOT 3 = 2 3)
   Stage 7:  Magnitude comparison (digit ordering via > <)
   Stage 8:  Digit distance (8 - 4 = 4, a >= b only — how far apart?)
   Stage 9:  Successor/predecessor (+1/-1 as arithmetic)
@@ -17,6 +17,12 @@ Each stage builds on the previous:
 
 All generators return (n_samples, seq_len) long tensors, left-padded with PAD.
 Token encoding: digit d -> token d+1.  See VOCAB below.
+
+Process supervision: Counting stages (2-6) use interleaved running counts
+(e.g. DOT 1 DOT 2 DOT 3 instead of DOT DOT DOT). The cross-entropy loss
+provides gradient at every counting step, not just the final result.
+This teaches the counting PROCESS, making memorization of input→output
+pairs insufficient — the model must demonstrate correct counting at every step.
 
 Design rationale (see CONTINUATION.md):
   - Each stage has near-100% coverage at the algorithmic level
@@ -70,6 +76,19 @@ def _pad_left(tokens: List[int], seq_len: int) -> List[int]:
     return [VOCAB['PAD']] * pad_n + tokens
 
 
+def _interleave_count(token_id: int, count: int) -> List[int]:
+    """Generate interleaved counting tokens: [token, 1, token, 2, ..., token, N].
+
+    Process supervision for counting: after each object token, the model must
+    predict the running count.  This provides gradient at every counting step.
+    For count=0, returns [] (empty — no tokens to count).
+    """
+    tokens = []
+    for i in range(count):
+        tokens.extend([token_id, digit_to_token(i + 1)])
+    return tokens
+
+
 # ---------------------------------------------------------------------------
 # Stage 1: Digit Successor (ordering)
 # ---------------------------------------------------------------------------
@@ -79,7 +98,7 @@ def _enumerate_digit_successors() -> List[Tuple]:
     return [(a, a + 1) for a in range(9)]
 
 
-def generate_digit_successor(n_samples: int, seq_len: int = 32,
+def generate_digit_successor(n_samples: int, seq_len: int = 48,
                               problems: Optional[List] = None) -> Tensor:
     """[PAD..., a, NEXT, b]  where b = a + 1.
 
@@ -104,19 +123,21 @@ def _enumerate_counting() -> List[Tuple]:
     return [(d,) for d in range(10)]
 
 
-def generate_counting(n_samples: int, seq_len: int = 32,
+def generate_counting(n_samples: int, seq_len: int = 48,
                       problems: Optional[List] = None) -> Tensor:
-    """[PAD..., DOT, ..., DOT, =, d]  where count(DOT) = d.
+    """[PAD..., DOT, 1, DOT, 2, ..., DOT, d, =, d]  where count(DOT) = d.
 
-    Teaches the model that each digit symbol corresponds to a quantity.
+    Interleaved counting: after each DOT, the model predicts the running count.
     For d=0: [PAD..., =, 0] (no dots means zero).
+    For d=3: [PAD..., DOT, 1, DOT, 2, DOT, 3, =, 3].
+    Max length: 9*2 + 2 = 20 tokens.
     """
     if problems is None:
         problems = _enumerate_counting()
     seqs = torch.zeros(n_samples, seq_len, dtype=torch.long)
     for i in range(n_samples):
         (d,) = random.choice(problems)
-        tokens = [VOCAB['DOT']] * d + [VOCAB['='], digit_to_token(d)]
+        tokens = _interleave_count(VOCAB['DOT'], d) + [VOCAB['='], digit_to_token(d)]
         seqs[i] = torch.tensor(_pad_left(tokens, seq_len))
     return seqs
 
@@ -130,22 +151,20 @@ def _enumerate_count_tens() -> List[Tuple]:
     return [(d,) for d in range(10)]
 
 
-def generate_count_tens(n_samples: int, seq_len: int = 32,
+def generate_count_tens(n_samples: int, seq_len: int = 48,
                         problems: Optional[List] = None) -> Tensor:
-    """[PAD..., TEN, ..., TEN, =, d]  where count(TEN) = d.
+    """[PAD..., TEN, 1, TEN, 2, ..., TEN, d, =, d]  where count(TEN) = d.
 
     Identical format to Stage 2 but with TEN tokens.  Teaches the model
-    that counting is counting regardless of the token type — the same
-    skill transfers across DOT and TEN.  This is the prerequisite for
-    two-digit counting (Stage 4), where tens digit = count(TEN) and
-    ones digit = count(DOT).
+    that counting is counting regardless of the token type.
+    Max length: 9*2 + 2 = 20 tokens.
     """
     if problems is None:
         problems = _enumerate_count_tens()
     seqs = torch.zeros(n_samples, seq_len, dtype=torch.long)
     for i in range(n_samples):
         (d,) = random.choice(problems)
-        tokens = [VOCAB['TEN']] * d + [VOCAB['='], digit_to_token(d)]
+        tokens = _interleave_count(VOCAB['TEN'], d) + [VOCAB['='], digit_to_token(d)]
         seqs[i] = torch.tensor(_pad_left(tokens, seq_len))
     return seqs
 
@@ -159,21 +178,21 @@ def _enumerate_counting_2d() -> List[Tuple]:
     return [(d,) for d in range(10)]
 
 
-def generate_counting_2d(n_samples: int, seq_len: int = 32,
+def generate_counting_2d(n_samples: int, seq_len: int = 48,
                          problems: Optional[List] = None) -> Tensor:
-    """[PAD..., DOT, ..., DOT, =, 0, d]  where count(DOT) = d.
+    """[PAD..., DOT, 1, ..., DOT, d, =, 0, d]  where count(DOT) = d.
 
     Same as Stage 2 but with two-digit output (zero-padded tens digit).
-    Teaches the model to produce two result tokens where the tens digit
-    is trivially 0 and the ones digit is the familiar DOT count.
-    This isolates "learn two-digit output format" from "learn to segment input".
+    Isolates "learn two-digit output format" from "learn to segment input".
+    Max length: 9*2 + 3 = 21 tokens.
     """
     if problems is None:
         problems = _enumerate_counting_2d()
     seqs = torch.zeros(n_samples, seq_len, dtype=torch.long)
     for i in range(n_samples):
         (d,) = random.choice(problems)
-        tokens = [VOCAB['DOT']] * d + [VOCAB['='], digit_to_token(0), digit_to_token(d)]
+        tokens = (_interleave_count(VOCAB['DOT'], d) +
+                  [VOCAB['='], digit_to_token(0), digit_to_token(d)])
         seqs[i] = torch.tensor(_pad_left(tokens, seq_len))
     return seqs
 
@@ -187,22 +206,21 @@ def _enumerate_count_tens_2d() -> List[Tuple]:
     return [(d,) for d in range(10)]
 
 
-def generate_count_tens_2d(n_samples: int, seq_len: int = 32,
+def generate_count_tens_2d(n_samples: int, seq_len: int = 48,
                            problems: Optional[List] = None) -> Tensor:
-    """[PAD..., TEN, ..., TEN, =, d, 0]  where count(TEN) = d.
+    """[PAD..., TEN, 1, ..., TEN, d, =, d, 0]  where count(TEN) = d.
 
     Same as Stage 3 but with two-digit output (zero-padded ones digit).
-    Teaches the model that TEN counts map to the tens position (first digit)
-    while the ones position is trivially 0.
-    Combined with Stage 4 (DOT count → ones position), this prepares the
-    model to compose both skills in Stage 6 (two-digit counting).
+    Teaches TEN counts map to tens position, ones is trivially 0.
+    Max length: 9*2 + 3 = 21 tokens.
     """
     if problems is None:
         problems = _enumerate_count_tens_2d()
     seqs = torch.zeros(n_samples, seq_len, dtype=torch.long)
     for i in range(n_samples):
         (d,) = random.choice(problems)
-        tokens = [VOCAB['TEN']] * d + [VOCAB['='], digit_to_token(d), digit_to_token(0)]
+        tokens = (_interleave_count(VOCAB['TEN'], d) +
+                  [VOCAB['='], digit_to_token(d), digit_to_token(0)])
         seqs[i] = torch.tensor(_pad_left(tokens, seq_len))
     return seqs
 
@@ -222,22 +240,22 @@ def _enumerate_two_digit_counting() -> List[Tuple]:
     return [(n,) for n in range(100)]
 
 
-def generate_two_digit_counting(n_samples: int, seq_len: int = 32,
+def generate_two_digit_counting(n_samples: int, seq_len: int = 48,
                                 problems: Optional[List] = None) -> Tensor:
-    """[PAD..., TEN, ..., TEN, DOT, ..., DOT, =, d1, d2]
+    """[PAD..., TEN, 1, ..., TEN, T, DOT, 1, ..., DOT, D, =, T, D]
 
-    TEN tokens represent bundles of 10, DOT tokens represent ones.
+    Interleaved counting for both TENs and DOTs.
     count(TEN) = tens digit, count(DOT) = ones digit.
 
-    Example: 23 -> TEN TEN DOT DOT DOT = 2 3
-    Example: 10 -> TEN = 1 0
-    Example:  5 -> DOT DOT DOT DOT DOT = 0 5  (scaffold from Stage 4)
+    Example: 23 -> TEN 1 TEN 2 DOT 1 DOT 2 DOT 3 = 2 3
+    Example: 10 -> TEN 1 = 1 0
+    Example:  5 -> DOT 1 DOT 2 DOT 3 DOT 4 DOT 5 = 0 5
     Example:  0 -> = 0 0
 
-    Includes 0-9 as within-stage scaffolding: these pure-DOT problems
-    bridge from Stage 4, helping the model learn that DOT counting
-    works the same way regardless of whether TEN tokens precede the DOTs.
-    Max sequence length: 9 TENs + 9 DOTs + = + 2 digits = 21 tokens.
+    Includes 0-9 as within-stage scaffolding (pure DOT counting).
+    The interleaved running counts provide dense process supervision:
+    at every step the model demonstrates it's tracking the count correctly.
+    Max sequence length: 9*2 + 9*2 + 3 = 39 tokens.
     """
     if problems is None:
         problems = _enumerate_two_digit_counting()
@@ -246,7 +264,8 @@ def generate_two_digit_counting(n_samples: int, seq_len: int = 32,
         (n,) = random.choice(problems)
         tens = n // 10
         ones = n % 10
-        tokens = ([VOCAB['TEN']] * tens + [VOCAB['DOT']] * ones +
+        tokens = (_interleave_count(VOCAB['TEN'], tens) +
+                  _interleave_count(VOCAB['DOT'], ones) +
                   [VOCAB['='], digit_to_token(tens), digit_to_token(ones)])
         seqs[i] = torch.tensor(_pad_left(tokens, seq_len))
     return seqs
@@ -270,7 +289,7 @@ def _enumerate_comparisons() -> List[Tuple]:
     return problems
 
 
-def generate_comparison(n_samples: int, seq_len: int = 32,
+def generate_comparison(n_samples: int, seq_len: int = 48,
                         problems: Optional[List] = None) -> Tensor:
     """[PAD..., a, CMP, b, RESULT]  where RESULT in {TRUE, FALSE}."""
     if problems is None:
@@ -300,7 +319,7 @@ def _enumerate_digit_distance() -> List[Tuple]:
     return problems
 
 
-def generate_digit_distance(n_samples: int, seq_len: int = 32,
+def generate_digit_distance(n_samples: int, seq_len: int = 48,
                             problems: Optional[List] = None) -> Tensor:
     """[PAD..., a, -, b, =, d]  where d = a - b, a >= b.
 
@@ -332,7 +351,7 @@ def _enumerate_successors() -> List[Tuple]:
     return problems
 
 
-def generate_successor(n_samples: int, seq_len: int = 32,
+def generate_successor(n_samples: int, seq_len: int = 48,
                        problems: Optional[List] = None) -> Tensor:
     """[PAD..., a, OP, 1, =, result]  where OP in {+, -}."""
     if problems is None:
@@ -372,7 +391,7 @@ def _enumerate_single_digit(ops=None) -> List[Tuple]:
     return problems
 
 
-def generate_single_digit(n_samples: int, seq_len: int = 32,
+def generate_single_digit(n_samples: int, seq_len: int = 48,
                           problems: Optional[List] = None,
                           ops=None) -> Tensor:
     """[PAD..., a, OP, b, =, d1, d2]  (result always 2 digits, zero-padded)."""
@@ -409,7 +428,7 @@ def _enumerate_two_digit(ops=None) -> List[Tuple]:
     return problems
 
 
-def generate_two_digit(n_samples: int, seq_len: int = 32,
+def generate_two_digit(n_samples: int, seq_len: int = 48,
                        problems: Optional[List] = None,
                        ops=None) -> Tensor:
     """[PAD..., a1, a2, OP, b1, b2, =, r1, r2, r3]  (result always 3 digits)."""
@@ -469,7 +488,7 @@ def _enumerate_pemdas() -> List[Tuple]:
     return problems
 
 
-def generate_pemdas(n_samples: int, seq_len: int = 32,
+def generate_pemdas(n_samples: int, seq_len: int = 48,
                     problems: Optional[List] = None) -> Tensor:
     """[PAD..., a, OP1, b, OP2, c, =, r1, r2, r3]  (result always 3 digits)."""
     if problems is None:
@@ -513,7 +532,7 @@ MIN_PROBLEMS_FOR_SPLIT = 30  # below this, use all problems for both train and t
 
 
 def get_stage_data(stage: int, n_train: int = 5000, n_test: int = 1000,
-                   test_fraction: float = 0.2, seq_len: int = 32,
+                   test_fraction: float = 0.2, seq_len: int = 48,
                    seed: int = 42) -> Dict:
     """Generate train/test data with held-out operand combinations.
 
