@@ -355,9 +355,8 @@ def train_stage(model, train_seqs, test_loader, device, amp_ctx, scaler,
                       test_acc=round(test_acc, 4),
                       time=round(ep_s, 1))
 
-        if n_result_tokens > 1:
-            record['train_per_token'] = [round(x, 4) for x in train_result['per_token']]
-            record['test_per_token'] = [round(x, 4) for x in test_result['per_token']]
+        record['train_per_token'] = [round(x, 4) for x in train_result['per_token']]
+        record['test_per_token'] = [round(x, 4) for x in test_result['per_token']]
 
         # Catastrophic-forgetting check on previous stages
         if prev_loaders:
@@ -368,13 +367,11 @@ def train_stage(model, train_seqs, test_loader, device, amp_ctx, scaler,
         history.append(record)
 
         if epoch % args.print_every == 0 or epoch == 1 or epoch == epochs:
-            # Per-token diagnostic for multi-token results (train + test)
-            tr_tok_str = te_tok_str = ""
-            if n_result_tokens > 1:
-                tr_tok = '|'.join(f'{x:.2f}' for x in train_result['per_token'])
-                te_tok = '|'.join(f'{x:.2f}' for x in test_result['per_token'])
-                tr_tok_str = f" [{tr_tok}]"
-                te_tok_str = f" [{te_tok}]"
+            # Per-token diagnostic (always shown, even for n_result=1)
+            tr_tok = '|'.join(f'{x:.2f}' for x in train_result['per_token'])
+            te_tok = '|'.join(f'{x:.2f}' for x in test_result['per_token'])
+            tr_tok_str = f" [{tr_tok}]"
+            te_tok_str = f" [{te_tok}]"
 
             prev_str = ""
             if prev_loaders:

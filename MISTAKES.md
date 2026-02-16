@@ -133,6 +133,20 @@ All four ablation tasks show 100% train accuracy with near-random test accuracy 
 - Need either: (a) much more training data (50K+), or (b) much longer training (500+ epochs for grokking), or (c) smaller models, or (d) stronger regularization.
 - The results file now includes per-epoch history (`epoch_history` key in JSONL) so learning dynamics are visible.
 
+### #43. Scratchpad Query Type Placed in Output, Not Input (RESOLVED)
+
+**Date:** 2026-02-16
+
+QueryCountingGenerator (Stage 1) randomly chose DOT or TEN as the query type and placed it as the first work token (after WORK). The model had no signal in the input for which type to count — the query was unpredictable from input alone.
+
+**Symptoms:** Token 1 (query type) stuck at ~51% test accuracy (chance for binary DOT/TEN). Token 2 (count) reached ~87% test accuracy — the model could count once teacher forcing gave it the correct query. Exact-match capped at ~45%.
+
+**Root cause:** The query type was part of the output (work area), not the input (question area). The model cannot predict a randomly chosen token from input that doesn't contain the signal.
+
+**Fix:** Move query to input using NOTE marker: `[shuffled DOTs/TENs] NOTE [DOT/TEN] WORK [count]`. n_result dropped from 2 to 1. Stage 1 now passes in ~8 epochs (was stuck at 100 epochs before).
+
+**Lesson:** Every token in the work area must be deterministically derivable from the input. If a token is chosen randomly and placed in the output, the model has no basis to predict it. Scratchpad design rule: the work area contains *answers*, the question area contains *queries*.
+
 ---
 
 ## Condensed Archive (Historical Reference)

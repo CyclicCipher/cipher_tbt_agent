@@ -16,8 +16,9 @@ Previous focus: **JEPA** — JEPA-style latent prediction on Mamba3 backbone (st
 
 ## Critical Reference
 
-**ALWAYS read `MISTAKES.md` before making changes.** It has 42 documented mistakes with root causes. The most relevant active ones:
+**ALWAYS read `MISTAKES.md` before making changes.** It has 43 documented mistakes with root causes. The most relevant active ones:
 
+- **#43 (Query in output, not input):** Scratchpad work tokens must be deterministically derivable from input. Randomly chosen tokens in the output are unpredictable. Fixed.
 - **#42 (Ablation benchmarks are memorization):** 5K samples + 1.26M params + 50 epochs = memorization, not generalization. All non-trivial tasks show 100% train / chance test. This motivated the compositionality curriculum pivot.
 - **#41 (Ablation eval leak):** Answer token at seqs[:, -1] was visible to logits[:, -1]. All tasks scored ~100% via trivial copy. Fixed: use logits[:, -2] which genuinely predicts the answer.
 - **#38 (ePC archived):** ePC is 15x slower than backprop for identical accuracy. Don't resurrect it without a qualitatively new argument.
@@ -64,11 +65,21 @@ Key files:
 
 **WY chunkwise status:** `delta_recurrence_wy()` is numerically verified (Phase 5a+5b+5c complete). Per-channel decay and PoPE pair (B₂ via virtual token expansion) fully supported. Remaining simplification: SISO (r=1).
 
+### Scratchpad Framework (experiments/scratchpad/) — NEW
+
+Model-agnostic framework for generating problems with structured work areas:
+
+- `framework.py` — Vocab (dynamic token registry), Problem (question + steps), Step (named graded tokens), Grader (per-step/per-token scoring), ProblemGenerator (abstract base), split_problems (train/test by held-out specs)
+- `generators/counting.py` — QueryCountingGenerator (Stage 1, NOTE-based query), CombinedCountingGenerator (Stage 2)
+- `generators/arithmetic.py` — SingleDigitArithmeticGenerator (Stage 3), TwoDigitSingleArithmeticGenerator (Stage 4, column scratchpad), TwoDigitArithmeticGenerator (Stage 5, column scratchpad)
+
+Stages 4-5 use column-by-column scratchpad with SEP separators: `5 1 + 4 2 WORK 1 + 2 + 0 = 0 3 SEP 5 + 4 + 0 = 0 9 SEP 0 0 9 3`
+
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
 
 - `mamba3_block.py` — Mamba3 block implementation (SSD-based, backbone for arithmetic curriculum)
-- `arithmetic_tasks.py` — Task generators for 5-stage curriculum (query counting, combined counting with scratchpad, single-digit +/-, bridge, two-digit +/-)
-- `train_arithmetic.py` — Curriculum training script (stages 1-5, curriculum/direct modes, per-token diagnostics with train+test breakdown)
+- `arithmetic_tasks.py` — Old task generators (superseded by scratchpad framework)
+- `train_arithmetic.py` — Curriculum training script (uses scratchpad framework, stages 1-5, curriculum/direct modes, per-token diagnostics with train+test breakdown)
 
 ### Archived ePC Variants
 
@@ -79,9 +90,12 @@ ePC code within active experiments has been moved to `archived_epc/` subdirector
 ```
 predictive-coding-agent/
 ├── CLAUDE.md              # This file
-├── MISTAKES.md            # 42 documented mistakes (ALWAYS READ)
+├── MISTAKES.md            # 43 documented mistakes (ALWAYS READ)
 ├── CONTINUATION.md        # Compositional arithmetic curriculum plan (ACTIVE)
 ├── experiments/
+│   ├── scratchpad/        # Scratchpad framework (NEW, model-agnostic)
+│   │   ├── framework.py   # Vocab, Problem, Step, Grader, ProblemGenerator
+│   │   └── generators/    # counting.py (S1-S2), arithmetic.py (S3-S5)
 │   ├── energy_reasoning/  # JEPA backprop (paused)
 │   │   ├── archived_epc/  # ePC-JEPA (archived 2026-02-14)
 │   │   ├── jepa_model.py  # Active JEPA model
@@ -89,8 +103,8 @@ predictive-coding-agent/
 │   │   └── data_gen.py    # Synthetic data generation
 │   ├── Mamba3/            # Mamba3 backbone + arithmetic curriculum (ACTIVE)
 │   │   ├── mamba3_block.py       # Mamba3 block (backbone model)
-│   │   ├── arithmetic_tasks.py   # NEW: Compositional arithmetic task generators
-│   │   ├── train_arithmetic.py   # NEW: Curriculum training script
+│   │   ├── arithmetic_tasks.py   # Old task generators (superseded)
+│   │   ├── train_arithmetic.py   # Curriculum training (uses scratchpad)
 │   │   └── archived_epc/        # ePC-Mamba3 (archived 2026-02-14)
 │   └── Naja/              # Hybrid Mamba3 + Gated DeltaNet (WY complete, ablations paused)
 │       ├── naja.py        # Full model

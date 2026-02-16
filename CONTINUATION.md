@@ -59,72 +59,66 @@ Root causes:
 - Weight-tied embedding
 - Config: `d_model=128, d_state=64, n_layer=4, headdim=64`
 
-### Vocabulary
+### Vocabulary (Scratchpad Framework)
 
 ```
-Token 0:  PAD
-Token 1:  digit 0  ...  Token 10: digit 9
-Token 11: +    Token 12: -    Token 13: *    Token 14: /
-Token 15: =    Token 16: >    Token 17: <
-Token 18: TRUE   Token 19: FALSE
-Token 20: (    Token 21: )
-Token 22: DOT (● unit object)    Token 23: TEN (■ ten-bundle)    Token 24: NEXT
-vocab_size = 25
+Token 0:  PAD    Token 1:  WORK   Token 2:  NOTE   Token 3:  SEP
+Token 4:  0  ...  Token 13: 9
+Token 14: +    Token 15: -    Token 16: =
+Token 17: DOT    Token 18: TEN
+vocab_size = 19
 ```
+
+Built deterministically by `_build_vocab()` in `train_arithmetic.py`. Structural tokens (PAD, WORK, NOTE, SEP) come from the `Vocab` class. WORK replaces the old `=` separator. NOTE marks queries in the input. SEP separates column steps in the scratchpad.
 
 ### Stage 1: Query Counting (sub-skill)
 
-**Format:** `[PAD..., <shuffled DOTs and TENs>, =, QUERY, count]`
+**Format:** `[PAD..., <shuffled DOTs and TENs>, NOTE, QUERY, WORK, count]`
 - Each sample randomly asks: "how many DOTs?" or "how many TENs?"
-- QUERY token (DOT or TEN) after `=` tells the model which type to count
+- NOTE marker in the input tells the model what to count (Mistake #43: query must be in input, not output)
 - n_result = 1 (single count digit)
-- Example: `DOT TEN DOT TEN DOT = DOT 3` (query=DOT, answer=3)
-- Example: `DOT TEN DOT TEN DOT = TEN 2` (query=TEN, answer=2)
-- Example: `TEN TEN TEN TEN = TEN 4` (query=TEN, answer=4)
-- Example: `= DOT 0` (nothing to count, query=DOT)
+- Example: `DOT TEN DOT TEN DOT NOTE DOT WORK 3` (query=DOT, answer=3)
+- Example: `DOT TEN DOT TEN DOT NOTE TEN WORK 2` (query=TEN, answer=2)
+- Example: `TEN TEN TEN TEN NOTE TEN WORK 4` (query=TEN, answer=4)
 - 100 problems (10×10 count combinations), split 80/20
-- Each query type gets ~50% of samples → both counting skills trained independently
-- **Teaches:** Count a specific token type while ignoring confounders. Grounds digits in quantities.
-- **Key design:** No autoregressive dependency between DOT and TEN counting — each is learned from input alone when it appears as the query.
+- **Status:** PASSING — reaches ≥95% test in ~8 epochs (seed=123).
 
 ### Stage 2: Combined Counting with Scratchpad (composition)
 
-**Format:** `[PAD..., <shuffled DOTs and TENs>, =, DOT, d, TEN, t]`
+**Format:** `[PAD..., <shuffled DOTs and TENs>, WORK, DOT, d, TEN, t]`
 - Reuses Stage 1's query tokens as composition cues
 - The model counts DOTs first (DOT → d), then TENs (TEN → t)
-- n_result = 4 (DOT, d, TEN, t — query tokens are process supervision)
-- Example: `DOT TEN DOT TEN DOT = DOT 3 TEN 2`
-- Example: `TEN TEN TEN TEN = DOT 0 TEN 4`
-- Example: `= DOT 0 TEN 0`
+- n_result = 4 (DOT, d, TEN, t — cue tokens are ungraded)
+- Example: `DOT TEN DOT TEN DOT WORK DOT 3 TEN 2`
 - Same 100 problems, same train/test split as Stage 1
-- **Teaches:** Composition — chain two independently learned counting operations. The scratchpad format mirrors Stage 1, cueing the model to apply prior skills.
-- **Partial credit:** Per-token accuracy shows which count is mastered. Query tokens should be ~100% (trivial); count digits are the real test.
+- **Status:** PASSING — reaches ≥95% test in ~26 epochs (seed=123).
 
 ### Stage 3: Single-Digit +/- (arithmetic facts)
 
-**Format:** `[PAD..., a, OP, b, =, d1, d2]` (2-digit zero-padded result)
+**Format:** `[PAD..., a, OP, b, WORK, carry, ones]` (2-digit zero-padded result)
 - Addition: all (a,b) pairs, 100 problems
 - Subtraction: a ≥ b only, 55 problems
 - Total: 155 problems, split ~124/31
-- Example: `3 + 4 = 0 7`, `8 + 5 = 1 3`, `7 - 3 = 0 4`
-- **Teaches:** Addition and subtraction operations, operator dispatch, 2-digit output format.
+- Example: `3 + 4 WORK 0 7`, `8 + 5 WORK 1 3`, `7 - 3 WORK 0 4`
+- n_result = 2 (carry digit + ones digit)
 
-### Stage 4: Two-Digit ± Single-Digit (bridge)
+### Stage 4: Two-Digit ± Single-Digit (bridge, column scratchpad)
 
-**Format:** `[PAD..., a1, a2, OP, 0, b, =, r1, r2, r3]` (3-digit result)
+**Format:** `[PAD..., a1, a2, OP, 0, b, WORK, <column scratchpad>]`
 - a ∈ 10-99, b ∈ 0-9 (zero-padded to match Stage 5 format)
-- Subtraction always valid (a ≥ 10 > 9 ≥ b)
+- Column scratchpad: ones column → tens column → hundreds column → final answer
+- n_result = 21 (full column-by-column scratchpad)
+- Example: `2 3 + 0 4 WORK 3 + 4 + 0 = 0 7 SEP 2 + 0 + 0 = 0 2 SEP 0 0 2 7`
 - Total: 1,800 problems (90×10×2), split ~1,440/360
-- Example: `2 3 + 0 4 = 0 2 7`, `5 0 - 0 3 = 0 4 7`
-- **Teaches:** Multi-digit I/O format, carry propagation — reusing single-digit skill from Stage 3.
 
-### Stage 5: Two-Digit ± Two-Digit (composition test)
+### Stage 5: Two-Digit ± Two-Digit (composition test, column scratchpad)
 
-**Format:** `[PAD..., a1, a2, OP, b1, b2, =, r1, r2, r3]` (3-digit result)
+**Format:** `[PAD..., a1, a2, OP, b1, b2, WORK, <column scratchpad>]`
 - a, b ∈ 10-99
-- Addition: 8,100 problems. Subtraction (a ≥ b): ~4,095 problems.
+- Same column scratchpad format as Stage 4
+- n_result = 21 (full column-by-column scratchpad)
+- Example: `5 1 + 4 2 WORK 1 + 2 + 0 = 0 3 SEP 5 + 4 + 0 = 0 9 SEP 0 0 9 3`
 - Total: ~12,195 problems, split ~9,756/2,439
-- Example: `2 3 + 4 8 = 0 7 1`, `9 5 - 1 8 = 0 7 7`
 - **This is the critical composition test:**
   - The model has learned counting (Stages 1-2), single-digit ops (Stage 3), multi-digit format (Stage 4)
   - It must compose: column-wise addition + carry propagation
@@ -155,10 +149,18 @@ For each stage:
 ```
 experiments/Mamba3/
 ├── mamba3_block.py           # Mamba3 model (DO NOT MODIFY)
-├── arithmetic_tasks.py       # Task generators (5 stages)
-├── train_arithmetic.py       # Curriculum training script
+├── arithmetic_tasks.py       # Old task generators (SUPERSEDED by scratchpad)
+├── train_arithmetic.py       # Curriculum training script (uses scratchpad framework)
 ├── continual.py              # EWC, DER++, differential LR
 └── archived_epc/             # Archived, ignore
+
+experiments/scratchpad/
+├── __init__.py               # Exports Vocab, split_problems
+├── framework.py              # Vocab, Problem, Step, Grader, ProblemGenerator, Curriculum
+└── generators/
+    ├── __init__.py            # Exports all generators
+    ├── counting.py            # QueryCountingGenerator (S1), CombinedCountingGenerator (S2)
+    └── arithmetic.py          # SingleDigit (S3), TwoDigitSingle (S4), TwoDigit (S5)
 ```
 
 ### Running Experiments (ON GPU, not Claude's machine)
@@ -198,8 +200,8 @@ python train_arithmetic.py --stage 3 --epochs 50
 
 | File | What's in it |
 |------|-------------|
-| `MISTAKES.md` | 42 documented mistakes — **always read first** |
+| `MISTAKES.md` | 43 documented mistakes — **always read first** |
 | `CLAUDE.md` | Architecture overview, priorities |
-| `experiments/Mamba3/mamba3_block.py` | Mamba3 model (backbone) |
-| `experiments/Mamba3/arithmetic_tasks.py` | Task generators (5 stages) |
-| `experiments/Mamba3/train_arithmetic.py` | Training script |
+| `experiments/scratchpad/framework.py` | Scratchpad framework (Vocab, Problem, Grader) |
+| `experiments/scratchpad/generators/` | Stage 1-5 problem generators |
+| `experiments/Mamba3/train_arithmetic.py` | Training script (uses scratchpad) |
