@@ -4,7 +4,7 @@
 
 A biologically-inspired AI system targeting the Danganronpa visual novel as an evaluation environment. Originally built on predictive coding (PC), now pivoting to backprop with potential modifications for local-learning-like benefits.
 
-Current focus: **Compositional Arithmetic Curriculum** — Testing whether a staged curriculum teaching composable sub-skills (query counting → combined counting → single-digit +/- → two-digit±single-digit → two-digit±two-digit) enables generalization that direct training cannot. Uses the Mamba3 backbone. See `CONTINUATION.md`.
+Current focus: **Compositional Arithmetic Curriculum** — Testing whether a prerequisite-complete curriculum (counting → ordinality → comparison → counting-based addition/subtraction → multi-digit column arithmetic) enables generalization that direct training cannot. Key insight (Mistake #44): single-digit addition is NOT a fact stage — it decomposes into counting-up via the successor function. Uses the Mamba3 backbone. See `CONTINUATION.md`.
 
 **Naja** (WY chunkwise) is complete and numerically verified (Phase 5a+5b+5c). Ablation testing (Phase 5d) showed all benchmarks are memorization, not generalization (Mistake #42). This motivated the compositionality pivot.
 
@@ -16,8 +16,9 @@ Previous focus: **JEPA** — JEPA-style latent prediction on Mamba3 backbone (st
 
 ## Critical Reference
 
-**ALWAYS read `MISTAKES.md` before making changes.** It has 43 documented mistakes with root causes. The most relevant active ones:
+**ALWAYS read `MISTAKES.md` before making changes.** It has 44 documented mistakes with root causes. The most relevant active ones:
 
+- **#44 (Missing prerequisites):** Single-digit addition was treated as a fact stage (155 entries to memorize). But addition decomposes into counting-up via successor. The curriculum jumped from counting to arithmetic without teaching ordinality, comparison, or place value. Category theory constraint: every composition requires its constituent objects to be established.
 - **#43 (Query in output, not input):** Scratchpad work tokens must be deterministically derivable from input. Randomly chosen tokens in the output are unpredictable. Fixed.
 - **#42 (Ablation benchmarks are memorization):** 5K samples + 1.26M params + 50 epochs = memorization, not generalization. All non-trivial tasks show 100% train / chance test. This motivated the compositionality curriculum pivot.
 - **#41 (Ablation eval leak):** Answer token at seqs[:, -1] was visible to logits[:, -1]. All tasks scored ~100% via trivial copy. Fixed: use logits[:, -2] which genuinely predicts the answer.
@@ -71,15 +72,18 @@ Model-agnostic framework for generating problems with structured work areas:
 
 - `framework.py` — Vocab (dynamic token registry), Problem (question + steps), Step (named graded tokens), Grader (per-step/per-token scoring), ProblemGenerator (abstract base), split_problems (train/test by held-out specs)
 - `generators/counting.py` — QueryCountingGenerator (Stage 1, NOTE-based query), CombinedCountingGenerator (Stage 2)
-- `generators/arithmetic.py` — SingleDigitArithmeticGenerator (Stage 3), TwoDigitSingleArithmeticGenerator (Stage 4, column scratchpad), TwoDigitArithmeticGenerator (Stage 5, column scratchpad)
+- `generators/ordinality.py` — SuccessorGenerator (Stage 3), ComparisonGenerator (Stage 4)
+- `generators/arithmetic.py` — CountingAdditionGenerator (Stage 5), CountingSubtractionGenerator (Stage 6)
+- `generators/multi_digit.py` — TwoDigitSingleGenerator (Stage 7, column scratchpad), TwoDigitGenerator (Stage 8, column scratchpad)
 
-Stages 4-5 use column-by-column scratchpad with SEP separators: `5 1 + 4 2 WORK 1 + 2 + 0 = 0 3 SEP 5 + 4 + 0 = 0 9 SEP 0 0 9 3`
+Stages 5-6 ground addition/subtraction in counting: `3 + 4 WORK 4 5 6 7 = 0 7` (count up 4 from 3).
+Stages 7-8 use column-by-column scratchpad with counting-based column operations.
 
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
 
 - `mamba3_block.py` — Mamba3 block implementation (SSD-based, backbone for arithmetic curriculum)
 - `arithmetic_tasks.py` — Old task generators (superseded by scratchpad framework)
-- `train_arithmetic.py` — Curriculum training script (uses scratchpad framework, stages 1-5, curriculum/direct modes, per-token diagnostics with train+test breakdown)
+- `train_arithmetic.py` — Curriculum training script (uses scratchpad framework, stages 1-8, curriculum/direct modes, per-token diagnostics with train+test breakdown)
 
 ### Archived ePC Variants
 
@@ -90,12 +94,13 @@ ePC code within active experiments has been moved to `archived_epc/` subdirector
 ```
 predictive-coding-agent/
 ├── CLAUDE.md              # This file
-├── MISTAKES.md            # 43 documented mistakes (ALWAYS READ)
+├── MISTAKES.md            # 44 documented mistakes (ALWAYS READ)
 ├── CONTINUATION.md        # Compositional arithmetic curriculum plan (ACTIVE)
 ├── experiments/
-│   ├── scratchpad/        # Scratchpad framework (NEW, model-agnostic)
+│   ├── scratchpad/        # Scratchpad framework (model-agnostic)
 │   │   ├── framework.py   # Vocab, Problem, Step, Grader, ProblemGenerator
-│   │   └── generators/    # counting.py (S1-S2), arithmetic.py (S3-S5)
+│   │   ├── DESIGN_GUIDE.md # Curriculum design principles (category theory, prerequisites)
+│   │   └── generators/    # counting.py (S1-S2), ordinality.py (S3-S4), arithmetic.py (S5-S6), multi_digit.py (S7-S8)
 │   ├── energy_reasoning/  # JEPA backprop (paused)
 │   │   ├── archived_epc/  # ePC-JEPA (archived 2026-02-14)
 │   │   ├── jepa_model.py  # Active JEPA model
@@ -158,14 +163,19 @@ The core generalization problem persists across all architectures (JEPA, Naja, M
 
 The original 12-stage curriculum failed — provided no advantage over direct training. The 4-stage revision also failed — skipped sub-skill scaffolding, removed process supervision, autoregressive output asymmetry caused memorization. See `CONTINUATION.md` for full post-mortem.
 
-**Current experiment:** 5-stage curriculum on Mamba3 with process supervision and composition cues (see `CONTINUATION.md`):
-1. Query counting — "how many DOTs/TENs?" with confounders (sub-skill, n_result=1)
-2. Combined counting — DOT d TEN t scratchpad (composition, n_result=4)
-3. Single-digit +/- (155 problems, 2-digit output)
-4. Two-digit ± single-digit (1,800 problems, bridge to multi-digit)
-5. Two-digit ± two-digit (~12,195 problems, composition test)
+**Current experiment:** 8-stage prerequisite-complete curriculum on Mamba3 (see `CONTINUATION.md`):
+1. Query counting — "how many DOTs/TENs?" with confounders (sub-skill)
+2. Combined counting — DOT d TEN t scratchpad (composition)
+3. Successor/predecessor — digit ordinality (SUCC(4)=5, PRED(7)=6)
+4. Comparison — digit ordering (GT/LT/EQ)
+5. Counting-based addition — `3 + 4 WORK 4 5 6 7 = 0 7` (reduces to counting-up)
+6. Counting-based subtraction — `7 - 3 WORK 6 5 4 = 0 4` (reduces to counting-down)
+7. Two-digit ± single-digit (bridge to multi-digit, column scratchpad)
+8. Two-digit ± two-digit (~12,195 problems, composition test)
 
-**Key test:** Does curriculum training (stages 1→5) produce better generalization on Stage 5 than direct training on Stage 5 alone?
+**Key insight (Mistake #44):** Single-digit addition is NOT a fact stage. It decomposes into counting-up via the successor function. Category theory constraint: every composition requires its prerequisite objects to be established.
+
+**Key test:** Does curriculum training (stages 1→8) produce better generalization on Stage 8 than direct training on Stage 8 alone?
 
 **Curriculum rules:** Stages advance only on ≥95% test accuracy. If a stage fails after max epochs, the curriculum halts. Per-token accuracy diagnostics show both train and test breakdowns for multi-token stages.
 

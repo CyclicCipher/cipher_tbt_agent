@@ -42,13 +42,21 @@ Root causes:
 4. **No composition cues** — Zero signal telling the model to reuse prior skills for new tasks.
 5. **No partial credit** — Exact-match metric hid the fact that one counting skill was mastered while the other wasn't.
 
-## Revised Curriculum (5 Stages)
+## Revised Curriculum (8 Stages — Prerequisite-Complete)
+
+### Why the 5-stage curriculum was wrong
+
+The original 5-stage curriculum jumped from counting (Stages 1-2) to single-digit arithmetic (Stage 3) with four unverified assumptions about digit semantics: ordinality, place value, comparison, and the meaning of addition. See Mistake #44 and `DESIGN_GUIDE.md` for the category theory formulation.
+
+The fix is to add intermediate stages that ground digits in quantities and teach addition as a composition of counting + successor, not as a lookup table.
 
 ### Design Principles
 
+- **Prerequisite completeness** — Before teaching any composition, verify ALL prerequisite skills are learned. No missing edges in the knowledge graph. (Category theory constraint: morphism well-definedness requires codomain/domain matching.)
 - **Sub-skills first, composition second** — Learn DOT and TEN counting independently (Stage 1) before combining (Stage 2)
-- **Process supervision via scratchpad** — Stage 2 reuses Stage 1's query tokens as composition cues, teaching the model to chain two counting operations
-- **Explicit composition cues** — DOT/TEN tokens after `=` signal which counting skill to apply, bridging between stages
+- **Operations reduce to known skills** — Addition reduces to counting-up. Subtraction reduces to counting-down. The scratchpad shows the reduction explicitly.
+- **Process supervision via scratchpad** — Every intermediate computation is visible in the work area. No hidden-state-only reasoning.
+- **No false fact stages** — If a skill has >20 entries and can be decomposed into simpler operations, it's a composition stage, not a fact stage. The only genuine facts are symbol-to-meaning mappings.
 - **Partial credit** — Per-token accuracy tracks individual skill mastery; display shows both train and test breakdowns
 - **Enough problems for real splits** — Confounders (TENs in DOT-counting, DOTs in TEN-counting) expand problem space to 100 even for individual counting
 
@@ -66,10 +74,13 @@ Token 0:  PAD    Token 1:  WORK   Token 2:  NOTE   Token 3:  SEP
 Token 4:  0  ...  Token 13: 9
 Token 14: +    Token 15: -    Token 16: =
 Token 17: DOT    Token 18: TEN
-vocab_size = 19
+Token 19: SUCC   Token 20: PRED
+Token 21: GT     Token 22: LT     Token 23: EQ
+Token 24: :      (scratchpad column separator in counting-based stages)
+vocab_size = 25
 ```
 
-Built deterministically by `_build_vocab()` in `train_arithmetic.py`. Structural tokens (PAD, WORK, NOTE, SEP) come from the `Vocab` class. WORK replaces the old `=` separator. NOTE marks queries in the input. SEP separates column steps in the scratchpad.
+Built deterministically by `_build_vocab()` in `train_arithmetic.py`. Structural tokens (PAD, WORK, NOTE, SEP) come from the `Vocab` class. WORK replaces the old `=` separator. NOTE marks queries in the input. SEP separates column steps in the scratchpad. SUCC/PRED are successor/predecessor operations. GT/LT/EQ are comparison results. `:` separates the column setup from the counting-up/down sequence in Stages 5-8.
 
 ### Stage 1: Query Counting (sub-skill)
 
@@ -93,39 +104,84 @@ Built deterministically by `_build_vocab()` in `train_arithmetic.py`. Structural
 - Same 100 problems, same train/test split as Stage 1
 - **Status:** PASSING — reaches ≥95% test in ~26 epochs (seed=123).
 
-### Stage 3: Single-Digit +/- (arithmetic facts)
+### Stage 3: Successor / Predecessor (ordinality)
 
-**Format:** `[PAD..., a, OP, b, WORK, carry, ones]` (2-digit zero-padded result)
-- Addition: all (a,b) pairs, 100 problems
-- Subtraction: a ≥ b only, 55 problems
-- Total: 155 problems, split ~124/31
-- Example: `3 + 4 WORK 0 7`, `8 + 5 WORK 1 3`, `7 - 3 WORK 0 4`
-- n_result = 2 (carry digit + ones digit)
+**Format:** `[PAD..., a, NOTE, SUCC/PRED, WORK, result]`
+- Teaches the number line: what digit comes next? what digit comes before?
+- NOTE marker specifies the operation (successor or predecessor)
+- n_result = 1 (the next/previous digit)
+- Wraps at boundaries: SUCC(9) = 0, PRED(0) = 9 (mod-10 successor, no carry — carry comes later)
+- Example: `4 NOTE SUCC WORK 5` (successor of 4 is 5)
+- Example: `7 NOTE PRED WORK 6` (predecessor of 7 is 6)
+- Example: `9 NOTE SUCC WORK 0` (wraps around)
+- 20 problems (10 digits × 2 operations), composition stage with held-out specs
+- **Prerequisite verification:** Does the model understand digit ordering?
+- **New vocab tokens:** SUCC, PRED
 
-### Stage 4: Two-Digit ± Single-Digit (bridge, column scratchpad)
+### Stage 4: Comparison (digit ordering)
 
-**Format:** `[PAD..., a1, a2, OP, 0, b, WORK, <column scratchpad>]`
-- a ∈ 10-99, b ∈ 0-9 (zero-padded to match Stage 5 format)
+**Format:** `[PAD..., a, NOTE, b, WORK, GT/LT/EQ]`
+- NOTE separates the two operands
+- Output is a single token: GT (a > b), LT (a < b), or EQ (a = b)
+- n_result = 1
+- Example: `7 NOTE 3 WORK GT` (7 > 3)
+- Example: `2 NOTE 8 WORK LT` (2 < 8)
+- Example: `5 NOTE 5 WORK EQ` (5 = 5)
+- 100 problems (10×10 digit pairs), composition stage with held-out specs
+- **Prerequisite:** Stage 3 (successor teaches ordering)
+- **New vocab tokens:** GT, LT, EQ
+
+### Stage 5: Counting-Based Addition (addition = counting-up)
+
+**Format:** `[PAD..., a, +, b, WORK, <count-up sequence>, =, carry, ones]`
+- The scratchpad explicitly shows counting up b steps from a
+- Reduces addition to the successor operation learned in Stage 3
+- n_result = variable (b intermediate digits + 3 for `= carry ones`)
+- Example: `3 + 4 WORK 4 5 6 7 = 0 7` (start at 3, count up 4 steps: 4,5,6,7)
+- Example: `8 + 5 WORK 9 0 1 2 3 = 1 3` (crosses tens boundary: 9,0,1,2,3 → carry=1, ones=3)
+- Example: `6 + 0 WORK = 0 6` (zero steps, result is just 6)
+- Max sequence length: 9 intermediate digits (for +9), fits easily in seq_len=48
+- 100 problems (10×10 addition pairs), composition stage with held-out specs
+- **Prerequisite:** Stage 3 (successor function)
+- **Key test:** Does the model use counting, or does it memorize? Held-out spec test reveals this.
+
+### Stage 6: Counting-Based Subtraction (subtraction = counting-down)
+
+**Format:** `[PAD..., a, -, b, WORK, <count-down sequence>, =, borrow, ones]`
+- The scratchpad shows counting down b steps from a (using predecessor from Stage 3)
+- a ≥ b only (non-negative results)
+- n_result = variable (b intermediate digits + 3 for `= borrow ones`)
+- Example: `7 - 3 WORK 6 5 4 = 0 4` (start at 7, count down 3 steps: 6,5,4)
+- Example: `5 - 0 WORK = 0 5` (zero steps)
+- 55 problems (a ≥ b pairs), composition stage with held-out specs
+- **Prerequisite:** Stage 3 (predecessor function)
+
+### Stage 7: Two-Digit ± Single-Digit (bridge, column scratchpad)
+
+**Format:** `[PAD..., a1, a0, OP, 0, b0, WORK, <column scratchpad>]`
+- a ∈ 10-99, b ∈ 0-9 (zero-padded to match Stage 8 format)
 - Column scratchpad: ones column → tens column → hundreds column → final answer
-- n_result = 21 (full column-by-column scratchpad)
-- Example: `2 3 + 0 4 WORK 3 + 4 + 0 = 0 7 SEP 2 + 0 + 0 = 0 2 SEP 0 0 2 7`
+- Each column step reuses Stage 5/6's counting-based format
+- n_result = variable (depends on column count lengths)
+- Example: `2 3 + 0 4 WORK 3 + 4 : 4 5 6 7 = 0 7 SEP 2 + 0 : = 0 2 SEP 0 2 7`
 - Total: 1,800 problems (90×10×2), split ~1,440/360
+- **Prerequisite:** Stages 5-6 (counting-based single-digit ops)
 
-### Stage 5: Two-Digit ± Two-Digit (composition test, column scratchpad)
+### Stage 8: Two-Digit ± Two-Digit (composition test, column scratchpad)
 
-**Format:** `[PAD..., a1, a2, OP, b1, b2, WORK, <column scratchpad>]`
+**Format:** `[PAD..., a1, a0, OP, b1, b0, WORK, <column scratchpad>]`
 - a, b ∈ 10-99
-- Same column scratchpad format as Stage 4
-- n_result = 21 (full column-by-column scratchpad)
-- Example: `5 1 + 4 2 WORK 1 + 2 + 0 = 0 3 SEP 5 + 4 + 0 = 0 9 SEP 0 0 9 3`
+- Same column scratchpad format as Stage 7
+- n_result = variable
+- Example: `5 1 + 4 2 WORK 1 + 2 : 2 3 = 0 3 SEP 5 + 4 : 5 6 7 8 9 = 0 9 SEP 0 9 3`
 - Total: ~12,195 problems, split ~9,756/2,439
 - **This is the critical composition test:**
-  - The model has learned counting (Stages 1-2), single-digit ops (Stage 3), multi-digit format (Stage 4)
-  - It must compose: column-wise addition + carry propagation
+  - The model has learned counting (Stages 1-2), ordinality (Stage 3), comparison (Stage 4), counting-based addition/subtraction (Stages 5-6), multi-digit format (Stage 7)
+  - It must compose: column-wise counting + carry propagation
   - Problem space far too large to memorize
 - **Two experimental arms:**
-  1. **Curriculum:** Train Stages 1→2→3→4→5 (advance at ≥95% test)
-  2. **Direct:** Train on Stage 5 data only (same total training budget)
+  1. **Curriculum:** Train Stages 1→2→3→4→5→6→7→8 (advance at ≥95% test)
+  2. **Direct:** Train on Stage 8 data only (same total training budget)
 - **Hypothesis:** Curriculum arm generalizes; direct arm memorizes.
 
 ---
@@ -157,25 +213,31 @@ experiments/Mamba3/
 experiments/scratchpad/
 ├── __init__.py               # Exports Vocab, split_problems
 ├── framework.py              # Vocab, Problem, Step, Grader, ProblemGenerator, Curriculum
+├── DESIGN_GUIDE.md           # Curriculum design principles (category theory, prerequisites)
 └── generators/
     ├── __init__.py            # Exports all generators
     ├── counting.py            # QueryCountingGenerator (S1), CombinedCountingGenerator (S2)
-    └── arithmetic.py          # SingleDigit (S3), TwoDigitSingle (S4), TwoDigit (S5)
+    ├── ordinality.py          # SuccessorGenerator (S3), ComparisonGenerator (S4)
+    ├── arithmetic.py          # CountingAdditionGenerator (S5), CountingSubtractionGenerator (S6)
+    └── multi_digit.py         # TwoDigitSingle (S7), TwoDigit (S8)
 ```
 
 ### Running Experiments (ON GPU, not Claude's machine)
 
 ```bash
-# Curriculum arm: stages 1→2→3→4→5
-python train_arithmetic.py --curriculum --target_stage 5 --results_file curriculum.jsonl
+# Curriculum arm: stages 1→2→3→4→5→6→7→8
+python train_arithmetic.py --curriculum --target_stage 8 --results_file curriculum.jsonl
 
-# Direct arm: stage 5 only
-python train_arithmetic.py --stage 5 --epochs 200 --results_file direct.jsonl
+# Direct arm: stage 8 only
+python train_arithmetic.py --stage 8 --epochs 200 --results_file direct.jsonl
 
 # Quick test: individual stages
 python train_arithmetic.py --stage 1 --epochs 50
 python train_arithmetic.py --stage 2 --epochs 50
-python train_arithmetic.py --stage 3 --epochs 50
+python train_arithmetic.py --stage 3 --epochs 50  # successor/predecessor
+python train_arithmetic.py --stage 4 --epochs 50  # comparison
+python train_arithmetic.py --stage 5 --epochs 50  # counting-based addition
+python train_arithmetic.py --stage 6 --epochs 50  # counting-based subtraction
 ```
 
 ---
@@ -186,15 +248,20 @@ python train_arithmetic.py --stage 3 --epochs 50
 - **Use Mamba3LM, not NajaLM.** This tests the curriculum hypothesis, not Naja.
 - **Per Mistake #41:** Answer prediction from `logits[:, p-1]` for position p.
 - **Per Mistake #42:** Verify test accuracy is above chance before drawing conclusions.
+- **Per Mistake #44:** Every composition stage must have all prerequisites taught and verified. No missing edges in the knowledge graph. Single-digit addition is a composition stage (counting-up), not a fact stage.
 
 ## Success Criteria
 
 1. **Stage 1 reaches ≥95% test accuracy** (individual counting generalizes)
 2. **Stage 2 reaches ≥95% test accuracy** (composition works for counting)
-3. **Stages 3-4 each reach ≥95% test accuracy** (arithmetic sub-skills)
-4. **Curriculum arm on Stage 5 achieves significantly higher test accuracy than direct arm** (full composition works)
-5. **No catastrophic forgetting** — accuracy on earlier stages stays above 90%
-6. If Stage 5 succeeds, can extend with multiplication, PEMDAS later
+3. **Stage 3 reaches ≥95% test accuracy** (successor/predecessor — ordinality)
+4. **Stage 4 reaches ≥95% test accuracy** (comparison — digit ordering)
+5. **Stage 5 reaches ≥95% test accuracy** (addition as counting-up — the key grounding test)
+6. **Stage 6 reaches ≥95% test accuracy** (subtraction as counting-down)
+7. **Stages 7-8 each reach ≥95% test accuracy** (multi-digit column arithmetic)
+8. **Curriculum arm on Stage 8 achieves significantly higher test accuracy than direct arm** (full composition works)
+9. **No catastrophic forgetting** — accuracy on earlier stages stays above 90%
+10. If Stage 8 succeeds, can extend with multiplication, PEMDAS later
 
 ## Key Files to Read First
 

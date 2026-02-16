@@ -16,33 +16,97 @@ If a token is randomly chosen and placed in the output, the model has no basis t
 
 ---
 
-## Core Principle: Fact Stages vs Composition Stages
+## Core Principle: Prerequisite Completeness (Category Theory Constraint)
 
-Not all stages test the same thing. A curriculum has two kinds of stages:
+**Every composition (morphism) requires its constituent objects to be well-defined in the model's learned representation.**
 
-### Fact Stages (memorization is the goal)
-- Teach atomic knowledge: arithmetic facts (3+4=7), vocabulary, lookup tables
-- The model MUST memorize these — there's no sub-algorithm to derive 3+4=7
-- **Do NOT hold out specs.** Train and test on the same spec set.
-- Test accuracy measures: "has the model memorized all facts?"
-- Example: Stage 3 (single-digit +/-) has 155 facts. All 155 should appear in training.
+In category theory, composition g ∘ f is only defined when the codomain of f equals the domain of g. In curriculum terms: the OUTPUT representation of skill A must match the INPUT representation needed by skill B. If the model learns counting (objects → digits) but addition treats digits as arbitrary symbols (not quantities), the composition "counting → addition" is undefined. The codomain of counting (digits-as-quantity-labels) doesn't match the domain of addition (digits-as-arbitrary-tokens-in-a-fact-table).
 
-### Composition Stages (generalization is the goal)
-- Test whether memorized facts compose into new capabilities
-- **Hold out specs.** Train/test on disjoint operand combinations.
-- Test accuracy measures: "can the model apply learned sub-skills to unseen combinations?"
-- Example: Stage 5 (two-digit +/-) has ~12K problems. Held-out specs test whether column arithmetic generalizes.
+### The prerequisite verification rule
 
-### The Distinction Matters
-Stage 3 failed because we held out 31 of 155 arithmetic facts. The model memorized the 124 training facts perfectly (100% train) but couldn't generalize to unseen facts (10% test = chance). This isn't a model failure — it's a curriculum design error. Single-digit addition IS a lookup table. Holding out entries tests whether the model learned modular arithmetic, which requires grokking (500-1000+ epochs past memorization).
+Before teaching a composed skill, verify that:
+1. **All prerequisite skills are learned** (not assumed, not skipped)
+2. **The model's learned representation of prerequisites includes the properties needed for composition** — counting produces digits, but does the model know that digit 5 means "more than" digit 3? That the digits are ordered? That one TEN equals ten DOTs?
+3. **Each composition is explicitly grounded** in an operation the model already performs — addition should REDUCE to counting in the scratchpad, not be taught as an independent lookup table
 
-**Rule of thumb:** If the stage teaches atomic, non-decomposable knowledge, it's a fact stage. If it requires combining previously learned sub-skills, it's a composition stage.
+### Missing prerequisite diagnostic
+
+When a composition stage fails (100% train, chance test), don't just add more data or epochs. Ask:
+
+```
+For each input token in this stage:
+  Does the model demonstrably understand what this token MEANS?
+  Was that meaning explicitly taught and verified in a prior stage?
+  Does the scratchpad show HOW prior skills produce the answer?
+```
+
+If any answer is "no", there's a missing prerequisite — a gap in the knowledge graph.
+
+### Example: The counting → arithmetic gap
+
+The original curriculum jumped from counting (Stages 1-2) to single-digit arithmetic (Stage 3) with these unverified assumptions:
+
+| Assumption | Verified? | What's missing |
+|-----------|-----------|----------------|
+| Digits have ordinal structure (5 comes after 4) | **No** | Successor/predecessor stage |
+| One TEN = 10 DOTs (place value) | **No** | Place value grounding stage |
+| Digits represent comparable quantities (7 > 3) | **No** | Comparison stage |
+| Addition means "combine quantities and recount" | **No** | Addition-as-counting stage |
+
+Without these, the model sees `3 + 4 WORK 0 7` with no reason to believe 7 follows from 3 and 4 except as a memorized fact. Counting taught it to associate quantities with digits, but never taught it that digits represent quantities that can be combined.
+
+---
+
+## Core Principle: Fact Stages Are a Design Smell
+
+The original design guide classified stages as either "fact stages" (memorization is the goal) or "composition stages" (generalization is the goal). **This distinction was premature.**
+
+### The old view (partially wrong)
+- "Single-digit addition IS a lookup table. There's no sub-algorithm to derive 3+4=7."
+- Therefore: don't hold out specs, let the model memorize all 155 facts.
+
+### The corrected view
+If the model can count (and it can — Stage 1 generalizes), then there IS a sub-algorithm for 3+4:
+
+```
+3 + 4 WORK 3 4 5 6 7 = 0 7
+```
+
+Start at 3, count up 4 steps (using the successor function), arrive at 7. This is addition DERIVED from counting, not memorized as an independent fact.
+
+### Why this matters for multi-digit generalization
+
+A model that memorizes 155 single-digit facts has learned a lookup table. When it encounters column arithmetic in Stage 4-5, it has 155 entries to retrieve, but no understanding of WHY 3+4=7. The column scratchpad decomposes multi-digit arithmetic into single-digit operations, but if single-digit operations are opaque lookup tables, the model has no way to verify its own work, detect errors, or generalize the carry mechanism to new situations.
+
+A model that learns addition-as-counting has a PROCEDURE it can apply to any digit pair. The carry mechanism is a natural consequence: when you count past 9, you wrap to 0 and increment the tens digit. The model doesn't need to memorize "8+5=13" — it counts 8→9→10→11→12→13 and observes the tens digit changed.
+
+### When is a fact stage genuinely needed?
+
+A stage should be classified as a fact stage ONLY when:
+1. The knowledge is genuinely atomic — no decomposition into simpler skills exists
+2. The model has no prior skill that could derive the knowledge
+3. The number of facts is small enough that memorization is practical
+
+Examples of genuinely atomic facts:
+- Symbol-to-meaning mappings (digit "3" means three objects)
+- Axioms that can't be derived (commutativity of addition, if you want to teach it)
+
+Examples of FALSE fact stages (contain hidden compositional structure):
+- Single-digit addition (decomposable into counting)
+- Multiplication tables (decomposable into repeated addition)
+- Subtraction facts (decomposable into counting down)
+
+**Rule of thumb:** If a "fact stage" has more than ~20 entries, look for hidden compositional structure. Large fact tables are a sign that the knowledge graph is missing intermediate nodes.
+
+### Stage classification (revised)
 
 | Stage | Type | Held-out? | What test measures |
 |-------|------|-----------|-------------------|
 | 1 (query counting) | Composition | Yes | Can the model count unseen (d,t) combos? |
 | 2 (combined counting) | Composition | Yes | Can two counts compose? |
-| 3 (single-digit +/-) | **Fact** | **No** | Has the model memorized all 155 facts? |
+| 2.5a (successor/predecessor) | Composition | Yes | Does the model know digit ordering? |
+| 2.5b (comparison) | Composition | Yes | Can the model compare quantities? |
+| 3 (addition as counting-up) | **Composition** | **Yes** | Does addition reduce to counting? |
 | 4 (two-digit ± one) | Composition | Yes | Can column scratchpad generalize? |
 | 5 (two-digit ± two) | Composition | Yes | Full compositional generalization? |
 
@@ -144,23 +208,51 @@ For each work token, ask: "What previously-seen tokens does the model need to pr
 
 ## Implications for Category Theory Knowledge Graph
 
-When building a curriculum over a knowledge graph:
+### Categorical structure of curricula
 
-1. **Leaf nodes are fact stages** — atomic definitions, axioms, base cases. Don't hold out.
-2. **Composition nodes are composition stages** — theorems derived from lemmas, multi-step proofs. Hold out.
-3. **Edge direction matters** — if A → B means "A is prerequisite for B", then B's scratchpad should contain A's format as a sub-step.
-4. **Per-token diagnostics per graph node** — when a node fails, the failing token tells you which prerequisite edge is broken.
-5. **Graph structure = scratchpad structure** — the work area for a composition node should mirror its incoming edges. If a theorem uses Lemma A and Lemma B, the scratchpad should have a step for each.
+A curriculum forms a category where:
+- **Objects** = skills/concepts the model can learn (counting, ordinality, addition, etc.)
+- **Morphisms** = "reduces to" or "builds on" relationships (addition reduces to counting)
+- **Composition** = transitive skill dependencies (addition builds on counting, which builds on object recognition)
+- **Identity** = every skill trivially reduces to itself
+
+The **composition law** is the key constraint: if f: counting → ordinality and g: ordinality → addition, then g ∘ f: counting → addition must be well-defined. In curriculum terms: the model must be able to trace any composed skill back through all its prerequisites.
+
+### Morphism well-definedness = prerequisite completeness
+
+A morphism f: A → B is well-defined only if:
+1. Object A is established (the prerequisite skill is verified learned)
+2. Object B's domain matches A's codomain (the output format of A is the input format of B)
+3. The morphism itself is taught (the scratchpad shows how A's skill produces B's output)
+
+**If any of these three conditions fail, the composition is undefined and the model will memorize instead of compose.**
+
+### Revised graph design rules
+
+1. **Leaf nodes are genuinely atomic** — symbol-to-meaning mappings, single axioms, irreducible definitions. NOT lookup tables that contain hidden structure.
+2. **Every internal node must have explicit incoming edges** — if a skill has prerequisites, ALL prerequisites must be leaf or internal nodes with their own stages. Missing edges = missing stages.
+3. **Edge direction encodes reduction** — if A → B, then B's scratchpad must SHOW the reduction to A. The work area literally contains A's format as a sub-computation.
+4. **Per-token diagnostics per graph node** — when a node fails, the failing token tells you which incoming edge is broken.
+5. **Graph completeness check** — for every internal node, ask: "Does the model provably understand every input symbol's meaning?" If not, there's a missing incoming edge from a node that teaches that meaning.
+6. **Codomain/domain matching** — the tokens produced by stage A must be consumed by stage B in the same semantic role. If A produces digits-as-quantity-labels, B must consume them as quantities, not as arbitrary symbols.
+7. **No large fact tables** — if a leaf node has >20 entries, it likely contains compositional structure. Decompose it into a sub-graph with genuine leaves and internal composition nodes.
 
 ---
 
 ## Checklist for Designing a New Stage
 
+### Prerequisite completeness (category theory check)
+- [ ] List ALL prerequisite skills this stage assumes
+- [ ] For each prerequisite: is it taught and verified in a prior stage?
+- [ ] For each input token: does the model demonstrably understand its MEANING (not just its token ID)?
+- [ ] If this stage composes two skills A and B: does A's output format match B's input format?
+- [ ] If this is marked as a "fact stage": verify there is NO compositional decomposition into simpler skills the model already has. If there is, decompose it.
+
+### Standard checks
 - [ ] Every work token is deterministically derivable from input + previous work tokens
-- [ ] The stage is correctly classified as fact or composition
-- [ ] Fact stages: `is_fact_stage = True`, no held-out split
-- [ ] Composition stages: held-out specs, test measures generalization
+- [ ] The scratchpad explicitly shows HOW prior skills produce the answer (reduction, not lookup)
 - [ ] Scratchpad format reuses sub-sequences from prerequisite stages
 - [ ] Per-token accuracy will be displayed (always, even n_result=1)
 - [ ] Structural tokens (NOTE, SEP) are used consistently
 - [ ] Run a few samples through `decode_tokens()` and verify by hand
+- [ ] Composition stages: held-out specs, test measures generalization on unseen combinations

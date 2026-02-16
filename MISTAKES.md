@@ -133,6 +133,31 @@ All four ablation tasks show 100% train accuracy with near-random test accuracy 
 - Need either: (a) much more training data (50K+), or (b) much longer training (500+ epochs for grokking), or (c) smaller models, or (d) stronger regularization.
 - The results file now includes per-epoch history (`epoch_history` key in JSONL) so learning dynamics are visible.
 
+### #44. Single-Digit Addition Treated as Fact Stage — Missing Prerequisites (ACTIVE)
+
+**Date:** 2026-02-16
+
+Stage 3 classified single-digit addition as a "fact stage" (155 arithmetic facts to memorize). This skipped four unverified prerequisites between counting (Stages 1-2) and arithmetic:
+
+| Missing prerequisite | What the model needs | Was it taught? |
+|---------------------|---------------------|----------------|
+| Ordinality (successor) | Digit 5 comes after digit 4 | **No** |
+| Place value | 1 TEN = 10 DOTs | **No** |
+| Comparison | 7 > 3 (digits represent ordered quantities) | **No** |
+| Addition = counting-up | 3+4 means "start at 3, count up 4 steps" | **No** |
+
+Without these, the model sees `3 + 4 WORK 0 7` with no reason to believe 7 follows from 3 and 4. The only path is memorization. Memorized single-digit facts don't compose into multi-digit arithmetic because the model never learned WHAT addition means — only WHICH symbol pairs map to which outputs.
+
+**Category theory formulation:** The morphism from counting to addition is undefined because the codomain of counting (digits-as-quantity-labels) doesn't match the domain of addition (digits-as-arbitrary-symbols-in-a-fact-table). The composition is ill-typed.
+
+**Root cause:** Assumed that digits are self-explanatory. The model sees digits as token IDs (4-13 in vocab). Nothing in the training connects these IDs to quantities, ordering, or operations on quantities.
+
+**Fix:** Add intermediate stages (successor/predecessor, comparison) that ground digits in quantities and teach addition as counting-up. Single-digit addition becomes a composition stage, not a fact stage. See `DESIGN_GUIDE.md` for the full rationale and revised stage table.
+
+**Principle:** If a "fact stage" has more than ~20 entries, it likely contains compositional structure. A large lookup table is a sign that the knowledge graph is missing intermediate nodes. Before teaching any composed skill, verify ALL prerequisite concepts are learned — don't assume the model understands token meanings just because earlier stages passed.
+
+---
+
 ### #43. Scratchpad Query Type Placed in Output, Not Input (RESOLVED)
 
 **Date:** 2026-02-16
@@ -219,3 +244,4 @@ Below are condensed lessons from resolved/archived mistakes. Full debugging narr
 - 2026-02-15: #40 (three WY chunkwise bugs: decay convention, state update formula, pseudo-key decay)
 - 2026-02-15: #41 (ablation evaluation leak: answer in sequence, trivial copy instead of genuine prediction)
 - 2026-02-16: #42 (ablation benchmarks are all memorization; 5K samples + 50 epochs + 1.26M params = no generalization)
+- 2026-02-16: #44 (single-digit addition treated as fact stage; missing prerequisites between counting and arithmetic; category theory constraint on morphism well-definedness)
