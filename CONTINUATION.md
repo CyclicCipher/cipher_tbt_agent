@@ -1,356 +1,234 @@
-# CONTINUATION: Implement Real WY Chunkwise Parallelism for Naja
+# CONTINUATION: Compositional Arithmetic Curriculum on Mamba3
 
-**Date:** 2026-02-14
-**Priority:** IMMEDIATE — Naja is unusably slow without this.
-**Context:** See Mistake #39 in MISTAKES.md.
+**Date:** 2026-02-16
+**Priority:** IMMEDIATE — Tests the core generalization hypothesis.
+**Context:** See Mistakes #42 (memorization), #38 (ePC archived), #34 (next-step prediction).
 
 ---
 
 ## The Problem
 
-Naja's sequential recurrence (`delta_recurrence()` in `naja.py:114-211`) launches ~20 CUDA kernels per timestep. At seq_len=64, n_layer=4, that's ~5,120 kernel launches per batch with ~30us overhead each, giving ~150ms of pure launch latency. GPU utilization reads 0%. Training appears to hang.
+Every model we've trained memorizes instead of generalizing on multi-step algorithmic tasks:
 
-The current `delta_recurrence_chunkwise()` (naja.py:294-344) is **not real parallelism** — it just wraps the same sequential loop in `torch.utils.checkpoint`. It trades memory for compute but doesn't reduce sequential steps at all.
+- **Stage 2** (5-rule pattern induction): 99% train, ~25% test.
+- **Associative recall** (Naja ablation): 100% train, 8-22% test.
+- **Permutation_4**: 55-87% train, 25% test (chance).
+- **Multi-scale memory**: 39-100% train, 7% test (chance).
 
-## The Solution: WY Chunkwise Parallelism
+The model treats composite tasks as monolithic lookup tables. With 1.26M parameters and only 5K training examples, memorization is always the path of least resistance. More data or longer training (grokking) might help, but neither addresses the fundamental question: **can the model learn to compose sub-skills?**
 
-Replace the sequential per-timestep loop with the 4-step WY chunkwise algorithm from Gated DeltaNet (Yang et al., ICLR 2025). This reduces sequential steps from L to L/C (e.g., 64→1 with chunk_size=64).
+## The Hypothesis: Compositional Curriculum
 
----
+How many examples of addition does it take to teach a child? About 50-100, covering single-digit pairs (10×10 = 100 total). But then the child generalizes to multi-digit addition *without* seeing all 1000×1000 two-digit cases.
 
-## Mathematical Background
+The child can do this because they learned **composable sub-skills first**:
 
-### WY Representation
+1. **Counting** — numbers are ordered, "next" means +1
+2. **Place value** — "23" means 2×10 + 3 (positional decomposition)
+3. **Single-digit addition** — the 100 base facts
+4. **The carry rule** — when a column exceeds 9, send 1 to the next column
 
-A product of Householder reflections H_i = I - β_i·k_i·k_i^T can be written as:
+Each stage has near-100% coverage at the *algorithmic level*. By the time they see "23 + 48", the only new thing is "apply the same column procedure and carry."
 
-```
-P_n = prod_{t=1}^{n} H_t = I - Σ_{i=1}^{n} w_i · k_i^T
-```
+**Our models skip all of this.** They see associative recall as a monolithic function from 32-token sequence → answer token. They never decompose the task into "scan for matching key" then "read adjacent value."
 
-where the pseudo-keys w_i are computed inductively:
-```
-w_1 = β_1 · k_1
-w_{t+1} = β_{t+1} · (k_{t+1} - Σ_{i=1}^{t} (k_i^T · k_{t+1}) · w_i)
-       = β_{t+1} · P_t · k_{t+1}
-```
-
-### UT Transform (Matrix Form for a Chunk of C Tokens)
-
-```
-A = tril(diag(β) · K · K^T, -1)       # C×C strictly lower triangular
-T = (I + A)^{-1} · diag(β)             # via forward substitution, O(C²)
-W = T · K                               # C×d_k pseudo-keys
-U = T · V                               # C×d_v pseudo-values
-```
-
-### The 4-Step Algorithm
-
-For each chunk c (parallel across chunks):
-
-**Step 1 — Intra-chunk WY:** Compute W_c, U_c via UT transform above.
-
-**Step 2 — Chunk state accumulation:**
-```
-P_c = I - K_c^T · W_c        # d_k × d_k transition for this chunk
-H_c = K_c^T · U_c            # d_k × d_v state contribution from this chunk
-```
-
-**Step 3 — Inter-chunk scan** (sequential over L/C chunks, much smaller than L):
-```
-S_c = γ_c · P_c · S_{c-1} + H_c    # γ_c = cumulative decay within chunk
-```
-
-**Step 4 — Intra-chunk output:**
-```
-O_c = Q_c · S_{c-1} + tril(Q_c · K_c^T) · (U_c - W_c · S_{c-1})
-```
+**The experiment:** Build a staged arithmetic curriculum on the Mamba3 backbone. Train each sub-skill to generalization before introducing the next. Test whether compositional training enables generalization on composite tasks that fail with direct training.
 
 ---
 
-## Naja-Specific Complications
+## Experimental Design
 
-### 1. Two Householder Reflections (PoPE Pair)
+### Architecture
 
-Naja uses B₁ AND B₂ (orthogonal pair from PoPE). This is equivalent to DeltaProduct with n_h=2. Two approaches:
+**Mamba3LM** from `experiments/Mamba3/mamba3_block.py`:
+- `model(input_ids) -> logits` (simple LM interface)
+- Weight-tied embedding
+- Config: `d_model=128, d_state=64, n_layer=4, headdim=64`
+- ~500K params (smaller than Naja's 1.26M — important for generalization)
 
-**Option A — Virtual token expansion (DeltaProduct approach):**
-Expand each real token into 2 virtual tokens (one for B₁/β₁, one for B₂/β₂). Apply standard DeltaNet WY to the 2C-length virtual sequence. Read outputs at every 2nd position. Simple but doubles chunk size.
+### Vocabulary
 
-**Option B — Compose two WY transforms per chunk:**
-Apply the WY transform twice within each chunk — first for B₁, then for B₂. More efficient but more complex.
-
-**Recommendation:** Start with Option A (virtual expansion). It's simpler and reuses the standard WY algorithm directly. Optimize to Option B later if needed.
-
-### 2. Per-Channel Decay α_t (Diagonal, Not Scalar)
-
-Naja's decay is per-channel: `α_t ∈ R^{d_state}`, not scalar like Gated DeltaNet. The cumulative decay between positions i and j within a chunk is:
 ```
-Γ_{i,j} = prod_{k=j+1}^{i} diag(α_k)    # d_state × d_state diagonal
-```
+Token 0:  PAD
+Token 1:  digit 0
+Token 2:  digit 1
+...
+Token 10: digit 9
+Token 11: +  (PLUS)
+Token 12: -  (MINUS)
+Token 13: *  (TIMES)
+Token 14: /  (DIVIDE)
+Token 15: =  (EQUALS)
+Token 16: >  (GT)
+Token 17: <  (LT)
+Token 18: TRUE
+Token 19: FALSE
+Token 20: (  (LPAREN)
+Token 21: )  (RPAREN)
 
-This modifies the A matrix in the UT transform:
-```
-A_{i,j} = β_j · (k_j^T · Γ_{i,j} · k_i)    # scalar, for i > j
-```
-
-For diagonal Γ, this is still efficient: `k_j^T · diag(γ) · k_i = Σ_d (k_j[d] · γ[d] · k_i[d])`.
-
-**Simplification option for first implementation:** Temporarily fall back to scalar decay (mean of α channels) for the chunkwise path, keeping per-channel only for the reference sequential path. Gets the speedup working, then add per-channel later.
-
-### 3. Trapezoidal Discretization
-
-Naja blends current and previous inputs via λ:
-```
-write_t = λ_t · (x_t ⊗ B_t) + (1-λ_t) · (x_{t-1} ⊗ B_{t-1})
+vocab_size = 22
 ```
 
-In the WY framework, this changes the "value" V at each position to the blended write. Doesn't change the algorithm structure — just the input V that goes into `U = T · V`.
+Digits are encoded as `digit + 1` (so token 1 = digit 0, token 10 = digit 9). Multi-digit numbers use multiple digit tokens in sequence (e.g., "23" = tokens [3, 4]).
 
-### 4. MIMO (rank-r)
+### Curriculum Stages
 
-For a first implementation, restrict to SISO (r=1) for the WY chunkwise path. The Householder erase uses a single key direction regardless of MIMO rank, so the WY transform applies cleanly. MIMO can be added after the core WY is working.
+#### Stage 1: Magnitude Comparison (learn that digits have ordinal meaning)
+
+**Format:** `[PAD..., a, CMP, b, RESULT]`
+- Example: `3 > 1 → TRUE`, `2 > 7 → FALSE`, `5 < 8 → TRUE`
+- CMP ∈ {`>`, `<`}, RESULT ∈ {`TRUE`, `FALSE`}
+- Single-digit only
+- 90 possible comparisons (10×10 minus 10 equal pairs)
+- **Tests:** Does the model learn magnitude ordering of digit tokens?
+- **Coverage:** Near-complete (can see most/all of the 90 pairs)
+- **Generalization test:** Held-out digit pairs
+
+#### Stage 2: Successor / Predecessor (learn +1/-1 as operations on quantity)
+
+**Format:** `[PAD..., a, +, 1, =, result]` and `[PAD..., a, -, 1, =, result]`
+- Example: `3 + 1 = 4`, `7 - 1 = 6`
+- Result is always a single digit (restrict to 0-9 range)
+- 18 examples total (9 successors + 9 predecessors)
+- **Tests:** Does the model learn that + and - modify quantity?
+- **Advancement criterion:** ≥95% test accuracy
+
+#### Stage 3: Single-Digit Arithmetic (learn the four operations)
+
+**Format:** `[PAD..., a, OP, b, =, r1, (r2)]`
+- Addition: `3 + 4 = 7`, `8 + 5 = 1 3` (result can be 1-2 digits)
+- Subtraction: `7 - 3 = 4` (only a ≥ b to avoid negatives)
+- Multiplication: `3 * 4 = 1 2`, `2 * 3 = 6`
+- Division: `8 / 2 = 4` (only exact divisions, b > 0)
+- **Tests:** Does the model learn each operation?
+- **Coverage:** All valid single-digit pairs for each operation
+- **Key question:** Does prior training on Stage 1-2 help learn Stage 3 faster?
+
+#### Stage 4: Two-Digit Arithmetic (composition of place value + operation + carry)
+
+**Format:** `[PAD..., d1, d2, OP, d3, d4, =, r1, r2, (r3)]`
+- Example: `2 3 + 1 4 = 3 7`, `4 5 - 1 8 = 2 7`
+- **This is the critical generalization test:**
+  - The model has NEVER seen two-digit addition directly
+  - It must compose: place value (Stage 1-2) + single-digit operation (Stage 3) + carry
+- **Two experimental arms:**
+  1. **Curriculum:** Train Stages 1→2→3→4 sequentially (advance at ≥95% test)
+  2. **Direct:** Train on Stage 4 data only (same total training budget)
+- **Hypothesis:** Curriculum arm generalizes; direct arm memorizes.
+
+#### Stage 5: PEMDAS (composition of operations with precedence)
+
+**Format:** `[PAD..., a, OP1, b, OP2, c, =, result]`
+- Example: `2 + 3 * 4 = 1 4` (not 20)
+- Example: `8 - 2 + 3 = 9`
+- Tests whether the model applies operator precedence
+- Only attempted if Stage 4 succeeds
+- **Bonus:** Add parentheses: `( 2 + 3 ) * 4 = 2 0`
+
+### Evaluation Protocol
+
+For each stage:
+1. **Train set:** Sample problems with random operands
+2. **Test set:** Held-out operand combinations (never seen during training)
+3. **Metric:** Exact-match accuracy on the result tokens
+4. **Advancement:** Move to next stage when test accuracy ≥ 95%
+
+For the composition test (Stage 4):
+1. **Curriculum arm:** Sequential training through Stages 1→2→3→4
+2. **Direct arm:** Same model, same total epochs, trained only on Stage 4 data
+3. **Control:** Random curriculum order (stages shuffled, not sequential)
+
+### Loss Function
+
+Next-step prediction cross-entropy on the full sequence (same as Naja/JEPA training). The model learns to predict every token including operators and equals signs, but accuracy is measured only on the result tokens.
+
+For tasks with fixed-position answers (comparison, successor), also use `logits[:, -2]` answer prediction (per Mistake #41) as a secondary metric.
 
 ---
 
 ## Implementation Plan
 
-### Phase 5a: Pure PyTorch WY (No Triton) ✓ COMPLETE & VERIFIED
-
-Implemented the WY chunkwise algorithm in pure PyTorch. **Numerically verified** on GPU: all 5 test cases pass at ~1e-6 max diff vs naive sequential reference.
-
-File modified: `experiments/Naja/naja.py`
-
-**Functions added:**
-
-1. `_chunk_scaled_dot_kkt(K, beta)` → Compute A = tril(diag(β)·K·K^T, -1) per chunk ✓
-2. `_solve_tril(A, beta)` → Forward substitution for (I+A)^{-1}·diag(β) using `torch.linalg.solve_triangular` ✓
-3. `_prepare_wy_repr(K, V, beta)` → Full UT transform: A → T → W, U ✓
-4. `delta_recurrence_wy(x_write, ..., chunk_size)` → Complete 4-step chunkwise algorithm ✓
-
-**Standalone test:** `test_wy_minimal.py` — 5 test cases (constant decay, no decay, no delta, multi-chunk, full strength). All passing.
-
-**Three bugs found and fixed during verification (Mistake #40):**
-1. Decay-before-erase convention mismatch in A matrix
-2. Wrong inter-chunk state update (used P@S+H instead of FLA-style v_new + K_fwd)
-3. Pseudo-keys W missing cumulative decay factor (need `W_state = T @ (K * exp(cumsum))`)
-
-**Wired into `NajaMixer.forward()`** via `use_wy_chunkwise` config flag ✓
-**CLI flag:** `--use_wy_chunkwise` in train_naja.py ✓
-**Diagnostics:** `diagnose.py` updated with WY timing and correctness tests ✓
-
-**Remaining simplifications (Phase 5b lifted scalar decay):**
-- SISO only (r=1 MIMO column for erase key)
-- Single Householder (B1 only, B2/PoPE pair ignored)
-- Trapezoidal blending baked into V before WY transform
-
-### Phase 5b: Per-Channel Decay ✓ COMPLETE & VERIFIED
-
-Lifted the scalar decay simplification. Per-channel decay means each of the `d_state` channels gets its own decay rate `alpha_t[d]`.
-
-**Key mathematical insight:** The A matrix stays CxC (NOT CxCxd_state) because the Householder projection contracts over d_state. Per-channel decay is absorbed into the key weighting:
+### File Structure
 
 ```
-A[i,j] = β_j * Σ_d k_i[d] * k_j[d] * exp(cumsum[i,d] - cumsum[j,d])
-       = β_j * K_pos[i] · K_neg[j]
+experiments/Mamba3/
+├── mamba3_block.py           # Existing Mamba3 model (DO NOT MODIFY)
+├── train_arithmetic.py       # NEW: Curriculum training script
+├── arithmetic_tasks.py       # NEW: Task generators for all stages
+└── archived_epc/             # Existing, ignore
 ```
 
-where `K_pos = K * exp(cumsum)`, `K_neg = K * exp(-cumsum)`. This is more efficient than the original scalar implementation (no separate decay_matrix computation).
+### Phase 1: Task Generators (`arithmetic_tasks.py`)
 
-**What changed:**
-- `log_alpha_cumsum` shape: `(batch, nheads, n_chunks, Cs)` → `(batch, nheads, n_chunks, Cs, d_state)`
-- `gamma_c` shape: `(batch, nheads, n_chunks)` → `(batch, nheads, n_chunks, d_state)`
-- A matrix: computed as `K_pos @ K_neg^T` instead of `KKt * scalar_decay_matrix`
-- T, W, U shapes: **UNCHANGED** (CxC, Cs×d_state, Cs×headdim) — no new forward substitution needed
-- K_fwd, W_state, decay_from_start: all now per-channel weighted
-- Step 4 output: Q_decay = Q * exp(cumsum) folds per-channel decay into readout
-- QKt: `Q_decay @ K_neg^T` absorbs per-channel decay into the attention-like matrix
+Create generators for each stage. Each returns `(sequences, targets)` tensors following the existing convention (PAD=0, left-padded).
 
-**Verification:** 8 test cases all passing at ~2e-6 max diff vs naive reference:
-- Tests 1-5: original tests (constant alpha, no decay, no beta, multi-chunk, aggressive)
-- Test 6: per-channel varying alpha, single chunk
-- Test 7: per-channel varying alpha, multi-chunk (the hardest test)
-- Test 8: per-channel varying alpha, multi-chunk, beta=1 (aggressive)
+Functions to implement:
+- `generate_comparison(n_samples, held_out_pairs)` → Stage 1
+- `generate_successor(n_samples)` → Stage 2
+- `generate_single_digit_arithmetic(n_samples, ops, held_out_pairs)` → Stage 3
+- `generate_two_digit_arithmetic(n_samples, ops, held_out_pairs)` → Stage 4
+- `generate_pemdas(n_samples, held_out_exprs)` → Stage 5
+- `VOCAB` dict mapping symbols to token IDs
+- `decode_tokens(tensor)` → human-readable string (for debugging)
 
-### Phase 5c: PoPE Pair (B₁, B₂) ✓ COMPLETE & VERIFIED
+### Phase 2: Training Script (`train_arithmetic.py`)
 
-Virtual token expansion (DeltaProduct with n_h=2) fully integrated into `delta_recurrence_wy()`. Each real token becomes 2 virtual tokens:
+Build on patterns from `train_naja.py` but with curriculum logic:
 
-- Virtual 2t: K=B̂₁, V=v₁, β=β₁, α=α_t (standard B₁ with real decay)
-- Virtual 2t+1: K=B̂₂, V=v₂, β=β₂, α=1.0 (B₂ with no extra decay within the pair)
+1. **Single-stage mode:** `python train_arithmetic.py --stage 3 --epochs 50`
+2. **Curriculum mode:** `python train_arithmetic.py --curriculum --target_stage 4`
+   - Trains stages sequentially
+   - Advances when test_acc ≥ 95% (configurable via `--advance_threshold`)
+   - Reports per-stage epoch counts
+3. **Direct mode:** `python train_arithmetic.py --stage 4 --epochs 200`
+   - Same total budget as curriculum, but only Stage 4 data
+4. **Comparison output:** JSON results file with per-stage learning curves
 
-Q is zeroed at B₁ positions (even) — only B₂ positions contribute readout. Output extracted via `Y[:, 1::2]`.
+Key features:
+- Uses `Mamba3LM` (not NajaLM)
+- Same training infrastructure: AdamW, cosine LR, AMP, gradient clipping
+- `--results_file` for JSON output (compatible with ablation runner pattern)
+- No diagnostics charts (keep it simple)
+- Per-epoch accuracy on BOTH the current stage AND all previous stages (to detect catastrophic forgetting)
 
-**Verification:** Tests 9-11 in test_wy_minimal.py all pass at ~1e-5 to 1e-6:
-- Test 9: B₂ single chunk, constant alpha
-- Test 10: B₂ multi-chunk, per-channel alpha (hardest)
-- Test 11: B₂ aggressive (beta1=1, beta2=1)
+### Phase 3: Run Experiments (ON GPU, not Claude's machine)
 
-**Bug fix (2026-02-15):** K_neg overflow in WY when alpha < 0.5 with Cs=128. Root cause: `exp(-cumsum)` exceeds float32 range. Fixed by clamping `(-cumsum).clamp(max=30.0)` before exp. This only affects above-diagonal entries that get zeroed by the causal mask.
-
-### Phase 5d: Ablation Testing
-
-Run ablation experiments on GPU to validate each Naja component.
-
-**Ablation runner:** `python run_ablations.py` (or `--dry-run` to preview)
-
-**Feature isolation grid:**
-
-| Feature tested     | Control (ON)       | Ablated (OFF)      |
-|--------------------|--------------------|--------------------|
-| Delta rule         | delta_only         | mamba3_base        |
-| PoPE pair (B₂)    | naja_full          | delta_per_channel  |
-| Per-channel decay  | naja_full          | pope_perp_only     |
-| Surprise gating    | surprise           | naja_full          |
-| MIMO r=2           | mimo2              | naja_full          |
-
-**Tasks (each designed to stress a specific feature):**
-
-| Task               | Stresses           |
-|--------------------|---------------------|
-| associative_recall | delta rule (erase+write) |
-| parity             | PoPE pair (rotation)     |
-| multi_scale        | per-channel decay        |
-| permutation_3/4    | full architecture        |
-
-**Usage:**
 ```bash
-# Full grid (~45 runs, ~8 min on RTX 3050 Ti)
-python run_ablations.py
+# Curriculum arm: stages 1→2→3→4
+python train_arithmetic.py --curriculum --target_stage 4 --results_file curriculum.jsonl
 
-# Quick subset
-python run_ablations.py --tasks parity associative_recall --presets mamba3_base naja_full delta_only
+# Direct arm: stage 4 only, same total epochs
+python train_arithmetic.py --stage 4 --epochs 200 --results_file direct.jsonl
 
-# Resume after interruption
-python run_ablations.py --resume
+# Control: each stage independently
+python train_arithmetic.py --stage 1 --epochs 50 --results_file stage1.jsonl
+python train_arithmetic.py --stage 2 --epochs 50 --results_file stage2.jsonl
+python train_arithmetic.py --stage 3 --epochs 50 --results_file stage3.jsonl
 ```
-
-Results saved to `ablation_results.jsonl`. Summary table printed at the end.
-
-Complete all ablations before investing in Triton optimization.
-
-### Phase 5e: Triton Kernels (After Ablations)
-
-For maximum performance, either:
-- Port core operations to Triton (using `flash-linear-attention` as reference)
-- Or use `flash-linear-attention` as a dependency and import its kernels directly
-
-Expected gain: 3-10x over PyTorch WY (from fusing intra-chunk operations and eliminating intermediate memory traffic).
-
----
-
-## Reference Implementations
-
-### SSD chunkwise (already in codebase)
-
-`experiments/Mamba3/mamba3_block.py:ssd_trapz()` (lines 143-229) implements the same 4-step structure for diagonal state transitions. Use as structural template — the steps map 1:1.
-
-### flash-linear-attention library (external reference)
-
-```
-fla/ops/delta_rule/wy_fast.py           # WY Triton kernels
-fla/ops/delta_rule/chunk.py             # Main orchestrator
-fla/ops/delta_rule/naive.py             # Reference sequential implementation
-fla/ops/common/solve_tril.py            # Forward substitution Triton kernels
-fla/ops/common/chunk_scaled_dot_kkt.py  # Key-key interaction computation
-fla/ops/common/chunk_delta_h.py         # Inter-chunk hidden state propagation
-```
-
-### DeltaNet naive reference (for verification)
-
-```python
-def delta_rule_recurrence(q, k, v, beta):
-    S = torch.zeros(b, h, d_k, d_v)
-    for i in range(l):
-        _k = k[:, :, i]
-        _v = v[:, :, i].clone()
-        beta_i = beta[:, :, i]
-        _v = _v - (S.clone() * _k[..., None]).sum(-2)  # error = v - S^T k
-        _v = _v * beta_i                                # scaled error
-        S = S.clone() + _k.unsqueeze(-1) * _v.unsqueeze(-2)  # rank-1 update
-        o[:, :, i] = torch.einsum('bhd,bhdm->bhm', _q, S)
-    return o, S
-```
-
----
-
-## Mapping Naja's Current Recurrence to DeltaNet
-
-Naja's current `delta_recurrence()` (naja.py:114-211) does per timestep:
-
-```python
-# Decay (per-channel)
-h = h * α_t                        # ← Gated DeltaNet's scalar α, but diagonal
-
-# Erase (Householder 1)
-h = h - β₁ · (h · b̂₁) ⊗ b̂₁       # ← DeltaNet's I - β·k·k^T
-
-# Erase (Householder 2, PoPE pair)
-h = h - β₂ · (h · b̂₂) ⊗ b̂₂       # ← DeltaProduct's second Householder
-
-# Write (rank-r MIMO)
-h = h + β₁ · Σᵢ x_write[:,i] ⊗ B₁[:,i]  # ← DeltaNet's β·v·k^T
-
-# Readout
-y_t = h · C                        # ← DeltaNet's q^T · S
-```
-
-To map to DeltaNet's WY formulation:
-- **k** = B̂₁ (normalized first MIMO column of B₁)
-- **v** = write contribution (x_write contracted with B₁)
-- **β** = β₁ (write/erase gate)
-- **q** = C (readout projection)
-- **α** = per-channel decay (diagonal, not scalar)
-- B₂/β₂ = second Householder (handle via virtual expansion or composition)
 
 ---
 
 ## Key Constraints
 
-- **Do NOT run full training on Claude's machine** (Mistake #36). Implement, commit, push. User tests on GPU.
-- **Read the DeltaNet paper thoroughly** before implementing (Mistake #13). Especially Section 3 (chunkwise algorithm) and Appendix B (WY derivation) of arXiv:2406.06484.
-- **Verify correctness first** by comparing WY output vs naive sequential output on small inputs.
-- **Keep the naive sequential implementation** as permanent reference for correctness testing.
-- **4GB VRAM budget** — the WY algorithm should use LESS memory than naive (no per-timestep activation storage).
-
-## Papers to Read (in order)
-
-1. **Yang et al. 2024** — "Parallelizing Linear Transformers with the Delta Rule" (arXiv:2406.06484). THE paper for the WY algorithm. Read Sections 2-3 and Appendix B completely.
-2. **Yang et al. 2025** — "Gated Delta Networks" (arXiv:2412.06464). Extends WY to include data-dependent decay (our α). Read Section 3.
-3. **Siems et al. 2025** — "DeltaProduct" (arXiv:2502.10297). Multiple Householders per token via virtual expansion (our B₁/B₂ PoPE pair). Read Section 3.
-4. **Songlin Yang's blog** — "DeltaNet Explained Part II" (sustcsonglin.github.io/blog/2024/deltanet-2/). Clear walkthrough of the WY algorithm with code.
+- **Do NOT run training on Claude's machine** (Mistake #36). Implement, commit, push.
+- **Use Mamba3LM, not NajaLM.** This experiment tests the curriculum hypothesis, not the Naja architecture. Mamba3 is simpler and has fewer confounds.
+- **Measure generalization, not memorization.** Test sets must contain operand combinations never seen in training. Per Mistake #42, verify that test accuracy is above chance before drawing conclusions.
+- **Per Mistake #41:** Answer prediction from `logits[:, -2]`, not `logits[:, -1]`.
+- **Keep it simple.** No feature flags, no presets, no ablation grid. Two arms: curriculum vs direct. One model architecture. One clear question.
 
 ## Success Criteria
 
-### Phase 5a ✓ ACHIEVED
-1. ✅ `delta_recurrence_wy()` matches `delta_recurrence()` to ~1e-6 (target was <1e-4)
-2. ✅ Training time per epoch ~10s on RTX 3050 Ti (vs ~minutes with naive sequential)
-3. ⬜ GPU utilization rises from ~0% to >50% (not yet profiled with nvidia-smi)
-4. ✅ No accuracy regression on Stage 1b: 97.0% test (matches Mamba3 baseline)
-5. ✅ test_wy_minimal.py provides standalone correctness verification
-
-### Phase 5b ✓ ACHIEVED
-6. ✅ Per-channel decay WY matches naive per-channel reference to ~2e-6 (target was <1e-4)
-7. ✅ All test_wy_minimal.py tests updated and passing with per-channel decay (8 tests)
-
-### Phase 5c ✓ ACHIEVED
-8. ✅ Virtual token expansion for B₂ matches naive reference to ~1e-5 (Tests 9-11)
-9. ✅ K_neg overflow fix: `(-cumsum).clamp(max=30.0)` prevents float32 overflow
-
-### Phase 5d
-10. ⬜ Ablation results documented for each Naja component
-11. ⬜ Architecture decisions finalized based on empirical evidence
-
----
+1. **Stage 1-3 each reach ≥95% test accuracy** (proves sub-skills are learnable)
+2. **Curriculum arm on Stage 4 achieves significantly higher test accuracy than direct arm** (proves composition works)
+3. **No catastrophic forgetting** — accuracy on stages 1-3 stays above 90% while training Stage 4
+4. If Stage 4 succeeds, Stage 5 (PEMDAS) is a bonus
 
 ## Key Files to Read First
 
 | File | What's in it |
 |------|-------------|
-| `MISTAKES.md` | 39 documented mistakes — **always read first** |
+| `MISTAKES.md` | 42 documented mistakes — **always read first** |
 | `CLAUDE.md` | Architecture overview, priorities |
-| `experiments/Naja/naja.py` | Current Naja model (delta_recurrence, delta_recurrence_chunkwise) |
-| `experiments/Naja/DESIGN.md` | Full mathematical specification of Naja |
-| `experiments/Naja/train_naja.py` | Training loop, CLI args |
-| `experiments/Naja/diagnose.py` | Diagnostic suite (timing, correctness) |
-| `experiments/Mamba3/mamba3_block.py` | SSD chunkwise reference (ssd_trapz, lines 143-229) |
+| `experiments/Mamba3/mamba3_block.py` | Mamba3 model (the backbone for this experiment) |
+| `experiments/Naja/tasks.py` | Task generator pattern to follow |
+| `experiments/Naja/train_naja.py` | Training loop pattern to follow |

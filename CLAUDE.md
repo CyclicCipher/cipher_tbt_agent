@@ -4,11 +4,11 @@
 
 A biologically-inspired AI system targeting the Danganronpa visual novel as an evaluation environment. Originally built on predictive coding (PC), now pivoting to backprop with potential modifications for local-learning-like benefits.
 
-Current focus: **Naja** — A hybrid architecture combining Mamba3's continuous-time SSM dynamics with the delta rule's targeted write/erase memory, MIMO, PoPE orthogonal pairs, per-channel decay, and surprise gating. This is the `experiments/Naja/` directory.
+Current focus: **Compositional Arithmetic Curriculum** — Testing whether a staged curriculum teaching composable sub-skills (comparison → successor → single-digit arithmetic → two-digit arithmetic → PEMDAS) enables generalization that direct training cannot. Uses the Mamba3 backbone. See `CONTINUATION.md`.
 
-**Phase 5a+5b+5c (WY chunkwise with per-channel decay and PoPE pair) is COMPLETE and numerically verified** (max diff ~2e-6 vs naive reference). Eleven test cases pass including B₂ virtual token expansion, per-channel multi-chunk, and aggressive beta.
+**Naja** (WY chunkwise) is complete and numerically verified (Phase 5a+5b+5c). Ablation testing (Phase 5d) showed all benchmarks are memorization, not generalization (Mistake #42). This motivated the compositionality pivot.
 
-**Next priority: Phase 5d — ablation testing.** Run `python run_ablations.py` on GPU. See `CONTINUATION.md`.
+**Next priority: Implement `arithmetic_tasks.py` and `train_arithmetic.py` in `experiments/Mamba3/`.** See `CONTINUATION.md`.
 
 Previous focus: **JEPA** — JEPA-style latent prediction on Mamba3 backbone (still in `experiments/energy_reasoning/`).
 
@@ -16,11 +16,10 @@ Previous focus: **JEPA** — JEPA-style latent prediction on Mamba3 backbone (st
 
 ## Critical Reference
 
-**ALWAYS read `MISTAKES.md` before making changes.** It has 41 documented mistakes with root causes. The most relevant active ones:
+**ALWAYS read `MISTAKES.md` before making changes.** It has 42 documented mistakes with root causes. The most relevant active ones:
 
+- **#42 (Ablation benchmarks are memorization):** 5K samples + 1.26M params + 50 epochs = memorization, not generalization. All non-trivial tasks show 100% train / chance test. This motivated the compositionality curriculum pivot.
 - **#41 (Ablation eval leak):** Answer token at seqs[:, -1] was visible to logits[:, -1]. All tasks scored ~100% via trivial copy. Fixed: use logits[:, -2] which genuinely predicts the answer.
-- **#40 (WY chunkwise bugs):** Three independent bugs in the initial WY implementation — decay convention, inter-chunk state formula, pseudo-key decay factor. All fixed. Key lesson: single-chunk tests are necessary but not sufficient; always test multi-chunk.
-- **#39 (Fake Phase 5):** The OLD `delta_recurrence_chunkwise()` was just gradient checkpointing. Now replaced by real `delta_recurrence_wy()` which is numerically correct.
 - **#38 (ePC archived):** ePC is 15x slower than backprop for identical accuracy. Don't resurrect it without a qualitatively new argument.
 - **#34 (Next-step prediction):** Causal models (Mamba) need next-step prediction, not masked prediction.
 - **#13 (Read the paper):** Never skim a research paper you're implementing. Read every appendix.
@@ -44,7 +43,7 @@ Key files:
 - `train_jepa.py` — Training loop, data generation, diagnostics
 - `data_gen.py` — Synthetic sequence generation (stages 1a/1b/2)
 
-### Naja (experiments/Naja/) — ACTIVE PRIORITY
+### Naja (experiments/Naja/) — WY COMPLETE, ABLATIONS PAUSED
 
 Hybrid Mamba3 + Gated DeltaNet architecture with backprop training:
 
@@ -65,9 +64,11 @@ Key files:
 
 **WY chunkwise status:** `delta_recurrence_wy()` is numerically verified (Phase 5a+5b+5c complete). Per-channel decay and PoPE pair (B₂ via virtual token expansion) fully supported. Remaining simplification: SISO (r=1).
 
-### Mamba3 Backbone (experiments/Mamba3/)
+### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
 
-- `mamba3_block.py` — Mamba3 block implementation (SSD-based, reference for chunkwise pattern)
+- `mamba3_block.py` — Mamba3 block implementation (SSD-based, backbone for arithmetic curriculum)
+- `arithmetic_tasks.py` — NEW: Task generators for compositional arithmetic stages (to be created)
+- `train_arithmetic.py` — NEW: Curriculum training script (to be created)
 
 ### Archived ePC Variants
 
@@ -87,17 +88,19 @@ All ePC code has been moved to `archived_epc/` subdirectories. These are retaine
 ```
 predictive-coding-agent/
 ├── CLAUDE.md              # This file
-├── MISTAKES.md            # 39 documented mistakes (ALWAYS READ)
-├── CONTINUATION.md        # WY chunkwise implementation plan (ACTIVE)
+├── MISTAKES.md            # 42 documented mistakes (ALWAYS READ)
+├── CONTINUATION.md        # Compositional arithmetic curriculum plan (ACTIVE)
 ├── experiments/
-│   ├── energy_reasoning/  # JEPA backprop (ACTIVE DEVELOPMENT)
+│   ├── energy_reasoning/  # JEPA backprop (paused)
 │   │   ├── archived_epc/  # ePC-JEPA (archived 2026-02-14)
 │   │   ├── jepa_model.py  # Active JEPA model
 │   │   ├── train_jepa.py  # Active training script
 │   │   └── data_gen.py    # Synthetic data generation
-│   ├── Mamba3/            # Mamba3 block + archived ePC
-│   │   ├── archived_epc/  # ePC-Mamba3 (archived 2026-02-14)
-│   │   └── mamba3_block.py # Mamba3 block (shared dependency)
+│   ├── Mamba3/            # Mamba3 backbone + arithmetic curriculum (ACTIVE)
+│   │   ├── mamba3_block.py       # Mamba3 block (backbone model)
+│   │   ├── arithmetic_tasks.py   # NEW: Compositional arithmetic task generators
+│   │   ├── train_arithmetic.py   # NEW: Curriculum training script
+│   │   └── archived_epc/        # ePC-Mamba3 (archived 2026-02-14)
 │   ├── ePC_ResNet/        # ePC ResNet-18 (archived)
 │   ├── ePC_Mamba/         # ePC-Mamba2 (archived)
 │   ├── eBPC/              # Error-based Bayesian PC (reference)
@@ -147,21 +150,22 @@ python experiments/energy_reasoning/train_jepa.py --stage 1b --profile
 - **Langevin gap negative:** Energy minimization over z actively hurts (~-5%).
 - **Hypothesis:** Model interprets 5 simple rules as 1 complex rule. See `docs/hypotheses/generalization_vs_memorization.md`.
 
-## Next Direction: Backprop With Local-Learning-Like Benefits
+## Next Direction: Compositional Curriculum Learning
 
-ePC's original goal was to achieve local learning as a path to:
-1. **Catastrophic forgetting resistance** — local updates don't overwrite unrelated circuits
-2. **Modular neural circuits** — each layer learns from its own local error signal
-3. **Energy-based reasoning** — inference-time optimization over latent variables
+The core generalization problem persists across all architectures (JEPA, Naja, Mamba3): models memorize composite tasks instead of learning algorithmic structure. Ablation benchmarks (Mistake #42) confirmed this — 100% train / chance test on every non-trivial task.
 
-These goals remain valid. Possible backprop-compatible approaches to explore:
-- **Gradient isolation / stop-gradient techniques** — selective detaching to create semi-local learning
-- **Auxiliary local losses** — per-layer prediction losses alongside global backprop
-- **EWC / SI / PackNet** — established continual learning methods for catastrophic forgetting
-- **Mixture of experts / modular networks** — architectural modularity without local learning
-- **Progressive training** — stage-wise freezing and expansion
+**Hypothesis:** Like children learning arithmetic, models need a curriculum that builds composable sub-skills before the composite skill. Each stage has near-100% coverage at the algorithmic level, so there's no room for memorization — the model must learn the actual rule.
 
-The Stage 2 generalization problem (5-rule induction) is the immediate priority. This is a representation problem, not a gradient problem.
+**Current experiment:** Compositional arithmetic on Mamba3 (see `CONTINUATION.md`):
+1. Magnitude comparison (learn digit ordering)
+2. Successor/predecessor (learn +1/-1)
+3. Single-digit arithmetic (learn +, -, ×, ÷)
+4. Two-digit arithmetic (compose place value + operation + carry)
+5. PEMDAS (compose operations with precedence)
+
+**Key test:** Does curriculum training (stages 1→2→3→4) produce better generalization on Stage 4 than direct training on Stage 4 alone?
+
+Previous goals (catastrophic forgetting, modular circuits, energy-based reasoning) remain valid but are secondary until the generalization problem is understood.
 
 ## Research Papers Implemented
 
