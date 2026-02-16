@@ -170,6 +170,36 @@ def print_results_table(results_file: str):
             best = max(task_results, key=lambda r: r['test_acc'])
             print(f"{task:<22} {best['preset']:<22} {best['test_acc']:7.4f}")
 
+    # Per-epoch trajectories (if available)
+    has_history = any(r.get('epoch_history') for r in results)
+    if has_history:
+        print(f"\n### Training trajectories\n")
+        for task in tasks:
+            print(f"  {task}:")
+            print(f"  {'Preset':<22} ", end="")
+            # Find the longest history to determine epoch columns
+            task_results = [r for r in results if r['task'] == task and r.get('epoch_history')]
+            if not task_results:
+                print("  (no epoch data)")
+                continue
+            # Use first result's epochs as column headers
+            epochs_list = [h['epoch'] for h in task_results[0]['epoch_history']]
+            for ep in epochs_list:
+                print(f" ep{ep:>3}", end="")
+            print()
+            print(f"  {'':<22} ", end="")
+            for _ in epochs_list:
+                print(f"  {'TstAcc':>5}", end="")
+            print()
+            print(f"  {'-' * (24 + 7 * len(epochs_list))}")
+            for r in sorted(task_results, key=lambda x: x['preset']):
+                hist = r['epoch_history']
+                print(f"  {r['preset']:<22} ", end="")
+                for h in hist:
+                    print(f"  {h['test_acc']:5.3f}", end="")
+                print()
+            print()
+
     # Feature contribution table
     print(f"\n### Feature contribution (naja_full - ablated)\n")
     print(f"{'Feature':<22} {'Task':<22} {'Full':>7} {'Ablated':>7} {'Delta':>7} {'Ablated Preset':<22}")

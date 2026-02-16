@@ -850,6 +850,18 @@ def train(args):
     if total_nan > 0:
         print(f"  WARNING: {total_nan} NaN batches across all epochs")
 
+    # Build per-epoch trajectory (at print_every intervals) for results file.
+    # This lets the results file show learning dynamics, not just finals.
+    epoch_history = []
+    for h in history:
+        if h['epoch'] % args.print_every == 0 or h['epoch'] == args.epochs:
+            epoch_history.append({
+                'epoch': h['epoch'],
+                'train_acc': round(h['train_acc'], 4),
+                'test_acc': round(h['test_acc'], 4),
+                'loss': round(h['loss'], 4),
+            })
+
     result = {
         'train_acc': train_acc,
         'test_acc': test_acc,
@@ -860,6 +872,7 @@ def train(args):
         'preset': args.preset,
         'n_params': n_params,
         'epochs': args.epochs,
+        'epoch_history': epoch_history,
     }
 
     # Append JSON line to results file if requested

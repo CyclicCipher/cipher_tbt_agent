@@ -106,6 +106,35 @@ All ablation task generators (associative recall, parity, multi-scale, permutati
 
 ---
 
+### #42. Ablation Benchmarks Are All Memorization, Not Generalization (ACTIVE)
+
+**Date:** 2026-02-16
+
+All four ablation tasks show 100% train accuracy with near-random test accuracy on the non-trivial benchmarks. The models memorize 5000 training sequences instead of learning the algorithmic structure.
+
+| Task | Train Acc | Test Acc | Random Chance |
+|------|-----------|----------|---------------|
+| parity | 100% | 100% | 50% — trivially easy |
+| permutation_3 | 100% | 100% | 33% — trivially easy |
+| associative_recall | 100% | 8-22% | ~3% — **memorized** |
+| multi_scale | 39-100% | 7% | ~7% — **at chance** |
+| permutation_4 | 55-87% | 25% | 25% — **at chance** |
+
+**Root causes:**
+
+1. **5000 samples vs 1.26M parameters:** 250× more params than samples. The model memorizes the dataset without learning any algorithmic structure.
+2. **50 epochs is far too few for grokking.** Algorithmic generalization on small datasets typically requires 100-1000× more training beyond the memorization point (Power et al. 2022).
+3. **naja_full trains slower on multi_scale** (only 39% train in 50 epochs) while simpler models hit 100% train, suggesting the extra machinery (delta rule + PoPE + per-channel decay) adds optimization difficulty for some tasks.
+4. **Only trivial tasks succeed:** parity (binary output) and permutation_3 (3 possible answers) have such small output spaces that partial learning suffices.
+
+**Implications for ablation design:**
+
+- Feature ablation is meaningless when all models are memorizing. You can't attribute generalization differences when there's no generalization.
+- Need either: (a) much more training data (50K+), or (b) much longer training (500+ epochs for grokking), or (c) smaller models, or (d) stronger regularization.
+- The results file now includes per-epoch history (`epoch_history` key in JSONL) so learning dynamics are visible.
+
+---
+
 ## Condensed Archive (Historical Reference)
 
 Below are condensed lessons from resolved/archived mistakes. Full debugging narratives have been removed.
@@ -175,3 +204,4 @@ Below are condensed lessons from resolved/archived mistakes. Full debugging narr
 - 2026-02-14: #38-39 (ePC archived, fake Phase 5 chunkwise)
 - 2026-02-15: #40 (three WY chunkwise bugs: decay convention, state update formula, pseudo-key decay)
 - 2026-02-15: #41 (ablation evaluation leak: answer in sequence, trivial copy instead of genuine prediction)
+- 2026-02-16: #42 (ablation benchmarks are all memorization; 5K samples + 50 epochs + 1.26M params = no generalization)
