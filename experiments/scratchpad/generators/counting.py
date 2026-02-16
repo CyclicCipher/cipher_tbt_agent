@@ -21,12 +21,13 @@ def _setup_counting_vocab(vocab: Vocab) -> None:
 class QueryCountingGenerator(ProblemGenerator):
     """Stage 1: query-based counting.
 
-    Input: shuffled DOTs and TENs.
-    Work: WORK <QUERY> <count>
-    The query token (DOT or TEN) tells the model which type to count.
+    Input: shuffled DOTs and TENs, then NOTE <QUERY> to specify what to count.
+    Work: WORK <count>
+    The query token (DOT or TEN) appears in the input so the model knows
+    which type to count BEFORE the work area begins.
 
-    Example: DOT TEN DOT TEN DOT WORK DOT 3
-    Example: TEN TEN TEN WORK TEN 3
+    Example: DOT TEN DOT TEN DOT NOTE DOT WORK 3
+    Example: TEN TEN TEN NOTE TEN WORK 3
 
     Rubric: 1 step ("count") with 1 graded token.
     """
@@ -48,16 +49,17 @@ class QueryCountingGenerator(ProblemGenerator):
             # Build shuffled input
             input_toks = [vocab['DOT']] * d + [vocab['TEN']] * t
             random.shuffle(input_toks)
-            # Random query
+            # Random query — placed in input (after NOTE) so model can see it
             if random.random() < 0.5:
                 query_tok, answer = vocab['DOT'], d
             else:
                 query_tok, answer = vocab['TEN'], t
+            input_toks.append(vocab.NOTE)
+            input_toks.append(query_tok)
 
             problems.append(Problem(
                 question=input_toks,
                 steps=[
-                    Step('query', [query_tok], grading='ungraded'),
                     Step('count', [vocab[str(answer)]], weight=1.0),
                 ],
             ))

@@ -8,7 +8,7 @@ Modes:
   Direct:        python train_arithmetic.py --stage 5 --epochs 200
 
 Stages (via scratchpad framework):
-  1: Query counting — "how many DOTs/TENs?" (n_result=2)
+  1: Query counting — "how many DOTs/TENs?" (n_result=1)
   2: Combined counting — DOT d TEN t (n_result=4)
   3: Single-digit +/- — carry + ones (n_result=2)
   4: Two-digit ± single-digit — column scratchpad (n_result=21)
