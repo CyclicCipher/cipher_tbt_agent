@@ -87,7 +87,10 @@ def parse_args():
 
     # Misc
     p.add_argument('--device', type=str, default='auto')
-    p.add_argument('--seed', type=int, default=42)
+    p.add_argument('--seed', type=int, default=42,
+                   help='Training seed (model init, batch order)')
+    p.add_argument('--data_seed', type=int, default=42,
+                   help='Data split seed (train/test problem partition, always fixed)')
     p.add_argument('--print_every', type=int, default=10)
 
     args = p.parse_args()
@@ -330,7 +333,7 @@ def main():
     def make_loaders(stage):
         data = get_stage_data(stage, n_train=args.n_train, n_test=args.n_test,
                               test_fraction=args.test_fraction,
-                              seq_len=args.seq_len, seed=args.seed)
+                              seq_len=args.seq_len, seed=args.data_seed)
         tr = DataLoader(TensorDataset(data['train_seqs']),
                         batch_size=args.batch_size, shuffle=True, drop_last=True)
         te = DataLoader(TensorDataset(data['test_seqs']),
@@ -360,19 +363,24 @@ def main():
         for stage in range(start_stage, args.target_stage + 1):
             tr, te, data = make_loaders(stage)
 
-            # Experience replay: mix previous-stage samples into train loader
+            # Experience replay: stratified sampling from previous stages.
+            # Equal samples per stage ensures foundational skills (especially
+            # DOT/TEN counting) aren't undersampled by bad random draws.
             if prev_train_seqs and args.replay_fraction > 0:
-                all_prev = torch.cat(prev_train_seqs, dim=0)
                 n_replay = max(1, int(len(data['train_seqs']) * args.replay_fraction))
-                perm = torch.randperm(len(all_prev))[:n_replay]
-                replay_seqs = all_prev[perm]
+                per_stage = max(1, n_replay // len(prev_train_seqs))
+                replay_parts = []
+                for pts in prev_train_seqs:
+                    perm = torch.randperm(len(pts))[:per_stage]
+                    replay_parts.append(pts[perm])
+                replay_seqs = torch.cat(replay_parts, dim=0)
                 combined = torch.cat([data['train_seqs'], replay_seqs], dim=0)
                 tr = DataLoader(TensorDataset(combined),
                                 batch_size=args.batch_size, shuffle=True,
                                 drop_last=True)
                 print(f"Stage {stage}: {data['n_train_problems']} train / "
                       f"{data['n_test_problems']} test problems"
-                      f" (+{n_replay} replay)")
+                      f" (+{len(replay_seqs)} replay, {per_stage}/stage)")
             else:
                 print(f"Stage {stage}: {data['n_train_problems']} train / "
                       f"{data['n_test_problems']} test problems")
