@@ -2,11 +2,14 @@
 Compositional arithmetic task generators for curriculum learning.
 
 Each stage builds on the previous:
-  Stage 1: Magnitude comparison (digit ordering)
-  Stage 2: Successor/predecessor (+1/-1)
-  Stage 3: Single-digit arithmetic (+, -, *, /)
-  Stage 4: Two-digit arithmetic (compose place value + operation + carry)
-  Stage 5: PEMDAS (compose operations with precedence)
+  Stage 1: Digit successor (ordering — what comes after 3?)
+  Stage 2: Counting / cardinality (DOT DOT DOT = 3)
+  Stage 3: Two-digit counting / place value (TEN TEN DOT DOT DOT = 2 3)
+  Stage 4: Magnitude comparison (digit ordering via > <)
+  Stage 5: Successor/predecessor (+1/-1 as arithmetic)
+  Stage 6: Single-digit arithmetic (+, -, *, /)
+  Stage 7: Two-digit arithmetic (compose place value + operation + carry)
+  Stage 8: PEMDAS (compose operations with precedence)
 
 All generators return (n_samples, seq_len) long tensors, left-padded with PAD.
 Token encoding: digit d -> token d+1.  See VOCAB below.
@@ -25,7 +28,7 @@ from torch import Tensor
 
 
 # ---------------------------------------------------------------------------
-# Vocabulary (22 tokens)
+# Vocabulary (25 tokens)
 # ---------------------------------------------------------------------------
 
 VOCAB = {
@@ -36,9 +39,10 @@ VOCAB = {
     '=': 15, '>': 16, '<': 17,
     'TRUE': 18, 'FALSE': 19,
     '(': 20, ')': 21,
+    'DOT': 22, 'TEN': 23, 'NEXT': 24,
 }
 
-VOCAB_SIZE = 22
+VOCAB_SIZE = 25
 
 ID_TO_TOKEN = {v: k for k, v in VOCAB.items()}
 
@@ -63,7 +67,94 @@ def _pad_left(tokens: List[int], seq_len: int) -> List[int]:
 
 
 # ---------------------------------------------------------------------------
-# Stage 1: Magnitude Comparison
+# Stage 1: Digit Successor (ordering)
+# ---------------------------------------------------------------------------
+
+def _enumerate_digit_successors() -> List[Tuple]:
+    """All single-digit successor pairs (9 total: 0->1, 1->2, ..., 8->9)."""
+    return [(a, a + 1) for a in range(9)]
+
+
+def generate_digit_successor(n_samples: int, seq_len: int = 32,
+                              problems: Optional[List] = None) -> Tensor:
+    """[PAD..., a, NEXT, b]  where b = a + 1.
+
+    Teaches the model that digits have a natural order.
+    """
+    if problems is None:
+        problems = _enumerate_digit_successors()
+    seqs = torch.zeros(n_samples, seq_len, dtype=torch.long)
+    for i in range(n_samples):
+        a, b = random.choice(problems)
+        tokens = [digit_to_token(a), VOCAB['NEXT'], digit_to_token(b)]
+        seqs[i] = torch.tensor(_pad_left(tokens, seq_len))
+    return seqs
+
+
+# ---------------------------------------------------------------------------
+# Stage 2: Single-Digit Counting (cardinality)
+# ---------------------------------------------------------------------------
+
+def _enumerate_counting() -> List[Tuple]:
+    """All single-digit counting problems (10 total: 0-9 dots -> digit)."""
+    return [(d,) for d in range(10)]
+
+
+def generate_counting(n_samples: int, seq_len: int = 32,
+                      problems: Optional[List] = None) -> Tensor:
+    """[PAD..., DOT, ..., DOT, =, d]  where count(DOT) = d.
+
+    Teaches the model that each digit symbol corresponds to a quantity.
+    For d=0: [PAD..., =, 0] (no dots means zero).
+    """
+    if problems is None:
+        problems = _enumerate_counting()
+    seqs = torch.zeros(n_samples, seq_len, dtype=torch.long)
+    for i in range(n_samples):
+        (d,) = random.choice(problems)
+        tokens = [VOCAB['DOT']] * d + [VOCAB['='], digit_to_token(d)]
+        seqs[i] = torch.tensor(_pad_left(tokens, seq_len))
+    return seqs
+
+
+# ---------------------------------------------------------------------------
+# Stage 3: Two-Digit Counting (place value)
+# ---------------------------------------------------------------------------
+
+def _enumerate_two_digit_counting() -> List[Tuple]:
+    """All two-digit counting problems (90 total: 10-99)."""
+    return [(n,) for n in range(10, 100)]
+
+
+def generate_two_digit_counting(n_samples: int, seq_len: int = 32,
+                                problems: Optional[List] = None) -> Tensor:
+    """[PAD..., TEN, ..., TEN, DOT, ..., DOT, =, d1, d2]
+
+    TEN tokens represent bundles of 10, DOT tokens represent ones.
+    count(TEN) = tens digit, count(DOT) = ones digit.
+
+    Example: 23 -> TEN TEN DOT DOT DOT = 2 3
+    Example: 10 -> TEN = 1 0
+    Example: 20 -> TEN TEN = 2 0
+
+    Teaches place value: two-digit numbers decompose into tens + ones.
+    Max sequence length: 9 TENs + 9 DOTs + = + 2 digits = 21 tokens.
+    """
+    if problems is None:
+        problems = _enumerate_two_digit_counting()
+    seqs = torch.zeros(n_samples, seq_len, dtype=torch.long)
+    for i in range(n_samples):
+        (n,) = random.choice(problems)
+        tens = n // 10
+        ones = n % 10
+        tokens = ([VOCAB['TEN']] * tens + [VOCAB['DOT']] * ones +
+                  [VOCAB['='], digit_to_token(tens), digit_to_token(ones)])
+        seqs[i] = torch.tensor(_pad_left(tokens, seq_len))
+    return seqs
+
+
+# ---------------------------------------------------------------------------
+# Stage 4: Magnitude Comparison
 # ---------------------------------------------------------------------------
 
 def _enumerate_comparisons() -> List[Tuple]:
@@ -80,7 +171,7 @@ def _enumerate_comparisons() -> List[Tuple]:
     return problems
 
 
-def generate_comparison(n_samples: int, seq_len: int = 16,
+def generate_comparison(n_samples: int, seq_len: int = 32,
                         problems: Optional[List] = None) -> Tensor:
     """[PAD..., a, CMP, b, RESULT]  where RESULT in {TRUE, FALSE}."""
     if problems is None:
@@ -94,7 +185,7 @@ def generate_comparison(n_samples: int, seq_len: int = 16,
 
 
 # ---------------------------------------------------------------------------
-# Stage 2: Successor / Predecessor
+# Stage 5: Successor / Predecessor (arithmetic)
 # ---------------------------------------------------------------------------
 
 def _enumerate_successors() -> List[Tuple]:
@@ -107,7 +198,7 @@ def _enumerate_successors() -> List[Tuple]:
     return problems
 
 
-def generate_successor(n_samples: int, seq_len: int = 16,
+def generate_successor(n_samples: int, seq_len: int = 32,
                        problems: Optional[List] = None) -> Tensor:
     """[PAD..., a, OP, 1, =, result]  where OP in {+, -}."""
     if problems is None:
@@ -122,7 +213,7 @@ def generate_successor(n_samples: int, seq_len: int = 16,
 
 
 # ---------------------------------------------------------------------------
-# Stage 3: Single-Digit Arithmetic
+# Stage 6: Single-Digit Arithmetic
 # ---------------------------------------------------------------------------
 
 def _enumerate_single_digit(ops=None) -> List[Tuple]:
@@ -147,7 +238,7 @@ def _enumerate_single_digit(ops=None) -> List[Tuple]:
     return problems
 
 
-def generate_single_digit(n_samples: int, seq_len: int = 16,
+def generate_single_digit(n_samples: int, seq_len: int = 32,
                           problems: Optional[List] = None,
                           ops=None) -> Tensor:
     """[PAD..., a, OP, b, =, d1, d2]  (result always 2 digits, zero-padded)."""
@@ -163,7 +254,7 @@ def generate_single_digit(n_samples: int, seq_len: int = 16,
 
 
 # ---------------------------------------------------------------------------
-# Stage 4: Two-Digit Arithmetic
+# Stage 7: Two-Digit Arithmetic
 # ---------------------------------------------------------------------------
 
 def _enumerate_two_digit(ops=None) -> List[Tuple]:
@@ -184,7 +275,7 @@ def _enumerate_two_digit(ops=None) -> List[Tuple]:
     return problems
 
 
-def generate_two_digit(n_samples: int, seq_len: int = 16,
+def generate_two_digit(n_samples: int, seq_len: int = 32,
                        problems: Optional[List] = None,
                        ops=None) -> Tensor:
     """[PAD..., a1, a2, OP, b1, b2, =, r1, r2, r3]  (result always 3 digits)."""
@@ -207,7 +298,7 @@ def generate_two_digit(n_samples: int, seq_len: int = 16,
 
 
 # ---------------------------------------------------------------------------
-# Stage 5: PEMDAS
+# Stage 8: PEMDAS
 # ---------------------------------------------------------------------------
 
 def _apply_op(a: int, op: str, b: int):
@@ -244,7 +335,7 @@ def _enumerate_pemdas() -> List[Tuple]:
     return problems
 
 
-def generate_pemdas(n_samples: int, seq_len: int = 16,
+def generate_pemdas(n_samples: int, seq_len: int = 32,
                     problems: Optional[List] = None) -> Tensor:
     """[PAD..., a, OP1, b, OP2, c, =, r1, r2, r3]  (result always 3 digits)."""
     if problems is None:
@@ -269,16 +360,19 @@ def generate_pemdas(n_samples: int, seq_len: int = 16,
 # ---------------------------------------------------------------------------
 
 STAGE_CONFIG = {
-    1: dict(name='comparison',    enumerate=_enumerate_comparisons, generate=generate_comparison,   n_result=1),
-    2: dict(name='successor',     enumerate=_enumerate_successors,  generate=generate_successor,    n_result=1),
-    3: dict(name='single_digit',  enumerate=_enumerate_single_digit, generate=generate_single_digit, n_result=2),
-    4: dict(name='two_digit',     enumerate=_enumerate_two_digit,   generate=generate_two_digit,    n_result=3),
-    5: dict(name='pemdas',        enumerate=_enumerate_pemdas,      generate=generate_pemdas,       n_result=3),
+    1: dict(name='digit_successor',      enumerate=_enumerate_digit_successors,    generate=generate_digit_successor,     n_result=1),
+    2: dict(name='counting',             enumerate=_enumerate_counting,            generate=generate_counting,            n_result=1),
+    3: dict(name='two_digit_counting',   enumerate=_enumerate_two_digit_counting,  generate=generate_two_digit_counting,  n_result=2),
+    4: dict(name='comparison',           enumerate=_enumerate_comparisons,         generate=generate_comparison,          n_result=1),
+    5: dict(name='successor',            enumerate=_enumerate_successors,          generate=generate_successor,           n_result=1),
+    6: dict(name='single_digit',         enumerate=_enumerate_single_digit,        generate=generate_single_digit,        n_result=2),
+    7: dict(name='two_digit',            enumerate=_enumerate_two_digit,           generate=generate_two_digit,           n_result=3),
+    8: dict(name='pemdas',               enumerate=_enumerate_pemdas,              generate=generate_pemdas,              n_result=3),
 }
 
 
 def get_stage_data(stage: int, n_train: int = 5000, n_test: int = 1000,
-                   test_fraction: float = 0.2, seq_len: int = 16,
+                   test_fraction: float = 0.2, seq_len: int = 32,
                    seed: int = 42) -> Dict:
     """Generate train/test data with held-out operand combinations.
 

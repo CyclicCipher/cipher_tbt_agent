@@ -67,8 +67,8 @@ Key files:
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
 
 - `mamba3_block.py` — Mamba3 block implementation (SSD-based, backbone for arithmetic curriculum)
-- `arithmetic_tasks.py` — NEW: Task generators for compositional arithmetic stages (to be created)
-- `train_arithmetic.py` — NEW: Curriculum training script (to be created)
+- `arithmetic_tasks.py` — Task generators for 8-stage arithmetic curriculum (25-token vocab incl. DOT, TEN, NEXT)
+- `train_arithmetic.py` — Curriculum training script (stages 1-8, curriculum/direct modes)
 
 ### Archived ePC Variants
 
@@ -145,13 +145,16 @@ The core generalization problem persists across all architectures (JEPA, Naja, M
 **Hypothesis:** Like children learning arithmetic, models need a curriculum that builds composable sub-skills before the composite skill. Each stage has near-100% coverage at the algorithmic level, so there's no room for memorization — the model must learn the actual rule.
 
 **Current experiment:** Compositional arithmetic on Mamba3 (see `CONTINUATION.md`):
-1. Magnitude comparison (learn digit ordering)
-2. Successor/predecessor (learn +1/-1)
-3. Single-digit arithmetic (learn +, -, ×, ÷)
-4. Two-digit arithmetic (compose place value + operation + carry)
-5. PEMDAS (compose operations with precedence)
+1. Digit successor (learn digit ordering: 3 → 4)
+2. Single-digit counting (learn cardinality: ●●● = 3)
+3. Two-digit counting (learn place value: ■■●●● = 25)
+4. Magnitude comparison (learn > < on digits)
+5. Successor/predecessor (learn +1/-1 as arithmetic)
+6. Single-digit arithmetic (learn +, -, ×, ÷)
+7. Two-digit arithmetic (compose place value + operation + carry)
+8. PEMDAS (compose operations with precedence)
 
-**Key test:** Does curriculum training (stages 1→2→3→4) produce better generalization on Stage 4 than direct training on Stage 4 alone?
+**Key test:** Does curriculum training (stages 1→7) produce better generalization on Stage 7 than direct training on Stage 7 alone?
 
 Previous goals (catastrophic forgetting, modular circuits, energy-based reasoning) remain valid but are secondary until the generalization problem is understood.
 

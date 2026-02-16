@@ -39,12 +39,12 @@ def parse_args():
     p = argparse.ArgumentParser(description='Compositional Arithmetic Curriculum')
 
     # Mode
-    p.add_argument('--stage', type=int, choices=[1, 2, 3, 4, 5], default=None,
+    p.add_argument('--stage', type=int, choices=list(range(1, 9)), default=None,
                    help='Single stage to train (direct mode)')
     p.add_argument('--curriculum', action='store_true',
                    help='Curriculum mode: train stages 1 -> target_stage')
-    p.add_argument('--target_stage', type=int, choices=[2, 3, 4, 5], default=4,
-                   help='Final stage for curriculum mode (default: 4)')
+    p.add_argument('--target_stage', type=int, choices=list(range(2, 9)), default=7,
+                   help='Final stage for curriculum mode (default: 7 = two-digit arithmetic)')
 
     # Architecture
     p.add_argument('--d_model', type=int, default=128)
@@ -57,7 +57,7 @@ def parse_args():
     p.add_argument('--n_train', type=int, default=5000)
     p.add_argument('--n_test', type=int, default=1000)
     p.add_argument('--test_fraction', type=float, default=0.2)
-    p.add_argument('--seq_len', type=int, default=16)
+    p.add_argument('--seq_len', type=int, default=32)
 
     # Training
     p.add_argument('--epochs', type=int, default=50,
