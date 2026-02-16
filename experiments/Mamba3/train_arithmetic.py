@@ -7,12 +7,12 @@ Modes:
   Curriculum:    python train_arithmetic.py --curriculum --target_stage 5
   Direct:        python train_arithmetic.py --stage 5 --epochs 200
 
-Stages:
-  1: Query counting — "how many DOTs/TENs?" (sub-skill, n_result=1)
-  2: Combined counting — DOT d TEN t scratchpad (composition, n_result=4)
-  3: Single-digit +/- (2-digit output)
-  4: Two-digit ± single-digit (3-digit output, bridge)
-  5: Two-digit ± two-digit (3-digit output, composition test)
+Stages (via scratchpad framework):
+  1: Query counting — "how many DOTs/TENs?" (n_result=2)
+  2: Combined counting — DOT d TEN t (n_result=4)
+  3: Single-digit +/- — carry + ones (n_result=2)
+  4: Two-digit ± single-digit — column scratchpad (n_result=21)
+  5: Two-digit ± two-digit — column scratchpad (n_result=21)
 
 See CONTINUATION.md for experimental design.
 Do NOT run full training on CPU (Mistake #36).
@@ -33,9 +33,41 @@ from torch.utils.data import DataLoader, TensorDataset
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 from experiments.Mamba3.mamba3_block import Mamba3Config, Mamba3LM
-from experiments.Mamba3.arithmetic_tasks import (
-    VOCAB_SIZE, get_stage_data, decode_tokens,
+from experiments.scratchpad import Vocab, split_problems
+from experiments.scratchpad.generators import (
+    QueryCountingGenerator, CombinedCountingGenerator,
+    SingleDigitArithmeticGenerator, TwoDigitSingleArithmeticGenerator,
+    TwoDigitArithmeticGenerator,
 )
+
+
+# ---------------------------------------------------------------------------
+# Scratchpad vocab + generators  (replaces arithmetic_tasks imports)
+# ---------------------------------------------------------------------------
+
+def _build_vocab():
+    """Build deterministic vocab with all tokens for the arithmetic curriculum."""
+    v = Vocab()                         # PAD=0, WORK=1, NOTE=2, SEP=3
+    for d in range(10): v.add(str(d))   # 4-13
+    v.add('+'); v.add('-'); v.add('=')   # 14-16
+    v.add('DOT'); v.add('TEN')          # 17-18
+    return v
+
+VOCAB = _build_vocab()
+VOCAB_SIZE = len(VOCAB)
+
+GENERATORS = {
+    1: QueryCountingGenerator(),
+    2: CombinedCountingGenerator(),
+    3: SingleDigitArithmeticGenerator(),
+    4: TwoDigitSingleArithmeticGenerator(),
+    5: TwoDigitArithmeticGenerator(),
+}
+
+
+def decode_tokens(tokens):
+    """Compatibility shim: decode token IDs to readable string."""
+    return VOCAB.decode_sequence(tokens)
 from experiments.Mamba3.continual import EWC, DERPlusPlus, build_layer_lr_groups
 
 
@@ -413,7 +445,8 @@ def main():
 
     # --- Helper to build loaders for a stage ---
     def make_loaders(stage):
-        data = get_stage_data(stage, n_train=args.n_train, n_test=args.n_test,
+        gen = GENERATORS[stage]
+        data = split_problems(gen, VOCAB, n_train=args.n_train, n_test=args.n_test,
                               test_fraction=args.test_fraction,
                               seq_len=args.seq_len, seed=args.data_seed)
         tr = DataLoader(TensorDataset(data['train_seqs']),
@@ -454,13 +487,13 @@ def main():
             if prev_train_seqs and args.replay_fraction > 0:
                 n_replay = max(1, int(len(data['train_seqs']) * args.replay_fraction))
                 per_stage = max(1, n_replay // len(prev_train_seqs))
-                print(f"Stage {stage}: {data['n_train_problems']} train / "
-                      f"{data['n_test_problems']} test problems"
+                print(f"Stage {stage}: {data['n_train_specs']} train / "
+                      f"{data['n_test_specs']} test problems"
                       f" (+{per_stage * len(prev_train_seqs)} replay/epoch, "
                       f"{per_stage}/stage, resampled)")
             else:
-                print(f"Stage {stage}: {data['n_train_problems']} train / "
-                      f"{data['n_test_problems']} test problems")
+                print(f"Stage {stage}: {data['n_train_specs']} train / "
+                      f"{data['n_test_specs']} test problems")
 
             # Print a few sample sequences for sanity
             for j in range(min(3, len(data['train_seqs']))):
@@ -501,8 +534,8 @@ def main():
     else:
         stage = args.stage
         _, te, data = make_loaders(stage)
-        print(f"\nStage {stage}: {data['n_train_problems']} train / "
-              f"{data['n_test_problems']} test problems")
+        print(f"\nStage {stage}: {data['n_train_specs']} train / "
+              f"{data['n_test_specs']} test problems")
         for j in range(min(3, len(data['train_seqs']))):
             print(f"  sample: {decode_tokens(data['train_seqs'][j])}")
         print()
