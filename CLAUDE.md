@@ -72,16 +72,7 @@ Key files:
 
 ### Archived ePC Variants
 
-All ePC code has been moved to `archived_epc/` subdirectories. These are retained for reference but are not actively developed.
-
-| Directory | Architecture | Task | Status |
-|-----------|-------------|------|--------|
-| `experiments/energy_reasoning/archived_epc/` | Mamba3 + ePC-JEPA | Sequence prediction | Archived (15x slower, no benefit) |
-| `experiments/Mamba3/archived_epc/` | Mamba3 + ePC | Copy/sequence | Archived (15x slower, no benefit) |
-| `experiments/ePC_ResNet/` | ResNet-18 + ePC | CIFAR-10 | Archived |
-| `experiments/ePC_Mamba/` | Mamba2 + ePC | Synthetic | Archived (superseded by Mamba3) |
-| `experiments/eBPC/` | MLP + eBPC | MNIST | Working (95.74%) but not actively developed |
-| `experiments/eBPC_ResNet/` | MLP + eBPC + low-rank V | MNIST | Abandoned (NaN from PSD violations) |
+ePC code within active experiments has been moved to `archived_epc/` subdirectories within `experiments/Mamba3/` and `experiments/energy_reasoning/`. All standalone archived experiments (ePC_ResNet, ePC_Mamba, eBPC, eBPC_ResNet, BayesianPC, archived_kronos) have been deleted.
 
 ## Directory Structure
 
@@ -101,23 +92,20 @@ predictive-coding-agent/
 │   │   ├── arithmetic_tasks.py   # NEW: Compositional arithmetic task generators
 │   │   ├── train_arithmetic.py   # NEW: Curriculum training script
 │   │   └── archived_epc/        # ePC-Mamba3 (archived 2026-02-14)
-│   ├── ePC_ResNet/        # ePC ResNet-18 (archived)
-│   ├── ePC_Mamba/         # ePC-Mamba2 (archived)
-│   ├── eBPC/              # Error-based Bayesian PC (reference)
-│   ├── eBPC_ResNet/       # eBPC with low-rank V (abandoned)
-│   ├── BayesianPC/        # Original BPC (wrong, see #12)
-│   └── archived_kronos/   # KFAC optimizer (abandoned, see #20)
+│   └── Naja/              # Hybrid Mamba3 + Gated DeltaNet (WY complete, ablations paused)
+│       ├── naja.py        # Full model
+│       ├── train_naja.py  # Training loop
+│       ├── tasks.py       # Ablation task generators
+│       └── DESIGN.md      # Architecture specification
 ├── src/
 │   ├── network/           # Baseline PC (95.14% MNIST)
 │   ├── wrapper/           # Sensorimotor wrapper for Danganronpa
 │   └── ...
-├── lrpd/                  # Low-Rank Plus Diagonal library
-└── tests/
+└── lrpd/                  # Low-Rank Plus Diagonal library
 ```
 
 ## Known Issues & Gotchas
 
-- **BayesianPC/** has the wrong Bayesian treatment (posteriors over value nodes instead of weights). See Mistake #12. Don't use it.
 - **energy_scale** was a hack compensating for sum reduction in ePC. It's been removed everywhere. If you see it, it's a bug.
 
 ## Hardware
