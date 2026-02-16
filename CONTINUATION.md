@@ -92,7 +92,31 @@ Digits are encoded as `digit + 1` (so token 1 = digit 0, token 10 = digit 9). Mu
 - **Tests:** Does the model learn that digit symbols represent quantities of objects?
 - **Foundational:** Grounds digit tokens in concrete quantity (cardinality principle)
 
-#### Stage 3: Two-Digit Counting (learn place value via ten-bundles)
+#### Stage 3: Count TENs (same counting skill, new token)
+
+**Format:** `[PAD..., TEN, ..., TEN, =, d]` where count(TEN) = d
+- Example: `TEN TEN TEN = 3`
+- 10 problems total (0-9 TENs → digit)
+- **Tests:** Does counting transfer across token types?
+- **Foundational:** Prerequisite for place value (TEN = tens column)
+
+#### Stage 4: Count DOTs — two-digit output (bridge to multi-token results)
+
+**Format:** `[PAD..., DOT, ..., DOT, =, 0, d]` where count(DOT) = d
+- Example: `DOT DOT DOT = 0 3` (same count as Stage 2, but in two-digit format)
+- 10 problems total (0-9 DOTs)
+- **Tests:** Can the model learn two-digit output format?
+- **Key insight:** Stages 1-3 all produce n_result=1. This stage isolates "learn to produce two result tokens" from "learn to segment input". The tens digit is trivially 0; the ones digit is the already-known DOT count.
+
+#### Stage 5: Count TENs — two-digit output (bridge to multi-token results)
+
+**Format:** `[PAD..., TEN, ..., TEN, =, d, 0]` where count(TEN) = d
+- Example: `TEN TEN TEN = 3 0` (TEN count maps to tens position)
+- 10 problems total (0-9 TENs)
+- **Tests:** Does the model learn that TEN count goes in the tens position?
+- **Key insight:** Combined with Stage 4, the model now knows: DOT count → ones position (Stage 4), TEN count → tens position (Stage 5). Stage 6 composes these two skills.
+
+#### Stage 6: Two-Digit Counting (learn place value via ten-bundles)
 
 **Format:** `[PAD..., TEN, ..., TEN, DOT, ..., DOT, =, d1, d2]`
 - TEN tokens = bundles of 10, DOT tokens = ones
@@ -100,10 +124,10 @@ Digits are encoded as `digit + 1` (so token 1 = digit 0, token 10 = digit 9). Mu
 - Example: `TEN = 1 0` (10 = 1 ten + 0 ones)
 - 90 problems total (10-99)
 - Max sequence: 9 TENs + 9 DOTs + = + 2 digits = 21 tokens
-- **Tests:** Does the model learn positional decomposition (place value)?
-- **Key:** Like children learning with bundled sticks — tens and ones are separate counts
+- **Tests:** Does the model compose "count TENs → tens digit" + "count DOTs → ones digit"?
+- **Builds on:** Stages 4-5 (two-digit output format with position-specific counting)
 
-#### Stage 4: Magnitude Comparison (learn that digits have ordinal meaning)
+#### Stage 7: Magnitude Comparison (learn that digits have ordinal meaning)
 
 **Format:** `[PAD..., a, CMP, b, RESULT]`
 - Example: `3 > 1 → TRUE`, `2 > 7 → FALSE`, `5 < 8 → TRUE`
@@ -113,7 +137,15 @@ Digits are encoded as `digit + 1` (so token 1 = digit 0, token 10 = digit 9). Mu
 - **Tests:** Does the model learn magnitude ordering of digit tokens?
 - **Builds on:** Stage 1 (digit ordering) should make comparison easier
 
-#### Stage 5: Successor / Predecessor (learn +1/-1 as arithmetic operations)
+#### Stage 8: Digit Distance (magnitude awareness — how far apart?)
+
+**Format:** `[PAD..., a, -, b, =, d]` where d = a - b, a >= b
+- Example: `8 - 4 = 4`, `5 - 5 = 0`
+- 55 problems total
+- **Tests:** Does the model learn not just "which is bigger?" but "by how much?"
+- **Builds on:** Stage 7 (comparison)
+
+#### Stage 9: Successor / Predecessor (learn +1/-1 as arithmetic operations)
 
 **Format:** `[PAD..., a, +, 1, =, result]` and `[PAD..., a, -, 1, =, result]`
 - Example: `3 + 1 = 4`, `7 - 1 = 6`
@@ -121,7 +153,7 @@ Digits are encoded as `digit + 1` (so token 1 = digit 0, token 10 = digit 9). Mu
 - **Tests:** Does the model learn that + and - modify quantity?
 - **Builds on:** Stage 1 (successor) + Stage 2 (cardinality)
 
-#### Stage 6: Single-Digit Arithmetic (learn the four operations)
+#### Stage 10: Single-Digit Arithmetic (learn the four operations)
 
 **Format:** `[PAD..., a, OP, b, =, d1, d2]` (result always 2 digits, zero-padded)
 - Addition: `3 + 4 = 0 7`, `8 + 5 = 1 3`
@@ -129,27 +161,27 @@ Digits are encoded as `digit + 1` (so token 1 = digit 0, token 10 = digit 9). Mu
 - Multiplication: `3 * 4 = 1 2`, `2 * 3 = 0 6`
 - Division: `8 / 2 = 0 4` (only exact divisions, b > 0)
 - **Tests:** Does the model learn each operation?
-- **Builds on:** Stages 1-5 (number sense + simple operations)
+- **Builds on:** Stages 1-9 (number sense + simple operations)
 
-#### Stage 7: Two-Digit Arithmetic (composition of place value + operation + carry)
+#### Stage 11: Two-Digit Arithmetic (composition of place value + operation + carry)
 
 **Format:** `[PAD..., d1, d2, OP, d3, d4, =, r1, r2, r3]` (result always 3 digits)
 - Example: `2 3 + 1 4 = 0 3 7`, `4 5 - 1 8 = 0 2 7`
 - **This is the critical generalization test:**
-  - The model has learned place value (Stage 3) and single-digit ops (Stage 6)
+  - The model has learned place value (Stage 6) and single-digit ops (Stage 10)
   - It must compose: place value + single-digit operation + carry
 - **Two experimental arms:**
-  1. **Curriculum:** Train Stages 1→2→3→4→5→6→7 sequentially (advance at ≥95% test)
-  2. **Direct:** Train on Stage 7 data only (same total training budget)
+  1. **Curriculum:** Train Stages 1→...→11 sequentially (advance at ≥95% test)
+  2. **Direct:** Train on Stage 11 data only (same total training budget)
 - **Hypothesis:** Curriculum arm generalizes; direct arm memorizes.
 
-#### Stage 8: PEMDAS (composition of operations with precedence)
+#### Stage 12: PEMDAS (composition of operations with precedence)
 
 **Format:** `[PAD..., a, OP1, b, OP2, c, =, r1, r2, r3]` (result always 3 digits)
 - Example: `2 + 3 * 4 = 0 1 4` (not 020)
 - Example: `8 - 2 + 3 = 0 0 9`
 - Tests whether the model applies operator precedence
-- Only attempted if Stage 7 succeeds
+- Only attempted if Stage 11 succeeds
 
 ### Evaluation Protocol
 
@@ -159,9 +191,9 @@ For each stage:
 3. **Metric:** Exact-match accuracy on the result tokens
 4. **Advancement:** Move to next stage when test accuracy ≥ 95%
 
-For the composition test (Stage 7):
-1. **Curriculum arm:** Sequential training through Stages 1→2→3→4→5→6→7
-2. **Direct arm:** Same model, same total epochs, trained only on Stage 7 data
+For the composition test (Stage 11):
+1. **Curriculum arm:** Sequential training through Stages 1→...→11
+2. **Direct arm:** Same model, same total epochs, trained only on Stage 11 data
 3. **Control:** Random curriculum order (stages shuffled, not sequential)
 
 ### Loss Function
@@ -190,13 +222,17 @@ Create generators for each stage. Each returns `(sequences, targets)` tensors fo
 
 Functions implemented:
 - `generate_digit_successor(n_samples, ...)` → Stage 1 (digit ordering)
-- `generate_counting(n_samples, ...)` → Stage 2 (cardinality)
-- `generate_two_digit_counting(n_samples, ...)` → Stage 3 (place value)
-- `generate_comparison(n_samples, ...)` → Stage 4 (magnitude comparison)
-- `generate_successor(n_samples, ...)` → Stage 5 (±1 arithmetic)
-- `generate_single_digit(n_samples, ...)` → Stage 6 (four operations)
-- `generate_two_digit(n_samples, ...)` → Stage 7 (two-digit arithmetic)
-- `generate_pemdas(n_samples, ...)` → Stage 8 (precedence)
+- `generate_counting(n_samples, ...)` → Stage 2 (DOT cardinality, 1-digit output)
+- `generate_count_tens(n_samples, ...)` → Stage 3 (TEN cardinality, 1-digit output)
+- `generate_counting_2d(n_samples, ...)` → Stage 4 (DOT cardinality, 2-digit output)
+- `generate_count_tens_2d(n_samples, ...)` → Stage 5 (TEN cardinality, 2-digit output)
+- `generate_two_digit_counting(n_samples, ...)` → Stage 6 (place value composition)
+- `generate_comparison(n_samples, ...)` → Stage 7 (magnitude comparison)
+- `generate_digit_distance(n_samples, ...)` → Stage 8 (how far apart?)
+- `generate_successor(n_samples, ...)` → Stage 9 (±1 arithmetic)
+- `generate_single_digit(n_samples, ...)` → Stage 10 (four operations)
+- `generate_two_digit(n_samples, ...)` → Stage 11 (two-digit arithmetic)
+- `generate_pemdas(n_samples, ...)` → Stage 12 (precedence)
 - `VOCAB` dict mapping symbols to token IDs (25 tokens incl. DOT, TEN, NEXT)
 - `decode_tokens(tensor)` → human-readable string (for debugging)
 
@@ -204,13 +240,13 @@ Functions implemented:
 
 Build on patterns from `train_naja.py` but with curriculum logic:
 
-1. **Single-stage mode:** `python train_arithmetic.py --stage 3 --epochs 50`
-2. **Curriculum mode:** `python train_arithmetic.py --curriculum --target_stage 7`
-   - Trains stages 1→7 sequentially
+1. **Single-stage mode:** `python train_arithmetic.py --stage 6 --epochs 50`
+2. **Curriculum mode:** `python train_arithmetic.py --curriculum --target_stage 11`
+   - Trains stages 1→11 sequentially
    - Advances when test_acc ≥ 95% (configurable via `--advance_threshold`)
    - Reports per-stage epoch counts
-3. **Direct mode:** `python train_arithmetic.py --stage 7 --epochs 200`
-   - Same total budget as curriculum, but only Stage 7 data
+3. **Direct mode:** `python train_arithmetic.py --stage 11 --epochs 200`
+   - Same total budget as curriculum, but only Stage 11 data
 4. **Comparison output:** JSON results file with per-stage learning curves
 
 Key features:
@@ -223,19 +259,14 @@ Key features:
 ### Phase 3: Run Experiments (ON GPU, not Claude's machine)
 
 ```bash
-# Curriculum arm: stages 1→2→3→4→5→6→7
-python train_arithmetic.py --curriculum --target_stage 7 --results_file curriculum.jsonl
+# Curriculum arm: stages 1→...→11
+python train_arithmetic.py --curriculum --target_stage 11 --results_file curriculum.jsonl
 
-# Direct arm: stage 7 only, same total epochs
-python train_arithmetic.py --stage 7 --epochs 200 --results_file direct.jsonl
+# Direct arm: stage 11 only, same total epochs
+python train_arithmetic.py --stage 11 --epochs 200 --results_file direct.jsonl
 
-# Control: each stage independently
-python train_arithmetic.py --stage 1 --epochs 50 --results_file stage1.jsonl
-python train_arithmetic.py --stage 2 --epochs 50 --results_file stage2.jsonl
-python train_arithmetic.py --stage 3 --epochs 50 --results_file stage3.jsonl
-python train_arithmetic.py --stage 4 --epochs 50 --results_file stage4.jsonl
-python train_arithmetic.py --stage 5 --epochs 50 --results_file stage5.jsonl
-python train_arithmetic.py --stage 6 --epochs 50 --results_file stage6.jsonl
+# Quick test: curriculum through Stage 6 (place value composition)
+python train_arithmetic.py --curriculum --target_stage 6 --results_file curriculum_s6.jsonl
 ```
 
 ---
@@ -250,10 +281,11 @@ python train_arithmetic.py --stage 6 --epochs 50 --results_file stage6.jsonl
 
 ## Success Criteria
 
-1. **Stages 1-6 each reach ≥95% test accuracy** (proves sub-skills are learnable)
-2. **Curriculum arm on Stage 7 achieves significantly higher test accuracy than direct arm** (proves composition works)
-3. **No catastrophic forgetting** — accuracy on stages 1-6 stays above 90% while training Stage 7
-4. If Stage 7 succeeds, Stage 8 (PEMDAS) is a bonus
+1. **Stages 1-10 each reach ≥95% test accuracy** (proves sub-skills are learnable)
+2. **Curriculum arm on Stage 11 achieves significantly higher test accuracy than direct arm** (proves composition works)
+3. **No catastrophic forgetting** — accuracy on earlier stages stays above 90% while training later stages
+4. If Stage 11 succeeds, Stage 12 (PEMDAS) is a bonus
+5. **Immediate test:** Stage 6 (two-digit counting) should now pass with bridge Stages 4-5 in place
 
 ## Key Files to Read First
 

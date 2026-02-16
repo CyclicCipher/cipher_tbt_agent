@@ -67,8 +67,8 @@ Key files:
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
 
 - `mamba3_block.py` — Mamba3 block implementation (SSD-based, backbone for arithmetic curriculum)
-- `arithmetic_tasks.py` — Task generators for 10-stage arithmetic curriculum (25-token vocab incl. DOT, TEN, NEXT)
-- `train_arithmetic.py` — Curriculum training script (stages 1-10, curriculum/direct modes, per-token diagnostics)
+- `arithmetic_tasks.py` — Task generators for 12-stage arithmetic curriculum (25-token vocab incl. DOT, TEN, NEXT)
+- `train_arithmetic.py` — Curriculum training script (stages 1-12, curriculum/direct modes, per-token diagnostics)
 
 ### Archived ePC Variants
 
@@ -148,15 +148,17 @@ The core generalization problem persists across all architectures (JEPA, Naja, M
 1. Digit successor (learn digit ordering: 3 → 4)
 2. Count DOTs (learn cardinality: ●●● = 3)
 3. Count TENs (same counting skill, new token: ■■■ = 3)
-4. Two-digit counting (compose place value: ■■●●● = 2 5)
-5. Magnitude comparison (learn > < on digits)
-6. Digit distance (how far apart? 8 - 4 = 4, a >= b only)
-7. Successor/predecessor (learn +1/-1 as arithmetic)
-8. Single-digit arithmetic (learn +, -, ×, ÷)
-9. Two-digit arithmetic (compose place value + operation + carry)
-10. PEMDAS (compose operations with precedence)
+4. Count DOTs, 2-digit output (bridge: ●●● = 0 3 — learn 2-token output format)
+5. Count TENs, 2-digit output (bridge: ■■■ = 3 0 — learn tens-position mapping)
+6. Two-digit counting (compose place value: ■■●●● = 2 5)
+7. Magnitude comparison (learn > < on digits)
+8. Digit distance (how far apart? 8 - 4 = 4, a >= b only)
+9. Successor/predecessor (learn +1/-1 as arithmetic)
+10. Single-digit arithmetic (learn +, -, ×, ÷)
+11. Two-digit arithmetic (compose place value + operation + carry)
+12. PEMDAS (compose operations with precedence)
 
-**Key test:** Does curriculum training (stages 1→9) produce better generalization on Stage 9 than direct training on Stage 9 alone?
+**Key test:** Does curriculum training (stages 1→11) produce better generalization on Stage 11 than direct training on Stage 11 alone?
 
 **Curriculum rules:** Stages advance only on ≥95% test accuracy. If a stage fails after max epochs, the curriculum halts. Per-token accuracy diagnostics show which result position is the bottleneck for multi-token stages.
 
