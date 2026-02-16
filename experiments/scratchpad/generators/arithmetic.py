@@ -80,6 +80,10 @@ class SingleDigitArithmeticGenerator(ProblemGenerator):
     def name(self) -> str:
         return 'single_digit'
 
+    @property
+    def is_fact_stage(self) -> bool:
+        return True  # arithmetic facts must be memorized, not generalized
+
     def enumerate_all(self) -> List[Any]:
         problems = []
         for a in range(10):

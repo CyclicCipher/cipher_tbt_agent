@@ -284,6 +284,16 @@ class ProblemGenerator(ABC):
         """Human-readable name for this problem type."""
         ...
 
+    @property
+    def is_fact_stage(self) -> bool:
+        """If True, all specs are used for both train and test (no held-out split).
+
+        Fact stages teach atomic knowledge (e.g., arithmetic facts) that must be
+        memorized. Composition stages test whether facts compose into new
+        capabilities. See DESIGN_GUIDE.md for the full rationale.
+        """
+        return False
+
 
 # ---------------------------------------------------------------------------
 # Curriculum
@@ -363,7 +373,7 @@ def split_problems(generator: ProblemGenerator, vocab: Vocab,
     shuffled = list(all_specs)
     rng.shuffle(shuffled)
 
-    if len(shuffled) < min_for_split:
+    if generator.is_fact_stage or len(shuffled) < min_for_split:
         train_specs = shuffled
         test_specs = shuffled
     else:
