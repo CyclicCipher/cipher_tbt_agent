@@ -191,11 +191,36 @@ def evaluate_result_accuracy(model, loader, device, amp_ctx, n_result_tokens):
 # Single-stage training loop
 # ---------------------------------------------------------------------------
 
-def train_stage(model, train_loader, test_loader, device, amp_ctx, scaler,
+def _build_replay_loader(train_seqs, prev_train_seqs, replay_fraction, batch_size):
+    """Build a DataLoader with freshly sampled stratified replay.
+
+    Called each epoch so the model sees different replay samples,
+    preventing memorization of a fixed replay buffer.
+    """
+    if not prev_train_seqs or replay_fraction <= 0:
+        return DataLoader(TensorDataset(train_seqs),
+                          batch_size=batch_size, shuffle=True, drop_last=True)
+    n_replay = max(1, int(len(train_seqs) * replay_fraction))
+    per_stage = max(1, n_replay // len(prev_train_seqs))
+    replay_parts = []
+    for pts in prev_train_seqs:
+        perm = torch.randperm(len(pts))[:per_stage]
+        replay_parts.append(pts[perm])
+    replay_seqs = torch.cat(replay_parts, dim=0)
+    combined = torch.cat([train_seqs, replay_seqs], dim=0)
+    return DataLoader(TensorDataset(combined),
+                      batch_size=batch_size, shuffle=True, drop_last=True)
+
+
+def train_stage(model, train_seqs, test_loader, device, amp_ctx, scaler,
                 n_result_tokens, epochs, args, stage_label="",
-                prev_loaders=None):
+                prev_loaders=None, prev_train_seqs=None):
     """Train one stage. Returns (history, passed) where passed indicates
-    whether test accuracy reached the advance_threshold."""
+    whether test accuracy reached the advance_threshold.
+
+    If prev_train_seqs is provided, replay is resampled every epoch
+    for better coverage of previous skills.
+    """
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scheduler = torch.optim.lr_scheduler.LambdaLR(
@@ -208,6 +233,10 @@ def train_stage(model, train_loader, test_loader, device, amp_ctx, scaler,
         epoch_loss = 0.0
         n_batches = 0
         t0 = time.perf_counter()
+
+        # Resample replay every epoch for diverse coverage
+        train_loader = _build_replay_loader(
+            train_seqs, prev_train_seqs, args.replay_fraction, args.batch_size)
 
         for (seqs,) in train_loader:
             seqs = seqs.to(device)
@@ -361,26 +390,16 @@ def main():
                 print(f"  Skipping stages 1-{last_passed} (already passed)\n")
 
         for stage in range(start_stage, args.target_stage + 1):
-            tr, te, data = make_loaders(stage)
+            _, te, data = make_loaders(stage)
 
-            # Experience replay: stratified sampling from previous stages.
-            # Equal samples per stage ensures foundational skills (especially
-            # DOT/TEN counting) aren't undersampled by bad random draws.
+            # Replay info for logging
             if prev_train_seqs and args.replay_fraction > 0:
                 n_replay = max(1, int(len(data['train_seqs']) * args.replay_fraction))
                 per_stage = max(1, n_replay // len(prev_train_seqs))
-                replay_parts = []
-                for pts in prev_train_seqs:
-                    perm = torch.randperm(len(pts))[:per_stage]
-                    replay_parts.append(pts[perm])
-                replay_seqs = torch.cat(replay_parts, dim=0)
-                combined = torch.cat([data['train_seqs'], replay_seqs], dim=0)
-                tr = DataLoader(TensorDataset(combined),
-                                batch_size=args.batch_size, shuffle=True,
-                                drop_last=True)
                 print(f"Stage {stage}: {data['n_train_problems']} train / "
                       f"{data['n_test_problems']} test problems"
-                      f" (+{len(replay_seqs)} replay, {per_stage}/stage)")
+                      f" (+{per_stage * len(prev_train_seqs)} replay/epoch, "
+                      f"{per_stage}/stage, resampled)")
             else:
                 print(f"Stage {stage}: {data['n_train_problems']} train / "
                       f"{data['n_test_problems']} test problems")
@@ -389,10 +408,12 @@ def main():
             for j in range(min(3, len(data['train_seqs']))):
                 print(f"  sample: {decode_tokens(data['train_seqs'][j])}")
 
+            # Replay is resampled each epoch inside train_stage
             history, passed = train_stage(
-                model, tr, te, device, amp_ctx, scaler,
+                model, data['train_seqs'], te, device, amp_ctx, scaler,
                 data['n_result_tokens'], args.epochs, args,
-                stage_label=f"S{stage}", prev_loaders=prev_loaders)
+                stage_label=f"S{stage}", prev_loaders=prev_loaders,
+                prev_train_seqs=prev_train_seqs)
             all_history.extend(history)
 
             if not passed:
@@ -411,7 +432,7 @@ def main():
             print()
     else:
         stage = args.stage
-        tr, te, data = make_loaders(stage)
+        _, te, data = make_loaders(stage)
         print(f"\nStage {stage}: {data['n_train_problems']} train / "
               f"{data['n_test_problems']} test problems")
         for j in range(min(3, len(data['train_seqs']))):
@@ -419,7 +440,7 @@ def main():
         print()
 
         history, passed = train_stage(
-            model, tr, te, device, amp_ctx, scaler,
+            model, data['train_seqs'], te, device, amp_ctx, scaler,
             data['n_result_tokens'], args.epochs, args,
             stage_label=f"S{stage}")
         all_history.extend(history)
