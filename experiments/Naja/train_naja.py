@@ -35,6 +35,7 @@ import os
 import sys
 import time
 from contextlib import nullcontext
+from pathlib import Path
 
 import torch
 import torch.nn.functional as F
@@ -63,6 +64,11 @@ PRESETS = {
         use_delta_rule=False, use_pope_perp=False, per_channel_decay=False,
         stable_reparam=False, use_surprise_gate=False, mimo_rank=1,
     ),
+    'mamba3_rope': dict(
+        use_delta_rule=False, use_pope_perp=False, per_channel_decay=False,
+        stable_reparam=False, use_surprise_gate=False, mimo_rank=1,
+        use_pope=False,
+    ),
     'delta_only': dict(
         use_delta_rule=True, use_pope_perp=False, per_channel_decay=False,
         stable_reparam=False, use_surprise_gate=False, mimo_rank=1,
@@ -73,6 +79,10 @@ PRESETS = {
     ),
     'per_channel_only': dict(
         use_delta_rule=False, use_pope_perp=False, per_channel_decay=True,
+        stable_reparam=False, use_surprise_gate=False, mimo_rank=1,
+    ),
+    'delta_per_channel': dict(
+        use_delta_rule=True, use_pope_perp=False, per_channel_decay=True,
         stable_reparam=False, use_surprise_gate=False, mimo_rank=1,
     ),
     'stable_reparam': dict(
@@ -124,11 +134,18 @@ def parse_args():
     p.add_argument('--no_delta_rule', action='store_true')
     p.add_argument('--use_pope_perp', action='store_true', default=None)
     p.add_argument('--no_pope_perp', action='store_true')
+    p.add_argument('--no_pope', action='store_true',
+                   help='Use RoPE instead of PoPE for B/C encoding')
     p.add_argument('--per_channel_decay', action='store_true', default=None)
     p.add_argument('--no_per_channel_decay', action='store_true')
     p.add_argument('--stable_reparam', action='store_true', default=None)
     p.add_argument('--use_surprise_gate', action='store_true', default=None)
-    p.add_argument('--use_chunkwise', action='store_true', default=False)
+    p.add_argument('--use_chunkwise', action='store_true', default=False,
+                   help='Legacy gradient-checkpointed chunking')
+    p.add_argument('--use_wy_chunkwise', action='store_true', default=True,
+                   help='WY chunkwise parallelism (default)')
+    p.add_argument('--no_wy_chunkwise', action='store_true',
+                   help='Disable WY chunkwise (use naive sequential)')
     p.add_argument('--chunk_size', type=int, default=64)
 
     # Data
@@ -141,7 +158,7 @@ def parse_args():
 
     # Training
     p.add_argument('--epochs', type=int, default=30)
-    p.add_argument('--batch_size', type=int, default=32)
+    p.add_argument('--batch_size', type=int, default=64)
     p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--warmup_epochs', type=int, default=4)
     p.add_argument('--w_clip', type=float, default=1.0, help='Gradient clipping max norm')
@@ -151,6 +168,16 @@ def parse_args():
     p.add_argument('--no_amp', action='store_true', help='Disable mixed precision')
     p.add_argument('--compile', action='store_true', help='torch.compile the model')
     p.add_argument('--profile', action='store_true', help='Print timing breakdown (5 epochs)')
+
+    # Diagnostics
+    p.add_argument('--diag_every', type=int, default=5,
+                   help='Save diagnostic charts every N epochs (0 to disable)')
+    p.add_argument('--diag_dir', type=str, default=None,
+                   help='Directory for diagnostic charts (default: auto)')
+
+    # Output
+    p.add_argument('--results_file', type=str, default=None,
+                   help='Append JSON result line to this file after training')
 
     # Misc
     p.add_argument('--device', type=str, default='auto')
@@ -175,26 +202,26 @@ def parse_args():
             args.batch_size = 128
         args.seq_len = max(2 * args.n_examples + 2, args.seq_len)
 
-    # VRAM-aware defaults: the naive sequential recurrence stores
-    # intermediate tensors for every time step across all layers.
-    # On <=6GB cards this easily OOMs at batch_size=32.
+    # Handle --no_wy_chunkwise
+    if args.no_wy_chunkwise:
+        args.use_wy_chunkwise = False
+
+    # VRAM-aware defaults for batch size
     if args.device == 'auto' or args.device.startswith('cuda'):
         try:
             import torch
             if torch.cuda.is_available():
                 vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                if vram_gb <= 6.0:
-                    if args.batch_size == 32:
-                        args.batch_size = 8
+                if vram_gb <= 4.0:
+                    # Naja is very memory-efficient (~200MB peak at batch=32).
+                    # Only reduce for very small GPUs (≤4GB).
                     if args.stage == '2' and args.batch_size == 128:
-                        args.batch_size = 32
-                    # Auto-enable gradient checkpointing to reduce activation memory
-                    if not args.use_chunkwise:
-                        args.use_chunkwise = True
-                        args.chunk_size = 16
+                        args.batch_size = 64
+                    # chunk_size=64 is fine: with virtual tokens (Cs=128)
+                    # the WY matrices are only ~16MB per head.
                     print(f"VRAM: {vram_gb:.1f}GB detected — "
                           f"batch_size={args.batch_size}, "
-                          f"chunkwise=True (chunk_size={args.chunk_size})")
+                          f"chunk_size={args.chunk_size}")
         except ImportError:
             pass
 
@@ -226,6 +253,8 @@ def build_config(args) -> NajaConfig:
         preset['stable_reparam'] = True
     if args.use_surprise_gate is not None:
         preset['use_surprise_gate'] = True
+    if args.no_pope:
+        preset['use_pope'] = False
     if args.mimo_rank is not None:
         preset['mimo_rank'] = args.mimo_rank
 
@@ -237,6 +266,7 @@ def build_config(args) -> NajaConfig:
         expand=args.expand,
         chunk_size=args.chunk_size,
         use_chunkwise=args.use_chunkwise,
+        use_wy_chunkwise=args.use_wy_chunkwise,
         **preset,
     )
 
@@ -281,7 +311,13 @@ def evaluate_nextstep(model, loader, device, amp_ctx):
 
 
 def evaluate_last_token(model, loader, device, amp_ctx):
-    """Evaluate accuracy on the last token only (Stage 2 / tasks with targets)."""
+    """Evaluate accuracy predicting the answer token.
+
+    The answer is at seqs[:, -1], so the genuine prediction is at
+    logits[:, -2] (which sees everything up to and including the query
+    token but NOT the answer).  Using logits[:, -1] would be trivial
+    copy-last-token — see Mistake #41.
+    """
     model.eval()
     correct = 0
     total = 0
@@ -292,7 +328,7 @@ def evaluate_last_token(model, loader, device, amp_ctx):
             targets = batch[1].to(device)
             with amp_ctx():
                 logits = model(seqs)
-            pred_last = logits[:, -1].argmax(dim=-1)
+            pred_last = logits[:, -2].argmax(dim=-1)
             correct += (pred_last == targets).sum().item()
             total += targets.shape[0]
 
@@ -315,11 +351,190 @@ def evaluate_with_kl_surprise(model, loader, device, amp_ctx, kl_tracker):
                 surprise = kl_tracker(logits_p1)
                 # Re-run with surprise signal
                 logits = model(seqs, surprise=surprise.detach())
-            pred_last = logits[:, -1].argmax(dim=-1)
+            pred_last = logits[:, -2].argmax(dim=-1)
             correct += (pred_last == targets).sum().item()
             total += targets.shape[0]
 
     return correct / max(total, 1)
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics
+# ---------------------------------------------------------------------------
+
+def collect_diagnostics(model, config, epoch, device, amp_ctx):
+    """Collect diagnostic snapshot from model state."""
+    diag = {'epoch': epoch}
+
+    # Alpha (decay) distribution
+    model.eval()
+    with torch.no_grad():
+        all_alpha = []
+        all_beta1 = []
+        all_beta2 = []
+        grad_norms = {}
+        weight_norms = {}
+
+        for i, layer in enumerate(model.layers):
+            mixer = layer.mixer
+            # Weight norms per layer
+            weight_norms[f'L{i}_in_proj'] = mixer.in_proj.weight.norm().item()
+            weight_norms[f'L{i}_out_proj'] = mixer.out_proj.weight.norm().item()
+
+            # Gradient norms (if available)
+            for name, p in mixer.named_parameters():
+                if p.grad is not None:
+                    grad_norms[f'L{i}_{name}'] = p.grad.norm().item()
+
+        diag['weight_norms'] = weight_norms
+        diag['grad_norms'] = grad_norms
+
+        # Run a forward pass to capture alpha/beta values
+        dummy = torch.randint(0, 16, (4, 64), device=device)
+        hooks = []
+        captured = {}
+
+        def make_hook(layer_idx):
+            def hook_fn(module, input, output):
+                # Access the mixer's internal state after forward
+                pass
+            return hook_fn
+
+        # Simpler: directly access the mixer parameters for alpha stats
+        for i, layer in enumerate(model.layers):
+            mixer = layer.mixer
+            if hasattr(mixer, 'decay_bias'):
+                # Per-channel decay: the bias determines typical alpha range
+                bias = mixer.decay_bias.detach()
+                if config.stable_reparam:
+                    alpha_approx = 1.0 - 1.0 / (bias.pow(2) + 0.5)
+                else:
+                    alpha_approx = torch.sigmoid(bias)
+                all_alpha.append(alpha_approx.cpu().flatten())
+
+            if hasattr(mixer, 'beta1_proj'):
+                # Beta1 bias gives typical gate value
+                b1_bias = mixer.beta1_proj.bias.detach() if mixer.beta1_proj.bias is not None else torch.zeros(1)
+                all_beta1.append(torch.sigmoid(b1_bias).cpu().flatten())
+
+            if hasattr(mixer, 'beta2_proj'):
+                b2_bias = mixer.beta2_proj.bias.detach() if mixer.beta2_proj.bias is not None else torch.zeros(1)
+                all_beta2.append(torch.sigmoid(b2_bias).cpu().flatten())
+
+        if all_alpha:
+            diag['alpha'] = torch.cat(all_alpha).numpy()
+        if all_beta1:
+            diag['beta1'] = torch.cat(all_beta1).numpy()
+        if all_beta2:
+            diag['beta2'] = torch.cat(all_beta2).numpy()
+
+    return diag
+
+
+def save_diagnostic_charts(history, diag, save_dir, epoch):
+    """Save diagnostic charts as PNG."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("  [diagnostics] matplotlib not available, skipping charts")
+        return
+
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 8))
+    fig.suptitle(f'Naja Diagnostics — Epoch {epoch}', fontsize=14)
+
+    # 1. Loss curve
+    ax = axes[0, 0]
+    epochs = [h['epoch'] for h in history]
+    losses = [h['loss'] for h in history]
+    ax.plot(epochs, losses, 'b-', linewidth=1.5)
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Loss')
+    ax.set_title('Training Loss')
+    ax.grid(True, alpha=0.3)
+    # Mark NaN losses
+    nan_epochs = [e for e, l in zip(epochs, losses) if math.isnan(l)]
+    if nan_epochs:
+        ax.axvline(x=nan_epochs[0], color='r', linestyle='--', label=f'NaN at epoch {nan_epochs[0]}')
+        ax.legend()
+
+    # 2. Accuracy curves
+    ax = axes[0, 1]
+    train_acc = [h['train_acc'] for h in history]
+    test_acc = [h['test_acc'] for h in history]
+    ax.plot(epochs, train_acc, 'b-', label='Train', linewidth=1.5)
+    ax.plot(epochs, test_acc, 'r--', label='Test', linewidth=1.5)
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Accuracy')
+    ax.set_title('Train / Test Accuracy')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(0, 1.05)
+
+    # 3. Alpha (decay) distribution
+    ax = axes[0, 2]
+    if 'alpha' in diag:
+        ax.hist(diag['alpha'], bins=50, color='steelblue', edgecolor='none', alpha=0.8)
+        ax.axvline(x=diag['alpha'].mean(), color='red', linestyle='--',
+                    label=f'mean={diag["alpha"].mean():.3f}')
+        ax.set_xlabel('Alpha (decay)')
+        ax.set_title('Per-Channel Decay Distribution')
+        ax.legend()
+    else:
+        ax.text(0.5, 0.5, 'N/A', ha='center', va='center', transform=ax.transAxes)
+    ax.grid(True, alpha=0.3)
+
+    # 4. Gradient norms per layer
+    ax = axes[1, 0]
+    if diag.get('grad_norms'):
+        names = list(diag['grad_norms'].keys())
+        values = list(diag['grad_norms'].values())
+        # Group by layer
+        layer_norms = {}
+        for n, v in zip(names, values):
+            layer = n.split('_')[0]  # "L0", "L1", etc.
+            layer_norms.setdefault(layer, []).append(v)
+        layer_means = {k: sum(v)/len(v) for k, v in layer_norms.items()}
+        ax.bar(list(layer_means.keys()), list(layer_means.values()), color='coral')
+        ax.set_xlabel('Layer')
+        ax.set_ylabel('Mean Gradient Norm')
+        ax.set_title('Gradient Norms by Layer')
+    else:
+        ax.text(0.5, 0.5, 'No gradients', ha='center', va='center', transform=ax.transAxes)
+    ax.grid(True, alpha=0.3)
+
+    # 5. Weight norms per layer
+    ax = axes[1, 1]
+    if diag.get('weight_norms'):
+        names = list(diag['weight_norms'].keys())
+        values = list(diag['weight_norms'].values())
+        ax.barh(names, values, color='mediumseagreen')
+        ax.set_xlabel('Weight Norm')
+        ax.set_title('Weight Norms')
+    ax.grid(True, alpha=0.3)
+
+    # 6. Gradient norm history
+    ax = axes[1, 2]
+    if any('grad_norm' in h for h in history):
+        gn_epochs = [h['epoch'] for h in history if 'grad_norm' in h]
+        gn_values = [h['grad_norm'] for h in history if 'grad_norm' in h]
+        ax.plot(gn_epochs, gn_values, 'g-', linewidth=1.5)
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Grad Norm (clipped)')
+        ax.set_title('Gradient Norm Over Time')
+    else:
+        ax.text(0.5, 0.5, 'N/A', ha='center', va='center', transform=ax.transAxes)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    path = save_dir / f'epoch_{epoch:03d}.png'
+    fig.savefig(path, dpi=100, bbox_inches='tight')
+    plt.close(fig)
+    print(f"  [diagnostics] saved {path}")
 
 
 # ---------------------------------------------------------------------------
@@ -391,11 +606,14 @@ def train(args):
 
     # --- torch.compile ---
     if args.compile:
-        try:
-            model = torch.compile(model)
-            print("torch.compile: ON")
-        except Exception as e:
-            print(f"torch.compile: FAILED ({e}), continuing without")
+        if config.use_wy_chunkwise:
+            print("torch.compile: SKIPPED (incompatible with WY chunkwise)")
+        else:
+            try:
+                model = torch.compile(model)
+                print("torch.compile: ON")
+            except Exception as e:
+                print(f"torch.compile: FAILED ({e}), continuing without")
 
     # --- Optimizer ---
     optimizer = torch.optim.AdamW(
@@ -407,6 +625,8 @@ def train(args):
 
     # --- Config summary ---
     features = []
+    if not config.use_pope:
+        features.append('rope')
     if config.use_delta_rule:
         features.append('delta')
     if config.use_pope_perp:
@@ -419,7 +639,9 @@ def train(args):
         features.append('surprise')
     if config.mimo_rank > 1:
         features.append(f'mimo_r{config.mimo_rank}')
-    if config.use_chunkwise:
+    if config.use_wy_chunkwise:
+        features.append(f'wy_chunk{config.chunk_size}')
+    elif config.use_chunkwise:
         features.append(f'chunk{config.chunk_size}')
     feat_str = '+'.join(features) if features else 'base_mamba3'
 
@@ -446,6 +668,11 @@ def train(args):
         prof = {'forward': 0.0, 'backward': 0.0, 'step': 0.0, 'eval': 0.0}
         profile_epochs = min(5, args.epochs)
 
+    # --- Diagnostics ---
+    history = []
+    diag_dir = args.diag_dir or os.path.join(
+        os.path.dirname(__file__), 'diagnostics', f'{task_name}_{feat_str}')
+
     # --- Training loop ---
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -453,6 +680,8 @@ def train(args):
         epoch_correct = 0
         epoch_total = 0
         n_batches = 0
+        n_nan_batches = 0
+        epoch_grad_norm = 0.0
         t_epoch = time.perf_counter()
 
         for batch in train_loader:
@@ -470,9 +699,10 @@ def train(args):
 
                 # Loss: next-step prediction
                 if has_targets:
-                    # Use last-token CE for tasks with explicit targets
+                    # Predict the answer token: logits[:, -2] sees [prefix..., Q]
+                    # but NOT the answer at seqs[:, -1].  See Mistake #41.
                     targets = batch[1].to(device)
-                    loss = F.cross_entropy(logits[:, -1], targets)
+                    loss = F.cross_entropy(logits[:, -2], targets)
                     # Also add next-step CE on the full sequence for representation learning
                     loss_ns = F.cross_entropy(
                         logits[:, :-1].reshape(-1, vocab_size),
@@ -487,6 +717,27 @@ def train(args):
                         ignore_index=0,
                     )
 
+            # Skip NaN/Inf losses (log but don't crash)
+            loss_val = loss.item()
+            if not math.isfinite(loss_val):
+                n_nan_batches += 1
+                optimizer.zero_grad()
+                # Still count accuracy from valid logits
+                with torch.no_grad():
+                    if has_targets:
+                        pred = logits[:, -2].argmax(dim=-1)
+                        valid = ~torch.isnan(logits[:, -2].sum(dim=-1))
+                        epoch_correct += (pred[valid] == targets[valid]).sum().item()
+                        epoch_total += valid.sum().item()
+                    else:
+                        preds = logits[:, :-1].argmax(dim=-1)
+                        tgts = seqs[:, 1:]
+                        mask = (tgts != 0) & ~torch.isnan(logits[:, :-1].sum(dim=-1))
+                        epoch_correct += (preds[mask] == tgts[mask]).sum().item()
+                        epoch_total += mask.sum().item()
+                n_batches += 1
+                continue
+
             if args.profile and epoch <= profile_epochs:
                 torch.cuda.synchronize() if device.type == 'cuda' else None
                 prof['forward'] += time.perf_counter() - t0
@@ -498,13 +749,15 @@ def train(args):
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
                 if args.w_clip > 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.w_clip)
+                    gn = torch.nn.utils.clip_grad_norm_(model.parameters(), args.w_clip)
+                    epoch_grad_norm += gn.item()
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 loss.backward()
                 if args.w_clip > 0:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.w_clip)
+                    gn = torch.nn.utils.clip_grad_norm_(model.parameters(), args.w_clip)
+                    epoch_grad_norm += gn.item()
                 optimizer.step()
 
             if args.profile and epoch <= profile_epochs:
@@ -514,7 +767,7 @@ def train(args):
             # --- Train accuracy ---
             with torch.no_grad():
                 if has_targets:
-                    pred = logits[:, -1].argmax(dim=-1)
+                    pred = logits[:, -2].argmax(dim=-1)
                     epoch_correct += (pred == targets).sum().item()
                     epoch_total += targets.shape[0]
                 else:
@@ -524,12 +777,14 @@ def train(args):
                     epoch_correct += (preds[mask] == tgts[mask]).sum().item()
                     epoch_total += mask.sum().item()
 
-            epoch_loss += loss.item()
+            epoch_loss += loss_val
             n_batches += 1
 
         scheduler.step()
         train_acc = epoch_correct / max(epoch_total, 1)
-        avg_loss = epoch_loss / max(n_batches, 1)
+        valid_batches = n_batches - n_nan_batches
+        avg_loss = epoch_loss / max(valid_batches, 1)
+        avg_grad_norm = epoch_grad_norm / max(valid_batches, 1)
         ms_per_batch = (time.perf_counter() - t_epoch) / max(n_batches, 1) * 1000
 
         # --- Evaluation ---
@@ -552,15 +807,29 @@ def train(args):
 
         ep_s = time.perf_counter() - t_epoch
 
+        # --- Record history ---
+        record = {
+            'epoch': epoch, 'loss': avg_loss, 'train_acc': train_acc,
+            'test_acc': test_acc, 'grad_norm': avg_grad_norm,
+            'nan_batches': n_nan_batches,
+        }
+        history.append(record)
+
         # --- Print ---
         if epoch % args.print_every == 0 or epoch == args.epochs:
+            nan_str = f" ({n_nan_batches} nan)" if n_nan_batches > 0 else ""
             if has_targets:
                 kl_str = f"{kl_acc:7.4f}" if kl_acc is not None else "    ---"
                 print(f"{epoch:5d}  {avg_loss:8.4f}  {train_acc:7.4f}  {test_acc:7.4f}  "
-                      f"{kl_str}  {ms_per_batch:6.1f}  {ep_s:6.1f}")
+                      f"{kl_str}  {ms_per_batch:6.1f}  {ep_s:6.1f}{nan_str}")
             else:
                 print(f"{epoch:5d}  {avg_loss:8.4f}  {train_acc:7.4f}  {test_acc:7.4f}  "
-                      f"{ms_per_batch:6.1f}  {ep_s:6.1f}")
+                      f"{ms_per_batch:6.1f}  {ep_s:6.1f}{nan_str}")
+
+        # --- Diagnostic charts ---
+        if args.diag_every > 0 and (epoch % args.diag_every == 0 or epoch == args.epochs):
+            diag = collect_diagnostics(model, config, epoch, device, amp_ctx)
+            save_diagnostic_charts(history, diag, diag_dir, epoch)
 
         # Profile breakdown after N epochs
         if args.profile and epoch == profile_epochs:
@@ -577,16 +846,42 @@ def train(args):
     if kl_acc is not None:
         print(f"  KL surprise test_acc={kl_acc:.4f}")
     print(f"Config: {feat_str}")
+    total_nan = sum(h['nan_batches'] for h in history)
+    if total_nan > 0:
+        print(f"  WARNING: {total_nan} NaN batches across all epochs")
 
-    return {
+    # Build per-epoch trajectory (at print_every intervals) for results file.
+    # This lets the results file show learning dynamics, not just finals.
+    epoch_history = []
+    for h in history:
+        if h['epoch'] % args.print_every == 0 or h['epoch'] == args.epochs:
+            epoch_history.append({
+                'epoch': h['epoch'],
+                'train_acc': round(h['train_acc'], 4),
+                'test_acc': round(h['test_acc'], 4),
+                'loss': round(h['loss'], 4),
+            })
+
+    result = {
         'train_acc': train_acc,
         'test_acc': test_acc,
         'kl_acc': kl_acc,
         'loss': avg_loss,
         'config': feat_str,
         'task': task_name,
+        'preset': args.preset,
         'n_params': n_params,
+        'epochs': args.epochs,
+        'epoch_history': epoch_history,
     }
+
+    # Append JSON line to results file if requested
+    if args.results_file:
+        import json
+        with open(args.results_file, 'a') as f:
+            f.write(json.dumps(result) + '\n')
+
+    return result
 
 
 # ---------------------------------------------------------------------------

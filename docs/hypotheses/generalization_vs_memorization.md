@@ -1,7 +1,7 @@
 # Hypothesis: Multi-Rule Collapse Prevents Generalization
 
 **Date:** 2026-02-13
-**Status:** Active — empirically motivated, not yet formally tested
+**Status:** Weakened — single-rule tasks also fail (2026-02-16 Naja ablations)
 **Authors:** Project team
 
 ## The Hypothesis
@@ -114,6 +114,80 @@ Observed multi-stage grokking in deep networks: test accuracy improves through m
 **Link:** https://www.sciencedirect.com/science/article/pii/S0167278925003367
 
 Measured network complexity through training and found a characteristic rise-and-fall: complexity increases during memorization and drops sharply during generalization. The generalizing solution is simpler. In our framing: "5 simple rules" has lower complexity than "1 complex rule that fits all training data," so the transition to generalization is literally a simplification.
+
+## Naja Ablation Evidence (2026-02-16) — Hypothesis Weakened
+
+### New data: single-rule tasks also fail to generalize
+
+The Naja Phase 5d ablation suite tested four architectures (mamba3_base,
+mamba3_rope, delta_only, naja_full) on four tasks. Critically, **every
+ablation task is a single-rule task** — there is exactly one algorithm to
+learn, with no multi-rule mixture.
+
+| Task | Algorithm | # Rules | Train Acc | Test Acc | Random |
+|------|-----------|---------|-----------|----------|--------|
+| parity | XOR tracking | 1 | 100% | 100% | 50% |
+| permutation_3 | simulate 4 swaps on 3 elements | 1 | 100% | 100% | 33% |
+| associative_recall | key-value lookup (8 pairs) | 1 | 100% | 8-22% | 3% |
+| multi_scale | remember token across 60 positions | 1 | 39-100% | 7% | 7% |
+| permutation_4 | simulate 6 swaps on 4 elements | 1 | 55-87% | 25% | 25% |
+
+Results were consistent across all four architectures — no model
+generalized on any of the harder tasks. (See Mistake #42.)
+
+### What this means for the hypothesis
+
+**The multi-rule collapse hypothesis cannot be the primary explanation for
+memorization.** If it were, single-rule tasks should generalize the way
+Stage 1 did. But associative_recall, multi_scale, and permutation_4 are
+all single-rule and all show the same memorization pattern as Stage 2.
+
+The real pattern separating success from failure is **task complexity**:
+
+- **Tasks that succeed** (parity, permutation_3): tiny output spaces
+  (2-3 possible answers), short sequences, shallow computation.
+- **Tasks that fail** (assoc. recall, multi_scale, perm_4): larger output
+  spaces (4-30 tokens), longer sequences, deeper sequential reasoning.
+
+This suggests the core issue is **capacity-to-data ratio + training
+duration**, not multi-rule structure specifically:
+- 5000 training samples vs 1.26M parameters = trivial memorization
+- 50 epochs is far short of grokking timescales
+- The model overfits whenever the task is complex enough that partial
+  learning doesn't accidentally generalize
+
+### Revised understanding
+
+Multi-rule collapse may still be a **compounding factor** in Stage 2 —
+having 5 rules makes the effective data per rule 5× smaller, and the
+model must additionally discover that rules exist. But it's not the root
+cause. The root cause is that these models memorize whenever the task
+exceeds a complexity threshold, regardless of whether one or five rules
+are involved.
+
+The ~25% test accuracy in Stage 2 might not mean "learned 1 of 5 rules."
+It might mean "partially learned the shared copy/lookup mechanism that
+underlies all rules, getting some test examples right by structural
+similarity to training examples." The Naja associative_recall results
+support this: a single-rule lookup task with vocab=32 also gets well
+above random chance (8-22% vs 3% chance) despite clear memorization —
+because some test key-value patterns happen to resemble training ones.
+
+### What experiments should target next
+
+The original proposed experiments (curriculum learning, explicit rule
+tokens, extended training) are still relevant for Stage 2 specifically.
+But the more fundamental problem — **models memorize instead of learning
+algorithms on small datasets** — requires a different approach:
+
+1. **Reduce model size** to match dataset scale (tiny models on 5K
+   samples), OR increase data to 50K+
+2. **Extend training to 500+ epochs** to test whether grokking occurs on
+   single-rule algorithmic tasks (this is the cheapest experiment)
+3. **Add stronger regularization** (higher weight decay, dropout) to
+   penalize memorization
+4. **Simplify tasks first**: get generalization working on associative
+   recall (the simplest failing task) before tackling multi-rule Stage 2
 
 ## Proposed Next Steps to Test the Hypothesis
 
