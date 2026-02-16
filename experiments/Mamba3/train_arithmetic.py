@@ -4,14 +4,15 @@ Curriculum training script for compositional arithmetic on Mamba3.
 
 Modes:
   Single-stage:  python train_arithmetic.py --stage 2 --epochs 50
-  Curriculum:    python train_arithmetic.py --curriculum --target_stage 4
-  Direct:        python train_arithmetic.py --stage 4 --epochs 200
+  Curriculum:    python train_arithmetic.py --curriculum --target_stage 5
+  Direct:        python train_arithmetic.py --stage 5 --epochs 200
 
 Stages:
-  1: Mixed counting (DOT/TEN, randomized order, no interleaving)
-  2: Single-digit +/- (2-digit output)
-  3: Two-digit ± single-digit (3-digit output, bridge)
-  4: Two-digit ± two-digit (3-digit output, composition test)
+  1: Query counting — "how many DOTs/TENs?" (sub-skill, n_result=1)
+  2: Combined counting — DOT d TEN t scratchpad (composition, n_result=4)
+  3: Single-digit +/- (2-digit output)
+  4: Two-digit ± single-digit (3-digit output, bridge)
+  5: Two-digit ± two-digit (3-digit output, composition test)
 
 See CONTINUATION.md for experimental design.
 Do NOT run full training on CPU (Mistake #36).
@@ -46,12 +47,12 @@ def parse_args():
     p = argparse.ArgumentParser(description='Compositional Arithmetic Curriculum')
 
     # Mode
-    p.add_argument('--stage', type=int, choices=list(range(1, 5)), default=None,
+    p.add_argument('--stage', type=int, choices=list(range(1, 6)), default=None,
                    help='Single stage to train (direct mode)')
     p.add_argument('--curriculum', action='store_true',
                    help='Curriculum mode: train stages 1 -> target_stage')
-    p.add_argument('--target_stage', type=int, choices=list(range(2, 5)), default=4,
-                   help='Final stage for curriculum mode (default: 4 = two-digit arithmetic)')
+    p.add_argument('--target_stage', type=int, choices=list(range(2, 6)), default=5,
+                   help='Final stage for curriculum mode (default: 5 = two-digit arithmetic)')
 
     # Architecture
     p.add_argument('--d_model', type=int, default=128)
@@ -333,11 +334,13 @@ def train_stage(model, train_seqs, test_loader, device, amp_ctx, scaler,
         history.append(record)
 
         if epoch % args.print_every == 0 or epoch == 1 or epoch == epochs:
-            # Per-token diagnostic for multi-token results (test only)
-            tok_str = ""
+            # Per-token diagnostic for multi-token results (train + test)
+            tr_tok_str = te_tok_str = ""
             if n_result_tokens > 1:
+                tr_tok = '|'.join(f'{x:.2f}' for x in train_result['per_token'])
                 te_tok = '|'.join(f'{x:.2f}' for x in test_result['per_token'])
-                tok_str = f" [{te_tok}]"
+                tr_tok_str = f" [{tr_tok}]"
+                te_tok_str = f" [{te_tok}]"
 
             prev_str = ""
             if prev_loaders:
@@ -345,7 +348,8 @@ def train_stage(model, train_seqs, test_loader, device, amp_ctx, scaler,
                          for s in sorted(prev_loaders)]
                 prev_str = f"  prev=[{', '.join(parts)}]"
             print(f"  [{stage_label}] ep {epoch:3d}  loss={avg_loss:.4f}  "
-                  f"train={train_acc:.4f}  test={test_acc:.4f}{tok_str}  "
+                  f"train={train_acc:.4f}{tr_tok_str}  "
+                  f"test={test_acc:.4f}{te_tok_str}  "
                   f"{ep_s:.1f}s{prev_str}")
 
         if test_acc >= args.advance_threshold:

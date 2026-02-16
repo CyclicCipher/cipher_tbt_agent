@@ -1,21 +1,23 @@
 """
 Compositional arithmetic task generators for curriculum learning.
 
-Revised curriculum (4 stages):
-  Stage 1: Mixed counting  — DOT/TEN tokens in random order, no interleaving
-  Stage 2: Single-digit +/- — 2-digit zero-padded output
-  Stage 3: Two-digit ± single-digit — 3-digit output (bridge)
-  Stage 4: Two-digit ± two-digit — 3-digit output (composition test)
+Revised curriculum (5 stages):
+  Stage 1: Query counting  — "how many DOTs?" or "how many TENs?" (sub-skill)
+  Stage 2: Combined counting — count DOTs then TENs with scratchpad (composition)
+  Stage 3: Single-digit +/- — 2-digit zero-padded output
+  Stage 4: Two-digit ± single-digit — 3-digit output (bridge)
+  Stage 5: Two-digit ± two-digit — 3-digit output (composition test)
 
 All generators return (n_samples, seq_len) long tensors, left-padded with PAD.
 Token encoding: digit d -> token d+1.  See VOCAB below.
 
 Design principles:
-  - Every stage has enough problems for meaningful train/test splits
-  - No free answers in the input (no interleaved counting)
-  - Counting stage uses randomized DOT/TEN order (no run-length shortcut)
-  - Each stage teaches a skill that directly composes into later stages
-  - Consistent output format within result-size groups
+  - Sub-skills taught independently before composition (Stage 1 → 2)
+  - Process supervision: scratchpad tokens in Stage 2 reuse Stage 1 query format
+  - Composition cues: DOT/TEN query tokens signal which counting skill to apply
+  - Every stage has enough problems for meaningful train/test splits (≥100)
+  - Randomized DOT/TEN order in input (no run-length shortcut)
+  - Partial credit: per-token accuracy tracks individual skill mastery
 """
 
 import random
@@ -65,31 +67,34 @@ def _pad_left(tokens: List[int], seq_len: int) -> List[int]:
 
 
 # ---------------------------------------------------------------------------
-# Stage 1: Mixed Counting (grounding digits in quantities)
+# Stage 1: Query-Based Counting (sub-skill)
 # ---------------------------------------------------------------------------
 
 def _enumerate_mixed_counting() -> List[Tuple]:
     """All (dot_count, ten_count) pairs, 0-9 each.  100 total.
 
-    Each pair represents a two-digit number: 10*ten_count + dot_count.
-    Grounds digit tokens in concrete quantities.
+    Used by both Stage 1 (query counting) and Stage 2 (combined counting).
+    TEN confounders make DOT counting non-trivial (and vice versa),
+    giving 100 problems per query type — enough for real train/test splits.
     """
     return [(d, t) for d in range(10) for t in range(10)]
 
 
-def generate_mixed_counting(n_samples: int, seq_len: int = 48,
+def generate_query_counting(n_samples: int, seq_len: int = 48,
                             problems: Optional[List] = None) -> Tensor:
-    """[PAD..., <shuffled DOTs and TENs>, =, tens_digit, ones_digit]
+    """[PAD..., <shuffled DOTs and TENs>, =, QUERY, count]
 
-    DOT and TEN tokens are randomly interleaved (no fixed ordering).
-    No running counts — the model must actually count each token type.
+    Query-based counting: each sample randomly asks for DOT or TEN count.
+    Forces independent learning of both counting skills.  The query token
+    (DOT or TEN) after '=' tells the model which type to count.
 
-    Example: 3 DOTs + 2 TENs → DOT TEN DOT TEN DOT = 2 3
-    Example: 0 DOTs + 4 TENs → TEN TEN TEN TEN = 4 0
-    Example: 5 DOTs + 0 TENs → DOT DOT DOT DOT DOT = 0 5
-    Example: 0 DOTs + 0 TENs → = 0 0
+    Example: 3 DOTs + 2 TENs, query=DOT → DOT TEN DOT TEN DOT = DOT 3
+    Example: 3 DOTs + 2 TENs, query=TEN → DOT TEN DOT TEN DOT = TEN 2
+    Example: 0 DOTs + 4 TENs, query=TEN → TEN TEN TEN TEN = TEN 4
+    Example: 0 DOTs + 0 TENs, query=DOT → = DOT 0
 
-    Max length: 9 + 9 + 1 + 2 = 21 tokens.
+    n_result = 1 (just the count digit; query token is input context).
+    Max length: 9 + 9 + 1 + 1 + 1 = 21 tokens.
     """
     if problems is None:
         problems = _enumerate_mixed_counting()
@@ -98,13 +103,55 @@ def generate_mixed_counting(n_samples: int, seq_len: int = 48,
         d, t = random.choice(problems)
         input_tokens = [VOCAB['DOT']] * d + [VOCAB['TEN']] * t
         random.shuffle(input_tokens)
-        tokens = input_tokens + [VOCAB['='], digit_to_token(t), digit_to_token(d)]
+        # Random query: count DOTs or TENs
+        if random.random() < 0.5:
+            query_tok, answer = VOCAB['DOT'], d
+        else:
+            query_tok, answer = VOCAB['TEN'], t
+        tokens = input_tokens + [VOCAB['='], query_tok, digit_to_token(answer)]
         seqs[i] = torch.tensor(_pad_left(tokens, seq_len))
     return seqs
 
 
 # ---------------------------------------------------------------------------
-# Stage 2: Single-Digit Arithmetic (+, -)
+# Stage 2: Combined Counting with Scratchpad (composition)
+# ---------------------------------------------------------------------------
+
+def generate_combined_counting(n_samples: int, seq_len: int = 48,
+                               problems: Optional[List] = None) -> Tensor:
+    """[PAD..., <shuffled DOTs and TENs>, =, DOT, d, TEN, t]
+
+    Composition stage: reuses Stage 1 query tokens as scratchpad cues.
+    The model counts DOTs first (DOT query → d), then TENs (TEN query → t).
+    This explicitly teaches the model to chain two counting operations
+    using the same format it learned in Stage 1.
+
+    Example: 3 DOTs + 2 TENs → DOT TEN DOT TEN DOT = DOT 3 TEN 2
+    Example: 0 DOTs + 4 TENs → TEN TEN TEN TEN = DOT 0 TEN 4
+    Example: 5 DOTs + 0 TENs → DOT DOT DOT DOT DOT = DOT 5 TEN 0
+    Example: 0 DOTs + 0 TENs → = DOT 0 TEN 0
+
+    n_result = 4 (DOT, d, TEN, t — query tokens are process cues).
+    Max length: 9 + 9 + 1 + 4 = 23 tokens.
+    """
+    if problems is None:
+        problems = _enumerate_mixed_counting()
+    seqs = torch.zeros(n_samples, seq_len, dtype=torch.long)
+    for i in range(n_samples):
+        d, t = random.choice(problems)
+        input_tokens = [VOCAB['DOT']] * d + [VOCAB['TEN']] * t
+        random.shuffle(input_tokens)
+        tokens = input_tokens + [
+            VOCAB['='],
+            VOCAB['DOT'], digit_to_token(d),
+            VOCAB['TEN'], digit_to_token(t),
+        ]
+        seqs[i] = torch.tensor(_pad_left(tokens, seq_len))
+    return seqs
+
+
+# ---------------------------------------------------------------------------
+# Stage 3: Single-Digit Arithmetic (+, -)
 # ---------------------------------------------------------------------------
 
 def _enumerate_single_digit() -> List[Tuple]:
@@ -138,7 +185,7 @@ def generate_single_digit(n_samples: int, seq_len: int = 48,
 
 
 # ---------------------------------------------------------------------------
-# Stage 3: Two-Digit ± Single-Digit (bridge)
+# Stage 4: Two-Digit ± Single-Digit (bridge)
 # ---------------------------------------------------------------------------
 
 def _enumerate_two_digit_single() -> List[Tuple]:
@@ -161,7 +208,7 @@ def generate_two_digit_single(n_samples: int, seq_len: int = 48,
     """[PAD..., a1, a2, OP, 0, b, =, r1, r2, r3]  (result always 3 digits).
 
     Second operand zero-padded to match two-digit format for consistency
-    with Stage 4.  Teaches multi-digit I/O while reusing single-digit skill.
+    with Stage 5.  Teaches multi-digit I/O while reusing single-digit skill.
     """
     if problems is None:
         problems = _enumerate_two_digit_single()
@@ -182,7 +229,7 @@ def generate_two_digit_single(n_samples: int, seq_len: int = 48,
 
 
 # ---------------------------------------------------------------------------
-# Stage 4: Two-Digit ± Two-Digit (composition test)
+# Stage 5: Two-Digit ± Two-Digit (composition test)
 # ---------------------------------------------------------------------------
 
 def _enumerate_two_digit() -> List[Tuple]:
@@ -227,10 +274,11 @@ def generate_two_digit(n_samples: int, seq_len: int = 48,
 # ---------------------------------------------------------------------------
 
 STAGE_CONFIG = {
-    1: dict(name='mixed_counting',   enumerate=_enumerate_mixed_counting,   generate=generate_mixed_counting,   n_result=2),
-    2: dict(name='single_digit',     enumerate=_enumerate_single_digit,     generate=generate_single_digit,     n_result=2),
-    3: dict(name='two_digit_single', enumerate=_enumerate_two_digit_single, generate=generate_two_digit_single, n_result=3),
-    4: dict(name='two_digit',        enumerate=_enumerate_two_digit,        generate=generate_two_digit,        n_result=3),
+    1: dict(name='query_counting',    enumerate=_enumerate_mixed_counting,   generate=generate_query_counting,          n_result=1),
+    2: dict(name='combined_counting', enumerate=_enumerate_mixed_counting,   generate=generate_combined_counting,       n_result=4),
+    3: dict(name='single_digit',      enumerate=_enumerate_single_digit,     generate=generate_single_digit,            n_result=2),
+    4: dict(name='two_digit_single',  enumerate=_enumerate_two_digit_single, generate=generate_two_digit_single,        n_result=3),
+    5: dict(name='two_digit',         enumerate=_enumerate_two_digit,        generate=generate_two_digit,               n_result=3),
 }
 
 

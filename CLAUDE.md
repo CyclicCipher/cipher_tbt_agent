@@ -4,7 +4,7 @@
 
 A biologically-inspired AI system targeting the Danganronpa visual novel as an evaluation environment. Originally built on predictive coding (PC), now pivoting to backprop with potential modifications for local-learning-like benefits.
 
-Current focus: **Compositional Arithmetic Curriculum** — Testing whether a staged curriculum teaching composable sub-skills (mixed counting → single-digit +/- → two-digit±single-digit → two-digit±two-digit) enables generalization that direct training cannot. Uses the Mamba3 backbone. See `CONTINUATION.md`.
+Current focus: **Compositional Arithmetic Curriculum** — Testing whether a staged curriculum teaching composable sub-skills (query counting → combined counting → single-digit +/- → two-digit±single-digit → two-digit±two-digit) enables generalization that direct training cannot. Uses the Mamba3 backbone. See `CONTINUATION.md`.
 
 **Naja** (WY chunkwise) is complete and numerically verified (Phase 5a+5b+5c). Ablation testing (Phase 5d) showed all benchmarks are memorization, not generalization (Mistake #42). This motivated the compositionality pivot.
 
@@ -67,8 +67,8 @@ Key files:
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
 
 - `mamba3_block.py` — Mamba3 block implementation (SSD-based, backbone for arithmetic curriculum)
-- `arithmetic_tasks.py` — Task generators for revised 4-stage curriculum (mixed counting, single-digit +/-, bridge, two-digit +/-)
-- `train_arithmetic.py` — Curriculum training script (stages 1-4, curriculum/direct modes, per-token diagnostics)
+- `arithmetic_tasks.py` — Task generators for 5-stage curriculum (query counting, combined counting with scratchpad, single-digit +/-, bridge, two-digit +/-)
+- `train_arithmetic.py` — Curriculum training script (stages 1-5, curriculum/direct modes, per-token diagnostics with train+test breakdown)
 
 ### Archived ePC Variants
 
@@ -142,17 +142,18 @@ python experiments/energy_reasoning/train_jepa.py --stage 1b --profile
 
 The core generalization problem persists across all architectures (JEPA, Naja, Mamba3): models memorize composite tasks instead of learning algorithmic structure. Ablation benchmarks (Mistake #42) confirmed this — 100% train / chance test on every non-trivial task.
 
-The original 12-stage curriculum failed — provided no advantage over direct training. Root causes: early stages trivially memorizable (9-10 problems each), interleaved counting gave the answer away, composition test too small. See `CONTINUATION.md` for full post-mortem.
+The original 12-stage curriculum failed — provided no advantage over direct training. The 4-stage revision also failed — skipped sub-skill scaffolding, removed process supervision, autoregressive output asymmetry caused memorization. See `CONTINUATION.md` for full post-mortem.
 
-**Revised experiment:** 4-stage curriculum on Mamba3 (see `CONTINUATION.md`):
-1. Mixed counting (shuffled DOT/TEN tokens, no interleaving, 100 combinations)
-2. Single-digit +/- (155 problems, 2-digit output)
-3. Two-digit ± single-digit (1,800 problems, bridge to multi-digit)
-4. Two-digit ± two-digit (~12,195 problems, composition test)
+**Current experiment:** 5-stage curriculum on Mamba3 with process supervision and composition cues (see `CONTINUATION.md`):
+1. Query counting — "how many DOTs/TENs?" with confounders (sub-skill, n_result=1)
+2. Combined counting — DOT d TEN t scratchpad (composition, n_result=4)
+3. Single-digit +/- (155 problems, 2-digit output)
+4. Two-digit ± single-digit (1,800 problems, bridge to multi-digit)
+5. Two-digit ± two-digit (~12,195 problems, composition test)
 
-**Key test:** Does curriculum training (stages 1→4) produce better generalization on Stage 4 than direct training on Stage 4 alone?
+**Key test:** Does curriculum training (stages 1→5) produce better generalization on Stage 5 than direct training on Stage 5 alone?
 
-**Curriculum rules:** Stages advance only on ≥95% test accuracy. If a stage fails after max epochs, the curriculum halts. Per-token accuracy diagnostics show which result position is the bottleneck for multi-token stages.
+**Curriculum rules:** Stages advance only on ≥95% test accuracy. If a stage fails after max epochs, the curriculum halts. Per-token accuracy diagnostics show both train and test breakdowns for multi-token stages.
 
 Previous goals (catastrophic forgetting, modular circuits, energy-based reasoning) remain valid but are secondary until the generalization problem is understood.
 
