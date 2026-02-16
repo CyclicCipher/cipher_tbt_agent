@@ -80,7 +80,7 @@ def parse_args():
     # Misc
     p.add_argument('--device', type=str, default='auto')
     p.add_argument('--seed', type=int, default=42)
-    p.add_argument('--print_every', type=int, default=1)
+    p.add_argument('--print_every', type=int, default=10)
 
     args = p.parse_args()
     if args.stage is None and not args.curriculum:
@@ -197,7 +197,7 @@ def train_stage(model, train_loader, test_loader, device, amp_ctx, scaler,
 
         history.append(record)
 
-        if epoch % args.print_every == 0 or epoch == epochs:
+        if epoch % args.print_every == 0 or epoch == 1 or epoch == epochs:
             prev_str = ""
             if prev_loaders:
                 parts = [f"S{s}={record[f'stage{s}_acc']:.2f}"
