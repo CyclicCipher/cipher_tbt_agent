@@ -371,6 +371,9 @@ STAGE_CONFIG = {
 }
 
 
+MIN_PROBLEMS_FOR_SPLIT = 30  # below this, use all problems for both train and test
+
+
 def get_stage_data(stage: int, n_train: int = 5000, n_test: int = 1000,
                    test_fraction: float = 0.2, seq_len: int = 32,
                    seed: int = 42) -> Dict:
@@ -378,6 +381,11 @@ def get_stage_data(stage: int, n_train: int = 5000, n_test: int = 1000,
 
     The problem space is enumerated, shuffled with a fixed seed, then split
     so test operand combinations are *never* seen during training.
+
+    For stages with very few problems (< MIN_PROBLEMS_FOR_SPLIT), ALL
+    problems are used for both train and test.  These foundational stages
+    exist to be overlearned building blocks — the meaningful generalization
+    test happens at later stages.
 
     Returns dict with train_seqs, test_seqs, n_result_tokens, vocab_size,
     n_train_problems, n_test_problems, stage.
@@ -389,9 +397,15 @@ def get_stage_data(stage: int, n_train: int = 5000, n_test: int = 1000,
     shuffled = list(all_problems)
     rng.shuffle(shuffled)
 
-    n_held = max(1, int(len(shuffled) * test_fraction))
-    test_problems = shuffled[:n_held]
-    train_problems = shuffled[n_held:]
+    if len(shuffled) < MIN_PROBLEMS_FOR_SPLIT:
+        # Too few problems for a meaningful held-out split.
+        # Train and test on the full problem set.
+        train_problems = shuffled
+        test_problems = shuffled
+    else:
+        n_held = max(1, int(len(shuffled) * test_fraction))
+        test_problems = shuffled[:n_held]
+        train_problems = shuffled[n_held:]
 
     train_seqs = cfg['generate'](n_train, seq_len=seq_len, problems=train_problems)
     test_seqs = cfg['generate'](n_test, seq_len=seq_len, problems=test_problems)
