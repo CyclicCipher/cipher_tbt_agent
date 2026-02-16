@@ -69,6 +69,8 @@ def parse_args():
     p.add_argument('--grad_clip', type=float, default=1.0)
     p.add_argument('--advance_threshold', type=float, default=0.95,
                    help='Test accuracy to advance in curriculum mode')
+    p.add_argument('--replay_fraction', type=float, default=0.25,
+                   help='Fraction of previous-stage data mixed into current stage (0=off)')
 
     # Output
     p.add_argument('--results_file', type=str, default=None)
@@ -266,13 +268,30 @@ def main():
 
     if args.curriculum:
         print(f"\nCurriculum 1 -> {args.target_stage}  "
-              f"(advance >= {args.advance_threshold})\n")
+              f"(advance >= {args.advance_threshold})"
+              f"  replay={args.replay_fraction}\n")
         prev_loaders = {}
+        prev_train_seqs = []  # accumulate training tensors for replay
 
         for stage in range(1, args.target_stage + 1):
             tr, te, data = make_loaders(stage)
-            print(f"Stage {stage}: {data['n_train_problems']} train / "
-                  f"{data['n_test_problems']} test problems")
+
+            # Experience replay: mix previous-stage samples into train loader
+            if prev_train_seqs and args.replay_fraction > 0:
+                all_prev = torch.cat(prev_train_seqs, dim=0)
+                n_replay = max(1, int(len(data['train_seqs']) * args.replay_fraction))
+                perm = torch.randperm(len(all_prev))[:n_replay]
+                replay_seqs = all_prev[perm]
+                combined = torch.cat([data['train_seqs'], replay_seqs], dim=0)
+                tr = DataLoader(TensorDataset(combined),
+                                batch_size=args.batch_size, shuffle=True,
+                                drop_last=True)
+                print(f"Stage {stage}: {data['n_train_problems']} train / "
+                      f"{data['n_test_problems']} test problems"
+                      f" (+{n_replay} replay)")
+            else:
+                print(f"Stage {stage}: {data['n_train_problems']} train / "
+                      f"{data['n_test_problems']} test problems")
 
             # Print a few sample sequences for sanity
             for j in range(min(3, len(data['train_seqs']))):
@@ -285,6 +304,7 @@ def main():
             all_history.extend(history)
 
             prev_loaders[stage] = (te, data['n_result_tokens'])
+            prev_train_seqs.append(data['train_seqs'])
             print()
     else:
         stage = args.stage
