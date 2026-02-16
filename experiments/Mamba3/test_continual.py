@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-Test continual learning methods on the arithmetic curriculum.
+Test continual learning on the arithmetic curriculum.
 
-Runs 3 configurations to Stage 6, comparing catastrophic forgetting:
-  1. diff_lr  -- Differential learning rates by layer
-  2. der      -- DER++ logit matching
-  3. both     -- diff_lr + DER++ combined
+Uses differential learning rates (lower LR for earlier layers) as the
+primary continual learning method. Replay buffer provides prior-stage
+examples.
 
-EWC was tested and found counterproductive: its quadratic penalty makes
-the model rigid after a few stages, causing training to fail. Removed.
+EWC and DER++ were both tested and found counterproductive:
+  - EWC: quadratic penalty makes the model rigid after a few stages.
+  - DER++: logit matching loss fights task learning (failed Stage 4,
+    a task that otherwise passes in 1 epoch). Also 3x slower.
 
 Usage:
   python experiments/Mamba3/test_continual.py                 # Full test (GPU)
@@ -35,26 +36,19 @@ from experiments.Mamba3.mamba3_block import Mamba3Config, Mamba3LM
 from experiments.Mamba3.arithmetic_tasks import (
     VOCAB_SIZE, get_stage_data, decode_tokens,
 )
-from experiments.Mamba3.continual import DERPlusPlus, build_layer_lr_groups
+from experiments.Mamba3.continual import build_layer_lr_groups
 from experiments.Mamba3.train_arithmetic import (
     train_stage, evaluate_result_accuracy, make_lr_lambda,
 )
 
 
 # ---------------------------------------------------------------------------
-# Configurations
+# Run
 # ---------------------------------------------------------------------------
 
-CONFIGS = {
-    'diff_lr': dict(diff_lr=True, ewc=False, der=False),
-    'der':     dict(diff_lr=False, ewc=False, der=True),
-    'both':    dict(diff_lr=True, ewc=False, der=True),
-}
-
-
-def make_args(overrides, base_args):
-    """Create a SimpleNamespace with training args, applying overrides."""
-    d = dict(
+def run_experiment(base_args, device):
+    """Run curriculum with diff_lr. Returns dict of results."""
+    args = SimpleNamespace(
         lr=base_args.lr,
         weight_decay=0.01,
         warmup_epochs=4,
@@ -63,26 +57,14 @@ def make_args(overrides, base_args):
         advance_threshold=0.95,
         replay_fraction=0.25,
         print_every=base_args.print_every,
-        # CL defaults
-        diff_lr=False,
+        diff_lr=True,
         lr_decay=base_args.lr_decay,
         ewc=False,
         ewc_lambda=0.0,
         der=False,
-        der_alpha=base_args.der_alpha,
-        der_samples=base_args.der_samples,
+        der_alpha=0.0,
+        der_samples=0,
     )
-    d.update(overrides)
-    return SimpleNamespace(**d)
-
-
-# ---------------------------------------------------------------------------
-# Single experiment run
-# ---------------------------------------------------------------------------
-
-def run_experiment(name, config_overrides, base_args, device):
-    """Run one curriculum experiment. Returns dict of results."""
-    args = make_args(config_overrides, base_args)
 
     torch.manual_seed(base_args.seed)
 
@@ -97,9 +79,6 @@ def run_experiment(name, config_overrides, base_args, device):
     scaler = torch.amp.GradScaler('cuda') if use_amp else None
     amp_ctx = (lambda: torch.amp.autocast('cuda', dtype=torch.float16)) if use_amp else nullcontext
 
-    # CL objects
-    der_obj = DERPlusPlus(alpha=args.der_alpha, n_snapshot=args.der_samples) if args.der else None
-
     def make_loaders(stage):
         data = get_stage_data(stage, n_train=base_args.n_train,
                               n_test=base_args.n_test,
@@ -111,19 +90,8 @@ def run_experiment(name, config_overrides, base_args, device):
         return te, data
 
     def make_param_groups():
-        if args.diff_lr:
-            return build_layer_lr_groups(model, args.lr, args.lr_decay,
-                                         args.weight_decay)
-        return None
-
-    tags = []
-    if args.diff_lr: tags.append('diff_lr')
-    if args.der: tags.append('der')
-    tag_str = '+'.join(tags) if tags else 'none'
-
-    print(f"\n{'='*60}")
-    print(f"  Config: {name} ({tag_str})")
-    print(f"{'='*60}")
+        return build_layer_lr_groups(model, args.lr, args.lr_decay,
+                                     args.weight_decay)
 
     prev_loaders = {}
     prev_train_seqs = []
@@ -150,7 +118,7 @@ def run_experiment(name, config_overrides, base_args, device):
             data['n_result_tokens'], base_args.epochs, args,
             stage_label=f"S{stage}", prev_loaders=prev_loaders,
             prev_train_seqs=prev_train_seqs,
-            ewc=None, der=der_obj, param_groups=make_param_groups())
+            ewc=None, der=None, param_groups=make_param_groups())
         all_history.extend(history)
 
         if not passed:
@@ -163,12 +131,6 @@ def run_experiment(name, config_overrides, base_args, device):
         prev_train_seqs.append(data['train_seqs'])
         last_stage = stage
 
-        # Register with CL methods
-        if der_obj is not None:
-            der_obj.register_stage(model, data['train_seqs'],
-                                   device, amp_ctx,
-                                   data['n_result_tokens'])
-
     elapsed = time.perf_counter() - t_start
     last = all_history[-1] if all_history else {}
 
@@ -180,7 +142,6 @@ def run_experiment(name, config_overrides, base_args, device):
             prev_accs[s] = last[key]
 
     return dict(
-        name=name,
         last_stage=last_stage,
         passed=last_stage == base_args.target_stage,
         train_acc=last.get('train_acc', 0),
@@ -198,9 +159,9 @@ def run_experiment(name, config_overrides, base_args, device):
 # ---------------------------------------------------------------------------
 
 def main():
-    p = argparse.ArgumentParser(description='Test CL methods on arithmetic curriculum')
+    p = argparse.ArgumentParser(description='Test curriculum with diff_lr on arithmetic')
     p.add_argument('--target_stage', type=int, default=6)
-    p.add_argument('--epochs', type=int, default=100)
+    p.add_argument('--epochs', type=int, default=50)
     p.add_argument('--seed', type=int, default=42)
     p.add_argument('--data_seed', type=int, default=42)
     p.add_argument('--d_model', type=int, default=128)
@@ -213,14 +174,8 @@ def main():
     p.add_argument('--seq_len', type=int, default=48)
     p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--lr_decay', type=float, default=0.5)
-    p.add_argument('--der_alpha', type=float, default=0.5)
-    p.add_argument('--der_samples', type=int, default=500)
     p.add_argument('--print_every', type=int, default=10)
     p.add_argument('--device', type=str, default='auto')
-    p.add_argument('--configs', type=str, nargs='+',
-                   choices=list(CONFIGS.keys()),
-                   default=list(CONFIGS.keys()),
-                   help='Which configs to test (default: all)')
     base_args = p.parse_args()
 
     if base_args.device == 'auto':
@@ -234,38 +189,23 @@ def main():
                        n_layer=base_args.n_layer, headdim=base_args.headdim),
                        VOCAB_SIZE).parameters())
 
-    print(f"Continual Learning Comparison")
+    print(f"Arithmetic Curriculum (diff_lr + replay)")
     print(f"  Model: {n_params:,} params | {device}")
     print(f"  Target: Stage {base_args.target_stage} | "
           f"{base_args.epochs} epochs/stage | seed={base_args.seed}")
-    print(f"  Configs: {', '.join(base_args.configs)}")
 
-    results = []
-    for cfg_name in base_args.configs:
-        result = run_experiment(cfg_name, CONFIGS[cfg_name], base_args, device)
-        results.append(result)
+    result = run_experiment(base_args, device)
 
-    # --- Comparison table ---
-    print(f"\n{'='*70}")
-    print(f"  RESULTS COMPARISON (target=Stage {base_args.target_stage})")
-    print(f"{'='*70}")
-    print(f"  {'Config':<10} {'Last':>5} {'Train':>7} {'Test':>7} "
-          f"{'Per-Token':<15} {'Time':>6} {'Epochs':>6}")
-    print(f"  {'-'*10} {'-'*5} {'-'*7} {'-'*7} {'-'*15} {'-'*6} {'-'*6}")
+    # --- Summary ---
+    print(f"\n{'='*60}")
+    pt_str = '|'.join(f'{x:.2f}' for x in result['test_per_token']) if result['test_per_token'] else 'n/a'
+    status = 'PASS' if result['passed'] else f"FAILED at Stage {result['last_stage']}"
+    print(f"  {status}  train={result['train_acc']:.4f}  test={result['test_acc']:.4f}  "
+          f"per-token=[{pt_str}]  {result['elapsed']:.0f}s  {result['n_epochs']} epochs")
 
-    for r in results:
-        pt_str = '|'.join(f'{x:.2f}' for x in r['test_per_token']) if r['test_per_token'] else 'n/a'
-        status = 'PASS' if r['passed'] else f"S{r['last_stage']}"
-        print(f"  {r['name']:<10} {status:>5} {r['train_acc']:>7.4f} "
-              f"{r['test_acc']:>7.4f} [{pt_str:^13}] "
-              f"{r['elapsed']:>5.0f}s {r['n_epochs']:>6d}")
-
-    # Prev-stage stability for the last recorded epoch
-    print(f"\n  Previous-stage accuracy (last epoch):")
-    for r in results:
-        if r['prev_accs']:
-            parts = [f"S{s}={a:.2f}" for s, a in sorted(r['prev_accs'].items())]
-            print(f"    {r['name']:<10} {', '.join(parts)}")
+    if result['prev_accs']:
+        parts = [f"S{s}={a:.2f}" for s, a in sorted(result['prev_accs'].items())]
+        print(f"  Previous stages: {', '.join(parts)}")
 
     print()
 
