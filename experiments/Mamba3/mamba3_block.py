@@ -45,6 +45,9 @@ class Mamba3Config:
     d_conv: int = 4          # convolution kernel size (if use_conv=True)
     use_pope: bool = True    # PoPE (Polar Positional Embeddings) instead of RoPE
     mimo_rank: int = 1       # r=1 is SISO (default), r>1 is MIMO
+    stable_ssm: bool = False # StableSSM "best" reparameterization for A-matrix
+                             # (Wang & Li 2024, arXiv:2311.14495)
+    use_triton: bool = False # Use Triton-accelerated SSD kernels when available
 
     def __post_init__(self):
         self.d_inner = self.expand * self.d_model
@@ -120,6 +123,26 @@ def apply_pope(x: Tensor, theta: Tensor, delta: Tensor) -> Tensor:
 # ---------------------------------------------------------------------------
 # SSD core with trapezoidal discretization
 # ---------------------------------------------------------------------------
+
+def stable_log_decay(w: Tensor) -> Tensor:
+    """StableSSM 'best' reparameterization in log-space.
+
+    Maps unconstrained w to log-space decay compatible with the SSD core.
+    Ref: Wang & Li 2024, "StableSSM" (arXiv:2311.14495, ICML 2024).
+
+    The "best" stable reparameterization:
+        decay = 1 - 1/(w² + 0.5)
+
+    For |w| > sqrt(0.5) ≈ 0.707: decay ∈ (0, 1) — valid positive decay.
+    For smaller |w|: decay ≤ 0 — clamped to avoid log of non-positive.
+
+    Returns log(decay) (negative), suitable for segsum/exp in SSD.
+    """
+    decay = 1.0 - 1.0 / (w * w + 0.5)
+    # Clamp to small positive value to keep log defined
+    decay = decay.clamp(min=1e-6)
+    return torch.log(decay)
+
 
 def segsum(x: Tensor) -> Tensor:
     """Stable segment sum in log-space (same as Mamba2).
@@ -326,9 +349,10 @@ class Mamba3Mixer(nn.Module):
         d_in_proj = 2 * d + 2 * d_bc * r + config.nheads + n // 2 + 1
         self.in_proj = nn.Linear(config.d_model, d_in_proj, bias=False)
 
-        # BC bias (learnable, channel-wise)
-        self.B_bias = nn.Parameter(torch.zeros(d_bc * r))
-        self.C_bias = nn.Parameter(torch.zeros(d_bc * r))
+        # BC bias (learnable, channel-wise, applied AFTER QK-norm)
+        # Paper Section 3.4: "initialized to all ones"
+        self.B_bias = nn.Parameter(torch.ones(d_bc * r))
+        self.C_bias = nn.Parameter(torch.ones(d_bc * r))
 
         # QK-norm on B, C (applied on raw features before rotation/polar encoding)
         self.B_norm = RMSNorm(d_bc * r)
@@ -340,12 +364,11 @@ class Mamba3Mixer(nn.Module):
             self.pope_delta_B = nn.Parameter(torch.zeros(d_bc))
             self.pope_delta_C = nn.Parameter(torch.zeros(d_bc))
 
-        # Optional short convolution
+        # Optional short convolution (on x only; Mamba3 removes this by default)
         if config.use_conv:
-            conv_dim = d + 2 * n
             self.conv1d = nn.Conv1d(
-                in_channels=conv_dim, out_channels=conv_dim,
-                kernel_size=config.d_conv, groups=conv_dim,
+                in_channels=d, out_channels=d,
+                kernel_size=config.d_conv, groups=d,
                 padding=config.d_conv - 1,
             )
         else:
@@ -353,7 +376,14 @@ class Mamba3Mixer(nn.Module):
 
         # SSM parameters
         self.dt_bias = nn.Parameter(torch.empty(config.nheads))
-        self.A_log = nn.Parameter(torch.empty(config.nheads))
+        if config.stable_ssm:
+            # StableSSM "best" reparameterization (Wang & Li 2024):
+            #   decay = 1 - 1/(w^2 + 0.5)  where w = A_raw * dt
+            # Unconstrained A_raw; negative values give decay < 1.
+            self.A_raw = nn.Parameter(torch.empty(config.nheads))
+        else:
+            # Standard Mamba parameterization: A = -exp(A_log)
+            self.A_log = nn.Parameter(torch.empty(config.nheads))
         self.D = nn.Parameter(torch.empty(config.nheads))
 
         # MIMO projections
@@ -369,7 +399,12 @@ class Mamba3Mixer(nn.Module):
 
     def _init_parameters(self):
         cfg = self.config
-        nn.init.uniform_(self.A_log, -5.0, -1.0)
+        if cfg.stable_ssm:
+            # Initialize A_raw so that initial decay ≈ exp(-exp(uniform(-5,-1))*dt)
+            # With typical dt~1: w~-2 gives decay≈0.78, w~-1 gives decay≈0.33
+            nn.init.uniform_(self.A_raw, -3.0, -0.5)
+        else:
+            nn.init.uniform_(self.A_log, -5.0, -1.0)
         nn.init.ones_(self.D)
         nn.init.uniform_(self.dt_bias, -1.0, 1.0)
         nn.init.xavier_uniform_(self.in_proj.weight)
@@ -388,7 +423,11 @@ class Mamba3Mixer(nn.Module):
         batch, seqlen, _ = u.shape
         r = cfg.mimo_rank
 
-        A = -torch.exp(self.A_log)  # (nheads,)
+        # A-matrix / decay computation
+        if cfg.stable_ssm:
+            A_raw = self.A_raw  # (nheads,) unconstrained
+        else:
+            A_raw = -torch.exp(self.A_log)  # (nheads,) guaranteed negative
 
         # Project input
         d_bc = cfg.d_state // 2 if cfg.use_pope else cfg.d_state
@@ -404,16 +443,17 @@ class Mamba3Mixer(nn.Module):
         lam = torch.sigmoid(lam_logit)       # (batch, seqlen, 1)
 
         # Optional convolution on x
+        # Paper Section 3.4: trapezoidal discretization eliminates the need
+        # for "the original short causal convolution and its accompanying
+        # activation function."  No SiLU on x when conv is off.
         if self.conv1d is not None:
             x = F.silu(
                 self.conv1d(x.transpose(1, 2)).transpose(1, 2)[:, :seqlen, :]
             )
-        else:
-            x = F.silu(x)
 
-        # Add BC bias + QK-norm
-        B_raw = self.B_norm(B_raw + self.B_bias)
-        C_raw = self.C_norm(C_raw + self.C_bias)
+        # QK-norm then BC bias (paper: "bias ... after its normalization")
+        B_raw = self.B_norm(B_raw) + self.B_bias
+        C_raw = self.C_norm(C_raw) + self.C_bias
 
         # Accumulate theta across positions for positional encoding
         theta_cumsum = torch.cumsum(theta, dim=1)
@@ -444,7 +484,15 @@ class Mamba3Mixer(nn.Module):
 
         # Reshape for multi-head
         x = x.reshape(batch, seqlen, cfg.nheads, cfg.headdim)
-        x_dt = x * dt.unsqueeze(-1)  # scale by dt
+        dt_exp = dt.unsqueeze(-1)  # (batch, seqlen, nheads, 1) for broadcasting
+        x_dt = x * dt_exp  # scale by current dt
+
+        # Log-space decay: A_dt < 0 so exp(A_dt) ∈ (0, 1)
+        if cfg.stable_ssm:
+            # StableSSM: decay = 1 - 1/((A_raw*dt)² + 0.5), in log-space
+            A_dt = stable_log_decay(A_raw * dt)  # (batch, seqlen, nheads)
+        else:
+            A_dt = A_raw * dt  # standard: A_raw = -exp(A_log) < 0
 
         if r > 1:
             # --- MIMO path: sequential recurrence (reference implementation) ---
@@ -457,7 +505,7 @@ class Mamba3Mixer(nn.Module):
 
             y = mamba3_mimo_recurrence(
                 x_write, x_write_prev,
-                A * dt,
+                A_dt,
                 B, B_prev, C,
                 lam_expand,
             )
@@ -469,15 +517,27 @@ class Mamba3Mixer(nn.Module):
             y = y.reshape(batch, seqlen, cfg.nheads, cfg.headdim)
         else:
             # --- SISO path: SSD (fast, chunkwise parallel) ---
-            x_prev = F.pad(x_dt[:, :-1], (0, 0, 0, 0, 1, 0))
+            # Paper Eq. 4: β_t = (1-λ_t) * Δ_t * exp(Δ_t A_t)
+            # Both γ_t and β_t use the CURRENT Δ_t, so x_prev must be
+            # shifted raw x scaled by current dt (not previous dt).
+            x_raw_prev = F.pad(x[:, :-1], (0, 0, 0, 0, 1, 0))
+            x_prev = x_raw_prev * dt_exp  # current dt applied to previous x
             B_prev = F.pad(B[:, :-1].unsqueeze(2), (0, 0, 0, 0, 1, 0))
             B_curr = B.unsqueeze(2)
             C_curr = C.unsqueeze(2)
             lam_expand = lam.unsqueeze(-1)  # (batch, seqlen, 1, 1)
 
-            y, _ = ssd_trapz(
+            _ssd_fn = ssd_trapz
+            if cfg.use_triton:
+                try:
+                    from .triton_ssd import ssd_trapz_triton
+                    _ssd_fn = ssd_trapz_triton
+                except ImportError:
+                    pass  # fall back to PyTorch
+
+            y, _ = _ssd_fn(
                 x_dt, x_prev,
-                A * dt,
+                A_dt,
                 B_curr, B_prev,
                 C_curr, lam_expand,
                 cfg.chunk_size,

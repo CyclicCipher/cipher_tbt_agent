@@ -158,6 +158,25 @@ Without these, the model sees `3 + 4 WORK 0 7` with no reason to believe 7 follo
 
 ---
 
+### #45. Four Mamba3 Implementation Bugs Found by Paper Cross-Reference (RESOLVED)
+
+**Date:** 2026-02-17
+
+Cross-referencing `mamba3_block.py` against the Mamba-3 paper (OpenReview HwCvaJOiCj) found four bugs:
+
+| Bug | Paper says | Our code did | Impact |
+|-----|-----------|-------------|--------|
+| BC bias init | "initialized to all ones" (§3.4) | `torch.zeros()` | Bias contributes ~0.77 ppl; wrong init undermines it |
+| BC bias order | "bias ... after its normalization" (§3.4) | `norm(x + bias)` (bias before norm) | RMSNorm can suppress the bias signal |
+| Trapezoidal dt | β_t uses current Δ_t (Eq. 4) | `shifted(x * dt)` → used Δ_{t-1} | Systematic error in trapezoidal correction with data-dependent dt |
+| SiLU on x | "eliminating ... activation function" (§3.4, Fig. 4) | `F.silu(x)` when conv is off | Extra nonlinearity not in paper; only gate Z should have SiLU |
+
+**Root cause:** Original implementation was based on paper equations without the architectural details in Section 3.4 and Figure 4. The trapezoidal dt bug is particularly subtle — both forward terms use the same Δ_t, not each position's own dt.
+
+**Lesson:** When implementing a paper, don't just get the equations right — get the architectural details right too. Bias initialization, ordering of normalization vs bias, presence/absence of activation functions — these "minor" details compound. Cross-reference against Figure 4 (architecture diagram), not just the math.
+
+---
+
 ### #43. Scratchpad Query Type Placed in Output, Not Input (RESOLVED)
 
 **Date:** 2026-02-16
@@ -245,3 +264,4 @@ Below are condensed lessons from resolved/archived mistakes. Full debugging narr
 - 2026-02-15: #41 (ablation evaluation leak: answer in sequence, trivial copy instead of genuine prediction)
 - 2026-02-16: #42 (ablation benchmarks are all memorization; 5K samples + 50 epochs + 1.26M params = no generalization)
 - 2026-02-16: #44 (single-digit addition treated as fact stage; missing prerequisites between counting and arithmetic; category theory constraint on morphism well-definedness)
+- 2026-02-17: #45 (four Mamba3 bugs: BC bias init/order, trapezoidal dt mismatch, SiLU on x without conv)

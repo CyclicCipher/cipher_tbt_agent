@@ -106,6 +106,8 @@ def parse_args():
     p.add_argument('--n_layer', type=int, default=4)
     p.add_argument('--headdim', type=int, default=64)
     p.add_argument('--chunk_size', type=int, default=16)
+    p.add_argument('--stable_ssm', action='store_true',
+                   help='Use StableSSM A-matrix reparameterization (Wang & Li 2024)')
 
     # Data
     p.add_argument('--n_train', type=int, default=5000)
@@ -442,6 +444,7 @@ def main():
         d_model=args.d_model, d_state=args.d_state,
         n_layer=args.n_layer, headdim=args.headdim,
         chunk_size=args.chunk_size,
+        stable_ssm=args.stable_ssm,
     )
     model = Mamba3LM(config, VOCAB_SIZE).to(device)
     n_params = sum(p.numel() for p in model.parameters())
