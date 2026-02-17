@@ -159,6 +159,10 @@ def parse_args():
     p.add_argument('--no_resume', action='store_true',
                    help='Start fresh even if checkpoints exist')
 
+    # Loss
+    p.add_argument('--result_only_loss', action='store_true',
+                   help='Compute loss only on work-area tokens (after WORK marker)')
+
     # Performance
     p.add_argument('--no_amp', action='store_true')
     p.add_argument('--compile', action='store_true')
@@ -175,6 +179,44 @@ def parse_args():
     if args.stage is None and not args.curriculum:
         args.stage = 1
     return args
+
+
+# ---------------------------------------------------------------------------
+# Result-only loss: mask to work-area tokens only
+# ---------------------------------------------------------------------------
+
+WORK_TOKEN_ID = 1  # WORK is always token 1 (see Vocab.__init__)
+
+
+def work_area_loss(logits: torch.Tensor, seqs: torch.Tensor) -> torch.Tensor:
+    """Cross-entropy loss restricted to tokens after the WORK marker.
+
+    Standard full-sequence loss wastes gradient signal on the input tokens
+    (random DOT/TEN shuffles = irreducible noise). This focuses 100% of
+    gradient on the actual task output.
+
+    Uses next-token prediction: logits[:, t] predicts seqs[:, t+1].
+    We want loss on work-area target positions (after WORK).
+    """
+    B, L, V = logits.shape
+
+    # Build mask: 1 for positions AFTER the WORK token
+    # WORK is at some position w; we want loss on targets at positions w+1..L-1
+    # In next-token format: target[t] = seqs[t+1], predicted by logits[t]
+    # So we need mask on logit positions w..L-2 (which predict seqs[w+1..L-1])
+    work_pos = (seqs == WORK_TOKEN_ID).int().argmax(dim=1)  # (B,) first WORK pos
+    positions = torch.arange(L - 1, device=seqs.device).unsqueeze(0)  # (1, L-1)
+    mask = (positions >= work_pos.unsqueeze(1)).float()  # (B, L-1)
+
+    # Per-token cross-entropy (no reduction)
+    per_token = F.cross_entropy(
+        logits[:, :-1].reshape(-1, V),
+        seqs[:, 1:].reshape(-1),
+        reduction='none',
+    ).reshape(B, L - 1)
+
+    # Masked average
+    return (per_token * mask).sum() / mask.sum().clamp(min=1)
 
 
 # ---------------------------------------------------------------------------
@@ -330,11 +372,14 @@ def train_stage(model, train_seqs, test_loader, device, amp_ctx, scaler,
             seqs = seqs.to(device)
             with amp_ctx():
                 logits = model(seqs)
-                loss = F.cross_entropy(
-                    logits[:, :-1].reshape(-1, VOCAB_SIZE),
-                    seqs[:, 1:].reshape(-1),
-                    ignore_index=0,
-                )
+                if args.result_only_loss:
+                    loss = work_area_loss(logits, seqs)
+                else:
+                    loss = F.cross_entropy(
+                        logits[:, :-1].reshape(-1, VOCAB_SIZE),
+                        seqs[:, 1:].reshape(-1),
+                        ignore_index=0,
+                    )
 
             # Continual learning penalties
             if ewc is not None:
@@ -477,6 +522,8 @@ def main():
 
     if args.reverse_fraction > 0:
         print(f"Reverse problems: {args.reverse_fraction:.0%} of arithmetic stage samples")
+    if args.result_only_loss:
+        print("Loss: work-area tokens only (after WORK marker)")
 
     # --- CL method setup ---
     ewc_obj = EWC(lambda_ewc=args.ewc_lambda) if args.ewc else None
