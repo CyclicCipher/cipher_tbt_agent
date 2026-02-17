@@ -365,6 +365,102 @@ The CTKG is model-agnostic. It produces curricula (ordered generators with repla
 
 ---
 
+## Epiplexity: Measuring What a Stage Teaches
+
+**Reference:** Alemi (2025), "Epiplexity and the Solomonoff Prior."
+
+**Epiplexity** (S_preq) = area under the loss curve above the final loss. Formally, for a training run of T epochs with losses l_1, ..., l_T and final loss l_T:
+
+```
+S_preq = sum_{i=1}^{T} (l_i - l_T)
+```
+
+This measures the **structural information** the model extracted from the data during training. High S_preq means the model slowly discovered rich compositional structure. Low S_preq means the stage was trivially memorizable or contained little learnable structure.
+
+### Why This Matters for the CTKG
+
+Each node in the graph should carry an empirical epiplexity score from training runs. This gives a diagnostic beyond pass/fail (test accuracy):
+
+| S_preq | Interpretation | Action |
+|--------|---------------|--------|
+| High (slowly declining loss) | Stage teaches rich structure | Good — this is where generalization comes from |
+| Near-zero (rapid convergence) | Stage is trivial or memorizable | Warning — model may pass without learning reusable circuits |
+| High final loss (never converges) | Stage is too hard or missing prereqs | Error — check prerequisites in graph |
+
+**The "too easy" trap:** A stage with low S_preq can pass at 95% test accuracy while contributing nothing to downstream composition. Stage 3 (successor, 20 problems) is a likely candidate — the model may memorize all 20 facts without internalizing ordinality. Epiplexity catches this: if S_preq ≈ 0, the stage should be redesigned to require actual pattern learning (more combinatorial complexity, or compositional structure with earlier stages).
+
+**Relation to curriculum compiler:** The `validate()` method can flag stages where empirical S_preq is below a threshold, suggesting the stage is too simple to teach what it claims. This is a data-driven complement to the structural (graph-based) validation.
+
+### Updated Data Model
+
+```python
+@dataclass
+class Concept:
+    # ... existing fields ...
+
+    # Epiplexity diagnostics (populated after training runs)
+    empirical_epiplexity: Optional[float] = None   # S_preq from training
+    epiplexity_threshold: float = 1.0              # minimum expected S_preq
+```
+
+---
+
+## Factorization Order as a Design Variable
+
+**Reference:** Alemi (2025) — Chess factorization experiment.
+
+The **order in which tokens appear** in a sequence affects what representations the model learns. Same data, different ordering → different epiplexity → different OOD transfer.
+
+The chess experiment showed:
+- **Forward factorization** (moves → board): easy, mechanical application. Low epiplexity.
+- **Reverse factorization** (board → moves): hard, requires induction. Higher epiplexity AND better OOD transfer to new positions.
+
+### Implications for Scratchpad Design
+
+Each scratchpad format is a **factorization choice**. The question is: does this ordering force the model to build rich representations, or does it allow mechanical application?
+
+**Current forward factorization (Stage 3):**
+```
+3 + 4 WORK 0 7       — see operands, produce result
+```
+The model applies the operation mechanically. Each output token follows deterministically from the inputs and the operation rule.
+
+**Reverse factorization (Stage 3):**
+```
+? + 4 = 0 7 WORK 0 3   — see result + one operand, find the missing one
+3 + ? = 0 7 WORK 0 4   — same, other operand missing
+```
+The model must **induct** the missing operand from the result. This requires understanding the inverse relationship — what addition MEANS, not just how to apply it.
+
+### Design Principle
+
+For each concept node in the graph, consider both forward and reverse factorizations:
+- **Forward:** given inputs, produce outputs (application)
+- **Reverse:** given outputs (and partial inputs), produce missing inputs (induction)
+
+Training on both forces bidirectional understanding. The graph should track which factorizations are available for each node.
+
+### Updated Data Model
+
+```python
+@dataclass
+class Concept:
+    # ... existing fields ...
+
+    # Factorization support
+    supports_reverse: bool = False                 # can this concept be presented in reverse?
+    reverse_generator_class: Optional[str] = None  # generator for reverse problems
+```
+
+```python
+@dataclass
+class Prerequisite:
+    # ... existing fields ...
+    invertible: bool = False    # is this morphism reversible?
+```
+
+---
+
 ## Open Questions
 
 1. **How to represent "variable n_result"?** Stages 5-8 have variable-length scratchpads. The `problems_to_tensors()` function pads to seq_len, but the graph needs to know the maximum length for validation.
@@ -376,6 +472,10 @@ The CTKG is model-agnostic. It produces curricula (ordered generators with repla
 4. **Cross-domain functors:** The functor concept is elegant but speculative. Do we need it for the arithmetic domain, or is it only relevant when we add logic/language domains?
 
 5. **Engram-style prefetching:** The retrieval mechanism needs to be fast enough for inference. Graph traversal is O(V+E), which is fine for small graphs. For large graphs (thousands of concepts), we may need indexing.
+
+6. **Epiplexity threshold calibration:** What S_preq value indicates "too easy"? Likely domain-dependent. Need empirical data from initial curriculum runs to set thresholds.
+
+7. **Reverse factorization coverage:** Which stages benefit from reverse problems? Arithmetic stages (3-5) have natural inverses. Counting stages (1-2) don't have clean reverses (reconstruction is ambiguous). Should reverse coverage be tracked per-node in the graph?
 
 ---
 
@@ -390,3 +490,7 @@ The CTKG is model-agnostic. It produces curricula (ordered generators with repla
 4. **Types are contracts.** The input/output types on nodes and edges are contracts that the scratchpad format must satisfy. If the types don't match, the scratchpad is wrong.
 
 5. **Small atomic, large composite.** Atomic nodes should have <20 entries. Large collections are a signal to decompose into sub-graphs with compositional structure.
+
+6. **Measure, don't assume.** Track epiplexity (S_preq) per stage. A stage that passes doesn't necessarily teach structure — it might just be memorizable. Epiplexity distinguishes "learned to apply" from "learned to look up."
+
+7. **Both directions.** When a concept has a natural inverse, train on both forward and reverse factorizations. Reverse problems force induction, which builds richer representations than mechanical forward application alone.

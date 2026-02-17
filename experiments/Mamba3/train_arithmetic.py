@@ -14,6 +14,15 @@ Stages (via scratchpad framework):
   4: Two-digit ± single-digit — column scratchpad (n_result=21)
   5: Two-digit ± two-digit — column scratchpad (n_result=21)
 
+Diagnostics:
+  Epiplexity (S_preq): area under loss curve above final loss, per stage.
+    High S_preq = rich structure learned. Low S_preq = trivially memorizable.
+    Ref: Alemi (2025) "Epiplexity and the Solomonoff Prior"
+
+  Reverse problems (--reverse_fraction): mix in problems where one operand is
+    missing and must be inducted from the result. Forces bidirectional understanding.
+    Stage 3 only for now. Ref: Alemi (2025), factorization order experiment.
+
 See CONTINUATION.md for experimental design.
 Do NOT run full training on CPU (Mistake #36).
 """
@@ -51,18 +60,21 @@ def _build_vocab():
     for d in range(10): v.add(str(d))   # 4-13
     v.add('+'); v.add('-'); v.add('=')   # 14-16
     v.add('DOT'); v.add('TEN')          # 17-18
+    v.add('?')                          # 19  missing operand (reverse problems)
     return v
 
 VOCAB = _build_vocab()
 VOCAB_SIZE = len(VOCAB)
 
-GENERATORS = {
-    1: QueryCountingGenerator(),
-    2: CombinedCountingGenerator(),
-    3: SingleDigitArithmeticGenerator(),
-    4: TwoDigitSingleArithmeticGenerator(),
-    5: TwoDigitArithmeticGenerator(),
-}
+def _build_generators(reverse_fraction=0.0):
+    """Build stage generators. reverse_fraction applies to arithmetic stages."""
+    return {
+        1: QueryCountingGenerator(),
+        2: CombinedCountingGenerator(),
+        3: SingleDigitArithmeticGenerator(reverse_fraction=reverse_fraction),
+        4: TwoDigitSingleArithmeticGenerator(),
+        5: TwoDigitArithmeticGenerator(),
+    }
 
 
 def decode_tokens(tokens):
@@ -113,6 +125,8 @@ def parse_args():
                    help='Test accuracy to advance in curriculum mode')
     p.add_argument('--replay_fraction', type=float, default=0.25,
                    help='Fraction of previous-stage data mixed into current stage (0=off)')
+    p.add_argument('--reverse_fraction', type=float, default=0.0,
+                   help='Fraction of reverse problems in arithmetic stages (0=off, 0.3=30%%)')
 
     # Continual learning
     p.add_argument('--diff_lr', action='store_true',
@@ -294,6 +308,7 @@ def train_stage(model, train_seqs, test_loader, device, amp_ctx, scaler,
         optimizer, make_lr_lambda(args.warmup_epochs, epochs))
 
     history = []
+    epoch_losses = []  # for epiplexity computation
     passed = False
     for epoch in range(1, epochs + 1):
         model.train()
@@ -338,6 +353,7 @@ def train_stage(model, train_seqs, test_loader, device, amp_ctx, scaler,
 
         scheduler.step()
         avg_loss = epoch_loss / max(n_batches, 1)
+        epoch_losses.append(avg_loss)
 
         train_result = evaluate_result_accuracy(
             model, train_loader, device, amp_ctx, n_result_tokens)
@@ -389,6 +405,23 @@ def train_stage(model, train_seqs, test_loader, device, amp_ctx, scaler,
             passed = True
             break
 
+    # Epiplexity: area under loss curve above final loss
+    # S_preq = sum(l_i - l_final) for all epochs
+    # High S_preq = model slowly extracted rich structure (good)
+    # Low S_preq = stage trivially memorizable or too simple (warning)
+    # Ref: Alemi (2025) "Epiplexity and the Solomonoff Prior"
+    if epoch_losses:
+        l_final = epoch_losses[-1]
+        epiplexity = sum(l - l_final for l in epoch_losses)
+        n_epochs_run = len(epoch_losses)
+        print(f"  [{stage_label}] Epiplexity: S_preq={epiplexity:.2f}  "
+              f"(final_loss={l_final:.4f}, {n_epochs_run} epochs)")
+        # Attach to last history record for downstream analysis
+        if history:
+            history[-1]['epiplexity'] = round(epiplexity, 4)
+            history[-1]['final_loss'] = round(l_final, 4)
+            history[-1]['n_epochs_run'] = n_epochs_run
+
     return history, passed
 
 
@@ -430,6 +463,10 @@ def main():
           f" | chunk={config.chunk_size} seq={args.seq_len}")
 
     all_history = []
+    generators = _build_generators(reverse_fraction=args.reverse_fraction)
+
+    if args.reverse_fraction > 0:
+        print(f"Reverse problems: {args.reverse_fraction:.0%} of arithmetic stage samples")
 
     # --- CL method setup ---
     ewc_obj = EWC(lambda_ewc=args.ewc_lambda) if args.ewc else None
@@ -444,7 +481,7 @@ def main():
 
     # --- Helper to build loaders for a stage ---
     def make_loaders(stage):
-        gen = GENERATORS[stage]
+        gen = generators[stage]
         data = split_problems(gen, VOCAB, n_train=args.n_train, n_test=args.n_test,
                               test_fraction=args.test_fraction,
                               seq_len=args.seq_len, seed=args.data_seed)

@@ -32,6 +32,7 @@ def _setup_arithmetic_vocab(vocab: Vocab) -> None:
     vocab.add('+')
     vocab.add('-')
     vocab.add('=')
+    vocab.add('?')  # missing operand marker for reverse problems
 
 
 def _column_op(a_digit: int, b_digit: int, op: str, carry_in: int,
@@ -74,7 +75,26 @@ class SingleDigitArithmeticGenerator(ProblemGenerator):
     same format used within each column step in Stages 4-5.
 
     155 problems: 100 addition + 55 subtraction (a >= b).
+
+    Reverse problems (when reverse_fraction > 0):
+      Forward:  3 + 4 WORK 0 7     — given operands, produce result
+      Reverse:  ? + 4 = 0 7 WORK 0 3  — given result + one operand, find missing
+      Reverse:  3 + ? = 0 7 WORK 0 4  — same, other operand missing
+
+    Both forward and reverse have n_result=2 (carry + ones/answer).
+    For reverse, carry is always 0 (missing operand is single digit).
+
+    Reverse problems force the model to understand the INVERSE relationship —
+    what the operation means, not just how to apply it mechanically.
+    Ref: Alemi (2025), factorization order affects representation quality.
     """
+
+    def __init__(self, reverse_fraction: float = 0.0):
+        """Args:
+            reverse_fraction: fraction of problems presented in reverse (0.0-1.0).
+                0.0 = all forward (default), 0.3 = 30% reverse, etc.
+        """
+        self.reverse_fraction = reverse_fraction
 
     @property
     def name(self) -> str:
@@ -107,14 +127,37 @@ class SingleDigitArithmeticGenerator(ProblemGenerator):
             carry = res // 10 if op == '+' else 0
             ones = res % 10 if op == '+' else res
 
-            question = [vocab[str(a)], vocab[op], vocab[str(b)]]
-            problems.append(Problem(
-                question=question,
-                steps=[
-                    Step('carry', [vocab[str(carry)]], weight=0.5),
-                    Step('ones', [vocab[str(ones)]], weight=0.5),
-                ],
-            ))
+            if self.reverse_fraction > 0 and random.random() < self.reverse_fraction:
+                # Reverse: given result + one operand, find the missing one
+                if random.random() < 0.5:
+                    # Missing first operand: ? OP b = carry ones → answer is a
+                    question = [vocab['?'], vocab[op], vocab[str(b)],
+                                vocab['='], vocab[str(carry)], vocab[str(ones)]]
+                    answer = a
+                else:
+                    # Missing second operand: a OP ? = carry ones → answer is b
+                    question = [vocab[str(a)], vocab[op], vocab['?'],
+                                vocab['='], vocab[str(carry)], vocab[str(ones)]]
+                    answer = b
+                problems.append(Problem(
+                    question=question,
+                    steps=[
+                        Step('carry', [vocab['0']], weight=0.5),
+                        Step('answer', [vocab[str(answer)]], weight=0.5),
+                    ],
+                    metadata={'reverse': True},
+                ))
+            else:
+                # Forward: a OP b → carry ones
+                question = [vocab[str(a)], vocab[op], vocab[str(b)]]
+                problems.append(Problem(
+                    question=question,
+                    steps=[
+                        Step('carry', [vocab[str(carry)]], weight=0.5),
+                        Step('ones', [vocab[str(ones)]], weight=0.5),
+                    ],
+                    metadata={'reverse': False},
+                ))
         return problems
 
 
@@ -126,7 +169,19 @@ class TwoDigitSingleArithmeticGenerator(ProblemGenerator):
 
     Second operand zero-padded to 2 digits for consistency with Stage 5.
     1800 problems: 90 * 10 * 2.
+
+    Reverse support: TODO — column scratchpad reverse requires running columns
+    in reverse order and/or presenting the result first with a missing operand.
+    Deferred until Stage 3 reverse results are analyzed.
     """
+
+    def __init__(self, reverse_fraction: float = 0.0):
+        # Accepted for API consistency but not yet implemented for multi-digit
+        if reverse_fraction > 0:
+            raise NotImplementedError(
+                "Reverse problems not yet implemented for multi-digit stages. "
+                "Use reverse_fraction only with SingleDigitArithmeticGenerator.")
+        self.reverse_fraction = reverse_fraction
 
     @property
     def name(self) -> str:
@@ -184,7 +239,16 @@ class TwoDigitArithmeticGenerator(ProblemGenerator):
     Work: WORK a0 OP b0 OP 0 = c1 r0 SEP a1 OP b1 OP c1 = c2 r1 SEP c2 r1 r0
 
     ~12195 problems: 8100 addition + ~4095 subtraction (a >= b).
+
+    Reverse support: TODO — same as Stage 4. Deferred.
     """
+
+    def __init__(self, reverse_fraction: float = 0.0):
+        if reverse_fraction > 0:
+            raise NotImplementedError(
+                "Reverse problems not yet implemented for multi-digit stages. "
+                "Use reverse_fraction only with SingleDigitArithmeticGenerator.")
+        self.reverse_fraction = reverse_fraction
 
     @property
     def name(self) -> str:

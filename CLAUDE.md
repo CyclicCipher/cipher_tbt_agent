@@ -73,11 +73,9 @@ Model-agnostic framework for generating problems with structured work areas:
 - `framework.py` — Vocab (dynamic token registry), Problem (question + steps), Step (named graded tokens), Grader (per-step/per-token scoring), ProblemGenerator (abstract base), split_problems (train/test by held-out specs)
 - `generators/counting.py` — QueryCountingGenerator (Stage 1, NOTE-based query), CombinedCountingGenerator (Stage 2)
 - `generators/ordinality.py` — SuccessorGenerator (Stage 3), ComparisonGenerator (Stage 4)
-- `generators/arithmetic.py` — CountingAdditionGenerator (Stage 5), CountingSubtractionGenerator (Stage 6)
-- `generators/multi_digit.py` — TwoDigitSingleGenerator (Stage 7, column scratchpad), TwoDigitGenerator (Stage 8, column scratchpad)
+- `generators/arithmetic.py` — SingleDigitArithmeticGenerator (Stage 3, supports reverse problems via `reverse_fraction`), TwoDigitSingleArithmeticGenerator (Stage 4), TwoDigitArithmeticGenerator (Stage 5)
 
-Stages 5-6 ground addition/subtraction in counting: `3 + 4 WORK 4 5 6 7 = 0 7` (count up 4 from 3).
-Stages 7-8 use column-by-column scratchpad with counting-based column operations.
+Reverse problems (Stage 3): `? + 4 = 0 7 WORK 0 3` — given result + one operand, find missing operand. Forces induction (understanding the inverse), not just mechanical forward application. Mixed with forward problems within the same stage. Ref: Alemi (2025) factorization order.
 
 ### CTKG (experiments/ctkg/) — NEW, DESIGN PHASE
 
@@ -89,13 +87,13 @@ Category Theory Knowledge Graph — a directed acyclic graph where nodes are con
 4. **Computational aid** (long-term) — deterministic solver for multi-step problems, model delegates computation to graph
 
 Key files:
-- `DESIGN.md` — Full architecture, data model, arithmetic domain graph, integration plan
+- `DESIGN.md` — Full architecture, data model, arithmetic domain graph, epiplexity diagnostics, factorization order design, integration plan
 
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
 
 - `mamba3_block.py` — Mamba3 block implementation (SSD-based, backbone for arithmetic curriculum)
 - `arithmetic_tasks.py` — Old task generators (superseded by scratchpad framework)
-- `train_arithmetic.py` — Curriculum training script (uses scratchpad framework, stages 1-8, curriculum/direct modes, per-token diagnostics with train+test breakdown)
+- `train_arithmetic.py` — Curriculum training script (uses scratchpad framework, stages 1-5, curriculum/direct modes, per-token diagnostics with train+test breakdown, epiplexity tracking per stage, `--reverse_fraction` for reverse problem mixing)
 
 ### Archived ePC Variants
 
@@ -194,6 +192,10 @@ The original 12-stage curriculum failed — provided no advantage over direct tr
 
 **Curriculum rules:** Stages advance only on ≥95% test accuracy. If a stage fails after max epochs, the curriculum halts. Per-token accuracy diagnostics show both train and test breakdowns for multi-token stages.
 
+**Epiplexity tracking:** Each stage logs S_preq = sum(l_i - l_final), measuring structural information extracted during training. High S_preq = rich structure learned. Low S_preq = trivially memorizable (warning: model may pass without learning reusable circuits). Ref: Alemi (2025) "Epiplexity and the Solomonoff Prior."
+
+**Reverse problems:** `--reverse_fraction 0.3` mixes 30% reverse problems into Stage 3 (single-digit arithmetic). Reverse format: `? + 4 = 0 7 WORK 0 3` — find missing operand. Forces induction (understanding the inverse) rather than mechanical forward application. Both forward and reverse maintain n_result=2 for batch compatibility.
+
 Previous goals (catastrophic forgetting, modular circuits, energy-based reasoning) remain valid but are secondary until the generalization problem is understood.
 
 ## Research Papers Implemented
@@ -211,6 +213,10 @@ Previous goals (catastrophic forgetting, modular circuits, energy-based reasonin
 8. **Siems et al. 2025** — "DeltaProduct" (NeurIPS 2025). Multiple Householder reflections per token via virtual token expansion. arXiv:2502.10297. Relevant: Naja's PoPE pair = DeltaProduct with n_h=2.
 9. **Gopalakrishnan et al. 2024** — PoPE (Polar Positional Embeddings). Decouples content from position.
 10. **Kimi Team (Moonshot AI) 2025** — "Kimi Linear: An Expressive, Efficient Attention Architecture" (KDA). arXiv:2510.26692. Per-channel diagonal decay with `a=b=k` DPLR constraint eliminates secondary chunking. FLA-style state update and decay-weighted pseudo-keys are the ground truth for WY correctness. Our Phase 5a bugs were found by comparing against KDA/FLA conventions.
+
+## Research Papers Referenced (Curriculum Design / Information Theory)
+
+12. **Alemi 2025** — "Epiplexity and the Solomonoff Prior". Prequential coding as measure of structural information. Key results applied: (a) epiplexity (S_preq) as per-stage diagnostic, (b) factorization order affects representation quality (chess experiment — reverse order forces induction, produces richer circuits), (c) "too easy" trap (low S_preq stages may pass without teaching reusable structure). Directly motivates epiplexity tracking in `train_arithmetic.py` and reverse problem design.
 
 ## Research Papers Referenced (Generalization/Grokking)
 
