@@ -48,6 +48,10 @@ class Mamba3Config:
     stable_ssm: bool = False # StableSSM "best" reparameterization for A-matrix
                              # (Wang & Li 2024, arXiv:2311.14495)
     use_triton: bool = False # Use Triton-accelerated SSD kernels when available
+    use_mhc: bool = False    # Manifold-constrained hyperconnections (Xiao et al. 2025)
+    mhc_n_streams: int = 4   # Number of residual streams (expansion rate)
+    mhc_alpha_init: float = 0.01  # Initial gating parameter (small → ≈uniform mixing)
+    mhc_sinkhorn_iters: int = 20  # Sinkhorn-Knopp iterations for column-stochastic
 
     def __post_init__(self):
         self.d_inner = self.expand * self.d_model
@@ -71,6 +75,113 @@ class RMSNorm(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps) * self.weight
 
+
+# ---------------------------------------------------------------------------
+# Manifold-Constrained Hyperconnections (mHC)
+# ---------------------------------------------------------------------------
+# Ref: Xiao et al. 2025, "Manifold-Constrained Hyperconnections"
+#
+# Replaces standard residual connections (x + f(x)) with multi-stream
+# gated communication. Each sublayer reads from a weighted combination of
+# n streams and writes its output back to all streams via a column-stochastic
+# gating matrix. The constraint (each column sums to 1) preserves the
+# "residual manifold", preventing norm drift across layers.
+#
+# Compute overhead: ~2-7% (dominated by stream mixing, not Sinkhorn on tiny
+# n×n matrices). Parameter overhead: negligible (~200 params for n=4, L=4).
+# ---------------------------------------------------------------------------
+
+def sinkhorn_normalize(M_raw: Tensor, n_iters: int = 20) -> Tensor:
+    """Column-stochastic normalization via Sinkhorn-Knopp.
+
+    Exponentiates raw parameters to make positive, alternates row/column
+    normalization, then final column normalization ensures each column
+    sums to exactly 1. Works for rectangular matrices.
+
+    Args:
+        M_raw: raw parameter matrix, typically (n+1, n)
+        n_iters: Sinkhorn iterations (paper default: 20)
+
+    Returns:
+        Column-stochastic matrix (same shape, each column sums to 1)
+    """
+    M = M_raw.exp()
+    for _ in range(n_iters):
+        M = M / (M.sum(dim=1, keepdim=True) + 1e-8)  # Row normalize
+        M = M / (M.sum(dim=0, keepdim=True) + 1e-8)  # Column normalize
+    return M / (M.sum(dim=0, keepdim=True) + 1e-8)    # Final column
+
+
+class HyperConnection(nn.Module):
+    """Manifold-constrained hyperconnection for one sublayer.
+
+    Manages the multi-stream residual connection. The sublayer reads from
+    a softmax-weighted combination of n streams and writes its output back
+    to all n streams via a column-stochastic gating matrix.
+
+    The gating matrix M ∈ R^((n+1)×n) has:
+      - Rows 0..n-1: how each existing stream contributes to each new stream
+      - Row n: how the sublayer output contributes to each new stream
+      - Column-stochastic: each new stream's source weights sum to 1
+
+    This generalizes standard residual connections: when the diagonal of
+    rows 0..n-1 dominates, streams bypass the layer (residual); when row n
+    dominates, the sublayer output replaces the streams.
+
+    Args:
+        n_streams: number of residual streams (expansion rate)
+        alpha_init: initial gating value (small → approx uniform mixing)
+        sinkhorn_iters: iterations for manifold constraint enforcement
+    """
+
+    def __init__(self, n_streams: int, alpha_init: float = 0.01,
+                 sinkhorn_iters: int = 20):
+        super().__init__()
+        self.n = n_streams
+        self.sinkhorn_iters = sinkhorn_iters
+
+        # Gate: (n+1) sources × n destinations
+        self.gate = nn.Parameter(
+            torch.full((n_streams + 1, n_streams), alpha_init))
+
+        # Input combination weights (softmax-normalized)
+        # Initialize to strongly prefer stream 0 (primary residual)
+        init_w = torch.zeros(n_streams)
+        init_w[0] = 5.0  # After softmax: ~98% weight on stream 0
+        self.input_logits = nn.Parameter(init_w)
+
+    def get_input(self, streams: Tensor) -> Tensor:
+        """Combine n streams → sublayer input.
+
+        Args:
+            streams: (batch, seq_len, n, d_model)
+
+        Returns:
+            (batch, seq_len, d_model)
+        """
+        w = F.softmax(self.input_logits, dim=0)  # (n,)
+        return torch.einsum('n, bsnd -> bsd', w, streams)
+
+    def update(self, streams: Tensor, sublayer_output: Tensor) -> Tensor:
+        """Mix sublayer output back into all streams.
+
+        Args:
+            streams: (batch, seq_len, n, d_model) current streams
+            sublayer_output: (batch, seq_len, d_model) sublayer output
+
+        Returns:
+            (batch, seq_len, n, d_model) updated streams
+        """
+        M = sinkhorn_normalize(self.gate, self.sinkhorn_iters)  # (n+1, n)
+        # Stack sources: (batch, seq_len, n+1, d_model)
+        sources = torch.cat([streams, sublayer_output.unsqueeze(2)], dim=2)
+        # Mix: new_streams[i] = Σ_j M[j, i] * sources[j]
+        return torch.einsum('jn, bsjd -> bsnd', M, sources)
+
+
+# ---------------------------------------------------------------------------
+# Positional Encodings
+# ---------------------------------------------------------------------------
 
 def apply_rope(x: Tensor, theta: Tensor) -> Tensor:
     """Apply rotary position embedding (data-dependent RoPE).
@@ -605,7 +716,13 @@ class Mamba3LM(nn.Module):
     """Complete Mamba-3 language model.
 
     Architecture:
-        Embedding → N x Mamba3Block → RMSNorm → Linear(vocab)
+        Standard:  Embedding → N x Mamba3Block → RMSNorm → Linear(vocab)
+        With mHC:  Embedding → Expand(n) → N x (mHC-Mixer + mHC-MLP) → Contract → RMSNorm → Linear(vocab)
+
+    When use_mhc=True, the residual stream is expanded to n parallel streams.
+    Each sublayer (mixer, MLP) reads from a weighted combination of streams
+    and writes back via a column-stochastic gating matrix (manifold constraint).
+    Ref: Xiao et al. 2025, "Manifold-Constrained Hyperconnections"
 
     Args:
         config: Mamba3Config.
@@ -627,6 +744,20 @@ class Mamba3LM(nn.Module):
         # Weight tying
         self.out_proj.weight = self.embedding.weight
 
+        # mHC: per-sublayer hyperconnections (mixer + MLP per block)
+        if config.use_mhc:
+            n = config.mhc_n_streams
+            a = config.mhc_alpha_init
+            s = config.mhc_sinkhorn_iters
+            self.mixer_hcs = nn.ModuleList([
+                HyperConnection(n, a, s) for _ in range(config.n_layer)
+            ])
+            self.mlp_hcs = nn.ModuleList([
+                HyperConnection(n, a, s) for _ in range(config.n_layer)
+            ])
+            # Contraction weights (combine n streams → 1 at model exit)
+            self.contract_logits = nn.Parameter(torch.zeros(n))
+
     def forward(self, input_ids: Tensor) -> Tensor:
         """Forward pass.
 
@@ -637,7 +768,29 @@ class Mamba3LM(nn.Module):
             logits: (batch, seqlen, vocab_size)
         """
         x = self.embedding(input_ids)
-        for layer in self.layers:
-            x = layer(x)
+
+        if self.config.use_mhc:
+            n = self.config.mhc_n_streams
+            # Expand to n streams: (batch, seq, d) → (batch, seq, n, d)
+            streams = x.unsqueeze(2).expand(-1, -1, n, -1).clone()
+
+            for i, block in enumerate(self.layers):
+                # Mixer sublayer with mHC
+                mixer_in = self.mixer_hcs[i].get_input(streams)
+                mixer_out = block.mixer(block.mixer_norm(mixer_in))
+                streams = self.mixer_hcs[i].update(streams, mixer_out)
+
+                # MLP sublayer with mHC
+                mlp_in = self.mlp_hcs[i].get_input(streams)
+                mlp_out = block.mlp(block.mlp_norm(mlp_in))
+                streams = self.mlp_hcs[i].update(streams, mlp_out)
+
+            # Contract: (batch, seq, n, d) → (batch, seq, d)
+            w = F.softmax(self.contract_logits, dim=0)  # (n,)
+            x = torch.einsum('n, bsnd -> bsd', w, streams)
+        else:
+            for layer in self.layers:
+                x = layer(x)
+
         x = self.norm(x)
         return self.out_proj(x)

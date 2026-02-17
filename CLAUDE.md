@@ -91,10 +91,10 @@ Key files:
 
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
 
-- `mamba3_block.py` — Mamba3 block (SSD-based, PoPE, trapezoidal discretization, `--stable_ssm` option, `--use_triton` option)
+- `mamba3_block.py` — Mamba3 block (SSD-based, PoPE, trapezoidal discretization, `--stable_ssm` option, `--use_triton` option, `--mhc` option with `HyperConnection` class and `sinkhorn_normalize`)
 - `triton_ssd.py` — Triton-accelerated SSD kernels (graceful fallback to PyTorch when Triton unavailable)
 - `arithmetic_tasks.py` — Old task generators (superseded by scratchpad framework)
-- `train_arithmetic.py` — Curriculum training script (uses scratchpad framework, stages 1-5, curriculum/direct modes, per-token diagnostics with train+test breakdown, epiplexity tracking per stage, `--reverse_fraction` for reverse problem mixing, `--stable_ssm` for StableSSM A-matrix)
+- `train_arithmetic.py` — Curriculum training script (uses scratchpad framework, stages 1-5, curriculum/direct modes, per-token diagnostics with train+test breakdown, epiplexity tracking per stage, `--reverse_fraction` for reverse problem mixing, `--stable_ssm` for StableSSM A-matrix, `--mhc` / `--mhc_n_streams` for manifold-constrained hyperconnections)
 
 ### Archived ePC Variants
 
@@ -215,6 +215,10 @@ Previous goals (catastrophic forgetting, modular circuits, energy-based reasonin
 9. **Gopalakrishnan et al. 2024** — PoPE (Polar Positional Embeddings). Decouples content from position.
 10. **Kimi Team (Moonshot AI) 2025** — "Kimi Linear: An Expressive, Efficient Attention Architecture" (KDA). arXiv:2510.26692. Per-channel diagonal decay with `a=b=k` DPLR constraint eliminates secondary chunking. FLA-style state update and decay-weighted pseudo-keys are the ground truth for WY correctness. Our Phase 5a bugs were found by comparing against KDA/FLA conventions.
 11. **Wang & Li 2024** — "StableSSM: Alleviating the Curse of Memory in State-space Models through Stable Reparameterization" (ICML 2024). arXiv:2311.14495. Best reparameterization `f(w) = 1 - 1/(w² + 0.5)` minimizes gradient-to-weight ratio, enabling larger learning rates and better long-range dependency learning. Implemented as `--stable_ssm` option in Mamba3.
+
+## Research Papers Referenced (Architecture Improvements)
+
+13. **Xiao et al. 2025** — "Manifold-Constrained Hyperconnections" (mHC). Replaces standard residual connections with multi-stream gated communication. Column-stochastic gating matrices (enforced via Sinkhorn-Knopp) preserve the "residual manifold", preventing norm drift. ~6.7% compute overhead, negligible parameter overhead. Implemented as `--mhc` / `--mhc_n_streams` in Mamba3. Ref: `docs/research/mHC manifold constrained hyperconnections.pdf`.
 
 ## Research Papers Referenced (Curriculum Design / Information Theory)
 

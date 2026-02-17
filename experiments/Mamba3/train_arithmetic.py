@@ -108,6 +108,10 @@ def parse_args():
     p.add_argument('--chunk_size', type=int, default=16)
     p.add_argument('--stable_ssm', action='store_true',
                    help='Use StableSSM A-matrix reparameterization (Wang & Li 2024)')
+    p.add_argument('--mhc', action='store_true',
+                   help='Enable manifold-constrained hyperconnections (Xiao et al. 2025)')
+    p.add_argument('--mhc_n_streams', type=int, default=4,
+                   help='mHC expansion rate (number of residual streams, default 4)')
 
     # Data
     p.add_argument('--n_train', type=int, default=5000)
@@ -445,6 +449,8 @@ def main():
         n_layer=args.n_layer, headdim=args.headdim,
         chunk_size=args.chunk_size,
         stable_ssm=args.stable_ssm,
+        use_mhc=args.mhc,
+        mhc_n_streams=args.mhc_n_streams,
     )
     model = Mamba3LM(config, VOCAB_SIZE).to(device)
     n_params = sum(p.numel() for p in model.parameters())
@@ -460,10 +466,11 @@ def main():
         except Exception as e:
             print(f"torch.compile: FAILED ({e})")
 
+    mhc_str = f" | mHC(n={config.mhc_n_streams})" if config.use_mhc else ""
     print(f"Mamba3LM | {n_params:,} params | {device}"
           f" | d={config.d_model} N={config.d_state}"
           f" | L={config.n_layer} H={config.nheads}"
-          f" | chunk={config.chunk_size} seq={args.seq_len}")
+          f" | chunk={config.chunk_size} seq={args.seq_len}{mhc_str}")
 
     all_history = []
     generators = _build_generators(reverse_fraction=args.reverse_fraction)
