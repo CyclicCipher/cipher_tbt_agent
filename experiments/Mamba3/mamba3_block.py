@@ -94,9 +94,9 @@ class RMSNorm(nn.Module):
 def sinkhorn_normalize(M_raw: Tensor, n_iters: int = 20) -> Tensor:
     """Column-stochastic normalization via Sinkhorn-Knopp.
 
-    Exponentiates raw parameters to make positive, alternates row/column
-    normalization, then final column normalization ensures each column
-    sums to exactly 1. Works for rectangular matrices.
+    Uses straight-through estimator: forward pass uses full Sinkhorn result,
+    backward pass sees only single-step column normalization. This avoids
+    backpropagating through the iterative loop (20 iters → 1 step in grad).
 
     Args:
         M_raw: raw parameter matrix, typically (n+1, n)
@@ -105,11 +105,20 @@ def sinkhorn_normalize(M_raw: Tensor, n_iters: int = 20) -> Tensor:
     Returns:
         Column-stochastic matrix (same shape, each column sums to 1)
     """
-    M = M_raw.exp()
-    for _ in range(n_iters):
-        M = M / (M.sum(dim=1, keepdim=True) + 1e-8)  # Row normalize
-        M = M / (M.sum(dim=0, keepdim=True) + 1e-8)  # Column normalize
-    return M / (M.sum(dim=0, keepdim=True) + 1e-8)    # Final column
+    # Forward: full Sinkhorn in no_grad (no graph built for iterations)
+    with torch.no_grad():
+        M = M_raw.exp()
+        for _ in range(n_iters):
+            M = M / (M.sum(dim=1, keepdim=True) + 1e-8)
+            M = M / (M.sum(dim=0, keepdim=True) + 1e-8)
+        M_target = M / (M.sum(dim=0, keepdim=True) + 1e-8)
+
+    # Backward: single-step column softmax (differentiable, cheap)
+    M_soft = M_raw.exp()
+    M_soft = M_soft / (M_soft.sum(dim=0, keepdim=True) + 1e-8)
+
+    # Straight-through: forward value = M_target, gradient from M_soft
+    return M_soft + (M_target - M_soft).detach()
 
 
 class HyperConnection(nn.Module):
@@ -173,10 +182,13 @@ class HyperConnection(nn.Module):
             (batch, seq_len, n, d_model) updated streams
         """
         M = sinkhorn_normalize(self.gate, self.sinkhorn_iters)  # (n+1, n)
-        # Stack sources: (batch, seq_len, n+1, d_model)
-        sources = torch.cat([streams, sublayer_output.unsqueeze(2)], dim=2)
-        # Mix: new_streams[i] = Σ_j M[j, i] * sources[j]
-        return torch.einsum('jn, bsjd -> bsnd', M, sources)
+        # Split gating: stream-to-stream mixing + output injection
+        # Avoids torch.cat temporary tensor allocation
+        M_streams = M[:self.n]  # (n, n)
+        M_output = M[self.n]    # (n,)
+        new = torch.einsum('jn, bsjd -> bsnd', M_streams, streams)
+        new = new + M_output[None, None, :, None] * sublayer_output.unsqueeze(2)
+        return new
 
 
 # ---------------------------------------------------------------------------
@@ -772,7 +784,8 @@ class Mamba3LM(nn.Module):
         if self.config.use_mhc:
             n = self.config.mhc_n_streams
             # Expand to n streams: (batch, seq, d) → (batch, seq, n, d)
-            streams = x.unsqueeze(2).expand(-1, -1, n, -1).clone()
+            # expand() creates a view (no copy); update() produces new tensors via einsum
+            streams = x.unsqueeze(2).expand(-1, -1, n, -1)
 
             for i, block in enumerate(self.layers):
                 # Mixer sublayer with mHC
