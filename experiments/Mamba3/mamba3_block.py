@@ -150,8 +150,13 @@ class HyperConnection(nn.Module):
         self.sinkhorn_iters = sinkhorn_iters
 
         # Gate: (n+1) sources × n destinations
-        self.gate = nn.Parameter(
-            torch.full((n_streams + 1, n_streams), alpha_init))
+        # Diagonal bias: stream i → stream i starts strong (self-bypass),
+        # off-diagonal and layer output start small. Breaks column symmetry
+        # so streams can specialize from the first gradient step.
+        gate_init = torch.full((n_streams + 1, n_streams), alpha_init)
+        for i in range(n_streams):
+            gate_init[i, i] = 1.0
+        self.gate = nn.Parameter(gate_init)
 
         # Input combination weights (softmax-normalized)
         # Initialize to strongly prefer stream 0 (primary residual)
@@ -769,6 +774,11 @@ class Mamba3LM(nn.Module):
             ])
             # Contraction weights (combine n streams → 1 at model exit)
             self.contract_logits = nn.Parameter(torch.zeros(n))
+            # Per-stream expansion bias: breaks initial symmetry so streams
+            # can specialize from the first gradient step. Without this,
+            # identical streams + symmetric gating = streams stay identical.
+            self.stream_bias = nn.Parameter(
+                torch.randn(n, config.d_model) * 0.002)
 
     def forward(self, input_ids: Tensor) -> Tensor:
         """Forward pass.
@@ -782,10 +792,10 @@ class Mamba3LM(nn.Module):
         x = self.embedding(input_ids)
 
         if self.config.use_mhc:
-            n = self.config.mhc_n_streams
             # Expand to n streams: (batch, seq, d) → (batch, seq, n, d)
-            # expand() creates a view (no copy); update() produces new tensors via einsum
-            streams = x.unsqueeze(2).expand(-1, -1, n, -1)
+            # Per-stream bias breaks symmetry (otherwise identical streams
+            # + symmetric gating = streams never differentiate)
+            streams = x.unsqueeze(2) + self.stream_bias  # broadcasts (n, d)
 
             for i, block in enumerate(self.layers):
                 # Mixer sublayer with mHC
