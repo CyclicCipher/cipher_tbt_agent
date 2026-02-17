@@ -16,6 +16,7 @@ def _setup_counting_vocab(vocab: Vocab) -> None:
         vocab.add(str(d))
     vocab.add('DOT')
     vocab.add('TEN')
+    vocab.add('STOP')
 
 
 class QueryCountingGenerator(ProblemGenerator):
@@ -67,15 +68,27 @@ class QueryCountingGenerator(ProblemGenerator):
 
 
 class CombinedCountingGenerator(ProblemGenerator):
-    """Stage 2: combined counting with scratchpad cues.
+    """Stage 2: combined counting with count-up process tokens.
 
     Input: shuffled DOTs and TENs.
-    Work: WORK DOT <d> TEN <t>
-    Reuses Stage 1 query tokens as composition cues.
+    Work: WORK DOT <1..d> <STOP padding> TEN <1..t> <STOP padding>
 
-    Example: DOT TEN DOT TEN DOT WORK DOT 3 TEN 2
+    The model counts up using the successor function, then emits STOP
+    tokens for remaining slots. Each count section is fixed at 9 tokens.
+    This forces the model to demonstrate the counting PROCESS (successor
+    chain), not just output the final count digit.
 
-    Rubric: 4 steps — DOT cue (ungraded), dot_count, TEN cue (ungraded), ten_count.
+    Example (d=2, t=3):
+      DOT TEN DOT TEN TEN WORK DOT 1 2 STOP STOP STOP STOP STOP STOP STOP
+                              TEN 1 2 3 STOP STOP STOP STOP STOP STOP
+
+    Example (d=0, t=1):
+      TEN WORK DOT STOP STOP STOP STOP STOP STOP STOP STOP STOP
+               TEN 1 STOP STOP STOP STOP STOP STOP STOP STOP
+
+    Rubric: 4 steps — DOT cue (ungraded), dot_count (graded, 9 tokens),
+            TEN cue (ungraded), ten_count (graded, 9 tokens).
+    n_result = 20 for all problems.
     """
 
     @property
@@ -88,19 +101,26 @@ class CombinedCountingGenerator(ProblemGenerator):
     def generate(self, specs: List[Any], n_samples: int,
                  vocab: Vocab) -> List[Problem]:
         _setup_counting_vocab(vocab)
+        MAX_COUNT = 9  # max single-digit count
         problems = []
         for _ in range(n_samples):
             d, t = random.choice(specs)
             input_toks = [vocab['DOT']] * d + [vocab['TEN']] * t
             random.shuffle(input_toks)
 
+            # Count-up process: 1, 2, ..., count then STOP to fill 9 slots
+            dot_toks = ([vocab[str(i)] for i in range(1, d + 1)]
+                        + [vocab['STOP']] * (MAX_COUNT - d))
+            ten_toks = ([vocab[str(i)] for i in range(1, t + 1)]
+                        + [vocab['STOP']] * (MAX_COUNT - t))
+
             problems.append(Problem(
                 question=input_toks,
                 steps=[
                     Step('dot_cue', [vocab['DOT']], grading='ungraded'),
-                    Step('dot_count', [vocab[str(d)]], weight=1.0),
+                    Step('dot_count', dot_toks, weight=1.0),
                     Step('ten_cue', [vocab['TEN']], grading='ungraded'),
-                    Step('ten_count', [vocab[str(t)]], weight=1.0),
+                    Step('ten_count', ten_toks, weight=1.0),
                 ],
             ))
         return problems

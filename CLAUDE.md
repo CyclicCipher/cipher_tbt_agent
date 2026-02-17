@@ -71,7 +71,7 @@ Key files:
 Model-agnostic framework for generating problems with structured work areas:
 
 - `framework.py` — Vocab (dynamic token registry), Problem (question + steps), Step (named graded tokens), Grader (per-step/per-token scoring), ProblemGenerator (abstract base), split_problems (train/test by held-out specs)
-- `generators/counting.py` — QueryCountingGenerator (Stage 1, NOTE-based query), CombinedCountingGenerator (Stage 2)
+- `generators/counting.py` — QueryCountingGenerator (Stage 1, NOTE-based query), CombinedCountingGenerator (Stage 2, count-up process with STOP token)
 - `generators/ordinality.py` — SuccessorGenerator (Stage 3), ComparisonGenerator (Stage 4)
 - `generators/arithmetic.py` — SingleDigitArithmeticGenerator (Stage 3, supports reverse problems via `reverse_fraction`), TwoDigitSingleArithmeticGenerator (Stage 4), TwoDigitArithmeticGenerator (Stage 5)
 
@@ -179,7 +179,7 @@ The original 12-stage curriculum failed — provided no advantage over direct tr
 
 **Current experiment:** 8-stage prerequisite-complete curriculum on Mamba3 (see `CONTINUATION.md`):
 1. Query counting — "how many DOTs/TENs?" with confounders (sub-skill)
-2. Combined counting — DOT d TEN t scratchpad (composition)
+2. Combined counting — DOT 1..d STOP TEN 1..t STOP count-up process (composition)
 3. Successor/predecessor — digit ordinality (SUCC(4)=5, PRED(7)=6)
 4. Comparison — digit ordering (GT/LT/EQ)
 5. Counting-based addition — `3 + 4 WORK 4 5 6 7 = 0 7` (reduces to counting-up)
