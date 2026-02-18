@@ -103,6 +103,15 @@ Key files:
 - `arithmetic_tasks.py` — Old task generators (superseded by scratchpad framework)
 - `train_arithmetic.py` — Curriculum training script (uses scratchpad framework, stages 1-5, curriculum/direct modes, per-token diagnostics with train+test breakdown, epiplexity tracking per stage, `--reverse_fraction` for reverse problem mixing, `--stable_ssm` for StableSSM A-matrix, `--mhc` / `--mhc_n_streams` for manifold-constrained hyperconnections)
 
+### BTT-Mamba3 (experiments/BTT_Mamba3/) — DESIGN PHASE
+
+Block Tensor-Train compressed Mamba3. Replaces dense nn.Linear layers with BTT-decomposed versions for dramatically reduced parameter count at equivalent model width. Enables training d=1024+ models within 4GB VRAM.
+
+Key files:
+- `DESIGN.md` — Full analysis: layer inventory, BTT candidates, small-scale solutions, μP scaling, implementation plan
+
+**Paper:** "Compute Better Spent: Replacing Dense Layers with Structured Matrices" (docs/research/BTT paper.pdf). c=2, r=4 matches GPT-2 Small at 2.7× fewer FLOPs.
+
 ### Archived ePC Variants
 
 ePC code within active experiments has been moved to `archived_epc/` subdirectories within `experiments/Mamba3/` and `experiments/energy_reasoning/`. All standalone archived experiments (ePC_ResNet, ePC_Mamba, eBPC, eBPC_ResNet, BayesianPC, archived_kronos) have been deleted.
@@ -133,6 +142,8 @@ predictive-coding-agent/
 │   │   ├── arithmetic_tasks.py   # Old task generators (superseded)
 │   │   ├── train_arithmetic.py   # Curriculum training (uses scratchpad)
 │   │   └── archived_epc/        # ePC-Mamba3 (archived 2026-02-14)
+│   ├── BTT_Mamba3/        # BTT-compressed Mamba3 (DESIGN PHASE)
+│   │   └── DESIGN.md      # Layer inventory, BTT candidates, implementation plan
 │   └── Naja/              # Hybrid Mamba3 + Gated DeltaNet (WY complete, ablations paused)
 │       ├── naja.py        # Full model
 │       ├── train_naja.py  # Training loop
