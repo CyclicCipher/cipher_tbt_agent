@@ -34,6 +34,7 @@ from .graph import (
     Adjunction,
     Concept,
     Functor,
+    Interface,
     KnowledgeGraph,
     Prerequisite,
     TypeDef,
@@ -119,7 +120,7 @@ def group_blocks(lines: List[Line], source: str = '') -> List[Block]:
     blocks: List[Block] = []
     current: Optional[Block] = None
 
-    TOP_KEYWORDS = {'concept', 'functor', 'adjunction'}
+    TOP_KEYWORDS = {'concept', 'functor', 'adjunction', 'interface'}
 
     for ln in lines:
         first_word = ln.content.split()[0] if ln.content else ''
@@ -420,6 +421,45 @@ def _parse_adjunction(block: Block, source: str = '') -> Adjunction:
 
 
 # ---------------------------------------------------------------------------
+# Interface parser
+# ---------------------------------------------------------------------------
+
+def _parse_interface(block: Block, source: str = '') -> Interface:
+    """Parse an interface block.
+
+    Syntax:
+        interface NAME
+          exports types TYPE1 TYPE2 ...
+          exports concepts CONCEPT1 CONCEPT2 ...
+    """
+    name = block.name
+    types: List[str] = []
+    concepts: List[str] = []
+
+    for ln in block.fields:
+        parts = ln.content.split(None, 2)
+        keyword = parts[0]
+        if keyword == 'exports' and len(parts) >= 3:
+            kind = parts[1]
+            names = parts[2].split()
+            if kind == 'types':
+                types.extend(names)
+            elif kind == 'concepts':
+                concepts.extend(names)
+            else:
+                raise ParseError(
+                    f"Unknown exports kind: '{kind}' "
+                    f"(expected 'types' or 'concepts')",
+                    ln.number, source)
+        else:
+            raise ParseError(
+                f"Unknown interface field: '{keyword}'",
+                ln.number, source)
+
+    return Interface(name=name, types=types, concepts=concepts)
+
+
+# ---------------------------------------------------------------------------
 # Top-level parse function
 # ---------------------------------------------------------------------------
 
@@ -460,6 +500,10 @@ def parse(text: str, source: str = '') -> KnowledgeGraph:
             adj = _parse_adjunction(block, source)
             graph.adjunctions[adj.name] = adj
 
+        elif block.kind == 'interface':
+            iface = _parse_interface(block, source)
+            graph.interfaces[iface.name] = iface
+
     return graph
 
 
@@ -471,7 +515,11 @@ def parse_file(path: str) -> KnowledgeGraph:
 
 
 def merge(target: KnowledgeGraph, source: KnowledgeGraph) -> None:
-    """Merge source graph into target (for loading multiple .ctkg files)."""
+    """Merge source graph into target (for loading multiple .ctkg files).
+
+    For sheaf-aware merging with consistency checks, use
+    KnowledgeGraph.sheaf_merge() instead.
+    """
     for t in source.types.values():
         target.add_type(t)
     for c in source.concepts.values():
@@ -480,3 +528,4 @@ def merge(target: KnowledgeGraph, source: KnowledgeGraph) -> None:
         target.add_prerequisite(p)
     target.functors.update(source.functors)
     target.adjunctions.update(source.adjunctions)
+    target.interfaces.update(source.interfaces)

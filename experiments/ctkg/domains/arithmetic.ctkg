@@ -190,3 +190,11 @@ adjunction add_sub
   inverse single_digit_subtraction
   unit a + b - b = a
   counit a - b + b = a
+
+-- =========================================================================
+-- Interface — what this domain exports for cross-domain composition
+-- =========================================================================
+
+interface arithmetic
+  exports types digit carry op cmp_result arith_result column_result
+  exports concepts successor predecessor comparison single_digit_addition single_digit_subtraction two_digit_arithmetic

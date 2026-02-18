@@ -1,7 +1,7 @@
 # Category Theory Knowledge Graph (CTKG) — Design Document
 
 **Date:** 2026-02-16 (updated 2026-02-18)
-**Status:** Universal type system + DSL parser + arithmetic domain implemented. 6/6 tests pass.
+**Status:** Universal type system + DSL parser + arithmetic domain + sheaf consistency + logic domain implemented. 11/11 tests pass.
 **Context:** Mistake #44 showed that missing prerequisites between counting and arithmetic caused the model to memorize instead of compose. A knowledge graph with structural constraints would have caught this automatically — like a compiler catching a missing import. This motivates building the CTKG as a general-purpose infrastructure component, not just a curriculum tool.
 
 ---
@@ -571,8 +571,10 @@ The current implementation uses category theory vocabulary (objects, morphisms, 
 | Objects (concepts) | Implemented | Concept dataclass |
 | Morphisms (prerequisites) | Implemented | Prerequisite dataclass |
 | Composition (transitive) | Implemented | Via ancestors() / descendants() |
-| Validation (6 error types) | Implemented | validate() in graph.py |
+| Validation (7 error types) | Implemented | validate() in graph.py |
 | Curriculum generation | Implemented | topological_sort + generate_curriculum |
+| Sheaf consistency | Implemented | sheaf_check(), sheaf_merge(), SheafViolation |
+| Interfaces | Implemented | Interface dataclass, DSL `interface` blocks |
 
 ### What we need (prioritized by practical impact)
 
@@ -601,6 +603,95 @@ id_X: X → X for every concept. Would model "review" as a formal operation. Not
 **6. Natural transformations, limits, colimits, pullbacks (LOW priority)**
 
 Theoretical elegance. Natural transformations compare competing functors. Limits/colimits generalize constraint satisfaction. Not needed until multiple domains are active and we need to prove structural equivalences.
+
+---
+
+## Sheaf Consistency (IMPLEMENTED)
+
+When composing multiple domains into a single knowledge graph, we need a guarantee that overlapping definitions agree. This is where sheaf theory provides the right mathematical framework.
+
+### The Problem
+
+Suppose the arithmetic domain defines `digit = symbol(0..9) ordered` and a separate finance domain also defines `digit = symbol(0..9)` but without the `ordered` annotation. If we naively merge these, the `digit` type in the merged graph is ambiguous — does it have ordering or not? Concepts from arithmetic that rely on ordering would silently break.
+
+More subtly: two domains might define a concept with the same name but different input/output types. Merging them produces a graph where the concept's type depends on which domain you ask — a contradiction that no amount of validation can catch after the merge.
+
+### The Sheaf Framework
+
+In sheaf theory:
+- Each **domain** is an "open set" in the topology of knowledge
+- A **section** over a domain is a consistent assignment of data (types, concepts, prerequisites) to that domain
+- The **restriction** of a section to a smaller domain is just subgraph extraction
+- The **gluing axiom** says: if two sections agree on their overlap, they can be composed into a global section
+
+For the CTKG, this translates to:
+- Each `.ctkg` file defines a section over its domain
+- Overlapping type names must have identical structure (same constructor, params, annotations)
+- Overlapping concept names must have compatible input/output types
+- If these conditions hold, the merge is well-defined; if not, we get a `SheafViolation` error
+
+### Implementation
+
+**Interface declarations** — each domain declares what it exports:
+
+```
+interface arithmetic
+  exports types digit carry op cmp_result arith_result column_result
+  exports concepts successor predecessor comparison single_digit_addition
+```
+
+**Type compatibility** — structural equality on `TypeDef`:
+
+```python
+def types_compatible(a: TypeDef, b: TypeDef) -> bool:
+    return (a.constructor == b.constructor
+            and a.params == b.params
+            and a.annotations == b.annotations)
+```
+
+**Sheaf check** — `KnowledgeGraph.sheaf_check(other)` returns a list of `SheafViolation` errors for any overlapping types or concepts that disagree.
+
+**Sheaf merge** — `KnowledgeGraph.sheaf_merge(source)` first checks consistency, then merges if clean. If violations are found, the target graph is left unmodified and the violations are returned.
+
+### Example: Compatible Merge
+
+Arithmetic defines `digit = symbol(0..9) ordered`. Logic uses builtins (`bool`, `nat`) but defines its own types (`connective`, `truth_value`). No overlap on custom types → merge succeeds cleanly.
+
+```python
+arith = build_arithmetic_graph()
+logic = build_logic_graph()
+violations = arith.sheaf_merge(logic)
+assert violations == []  # clean merge
+```
+
+### Example: Sheaf Violation
+
+```python
+graph_a = parse("type status = symbol(OK, ERR)")
+graph_b = parse("type status = symbol(GOOD, BAD, UNKNOWN)")
+violations = graph_a.sheaf_check(graph_b)
+# → [SheafViolation: Type 'status' defined incompatibly across domains]
+```
+
+### DSL Grammar Addition
+
+```
+interface    = 'interface' NAME NL (interface_field NL)*
+interface_field = 'exports' ('types' | 'concepts') NAME+
+```
+
+### Data Model
+
+```python
+@dataclass
+class Interface:
+    name: str
+    types: List[str]      # exported type names
+    concepts: List[str]   # exported concept names
+
+class SheafViolation(ValidationError):
+    """Overlapping definitions are incompatible across domains."""
+```
 
 ---
 
@@ -729,7 +820,7 @@ adjunction addition_subtraction
 
 ```
 file         = (statement NL)*
-statement    = typedef | concept | functor | adjunction | comment
+statement    = typedef | concept | functor | adjunction | interface | comment
 comment      = '--' TEXT
 
 typedef      = 'type' NAME '=' CONSTRUCTOR
@@ -763,6 +854,9 @@ adj_field    = 'forward' NAME
              | 'unit' EXPR
              | 'counit' EXPR
 
+interface    = 'interface' NAME NL (interface_field NL)*
+interface_field = 'exports' ('types' | 'concepts') NAME+
+
 type_list    = NAME (NAME)*
 NAME         = [a-zA-Z_][a-zA-Z0-9_]*
 STRING       = '"' [^"]* '"'
@@ -781,9 +875,10 @@ The parser reads `.ctkg` files and emits Python graph objects:
 - `requires` fields → `Prerequisite` instances
 - `functor` blocks → `Functor` instances
 - `adjunction` blocks → `Adjunction` instances
+- `interface` blocks → `Interface` instances (exported types and concepts)
 
 The graph is constructed by loading one or more `.ctkg` files, then calling `validate()`.
-Validation now checks type resolution: all type names in concept inputs/outputs must exist in the type registry (either defined in the `.ctkg` file or built-in).
+Validation checks type resolution: all type names in concept inputs/outputs must exist in the type registry. Multi-domain merging uses `sheaf_merge()` to enforce consistency on overlapping definitions.
 
 ---
 
@@ -831,6 +926,17 @@ The engine is domain-agnostic. Same engine for arithmetic, electronics, formal l
 - `domains/arithmetic.ctkg` — 9 concepts, 13 types, 12 prerequisites, 1 adjunction
 - `test_parser.py` — 6 tests, all passing
 - `arithmetic.py` → thin wrapper that loads from .ctkg
+
+### Phase 2.5: Sheaf consistency + multi-domain ✅ DONE
+
+- `Interface` dataclass — declares exported types and concepts per domain
+- `SheafViolation` error — caught when overlapping definitions disagree
+- `types_compatible()` — structural equality on TypeDef
+- `sheaf_check()` — compare two graphs for overlap consistency
+- `sheaf_merge()` — merge with consistency enforcement (refuses on violation)
+- `interface` block in DSL — `exports types` / `exports concepts`
+- `domains/logic.ctkg` — 5 logic concepts, 8 types, interface declaration
+- `test_parser.py` — 11 tests, all passing (5 new sheaf tests)
 
 ### Phase 3: Computation rule interpreter (NEXT)
 
@@ -892,3 +998,5 @@ The engine is domain-agnostic. Same engine for arithmetic, electronics, formal l
 6. **Measure, don't assume.** Track epiplexity (S_preq) per stage. A stage that passes doesn't necessarily teach structure — it might just be memorizable. Epiplexity distinguishes "learned to apply" from "learned to look up."
 
 7. **Both directions.** When a concept has a natural inverse, train on both forward and reverse factorizations. Reverse problems force induction, which builds richer representations than mechanical forward application alone.
+
+8. **Sheaf before merge.** Never merge two domain graphs without `sheaf_check()`. Incompatible overlapping definitions produce silent bugs that are nearly impossible to diagnose after the merge. The sheaf condition is cheap to check and catches contradictions at composition time, not at training time.

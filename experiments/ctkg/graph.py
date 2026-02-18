@@ -241,6 +241,54 @@ class UndefinedType(ValidationError):
     """Concept references a type name not in the type registry."""
 
 
+class SheafViolation(ValidationError):
+    """Overlapping definitions are incompatible across domains.
+
+    In sheaf theory: two sections on overlapping open sets must agree
+    on the overlap. In CTKG: if two domains both define a type or
+    concept with the same name, the definitions must be structurally
+    compatible.
+    """
+
+
+# ---------------------------------------------------------------------------
+# Interfaces (sheaf sections)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Interface:
+    """Declares what a domain exports for cross-domain composition.
+
+    In sheaf theory terms: a domain is an "open set" in the topology of
+    knowledge. An interface is the "section" — the data visible to other
+    domains. The gluing axiom says: if two sections agree on their
+    overlap, they can be composed into a global section.
+
+    An interface lists the types and concepts that are available for
+    cross-domain references. When merging graphs, overlapping names
+    must have compatible definitions (the sheaf condition).
+    """
+    name: str                                      # interface name (usually domain name)
+    types: List[str] = field(default_factory=list)  # exported type names
+    concepts: List[str] = field(default_factory=list)  # exported concept names
+
+
+# ---------------------------------------------------------------------------
+# Type compatibility (sheaf restriction maps)
+# ---------------------------------------------------------------------------
+
+def types_compatible(a: TypeDef, b: TypeDef) -> bool:
+    """Check if two type definitions are structurally compatible.
+
+    Compatible means: same constructor, same params, same annotations.
+    This is the sheaf condition on types — the restriction maps must
+    agree on the overlap.
+    """
+    return (a.constructor == b.constructor
+            and a.params == b.params
+            and a.annotations == b.annotations)
+
+
 # ---------------------------------------------------------------------------
 # Curriculum stage (output of generate_curriculum)
 # ---------------------------------------------------------------------------
@@ -270,6 +318,7 @@ class KnowledgeGraph:
         self.prerequisites: List[Prerequisite] = []
         self.functors: Dict[str, Functor] = {}
         self.adjunctions: Dict[str, Adjunction] = {}
+        self.interfaces: Dict[str, Interface] = {}
         self._children: Dict[str, Set[str]] = {}  # parent -> children
         self._parents: Dict[str, Set[str]] = {}   # child -> parents
 
@@ -524,6 +573,81 @@ class KnowledgeGraph:
         return sub
 
     # -------------------------------------------------------------------
+    # Sheaf consistency (multi-domain composition)
+    # -------------------------------------------------------------------
+
+    def sheaf_check(self, other: 'KnowledgeGraph') -> List[SheafViolation]:
+        """Check sheaf consistency between this graph and another.
+
+        The sheaf condition requires that overlapping definitions agree:
+        - If both graphs define a type with the same name, the TypeDefs
+          must be structurally compatible (same constructor, params,
+          annotations).
+        - If both graphs define a concept with the same name, the
+          concepts must have compatible input/output types.
+
+        Returns a list of SheafViolation errors (empty = compatible).
+        """
+        violations: List[SheafViolation] = []
+
+        # Check overlapping types (excluding builtins — those always agree)
+        for name, my_type in self.types.items():
+            if name in BUILTIN_TYPES:
+                continue
+            other_type = other.types.get(name)
+            if other_type is None or name in BUILTIN_TYPES:
+                continue
+            if not types_compatible(my_type, other_type):
+                violations.append(SheafViolation(
+                    f"Type '{name}' defined incompatibly across domains: "
+                    f"{my_type!r} vs {other_type!r}"))
+
+        # Check overlapping concepts
+        for name, my_concept in self.concepts.items():
+            other_concept = other.concepts.get(name)
+            if other_concept is None:
+                continue
+            # Input/output types must match
+            if my_concept.input_type != other_concept.input_type:
+                violations.append(SheafViolation(
+                    f"Concept '{name}' input types differ: "
+                    f"{my_concept.input_type} vs {other_concept.input_type}"))
+            if my_concept.output_type != other_concept.output_type:
+                violations.append(SheafViolation(
+                    f"Concept '{name}' output types differ: "
+                    f"{my_concept.output_type} vs {other_concept.output_type}"))
+
+        return violations
+
+    def sheaf_merge(self, source: 'KnowledgeGraph') -> List[SheafViolation]:
+        """Merge source graph into this graph with sheaf consistency check.
+
+        First checks that overlapping definitions are compatible. If any
+        violations are found, returns them without modifying the graph.
+        If all clear, performs the merge.
+
+        Returns:
+            List of SheafViolation errors (empty = merge succeeded).
+        """
+        violations = self.sheaf_check(source)
+        if violations:
+            return violations
+
+        # Safe to merge — no conflicts
+        for t in source.types.values():
+            if t.name not in BUILTIN_TYPES:
+                self.add_type(t)
+        for c in source.concepts.values():
+            self.add_concept(c)
+        for p in source.prerequisites:
+            self.add_prerequisite(p)
+        self.functors.update(source.functors)
+        self.adjunctions.update(source.adjunctions)
+        self.interfaces.update(source.interfaces)
+
+        return []
+
+    # -------------------------------------------------------------------
     # Queries
     # -------------------------------------------------------------------
 
@@ -536,11 +660,14 @@ class KnowledgeGraph:
 
     def summary(self) -> str:
         """Human-readable summary of the graph."""
-        lines = [
-            f"CTKG: {len(self.concepts)} concepts, "
-            f"{len(self.prerequisites)} prerequisites, "
-            f"{len(self.types) - len(BUILTIN_TYPES)} custom types"
+        parts = [
+            f"{len(self.concepts)} concepts",
+            f"{len(self.prerequisites)} prerequisites",
+            f"{len(self.types) - len(BUILTIN_TYPES)} custom types",
         ]
+        if self.interfaces:
+            parts.append(f"{len(self.interfaces)} interfaces")
+        lines = [f"CTKG: {', '.join(parts)}"]
         for domain, names in sorted(self.domains().items()):
             impl = sum(1 for n in names if self.concepts[n].status != 'planned')
             lines.append(f"  {domain}: {len(names)} concepts ({impl} implemented)")

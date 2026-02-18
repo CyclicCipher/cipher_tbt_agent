@@ -17,9 +17,13 @@ import traceback
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from experiments.ctkg.parser import parse, parse_file, ParseError
-from experiments.ctkg.graph import TypeDef, BUILTIN_TYPES, UndefinedType
+from experiments.ctkg.parser import parse, parse_file, merge, ParseError
+from experiments.ctkg.graph import (
+    TypeDef, BUILTIN_TYPES, UndefinedType, SheafViolation,
+    Interface, types_compatible,
+)
 from experiments.ctkg.domains.arithmetic import build_arithmetic_graph
+from experiments.ctkg.domains.logic import build_logic_graph
 
 
 def test_type_parsing():
@@ -304,6 +308,212 @@ def test_summary():
     return errors
 
 
+def test_logic_domain():
+    """Test that logic.ctkg parses and validates."""
+    graph = build_logic_graph()
+
+    errors = []
+
+    # Types
+    expected_types = ['connective', 'quantifier', 'truth_value', 'prop_var',
+                      'literal', 'clause', 'formula', 'proof_step']
+    for tname in expected_types:
+        if tname not in graph.types:
+            errors.append(f"Missing type: {tname}")
+
+    # Concepts
+    expected_concepts = ['truth_eval', 'negation', 'compound_eval',
+                         'tautology_check', 'modus_ponens']
+    for cname in expected_concepts:
+        if cname not in graph.concepts:
+            errors.append(f"Missing concept: {cname}")
+
+    if len(graph.concepts) != 5:
+        errors.append(f"Expected 5 concepts, got {len(graph.concepts)}")
+
+    # All concepts should be in logic domain
+    for c in graph.concepts.values():
+        if c.domain != 'logic':
+            errors.append(f"{c.name}.domain = '{c.domain}', expected 'logic'")
+
+    # Interface should be parsed
+    if 'logic' not in graph.interfaces:
+        errors.append("Missing interface: logic")
+    else:
+        iface = graph.interfaces['logic']
+        if len(iface.types) != 6:
+            errors.append(
+                f"Interface exports {len(iface.types)} types, expected 6: "
+                f"{iface.types}")
+        if len(iface.concepts) != 5:
+            errors.append(
+                f"Interface exports {len(iface.concepts)} concepts, "
+                f"expected 5: {iface.concepts}")
+
+    # Validation
+    val_errors = graph.validate(check_types=True)
+    if val_errors:
+        errors.append(f"Validation errors: {val_errors}")
+
+    return errors
+
+
+def test_sheaf_compatible_merge():
+    """Test that compatible domains merge without sheaf violations."""
+    arith = build_arithmetic_graph()
+    logic = build_logic_graph()
+
+    errors = []
+
+    # These domains share only builtin types (nat, bool, etc.)
+    # They should merge cleanly
+    violations = arith.sheaf_check(logic)
+    if violations:
+        errors.append(f"Unexpected sheaf violations: {violations}")
+
+    # Perform sheaf merge
+    violations = arith.sheaf_merge(logic)
+    if violations:
+        errors.append(f"Sheaf merge failed: {violations}")
+
+    # After merge, should have concepts from both domains
+    if 'successor' not in arith.concepts:
+        errors.append("Lost arithmetic concept after merge")
+    if 'truth_eval' not in arith.concepts:
+        errors.append("Logic concept not merged")
+
+    # Should have types from both domains
+    if 'digit' not in arith.types:
+        errors.append("Lost arithmetic type after merge")
+    if 'connective' not in arith.types:
+        errors.append("Logic type not merged")
+
+    # Should have interfaces from both domains
+    if 'arithmetic' not in arith.interfaces:
+        errors.append("Lost arithmetic interface after merge")
+    if 'logic' not in arith.interfaces:
+        errors.append("Logic interface not merged")
+
+    # Merged graph should still validate
+    val_errors = arith.validate(check_types=True)
+    if val_errors:
+        errors.append(f"Merged graph validation errors: {val_errors}")
+
+    return errors
+
+
+def test_sheaf_violation():
+    """Test that incompatible type definitions produce SheafViolation."""
+    errors = []
+
+    # Create two graphs with conflicting type definitions
+    graph_a = parse("""
+type status = symbol(OK, ERR)
+
+concept check_a
+  domain domain_a
+  description "uses status"
+  input status
+  output bool
+""")
+
+    graph_b = parse("""
+type status = symbol(GOOD, BAD, UNKNOWN)
+
+concept check_b
+  domain domain_b
+  description "uses status differently"
+  input status
+  output bool
+""")
+
+    # sheaf_check should detect the conflict
+    violations = graph_a.sheaf_check(graph_b)
+    if len(violations) != 1:
+        errors.append(
+            f"Expected 1 SheafViolation, got {len(violations)}: {violations}")
+    elif not isinstance(violations[0], SheafViolation):
+        errors.append(
+            f"Expected SheafViolation, got {type(violations[0])}: "
+            f"{violations[0]}")
+    elif 'status' not in violations[0].message:
+        errors.append(
+            f"SheafViolation should mention 'status': {violations[0]}")
+
+    # sheaf_merge should refuse
+    violations = graph_a.sheaf_merge(graph_b)
+    if not violations:
+        errors.append("sheaf_merge should have refused incompatible types")
+
+    # graph_a should be unchanged
+    if 'check_b' in graph_a.concepts:
+        errors.append("graph_a was modified despite sheaf violation")
+
+    return errors
+
+
+def test_type_compatibility():
+    """Test the types_compatible function directly."""
+    errors = []
+
+    # Same definitions should be compatible
+    a = TypeDef('digit', 'symbol', ['0', '1', '2'], {'ordered'})
+    b = TypeDef('digit', 'symbol', ['0', '1', '2'], {'ordered'})
+    if not types_compatible(a, b):
+        errors.append("Identical type defs should be compatible")
+
+    # Different constructor
+    c = TypeDef('digit', 'nat', [], set())
+    if types_compatible(a, c):
+        errors.append("Different constructors should be incompatible")
+
+    # Different params
+    d = TypeDef('digit', 'symbol', ['0', '1'], {'ordered'})
+    if types_compatible(a, d):
+        errors.append("Different params should be incompatible")
+
+    # Different annotations
+    e = TypeDef('digit', 'symbol', ['0', '1', '2'], {'metric'})
+    if types_compatible(a, e):
+        errors.append("Different annotations should be incompatible")
+
+    return errors
+
+
+def test_interface_parsing():
+    """Test that interface blocks parse correctly."""
+    text = """
+type digit = symbol(0, 1, 2)
+
+concept foo
+  domain test
+  description "test"
+  input digit
+  output bool
+
+interface test_domain
+  exports types digit
+  exports concepts foo
+"""
+    graph = parse(text)
+
+    errors = []
+
+    if 'test_domain' not in graph.interfaces:
+        errors.append("Interface 'test_domain' not parsed")
+        return errors
+
+    iface = graph.interfaces['test_domain']
+    if iface.name != 'test_domain':
+        errors.append(f"Interface name: {iface.name}")
+    if iface.types != ['digit']:
+        errors.append(f"Interface types: {iface.types}")
+    if iface.concepts != ['foo']:
+        errors.append(f"Interface concepts: {iface.concepts}")
+
+    return errors
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -317,6 +527,11 @@ def run_all_tests():
         ('Parse errors', test_parse_errors),
         ('Curriculum generation', test_curriculum_generation),
         ('Summary', test_summary),
+        ('Logic domain', test_logic_domain),
+        ('Sheaf compatible merge', test_sheaf_compatible_merge),
+        ('Sheaf violation', test_sheaf_violation),
+        ('Type compatibility', test_type_compatibility),
+        ('Interface parsing', test_interface_parsing),
     ]
 
     total = 0

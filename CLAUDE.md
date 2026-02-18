@@ -77,18 +77,21 @@ Model-agnostic framework for generating problems with structured work areas:
 
 Reverse problems (Stage 3): `? + 4 = 0 7 WORK 0 3` — given result + one operand, find missing operand. Forces induction (understanding the inverse), not just mechanical forward application. Mixed with forward problems within the same stage. Ref: Alemi (2025) factorization order.
 
-### CTKG (experiments/ctkg/) — IMPLEMENTED + DSL + UNIVERSAL TYPES
+### CTKG (experiments/ctkg/) — IMPLEMENTED + DSL + SHEAVES
 
-Category Theory Knowledge Graph — a directed acyclic graph where nodes are concepts/skills and edges are prerequisite relationships. Built on a universal type system of primitives (`symbol`, `seq`, `tuple`, `tagged` + structure annotations) that compose into any domain-specific type. Includes functors (structure-preserving maps between domains) and adjunctions (forward/inverse pairs).
+Category Theory Knowledge Graph — a directed acyclic graph where nodes are concepts/skills and edges are prerequisite relationships. Built on a universal type system of primitives (`symbol`, `seq`, `tuple`, `tagged` + structure annotations) that compose into any domain-specific type. Includes functors (structure-preserving maps between domains), adjunctions (forward/inverse pairs), and sheaf consistency checking for multi-domain composition.
 
 1. **Curriculum compiler** (IMPLEMENTED) — topological sort = valid curriculum, type checking catches missing prerequisites before training. `validate()` checks 7 error types including `UndefinedType`.
 2. **Structured training data** (IMPLEMENTED) — `generate_curriculum()` produces ordered stages with replay policies from the graph structure.
-3. **DSL parser** (IMPLEMENTED) — `.ctkg` indentation-based file format for declarative graph definition. Supports type, concept, functor, adjunction blocks. `parse_file()` returns KnowledgeGraph.
+3. **DSL parser** (IMPLEMENTED) — `.ctkg` indentation-based file format for declarative graph definition. Supports type, concept, functor, adjunction, interface blocks. `parse_file()` returns KnowledgeGraph.
 4. **Universal type system** (IMPLEMENTED) — `TypeDef` with constructors (`symbol`, `nat`, `seq`, `tuple`, `tagged`, `expr`, `proposition`), structure annotations (`ordered`, `metric`, `invertible`, etc.), and 4 builtin types. Validation catches undefined type references.
-5. **External knowledge store** (deferred) — knowledge in system RAM, structure-aware retrieval, compensates for 4GB VRAM limit
-6. **Computational aid** (deferred) — deterministic solver for multi-step problems
+5. **Sheaf consistency** (IMPLEMENTED) — `sheaf_check()` validates that overlapping type/concept definitions agree across domains. `sheaf_merge()` enforces consistency on merge. `Interface` blocks declare exported types/concepts per domain. `SheafViolation` error for incompatible overlaps.
+6. **External knowledge store** (deferred) — knowledge in system RAM, structure-aware retrieval, compensates for 4GB VRAM limit
+7. **Computational aid** (deferred) — deterministic solver for multi-step problems
 
-**Arithmetic domain:** 9 concepts, 13 custom types, 12 prerequisites, 1 adjunction (add/sub). All types defined with universal primitives (e.g., `type digit = symbol(0..9) ordered`).
+**Arithmetic domain:** 9 concepts, 13 custom types, 12 prerequisites, 1 adjunction (add/sub), 1 interface. All types defined with universal primitives (e.g., `type digit = symbol(0..9) ordered`).
+
+**Logic domain:** 5 concepts (truth_eval, negation, compound_eval, tautology_check, modus_ponens), 8 custom types, 1 interface. Tests multi-domain composition with arithmetic via sheaf merge.
 
 **Target calculations:** (1) Analytically solve ODEs up to 3rd order, (2) Solve ODEs via Laplace transform, (3) Derive the impulse response of a damped harmonic oscillator — 47 stages from counting to solution. (4) Logic from propositional to natural transformations in category theory — 21 stages.
 
@@ -99,12 +102,14 @@ Category Theory Knowledge Graph — a directed acyclic graph where nodes are con
 **Commercial architecture:** Layer 1 (Graph data — `.ctkg` files, customer provides), Layer 2 (Computation rules — declarative, customer provides), Layer 3 (Engine — we provide: parser, validator, curriculum generator, trainer).
 
 Key files:
-- `DESIGN.md` — Architecture, universal type system, DSL grammar, categorical structure assessment, curriculum patterns, commercial architecture
-- `graph.py` — `TypeDef`, `Concept`, `Prerequisite`, `Functor`, `Adjunction`, `KnowledgeGraph` (validate, topological_sort, generate_curriculum, ancestors, descendants, frontier, missing_for)
-- `parser.py` — DSL parser: `parse(text)`, `parse_file(path)`, `merge(target, source)`. Handles type/concept/functor/adjunction blocks, comments, multi-line process blocks.
+- `DESIGN.md` — Architecture, universal type system, sheaf consistency, DSL grammar, categorical structure assessment, curriculum patterns, commercial architecture
+- `graph.py` — `TypeDef`, `Concept`, `Prerequisite`, `Functor`, `Adjunction`, `Interface`, `SheafViolation`, `KnowledgeGraph` (validate, sheaf_check, sheaf_merge, topological_sort, generate_curriculum, ancestors, descendants, frontier, missing_for)
+- `parser.py` — DSL parser: `parse(text)`, `parse_file(path)`, `merge(target, source)`. Handles type/concept/functor/adjunction/interface blocks, comments, multi-line process blocks.
 - `domains/arithmetic.py` — Thin wrapper loading from arithmetic.ctkg
-- `domains/arithmetic.ctkg` — Full arithmetic domain (9 concepts, 13 types, 12 prereqs, 1 adjunction)
-- `test_parser.py` — 6 tests covering type parsing, domain loading, validation, errors, curriculum generation
+- `domains/arithmetic.ctkg` — Full arithmetic domain (9 concepts, 13 types, 12 prereqs, 1 adjunction, 1 interface)
+- `domains/logic.py` — Thin wrapper loading from logic.ctkg
+- `domains/logic.ctkg` — Logic domain (5 concepts, 8 types, 1 interface)
+- `test_parser.py` — 11 tests covering type parsing, domain loading, validation, errors, curriculum generation, sheaf consistency, interface parsing
 
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
 
@@ -134,12 +139,12 @@ predictive-coding-agent/
 ├── MISTAKES.md            # 44 documented mistakes (ALWAYS READ)
 ├── CONTINUATION.md        # Compositional arithmetic curriculum plan (ACTIVE)
 ├── experiments/
-│   ├── ctkg/              # Category Theory Knowledge Graph (IMPLEMENTED + DSL)
-│   │   ├── DESIGN.md      # Architecture, DSL grammar, curriculum patterns, commercial arch
-│   │   ├── graph.py       # Concept, Prerequisite, Functor, Adjunction, KnowledgeGraph
-│   │   ├── parser.py      # DSL parser: parse(), parse_file(), merge()
-│   │   ├── test_parser.py # Parser verification test
-│   │   └── domains/       # arithmetic.py/.ctkg (9 concepts, 13 types, 1 adjunction)
+│   ├── ctkg/              # Category Theory Knowledge Graph (IMPLEMENTED + DSL + SHEAVES)
+│   │   ├── DESIGN.md      # Architecture, DSL grammar, sheaf consistency, commercial arch
+│   │   ├── graph.py       # Concept, Prerequisite, Functor, Adjunction, Interface, KnowledgeGraph
+│   │   ├── parser.py      # DSL parser: parse(), parse_file(), merge(), sheaf_merge()
+│   │   ├── test_parser.py # 11 tests (types, domains, sheaf consistency, interfaces)
+│   │   └── domains/       # arithmetic.py/.ctkg, logic.py/.ctkg
 │   ├── scratchpad/        # Scratchpad framework (model-agnostic)
 │   │   ├── framework.py   # Vocab, Problem, Step, Grader, ProblemGenerator
 │   │   ├── DESIGN_GUIDE.md # Curriculum design principles (category theory, prerequisites)
