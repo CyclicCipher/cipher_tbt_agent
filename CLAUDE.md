@@ -77,17 +77,24 @@ Model-agnostic framework for generating problems with structured work areas:
 
 Reverse problems (Stage 3): `? + 4 = 0 7 WORK 0 3` — given result + one operand, find missing operand. Forces induction (understanding the inverse), not just mechanical forward application. Mixed with forward problems within the same stage. Ref: Alemi (2025) factorization order.
 
-### CTKG (experiments/ctkg/) — NEW, DESIGN PHASE
+### CTKG (experiments/ctkg/) — IMPLEMENTED, USE CASES 1-2
 
-Category Theory Knowledge Graph — a directed acyclic graph where nodes are concepts/skills and edges are prerequisite relationships. Four planned use cases:
+Category Theory Knowledge Graph — a directed acyclic graph where nodes are concepts/skills and edges are prerequisite relationships. Current focus on use cases 1-2 (curriculum compiler + structured training data).
 
-1. **Curriculum compiler** (immediate) — topological sort = valid curriculum, type checking catches missing prerequisites before training
-2. **Structured training data** (near-term) — graph structure determines training order, replay policy, format consistency
-3. **External knowledge store** (medium-term) — knowledge in system RAM, structure-aware retrieval (not similarity-based RAG), compensates for 4GB VRAM limit
-4. **Computational aid** (long-term) — deterministic solver for multi-step problems, model delegates computation to graph
+1. **Curriculum compiler** (IMPLEMENTED) — topological sort = valid curriculum, type checking catches missing prerequisites before training. `validate()` checks 6 error types.
+2. **Structured training data** (IMPLEMENTED) — `generate_curriculum()` produces ordered stages with replay policies from the graph structure.
+3. **External knowledge store** (deferred) — knowledge in system RAM, structure-aware retrieval, compensates for 4GB VRAM limit
+4. **Computational aid** (deferred) — deterministic solver for multi-step problems
+
+**Full graph:** 89 concepts across 9 domains (arithmetic, arithmetic_ex, algebra, functions, calculus, ode, logic, abstract_alg, science), 132 prerequisites. 5 implemented (with generators), 84 planned.
+
+**Target calculations:** (1) Analytically solve ODEs up to 3rd order, (2) Solve ODEs via Laplace transform, (3) Derive the impulse response of a damped harmonic oscillator — 47 stages from counting to solution. (4) Logic from propositional to natural transformations in category theory — 21 stages.
 
 Key files:
-- `DESIGN.md` — Full architecture, data model, arithmetic domain graph, epiplexity diagnostics, factorization order design, integration plan
+- `DESIGN.md` — Architecture, data model, validation rules, epiplexity, factorization order
+- `graph.py` — `Concept`, `Prerequisite`, `KnowledgeGraph` (validate, topological_sort, generate_curriculum, ancestors, descendants, frontier, missing_for)
+- `domains/arithmetic.py` — Working arithmetic subgraph (5 implemented concepts, maps to existing generators)
+- `domains/full.py` — Complete 89-concept graph across all domains (math, logic, science)
 
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
 
@@ -108,9 +115,10 @@ predictive-coding-agent/
 ├── MISTAKES.md            # 44 documented mistakes (ALWAYS READ)
 ├── CONTINUATION.md        # Compositional arithmetic curriculum plan (ACTIVE)
 ├── experiments/
-│   ├── ctkg/              # Category Theory Knowledge Graph (NEW)
-│   │   ├── DESIGN.md      # Architecture: 4 use cases, data model, arithmetic domain graph
-│   │   └── graph.py       # (planned) KnowledgeGraph, Concept, Prerequisite, validation
+│   ├── ctkg/              # Category Theory Knowledge Graph (IMPLEMENTED)
+│   │   ├── DESIGN.md      # Architecture: 4 use cases, data model, validation rules
+│   │   ├── graph.py       # Concept, Prerequisite, KnowledgeGraph, validation
+│   │   └── domains/       # arithmetic.py (5 implemented), full.py (89 concepts, 9 domains)
 │   ├── scratchpad/        # Scratchpad framework (model-agnostic)
 │   │   ├── framework.py   # Vocab, Problem, Step, Grader, ProblemGenerator
 │   │   ├── DESIGN_GUIDE.md # Curriculum design principles (category theory, prerequisites)
