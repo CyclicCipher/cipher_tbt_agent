@@ -34,9 +34,10 @@ Usage:
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 
 # ---------------------------------------------------------------------------
@@ -144,10 +145,18 @@ class Concept:
 
 @dataclass
 class Prerequisite:
-    """An edge in the knowledge graph.
+    """An edge in the knowledge graph — a morphism in the Markov category.
 
     Represents "source is prerequisite for target", with metadata about
     how the source skill is used by the target.
+
+    The transfer_probability is the Markov kernel weight: P(can learn target |
+    mastered source).  Default 1.0 = hard prerequisite (must fully master
+    source before target).  Values <1.0 = soft prerequisite (partial mastery
+    of source partially enables target).
+
+    Categorically: morphisms in FinStoch with objects as concepts and
+    stochastic matrices as transition probabilities.
     """
     source: str  # prerequisite concept
     target: str  # dependent concept
@@ -158,6 +167,9 @@ class Prerequisite:
     domain_type: List[str] = field(default_factory=list)    # target expects
 
     invertible: bool = False  # is this morphism reversible?
+
+    # Markov kernel weight: P(can learn target | mastered source)
+    transfer_probability: float = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -299,6 +311,76 @@ class CurriculumStage:
     number: int
     concept: Concept
     replay_concepts: List[str] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Mastery state (distribution over the knowledge graph)
+# ---------------------------------------------------------------------------
+
+class MasteryState:
+    """Per-concept mastery levels forming a distribution over the graph.
+
+    Categorically: a functor from the knowledge graph (viewed as a category)
+    to the unit interval [0,1].  Each concept maps to its mastery level;
+    each prerequisite edge maps to its transfer probability, weighting
+    how mastery of the source enables learning the target.
+
+    The Bayes filter interpretation (Fritz et al. 2024): update mastery
+    beliefs as assessment data arrives.
+    """
+
+    def __init__(self, graph: 'KnowledgeGraph'):
+        self._graph = graph
+        self.levels: Dict[str, float] = {
+            name: 0.0 for name in graph.concepts
+        }
+
+    def observe(self, concept: str, score: float) -> None:
+        """Update mastery for a concept based on assessment score."""
+        self.levels[concept] = max(0.0, min(1.0, score))
+
+    def expected_readiness(self, concept: str) -> float:
+        """Expected readiness = min over prerequisites of
+        (source mastery * transfer probability).
+
+        If a concept has no prerequisites, readiness is 1.0 (always ready).
+        The min reflects the bottleneck: the weakest prerequisite limits
+        readiness for the target.
+        """
+        prereqs = [p for p in self._graph.prerequisites
+                   if p.target == concept]
+        if not prereqs:
+            return 1.0
+        return min(
+            self.levels.get(p.source, 0.0) * p.transfer_probability
+            for p in prereqs
+        )
+
+    def frontier(self, threshold: float = 0.8) -> Set[str]:
+        """Concepts ready to learn: readiness above threshold, not mastered.
+
+        Generalises KnowledgeGraph.frontier() to the probabilistic case:
+        instead of requiring ALL prerequisites to be in a learned set, we
+        require the expected readiness (product of mastery * transfer) to
+        exceed the threshold.
+        """
+        ready: Set[str] = set()
+        for name in self._graph.concepts:
+            if self.levels.get(name, 0.0) >= 0.95:
+                continue  # already mastered
+            if self.expected_readiness(name) >= threshold:
+                ready.add(name)
+        return ready
+
+    def information_gain(self, concept: str) -> float:
+        """Expected information gain from learning this concept.
+
+        I(concept) = H(concept) - H(concept | prerequisites).
+        Uses the graph's entropy methods.  Higher = more information
+        transferred from prerequisites to this concept.
+        """
+        learned = {n for n, v in self.levels.items() if v >= 0.95}
+        return self._graph.mutual_information(concept, learned)
 
 
 # ---------------------------------------------------------------------------
@@ -507,6 +589,188 @@ class KnowledgeGraph:
     def missing_for(self, name: str, learned: Set[str]) -> Set[str]:
         """Transitive prerequisites of `name` not yet learned."""
         return (self.ancestors(name) | self._parents.get(name, set())) - learned
+
+    # -------------------------------------------------------------------
+    # Probabilistic structure (Markov category)
+    # -------------------------------------------------------------------
+
+    def d_separated(self, x: str, y: str, given: Set[str]) -> bool:
+        """Test if x and y are d-separated given the observed set.
+
+        Uses the Bayes-ball algorithm (Shachter 1998).  d-Separation is the
+        core inference primitive of Bayesian networks.  In our curriculum
+        graph it answers: "given that the student has mastered the concepts
+        in `given`, is their performance on concept x independent of their
+        performance on concept y?"
+
+        Categorically: this is the conditional independence relation in the
+        Markov category (Fritz & Klingler, JMLR 2023).
+
+        Returns True if x and y are conditionally independent given `given`.
+        """
+        if x == y:
+            return False
+        if x not in self.concepts or y not in self.concepts:
+            raise ValueError(f"Unknown concept: {x if x not in self.concepts else y}")
+
+        # Phase 1: precompute collider activation set.
+        # A collider A → B ← C is activated when B or any descendant of B
+        # is observed.  Equivalently: B is in `given` or B is an ancestor
+        # of some node in `given`.  So: collider_active = given ∪ ancestors(given).
+        collider_active = set(given)
+        for z in given:
+            collider_active.update(self.ancestors(z))
+
+        # Phase 2: Bayes-ball from x.
+        # Track (node, direction) pairs.
+        # direction: 'up' = ball arrived from a child, 'down' = from a parent.
+        visited: Set[Tuple[str, str]] = set()
+        queue: deque[Tuple[str, str]] = deque()
+        reachable: Set[str] = set()
+
+        # Launch balls from x in both directions
+        queue.append((x, 'up'))
+        queue.append((x, 'down'))
+
+        while queue:
+            node, direction = queue.popleft()
+            if (node, direction) in visited:
+                continue
+            visited.add((node, direction))
+
+            if node != x:
+                reachable.add(node)
+
+            if direction == 'up' and node not in given:
+                # Ball from child, node NOT observed:
+                # pass up to parents (chain/fork unblocked)
+                for parent in self._parents.get(node, set()):
+                    queue.append((parent, 'up'))
+                # pass down to children
+                for child in self._children.get(node, set()):
+                    queue.append((child, 'down'))
+
+            elif direction == 'down':
+                # Ball from parent
+                if node not in given:
+                    # Not observed: pass down to children (chain unblocked)
+                    for child in self._children.get(node, set()):
+                        queue.append((child, 'down'))
+                if node in collider_active:
+                    # Node is observed or has an observed descendant:
+                    # collider activated, pass up to parents
+                    for parent in self._parents.get(node, set()):
+                        queue.append((parent, 'up'))
+
+        return y not in reachable
+
+    def concept_entropy(self, concept_name: str) -> float:
+        """H(C) = log2(|problem_space|) — maximum uncertainty about concept.
+
+        This is the entropy of the uniform distribution over the concept's
+        problem space.  By the Baez-Fritz-Leinster theorem (2011), Shannon
+        entropy is the unique functorial measure of information loss: if
+        we view a concept as a morphism in FinProb, its entropy is the
+        unique function that is (1) functorial, (2) convex-linear, (3)
+        continuous.
+
+        Returns inf if problem space size is unknown.
+        """
+        concept = self.concepts.get(concept_name)
+        if not concept:
+            raise ValueError(f"Unknown concept: {concept_name}")
+        if concept.n_problems and concept.n_problems > 0:
+            return math.log2(concept.n_problems)
+        return float('inf')
+
+    def conditional_entropy(self, concept_name: str,
+                            learned: Set[str]) -> float:
+        """H(C | learned) — remaining uncertainty given learned prerequisites.
+
+        Approximated as: H(C) minus the information transferred from each
+        learned prerequisite, weighted by transfer probability.
+
+        This connects to the prequential coding interpretation: the
+        information still to be extracted at a stage, given that the
+        prerequisites have been learned.  Corresponds to the expected
+        epiplexity of the stage.
+        """
+        h_c = self.concept_entropy(concept_name)
+        if math.isinf(h_c):
+            return h_c
+
+        prereqs = [p for p in self.prerequisites
+                   if p.target == concept_name]
+        transfer = 0.0
+        for p in prereqs:
+            if p.source in learned:
+                h_source = self.concept_entropy(p.source)
+                if not math.isinf(h_source):
+                    transfer += h_source * p.transfer_probability
+
+        return max(0.0, h_c - transfer)
+
+    def mutual_information(self, concept_name: str,
+                           learned: Set[str]) -> float:
+        """I(C; learned) = H(C) - H(C | learned).
+
+        The information transferred from prerequisites to this concept.
+        Higher values = prerequisites are highly informative for this concept.
+        """
+        h_c = self.concept_entropy(concept_name)
+        h_c_given = self.conditional_entropy(concept_name, learned)
+        if math.isinf(h_c) or math.isinf(h_c_given):
+            return 0.0
+        return h_c - h_c_given
+
+    def intervene(self, do_concepts: Set[str]) -> 'KnowledgeGraph':
+        """Pearl's do-operator via string diagram surgery.
+
+        Returns a mutilated graph where all incoming edges to the
+        do_concepts are removed.  This models "what if we force-teach
+        (or skip) these concepts, breaking the natural prerequisite flow?"
+
+        Categorically: an endofunctor on the diagram that severs incoming
+        morphisms to the intervention targets (Jacobs, Kissinger, Zanasi
+        2019).
+
+        The returned graph is a new object — self is not modified.
+        """
+        # Build new graph with same concepts and types
+        new_graph = KnowledgeGraph()
+        new_graph.types = dict(self.types)
+        for c in self.concepts.values():
+            new_graph.add_concept(c)
+        # Copy edges except those targeting intervened concepts
+        for p in self.prerequisites:
+            if p.target not in do_concepts:
+                new_graph.add_prerequisite(p)
+        new_graph.functors = dict(self.functors)
+        new_graph.adjunctions = dict(self.adjunctions)
+        new_graph.interfaces = dict(self.interfaces)
+        return new_graph
+
+    def information_flow(self) -> Dict[str, float]:
+        """Compute information flow through each edge.
+
+        For each prerequisite edge, compute how much information
+        (in bits) flows from source to target:
+            flow = H(source) * transfer_probability
+
+        Returns a dict mapping "source->target" to flow in bits.
+        Edges with unknown source entropy are omitted.
+        """
+        flows: Dict[str, float] = {}
+        for p in self.prerequisites:
+            h_source = self.concept_entropy(p.source)
+            if not math.isinf(h_source):
+                key = f"{p.source}->{p.target}"
+                flows[key] = h_source * p.transfer_probability
+        return flows
+
+    def mastery_state(self) -> 'MasteryState':
+        """Create a fresh MasteryState for this graph."""
+        return MasteryState(self)
 
     # -------------------------------------------------------------------
     # Curriculum generation (Use Case 2)

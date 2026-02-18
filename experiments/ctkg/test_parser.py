@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from experiments.ctkg.parser import parse, parse_file, merge, ParseError
 from experiments.ctkg.graph import (
     TypeDef, BUILTIN_TYPES, UndefinedType, SheafViolation,
-    Interface, types_compatible,
+    Interface, types_compatible, MasteryState,
 )
 from experiments.ctkg.domains.arithmetic import build_arithmetic_graph
 from experiments.ctkg.domains.logic import build_logic_graph
@@ -514,6 +514,357 @@ interface test_domain
     return errors
 
 
+def test_transfer_probability_parsing():
+    """Test that transfer_probability parses from requires syntax."""
+    text = """
+type digit = symbol(0, 1, 2)
+
+concept base
+  domain test
+  description "base skill"
+  input digit
+  output digit
+  atomic
+
+concept derived_hard
+  domain test
+  description "hard prerequisite (default 1.0)"
+  input digit
+  output digit
+  requires base via "foundation"
+
+concept derived_soft
+  domain test
+  description "soft prerequisite"
+  input digit
+  output digit
+  requires base via "partial foundation" [0.75]
+"""
+    graph = parse(text)
+
+    errors = []
+
+    # Hard prerequisite: default transfer_probability = 1.0
+    hard_prereqs = [p for p in graph.prerequisites
+                    if p.target == 'derived_hard']
+    if len(hard_prereqs) != 1:
+        errors.append(f"Expected 1 hard prereq, got {len(hard_prereqs)}")
+    elif hard_prereqs[0].transfer_probability != 1.0:
+        errors.append(
+            f"Hard prereq transfer_probability: "
+            f"{hard_prereqs[0].transfer_probability} != 1.0")
+
+    # Soft prerequisite: explicit transfer_probability = 0.75
+    soft_prereqs = [p for p in graph.prerequisites
+                    if p.target == 'derived_soft']
+    if len(soft_prereqs) != 1:
+        errors.append(f"Expected 1 soft prereq, got {len(soft_prereqs)}")
+    elif soft_prereqs[0].transfer_probability != 0.75:
+        errors.append(
+            f"Soft prereq transfer_probability: "
+            f"{soft_prereqs[0].transfer_probability} != 0.75")
+    elif soft_prereqs[0].role != 'partial foundation':
+        errors.append(
+            f"Soft prereq role: '{soft_prereqs[0].role}' != 'partial foundation'")
+
+    return errors
+
+
+def test_d_separation():
+    """Test d-separation (Bayes-ball algorithm) on the arithmetic graph."""
+    graph = build_arithmetic_graph()
+
+    errors = []
+
+    # Chain: query_counting -> combined_counting -> successor
+    # If we observe combined_counting, query_counting and successor
+    # should be d-separated.
+    if not graph.d_separated('query_counting', 'successor',
+                              {'combined_counting'}):
+        errors.append(
+            "query_counting and successor should be d-separated "
+            "given combined_counting")
+
+    # Without observing combined_counting, they should NOT be d-separated
+    # (information flows through the chain).
+    if graph.d_separated('query_counting', 'successor', set()):
+        errors.append(
+            "query_counting and successor should NOT be d-separated "
+            "given nothing (chain is open)")
+
+    # Fork: successor and predecessor share parent combined_counting.
+    # Observing combined_counting blocks the fork.
+    if not graph.d_separated('successor', 'predecessor',
+                              {'combined_counting'}):
+        errors.append(
+            "successor and predecessor should be d-separated "
+            "given combined_counting (fork blocked)")
+
+    # Without observing combined_counting, successor and predecessor
+    # are NOT d-separated (fork is open).
+    if graph.d_separated('successor', 'predecessor', set()):
+        errors.append(
+            "successor and predecessor should NOT be d-separated "
+            "given nothing (fork is open)")
+
+    # Collider: single_digit_addition has parents successor and comparison.
+    # Without observing single_digit_addition, successor and comparison
+    # ARE d-separated via the collider path (collider blocks by default).
+    # But comparison also depends on successor, so they're NOT d-separated
+    # via the chain path successor -> comparison.
+    # Test a cleaner collider: two_digit_single_arithmetic has parents
+    # single_digit_addition and single_digit_subtraction.
+    # The only path between addition and subtraction goes through their
+    # shared ancestors OR through two_digit_single_arithmetic (collider).
+    # Observing all shared ancestors blocks the chain paths.
+    # If we also observe two_digit_single_arithmetic, the collider opens.
+    shared = {'successor', 'predecessor', 'comparison', 'combined_counting',
+              'query_counting'}
+    if not graph.d_separated('single_digit_addition',
+                              'single_digit_subtraction', shared):
+        errors.append(
+            "addition and subtraction should be d-separated given "
+            "shared ancestors (collider closed)")
+
+    # Observing two_digit_single_arithmetic (the collider child) opens it
+    shared_plus_collider = shared | {'two_digit_single_arithmetic'}
+    if graph.d_separated('single_digit_addition',
+                          'single_digit_subtraction',
+                          shared_plus_collider):
+        errors.append(
+            "addition and subtraction should NOT be d-separated when "
+            "collider child is observed")
+
+    return errors
+
+
+def test_entropy():
+    """Test entropy computations on a graph with known problem counts."""
+    import math
+
+    text = """
+type digit = symbol(0, 1, 2, 3)
+
+concept base
+  domain test
+  description "base"
+  input digit
+  output digit
+  atomic
+
+concept mid
+  domain test
+  description "middle"
+  input digit
+  output digit
+  requires base via "foundation" [0.8]
+
+concept top
+  domain test
+  description "top"
+  input digit
+  output digit
+  requires mid via "bridge"
+"""
+    graph = parse(text)
+    # Set problem counts for entropy computation
+    graph.concepts['base'].n_problems = 16
+    graph.concepts['mid'].n_problems = 32
+    graph.concepts['top'].n_problems = 64
+
+    errors = []
+
+    # H(base) = log2(16) = 4.0
+    h_base = graph.concept_entropy('base')
+    if abs(h_base - 4.0) > 1e-9:
+        errors.append(f"H(base) = {h_base}, expected 4.0")
+
+    # H(mid) = log2(32) = 5.0
+    h_mid = graph.concept_entropy('mid')
+    if abs(h_mid - 5.0) > 1e-9:
+        errors.append(f"H(mid) = {h_mid}, expected 5.0")
+
+    # H(top) = log2(64) = 6.0
+    h_top = graph.concept_entropy('top')
+    if abs(h_top - 6.0) > 1e-9:
+        errors.append(f"H(top) = {h_top}, expected 6.0")
+
+    # Conditional entropy: H(mid | {base}) = H(mid) - H(base) * 0.8
+    # = 5.0 - 4.0 * 0.8 = 5.0 - 3.2 = 1.8
+    h_mid_given_base = graph.conditional_entropy('mid', {'base'})
+    if abs(h_mid_given_base - 1.8) > 1e-9:
+        errors.append(
+            f"H(mid|base) = {h_mid_given_base}, expected 1.8")
+
+    # Mutual information: I(mid; base) = H(mid) - H(mid|base) = 3.2
+    mi = graph.mutual_information('mid', {'base'})
+    if abs(mi - 3.2) > 1e-9:
+        errors.append(f"I(mid; base) = {mi}, expected 3.2")
+
+    # H(mid | {}) = H(mid) (no prerequisites learned)
+    h_mid_given_nothing = graph.conditional_entropy('mid', set())
+    if abs(h_mid_given_nothing - 5.0) > 1e-9:
+        errors.append(
+            f"H(mid|nothing) = {h_mid_given_nothing}, expected 5.0")
+
+    # Information flow
+    flows = graph.information_flow()
+    expected_flow = 4.0 * 0.8  # H(base) * transfer_prob
+    if abs(flows.get('base->mid', 0) - expected_flow) > 1e-9:
+        errors.append(
+            f"Flow base->mid = {flows.get('base->mid')}, "
+            f"expected {expected_flow}")
+
+    return errors
+
+
+def test_intervention():
+    """Test do-calculus / diagram surgery."""
+    graph = build_arithmetic_graph()
+
+    errors = []
+
+    # Intervene on combined_counting: removes its incoming edge
+    # from query_counting
+    mutilated = graph.intervene({'combined_counting'})
+
+    # combined_counting should have no parents in mutilated graph
+    cc_parents = mutilated._parents.get('combined_counting', set())
+    if cc_parents:
+        errors.append(
+            f"Intervened combined_counting still has parents: {cc_parents}")
+
+    # query_counting should have no children pointing to combined_counting
+    qc_children = mutilated._children.get('query_counting', set())
+    if 'combined_counting' in qc_children:
+        errors.append(
+            "query_counting still has combined_counting as child "
+            "after intervention")
+
+    # Original graph should be unmodified
+    orig_cc_parents = graph._parents.get('combined_counting', set())
+    if 'query_counting' not in orig_cc_parents:
+        errors.append("Original graph was modified by intervention")
+
+    # All concepts should still be present
+    if set(mutilated.concepts.keys()) != set(graph.concepts.keys()):
+        errors.append("Intervention changed the concept set")
+
+    # Remaining edges should be intact
+    orig_non_cc = [p for p in graph.prerequisites
+                   if p.target != 'combined_counting']
+    mut_edges = [(p.source, p.target) for p in mutilated.prerequisites]
+    for p in orig_non_cc:
+        if (p.source, p.target) not in mut_edges:
+            errors.append(
+                f"Edge {p.source}->{p.target} missing after intervention")
+
+    # After intervention, combined_counting and query_counting should
+    # be d-separated given anything (no connecting edges)
+    if not mutilated.d_separated('query_counting', 'combined_counting',
+                                  set()):
+        errors.append(
+            "After intervening on combined_counting, it should be "
+            "d-separated from query_counting")
+
+    return errors
+
+
+def test_mastery_state():
+    """Test MasteryState operations."""
+    text = """
+type digit = symbol(0, 1, 2, 3)
+
+concept A
+  domain test
+  description "root"
+  input digit
+  output digit
+  atomic
+
+concept B
+  domain test
+  description "mid"
+  input digit
+  output digit
+  requires A via "foundation" [0.9]
+
+concept C
+  domain test
+  description "top"
+  input digit
+  output digit
+  requires A via "also needed"
+  requires B via "bridge" [0.8]
+"""
+    graph = parse(text)
+
+    errors = []
+
+    state = graph.mastery_state()
+
+    # Initially all mastery is 0
+    if any(v != 0.0 for v in state.levels.values()):
+        errors.append(f"Initial mastery not all zero: {state.levels}")
+
+    # A has no prereqs, so readiness = 1.0
+    if state.expected_readiness('A') != 1.0:
+        errors.append(
+            f"A readiness = {state.expected_readiness('A')}, expected 1.0")
+
+    # B depends on A (mastery 0), so readiness = 0 * 0.9 = 0.0
+    if state.expected_readiness('B') != 0.0:
+        errors.append(
+            f"B readiness = {state.expected_readiness('B')}, expected 0.0")
+
+    # Frontier with threshold 0.8: only A (no prereqs)
+    front = state.frontier(threshold=0.8)
+    if front != {'A'}:
+        errors.append(f"Initial frontier: {front}, expected {{'A'}}")
+
+    # Learn A
+    state.observe('A', 0.95)
+
+    # Now B readiness = 0.95 * 0.9 = 0.855
+    b_ready = state.expected_readiness('B')
+    if abs(b_ready - 0.855) > 1e-9:
+        errors.append(f"B readiness after A=0.95: {b_ready}, expected 0.855")
+
+    # C readiness = min(0.95 * 1.0, 0.0 * 0.8) = min(0.95, 0.0) = 0.0
+    # (B not yet learned)
+    c_ready = state.expected_readiness('C')
+    if abs(c_ready - 0.0) > 1e-9:
+        errors.append(f"C readiness: {c_ready}, expected 0.0")
+
+    # Frontier: A is mastered, B is ready (0.855 > 0.8), C is not (0.0)
+    front = state.frontier(threshold=0.8)
+    if front != {'B'}:
+        errors.append(f"Frontier after learning A: {front}, expected {{'B'}}")
+
+    # Learn B
+    state.observe('B', 0.95)
+
+    # C readiness = min(0.95 * 1.0, 0.95 * 0.8) = min(0.95, 0.76) = 0.76
+    c_ready = state.expected_readiness('C')
+    if abs(c_ready - 0.76) > 1e-9:
+        errors.append(
+            f"C readiness after B=0.95: {c_ready}, expected 0.76")
+
+    # Frontier with threshold 0.7: C should be ready
+    front = state.frontier(threshold=0.7)
+    if front != {'C'}:
+        errors.append(
+            f"Frontier(0.7) after A,B: {front}, expected {{'C'}}")
+
+    # Frontier with threshold 0.8: C not ready (0.76 < 0.8)
+    front = state.frontier(threshold=0.8)
+    if front != set():
+        errors.append(
+            f"Frontier(0.8) after A,B: {front}, expected empty")
+
+    return errors
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -532,6 +883,11 @@ def run_all_tests():
         ('Sheaf violation', test_sheaf_violation),
         ('Type compatibility', test_type_compatibility),
         ('Interface parsing', test_interface_parsing),
+        ('Transfer probability parsing', test_transfer_probability_parsing),
+        ('d-separation', test_d_separation),
+        ('Entropy', test_entropy),
+        ('Intervention', test_intervention),
+        ('Mastery state', test_mastery_state),
     ]
 
     total = 0

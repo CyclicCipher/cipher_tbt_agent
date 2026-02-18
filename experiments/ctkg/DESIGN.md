@@ -938,6 +938,59 @@ The engine is domain-agnostic. Same engine for arithmetic, electronics, formal l
 - `domains/logic.ctkg` — 5 logic concepts, 8 types, interface declaration
 - `test_parser.py` — 11 tests, all passing (5 new sheaf tests)
 
+### Phase 2.7: Probabilistic structure (Markov category) ✅ DONE
+
+The CTKG now supports probabilistic reasoning via three mechanisms grounded
+in categorical probability theory.
+
+**Markov kernel weights on prerequisites:**
+- `Prerequisite.transfer_probability` (default 1.0) = P(can learn target | mastered source)
+- DSL syntax: `requires NAME via "ROLE" [0.75]` — trailing `[probability]` is optional
+- Categorically: morphisms in FinStoch (Fritz, Advances in Mathematics 2020)
+
+**d-Separation (Bayes-ball algorithm):**
+- `KnowledgeGraph.d_separated(x, y, given)` — conditional independence test
+- Uses Shachter (1998) Bayes-ball algorithm
+- Categorically: the conditional independence relation in the Markov category
+  (Fritz & Klingler, JMLR 2023)
+- Use case: "given that the student has mastered set Z, is their performance
+  on concept X independent of concept Y?"
+
+**Entropy (Baez-Fritz-Leinster characterisation):**
+- `concept_entropy(name)` — H(C) = log2(|problem_space|), the maximum uncertainty
+- `conditional_entropy(name, learned)` — H(C | learned), remaining uncertainty
+  given prerequisites, weighted by transfer probability
+- `mutual_information(name, learned)` — I(C; learned) = H(C) - H(C | learned)
+- `information_flow()` — per-edge information transfer in bits
+- The Baez-Fritz-Leinster theorem (2011) proves Shannon entropy is the *unique*
+  functorial information measure: any function that is (1) functorial, (2)
+  convex-linear, (3) continuous must be Shannon entropy. This gives a principled
+  foundation for epiplexity tracking.
+
+**Intervention / do-calculus (string diagram surgery):**
+- `KnowledgeGraph.intervene(do_concepts)` — returns mutilated graph
+- Removes all incoming edges to intervened concepts
+- Models "what if we skip/force-teach these concepts?"
+- Categorically: an endofunctor performing diagram surgery
+  (Jacobs, Kissinger, Zanasi 2019)
+
+**MasteryState:**
+- `MasteryState(graph)` — per-concept mastery levels in [0, 1]
+- `observe(concept, score)` — Bayesian update from assessment
+- `expected_readiness(concept)` — min(mastery × transfer_probability) over prereqs
+- `frontier(threshold)` — concepts ready to learn (readiness > threshold)
+- `information_gain(concept)` — expected bits gained from learning this concept
+- Categorically: a functor from the knowledge graph to [0, 1]
+  (Fritz et al. 2024, Hidden Markov models and the Bayes filter)
+
+**Deferred probabilistic extensions (designed, not yet implemented):**
+- Imprecise probability / credal sets (Liell-Cock & Staton, POPL 2025) —
+  soft prerequisites as convex sets of distributions rather than point estimates
+- Categorical gradient learning (Cruttwell, Gavranovic et al. 2022) —
+  lens/optic framework for forward (teaching) and backward (assessment) passes
+- Possibility theory (Fritz & Teran 2024) — alternative to probabilistic
+  weights using t-norm-based Markov categories
+
 ### Phase 3: Computation rule interpreter (NEXT)
 
 - Parse `process` field into an AST (currently stored as raw strings)

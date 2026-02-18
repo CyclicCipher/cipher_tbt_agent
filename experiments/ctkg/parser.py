@@ -294,14 +294,25 @@ def _parse_concept(block: Block, source: str = '') -> Tuple[Concept, List[Prereq
         elif keyword == 'max_epochs':
             max_epochs = int(rest.strip())
         elif keyword == 'requires':
-            # requires NAME via "ROLE"
+            # requires NAME via "ROLE" [0.95]
+            # Transfer probability is optional, defaults to 1.0
             req_parts = rest.split(' via ', 1)
             req_name = req_parts[0].strip()
-            req_role = _parse_string(req_parts[1]) if len(req_parts) > 1 else ''
+            req_role = ''
+            transfer_prob = 1.0
+            if len(req_parts) > 1:
+                role_and_prob = req_parts[1]
+                # Check for trailing [probability]
+                prob_match = re.search(r'\[(\d*\.?\d+)\]\s*$', role_and_prob)
+                if prob_match:
+                    transfer_prob = float(prob_match.group(1))
+                    role_and_prob = role_and_prob[:prob_match.start()].strip()
+                req_role = _parse_string(role_and_prob)
             prereqs.append(Prerequisite(
                 source=req_name,
                 target=name,
                 role=req_role,
+                transfer_probability=transfer_prob,
             ))
         elif keyword == 'process':
             # Process can be single-line or multi-line (indented block)

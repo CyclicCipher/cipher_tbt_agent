@@ -77,17 +77,22 @@ Model-agnostic framework for generating problems with structured work areas:
 
 Reverse problems (Stage 3): `? + 4 = 0 7 WORK 0 3` — given result + one operand, find missing operand. Forces induction (understanding the inverse), not just mechanical forward application. Mixed with forward problems within the same stage. Ref: Alemi (2025) factorization order.
 
-### CTKG (experiments/ctkg/) — IMPLEMENTED + DSL + SHEAVES
+### CTKG (experiments/ctkg/) — IMPLEMENTED + DSL + SHEAVES + MARKOV
 
-Category Theory Knowledge Graph — a directed acyclic graph where nodes are concepts/skills and edges are prerequisite relationships. Built on a universal type system of primitives (`symbol`, `seq`, `tuple`, `tagged` + structure annotations) that compose into any domain-specific type. Includes functors (structure-preserving maps between domains), adjunctions (forward/inverse pairs), and sheaf consistency checking for multi-domain composition.
+Category Theory Knowledge Graph — a directed acyclic graph where nodes are concepts/skills and edges are prerequisite relationships. Built on a universal type system of primitives (`symbol`, `seq`, `tuple`, `tagged` + structure annotations) that compose into any domain-specific type. Includes functors (structure-preserving maps between domains), adjunctions (forward/inverse pairs), sheaf consistency checking for multi-domain composition, and probabilistic structure (Markov category).
 
 1. **Curriculum compiler** (IMPLEMENTED) — topological sort = valid curriculum, type checking catches missing prerequisites before training. `validate()` checks 7 error types including `UndefinedType`.
 2. **Structured training data** (IMPLEMENTED) — `generate_curriculum()` produces ordered stages with replay policies from the graph structure.
 3. **DSL parser** (IMPLEMENTED) — `.ctkg` indentation-based file format for declarative graph definition. Supports type, concept, functor, adjunction, interface blocks. `parse_file()` returns KnowledgeGraph.
 4. **Universal type system** (IMPLEMENTED) — `TypeDef` with constructors (`symbol`, `nat`, `seq`, `tuple`, `tagged`, `expr`, `proposition`), structure annotations (`ordered`, `metric`, `invertible`, etc.), and 4 builtin types. Validation catches undefined type references.
 5. **Sheaf consistency** (IMPLEMENTED) — `sheaf_check()` validates that overlapping type/concept definitions agree across domains. `sheaf_merge()` enforces consistency on merge. `Interface` blocks declare exported types/concepts per domain. `SheafViolation` error for incompatible overlaps.
-6. **External knowledge store** (deferred) — knowledge in system RAM, structure-aware retrieval, compensates for 4GB VRAM limit
-7. **Computational aid** (deferred) — deterministic solver for multi-step problems
+6. **Probabilistic structure / Markov category** (IMPLEMENTED) — prerequisite edges carry `transfer_probability` (Markov kernel weights). `d_separated()` for conditional independence (Bayes-ball). `concept_entropy()` / `conditional_entropy()` / `mutual_information()` grounded in Baez-Fritz-Leinster characterisation. `intervene()` for do-calculus via string diagram surgery. `MasteryState` for per-concept mastery tracking with probabilistic frontier.
+7. **External knowledge store** (deferred) — knowledge in system RAM, structure-aware retrieval, compensates for 4GB VRAM limit
+8. **Computational aid** (deferred) — deterministic solver for multi-step problems
+
+**Probabilistic features:** Each prerequisite edge carries `transfer_probability` (default 1.0 = hard prerequisite). DSL syntax: `requires NAME via "ROLE" [0.75]`. `MasteryState` tracks per-concept mastery in [0,1], computes `expected_readiness()` and probabilistic `frontier()`. `d_separated(x, y, given)` answers "is X independent of Y given Z?" via Bayes-ball. `information_flow()` computes per-edge information transfer in bits. `intervene(do_concepts)` returns mutilated graph for causal queries.
+
+**Deferred probabilistic extensions:** Imprecise probability / credal sets (Liell-Cock & Staton, POPL 2025), categorical gradient learning / lenses (Cruttwell & Gavranovic 2022), possibility theory (Fritz & Teran 2024).
 
 **Arithmetic domain:** 9 concepts, 13 custom types, 12 prerequisites, 1 adjunction (add/sub), 1 interface. All types defined with universal primitives (e.g., `type digit = symbol(0..9) ordered`).
 
@@ -102,14 +107,14 @@ Category Theory Knowledge Graph — a directed acyclic graph where nodes are con
 **Commercial architecture:** Layer 1 (Graph data — `.ctkg` files, customer provides), Layer 2 (Computation rules — declarative, customer provides), Layer 3 (Engine — we provide: parser, validator, curriculum generator, trainer).
 
 Key files:
-- `DESIGN.md` — Architecture, universal type system, sheaf consistency, DSL grammar, categorical structure assessment, curriculum patterns, commercial architecture
-- `graph.py` — `TypeDef`, `Concept`, `Prerequisite`, `Functor`, `Adjunction`, `Interface`, `SheafViolation`, `KnowledgeGraph` (validate, sheaf_check, sheaf_merge, topological_sort, generate_curriculum, ancestors, descendants, frontier, missing_for)
-- `parser.py` — DSL parser: `parse(text)`, `parse_file(path)`, `merge(target, source)`. Handles type/concept/functor/adjunction/interface blocks, comments, multi-line process blocks.
+- `DESIGN.md` — Architecture, universal type system, sheaf consistency, DSL grammar, categorical structure assessment, curriculum patterns, probabilistic structure, commercial architecture
+- `graph.py` — `TypeDef`, `Concept`, `Prerequisite` (with `transfer_probability`), `Functor`, `Adjunction`, `Interface`, `SheafViolation`, `MasteryState`, `KnowledgeGraph` (validate, sheaf_check, sheaf_merge, topological_sort, generate_curriculum, d_separated, concept_entropy, conditional_entropy, mutual_information, intervene, information_flow, mastery_state, ancestors, descendants, frontier, missing_for)
+- `parser.py` — DSL parser: `parse(text)`, `parse_file(path)`, `merge(target, source)`. Handles type/concept/functor/adjunction/interface blocks, comments, multi-line process blocks. Parses `[probability]` on requires lines.
 - `domains/arithmetic.py` — Thin wrapper loading from arithmetic.ctkg
 - `domains/arithmetic.ctkg` — Full arithmetic domain (9 concepts, 13 types, 12 prereqs, 1 adjunction, 1 interface)
 - `domains/logic.py` — Thin wrapper loading from logic.ctkg
 - `domains/logic.ctkg` — Logic domain (5 concepts, 8 types, 1 interface)
-- `test_parser.py` — 11 tests covering type parsing, domain loading, validation, errors, curriculum generation, sheaf consistency, interface parsing
+- `test_parser.py` — 16 tests covering type parsing, domain loading, validation, errors, curriculum generation, sheaf consistency, interface parsing, transfer probabilities, d-separation, entropy, intervention, mastery state
 
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
 
@@ -259,6 +264,17 @@ Previous goals (catastrophic forgetting, modular circuits, energy-based reasonin
 ## Research Papers Referenced (Curriculum Design / Information Theory)
 
 12. **Alemi 2025** — "Epiplexity and the Solomonoff Prior". Prequential coding as measure of structural information. Key results applied: (a) epiplexity (S_preq) as per-stage diagnostic, (b) factorization order affects representation quality (chess experiment — reverse order forces induction, produces richer circuits), (c) "too easy" trap (low S_preq stages may pass without teaching reusable structure). Directly motivates epiplexity tracking in `train_arithmetic.py` and reverse problem design.
+
+## Research Papers Referenced (Categorical Probability)
+
+14. **Fritz 2020** — "A synthetic approach to Markov kernels, conditional independence and theorems on sufficient statistics" (Advances in Mathematics 370). Markov categories: the central categorical framework for probability. FinStoch (stochastic matrices) as the canonical example. d-separation, sufficient statistics, conditional independence all proved synthetically. arXiv:1908.07021. IMPLEMENTED: `d_separated()`, `transfer_probability`.
+15. **Fritz & Klingler 2023** — "The d-separation criterion in categorical probability" (JMLR 24(46)). d-separation theorem in fully abstract Markov category terms. Soundness for arbitrary generalized causal models. IMPLEMENTED: Bayes-ball algorithm in `graph.py`.
+16. **Fritz et al. 2024** — "Hidden Markov models and the Bayes filter in categorical probability". Generalises HMMs and Bayes filter to abstract Markov categories. When instantiated: Kalman filter, forward-backward algorithm, Rauch-Tung-Striebel smoother. arXiv:2401.14669. IMPLEMENTED: `MasteryState` as simplified Bayes filter.
+17. **Baez, Fritz & Leinster 2011** — "A characterization of entropy in terms of information loss" (Entropy 13). Shannon entropy is the *unique* functorial information measure: (1) functorial, (2) convex-linear, (3) continuous ⟹ Shannon entropy. arXiv:1106.1791. IMPLEMENTED: `concept_entropy()`, `conditional_entropy()`, `mutual_information()`.
+18. **Bradley 2021** — "Entropy as a topological operad derivation" (Entropy 23(9)). Shannon entropy = derivation of the operad of topological simplices. Connects information theory to algebraic topology.
+19. **Jacobs, Kissinger & Zanasi 2019** — "Causal inference by string diagram surgery" (MSCS). Interventions (do-calculus) as endofunctors performing surgery on string diagrams. Complete diagrammatic treatment of causal reasoning. IMPLEMENTED: `intervene()`.
+20. **Liell-Cock & Staton 2025** — "Compositional imprecise probability" (POPL 2025). Graded monads for credal sets. First fully compositional account of imprecise probability. arXiv:2405.09391. DEFERRED: future extension for soft prerequisites.
+21. **Cruttwell, Gavranovic et al. 2022** — "Categorical foundations of gradient-based learning" (ESOP 2022). Learning as composition of parametric lenses/optics. Unifies ADAM, AdaGrad, Nesterov. DEFERRED: lens framework for curriculum forward/backward passes.
 
 ## Research Papers Referenced (Generalization/Grokking)
 
