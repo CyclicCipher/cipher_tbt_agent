@@ -95,6 +95,43 @@ class Prerequisite:
 
 
 # ---------------------------------------------------------------------------
+# Functors (structure-preserving maps between domains)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Functor:
+    """A structure-preserving map between domains.
+
+    Maps concepts to concepts and prerequisites to prerequisites while
+    preserving composition: if A → B in source domain, then
+    F(A) → F(B) in target domain.
+    """
+    name: str
+    source_domain: str
+    target_domain: str
+    concept_map: Dict[str, str] = field(default_factory=dict)  # source → target
+    preserves: List[str] = field(default_factory=list)  # what it preserves
+
+
+# ---------------------------------------------------------------------------
+# Adjunctions (forward/inverse pairs)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Adjunction:
+    """A forward/inverse concept pair with round-trip verification.
+
+    The unit and counit express that applying forward then inverse
+    (or vice versa) recovers the original.
+    """
+    name: str
+    forward: str   # concept name
+    inverse: str   # concept name
+    unit: str = ''    # round-trip expression: forward then inverse
+    counit: str = ''  # round-trip expression: inverse then forward
+
+
+# ---------------------------------------------------------------------------
 # Validation errors
 # ---------------------------------------------------------------------------
 
@@ -160,6 +197,8 @@ class KnowledgeGraph:
     def __init__(self):
         self.concepts: Dict[str, Concept] = {}
         self.prerequisites: List[Prerequisite] = []
+        self.functors: Dict[str, Functor] = {}
+        self.adjunctions: Dict[str, Adjunction] = {}
         self._children: Dict[str, Set[str]] = {}  # parent -> children
         self._parents: Dict[str, Set[str]] = {}   # child -> parents
 

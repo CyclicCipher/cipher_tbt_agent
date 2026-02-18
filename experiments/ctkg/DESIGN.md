@@ -1,7 +1,7 @@
 # Category Theory Knowledge Graph (CTKG) — Design Document
 
-**Date:** 2026-02-16
-**Status:** Initial design. No code yet.
+**Date:** 2026-02-16 (updated 2026-02-18)
+**Status:** Core infrastructure implemented (graph.py, 89-concept graph). DSL and categorical features in design.
 **Context:** Mistake #44 showed that missing prerequisites between counting and arithmetic caused the model to memorize instead of compose. A knowledge graph with structural constraints would have caught this automatically — like a compiler catching a missing import. This motivates building the CTKG as a general-purpose infrastructure component, not just a curriculum tool.
 
 ---
@@ -458,6 +458,293 @@ class Prerequisite:
     # ... existing fields ...
     invertible: bool = False    # is this morphism reversible?
 ```
+
+---
+
+## Categorical Structure — Honest Assessment
+
+The current implementation uses category theory vocabulary (objects, morphisms, composition) but not its substance. What we have is a well-validated DAG. Here's what we need to add and why.
+
+### What we have
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Objects (concepts) | Implemented | Concept dataclass |
+| Morphisms (prerequisites) | Implemented | Prerequisite dataclass |
+| Composition (transitive) | Implemented | Via ancestors() / descendants() |
+| Validation (6 error types) | Implemented | validate() in graph.py |
+| Curriculum generation | Implemented | topological_sort + generate_curriculum |
+
+### What we need (prioritized by practical impact)
+
+**1. Typed composition (HIGH priority)**
+
+Current type system: list-of-string equality (`['digit'] == ['digit']`). No semantic distinction between "digit as quantity" vs "digit as ordinal" vs "digit as symbol."
+
+Need: semantic type labels so the compiler catches that `counting.digit_as_quantity ≠ fact_table.digit_as_symbol`, which is exactly what Mistake #44 was about.
+
+**2. Computation morphisms (HIGH priority)**
+
+Morphisms currently carry only metadata (role, type annotations). They need to carry **computation rules** — how the target concept's process composes the source concept's process. This is what enables auto-generating problems at higher stages from lower stages' rules.
+
+**3. Functors (MEDIUM priority)**
+
+Structure-preserving maps between domains. F: Arithmetic → Logic maps concepts to concepts and prerequisites to prerequisites while preserving composition. Needed for cross-domain curriculum transfer.
+
+**4. Adjunctions (MEDIUM priority)**
+
+Forward/inverse pairs with round-trip verification. Currently approximated by `supports_reverse` flag but not formalized. Needed for teaching bidirectional understanding.
+
+**5. Identity morphisms (LOW priority)**
+
+id_X: X → X for every concept. Would model "review" as a formal operation. Not needed until spaced repetition is formalized.
+
+**6. Natural transformations, limits, colimits, pullbacks (LOW priority)**
+
+Theoretical elegance. Natural transformations compare competing functors. Limits/colimits generalize constraint satisfaction. Not needed until multiple domains are active and we need to prove structural equivalences.
+
+---
+
+## Three Curriculum Patterns
+
+Every category theory concept maps to one of three curriculum patterns. The CTKG DSL must express all three.
+
+### Pattern 1: Process (composition, functors)
+
+The scratchpad shows step-by-step execution of the concept. The model learns by training on process tokens.
+
+Example — composition (column addition composes single-digit addition):
+```
+2 3 + 4 8 WORK 3 + 8 + 0 = 1 1 SEP 2 + 4 + 1 = 0 7 SEP 0 7 1
+                    ^^^^^^^^^^^^^^^^^   ^^^^^^^^^^^^^^^^^
+                    Stage 3 process     Stage 3 process (reused)
+```
+
+Example — functor (mapping arithmetic to a new domain):
+```
+DOMAIN arithmetic: 3 + 4 WORK 4 5 6 7 = 0 7
+MAP arithmetic logic: + → OR, digit → proposition
+DOMAIN logic: P OR Q WORK [disjunction process tokens]
+```
+
+### Pattern 2: Relationship (adjunctions, natural transformations)
+
+The scratchpad shows two related computations and a VERIFY step proving their relationship. The model learns structural linkage.
+
+Example — adjunction (forward + inverse with round-trip):
+```
+FORWARD: 3 + 4 WORK 4 5 6 7 = 0 7
+INVERSE: 7 - 4 WORK 6 5 4 = 0 3
+VERIFY: 3 + 4 - 4 = 3 ✓
+```
+
+Example — natural transformation (two functors agree):
+```
+PATH1: arithmetic → sets via F1: addition → union
+PATH2: arithmetic → sets via F2: addition → multiset_sum
+VERIFY: F1(3+4) ≡ F2(3+4)
+```
+
+### Pattern 3: Constraint (limits, pullbacks)
+
+The scratchpad shows multiple constraints and a WORK step finding the object satisfying all of them. The model learns constraint satisfaction.
+
+Example — limit (find the most specific common structure):
+```
+CONSTRAINT: X is a group
+CONSTRAINT: X has total order
+WORK: group ∩ total_order = ordered_group
+VERIFY: ordered_group satisfies both
+```
+
+---
+
+## CTKG DSL — Domain-Specific Language
+
+### Motivation
+
+The CTKG is intended as a commercial system. Customers must be able to define domains without writing Python — just data. A custom DSL is more concise than JSON/YAML, more readable for domain experts, and gives us control over syntax evolution.
+
+### Design principles
+
+1. **Indentation-based** — no braces, no XML tags
+2. **Keywords over punctuation** — `requires`, `map`, `verify` not `->`, `=>`, `<=>`
+3. **Extensible** — new keywords can be added without breaking existing files
+4. **Comments** — `--` line comments
+5. **Sections** — top-level keywords (`concept`, `functor`, `adjunction`) start blocks
+
+### Example
+
+```
+-- Arithmetic domain: counting through column operations
+
+concept query_counting
+  domain arithmetic
+  atomic
+  description "Count DOTs or TENs given a query"
+  input DOT_TEN_sequence query_token
+  output digit
+  process count(filter(input, query))
+  threshold 0.95
+
+concept combined_counting
+  domain arithmetic
+  description "Count both via successor count-up with STOP"
+  input DOT_TEN_sequence
+  output count_up_sequence count_up_sequence
+  requires query_counting via "individual counting composes into dual"
+  process
+    dot_count = count_up(count(filter(input, DOT)))
+    ten_count = count_up(count(filter(input, TEN)))
+
+concept single_digit_addition
+  domain arithmetic
+  description "Single-digit +/- producing carry + ones"
+  input digit op digit
+  output carry digit
+  requires combined_counting via "counting grounds digit semantics"
+  reversible
+  process
+    forward: carry, ones = apply_op(a, op, b)
+    inverse: missing = invert_op(result, known, op)
+
+-- Cross-domain transfer
+
+functor arith_to_logic
+  from arithmetic to logic
+  map query_counting -> proposition_counting
+  map addition -> disjunction
+  map column_addition -> proof_composition
+  preserves composition
+
+-- Forward/inverse pairing
+
+adjunction addition_subtraction
+  forward addition
+  inverse subtraction
+  unit a + b - b = a
+  counit a - b + b = a
+```
+
+### Grammar (informal)
+
+```
+file         = (statement NL)*
+statement    = concept | functor | adjunction | comment
+comment      = '--' TEXT
+
+concept      = 'concept' NAME NL (concept_field NL)*
+concept_field = 'domain' NAME
+             | 'atomic'
+             | 'description' STRING
+             | 'input' type_list
+             | 'output' type_list
+             | 'requires' NAME 'via' STRING
+             | 'reversible'
+             | 'threshold' FLOAT
+             | 'max_epochs' INT
+             | 'process' (EXPR | NL (INDENT EXPR NL)*)
+
+functor      = 'functor' NAME NL (functor_field NL)*
+functor_field = 'from' NAME 'to' NAME
+             | 'map' NAME '->' NAME
+             | 'preserves' NAME
+
+adjunction   = 'adjunction' NAME NL (adj_field NL)*
+adj_field    = 'forward' NAME
+             | 'inverse' NAME
+             | 'unit' EXPR
+             | 'counit' EXPR
+
+type_list    = NAME (NAME)*
+NAME         = [a-zA-Z_][a-zA-Z0-9_]*
+STRING       = '"' [^"]* '"'
+FLOAT        = [0-9]+ '.' [0-9]+
+INT          = [0-9]+
+EXPR         = (any text until end of line or dedent)
+INDENT       = 2+ spaces deeper than parent
+NL           = newline
+```
+
+### What the parser produces
+
+The parser reads `.ctkg` files and emits the same Python objects the current code uses:
+- `concept` blocks → `Concept` instances
+- `requires` fields → `Prerequisite` instances
+- `functor` blocks → `Functor` instances (new dataclass)
+- `adjunction` blocks → `Adjunction` instances (new dataclass)
+
+The graph is constructed by loading one or more `.ctkg` files, then calling `validate()`.
+
+---
+
+## Commercial Architecture
+
+Three-layer design where customers define WHAT to teach, the system handles HOW.
+
+### Layer 1 — Graph (customer provides)
+
+`.ctkg` files defining concepts, prerequisites, functors, adjunctions. Pure data, no code. The customer brings domain expertise.
+
+### Layer 2 — Computation rules (customer provides)
+
+The `process` field in each concept defines how outputs derive from inputs. Rules reference other concepts by name — the system resolves references using the graph and composes computations automatically.
+
+Key property: a composite concept's process is derivable from its prerequisites' processes. The customer defines atomic rules; the system derives the full computation tree.
+
+### Layer 3 — Engine (we provide)
+
+- **Parser**: `.ctkg` → Python graph objects
+- **Validator**: Graph structure, type matching, prerequisite completeness
+- **Curriculum compiler**: Topological sort + replay policy
+- **Problem generator**: Samples inputs, evaluates computation rules, produces process tokens + answers
+- **Trainer**: Model-agnostic training loop
+- **Diagnostics**: Per-stage epiplexity, per-token accuracy, train/test breakdown
+
+The engine is domain-agnostic. Same engine for arithmetic, electronics, formal logic, or any domain the customer defines.
+
+---
+
+## Updated Implementation Plan
+
+### Phase 1: Graph data structures + validation ✅ DONE
+
+- `graph.py` — Concept, Prerequisite, KnowledgeGraph, 6 validation errors
+- `domains/arithmetic.py` — 5 implemented concepts
+- `domains/full.py` — 89 concepts, 132 prerequisites, 9 domains
+
+### Phase 2: DSL parser (CURRENT)
+
+- Grammar specification (see above)
+- `parser.py` — tokenizer + recursive descent parser for `.ctkg` files
+- `Functor` and `Adjunction` dataclasses in graph.py
+- Convert `domains/arithmetic.py` to `domains/arithmetic.ctkg` as proof of concept
+- Validation: parse errors with line numbers
+
+### Phase 3: Semantic type system
+
+- Replace list-of-string types with structured `Type` objects
+- Domain labels: 'quantity', 'ordered', 'counted', 'symbol', etc.
+- Validation catches semantic mismatches, not just syntactic ones
+
+### Phase 4: Computation rule interpreter
+
+- Parse `process` field into an AST
+- Evaluate rules by composing prerequisite rules
+- Auto-generate problems from rule evaluation + input sampling
+- Auto-assemble scratchpads from rule execution trace
+
+### Phase 5: Curriculum generation from `.ctkg` files
+
+- End-to-end: `.ctkg` file → validated graph → curriculum → training data
+- Replace hardcoded stage list in `train_arithmetic.py`
+- Replay policy based on graph distance
+
+### Phase 6: Functor implementation
+
+- `Functor` dataclass with concept_map and morphism_map
+- Validation: functor preserves composition
+- Curriculum transfer: train on domain A, apply functor to generate domain B curriculum
 
 ---
 

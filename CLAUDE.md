@@ -77,24 +77,32 @@ Model-agnostic framework for generating problems with structured work areas:
 
 Reverse problems (Stage 3): `? + 4 = 0 7 WORK 0 3` — given result + one operand, find missing operand. Forces induction (understanding the inverse), not just mechanical forward application. Mixed with forward problems within the same stage. Ref: Alemi (2025) factorization order.
 
-### CTKG (experiments/ctkg/) — IMPLEMENTED, USE CASES 1-2
+### CTKG (experiments/ctkg/) — IMPLEMENTED + DSL PARSER
 
-Category Theory Knowledge Graph — a directed acyclic graph where nodes are concepts/skills and edges are prerequisite relationships. Current focus on use cases 1-2 (curriculum compiler + structured training data).
+Category Theory Knowledge Graph — a directed acyclic graph where nodes are concepts/skills and edges are prerequisite relationships. Includes functors (structure-preserving maps between domains) and adjunctions (forward/inverse pairs). Current focus: curriculum compiler + structured training data + DSL for declarative graph definition.
 
 1. **Curriculum compiler** (IMPLEMENTED) — topological sort = valid curriculum, type checking catches missing prerequisites before training. `validate()` checks 6 error types.
 2. **Structured training data** (IMPLEMENTED) — `generate_curriculum()` produces ordered stages with replay policies from the graph structure.
-3. **External knowledge store** (deferred) — knowledge in system RAM, structure-aware retrieval, compensates for 4GB VRAM limit
-4. **Computational aid** (deferred) — deterministic solver for multi-step problems
+3. **DSL parser** (IMPLEMENTED) — `.ctkg` indentation-based file format for declarative graph definition. Supports concept, functor, adjunction blocks. `parse_file()` returns KnowledgeGraph.
+4. **External knowledge store** (deferred) — knowledge in system RAM, structure-aware retrieval, compensates for 4GB VRAM limit
+5. **Computational aid** (deferred) — deterministic solver for multi-step problems
 
 **Full graph:** 89 concepts across 9 domains (arithmetic, arithmetic_ex, algebra, functions, calculus, ode, logic, abstract_alg, science), 132 prerequisites. 5 implemented (with generators), 84 planned.
 
 **Target calculations:** (1) Analytically solve ODEs up to 3rd order, (2) Solve ODEs via Laplace transform, (3) Derive the impulse response of a damped harmonic oscillator — 47 stages from counting to solution. (4) Logic from propositional to natural transformations in category theory — 21 stages.
 
+**Three curriculum patterns:** Process (composition/functors — step-by-step execution), Relationship (adjunctions/natural transformations — paired forward/inverse computations), Constraint (limits/pullbacks — multi-constraint satisfaction).
+
+**Commercial architecture:** Layer 1 (Graph data — `.ctkg` files, customer provides), Layer 2 (Computation rules — declarative, customer provides), Layer 3 (Engine — we provide: parser, validator, curriculum generator, trainer).
+
 Key files:
-- `DESIGN.md` — Architecture, data model, validation rules, epiplexity, factorization order
-- `graph.py` — `Concept`, `Prerequisite`, `KnowledgeGraph` (validate, topological_sort, generate_curriculum, ancestors, descendants, frontier, missing_for)
+- `DESIGN.md` — Architecture, data model, validation rules, DSL grammar, categorical structure assessment, curriculum patterns, commercial architecture
+- `graph.py` — `Concept`, `Prerequisite`, `Functor`, `Adjunction`, `KnowledgeGraph` (validate, topological_sort, generate_curriculum, ancestors, descendants, frontier, missing_for)
+- `parser.py` — DSL parser: `parse(text)`, `parse_file(path)`, `merge(target, source)`. Handles concept/functor/adjunction blocks, comments, multi-line process blocks.
 - `domains/arithmetic.py` — Working arithmetic subgraph (5 implemented concepts, maps to existing generators)
+- `domains/arithmetic.ctkg` — Same graph in DSL format (proof of concept, parser-verified)
 - `domains/full.py` — Complete 89-concept graph across all domains (math, logic, science)
+- `test_parser.py` — Parser verification test (compares DSL output against Python builder)
 
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
 
@@ -124,10 +132,12 @@ predictive-coding-agent/
 ├── MISTAKES.md            # 44 documented mistakes (ALWAYS READ)
 ├── CONTINUATION.md        # Compositional arithmetic curriculum plan (ACTIVE)
 ├── experiments/
-│   ├── ctkg/              # Category Theory Knowledge Graph (IMPLEMENTED)
-│   │   ├── DESIGN.md      # Architecture: 4 use cases, data model, validation rules
-│   │   ├── graph.py       # Concept, Prerequisite, KnowledgeGraph, validation
-│   │   └── domains/       # arithmetic.py (5 implemented), full.py (89 concepts, 9 domains)
+│   ├── ctkg/              # Category Theory Knowledge Graph (IMPLEMENTED + DSL)
+│   │   ├── DESIGN.md      # Architecture, DSL grammar, curriculum patterns, commercial arch
+│   │   ├── graph.py       # Concept, Prerequisite, Functor, Adjunction, KnowledgeGraph
+│   │   ├── parser.py      # DSL parser: parse(), parse_file(), merge()
+│   │   ├── test_parser.py # Parser verification test
+│   │   └── domains/       # arithmetic.py/.ctkg (5 implemented), full.py (89 concepts)
 │   ├── scratchpad/        # Scratchpad framework (model-agnostic)
 │   │   ├── framework.py   # Vocab, Problem, Step, Grader, ProblemGenerator
 │   │   ├── DESIGN_GUIDE.md # Curriculum design principles (category theory, prerequisites)

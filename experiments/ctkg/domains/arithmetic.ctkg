@@ -1,0 +1,77 @@
+-- arithmetic.ctkg — Proof of concept for the CTKG DSL
+-- This should produce the same graph as build_arithmetic_graph() in arithmetic.py
+
+-- =========================================================================
+-- Stage 1: Query Counting
+-- =========================================================================
+
+concept query_counting
+  domain arithmetic
+  description "Count DOTs or TENs in a shuffled sequence given a query"
+  input DOT_TEN_sequence query_token
+  output digit
+  threshold 0.95
+  max_epochs 100
+
+-- =========================================================================
+-- Stage 2: Combined Counting (process-supervised)
+-- =========================================================================
+
+concept combined_counting
+  domain arithmetic
+  description "Count both DOTs and TENs via count-up process. Uses successor function: DOT 1 2 STOP... TEN 1 2 3 STOP..."
+  input DOT_TEN_sequence
+  output count_up_sequence count_up_sequence
+  requires query_counting via "Individual counting composes into dual counting"
+  threshold 0.95
+  max_epochs 100
+  process count_up(DOT), count_up(TEN)
+
+-- =========================================================================
+-- Stage 3: Single-Digit Arithmetic
+-- =========================================================================
+
+concept single_digit_arithmetic
+  domain arithmetic
+  description "Single-digit +/- producing carry + ones"
+  input digit op digit
+  output carry digit
+  requires combined_counting via "Counting grounds digit semantics for arithmetic"
+  atomic
+  reversible
+  threshold 0.95
+  max_epochs 100
+  process carry, ones = apply_op(a, op, b)
+
+-- =========================================================================
+-- Stage 4: Two-Digit +/- Single-Digit
+-- =========================================================================
+
+concept two_digit_single_arithmetic
+  domain arithmetic
+  description "Two-digit +/- single-digit with column scratchpad"
+  input digit_pair op zero_padded_digit
+  output column_scratchpad
+  requires single_digit_arithmetic via "Single-digit ops are the column operations"
+  threshold 0.95
+  max_epochs 100
+  process
+    ones_carry, ones = apply_op(a_ones, op, b)
+    tens = a_tens + ones_carry
+
+-- =========================================================================
+-- Stage 5: Two-Digit +/- Two-Digit
+-- =========================================================================
+
+concept two_digit_arithmetic
+  domain arithmetic
+  description "Two-digit +/- two-digit with column scratchpad"
+  input digit_pair op digit_pair
+  output column_scratchpad
+  requires two_digit_single_arithmetic via "Bridge from one-variable column to two-variable column"
+  threshold 0.95
+  max_epochs 100
+  process
+    ones_carry, ones = apply_op(a_ones, op, b_ones)
+    tens_carry, tens = apply_op(a_tens + ones_carry, op_ext, b_tens)
+    hundreds = tens_carry
