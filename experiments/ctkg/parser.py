@@ -1,10 +1,15 @@
 """CTKG DSL parser — reads .ctkg files into graph objects.
 
-The DSL is an indentation-based language for defining knowledge graphs.
-Top-level blocks: concept, functor, adjunction. Fields are indented
-under their parent block.
+The DSL is an indentation-based language for defining knowledge graphs
+with universal type primitives.
+
+Top-level blocks: type, concept, functor, adjunction.
+Fields are indented under their parent block.
 
 Example:
+    type digit = symbol(0, 1, 2, 3, 4, 5, 6, 7, 8, 9) ordered
+    type op = symbol(ADD, SUB)
+
     concept addition
       domain arithmetic
       description "Single-digit addition"
@@ -12,7 +17,9 @@ Example:
       output carry digit
       requires counting via "grounds digit semantics"
       reversible
-      process carry, ones = apply_op(a, op, b)
+      process
+        result = fold(b, a, succ)
+        carry = compare(result, 9)
 
 See DESIGN.md for the full grammar specification.
 """
@@ -20,7 +27,8 @@ See DESIGN.md for the full grammar specification.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
+import re
 
 from .graph import (
     Adjunction,
@@ -28,6 +36,7 @@ from .graph import (
     Functor,
     KnowledgeGraph,
     Prerequisite,
+    TypeDef,
 )
 
 
@@ -97,11 +106,12 @@ def _strip_comment(line: str) -> str:
 
 @dataclass
 class Block:
-    """A top-level block (concept, functor, adjunction) with its fields."""
-    kind: str          # 'concept', 'functor', 'adjunction'
-    name: str          # block name
+    """A top-level block (type, concept, functor, adjunction) with fields."""
+    kind: str          # 'type', 'concept', 'functor', 'adjunction'
+    name: str          # block name (or full header for type)
     fields: List[Line] # indented field lines
     line: int          # line number of the block header
+    header: str = ''   # full header text (for single-line blocks like type)
 
 
 def group_blocks(lines: List[Line], source: str = '') -> List[Block]:
@@ -114,7 +124,17 @@ def group_blocks(lines: List[Line], source: str = '') -> List[Block]:
     for ln in lines:
         first_word = ln.content.split()[0] if ln.content else ''
 
-        if ln.indent == 0 and first_word in TOP_KEYWORDS:
+        # Type definitions are single-line: type NAME = CONSTRUCTOR(...)
+        if ln.indent == 0 and first_word == 'type':
+            blocks.append(Block(
+                kind='type',
+                name='',  # parsed from header
+                fields=[],
+                line=ln.number,
+                header=ln.content,
+            ))
+            current = None  # type blocks don't have children
+        elif ln.indent == 0 and first_word in TOP_KEYWORDS:
             # Start new block
             parts = ln.content.split(None, 1)
             if len(parts) < 2:
@@ -129,7 +149,7 @@ def group_blocks(lines: List[Line], source: str = '') -> List[Block]:
             blocks.append(current)
         elif current is not None and ln.indent > 0:
             current.fields.append(ln)
-        elif ln.indent == 0 and first_word not in TOP_KEYWORDS:
+        elif ln.indent == 0:
             raise ParseError(
                 f"Unexpected top-level keyword: '{first_word}'",
                 ln.number, source)
@@ -139,6 +159,78 @@ def group_blocks(lines: List[Line], source: str = '') -> List[Block]:
                 ln.number, source)
 
     return blocks
+
+
+# ---------------------------------------------------------------------------
+# Type definition parser
+# ---------------------------------------------------------------------------
+
+def _parse_type_def(block: Block, source: str = '') -> TypeDef:
+    """Parse a type definition line.
+
+    Syntax:
+        type NAME = CONSTRUCTOR(param1, param2, ...) [annotation1] [annotation2]
+        type NAME = CONSTRUCTOR [annotation1]
+
+    Examples:
+        type digit = symbol(0, 1, 2, 3, 4, 5, 6, 7, 8, 9) ordered
+        type op = symbol(ADD, SUB)
+        type carry = symbol(0, 1)
+        type count_seq = seq(digit)
+        type scratchpad = tuple(carry, digit, carry, digit, digit)
+        type result = tagged(success: nat, error: bool)
+    """
+    header = block.header
+    # Strip 'type' keyword
+    rest = header[4:].strip()
+
+    # Split on '='
+    eq_pos = rest.find('=')
+    if eq_pos < 0:
+        raise ParseError(
+            f"Type definition requires '=': '{header}'",
+            block.line, source)
+
+    name = rest[:eq_pos].strip()
+    if not name or not re.match(r'^[a-zA-Z_]\w*$', name):
+        raise ParseError(
+            f"Invalid type name: '{name}'", block.line, source)
+
+    rhs = rest[eq_pos + 1:].strip()
+
+    # Parse constructor and optional params
+    # Formats: "constructor" or "constructor(p1, p2, ...)" optionally followed
+    # by annotation words
+    annotations: Set[str] = set()
+
+    paren_open = rhs.find('(')
+    if paren_open >= 0:
+        constructor = rhs[:paren_open].strip()
+        # Find matching close paren
+        paren_close = rhs.rfind(')')
+        if paren_close < 0:
+            raise ParseError(
+                f"Unmatched '(' in type definition: '{header}'",
+                block.line, source)
+        params_str = rhs[paren_open + 1:paren_close]
+        params = [p.strip() for p in params_str.split(',') if p.strip()]
+        # Everything after closing paren = annotations
+        after_paren = rhs[paren_close + 1:].strip()
+        if after_paren:
+            annotations = set(after_paren.split())
+    else:
+        # No params — constructor is first word, rest are annotations
+        parts = rhs.split()
+        constructor = parts[0]
+        params = []
+        annotations = set(parts[1:]) if len(parts) > 1 else set()
+
+    return TypeDef(
+        name=name,
+        constructor=constructor,
+        params=params,
+        annotations=annotations,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +323,7 @@ def _parse_concept(block: Block, source: str = '') -> Tuple[Concept, List[Prereq
         domain=domain,
         input_type=input_type,
         output_type=output_type,
+        process=process_lines,
         is_atomic=atomic,
         supports_reverse=reversible,
         pass_threshold=threshold,
@@ -349,7 +442,11 @@ def parse(text: str, source: str = '') -> KnowledgeGraph:
     graph = KnowledgeGraph()
 
     for block in blocks:
-        if block.kind == 'concept':
+        if block.kind == 'type':
+            typedef = _parse_type_def(block, source)
+            graph.add_type(typedef)
+
+        elif block.kind == 'concept':
             concept, prereqs = _parse_concept(block, source)
             graph.add_concept(concept)
             for p in prereqs:
@@ -375,6 +472,8 @@ def parse_file(path: str) -> KnowledgeGraph:
 
 def merge(target: KnowledgeGraph, source: KnowledgeGraph) -> None:
     """Merge source graph into target (for loading multiple .ctkg files)."""
+    for t in source.types.values():
+        target.add_type(t)
     for c in source.concepts.values():
         target.add_concept(c)
     for p in source.prerequisites:

@@ -1,7 +1,7 @@
 # Category Theory Knowledge Graph (CTKG) — Design Document
 
 **Date:** 2026-02-16 (updated 2026-02-18)
-**Status:** Core infrastructure implemented (graph.py, 89-concept graph). DSL and categorical features in design.
+**Status:** Universal type system + DSL parser + arithmetic domain implemented. 6/6 tests pass.
 **Context:** Mistake #44 showed that missing prerequisites between counting and arithmetic caused the model to memorize instead of compose. A knowledge graph with structural constraints would have caught this automatically — like a compiler catching a missing import. This motivates building the CTKG as a general-purpose infrastructure component, not just a curriculum tool.
 
 ---
@@ -15,6 +15,118 @@ A directed acyclic graph where:
 - **Each edge** carries metadata: how the source skill is used by the target, codomain/domain type annotations
 
 The graph enforces **structural constraints** that prevent ill-formed curricula. The key insight: if the graph is correct, the curriculum is correct. Mistakes happen when the graph is incomplete (missing nodes/edges), not when the training procedure is wrong.
+
+---
+
+## Universal Type System
+
+The CTKG uses a small set of universal primitives that compose into any domain-specific type. This ensures that "digit," "price," or "chemical bond" are not opaque strings but structurally defined objects the system can reason about.
+
+### The Problem
+
+Without universal primitives, every new domain requires reprogramming. `DOT_TEN_sequence` means nothing to the computer — it's just a label on a wire. If a customer in finance creates `price_sequence`, the system would happily connect it to `column_scratchpad` if the strings accidentally matched. We need types with structure, not just names.
+
+### The Insight
+
+At the level of a language model processing tokens, everything reduces to: **pick one symbol from a finite set, then maybe pick another.** The structure is in how those sets relate to each other.
+
+### Type Primitives (IMPLEMENTED)
+
+**Type constructors** — how to build types:
+
+| Constructor | Syntax | Meaning | Example |
+|-------------|--------|---------|---------|
+| `symbol` | `symbol(a, b, c, ...)` | Element from a named finite set | `digit = symbol(0..9)` |
+| `nat` | `nat` | Natural number | Built-in |
+| `bool` | `bool` | True / false | Built-in |
+| `seq` | `seq(T)` | Variable-length sequence of T | `count_seq = seq(digit)` |
+| `tuple` | `tuple(T1, T2, ...)` | Fixed-length product | `digit_pair = tuple(digit, digit)` |
+| `tagged` | `tagged(l1: T1, l2: T2)` | Sum type / variant | `result = tagged(ok: nat, err: bool)` |
+| `expr` | `expr` | Quoted expression (code-as-data) | Built-in |
+| `proposition` | `proposition` | Logical statement | Built-in |
+
+**Structure annotations** — properties on types:
+
+| Annotation | Meaning | Unlocks |
+|------------|---------|---------|
+| `ordered` | Elements have a total order | `succ`, `pred`, `compare` |
+| `invertible` | Operations can be reversed | Adjunction support |
+| `commutative` | `a op b = b op a` | Symmetry optimization |
+| `associative` | `(a op b) op c = a op (b op c)` | Regrouping |
+| `periodic(k)` | Wraps around every k elements | Modular arithmetic |
+| `metric` | Elements have a distance function | Similarity, approximation |
+
+**Builtin types** — always available without declaration: `nat`, `bool`, `expr`, `proposition`.
+
+### Three Levels of Process Primitives
+
+Every concept's `process` field uses operations from three levels. Higher levels subsume lower ones.
+
+**Level 1 — Computation** (applying known operations):
+
+| Primitive | Signature | Meaning |
+|-----------|-----------|---------|
+| `succ(x)` | ordered T → T | Next element |
+| `pred(x)` | ordered T → T | Previous element |
+| `compare(a, b)` | ordered T × T → {GT, LT, EQ} | Comparison |
+| `lookup(table, key)` | Table × Key → Value | Finite function |
+| `fold(seq, init, step)` | seq(T) × S × (S×T→S) → S | Reduce sequence |
+| `scan(seq, init, step)` | seq(T) × S × (S×T→S) → seq(S) | Running fold |
+| `count(seq, filter)` | seq(T) × Pred → nat | Count matches |
+| `emit(x)` | T → output | Produce token |
+| `if(c, then, else)` | bool × T × T → T | Conditional |
+
+**Level 2 — Logic** (reasoning about values):
+
+| Primitive | Signature | Meaning |
+|-----------|-----------|---------|
+| `equal(a, b)` | T × T → bool | Equality test |
+| `and(a, b)` | bool × bool → bool | Conjunction |
+| `or(a, b)` | bool × bool → bool | Disjunction |
+| `not(a)` | bool → bool | Negation |
+| `implies(a, b)` | bool × bool → bool | Implication |
+| `forall(x in T, P(x))` | T × (T→bool) → bool | Universal (finite) |
+| `exists(x in T, P(x))` | T × (T→bool) → bool | Existential (finite) |
+
+**Level 3 — Transform** (operating on expressions as data):
+
+| Primitive | Signature | Meaning |
+|-----------|-----------|---------|
+| `quote(expr)` | T → expr | Reify expression |
+| `match(expr, pattern)` | expr × pattern → bindings | Pattern match |
+| `substitute(expr, var, val)` | expr × name × T → expr | Replace variable |
+| `rewrite(expr, rule)` | expr × rule → expr | Apply transformation |
+| `decompose(expr)` | expr → seq(expr) | Break into parts |
+| `compose(a, b)` | expr × expr → expr | Combine expressions |
+
+Level 1 lets you DO arithmetic. Level 2 lets you PROVE things about arithmetic. Level 3 lets you IMPROVE algorithms (meta-reasoning, code-as-data).
+
+### Type Validation (IMPLEMENTED)
+
+The validator checks that every type name used in a concept's `input`/`output` resolves against the type registry. This catches errors at parse time:
+
+```
+CTKG validation error:
+  Concept 'foo' input type 'nonexistent_type' not defined in type registry
+```
+
+### Cross-Domain Universality
+
+The same primitives work for any domain:
+
+```
+-- Finance
+type price = symbol(0..999) ordered metric
+type signal = symbol(BUY, SELL, HOLD)
+
+-- Chemistry
+type element = symbol(H, He, Li, ...) ordered
+type bond = tagged(single: tuple(element, element), double: tuple(element, element))
+
+-- Logic
+type prop = proposition
+type proof_step = tuple(prop, rule_name, seq(prop))
+```
 
 ---
 
@@ -119,34 +231,21 @@ Category ARITH:
 
 ### Type System
 
-Each node has an **input type** (what tokens it consumes) and an **output type** (what tokens it produces). Edges are valid only when types match:
+**See "Universal Type System" section above for the complete reference.**
 
+Types are now defined using universal constructors (`symbol`, `seq`, `tuple`, `tagged`) with structure annotations (`ordered`, `metric`, etc.). The validator checks that all type names in concept inputs/outputs resolve against the type registry.
+
+Example from `arithmetic.ctkg`:
 ```
-counting:
-  input:  [DOT/TEN tokens]
-  output: [digit]  -- digit-as-quantity-label
+type digit = symbol(0, 1, 2, 3, 4, 5, 6, 7, 8, 9) ordered
+type carry = symbol(0, 1)
+type arith_result = tuple(carry, digit)
 
-ordinality:
-  input:  [digit, SUCC/PRED]
-  output: [digit]  -- digit-as-ordered-quantity
-
-comparison:
-  input:  [digit, digit]
-  output: [GT/LT/EQ]
-
-addition:
-  input:  [digit, +, digit]
-  output: [count-sequence, =, carry, digit]  -- digit-as-counted-quantity
-
-column_addition:
-  input:  [digit, digit, +, digit, digit]
-  output: [column_scratchpad]  -- contains addition sub-computations
+concept single_digit_addition
+  input digit op digit
+  output arith_result        -- type validated against registry
+  ...
 ```
-
-The edge `ordinality → addition` is valid because:
-- ordinality output: `digit` (as ordered quantity)
-- addition input: `digit` (needs ordered quantity for counting-up)
-- Types match: the digit produced by ordinality IS the digit consumed by addition
 
 The old edge `counting → single_digit_addition_fact` was INVALID because:
 - counting output: `digit` (as quantity label)
@@ -630,8 +729,16 @@ adjunction addition_subtraction
 
 ```
 file         = (statement NL)*
-statement    = concept | functor | adjunction | comment
+statement    = typedef | concept | functor | adjunction | comment
 comment      = '--' TEXT
+
+typedef      = 'type' NAME '=' CONSTRUCTOR
+             | 'type' NAME '=' CONSTRUCTOR '(' param_list ')' (ANNOTATION)*
+CONSTRUCTOR  = 'symbol' | 'nat' | 'bool' | 'seq' | 'tuple'
+             | 'tagged' | 'expr' | 'proposition'
+param_list   = PARAM (',' PARAM)*
+ANNOTATION   = 'ordered' | 'invertible' | 'commutative'
+             | 'associative' | 'metric' | 'periodic(' INT ')'
 
 concept      = 'concept' NAME NL (concept_field NL)*
 concept_field = 'domain' NAME
@@ -668,13 +775,15 @@ NL           = newline
 
 ### What the parser produces
 
-The parser reads `.ctkg` files and emits the same Python objects the current code uses:
-- `concept` blocks → `Concept` instances
+The parser reads `.ctkg` files and emits Python graph objects:
+- `type` lines → `TypeDef` instances (registered in graph's type registry)
+- `concept` blocks → `Concept` instances (with `process` lines preserved)
 - `requires` fields → `Prerequisite` instances
-- `functor` blocks → `Functor` instances (new dataclass)
-- `adjunction` blocks → `Adjunction` instances (new dataclass)
+- `functor` blocks → `Functor` instances
+- `adjunction` blocks → `Adjunction` instances
 
 The graph is constructed by loading one or more `.ctkg` files, then calling `validate()`.
+Validation now checks type resolution: all type names in concept inputs/outputs must exist in the type registry (either defined in the `.ctkg` file or built-in).
 
 ---
 
@@ -710,41 +819,43 @@ The engine is domain-agnostic. Same engine for arithmetic, electronics, formal l
 ### Phase 1: Graph data structures + validation ✅ DONE
 
 - `graph.py` — Concept, Prerequisite, KnowledgeGraph, 6 validation errors
-- `domains/arithmetic.py` — 5 implemented concepts
-- `domains/full.py` — 89 concepts, 132 prerequisites, 9 domains
+- `domains/arithmetic.py` — 5 implemented concepts (now loads from .ctkg)
 
-### Phase 2: DSL parser (CURRENT)
+### Phase 2: DSL parser + universal types ✅ DONE
 
-- Grammar specification (see above)
-- `parser.py` — tokenizer + recursive descent parser for `.ctkg` files
-- `Functor` and `Adjunction` dataclasses in graph.py
-- Convert `domains/arithmetic.py` to `domains/arithmetic.ctkg` as proof of concept
-- Validation: parse errors with line numbers
+- Grammar specification with `type` keyword
+- `parser.py` — tokenizer + parser for `.ctkg` files (type, concept, functor, adjunction)
+- `TypeDef` dataclass with constructor, params, annotations
+- Builtin types: nat, bool, expr, proposition
+- `UndefinedType` validation error — catches unresolved type names
+- `domains/arithmetic.ctkg` — 9 concepts, 13 types, 12 prerequisites, 1 adjunction
+- `test_parser.py` — 6 tests, all passing
+- `arithmetic.py` → thin wrapper that loads from .ctkg
 
-### Phase 3: Semantic type system
+### Phase 3: Computation rule interpreter (NEXT)
 
-- Replace list-of-string types with structured `Type` objects
-- Domain labels: 'quantity', 'ordered', 'counted', 'symbol', etc.
-- Validation catches semantic mismatches, not just syntactic ones
-
-### Phase 4: Computation rule interpreter
-
-- Parse `process` field into an AST
+- Parse `process` field into an AST (currently stored as raw strings)
+- Define evaluation semantics for Level 1 primitives (succ, pred, fold, scan, etc.)
 - Evaluate rules by composing prerequisite rules
 - Auto-generate problems from rule evaluation + input sampling
 - Auto-assemble scratchpads from rule execution trace
 
-### Phase 5: Curriculum generation from `.ctkg` files
+### Phase 4: Curriculum generation from `.ctkg` files
 
 - End-to-end: `.ctkg` file → validated graph → curriculum → training data
 - Replace hardcoded stage list in `train_arithmetic.py`
 - Replay policy based on graph distance
 
-### Phase 6: Functor implementation
+### Phase 5: Functor validation
 
-- `Functor` dataclass with concept_map and morphism_map
-- Validation: functor preserves composition
+- Validate that functor preserves composition
 - Curriculum transfer: train on domain A, apply functor to generate domain B curriculum
+
+### Phase 6: Level 2-3 primitives
+
+- Logic primitives (equal, forall, exists, implies) for proof-supervised training
+- Transform primitives (quote, match, rewrite) for meta-reasoning / algorithm improvement
+- Process AST evaluation for all three levels
 
 ---
 

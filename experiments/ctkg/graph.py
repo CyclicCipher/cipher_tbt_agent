@@ -1,24 +1,34 @@
 """Category Theory Knowledge Graph — Core data structures and validation.
 
 The CTKG is a DAG where nodes are concepts/skills and edges are prerequisite
-relationships. It serves as:
+relationships.  It is built on a universal type system of primitives that
+compose into any domain-specific type.
 
-1. Curriculum compiler — topological sort = valid training order; validation
-   catches missing prerequisites before training runs.
-2. Structured training data generator — graph structure determines training
-   order, replay policy, and format consistency.
+Three levels of primitives:
+  Level 1 — Computation:  succ, pred, compare, lookup, fold, scan, emit, if
+  Level 2 — Logic:        equal, and, or, not, implies, forall, exists
+  Level 3 — Transform:    quote, match, substitute, rewrite, decompose, compose
+
+Type primitives:
+  symbol(set)  — element from a named finite set
+  nat          — natural number (inductive: zero | succ)
+  bool         — true | false
+  seq(T)       — variable-length sequence
+  tuple(T...)  — fixed-length product
+  tagged(...)  — sum / variant type
+  expr         — quoted expression (code-as-data)
+  proposition  — logical statement
+
+Structure annotations:
+  ordered, invertible, commutative, associative, periodic(k), metric
 
 Usage:
     graph = KnowledgeGraph()
+    graph.add_type(TypeDef('digit', 'symbol', ...))
     graph.add_concept(Concept(name='counting', ...))
-    graph.add_concept(Concept(name='addition', ...))
-    graph.add_prerequisite(Prerequisite(source='counting', target='addition', ...))
+    graph.add_prerequisite(Prerequisite(...))
 
     errors = graph.validate()
-    if errors:
-        for e in errors:
-            print(f"CTKG ERROR: {e}")
-
     curriculum = graph.generate_curriculum(target='addition')
 """
 
@@ -26,7 +36,60 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Union
+
+
+# ---------------------------------------------------------------------------
+# Type system — universal primitives
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TypeDef:
+    """A named type definition.
+
+    Types compose from a small set of universal constructors:
+      symbol(set_name)        — element from a named finite set
+      nat                     — natural number
+      bool                    — true | false
+      seq(T)                  — variable-length sequence of T
+      tuple(T1, T2, ...)      — fixed-length product
+      tagged(l1: T1, l2: T2)  — sum / variant
+      expr                    — quoted expression (meta-reasoning)
+      proposition             — logical statement
+      rule(pat, repl)         — rewrite rule
+
+    Structure annotations are stored as a set of strings:
+      ordered, invertible, commutative, associative, periodic(k), metric
+    """
+    name: str                        # type identifier (e.g. 'digit')
+    constructor: str                 # base constructor (symbol, nat, seq, ...)
+    params: List[str] = field(default_factory=list)      # constructor params
+    annotations: Set[str] = field(default_factory=set)   # structure tags
+    description: str = ''            # human-readable doc
+
+    def __post_init__(self):
+        # Normalise annotations to a set
+        if isinstance(self.annotations, list):
+            self.annotations = set(self.annotations)
+
+    def __repr__(self):
+        ann = ' '.join(sorted(self.annotations))
+        if self.params:
+            params = ', '.join(self.params)
+            base = f"{self.constructor}({params})"
+        else:
+            base = self.constructor
+        return f"{self.name} = {base}" + (f" [{ann}]" if ann else "")
+
+
+# Builtin types — always available, never need to be declared.
+BUILTIN_TYPES: Dict[str, TypeDef] = {
+    'nat':  TypeDef('nat', 'nat', description='Natural number'),
+    'bool': TypeDef('bool', 'bool', description='Boolean'),
+    'expr': TypeDef('expr', 'expr', description='Quoted expression'),
+    'proposition': TypeDef(
+        'proposition', 'proposition', description='Logical statement'),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -37,17 +100,20 @@ from typing import Dict, List, Optional, Set
 class Concept:
     """A node in the knowledge graph.
 
-    Each concept represents a teachable skill. It carries metadata about
+    Each concept represents a teachable skill.  It carries metadata about
     what it teaches, how to verify learning, and its scratchpad format.
     """
     name: str
     description: str
-    domain: str  # e.g., 'arithmetic', 'algebra', 'calculus', 'logic', 'science'
+    domain: str  # e.g., 'arithmetic', 'algebra', 'calculus', 'logic'
 
     # Type annotations — what this concept consumes and produces.
-    # Types are string labels (advisory, used for validation warnings).
+    # These are *type names* that resolve against the graph's type registry.
     input_type: List[str] = field(default_factory=list)
     output_type: List[str] = field(default_factory=list)
+
+    # Process — computation rule expressed as a list of process-language lines.
+    process: List[str] = field(default_factory=list)
 
     # Scratchpad integration
     generator_class: Optional[str] = None  # ProblemGenerator subclass name
@@ -171,6 +237,10 @@ class UnimplementedDependency(ValidationError):
     """Implemented concept depends on a planned (unimplemented) concept."""
 
 
+class UndefinedType(ValidationError):
+    """Concept references a type name not in the type registry."""
+
+
 # ---------------------------------------------------------------------------
 # Curriculum stage (output of generate_curriculum)
 # ---------------------------------------------------------------------------
@@ -190,17 +260,34 @@ class CurriculumStage:
 class KnowledgeGraph:
     """Category Theory Knowledge Graph.
 
-    A DAG where nodes are concepts and edges are prerequisite relationships.
-    Provides validation, topological sorting, and curriculum generation.
+    A DAG where nodes are concepts and edges are prerequisite relationships,
+    with a type registry for universal primitives.
     """
 
     def __init__(self):
+        self.types: Dict[str, TypeDef] = dict(BUILTIN_TYPES)
         self.concepts: Dict[str, Concept] = {}
         self.prerequisites: List[Prerequisite] = []
         self.functors: Dict[str, Functor] = {}
         self.adjunctions: Dict[str, Adjunction] = {}
         self._children: Dict[str, Set[str]] = {}  # parent -> children
         self._parents: Dict[str, Set[str]] = {}   # child -> parents
+
+    # ---------------------------------------------------------------
+    # Type registry
+    # ---------------------------------------------------------------
+
+    def add_type(self, typedef: TypeDef) -> None:
+        """Register a named type."""
+        self.types[typedef.name] = typedef
+
+    def resolve_type(self, name: str) -> Optional[TypeDef]:
+        """Look up a type by name.  Returns None if undefined."""
+        return self.types.get(name)
+
+    # ---------------------------------------------------------------
+    # Graph construction
+    # ---------------------------------------------------------------
 
     def add_concept(self, concept: Concept) -> None:
         """Add a concept node to the graph."""
@@ -218,12 +305,15 @@ class KnowledgeGraph:
     # Validation (Use Case 1: Curriculum Compiler)
     # -------------------------------------------------------------------
 
-    def validate(self, check_implementation: bool = False) -> List[ValidationError]:
+    def validate(self, check_implementation: bool = False,
+                 check_types: bool = True) -> List[ValidationError]:
         """Check all structural constraints.
 
         Args:
             check_implementation: If True, also flag implemented concepts
                 that depend on planned (unimplemented) concepts.
+            check_types: If True, validate that all type names in concepts
+                resolve against the type registry.
 
         Returns:
             List of errors (empty = valid graph).
@@ -258,13 +348,10 @@ class KnowledgeGraph:
                     f"problems (>20). Likely decomposable."))
 
         # 4. Orphan nodes: non-atomic concept with children but no parents
-        #    (i.e., an internal node that should have prerequisites but doesn't)
         for c in self.concepts.values():
             parents = self._parents.get(c.name, set())
             children = self._children.get(c.name, set())
             if not c.is_atomic and not parents and children:
-                # Has dependents but no prerequisites — might be a legitimate
-                # root concept. Only flag if it's not the only root.
                 pass  # Root concepts are expected to have no parents.
 
         # 5. Cycle detection (via topological sort attempt)
@@ -283,6 +370,20 @@ class KnowledgeGraph:
                             errors.append(UnimplementedDependency(
                                 f"'{c.name}' (status={c.status}) depends on "
                                 f"'{parent_name}' (status=planned)"))
+
+        # 7. Type resolution check
+        if check_types:
+            for c in self.concepts.values():
+                for tname in c.input_type:
+                    if tname not in self.types:
+                        errors.append(UndefinedType(
+                            f"Concept '{c.name}' input type '{tname}' "
+                            f"not defined in type registry"))
+                for tname in c.output_type:
+                    if tname not in self.types:
+                        errors.append(UndefinedType(
+                            f"Concept '{c.name}' output type '{tname}' "
+                            f"not defined in type registry"))
 
         return errors
 
@@ -409,9 +510,14 @@ class KnowledgeGraph:
     def subgraph(self, names: Set[str]) -> 'KnowledgeGraph':
         """Extract a subgraph containing only the named concepts."""
         sub = KnowledgeGraph()
+        # Copy relevant types
         for name in names:
-            if name in self.concepts:
-                sub.add_concept(self.concepts[name])
+            c = self.concepts.get(name)
+            if c:
+                sub.add_concept(c)
+                for tname in c.input_type + c.output_type:
+                    if tname in self.types and tname not in sub.types:
+                        sub.add_type(self.types[tname])
         for p in self.prerequisites:
             if p.source in names and p.target in names:
                 sub.add_prerequisite(p)
@@ -432,7 +538,8 @@ class KnowledgeGraph:
         """Human-readable summary of the graph."""
         lines = [
             f"CTKG: {len(self.concepts)} concepts, "
-            f"{len(self.prerequisites)} prerequisites"
+            f"{len(self.prerequisites)} prerequisites, "
+            f"{len(self.types) - len(BUILTIN_TYPES)} custom types"
         ]
         for domain, names in sorted(self.domains().items()):
             impl = sum(1 for n in names if self.concepts[n].status != 'planned')
