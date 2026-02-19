@@ -177,6 +177,25 @@ Cross-referencing `mamba3_block.py` against the Mamba-3 paper (OpenReview HwCvaJ
 
 ---
 
+### #46. Redundant Out-Norm and Wrong dt_bias Init in Mamba3 (RESOLVED)
+
+**Date:** 2026-02-19
+
+Two more discrepancies found by systematic paper audit:
+
+| Bug | Paper says | Our code did | Impact |
+|-----|-----------|-------------|--------|
+| Redundant out_norm | QK-norm on B/C *replaces* pre-output-projection RMSNorm | Had both QK-norm on B/C AND RMSNorm before output projection | Double normalization; wastes parameters and may dampen signal |
+| dt_bias init | Mamba-2 convention: `inverse_softplus(log_uniform(0.001, 0.1))` → dt starts in [0.001, 0.1] | `uniform(-1, 1)` → softplus gives dt in ~[0.31, 1.31] | Initial timesteps 10-100x too large; state decays too fast early in training |
+
+**Root cause:** #45 caught implementation bugs visible in equations/figures. These two are subtler — the out_norm change is described in prose ("swaps the pre-output projection norm with QK-normalization") not equations, and the dt_bias init is inherited convention from Mamba-2 not restated in Mamba-3.
+
+**Also documented (not fixed):** MIMO SSD path folds ranks into independent heads instead of summing into the paper's shared state matrix. The sequential reference recurrence is mathematically correct. The SSD approximation trades cross-rank state interaction for parallelism — a conscious speed-vs-fidelity tradeoff.
+
+**Lesson:** Paper audit must check three layers: (1) equations/math, (2) architecture diagrams/prose, (3) inherited conventions from prior work that the new paper doesn't restate.
+
+---
+
 ### #43. Scratchpad Query Type Placed in Output, Not Input (RESOLVED)
 
 **Date:** 2026-02-16
@@ -265,3 +284,4 @@ Below are condensed lessons from resolved/archived mistakes. Full debugging narr
 - 2026-02-16: #42 (ablation benchmarks are all memorization; 5K samples + 50 epochs + 1.26M params = no generalization)
 - 2026-02-16: #44 (single-digit addition treated as fact stage; missing prerequisites between counting and arithmetic; category theory constraint on morphism well-definedness)
 - 2026-02-17: #45 (four Mamba3 bugs: BC bias init/order, trapezoidal dt mismatch, SiLU on x without conv)
+- 2026-02-19: #46 (redundant out_norm, wrong dt_bias init; also documented MIMO SSD shared-state tradeoff)

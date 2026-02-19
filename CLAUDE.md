@@ -16,7 +16,7 @@ Previous focus: **JEPA** — JEPA-style latent prediction on Mamba3 backbone (st
 
 ## Critical Reference
 
-**ALWAYS read `MISTAKES.md` before making changes.** It has 44 documented mistakes with root causes. The most relevant active ones:
+**ALWAYS read `MISTAKES.md` before making changes.** It has 46 documented mistakes with root causes. The most relevant active ones:
 
 - **#44 (Missing prerequisites):** Single-digit addition was treated as a fact stage (155 entries to memorize). But addition decomposes into counting-up via successor. The curriculum jumped from counting to arithmetic without teaching ordinality, comparison, or place value. Category theory constraint: every composition requires its constituent objects to be established.
 - **#43 (Query in output, not input):** Scratchpad work tokens must be deterministically derivable from input. Randomly chosen tokens in the output are unpredictable. Fixed.
@@ -124,6 +124,8 @@ Key files:
 - `test_parser.py` — 16 tests covering type parsing, domain loading, validation, errors, curriculum generation, sheaf consistency, interface parsing, transfer probabilities, d-separation, entropy, intervention, mastery state
 
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
+
+**Paper audit (Mistake #45, #46):** Implementation cross-referenced against Mamba-3 paper (OpenReview HwCvaJOiCj). All equation-level, architectural, and convention-level bugs fixed. Known deliberate deviations: PoPE (replaces RoPE), StableSSM (replaces standard A-log), MIMO SSD (independent per-rank states instead of shared state — speed-vs-fidelity tradeoff).
 
 - `mamba3_block.py` — Mamba3 block (SSD-based, PoPE, trapezoidal discretization, `--stable_ssm` option, `--use_triton` option, `--mhc` option with `HyperConnection` class and `sinkhorn_normalize`)
 - `triton_ssd.py` — Triton-accelerated SSD kernels (graceful fallback to PyTorch when Triton unavailable)

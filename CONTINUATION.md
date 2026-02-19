@@ -1,8 +1,10 @@
 # CONTINUATION: Compositional Arithmetic Curriculum on Mamba3
 
-**Date:** 2026-02-16
+**Date:** 2026-02-19 (updated)
 **Priority:** IMMEDIATE — Tests the core generalization hypothesis.
 **Context:** See Mistakes #42 (memorization), #38 (ePC archived), #34 (next-step prediction).
+
+**Mamba3 backbone status:** Paper audit complete (Mistakes #45, #46). All known discrepancies fixed. Intentional deviations documented: PoPE (replaces RoPE), StableSSM (replaces standard A-log), MIMO SSD independent-rank approximation. The backbone is ready for curriculum experiments.
 
 ---
 
@@ -267,7 +269,7 @@ python train_arithmetic.py --stage 6 --epochs 50  # counting-based subtraction
 
 | File | What's in it |
 |------|-------------|
-| `MISTAKES.md` | 43 documented mistakes — **always read first** |
+| `MISTAKES.md` | 46 documented mistakes — **always read first** |
 | `CLAUDE.md` | Architecture overview, priorities |
 | `experiments/scratchpad/framework.py` | Scratchpad framework (Vocab, Problem, Grader) |
 | `experiments/scratchpad/generators/` | Stage 1-5 problem generators |

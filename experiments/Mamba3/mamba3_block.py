@@ -15,7 +15,8 @@ Implements the three core improvements from the Mamba-3 paper
 
 3. Llama-style architecture:
    Alternating Mamba3Mixer + SwiGLU MLP blocks with pre-RMSNorm.
-   QK-norm on B, C projections. No short causal convolution.
+   QK-norm on B, C projections (replaces pre-output-projection norm).
+   No short causal convolution.
 
 The SSD core is reused from Mamba2 with modifications for
 trapezoidal discretization.
@@ -24,6 +25,7 @@ No official code has been released. This is based on the paper's
 equations and descriptions.
 """
 
+import math
 from dataclasses import dataclass
 
 import torch
@@ -448,7 +450,8 @@ class Mamba3Mixer(nn.Module):
     - Trapezoidal discretization (blends current + previous input)
     - Data-dependent RoPE on B, C (complex SSM equivalence)
     - Learnable bias on B, C projections
-    - QK-norm on B, C after projection
+    - QK-norm on B, C after projection (replaces pre-output-projection norm)
+    - No pre-output-projection RMSNorm (normalization budget moved to QK-norm)
     - Short convolution optional (default: off)
 
     Input:  (batch, seqlen, d_model)
@@ -519,8 +522,8 @@ class Mamba3Mixer(nn.Module):
             self.mimo_x_proj = nn.Linear(d, d * r, bias=False)
             self.mimo_out_proj = nn.Linear(d * r, d, bias=False)
 
-        # Output
-        self.out_norm = RMSNorm(d)
+        # Output (no RMSNorm here — paper moves normalization budget to
+        # QK-norm on B/C projections, removing the pre-output-projection norm)
         self.out_proj = nn.Linear(d, config.d_model, bias=False)
 
         self._init_parameters()
@@ -534,7 +537,13 @@ class Mamba3Mixer(nn.Module):
         else:
             nn.init.uniform_(self.A_log, -5.0, -1.0)
         nn.init.ones_(self.D)
-        nn.init.uniform_(self.dt_bias, -1.0, 1.0)
+        # Mamba-2 convention: dt starts in [0.001, 0.1] after softplus.
+        # inverse_softplus(x) = log(exp(x) - 1).  We sample dt_target from
+        # log-uniform(0.001, 0.1) then store inverse_softplus(dt_target).
+        dt_target = torch.exp(
+            torch.empty(cfg.nheads).uniform_(math.log(0.001), math.log(0.1))
+        )
+        self.dt_bias.data.copy_(torch.log(torch.exp(dt_target) - 1))
         nn.init.xavier_uniform_(self.in_proj.weight)
         nn.init.xavier_uniform_(self.out_proj.weight)
 
@@ -712,9 +721,10 @@ class Mamba3Mixer(nn.Module):
         # D skip connection
         y = y + x * self.D.unsqueeze(-1)
 
-        # Flatten heads, gated norm, output projection
+        # Flatten heads, gated output projection
+        # (no out_norm — normalization budget is in QK-norm on B/C)
         y = y.reshape(batch, seqlen, cfg.d_inner)
-        y = self.out_norm(y * F.silu(z))
+        y = y * F.silu(z)
         y = self.out_proj(y)
 
         return y
