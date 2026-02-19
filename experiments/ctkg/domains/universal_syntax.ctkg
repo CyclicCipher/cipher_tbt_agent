@@ -1,0 +1,131 @@
+-- universal_syntax.ctkg — Language-independent syntactic structure
+--
+-- Defines abstract syntactic concepts shared across all natural languages.
+-- Language-specific domains (English, Japanese, etc.) instantiate these
+-- via functors that set parameters like head direction and word order.
+--
+-- Based on Universal Dependencies (UD) cross-lingual categories.
+-- Process blocks describe abstract algorithms parameterized by
+-- language-specific settings (head_dir, word_order).
+
+-- =========================================================================
+-- Universal type definitions
+-- =========================================================================
+
+-- Lexical categories (UD-aligned universal POS set)
+type pos_tag = symbol(N, V, ADJ, ADV, DET, ADP, CONJ, COMP, PRON, AUX, NUM, PART, INTJ, UNK)
+type word = symbol
+type word_seq = seq(word)
+type pos_seq = seq(pos_tag)
+
+-- Chunk labels (BIO tagging scheme)
+type bio_tag = symbol(B_NP, I_NP, B_PP, I_PP, B_VP, I_VP, O)
+type bio_seq = seq(bio_tag)
+
+-- Clause structure
+type clause_tag = symbol(SUBJ, PRED, OTHER)
+type clause_seq = seq(clause_tag)
+
+-- Structural parameters (set per-language via functor)
+type head_dir = symbol(INITIAL, FINAL)
+type word_order = symbol(SVO, SOV, VSO, VOS, OVS, OSV, FREE)
+
+-- Agreement
+type agree_result = symbol(AGREE, DISAGREE)
+
+-- =========================================================================
+-- Stage 1: Lexical Category Assignment (POS tagging)
+-- =========================================================================
+
+concept lexical_category
+  domain universal_syntax
+  description "Assign part-of-speech tags to words"
+  input word_seq
+  output pos_seq
+  threshold 0.95
+  max_epochs 100
+  process scan(words, empty, lookup(word, lexicon))
+
+-- =========================================================================
+-- Stage 2: NP Structure (noun phrase chunking)
+-- =========================================================================
+
+concept np_structure
+  domain universal_syntax
+  description "Identify noun phrase boundaries using BIO tags"
+  input word_seq
+  output bio_seq
+  requires lexical_category via "POS tags identify NP heads and dependents"
+  threshold 0.95
+  max_epochs 100
+  process
+    for word in words
+      if is_np_start(word, head_dir) then emit(B_NP)
+      elif in_np(word) then emit(I_NP)
+      else emit(O)
+
+-- =========================================================================
+-- Stage 3: PP Structure (prepositional/adpositional phrase chunking)
+-- =========================================================================
+
+concept pp_structure
+  domain universal_syntax
+  description "Identify prepositional phrase boundaries using BIO tags"
+  input word_seq
+  output bio_seq
+  requires np_structure via "PPs contain NPs as complements"
+  threshold 0.95
+  max_epochs 100
+  process
+    for word in words
+      if is_pp_start(word, head_dir) then emit(B_PP)
+      elif in_pp(word) then emit(I_PP)
+      else emit(O)
+
+-- =========================================================================
+-- Stage 4: VP Structure (verb phrase chunking)
+-- =========================================================================
+
+concept vp_structure
+  domain universal_syntax
+  description "Identify verb phrase boundaries using BIO tags"
+  input word_seq
+  output bio_seq
+  requires np_structure via "VPs contain NP arguments"
+  requires pp_structure via "VPs contain PP adjuncts"
+  threshold 0.95
+  max_epochs 100
+  process
+    for word in words
+      if is_vp_start(word, head_dir) then emit(B_VP)
+      elif in_vp(word) then emit(I_VP)
+      else emit(O)
+
+-- =========================================================================
+-- Stage 5: Simple Clause Structure
+-- =========================================================================
+
+concept simple_clause
+  domain universal_syntax
+  description "Identify subject and predicate regions in a clause"
+  input word_seq
+  output clause_seq
+  requires np_structure via "Subject is an NP"
+  requires vp_structure via "Predicate is a VP"
+  threshold 0.95
+  max_epochs 100
+  process
+    subj = find(phrases, NP, subject_position(word_order))
+    pred = find(phrases, VP, predicate_position(word_order))
+    for word in words
+      if in_span(word, subj) then emit(SUBJ)
+      elif in_span(word, pred) then emit(PRED)
+      else emit(OTHER)
+
+-- =========================================================================
+-- Interface
+-- =========================================================================
+
+interface universal_syntax
+  exports types pos_tag word bio_tag clause_tag head_dir word_order
+  exports concepts lexical_category np_structure pp_structure vp_structure simple_clause

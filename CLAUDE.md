@@ -77,6 +77,8 @@ Model-agnostic framework for generating problems with structured work areas:
 
 Reverse problems (Stage 3): `? + 4 = 0 7 WORK 0 3` — given result + one operand, find missing operand. Forces induction (understanding the inverse), not just mechanical forward application. Mixed with forward problems within the same stage. Ref: Alemi (2025) factorization order.
 
+**Syntax generators (NEW):** `generators/syntax.py` — PosTagGenerator (Stage 1), NpChunkGenerator (Stage 2), PpChunkGenerator (Stage 3), VpChunkGenerator (Stage 4), ClauseStructureGenerator (Stage 5). All take pre-annotated WikiText-2 sentences, produce fixed-length scratchpad output (STOP-padded to max_words). Each stage uses the same sentence pool with different output format. BIO tagging scheme for chunk stages (B_NP/I_NP/O_NP etc.).
+
 ### CTKG (experiments/ctkg/) — IMPLEMENTED + DSL + SHEAVES + MARKOV
 
 Category Theory Knowledge Graph — a directed acyclic graph where nodes are concepts/skills and edges are prerequisite relationships. Built on a universal type system of primitives (`symbol`, `seq`, `tuple`, `tagged` + structure annotations) that compose into any domain-specific type. Includes functors (structure-preserving maps between domains), adjunctions (forward/inverse pairs), sheaf consistency checking for multi-domain composition, and probabilistic structure (Markov category).
@@ -98,6 +100,8 @@ Category Theory Knowledge Graph — a directed acyclic graph where nodes are con
 
 **Logic domain:** 5 concepts (truth_eval, negation, compound_eval, tautology_check, modus_ponens), 8 custom types, 1 interface. Tests multi-domain composition with arithmetic via sheaf merge.
 
+**Syntax domains (NEW):** Universal syntax (5 concepts: lexical_category, np_structure, pp_structure, vp_structure, simple_clause) + English parameterization (5 concepts with functor mapping from universal). Universal domain defines language-independent syntactic skills; English domain instantiates with head-initial, SVO parameters. Adding a new language (e.g., Japanese) requires only a new `.ctkg` file + functor, same generators and training loop.
+
 **Target calculations:** (1) Analytically solve ODEs up to 3rd order, (2) Solve ODEs via Laplace transform, (3) Derive the impulse response of a damped harmonic oscillator — 47 stages from counting to solution. (4) Logic from propositional to natural transformations in category theory — 21 stages.
 
 **Three curriculum patterns:** Process (composition/functors — step-by-step execution), Relationship (adjunctions/natural transformations — paired forward/inverse computations), Constraint (limits/pullbacks — multi-constraint satisfaction).
@@ -114,6 +118,9 @@ Key files:
 - `domains/arithmetic.ctkg` — Full arithmetic domain (9 concepts, 13 types, 12 prereqs, 1 adjunction, 1 interface)
 - `domains/logic.py` — Thin wrapper loading from logic.ctkg
 - `domains/logic.ctkg` — Logic domain (5 concepts, 8 types, 1 interface)
+- `domains/syntax.py` — Thin wrapper loading universal_syntax.ctkg + english_syntax.ctkg
+- `domains/universal_syntax.ctkg` — Universal syntax (5 concepts, 15 types, language-independent)
+- `domains/english_syntax.ctkg` — English parameterization (5 concepts, functor from universal)
 - `test_parser.py` — 16 tests covering type parsing, domain loading, validation, errors, curriculum generation, sheaf consistency, interface parsing, transfer probabilities, d-separation, entropy, intervention, mastery state
 
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
@@ -122,6 +129,7 @@ Key files:
 - `triton_ssd.py` — Triton-accelerated SSD kernels (graceful fallback to PyTorch when Triton unavailable)
 - `arithmetic_tasks.py` — Old task generators (superseded by scratchpad framework)
 - `train_arithmetic.py` — Curriculum training script (uses scratchpad framework, stages 1-5, curriculum/direct modes, per-token diagnostics with train+test breakdown, epiplexity tracking per stage, `--reverse_fraction` for reverse problem mixing, `--stable_ssm` for StableSSM A-matrix, `--mhc` / `--mhc_n_streams` for manifold-constrained hyperconnections)
+- `train_language.py` — Syntax parsing curriculum on WikiText-2 (NEW). 5 stages matching English CTKG: POS tagging → NP → PP → VP → clause structure. Uses spaCy annotations as ground truth. Same training loop as train_arithmetic.py (epiplexity, replay, catastrophic forgetting checks). Key test: curriculum vs direct training on clause structure.
 
 ### BTT-Mamba3 (experiments/BTT_Mamba3/) — DESIGN PHASE
 
@@ -149,20 +157,23 @@ predictive-coding-agent/
 │   │   ├── graph.py       # Concept, Prerequisite, Functor, Adjunction, Interface, KnowledgeGraph
 │   │   ├── parser.py      # DSL parser: parse(), parse_file(), merge(), sheaf_merge()
 │   │   ├── test_parser.py # 11 tests (types, domains, sheaf consistency, interfaces)
-│   │   └── domains/       # arithmetic.py/.ctkg, logic.py/.ctkg
+│   │   └── domains/       # arithmetic.py/.ctkg, logic.py/.ctkg, syntax.py/universal_syntax.ctkg/english_syntax.ctkg
 │   ├── scratchpad/        # Scratchpad framework (model-agnostic)
 │   │   ├── framework.py   # Vocab, Problem, Step, Grader, ProblemGenerator
 │   │   ├── DESIGN_GUIDE.md # Curriculum design principles (category theory, prerequisites)
-│   │   └── generators/    # counting.py (S1-S2), ordinality.py (S3-S4), arithmetic.py (S5-S6), multi_digit.py (S7-S8)
+│   │   └── generators/    # counting.py (S1-S2), ordinality.py (S3-S4), arithmetic.py (S5-S6), multi_digit.py (S7-S8), syntax.py (language S1-S5)
 │   ├── energy_reasoning/  # JEPA backprop (paused)
 │   │   ├── archived_epc/  # ePC-JEPA (archived 2026-02-14)
 │   │   ├── jepa_model.py  # Active JEPA model
 │   │   ├── train_jepa.py  # Active training script
 │   │   └── data_gen.py    # Synthetic data generation
+│   ├── language/           # WikiText-2 syntax curriculum (NEW)
+│   │   └── wikitext2.py   # Data loader + spaCy annotation + caching
 │   ├── Mamba3/            # Mamba3 backbone + arithmetic curriculum (ACTIVE)
 │   │   ├── mamba3_block.py       # Mamba3 block (backbone model)
 │   │   ├── arithmetic_tasks.py   # Old task generators (superseded)
 │   │   ├── train_arithmetic.py   # Curriculum training (uses scratchpad)
+│   │   ├── train_language.py     # Syntax parsing curriculum on WikiText-2 (NEW)
 │   │   └── archived_epc/        # ePC-Mamba3 (archived 2026-02-14)
 │   ├── BTT_Mamba3/        # BTT-compressed Mamba3 (DESIGN PHASE)
 │   │   └── DESIGN.md      # Layer inventory, BTT candidates, implementation plan

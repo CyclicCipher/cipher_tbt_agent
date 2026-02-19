@@ -10,6 +10,13 @@ from .arithmetic import (
     TwoDigitSingleArithmeticGenerator,
     TwoDigitArithmeticGenerator,
 )
+from .syntax import (
+    PosTagGenerator,
+    NpChunkGenerator,
+    PpChunkGenerator,
+    VpChunkGenerator,
+    ClauseStructureGenerator,
+)
 
 __all__ = [
     'QueryCountingGenerator',
@@ -17,4 +24,9 @@ __all__ = [
     'SingleDigitArithmeticGenerator',
     'TwoDigitSingleArithmeticGenerator',
     'TwoDigitArithmeticGenerator',
+    'PosTagGenerator',
+    'NpChunkGenerator',
+    'PpChunkGenerator',
+    'VpChunkGenerator',
+    'ClauseStructureGenerator',
 ]
