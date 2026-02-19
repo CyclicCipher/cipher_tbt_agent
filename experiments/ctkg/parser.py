@@ -32,10 +32,12 @@ import re
 
 from .graph import (
     Adjunction,
+    Challenge,
     Concept,
     Functor,
     Interface,
     KnowledgeGraph,
+    Override,
     Prerequisite,
     TypeDef,
 )
@@ -255,8 +257,9 @@ def _parse_type_list(text: str) -> List[str]:
 # Concept parser
 # ---------------------------------------------------------------------------
 
-def _parse_concept(block: Block, source: str = '') -> Tuple[Concept, List[Prerequisite]]:
-    """Parse a concept block into a Concept and its prerequisites."""
+def _parse_concept(block: Block, source: str = '') -> Tuple[
+        Concept, List[Prerequisite], List[Challenge], List[Override]]:
+    """Parse a concept block into a Concept, prerequisites, challenges, overrides."""
     name = block.name
     domain = ''
     description = ''
@@ -268,6 +271,11 @@ def _parse_concept(block: Block, source: str = '') -> Tuple[Concept, List[Prereq
     max_epochs = 100
     process_lines: List[str] = []
     prereqs: List[Prerequisite] = []
+    challenges: List[Challenge] = []
+    overrides_list: List[Override] = []
+    tier = 'theorem'
+    assumes: List[str] = []
+    defaults: Dict[str, str] = {}
 
     i = 0
     fields = block.fields
@@ -293,26 +301,95 @@ def _parse_concept(block: Block, source: str = '') -> Tuple[Concept, List[Prereq
             threshold = float(rest.strip())
         elif keyword == 'max_epochs':
             max_epochs = int(rest.strip())
+        elif keyword == 'tier':
+            tier = rest.strip()
+            if tier not in ('axiom', 'theorem', 'conjecture', 'heuristic'):
+                raise ParseError(
+                    f"Invalid tier '{tier}' — must be axiom, theorem, "
+                    f"conjecture, or heuristic", ln.number, source)
+        elif keyword == 'assumes':
+            assumes = rest.split()
+        elif keyword == 'default':
+            # default NAME = VALUE
+            eq_pos = rest.find('=')
+            if eq_pos < 0:
+                raise ParseError(
+                    f"Default requires '=': '{ln.content}'",
+                    ln.number, source)
+            prop = rest[:eq_pos].strip()
+            val = rest[eq_pos + 1:].strip()
+            defaults[prop] = val
         elif keyword == 'requires':
-            # requires NAME via "ROLE" [0.95]
-            # Transfer probability is optional, defaults to 1.0
+            # requires NAME via "ROLE" [0.95] assuming ASSUMPTION [STATUS]
+            # Transfer probability and assuming are both optional
             req_parts = rest.split(' via ', 1)
             req_name = req_parts[0].strip()
             req_role = ''
             transfer_prob = 1.0
+            assuming = None
+            assumption_status = 'derived'
             if len(req_parts) > 1:
-                role_and_prob = req_parts[1]
+                role_and_rest = req_parts[1]
+                # Check for 'assuming' clause
+                assuming_match = re.search(
+                    r'\bassuming\s+(\S+)(?:\s+\[(\w+)\])?\s*$',
+                    role_and_rest)
+                if assuming_match:
+                    assuming = assuming_match.group(1)
+                    if assuming_match.group(2):
+                        assumption_status = assuming_match.group(2)
+                    role_and_rest = role_and_rest[:assuming_match.start()].strip()
                 # Check for trailing [probability]
-                prob_match = re.search(r'\[(\d*\.?\d+)\]\s*$', role_and_prob)
+                prob_match = re.search(r'\[(\d*\.?\d+)\]\s*$', role_and_rest)
                 if prob_match:
                     transfer_prob = float(prob_match.group(1))
-                    role_and_prob = role_and_prob[:prob_match.start()].strip()
-                req_role = _parse_string(role_and_prob)
+                    role_and_rest = role_and_rest[:prob_match.start()].strip()
+                req_role = _parse_string(role_and_rest)
             prereqs.append(Prerequisite(
                 source=req_name,
                 target=name,
                 role=req_role,
                 transfer_probability=transfer_prob,
+                assuming=assuming,
+                assumption_status=assumption_status,
+            ))
+        elif keyword == 'challenges':
+            # challenges NAME via "REASON"
+            ch_parts = rest.split(' via ', 1)
+            ch_target = ch_parts[0].strip()
+            ch_role = ''
+            if len(ch_parts) > 1:
+                ch_role = _parse_string(ch_parts[1])
+            challenges.append(Challenge(
+                source=name,
+                target=ch_target,
+                role=ch_role,
+            ))
+        elif keyword == 'overrides':
+            # overrides NAME with PROP = VALUE via "REASON"
+            ov_parts = rest.split(' with ', 1)
+            ov_target = ov_parts[0].strip()
+            ov_prop = ''
+            ov_val = ''
+            ov_reason = ''
+            if len(ov_parts) > 1:
+                prop_and_rest = ov_parts[1]
+                # Split on 'via' for reason
+                via_parts = prop_and_rest.split(' via ', 1)
+                prop_eq = via_parts[0]
+                if len(via_parts) > 1:
+                    ov_reason = _parse_string(via_parts[1])
+                # Parse PROP = VALUE
+                eq_pos = prop_eq.find('=')
+                if eq_pos >= 0:
+                    ov_prop = prop_eq[:eq_pos].strip()
+                    ov_val = prop_eq[eq_pos + 1:].strip()
+            overrides_list.append(Override(
+                instance=name,
+                default_concept=ov_target,
+                property=ov_prop,
+                value=ov_val,
+                reason=ov_reason,
             ))
         elif keyword == 'process':
             # Process can be single-line or multi-line (indented block)
@@ -341,9 +418,12 @@ def _parse_concept(block: Block, source: str = '') -> Tuple[Concept, List[Prereq
         pass_threshold=threshold,
         max_epochs=max_epochs,
         status='planned',  # DSL-loaded concepts start as planned
+        tier=tier,
+        assumes=assumes,
+        defaults=defaults,
     )
 
-    return concept, prereqs
+    return concept, prereqs, challenges, overrides_list
 
 
 # ---------------------------------------------------------------------------
@@ -498,10 +578,15 @@ def parse(text: str, source: str = '') -> KnowledgeGraph:
             graph.add_type(typedef)
 
         elif block.kind == 'concept':
-            concept, prereqs = _parse_concept(block, source)
+            concept, prereqs, challenges, overrides_list = _parse_concept(
+                block, source)
             graph.add_concept(concept)
             for p in prereqs:
                 graph.add_prerequisite(p)
+            for ch in challenges:
+                graph.add_challenge(ch)
+            for ov in overrides_list:
+                graph.add_override(ov)
 
         elif block.kind == 'functor':
             functor = _parse_functor(block, source)
@@ -537,6 +622,10 @@ def merge(target: KnowledgeGraph, source: KnowledgeGraph) -> None:
         target.add_concept(c)
     for p in source.prerequisites:
         target.add_prerequisite(p)
+    for ch in source.challenges:
+        target.add_challenge(ch)
+    for ov in source.overrides:
+        target.add_override(ov)
     target.functors.update(source.functors)
     target.adjunctions.update(source.adjunctions)
     target.interfaces.update(source.interfaces)

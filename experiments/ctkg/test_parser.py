@@ -20,7 +20,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from experiments.ctkg.parser import parse, parse_file, merge, ParseError
 from experiments.ctkg.graph import (
     TypeDef, BUILTIN_TYPES, UndefinedType, SheafViolation,
-    Interface, types_compatible, MasteryState,
+    ChallengedConjecture, UngroundedAssumption,
+    Interface, Challenge, Override, types_compatible, MasteryState,
 )
 from experiments.ctkg.domains.arithmetic import build_arithmetic_graph
 from experiments.ctkg.domains.logic import build_logic_graph
@@ -865,6 +866,384 @@ concept C
     return errors
 
 
+def test_epistemic_tiers():
+    """Test that epistemic tiers parse correctly from DSL."""
+    text = """
+type digit = symbol(0, 1, 2, 3)
+
+concept axiom_concept
+  domain test
+  description "a mathematical necessity"
+  tier axiom
+  input digit
+  output digit
+  atomic
+
+concept theorem_concept
+  domain test
+  description "derived from premises"
+  tier theorem
+  assumes some_assumption
+  input digit
+  output digit
+  requires axiom_concept via "foundation"
+
+concept conjecture_concept
+  domain test
+  description "widely believed but unproven"
+  tier conjecture
+  input digit
+  output digit
+  requires theorem_concept via "derived"
+
+concept heuristic_concept
+  domain test
+  description "dogs have 4 legs"
+  tier heuristic
+  input digit
+  output digit
+  default legs = 4
+  default color = brown
+"""
+    graph = parse(text)
+
+    errors = []
+
+    # Check tiers
+    ax = graph.concepts.get('axiom_concept')
+    if not ax or ax.tier != 'axiom':
+        errors.append(f"axiom_concept tier: {ax.tier if ax else 'missing'}")
+
+    th = graph.concepts.get('theorem_concept')
+    if not th or th.tier != 'theorem':
+        errors.append(f"theorem_concept tier: {th.tier if th else 'missing'}")
+    if not th or th.assumes != ['some_assumption']:
+        errors.append(f"theorem_concept assumes: {th.assumes if th else 'missing'}")
+
+    conj = graph.concepts.get('conjecture_concept')
+    if not conj or conj.tier != 'conjecture':
+        errors.append(f"conjecture_concept tier: {conj.tier if conj else 'missing'}")
+
+    heur = graph.concepts.get('heuristic_concept')
+    if not heur or heur.tier != 'heuristic':
+        errors.append(f"heuristic_concept tier: {heur.tier if heur else 'missing'}")
+    if not heur or heur.defaults != {'legs': '4', 'color': 'brown'}:
+        errors.append(f"heuristic_concept defaults: {heur.defaults if heur else 'missing'}")
+
+    # Default tier should be 'theorem' (axiom_concept explicitly sets 'axiom')
+    # theorem_concept explicitly sets 'theorem' but that's also the default
+
+    return errors
+
+
+def test_challenge_edges():
+    """Test challenge edges parse and validate correctly."""
+    text = """
+type digit = symbol(0, 1, 2, 3)
+
+concept negative_energy
+  domain physics
+  tier conjecture
+  description "warp drives require exotic matter"
+  input digit
+  output digit
+
+concept lentz_soliton
+  domain physics
+  tier theorem
+  description "positive-energy warp metric"
+  input digit
+  output digit
+  challenges negative_energy via "positive-energy reformulation"
+
+concept standard_model
+  domain physics
+  tier axiom
+  description "well-tested axiom"
+  input digit
+  output digit
+"""
+    graph = parse(text)
+
+    errors = []
+
+    # Check that challenge was parsed
+    if len(graph.challenges) != 1:
+        errors.append(f"Expected 1 challenge, got {len(graph.challenges)}")
+        return errors
+
+    ch = graph.challenges[0]
+    if ch.source != 'lentz_soliton':
+        errors.append(f"Challenge source: {ch.source}")
+    if ch.target != 'negative_energy':
+        errors.append(f"Challenge target: {ch.target}")
+    if ch.role != 'positive-energy reformulation':
+        errors.append(f"Challenge role: {ch.role}")
+
+    # challenged_concepts() should return the challenged concept
+    challenged = graph.challenged_concepts()
+    if 'negative_energy' not in challenged:
+        errors.append(f"challenged_concepts missing negative_energy: {challenged}")
+    elif len(challenged['negative_energy']) != 1:
+        errors.append(f"Expected 1 challenger, got {len(challenged['negative_energy'])}")
+
+    # Validation should produce a ChallengedConjecture warning
+    val_errors = graph.validate(check_types=True)
+    challenged_warnings = [e for e in val_errors if isinstance(e, ChallengedConjecture)]
+    if len(challenged_warnings) != 1:
+        errors.append(
+            f"Expected 1 ChallengedConjecture warning, got "
+            f"{len(challenged_warnings)}: {val_errors}")
+    elif 'negative_energy' not in challenged_warnings[0].message:
+        errors.append(
+            f"Warning should mention negative_energy: {challenged_warnings[0]}")
+
+    return errors
+
+
+def test_overrides_fido():
+    """Test the Fido problem: defaults with instance overrides."""
+    text = """
+type digit = symbol(0, 1, 2, 3)
+
+concept dog
+  domain biology
+  tier heuristic
+  description "typical dog properties"
+  input digit
+  output digit
+  default legs = 4
+  default tail = 1
+
+concept fido
+  domain biology
+  description "a specific dog"
+  input digit
+  output digit
+  overrides dog with legs = 3 via "lost a leg in accident"
+
+concept rex
+  domain biology
+  description "another dog"
+  input digit
+  output digit
+"""
+    graph = parse(text)
+
+    errors = []
+
+    # Check override was parsed
+    if len(graph.overrides) != 1:
+        errors.append(f"Expected 1 override, got {len(graph.overrides)}")
+        return errors
+
+    ov = graph.overrides[0]
+    if ov.instance != 'fido':
+        errors.append(f"Override instance: {ov.instance}")
+    if ov.default_concept != 'dog':
+        errors.append(f"Override default_concept: {ov.default_concept}")
+    if ov.property != 'legs':
+        errors.append(f"Override property: {ov.property}")
+    if ov.value != '3':
+        errors.append(f"Override value: {ov.value}")
+    if ov.reason != 'lost a leg in accident':
+        errors.append(f"Override reason: {ov.reason}")
+
+    # resolve_default for fido should return 3 (override)
+    legs_fido = graph.resolve_default('dog', 'legs', 'fido')
+    if legs_fido != '3':
+        errors.append(f"resolve_default(dog, legs, fido) = {legs_fido}, expected '3'")
+
+    # resolve_default for rex should return 4 (default, no override)
+    legs_rex = graph.resolve_default('dog', 'legs', 'rex')
+    if legs_rex != '4':
+        errors.append(f"resolve_default(dog, legs, rex) = {legs_rex}, expected '4'")
+
+    # resolve_default for tail should return 1 (no override for any instance)
+    tail_fido = graph.resolve_default('dog', 'tail', 'fido')
+    if tail_fido != '1':
+        errors.append(f"resolve_default(dog, tail, fido) = {tail_fido}, expected '1'")
+
+    # resolve_default without instance should return default
+    legs_default = graph.resolve_default('dog', 'legs')
+    if legs_default != '4':
+        errors.append(f"resolve_default(dog, legs) = {legs_default}, expected '4'")
+
+    return errors
+
+
+def test_assumption_conditioned_prereqs():
+    """Test assumption-conditioned prerequisites parse correctly."""
+    text = """
+type digit = symbol(0, 1, 2, 3)
+
+concept original_metric
+  domain physics
+  tier axiom
+  description "original Alcubierre metric"
+  input digit
+  output digit
+  atomic
+
+concept negative_energy
+  domain physics
+  tier conjecture
+  description "warp drives need negative energy"
+  input digit
+  output digit
+
+concept warp_drive
+  domain physics
+  description "FTL via spacetime warping"
+  input digit
+  output digit
+  requires negative_energy via "metric solution" assuming original_metric [derived]
+  requires original_metric via "field equations"
+"""
+    graph = parse(text)
+
+    errors = []
+
+    # Find the assumption-conditioned prerequisite
+    cond_prereqs = [p for p in graph.prerequisites if p.assuming is not None]
+    if len(cond_prereqs) != 1:
+        errors.append(f"Expected 1 conditioned prereq, got {len(cond_prereqs)}")
+        return errors
+
+    p = cond_prereqs[0]
+    if p.assuming != 'original_metric':
+        errors.append(f"assuming: {p.assuming}")
+    if p.assumption_status != 'derived':
+        errors.append(f"assumption_status: {p.assumption_status}")
+    if p.source != 'negative_energy':
+        errors.append(f"source: {p.source}")
+    if p.target != 'warp_drive':
+        errors.append(f"target: {p.target}")
+
+    # assumption_dependents should find the prereq
+    deps = graph.assumption_dependents('original_metric')
+    if 'negative_energy->warp_drive' not in deps['prerequisites']:
+        errors.append(f"assumption_dependents prereqs: {deps['prerequisites']}")
+
+    return errors
+
+
+def test_what_if_not():
+    """Test counterfactual exploration via what_if_not()."""
+    text = """
+type digit = symbol(0, 1, 2, 3)
+
+concept A
+  domain test
+  description "root"
+  input digit
+  output digit
+  atomic
+
+concept B
+  domain test
+  description "blocker"
+  input digit
+  output digit
+  requires A via "foundation"
+
+concept C
+  domain test
+  description "blocked by B"
+  input digit
+  output digit
+  requires B via "needs B"
+
+concept D
+  domain test
+  description "blocked by both A and B"
+  input digit
+  output digit
+  requires A via "needs A"
+  requires B via "needs B"
+
+concept E
+  domain test
+  description "only needs A, not B"
+  input digit
+  output digit
+  requires A via "needs A"
+"""
+    graph = parse(text)
+
+    errors = []
+
+    # what_if_not(B): C depends only on B, so C should be opened.
+    # D depends on both A and B. With B removed, D still needs A,
+    # and A exists in the reduced graph, so D becomes frontier-eligible.
+    # E doesn't depend on B at all, so it's not "blocked_in_original".
+    opened = graph.what_if_not('B')
+
+    # C and D are descendants of B, so both were blocked.
+    # In the reduced graph (without B), C has no parents (B was removed),
+    # so all its prereqs are satisfied trivially → opened.
+    # D has parent A (which exists) → opened.
+    if 'C' not in opened:
+        errors.append(f"C should be opened when B removed: {opened}")
+    if 'D' not in opened:
+        errors.append(f"D should be opened when B removed: {opened}")
+    if 'E' in opened:
+        errors.append(f"E should NOT be in opened (not a descendant of B): {opened}")
+    if 'A' in opened:
+        errors.append(f"A should NOT be in opened: {opened}")
+
+    return errors
+
+
+def test_ungrounded_assumption():
+    """Test that ungrounded assumptions are caught by validation."""
+    text = """
+type digit = symbol(0, 1, 2, 3)
+
+concept foo
+  domain test
+  description "has a dangling assumption"
+  tier theorem
+  assumes nonexistent_assumption
+  input digit
+  output digit
+"""
+    graph = parse(text)
+    val_errors = graph.validate(check_types=True)
+
+    errors = []
+    ungrounded = [e for e in val_errors if isinstance(e, UngroundedAssumption)]
+    if len(ungrounded) != 1:
+        errors.append(
+            f"Expected 1 UngroundedAssumption, got {len(ungrounded)}: {val_errors}")
+    elif 'nonexistent_assumption' not in ungrounded[0].message:
+        errors.append(f"Should mention the assumption: {ungrounded[0]}")
+
+    return errors
+
+
+def test_tier_parse_error():
+    """Test that invalid tier values produce ParseError."""
+    errors = []
+
+    try:
+        parse("""
+type digit = symbol(0, 1)
+concept foo
+  domain test
+  description "bad tier"
+  tier invalid_tier
+  input digit
+  output digit
+""")
+        errors.append("Should have raised ParseError for invalid tier")
+    except ParseError as e:
+        if "Invalid tier" not in str(e):
+            errors.append(f"Wrong error message: {e}")
+
+    return errors
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
@@ -888,6 +1267,13 @@ def run_all_tests():
         ('Entropy', test_entropy),
         ('Intervention', test_intervention),
         ('Mastery state', test_mastery_state),
+        ('Epistemic tiers', test_epistemic_tiers),
+        ('Challenge edges', test_challenge_edges),
+        ('Overrides (Fido problem)', test_overrides_fido),
+        ('Assumption-conditioned prereqs', test_assumption_conditioned_prereqs),
+        ('what_if_not()', test_what_if_not),
+        ('Ungrounded assumption', test_ungrounded_assumption),
+        ('Tier parse error', test_tier_parse_error),
     ]
 
     total = 0

@@ -22,6 +22,12 @@ Type primitives:
 Structure annotations:
   ordered, invertible, commutative, associative, periodic(k), metric
 
+Epistemic tiers:
+  axiom      — mathematical/logical necessity, don't question
+  theorem    — derived from premises, valid iff premises hold
+  conjecture — widely believed but unproven, actively probe
+  heuristic  — useful approximation with known exceptions (Fido problem)
+
 Usage:
     graph = KnowledgeGraph()
     graph.add_type(TypeDef('digit', 'symbol', ...))
@@ -138,6 +144,16 @@ class Concept:
     # Implementation status
     status: str = 'planned'  # 'planned' | 'implemented' | 'verified'
 
+    # Epistemic tier — how confidently is this concept known?
+    tier: str = 'theorem'  # 'axiom' | 'theorem' | 'conjecture' | 'heuristic'
+
+    # Assumptions — named assumptions this concept depends on
+    assumes: List[str] = field(default_factory=list)
+
+    # Defaults — for heuristic-tier concepts, default property values
+    # that may be overridden by specific instances (the Fido problem)
+    defaults: Dict[str, str] = field(default_factory=dict)
+
 
 # ---------------------------------------------------------------------------
 # Edges (morphisms in the category)
@@ -170,6 +186,13 @@ class Prerequisite:
 
     # Markov kernel weight: P(can learn target | mastered source)
     transfer_probability: float = 1.0
+
+    # Assumption context — what assumption makes this prerequisite hold?
+    # If None, the prerequisite is unconditional.
+    assuming: Optional[str] = None
+
+    # Status of the assumption: 'axiomatic' | 'derived' | 'empirical' | 'heuristic'
+    assumption_status: str = 'derived'
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +230,51 @@ class Adjunction:
     inverse: str   # concept name
     unit: str = ''    # round-trip expression: forward then inverse
     counit: str = ''  # round-trip expression: inverse then forward
+
+
+# ---------------------------------------------------------------------------
+# Challenge edges (epistemic reasoning)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Challenge:
+    """A challenge edge — evidence weakening a concept.
+
+    Unlike prerequisites (which say "A enables B"), challenges say
+    "evidence E weakens the claim that concept C holds."  When the model
+    encounters a concept with active challenges, it must branch and
+    consider the alternative.
+
+    Categorically: challenge edges are morphisms in the *opposite*
+    direction — they weaken rather than strengthen the target.
+    """
+    source: str        # the challenging concept (the new evidence)
+    target: str        # the challenged concept (the claim being weakened)
+    role: str          # how the challenge works (human-readable)
+    strength: float = 1.0  # 0.0 = weak hint, 1.0 = full refutation
+
+
+# ---------------------------------------------------------------------------
+# Overrides (the Fido problem — exceptions to heuristic defaults)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Override:
+    """An instance-level exception to a heuristic default.
+
+    "Dogs have 4 legs" is a heuristic.  "Fido has 3 legs" is an override.
+    When reasoning about Fido, the override takes precedence over the
+    default.
+
+    Categorically: defaults are natural transformations from the heuristic
+    concept to instances; overrides are modifications (whiskering) at
+    specific components.
+    """
+    instance: str        # the instance concept
+    default_concept: str  # the heuristic being overridden
+    property: str        # which property is overridden
+    value: str           # the override value
+    reason: str = ''     # why the override exists
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +329,14 @@ class SheafViolation(ValidationError):
     concept with the same name, the definitions must be structurally
     compatible.
     """
+
+
+class ChallengedConjecture(ValidationError):
+    """A conjecture has active challenge edges — consider branching."""
+
+
+class UngroundedAssumption(ValidationError):
+    """A prerequisite assumes X but X is not defined as a concept."""
 
 
 # ---------------------------------------------------------------------------
@@ -398,6 +474,8 @@ class KnowledgeGraph:
         self.types: Dict[str, TypeDef] = dict(BUILTIN_TYPES)
         self.concepts: Dict[str, Concept] = {}
         self.prerequisites: List[Prerequisite] = []
+        self.challenges: List[Challenge] = []
+        self.overrides: List[Override] = []
         self.functors: Dict[str, Functor] = {}
         self.adjunctions: Dict[str, Adjunction] = {}
         self.interfaces: Dict[str, Interface] = {}
@@ -431,6 +509,14 @@ class KnowledgeGraph:
         self.prerequisites.append(prereq)
         self._children.setdefault(prereq.source, set()).add(prereq.target)
         self._parents.setdefault(prereq.target, set()).add(prereq.source)
+
+    def add_challenge(self, challenge: Challenge) -> None:
+        """Add a challenge edge to the graph."""
+        self.challenges.append(challenge)
+
+    def add_override(self, override: Override) -> None:
+        """Add an override (instance-level exception to a default)."""
+        self.overrides.append(override)
 
     # -------------------------------------------------------------------
     # Validation (Use Case 1: Curriculum Compiler)
@@ -515,6 +601,40 @@ class KnowledgeGraph:
                         errors.append(UndefinedType(
                             f"Concept '{c.name}' output type '{tname}' "
                             f"not defined in type registry"))
+
+        # 8. Challenged conjectures: flag conjectures with active challenges
+        challenged_targets = {ch.target for ch in self.challenges}
+        for c in self.concepts.values():
+            if c.tier == 'conjecture' and c.name in challenged_targets:
+                challengers = [ch.source for ch in self.challenges
+                               if ch.target == c.name]
+                errors.append(ChallengedConjecture(
+                    f"Conjecture '{c.name}' has active challenges from: "
+                    f"{', '.join(challengers)}. Consider branching."))
+
+        # 9. Ungrounded assumptions: prerequisite assumes X but X not in graph
+        all_names = set(self.concepts.keys())
+        # Gather all assumption names from concepts and prerequisites
+        all_assumptions: Set[str] = set()
+        for c in self.concepts.values():
+            all_assumptions.update(c.assumes)
+        for p in self.prerequisites:
+            if p.assuming:
+                all_assumptions.add(p.assuming)
+        # Check that each assumption is either a concept name or a known
+        # assumption string (we only flag if check_types is on, to avoid
+        # noise in basic validation)
+        if check_types:
+            for assumption in all_assumptions:
+                if assumption not in all_names:
+                    # Find who references it
+                    refs = [c.name for c in self.concepts.values()
+                            if assumption in c.assumes]
+                    refs += [f"{p.source}->{p.target}" for p in self.prerequisites
+                             if p.assuming == assumption]
+                    errors.append(UngroundedAssumption(
+                        f"Assumption '{assumption}' not defined as a concept. "
+                        f"Referenced by: {', '.join(refs)}"))
 
         return errors
 
@@ -745,10 +865,129 @@ class KnowledgeGraph:
         for p in self.prerequisites:
             if p.target not in do_concepts:
                 new_graph.add_prerequisite(p)
+        new_graph.challenges = list(self.challenges)
+        new_graph.overrides = list(self.overrides)
         new_graph.functors = dict(self.functors)
         new_graph.adjunctions = dict(self.adjunctions)
         new_graph.interfaces = dict(self.interfaces)
         return new_graph
+
+    # -------------------------------------------------------------------
+    # Epistemic reasoning (critical thinking)
+    # -------------------------------------------------------------------
+
+    def what_if_not(self, concept_name: str) -> Set[str]:
+        """What concepts become unblocked if we remove a concept?
+
+        The dual of missing_for(): instead of "what do I need to reach X?",
+        this asks "what becomes reachable if I stop assuming Y?"
+
+        Returns the set of concepts that were blocked ONLY by concept_name
+        (directly or transitively).  These are the concepts that would
+        become frontier candidates if the assumption were removed.
+
+        Use case: if the removed concept is a conjecture with active
+        challenges, a large returned set = high-value research direction.
+        """
+        if concept_name not in self.concepts:
+            raise ValueError(f"Unknown concept: {concept_name}")
+
+        # Build a graph without the concept and its prerequisite edges
+        reduced = KnowledgeGraph()
+        reduced.types = dict(self.types)
+        for name, c in self.concepts.items():
+            if name != concept_name:
+                reduced.add_concept(c)
+        for p in self.prerequisites:
+            if p.source != concept_name and p.target != concept_name:
+                reduced.add_prerequisite(p)
+
+        # Find what's newly reachable: concepts that have all prereqs
+        # satisfied in the reduced graph but not in the original graph
+        all_names = set(self.concepts.keys()) - {concept_name}
+
+        # In original graph: concepts whose ancestors include concept_name
+        blocked_in_original = self.descendants(concept_name)
+
+        # In reduced graph: which of those blocked concepts now have
+        # all prereqs satisfied (i.e., concept_name was the only blocker)?
+        opened: Set[str] = set()
+        for name in blocked_in_original:
+            if name == concept_name:
+                continue
+            if name not in reduced.concepts:
+                continue
+            # Check if all parents in reduced graph exist
+            parents = reduced._parents.get(name, set())
+            # A concept is "opened" if it exists in reduced graph and
+            # all its remaining parents exist too
+            if parents <= set(reduced.concepts.keys()):
+                opened.add(name)
+
+        return opened
+
+    def challenged_concepts(self) -> Dict[str, List[Challenge]]:
+        """Return concepts with active challenges and their challengers.
+
+        Returns a dict mapping challenged concept name to list of
+        Challenge objects targeting it.  Empty dict = no active disputes.
+        """
+        result: Dict[str, List[Challenge]] = {}
+        for ch in self.challenges:
+            result.setdefault(ch.target, []).append(ch)
+        return result
+
+    def assumption_dependents(self, assumption: str) -> Dict[str, List[str]]:
+        """Find all concepts and prerequisites that depend on an assumption.
+
+        Returns:
+            Dict with keys 'concepts' and 'prerequisites', each mapping
+            to a list of names/edge descriptions.
+        """
+        dependent_concepts = [
+            c.name for c in self.concepts.values()
+            if assumption in c.assumes
+        ]
+        dependent_prereqs = [
+            f"{p.source}->{p.target}"
+            for p in self.prerequisites
+            if p.assuming == assumption
+        ]
+        return {
+            'concepts': dependent_concepts,
+            'prerequisites': dependent_prereqs,
+        }
+
+    def resolve_default(self, concept_name: str, property_name: str,
+                        instance_name: Optional[str] = None) -> Optional[str]:
+        """Resolve a property value, checking overrides before defaults.
+
+        The Fido problem: "dogs have 4 legs" is a default, but Fido
+        has 3 legs via an override.
+
+        Args:
+            concept_name: The heuristic concept with the default.
+            property_name: The property to resolve.
+            instance_name: If given, check for instance-level overrides.
+
+        Returns:
+            The override value if one exists for this instance,
+            otherwise the default value, or None if neither exists.
+        """
+        # Check for instance-level override first
+        if instance_name:
+            for ov in self.overrides:
+                if (ov.instance == instance_name
+                        and ov.default_concept == concept_name
+                        and ov.property == property_name):
+                    return ov.value
+
+        # Fall back to default
+        concept = self.concepts.get(concept_name)
+        if concept:
+            return concept.defaults.get(property_name)
+
+        return None
 
     def information_flow(self) -> Dict[str, float]:
         """Compute information flow through each edge.
@@ -905,6 +1144,10 @@ class KnowledgeGraph:
             self.add_concept(c)
         for p in source.prerequisites:
             self.add_prerequisite(p)
+        for ch in source.challenges:
+            self.add_challenge(ch)
+        for ov in source.overrides:
+            self.add_override(ov)
         self.functors.update(source.functors)
         self.adjunctions.update(source.adjunctions)
         self.interfaces.update(source.interfaces)

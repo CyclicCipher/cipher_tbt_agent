@@ -1,7 +1,7 @@
 # Category Theory Knowledge Graph (CTKG) — Design Document
 
-**Date:** 2026-02-16 (updated 2026-02-18)
-**Status:** Universal type system + DSL parser + arithmetic domain + sheaf consistency + logic domain implemented. 11/11 tests pass.
+**Date:** 2026-02-16 (updated 2026-02-19)
+**Status:** Universal type system + DSL parser + arithmetic domain + sheaf consistency + logic domain + epistemic reasoning implemented.
 **Context:** Mistake #44 showed that missing prerequisites between counting and arithmetic caused the model to memorize instead of compose. A knowledge graph with structural constraints would have caught this automatically — like a compiler catching a missing import. This motivates building the CTKG as a general-purpose infrastructure component, not just a curriculum tool.
 
 ---
@@ -991,6 +991,38 @@ in categorical probability theory.
 - Possibility theory (Fritz & Teran 2024) — alternative to probabilistic
   weights using t-norm-based Markov categories
 
+### Phase 2.9: Epistemic reasoning (IMPLEMENTED)
+
+The CTKG now supports critical thinking via four mechanisms:
+
+**Epistemic tiers on concepts:**
+- `Concept.tier` = `'axiom'` | `'theorem'` | `'conjecture'` | `'heuristic'`
+- `Concept.assumes` = list of assumption names the concept depends on
+- `Concept.defaults` = dict of default properties (for heuristic-tier concepts)
+- DSL: `tier conjecture`, `assumes NAME1 NAME2`, `default NAME = VALUE`
+
+**Assumption-conditioned prerequisites:**
+- `Prerequisite.assuming` = name of the assumption making this prerequisite hold
+- `Prerequisite.assumption_status` = `'axiomatic'` | `'derived'` | `'empirical'` | `'heuristic'`
+- DSL: `requires NAME via "ROLE" assuming ASSUMPTION [STATUS]`
+
+**Challenge edges:**
+- `Challenge(source, target, role, strength)` — evidence weakening a concept
+- `KnowledgeGraph.challenges` — list of all challenge edges
+- DSL: `challenges NAME via "REASON"` inside concept blocks
+- Validation: `ChallengedConjecture` warning when a conjecture has active challenges
+
+**Defaults and overrides (Fido problem):**
+- `Override(instance, default_concept, property, value, reason)` — instance exception
+- `KnowledgeGraph.overrides` — list of all override edges
+- DSL: `overrides NAME with PROP = VALUE via "REASON"` inside concept blocks
+- `KnowledgeGraph.resolve_default(concept, property, instance)` — returns override value if exists, else default
+
+**Counterfactual exploration:**
+- `KnowledgeGraph.what_if_not(concept)` — returns set of concepts that become unblocked if concept is removed
+- `KnowledgeGraph.challenged_concepts()` — returns concepts with active challenges + their challengers
+- `KnowledgeGraph.assumption_dependents(assumption)` — returns all concepts/prereqs that depend on an assumption
+
 ### Phase 3: Computation rule interpreter (NEXT)
 
 - Parse `process` field into an AST (currently stored as raw strings)
@@ -1015,6 +1047,202 @@ in categorical probability theory.
 - Logic primitives (equal, forall, exists, implies) for proof-supervised training
 - Transform primitives (quote, match, rewrite) for meta-reasoning / algorithm improvement
 - Process AST evaluation for all three levels
+
+---
+
+## Epistemic Reasoning — Critical Thinking Infrastructure (IMPLEMENTED)
+
+**Motivation (Light Yagami roleplay, 2026-02-19):** An AI playing Light Yagami accepted without question the claim that it was an EEG-derived mind copy — a claim that is technologically impossible given the character's 2003 timeframe. The model built elaborate strategic frameworks on top of an unexamined false premise. This revealed that the CTKG's fixed-graph model of knowledge (concept A requires concept B, full stop) cannot teach the model to question whether a prerequisite is fundamental or merely assumed.
+
+The Fido problem crystallizes this: "Dogs have 4 legs" + "Fido is a dog" → "Fido has 4 legs." But Fido lost a leg. The system needs to represent default properties that admit exceptions, derived results that depend on assumptions that might be wrong, and active challenges from new evidence.
+
+**Design principle:** The CTKG shouldn't just encode what's known — it should encode *how confidently* it's known and *what would change if it were wrong*. Knowledge is a presheaf over assumption contexts, not a fixed graph.
+
+### Epistemic Tiers on Concepts
+
+Every concept carries a `tier` field indicating its epistemic status:
+
+| Tier | Meaning | Audit frequency | Example |
+|------|---------|-----------------|---------|
+| `axiom` | Mathematical/logical necessity within its domain. Don't question during normal work. | Never (within domain) | Conservation of energy, group axioms |
+| `theorem` | Rigorously derived from stated premises. Valid iff premises hold. | When stuck, question premises | "Alcubierre requires negative energy" (given original metric) |
+| `conjecture` | Widely believed, possibly evidence-supported, but unproven. | Maintain active skepticism | "FTL signaling is impossible" |
+| `heuristic` | Useful approximation with known exceptions. | Expect exceptions | "Dogs have 4 legs", "heavy elements are stable" |
+
+The model's reasoning strategy is tier-dependent. When stuck, climb the dependency chain and look for the highest-tier concept it can afford to question — conjectures before theorems, theorems before axioms.
+
+```
+concept no_ftl_signaling
+  domain physics
+  tier conjecture
+  description "No information can travel faster than light"
+  assumes special_relativity pointlike_observers
+  ...
+```
+
+### Assumption-Conditioned Prerequisites
+
+Prerequisites carry an explicit assumption context: a list of names identifying which assumptions make the prerequisite hold, and a `status` indicating whether it's axiomatic, derived, empirical, or heuristic.
+
+```
+requires negative_energy via "metric solution" assuming original_alcubierre_metric [derived]
+```
+
+This makes the dependency *transparent*. The model can see that the requirement flows from a specific assumption, not from physics itself. When exploring alternatives, it knows exactly which assumption to relax. Drop `original_alcubierre_metric`, and the `negative_energy` requirement detaches — opening the search space to Lentz-type solutions.
+
+DSL syntax extends the existing requires line:
+```
+requires NAME via "ROLE" [probability] assuming ASSUMPTION_NAME [STATUS]
+```
+
+Both `[probability]` and `assuming` are optional. `[STATUS]` after the assumption defaults to `derived`.
+
+### Challenge Edges
+
+A new edge type alongside prerequisites. Challenges say "evidence E weakens the claim that concept C or prerequisite P holds."
+
+```
+concept lentz_soliton
+  domain physics
+  description "Positive-energy warp metric using shift vector"
+  challenges negative_energy_requirement via "positive-energy reformulation"
+```
+
+When the model encounters a concept with active challenges, it is *forced to branch*: it cannot simply accept the challenged premise. This externalizes MIMO hypothesis tracking into the graph structure.
+
+Challenge edges also create a natural "audit trigger." When new research is added to the CTKG and includes a challenge edge, every concept downstream of the challenged premise is flagged for re-evaluation.
+
+### Defaults and Overrides (The Fido Problem)
+
+Heuristic-tier concepts express default properties that admit exceptions. An **override** is an instance-level assertion that contradicts a default.
+
+```
+concept dogs_have_four_legs
+  domain biology
+  tier heuristic
+  description "Dogs typically have four legs"
+  default legs = 4
+
+concept fido
+  domain biology
+  description "A specific dog"
+  overrides dogs_have_four_legs with legs = 3 via "lost a leg in accident"
+```
+
+Semantics: when the model reasons about a specific instance, it first checks for overrides. If an override exists, it takes precedence over the default. If no override exists, the default applies.
+
+This connects to the challenge edge mechanism: an override is a challenge scoped to a specific instance rather than to the general concept. The `overrides` DSL keyword creates an `Override` edge in the graph.
+
+Categorically: defaults are natural transformations from the heuristic concept to instances; overrides are modifications (whiskering) of the natural transformation at specific components.
+
+### Counterfactual Exploration: `what_if_not()`
+
+Extension of the existing `intervene()` method. Instead of just removing incoming edges (do-calculus), `what_if_not()` removes a concept entirely and returns the set of concepts that become *unrequired* — the search space that opens up.
+
+```python
+opened = graph.what_if_not('negative_energy_density')
+# Returns: concepts that were blocked only by negative_energy_density
+```
+
+This is the dual of `missing_for()`. Instead of "what do I need to reach X?", it's "what becomes reachable if I stop assuming Y?" If the opened set is large and the removed concept is merely a conjecture, that's a high-value research direction.
+
+### Updated Data Model
+
+```python
+@dataclass
+class Concept:
+    # ... existing fields ...
+
+    # Epistemic tier
+    tier: str = 'theorem'  # 'axiom' | 'theorem' | 'conjecture' | 'heuristic'
+    assumes: List[str] = field(default_factory=list)  # assumption names
+
+    # Defaults (for heuristic-tier concepts)
+    defaults: Dict[str, str] = field(default_factory=dict)  # property -> value
+
+@dataclass
+class Prerequisite:
+    # ... existing fields ...
+
+    # Assumption context
+    assuming: Optional[str] = None     # which assumption makes this hold
+    assumption_status: str = 'derived' # 'axiomatic' | 'derived' | 'empirical' | 'heuristic'
+
+@dataclass
+class Challenge:
+    """A challenge edge — evidence weakening a concept or prerequisite."""
+    source: str        # challenging concept
+    target: str        # challenged concept
+    role: str          # how the challenge works
+    strength: float = 1.0  # 0.0 = weak hint, 1.0 = full refutation
+
+@dataclass
+class Override:
+    """An instance-level exception to a heuristic default."""
+    instance: str      # the instance concept
+    default_concept: str  # the heuristic being overridden
+    property: str      # which property
+    value: str         # override value
+    reason: str = ''   # why the override exists
+```
+
+### Updated DSL Grammar
+
+```
+concept_field += 'tier' TIER
+             |  'assumes' NAME+
+             |  'default' NAME '=' VALUE
+             |  'challenges' NAME 'via' STRING
+             |  'overrides' NAME 'with' NAME '=' VALUE 'via' STRING
+requires_ext  = 'requires' NAME 'via' STRING ['[' FLOAT ']'] ['assuming' NAME ['[' STATUS ']']]
+TIER          = 'axiom' | 'theorem' | 'conjecture' | 'heuristic'
+STATUS        = 'axiomatic' | 'derived' | 'empirical' | 'heuristic'
+```
+
+### Validation Extensions
+
+Two new validation rules:
+
+1. **ChallengedConjecture** — a concept with tier `conjecture` that has active challenge edges should be flagged as "under active dispute — consider branching."
+
+2. **UngroundedAssumption** — a prerequisite with `assuming X` where X is not defined as a concept in the graph. Catches dangling assumption references.
+
+### Example: Warp Drive Domain
+
+```
+concept alcubierre_drive
+  domain physics
+  tier theorem
+  description "FTL warp by contracting space ahead and expanding behind"
+  assumes original_alcubierre_metric
+  requires negative_energy via "metric solution" assuming original_alcubierre_metric [derived]
+  requires spacetime_manipulation via "GR field equations"
+
+concept negative_energy_requirement
+  domain physics
+  tier conjecture
+  description "Warp drives require exotic matter with negative energy density"
+  assumes original_alcubierre_metric
+
+concept lentz_soliton
+  domain physics
+  tier theorem
+  description "Positive-energy warp metric using shift vector"
+  assumes lentz_metric
+  challenges negative_energy_requirement via "positive-energy reformulation"
+```
+
+Running `what_if_not('negative_energy_requirement')` on this graph would show that `alcubierre_drive` becomes reachable without exotic matter — pointing the model toward the Lentz reformulation.
+
+### Integration with Roleplay Findings
+
+The epistemic reasoning system directly addresses the three failure modes identified in the Light Yagami session:
+
+1. **Premise acceptance** → Epistemic tiers + challenge edges force the model to distinguish between axioms it shouldn't question and conjectures it should actively probe.
+
+2. **Information boundary collapse** → Assumption contexts make explicit which facts depend on which premises, preventing the model from treating derived results as ground truth.
+
+3. **Missing MIMO hypothesis tracking** → Challenge edges externalize parallel hypotheses into the graph structure. The model doesn't need to spontaneously generate alternatives — the graph tells it where alternatives exist.
 
 ---
 
@@ -1053,3 +1281,11 @@ in categorical probability theory.
 7. **Both directions.** When a concept has a natural inverse, train on both forward and reverse factorizations. Reverse problems force induction, which builds richer representations than mechanical forward application alone.
 
 8. **Sheaf before merge.** Never merge two domain graphs without `sheaf_check()`. Incompatible overlapping definitions produce silent bugs that are nearly impossible to diagnose after the merge. The sheaf condition is cheap to check and catches contradictions at composition time, not at training time.
+
+9. **Know what you don't know.** Every concept has an epistemic tier. Axioms are trusted. Theorems are trusted given their premises. Conjectures are actively probed. Heuristics expect exceptions. When stuck, question the highest-tier thing you can afford to question.
+
+10. **Challenges are first-class.** When new evidence weakens an existing claim, add a challenge edge. This forces the model to branch rather than ignore the contradiction. Unaddressed challenges are technical debt.
+
+11. **Defaults are not facts.** Heuristic-tier concepts express defaults, not universal truths. Always check for overrides before applying a default. The Fido problem: "dogs have 4 legs" is a heuristic, not an axiom.
+
+12. **Assumptions are explicit.** Every derived result should name the assumptions it depends on. When an assumption is weakened, all results that depend on it are automatically flagged.
