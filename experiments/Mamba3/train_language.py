@@ -113,7 +113,7 @@ def parse_args():
     # Data
     p.add_argument('--data_dir', type=str, default=None,
                    help='Directory for WikiText-2 data/cache')
-    p.add_argument('--max_words', type=int, default=12,
+    p.add_argument('--max_words', type=int, default=15,
                    help='Max words per sentence (shorter padded, longer filtered)')
     p.add_argument('--min_words', type=int, default=3)
     p.add_argument('--max_vocab', type=int, default=2000,

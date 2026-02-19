@@ -168,10 +168,16 @@ def load_wikitext2(data_dir: Optional[str] = None,
 
     cache_path = os.path.join(data_dir, f'wikitext2_{split}.txt')
 
-    if os.path.exists(cache_path):
+    # Check cache — require minimum size to guard against corrupt files
+    # (e.g. from a previous run that crashed mid-write)
+    if os.path.exists(cache_path) and os.path.getsize(cache_path) > 1000:
         with open(cache_path, 'r', encoding='utf-8') as f:
-            return [line.strip() for line in f
-                    if line.strip() and not line.strip().startswith('=')]
+            paragraphs = [line.strip() for line in f
+                          if line.strip() and not line.strip().startswith('=')]
+        if paragraphs:
+            return paragraphs
+        # Cache exists but empty/corrupt — re-download
+        os.remove(cache_path)
 
     # Try HuggingFace datasets
     try:
@@ -188,11 +194,17 @@ def load_wikitext2(data_dir: Optional[str] = None,
             f"Error: {e}"
         )
 
-    # Cache for next time
+    if not paragraphs:
+        raise RuntimeError("WikiText-2 loaded but produced 0 paragraphs")
+
+    # Cache via temp file to avoid corrupt partial writes
     os.makedirs(data_dir, exist_ok=True)
-    with open(cache_path, 'w', encoding='utf-8') as f:
+    tmp_path = cache_path + '.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
         for p in paragraphs:
             f.write(p + '\n')
+    os.replace(tmp_path, cache_path)
+    print(f"  Cached {len(paragraphs)} paragraphs -> {cache_path}")
 
     return paragraphs
 
@@ -321,15 +333,29 @@ def load_or_annotate(data_dir: Optional[str] = None,
         data_dir = os.path.join(os.path.dirname(__file__), 'data')
 
     cache = _cache_path(data_dir, split, max_words)
-    if os.path.exists(cache):
+    # Guard against empty/corrupt annotation cache
+    if os.path.exists(cache) and os.path.getsize(cache) > 100:
         print(f"  Loading cached annotations: {cache}")
-        return load_annotations(cache)
+        sents = load_annotations(cache)
+        if sents:
+            return sents
+        print(f"  WARNING: cache was empty, re-annotating...")
+        os.remove(cache)
 
     print(f"  Annotating WikiText-2 ({split})... this may take a few minutes.")
     paragraphs = load_wikitext2(data_dir, split)
+    print(f"  Loaded {len(paragraphs)} paragraphs")
     sentences = annotate_sentences(
         paragraphs, max_words=max_words, min_words=min_words,
         spacy_model=spacy_model)
+
+    if not sentences:
+        raise RuntimeError(
+            f"Annotation produced 0 sentences from {len(paragraphs)} paragraphs "
+            f"(filter: {min_words}-{max_words} words). "
+            f"Try increasing --max_words (default 12)."
+        )
+
     save_annotations(sentences, cache)
     print(f"  Cached {len(sentences)} annotated sentences -> {cache}")
     return sentences
