@@ -61,8 +61,8 @@ SPACY_TO_POS = {
     'DET': 'DET', 'ADP': 'ADP',
     'CCONJ': 'CONJ', 'SCONJ': 'COMP',
     'NUM': 'NUM', 'PART': 'PART',
-    'INTJ': 'INTJ', 'PUNCT': 'PUNCT',
-    'SYM': 'UNK', 'X': 'UNK', 'SPACE': 'UNK',
+    'INTJ': 'INTJ',
+    'PUNCT': 'UNK', 'SYM': 'UNK', 'X': 'UNK', 'SPACE': 'UNK',
 }
 
 
@@ -213,6 +213,67 @@ def load_wikitext2(data_dir: Optional[str] = None,
 # Annotation
 # -----------------------------------------------------------------------
 
+def _process_doc(doc, min_words: int, max_words: int) -> List[AnnotatedSentence]:
+    """Extract annotated sentences from a single spaCy Doc."""
+    sentences: List[AnnotatedSentence] = []
+    for sent in doc.sents:
+        # Filter to content tokens (no punct, no whitespace, no PUNCT POS)
+        content_toks = [tok for tok in sent
+                        if not tok.is_punct and not tok.is_space
+                        and tok.pos_ != 'PUNCT']
+        if len(content_toks) < min_words or len(content_toks) > max_words:
+            continue
+
+        # Build token-to-index map (content tokens only)
+        tok_to_idx = {tok.i: i for i, tok in enumerate(content_toks)}
+
+        word_texts = [tok.text.lower() for tok in content_toks]
+        pos_tags = [SPACY_TO_POS.get(tok.pos_, 'UNK')
+                    for tok in content_toks]
+        dep_labels = [tok.dep_ for tok in content_toks]
+
+        # Dep heads: map spaCy global indices to our local indices
+        dep_heads = []
+        for tok in content_toks:
+            if tok.head == tok:  # root
+                dep_heads.append(-1)
+            elif tok.head.i in tok_to_idx:
+                dep_heads.append(tok_to_idx[tok.head.i])
+            else:
+                dep_heads.append(-1)  # head was punctuation (rare)
+
+        # NP spans from spaCy noun_chunks
+        np_spans = []
+        for chunk in sent.noun_chunks:
+            chunk_words = [tok for tok in chunk
+                           if not tok.is_punct and not tok.is_space]
+            if chunk_words:
+                start = tok_to_idx.get(chunk_words[0].i)
+                end = tok_to_idx.get(chunk_words[-1].i)
+                if start is not None and end is not None:
+                    np_spans.append([start, end + 1])
+
+        # PP and VP spans from dependency parse
+        pp_spans = _extract_pp_spans(pos_tags, dep_heads)
+        vp_spans = _extract_vp_spans(pos_tags, dep_labels, dep_heads)
+        subj_span, pred_span = _extract_clause_spans(
+            pos_tags, dep_labels, dep_heads)
+
+        sentences.append(AnnotatedSentence(
+            text=sent.text.strip(),
+            words=word_texts,
+            pos_tags=pos_tags,
+            dep_labels=dep_labels,
+            dep_heads=dep_heads,
+            np_spans=np_spans,
+            pp_spans=pp_spans,
+            vp_spans=vp_spans,
+            subj_span=subj_span,
+            pred_span=pred_span,
+        ))
+    return sentences
+
+
 def annotate_sentences(paragraphs: List[str],
                        max_words: int = 12,
                        min_words: int = 3,
@@ -222,6 +283,8 @@ def annotate_sentences(paragraphs: List[str],
 
     Filters to sentences with min_words <= n_words <= max_words.
     Strips punctuation from word lists (syntax operates on words).
+
+    Uses nlp.pipe() for batched processing (~10x faster than one-by-one).
     """
     try:
         import spacy
@@ -232,65 +295,13 @@ def annotate_sentences(paragraphs: List[str],
             "  python -m spacy download en_core_web_sm"
         )
 
-    nlp = spacy.load(spacy_model)
+    # Only load components we need: tok, tagger, parser (for sents, POS, deps)
+    nlp = spacy.load(spacy_model, exclude=['ner', 'lemmatizer'])
     sentences: List[AnnotatedSentence] = []
 
-    for para in paragraphs:
-        doc = nlp(para)
-        for sent in doc.sents:
-            # Filter to content tokens (no punct, no whitespace)
-            content_toks = [tok for tok in sent
-                            if not tok.is_punct and not tok.is_space]
-            if len(content_toks) < min_words or len(content_toks) > max_words:
-                continue
-
-            # Build token-to-index map (content tokens only)
-            tok_to_idx = {tok.i: i for i, tok in enumerate(content_toks)}
-
-            word_texts = [tok.text.lower() for tok in content_toks]
-            pos_tags = [SPACY_TO_POS.get(tok.pos_, 'UNK')
-                        for tok in content_toks]
-            dep_labels = [tok.dep_ for tok in content_toks]
-
-            # Dep heads: map spaCy global indices to our local indices
-            dep_heads = []
-            for tok in content_toks:
-                if tok.head == tok:  # root
-                    dep_heads.append(-1)
-                elif tok.head.i in tok_to_idx:
-                    dep_heads.append(tok_to_idx[tok.head.i])
-                else:
-                    dep_heads.append(-1)  # head was punctuation (rare)
-
-            # NP spans from spaCy noun_chunks
-            np_spans = []
-            for chunk in sent.noun_chunks:
-                chunk_words = [tok for tok in chunk
-                               if not tok.is_punct and not tok.is_space]
-                if chunk_words:
-                    start = tok_to_idx.get(chunk_words[0].i)
-                    end = tok_to_idx.get(chunk_words[-1].i)
-                    if start is not None and end is not None:
-                        np_spans.append([start, end + 1])
-
-            # PP and VP spans from dependency parse
-            pp_spans = _extract_pp_spans(pos_tags, dep_heads)
-            vp_spans = _extract_vp_spans(pos_tags, dep_labels, dep_heads)
-            subj_span, pred_span = _extract_clause_spans(
-                pos_tags, dep_labels, dep_heads)
-
-            sentences.append(AnnotatedSentence(
-                text=sent.text.strip(),
-                words=word_texts,
-                pos_tags=pos_tags,
-                dep_labels=dep_labels,
-                dep_heads=dep_heads,
-                np_spans=np_spans,
-                pp_spans=pp_spans,
-                vp_spans=vp_spans,
-                subj_span=subj_span,
-                pred_span=pred_span,
-            ))
+    # Batch processing with nlp.pipe() — much faster than nlp(para) in a loop
+    for doc in nlp.pipe(paragraphs, batch_size=256, n_process=1):
+        sentences.extend(_process_doc(doc, min_words, max_words))
 
     return sentences
 
@@ -299,8 +310,12 @@ def annotate_sentences(paragraphs: List[str],
 # Cache management
 # -----------------------------------------------------------------------
 
+# Bump version when annotation schema changes to auto-invalidate cache
+_ANNOTATION_VERSION = 2  # v2: exclude PUNCT tokens, map PUNCT->UNK
+
 def _cache_path(data_dir: str, split: str, max_words: int) -> str:
-    return os.path.join(data_dir, f'annotated_{split}_max{max_words}.json')
+    return os.path.join(data_dir,
+                        f'annotated_{split}_max{max_words}_v{_ANNOTATION_VERSION}.json')
 
 
 def save_annotations(sentences: List[AnnotatedSentence],
