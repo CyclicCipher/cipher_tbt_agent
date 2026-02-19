@@ -137,6 +137,10 @@ def parse_args():
     # Output
     p.add_argument('--results_file', type=str, default=None)
 
+    # Checkpointing
+    p.add_argument('--checkpoint_dir', type=str, default=None,
+                   help='Directory for stage checkpoints (saves after each passed stage)')
+
     # Performance
     p.add_argument('--no_amp', action='store_true')
     p.add_argument('--compile', action='store_true')
@@ -151,6 +155,35 @@ def parse_args():
     if args.stage is None and not args.curriculum:
         args.stage = 1
     return args
+
+
+# ---------------------------------------------------------------------------
+# Checkpointing
+# ---------------------------------------------------------------------------
+
+def save_checkpoint(checkpoint_dir, stage, model, prev_train_seqs, all_history,
+                    config=None, vocab_size=None):
+    """Save model + replay buffer + config after a passed stage."""
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    path = os.path.join(checkpoint_dir, f'stage_{stage}.pt')
+    payload = {
+        'stage': stage,
+        'model_state_dict': model.state_dict(),
+        'prev_train_seqs': prev_train_seqs,
+        'all_history': all_history,
+    }
+    if config is not None:
+        payload['config'] = dict(
+            d_model=config.d_model, d_state=config.d_state,
+            n_layer=config.n_layer, headdim=config.headdim,
+            chunk_size=config.chunk_size, stable_ssm=config.stable_ssm,
+            use_mhc=config.use_mhc, mhc_n_streams=config.mhc_n_streams,
+        )
+    if vocab_size is not None:
+        payload['vocab_size'] = vocab_size
+    payload['domain'] = 'language'
+    torch.save(payload, path)
+    print(f"  Checkpoint saved -> {path}")
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +496,12 @@ def main():
 
             prev_loaders[stage] = (te, data['n_result_tokens'])
             prev_train_seqs.append(data['train_seqs'])
+
+            # Save checkpoint after each passed stage
+            if args.checkpoint_dir:
+                save_checkpoint(args.checkpoint_dir, stage, model,
+                                prev_train_seqs, all_history,
+                                config=config, vocab_size=VOCAB_SIZE)
             print()
     else:
         stage = args.stage
