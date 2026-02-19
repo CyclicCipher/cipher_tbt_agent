@@ -129,7 +129,9 @@ def parse_args():
 
     # Training
     p.add_argument('--epochs', type=int, default=100)
-    p.add_argument('--batch_size', type=int, default=64)
+    p.add_argument('--batch_size', type=int, default=16)
+    p.add_argument('--grad_accum', type=int, default=4,
+                   help='Gradient accumulation steps (effective batch = batch_size * grad_accum)')
     p.add_argument('--lr', type=float, default=1e-3)
     p.add_argument('--warmup_epochs', type=int, default=4)
     p.add_argument('--weight_decay', type=float, default=0.01)
@@ -271,6 +273,7 @@ def train_stage(model, train_seqs, test_loader, device, amp_ctx, scaler,
     scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer, make_lr_lambda(args.warmup_epochs, epochs))
 
+    grad_accum = getattr(args, 'grad_accum', 1)
     history = []
     epoch_losses = []
     passed = False
@@ -283,7 +286,8 @@ def train_stage(model, train_seqs, test_loader, device, amp_ctx, scaler,
         train_loader = _build_replay_loader(
             train_seqs, prev_train_seqs, args.replay_fraction, args.batch_size)
 
-        for (seqs,) in train_loader:
+        optimizer.zero_grad()
+        for step_idx, (seqs,) in enumerate(train_loader):
             seqs = seqs.to(device)
             with amp_ctx():
                 logits = model(seqs)
@@ -292,20 +296,25 @@ def train_stage(model, train_seqs, test_loader, device, amp_ctx, scaler,
                     seqs[:, 1:].reshape(-1),
                     ignore_index=0,
                 )
+                loss = loss / grad_accum  # scale for accumulation
 
-            optimizer.zero_grad()
             if scaler is not None:
                 scaler.scale(loss).backward()
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-                scaler.step(optimizer)
-                scaler.update()
             else:
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-                optimizer.step()
 
-            epoch_loss += loss.item()
+            if (step_idx + 1) % grad_accum == 0 or (step_idx + 1) == len(train_loader):
+                if scaler is not None:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+                    optimizer.step()
+                optimizer.zero_grad()
+
+            epoch_loss += loss.item() * grad_accum  # undo scaling for logging
             n_batches += 1
 
         scheduler.step()
@@ -440,6 +449,9 @@ def main():
           f" | L={config.n_layer} H={config.nheads}"
           f" | chunk={config.chunk_size} seq={args.seq_len}"
           f"{ssm_str}{mimo_str}{mhc_str}")
+    eff_batch = args.batch_size * args.grad_accum
+    print(f"  batch={args.batch_size} x grad_accum={args.grad_accum} "
+          f"= effective {eff_batch}")
 
     all_history = []
 
