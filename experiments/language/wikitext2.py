@@ -169,7 +169,7 @@ def load_wikitext2(data_dir: Optional[str] = None,
     cache_path = os.path.join(data_dir, f'wikitext2_{split}.txt')
 
     if os.path.exists(cache_path):
-        with open(cache_path, 'r') as f:
+        with open(cache_path, 'r', encoding='utf-8') as f:
             return [line.strip() for line in f
                     if line.strip() and not line.strip().startswith('=')]
 
@@ -190,7 +190,7 @@ def load_wikitext2(data_dir: Optional[str] = None,
 
     # Cache for next time
     os.makedirs(data_dir, exist_ok=True)
-    with open(cache_path, 'w') as f:
+    with open(cache_path, 'w', encoding='utf-8') as f:
         for p in paragraphs:
             f.write(p + '\n')
 
@@ -295,13 +295,13 @@ def save_annotations(sentences: List[AnnotatedSentence],
                      path: str) -> None:
     """Save annotated sentences to JSON cache."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w') as f:
+    with open(path, 'w', encoding='utf-8') as f:
         json.dump([s.to_dict() for s in sentences], f)
 
 
 def load_annotations(path: str) -> List[AnnotatedSentence]:
     """Load annotated sentences from JSON cache."""
-    with open(path, 'r') as f:
+    with open(path, 'r', encoding='utf-8') as f:
         data = json.load(f)
     return [AnnotatedSentence.from_dict(d) for d in data]
 
