@@ -104,8 +104,12 @@ def parse_args():
     p.add_argument('--n_layer', type=int, default=4)
     p.add_argument('--headdim', type=int, default=64)
     p.add_argument('--chunk_size', type=int, default=16)
-    p.add_argument('--stable_ssm', action='store_true',
-                   help='Use StableSSM A-matrix reparameterization')
+    p.add_argument('--mimo_rank', type=int, default=4,
+                   help='MIMO rank (1=SISO, >1=multi-input multi-output)')
+    p.add_argument('--stable_ssm', action='store_true', default=True,
+                   help='Use StableSSM A-matrix reparameterization (default: on)')
+    p.add_argument('--no_stable_ssm', action='store_false', dest='stable_ssm',
+                   help='Disable StableSSM reparameterization')
     p.add_argument('--mhc', action='store_true',
                    help='Enable manifold-constrained hyperconnections')
     p.add_argument('--mhc_n_streams', type=int, default=4)
@@ -138,7 +142,7 @@ def parse_args():
     p.add_argument('--results_file', type=str, default=None)
 
     # Checkpointing
-    p.add_argument('--checkpoint_dir', type=str, default=None,
+    p.add_argument('--checkpoint_dir', type=str, default='checkpoints',
                    help='Directory for stage checkpoints (saves after each passed stage)')
 
     # Performance
@@ -176,7 +180,8 @@ def save_checkpoint(checkpoint_dir, stage, model, prev_train_seqs, all_history,
         payload['config'] = dict(
             d_model=config.d_model, d_state=config.d_state,
             n_layer=config.n_layer, headdim=config.headdim,
-            chunk_size=config.chunk_size, stable_ssm=config.stable_ssm,
+            chunk_size=config.chunk_size, mimo_rank=config.mimo_rank,
+            stable_ssm=config.stable_ssm,
             use_mhc=config.use_mhc, mhc_n_streams=config.mhc_n_streams,
         )
     if vocab_size is not None:
@@ -407,6 +412,7 @@ def main():
         d_model=args.d_model, d_state=args.d_state,
         n_layer=args.n_layer, headdim=args.headdim,
         chunk_size=args.chunk_size,
+        mimo_rank=args.mimo_rank,
         stable_ssm=args.stable_ssm,
         use_mhc=args.mhc,
         mhc_n_streams=args.mhc_n_streams,
@@ -427,10 +433,13 @@ def main():
             print(f"torch.compile: FAILED ({e})")
 
     mhc_str = f" | mHC(n={config.mhc_n_streams})" if config.use_mhc else ""
+    ssm_str = " | StableSSM" if config.stable_ssm else ""
+    mimo_str = f" | MIMO(r={config.mimo_rank})" if config.mimo_rank > 1 else ""
     print(f"Mamba3LM | {n_params:,} params | {device}"
           f" | d={config.d_model} N={config.d_state}"
           f" | L={config.n_layer} H={config.nheads}"
-          f" | chunk={config.chunk_size} seq={args.seq_len}{mhc_str}")
+          f" | chunk={config.chunk_size} seq={args.seq_len}"
+          f"{ssm_str}{mimo_str}{mhc_str}")
 
     all_history = []
 

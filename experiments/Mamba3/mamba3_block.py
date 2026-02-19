@@ -44,7 +44,7 @@ class Mamba3Config:
     use_conv: bool = False   # optional short convolution (Mamba3 removes it)
     d_conv: int = 4          # convolution kernel size (if use_conv=True)
     use_pope: bool = True    # PoPE (Polar Positional Embeddings) instead of RoPE
-    mimo_rank: int = 1       # r=1 is SISO (default), r>1 is MIMO
+    mimo_rank: int = 4       # MIMO rank (r=4 default per Mamba3 paper)
     stable_ssm: bool = False # StableSSM "best" reparameterization for A-matrix
                              # (Wang & Li 2024, arXiv:2311.14495)
     use_triton: bool = False # Use Triton-accelerated SSD kernels when available
