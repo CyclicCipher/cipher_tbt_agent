@@ -622,25 +622,72 @@ class Mamba3Mixer(nn.Module):
         else:
             A_dt = A_raw * dt  # standard: A_raw = -exp(A_log) < 0
 
+        # Select SSD implementation (shared by both MIMO and SISO paths)
+        _ssd_fn = ssd_trapz
+        if cfg.use_triton:
+            try:
+                from .triton_ssd import ssd_trapz_triton
+                _ssd_fn = ssd_trapz_triton
+            except ImportError:
+                pass  # fall back to PyTorch
+
+        lam_expand = lam.unsqueeze(-1)  # (batch, seqlen, 1, 1)
+
         if r > 1:
-            # --- MIMO path: sequential recurrence (reference implementation) ---
-            x_flat = x_dt.reshape(batch, seqlen, cfg.d_inner)
-            x_write = self.mimo_x_proj(x_flat).reshape(batch, seqlen, cfg.nheads, cfg.headdim, r)
+            # --- MIMO path: batched SSD via rank-as-heads ---
+            #
+            # Each MIMO rank gets its own independent B, C, and state,
+            # but shares the same A (decay). We fold r ranks into the
+            # head dimension, producing nheads*r effective heads, then
+            # run a single parallel SSD call.
+            #
+            # Effective head j = h*r + i, where h is the original head
+            # and i is the rank index.
 
-            x_write_prev = F.pad(x_write[:, :-1], (0, 0, 0, 0, 0, 0, 1, 0))
-            B_prev = F.pad(B[:, :-1], (0, 0, 0, 0, 1, 0))
-            lam_expand = lam.unsqueeze(-1)  # (batch, seqlen, 1, 1)
+            # Project raw x (before dt) through MIMO, then apply current
+            # dt to both current and shifted-previous (trapezoidal rule).
+            x_raw_flat = x.reshape(batch, seqlen, cfg.d_inner)
+            x_write_raw = self.mimo_x_proj(x_raw_flat).reshape(
+                batch, seqlen, cfg.nheads, cfg.headdim, r)
+            # Merge (nheads, r) → nheads*r effective heads
+            x_write_raw = x_write_raw.permute(0, 1, 2, 4, 3).reshape(
+                batch, seqlen, cfg.nheads * r, cfg.headdim)
 
-            y = mamba3_mimo_recurrence(
-                x_write, x_write_prev,
-                A_dt,
-                B, B_prev, C,
-                lam_expand,
+            # Expand dt and A_dt: repeat each head's value r times
+            dt_mimo = dt.unsqueeze(-1).expand(-1, -1, -1, r).reshape(
+                batch, seqlen, cfg.nheads * r)
+            A_dt_mimo = A_dt.unsqueeze(-1).expand(-1, -1, -1, r).reshape(
+                batch, seqlen, cfg.nheads * r)
+            dt_mimo_exp = dt_mimo.unsqueeze(-1)  # (batch, seq, nheads*r, 1)
+
+            # Current and previous x, both scaled by current dt
+            x_curr = x_write_raw * dt_mimo_exp
+            x_raw_prev = F.pad(x_write_raw[:, :-1], (0, 0, 0, 0, 1, 0))
+            x_prev = x_raw_prev * dt_mimo_exp
+
+            # Expand B, C: (batch, seq, r, d_state) → (batch, seq, nheads*r, d_state)
+            # B_mimo[h*r+i] = B[i] for all h (each rank's B shared across heads)
+            B_mimo = B.unsqueeze(2).expand(
+                -1, -1, cfg.nheads, -1, -1).reshape(
+                batch, seqlen, cfg.nheads * r, cfg.d_state)
+            C_mimo = C.unsqueeze(2).expand(
+                -1, -1, cfg.nheads, -1, -1).reshape(
+                batch, seqlen, cfg.nheads * r, cfg.d_state)
+            B_prev_mimo = F.pad(B_mimo[:, :-1], (0, 0, 0, 0, 1, 0))
+
+            y, _ = _ssd_fn(
+                x_curr, x_prev,
+                A_dt_mimo,
+                B_mimo, B_prev_mimo,
+                C_mimo, lam_expand,
+                cfg.chunk_size,
             )
-            # y: (batch, seqlen, nheads, headdim, r)
+            # y: (batch, seqlen, nheads*r, headdim)
 
-            # Contract MIMO output
-            y = y.reshape(batch, seqlen, cfg.d_inner * r)
+            # Unfold back: (nheads*r, headdim) → (nheads, r, headdim) → contract
+            y = y.reshape(batch, seqlen, cfg.nheads, r, cfg.headdim)
+            y = y.permute(0, 1, 2, 4, 3).reshape(
+                batch, seqlen, cfg.d_inner * r)
             y = self.mimo_out_proj(y)
             y = y.reshape(batch, seqlen, cfg.nheads, cfg.headdim)
         else:
@@ -653,15 +700,6 @@ class Mamba3Mixer(nn.Module):
             B_prev = F.pad(B[:, :-1].unsqueeze(2), (0, 0, 0, 0, 1, 0))
             B_curr = B.unsqueeze(2)
             C_curr = C.unsqueeze(2)
-            lam_expand = lam.unsqueeze(-1)  # (batch, seqlen, 1, 1)
-
-            _ssd_fn = ssd_trapz
-            if cfg.use_triton:
-                try:
-                    from .triton_ssd import ssd_trapz_triton
-                    _ssd_fn = ssd_trapz_triton
-                except ImportError:
-                    pass  # fall back to PyTorch
 
             y, _ = _ssd_fn(
                 x_dt, x_prev,
