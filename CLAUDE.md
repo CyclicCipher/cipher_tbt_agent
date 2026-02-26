@@ -18,6 +18,7 @@ Previous focus: **JEPA** — JEPA-style latent prediction on Mamba3 backbone (st
 
 **ALWAYS read `MISTAKES.md` before making changes.** It has 46 documented mistakes with root causes. The most relevant active ones:
 
+- **#47 (MIMO creates independent states):** MIMO implementation folds R ranks into `nheads*r` independent heads, each with its own state. Paper's MIMO uses a **shared** N×P state per head with rank-R outer product updates — state doesn't grow with R. Our implementation is R× more expensive (state, compute, memory), defeating MIMO's purpose of increasing hardware efficiency. Also: `mimo_x_proj` and `mimo_out_proj` have wrong dimensions. Sequential recurrence is correct; SSD path and projections need fixing. See CONTINUATION.md for fix plan.
 - **#44 (Missing prerequisites):** Single-digit addition was treated as a fact stage (155 entries to memorize). But addition decomposes into counting-up via successor. The curriculum jumped from counting to arithmetic without teaching ordinality, comparison, or place value. Category theory constraint: every composition requires its constituent objects to be established.
 - **#43 (Query in output, not input):** Scratchpad work tokens must be deterministically derivable from input. Randomly chosen tokens in the output are unpredictable. Fixed.
 - **#42 (Ablation benchmarks are memorization):** 5K samples + 1.26M params + 50 epochs = memorization, not generalization. All non-trivial tasks show 100% train / chance test. This motivated the compositionality curriculum pivot.
@@ -125,7 +126,7 @@ Key files:
 
 ### Mamba3 Backbone (experiments/Mamba3/) — ACTIVE PRIORITY
 
-**Paper audit (Mistake #45, #46):** Implementation cross-referenced against Mamba-3 paper (OpenReview HwCvaJOiCj). All equation-level, architectural, and convention-level bugs fixed. Known deliberate deviations: PoPE (replaces RoPE), StableSSM (replaces standard A-log), MIMO SSD (independent per-rank states instead of shared state — speed-vs-fidelity tradeoff).
+**Paper audit (Mistake #45, #46, #47):** Implementation cross-referenced against Mamba-3 paper (OpenReview HwCvaJOiCj). Equation-level and architectural bugs fixed (#45, #46). Known deliberate deviations: PoPE (replaces RoPE), StableSSM (replaces standard A-log). **MIMO is broken (#47):** current implementation creates R× independent states instead of the paper's shared-state rank-R updates. Fix required — see CONTINUATION.md.
 
 - `mamba3_block.py` — Mamba3 block (SSD-based, PoPE, trapezoidal discretization, `--stable_ssm` option, `--use_triton` option, `--mhc` option with `HyperConnection` class and `sinkhorn_normalize`)
 - `triton_ssd.py` — Triton-accelerated SSD kernels (graceful fallback to PyTorch when Triton unavailable)

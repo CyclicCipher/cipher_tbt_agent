@@ -190,9 +190,54 @@ Two more discrepancies found by systematic paper audit:
 
 **Root cause:** #45 caught implementation bugs visible in equations/figures. These two are subtler — the out_norm change is described in prose ("swaps the pre-output projection norm with QK-normalization") not equations, and the dt_bias init is inherited convention from Mamba-2 not restated in Mamba-3.
 
-**Also documented (not fixed):** MIMO SSD path folds ranks into independent heads instead of summing into the paper's shared state matrix. The sequential reference recurrence is mathematically correct. The SSD approximation trades cross-rank state interaction for parallelism — a conscious speed-vs-fidelity tradeoff.
-
 **Lesson:** Paper audit must check three layers: (1) equations/math, (2) architecture diagrams/prose, (3) inherited conventions from prior work that the new paper doesn't restate.
+
+---
+
+### #47. MIMO Implementation Creates Independent States Instead of Shared-State Rank-R Updates (ACTIVE)
+
+**Date:** 2026-02-26
+
+**Status:** Bug identified, fix not yet implemented.
+
+**What the paper says (Appendix D):**
+- B_t: D → N×R (input projection)
+- C_t: D → N×R (output projection)
+- X_t: D → P (via W_X') → P×R (via W_X) — two-stage projection
+- State H_t ∈ R^(N×P) — **same size regardless of R**
+- Write: `H_t = α_t * H_{t-1} + B_t @ X_t^T` where B_t is (N,R), X_t is (P,R), so `B @ X^T` = (N,R)×(R,P) = (N,P) — a rank-R update to the shared state
+- Read: `Y_t = H_t^T @ C_t` = (P,N)×(N,R) = (P,R) — R readout vectors from shared state
+- Output: down-project P×R → P → D
+
+**Why MIMO increases hardware efficiency:** At inference, the bottleneck is memory bandwidth (reading/writing state). MIMO gives more expressive input/output mappings (R input vectors, R output vectors) **without growing the state** (still N×P per head). This increases arithmetic intensity (compute/memory ratio), making inference compute-bound instead of memory-bound. The paper explicitly states: "MIMO is particularly suitable for inference, as the extra expressivity allows stronger inference efficiency."
+
+**What our code does (lines 645-700 of mamba3_block.py):**
+- Folds R ranks into the head dimension: `nheads*r` effective heads
+- Each effective head gets its own **independent** N×P state
+- State size: N × P × nheads × R (R× too large)
+- Compute: R× more SSD work (R× more independent heads)
+- Memory bandwidth: R× more state I/O
+
+This is exactly backwards. The implementation makes MIMO **decrease** hardware efficiency (R× more state, R× more compute) instead of increasing it. It's equivalent to just having R× more heads — no efficiency gain, pure overhead.
+
+**Additional bugs in the MIMO projections:**
+- `mimo_x_proj`: `nn.Linear(d, d * r)` — paper says X projection is D → P → P×R, not D → D×R. The first stage (D→P) should be implicit in the head reshape, the second (P→P×R) should be a per-head P→P×R projection. Currently it's a massive D×(D×R) matrix instead of a small P×(P×R) per head.
+- `mimo_out_proj`: `nn.Linear(d * r, d)` — paper says down-project P×R → P → D. Currently it's a (D×R)×D matrix.
+
+**The sequential recurrence (`mamba3_mimo_recurrence`) has the correct shared-state math** — H is (N,P) per head and the rank-R outer product `einsum('bnpi,bid->bnpd', x_write, B)` sums R contributions into the shared state. But it's only used as a reference, not in the actual forward pass.
+
+**Fix required:**
+1. Change state to be N×P per head (not N×P per head per rank)
+2. Write: compute rank-R outer product `B @ X^T` = (N,R)×(R,P) = (N,P), add to shared state
+3. Read: compute `H^T @ C` = (P,N)×(N,R) = (P,R), producing R values per head
+4. Down-project: P×R → P per head, then flatten to D
+5. Fix MIMO X projection: two-stage D→P→P×R (paper's W_X' and W_X), not single D→D×R
+6. For SSD kernel: either (a) write a dedicated MIMO SSD that handles shared-state rank-R updates, or (b) use the existing SSD with the mathematical decomposition: run R SSD passes for the write side, accumulate states, then R readout passes — this correctly handles cross-rank state sharing but is O(R²) in the quadratic attention term
+7. Alternative: for small R (R=4), the sequential recurrence is acceptable for our model sizes
+
+**Root cause:** The original MIMO implementation (documented as "conscious speed-vs-fidelity tradeoff" in Mistake #46) misunderstood the paper's design intent. The paper's MIMO is specifically designed to NOT grow the state — that's the whole point. Treating ranks as independent heads defeats the purpose entirely.
+
+**Lesson:** When a paper says a technique "increases hardware efficiency", verify that your implementation actually achieves this. If your implementation makes things R× more expensive, you've implemented the opposite of what the paper describes. Don't rationalize implementation divergences as "tradeoffs" without checking whether the divergence reverses the paper's core design goal.
 
 ---
 
@@ -284,4 +329,5 @@ Below are condensed lessons from resolved/archived mistakes. Full debugging narr
 - 2026-02-16: #42 (ablation benchmarks are all memorization; 5K samples + 50 epochs + 1.26M params = no generalization)
 - 2026-02-16: #44 (single-digit addition treated as fact stage; missing prerequisites between counting and arithmetic; category theory constraint on morphism well-definedness)
 - 2026-02-17: #45 (four Mamba3 bugs: BC bias init/order, trapezoidal dt mismatch, SiLU on x without conv)
-- 2026-02-19: #46 (redundant out_norm, wrong dt_bias init; also documented MIMO SSD shared-state tradeoff)
+- 2026-02-19: #46 (redundant out_norm, wrong dt_bias init)
+- 2026-02-26: #47 (MIMO creates R× independent states instead of paper's shared-state rank-R updates; also wrong projection dimensions)

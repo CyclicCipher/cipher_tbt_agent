@@ -4,7 +4,54 @@
 **Priority:** IMMEDIATE — Tests the core generalization hypothesis.
 **Context:** See Mistakes #42 (memorization), #38 (ePC archived), #34 (next-step prediction).
 
-**Mamba3 backbone status:** Paper audit complete (Mistakes #45, #46). All known discrepancies fixed. Intentional deviations documented: PoPE (replaces RoPE), StableSSM (replaces standard A-log), MIMO SSD independent-rank approximation. The backbone is ready for curriculum experiments.
+**Mamba3 backbone status:** Paper audit complete (Mistakes #45, #46, #47). Intentional deviations: PoPE (replaces RoPE), StableSSM (replaces standard A-log). **MIMO is broken** — see Mistake #47 and "IMMEDIATE: MIMO Fix" section below. Fix MIMO before running curriculum experiments with MIMO enabled.
+
+---
+
+## IMMEDIATE: MIMO Fix (Mistake #47)
+
+**Priority:** Fix before any MIMO-enabled training runs.
+
+### The Bug
+
+The MIMO implementation in `mamba3_block.py` (lines 645-700) folds R ranks into the head dimension, creating `nheads*r` independent heads each with their own state. This **multiplies** state size and compute by R — the exact opposite of the paper's intent.
+
+### What the Paper Says (Appendix D)
+
+MIMO is designed to increase hardware efficiency at inference by providing more expressive I/O without growing the state:
+
+```
+State:  H_t ∈ R^(N×P) per head      ← same size regardless of R
+Write:  H_t = α * H_{t-1} + B_t @ X_t^T    where B(N,R) @ X(P,R)^T = (N,P)  ← rank-R update
+Read:   Y_t = H_t^T @ C_t           where H(N,P)^T @ C(N,R) = (P,R)          ← R readout vectors
+Output: down-project P×R → P → D
+```
+
+Key: all R ranks share the same N×P state. The rank-R outer product `B @ X^T` is a sum of R rank-1 updates — more expressive than rank-1, but state stays N×P.
+
+### What Our Code Does (Wrong)
+
+- Folds R into heads: `nheads*r` effective heads, each with independent state
+- State size: N × P × nheads × R (R× too large)
+- Also wrong: `mimo_x_proj = Linear(d, d*r)` — paper says two-stage D→P→P×R via W_X' and W_X
+- Also wrong: `mimo_out_proj = Linear(d*r, d)` — paper says P×R→P→D
+
+**Note:** The sequential recurrence `mamba3_mimo_recurrence()` (lines 385-439) already has correct shared-state math. The bug is only in the SSD path and the projection layers.
+
+### Fix Plan
+
+1. **MIMO X projection** — Replace `Linear(d, d*r)` with the paper's two-stage: W_X' (d→d, or equivalently implicit in head reshape to P) then W_X (P→P×R per head, i.e., `Linear(headdim, headdim*r)`)
+2. **MIMO output projection** — Replace `Linear(d*r, d)` with W_O' (P×R→P per head) then W_O (d→d_model, already exists as `out_proj`)
+3. **SSD MIMO forward path** — Two options:
+   - **(a) Dedicated MIMO SSD:** Modify the SSD kernel to handle rank-R writes and reads on a shared state. The intra-chunk quadratic term becomes `Y_j = Σ_i (C_j^T @ L @ B_i) @ X_i` — O(R²) cross-rank terms but on small Q×Q matrices.
+   - **(b) Sequential recurrence for MIMO:** For small models (our d=128), just use `mamba3_mimo_recurrence()` when r>1. Simple, correct, adequate for our scale.
+   - Recommendation: start with (b) for correctness, implement (a) later if speed matters.
+4. **Verify** — Check that r=1 produces identical results before and after the change (MIMO projections should be no-ops or absent for r=1).
+
+### Files to Modify
+
+- `experiments/Mamba3/mamba3_block.py` — MIMO projections in `__init__`, MIMO forward path in `forward()`
+- Sequential recurrence is already correct — can be used directly for option (b)
 
 ---
 
