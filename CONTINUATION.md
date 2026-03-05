@@ -1,8 +1,57 @@
 # CONTINUATION: Compositional Arithmetic Curriculum on Mamba3
 
-**Date:** 2026-02-16
+**Date:** 2026-02-19 (updated)
 **Priority:** IMMEDIATE — Tests the core generalization hypothesis.
 **Context:** See Mistakes #42 (memorization), #38 (ePC archived), #34 (next-step prediction).
+
+**Mamba3 backbone status:** Paper audit complete (Mistakes #45, #46, #47). Intentional deviations: PoPE (replaces RoPE), StableSSM (replaces standard A-log). **MIMO is broken** — see Mistake #47 and "IMMEDIATE: MIMO Fix" section below. Fix MIMO before running curriculum experiments with MIMO enabled.
+
+---
+
+## IMMEDIATE: MIMO Fix (Mistake #47)
+
+**Priority:** Fix before any MIMO-enabled training runs.
+
+### The Bug
+
+The MIMO implementation in `mamba3_block.py` (lines 645-700) folds R ranks into the head dimension, creating `nheads*r` independent heads each with their own state. This **multiplies** state size and compute by R — the exact opposite of the paper's intent.
+
+### What the Paper Says (Appendix D)
+
+MIMO is designed to increase hardware efficiency at inference by providing more expressive I/O without growing the state:
+
+```
+State:  H_t ∈ R^(N×P) per head      ← same size regardless of R
+Write:  H_t = α * H_{t-1} + B_t @ X_t^T    where B(N,R) @ X(P,R)^T = (N,P)  ← rank-R update
+Read:   Y_t = H_t^T @ C_t           where H(N,P)^T @ C(N,R) = (P,R)          ← R readout vectors
+Output: down-project P×R → P → D
+```
+
+Key: all R ranks share the same N×P state. The rank-R outer product `B @ X^T` is a sum of R rank-1 updates — more expressive than rank-1, but state stays N×P.
+
+### What Our Code Does (Wrong)
+
+- Folds R into heads: `nheads*r` effective heads, each with independent state
+- State size: N × P × nheads × R (R× too large)
+- Also wrong: `mimo_x_proj = Linear(d, d*r)` — paper says two-stage D→P→P×R via W_X' and W_X
+- Also wrong: `mimo_out_proj = Linear(d*r, d)` — paper says P×R→P→D
+
+**Note:** The sequential recurrence `mamba3_mimo_recurrence()` (lines 385-439) already has correct shared-state math. The bug is only in the SSD path and the projection layers.
+
+### Fix Plan
+
+1. **MIMO X projection** — Replace `Linear(d, d*r)` with the paper's two-stage: W_X' (d→d, or equivalently implicit in head reshape to P) then W_X (P→P×R per head, i.e., `Linear(headdim, headdim*r)`)
+2. **MIMO output projection** — Replace `Linear(d*r, d)` with W_O' (P×R→P per head) then W_O (d→d_model, already exists as `out_proj`)
+3. **SSD MIMO forward path** — Two options:
+   - **(a) Dedicated MIMO SSD:** Modify the SSD kernel to handle rank-R writes and reads on a shared state. The intra-chunk quadratic term becomes `Y_j = Σ_i (C_j^T @ L @ B_i) @ X_i` — O(R²) cross-rank terms but on small Q×Q matrices.
+   - **(b) Sequential recurrence for MIMO:** For small models (our d=128), just use `mamba3_mimo_recurrence()` when r>1. Simple, correct, adequate for our scale.
+   - Recommendation: start with (b) for correctness, implement (a) later if speed matters.
+4. **Verify** — Check that r=1 produces identical results before and after the change (MIMO projections should be no-ops or absent for r=1).
+
+### Files to Modify
+
+- `experiments/Mamba3/mamba3_block.py` — MIMO projections in `__init__`, MIMO forward path in `forward()`
+- Sequential recurrence is already correct — can be used directly for option (b)
 
 ---
 
@@ -15,28 +64,50 @@ Every model we've trained memorizes instead of generalizing on multi-step algori
 - **Permutation_4**: 55-87% train, 25% test (chance).
 - **Multi-scale memory**: 39-100% train, 7% test (chance).
 
-The model treats composite tasks as monolithic lookup tables. With 1.26M parameters and only 5K training examples, memorization is always the path of least resistance. More data or longer training (grokking) might help, but neither addresses the fundamental question: **can the model learn to compose sub-skills?**
+The model treats composite tasks as monolithic lookup tables. With 1.26M parameters and only 5K training examples, memorization is always the path of least resistance.
 
 ## The Hypothesis: Compositional Curriculum
 
-How many examples of addition does it take to teach a child? About 50-100, covering single-digit pairs (10×10 = 100 total). But then the child generalizes to multi-digit addition *without* seeing all 1000×1000 two-digit cases.
+**Can the model learn to compose sub-skills?**
 
-The child can do this because they learned **composable sub-skills first**:
+### Attempt 1: 12-Stage Curriculum (FAILED)
 
-1. **Counting** — numbers are ordered, "next" means +1
-2. **Place value** — "23" means 2×10 + 3 (positional decomposition)
-3. **Single-digit addition** — the 100 base facts
-4. **The carry rule** — when a column exceeds 9, send 1 to the next column
+Root causes:
 
-Each stage has near-100% coverage at the *algorithmic level*. By the time they see "23 + 48", the only new thing is "apply the same column procedure and carry."
+1. **Early stages trivially memorizable** — Stages 1-5 had only 9-10 problems each, all below the split threshold. The model "passed" by memorizing lookup tables, never learning algorithms.
+2. **Interleaved counting gave the answer away** — `DOT 1 DOT 2 DOT 3 = 3` taught copying, not counting. The answer was in the input.
+3. **Composition test too small** — Stage 6 had only 100 problems (80 train / 20 test). Heavy memorization pressure.
+4. **No stage forced algorithmic learning** — Every early stage had a small enough problem space that memorization sufficed.
 
-**Our models skip all of this.** They see associative recall as a monolithic function from 32-token sequence → answer token. They never decompose the task into "scan for matching key" then "read adjacent value."
+### Attempt 2: 4-Stage Curriculum (FAILED)
 
-**The experiment:** Build a staged arithmetic curriculum on the Mamba3 backbone. Train each sub-skill to generalization before introducing the next. Test whether compositional training enables generalization on composite tasks that fail with direct training.
+Collapsed 12 stages into 4, skipping sub-skill stages entirely. Stage 1 jumped straight to combined DOT+TEN counting with shuffled order.
 
----
+Root causes:
 
-## Experimental Design
+1. **Skipped sub-skill scaffolding** — New Stage 1 ≈ old Stage 6 but without Stages 2-5 teaching individual counting first. The model never learned to count DOTs or TENs independently.
+2. **Removed process supervision** — Old interleaved counting trained the model HOW to count step by step. New format only asked for the final answer, which the model memorized.
+3. **Autoregressive output asymmetry** — In `= tens ones`, the tens digit must be predicted from input alone (→ learns counting), but the ones digit can condition on the ground-truth tens digit via teacher forcing (→ memorizes the combination instead of counting). Result: test per-token [1.00|0.00].
+4. **No composition cues** — Zero signal telling the model to reuse prior skills for new tasks.
+5. **No partial credit** — Exact-match metric hid the fact that one counting skill was mastered while the other wasn't.
+
+## Revised Curriculum (8 Stages — Prerequisite-Complete)
+
+### Why the 5-stage curriculum was wrong
+
+The original 5-stage curriculum jumped from counting (Stages 1-2) to single-digit arithmetic (Stage 3) with four unverified assumptions about digit semantics: ordinality, place value, comparison, and the meaning of addition. See Mistake #44 and `DESIGN_GUIDE.md` for the category theory formulation.
+
+The fix is to add intermediate stages that ground digits in quantities and teach addition as a composition of counting + successor, not as a lookup table.
+
+### Design Principles
+
+- **Prerequisite completeness** — Before teaching any composition, verify ALL prerequisite skills are learned. No missing edges in the knowledge graph. (Category theory constraint: morphism well-definedness requires codomain/domain matching.)
+- **Sub-skills first, composition second** — Learn DOT and TEN counting independently (Stage 1) before combining (Stage 2)
+- **Operations reduce to known skills** — Addition reduces to counting-up. Subtraction reduces to counting-down. The scratchpad shows the reduction explicitly.
+- **Process supervision via scratchpad** — Every intermediate computation is visible in the work area. No hidden-state-only reasoning.
+- **No false fact stages** — If a skill has >20 entries and can be decomposed into simpler operations, it's a composition stage, not a fact stage. The only genuine facts are symbol-to-meaning mappings.
+- **Partial credit** — Per-token accuracy tracks individual skill mastery; display shows both train and test breakdowns
+- **Enough problems for real splits** — Confounders (TENs in DOT-counting, DOTs in TEN-counting) expand problem space to 100 even for individual counting
 
 ### Architecture
 
@@ -44,166 +115,178 @@ Each stage has near-100% coverage at the *algorithmic level*. By the time they s
 - `model(input_ids) -> logits` (simple LM interface)
 - Weight-tied embedding
 - Config: `d_model=128, d_state=64, n_layer=4, headdim=64`
-- ~500K params (smaller than Naja's 1.26M — important for generalization)
 
-### Vocabulary
+### Vocabulary (Scratchpad Framework)
 
 ```
-Token 0:  PAD
-Token 1:  digit 0
-Token 2:  digit 1
-...
-Token 10: digit 9
-Token 11: +  (PLUS)
-Token 12: -  (MINUS)
-Token 13: *  (TIMES)
-Token 14: /  (DIVIDE)
-Token 15: =  (EQUALS)
-Token 16: >  (GT)
-Token 17: <  (LT)
-Token 18: TRUE
-Token 19: FALSE
-Token 20: (  (LPAREN)
-Token 21: )  (RPAREN)
-
-vocab_size = 22
+Token 0:  PAD    Token 1:  WORK   Token 2:  NOTE   Token 3:  SEP
+Token 4:  0  ...  Token 13: 9
+Token 14: +    Token 15: -    Token 16: =
+Token 17: DOT    Token 18: TEN
+Token 19: SUCC   Token 20: PRED
+Token 21: GT     Token 22: LT     Token 23: EQ
+Token 24: :      (scratchpad column separator in counting-based stages)
+vocab_size = 25
 ```
 
-Digits are encoded as `digit + 1` (so token 1 = digit 0, token 10 = digit 9). Multi-digit numbers use multiple digit tokens in sequence (e.g., "23" = tokens [3, 4]).
+Built deterministically by `_build_vocab()` in `train_arithmetic.py`. Structural tokens (PAD, WORK, NOTE, SEP) come from the `Vocab` class. WORK replaces the old `=` separator. NOTE marks queries in the input. SEP separates column steps in the scratchpad. SUCC/PRED are successor/predecessor operations. GT/LT/EQ are comparison results. `:` separates the column setup from the counting-up/down sequence in Stages 5-8.
 
-### Curriculum Stages
+### Stage 1: Query Counting (sub-skill)
 
-#### Stage 1: Magnitude Comparison (learn that digits have ordinal meaning)
+**Format:** `[PAD..., <shuffled DOTs and TENs>, NOTE, QUERY, WORK, count]`
+- Each sample randomly asks: "how many DOTs?" or "how many TENs?"
+- NOTE marker in the input tells the model what to count (Mistake #43: query must be in input, not output)
+- n_result = 1 (single count digit)
+- Example: `DOT TEN DOT TEN DOT NOTE DOT WORK 3` (query=DOT, answer=3)
+- Example: `DOT TEN DOT TEN DOT NOTE TEN WORK 2` (query=TEN, answer=2)
+- Example: `TEN TEN TEN TEN NOTE TEN WORK 4` (query=TEN, answer=4)
+- 100 problems (10×10 count combinations), split 80/20
+- **Status:** PASSING — reaches ≥95% test in ~8 epochs (seed=123).
 
-**Format:** `[PAD..., a, CMP, b, RESULT]`
-- Example: `3 > 1 → TRUE`, `2 > 7 → FALSE`, `5 < 8 → TRUE`
-- CMP ∈ {`>`, `<`}, RESULT ∈ {`TRUE`, `FALSE`}
-- Single-digit only
-- 90 possible comparisons (10×10 minus 10 equal pairs)
-- **Tests:** Does the model learn magnitude ordering of digit tokens?
-- **Coverage:** Near-complete (can see most/all of the 90 pairs)
-- **Generalization test:** Held-out digit pairs
+### Stage 2: Combined Counting with Scratchpad (composition)
 
-#### Stage 2: Successor / Predecessor (learn +1/-1 as operations on quantity)
+**Format:** `[PAD..., <shuffled DOTs and TENs>, WORK, DOT, d, TEN, t]`
+- Reuses Stage 1's query tokens as composition cues
+- The model counts DOTs first (DOT → d), then TENs (TEN → t)
+- n_result = 4 (DOT, d, TEN, t — cue tokens are ungraded)
+- Example: `DOT TEN DOT TEN DOT WORK DOT 3 TEN 2`
+- Same 100 problems, same train/test split as Stage 1
+- **Status:** PASSING — reaches ≥95% test in ~26 epochs (seed=123).
 
-**Format:** `[PAD..., a, +, 1, =, result]` and `[PAD..., a, -, 1, =, result]`
-- Example: `3 + 1 = 4`, `7 - 1 = 6`
-- Result is always a single digit (restrict to 0-9 range)
-- 18 examples total (9 successors + 9 predecessors)
-- **Tests:** Does the model learn that + and - modify quantity?
-- **Advancement criterion:** ≥95% test accuracy
+### Stage 3: Successor / Predecessor (ordinality)
 
-#### Stage 3: Single-Digit Arithmetic (learn the four operations)
+**Format:** `[PAD..., a, NOTE, SUCC/PRED, WORK, result]`
+- Teaches the number line: what digit comes next? what digit comes before?
+- NOTE marker specifies the operation (successor or predecessor)
+- n_result = 1 (the next/previous digit)
+- Wraps at boundaries: SUCC(9) = 0, PRED(0) = 9 (mod-10 successor, no carry — carry comes later)
+- Example: `4 NOTE SUCC WORK 5` (successor of 4 is 5)
+- Example: `7 NOTE PRED WORK 6` (predecessor of 7 is 6)
+- Example: `9 NOTE SUCC WORK 0` (wraps around)
+- 20 problems (10 digits × 2 operations), composition stage with held-out specs
+- **Prerequisite verification:** Does the model understand digit ordering?
+- **New vocab tokens:** SUCC, PRED
 
-**Format:** `[PAD..., a, OP, b, =, r1, (r2)]`
-- Addition: `3 + 4 = 7`, `8 + 5 = 1 3` (result can be 1-2 digits)
-- Subtraction: `7 - 3 = 4` (only a ≥ b to avoid negatives)
-- Multiplication: `3 * 4 = 1 2`, `2 * 3 = 6`
-- Division: `8 / 2 = 4` (only exact divisions, b > 0)
-- **Tests:** Does the model learn each operation?
-- **Coverage:** All valid single-digit pairs for each operation
-- **Key question:** Does prior training on Stage 1-2 help learn Stage 3 faster?
+### Stage 4: Comparison (digit ordering)
 
-#### Stage 4: Two-Digit Arithmetic (composition of place value + operation + carry)
+**Format:** `[PAD..., a, NOTE, b, WORK, GT/LT/EQ]`
+- NOTE separates the two operands
+- Output is a single token: GT (a > b), LT (a < b), or EQ (a = b)
+- n_result = 1
+- Example: `7 NOTE 3 WORK GT` (7 > 3)
+- Example: `2 NOTE 8 WORK LT` (2 < 8)
+- Example: `5 NOTE 5 WORK EQ` (5 = 5)
+- 100 problems (10×10 digit pairs), composition stage with held-out specs
+- **Prerequisite:** Stage 3 (successor teaches ordering)
+- **New vocab tokens:** GT, LT, EQ
 
-**Format:** `[PAD..., d1, d2, OP, d3, d4, =, r1, r2, (r3)]`
-- Example: `2 3 + 1 4 = 3 7`, `4 5 - 1 8 = 2 7`
-- **This is the critical generalization test:**
-  - The model has NEVER seen two-digit addition directly
-  - It must compose: place value (Stage 1-2) + single-digit operation (Stage 3) + carry
+### Stage 5: Counting-Based Addition (addition = counting-up)
+
+**Format:** `[PAD..., a, +, b, WORK, <count-up sequence>, =, carry, ones]`
+- The scratchpad explicitly shows counting up b steps from a
+- Reduces addition to the successor operation learned in Stage 3
+- n_result = variable (b intermediate digits + 3 for `= carry ones`)
+- Example: `3 + 4 WORK 4 5 6 7 = 0 7` (start at 3, count up 4 steps: 4,5,6,7)
+- Example: `8 + 5 WORK 9 0 1 2 3 = 1 3` (crosses tens boundary: 9,0,1,2,3 → carry=1, ones=3)
+- Example: `6 + 0 WORK = 0 6` (zero steps, result is just 6)
+- Max sequence length: 9 intermediate digits (for +9), fits easily in seq_len=48
+- 100 problems (10×10 addition pairs), composition stage with held-out specs
+- **Prerequisite:** Stage 3 (successor function)
+- **Key test:** Does the model use counting, or does it memorize? Held-out spec test reveals this.
+
+### Stage 6: Counting-Based Subtraction (subtraction = counting-down)
+
+**Format:** `[PAD..., a, -, b, WORK, <count-down sequence>, =, borrow, ones]`
+- The scratchpad shows counting down b steps from a (using predecessor from Stage 3)
+- a ≥ b only (non-negative results)
+- n_result = variable (b intermediate digits + 3 for `= borrow ones`)
+- Example: `7 - 3 WORK 6 5 4 = 0 4` (start at 7, count down 3 steps: 6,5,4)
+- Example: `5 - 0 WORK = 0 5` (zero steps)
+- 55 problems (a ≥ b pairs), composition stage with held-out specs
+- **Prerequisite:** Stage 3 (predecessor function)
+
+### Stage 7: Two-Digit ± Single-Digit (bridge, column scratchpad)
+
+**Format:** `[PAD..., a1, a0, OP, 0, b0, WORK, <column scratchpad>]`
+- a ∈ 10-99, b ∈ 0-9 (zero-padded to match Stage 8 format)
+- Column scratchpad: ones column → tens column → hundreds column → final answer
+- Each column step reuses Stage 5/6's counting-based format
+- n_result = variable (depends on column count lengths)
+- Example: `2 3 + 0 4 WORK 3 + 4 : 4 5 6 7 = 0 7 SEP 2 + 0 : = 0 2 SEP 0 2 7`
+- Total: 1,800 problems (90×10×2), split ~1,440/360
+- **Prerequisite:** Stages 5-6 (counting-based single-digit ops)
+
+### Stage 8: Two-Digit ± Two-Digit (composition test, column scratchpad)
+
+**Format:** `[PAD..., a1, a0, OP, b1, b0, WORK, <column scratchpad>]`
+- a, b ∈ 10-99
+- Same column scratchpad format as Stage 7
+- n_result = variable
+- Example: `5 1 + 4 2 WORK 1 + 2 : 2 3 = 0 3 SEP 5 + 4 : 5 6 7 8 9 = 0 9 SEP 0 9 3`
+- Total: ~12,195 problems, split ~9,756/2,439
+- **This is the critical composition test:**
+  - The model has learned counting (Stages 1-2), ordinality (Stage 3), comparison (Stage 4), counting-based addition/subtraction (Stages 5-6), multi-digit format (Stage 7)
+  - It must compose: column-wise counting + carry propagation
+  - Problem space far too large to memorize
 - **Two experimental arms:**
-  1. **Curriculum:** Train Stages 1→2→3→4 sequentially (advance at ≥95% test)
-  2. **Direct:** Train on Stage 4 data only (same total training budget)
+  1. **Curriculum:** Train Stages 1→2→3→4→5→6→7→8 (advance at ≥95% test)
+  2. **Direct:** Train on Stage 8 data only (same total training budget)
 - **Hypothesis:** Curriculum arm generalizes; direct arm memorizes.
-
-#### Stage 5: PEMDAS (composition of operations with precedence)
-
-**Format:** `[PAD..., a, OP1, b, OP2, c, =, result]`
-- Example: `2 + 3 * 4 = 1 4` (not 20)
-- Example: `8 - 2 + 3 = 9`
-- Tests whether the model applies operator precedence
-- Only attempted if Stage 4 succeeds
-- **Bonus:** Add parentheses: `( 2 + 3 ) * 4 = 2 0`
-
-### Evaluation Protocol
-
-For each stage:
-1. **Train set:** Sample problems with random operands
-2. **Test set:** Held-out operand combinations (never seen during training)
-3. **Metric:** Exact-match accuracy on the result tokens
-4. **Advancement:** Move to next stage when test accuracy ≥ 95%
-
-For the composition test (Stage 4):
-1. **Curriculum arm:** Sequential training through Stages 1→2→3→4
-2. **Direct arm:** Same model, same total epochs, trained only on Stage 4 data
-3. **Control:** Random curriculum order (stages shuffled, not sequential)
-
-### Loss Function
-
-Next-step prediction cross-entropy on the full sequence (same as Naja/JEPA training). The model learns to predict every token including operators and equals signs, but accuracy is measured only on the result tokens.
-
-For tasks with fixed-position answers (comparison, successor), also use `logits[:, -2]` answer prediction (per Mistake #41) as a secondary metric.
 
 ---
 
-## Implementation Plan
+## Evaluation Protocol
+
+For each stage:
+1. **Train set:** Sampled from held-in problem combinations
+2. **Test set:** Held-out operand combinations (never seen during training)
+3. **Metric:** Exact-match accuracy on the result tokens
+4. **Per-token accuracy** for multi-token results — shows BOTH train and test breakdowns
+5. **Partial credit:** Per-token display tracks individual skill mastery
+6. **Advancement:** Move to next stage when test accuracy ≥ 95%
+
+---
+
+## Implementation
 
 ### File Structure
 
 ```
 experiments/Mamba3/
-├── mamba3_block.py           # Existing Mamba3 model (DO NOT MODIFY)
-├── train_arithmetic.py       # NEW: Curriculum training script
-├── arithmetic_tasks.py       # NEW: Task generators for all stages
-└── archived_epc/             # Existing, ignore
+├── mamba3_block.py           # Mamba3 model (DO NOT MODIFY)
+├── arithmetic_tasks.py       # Old task generators (SUPERSEDED by scratchpad)
+├── train_arithmetic.py       # Curriculum training script (uses scratchpad framework)
+├── continual.py              # EWC, DER++, differential LR
+└── archived_epc/             # Archived, ignore
+
+experiments/scratchpad/
+├── __init__.py               # Exports Vocab, split_problems
+├── framework.py              # Vocab, Problem, Step, Grader, ProblemGenerator, Curriculum
+├── DESIGN_GUIDE.md           # Curriculum design principles (category theory, prerequisites)
+└── generators/
+    ├── __init__.py            # Exports all generators
+    ├── counting.py            # QueryCountingGenerator (S1), CombinedCountingGenerator (S2)
+    ├── ordinality.py          # SuccessorGenerator (S3), ComparisonGenerator (S4)
+    ├── arithmetic.py          # CountingAdditionGenerator (S5), CountingSubtractionGenerator (S6)
+    └── multi_digit.py         # TwoDigitSingle (S7), TwoDigit (S8)
 ```
 
-### Phase 1: Task Generators (`arithmetic_tasks.py`)
-
-Create generators for each stage. Each returns `(sequences, targets)` tensors following the existing convention (PAD=0, left-padded).
-
-Functions to implement:
-- `generate_comparison(n_samples, held_out_pairs)` → Stage 1
-- `generate_successor(n_samples)` → Stage 2
-- `generate_single_digit_arithmetic(n_samples, ops, held_out_pairs)` → Stage 3
-- `generate_two_digit_arithmetic(n_samples, ops, held_out_pairs)` → Stage 4
-- `generate_pemdas(n_samples, held_out_exprs)` → Stage 5
-- `VOCAB` dict mapping symbols to token IDs
-- `decode_tokens(tensor)` → human-readable string (for debugging)
-
-### Phase 2: Training Script (`train_arithmetic.py`)
-
-Build on patterns from `train_naja.py` but with curriculum logic:
-
-1. **Single-stage mode:** `python train_arithmetic.py --stage 3 --epochs 50`
-2. **Curriculum mode:** `python train_arithmetic.py --curriculum --target_stage 4`
-   - Trains stages sequentially
-   - Advances when test_acc ≥ 95% (configurable via `--advance_threshold`)
-   - Reports per-stage epoch counts
-3. **Direct mode:** `python train_arithmetic.py --stage 4 --epochs 200`
-   - Same total budget as curriculum, but only Stage 4 data
-4. **Comparison output:** JSON results file with per-stage learning curves
-
-Key features:
-- Uses `Mamba3LM` (not NajaLM)
-- Same training infrastructure: AdamW, cosine LR, AMP, gradient clipping
-- `--results_file` for JSON output (compatible with ablation runner pattern)
-- No diagnostics charts (keep it simple)
-- Per-epoch accuracy on BOTH the current stage AND all previous stages (to detect catastrophic forgetting)
-
-### Phase 3: Run Experiments (ON GPU, not Claude's machine)
+### Running Experiments (ON GPU, not Claude's machine)
 
 ```bash
-# Curriculum arm: stages 1→2→3→4
-python train_arithmetic.py --curriculum --target_stage 4 --results_file curriculum.jsonl
+# Curriculum arm: stages 1→2→3→4→5→6→7→8
+python train_arithmetic.py --curriculum --target_stage 8 --results_file curriculum.jsonl
 
-# Direct arm: stage 4 only, same total epochs
-python train_arithmetic.py --stage 4 --epochs 200 --results_file direct.jsonl
+# Direct arm: stage 8 only
+python train_arithmetic.py --stage 8 --epochs 200 --results_file direct.jsonl
 
-# Control: each stage independently
-python train_arithmetic.py --stage 1 --epochs 50 --results_file stage1.jsonl
-python train_arithmetic.py --stage 2 --epochs 50 --results_file stage2.jsonl
-python train_arithmetic.py --stage 3 --epochs 50 --results_file stage3.jsonl
+# Quick test: individual stages
+python train_arithmetic.py --stage 1 --epochs 50
+python train_arithmetic.py --stage 2 --epochs 50
+python train_arithmetic.py --stage 3 --epochs 50  # successor/predecessor
+python train_arithmetic.py --stage 4 --epochs 50  # comparison
+python train_arithmetic.py --stage 5 --epochs 50  # counting-based addition
+python train_arithmetic.py --stage 6 --epochs 50  # counting-based subtraction
 ```
 
 ---
@@ -211,24 +294,30 @@ python train_arithmetic.py --stage 3 --epochs 50 --results_file stage3.jsonl
 ## Key Constraints
 
 - **Do NOT run training on Claude's machine** (Mistake #36). Implement, commit, push.
-- **Use Mamba3LM, not NajaLM.** This experiment tests the curriculum hypothesis, not the Naja architecture. Mamba3 is simpler and has fewer confounds.
-- **Measure generalization, not memorization.** Test sets must contain operand combinations never seen in training. Per Mistake #42, verify that test accuracy is above chance before drawing conclusions.
-- **Per Mistake #41:** Answer prediction from `logits[:, -2]`, not `logits[:, -1]`.
-- **Keep it simple.** No feature flags, no presets, no ablation grid. Two arms: curriculum vs direct. One model architecture. One clear question.
+- **Use Mamba3LM, not NajaLM.** This tests the curriculum hypothesis, not Naja.
+- **Per Mistake #41:** Answer prediction from `logits[:, p-1]` for position p.
+- **Per Mistake #42:** Verify test accuracy is above chance before drawing conclusions.
+- **Per Mistake #44:** Every composition stage must have all prerequisites taught and verified. No missing edges in the knowledge graph. Single-digit addition is a composition stage (counting-up), not a fact stage.
 
 ## Success Criteria
 
-1. **Stage 1-3 each reach ≥95% test accuracy** (proves sub-skills are learnable)
-2. **Curriculum arm on Stage 4 achieves significantly higher test accuracy than direct arm** (proves composition works)
-3. **No catastrophic forgetting** — accuracy on stages 1-3 stays above 90% while training Stage 4
-4. If Stage 4 succeeds, Stage 5 (PEMDAS) is a bonus
+1. **Stage 1 reaches ≥95% test accuracy** (individual counting generalizes)
+2. **Stage 2 reaches ≥95% test accuracy** (composition works for counting)
+3. **Stage 3 reaches ≥95% test accuracy** (successor/predecessor — ordinality)
+4. **Stage 4 reaches ≥95% test accuracy** (comparison — digit ordering)
+5. **Stage 5 reaches ≥95% test accuracy** (addition as counting-up — the key grounding test)
+6. **Stage 6 reaches ≥95% test accuracy** (subtraction as counting-down)
+7. **Stages 7-8 each reach ≥95% test accuracy** (multi-digit column arithmetic)
+8. **Curriculum arm on Stage 8 achieves significantly higher test accuracy than direct arm** (full composition works)
+9. **No catastrophic forgetting** — accuracy on earlier stages stays above 90%
+10. If Stage 8 succeeds, can extend with multiplication, PEMDAS later
 
 ## Key Files to Read First
 
 | File | What's in it |
 |------|-------------|
-| `MISTAKES.md` | 42 documented mistakes — **always read first** |
+| `MISTAKES.md` | 46 documented mistakes — **always read first** |
 | `CLAUDE.md` | Architecture overview, priorities |
-| `experiments/Mamba3/mamba3_block.py` | Mamba3 model (the backbone for this experiment) |
-| `experiments/Naja/tasks.py` | Task generator pattern to follow |
-| `experiments/Naja/train_naja.py` | Training loop pattern to follow |
+| `experiments/scratchpad/framework.py` | Scratchpad framework (Vocab, Problem, Grader) |
+| `experiments/scratchpad/generators/` | Stage 1-5 problem generators |
+| `experiments/Mamba3/train_arithmetic.py` | Training script (uses scratchpad) |

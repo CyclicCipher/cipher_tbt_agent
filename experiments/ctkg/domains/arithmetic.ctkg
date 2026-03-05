@@ -1,0 +1,200 @@
+-- arithmetic.ctkg — Full arithmetic domain with universal type primitives
+--
+-- Demonstrates the three-level primitive system:
+--   Level 1 (Computation): succ, pred, compare, fold, scan, emit, lookup
+--   Level 2 (Logic):       equal, and, or, not, implies, forall, exists
+--   Level 3 (Transform):   quote, match, substitute, rewrite, decompose, compose
+--
+-- This file defines types, concepts, and an adjunction.
+
+-- =========================================================================
+-- Type definitions — universal primitives composed into domain types
+-- =========================================================================
+
+-- Base types: elements from finite sets
+type digit = symbol(0, 1, 2, 3, 4, 5, 6, 7, 8, 9) ordered
+type carry = symbol(0, 1)
+type op = symbol(ADD, SUB)
+type cmp_result = symbol(GT, LT, EQ)
+type object_token = symbol(DOT, TEN)
+type stop = symbol(STOP)
+
+-- Compound types: built from base types
+type object_seq = seq(object_token)
+type count_seq = seq(digit)
+type digit_pair = tuple(digit, digit)
+
+-- Process output types
+type query_result = tuple(digit)
+type counting_result = tuple(count_seq, stop, count_seq, stop)
+type arith_result = tuple(carry, digit)
+type column_result = seq(digit)
+
+-- =========================================================================
+-- Stage 1: Query Counting
+-- =========================================================================
+
+concept query_counting
+  domain arithmetic
+  description "Count DOTs or TENs in a shuffled sequence given a query"
+  input object_seq query_result
+  output digit
+  threshold 0.95
+  max_epochs 100
+  process emit(count(filter(input, query)))
+
+-- =========================================================================
+-- Stage 2: Combined Counting (process-supervised)
+-- =========================================================================
+
+concept combined_counting
+  domain arithmetic
+  description "Count both DOTs and TENs via count-up process with STOP termination"
+  input object_seq
+  output counting_result
+  requires query_counting via "Individual counting composes into dual counting"
+  threshold 0.95
+  max_epochs 100
+  process
+    d = count(filter(input, DOT))
+    scan(d, 0, succ)
+    emit(STOP)
+    t = count(filter(input, TEN))
+    scan(t, 0, succ)
+    emit(STOP)
+
+-- =========================================================================
+-- Stage 3: Successor / Predecessor (ordinality)
+-- =========================================================================
+
+concept successor
+  domain arithmetic
+  description "Next digit in order: SUCC(4) = 5, SUCC(9) = undefined"
+  input digit
+  output digit
+  requires combined_counting via "Counting establishes digit sequence"
+  atomic
+  threshold 0.95
+  max_epochs 100
+  process emit(succ(a))
+
+concept predecessor
+  domain arithmetic
+  description "Previous digit in order: PRED(5) = 4, PRED(0) = undefined"
+  input digit
+  output digit
+  requires combined_counting via "Counting establishes digit sequence"
+  atomic
+  threshold 0.95
+  max_epochs 100
+  process emit(pred(a))
+
+-- =========================================================================
+-- Stage 4: Comparison
+-- =========================================================================
+
+concept comparison
+  domain arithmetic
+  description "Compare two digits: GT, LT, or EQ"
+  input digit digit
+  output cmp_result
+  requires successor via "Ordering enables comparison"
+  requires predecessor via "Ordering enables comparison"
+  threshold 0.95
+  max_epochs 100
+  process emit(compare(a, b))
+
+-- =========================================================================
+-- Stage 5: Single-Digit Addition (counting-up)
+-- =========================================================================
+
+concept single_digit_addition
+  domain arithmetic
+  description "a + b by counting up b times from a, producing carry + ones"
+  input digit op digit
+  output arith_result
+  requires successor via "Successor is the counting-up primitive"
+  requires comparison via "Comparison detects overflow past 9"
+  atomic
+  reversible
+  threshold 0.95
+  max_epochs 100
+  process
+    result = fold(b, a, succ)
+    c = if(compare(result, 9) == GT, 1, 0)
+    ones = if(c == 1, result - 10, result)
+    emit(c, ones)
+
+-- =========================================================================
+-- Stage 6: Single-Digit Subtraction (counting-down)
+-- =========================================================================
+
+concept single_digit_subtraction
+  domain arithmetic
+  description "a - b by counting down b times from a, producing borrow + ones"
+  input digit op digit
+  output arith_result
+  requires predecessor via "Predecessor is the counting-down primitive"
+  requires comparison via "Comparison detects underflow past 0"
+  atomic
+  reversible
+  threshold 0.95
+  max_epochs 100
+  process
+    result = fold(b, a, pred)
+    borrow = if(compare(result, 0) == LT, 1, 0)
+    ones = if(borrow == 1, result + 10, result)
+    emit(borrow, ones)
+
+-- =========================================================================
+-- Stage 7: Two-Digit +/- Single-Digit (bridge to multi-digit)
+-- =========================================================================
+
+concept two_digit_single_arithmetic
+  domain arithmetic
+  description "Two-digit +/- single-digit with column scratchpad"
+  input digit_pair op digit
+  output column_result
+  requires single_digit_addition via "Single-digit add is the ones column operation"
+  requires single_digit_subtraction via "Single-digit sub is the ones column operation"
+  threshold 0.95
+  max_epochs 100
+  process
+    ones_carry, ones = lookup(single_digit_op, a_ones, op, b)
+    tens = if(op == ADD, a_tens + ones_carry, a_tens - ones_carry)
+    emit(tens, ones)
+
+-- =========================================================================
+-- Stage 8: Two-Digit +/- Two-Digit (full column arithmetic)
+-- =========================================================================
+
+concept two_digit_arithmetic
+  domain arithmetic
+  description "Two-digit +/- two-digit with column scratchpad"
+  input digit_pair op digit_pair
+  output column_result
+  requires two_digit_single_arithmetic via "Bridge from one-variable column to two-variable column"
+  threshold 0.95
+  max_epochs 100
+  process
+    ones_carry, ones = lookup(single_digit_op, a_ones, op, b_ones)
+    tens_carry, tens = lookup(single_digit_op, a_tens + ones_carry, op, b_tens)
+    emit(tens_carry, tens, ones)
+
+-- =========================================================================
+-- Adjunction: addition / subtraction are inverses
+-- =========================================================================
+
+adjunction add_sub
+  forward single_digit_addition
+  inverse single_digit_subtraction
+  unit a + b - b = a
+  counit a - b + b = a
+
+-- =========================================================================
+-- Interface — what this domain exports for cross-domain composition
+-- =========================================================================
+
+interface arithmetic
+  exports types digit carry op cmp_result arith_result column_result
+  exports concepts successor predecessor comparison single_digit_addition single_digit_subtraction two_digit_arithmetic

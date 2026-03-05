@@ -15,7 +15,8 @@ Implements the three core improvements from the Mamba-3 paper
 
 3. Llama-style architecture:
    Alternating Mamba3Mixer + SwiGLU MLP blocks with pre-RMSNorm.
-   QK-norm on B, C projections. No short causal convolution.
+   QK-norm on B, C projections (replaces pre-output-projection norm).
+   No short causal convolution.
 
 The SSD core is reused from Mamba2 with modifications for
 trapezoidal discretization.
@@ -24,6 +25,7 @@ No official code has been released. This is based on the paper's
 equations and descriptions.
 """
 
+import math
 from dataclasses import dataclass
 
 import torch
@@ -44,7 +46,14 @@ class Mamba3Config:
     use_conv: bool = False   # optional short convolution (Mamba3 removes it)
     d_conv: int = 4          # convolution kernel size (if use_conv=True)
     use_pope: bool = True    # PoPE (Polar Positional Embeddings) instead of RoPE
-    mimo_rank: int = 1       # r=1 is SISO (default), r>1 is MIMO
+    mimo_rank: int = 4       # MIMO rank (r=4 default per Mamba3 paper)
+    stable_ssm: bool = False # StableSSM "best" reparameterization for A-matrix
+                             # (Wang & Li 2024, arXiv:2311.14495)
+    use_triton: bool = False # Use Triton-accelerated SSD kernels when available
+    use_mhc: bool = False    # Manifold-constrained hyperconnections (Xiao et al. 2025)
+    mhc_n_streams: int = 4   # Number of residual streams (expansion rate)
+    mhc_alpha_init: float = 0.01  # Initial gating parameter (small → ≈uniform mixing)
+    mhc_sinkhorn_iters: int = 20  # Sinkhorn-Knopp iterations for column-stochastic
 
     def __post_init__(self):
         self.d_inner = self.expand * self.d_model
@@ -68,6 +77,130 @@ class RMSNorm(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps) * self.weight
 
+
+# ---------------------------------------------------------------------------
+# Manifold-Constrained Hyperconnections (mHC)
+# ---------------------------------------------------------------------------
+# Ref: Xiao et al. 2025, "Manifold-Constrained Hyperconnections"
+#
+# Replaces standard residual connections (x + f(x)) with multi-stream
+# gated communication. Each sublayer reads from a weighted combination of
+# n streams and writes its output back to all streams via a column-stochastic
+# gating matrix. The constraint (each column sums to 1) preserves the
+# "residual manifold", preventing norm drift across layers.
+#
+# Compute overhead: ~2-7% (dominated by stream mixing, not Sinkhorn on tiny
+# n×n matrices). Parameter overhead: negligible (~200 params for n=4, L=4).
+# ---------------------------------------------------------------------------
+
+def sinkhorn_normalize(M_raw: Tensor, n_iters: int = 20) -> Tensor:
+    """Column-stochastic normalization via Sinkhorn-Knopp.
+
+    Uses straight-through estimator: forward pass uses full Sinkhorn result,
+    backward pass sees only single-step column normalization. This avoids
+    backpropagating through the iterative loop (20 iters → 1 step in grad).
+
+    Args:
+        M_raw: raw parameter matrix, typically (n+1, n)
+        n_iters: Sinkhorn iterations (paper default: 20)
+
+    Returns:
+        Column-stochastic matrix (same shape, each column sums to 1)
+    """
+    # Forward: full Sinkhorn in no_grad (no graph built for iterations)
+    with torch.no_grad():
+        M = M_raw.exp()
+        for _ in range(n_iters):
+            M = M / (M.sum(dim=1, keepdim=True) + 1e-8)
+            M = M / (M.sum(dim=0, keepdim=True) + 1e-8)
+        M_target = M / (M.sum(dim=0, keepdim=True) + 1e-8)
+
+    # Backward: single-step column softmax (differentiable, cheap)
+    M_soft = M_raw.exp()
+    M_soft = M_soft / (M_soft.sum(dim=0, keepdim=True) + 1e-8)
+
+    # Straight-through: forward value = M_target, gradient from M_soft
+    return M_soft + (M_target - M_soft).detach()
+
+
+class HyperConnection(nn.Module):
+    """Manifold-constrained hyperconnection for one sublayer.
+
+    Manages the multi-stream residual connection. The sublayer reads from
+    a softmax-weighted combination of n streams and writes its output back
+    to all n streams via a column-stochastic gating matrix.
+
+    The gating matrix M ∈ R^((n+1)×n) has:
+      - Rows 0..n-1: how each existing stream contributes to each new stream
+      - Row n: how the sublayer output contributes to each new stream
+      - Column-stochastic: each new stream's source weights sum to 1
+
+    This generalizes standard residual connections: when the diagonal of
+    rows 0..n-1 dominates, streams bypass the layer (residual); when row n
+    dominates, the sublayer output replaces the streams.
+
+    Args:
+        n_streams: number of residual streams (expansion rate)
+        alpha_init: initial gating value (small → approx uniform mixing)
+        sinkhorn_iters: iterations for manifold constraint enforcement
+    """
+
+    def __init__(self, n_streams: int, alpha_init: float = 0.01,
+                 sinkhorn_iters: int = 20):
+        super().__init__()
+        self.n = n_streams
+        self.sinkhorn_iters = sinkhorn_iters
+
+        # Gate: (n+1) sources × n destinations
+        # Diagonal bias: stream i → stream i starts strong (self-bypass),
+        # off-diagonal and layer output start small. Breaks column symmetry
+        # so streams can specialize from the first gradient step.
+        gate_init = torch.full((n_streams + 1, n_streams), alpha_init)
+        for i in range(n_streams):
+            gate_init[i, i] = 1.0
+        self.gate = nn.Parameter(gate_init)
+
+        # Input combination weights (softmax-normalized)
+        # Initialize to strongly prefer stream 0 (primary residual)
+        init_w = torch.zeros(n_streams)
+        init_w[0] = 5.0  # After softmax: ~98% weight on stream 0
+        self.input_logits = nn.Parameter(init_w)
+
+    def get_input(self, streams: Tensor) -> Tensor:
+        """Combine n streams → sublayer input.
+
+        Args:
+            streams: (batch, seq_len, n, d_model)
+
+        Returns:
+            (batch, seq_len, d_model)
+        """
+        w = F.softmax(self.input_logits, dim=0)  # (n,)
+        return torch.einsum('n, bsnd -> bsd', w, streams)
+
+    def update(self, streams: Tensor, sublayer_output: Tensor) -> Tensor:
+        """Mix sublayer output back into all streams.
+
+        Args:
+            streams: (batch, seq_len, n, d_model) current streams
+            sublayer_output: (batch, seq_len, d_model) sublayer output
+
+        Returns:
+            (batch, seq_len, n, d_model) updated streams
+        """
+        M = sinkhorn_normalize(self.gate, self.sinkhorn_iters)  # (n+1, n)
+        # Split gating: stream-to-stream mixing + output injection
+        # Avoids torch.cat temporary tensor allocation
+        M_streams = M[:self.n]  # (n, n)
+        M_output = M[self.n]    # (n,)
+        new = torch.einsum('jn, bsjd -> bsnd', M_streams, streams)
+        new = new + M_output[None, None, :, None] * sublayer_output.unsqueeze(2)
+        return new
+
+
+# ---------------------------------------------------------------------------
+# Positional Encodings
+# ---------------------------------------------------------------------------
 
 def apply_rope(x: Tensor, theta: Tensor) -> Tensor:
     """Apply rotary position embedding (data-dependent RoPE).
@@ -120,6 +253,26 @@ def apply_pope(x: Tensor, theta: Tensor, delta: Tensor) -> Tensor:
 # ---------------------------------------------------------------------------
 # SSD core with trapezoidal discretization
 # ---------------------------------------------------------------------------
+
+def stable_log_decay(w: Tensor) -> Tensor:
+    """StableSSM 'best' reparameterization in log-space.
+
+    Maps unconstrained w to log-space decay compatible with the SSD core.
+    Ref: Wang & Li 2024, "StableSSM" (arXiv:2311.14495, ICML 2024).
+
+    The "best" stable reparameterization:
+        decay = 1 - 1/(w² + 0.5)
+
+    For |w| > sqrt(0.5) ≈ 0.707: decay ∈ (0, 1) — valid positive decay.
+    For smaller |w|: decay ≤ 0 — clamped to avoid log of non-positive.
+
+    Returns log(decay) (negative), suitable for segsum/exp in SSD.
+    """
+    decay = 1.0 - 1.0 / (w * w + 0.5)
+    # Clamp to small positive value to keep log defined
+    decay = decay.clamp(min=1e-6)
+    return torch.log(decay)
+
 
 def segsum(x: Tensor) -> Tensor:
     """Stable segment sum in log-space (same as Mamba2).
@@ -297,7 +450,8 @@ class Mamba3Mixer(nn.Module):
     - Trapezoidal discretization (blends current + previous input)
     - Data-dependent RoPE on B, C (complex SSM equivalence)
     - Learnable bias on B, C projections
-    - QK-norm on B, C after projection
+    - QK-norm on B, C after projection (replaces pre-output-projection norm)
+    - No pre-output-projection RMSNorm (normalization budget moved to QK-norm)
     - Short convolution optional (default: off)
 
     Input:  (batch, seqlen, d_model)
@@ -326,9 +480,10 @@ class Mamba3Mixer(nn.Module):
         d_in_proj = 2 * d + 2 * d_bc * r + config.nheads + n // 2 + 1
         self.in_proj = nn.Linear(config.d_model, d_in_proj, bias=False)
 
-        # BC bias (learnable, channel-wise)
-        self.B_bias = nn.Parameter(torch.zeros(d_bc * r))
-        self.C_bias = nn.Parameter(torch.zeros(d_bc * r))
+        # BC bias (learnable, channel-wise, applied AFTER QK-norm)
+        # Paper Section 3.4: "initialized to all ones"
+        self.B_bias = nn.Parameter(torch.ones(d_bc * r))
+        self.C_bias = nn.Parameter(torch.ones(d_bc * r))
 
         # QK-norm on B, C (applied on raw features before rotation/polar encoding)
         self.B_norm = RMSNorm(d_bc * r)
@@ -340,12 +495,11 @@ class Mamba3Mixer(nn.Module):
             self.pope_delta_B = nn.Parameter(torch.zeros(d_bc))
             self.pope_delta_C = nn.Parameter(torch.zeros(d_bc))
 
-        # Optional short convolution
+        # Optional short convolution (on x only; Mamba3 removes this by default)
         if config.use_conv:
-            conv_dim = d + 2 * n
             self.conv1d = nn.Conv1d(
-                in_channels=conv_dim, out_channels=conv_dim,
-                kernel_size=config.d_conv, groups=conv_dim,
+                in_channels=d, out_channels=d,
+                kernel_size=config.d_conv, groups=d,
                 padding=config.d_conv - 1,
             )
         else:
@@ -353,7 +507,14 @@ class Mamba3Mixer(nn.Module):
 
         # SSM parameters
         self.dt_bias = nn.Parameter(torch.empty(config.nheads))
-        self.A_log = nn.Parameter(torch.empty(config.nheads))
+        if config.stable_ssm:
+            # StableSSM "best" reparameterization (Wang & Li 2024):
+            #   decay = 1 - 1/(w^2 + 0.5)  where w = A_raw * dt
+            # Unconstrained A_raw; negative values give decay < 1.
+            self.A_raw = nn.Parameter(torch.empty(config.nheads))
+        else:
+            # Standard Mamba parameterization: A = -exp(A_log)
+            self.A_log = nn.Parameter(torch.empty(config.nheads))
         self.D = nn.Parameter(torch.empty(config.nheads))
 
         # MIMO projections
@@ -361,17 +522,28 @@ class Mamba3Mixer(nn.Module):
             self.mimo_x_proj = nn.Linear(d, d * r, bias=False)
             self.mimo_out_proj = nn.Linear(d * r, d, bias=False)
 
-        # Output
-        self.out_norm = RMSNorm(d)
+        # Output (no RMSNorm here — paper moves normalization budget to
+        # QK-norm on B/C projections, removing the pre-output-projection norm)
         self.out_proj = nn.Linear(d, config.d_model, bias=False)
 
         self._init_parameters()
 
     def _init_parameters(self):
         cfg = self.config
-        nn.init.uniform_(self.A_log, -5.0, -1.0)
+        if cfg.stable_ssm:
+            # Initialize A_raw so that initial decay ≈ exp(-exp(uniform(-5,-1))*dt)
+            # With typical dt~1: w~-2 gives decay≈0.78, w~-1 gives decay≈0.33
+            nn.init.uniform_(self.A_raw, -3.0, -0.5)
+        else:
+            nn.init.uniform_(self.A_log, -5.0, -1.0)
         nn.init.ones_(self.D)
-        nn.init.uniform_(self.dt_bias, -1.0, 1.0)
+        # Mamba-2 convention: dt starts in [0.001, 0.1] after softplus.
+        # inverse_softplus(x) = log(exp(x) - 1).  We sample dt_target from
+        # log-uniform(0.001, 0.1) then store inverse_softplus(dt_target).
+        dt_target = torch.exp(
+            torch.empty(cfg.nheads).uniform_(math.log(0.001), math.log(0.1))
+        )
+        self.dt_bias.data.copy_(torch.log(torch.exp(dt_target) - 1))
         nn.init.xavier_uniform_(self.in_proj.weight)
         nn.init.xavier_uniform_(self.out_proj.weight)
 
@@ -388,7 +560,11 @@ class Mamba3Mixer(nn.Module):
         batch, seqlen, _ = u.shape
         r = cfg.mimo_rank
 
-        A = -torch.exp(self.A_log)  # (nheads,)
+        # A-matrix / decay computation
+        if cfg.stable_ssm:
+            A_raw = self.A_raw  # (nheads,) unconstrained
+        else:
+            A_raw = -torch.exp(self.A_log)  # (nheads,) guaranteed negative
 
         # Project input
         d_bc = cfg.d_state // 2 if cfg.use_pope else cfg.d_state
@@ -404,16 +580,17 @@ class Mamba3Mixer(nn.Module):
         lam = torch.sigmoid(lam_logit)       # (batch, seqlen, 1)
 
         # Optional convolution on x
+        # Paper Section 3.4: trapezoidal discretization eliminates the need
+        # for "the original short causal convolution and its accompanying
+        # activation function."  No SiLU on x when conv is off.
         if self.conv1d is not None:
             x = F.silu(
                 self.conv1d(x.transpose(1, 2)).transpose(1, 2)[:, :seqlen, :]
             )
-        else:
-            x = F.silu(x)
 
-        # Add BC bias + QK-norm
-        B_raw = self.B_norm(B_raw + self.B_bias)
-        C_raw = self.C_norm(C_raw + self.C_bias)
+        # QK-norm then BC bias (paper: "bias ... after its normalization")
+        B_raw = self.B_norm(B_raw) + self.B_bias
+        C_raw = self.C_norm(C_raw) + self.C_bias
 
         # Accumulate theta across positions for positional encoding
         theta_cumsum = torch.cumsum(theta, dim=1)
@@ -444,40 +621,98 @@ class Mamba3Mixer(nn.Module):
 
         # Reshape for multi-head
         x = x.reshape(batch, seqlen, cfg.nheads, cfg.headdim)
-        x_dt = x * dt.unsqueeze(-1)  # scale by dt
+        dt_exp = dt.unsqueeze(-1)  # (batch, seqlen, nheads, 1) for broadcasting
+        x_dt = x * dt_exp  # scale by current dt
+
+        # Log-space decay: A_dt < 0 so exp(A_dt) ∈ (0, 1)
+        if cfg.stable_ssm:
+            # StableSSM: decay = 1 - 1/((A_raw*dt)² + 0.5), in log-space
+            A_dt = stable_log_decay(A_raw * dt)  # (batch, seqlen, nheads)
+        else:
+            A_dt = A_raw * dt  # standard: A_raw = -exp(A_log) < 0
+
+        # Select SSD implementation (shared by both MIMO and SISO paths)
+        _ssd_fn = ssd_trapz
+        if cfg.use_triton:
+            try:
+                from .triton_ssd import ssd_trapz_triton
+                _ssd_fn = ssd_trapz_triton
+            except ImportError:
+                pass  # fall back to PyTorch
+
+        lam_expand = lam.unsqueeze(-1)  # (batch, seqlen, 1, 1)
 
         if r > 1:
-            # --- MIMO path: sequential recurrence (reference implementation) ---
-            x_flat = x_dt.reshape(batch, seqlen, cfg.d_inner)
-            x_write = self.mimo_x_proj(x_flat).reshape(batch, seqlen, cfg.nheads, cfg.headdim, r)
+            # --- MIMO path: batched SSD via rank-as-heads ---
+            #
+            # Each MIMO rank gets its own independent B, C, and state,
+            # but shares the same A (decay). We fold r ranks into the
+            # head dimension, producing nheads*r effective heads, then
+            # run a single parallel SSD call.
+            #
+            # Effective head j = h*r + i, where h is the original head
+            # and i is the rank index.
 
-            x_write_prev = F.pad(x_write[:, :-1], (0, 0, 0, 0, 0, 0, 1, 0))
-            B_prev = F.pad(B[:, :-1], (0, 0, 0, 0, 1, 0))
-            lam_expand = lam.unsqueeze(-1)  # (batch, seqlen, 1, 1)
+            # Project raw x (before dt) through MIMO, then apply current
+            # dt to both current and shifted-previous (trapezoidal rule).
+            x_raw_flat = x.reshape(batch, seqlen, cfg.d_inner)
+            x_write_raw = self.mimo_x_proj(x_raw_flat).reshape(
+                batch, seqlen, cfg.nheads, cfg.headdim, r)
+            # Merge (nheads, r) → nheads*r effective heads
+            x_write_raw = x_write_raw.permute(0, 1, 2, 4, 3).reshape(
+                batch, seqlen, cfg.nheads * r, cfg.headdim)
 
-            y = mamba3_mimo_recurrence(
-                x_write, x_write_prev,
-                A * dt,
-                B, B_prev, C,
-                lam_expand,
+            # Expand dt and A_dt: repeat each head's value r times
+            dt_mimo = dt.unsqueeze(-1).expand(-1, -1, -1, r).reshape(
+                batch, seqlen, cfg.nheads * r)
+            A_dt_mimo = A_dt.unsqueeze(-1).expand(-1, -1, -1, r).reshape(
+                batch, seqlen, cfg.nheads * r)
+            dt_mimo_exp = dt_mimo.unsqueeze(-1)  # (batch, seq, nheads*r, 1)
+
+            # Current and previous x, both scaled by current dt
+            x_curr = x_write_raw * dt_mimo_exp
+            x_raw_prev = F.pad(x_write_raw[:, :-1], (0, 0, 0, 0, 1, 0))
+            x_prev = x_raw_prev * dt_mimo_exp
+
+            # Expand B, C: (batch, seq, r, d_state) → (batch, seq, nheads*r, d_state)
+            # B_mimo[h*r+i] = B[i] for all h (each rank's B shared across heads)
+            B_mimo = B.unsqueeze(2).expand(
+                -1, -1, cfg.nheads, -1, -1).reshape(
+                batch, seqlen, cfg.nheads * r, cfg.d_state)
+            C_mimo = C.unsqueeze(2).expand(
+                -1, -1, cfg.nheads, -1, -1).reshape(
+                batch, seqlen, cfg.nheads * r, cfg.d_state)
+            B_prev_mimo = F.pad(B_mimo[:, :-1], (0, 0, 0, 0, 1, 0))
+
+            y, _ = _ssd_fn(
+                x_curr, x_prev,
+                A_dt_mimo,
+                B_mimo, B_prev_mimo,
+                C_mimo, lam_expand,
+                cfg.chunk_size,
             )
-            # y: (batch, seqlen, nheads, headdim, r)
+            # y: (batch, seqlen, nheads*r, headdim)
 
-            # Contract MIMO output
-            y = y.reshape(batch, seqlen, cfg.d_inner * r)
+            # Unfold back: (nheads*r, headdim) → (nheads, r, headdim) → contract
+            y = y.reshape(batch, seqlen, cfg.nheads, r, cfg.headdim)
+            y = y.permute(0, 1, 2, 4, 3).reshape(
+                batch, seqlen, cfg.d_inner * r)
             y = self.mimo_out_proj(y)
             y = y.reshape(batch, seqlen, cfg.nheads, cfg.headdim)
         else:
             # --- SISO path: SSD (fast, chunkwise parallel) ---
-            x_prev = F.pad(x_dt[:, :-1], (0, 0, 0, 0, 1, 0))
+            # Paper Eq. 4: β_t = (1-λ_t) * Δ_t * exp(Δ_t A_t)
+            # Both γ_t and β_t use the CURRENT Δ_t, so x_prev must be
+            # shifted raw x scaled by current dt (not previous dt).
+            x_raw_prev = F.pad(x[:, :-1], (0, 0, 0, 0, 1, 0))
+            x_prev = x_raw_prev * dt_exp  # current dt applied to previous x
             B_prev = F.pad(B[:, :-1].unsqueeze(2), (0, 0, 0, 0, 1, 0))
             B_curr = B.unsqueeze(2)
             C_curr = C.unsqueeze(2)
-            lam_expand = lam.unsqueeze(-1)  # (batch, seqlen, 1, 1)
 
-            y, _ = ssd_trapz(
+            y, _ = _ssd_fn(
                 x_dt, x_prev,
-                A * dt,
+                A_dt,
                 B_curr, B_prev,
                 C_curr, lam_expand,
                 cfg.chunk_size,
@@ -486,9 +721,10 @@ class Mamba3Mixer(nn.Module):
         # D skip connection
         y = y + x * self.D.unsqueeze(-1)
 
-        # Flatten heads, gated norm, output projection
+        # Flatten heads, gated output projection
+        # (no out_norm — normalization budget is in QK-norm on B/C)
         y = y.reshape(batch, seqlen, cfg.d_inner)
-        y = self.out_norm(y * F.silu(z))
+        y = y * F.silu(z)
         y = self.out_proj(y)
 
         return y
@@ -545,7 +781,13 @@ class Mamba3LM(nn.Module):
     """Complete Mamba-3 language model.
 
     Architecture:
-        Embedding → N x Mamba3Block → RMSNorm → Linear(vocab)
+        Standard:  Embedding → N x Mamba3Block → RMSNorm → Linear(vocab)
+        With mHC:  Embedding → Expand(n) → N x (mHC-Mixer + mHC-MLP) → Contract → RMSNorm → Linear(vocab)
+
+    When use_mhc=True, the residual stream is expanded to n parallel streams.
+    Each sublayer (mixer, MLP) reads from a weighted combination of streams
+    and writes back via a column-stochastic gating matrix (manifold constraint).
+    Ref: Xiao et al. 2025, "Manifold-Constrained Hyperconnections"
 
     Args:
         config: Mamba3Config.
@@ -567,6 +809,25 @@ class Mamba3LM(nn.Module):
         # Weight tying
         self.out_proj.weight = self.embedding.weight
 
+        # mHC: per-sublayer hyperconnections (mixer + MLP per block)
+        if config.use_mhc:
+            n = config.mhc_n_streams
+            a = config.mhc_alpha_init
+            s = config.mhc_sinkhorn_iters
+            self.mixer_hcs = nn.ModuleList([
+                HyperConnection(n, a, s) for _ in range(config.n_layer)
+            ])
+            self.mlp_hcs = nn.ModuleList([
+                HyperConnection(n, a, s) for _ in range(config.n_layer)
+            ])
+            # Contraction weights (combine n streams → 1 at model exit)
+            self.contract_logits = nn.Parameter(torch.zeros(n))
+            # Per-stream expansion bias: breaks initial symmetry so streams
+            # can specialize from the first gradient step. Without this,
+            # identical streams + symmetric gating = streams stay identical.
+            self.stream_bias = nn.Parameter(
+                torch.randn(n, config.d_model) * 0.002)
+
     def forward(self, input_ids: Tensor) -> Tensor:
         """Forward pass.
 
@@ -577,7 +838,30 @@ class Mamba3LM(nn.Module):
             logits: (batch, seqlen, vocab_size)
         """
         x = self.embedding(input_ids)
-        for layer in self.layers:
-            x = layer(x)
+
+        if self.config.use_mhc:
+            # Expand to n streams: (batch, seq, d) → (batch, seq, n, d)
+            # Per-stream bias breaks symmetry (otherwise identical streams
+            # + symmetric gating = streams never differentiate)
+            streams = x.unsqueeze(2) + self.stream_bias  # broadcasts (n, d)
+
+            for i, block in enumerate(self.layers):
+                # Mixer sublayer with mHC
+                mixer_in = self.mixer_hcs[i].get_input(streams)
+                mixer_out = block.mixer(block.mixer_norm(mixer_in))
+                streams = self.mixer_hcs[i].update(streams, mixer_out)
+
+                # MLP sublayer with mHC
+                mlp_in = self.mlp_hcs[i].get_input(streams)
+                mlp_out = block.mlp(block.mlp_norm(mlp_in))
+                streams = self.mlp_hcs[i].update(streams, mlp_out)
+
+            # Contract: (batch, seq, n, d) → (batch, seq, d)
+            w = F.softmax(self.contract_logits, dim=0)  # (n,)
+            x = torch.einsum('n, bsnd -> bsd', w, streams)
+        else:
+            for layer in self.layers:
+                x = layer(x)
+
         x = self.norm(x)
         return self.out_proj(x)

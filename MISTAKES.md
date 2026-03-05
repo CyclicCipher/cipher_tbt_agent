@@ -133,6 +133,128 @@ All four ablation tasks show 100% train accuracy with near-random test accuracy 
 - Need either: (a) much more training data (50K+), or (b) much longer training (500+ epochs for grokking), or (c) smaller models, or (d) stronger regularization.
 - The results file now includes per-epoch history (`epoch_history` key in JSONL) so learning dynamics are visible.
 
+### #44. Single-Digit Addition Treated as Fact Stage — Missing Prerequisites (ACTIVE)
+
+**Date:** 2026-02-16
+
+Stage 3 classified single-digit addition as a "fact stage" (155 arithmetic facts to memorize). This skipped four unverified prerequisites between counting (Stages 1-2) and arithmetic:
+
+| Missing prerequisite | What the model needs | Was it taught? |
+|---------------------|---------------------|----------------|
+| Ordinality (successor) | Digit 5 comes after digit 4 | **No** |
+| Place value | 1 TEN = 10 DOTs | **No** |
+| Comparison | 7 > 3 (digits represent ordered quantities) | **No** |
+| Addition = counting-up | 3+4 means "start at 3, count up 4 steps" | **No** |
+
+Without these, the model sees `3 + 4 WORK 0 7` with no reason to believe 7 follows from 3 and 4. The only path is memorization. Memorized single-digit facts don't compose into multi-digit arithmetic because the model never learned WHAT addition means — only WHICH symbol pairs map to which outputs.
+
+**Category theory formulation:** The morphism from counting to addition is undefined because the codomain of counting (digits-as-quantity-labels) doesn't match the domain of addition (digits-as-arbitrary-symbols-in-a-fact-table). The composition is ill-typed.
+
+**Root cause:** Assumed that digits are self-explanatory. The model sees digits as token IDs (4-13 in vocab). Nothing in the training connects these IDs to quantities, ordering, or operations on quantities.
+
+**Fix:** Add intermediate stages (successor/predecessor, comparison) that ground digits in quantities and teach addition as counting-up. Single-digit addition becomes a composition stage, not a fact stage. See `DESIGN_GUIDE.md` for the full rationale and revised stage table.
+
+**Principle:** If a "fact stage" has more than ~20 entries, it likely contains compositional structure. A large lookup table is a sign that the knowledge graph is missing intermediate nodes. Before teaching any composed skill, verify ALL prerequisite concepts are learned — don't assume the model understands token meanings just because earlier stages passed.
+
+---
+
+### #45. Four Mamba3 Implementation Bugs Found by Paper Cross-Reference (RESOLVED)
+
+**Date:** 2026-02-17
+
+Cross-referencing `mamba3_block.py` against the Mamba-3 paper (OpenReview HwCvaJOiCj) found four bugs:
+
+| Bug | Paper says | Our code did | Impact |
+|-----|-----------|-------------|--------|
+| BC bias init | "initialized to all ones" (§3.4) | `torch.zeros()` | Bias contributes ~0.77 ppl; wrong init undermines it |
+| BC bias order | "bias ... after its normalization" (§3.4) | `norm(x + bias)` (bias before norm) | RMSNorm can suppress the bias signal |
+| Trapezoidal dt | β_t uses current Δ_t (Eq. 4) | `shifted(x * dt)` → used Δ_{t-1} | Systematic error in trapezoidal correction with data-dependent dt |
+| SiLU on x | "eliminating ... activation function" (§3.4, Fig. 4) | `F.silu(x)` when conv is off | Extra nonlinearity not in paper; only gate Z should have SiLU |
+
+**Root cause:** Original implementation was based on paper equations without the architectural details in Section 3.4 and Figure 4. The trapezoidal dt bug is particularly subtle — both forward terms use the same Δ_t, not each position's own dt.
+
+**Lesson:** When implementing a paper, don't just get the equations right — get the architectural details right too. Bias initialization, ordering of normalization vs bias, presence/absence of activation functions — these "minor" details compound. Cross-reference against Figure 4 (architecture diagram), not just the math.
+
+---
+
+### #46. Redundant Out-Norm and Wrong dt_bias Init in Mamba3 (RESOLVED)
+
+**Date:** 2026-02-19
+
+Two more discrepancies found by systematic paper audit:
+
+| Bug | Paper says | Our code did | Impact |
+|-----|-----------|-------------|--------|
+| Redundant out_norm | QK-norm on B/C *replaces* pre-output-projection RMSNorm | Had both QK-norm on B/C AND RMSNorm before output projection | Double normalization; wastes parameters and may dampen signal |
+| dt_bias init | Mamba-2 convention: `inverse_softplus(log_uniform(0.001, 0.1))` → dt starts in [0.001, 0.1] | `uniform(-1, 1)` → softplus gives dt in ~[0.31, 1.31] | Initial timesteps 10-100x too large; state decays too fast early in training |
+
+**Root cause:** #45 caught implementation bugs visible in equations/figures. These two are subtler — the out_norm change is described in prose ("swaps the pre-output projection norm with QK-normalization") not equations, and the dt_bias init is inherited convention from Mamba-2 not restated in Mamba-3.
+
+**Lesson:** Paper audit must check three layers: (1) equations/math, (2) architecture diagrams/prose, (3) inherited conventions from prior work that the new paper doesn't restate.
+
+---
+
+### #47. MIMO Implementation Creates Independent States Instead of Shared-State Rank-R Updates (ACTIVE)
+
+**Date:** 2026-02-26
+
+**Status:** Bug identified, fix not yet implemented.
+
+**What the paper says (Appendix D):**
+- B_t: D → N×R (input projection)
+- C_t: D → N×R (output projection)
+- X_t: D → P (via W_X') → P×R (via W_X) — two-stage projection
+- State H_t ∈ R^(N×P) — **same size regardless of R**
+- Write: `H_t = α_t * H_{t-1} + B_t @ X_t^T` where B_t is (N,R), X_t is (P,R), so `B @ X^T` = (N,R)×(R,P) = (N,P) — a rank-R update to the shared state
+- Read: `Y_t = H_t^T @ C_t` = (P,N)×(N,R) = (P,R) — R readout vectors from shared state
+- Output: down-project P×R → P → D
+
+**Why MIMO increases hardware efficiency:** At inference, the bottleneck is memory bandwidth (reading/writing state). MIMO gives more expressive input/output mappings (R input vectors, R output vectors) **without growing the state** (still N×P per head). This increases arithmetic intensity (compute/memory ratio), making inference compute-bound instead of memory-bound. The paper explicitly states: "MIMO is particularly suitable for inference, as the extra expressivity allows stronger inference efficiency."
+
+**What our code does (lines 645-700 of mamba3_block.py):**
+- Folds R ranks into the head dimension: `nheads*r` effective heads
+- Each effective head gets its own **independent** N×P state
+- State size: N × P × nheads × R (R× too large)
+- Compute: R× more SSD work (R× more independent heads)
+- Memory bandwidth: R× more state I/O
+
+This is exactly backwards. The implementation makes MIMO **decrease** hardware efficiency (R× more state, R× more compute) instead of increasing it. It's equivalent to just having R× more heads — no efficiency gain, pure overhead.
+
+**Additional bugs in the MIMO projections:**
+- `mimo_x_proj`: `nn.Linear(d, d * r)` — paper says X projection is D → P → P×R, not D → D×R. The first stage (D→P) should be implicit in the head reshape, the second (P→P×R) should be a per-head P→P×R projection. Currently it's a massive D×(D×R) matrix instead of a small P×(P×R) per head.
+- `mimo_out_proj`: `nn.Linear(d * r, d)` — paper says down-project P×R → P → D. Currently it's a (D×R)×D matrix.
+
+**The sequential recurrence (`mamba3_mimo_recurrence`) has the correct shared-state math** — H is (N,P) per head and the rank-R outer product `einsum('bnpi,bid->bnpd', x_write, B)` sums R contributions into the shared state. But it's only used as a reference, not in the actual forward pass.
+
+**Fix required:**
+1. Change state to be N×P per head (not N×P per head per rank)
+2. Write: compute rank-R outer product `B @ X^T` = (N,R)×(R,P) = (N,P), add to shared state
+3. Read: compute `H^T @ C` = (P,N)×(N,R) = (P,R), producing R values per head
+4. Down-project: P×R → P per head, then flatten to D
+5. Fix MIMO X projection: two-stage D→P→P×R (paper's W_X' and W_X), not single D→D×R
+6. For SSD kernel: either (a) write a dedicated MIMO SSD that handles shared-state rank-R updates, or (b) use the existing SSD with the mathematical decomposition: run R SSD passes for the write side, accumulate states, then R readout passes — this correctly handles cross-rank state sharing but is O(R²) in the quadratic attention term
+7. Alternative: for small R (R=4), the sequential recurrence is acceptable for our model sizes
+
+**Root cause:** The original MIMO implementation (documented as "conscious speed-vs-fidelity tradeoff" in Mistake #46) misunderstood the paper's design intent. The paper's MIMO is specifically designed to NOT grow the state — that's the whole point. Treating ranks as independent heads defeats the purpose entirely.
+
+**Lesson:** When a paper says a technique "increases hardware efficiency", verify that your implementation actually achieves this. If your implementation makes things R× more expensive, you've implemented the opposite of what the paper describes. Don't rationalize implementation divergences as "tradeoffs" without checking whether the divergence reverses the paper's core design goal.
+
+---
+
+### #43. Scratchpad Query Type Placed in Output, Not Input (RESOLVED)
+
+**Date:** 2026-02-16
+
+QueryCountingGenerator (Stage 1) randomly chose DOT or TEN as the query type and placed it as the first work token (after WORK). The model had no signal in the input for which type to count — the query was unpredictable from input alone.
+
+**Symptoms:** Token 1 (query type) stuck at ~51% test accuracy (chance for binary DOT/TEN). Token 2 (count) reached ~87% test accuracy — the model could count once teacher forcing gave it the correct query. Exact-match capped at ~45%.
+
+**Root cause:** The query type was part of the output (work area), not the input (question area). The model cannot predict a randomly chosen token from input that doesn't contain the signal.
+
+**Fix:** Move query to input using NOTE marker: `[shuffled DOTs/TENs] NOTE [DOT/TEN] WORK [count]`. n_result dropped from 2 to 1. Stage 1 now passes in ~8 epochs (was stuck at 100 epochs before).
+
+**Lesson:** Every token in the work area must be deterministically derivable from the input. If a token is chosen randomly and placed in the output, the model has no basis to predict it. Scratchpad design rule: the work area contains *answers*, the question area contains *queries*.
+
 ---
 
 ## Condensed Archive (Historical Reference)
@@ -205,3 +327,7 @@ Below are condensed lessons from resolved/archived mistakes. Full debugging narr
 - 2026-02-15: #40 (three WY chunkwise bugs: decay convention, state update formula, pseudo-key decay)
 - 2026-02-15: #41 (ablation evaluation leak: answer in sequence, trivial copy instead of genuine prediction)
 - 2026-02-16: #42 (ablation benchmarks are all memorization; 5K samples + 50 epochs + 1.26M params = no generalization)
+- 2026-02-16: #44 (single-digit addition treated as fact stage; missing prerequisites between counting and arithmetic; category theory constraint on morphism well-definedness)
+- 2026-02-17: #45 (four Mamba3 bugs: BC bias init/order, trapezoidal dt mismatch, SiLU on x without conv)
+- 2026-02-19: #46 (redundant out_norm, wrong dt_bias init)
+- 2026-02-26: #47 (MIMO creates R× independent states instead of paper's shared-state rank-R updates; also wrong projection dimensions)
