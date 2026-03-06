@@ -1651,6 +1651,136 @@ def phase16_cifar10_cats():
 
 
 # ---------------------------------------------------------------------------
+# Phase 17: User-provided cat photos (real-world, varied quality)
+# ---------------------------------------------------------------------------
+
+def phase17_user_cat_photos():
+    """Phase 17: Approximate synthesis on the user's own cat image collection.
+
+    Loads whatever images are in data/cats/ and data/negatives/, resizes to
+    128x128, trains on 80% of each class, tests on the held-out 20%.
+
+    The dataset is known to be imperfect:
+    - Pose sorting is approximate (some frontal/side/3Q are seated)
+    - Some images contain multiple animals
+    - One negative is a group of humans
+
+    A single visual feature is unlikely to fully separate cats from non-cats
+    at this resolution. The goal is to establish what the best single-feature
+    template achieves as a floor, and to confirm the pipeline runs on
+    real varied images. Expect 55-70%.
+
+    PASS threshold is intentionally low (55%) — barely above chance — since
+    the dataset is small and noisy. Real improvement requires TBT multi-view
+    (Phase 18) or feature combination (Phase 19+).
+    """
+    print('=' * 65)
+    print('Phase 17: User Cat Photos (Real-World, Varied Quality)')
+    print('  (75 cats + 49 negatives; expect 55-70% single-feature)')
+    print('=' * 65)
+
+    try:
+        import numpy as np
+    except ImportError:
+        print('  SKIP: numpy not available')
+        return False
+
+    vision_ctkg = os.path.join(_HERE, '..', 'ctkg', 'domains', 'vision.ctkg')
+    if not os.path.exists(vision_ctkg):
+        print(f'  SKIP: vision.ctkg not found')
+        return False
+
+    data_cats = os.path.join(_HERE, 'data', 'cats')
+    data_negs = os.path.join(_HERE, 'data', 'negatives')
+    if not os.path.exists(data_cats):
+        print(f'  SKIP: data/cats/ not found — populate with cat images first')
+        return False
+
+    from modalities.vision import VisionModality
+    from data_loader import load_image_folder, train_test_split
+
+    cats, negs = load_image_folder(
+        cats_dir=data_cats,
+        neg_dir=data_negs,
+        target_size=(128, 128),
+    )
+
+    if len(cats) == 0 or len(negs) == 0:
+        print('  SKIP: no images loaded (check PIL/Pillow is installed)')
+        return False
+
+    print(f'  Loaded: {len(cats)} cat images, {len(negs)} negative images')
+
+    # 80/20 train/test split on each class independently
+    cats_tr, neg_tr, cats_te, neg_te = train_test_split(cats, negs, test_fraction=0.2)
+    print(f'  Split:  train {len(cats_tr)}+{len(neg_tr)}, '
+          f'test {len(cats_te)}+{len(neg_te)}')
+
+    graph = parse_file(vision_ctkg)
+    ai = SymbolicAI(graph, modalities=[VisionModality()])
+
+    for img in cats_tr:
+        ai.teach('cat', (img,), (1,))
+    for img in neg_tr:
+        ai.teach('cat', (img,), (0,))
+    print(f'  Taught {len(cats_tr)} cat + {len(neg_tr)} non-cat training examples')
+
+    # Use all training images as subsample (small dataset — no need to sub-sample)
+    n_train = len(cats_tr) + len(neg_tr)
+    result = ai.consolidate_approx(
+        'cat',
+        accuracy_threshold=0.55,
+        subsample=n_train,
+        verbose=True,
+    )
+
+    if result is None:
+        print('  No template reached 55% threshold (chance = 50%).')
+        print('  Single visual features cannot separate this dataset.')
+        print()
+        return False
+
+    process, train_acc = result
+    print(f'  Best template:     {_fmt_process(process)}')
+    print(f'  Training accuracy: {train_acc:.1%}')
+
+    # Evaluate on held-out images
+    correct = 0
+    total = len(cats_te) + len(neg_te)
+    for img in cats_te:
+        out = ai.ask('cat', (img,))
+        if out == (1,):
+            correct += 1
+    for img in neg_te:
+        out = ai.ask('cat', (img,))
+        if out == (0,):
+            correct += 1
+
+    test_acc = correct / total if total > 0 else 0.0
+    print(f'  Test accuracy:     {test_acc:.1%}  ({correct}/{total} correct)')
+
+    # Breakdown by class
+    cat_correct = sum(
+        1 for img in cats_te if ai.ask('cat', (img,)) == (1,)
+    )
+    neg_correct = sum(
+        1 for img in neg_te if ai.ask('cat', (img,)) == (0,)
+    )
+    print(f'    Cat recall:      {cat_correct}/{len(cats_te)} '
+          f'({cat_correct/len(cats_te):.0%})')
+    print(f'    Non-cat recall:  {neg_correct}/{len(neg_te)} '
+          f'({neg_correct/len(neg_te):.0%})')
+
+    passed = test_acc >= 0.55
+    if passed:
+        print(f'  PASS — single-feature floor established.')
+    else:
+        print(f'  FAIL — below chance+5%. Feature combination needed.')
+    print()
+    return passed
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -1688,6 +1818,7 @@ def main():
     p14 = phase14_fluid_dynamics()
     p15 = phase15_approximate_synthesis_brightness()
     p16 = phase16_cifar10_cats()
+    p17 = phase17_user_cat_photos()
 
     print('=' * 65)
     print('Summary')
@@ -1708,6 +1839,7 @@ def main():
     print(f'  Phase 14 (fluid dynamics):         {"PASS" if p14 else "FAIL"}')
     print(f'  Phase 15 (approx synth brightness):{"PASS" if p15 else "FAIL"}')
     print(f'  Phase 16 (CIFAR-10 cats):          {"PASS" if p16 else "FAIL"}')
+    print(f'  Phase 17 (user cat photos):        {"PASS" if p17 else "FAIL"}')
     print()
     print('  Key results:')
     print('    Exact symbolic rule discovered from examples.')
@@ -1728,6 +1860,7 @@ def main():
     print('    float_pow/float_pi extend float arithmetic for physics domains.')
     print('    consolidate_approx finds statistical threshold rules (Gap A, Phase 15).')
     print('    Single visual feature baseline on real CIFAR-10 cat images (Phase 16).')
+    print('    User cat photo floor: best single feature on 75 cats + 49 negatives (Phase 17).')
     print()
 
 
