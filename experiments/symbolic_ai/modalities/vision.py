@@ -18,7 +18,10 @@ Biologically grounded primitives:
     img_resize(img, h, w)       — bilinear resize to h×w
     img_to_gray(img)            — ITU-R BT.601 luminance: 0.299R + 0.587G + 0.114B
     img_normalize(img)          — scale pixel values to [0.0, 1.0]
-    img_crop(img, y0, x0, h, w) — spatial crop
+    img_crop(img, y0, x0, h, w) — spatial crop (pixel coordinates)
+    img_crop_rel(img, y0_frac, x0_frac, y1_frac, x1_frac)
+                                — spatial crop with normalized [0,1] coordinates
+                                  (resolution-agnostic; suitable for process expressions)
 
 Retinal model (center-surround):
     img_dog(img, sigma1, sigma2)
@@ -52,6 +55,11 @@ Statistical summaries:
     img_std(img)                — scalar standard deviation
     img_patch(img, y, x, h, w)  — sub-image crop (same as img_crop)
     img_flatten(img)            — 1-D float list (row-major)
+
+Face understanding is NOT in this file.  The face_schematic concept is
+encoded as a process expression in experiments/ctkg/domains/vision.ctkg
+and executed by the CTKG runtime — consistent with how succ/pred encode
+number sense in arithmetic.ctkg.  Knowledge lives in the graph, not here.
 
 Dependencies: numpy (always available), scipy (optional, used for convolve2d).
 If scipy is unavailable, a pure-numpy fallback is used (slower but correct).
@@ -183,6 +191,7 @@ class VisionModality(Modality):
             # Spatial transforms
             'img_resize':       self._img_resize,
             'img_crop':         self._img_crop,
+            'img_crop_rel':     self._img_crop_rel,
             'img_patch':        self._img_crop,    # alias
             'img_flatten':      self._img_flatten,
             # Colour / normalisation
@@ -198,15 +207,10 @@ class VisionModality(Modality):
             # Statistics
             'img_mean':         self._img_mean,
             'img_std':          self._img_std,
-            # ── Innate face understanding ──────────────────────────────
-            # Biologically equivalent to newborn face preference (Goren 1975)
-            # and subcortical face detection (superior colliculus pathway).
-            # These are "built in" like succ/pred — not learned.
-            'img_face_schematic':   self._img_face_schematic,
-            'img_face_detect':      self._img_face_detect,
-            'img_face_align':       self._img_face_align,
-            'img_eye_response':     self._img_eye_response,
-            'img_face_score':       self._img_face_score,
+            # Face understanding is intentionally absent here.
+            # It lives in experiments/ctkg/domains/vision.ctkg as a
+            # process expression on the face_schematic concept —
+            # consistent with how succ/pred encode number sense.
         }
 
     # ------------------------------------------------------------------
@@ -285,6 +289,28 @@ class VisionModality(Modality):
                   h: int, w: int) -> np.ndarray:
         y0, x0, h, w = int(y0), int(x0), int(h), int(w)
         return img[y0:y0 + h, x0:x0 + w].astype(np.float32)
+
+    def _img_crop_rel(self, img: np.ndarray,
+                      y0_frac: float, x0_frac: float,
+                      y1_frac: float, x1_frac: float) -> np.ndarray:
+        """Crop using normalized [0, 1] coordinates.
+
+        Resolution-agnostic: works on any image size.  Suitable for use
+        in CTKG process expressions that must generalize across scales
+        (CIFAR-10 32×32, MineDojo frames, 1920×1080 screens, etc.).
+
+        img_crop_rel(img, 0.0, 0.0, 0.5, 1.0) → top half
+        img_crop_rel(img, 0.5, 0.0, 1.0, 1.0) → bottom half
+        """
+        arr = np.asarray(img, dtype=np.float32)
+        H, W = arr.shape[:2]
+        y0 = int(float(y0_frac) * H)
+        x0 = int(float(x0_frac) * W)
+        y1 = int(float(y1_frac) * H)
+        x1 = int(float(x1_frac) * W)
+        y0, y1 = max(0, y0), min(H, max(y0 + 1, y1))
+        x0, x1 = max(0, x0), min(W, max(x0 + 1, x1))
+        return arr[y0:y1, x0:x1]
 
     def _img_flatten(self, img: np.ndarray) -> list:
         return img.astype(np.float32).flatten().tolist()
@@ -382,142 +408,6 @@ class VisionModality(Modality):
 
     def _img_std(self, img: np.ndarray) -> float:
         return float(np.asarray(img, dtype=np.float32).std())
-
-    # ------------------------------------------------------------------
-    # Innate face understanding
-    #
-    # Models the subcortical face detection pathway present from birth:
-    #   Morton & Johnson (1991) — newborns prefer face-like configurations
-    #   Goren et al. (1975) — newborns track schematic faces, not scrambled
-    #   Johnson et al. (1991) — superior colliculus, not cortex, drives this
-    #
-    # The "face template" is the 2-dark-above-1-dark configuration.
-    # This is innate prior knowledge, not learned — treating it like
-    # succ/pred in the arithmetic domain.
-    # ------------------------------------------------------------------
-
-    def _img_face_schematic(self, patch: np.ndarray) -> float:
-        """Score how well the patch matches the schematic face template.
-
-        Template: two dark regions (eyes) in the upper half,
-                  one dark region (mouth/nose) in the lower half,
-                  on a lighter background.
-
-        This is the innate pattern newborns prefer (Goren et al. 1975).
-        Returns a confidence score in [0, 1].
-        """
-        arr = _ensure_2d(_to_float(patch))
-        arr = self._img_resize(arr, 32, 32)  # canonical scale
-        H, W = arr.shape
-
-        # Invert: dark regions become bright (eyes/mouth are dark features)
-        inv = 1.0 - arr
-
-        # Smooth to find blobs (eye scale ≈ W/8)
-        eye_sigma = max(1.0, W / 8.0)
-        k_eye = _gaussian_kernel_2d(eye_sigma)
-        smooth = _convolve2d(inv, k_eye)
-
-        # Top half: expect two peaks — one in left quarter, one in right
-        top = smooth[:H // 2, :]
-        left_eye_score  = float(top[:, :W // 2].max())
-        right_eye_score = float(top[:, W // 2:].max())
-
-        # Bottom half: expect one central peak — nose/mouth
-        bot = smooth[H // 2:, :]
-        mouth_score = float(bot[:, W // 4: 3 * W // 4].max())
-
-        # Both eyes must be present (symmetry requirement)
-        symmetry  = 1.0 - abs(left_eye_score - right_eye_score)
-        eye_score = min(left_eye_score, right_eye_score)  # both needed
-
-        # Geometric mean — all three components must be present
-        product = eye_score * mouth_score * max(0.0, symmetry)
-        return float(product ** (1.0 / 3.0)) if product > 0 else 0.0
-
-    def _img_face_detect(self, img: np.ndarray) -> tuple:
-        """Detect the most face-like region in the image.
-
-        Models subcortical (superior colliculus) face detection:
-        operates on low-resolution, coarse spatial information.
-
-        Returns (confidence, norm_y, norm_x) where norm_y/x ∈ [0,1]
-        are the approximate face-center location as fractions of H, W.
-        """
-        arr = _ensure_2d(_to_float(img))
-
-        # Work at coarse scale (subcortical processing is low-res)
-        small = self._img_resize(arr, 32, 32)
-        H, W = small.shape
-        size = 16  # detection window = half the downsampled image
-
-        best_score = 0.0
-        best_cy    = H / 2.0
-        best_cx    = W / 2.0
-
-        for y in range(0, H - size + 1, 4):
-            for x in range(0, W - size + 1, 4):
-                patch = small[y:y + size, x:x + size]
-                score = self._img_face_schematic(patch)
-                if score > best_score:
-                    best_score = score
-                    best_cy    = y + size / 2.0
-                    best_cx    = x + size / 2.0
-
-        return float(best_score), float(best_cy / H), float(best_cx / W)
-
-    def _img_face_align(self, img: np.ndarray,
-                        center_y_norm: float,
-                        center_x_norm: float,
-                        size_norm: float = 0.5) -> np.ndarray:
-        """Extract and normalize a face region to a canonical 32×32 patch.
-
-        center_y_norm, center_x_norm: face center as fractions of image H, W
-        size_norm: face box half-width as fraction of image width
-
-        Implements the crop + rescale step of face canonicalization,
-        analogous to cortical face normalization (FFA input normalization).
-        """
-        arr = _to_float(img)
-        H, W = arr.shape[:2]
-
-        cy   = int(float(center_y_norm) * H)
-        cx   = int(float(center_x_norm) * W)
-        half = max(8, int(float(size_norm) * W))
-
-        y0 = max(0, cy - half)
-        x0 = max(0, cx - half)
-        y1 = min(H, cy + half)
-        x1 = min(W, cx + half)
-
-        patch = arr[y0:y1, x0:x1]
-        return self._img_resize(patch, 32, 32)
-
-    def _img_eye_response(self, patch: np.ndarray) -> float:
-        """DoG response in the upper third of a (face) patch at eye scale.
-
-        Models the V1/V2 response to eye-like features:
-        high center-surround contrast at the correct scale and location.
-        Returns mean absolute DoG response in the expected eye region.
-        """
-        arr = _ensure_2d(_to_float(patch))
-        H, W = arr.shape
-        upper = arr[:H // 3, :]  # eyes are in upper 1/3 of face
-        dog   = self._img_dog(upper, 1.0, 3.0)  # eye-scale DoG
-        return float(np.abs(dog).mean())
-
-    def _img_face_score(self, patch: np.ndarray) -> float:
-        """Composite face quality score combining schematic + eye response.
-
-        Uses both the innate schematic template and the V1 eye response.
-        This is a stronger signal than either alone and models the early
-        cortical enhancement of subcortical face detection signals.
-        """
-        schematic = self._img_face_schematic(patch)
-        eye_resp  = self._img_eye_response(patch)
-        # Normalize eye response to [0, 1] (typical range 0–0.3)
-        eye_norm  = min(1.0, eye_resp / 0.3)
-        return float((schematic + eye_norm) / 2.0)
 
     # ------------------------------------------------------------------
     # preprocess hook

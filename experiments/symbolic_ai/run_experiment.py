@@ -1725,11 +1725,15 @@ def phase17_user_cat_photos():
         ai.teach('cat', (img,), (0,))
     print(f'  Taught {len(cats_tr)} cat + {len(neg_tr)} non-cat training examples')
 
-    # Use all training images as subsample (small dataset — no need to sub-sample)
+    # Use all training images as subsample (small dataset — no need to sub-sample).
+    # accuracy_threshold=1.01 is intentionally unreachable: forces the synthesizer
+    # to evaluate ALL templates (single-feature, multi-feature, face_schematic
+    # lookup-based) and return the globally best one rather than the first
+    # template that clears a low bar.  PASS/FAIL is checked on the test set.
     n_train = len(cats_tr) + len(neg_tr)
     result = ai.consolidate_approx(
         'cat',
-        accuracy_threshold=0.55,
+        accuracy_threshold=1.01,
         subsample=n_train,
         verbose=True,
     )

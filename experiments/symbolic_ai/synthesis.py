@@ -373,15 +373,122 @@ def _generate_visual_templates(
                 f'emit(if(score > {t}, 0, 1))',
             ])
 
-            # ── Innate face score ──────────────────────────────────────────
+            # ── Top-half vs bottom-half DoG std (face structural prior) ─────
+            # More edge activity in upper half → face-like arrangement.
+            # Directly implements the Goren (1975) logic in a template;
+            # the same computation lives in vision.ctkg:face_schematic as
+            # a process expression callable via lookup().
             templates.append([
-                f'score = img_face_score({img})',
+                f'gray = img_normalize(img_to_gray({img}))',
+                f'dog = img_dog(gray, 1.0, 3.0)',
+                f'top = img_crop_rel(dog, 0.0, 0.0, 0.5, 1.0)',
+                f'bot = img_crop_rel(dog, 0.5, 0.0, 1.0, 1.0)',
+                f'score = float_sub(img_std(top), img_std(bot))',
                 f'emit(if(score > {t}, 1, 0))',
             ])
             templates.append([
-                f'score = img_face_score({img})',
+                f'gray = img_normalize(img_to_gray({img}))',
+                f'dog = img_dog(gray, 1.0, 3.0)',
+                f'top = img_crop_rel(dog, 0.0, 0.0, 0.5, 1.0)',
+                f'bot = img_crop_rel(dog, 0.5, 0.0, 1.0, 1.0)',
+                f'score = float_sub(img_std(top), img_std(bot))',
                 f'emit(if(score > {t}, 0, 1))',
             ])
+
+    return templates
+
+
+def _generate_prereq_lookup_templates(
+    concept_name: str,
+    input_type: List[str],
+    available_ops: Set[str],
+    graph,
+) -> List[List[str]]:
+    """Generate templates that call prerequisite concepts via lookup().
+
+    For each ancestor concept that has a process block defined, generates
+    threshold templates that obtain the feature score via lookup(prereq, img).
+
+    This is the key architectural mechanism: face understanding lives in
+    the CTKG graph as a process expression (vision.ctkg:face_schematic),
+    not as hardcoded Python.  The synthesizer discovers how to USE it
+    (what threshold works) from examples — exactly as it discovers fold+succ
+    for addition from arithmetic examples.
+
+    Generated template shapes:
+        (a) Single-lookup threshold — each polarity
+        (b) Lookup + horizontal Gabor energy (face + fur)
+        (c) Lookup + total Gabor energy all 4 orientations (face + texture)
+    """
+    vars_   = _input_vars(input_type)
+    img_vars = [v for v, t in zip(vars_, input_type) if t == 'image']
+    if not img_vars:
+        return []
+
+    # Ancestor concepts that have processes defined (can be called via lookup).
+    prereqs_with_process: List[str] = []
+    for ancestor_name in sorted(graph.ancestors(concept_name)):
+        concept = graph.concepts.get(ancestor_name)
+        if concept is not None and concept.process:
+            prereqs_with_process.append(ancestor_name)
+
+    if not prereqs_with_process:
+        return []
+
+    templates: List[List[str]] = []
+
+    for img in img_vars:
+        for prereq in prereqs_with_process:
+            for t in _VISUAL_THRESHOLDS:
+                # (a) Single lookup threshold
+                templates.append([
+                    f'score = first(lookup({prereq}, {img}))',
+                    f'emit(if(score > {t}, 1, 0))',
+                ])
+                templates.append([
+                    f'score = first(lookup({prereq}, {img}))',
+                    f'emit(if(score > {t}, 0, 1))',
+                ])
+
+                # (b) Lookup + horizontal Gabor energy (face score + fur texture)
+                templates.append([
+                    f'face_s = first(lookup({prereq}, {img}))',
+                    f'gray = img_normalize(img_to_gray({img}))',
+                    f'tex = img_mean(img_gabor_energy(gray, 0.0, 2.0, 0.2))',
+                    f'score = float_add(face_s, tex)',
+                    f'emit(if(score > {t}, 1, 0))',
+                ])
+                templates.append([
+                    f'face_s = first(lookup({prereq}, {img}))',
+                    f'gray = img_normalize(img_to_gray({img}))',
+                    f'tex = img_mean(img_gabor_energy(gray, 0.0, 2.0, 0.2))',
+                    f'score = float_add(face_s, tex)',
+                    f'emit(if(score > {t}, 0, 1))',
+                ])
+
+                # (c) Lookup + total Gabor energy (face score + multi-orientation texture)
+                templates.append([
+                    f'face_s = first(lookup({prereq}, {img}))',
+                    f'gray = img_normalize(img_to_gray({img}))',
+                    f'ge0 = img_mean(img_gabor_energy(gray, 0.0, 2.0, 0.2))',
+                    f'ge1 = img_mean(img_gabor_energy(gray, 0.7854, 2.0, 0.2))',
+                    f'ge2 = img_mean(img_gabor_energy(gray, 1.5708, 2.0, 0.2))',
+                    f'ge3 = img_mean(img_gabor_energy(gray, 2.3562, 2.0, 0.2))',
+                    f'tex = float_add(float_add(ge0, ge1), float_add(ge2, ge3))',
+                    f'score = float_add(face_s, tex)',
+                    f'emit(if(score > {t}, 1, 0))',
+                ])
+                templates.append([
+                    f'face_s = first(lookup({prereq}, {img}))',
+                    f'gray = img_normalize(img_to_gray({img}))',
+                    f'ge0 = img_mean(img_gabor_energy(gray, 0.0, 2.0, 0.2))',
+                    f'ge1 = img_mean(img_gabor_energy(gray, 0.7854, 2.0, 0.2))',
+                    f'ge2 = img_mean(img_gabor_energy(gray, 1.5708, 2.0, 0.2))',
+                    f'ge3 = img_mean(img_gabor_energy(gray, 2.3562, 2.0, 0.2))',
+                    f'tex = float_add(float_add(ge0, ge1), float_add(ge2, ge3))',
+                    f'score = float_add(face_s, tex)',
+                    f'emit(if(score > {t}, 0, 1))',
+                ])
 
     return templates
 
@@ -570,7 +677,9 @@ class Synthesizer:
         Search order:
           1. Learned templates (highest success_count first) — often fastest win.
           2. Visual templates from _generate_visual_templates() if 'vision' in
-             available_ops — covers brightness, DoG, Gabor, face score.
+             available_ops — covers brightness, DoG, Gabor, top/bottom split.
+          3. Lookup-based templates from _generate_prereq_lookup_templates() —
+             calls CTKG concepts with processes (e.g. face_schematic) via lookup().
 
         Args:
             accuracy_threshold: Minimum fraction of examples correctly predicted.
@@ -608,6 +717,11 @@ class Synthesizer:
 
         if 'vision' in available_ops:
             candidates += _generate_visual_templates(concept.input_type)
+            # Lookup-based templates: call prerequisite CTKG process expressions.
+            # face_schematic is the prime example — knowledge in the graph, not Python.
+            candidates += _generate_prereq_lookup_templates(
+                concept_name, concept.input_type, available_ops, graph
+            )
 
         if not candidates:
             return None
