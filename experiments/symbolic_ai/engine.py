@@ -27,7 +27,28 @@ from typing import Callable, Dict, FrozenSet, List, Optional
 
 from interpreter import ProcessInterpreter
 from memory import ExampleStore
-from synthesis import Synthesizer
+from modalities.base import Modality
+from synthesis import CONCEPT_TO_PRIM, Synthesizer
+
+
+def _inputs_equal(a: tuple, b: tuple) -> bool:
+    """Element-wise equality that handles numpy arrays safely."""
+    if len(a) != len(b):
+        return False
+    for x, y in zip(a, b):
+        try:
+            import numpy as _np
+            if isinstance(x, _np.ndarray) or isinstance(y, _np.ndarray):
+                if not (isinstance(x, _np.ndarray) and isinstance(y, _np.ndarray)):
+                    return False
+                if x.shape != y.shape or not _np.array_equal(x, y):
+                    return False
+                continue
+        except ImportError:
+            pass
+        if x != y:
+            return False
+    return True
 
 
 class SymbolicAI:
@@ -60,7 +81,7 @@ class SymbolicAI:
         ai.ask('single_digit_addition', (9, 'ADD', 1))  # → (1, 0)
     """
 
-    def __init__(self, graph) -> None:
+    def __init__(self, graph, modalities: Optional[List[Modality]] = None) -> None:
         self.graph = graph
         self.stores: Dict[str, ExampleStore] = {}
         self._synthesizer = Synthesizer()
@@ -68,6 +89,9 @@ class SymbolicAI:
             engine_ask=self.ask,
             concept_names=frozenset(graph.concepts.keys()),
         )
+        # Register any input modalities (vision, audio, etc.)
+        for modality in (modalities or []):
+            self._interp.register_modality(modality)
 
     # ------------------------------------------------------------------
     # Core interface
@@ -113,8 +137,9 @@ class SymbolicAI:
         # Exact-match lookup in example store.
         store = self.stores.get(concept_name)
         if store is not None:
+            query = tuple(inputs)
             for stored_inputs, stored_outputs in store.examples:
-                if stored_inputs == tuple(inputs):
+                if _inputs_equal(stored_inputs, query):
                     return stored_outputs
 
         return None
@@ -144,9 +169,69 @@ class SymbolicAI:
         )
 
         if process is not None:
-            self.graph.concepts[concept_name].process = process
+            concept = self.graph.concepts[concept_name]
+            concept.process = process
+            # Register with the dynamic template library so future synthesis
+            # attempts on other concepts can re-use this proven pattern.
+            available_ops = {
+                prim
+                for anc in self.graph.ancestors(concept_name)
+                if (prim := CONCEPT_TO_PRIM.get(anc)) is not None
+            }
+            self._synthesizer.register_success(
+                concept_name, process, concept.input_type, available_ops
+            )
 
         return process
+
+    def consolidate_approx(
+        self,
+        concept_name: str,
+        accuracy_threshold: float = 0.85,
+        subsample: Optional[int] = 300,
+        verbose: bool = False,
+    ) -> Optional[tuple]:
+        """Approximate consolidation for statistical / visual concepts.
+
+        Like consolidate(), but accepts any template achieving >= accuracy_threshold
+        on stored examples.  Used when the concept's output is statistical
+        (e.g. cat_detection, image_brightness).
+
+        Returns (process_lines, accuracy) on success, None on failure.
+        On success, the concept's process is updated so future ask() calls
+        use the discovered rule.
+        """
+        store = self.stores.get(concept_name)
+        if store is None or len(store) == 0:
+            return None
+
+        result = self._synthesizer.synthesize_approx(
+            concept_name=concept_name,
+            store=store,
+            graph=self.graph,
+            interpreter=self._interp,
+            engine_ask=self.ask,
+            accuracy_threshold=accuracy_threshold,
+            subsample=subsample,
+            verbose=verbose,
+        )
+
+        if result is not None:
+            process, accuracy = result
+            self.graph.concepts[concept_name].process = process
+            # Register in learned template library
+            available_ops = {
+                prim
+                for anc in self.graph.ancestors(concept_name)
+                if (prim := CONCEPT_TO_PRIM.get(anc)) is not None
+            }
+            self._synthesizer.register_success(
+                concept_name, process,
+                self.graph.concepts[concept_name].input_type,
+                available_ops,
+            )
+
+        return result
 
     # ------------------------------------------------------------------
     # KL divergence / consolidation trigger
