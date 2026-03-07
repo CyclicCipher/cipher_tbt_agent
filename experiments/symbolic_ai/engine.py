@@ -30,7 +30,7 @@ from typing import Callable, Dict, FrozenSet, List, Optional, Tuple
 from interpreter import ProcessInterpreter
 from memory import ExampleStore
 from modalities.base import Modality
-from synthesis import CONCEPT_TO_PRIM, Synthesizer
+from synthesis import CONCEPT_TO_PRIM, Synthesizer, discover_categories
 
 
 def _inputs_equal(a: tuple, b: tuple) -> bool:
@@ -357,6 +357,117 @@ class SymbolicAI:
         table = store.build_full_freq_table()
         self._dist_tables[concept_name] = table
         return table
+
+    def induce_hierarchy(
+        self,
+        flat_concept: str,
+        n_clusters: int = 9,
+        min_examples: int = 1,
+        domain: str = 'discovered',
+    ) -> Dict:
+        """Discover latent categories from flat sequential prediction examples.
+
+        Given a flat next-word concept whose ExampleStore contains
+        (word1, word2) → (next_word,) examples, discovers POS-like latent
+        categories — without being told what categories exist.
+
+        Algorithm (distributional hypothesis, Firth 1957):
+            1. Extract unigram forward distributions:
+               From (w1, w2) → (w3,) examples, derive (w2,) → (w3,) pairs.
+               This gives P(next | word) — the signal for POS-like clustering.
+            2. Cluster words by JS-divergence of their forward distributions.
+               Words followed by similar words cluster together:
+                 DET cluster → all precede NOUN/ADJ
+                 NOUN cluster → all precede VERB/PREP
+            3. Add discovered category concepts to the CTKG.
+            4. Return cluster membership, compression metrics, and KL.
+
+        Cross-domain: replace 'word' with 'action', 'note', or 'state' and
+        the same algorithm discovers Minecraft action types, musical harmonic
+        roles, or motor movement primitives from sequential experience alone.
+
+        Args:
+            flat_concept:  Name of the flat sequential concept to analyse.
+                           Its ExampleStore must have multi-word context inputs.
+            n_clusters:    Target number of latent categories.
+            min_examples:  Minimum word frequency to include in clustering.
+            domain:        Domain label for newly created CTKG concepts.
+
+        Returns dict with keys:
+            'clusters':      {cluster_id: [word_list]} — discovered groupings
+            'assignment':    {word: cluster_id} — mapping for every eligible word
+            'n_eligible':    Number of unique words included in clustering
+            'n_clusters':    Actual clusters formed (≤ n_clusters requested)
+            'concept_names': List of CTKG concept names added ('cat_C0', ...)
+            'kl_flat':       KL (bits/step) of flat model before hierarchy
+        """
+        store = self.stores.get(flat_concept)
+        if store is None or len(store) == 0:
+            return {'error': f'No examples for concept {flat_concept!r}'}
+
+        # Extract unigram forward distribution:
+        # From each (w1, w2) → (w3,) example, yield (w2,) → (w3,).
+        # This captures "given word w2 appears at position t, what follows?"
+        # which is exactly the distributional signal for POS-like clustering.
+        unigram_store = ExampleStore(f'{flat_concept}__unigram')
+        for inputs, outputs in store.examples:
+            if len(inputs) >= 1 and len(outputs) >= 1:
+                context_word = (inputs[-1],)   # Last input token
+                unigram_store.add(context_word, outputs)
+
+        # Cluster words by JS-divergence of their forward distributions.
+        raw_assignment: Dict[tuple, int] = discover_categories(
+            unigram_store, n_clusters=n_clusters, min_examples=min_examples
+        )
+        if not raw_assignment:
+            return {'error': 'Not enough examples for clustering'}
+
+        # Invert: cluster_id → [word_list].
+        import collections as _col
+        clusters_raw: Dict[int, List[str]] = {}
+        for inp_tuple, cid in raw_assignment.items():
+            word = inp_tuple[0]
+            clusters_raw.setdefault(cid, []).append(word)
+
+        # Renumber clusters by size (largest = C0) for readable output.
+        by_size = sorted(clusters_raw.items(), key=lambda kv: -len(kv[1]))
+        renumber: Dict[int, int] = {old: new for new, (old, _) in enumerate(by_size)}
+        clusters: Dict[int, List[str]] = {
+            renumber[old]: sorted(members)
+            for old, members in clusters_raw.items()
+        }
+        assignment: Dict[str, int] = {
+            inp_tuple[0]: renumber[raw_cid]
+            for inp_tuple, raw_cid in raw_assignment.items()
+        }
+
+        # Add one CTKG concept per discovered category.
+        concept_names: List[str] = []
+        for cid in sorted(clusters.keys()):
+            cname = f'cat_C{cid}'
+            if cname not in self.graph.concepts:
+                sample = clusters[cid][:4]
+                desc = f'Discovered category {cid}: {", ".join(sample)}'
+                if len(clusters[cid]) > 4:
+                    desc += '...'
+                self.add_concept(
+                    name=cname,
+                    domain=domain,
+                    description=desc,
+                    input_type=['word'],
+                    output_type=['category_id'],
+                    tier='theorem',
+                )
+            concept_names.append(cname)
+
+        return {
+            'clusters':      clusters,
+            'assignment':    assignment,
+            'n_eligible':    len(raw_assignment),
+            'n_clusters':    len(clusters),
+            'concept_names': concept_names,
+            'kl_flat':       self.kl(flat_concept),
+        }
 
     # ------------------------------------------------------------------
     # KL divergence / consolidation trigger

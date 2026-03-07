@@ -53,7 +53,7 @@ from itertools import permutations
 import random as _random_mod
 from typing import Callable, Dict, FrozenSet, List, Optional, Set, Tuple
 
-from interpreter import ProcessInterpreter
+from interpreter import DryRunError, ProcessInterpreter
 from memory import ExampleStore
 
 
@@ -96,6 +96,14 @@ CONCEPT_TO_PRIM: Dict[str, str] = {
     'predecessor':        'pred',
     'comparison':         'compare',
     'visual_perception':  'vision',   # enables visual templates
+    # Phase F: Minecraft motor and observation concepts unlock 'minecraft'
+    # templates (visual-condition patterns, inventory-delta rules, etc.)
+    'motor_forward':      'minecraft',
+    'motor_attack':       'minecraft',
+    'motor_use':          'minecraft',
+    'observe_rgb':        'minecraft',
+    'observe_inventory':  'minecraft',
+    'log_detection':      'minecraft',
 }
 
 # Threshold values tried by approximate synthesis (float literals in templates).
@@ -263,6 +271,9 @@ def _generate_templates(
                 'result = second(state)',
                 'emit(result)',
             ])
+
+    # Phase F: Minecraft causal templates (pure observation patterns)
+    templates.extend(_generate_minecraft_templates(input_type, available_ops))
 
     # Sort by line count (fewest lines = simplest = preferred by MDL)
     templates.sort(key=len)
@@ -769,6 +780,220 @@ class Synthesizer:
 # Template testing
 # ---------------------------------------------------------------------------
 
+def _generate_minecraft_templates(
+    input_type: List[str],
+    available_ops: Set[str],
+) -> List[List[str]]:
+    """Phase F: Minecraft causal synthesis templates.
+
+    These are PURE templates — they read observation data (frames,
+    inventory counts) and return predicted conditions or counts.
+    Motor actions are the agent's BEHAVIOR (Phase G policy); these
+    templates express the agent's KNOWLEDGE about what conditions
+    lead to what observable outcomes.
+
+    Generated when 'minecraft' in available_ops (i.e. the concept's
+    ancestors include at least one Minecraft motor or observation primitive).
+
+    Template families:
+      MC-1  Visual condition — log_detection from frame
+      MC-2  Inventory threshold — item count exceeds N
+      MC-3  Frame-difference threshold — motion intensity signal
+      MC-4  Causal delta — inventory before vs after (requires compare)
+      MC-5  Day/night predictor from time ticks
+    """
+    if 'minecraft' not in available_ops:
+        return []
+
+    vars_      = _input_vars(input_type)
+    frame_vars = [v for v, t in zip(vars_, input_type) if t == 'mc_frame']
+    count_vars = [v for v, t in zip(vars_, input_type) if t == 'item_count']
+    time_vars  = [v for v, t in zip(vars_, input_type) if t == 'time_ticks']
+
+    templates: List[List[str]] = []
+
+    # MC-1: Visual log detection (pure wrapper: returns bool from frame)
+    for fv in frame_vars:
+        templates.append([
+            f'detected = log_detection({fv})',
+            'emit(detected,)',
+        ])
+
+    # MC-2: Inventory threshold (does the agent have >= N of this item?)
+    for cv in count_vars:
+        for threshold in (1, 2, 4, 8, 16):
+            templates.append([
+                f'emit(if(compare({cv}, {threshold}) == LT, 0, 1))',
+            ])
+        # Direct pass-through (inventory count as output)
+        templates.append([f'emit({cv},)'])
+
+    # MC-3: Frame-difference magnitude (motion intensity from temporal buffer)
+    for fv in frame_vars:
+        templates.append([
+            f'diff = img_mean(img_dog({fv}, 1.0, 2.0))',
+            f'emit(diff,)',
+        ])
+
+    # MC-4: Causal delta — "did count increase?"  (requires compare)
+    if 'compare' in available_ops and len(count_vars) >= 2:
+        for i, cv1 in enumerate(count_vars):
+            for cv2 in count_vars[i + 1:]:
+                templates.append([
+                    f'delta = compare({cv2}, {cv1})',
+                    'emit(if(delta == GT, 1, 0))',
+                ])
+
+    # MC-5: Day/night predictor
+    for tv in time_vars:
+        # Night if 13000 <= time <= 23000
+        templates.append([
+            f'is_day1 = compare({tv}, 13000)',
+            f'is_day2 = compare({tv}, 23000)',
+            f'is_night = if(is_day1 == LT, 0, if(is_day2 == GT, 0, 1))',
+            'emit(is_night,)',
+        ])
+
+    return templates
+
+
+# ---------------------------------------------------------------------------
+# Phase O: Unsupervised category discovery (distributional hypothesis)
+# ---------------------------------------------------------------------------
+
+def discover_categories(
+    store: ExampleStore,
+    n_clusters: int = 9,
+    min_examples: int = 1,
+) -> Dict[tuple, int]:
+    """Discover latent input categories by JS-divergence clustering.
+
+    Implements the distributional hypothesis (Firth 1957):
+    inputs with similar output distributions belong to the same category.
+
+    Given a store with (word,) → (next_word,) examples (one per sequential
+    step), groups input tokens by what tends to follow them.  The resulting
+    clusters are POS-like without POS being pre-specified:
+
+      DET cluster:  the, a, an     — all precede NOUN/ADJ tokens
+      NOUN cluster: cat, dog, mat  — all precede VERB/PREP tokens
+      VERB cluster: sat, ran, is   — all precede NOUN/PREP/ADJ tokens
+
+    The same algorithm discovers action categories in Minecraft, harmonic
+    roles in music, or motor primitives in motor control — no domain
+    knowledge required.  Only sequential data.
+
+    Args:
+        store:        ExampleStore with (word,) → (next_word,) format.
+                      Each input is a single-element tuple.
+        n_clusters:   Target number of categories to discover.
+        min_examples: Minimum observations of a word to include it.
+
+    Returns:
+        Dict mapping each included input tuple → cluster_id (0..k-1).
+        Words with fewer than min_examples observations are excluded.
+
+    Algorithm:
+        1. Compute P(output | input) for each unique eligible input.
+        2. Convert to V-dimensional probability vectors (shared vocab).
+        3. Agglomerative clustering with average linkage and JSD metric.
+        4. Merge until n_clusters remain.
+
+    Complexity: O(n² × V) per merge step, O(n³ × V) total.
+    Fine for small vocabularies (n ≤ 1000).
+    """
+    import math as _math
+    import collections as _col
+
+    # Count total observations per input.
+    input_counts: Dict[tuple, int] = _col.Counter(
+        inp for inp, _ in store.examples
+    )
+    eligible: List[tuple] = [
+        inp for inp, cnt in input_counts.items() if cnt >= min_examples
+    ]
+    if not eligible:
+        return {}
+
+    n_clusters = min(n_clusters, len(eligible))
+    if n_clusters <= 1:
+        return {inp: 0 for inp in eligible}
+
+    # Empirical output distributions for each eligible input.
+    freq_table = store.build_full_freq_table()
+    dists: Dict[tuple, Dict[tuple, float]] = {
+        inp: freq_table[inp] for inp in eligible if inp in freq_table
+    }
+    eligible = list(dists.keys())
+    if not eligible:
+        return {}
+
+    n_clusters = min(n_clusters, len(eligible))
+
+    # Build a shared output vocabulary across all distributions.
+    all_outputs: List[tuple] = sorted(
+        {out for dist in dists.values() for out in dist}
+    )
+    out_idx: Dict[tuple, int] = {out: i for i, out in enumerate(all_outputs)}
+    V = len(all_outputs)
+
+    def dist_to_vec(dist: Dict[tuple, float]) -> List[float]:
+        vec = [0.0] * V
+        for out, p in dist.items():
+            idx = out_idx.get(out)
+            if idx is not None:
+                vec[idx] = p
+        return vec
+
+    def jsd(p: List[float], q: List[float]) -> float:
+        """Jensen-Shannon divergence (symmetric, bounded in [0,1])."""
+        result = 0.0
+        for pi, qi in zip(p, q):
+            mi = 0.5 * (pi + qi)
+            if pi > 1e-12 and mi > 1e-12:
+                result += 0.5 * pi * _math.log2(pi / mi)
+            if qi > 1e-12 and mi > 1e-12:
+                result += 0.5 * qi * _math.log2(qi / mi)
+        return max(0.0, result)
+
+    # Initialise: each eligible input is its own cluster.
+    vecs: List[List[float]] = [dist_to_vec(dists[inp]) for inp in eligible]
+    members: List[List[tuple]] = [[inp] for inp in eligible]
+    sizes: List[int] = [1] * len(eligible)
+    active: List[int] = list(range(len(eligible)))
+
+    # Agglomerative (bottom-up) clustering with average linkage.
+    while len(active) > n_clusters:
+        # Find the pair of active clusters with minimum JSD.
+        best_dist = float('inf')
+        best_i = best_j = -1
+        for ii in range(len(active)):
+            for jj in range(ii + 1, len(active)):
+                ci, cj = active[ii], active[jj]
+                d = jsd(vecs[ci], vecs[cj])
+                if d < best_dist:
+                    best_dist = d
+                    best_i, best_j = ci, cj
+        if best_i < 0:
+            break   # Safety: no pair found (shouldn't happen)
+
+        # Merge best_j into best_i (weighted average of distribution vectors).
+        ni, nj = sizes[best_i], sizes[best_j]
+        total = ni + nj
+        vi, vj = vecs[best_i], vecs[best_j]
+        vecs[best_i] = [(ni * a + nj * b) / total for a, b in zip(vi, vj)]
+        sizes[best_i] = total
+        members[best_i].extend(members[best_j])
+        active.remove(best_j)
+
+    # Assign final cluster IDs (0-indexed from the surviving active list).
+    result: Dict[tuple, int] = {}
+    for new_id, ci in enumerate(active):
+        for inp in members[ci]:
+            result[inp] = new_id
+    return result
+
+
 def _test_template(
     template: List[str],
     store: ExampleStore,
@@ -776,13 +1001,22 @@ def _test_template(
     interpreter: ProcessInterpreter,
     engine_ask: Callable,
 ) -> bool:
-    """Return True iff template correctly predicts every stored example."""
+    """Return True iff template correctly predicts every stored example.
+
+    Always runs in dry_run=True mode so that effectful primitives
+    (e.g. mc_attack) raise DryRunError instead of sending game commands.
+    DryRunError → False (template cannot be evaluated without live env).
+    """
     old_ask = interpreter.engine_ask
     interpreter.engine_ask = engine_ask
     try:
         for inputs, expected in store.examples:
             try:
-                actual = interpreter.run(template, inputs, input_type)
+                actual = interpreter.run(
+                    template, inputs, input_type, dry_run=True
+                )
+            except DryRunError:
+                return False  # Template needs live env — skip it
             except Exception:
                 return False
             if actual != expected:
