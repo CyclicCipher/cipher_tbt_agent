@@ -360,25 +360,27 @@ class SymbolicAI:
 
     def induce_hierarchy(
         self,
-        flat_concept: str,
-        n_clusters: int = 9,
-        min_examples: int = 1,
-        domain: str = 'discovered',
+        flat_concept:  str,
+        n_clusters:    int           = 9,
+        min_examples:  int           = 1,
+        vocab_size:    Optional[int] = None,
+        method:        str           = 'auto',
+        domain:        str           = 'discovered',
     ) -> Dict:
         """Discover latent categories from flat sequential prediction examples.
 
         Given a flat next-word concept whose ExampleStore contains
-        (word1, word2) → (next_word,) examples, discovers POS-like latent
-        categories — without being told what categories exist.
+        (word1, word2) -> (next_word,) examples, discovers POS-like latent
+        categories -- without being told what categories exist.
 
         Algorithm (distributional hypothesis, Firth 1957):
             1. Extract unigram forward distributions:
-               From (w1, w2) → (w3,) examples, derive (w2,) → (w3,) pairs.
-               This gives P(next | word) — the signal for POS-like clustering.
-            2. Cluster words by JS-divergence of their forward distributions.
+               From (w1, w2) -> (w3,) examples, derive (w2,) -> (w3,) pairs.
+               This gives P(next | word) -- the signal for POS-like clustering.
+            2. Cluster words by JS-divergence / cosine distance.
                Words followed by similar words cluster together:
-                 DET cluster → all precede NOUN/ADJ
-                 NOUN cluster → all precede VERB/PREP
+                 DET cluster -> all precede NOUN/ADJ
+                 NOUN cluster -> all precede VERB/PREP
             3. Add discovered category concepts to the CTKG.
             4. Return cluster membership, compression metrics, and KL.
 
@@ -391,13 +393,20 @@ class SymbolicAI:
                            Its ExampleStore must have multi-word context inputs.
             n_clusters:    Target number of latent categories.
             min_examples:  Minimum word frequency to include in clustering.
+            vocab_size:    Cap the output vocabulary to top-N words before
+                           clustering.  Recommended for large corpora
+                           (e.g. vocab_size=2000 for WikiText-2).
+                           None = use all observed output words.
+            method:        Clustering algorithm ('auto', 'agglomerative',
+                           'kmeans').  'auto' uses agglomerative for n<=200
+                           words and k-means (numpy) for larger vocabularies.
             domain:        Domain label for newly created CTKG concepts.
 
         Returns dict with keys:
-            'clusters':      {cluster_id: [word_list]} — discovered groupings
-            'assignment':    {word: cluster_id} — mapping for every eligible word
+            'clusters':      {cluster_id: [word_list]} -- discovered groupings
+            'assignment':    {word: cluster_id} -- mapping for every eligible word
             'n_eligible':    Number of unique words included in clustering
-            'n_clusters':    Actual clusters formed (≤ n_clusters requested)
+            'n_clusters':    Actual clusters formed (<= n_clusters requested)
             'concept_names': List of CTKG concept names added ('cat_C0', ...)
             'kl_flat':       KL (bits/step) of flat model before hierarchy
         """
@@ -406,7 +415,7 @@ class SymbolicAI:
             return {'error': f'No examples for concept {flat_concept!r}'}
 
         # Extract unigram forward distribution:
-        # From each (w1, w2) → (w3,) example, yield (w2,) → (w3,).
+        # From each (w1, w2) -> (w3,) example, yield (w2,) -> (w3,).
         # This captures "given word w2 appears at position t, what follows?"
         # which is exactly the distributional signal for POS-like clustering.
         unigram_store = ExampleStore(f'{flat_concept}__unigram')
@@ -415,9 +424,13 @@ class SymbolicAI:
                 context_word = (inputs[-1],)   # Last input token
                 unigram_store.add(context_word, outputs)
 
-        # Cluster words by JS-divergence of their forward distributions.
+        # Cluster words by forward-distribution similarity.
         raw_assignment: Dict[tuple, int] = discover_categories(
-            unigram_store, n_clusters=n_clusters, min_examples=min_examples
+            unigram_store,
+            n_clusters   = n_clusters,
+            min_examples = min_examples,
+            vocab_size   = vocab_size,
+            method       = method,
         )
         if not raw_assignment:
             return {'error': 'Not enough examples for clustering'}

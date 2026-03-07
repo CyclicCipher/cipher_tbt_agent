@@ -861,51 +861,133 @@ def _generate_minecraft_templates(
 # Phase O: Unsupervised category discovery (distributional hypothesis)
 # ---------------------------------------------------------------------------
 
+def _kmeans_cluster(
+    matrix:      'np.ndarray',
+    k:           int,
+    n_iter:      int = 30,
+    random_seed: int = 42,
+) -> List[int]:
+    """K-means clustering on rows of `matrix` using cosine distance.
+
+    Uses K-means++ initialisation for reproducible, quality centroids.
+    Row vectors are L2-normalised so dot-product == cosine similarity.
+
+    Args:
+        matrix:      (n, d) float32 array — one probability vector per row.
+        k:           Number of clusters.
+        n_iter:      Maximum EM iterations (early stop on convergence).
+        random_seed: Seed for K-means++ initialisation.
+
+    Returns:
+        List[int] of length n with cluster assignments in 0..k-1.
+    """
+    import numpy as np
+
+    matrix = np.asarray(matrix, dtype=np.float32)
+    n, d   = matrix.shape
+    if k >= n:
+        return list(range(n))
+
+    rng = np.random.RandomState(random_seed)
+
+    # L2-normalise rows so dot-product gives cosine similarity.
+    # Replace zero-norm rows with a uniform direction to avoid NaN.
+    norms  = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms  = np.where(norms < 1e-12, 1.0, norms)
+    normed = matrix / norms                                    # (n, d)
+
+    # ---- K-means++ initialisation ----------------------------------------
+    centres_idx: List[int] = [int(rng.randint(n))]
+    for _ in range(1, k):
+        c       = normed[centres_idx]                          # (c, d)
+        sims    = normed @ c.T                                 # (n, c)
+        # Distance = 1 - max_cosine_similarity (clipped to [0,2]).
+        max_sim = sims.max(axis=1)                             # (n,)
+        dist2   = np.maximum(0.0, 1.0 - max_sim) ** 2         # (n,)
+        total   = dist2.sum()
+        if total < 1e-12:
+            centres_idx.append(int(rng.randint(n)))
+        else:
+            centres_idx.append(int(rng.choice(n, p=dist2 / total)))
+
+    centroids   = normed[centres_idx].copy()                   # (k, d)
+    assignments = np.zeros(n, dtype=np.int32)
+
+    # ---- EM iterations ---------------------------------------------------
+    for _ in range(n_iter):
+        sims            = normed @ centroids.T                 # (n, k)
+        new_assignments = sims.argmax(axis=1).astype(np.int32)
+        if np.array_equal(new_assignments, assignments):
+            break
+        assignments = new_assignments
+
+        # Update centroids as the unit-normalised mean of each cluster.
+        for ci in range(k):
+            mask = assignments == ci
+            if not mask.any():
+                continue                                       # empty cluster: keep old centroid
+            mean = normed[mask].mean(axis=0)
+            nm   = np.linalg.norm(mean)
+            centroids[ci] = mean / nm if nm > 1e-12 else mean
+
+    return assignments.tolist()
+
+
 def discover_categories(
-    store: ExampleStore,
-    n_clusters: int = 9,
-    min_examples: int = 1,
+    store:        ExampleStore,
+    n_clusters:   int            = 9,
+    min_examples: int            = 1,
+    vocab_size:   Optional[int]  = None,
+    method:       str            = 'auto',
 ) -> Dict[tuple, int]:
-    """Discover latent input categories by JS-divergence clustering.
+    """Discover latent input categories by JS-divergence / cosine clustering.
 
     Implements the distributional hypothesis (Firth 1957):
     inputs with similar output distributions belong to the same category.
 
-    Given a store with (word,) → (next_word,) examples (one per sequential
+    Given a store with (word,) -> (next_word,) examples (one per sequential
     step), groups input tokens by what tends to follow them.  The resulting
     clusters are POS-like without POS being pre-specified:
 
-      DET cluster:  the, a, an     — all precede NOUN/ADJ tokens
-      NOUN cluster: cat, dog, mat  — all precede VERB/PREP tokens
-      VERB cluster: sat, ran, is   — all precede NOUN/PREP/ADJ tokens
+      DET cluster:  the, a, an     -- all precede NOUN/ADJ tokens
+      NOUN cluster: cat, dog, mat  -- all precede VERB/PREP tokens
+      VERB cluster: sat, ran, is   -- all precede NOUN/PREP/ADJ tokens
 
     The same algorithm discovers action categories in Minecraft, harmonic
-    roles in music, or motor primitives in motor control — no domain
+    roles in music, or motor primitives in motor control -- no domain
     knowledge required.  Only sequential data.
 
     Args:
-        store:        ExampleStore with (word,) → (next_word,) format.
+        store:        ExampleStore with (word,) -> (next_word,) format.
                       Each input is a single-element tuple.
         n_clusters:   Target number of categories to discover.
         min_examples: Minimum observations of a word to include it.
+        vocab_size:   Cap the output vocabulary to the top-N most frequent
+                      output tokens.  Distributions are re-normalised over
+                      the reduced vocabulary.  None = use all observed tokens.
+                      Recommended for large corpora (e.g. 2000 for WikiText-2).
+        method:       Clustering algorithm to use.
+                        'auto'          -- agglomerative for n<=200,
+                                          k-means (numpy) otherwise.
+                        'agglomerative' -- bottom-up hierarchical (O(n^3 * V)).
+                                          Best quality; impractical for n>1000.
+                        'kmeans'        -- K-means with cosine distance.
+                                          Requires numpy; scales to n~10000.
 
     Returns:
-        Dict mapping each included input tuple → cluster_id (0..k-1).
+        Dict mapping each included input tuple -> cluster_id (0..k-1).
         Words with fewer than min_examples observations are excluded.
 
-    Algorithm:
-        1. Compute P(output | input) for each unique eligible input.
-        2. Convert to V-dimensional probability vectors (shared vocab).
-        3. Agglomerative clustering with average linkage and JSD metric.
-        4. Merge until n_clusters remain.
-
-    Complexity: O(n² × V) per merge step, O(n³ × V) total.
-    Fine for small vocabularies (n ≤ 1000).
+    Complexity:
+        agglomerative: O(n^3 * V) -- fine for n<=200 (built-in corpus).
+        kmeans:        O(n * k * V * T) with T~20 -- fine for n~5000 (WikiText-2).
     """
-    import math as _math
+    import math        as _math
     import collections as _col
 
-    # Count total observations per input.
+    # ------------------------------------------------------------------
+    # Step 1: Filter by minimum observation count.
+    # ------------------------------------------------------------------
     input_counts: Dict[tuple, int] = _col.Counter(
         inp for inp, _ in store.examples
     )
@@ -919,21 +1001,47 @@ def discover_categories(
     if n_clusters <= 1:
         return {inp: 0 for inp in eligible}
 
-    # Empirical output distributions for each eligible input.
+    # ------------------------------------------------------------------
+    # Step 2: Build empirical output distributions.
+    # ------------------------------------------------------------------
     freq_table = store.build_full_freq_table()
     dists: Dict[tuple, Dict[tuple, float]] = {
         inp: freq_table[inp] for inp in eligible if inp in freq_table
     }
-    eligible = list(dists.keys())
+    eligible   = list(dists.keys())
     if not eligible:
         return {}
 
     n_clusters = min(n_clusters, len(eligible))
 
-    # Build a shared output vocabulary across all distributions.
-    all_outputs: List[tuple] = sorted(
-        {out for dist in dists.values() for out in dist}
-    )
+    # ------------------------------------------------------------------
+    # Step 3: Build shared output vocabulary (optionally capped).
+    # ------------------------------------------------------------------
+    if vocab_size is not None:
+        # Weight output tokens by the count of their source input word.
+        output_freq: Dict[tuple, float] = _col.Counter()
+        for inp, dist in dists.items():
+            w = input_counts[inp]
+            for out, p in dist.items():
+                output_freq[out] += p * w
+        top_outputs  = [out for out, _ in output_freq.most_common(vocab_size)]
+        all_outputs  = sorted(top_outputs)
+
+        # Re-normalise each distribution over the restricted vocabulary.
+        renormed: Dict[tuple, Dict[tuple, float]] = {}
+        for inp, dist in dists.items():
+            mass = sum(dist.get(out, 0.0) for out in all_outputs)
+            if mass < 1e-12:
+                renormed[inp] = {out: 1.0 / len(all_outputs) for out in all_outputs}
+            else:
+                renormed[inp] = {out: dist.get(out, 0.0) / mass
+                                 for out in all_outputs}
+        dists = renormed
+    else:
+        all_outputs = sorted(
+            {out for dist in dists.values() for out in dist}
+        )
+
     out_idx: Dict[tuple, int] = {out: i for i, out in enumerate(all_outputs)}
     V = len(all_outputs)
 
@@ -945,8 +1053,38 @@ def discover_categories(
                 vec[idx] = p
         return vec
 
+    vecs_list: List[List[float]] = [dist_to_vec(dists[inp]) for inp in eligible]
+
+    # ------------------------------------------------------------------
+    # Step 4: Cluster.
+    # ------------------------------------------------------------------
+    n_eligible = len(eligible)
+    want_kmeans = (
+        method == 'kmeans'
+        or (method == 'auto' and n_eligible > 200)
+    )
+
+    kmeans_ok = False
+    raw_assignments: List[int] = []
+
+    if want_kmeans:
+        try:
+            import numpy as np
+            matrix          = np.array(vecs_list, dtype=np.float32)
+            raw_assignments = _kmeans_cluster(matrix, n_clusters)
+            kmeans_ok       = True
+        except ImportError:
+            pass  # Fall back to agglomerative below.
+
+    if kmeans_ok:
+        result: Dict[tuple, int] = {}
+        for inp, cid in zip(eligible, raw_assignments):
+            result[inp] = int(cid)
+        return result
+
+    # ---- Agglomerative clustering (fallback / explicit choice) ----------
     def jsd(p: List[float], q: List[float]) -> float:
-        """Jensen-Shannon divergence (symmetric, bounded in [0,1])."""
+        """Jensen-Shannon divergence (symmetric, bounded in [0, 1])."""
         result = 0.0
         for pi, qi in zip(p, q):
             mi = 0.5 * (pi + qi)
@@ -956,15 +1094,12 @@ def discover_categories(
                 result += 0.5 * qi * _math.log2(qi / mi)
         return max(0.0, result)
 
-    # Initialise: each eligible input is its own cluster.
-    vecs: List[List[float]] = [dist_to_vec(dists[inp]) for inp in eligible]
+    vecs:    List[List[float]]  = vecs_list
     members: List[List[tuple]] = [[inp] for inp in eligible]
-    sizes: List[int] = [1] * len(eligible)
-    active: List[int] = list(range(len(eligible)))
+    sizes:   List[int]         = [1] * n_eligible
+    active:  List[int]         = list(range(n_eligible))
 
-    # Agglomerative (bottom-up) clustering with average linkage.
     while len(active) > n_clusters:
-        # Find the pair of active clusters with minimum JSD.
         best_dist = float('inf')
         best_i = best_j = -1
         for ii in range(len(active)):
@@ -975,23 +1110,22 @@ def discover_categories(
                     best_dist = d
                     best_i, best_j = ci, cj
         if best_i < 0:
-            break   # Safety: no pair found (shouldn't happen)
+            break
 
-        # Merge best_j into best_i (weighted average of distribution vectors).
+        # Weighted average merge.
         ni, nj = sizes[best_i], sizes[best_j]
-        total = ni + nj
+        total  = ni + nj
         vi, vj = vecs[best_i], vecs[best_j]
         vecs[best_i] = [(ni * a + nj * b) / total for a, b in zip(vi, vj)]
         sizes[best_i] = total
         members[best_i].extend(members[best_j])
         active.remove(best_j)
 
-    # Assign final cluster IDs (0-indexed from the surviving active list).
-    result: Dict[tuple, int] = {}
+    result_agg: Dict[tuple, int] = {}
     for new_id, ci in enumerate(active):
         for inp in members[ci]:
-            result[inp] = new_id
-    return result
+            result_agg[inp] = new_id
+    return result_agg
 
 
 def _test_template(
