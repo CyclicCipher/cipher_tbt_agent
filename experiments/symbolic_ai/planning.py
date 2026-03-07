@@ -924,3 +924,316 @@ class DecisionEngine:
                     prev_loc = prev_state.get('location', '_unknown')
                     self.belief.observe(item, '_inv', False)
                     self.belief.observe(item, prev_loc, True)
+
+
+# ---------------------------------------------------------------------------
+# AIFEngine  (Active Inference — replaces DecisionEngine)
+# ---------------------------------------------------------------------------
+
+class AIFEngine:
+    """Active Inference planning engine.
+
+    Replaces condition-checking with Expected Free Energy (EFE) minimisation.
+    Same external interface as DecisionEngine — drop-in replacement.
+
+    Key difference
+    --------------
+    DecisionEngine: evaluates condition(state) → selects highest-priority
+                    satisfied goal → calls achieve(state).  Reactive.
+
+    AIFEngine:      evaluates G(π) = pragmatic_value + epistemic_value for
+                    every admissible action → selects argmin G.  Proactive.
+
+    Preferences replace Goals
+    -------------------------
+    The GenerativeModel holds PreferenceFactor objects (see generative_model.py).
+    These encode what the agent prefers to observe, in the form of log P(o).
+    No explicit goal-checking is performed.  Goals *emerge* from preferences:
+    actions that bring observations toward the preferred distribution are
+    naturally selected by EFE minimisation.
+
+    Backward compatibility
+    ----------------------
+    If ``goals`` is provided, AIFEngine falls back to DecisionEngine-style
+    condition-checking when the generative model has no preferences.  This
+    allows gradual migration: swap the engine class, keep the goal list,
+    and incrementally migrate goals to PreferenceFactor objects.
+
+    Parameters
+    ----------
+    generative_model
+        ``GenerativeModel`` instance with preferences + transition model.
+    affordances
+        ``AffordanceModel`` (shared; accumulates across episodes).
+    goal_stack
+        Optional ``GoalStack`` for backward-compatible sequential sub-goals.
+    episodic
+        Optional ``EpisodicBuffer``.
+    belief
+        Optional ``VariationalBelief`` (from perception.py) for world state
+        tracking.  Complements AffordanceModel.
+    goals
+        Optional list of ``Goal`` / ``FEPGoal`` for backward-compatible
+        condition-checking fallback.  Used only when generative model has
+        no preferences.
+    policy_horizon
+        Look-ahead depth for EFE computation.  Phase R3: 1 (single-step).
+        Phase R8: 3+ (multi-step policy rollout).
+    epistemic_weight
+        Weight of epistemic value term in G(π).  0.0 = purely pragmatic
+        (greedy goal-seeking).  0.5 = balanced (default).  1.0 = purely
+        exploratory.  Tune based on game complexity.
+    is_nav_fn, state_loc_key, state_inv_key, state_score_key
+        Same semantics as DecisionEngine.  Game-agnostic parameterisation.
+    """
+
+    def __init__(
+        self,
+        generative_model: Any,                          # GenerativeModel
+        affordances:      AffordanceModel,
+        goal_stack:       Optional[GoalStack]   = None,
+        episodic:         Optional[EpisodicBuffer] = None,
+        belief:           Any                   = None,  # VariationalBelief
+        goals:            Optional[List[Any]]   = None,
+        policy_horizon:   int                   = 1,
+        epistemic_weight: float                 = 0.5,
+        is_nav_fn:        Optional[Callable]    = None,
+        state_loc_key:    str                   = 'location',
+        state_inv_key:    str                   = 'inventory',
+        state_score_key:  str                   = 'score',
+    ) -> None:
+        self.model             = generative_model
+        self.affordances       = affordances
+        self.goal_stack        = goal_stack if goal_stack is not None else GoalStack()
+        self.episodic          = episodic
+        self.belief            = belief
+        self.goals             = goals or []
+        self.policy_horizon    = policy_horizon
+        self.epistemic_weight  = epistemic_weight
+        self._loc_key          = state_loc_key
+        self._inv_key          = state_inv_key
+        self._score_key        = state_score_key
+        self._step: int        = 0
+
+        # Navigation detection (same default as DecisionEngine).
+        if is_nav_fn is not None:
+            self._is_nav = is_nav_fn
+        else:
+            _NAV_WORDS: FrozenSet[str] = frozenset(
+                {'north', 'south', 'east', 'west', 'up', 'down'})
+            def _default_is_nav(action: str) -> bool:
+                return action.startswith('go ') or action in _NAV_WORDS
+            self._is_nav = _default_is_nav
+
+        # Fallback DecisionEngine for backward-compatible goal-checking.
+        self._fallback: Optional[DecisionEngine] = None
+        if self.goals:
+            self._fallback = DecisionEngine(
+                goals           = self.goals,
+                affordances     = self.affordances,
+                goal_stack      = self.goal_stack,
+                episodic        = None,   # episodic managed by AIFEngine
+                belief          = None,
+                is_nav_fn       = is_nav_fn,
+                state_loc_key   = state_loc_key,
+                state_inv_key   = state_inv_key,
+                state_score_key = state_score_key,
+            )
+
+    # ------------------------------------------------------------------
+    # Policy evaluation
+
+    def _candidate_actions(self, state: dict) -> List[str]:
+        """Return candidate actions for policy evaluation.
+
+        Uses state['admissible'] if available (TextWorld style).
+        Falls back to an empty list (caller must provide admissible actions
+        via state dict for the AIF engine to be useful).
+        """
+        return list(state.get('admissible', []))
+
+    def _evaluate_action(self, action: str, state: dict) -> float:
+        """Compute G(action) = pragmatic_value + epistemic_value.
+
+        Lower G → more preferred action.
+
+        Pragmatic component:  -log P(predicted_next_obs | preferences)
+                              High when predicted state is undesired.
+        Epistemic component:  -info_gain(state, action)
+                              Subtracted from G (info gain REDUCES free energy).
+        """
+        return self.model.expected_free_energy(
+            policy          = [action],
+            state           = state,
+            horizon         = self.policy_horizon,
+        )
+
+    # ------------------------------------------------------------------
+    # Main decide() / feedback()
+
+    def decide(self, state: dict, rng: Any) -> Tuple[str, str]:
+        """Select action by minimising Expected Free Energy G(π).
+
+        Algorithm
+        ---------
+        1. If GoalStack is non-empty AND goals provided: try stack top first
+           (backward-compatible sequential commitment).
+        2. If GenerativeModel has preferences: evaluate all admissible actions
+           by G(action); return argmin.
+        3. If no preferences AND goals provided: fall back to DecisionEngine
+           condition-checking.
+        4. Last resort: return ('look', 'AIF:no_candidates').
+
+        Returns
+        -------
+        (action, reason)  where reason encodes G value and mode.
+        """
+        self._step += 1
+
+        # 1. Check GoalStack (backward compat for sub-goal sequential commitment).
+        while not self.goal_stack.is_empty():
+            current = self.goal_stack.current()
+            try:
+                if current.condition(state):
+                    result = current.achieve(
+                        state, self.affordances, rng, stack=self.goal_stack)
+                    if result is not None:
+                        return result
+            except Exception:
+                pass
+            self.goal_stack.pop()
+
+        # 2. AIF mode: EFE minimisation over admissible actions.
+        if self.model.preferences:
+            candidates = self._candidate_actions(state)
+            if not candidates:
+                return 'look', 'AIF:no_admissible'
+
+            best_action = candidates[0]
+            best_G      = float('inf')
+            for action in candidates:
+                G = self._evaluate_action(action, state)
+                if G < best_G:
+                    best_G      = G
+                    best_action = action
+
+            reason = f'AIF:G={best_G:.3f}'
+            return best_action, reason
+
+        # 3. Backward-compat fallback: DecisionEngine condition-checking.
+        if self._fallback is not None:
+            return self._fallback.decide(state, rng)
+
+        return 'look', 'AIF:no_preferences_no_goals'
+
+    def feedback(
+        self,
+        prev_state: dict,
+        action:     str,
+        new_state:  dict,
+        events:     Optional[List[dict]] = None,
+    ) -> None:
+        """Record observed transition; update all model components.
+
+        In addition to DecisionEngine.feedback() behaviour, also:
+          - Updates GenerativeModel.transition with observed (s, a, s') triple.
+          - Updates VariationalBelief (if provided) from new_state.
+          - Computes reward signal from score delta for transition model.
+
+        Navigation failure, episodic update, and item acquisition logic
+        are identical to DecisionEngine.feedback().
+        """
+        if not action:
+            return
+
+        # --- Navigation failure detection --------------------------------
+        is_nav  = self._is_nav(action)
+        success = True
+        if is_nav:
+            success = (prev_state.get(self._loc_key) !=
+                       new_state.get(self._loc_key))
+
+        self.affordances.record(
+            prev_state, action, success,
+            loc_key=self._loc_key, inv_key=self._inv_key,
+        )
+
+        # --- Update generative model transition --------------------------
+        prev_score  = float(prev_state.get(self._score_key, 0) or 0)
+        new_score   = float(new_state.get(self._score_key, 0) or 0)
+        reward      = new_score - prev_score
+        self.model.transition.update(prev_state, action, new_state, reward)
+
+        # --- Update variational belief from new observations -------------
+        if self.belief is not None:
+            # Temporal decay first (one step has passed).
+            self.belief.decay()
+            # Then sharp update from new observation.
+            self.belief.update_from_obs(new_state)
+
+        # --- EpisodicBuffer update ----------------------------------------
+        if self.episodic is not None:
+            prev_inv  = set(prev_state.get(self._inv_key, []))
+            new_inv   = set(new_state.get(self._inv_key, []))
+            acquired  = list(new_inv - prev_inv)
+            lost      = list(prev_inv - new_inv)
+            delta: Dict[str, Any] = {
+                'acquired':    acquired,
+                'lost':        lost,
+                'score_delta': reward,
+                'moved_to':    new_state.get(self._loc_key) if success and is_nav else None,
+            }
+            surprise = min(1.0,
+                abs(reward)      * 0.5
+                + len(acquired)  * 0.3
+                + len(lost)      * 0.3
+                + (0.4 if is_nav and not success else 0.0)
+            )
+            outcome = ('neutral' if not acquired and not lost and reward == 0
+                       else 'failure' if is_nav and not success
+                       else 'success')
+            self.episodic.add(EpisodicEntry(
+                step     = self._step,
+                location = prev_state.get(self._loc_key, ''),
+                action   = action,
+                outcome  = outcome,
+                delta    = delta,
+                surprise = surprise,
+            ))
+
+        # --- Item acquisition / loss events --------------------------------
+        for ev in (events or []):
+            if ev.get('type') == 'acquired':
+                item = ev['item']
+                self.affordances.on_acquired(item)
+                if self.belief is not None:
+                    self.belief.observe(f'inv:{item}', True)
+            elif ev.get('type') == 'lost':
+                item = ev.get('item', '')
+                if item and self.belief is not None:
+                    self.belief.observe(f'inv:{item}', False)
+
+        # --- Propagate to fallback DecisionEngine if active --------------
+        if self._fallback is not None:
+            self._fallback.feedback(prev_state, action, new_state, events)
+
+    # ------------------------------------------------------------------
+    # Inspection
+
+    def current_free_energy(self, state: dict) -> float:
+        """Current prediction error F = -log P(o) under generative model."""
+        return self.model.pragmatic_value(state)
+
+    def preference_breakdown(self, state: dict) -> str:
+        """Human-readable per-factor prediction errors for debugging."""
+        rows = self.model.preference_breakdown(state)
+        lines = [f'    {name:<25} PE = {pe:.3f}' for name, pe in rows]
+        total = self.model.total_prediction_error(state)
+        return '\n'.join(lines) + f'\n    TOTAL F = {total:.3f}'
+
+    def __repr__(self) -> str:
+        return (
+            f'AIFEngine(model={self.model!r}, '
+            f'horizon={self.policy_horizon}, '
+            f'epistemic_w={self.epistemic_weight})'
+        )
