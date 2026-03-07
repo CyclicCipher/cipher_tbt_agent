@@ -30,7 +30,8 @@ from typing import Callable, Dict, FrozenSet, List, Optional, Tuple
 from interpreter import ProcessInterpreter
 from memory import ExampleStore
 from modalities.base import Modality
-from synthesis import CONCEPT_TO_PRIM, Synthesizer, discover_categories
+from synthesis import (CONCEPT_TO_PRIM, Synthesizer,
+                       discover_categories, discover_categories_from_dists)
 
 
 def _inputs_equal(a: tuple, b: tuple) -> bool:

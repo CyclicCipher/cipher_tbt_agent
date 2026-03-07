@@ -1128,6 +1128,178 @@ def discover_categories(
     return result_agg
 
 
+def discover_categories_from_dists(
+    dists:        Dict[tuple, Dict[tuple, float]],
+    input_counts: Dict[tuple, int],
+    n_clusters:   int           = 9,
+    min_examples: int           = 1,
+    vocab_size:   Optional[int] = None,
+    method:       str           = 'auto',
+) -> Dict[tuple, int]:
+    """Discover latent categories from pre-built probability distributions.
+
+    Streaming-friendly alternative to discover_categories().  The caller
+    accumulates word counts directly (e.g. via collections.Counter) and
+    converts them to probability distributions before calling this function.
+    This avoids storing O(n_tokens) raw examples in an ExampleStore —
+    useful for large corpora where n_tokens >> n_unique_words.
+
+    Args:
+        dists:        Pre-built empirical distributions.
+                      Format: {(word,): {(next_word,): probability}}.
+                      Each inner dict must already be normalised (sum = 1).
+        input_counts: Observation counts per input.
+                      Format: {(word,): int} — used for min_examples filter.
+        n_clusters:   Target number of categories to discover.
+        min_examples: Minimum observation count to include a word.
+        vocab_size:   Cap output vocabulary to top-N words (see discover_categories).
+        method:       Clustering algorithm ('auto', 'agglomerative', 'kmeans').
+
+    Returns:
+        Dict mapping each included input tuple -> cluster_id (0..k-1).
+        Words with fewer than min_examples observations are excluded.
+
+    Example::
+
+        # One-pass streaming accumulation
+        from collections import Counter, defaultdict
+        raw = defaultdict(Counter)
+        for i in range(len(tokens) - 1):
+            raw[tokens[i]][tokens[i+1]] += 1
+
+        input_counts = {(w,): sum(c.values()) for w, c in raw.items()}
+        dists = {
+            (w,): {(nw,): cnt / sum(c.values()) for nw, cnt in c.items()}
+            for w, c in raw.items()
+        }
+        assignment = discover_categories_from_dists(dists, input_counts, n_clusters=8)
+    """
+    import math        as _math
+    import collections as _col
+
+    # ------------------------------------------------------------------
+    # Step 1: Filter by minimum observation count.
+    # ------------------------------------------------------------------
+    eligible: List[tuple] = [
+        inp for inp in dists
+        if input_counts.get(inp, 0) >= min_examples
+    ]
+    if not eligible:
+        return {}
+
+    n_clusters = min(n_clusters, len(eligible))
+    if n_clusters <= 1:
+        return {inp: 0 for inp in eligible}
+
+    # ------------------------------------------------------------------
+    # Step 2: Build shared output vocabulary (optionally capped).
+    # ------------------------------------------------------------------
+    if vocab_size is not None:
+        output_freq: Dict[tuple, float] = _col.Counter()
+        for inp in eligible:
+            w    = input_counts.get(inp, 1)
+            dist = dists[inp]
+            for out, p in dist.items():
+                output_freq[out] += p * w
+        top_outputs = [out for out, _ in output_freq.most_common(vocab_size)]
+        all_outputs = sorted(top_outputs)
+
+        # Re-normalise each distribution over the restricted vocabulary.
+        final_dists: Dict[tuple, Dict[tuple, float]] = {}
+        for inp in eligible:
+            dist = dists[inp]
+            mass = sum(dist.get(out, 0.0) for out in all_outputs)
+            if mass < 1e-12:
+                final_dists[inp] = {out: 1.0 / len(all_outputs) for out in all_outputs}
+            else:
+                final_dists[inp] = {out: dist.get(out, 0.0) / mass
+                                    for out in all_outputs}
+    else:
+        final_dists = {inp: dists[inp] for inp in eligible}
+        all_outputs = sorted(
+            {out for d in final_dists.values() for out in d}
+        )
+
+    out_idx: Dict[tuple, int] = {out: i for i, out in enumerate(all_outputs)}
+    V = len(all_outputs)
+
+    def dist_to_vec(dist: Dict[tuple, float]) -> List[float]:
+        vec = [0.0] * V
+        for out, p in dist.items():
+            idx = out_idx.get(out)
+            if idx is not None:
+                vec[idx] = p
+        return vec
+
+    vecs_list: List[List[float]] = [dist_to_vec(final_dists[inp]) for inp in eligible]
+
+    # ------------------------------------------------------------------
+    # Step 3: Cluster.
+    # ------------------------------------------------------------------
+    n_eligible   = len(eligible)
+    want_kmeans  = (
+        method == 'kmeans'
+        or (method == 'auto' and n_eligible > 200)
+    )
+    kmeans_ok       = False
+    raw_assignments: List[int] = []
+
+    if want_kmeans:
+        try:
+            import numpy as np
+            matrix          = np.array(vecs_list, dtype=np.float32)
+            raw_assignments = _kmeans_cluster(matrix, n_clusters)
+            kmeans_ok       = True
+        except ImportError:
+            pass
+
+    if kmeans_ok:
+        return {inp: int(cid) for inp, cid in zip(eligible, raw_assignments)}
+
+    # ---- Agglomerative clustering fallback ---------------------------------
+    def jsd(p: List[float], q: List[float]) -> float:
+        result = 0.0
+        for pi, qi in zip(p, q):
+            mi = 0.5 * (pi + qi)
+            if pi > 1e-12 and mi > 1e-12:
+                result += 0.5 * pi * _math.log2(pi / mi)
+            if qi > 1e-12 and mi > 1e-12:
+                result += 0.5 * qi * _math.log2(qi / mi)
+        return max(0.0, result)
+
+    vecs:    List[List[float]]  = vecs_list
+    members: List[List[tuple]] = [[inp] for inp in eligible]
+    sizes:   List[int]         = [1] * n_eligible
+    active:  List[int]         = list(range(n_eligible))
+
+    while len(active) > n_clusters:
+        best_dist = float('inf')
+        best_i = best_j = -1
+        for ii in range(len(active)):
+            for jj in range(ii + 1, len(active)):
+                ci, cj = active[ii], active[jj]
+                d = jsd(vecs[ci], vecs[cj])
+                if d < best_dist:
+                    best_dist = d
+                    best_i, best_j = ci, cj
+        if best_i < 0:
+            break
+
+        ni, nj = sizes[best_i], sizes[best_j]
+        total  = ni + nj
+        vi, vj = vecs[best_i], vecs[best_j]
+        vecs[best_i] = [(ni * a + nj * b) / total for a, b in zip(vi, vj)]
+        sizes[best_i] = total
+        members[best_i].extend(members[best_j])
+        active.remove(best_j)
+
+    result_agg: Dict[tuple, int] = {}
+    for new_id, ci in enumerate(active):
+        for inp in members[ci]:
+            result_agg[inp] = new_id
+    return result_agg
+
+
 def _test_template(
     template: List[str],
     store: ExampleStore,
