@@ -1,6 +1,6 @@
 # Phase R: Active Inference Engine — Complete Roadmap
 
-**Status: IN PROGRESS — started 2026-03-07 — R0–R6 complete**
+**Status: IN PROGRESS — started 2026-03-07 — R0–R7 complete**
 **Track progress at the bottom of this file.**
 
 ---
@@ -393,38 +393,49 @@ If word cluster W precedes rewarded action A, W ← label A.
 
 **Goal:** Port to new text+image game using the adapter contract.
 
-**Status:** PENDING (depends on R0–R5)
+**Status:** COMPLETE (2026-03-07) — generic Action types + ScreenModality base class
 
-### New game adapter structure:
+### Files: `modalities/action.py` + `modalities/screen_modality.py` (new)
+
 ```
-<game>_modality.py     GameModality(keyboard=True, mouse=True, screen_capture=True)
-<game>_adapter.py      WorldModel, build_state(), make_goals() or build_generative_model()
-<game>_test.py         Validation: can agent complete basic objectives?
+action.py:
+  KeyPress(key, duration_s=0.0)     keyboard tap or hold
+  KeyHold(key, steps=1)             multi-step hold (for movement)
+  MouseMove(x, y, relative, dur)    cursor movement in [0,1] coords
+  MouseClick(x, y, button, double)  click at normalised screen position
+  MouseScroll(x, y, dx, dy, clicks) scroll wheel
+  Action = Union[str, KeyPress, KeyHold, MouseMove, MouseClick, MouseScroll, List[Action]]
+  flatten(action) -> List[Action]   recursive macro expansion
+  Factories: tap(), hold(), click(), move(), scroll_down(), scroll_up(), macro()
+
+screen_modality.py:
+  ScreenModality(window_title, region, capture_w, capture_h,
+                 frame_delay_s=0.1, dry_run=False, verbose=False)
+    — Abstract base class.  Three backends tried in order:
+        Screen: dxcam → mss → PIL.ImageGrab → zeros stub
+        Input:  pynput → logging stub
+    — Interface:
+        connect() → dict          first obs; resets state
+        step(action) → (obs, reward, done, info)
+        dispatch(action) → None   translate Action → OS events
+        disconnect() → None
+
+  Game adapter pattern (override these methods):
+    build_obs(frame, info={}) → dict  ← ONLY game-specific method
+    get_reward() → float
+    get_done() → bool
+    get_events() → List[dict]
+    get_admissible() → List[Action]
+    send_text(text: str) → None
 ```
 
-### Action contract extension (keyboard + mouse):
-```python
-@dataclass
-class KeyPress:
-    key: str         # 'w', 'enter', 'space', 'ctrl+c', etc.
+**Smoke test result:** mss + pynput available; live screen capture working (1920×1080).
+All 8 action types dispatched cleanly in dry_run=True mode.
 
-@dataclass
-class MouseMove:
-    x: float         # 0.0–1.0 normalized screen coordinates
-    y: float
-
-@dataclass
-class MouseClick:
-    x: float
-    y: float
-    button: str = 'left'   # 'left', 'right', 'middle'
-
-Action = Union[str, KeyPress, MouseMove, MouseClick, List['Action']]
-```
-
-The modality translates `Action` objects to actual OS-level events.
-The engine produces `Action` objects; the modality executes them.
-Both are decoupled — engine changes don't require modality changes and vice versa.
+**Game adapter requires 3 files only:**
+  1. `<game>_modality.py` — subclass ScreenModality, override build_obs() + get_reward() + get_done()
+  2. `<game>_adapter.py` — WorldModel, build_state(), GenerativeModel factory
+  3. `<game>_test.py`    — validate agent can complete basic objectives
 
 ---
 
@@ -466,7 +477,7 @@ For complex multi-minute decisions: Level 3 planner uses k=10+.
 | R4 — FovealAttention | COMPLETE | 2026-03-07 | `FovealAttention` added to `vision_cortex.py`; smoke test PASS |
 | R5 — Goal Learning | COMPLETE | 2026-03-07 | `goal_learning.py` written (`discover_goals`, `DiscoveredGoal`, `update_generative_model`); smoke test PASS |
 | R6 — Visual Symbol Learning | COMPLETE | 2026-03-07 | `visual_symbol.py`; VisualSymbolLearner + discover_visual_symbols(); smoke test PASS |
-| R7 — New Game Adapter | PENDING | — | After R0–R5 complete |
+| R7 — New Game Adapter | COMPLETE | 2026-03-07 | `action.py` (Action type hierarchy) + `screen_modality.py` (ScreenModality base); smoke test PASS |
 | R8 — Multi-step Rollouts | PENDING | — | After R3 + R7 |
 
 ---
