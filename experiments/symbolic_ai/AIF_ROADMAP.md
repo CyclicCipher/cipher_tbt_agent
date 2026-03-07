@@ -1,6 +1,6 @@
 # Phase R: Active Inference Engine — Complete Roadmap
 
-**Status: IN PROGRESS — started 2026-03-07 — R0–R5 complete**
+**Status: IN PROGRESS — started 2026-03-07 — R0–R6 complete**
 **Track progress at the bottom of this file.**
 
 ---
@@ -351,24 +351,41 @@ for states where `location='kitchen'` when hunger drive has deficit.
 
 **Goal:** Learn letter/word recognition from pixel statistics — no OCR labels.
 
-**Status:** PENDING (requires Phases R4 + R5)
+**Status:** COMPLETE (2026-03-07)
 
-### Design:
-Phase O discovers syntactic categories by clustering word→next-word distributions.
-Phase R6 discovers visual symbol categories by clustering patch→context distributions.
+### File: `modalities/visual_symbol.py` (new)
 
 ```
-1. Extract fixed-size patches (e.g. 8×8 pixels) from text regions of screen.
-2. For each patch, compute its distributional context: what patches precede/follow it
-   in a text line (left context, right context, vertical context).
-3. k-means cluster patches by context similarity → clusters = letter categories.
-4. Cluster sequences of letter patches by word-level context → word categories.
-5. Cross-reference with causal consequences: if the agent takes action 'eat' after
-   observing certain word patches, and score increases → those patches = 'eat' command.
+VisualGlyphStream          — rolling patch-token stream + bigram context counts
+                              (analogue of _stream_to_dists() for text)
+
+VisualSymbolLearner        — main class: wraps stream, drives two-level discovery
+  .observe(foveal)           — feed one text-region foveal patch (Level 1)
+  .discover_glyphs()         — cluster patch hashes → letter-like categories
+                               uses discover_categories_from_dists() UNCHANGED
+  .decode(foveal)            — decode → glyph cluster ids (left-to-right)
+  .observe_word(foveal)      — record glyph sequence for word-level clustering
+  .discover_words()          — cluster glyph sequences → word-like categories
+  .word_cluster(foveal)      — identify word cluster for one foveal patch
+  .causal_crossref(history)  — map word clusters → probable command labels
+
+discover_visual_symbols()  — module-level convenience function
 ```
 
-This is the visual analog of synthesis.py's `_stream_to_dists()` + `discover_categories_from_dists()`.
-The existing machinery already does this for text; Phase R6 applies it to pixel patches.
+**Key design decision:** `discover_categories_from_dists()` from `synthesis.py`
+is reused **verbatim** — the only change is the tokenization (patch hashes
+instead of word strings).  This is the strongest possible demonstration of
+algorithmic generality: one clustering function, two domains.
+
+**Causal cross-reference ("distributional hypothesis applied causally"):**
+"You shall know a visual word by the action it accompanies."
+If word cluster W precedes rewarded action A, W ← label A.
+
+**Smoke test results:**
+- 200 synthetic foveal frames (5 glyph templates): 1084 tokens, 20 unique hashes
+- discover_glyphs(): 18 hashes assigned to 8 clusters
+- decode([g0, g1, g2]): 3/3 patches classified correctly
+- causal_crossref(): labels high-confidence (word_cluster → action) pairs
 
 ---
 
@@ -448,7 +465,7 @@ For complex multi-minute decisions: Level 3 planner uses k=10+.
 | R3 — AIFEngine | COMPLETE | 2026-03-07 | Added to `planning.py` |
 | R4 — FovealAttention | COMPLETE | 2026-03-07 | `FovealAttention` added to `vision_cortex.py`; smoke test PASS |
 | R5 — Goal Learning | COMPLETE | 2026-03-07 | `goal_learning.py` written (`discover_goals`, `DiscoveredGoal`, `update_generative_model`); smoke test PASS |
-| R6 — Visual Symbol Learning | PENDING | — | Requires R4 complete |
+| R6 — Visual Symbol Learning | COMPLETE | 2026-03-07 | `visual_symbol.py`; VisualSymbolLearner + discover_visual_symbols(); smoke test PASS |
 | R7 — New Game Adapter | PENDING | — | After R0–R5 complete |
 | R8 — Multi-step Rollouts | PENDING | — | After R3 + R7 |
 
