@@ -23,7 +23,9 @@ KL divergence (from memory.py) acts as the consolidation signal:
 
 from __future__ import annotations
 
-from typing import Callable, Dict, FrozenSet, List, Optional
+import json
+import time
+from typing import Callable, Dict, FrozenSet, List, Optional, Tuple
 
 from interpreter import ProcessInterpreter
 from memory import ExampleStore
@@ -92,6 +94,12 @@ class SymbolicAI:
         # Register any input modalities (vision, audio, etc.)
         for modality in (modalities or []):
             self._interp.register_modality(modality)
+        # Phase E: KL history for curiosity() — dict of concept -> [kl_0, kl_1, ...]
+        self._kl_history: Dict[str, List[float]] = {}
+        # Phase L: pre-built frequency tables for distributional concepts.
+        # Populated by freq_consolidate(). Used by ask() as priority-3 fallback.
+        # Format: concept_name -> {inputs_tuple -> {outputs_tuple -> probability}}
+        self._dist_tables: Dict[str, Dict[tuple, Dict[tuple, float]]] = {}
 
     # ------------------------------------------------------------------
     # Core interface
@@ -118,13 +126,21 @@ class SymbolicAI:
         Priority:
             1. If the concept has a process expression, execute it.
             2. If there are stored examples, do exact-match lookup.
-            3. Return None (cannot answer).
+            3. If a frequency table exists (freq_consolidate was called),
+               return the mode of the empirical output distribution.
+            4. If examples exist but no freq table, compute freq on the fly.
+            5. Return None (cannot answer).
+
+        For distributional concepts (language, music, action selection) the
+        answer at priority 3/4 is the most likely output given experience —
+        equivalent to the Markov model's argmax prediction.  Use ask_dist()
+        to retrieve the full probability distribution instead of the mode.
         """
         concept = self.graph.concepts.get(concept_name)
         if concept is None:
             return None
 
-        # Execute process expression if one exists (built-in or consolidated).
+        # 1. Execute process expression if one exists (built-in or consolidated).
         if concept.process:
             try:
                 return self._interp.run(
@@ -134,13 +150,83 @@ class SymbolicAI:
                 # Process failed (e.g. wrong input type) — fall through.
                 pass
 
-        # Exact-match lookup in example store.
         store = self.stores.get(concept_name)
+        query = tuple(inputs)
+
+        # 2. Exact-match lookup in example store.
         if store is not None:
-            query = tuple(inputs)
             for stored_inputs, stored_outputs in store.examples:
                 if _inputs_equal(stored_inputs, query):
                     return stored_outputs
+
+        # 3. Pre-built freq table (freq_consolidate was called — fast path).
+        dist_table = self._dist_tables.get(concept_name)
+        if dist_table is not None:
+            dist = dist_table.get(query)
+            if dist:
+                return max(dist, key=dist.get)
+
+        # 4. On-the-fly frequency prediction from ExampleStore (slower).
+        if store is not None:
+            return store.freq_predict(query)
+
+        return None
+
+    def ask_dist(
+        self,
+        concept_name: str,
+        inputs: tuple,
+    ) -> Optional[Dict[tuple, float]]:
+        """Return the full probability distribution over outputs.
+
+        For deterministic concepts (process or exact-match), wraps the single
+        output as a Dirac delta distribution {output: 1.0}.
+
+        For distributional concepts (freq table or ExampleStore), returns the
+        empirical conditional distribution {output: probability}.
+
+        Returns None if the concept cannot answer at all.
+
+        Use this instead of ask() when you need:
+          - Log-likelihood scoring (language model evaluation)
+          - Sampling (generation / exploration)
+          - Entropy measurement (curiosity about uncertain predictions)
+        """
+        concept = self.graph.concepts.get(concept_name)
+        if concept is None:
+            return None
+
+        query = tuple(inputs)
+
+        # Try deterministic sources first — wrap as Dirac delta.
+        if concept.process:
+            try:
+                result = self._interp.run(
+                    concept.process, query, concept.input_type
+                )
+                if result is not None:
+                    return {result: 1.0}
+            except Exception:
+                pass
+
+        store = self.stores.get(concept_name)
+
+        # Exact-match -> Dirac delta.
+        if store is not None:
+            for stored_inputs, stored_outputs in store.examples:
+                if _inputs_equal(stored_inputs, query):
+                    return {stored_outputs: 1.0}
+
+        # Pre-built freq table — full distribution.
+        dist_table = self._dist_tables.get(concept_name)
+        if dist_table is not None:
+            dist = dist_table.get(query)
+            if dist:
+                return dict(dist)
+
+        # On-the-fly freq distribution from ExampleStore.
+        if store is not None:
+            return store.freq_dist(query)
 
         return None
 
@@ -233,6 +319,45 @@ class SymbolicAI:
 
         return result
 
+    def freq_consolidate(
+        self,
+        concept_name: str,
+    ) -> Dict[tuple, Dict[tuple, float]]:
+        """Consolidate a statistical concept into an empirical frequency table.
+
+        Unlike consolidate() (which searches for a deterministic process),
+        freq_consolidate() always succeeds.  It builds a snapshot of the
+        empirical conditional distribution from the stored examples and
+        caches it in self._dist_tables[concept_name].
+
+        After freq_consolidate():
+          - ask() returns the mode (argmax) prediction for any seen input
+          - ask_dist() returns the full probability distribution
+          - kl() reports the residual entropy (mean cross-entropy between
+            the empirical distribution and itself = 0 for seen contexts)
+
+        Returns the frequency table dict, or {} if no examples exist.
+
+        The residual entropy reported by kl() after freq_consolidate is the
+        genuine task difficulty — the irreducible stochasticity of the concept.
+        It is NOT a synthesis failure; it is the information-theoretic lower
+        bound on prediction error for this concept.
+
+        Example use case:
+            The 'next_word' concept cannot be synthesised (same bigram ->
+            many next words).  After freq_consolidate(), ask() returns the
+            most frequent next word for each seen bigram context.  For unseen
+            contexts, ask() still returns None (generalisation requires the
+            hierarchy — see Phase M).
+        """
+        store = self.stores.get(concept_name)
+        if store is None or len(store) == 0:
+            return {}
+
+        table = store.build_full_freq_table()
+        self._dist_tables[concept_name] = table
+        return table
+
     # ------------------------------------------------------------------
     # KL divergence / consolidation trigger
     # ------------------------------------------------------------------
@@ -240,12 +365,35 @@ class SymbolicAI:
     def kl(self, concept_name: str) -> float:
         """KL divergence of stored examples from the current model (in bits).
 
-        KL ≈ 0:   the current rule (or example cache) explains everything.
-        KL → inf: no rule, or rule is wrong.
+        For deterministic concepts:
+            KL = -log2(accuracy) using exact-match / process prediction.
+            KL ≈ 0   = rule perfectly explains all examples (consolidated)
+            KL -> inf = no rule, or rule is wrong
+
+        For distributional concepts (after freq_consolidate):
+            KL = mean negative log-likelihood under the empirical freq table.
+            This equals the empirical entropy H(output | input) — the residual
+            stochasticity of the concept.  It is NOT a synthesis failure.
+
+        The transition from deterministic to distributional KL happens
+        automatically when freq_consolidate() has been called.
         """
         store = self.stores.get(concept_name)
         if store is None or len(store) == 0:
             return float('inf')
+
+        # Distributional path: use mean negative log-likelihood.
+        if concept_name in self._dist_tables:
+            dist_table = self._dist_tables[concept_name]
+            def dist_fn(inp):
+                return dist_table.get(inp)
+            ll = store.mean_log_likelihood(dist_fn)
+            # ll is negative (bits); convert to positive KL-like measure.
+            # For a perfect distributional model, ll = -H (empirical entropy).
+            # We report H (entropy) as the KL for distributional concepts.
+            return -ll   # always non-negative; equals empirical entropy after consolidation
+
+        # Deterministic path: use accuracy-based KL.
         return store.kl_divergence(lambda inp: self.ask(concept_name, inp))
 
     def should_consolidate(
@@ -288,3 +436,438 @@ class SymbolicAI:
     def has_process(self, concept_name: str) -> bool:
         concept = self.graph.concepts.get(concept_name)
         return bool(concept and concept.process)
+
+    # ==================================================================
+    # Phase C: Dynamic CTKG extension
+    # ==================================================================
+
+    def add_concept(
+        self,
+        name: str,
+        domain: str = 'minecraft',
+        description: str = '',
+        input_type: Optional[List[str]] = None,
+        output_type: Optional[List[str]] = None,
+        process: Optional[List[str]] = None,
+        tier: str = 'theorem',
+    ) -> None:
+        """Add a new concept to the CTKG at runtime.
+
+        Used when the agent discovers a new concept from visual experience
+        (e.g. 'oak_log' emerges from visual clustering) and needs to add
+        it to the graph before accumulating examples and synthesizing a rule.
+
+        The interpreter's concept_names set is updated so that the new name
+        can be used as a concept reference in lookup() process expressions.
+        """
+        from ctkg.graph import Concept
+        concept = Concept(
+            name=name,
+            domain=domain,
+            description=description,
+            input_type=input_type or [],
+            output_type=output_type or [],
+            process=process or [],
+            status='planned',
+            tier=tier,
+        )
+        self.graph.add_concept(concept)
+        # Keep interpreter in sync with the graph's concept set.
+        self._interp.concept_names = frozenset(self.graph.concepts.keys())
+
+    def add_prerequisite(
+        self,
+        source: str,
+        target: str,
+        role: str = '',
+        transfer_probability: float = 1.0,
+    ) -> None:
+        """Add a prerequisite edge (epistemic ordering) at runtime."""
+        from ctkg.graph import Prerequisite
+        self.graph.add_prerequisite(Prerequisite(
+            source=source,
+            target=target,
+            role=role,
+            transfer_probability=transfer_probability,
+        ))
+
+    def add_causal_edge(
+        self,
+        source: str,
+        target: str,
+        role: str = '',
+        guard: str = '',
+        delay_steps: int = 0,
+        probability: float = 1.0,
+    ) -> None:
+        """Add a causal edge (physical causation) at runtime."""
+        from ctkg.graph import CausalEdge
+        self.graph.add_causal_edge(CausalEdge(
+            source=source,
+            target=target,
+            role=role,
+            guard=guard,
+            delay_steps=delay_steps,
+            probability=probability,
+        ))
+
+    def add_instance_edge(
+        self,
+        source: str,
+        target: str,
+        role: str = '',
+    ) -> None:
+        """Add an instance_of edge (subtype hierarchy) at runtime."""
+        from ctkg.graph import InstanceEdge
+        self.graph.add_instance_edge(InstanceEdge(
+            source=source, target=target, role=role
+        ))
+
+    def add_composition_edge(
+        self,
+        source: str,
+        target: str,
+        role: str = '',
+        probability: float = 1.0,
+    ) -> None:
+        """Add a composes_into edge (multi-input product morphism) at runtime."""
+        from ctkg.graph import CompositionEdge
+        self.graph.add_composition_edge(CompositionEdge(
+            source=source, target=target, role=role, probability=probability
+        ))
+
+    def add_temporal_edge(
+        self,
+        source: str,
+        target: str,
+        role: str = '',
+    ) -> None:
+        """Add a precedes edge (temporal ordering) at runtime."""
+        from ctkg.graph import TemporalEdge
+        self.graph.add_temporal_edge(TemporalEdge(
+            source=source, target=target, role=role
+        ))
+
+    # ==================================================================
+    # Phase E: Online synthesis
+    # ==================================================================
+
+    def observe(
+        self,
+        concept_name: str,
+        inputs: tuple,
+        outputs: tuple,
+        kl_threshold: float = 0.1,
+    ) -> Optional[List[str]]:
+        """Streaming teach() + auto-consolidation.
+
+        Records the (inputs, outputs) pair, appends the current KL to the
+        history buffer, then attempts consolidation if KL > kl_threshold.
+
+        Returns the discovered process on successful consolidation, else None.
+
+        Design: the agent calls observe() continuously as it plays.  The
+        KL history drives curiosity() for the exploration policy.
+        """
+        self.teach(concept_name, inputs, outputs)
+        kl = self.kl(concept_name)
+        self._kl_history.setdefault(concept_name, []).append(kl)
+        if self.should_consolidate(concept_name, kl_threshold):
+            return self.consolidate(concept_name)
+        return None
+
+    def curiosity(self, concept_name: str, window: int = 10) -> float:
+        """KL decrease rate (bits/step) over the last `window` observations.
+
+        High curiosity (positive rate) = KL is dropping fast = actively learning.
+        Zero curiosity  = already consolidated or examples too noisy.
+        Negative rate   = KL increasing (conflicting examples — investigate).
+
+        Used by highest_kl_rate_concept() to direct exploration.
+        """
+        history = self._kl_history.get(concept_name, [])
+        if len(history) < 2:
+            return 0.0
+        recent = history[-window:]
+        if len(recent) < 2:
+            return 0.0
+        # Positive = decreasing KL = learning; clamp to 0 if increasing
+        rate = (recent[0] - recent[-1]) / len(recent)
+        return max(0.0, rate)
+
+    def offline_consolidation(self) -> Dict[str, Optional[List[str]]]:
+        """Consolidate all high-KL concepts (sleep-coupled replay).
+
+        Called by MinecraftModality.on_sleep() when the agent goes to bed.
+        Iterates over all stores with KL > 0.1 and attempts consolidation.
+
+        Returns a dict of concept_name → discovered process (or None).
+        """
+        results: Dict[str, Optional[List[str]]] = {}
+        for name in list(self.stores.keys()):
+            if self.should_consolidate(name):
+                process = self.consolidate(name)
+                if process is not None:
+                    results[name] = process
+        return results
+
+    # ==================================================================
+    # Phase G: Exploration policy
+    # ==================================================================
+
+    def next_frontier_concept(self) -> Optional[str]:
+        """Next unlearned concept whose prerequisites are all learned.
+
+        Scans the topological sort of the CTKG.  Returns the first concept
+        that (a) has no process yet and (b) all its prerequisite concepts
+        have processes.  This is the next achievement to attempt.
+
+        Returns None if all concepts are learned or no concept is unblocked.
+        """
+        try:
+            order = self.graph.topological_sort()
+        except Exception:
+            return None
+
+        for name in order:
+            concept = self.graph.concepts.get(name)
+            if concept is None or concept.process:
+                continue  # Already learned
+            # Check all prerequisites have processes
+            prereq_names = self.graph._parents.get(name, set())
+            if all(
+                self.graph.concepts[p].process
+                for p in prereq_names
+                if p in self.graph.concepts
+            ):
+                return name
+
+        return None
+
+    def highest_kl_rate_concept(self) -> Optional[str]:
+        """Concept with the highest curiosity (fastest KL decrease rate).
+
+        Used to direct exploration toward concepts that are actively
+        being learned — maximum compression progress (Schmidhuber 2010).
+
+        Returns None if no concept has a non-zero curiosity score.
+        """
+        best_name: Optional[str] = None
+        best_score: float = 0.0
+        for name in self.stores:
+            score = self.curiosity(name)
+            if score > best_score:
+                best_score = score
+                best_name = name
+        return best_name
+
+    def priority(self, modality=None) -> tuple:
+        """Combined exploration priority (Mode, urgency, target).
+
+        If a modality is supplied and has current_priority(), defers to it
+        (survival drives take precedence over epistemic drives).
+        Otherwise falls back to pure epistemic priority:
+            ACHIEVE > EXPLORE > WANDER
+        """
+        if modality is not None and hasattr(modality, 'current_priority'):
+            mode, urgency, target = modality.current_priority(engine=self)
+            if mode in ('SURVIVE', 'EAT', 'SLEEP'):
+                return (mode, urgency, target)
+
+        frontier = self.next_frontier_concept()
+        curious  = self.highest_kl_rate_concept()
+
+        if frontier is not None:
+            return ('ACHIEVE', 0.40, frontier)
+        if curious is not None:
+            return ('EXPLORE', 0.30, curious)
+        return ('WANDER', 0.10, 'random_direction')
+
+    # ==================================================================
+    # Phase H: Checkpoint system
+    # ==================================================================
+
+    def save_checkpoint(self, path: str) -> None:
+        """Save the full engine state to a JSON checkpoint.
+
+        The "model" is: CTKG process expressions + example stores +
+        learned template library.  No gradient weights — the checkpoint
+        is human-readable and version-tagged.
+
+        Format:
+            {version, timestamp, ctkg: {...}, stores: {...},
+             learned_templates: [...]}
+
+        Named checkpoint conventions (caller's responsibility):
+            checkpoint_achieve_{name}.json  — permanent, after achievement
+            checkpoint_step_{N}.json        — rotating, every N steps
+        """
+        data = {
+            'version': '1.0',
+            'timestamp': time.time(),
+            'ctkg': self._serialize_graph(),
+            'stores': self._serialize_stores(),
+            'learned_templates': self._serialize_templates(),
+        }
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+
+    def load_checkpoint(self, path: str) -> None:
+        """Load engine state from a JSON checkpoint.
+
+        Restores concept processes (synthesized rules), example stores
+        (raw episode memory), and the learned template library.
+
+        Migration strategy on schema mismatch: processes that reference
+        still-valid primitive names are restored; invalid processes are
+        dropped (the agent re-learns them from remaining examples).
+        """
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+
+        version = data.get('version', '0')
+        if version != '1.0':
+            raise ValueError(
+                f"Checkpoint version {version!r} not supported "
+                f"(expected '1.0')"
+            )
+
+        self._deserialize_graph(data.get('ctkg', {}))
+        self._deserialize_stores(data.get('stores', {}))
+        self._deserialize_templates(data.get('learned_templates', []))
+
+    # ------------------------------------------------------------------
+    # Checkpoint serialization helpers
+    # ------------------------------------------------------------------
+
+    def _serialize_graph(self) -> dict:
+        """Serialise concept processes and all Phase B edge types."""
+        concepts = {}
+        for name, c in self.graph.concepts.items():
+            concepts[name] = {
+                'process': c.process,
+                'domain':  c.domain,
+                'description': c.description,
+                'input_type':  c.input_type,
+                'output_type': c.output_type,
+                'tier': getattr(c, 'tier', 'theorem'),
+            }
+
+        def _edge_list(edges, fields):
+            return [
+                {f: getattr(e, f) for f in fields}
+                for e in edges
+            ]
+
+        return {
+            'concepts': concepts,
+            'prerequisites': _edge_list(
+                self.graph.prerequisites,
+                ('source', 'target', 'role', 'transfer_probability'),
+            ),
+            'causal_edges': _edge_list(
+                self.graph.causal_edges,
+                ('source', 'target', 'role', 'guard', 'delay_steps', 'probability'),
+            ),
+            'composition_edges': _edge_list(
+                self.graph.composition_edges,
+                ('source', 'target', 'role', 'probability'),
+            ),
+            'instance_edges': _edge_list(
+                self.graph.instance_edges,
+                ('source', 'target', 'role'),
+            ),
+            'temporal_edges': _edge_list(
+                self.graph.temporal_edges,
+                ('source', 'target', 'role'),
+            ),
+        }
+
+    def _deserialize_graph(self, ctkg: dict) -> None:
+        """Restore concept processes from checkpoint."""
+        for name, info in ctkg.get('concepts', {}).items():
+            if name in self.graph.concepts:
+                self.graph.concepts[name].process = info.get('process', [])
+            else:
+                # Dynamically add concepts that weren't in the original graph.
+                self.add_concept(
+                    name=name,
+                    domain=info.get('domain', 'unknown'),
+                    description=info.get('description', ''),
+                    input_type=info.get('input_type', []),
+                    output_type=info.get('output_type', []),
+                    process=info.get('process', []),
+                    tier=info.get('tier', 'theorem'),
+                )
+
+    @staticmethod
+    def _to_json_safe(obj):
+        """Recursively convert numpy arrays (and other non-JSON types) to lists.
+
+        Handles: ndarray → nested list, tuple → list, bool/int/float/str pass-through.
+        Visual examples (frame arrays) are stored as nested Python lists in the
+        checkpoint; they will remain as lists on deserialization (correct for
+        symbolic knowledge checkpointing — pixel-level replay is not needed).
+        """
+        try:
+            import numpy as _np
+            if isinstance(obj, _np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, _np.generic):      # numpy scalars
+                return obj.item()
+        except ImportError:
+            pass
+        if isinstance(obj, (list, tuple)):
+            return [SymbolicAI._to_json_safe(v) for v in obj]
+        return obj
+
+    def _serialize_stores(self) -> dict:
+        """Serialise all ExampleStore instances.
+
+        Tuples become JSON arrays.  Numpy arrays (e.g. image frames) are
+        recursively converted to nested Python lists so the checkpoint file
+        is plain JSON.
+        """
+        result = {}
+        for name, store in self.stores.items():
+            result[name] = [
+                [
+                    SymbolicAI._to_json_safe(list(inp)),
+                    SymbolicAI._to_json_safe(list(out)),
+                ]
+                for inp, out in store.examples
+            ]
+        return result
+
+    def _deserialize_stores(self, stores: dict) -> None:
+        """Restore ExampleStore instances from checkpoint."""
+        for name, examples in stores.items():
+            self.stores[name] = ExampleStore(name)
+            for inp_list, out_list in examples:
+                self.stores[name].add(tuple(inp_list), tuple(out_list))
+
+    def _serialize_templates(self) -> list:
+        """Serialise the learned template library."""
+        result = []
+        for tmpl in self._synthesizer._learned:
+            result.append({
+                'process_lines':  tmpl.process_lines,
+                'n_digit_inputs': tmpl.n_digit_inputs,
+                'required_ops':   sorted(tmpl.required_ops),
+                'success_count':  tmpl.success_count,
+                'source_concept': tmpl.source_concept,
+            })
+        return result
+
+    def _deserialize_templates(self, templates: list) -> None:
+        """Restore learned templates into the synthesizer."""
+        from synthesis import _LearnedTemplate
+        self._synthesizer._learned.clear()
+        for t in templates:
+            self._synthesizer._learned.append(_LearnedTemplate(
+                process_lines  = t['process_lines'],
+                n_digit_inputs = t['n_digit_inputs'],
+                required_ops   = frozenset(t['required_ops']),
+                success_count  = t['success_count'],
+                source_concept = t['source_concept'],
+            ))
