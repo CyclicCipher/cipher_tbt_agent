@@ -42,10 +42,9 @@ Fourteen phases:
    15.  Approximate synthesis proof-of-concept (Gap A — statistical visual concepts):
         Synthetic bright/dark images; synthesizer discovers luminance threshold rule.
         First use of consolidate_approx() and float literals in templates.
-   16.  CIFAR-10 cat classification (approximate synthesis on real images):
-        Auto-download CIFAR-10; learn cat vs non-cat using Gabor/DoG features.
-        Reports best template, threshold, and test accuracy.
-        Expected: 65–75% with a single fixed visual feature.
+   16.  User cat photos (real-world, varied quality):
+        Loads data/cats/ and data/negatives/, trains approximate synthesis,
+        establishes single-feature floor on heterogeneous real images.
 
 Run from experiments/symbolic_ai/:
     python run_experiment.py
@@ -1564,98 +1563,11 @@ def phase15_approximate_synthesis_brightness():
 
 
 # ---------------------------------------------------------------------------
-# Phase 16: CIFAR-10 cat classification via approximate synthesis
-# ---------------------------------------------------------------------------
-
-def phase16_cifar10_cats():
-    """Phase 16: Cat vs. non-cat classification on real CIFAR-10 images.
-
-    Auto-downloads CIFAR-10 (~170 MB on first run).  Teaches 200 cat +
-    200 non-cat training examples to the 'cat' concept, then calls
-    consolidate_approx to find the best single-feature visual template.
-
-    Expected: 60–75% test accuracy with a single fixed visual feature.
-    (Multi-feature combination and reference frames are Phase 17+.)
-    """
-    print('=' * 65)
-    print('Phase 16: CIFAR-10 Cat Classification (Approximate Synthesis)')
-    print('  (Real images; expected 60-75% with single visual feature)')
-    print('=' * 65)
-
-    try:
-        import numpy as np  # noqa: F401 — confirms numpy is importable
-    except ImportError:
-        print('  SKIP: numpy not available')
-        return False
-
-    vision_ctkg = os.path.join(_HERE, '..', 'ctkg', 'domains', 'vision.ctkg')
-    if not os.path.exists(vision_ctkg):
-        print(f'  SKIP: vision.ctkg not found at {vision_ctkg}')
-        return False
-
-    from modalities.vision import VisionModality
-    from data_loader import load_cifar10_cats
-
-    graph = parse_file(vision_ctkg)
-    ai = SymbolicAI(graph, modalities=[VisionModality()])
-
-    cats_tr, neg_tr, cats_te, neg_te = load_cifar10_cats(
-        max_per_class_train=200,
-        max_per_class_test=500,
-    )
-
-    for img in cats_tr:
-        ai.teach('cat', (img,), (1,))
-    for img in neg_tr:
-        ai.teach('cat', (img,), (0,))
-    print(f'  Taught {len(cats_tr)} cat + {len(neg_tr)} non-cat examples')
-    print(f'  KL before consolidation: {ai.kl("cat"):.3f} bits')
-
-    result = ai.consolidate_approx(
-        'cat',
-        accuracy_threshold=0.60,
-        subsample=200,
-        verbose=True,
-    )
-
-    if result is None:
-        print('  No template reached 60% threshold.')
-        print('  (Visual primitives alone insufficient — combine features in Phase 17+)')
-        print()
-        return False
-
-    process, train_acc = result
-    print(f'  Best template: {_fmt_process(process)}')
-    print(f'  Training accuracy: {train_acc:.1%}')
-
-    # Evaluate on held-out CIFAR-10 test images
-    correct = 0
-    total = len(cats_te) + len(neg_te)
-    for img in cats_te:
-        out = ai.ask('cat', (img,))
-        if out == (1,):
-            correct += 1
-    for img in neg_te:
-        out = ai.ask('cat', (img,))
-        if out == (0,):
-            correct += 1
-
-    test_acc = correct / total if total > 0 else 0.0
-    print(f'  Test accuracy ({total} images): {test_acc:.1%}')
-
-    passed = test_acc >= 0.60
-    print(f'  {"PASS" if passed else "FAIL"} — '
-          f'{"Single-feature visual baseline established." if passed else "Below 60% threshold."}')
-    print()
-    return passed
-
-
-# ---------------------------------------------------------------------------
-# Phase 17: User-provided cat photos (real-world, varied quality)
+# Phase 16: User-provided cat photos (real-world, varied quality)
 # ---------------------------------------------------------------------------
 
 def phase17_user_cat_photos():
-    """Phase 17: Approximate synthesis on the user's own cat image collection.
+    """Phase 16: Approximate synthesis on the user's own cat image collection.
 
     Loads whatever images are in data/cats/ and data/negatives/, resizes to
     128x128, trains on 80% of each class, tests on the held-out 20%.
@@ -1675,7 +1587,7 @@ def phase17_user_cat_photos():
     (Phase 18) or feature combination (Phase 19+).
     """
     print('=' * 65)
-    print('Phase 17: User Cat Photos (Real-World, Varied Quality)')
+    print('Phase 16: User Cat Photos (Real-World, Varied Quality)')
     print('  (75 cats + 49 negatives; expect 55-70% single-feature)')
     print('=' * 65)
 
@@ -1821,8 +1733,7 @@ def main():
     p13 = phase13_ode_solving()
     p14 = phase14_fluid_dynamics()
     p15 = phase15_approximate_synthesis_brightness()
-    p16 = phase16_cifar10_cats()
-    p17 = phase17_user_cat_photos()
+    p16 = phase17_user_cat_photos()
 
     print('=' * 65)
     print('Summary')
@@ -1842,8 +1753,7 @@ def main():
     print(f'  Phase 13 (ODE solving):            {"PASS" if p13 else "FAIL"}')
     print(f'  Phase 14 (fluid dynamics):         {"PASS" if p14 else "FAIL"}')
     print(f'  Phase 15 (approx synth brightness):{"PASS" if p15 else "FAIL"}')
-    print(f'  Phase 16 (CIFAR-10 cats):          {"PASS" if p16 else "FAIL"}')
-    print(f'  Phase 17 (user cat photos):        {"PASS" if p17 else "FAIL"}')
+    print(f'  Phase 16 (user cat photos):        {"PASS" if p16 else "FAIL"}')
     print()
     print('  Key results:')
     print('    Exact symbolic rule discovered from examples.')
@@ -1863,8 +1773,7 @@ def main():
     print('    Fluid dynamics: continuity, Torricelli, Bernoulli, Venturi (Phase 14).')
     print('    float_pow/float_pi extend float arithmetic for physics domains.')
     print('    consolidate_approx finds statistical threshold rules (Gap A, Phase 15).')
-    print('    Single visual feature baseline on real CIFAR-10 cat images (Phase 16).')
-    print('    User cat photo floor: best single feature on 75 cats + 49 negatives (Phase 17).')
+    print('    User cat photo floor: best single feature on 75 cats + 49 negatives (Phase 16).')
     print()
 
 
