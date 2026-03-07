@@ -1061,12 +1061,55 @@ class AIFEngine:
                               High when predicted state is undesired.
         Epistemic component:  -info_gain(state, action)
                               Subtracted from G (info gain REDUCES free energy).
+
+        When policy_horizon == 1, evaluates only the immediate single-step G.
+        When policy_horizon > 1, this method is NOT called — beam_search()
+        is used instead by decide() to evaluate full k-step policies.
         """
         return self.model.expected_free_energy(
             policy          = [action],
             state           = state,
-            horizon         = self.policy_horizon,
+            horizon         = 1,
         )
+
+    def _beam_decide(self, state: dict) -> Tuple[str, str]:
+        """Multi-step EFE minimisation via beam search (Phase R8).
+
+        Called by decide() when policy_horizon > 1.  Generates candidate
+        k-step policies by beam search and returns the first action of the
+        best policy together with a reason string.
+
+        The full policy is NOT committed — only the first action is executed.
+        Re-planning occurs at every step with updated observations (MPC style).
+
+        Parameters
+        ----------
+        state   Current agent state dict with 'admissible' key.
+
+        Returns
+        -------
+        (action, reason)  where reason encodes the beam search result.
+        """
+        from generative_model import beam_search  # type: ignore[import]
+
+        candidates = self._candidate_actions(state)
+        if not candidates:
+            return 'look', 'AIF-beam:no_admissible'
+
+        best_policy, best_G = beam_search(
+            state      = state,
+            model      = self.model,
+            candidates = candidates,
+            horizon    = self.policy_horizon,
+            beam_width = max(3, min(10, len(candidates))),
+        )
+
+        if not best_policy:
+            return candidates[0], f'AIF-beam:empty_h{self.policy_horizon}'
+
+        action = best_policy[0]
+        reason = f'AIF-beam:G={best_G:.3f},h={self.policy_horizon},len={len(best_policy)}'
+        return action, reason
 
     # ------------------------------------------------------------------
     # Main decide() / feedback()
@@ -1105,6 +1148,11 @@ class AIFEngine:
 
         # 2. AIF mode: EFE minimisation over admissible actions.
         if self.model.preferences:
+            # R8: multi-step beam search when horizon > 1.
+            if self.policy_horizon > 1:
+                return self._beam_decide(state)
+
+            # R3: single-step greedy argmin G.
             candidates = self._candidate_actions(state)
             if not candidates:
                 return 'look', 'AIF:no_admissible'

@@ -463,3 +463,86 @@ class GenerativeModel:
             f'GenerativeModel(preferences={names}, '
             f'n_transitions={sum(self.transition._counts.values())})'
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase R8: Beam search over multi-step policies
+# ---------------------------------------------------------------------------
+
+def beam_search(
+    state:       dict,
+    model:       'GenerativeModel',
+    candidates:  List[str],
+    horizon:     int = 3,
+    beam_width:  int = 5,
+) -> Tuple[List[str], float]:
+    """Find the best k-step policy by beam search over Expected Free Energy.
+
+    Implements the Phase R8 multi-step policy rollout.  Each policy is a
+    sequence of actions evaluated by cumulative G(π) = Σ_τ G(a_τ, s_τ).
+    The argmin policy is returned together with its G value.
+
+    Parameters
+    ----------
+    state       Current state dict (starting point for rollout).
+    model       ``GenerativeModel`` providing pragmatic + epistemic values
+                and the transition model for state prediction.
+    candidates  List of candidate action strings to consider at each step.
+                Typically ``state['admissible']`` or the engine's default set.
+    horizon     Number of steps to look ahead.  Default 3.
+    beam_width  Maximum number of candidate policies to keep at each step.
+                Default 5.  Larger values → better quality, higher cost.
+                Complexity: O(beam_width × |candidates| × horizon).
+
+    Returns
+    -------
+    (best_policy, best_G)
+        ``best_policy`` — list of action strings (length ≤ ``horizon``).
+        ``best_G``      — cumulative Expected Free Energy of that policy.
+
+    Notes
+    -----
+    When ``candidates`` is empty, returns ([], inf).
+
+    When ``model.transition`` has no observations for a (state, action) pair,
+    ``predict()`` returns (state, 0.0) — low confidence — so the epistemic
+    bonus fully applies (novel actions are preferred during exploration).
+
+    The first element of ``best_policy`` is the action to execute now.
+    Subsequent elements represent the intended future actions, but they are
+    NOT executed yet — they are re-evaluated each step as new observations
+    arrive.  This is Model Predictive Control (MPC) style execution.
+    """
+    if not candidates or horizon < 1:
+        return [], float('inf')
+
+    # Beam: list of (cumulative_G, policy_so_far, predicted_state)
+    beams: List[Tuple[float, List[str], dict]] = [(0.0, [], dict(state))]
+
+    for _step in range(horizon):
+        next_beams: List[Tuple[float, List[str], dict]] = []
+
+        for cum_G, policy, current in beams:
+            for action in candidates:
+                # Predict next state under this action.
+                predicted, _conf = model.transition.predict(current, action)
+
+                # Accumulate G for this step.
+                step_G = (
+                    model.pragmatic_value(predicted)
+                    + model.epistemic_value(current, action)
+                )
+                next_beams.append((cum_G + step_G, policy + [action], predicted))
+
+        if not next_beams:
+            break
+
+        # Keep the top-beam_width policies by cumulative G (lower = better).
+        next_beams.sort(key=lambda b: b[0])
+        beams = next_beams[:beam_width]
+
+    if not beams:
+        return [], float('inf')
+
+    best_G, best_policy, _ = beams[0]
+    return best_policy, best_G

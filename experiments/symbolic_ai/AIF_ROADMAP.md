@@ -1,6 +1,6 @@
 # Phase R: Active Inference Engine — Complete Roadmap
 
-**Status: IN PROGRESS — started 2026-03-07 — R0–R7 complete**
+**Status: COMPLETE — 2026-03-07 — R0–R8 all phases done**
 **Track progress at the bottom of this file.**
 
 ---
@@ -443,25 +443,44 @@ All 8 action types dispatched cleanly in dry_run=True mode.
 
 **Goal:** Extend AIFEngine to evaluate policies of length > 1.
 
-**Status:** PENDING (depends on R3, R7)
+**Status:** COMPLETE (2026-03-07)
 
-### Design:
+### Files: `generative_model.py` (beam_search added) + `planning.py` (AIFEngine updated)
+
+```python
+# generative_model.py — new module-level function:
+def beam_search(
+    state:      dict,
+    model:      GenerativeModel,
+    candidates: List[str],
+    horizon:    int = 3,
+    beam_width: int = 5,
+) -> Tuple[List[str], float]:
+    """Beam search over k-step policies by cumulative G(π).
+
+    Each beam = (cumulative_G, policy_so_far, predicted_state).
+    At each step: expand each beam with all candidates → keep top-beam_width.
+    Returns (best_policy, best_G).  Complexity: O(beam_width × |cand| × h).
+    """
+
+# planning.py — AIFEngine additions:
+# AIFEngine._beam_decide(state): called by decide() when policy_horizon > 1
+#   - calls beam_search(); returns first action of best policy
+#   - reason string: 'AIF-beam:G=4.500,h=3,len=3'
+# AIFEngine.decide(): routes to _beam_decide() when policy_horizon > 1
 ```
-policy_horizon = k  # evaluate k-step action sequences
 
-candidate_policies = beam_search(
-    root_state = current_state,
-    transition = generative_model.transition,
-    horizon    = k,
-    beam_width = 10,
-)
-# Returns top-10 k-step policies by cumulative G(π)
+**Key insight from smoke test:**
+- h=1: greedy epistemic wins (novel actions → full epistemic bonus)
+- h=2: correctly sequences `go east → take apple` (G=5.0, beats all h=2 alternatives)
+- h=3: first action correct; textworld_test.py --plan still 3/3 PASS
 
-best_policy = argmin G(π) over candidate_policies
-action = best_policy[0]  # execute first step
-```
+**MPC (Model Predictive Control) execution:**
+Policy is a commitment of intent, not a sequence of actions to execute blindly.
+Only the first action is executed; policy is re-evaluated each step with
+updated observations.  This allows course-correction when predictions are wrong.
 
-For the new game: k=3 is likely sufficient for near-term planning.
+For the new game: k=3 is sufficient for near-term planning.
 For complex multi-minute decisions: Level 3 planner uses k=10+.
 
 ---
@@ -478,7 +497,7 @@ For complex multi-minute decisions: Level 3 planner uses k=10+.
 | R5 — Goal Learning | COMPLETE | 2026-03-07 | `goal_learning.py` written (`discover_goals`, `DiscoveredGoal`, `update_generative_model`); smoke test PASS |
 | R6 — Visual Symbol Learning | COMPLETE | 2026-03-07 | `visual_symbol.py`; VisualSymbolLearner + discover_visual_symbols(); smoke test PASS |
 | R7 — New Game Adapter | COMPLETE | 2026-03-07 | `action.py` (Action type hierarchy) + `screen_modality.py` (ScreenModality base); smoke test PASS |
-| R8 — Multi-step Rollouts | PENDING | — | After R3 + R7 |
+| R8 — Multi-step Rollouts | COMPLETE | 2026-03-07 | `beam_search()` in generative_model.py; AIFEngine._beam_decide(); backward compat 3/3 PASS |
 
 ---
 
