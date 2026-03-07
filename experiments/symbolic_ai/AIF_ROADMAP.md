@@ -1,6 +1,6 @@
 # Phase R: Active Inference Engine — Complete Roadmap
 
-**Status: IN PROGRESS — started 2026-03-07**
+**Status: IN PROGRESS — started 2026-03-07 — R0–R5 complete**
 **Track progress at the bottom of this file.**
 
 ---
@@ -262,7 +262,7 @@ Phase R3 is single-step look-ahead. Multi-step rollouts come in Phase R8.
 - Level 2 (medium, ~1s): AIFEngine — minimise action-level expected free energy
 - Level 3 (slow, ~10s): Deliberate planner — multi-step EFE over goals
 
-**Status:** PENDING
+**Status:** COMPLETE (2026-03-07)
 
 ### File: `vision_cortex.py` (extend existing)
 
@@ -300,34 +300,50 @@ FovealAttention
 
 **Goal:** Discover preferences from experience; eliminate manual goal specification.
 
-**Status:** PENDING
+**Status:** COMPLETE (2026-03-07)
 
-### File: `synthesis.py` (add function)
+### File: `goal_learning.py` (new dedicated module)
 
 ```python
+# goal_learning.py — DiscoveredGoal + discover_goals() + update_generative_model()
+
 def discover_goals(
-    causal_history:  List[Tuple[dict, str, dict, float]],   # (s, a, s', reward)
-    generative_model: GenerativeModel,
-    drives:          List[Drive],
-    min_observations: int = 5,
-) -> List[PreferenceFactor]:
+    causal_history:      List[Tuple[dict, str, dict, float]],   # (s, a, s', reward)
+    drives:              List[Drive],
+    min_support:         int   = 3,
+    min_confidence:      float = 0.5,
+    min_lift:            float = 1.2,
+    max_goals_per_drive: int   = 5,
+    skip_keys:           Optional[List[str]] = None,
+) -> List[DiscoveredGoal]:
     """
-    Discover PreferenceFactor objects from observed causal history.
+    Discover goal-relevant PreferenceFactor objects from causal history.
 
-    Algorithm:
-    1. For each drive D, find actions A where D.deficit(s') < D.deficit(s).
-       These are 'drive-reducing actions': the agent observes that A reduces D.
-    2. Find state features that PREDICT when A reduces D (regression).
-    3. Create PreferenceFactor: prefer states containing these features when D has deficit.
-    4. Update generative_model.preferences with discovered factors.
+    Algorithm (per Drive D):
+    1. Partition transitions: drive_reduced = deficit_before - deficit_after > 0.01
+    2. Feature statistics: conditional P(feature=val | drive_reduced) over prev_state
+    3. Filter by support ≥ min_support, confidence ≥ min_confidence, lift ≥ min_lift
+    4. Sort by information_gain (KL divergence bits), return top-max_goals_per_drive
 
-    Returns new/updated preference factors (sorted by confidence).
+    Returns List[DiscoveredGoal] sorted by information_gain descending.
+    Each DiscoveredGoal has: drive_name, feature_key, feature_value,
+      confidence, support, base_rate, drive_urgency, evidence (≤10 transitions).
+    Properties: lift (= confidence / base_rate), information_gain (KL bits).
+    Method: to_preference_factor(scale=5.0) → PreferenceFactor for GenerativeModel.
     """
+
+def update_generative_model(
+    generative_model, causal_history, drives, scale=5.0, verbose=False, **kwargs
+) -> int:
+    """Convenience: discover_goals() → to_preference_factor() → model.preferences.append()"""
 ```
 
+**Design note:** Placed in dedicated `goal_learning.py` (not `synthesis.py`) to
+keep template-based program synthesis separate from statistical causal inference.
+
 This replaces manual `FEPGoal(...)` specifications. The agent observes that
-"eating food when hungry reduces hunger deficit" and automatically generates
-a preference for states where food is in inventory when hunger is active.
+"kitchen+take_apple reduces hunger" and automatically generates a preference
+for states where `location='kitchen'` when hunger drive has deficit.
 
 ---
 
@@ -430,8 +446,8 @@ For complex multi-minute decisions: Level 3 planner uses k=10+.
 | R1 — GenerativeModel | COMPLETE | 2026-03-07 | `generative_model.py` written |
 | R2 — VariationalBelief | COMPLETE | 2026-03-07 | `perception.py` written |
 | R3 — AIFEngine | COMPLETE | 2026-03-07 | Added to `planning.py` |
-| R4 — FovealAttention | PENDING | — | Requires vision_cortex.py extension |
-| R5 — Goal Learning | PENDING | — | `discover_goals()` in synthesis.py |
+| R4 — FovealAttention | COMPLETE | 2026-03-07 | `FovealAttention` added to `vision_cortex.py`; smoke test PASS |
+| R5 — Goal Learning | COMPLETE | 2026-03-07 | `goal_learning.py` written (`discover_goals`, `DiscoveredGoal`, `update_generative_model`); smoke test PASS |
 | R6 — Visual Symbol Learning | PENDING | — | Requires R4 complete |
 | R7 — New Game Adapter | PENDING | — | After R0–R5 complete |
 | R8 — Multi-step Rollouts | PENDING | — | After R3 + R7 |
