@@ -615,14 +615,17 @@ class AffordanceModel:
 
     # ------------------------------------------------------------------
 
-    def record(self, state: dict, action: str, success: bool) -> None:
+    def record(
+        self, state: dict, action: str, success: bool,
+        loc_key: str = 'location', inv_key: str = 'inventory',
+    ) -> None:
         """Record one action attempt.
 
         Call this after every environment step via
         ``DecisionEngine.feedback()``.
         """
-        loc   = state.get('location', '')
-        inv   = frozenset(state.get('inventory', []))
+        loc   = state.get(loc_key, '')
+        inv   = frozenset(state.get(inv_key, []))
         feats = _featurise(loc, inv)
         key   = (loc, action)
 
@@ -711,22 +714,58 @@ class DecisionEngine:
 
     def __init__(
         self,
-        goals:        List[Any],
-        affordances:  AffordanceModel,
-        goal_stack:   Optional[GoalStack]      = None,
-        episodic:     Optional[EpisodicBuffer]  = None,
-        belief:       Optional[BeliefState]    = None,
+        goals:           List[Any],
+        affordances:     AffordanceModel,
+        goal_stack:      Optional[GoalStack]     = None,
+        episodic:        Optional[EpisodicBuffer] = None,
+        belief:          Optional[BeliefState]   = None,
+        is_nav_fn:       Optional[Callable]      = None,
+        state_loc_key:   str                     = 'location',
+        state_inv_key:   str                     = 'inventory',
+        state_score_key: str                     = 'score',
     ) -> None:
+        """
+        Parameters
+        ----------
+        goals           Goal/FEPGoal list (domain-specific; built by the caller).
+        affordances     AffordanceModel (shared across episodes).
+        goal_stack      Optional GoalStack for hierarchical decomposition.
+        episodic        Optional EpisodicBuffer.
+        belief          Optional BeliefState.
+        is_nav_fn       Callable ``(action: str) -> bool`` — returns True if the
+                        action is a navigation attempt (so its failure can be
+                        detected when location is unchanged).  Default: matches
+                        TextWorld-style "go <dir>" or bare direction words.
+                        Override for games with different action formats.
+        state_loc_key   Key in the state dict that holds the current location.
+                        Default 'location'.  Change to 'room', 'position', etc.
+        state_inv_key   Key for inventory list.  Default 'inventory'.
+        state_score_key Key for numeric score.  Default 'score'.
+        """
         # Initial static sort (safety first, then by static priority upper bound).
         self.goals = sorted(
             goals,
             key=lambda g: (-g.priority - (0.001 if g.is_safety else 0.0)),
         )
-        self.affordances = affordances
-        self.goal_stack  = goal_stack if goal_stack is not None else GoalStack()
-        self.episodic    = episodic
-        self.belief      = belief
-        self._step:      int = 0
+        self.affordances     = affordances
+        self.goal_stack      = goal_stack if goal_stack is not None else GoalStack()
+        self.episodic        = episodic
+        self.belief          = belief
+        self._step:    int   = 0
+        self._loc_key        = state_loc_key
+        self._inv_key        = state_inv_key
+        self._score_key      = state_score_key
+
+        # Navigation detection: parameterized to avoid game-specific hardcoding.
+        if is_nav_fn is not None:
+            self._is_nav = is_nav_fn
+        else:
+            # Default: TextWorld/MUD-style "go <dir>" or bare cardinal direction.
+            _NAV_WORDS: FrozenSet[str] = frozenset(
+                {'north', 'south', 'east', 'west', 'up', 'down'})
+            def _default_is_nav(action: str) -> bool:
+                return action.startswith('go ') or action in _NAV_WORDS
+            self._is_nav = _default_is_nav
 
     # ------------------------------------------------------------------
 
@@ -820,29 +859,32 @@ class DecisionEngine:
 
         self._step += 1
 
-        # Detect navigation failure.
-        _NAV_WORDS = {'north', 'south', 'east', 'west', 'up', 'down'}
-        is_nav  = action.startswith('go ') or action in _NAV_WORDS
+        # Detect navigation failure using parameterized is_nav function.
+        is_nav  = self._is_nav(action)
         success = True
         if is_nav:
-            success = prev_state.get('location') != new_state.get('location')
+            success = (prev_state.get(self._loc_key) !=
+                       new_state.get(self._loc_key))
 
-        self.affordances.record(prev_state, action, success)
+        self.affordances.record(
+            prev_state, action, success,
+            loc_key=self._loc_key, inv_key=self._inv_key,
+        )
 
         # --- EpisodicBuffer update ----------------------------------------
         if self.episodic is not None:
-            prev_score  = float(prev_state.get('score', 0) or 0)
-            new_score   = float(new_state.get('score', 0) or 0)
+            prev_score  = float(prev_state.get(self._score_key, 0) or 0)
+            new_score   = float(new_state.get(self._score_key, 0) or 0)
             score_delta = new_score - prev_score
-            prev_inv    = set(prev_state.get('inventory', []))
-            new_inv     = set(new_state.get('inventory', []))
+            prev_inv    = set(prev_state.get(self._inv_key, []))
+            new_inv     = set(new_state.get(self._inv_key, []))
             acquired    = list(new_inv - prev_inv)
             lost        = list(prev_inv - new_inv)
             delta: Dict[str, Any] = {
                 'acquired':    acquired,
                 'lost':        lost,
                 'score_delta': score_delta,
-                'moved_to':    new_state.get('location') if success and is_nav else None,
+                'moved_to':    new_state.get(self._loc_key) if success and is_nav else None,
             }
             surprise = min(1.0,
                 abs(score_delta) * 0.5
@@ -858,7 +900,7 @@ class DecisionEngine:
                 outcome = 'success'
             self.episodic.add(EpisodicEntry(
                 step=self._step,
-                location=prev_state.get('location', ''),
+                location=prev_state.get(self._loc_key, ''),
                 action=action,
                 outcome=outcome,
                 delta=delta,
