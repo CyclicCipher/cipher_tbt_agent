@@ -1,7 +1,7 @@
 # Category Theory Knowledge Graph (CTKG) — Design Document
 
-**Date:** 2026-02-16 (updated 2026-02-19)
-**Status:** Universal type system + DSL parser + arithmetic domain + sheaf consistency + logic domain + epistemic reasoning implemented.
+**Date:** 2026-02-16 (updated 2026-03-05)
+**Status:** Universal type system + DSL parser + arithmetic domain + sheaf consistency + logic domain + epistemic reasoning + standalone symbolic AI runtime implemented.
 **Context:** Mistake #44 showed that missing prerequisites between counting and arithmetic caused the model to memorize instead of compose. A knowledge graph with structural constraints would have caught this automatically — like a compiler catching a missing import. This motivates building the CTKG as a general-purpose infrastructure component, not just a curriculum tool.
 
 ---
@@ -66,14 +66,19 @@ Every concept's `process` field uses operations from three levels. Higher levels
 
 | Primitive | Signature | Meaning |
 |-----------|-----------|---------|
-| `succ(x)` | ordered T → T | Next element |
-| `pred(x)` | ordered T → T | Previous element |
+| `succ(x)` | ordered T → T | Next element (non-wrapping integer) |
+| `pred(x)` | ordered T → T | Previous element (non-wrapping integer) |
 | `compare(a, b)` | ordered T × T → {GT, LT, EQ} | Comparison |
-| `lookup(table, key)` | Table × Key → Value | Finite function |
-| `fold(seq, init, step)` | seq(T) × S × (S×T→S) → S | Reduce sequence |
-| `scan(seq, init, step)` | seq(T) × S × (S×T→S) → seq(S) | Running fold |
-| `count(seq, filter)` | seq(T) × Pred → nat | Count matches |
-| `emit(x)` | T → output | Produce token |
+| `lookup(concept, *args)` | concept × args → tuple | Call a named concept (returns tuple) |
+| `fold(n, init, step)` | nat × S × (S→S) → S | Apply step n times from init |
+| `fold_until(max, init, step, stop)` | nat × S × (S→S) × (S→bool) → S | fold with early exit; bounded by max |
+| `fn(param, body)` | — | Lexical-scope closure (special form) |
+| `pair(a, b)` | T × U → tuple(T,U) | Two-element tuple constructor |
+| `triple(a, b, c)` | T × U × V → tuple(T,U,V) | Three-element tuple constructor |
+| `first(s)` | tuple(T,...) → T | First element |
+| `second(s)` | tuple(T,...) → T | Second element |
+| `third(s)` | tuple(T,...) → T | Third element |
+| `emit(x, ...)` | T... → output | Produce output tuple |
 | `if(c, then, else)` | bool × T × T → T | Conditional |
 
 **Level 2 — Logic** (reasoning about values):
@@ -90,16 +95,52 @@ Every concept's `process` field uses operations from three levels. Higher levels
 
 **Level 3 — Transform** (operating on expressions as data):
 
+Implemented as **Level C — Symbolic AST** (tagged Python tuples; interpreter.py):
+
 | Primitive | Signature | Meaning |
 |-----------|-----------|---------|
-| `quote(expr)` | T → expr | Reify expression |
-| `match(expr, pattern)` | expr × pattern → bindings | Pattern match |
-| `substitute(expr, var, val)` | expr × name × T → expr | Replace variable |
-| `rewrite(expr, rule)` | expr × rule → expr | Apply transformation |
-| `decompose(expr)` | expr → seq(expr) | Break into parts |
-| `compose(a, b)` | expr × expr → expr | Combine expressions |
+| `sym_num(n)` | int → expr | Numeric constant node |
+| `sym_var(name)` | str → expr | Variable node (use literal X, Y, Z, T) |
+| `sym_add(e1, e2)` | expr × expr → expr | Addition node (constant-folds) |
+| `sym_sub(e1, e2)` | expr × expr → expr | Subtraction node (= sym_add + sym_neg) |
+| `sym_mul(e1, e2)` | expr × expr → expr | Multiplication node (constant-folds) |
+| `sym_pow(e, n)` | expr × nat → expr | Power node (constant-folds) |
+| `sym_neg(e)` | expr → expr | Negation node |
+| `sym_eval(expr, var, val)` | expr × str × int → int | Numerically evaluate at a point |
+| `sym_diff(expr, var)` | expr × str → expr | Differentiate (power + product rule) |
+| `sym_subst(expr, var, replacement)` | expr × str × expr → expr | Substitute sub-expression |
+| `sym_str(expr)` | expr → str | Human-readable string |
+
+Expressions are tagged Python tuples: `('NUM', n)`, `('VAR', 'X')`, `('ADD', e1, e2)`, `('MUL', e1, e2)`, `('POW', e, n)`, `('NEG', e)`. Constructors constant-fold (e.g., `sym_add(('NUM',2), ('NUM',3))` → `('NUM',5)`).
+
+**Still unimplemented from original Level 3 plan:** `quote`, `match`, `rewrite`, `decompose`, `compose` — needed for grammar induction and algorithm synthesis. `sym_match` is the next required primitive for linguistics/pattern tasks.
 
 Level 1 lets you DO arithmetic. Level 2 lets you PROVE things about arithmetic. Level 3 lets you IMPROVE algorithms (meta-reasoning, code-as-data).
+
+### Primitive Minimality
+
+The implemented primitives form a practical set. The theoretical minimum (fewest primitives for equivalent expressiveness):
+
+**Definitively redundant — can be removed with zero expressiveness loss:**
+- `triple(a,b,c)` = `pair(a, pair(b, c))`
+- `third(s)` = `second(second(s))`
+- `sym_sub(e1, e2)` = `sym_add(e1, sym_neg(e2))`
+- `equal(a, b)` = the `==` syntactic operator already in the language
+
+**Derivable but kept for readability:**
+- `pred(n)` — derivable as `fold_until` with stop on succ reaching n; kept because it's a genuine primitive (biological number sense)
+- `compare(a, b)` — derivable from repeated succ/pred; kept for performance and clarity
+- `fold(n, init, step)` — special case of `fold_until` with no stop condition; kept because simpler templates synthesize addition, multiplication
+- `sym_neg(e)` — = `sym_sub(sym_num(0), e)`; kept for convenience
+
+**Genuine theoretical minimum (17 forms):**
+`succ`, `fold_until`, `fn`, `if`, `pair`, `first`, `second`, `lookup`, `emit`,
+`sym_num`, `sym_var`, `sym_add`, `sym_mul`, `sym_pow`, `sym_diff`, `sym_eval`, `sym_subst`
+
+**Still missing for full completeness:**
+- `sym_match` — pattern matching on expression trees (needed for grammar/linguistics)
+- Float arithmetic — needed for real-valued physics/control domains
+- Sequence primitives beyond pairs — `seq_cons`, `seq_head`, `seq_tail`
 
 ### Type Validation (IMPLEMENTED)
 
@@ -1243,6 +1284,64 @@ The epistemic reasoning system directly addresses the three failure modes identi
 2. **Information boundary collapse** → Assumption contexts make explicit which facts depend on which premises, preventing the model from treating derived results as ground truth.
 
 3. **Missing MIMO hypothesis tracking** → Challenge edges externalize parallel hypotheses into the graph structure. The model doesn't need to spontaneously generate alternatives — the graph tells it where alternatives exist.
+
+---
+
+## Symbolic AI Runtime (IMPLEMENTED)
+
+The process language defined in `.ctkg` files is now fully executable. The `experiments/symbolic_ai/` system demonstrates that a structured symbolic reasoner can generalize from ≤10 examples with 100% accuracy — vs. Mamba3 (1.26M params, 50 epochs, 100 examples) achieving ~45% test accuracy on the same task (Mistake #42).
+
+### Architecture
+
+```
+experiments/symbolic_ai/
+├── interpreter.py   — ProcessInterpreter: executes process lines (List[str] → outputs)
+├── memory.py        — ExampleStore: stores examples + KL divergence metric
+├── synthesis.py     — Synthesizer: template-based program synthesis (consolidation)
+├── engine.py        — SymbolicAI: ties interpreter + memory + synthesizer together
+└── run_experiment.py — 11-phase arithmetic + symbolic differentiation experiment
+```
+
+### 11-Phase Experiment Results
+
+| Phase | What | Result |
+|-------|------|--------|
+| 1 | Built-in ops (succ, pred, compare) | PASS |
+| 2 | Learn addition from 20 examples | PASS (100%, discovers fold+succ+carry) |
+| 3 | Learn subtraction from 15 examples | PASS (100%, discovers fold+pred+borrow) |
+| 4 | Minimum examples sweep | PASS (succeeds at N=2) |
+| 5 | Prerequisite enforcement | PASS (synthesis blocked without ancestors) |
+| 6 | Learn multiplication from 10 examples | PASS (double-nested fold+fn) |
+| 7 | Learn exponentiation from 10 examples | PASS (triple-nested fold+fn) |
+| 8 | Learn division from 10 examples | PASS (fold_until template) |
+| 9 | Verify remainder (lookup process) | PASS (90/90) |
+| 10 | Verify GCD (Euclidean, fold_until+lookup) | PASS (81/81) |
+| 11 | Symbolic differentiation (Level C) | PASS (23/23) |
+
+### Synthesis Templates
+
+The `Synthesizer` walks templates from simplest to most complex until one is consistent with all stored examples. Templates are gated by the concept's transitive ancestors in the CTKG — if `successor` is not in the ancestor set, no fold+succ template is generated, so addition synthesis fails correctly (Phase 5).
+
+| Level | Lines | Template | Requires |
+|-------|-------|----------|---------|
+| 1 | 1 | `emit(succ(a))` | successor ancestor |
+| 1 | 1 | `emit(pred(a))` | predecessor ancestor |
+| 1 | 1 | `emit(compare(a,b))` | comparison ancestor |
+| 2 | 2 | `result = fold(x, y, succ); emit(result)` | successor |
+| 2 | 4 | fold + carry detection | successor |
+| 2 | 4 | fold + borrow detection | predecessor |
+| 3 | 2 | double-nested fold via fn (multiplication) | successor |
+| 4 | 2 | triple-nested fold via fn (exponentiation) | successor |
+| 5 | 3 | fold_until with pair state (division) | predecessor + comparison |
+
+### Key Design Decisions
+
+- **Integer succ, not digit succ.** `fold(b, a, succ)` for addition requires succ to be non-wrapping. The digit constraint applies only to I/O types, not intermediate values.
+- **Constant folding in sym_* constructors.** `sym_add(('NUM',2), ('NUM',3))` → `('NUM',5)` at construction time.
+- **X, Y, Z, T are literals.** Added to `_LITERALS` frozenset so they resolve as strings, not env lookups. Enables `sym_var(X)` → `('VAR', 'X')`.
+- **lookup() always returns tuple.** Use `first(lookup(...))` to extract a scalar.
+- **fold_until has hard safety cap.** max_steps is always set to an input variable, guaranteeing termination in at most max_steps steps. Cannot infinite-loop.
+- **`ai._interp`** is the ProcessInterpreter attribute in SymbolicAI (private, not `ai.interpreter`).
 
 ---
 

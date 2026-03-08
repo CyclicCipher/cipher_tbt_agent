@@ -32,13 +32,17 @@ import re
 
 from .graph import (
     Adjunction,
+    CausalEdge,
     Challenge,
+    CompositionEdge,
     Concept,
     Functor,
+    InstanceEdge,
     Interface,
     KnowledgeGraph,
     Override,
     Prerequisite,
+    TemporalEdge,
     TypeDef,
 )
 
@@ -258,8 +262,14 @@ def _parse_type_list(text: str) -> List[str]:
 # ---------------------------------------------------------------------------
 
 def _parse_concept(block: Block, source: str = '') -> Tuple[
-        Concept, List[Prerequisite], List[Challenge], List[Override]]:
-    """Parse a concept block into a Concept, prerequisites, challenges, overrides."""
+        Concept, List[Prerequisite], List[Challenge], List[Override],
+        List[CausalEdge], List[CompositionEdge], List[InstanceEdge], List[TemporalEdge]]:
+    """Parse a concept block into a Concept plus all edge lists.
+
+    Returns an 8-tuple:
+        (concept, prerequisites, challenges, overrides,
+         causal_edges, composition_edges, instance_edges, temporal_edges)
+    """
     name = block.name
     domain = ''
     description = ''
@@ -273,6 +283,10 @@ def _parse_concept(block: Block, source: str = '') -> Tuple[
     prereqs: List[Prerequisite] = []
     challenges: List[Challenge] = []
     overrides_list: List[Override] = []
+    causal_edges: List[CausalEdge] = []
+    composition_edges: List[CompositionEdge] = []
+    instance_edges: List[InstanceEdge] = []
+    temporal_edges: List[TemporalEdge] = []
     tier = 'theorem'
     assumes: List[str] = []
     defaults: Dict[str, str] = {}
@@ -400,6 +414,89 @@ def _parse_concept(block: Block, source: str = '') -> Tuple[
             while i + 1 < len(fields) and fields[i + 1].indent > base_indent:
                 i += 1
                 process_lines.append(fields[i].content)
+
+        elif keyword == 'causes':
+            # causes NAME via "ROLE" [prob] [delay=N] [guard="EXPR"]
+            # All qualifiers after 'via' are optional.
+            ce_parts = rest.split(' via ', 1)
+            ce_target = ce_parts[0].strip()
+            ce_role = ''
+            ce_prob = 1.0
+            ce_delay = 0
+            ce_guard = ''
+            if len(ce_parts) > 1:
+                tail = ce_parts[1]
+                # Extract guard="..." (quoted string)
+                guard_m = re.search(r'\bguard="([^"]*)"', tail)
+                if guard_m:
+                    ce_guard = guard_m.group(1)
+                    tail = tail[:guard_m.start()] + tail[guard_m.end():]
+                # Extract delay=N
+                delay_m = re.search(r'\bdelay=(\d+)', tail)
+                if delay_m:
+                    ce_delay = int(delay_m.group(1))
+                    tail = tail[:delay_m.start()] + tail[delay_m.end():]
+                # Extract [probability]
+                prob_m = re.search(r'\[(\d*\.?\d+)\]\s*$', tail)
+                if prob_m:
+                    ce_prob = float(prob_m.group(1))
+                    tail = tail[:prob_m.start()]
+                ce_role = _parse_string(tail.strip())
+            causal_edges.append(CausalEdge(
+                source=name,
+                target=ce_target,
+                role=ce_role,
+                guard=ce_guard,
+                delay_steps=ce_delay,
+                probability=ce_prob,
+            ))
+
+        elif keyword == 'composes_into':
+            # composes_into NAME via "ROLE" [prob]
+            ci_parts = rest.split(' via ', 1)
+            ci_target = ci_parts[0].strip()
+            ci_role = ''
+            ci_prob = 1.0
+            if len(ci_parts) > 1:
+                tail = ci_parts[1]
+                prob_m = re.search(r'\[(\d*\.?\d+)\]\s*$', tail)
+                if prob_m:
+                    ci_prob = float(prob_m.group(1))
+                    tail = tail[:prob_m.start()]
+                ci_role = _parse_string(tail.strip())
+            composition_edges.append(CompositionEdge(
+                source=name,
+                target=ci_target,
+                role=ci_role,
+                probability=ci_prob,
+            ))
+
+        elif keyword == 'instance_of':
+            # instance_of NAME via "ROLE"
+            io_parts = rest.split(' via ', 1)
+            io_target = io_parts[0].strip()
+            io_role = ''
+            if len(io_parts) > 1:
+                io_role = _parse_string(io_parts[1].strip())
+            instance_edges.append(InstanceEdge(
+                source=name,
+                target=io_target,
+                role=io_role,
+            ))
+
+        elif keyword == 'precedes':
+            # precedes NAME via "ROLE"
+            pr_parts = rest.split(' via ', 1)
+            pr_target = pr_parts[0].strip()
+            pr_role = ''
+            if len(pr_parts) > 1:
+                pr_role = _parse_string(pr_parts[1].strip())
+            temporal_edges.append(TemporalEdge(
+                source=name,
+                target=pr_target,
+                role=pr_role,
+            ))
+
         else:
             raise ParseError(
                 f"Unknown concept field: '{keyword}'",
@@ -423,7 +520,8 @@ def _parse_concept(block: Block, source: str = '') -> Tuple[
         defaults=defaults,
     )
 
-    return concept, prereqs, challenges, overrides_list
+    return (concept, prereqs, challenges, overrides_list,
+            causal_edges, composition_edges, instance_edges, temporal_edges)
 
 
 # ---------------------------------------------------------------------------
@@ -578,8 +676,9 @@ def parse(text: str, source: str = '') -> KnowledgeGraph:
             graph.add_type(typedef)
 
         elif block.kind == 'concept':
-            concept, prereqs, challenges, overrides_list = _parse_concept(
-                block, source)
+            (concept, prereqs, challenges, overrides_list,
+             causal_edges, composition_edges, instance_edges,
+             temporal_edges) = _parse_concept(block, source)
             graph.add_concept(concept)
             for p in prereqs:
                 graph.add_prerequisite(p)
@@ -587,6 +686,14 @@ def parse(text: str, source: str = '') -> KnowledgeGraph:
                 graph.add_challenge(ch)
             for ov in overrides_list:
                 graph.add_override(ov)
+            for e in causal_edges:
+                graph.add_causal_edge(e)
+            for e in composition_edges:
+                graph.add_composition_edge(e)
+            for e in instance_edges:
+                graph.add_instance_edge(e)
+            for e in temporal_edges:
+                graph.add_temporal_edge(e)
 
         elif block.kind == 'functor':
             functor = _parse_functor(block, source)
@@ -626,6 +733,14 @@ def merge(target: KnowledgeGraph, source: KnowledgeGraph) -> None:
         target.add_challenge(ch)
     for ov in source.overrides:
         target.add_override(ov)
+    for e in source.causal_edges:
+        target.add_causal_edge(e)
+    for e in source.composition_edges:
+        target.add_composition_edge(e)
+    for e in source.instance_edges:
+        target.add_instance_edge(e)
+    for e in source.temporal_edges:
+        target.add_temporal_edge(e)
     target.functors.update(source.functors)
     target.adjunctions.update(source.adjunctions)
     target.interfaces.update(source.interfaces)

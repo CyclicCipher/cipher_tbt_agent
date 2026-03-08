@@ -182,6 +182,86 @@ concept two_digit_arithmetic
     emit(tens_carry, tens, ones)
 
 -- =========================================================================
+-- Stage 9: Multiplication (repeated addition via fn)
+-- =========================================================================
+
+concept multiplication
+  domain arithmetic
+  description "a * b by folding b additions of a onto 0: fold(b, 0, fn(k, fold(a, k, succ)))"
+  input digit digit
+  output nat
+  requires successor via "succ is the only primitive needed; multiplication is repeated addition via fn-closure"
+  process
+    result = fold(b, 0, fn(k, fold(a, k, succ)))
+    emit(result)
+
+-- =========================================================================
+-- Stage 10: Exponentiation (repeated multiplication via nested fn)
+-- =========================================================================
+
+concept exponentiation
+  domain arithmetic
+  description "a ^ b by folding b multiplications of a onto 1: fold(b, 1, fn(acc, fold(a, 0, fn(k, fold(acc, k, succ)))))"
+  input digit digit
+  output nat
+  requires multiplication via "exponentiation is repeated multiplication"
+  requires successor via "succ is still the only primitive — triple-nested fold with fn"
+  process
+    result = fold(b, 1, fn(acc, fold(a, 0, fn(k, fold(acc, k, succ)))))
+    emit(result)
+
+-- =========================================================================
+-- Stage 11: Division — floor(a / b) via bounded repeated subtraction
+-- =========================================================================
+
+concept division
+  domain arithmetic
+  description "floor(a / b): count how many times b fits into a by repeated subtraction; bounded by a steps"
+  input digit digit
+  output nat
+  requires predecessor via "subtraction (fold+pred) is the step operation"
+  requires comparison via "stop condition: remaining < divisor"
+  process
+    state = fold_until(a, pair(a, 0), fn(s, pair(fold(b, first(s), pred), second(s) + 1)), fn(s, compare(first(s), b) == LT))
+    result = second(state)
+    emit(result)
+
+-- =========================================================================
+-- Stage 12: Remainder — a mod b = a - floor(a/b) * b
+-- =========================================================================
+
+concept remainder
+  domain arithmetic
+  description "a mod b: what remains after division; uses lookup(division) + multiply-back then subtract"
+  input digit digit
+  output nat
+  requires division via "quotient = lookup(division, a, b); then compute q*b and subtract"
+  requires successor via "multiply q*b via double-nested fold with succ"
+  requires predecessor via "subtract q*b from a via fold+pred"
+  process
+    q = first(lookup(division, a, b))
+    product = fold(q, 0, fn(k, fold(b, k, succ)))
+    result = fold(product, a, pred)
+    emit(result)
+
+-- =========================================================================
+-- Stage 13: Greatest Common Divisor — Euclidean algorithm
+-- =========================================================================
+
+concept greatest_common_divisor
+  domain arithmetic
+  description "GCD(a,b): Euclidean algorithm; while b != 0, (a,b) = (b, a mod b); return a"
+  input digit digit
+  output nat
+  requires remainder via "Euclidean step: replace (a,b) with (b, a mod b)"
+  requires comparison via "stop condition via equal(second(s), 0)"
+  process
+    budget = a + b
+    state = fold_until(budget, pair(a, b), fn(s, pair(second(s), first(lookup(remainder, first(s), second(s))))), fn(s, equal(second(s), 0)))
+    result = first(state)
+    emit(result)
+
+-- =========================================================================
 -- Adjunction: addition / subtraction are inverses
 -- =========================================================================
 
@@ -197,4 +277,4 @@ adjunction add_sub
 
 interface arithmetic
   exports types digit carry op cmp_result arith_result column_result
-  exports concepts successor predecessor comparison single_digit_addition single_digit_subtraction two_digit_arithmetic
+  exports concepts successor predecessor comparison single_digit_addition single_digit_subtraction two_digit_arithmetic multiplication exponentiation division remainder greatest_common_divisor

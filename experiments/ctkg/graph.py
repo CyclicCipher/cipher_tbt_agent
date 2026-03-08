@@ -278,6 +278,89 @@ class Override:
 
 
 # ---------------------------------------------------------------------------
+# New edge types (Phase B — Minecraft world model)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CausalEdge:
+    """A physical causal edge: source action/event produces target state/item.
+
+    Distinct from Prerequisite (epistemic): 'requires' is about what the
+    *agent must know*; 'causes' is about what the *world does*.
+
+    Categorically: a morphism in Kleisli(State × FinStoch) — a stochastic
+    map from (world state × triggering event) to the resulting state.
+    The kernel is state-dependent when guard is non-empty:
+        P(target | source, state) = probability if guard(state) else 0.0
+
+    Conditional causation via guard:
+        break(log) causes wood_drop  [1.0]
+        use_bed    causes sleep      [guard="equal(time_of_day,NIGHT)"]
+        use_bed    causes sleep      [guard="equal(weather,STORM)"]
+    Two edges with different guards model OR conditions (coproduct).
+    """
+    source: str           # triggering concept (action or event)
+    target: str           # produced concept (state or item)
+    role: str             # human-readable description
+    guard: str = ''       # process-language boolean ('' = unconditional)
+    delay_steps: int = 0  # game-tick delay (0 = same tick)
+    probability: float = 1.0  # base rate when guard is satisfied
+
+
+@dataclass
+class CompositionEdge:
+    """Multi-input product morphism: A₁ ⊗ A₂ ⊗ ... → B.
+
+    Models crafting recipes and multi-step plans where several concepts
+    combine to produce a single output.  Each CompositionEdge declares
+    one contributing concept; the full recipe has multiple edges sharing
+    the same target.
+
+    Categorically: a pullback — arrow from multiple inputs to one output.
+    The adjoint (decomposes_to) is optional; not all composition is reversible.
+    """
+    source: str           # one contributing concept
+    target: str           # the composed product concept
+    role: str             # human-readable description of the contribution
+    probability: float = 1.0
+
+
+@dataclass
+class InstanceEdge:
+    """Subtype / instance-of morphism: source is a specific case of target.
+
+    Induces spans (A ← supertype → B) that represent analogy without a
+    separate 'analogous_to' edge:
+        oak_log ← log → birch_log
+    Both are instance_of log, so they are structurally analogous.
+
+    MDL signal: if one process template covers all instances of a supertype,
+    merge them into a shared supertype concept (Functor already implements this).
+
+    Categorically: a forgetful functor from the subtype category to the
+    supertype category.
+    """
+    source: str           # the instance (e.g., 'oak_log')
+    target: str           # the supertype (e.g., 'log')
+    role: str             # human-readable description
+
+
+@dataclass
+class TemporalEdge:
+    """Sequential composition in time: source must occur before target.
+
+    Models action plans where step ordering matters.  A chain of TemporalEdge
+    edges defines a sequential plan (composition in the monoidal time monoid).
+    Steps without a TemporalEdge between them are concurrent (A ⊗ B).
+
+    Categorically: composition in a monoidal category with a time object.
+    """
+    source: str           # must-occur-first concept
+    target: str           # must-occur-after concept
+    role: str             # human-readable description
+
+
+# ---------------------------------------------------------------------------
 # Validation errors
 # ---------------------------------------------------------------------------
 
@@ -479,8 +562,19 @@ class KnowledgeGraph:
         self.functors: Dict[str, Functor] = {}
         self.adjunctions: Dict[str, Adjunction] = {}
         self.interfaces: Dict[str, Interface] = {}
-        self._children: Dict[str, Set[str]] = {}  # parent -> children
-        self._parents: Dict[str, Set[str]] = {}   # child -> parents
+        self._children: Dict[str, Set[str]] = {}  # parent -> children (prerequisite)
+        self._parents: Dict[str, Set[str]] = {}   # child -> parents (prerequisite)
+
+        # Phase B: world-model edge types
+        self.causal_edges: List[CausalEdge] = []
+        self.composition_edges: List[CompositionEdge] = []
+        self.instance_edges: List[InstanceEdge] = []
+        self.temporal_edges: List[TemporalEdge] = []
+        # Adjacency for causal traversal (forward planning)
+        self._causal_children: Dict[str, Set[str]] = {}  # source -> {targets}
+        # Adjacency for instance hierarchy (span-based analogy)
+        self._instance_parents: Dict[str, Set[str]] = {}   # instance -> {supertypes}
+        self._instance_children: Dict[str, Set[str]] = {}  # supertype -> {instances}
 
     # ---------------------------------------------------------------
     # Type registry
@@ -517,6 +611,30 @@ class KnowledgeGraph:
     def add_override(self, override: Override) -> None:
         """Add an override (instance-level exception to a default)."""
         self.overrides.append(override)
+
+    def add_causal_edge(self, edge: CausalEdge) -> None:
+        """Add a causal edge (physical causation with optional guard/delay)."""
+        self.causal_edges.append(edge)
+        self._causal_children.setdefault(edge.source, set()).add(edge.target)
+        # Ensure adjacency entries exist for both endpoints
+        self._causal_children.setdefault(edge.target, set())
+
+    def add_composition_edge(self, edge: CompositionEdge) -> None:
+        """Add a composition edge (multi-input product morphism)."""
+        self.composition_edges.append(edge)
+
+    def add_instance_edge(self, edge: InstanceEdge) -> None:
+        """Add an instance-of edge (subtype hierarchy)."""
+        self.instance_edges.append(edge)
+        self._instance_parents.setdefault(edge.source, set()).add(edge.target)
+        self._instance_children.setdefault(edge.target, set()).add(edge.source)
+        # Ensure entries exist for both endpoints
+        self._instance_parents.setdefault(edge.target, set())
+        self._instance_children.setdefault(edge.source, set())
+
+    def add_temporal_edge(self, edge: TemporalEdge) -> None:
+        """Add a temporal edge (sequential action ordering)."""
+        self.temporal_edges.append(edge)
 
     # -------------------------------------------------------------------
     # Validation (Use Case 1: Curriculum Compiler)
@@ -636,6 +754,45 @@ class KnowledgeGraph:
                         f"Assumption '{assumption}' not defined as a concept. "
                         f"Referenced by: {', '.join(refs)}"))
 
+        # 10. New edge type validation (Phase B)
+        # Check that all new-edge endpoints exist in the graph.
+        for e in self.causal_edges:
+            if e.source not in concept_names:
+                errors.append(MissingPrerequisite(
+                    f"CausalEdge '{e.source}' -> '{e.target}': "
+                    f"source '{e.source}' not in graph"))
+            if e.target not in concept_names:
+                errors.append(MissingPrerequisite(
+                    f"CausalEdge '{e.source}' -> '{e.target}': "
+                    f"target '{e.target}' not in graph"))
+        for e in self.composition_edges:
+            if e.source not in concept_names:
+                errors.append(MissingPrerequisite(
+                    f"CompositionEdge '{e.source}' -> '{e.target}': "
+                    f"source '{e.source}' not in graph"))
+            if e.target not in concept_names:
+                errors.append(MissingPrerequisite(
+                    f"CompositionEdge '{e.source}' -> '{e.target}': "
+                    f"target '{e.target}' not in graph"))
+        for e in self.instance_edges:
+            if e.source not in concept_names:
+                errors.append(MissingPrerequisite(
+                    f"InstanceEdge '{e.source}' -> '{e.target}': "
+                    f"source '{e.source}' not in graph"))
+            if e.target not in concept_names:
+                errors.append(MissingPrerequisite(
+                    f"InstanceEdge '{e.source}' -> '{e.target}': "
+                    f"supertype '{e.target}' not in graph"))
+        for e in self.temporal_edges:
+            if e.source not in concept_names:
+                errors.append(MissingPrerequisite(
+                    f"TemporalEdge '{e.source}' -> '{e.target}': "
+                    f"source '{e.source}' not in graph"))
+            if e.target not in concept_names:
+                errors.append(MissingPrerequisite(
+                    f"TemporalEdge '{e.source}' -> '{e.target}': "
+                    f"target '{e.target}' not in graph"))
+
         return errors
 
     # -------------------------------------------------------------------
@@ -694,6 +851,51 @@ class KnowledgeGraph:
                 visited.add(node)
                 stack.extend(self._children.get(node, set()))
         return visited
+
+    def causal_descendants(self, name: str) -> Set[str]:
+        """All concepts reachable from `name` via CausalEdge (forward planning).
+
+        Traverses only causal edges (physical causation), not prerequisite
+        edges (epistemic ordering).  Used by the agent to answer:
+        "What will eventually happen if I do X?"
+
+        Example: causal_descendants('break_log') might return
+        {'obtain_log', 'achieve_getting_wood'} — everything that
+        break_log causally enables (directly or transitively).
+        """
+        visited: Set[str] = set()
+        stack = list(self._causal_children.get(name, set()))
+        while stack:
+            node = stack.pop()
+            if node not in visited:
+                visited.add(node)
+                stack.extend(self._causal_children.get(node, set()))
+        return visited
+
+    def analogous_concepts(self, name: str) -> Set[str]:
+        """Concepts analogous to `name` via shared instance_of supertype.
+
+        Two concepts are analogous if they share at least one common
+        supertype in the instance hierarchy (they are both instances of
+        the same supertype, forming a span).
+
+        Example: analogous_concepts('oak_log') returns {'birch_log',
+        'spruce_log', ...} — all concepts that share the 'log' supertype.
+        No explicit 'analogous_to' edge is needed; the span (A ← log → B)
+        implies analogy.
+
+        Returns the empty set if `name` has no instance_of edges.
+        """
+        # Find all supertypes of name
+        supertypes = self._instance_parents.get(name, set())
+        if not supertypes:
+            return set()
+        # Union of all sibling instances (all concepts sharing any supertype)
+        siblings: Set[str] = set()
+        for supertype in supertypes:
+            siblings.update(self._instance_children.get(supertype, set()))
+        siblings.discard(name)  # exclude self
+        return siblings
 
     def frontier(self, learned: Set[str]) -> Set[str]:
         """Concepts whose prerequisites are all learned but aren't yet learned."""
@@ -870,6 +1072,18 @@ class KnowledgeGraph:
         new_graph.functors = dict(self.functors)
         new_graph.adjunctions = dict(self.adjunctions)
         new_graph.interfaces = dict(self.interfaces)
+        # Carry new edge types — causal edges targeting intervened concepts
+        # are severed (the do-operator breaks incoming physical causation too)
+        for e in self.causal_edges:
+            if e.target not in do_concepts:
+                new_graph.add_causal_edge(e)
+        for e in self.composition_edges:
+            if e.target not in do_concepts:
+                new_graph.add_composition_edge(e)
+        for e in self.instance_edges:
+            new_graph.add_instance_edge(e)
+        for e in self.temporal_edges:
+            new_graph.add_temporal_edge(e)
         return new_graph
 
     # -------------------------------------------------------------------
@@ -1148,6 +1362,14 @@ class KnowledgeGraph:
             self.add_challenge(ch)
         for ov in source.overrides:
             self.add_override(ov)
+        for e in source.causal_edges:
+            self.add_causal_edge(e)
+        for e in source.composition_edges:
+            self.add_composition_edge(e)
+        for e in source.instance_edges:
+            self.add_instance_edge(e)
+        for e in source.temporal_edges:
+            self.add_temporal_edge(e)
         self.functors.update(source.functors)
         self.adjunctions.update(source.adjunctions)
         self.interfaces.update(source.interfaces)

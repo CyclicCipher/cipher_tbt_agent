@@ -138,7 +138,29 @@ Design note on succ:
 from __future__ import annotations
 
 import re
-from typing import Any, Callable, Dict, FrozenSet, List, Optional, Tuple
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, Set, Tuple
+
+
+# ---------------------------------------------------------------------------
+# Phase D: dry-run protection
+# ---------------------------------------------------------------------------
+
+class DryRunError(RuntimeError):
+    """Raised when an effectful primitive is called in dry-run mode.
+
+    Synthesis always runs in dry-run mode so that template testing never
+    sends live commands to the game environment.  If a template requires
+    an effectful primitive (e.g. mc_attack), this error is raised and the
+    template is skipped.
+
+    Catch this in _test_template() to safely reject action-dependent templates.
+    """
+    def __init__(self, primitive_name: str):
+        self.primitive_name = primitive_name
+        super().__init__(
+            f"Effectful primitive {primitive_name!r} called in dry-run mode. "
+            f"This template requires a live game environment."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +230,8 @@ class _Parser:
         engine_ask: Optional[Callable],
         concept_names: FrozenSet[str],
         modality_fns: Optional[Dict[str, Callable]] = None,
+        dry_run: bool = False,
+        effectful_fns: Optional[Set[str]] = None,
     ):
         self.tokens = tokens
         self.pos = 0
@@ -215,6 +239,8 @@ class _Parser:
         self.engine_ask = engine_ask
         self.concept_names = concept_names
         self.modality_fns: Dict[str, Callable] = modality_fns if modality_fns is not None else {}
+        self.dry_run: bool = dry_run
+        self.effectful_fns: Set[str] = effectful_fns if effectful_fns is not None else set()
 
     def peek(self) -> Optional[Tuple[str, Any]]:
         if self.pos < len(self.tokens):
@@ -314,21 +340,28 @@ class _Parser:
                     self.consume()  # closing ')' of fn(...)
 
                     # Build lexically-scoped closure.
-                    captured_env    = dict(self.env)
-                    captured_ask    = self.engine_ask
-                    captured_cnames = self.concept_names
-                    captured_mfns   = self.modality_fns
+                    captured_env      = dict(self.env)
+                    captured_ask      = self.engine_ask
+                    captured_cnames   = self.concept_names
+                    captured_mfns     = self.modality_fns
+                    captured_dry_run  = self.dry_run
+                    captured_effectfl = self.effectful_fns
 
-                    def _make_closure(param, tokens, base_env, ask, cnames, mfns):
+                    def _make_closure(param, tokens, base_env, ask, cnames, mfns,
+                                      dry_run, effectful):
                         def _closure(arg_val: Any) -> Any:
                             call_env = dict(base_env)
                             call_env[param] = arg_val
-                            return _Parser(tokens, call_env, ask, cnames, mfns).parse_expr()
+                            return _Parser(
+                                tokens, call_env, ask, cnames, mfns,
+                                dry_run=dry_run, effectful_fns=effectful,
+                            ).parse_expr()
                         return _closure
 
                     return _make_closure(
                         param_name, body_tokens,
                         captured_env, captured_ask, captured_cnames, captured_mfns,
+                        captured_dry_run, captured_effectfl,
                     )
                 # ----------------------------------------------------------
 
@@ -780,6 +813,8 @@ class _Parser:
             return seq[1:]
 
         elif name in self.modality_fns:
+            if self.dry_run and name in self.effectful_fns:
+                raise DryRunError(name)
             return self.modality_fns[name](*args)
 
         else:
@@ -1273,9 +1308,17 @@ class ProcessInterpreter:
         # Modality primitives registered via register_modality().
         # Keys are function names (e.g. 'img_dog'); values are callables.
         self._modality_fns: Dict[str, Callable] = {}
+        # Phase D: names of effectful primitives (may not be called in dry-run mode).
+        self._effectful_fns: Set[str] = set()
+        # Internal flag set during run() when dry_run=True.
+        self._dry_run: bool = False
 
     def register_modality(self, modality: 'Modality') -> None:  # type: ignore[name-defined]
         """Register all primitives from a Modality into the interpreter.
+
+        If the modality exposes an EFFECTFUL class attribute (a set of
+        primitive names), those names are marked as effectful and will
+        raise DryRunError if called during synthesis (dry-run mode).
 
         After registration, process lines may call e.g. 'img = img_load(path)'
         and the interpreter will dispatch to the modality's implementation.
@@ -1285,14 +1328,26 @@ class ProcessInterpreter:
         primitive names all start with 'img_'.
         """
         self._modality_fns.update(modality.primitives)
+        # Register effectful names for dry-run protection (Phase D).
+        if hasattr(modality, 'EFFECTFUL'):
+            self._effectful_fns.update(modality.EFFECTFUL)
 
     def run(
         self,
         process_lines: List[str],
         inputs: tuple,
         input_type: List[str],
+        dry_run: bool = False,
     ) -> tuple:
-        """Execute process_lines with given inputs; return the emitted tuple."""
+        """Execute process_lines with given inputs; return the emitted tuple.
+
+        Args:
+            dry_run: If True, effectful primitives (e.g. mc_attack) raise
+                     DryRunError instead of executing.  Always True during
+                     synthesis so that template testing never sends live
+                     game commands.
+        """
+        self._dry_run = dry_run
         env = self._make_env(inputs, input_type)
 
         # Inject built-in function references so fold(n, init, succ) works.
@@ -1377,5 +1432,7 @@ class ProcessInterpreter:
             engine_ask=self.engine_ask,
             concept_names=self.concept_names,
             modality_fns=self._modality_fns,
+            dry_run=self._dry_run,
+            effectful_fns=self._effectful_fns,
         )
         return parser.parse_expr()

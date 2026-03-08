@@ -22,6 +22,8 @@ from experiments.ctkg.graph import (
     TypeDef, BUILTIN_TYPES, UndefinedType, SheafViolation,
     ChallengedConjecture, UngroundedAssumption,
     Interface, Challenge, Override, types_compatible, MasteryState,
+    CausalEdge, CompositionEdge, InstanceEdge, TemporalEdge,
+    MissingPrerequisite,
 )
 from experiments.ctkg.domains.arithmetic import build_arithmetic_graph
 from experiments.ctkg.domains.logic import build_logic_graph
@@ -134,9 +136,11 @@ def test_arithmetic_domain():
         if cname not in graph.concepts:
             errors.append(f"Missing concept: {cname}")
 
-    # Concept count
-    if len(graph.concepts) != 9:
-        errors.append(f"Expected 9 concepts, got {len(graph.concepts)}")
+    # Concept count (arithmetic.ctkg has grown: counting, ordinality, comparison,
+    # single-digit +/-, two-digit ±, multiplication, exponentiation, division,
+    # remainder, GCD = 14 concepts as of Phase B)
+    if len(graph.concepts) != 14:
+        errors.append(f"Expected 14 concepts, got {len(graph.concepts)}")
 
     # All concepts should be in arithmetic domain
     for c in graph.concepts.values():
@@ -164,9 +168,9 @@ def test_arithmetic_domain():
 
     # --- Prerequisites ---
     prereq_count = len(graph.prerequisites)
-    if prereq_count != 12:
+    if prereq_count != 22:
         edges = [(p.source, p.target) for p in graph.prerequisites]
-        errors.append(f"Expected 12 prerequisites, got {prereq_count}: {edges}")
+        errors.append(f"Expected 22 prerequisites, got {prereq_count}: {edges}")
 
     # --- Adjunction ---
     if 'add_sub' not in graph.adjunctions:
@@ -279,9 +283,9 @@ def test_curriculum_generation():
     if stages[-1].concept.name != 'two_digit_arithmetic':
         errors.append(f"Last stage: {stages[-1].concept.name}")
 
-    # Should have 9 stages
-    if len(stages) != 9:
-        errors.append(f"Expected 9 stages, got {len(stages)}")
+    # Should have 14 stages (one per concept in arithmetic domain)
+    if len(stages) != 14:
+        errors.append(f"Expected 14 stages, got {len(stages)}")
 
     # Each stage's replay should only contain ancestors
     for s in stages:
@@ -301,8 +305,8 @@ def test_summary():
     summary = graph.summary()
 
     errors = []
-    if '9 concepts' not in summary:
-        errors.append(f"Summary should mention 9 concepts: {summary}")
+    if '14 concepts' not in summary:
+        errors.append(f"Summary should mention 14 concepts: {summary}")
     if 'custom types' not in summary:
         errors.append(f"Summary should mention custom types: {summary}")
 
@@ -1245,6 +1249,480 @@ concept foo
 
 
 # ---------------------------------------------------------------------------
+# Phase B: new edge type tests
+# ---------------------------------------------------------------------------
+
+def test_causal_edges():
+    """Test that 'causes' edges parse correctly with all optional qualifiers."""
+    text = """
+concept state_B
+  domain test
+  description "result state"
+
+concept side_effect
+  domain test
+  description "optional side effect"
+
+concept guarded_result
+  domain test
+  description "conditional result"
+
+concept trigger
+  domain test
+  description "trigger concept"
+  causes state_B via "produces B" [0.80] delay=3
+  causes side_effect via "causes side effect"
+  causes guarded_result via "conditional" [0.60] guard="health < 10"
+"""
+    graph = parse(text)
+    errors = []
+
+    trigger_edges = [e for e in graph.causal_edges if e.source == 'trigger']
+    if len(trigger_edges) != 3:
+        errors.append(
+            f"Expected 3 causal edges from trigger, got {len(trigger_edges)}")
+        return errors
+
+    by_target = {e.target: e for e in trigger_edges}
+
+    # causes state_B via "produces B" [0.80] delay=3
+    e1 = by_target.get('state_B')
+    if not e1:
+        errors.append("Missing causal edge trigger -> state_B")
+    else:
+        if abs(e1.probability - 0.80) > 1e-9:
+            errors.append(
+                f"state_B probability: {e1.probability}, expected 0.80")
+        if e1.delay_steps != 3:
+            errors.append(
+                f"state_B delay_steps: {e1.delay_steps}, expected 3")
+        if e1.role != 'produces B':
+            errors.append(f"state_B role: {e1.role!r}, expected 'produces B'")
+        if e1.guard != '':
+            errors.append(f"state_B guard: {e1.guard!r}, expected ''")
+
+    # causes side_effect via "causes side effect"  (defaults)
+    e2 = by_target.get('side_effect')
+    if not e2:
+        errors.append("Missing causal edge trigger -> side_effect")
+    else:
+        if abs(e2.probability - 1.0) > 1e-9:
+            errors.append(
+                f"side_effect probability: {e2.probability}, expected 1.0")
+        if e2.delay_steps != 0:
+            errors.append(
+                f"side_effect delay_steps: {e2.delay_steps}, expected 0")
+
+    # causes guarded_result via "conditional" [0.60] guard="health < 10"
+    e3 = by_target.get('guarded_result')
+    if not e3:
+        errors.append("Missing causal edge trigger -> guarded_result")
+    else:
+        if abs(e3.probability - 0.60) > 1e-9:
+            errors.append(
+                f"guarded_result probability: {e3.probability}, expected 0.60")
+        if e3.guard != 'health < 10':
+            errors.append(
+                f"guarded_result guard: {e3.guard!r}, expected 'health < 10'")
+
+    return errors
+
+
+def test_composition_edges():
+    """Test that 'composes_into' edges parse correctly."""
+    text = """
+concept crafting_table
+  domain minecraft
+  description "a crafting table"
+
+concept wooden_pickaxe
+  domain minecraft
+  description "a wooden pickaxe"
+
+concept log
+  domain minecraft
+  description "a log"
+  composes_into crafting_table via "4 planks to table" [0.95]
+  composes_into wooden_pickaxe via "planks for head" [0.90]
+"""
+    graph = parse(text)
+    errors = []
+
+    log_edges = [e for e in graph.composition_edges if e.source == 'log']
+    if len(log_edges) != 2:
+        errors.append(
+            f"Expected 2 composition edges from log, got {len(log_edges)}")
+        return errors
+
+    by_target = {e.target: e for e in log_edges}
+
+    e1 = by_target.get('crafting_table')
+    if not e1:
+        errors.append("Missing composition edge log -> crafting_table")
+    else:
+        if abs(e1.probability - 0.95) > 1e-9:
+            errors.append(
+                f"crafting_table probability: {e1.probability}, expected 0.95")
+        if e1.role != '4 planks to table':
+            errors.append(
+                f"crafting_table role: {e1.role!r}, expected '4 planks to table'")
+
+    e2 = by_target.get('wooden_pickaxe')
+    if not e2:
+        errors.append("Missing composition edge log -> wooden_pickaxe")
+    else:
+        if abs(e2.probability - 0.90) > 1e-9:
+            errors.append(
+                f"wooden_pickaxe probability: {e2.probability}, expected 0.90")
+
+    return errors
+
+
+def test_instance_of_and_analogous():
+    """Test 'instance_of' edges and analogous_concepts() span traversal."""
+    text = """
+concept animal
+  domain biology
+  description "abstract animal"
+
+concept vehicle
+  domain biology
+  description "abstract vehicle"
+
+concept dog
+  domain biology
+  description "a dog"
+  instance_of animal via "dogs are animals"
+
+concept cat
+  domain biology
+  description "a cat"
+  instance_of animal via "cats are animals"
+
+concept car
+  domain biology
+  description "a car"
+  instance_of vehicle via "cars are vehicles"
+"""
+    graph = parse(text)
+    errors = []
+
+    if len(graph.instance_edges) != 3:
+        errors.append(
+            f"Expected 3 instance edges, got {len(graph.instance_edges)}")
+        return errors
+
+    dog_edge = next(
+        (e for e in graph.instance_edges if e.source == 'dog'), None)
+    if not dog_edge:
+        errors.append("Missing instance_of edge for dog")
+    elif dog_edge.target != 'animal':
+        errors.append(f"dog -> {dog_edge.target!r}, expected 'animal'")
+    elif dog_edge.role != 'dogs are animals':
+        errors.append(f"dog role: {dog_edge.role!r}, expected 'dogs are animals'")
+
+    # analogous_concepts(dog): shares 'animal' supertype with cat, not car
+    dog_analogs = graph.analogous_concepts('dog')
+    if 'cat' not in dog_analogs:
+        errors.append(
+            f"cat should be analogous to dog via animal: {dog_analogs}")
+    if 'car' in dog_analogs:
+        errors.append(
+            f"car should NOT be analogous to dog (different supertype): "
+            f"{dog_analogs}")
+    if 'dog' in dog_analogs:
+        errors.append(f"dog should NOT be its own analog: {dog_analogs}")
+    if 'animal' in dog_analogs:
+        errors.append(
+            f"supertype 'animal' should not appear in analogs: {dog_analogs}")
+
+    # analogous_concepts(cat): should find dog
+    cat_analogs = graph.analogous_concepts('cat')
+    if 'dog' not in cat_analogs:
+        errors.append(f"dog should be analogous to cat: {cat_analogs}")
+
+    # analogous_concepts(car): no shared supertypes with dog/cat
+    car_analogs = graph.analogous_concepts('car')
+    if 'dog' in car_analogs or 'cat' in car_analogs:
+        errors.append(
+            f"car analogs should not include animals: {car_analogs}")
+
+    # analogous_concepts(animal): no supertype → empty
+    animal_analogs = graph.analogous_concepts('animal')
+    if animal_analogs:
+        errors.append(
+            f"animal has no supertype, analogs should be empty: {animal_analogs}")
+
+    return errors
+
+
+def test_temporal_edges():
+    """Test that 'precedes' edges parse correctly."""
+    text = """
+concept place_table
+  domain minecraft
+  description "place crafting table"
+
+concept open_table
+  domain minecraft
+  description "open crafting table UI"
+
+concept sequence_start
+  domain minecraft
+  description "trigger sequence"
+  precedes place_table via "must place before opening"
+  precedes open_table via "opens UI after placing"
+"""
+    graph = parse(text)
+    errors = []
+
+    temporal_edges = graph.temporal_edges
+    if len(temporal_edges) != 2:
+        errors.append(
+            f"Expected 2 temporal edges, got {len(temporal_edges)}")
+        return errors
+
+    by_target = {e.target: e for e in temporal_edges}
+
+    e1 = by_target.get('place_table')
+    if not e1:
+        errors.append("Missing temporal edge sequence_start -> place_table")
+    else:
+        if e1.source != 'sequence_start':
+            errors.append(
+                f"Expected source 'sequence_start', got {e1.source!r}")
+        if e1.role != 'must place before opening':
+            errors.append(f"role: {e1.role!r}")
+
+    e2 = by_target.get('open_table')
+    if not e2:
+        errors.append("Missing temporal edge sequence_start -> open_table")
+    else:
+        if e2.role != 'opens UI after placing':
+            errors.append(f"open_table role: {e2.role!r}")
+
+    return errors
+
+
+def test_causal_descendants():
+    """Test causal_descendants() traverses CausalEdge (not Prerequisite) edges."""
+    text = """
+concept A
+  domain test
+  description "root event"
+  causes B via "A triggers B"
+
+concept B
+  domain test
+  description "intermediate event"
+  causes C via "B triggers C" [0.90]
+  causes D via "B triggers D" [0.70]
+
+concept C
+  domain test
+  description "terminal event C"
+
+concept D
+  domain test
+  description "intermediate D"
+  causes E via "D triggers E" [0.80]
+
+concept E
+  domain test
+  description "deep terminal"
+
+concept X
+  domain test
+  description "unreachable from A causally"
+"""
+    graph = parse(text)
+    errors = []
+
+    # causal_descendants('A') should reach B, C, D, E but not X or A itself
+    desc_A = graph.causal_descendants('A')
+    for expected in ('B', 'C', 'D', 'E'):
+        if expected not in desc_A:
+            errors.append(
+                f"{expected} should be a causal descendant of A: {desc_A}")
+    if 'A' in desc_A:
+        errors.append("A should not be its own causal descendant")
+    if 'X' in desc_A:
+        errors.append(f"X should not be a causal descendant of A: {desc_A}")
+
+    # causal_descendants('B') should reach C, D, E but not A
+    desc_B = graph.causal_descendants('B')
+    for expected in ('C', 'D', 'E'):
+        if expected not in desc_B:
+            errors.append(
+                f"{expected} should be a causal descendant of B: {desc_B}")
+    if 'A' in desc_B:
+        errors.append("A should not be a causal descendant of B")
+
+    # causal_descendants('E') is empty (terminal)
+    desc_E = graph.causal_descendants('E')
+    if desc_E:
+        errors.append(
+            f"E has no outgoing causal edges, expected empty: {desc_E}")
+
+    # causal_descendants('X') is empty
+    desc_X = graph.causal_descendants('X')
+    if desc_X:
+        errors.append(
+            f"X has no outgoing causal edges, expected empty: {desc_X}")
+
+    return errors
+
+
+def test_phase_b_validation():
+    """Test that validate() catches missing endpoints in new Phase B edge types."""
+    errors = []
+
+    # CausalEdge with missing target
+    graph_c = parse("""
+concept source_c
+  domain test
+  description "source"
+  causes nonexistent_causal_target via "broken"
+""")
+    errs_c = graph_c.validate(check_types=False)
+    missing_c = [e for e in errs_c
+                 if isinstance(e, MissingPrerequisite) and 'CausalEdge' in e.message]
+    if len(missing_c) != 1:
+        errors.append(
+            f"Expected 1 CausalEdge MissingPrerequisite, "
+            f"got {len(missing_c)}: {errs_c}")
+
+    # CompositionEdge with missing target
+    graph_comp = parse("""
+concept ingredient
+  domain test
+  description "ingredient"
+  composes_into nonexistent_product via "broken composition"
+""")
+    errs_comp = graph_comp.validate(check_types=False)
+    missing_comp = [e for e in errs_comp
+                    if isinstance(e, MissingPrerequisite)
+                    and 'CompositionEdge' in e.message]
+    if len(missing_comp) != 1:
+        errors.append(
+            f"Expected 1 CompositionEdge MissingPrerequisite, "
+            f"got {len(missing_comp)}: {errs_comp}")
+
+    # InstanceEdge with missing supertype
+    graph_i = parse("""
+concept child_c
+  domain test
+  description "child"
+  instance_of nonexistent_supertype via "broken instance"
+""")
+    errs_i = graph_i.validate(check_types=False)
+    missing_i = [e for e in errs_i
+                 if isinstance(e, MissingPrerequisite) and 'InstanceEdge' in e.message]
+    if len(missing_i) != 1:
+        errors.append(
+            f"Expected 1 InstanceEdge MissingPrerequisite, "
+            f"got {len(missing_i)}: {errs_i}")
+
+    # TemporalEdge with missing target
+    graph_t = parse("""
+concept first_step
+  domain test
+  description "first step"
+  precedes nonexistent_second_step via "broken temporal"
+""")
+    errs_t = graph_t.validate(check_types=False)
+    missing_t = [e for e in errs_t
+                 if isinstance(e, MissingPrerequisite) and 'TemporalEdge' in e.message]
+    if len(missing_t) != 1:
+        errors.append(
+            f"Expected 1 TemporalEdge MissingPrerequisite, "
+            f"got {len(missing_t)}: {errs_t}")
+
+    return errors
+
+
+def test_minecraft_domain_phase_b():
+    """Test that minecraft.ctkg loads cleanly with Phase B edges present."""
+    import os
+    mc_path = os.path.join(
+        os.path.dirname(__file__), 'domains', 'minecraft.ctkg')
+    graph = parse_file(mc_path)
+
+    errors = []
+
+    # Phase A sanity: key concepts present
+    expected_concepts = [
+        'motor_forward', 'motor_attack', 'observe_rgb', 'observe_health',
+        'log_detection', 'break_log', 'obtain_log', 'craft_planks',
+        'craft_crafting_table', 'craft_wooden_pickaxe', 'mine_stone',
+        'achieve_getting_wood', 'wooden_material', 'tool',
+    ]
+    for c in expected_concepts:
+        if c not in graph.concepts:
+            errors.append(f"Missing concept: {c}")
+
+    # Phase B: causal edges — break_log causally produces obtain_log
+    causal_targets_from_break = {
+        e.target for e in graph.causal_edges if e.source == 'break_log'}
+    if 'obtain_log' not in causal_targets_from_break:
+        errors.append(
+            f"break_log should causally produce obtain_log; "
+            f"got: {causal_targets_from_break}")
+
+    # causal_descendants of break_log should include obtain_log and craft_planks
+    if 'obtain_log' in graph.concepts and 'craft_planks' in graph.concepts:
+        desc = graph.causal_descendants('break_log')
+        for expected in ('obtain_log', 'craft_planks'):
+            if expected not in desc:
+                errors.append(
+                    f"{expected} should be a causal descendant of break_log: "
+                    f"{desc}")
+
+    # Phase B: instance_of — obtain_log is instance_of wooden_material
+    instance_targets_from_obtain = {
+        e.target for e in graph.instance_edges if e.source == 'obtain_log'}
+    if 'wooden_material' not in instance_targets_from_obtain:
+        errors.append(
+            f"obtain_log should be instance_of wooden_material; "
+            f"got: {instance_targets_from_obtain}")
+
+    # analogous_concepts: obtain_log and craft_planks share wooden_material
+    if 'obtain_log' in graph.concepts and 'craft_planks' in graph.concepts:
+        analogs = graph.analogous_concepts('obtain_log')
+        if 'craft_planks' not in analogs:
+            errors.append(
+                f"craft_planks should be analogous to obtain_log via "
+                f"wooden_material; got: {analogs}")
+
+    # Phase B: composition edges — craft_planks composes_into craft_crafting_table
+    comp_targets_from_planks = {
+        e.target for e in graph.composition_edges
+        if e.source == 'craft_planks'}
+    if not comp_targets_from_planks:
+        errors.append("craft_planks should have at least one composition edge")
+    else:
+        expected_comp = {'craft_crafting_table', 'craft_sticks'}
+        missing_comp = expected_comp - comp_targets_from_planks
+        if missing_comp:
+            errors.append(
+                f"craft_planks missing composition targets: {missing_comp}")
+
+    # Phase B: temporal edges — break_log precedes obtain_log
+    temporal_sources = {e.source for e in graph.temporal_edges}
+    if not temporal_sources:
+        errors.append("minecraft.ctkg should have at least one temporal edge")
+
+    # Full validation — no MissingPrerequisite errors expected
+    val_errors = graph.validate(check_types=False)
+    hard_errors = [e for e in val_errors if isinstance(e, MissingPrerequisite)]
+    if hard_errors:
+        errors.append(
+            f"minecraft.ctkg has unexpected validation errors: {hard_errors}")
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -1274,6 +1752,14 @@ def run_all_tests():
         ('what_if_not()', test_what_if_not),
         ('Ungrounded assumption', test_ungrounded_assumption),
         ('Tier parse error', test_tier_parse_error),
+        # Phase B: new edge types
+        ('Causal edges (causes)', test_causal_edges),
+        ('Composition edges (composes_into)', test_composition_edges),
+        ('Instance-of edges + analogous_concepts()', test_instance_of_and_analogous),
+        ('Temporal edges (precedes)', test_temporal_edges),
+        ('causal_descendants()', test_causal_descendants),
+        ('Phase B validation (missing endpoints)', test_phase_b_validation),
+        ('Minecraft domain (Phase B)', test_minecraft_domain_phase_b),
     ]
 
     total = 0
