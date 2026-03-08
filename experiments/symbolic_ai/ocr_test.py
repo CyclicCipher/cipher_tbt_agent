@@ -43,11 +43,23 @@ Usage
     # Read a single line image
     python ocr_test.py --line data/GT4HistOCR/corpus/EarlyModernLatin/1668-Leviathan-Hobbes/00002.bin.png
 
-    # Use a non-default GlyphReader
-    python ocr_test.py --reader glyph_reader_tits.pkl
+    # Use a non-default GlyphReader (e.g. one trained on real historical fonts)
+    python ocr_test.py --reader glyph_reader_hist.pkl
 
     # Run Phase O POS clustering on all read text
     python ocr_test.py --pos
+
+Training on real historical fonts (forced alignment)
+-----------------------------------------------------
+The baseline PIL-trained reader gives CER~0.95 because it learned from tiny
+bitmap fonts.  To train on the actual GT4HistOCR images:
+
+    python train_ocr.py                          # EarlyModernLatin (default)
+    python train_ocr.py --corpus all             # all 5 corpora
+    python train_ocr.py --n 2000                 # limit lines (faster)
+
+Then evaluate:
+    python ocr_test.py --reader glyph_reader_hist.pkl
 """
 from __future__ import annotations
 
