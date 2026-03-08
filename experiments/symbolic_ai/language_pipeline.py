@@ -791,14 +791,13 @@ def build_cluster_word_dists(
     train_texts: list,
     verbose:     bool = True,
 ) -> dict:
-    """Frequency-weighted word distribution for each cluster.
+    """Frequency-weighted word distribution for each cluster (member-word similarity).
 
-    Weights cluster members by corpus frequency, giving more influence to
-    frequent words when comparing cluster similarity via JSD.
+    Weights cluster members by corpus frequency.  This measures lexical overlap
+    between clusters — which words ARE in each cluster.  Use
+    build_cluster_succ_dists() for the task-relevant similarity instead.
     """
     import collections
-    _banner('Phase E3: Building cluster word distributions')
-
     word_freq: collections.Counter = collections.Counter()
     for text in train_texts:
         word_freq.update(text.split())
@@ -809,12 +808,64 @@ def build_cluster_word_dists(
         cluster_dists[cid] = {w: word_freq.get(w, 1) / freq_total for w in members}
 
     if verbose:
-        print(f'  Clusters with word distributions: {len(cluster_dists)}')
         for cid in sorted(cluster_dists.keys())[:3]:
             top = sorted(cluster_dists[cid].items(), key=lambda kv: -kv[1])[:4]
-            print(f'    C{cid:02d}: {" ".join(f"{w}({p:.3f})" for w, p in top)}')
+            print(f'    C{cid:02d} members: {" ".join(f"{w}({p:.3f})" for w, p in top)}')
 
     return cluster_dists
+
+
+def build_cluster_succ_dists(
+    ai:       'SymbolicAI',
+    clusters: dict,
+    verbose:  bool = True,
+) -> dict:
+    """Successor-distribution for each cluster (task-relevant similarity).
+
+    For next-word prediction, two clusters are similar if words in them tend to
+    be followed by the same words — not if they contain the same words.
+
+    succ_dist[c] = frequency-weighted average of ask_dist('next_word_hier', (w,))
+                   over all words w in cluster c.
+
+    This captures the SYNTACTIC ROLE of each cluster: preposition-clusters
+    and verb-clusters have very different successor distributions even if they
+    share no member words.  It is the correct similarity for next-word prediction
+    because it measures interchangeability of contexts, not lexical overlap.
+    """
+    import collections
+    _banner('Phase E3: Building cluster successor distributions')
+
+    succ_dists: dict = {}
+    n_words_used = 0
+
+    for cid, members in clusters.items():
+        merged: dict = collections.defaultdict(float)
+        total_weight = 0.0
+
+        for word in members:
+            dist = ai.ask_dist('next_word_hier', (word,))
+            if dist is None:
+                continue
+            # The dist keys are tuples like ('est',); sum probabilities per word.
+            for out_tup, prob in dist.items():
+                nw = out_tup[0] if isinstance(out_tup, tuple) else str(out_tup)
+                merged[nw] += prob
+            total_weight += 1.0
+            n_words_used += 1
+
+        if total_weight > 0:
+            succ_dists[cid] = {w: p / total_weight for w, p in merged.items()}
+        else:
+            succ_dists[cid] = {}
+
+    if verbose:
+        print(f'  Words with successor distributions: {n_words_used}')
+        for cid in sorted(succ_dists.keys())[:3]:
+            top = sorted(succ_dists[cid].items(), key=lambda kv: -kv[1])[:4]
+            print(f'    C{cid:02d} successors: {" ".join(f"{w}({p:.3f})" for w, p in top)}')
+
+    return succ_dists
 
 
 def _jsd(p: dict, q: dict) -> float:
@@ -1047,6 +1098,140 @@ def logprob_chain_e3(
 
 
 # ---------------------------------------------------------------------------
+# Phase E3b: Mixture calibration (E1 + E3 interpolation)
+# ---------------------------------------------------------------------------
+
+def tune_mixture_alpha(
+    ai:         'SymbolicAI',
+    dev_texts:  list,
+    assignment: dict,
+    nc_soft:    dict,
+    wgc_soft:   dict,
+    n_grid:     int = 20,
+    verbose:    bool = True,
+) -> float:
+    """Learn α that maximises log-likelihood of P_mix = (1-α)×P_E1 + α×P_E3.
+
+    E1 assigns probability 1 to its prediction when it has an exact match and
+    0 elsewhere.  E3 assigns a soft distribution.  The mixture gives:
+
+        P_mix(w3) = (1-α) × [1 if w3 == E1_pred else 0]
+                  + α     × P_E3(w3)
+
+    When E1 has no match: P_mix(w3) = α × P_E3(w3), so log-prob = log(α) + log(P_E3).
+    When E1 has a match: P_mix(correct) = (1-α) + α×P_E3(correct) ≥ (1-α).
+
+    α is found by 1D grid search over [0.01, 0.99] maximising total log-likelihood
+    on dev_texts.  No gradient descent required.
+    """
+    _banner('Phase E3b: Tuning mixture coefficient α')
+
+    # Pre-collect (E1_prob, E3_prob) pairs for all dev trigrams.
+    # E1_prob = P_E1(w3 | w1, w2): 1.0 if chain predicts correctly, else 0.0
+    # E3_prob = P_E3(w3 | w1, w2): soft probability from wgc_soft
+    pairs = []
+    for text in dev_texts:
+        tokens = text.split()
+        for i in range(len(tokens) - 2):
+            w1, w2, w3 = tokens[i], tokens[i + 1], tokens[i + 2]
+            c1 = assignment.get(w1)
+            c2 = assignment.get(w2)
+            c3 = assignment.get(w3)
+            if c1 is None or c2 is None or c3 is None:
+                continue
+
+            # E1 probability for w3.
+            e1_pred = predict_chain(ai, w1, w2, assignment)
+            p_e1 = 1.0 if e1_pred == w3 else 0.0
+
+            # E3 probability for w3.
+            c3_dist = nc_soft.get((str(c1), str(c2)))
+            if c3_dist is None:
+                continue
+            p_c3 = c3_dist.get((str(c3),), 0.0)
+            if p_c3 < 1e-12:
+                continue
+            w3_dist = wgc_soft.get((str(c1), str(c2), str(c3)))
+            if w3_dist is None:
+                continue
+            p_e3 = p_c3 * w3_dist.get((w3,), 0.0)
+
+            if p_e1 > 0 or p_e3 > 1e-12:
+                pairs.append((p_e1, p_e3))
+
+    if not pairs:
+        if verbose:
+            print('  No dev trigrams usable — α = 0.5 (default)')
+        return 0.5
+
+    # Grid search: α ∈ [0.01, 0.99]
+    best_alpha = 0.5
+    best_ll    = float('-inf')
+    alphas = [i / n_grid for i in range(1, n_grid)]  # 0.05, 0.10, ..., 0.95
+
+    for alpha in alphas:
+        ll = 0.0
+        n  = 0
+        for p_e1, p_e3 in pairs:
+            p_mix = (1 - alpha) * p_e1 + alpha * p_e3
+            if p_mix > 1e-12:
+                ll += math.log2(p_mix)
+                n  += 1
+        if n > 0 and ll > best_ll:
+            best_ll    = ll
+            best_alpha = alpha
+
+    if verbose:
+        print(f'  Dev trigrams with signal: {len(pairs):,}')
+        print(f'  Best α = {best_alpha:.2f}  '
+              f'(log-likelihood = {best_ll:.1f} over {len(pairs)} trigrams)')
+        # Show how LL varies across α for context.
+        sample_alphas = [0.05, 0.1, 0.2, 0.5, best_alpha]
+        for a in sorted(set(sample_alphas)):
+            ll = sum(math.log2(max((1-a)*p1 + a*p3, 1e-12)) for p1, p3 in pairs)
+            print(f'    α={a:.2f}: LL={ll:.1f}')
+
+    return best_alpha
+
+
+def logprob_chain_mix(
+    ai:         'SymbolicAI',
+    w1:         str,
+    w2:         str,
+    w3:         str,
+    assignment: dict,
+    nc_soft:    dict,
+    wgc_soft:   dict,
+    alpha:      float,
+) -> float | None:
+    """Log₂ probability under E1+E3 mixture: P_mix = (1-α)P_E1 + αP_E3."""
+    c1 = assignment.get(w1)
+    c2 = assignment.get(w2)
+    c3 = assignment.get(w3)
+    if c1 is None or c2 is None or c3 is None:
+        return None
+
+    # E1 component.
+    e1_pred = predict_chain(ai, w1, w2, assignment)
+    p_e1 = 1.0 if e1_pred == w3 else 0.0
+
+    # E3 component.
+    c3_dist = nc_soft.get((str(c1), str(c2)))
+    p_e3 = 0.0
+    if c3_dist is not None:
+        p_c3 = c3_dist.get((str(c3),), 0.0)
+        if p_c3 >= 1e-12:
+            w3_dist = wgc_soft.get((str(c1), str(c2), str(c3)))
+            if w3_dist is not None:
+                p_e3 = p_c3 * w3_dist.get((w3,), 0.0)
+
+    p_mix = (1 - alpha) * p_e1 + alpha * p_e3
+    if p_mix < 1e-12:
+        return None
+    return math.log2(p_mix)
+
+
+# ---------------------------------------------------------------------------
 # Main pipeline
 # ---------------------------------------------------------------------------
 
@@ -1165,32 +1350,71 @@ def main() -> None:
 
     if run_e3:
         # ---- Step 7: Build E3 soft retrieval components ----
-        _banner('Phase E3: Soft Retrieval')
+        # Use successor distributions (task-relevant similarity):
+        # sim(c, c') = exp(-T × JSD(succ_dist[c], succ_dist[c']))
+        # where succ_dist[c] = average next-word dist of words in cluster c.
+        # This measures "do words in c and c' predict the same continuations?"
+        # — directly relevant to next-word prediction (not just lexical overlap).
+        _banner('Phase E3: Soft Retrieval (successor-distribution similarity)')
         K = len(clusters)
-        cluster_dists = build_cluster_word_dists(assignment, clusters, train_texts, verbose=True)
+        succ_dists = build_cluster_succ_dists(ai, clusters, verbose=True)
         sim_matrix = build_cluster_similarity_matrix(
-            cluster_dists, K=K, temperature=args.e3_temperature, verbose=True)
+            succ_dists, K=K, temperature=args.e3_temperature, verbose=True)
 
-        print()
         nc_cache  = precompute_dist_cache(ai, 'next_cat')
         wgc_cache = precompute_dist_cache(ai, 'word_given_cat')
-        print(f'  Precomputed dist caches: next_cat={len(nc_cache)} keys, '
+        print(f'\n  Precomputed dist caches: next_cat={len(nc_cache)} keys, '
               f'word_given_cat={len(wgc_cache)} keys')
 
         nc_soft  = precompute_all_soft_dists(nc_cache,  sim_matrix, K, arity=2, verbose=True)
         wgc_soft = precompute_all_soft_dists(wgc_cache, sim_matrix, K, arity=3, verbose=True)
 
+        # ---- Step 8: Tune mixture α on a held-out dev slice ----
+        # Reserve 10% of test data for α tuning (rest goes to evaluation).
+        n_dev = max(len(test_texts) // 10, 20)
+        dev_texts  = test_texts[:n_dev]
+        eval_texts = test_texts[n_dev:]
+        alpha = tune_mixture_alpha(
+            ai, dev_texts, assignment, nc_soft, wgc_soft, verbose=True)
+        print(f'  Mixture α = {alpha:.2f}  '
+              f'(blends E1 exact-match with E3 soft prediction)')
+    else:
+        eval_texts = test_texts
+        alpha = 0.5  # unused
+
     # ---- Evaluation ----
     if args.phase == 'e1':
-        evaluate(ai, test_texts, assignment, train_pairs, verbose=True)
+        evaluate(ai, eval_texts, assignment, train_pairs, verbose=True)
     elif not context_assignment and not run_e3:
         print('  WARNING: E2 clustering failed; falling back to E1-only evaluation.')
-        evaluate(ai, test_texts, assignment, train_pairs, verbose=True)
+        evaluate(ai, eval_texts, assignment, train_pairs, verbose=True)
     else:
-        evaluate_all(ai, test_texts, assignment, context_assignment,
-                     train_pairs,
-                     nc_soft=nc_soft, wgc_soft=wgc_soft,
-                     verbose=True)
+        results = evaluate_all(ai, eval_texts, assignment, context_assignment,
+                               train_pairs,
+                               nc_soft=nc_soft, wgc_soft=wgc_soft,
+                               verbose=True)
+
+        # Extra: report mixture perplexity alongside E3.
+        if run_e3:
+            _banner('Phase E3b: Mixture calibration perplexity')
+            mix_ll = 0.0; mix_n = 0
+            for text in eval_texts:
+                toks = text.split()
+                for i in range(len(toks) - 2):
+                    lp = logprob_chain_mix(
+                        ai, toks[i], toks[i+1], toks[i+2],
+                        assignment, nc_soft, wgc_soft, alpha)
+                    if lp is not None:
+                        mix_ll -= lp; mix_n += 1
+            mix_ppl = 2 ** (mix_ll / mix_n) if mix_n else float('inf')
+            e3_n = results['e3_logloss_n']
+            e3_ppl = 2 ** (results['e3_logloss'] / e3_n) if e3_n else float('inf')
+            print(f'  E3 raw perplexity:      {e3_ppl:.1f}  '
+                  f'(N={e3_n})')
+            print(f'  Mixture (α={alpha:.2f}) PPL: {mix_ppl:.1f}  '
+                  f'(N={mix_n})')
+            print(f'  → mixture reduces perplexity by {e3_ppl/mix_ppl:.1f}×'
+                  if mix_ppl > 0 else '')
 
     # ---- Save ----
     if args.save:
