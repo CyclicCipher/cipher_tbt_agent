@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import concurrent.futures
 import math
 import os
 import sys
@@ -276,13 +277,18 @@ def saliency_map(image, learner: 'VisionLearner', patch_size: int) -> 'np.ndarra
     if rows == 0 or cols == 0:
         return None
 
-    # Extract all patch hashes in scanline order
-    hashes = []
-    for r in range(rows):
-        for c in range(cols):
-            patch = gray[r * patch_size:(r + 1) * patch_size,
-                         c * patch_size:(c + 1) * patch_size]
-            hashes.append(_quantize(_to_gray_f32(patch), learner.quant_bits))
+    # Extract all patch hashes in scanline order (vectorized for quant_bits=3)
+    if learner.quant_bits == 3:
+        gray_cropped = gray[:rows * patch_size, :cols * patch_size]
+        blocks = gray_cropped.reshape(rows, patch_size, cols, patch_size)
+        means = blocks.mean(axis=(1, 3))
+        q = np.clip(np.round(means * 7), 0, 7).astype(np.uint8)
+        hashes = [_GRAY_LUT_3BIT[v] for v in q.ravel()]
+    else:
+        hashes = [_quantize(_to_gray_f32(gray[r * patch_size:(r + 1) * patch_size,
+                                              c * patch_size:(c + 1) * patch_size]),
+                            learner.quant_bits)
+                  for r in range(rows) for c in range(cols)]
 
     # Compute surprise at each position using trained SequenceLearner
     sal = np.full(rows * cols, 1.0, dtype=np.float32)  # default: medium
@@ -484,6 +490,24 @@ def foveal_sequence(image,
     return tokens
 
 
+def _phase2_worker(args):
+    """Extract foveal sequences for one image — called by ThreadPoolExecutor."""
+    (img, peripheral, peripheral_patch, n_fixations,
+     foveal_radius_px, foveal_patch, n_pos_bins, quant_bits, relative_pos) = args
+    sal = saliency_map(img, peripheral, peripheral_patch)
+    if sal is None:
+        return []
+    fixations = select_fixations(sal, peripheral_patch, n_fixations,
+                                 min_dist_px=foveal_radius_px)
+    if not fixations:
+        return []
+    return [seq for px, py in fixations
+            for seq in [foveal_sequence(img, px, py, foveal_radius_px,
+                                        foveal_patch, n_pos_bins,
+                                        quant_bits, relative_pos)]
+            if seq]
+
+
 class FovealVisionLearner:
     """Biologically-inspired dual-scale vision learner.
 
@@ -523,7 +547,8 @@ class FovealVisionLearner:
                  n_peripheral_clusters: int = 32,
                  n_foveal_clusters: int = 64,
                  quant_bits: int = _QUANT_BITS,
-                 relative_pos: bool = True):
+                 relative_pos: bool = True,
+                 n_workers: int = 4):
         """
         Args:
             peripheral_patch:      Coarse patch size for saliency map (pixels).
@@ -537,6 +562,8 @@ class FovealVisionLearner:
             relative_pos:          True (default, V5) → 'D{dr},{dc}' tokens anchored
                                    at fixation centre; False (V4) → 'P{r},{c}' tokens
                                    from crop top-left corner.
+            n_workers:             Thread count for parallel Phase 2 extraction.
+                                   Set to 1 to disable parallelism.
         """
         self.peripheral_patch  = peripheral_patch
         self.foveal_patch      = foveal_patch
@@ -545,6 +572,7 @@ class FovealVisionLearner:
         self.n_pos_bins        = n_pos_bins
         self.quant_bits        = quant_bits
         self.relative_pos      = relative_pos
+        self._n_workers        = n_workers
 
         self.peripheral = VisionLearner(patch_size=peripheral_patch,
                                         quant_bits=quant_bits,
@@ -580,24 +608,21 @@ class FovealVisionLearner:
         # --- Phase 2: foveal ---
         if verbose:
             print('  [Phase 2] Extracting foveal sequences at salient locations...')
-        foveal_seqs: list[list] = []
-        n_empty = 0
-        for img in images:
-            sal = saliency_map(img, self.peripheral, self.peripheral_patch)
-            if sal is None:
-                n_empty += 1
-                continue
-            fixations = select_fixations(sal, self.peripheral_patch,
-                                         self.n_fixations,
-                                         min_dist_px=self.foveal_radius_px)
-            for px, py in fixations:
-                seq = foveal_sequence(img, px, py, self.foveal_radius_px,
-                                      self.foveal_patch, self.n_pos_bins,
-                                      self.quant_bits, self.relative_pos)
-                if seq:
-                    foveal_seqs.append(seq)
-            if not fixations:
-                n_empty += 1
+        args_list = [
+            (img, self.peripheral, self.peripheral_patch, self.n_fixations,
+             self.foveal_radius_px, self.foveal_patch, self.n_pos_bins,
+             self.quant_bits, self.relative_pos)
+            for img in images
+        ]
+        if self._n_workers > 1 and len(images) > 1:
+            with concurrent.futures.ThreadPoolExecutor(
+                    max_workers=self._n_workers) as pool:
+                per_image = list(pool.map(_phase2_worker, args_list))
+        else:
+            per_image = [_phase2_worker(a) for a in args_list]
+
+        foveal_seqs = [seq for seqs in per_image for seq in seqs]
+        n_empty = sum(1 for seqs in per_image if not seqs)
 
         if verbose:
             total_tok = sum(len(s) for s in foveal_seqs)
