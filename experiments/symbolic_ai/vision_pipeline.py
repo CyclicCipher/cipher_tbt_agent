@@ -77,6 +77,35 @@ _COLOR_LUT_FLAT = [f'C{l}{rg}{by}'
                    for by in range(4)]
 
 
+def _peripheral_color_hashes(arr_rgb, patch_size: int, rows: int, cols: int) -> list:
+    """Vectorized opponent-color hashes for a coarse peripheral patch grid.
+
+    Shared by image_to_sequence() (use_color=True) and saliency_map() (when
+    VisionLearner.use_color=True).  Requires numpy to already be imported.
+
+    Args:
+        arr_rgb:    HxWx3 float32 array, values in [0, 1].
+        patch_size: Pixels per patch.
+        rows, cols: Grid dimensions (patches, not pixels).
+
+    Returns:
+        List of color token strings (length rows*cols), e.g. ['C312', 'C021', ...]
+    """
+    import numpy as np
+    crop = arr_rgb[:rows * patch_size, :cols * patch_size]
+    r_ch = crop[..., 0].reshape(rows, patch_size, cols, patch_size).mean(axis=(1, 3))
+    g_ch = crop[..., 1].reshape(rows, patch_size, cols, patch_size).mean(axis=(1, 3))
+    b_ch = crop[..., 2].reshape(rows, patch_size, cols, patch_size).mean(axis=(1, 3))
+    lum    = 0.299 * r_ch + 0.587 * g_ch + 0.114 * b_ch
+    rg_opp = r_ch - g_ch
+    by_opp = b_ch - 0.5 * (r_ch + g_ch)
+    l_bin  = np.clip(np.round(lum * 7),        0, 7).astype(np.uint8)
+    rg_bin = np.clip(np.floor((rg_opp + 1.0) * 2), 0, 3).astype(np.uint8)
+    by_bin = np.clip(np.floor((by_opp + 0.5) * 4), 0, 3).astype(np.uint8)
+    idx = (l_bin * 16 + rg_bin * 4 + by_bin).ravel()
+    return [_COLOR_LUT_FLAT[i] for i in idx]
+
+
 def _load_patch_fns():
     """Import patch helper functions from modalities.visual_symbol."""
     try:
@@ -90,16 +119,19 @@ def image_to_sequence(
     image,
     patch_size: int = _PATCH_SIZE,
     quant_bits: int = _QUANT_BITS,
-) -> list[int]:
+    use_color: bool = False,
+) -> list:
     """Convert a single image to a scanline sequence of patch hashes.
 
     Args:
         image:      HxW or HxWxC numpy array (float32 or uint8).
         patch_size: Pixel size of each square patch.
         quant_bits: Quantization bits for patch hash (3 → 8 bins/channel).
+        use_color:  If True and image has ≥3 channels, emit opponent-color
+                    tokens 'C{l}{rg}{by}' instead of grayscale tokens.
 
     Returns:
-        List of integer patch hashes in scanline order.
+        List of patch hash strings in scanline order.
         Empty list if patch extraction fails or image is too small.
     """
     try:
@@ -115,7 +147,14 @@ def image_to_sequence(
         arr = np.array(image, dtype=np.float32)
         if arr.max() > 1.0:
             arr /= 255.0
+        is_color = use_color and arr.ndim == 3 and arr.shape[2] >= 3
         gray = _to_gray_f32(arr) if arr.ndim > 2 else arr
+        H, W = gray.shape
+        rows, cols = H // patch_size, W // patch_size
+        if rows == 0 or cols == 0:
+            return []
+        if is_color and quant_bits == 3:
+            return _peripheral_color_hashes(arr[..., :3], patch_size, rows, cols)
         patches = _extract_patches(gray, patch_size, patch_size)
         if not patches:
             return []
@@ -151,9 +190,11 @@ class VisionLearner:
 
     def __init__(self, patch_size: int = _PATCH_SIZE,
                  quant_bits: int = _QUANT_BITS,
-                 n_clusters: int = 64):
+                 n_clusters: int = 64,
+                 use_color: bool = False):
         self.patch_size = patch_size
         self.quant_bits = quant_bits
+        self.use_color  = use_color
         self.learner = SequenceLearner(n_clusters=n_clusters)
         self._n_images = 0
 
@@ -167,7 +208,8 @@ class VisionLearner:
         sequences = []
         n_empty = 0
         for img in images:
-            seq = image_to_sequence(img, self.patch_size, self.quant_bits)
+            seq = image_to_sequence(img, self.patch_size, self.quant_bits,
+                                    self.use_color)
             if seq:
                 sequences.append(seq)
             else:
@@ -204,7 +246,8 @@ class VisionLearner:
             frame:   HxW or HxWxC numpy array.
             verbose: Print progress.
         """
-        seq = image_to_sequence(frame, self.patch_size, self.quant_bits)
+        seq = image_to_sequence(frame, self.patch_size, self.quant_bits,
+                                self.use_color)
         if not seq:
             if verbose:
                 print('  calibrate: no patches extracted from frame.')
@@ -226,7 +269,8 @@ class VisionLearner:
             Same dict as SequenceLearner.evaluate().
         """
         test_seqs = [
-            image_to_sequence(img, self.patch_size, self.quant_bits)
+            image_to_sequence(img, self.patch_size, self.quant_bits,
+                              self.use_color)
             for img in test_images
         ]
         test_seqs = [s for s in test_seqs if s]
@@ -234,7 +278,8 @@ class VisionLearner:
         train_pairs: set[tuple] = set()
         if train_images:
             for img in train_images:
-                seq = image_to_sequence(img, self.patch_size, self.quant_bits)
+                seq = image_to_sequence(img, self.patch_size, self.quant_bits,
+                                        self.use_color)
                 for i in range(len(seq) - 1):
                     train_pairs.add((seq[i], seq[i + 1]))
 
@@ -288,8 +333,13 @@ def saliency_map(image, learner: 'VisionLearner', patch_size: int) -> 'np.ndarra
     if rows == 0 or cols == 0:
         return None
 
-    # Extract all patch hashes in scanline order (vectorized for quant_bits=3)
-    if learner.quant_bits == 3:
+    # Extract all patch hashes in scanline order
+    use_color = getattr(learner, 'use_color', False)
+    if use_color and arr.ndim == 3 and arr.shape[2] >= 3 and learner.quant_bits == 3:
+        # Opponent-color peripheral hashes (V12)
+        hashes = _peripheral_color_hashes(arr[..., :3], patch_size, rows, cols)
+    elif learner.quant_bits == 3:
+        # Grayscale vectorized path
         gray_cropped = gray[:rows * patch_size, :cols * patch_size]
         blocks = gray_cropped.reshape(rows, patch_size, cols, patch_size)
         means = blocks.mean(axis=(1, 3))
@@ -637,7 +687,8 @@ class FovealVisionLearner:
                  n_foveal_clusters: int = 64,
                  quant_bits: int = _QUANT_BITS,
                  relative_pos: bool = True,
-                 n_workers: int = 4):
+                 n_workers: int = 4,
+                 peripheral_color: bool = False):
         """
         Args:
             peripheral_patch:      Coarse patch size for saliency map (pixels).
@@ -653,6 +704,9 @@ class FovealVisionLearner:
                                    from crop top-left corner.
             n_workers:             Thread count for parallel Phase 2 extraction.
                                    Set to 1 to disable parallelism.
+            peripheral_color:      If True, peripheral VisionLearner uses opponent-
+                                   color patch tokens instead of grayscale (V12).
+                                   Helps distinguish same-luminance regions by hue.
         """
         self.peripheral_patch  = peripheral_patch
         self.foveal_patch      = foveal_patch
@@ -665,7 +719,8 @@ class FovealVisionLearner:
 
         self.peripheral = VisionLearner(patch_size=peripheral_patch,
                                         quant_bits=quant_bits,
-                                        n_clusters=n_peripheral_clusters)
+                                        n_clusters=n_peripheral_clusters,
+                                        use_color=peripheral_color)
         self.foveal = SequenceLearner(n_clusters=n_foveal_clusters)
         # V6 classification state
         self._known_classes: set = set()
@@ -1065,6 +1120,79 @@ class FovealVisionLearner:
         return {'accuracy': acc, 'correct': correct, 'total': total,
                 'per_class': dict(per_class)}
 
+    def classify_from_sequence(self, seq: list,
+                               laplace_k: float = 1.0) -> str | None:
+        """Classify from a pre-extracted foveal sequence without re-running fixate().
+
+        Same Naive Bayes logic as classify(), but operates on a sequence that
+        was already computed (e.g. a fixation dict's 'sequence' field from
+        scan() or fixate()).  Avoids redundant peripheral saliency + crop work.
+
+        Returns None if teach_class() has not been called, or if no known
+        features appear in the sequence.
+        """
+        if not self._known_classes:
+            return None
+        n_cls = len(self._known_classes)
+        features = self._foveal_seq_to_features(seq)
+        if not features:
+            return None
+        log_scores: dict = {c: 0.0 for c in self._known_classes}
+        n_features = 0
+        for feat in features:
+            counts = self._feat_counts.get(feat)
+            if counts is None:
+                continue
+            total = sum(counts.values())
+            for cls in self._known_classes:
+                p = (counts.get(cls, 0) + laplace_k) / (total + laplace_k * n_cls)
+                log_scores[cls] += math.log2(p)
+            n_features += 1
+        if n_features == 0:
+            return None
+        return max(log_scores, key=log_scores.get)
+
+    def build_scene_graph(self, image, n_saccades: int = 8,
+                          laplace_k: float = 1.0) -> dict:
+        """Build a spatial scene graph via iterative saccades + classification.
+
+        Runs scan() to issue saccades one at a time (with IOR + top-down
+        fill-in), then classifies each fixation's sequence using the V6
+        Naive Bayes head.  Returns a scene graph mapping pixel positions to
+        labelled observations — the foundation for spatial scene reasoning.
+
+        Usage:
+            fvl.teach_class(portrait_imgs, 'portrait')
+            fvl.teach_class(text_imgs,     'text_log')
+            fvl.teach_class(ui_imgs,       'ui')
+
+            scene = fvl.build_scene_graph(screenshot)
+            # → {(320, 240): {'label': 'portrait',  'saliency': 4.2, ...},
+            #    (960, 700): {'label': 'text_log',   'saliency': 3.1, ...}}
+
+            portraits = scene_query(scene, 'portrait')  # list of (px, py)
+
+        Args:
+            image:      Full image (HxW or HxWxC).
+            n_saccades: Max saccades (default 8 — covers a typical TiTS layout).
+            laplace_k:  Laplace smoothing for classifier (default 1.0).
+
+        Returns:
+            Dict mapping (px, py) → {'label': str|None, 'saliency': float,
+                                      'sequence': list}
+            label is None when teach_class() has not been called.
+        """
+        fixations = self.scan(image, n_saccades=n_saccades)
+        scene: dict = {}
+        for fix in fixations:
+            label = self.classify_from_sequence(fix['sequence'], laplace_k)
+            scene[fix['center_px']] = {
+                'label':    label,
+                'saliency': fix['saliency'],
+                'sequence': fix['sequence'],
+            }
+        return scene
+
     def top_features(self, class_label: str, topn: int = 10) -> list:
         """Most discriminative (pos:cluster) features for a class label.
 
@@ -1102,6 +1230,54 @@ class FovealVisionLearner:
             scored.append((feat, p))
 
         return sorted(scored, key=lambda x: -x[1])[:topn]
+
+
+# ---------------------------------------------------------------------------
+# Scene graph spatial query helpers
+# ---------------------------------------------------------------------------
+
+def scene_query(scene: dict, label: str) -> list:
+    """Return all (px, py) fixation positions in scene with the given label."""
+    return [pos for pos, info in scene.items() if info.get('label') == label]
+
+
+def scene_nearest(scene: dict, px: int, py: int) -> tuple | None:
+    """Return the (px, py) of the fixation nearest to (px, py)."""
+    if not scene:
+        return None
+    return min(scene.keys(), key=lambda p: (p[0] - px) ** 2 + (p[1] - py) ** 2)
+
+
+def scene_left_of(scene: dict, px: int) -> list:
+    """All fixation positions with x-coordinate < px."""
+    return [p for p in scene if p[0] < px]
+
+
+def scene_right_of(scene: dict, px: int) -> list:
+    """All fixation positions with x-coordinate > px."""
+    return [p for p in scene if p[0] > px]
+
+
+def scene_above(scene: dict, py: int) -> list:
+    """All fixation positions with y-coordinate < py."""
+    return [p for p in scene if p[1] < py]
+
+
+def scene_below(scene: dict, py: int) -> list:
+    """All fixation positions with y-coordinate > py."""
+    return [p for p in scene if p[1] > py]
+
+
+def scene_summary(scene: dict) -> str:
+    """One-line text summary of the scene graph (label counts + positions)."""
+    from collections import Counter
+    counts = Counter(info.get('label') for info in scene.values())
+    parts = [f"{label}×{n}" for label, n in sorted(counts.items())
+             if label is not None]
+    unlabelled = counts.get(None, 0)
+    if unlabelled:
+        parts.append(f"unlabelled×{unlabelled}")
+    return f"scene({len(scene)} fixations: {', '.join(parts) or 'none classified'})"
 
 
 # ---------------------------------------------------------------------------

@@ -64,6 +64,23 @@ where prediction error ≈ 0.
 
 ## Remaining roadmap
 
+### V10 — Multi-object scene graph ✅ DONE (2026-03-08)
+
+`FovealVisionLearner.build_scene_graph(image, n_saccades=8)`:
+- Runs `scan()` (IOR + top-down fill-in)
+- Calls `classify_from_sequence()` on each fixation's already-computed sequence
+- Returns `{(px, py): {'label', 'saliency', 'sequence'}}`
+
+New helper methods:
+- `classify_from_sequence(seq)` — classify without re-running fixate()
+- `build_scene_graph(image, n_saccades=8)` — full scene understanding
+
+Scene query functions (module-level):
+- `scene_query(scene, label)` — all positions with given label
+- `scene_nearest(scene, px, py)` — nearest fixation
+- `scene_left_of / right_of / above / below` — spatial partitioning
+- `scene_summary(scene)` — one-line text summary
+
 ### V9b — Richer top-down feedback: scene-level generative model (NEXT)
 
 The current `scan()` top-down fill-in only propagates the peripheral Markov
@@ -136,20 +153,24 @@ Tasks for V11:
 4. Identify character from portrait (teach_class per character).
 5. Read text log via foveal sequence → integrate with OCR pipeline.
 
-### V12 — Danganronpa scene understanding (long-term)
+### V12 — Peripheral color vision ✅ DONE (2026-03-08)
+
+`saliency_map` now uses opponent-color hashes when `VisionLearner.use_color=True`.
+Shared helper `_peripheral_color_hashes(arr_rgb, patch_size, rows, cols)` is reused
+by both `image_to_sequence(use_color=True)` and `saliency_map`.
+
+Enable:
+```python
+FovealVisionLearner(peripheral_color=True)
+# or standalone:
+VisionLearner(use_color=True)
+image_to_sequence(img, use_color=True)
+```
+
+### V13 — Danganronpa scene understanding (long-term)
 
 Full 1920×1080 visual novel.  Characters are animated sprites on complex scene
 backgrounds.  Much harder than TiTS — tackle only after V11 is solid.
-
-### V12 — Peripheral color vision
-
-`saliency_map` currently uses grayscale patches.  Adding color to the
-peripheral scan would help distinguish same-brightness objects of different
-hues (e.g., red vs. green objects on a white background).
-
-Approach: replace the grayscale LUT in `saliency_map` with the color LUT
-(needs the `rgb_img` array from the full image).  Peripheral clusters would
-then be opponent-color clusters rather than luminance-only clusters.
 
 ---
 
