@@ -97,18 +97,49 @@ scene = {
 Spatial queries: "Is there a cat?" → any node label == 'cat'.
 "What is left of the cat?" → nodes with px < cat_px.
 
-### V11 — Danganronpa scene understanding
+### V11 — TiTS scene understanding (near-term target)
 
-Apply to game screenshots (1920×1080):
-- Characters: high-saliency sprites → fixated, identified via foveal classification
-- Text/UI: high-saliency text regions → fixated for OCR integration
-- Background: repetitive, low-saliency → never fixated
+**Trials in Tainted Space** (TiTS) is the transitional evaluation environment
+between nanotextworld (pure text) and Danganronpa (full visual novel).
 
-Calibration: `FovealVisionLearner(foveal_radius_px=82, peripheral_patch=32)`
-(24" viewing distance, 1920×1080 screen).
+Why TiTS as a bridge:
+- Character portraits are clean, single-character images on simple backgrounds —
+  easier to classify than Danganronpa's animated sprites on complex scenes.
+- The game is primarily text-driven; the visual component is a single portrait
+  window + UI panels.  Simpler spatial layout than Danganronpa.
+- It is browser-based (HTML5), so screenshots are easy to capture with dxcam.
+- The text log is a distinct UI region (high-saliency text) → tests OCR integration.
 
-Color is essential: characters have distinctive hair/clothing colors that the
-opponent-color tokens (V7) will capture.
+Target layout:
+```
+┌─────────────────────────────────────────────────────┐
+│  CHARACTER PORTRAIT         │  STATS / INVENTORY    │
+│  (single image, clean bg)   │  (text panels, UI)    │
+│                             │                       │
+│  TEXT LOG (narrative)                               │
+│  (scrolling text, high-saliency for OCR)            │
+└─────────────────────────────────────────────────────┘
+```
+
+Calibration for browser window at 2 feet:
+```python
+FovealVisionLearner(
+    foveal_radius_px=82,   # 24" desktop at 24" viewing distance
+    peripheral_patch=32,
+)
+```
+
+Tasks for V11:
+1. Capture screenshots of TiTS browser window (dxcam or PIL screenshot).
+2. Train FovealVisionLearner on TiTS screenshots.
+3. Classify portrait region vs text region vs UI region.
+4. Identify character from portrait (teach_class per character).
+5. Read text log via foveal sequence → integrate with OCR pipeline.
+
+### V12 — Danganronpa scene understanding (long-term)
+
+Full 1920×1080 visual novel.  Characters are animated sprites on complex scene
+backgrounds.  Much harder than TiTS — tackle only after V11 is solid.
 
 ### V12 — Peripheral color vision
 
