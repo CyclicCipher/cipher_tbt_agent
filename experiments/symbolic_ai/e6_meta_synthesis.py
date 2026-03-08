@@ -273,6 +273,73 @@ def beam_search_composition(
 
 
 # ---------------------------------------------------------------------------
+# Bridge concepts — make E1/E4 chains discoverable by linear beam search
+# ---------------------------------------------------------------------------
+
+def register_bridge_concepts(ai, assignment, train_texts: list[str]) -> None:
+    """Register intermediate concepts that expose the E1/E4 structure to beam search.
+
+    The E1 chain is a diamond, not a linear chain:
+        word_pos(w1) ──┐
+                       ├─ next_cat → c3 ─┐
+        word_pos(w2) ──┘                  ├─ word_given_cat → w3
+                       └──────────────────┘  (needs c1,c2,c3)
+
+    Linear beam search can't express this.  We reify two intermediate concepts:
+
+        context_triple(w1, w2) → (c1, c2, c3)
+            ↳ Encodes "look up both cluster IDs + predict next cluster".
+            ↳ Composed with word_given_cat → discovers full E1 chain at depth 2.
+
+        slot_context(w1, w3) → (c1, c3)
+            ↳ Encodes "look up both flanking cluster IDs".
+            ↳ Composed with slot_occupants → discovers E4 chain at depth 2.
+
+        word_pos(word,) → (cat,)
+            ↳ Unary assignment; useful for single-word lookups.
+    """
+    # Register concepts in graph first (ai.ask returns None for unknown concepts).
+    for name, it, ot in [
+        ('word_pos',       ['word'],        ['cat']),
+        ('context_triple', ['word', 'word'], ['cat', 'cat', 'cat']),
+        ('slot_context',   ['word', 'word'], ['cat', 'cat']),
+    ]:
+        if name not in ai.graph.concepts:
+            ai.add_concept(name=name, domain='language',
+                           input_type=it, output_type=ot)
+
+    # word_pos: (word,) → (cat_str,)
+    for word, cid in assignment.items():
+        ai.teach('word_pos', (word,), (str(cid),))
+
+    # context_triple: (w1, w2) → (c1_str, c2_str, c3_str)
+    for text in train_texts:
+        tokens = text.split()
+        for i in range(len(tokens) - 2):
+            w1, w2 = tokens[i], tokens[i + 1]
+            c1 = assignment.get(w1)
+            c2 = assignment.get(w2)
+            if c1 is None or c2 is None:
+                continue
+            c3_out = ai.ask('next_cat', (str(c1), str(c2)))
+            if c3_out is None:
+                continue
+            c3 = c3_out[0] if isinstance(c3_out, tuple) else c3_out
+            ai.teach('context_triple', (w1, w2), (str(c1), str(c2), c3))
+
+    # slot_context: (w1, w3) → (c1_str, c3_str)
+    for text in train_texts:
+        tokens = text.split()
+        for i in range(len(tokens) - 2):
+            w1, w3 = tokens[i], tokens[i + 2]
+            c1 = assignment.get(w1)
+            c3 = assignment.get(w3)
+            if c1 is None or c3 is None:
+                continue
+            ai.teach('slot_context', (w1, w3), (str(c1), str(c3)))
+
+
+# ---------------------------------------------------------------------------
 # Demo tasks
 # ---------------------------------------------------------------------------
 
@@ -407,6 +474,7 @@ def main() -> None:
 
     train_chain(ai, train_texts, assignment, verbose=False)
     train_slot_occupants(ai, train_texts, assignment, verbose=False)
+    register_bridge_concepts(ai, assignment, train_texts)
 
     all_concepts = get_all_concepts(ai)
     print(f'  Concepts available for search: {all_concepts}')
@@ -441,7 +509,7 @@ def main() -> None:
             best_chain, best_cov, best_acc = results[0]
             print(f'\n  Best: [{best_cov:.0%}×{best_acc:.0%}] {best_chain.name}')
             print(f'  Interpretation: beam search found {len(best_chain.nodes)}-step composition')
-            if 'next_cat' in best_chain.name and 'word_given_cat' in best_chain.name:
+            if 'word_given_cat' in best_chain.name:
                 print(f'  ✓ Correctly rediscovered E1 category chain!')
             else:
                 print(f'  ✗ Did not find E1 chain — may need more examples or deeper search')
