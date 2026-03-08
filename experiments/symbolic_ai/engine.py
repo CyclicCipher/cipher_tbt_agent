@@ -155,11 +155,11 @@ class SymbolicAI:
         store = self.stores.get(concept_name)
         query = tuple(inputs)
 
-        # 2. Exact-match lookup in example store.
+        # 2. Exact-match lookup in example store (O(1) via _index).
         if store is not None:
-            for stored_inputs, stored_outputs in store.examples:
-                if _inputs_equal(stored_inputs, query):
-                    return stored_outputs
+            result = store.lookup(query)
+            if result is not None:
+                return result
 
         # 3. Pre-built freq table (freq_consolidate was called — fast path).
         dist_table = self._dist_tables.get(concept_name)
@@ -213,11 +213,11 @@ class SymbolicAI:
 
         store = self.stores.get(concept_name)
 
-        # Exact-match -> Dirac delta.
+        # Exact-match -> Dirac delta (O(1) via _index).
         if store is not None:
-            for stored_inputs, stored_outputs in store.examples:
-                if _inputs_equal(stored_inputs, query):
-                    return {stored_outputs: 1.0}
+            result = store.lookup(query)
+            if result is not None:
+                return {result: 1.0}
 
         # Pre-built freq table — full distribution.
         dist_table = self._dist_tables.get(concept_name)

@@ -60,6 +60,10 @@ from sequence_pipeline import SequenceLearner
 _PATCH_SIZE = 16
 _QUANT_BITS = 3
 
+# Lookup table for 3-bit (8-level) quantized gray values → content hash strings.
+# Index i → two-character string matching _quantize output for a 1×1 patch at level i.
+_GRAY_LUT_3BIT = ['00', '10', '20', '30', '40', '50', '60', '70']
+
 
 def _load_patch_fns():
     """Import patch helper functions from modalities.visual_symbol."""
@@ -428,49 +432,55 @@ def foveal_sequence(image,
 
     crop_rows = ch // fine_patch
     crop_cols = cw // fine_patch
-    tokens: list = []
 
-    # Pre-compute anchor and clipping bounds for relative position (V5)
+    import numpy as np
+
+    # --- Vectorized content hashes ---
+    # NOTE: do NOT call _to_gray_f32(patch) here.  `crop` is already a
+    # float32 slice of the globally-normalised `gray` image, so each
+    # pixel is already in [0, 1].  Re-normalising a 1×1 patch (the
+    # default fine_patch=1 case) sets min==max, causing _to_gray_f32 to
+    # return all-zeros and collapsing every pixel to hash '00'.
+    if fine_patch == 1:
+        levels = (1 << quant_bits) - 1
+        q = np.clip(np.round(crop * levels), 0, levels).astype(np.uint8)
+        lut = _GRAY_LUT_3BIT if quant_bits == 3 else None
+        if lut:
+            content_hashes = [lut[v] for v in q.ravel()]
+        else:
+            content_hashes = [_quantize(crop[r:r + 1, c:c + 1], quant_bits)
+                              for r in range(crop_rows) for c in range(crop_cols)]
+    else:
+        content_hashes = [_quantize(crop[r * fine_patch:(r + 1) * fine_patch,
+                                         c * fine_patch:(c + 1) * fine_patch], quant_bits)
+                          for r in range(crop_rows) for c in range(crop_cols)]
+
+    # --- Vectorized position tokens ---
+    rs = np.arange(crop_rows)
+    cs = np.arange(crop_cols)
     if relative_pos:
+        # V5 — Object-relative: anchor at fixation centre (crop centre).
+        # Identical objects at different image positions → identical sequences.
         anchor_r = crop_rows // 2
         anchor_c = crop_cols // 2
         half = n_pos_bins // 2  # e.g. 4 for n_pos_bins=8 → range [-4, 3]
+        dr_bins = np.clip(
+            ((rs - anchor_r) * n_pos_bins / crop_rows).astype(int), -half, half - 1)
+        dc_bins = np.clip(
+            ((cs - anchor_c) * n_pos_bins / crop_cols).astype(int), -half, half - 1)
+        dr_grid, dc_grid = np.meshgrid(dr_bins, dc_bins, indexing='ij')
+        pos_tokens = [f'D{dr},{dc}' for dr, dc in
+                      zip(dr_grid.ravel().tolist(), dc_grid.ravel().tolist())]
+    else:
+        # V4 — Crop-relative: position measured from top-left corner.
+        pr_bins = (rs / crop_rows * n_pos_bins).astype(int)
+        pc_bins = (cs / crop_cols * n_pos_bins).astype(int)
+        pr_grid, pc_grid = np.meshgrid(pr_bins, pc_bins, indexing='ij')
+        pos_tokens = [f'P{pr},{pc}' for pr, pc in
+                      zip(pr_grid.ravel().tolist(), pc_grid.ravel().tolist())]
 
-    for r in range(crop_rows):
-        for c in range(crop_cols):
-            if relative_pos:
-                # V5 — Object-relative: anchor at fixation centre (crop centre).
-                # The fixation centre IS the NMS saliency peak, so this is
-                # equivalent to anchoring at the most surprising point in the crop.
-                # Identical objects at different image positions → identical sequences.
-                dr = r - anchor_r
-                dc = c - anchor_c
-                # Map to bins: int(dr * n_pos_bins / crop_rows) ≈ dr / (crop_size / n_bins)
-                # Natural range: [-n_pos_bins//2, n_pos_bins//2 - 1]. Clip for safety.
-                dr_bin = int(dr * n_pos_bins / crop_rows)
-                dc_bin = int(dc * n_pos_bins / crop_cols)
-                dr_bin = max(-half, min(half - 1, dr_bin))
-                dc_bin = max(-half, min(half - 1, dc_bin))
-                pos_token = f'D{dr_bin},{dc_bin}'
-            else:
-                # V4 — Crop-relative: position measured from top-left corner.
-                pos_r = int(r / crop_rows * n_pos_bins)
-                pos_c = int(c / crop_cols * n_pos_bins)
-                pos_token = f'P{pos_r},{pos_c}'
-
-            # Sub-patch content hash.
-            # NOTE: do NOT call _to_gray_f32(patch) here.  `crop` is already a
-            # float32 slice of the globally-normalised `gray` image, so each
-            # pixel is already in [0, 1].  Re-normalising a 1×1 patch (the
-            # default fine_patch=1 case) sets min==max, causing _to_gray_f32 to
-            # return all-zeros and collapsing every pixel to hash '00'.
-            patch = crop[r * fine_patch:(r + 1) * fine_patch,
-                         c * fine_patch:(c + 1) * fine_patch]
-            content_hash = _quantize(patch, quant_bits)
-
-            tokens.append(pos_token)
-            tokens.append(content_hash)
-
+    # Interleave pos + content
+    tokens = [v for pair in zip(pos_tokens, content_hashes) for v in pair]
     return tokens
 
 

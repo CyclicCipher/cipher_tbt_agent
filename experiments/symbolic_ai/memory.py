@@ -54,10 +54,35 @@ class ExampleStore:
 
     concept_name: str
     examples: List[Tuple[tuple, tuple]] = field(default_factory=list)
+    # O(1) exact-match index for hashable inputs (strings, ints).
+    # Maps inputs_tuple -> first outputs_tuple seen for those inputs.
+    # Unhashable inputs (numpy arrays) fall back to linear scan in lookup().
+    _index: Dict[tuple, tuple] = field(default_factory=dict, init=False, repr=False)
 
     def add(self, inputs: tuple, outputs: tuple) -> None:
         """Add one (inputs, outputs) training example."""
-        self.examples.append((tuple(inputs), tuple(outputs)))
+        inputs = tuple(inputs)
+        outputs = tuple(outputs)
+        self.examples.append((inputs, outputs))
+        try:
+            # Keep first match — consistent with linear scan in ask().
+            if inputs not in self._index:
+                self._index[inputs] = outputs
+        except TypeError:
+            pass  # unhashable inputs; lookup() falls back to linear scan
+
+    def lookup(self, inputs: tuple) -> Optional[tuple]:
+        """O(1) exact-match lookup for hashable inputs; O(n) fallback otherwise."""
+        try:
+            return self._index.get(inputs)
+        except TypeError:
+            # Unhashable inputs (e.g. numpy arrays): element-wise linear scan.
+            for stored_inputs, stored_outputs in self.examples:
+                if len(stored_inputs) == len(inputs) and all(
+                    bool(x == y) for x, y in zip(stored_inputs, inputs)
+                ):
+                    return stored_outputs
+            return None
 
     def __len__(self) -> int:
         return len(self.examples)
