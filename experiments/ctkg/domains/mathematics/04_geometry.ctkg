@@ -1,0 +1,443 @@
+-- mathematics/04_geometry.ctkg
+-- Geometry and Trigonometry: from basic shapes to vectors and polar coordinates.
+--
+-- Extends 00_types.ctkg + 01_elementary.ctkg + 02_number_systems.ctkg + 03_algebra.ctkg.
+-- Prerequisite: algebra concepts (linear functions, coordinate plane) and
+-- elementary concepts (Pythagorean theorem, area formulas).
+--
+-- Curriculum order:
+--   Stage 1:  Angles and measurement (degrees and radians)
+--   Stage 2:  Triangle geometry (area, perimeter, Pythagorean theorem)
+--   Stage 3:  Similar triangles and proportionality
+--   Stage 4:  Circle geometry (area, circumference, arcs, sectors)
+--   Stage 5:  Coordinate geometry (distance and midpoint formulas)
+--   Stage 6:  Transformation geometry (reflection, rotation, translation)
+--   Stage 7:  Unit circle and radian measure
+--   Stage 8:  Trigonometric ratios (SOH-CAH-TOA)
+--   Stage 9:  Trigonometric functions and graphs
+--   Stage 10: Trigonometric identities
+--   Stage 11: Law of Sines and Law of Cosines
+--   Stage 12: Inverse trigonometric functions
+--   Stage 13: Polar coordinates
+--   Stage 14: Vector basics
+
+-- =========================================================================
+-- Stage 1: Angles and Measurement
+-- =========================================================================
+
+concept angle_measurement
+  domain geometry
+  description "Angles measured in degrees (0 to 360) or radians (0 to 2pi); complementary, supplementary types"
+  input expr angle_unit
+  output expr
+  requires real_number_arithmetic via "angle values are real numbers"
+  requires rational_number via "conversion factor pi/180 uses rational arithmetic"
+  -- Level C: angle as a quantity with unit
+
+concept radian_degree_conversion
+  domain geometry
+  description "Convert between degrees and radians: radians = degrees * pi/180"
+  input expr angle_unit
+  output expr
+  requires angle_measurement via "conversion presupposes understanding of both units"
+  requires real_number_arithmetic via "multiply by conversion factor pi/180 or 180/pi"
+  requires fraction_multiplication via "scaling by rational factor pi/180"
+  -- Level C: multiply by pi/180 or 180/pi (pi is irrational)
+
+-- =========================================================================
+-- Stage 2: Triangle Geometry
+-- =========================================================================
+
+concept triangle_area
+  domain geometry
+  description "Area = (1/2) * base * height: half of the bounding rectangle"
+  input expr expr
+  output expr
+  requires multiplication via "(1/2) * base * height: multiply two dimensions"
+  requires fraction_multiplication via "multiply by 1/2"
+  -- Level A:
+  --   product = lookup(multiplication, base, height)
+  --   result = lookup(fraction_multiplication, 1, 2, product, 1)
+  --   emit(result)
+
+concept polygon_perimeter
+  domain geometry
+  description "Perimeter = sum of all side lengths: fold addition over the list of sides"
+  input expr_seq
+  output expr
+  requires single_digit_addition via "sum successive side lengths"
+  requires real_number_arithmetic via "side lengths are real numbers"
+  -- Level B: fold over seq with addition
+
+concept pythagorean_theorem
+  domain geometry
+  description "In a right triangle: a^2 + b^2 = c^2; find any side given the other two"
+  input expr expr
+  output expr
+  requires exponentiation via "square the legs: a^2 and b^2"
+  requires integer_square_root via "take square root to find hypotenuse or leg"
+  requires real_number_arithmetic via "hypotenuse may be irrational (e.g., sqrt(2))"
+  -- Level A:
+  --   a_sq = lookup(exponentiation, a, 2)
+  --   b_sq = lookup(exponentiation, b, 2)
+  --   sum = a_sq + b_sq
+  --   c = lookup(integer_square_root, sum)
+  --   emit(c)
+
+concept special_right_triangles
+  domain geometry
+  description "45-45-90 and 30-60-90 triangles: fixed ratios between sides"
+  input expr angle_unit
+  output expr
+  requires pythagorean_theorem via "special ratios derived from Pythagorean theorem"
+  requires radian_degree_conversion via "angles given in either degrees or radians"
+  requires fraction_multiplication via "side ratios: 1:1:sqrt(2) and 1:sqrt(3)/2:2"
+  -- Level C: lookup table for special angle ratios
+
+-- =========================================================================
+-- Stage 3: Similar Triangles and Proportionality
+-- =========================================================================
+
+concept similar_triangles
+  domain geometry
+  description "Two triangles are similar (AA/SAS/SSS) iff corresponding sides are proportional"
+  input expr_seq expr_seq
+  output bool
+  requires rational_ordering via "compare ratios of corresponding sides"
+  requires fraction_equivalence via "proportional sides: a/d = b/e = c/f"
+  requires angle_measurement via "AA similarity: two pairs of equal angles"
+  -- Level C: ratio comparison across corresponding sides
+
+concept proportional_reasoning
+  domain geometry
+  description "If triangles similar with ratio k, then all lengths scale by k and areas scale by k^2"
+  input expr expr
+  output expr
+  requires similar_triangles via "proportionality follows from similarity"
+  requires multiplication via "scale lengths by k"
+  requires exponentiation via "areas scale by k^2"
+  -- Level A:
+  --   area_ratio = lookup(exponentiation, scale_factor, 2)
+  --   emit(area_ratio)
+
+-- =========================================================================
+-- Stage 4: Circle Geometry
+-- =========================================================================
+
+concept circle_circumference
+  domain geometry
+  description "C = 2*pi*r: circumference of circle with radius r"
+  input expr
+  output expr
+  requires multiplication via "multiply 2 * pi * r"
+  requires real_number_arithmetic via "pi is irrational; result is real"
+  -- Level C: pi is the irrational constant 3.14159...
+
+concept circle_area
+  domain geometry
+  description "A = pi*r^2: area of circle with radius r"
+  input expr
+  output expr
+  requires exponentiation via "compute r^2"
+  requires multiplication via "multiply pi * r^2"
+  requires circle_circumference via "same pi appears in area and circumference"
+  -- Level C: pi required
+
+concept arc_length_sector_area
+  domain geometry
+  description "Arc length = r*theta; Sector area = (1/2)*r^2*theta (theta in radians)"
+  input expr expr
+  output expr
+  requires radian_degree_conversion via "theta must be in radians for these formulas"
+  requires circle_circumference via "arc is a fraction of circumference"
+  requires circle_area via "sector is a fraction of circle area"
+  requires multiplication via "multiply r by theta for arc length"
+
+-- =========================================================================
+-- Stage 5: Coordinate Geometry
+-- =========================================================================
+
+concept distance_formula
+  domain geometry
+  description "d = sqrt((x2-x1)^2 + (y2-y1)^2): generalization of Pythagorean theorem"
+  input vector_2d vector_2d
+  output expr
+  requires pythagorean_theorem via "distance formula is Pythagorean theorem in coordinates"
+  requires integer_subtraction via "compute x2-x1 and y2-y1"
+  requires exponentiation via "square each difference"
+  requires integer_square_root via "take square root of sum of squares"
+  -- Level A:
+  --   dx = x2 - x1
+  --   dy = y2 - y1
+  --   dx2 = lookup(exponentiation, dx, 2)
+  --   dy2 = lookup(exponentiation, dy, 2)
+  --   sum = dx2 + dy2
+  --   d = lookup(integer_square_root, sum)
+  --   emit(d)
+
+concept midpoint_formula
+  domain geometry
+  description "M = ((x1+x2)/2, (y1+y2)/2): average of coordinates"
+  input vector_2d vector_2d
+  output vector_2d
+  requires integer_addition via "sum x-coordinates and y-coordinates"
+  requires division via "divide each sum by 2"
+  -- Level A:
+  --   mx = lookup(division, x1 + x2, 2)
+  --   my = lookup(division, y1 + y2, 2)
+  --   emit(mx, my)
+
+concept conic_sections
+  domain geometry
+  description "Parabola, ellipse, circle, hyperbola: cross-sections of a double cone"
+  input expr_seq
+  output expr
+  requires quadratic_equation_by_factoring via "conic equations are degree-2 in x and y"
+  requires distance_formula via "conics defined by distance relationships (focus, directrix)"
+  requires circle_area via "circle is a special case of ellipse"
+  requires linear_function via "asymptotes of hyperbolas are linear"
+  -- Level C: classify equation by discriminant B^2 - 4AC
+
+-- =========================================================================
+-- Stage 6: Transformation Geometry
+-- =========================================================================
+
+concept translation
+  domain geometry
+  description "Shift all points by (dx, dy): (x,y) -> (x+dx, y+dy)"
+  input vector_2d vector_2d
+  output vector_2d
+  requires coordinate_plane via "translation acts on coordinate pairs"
+  requires integer_addition via "add displacement to each coordinate"
+  -- Level A:
+  --   new_x = x + dx
+  --   new_y = y + dy
+  --   emit(new_x, new_y)
+
+concept reflection
+  domain geometry
+  description "Reflect over an axis: x-axis (x,y)->(x,-y); y-axis (x,y)->(-x,y)"
+  input vector_2d expr
+  output vector_2d
+  requires coordinate_plane via "reflection acts on coordinate pairs"
+  requires negative_number_concept via "negating a coordinate is a signed integer operation"
+  -- Level C: depends on which axis (or line y=x) is the mirror
+
+-- =========================================================================
+-- Stage 7: Unit Circle
+-- =========================================================================
+
+concept unit_circle
+  domain geometry
+  description "Circle of radius 1 centered at origin; point at angle theta is (cos(theta), sin(theta))"
+  input expr
+  output vector_2d
+  requires radian_degree_conversion via "angles on unit circle typically in radians"
+  requires pythagorean_theorem via "x^2 + y^2 = 1 is Pythagorean theorem with radius 1"
+  requires special_right_triangles via "unit circle values at 0, pi/6, pi/4, pi/3, pi/2 use special triangles"
+  -- Level C: trigonometric functions are defined via unit circle
+
+-- =========================================================================
+-- Stage 8: Trigonometric Ratios (Right Triangles)
+-- =========================================================================
+
+concept trig_ratios_right_triangle
+  domain geometry
+  description "SOH-CAH-TOA: sin=opp/hyp, cos=adj/hyp, tan=opp/adj in a right triangle"
+  input expr trig_fn_name
+  output expr
+  requires triangle_area via "establish the three sides of a right triangle"
+  requires pythagorean_theorem via "hypotenuse and leg relationships"
+  requires fraction_division via "each ratio is a quotient of two sides"
+  requires special_right_triangles via "exact values at 30, 45, 60 degrees"
+  -- Level C: lookup table for exact values; otherwise ratio computation
+
+concept trig_functions
+  domain geometry
+  description "sin, cos, tan as real-valued functions of angle; periodic extensions to all reals"
+  input trig_fn_name expr
+  output expr
+  requires trig_ratios_right_triangle via "functions defined for acute angles via right triangles"
+  requires unit_circle via "extension to all angles via unit circle definition"
+  requires real_number_arithmetic via "function values are real numbers"
+  -- Level C: definition via unit circle coordinates
+
+-- =========================================================================
+-- Stage 9: Trigonometric Identities
+-- =========================================================================
+
+concept pythagorean_trig_identity
+  domain geometry
+  description "sin^2(theta) + cos^2(theta) = 1; derived from unit circle and Pythagorean theorem"
+  input expr
+  output bool
+  requires trig_functions via "identity relates sin and cos as functions"
+  requires pythagorean_theorem via "x^2 + y^2 = 1 on unit circle implies this identity"
+  requires exponentiation via "sin^2 and cos^2 are squares of trig values"
+  -- Level C: symbolic proof using unit circle definition
+
+concept angle_sum_formulas
+  domain geometry
+  description "sin(A+B) = sin(A)cos(B) + cos(A)sin(B); cos(A+B) = cos(A)cos(B) - sin(A)sin(B)"
+  input expr expr
+  output expr
+  requires pythagorean_trig_identity via "angle sum formulas extend trig identities"
+  requires trig_functions via "sin and cos values as inputs"
+  requires real_number_arithmetic via "arithmetic on trig values"
+  -- Level C: derivation via geometric rotation or complex exponential
+
+concept double_angle_formulas
+  domain geometry
+  description "sin(2A) = 2sin(A)cos(A); cos(2A) = cos^2(A) - sin^2(A)"
+  input expr
+  output expr
+  requires angle_sum_formulas via "double angle is special case A+A of angle sum formula"
+  requires pythagorean_trig_identity via "cos(2A) has equivalent forms using the identity"
+  -- Level A (after angle_sum_formulas known):
+  --   s = lookup(trig_functions, SIN, A)
+  --   c = lookup(trig_functions, COS, A)
+  --   sin2A = 2 * s * c
+  --   emit(sin2A)
+
+-- =========================================================================
+-- Stage 10: Law of Sines and Cosines
+-- =========================================================================
+
+concept law_of_sines
+  domain geometry
+  description "a/sin(A) = b/sin(B) = c/sin(C): relates sides and opposite angles in any triangle"
+  input expr_seq expr_seq
+  output expr
+  requires trig_functions via "requires evaluating sine of each angle"
+  requires fraction_equivalence via "law asserts three ratios are equal"
+  requires similar_triangles via "law of sines generalizes triangle similarity"
+  -- Level C: algebraic manipulation of three-way ratio equality
+
+concept law_of_cosines
+  domain geometry
+  description "c^2 = a^2 + b^2 - 2ab*cos(C): generalization of Pythagorean theorem"
+  input expr_seq expr_seq
+  output expr
+  requires pythagorean_theorem via "law of cosines reduces to Pythagorean when C=90 degrees"
+  requires trig_functions via "requires evaluating cosine of included angle"
+  requires multiplication via "compute 2*a*b*cos(C)"
+  requires exponentiation via "compute a^2 and b^2"
+  -- Level C: algebraic rearrangement to find any unknown side or angle
+
+-- =========================================================================
+-- Stage 11: Inverse Trigonometric Functions
+-- =========================================================================
+
+concept inverse_trig_functions
+  domain geometry
+  description "arcsin, arccos, arctan: inverse of sin/cos/tan; restricted domains for unique output"
+  input trig_fn_name expr
+  output expr
+  requires trig_functions via "inverse functions undo sin/cos/tan"
+  requires real_number_arithmetic via "domain restrictions: arcsin takes [-1,1] -> [-pi/2, pi/2]"
+  -- Level C: inverse functions with restricted domains
+
+adjunction sin_arcsin
+  forward trig_functions
+  inverse inverse_trig_functions
+  unit arcsin(sin(x)) = x for x in [-pi/2, pi/2]
+  counit sin(arcsin(x)) = x for x in [-1, 1]
+
+-- =========================================================================
+-- Stage 12: Polar Coordinates
+-- =========================================================================
+
+concept polar_coordinates
+  domain geometry
+  description "Point (r, theta): r = distance from origin, theta = angle from positive x-axis"
+  input expr expr
+  output vector_2d
+  requires unit_circle via "polar to Cartesian: x = r*cos(theta), y = r*sin(theta)"
+  requires trig_functions via "convert using cos and sin"
+  requires multiplication via "multiply r by cos(theta) and r by sin(theta)"
+  -- Level A:
+  --   x = r * lookup(trig_functions, COS, theta)
+  --   y = r * lookup(trig_functions, SIN, theta)
+  --   emit(x, y)
+
+concept cartesian_to_polar
+  domain geometry
+  description "Convert (x,y) to (r, theta): r = sqrt(x^2+y^2), theta = arctan(y/x)"
+  input vector_2d
+  output expr
+  requires distance_formula via "r is the distance from origin: sqrt(x^2 + y^2)"
+  requires inverse_trig_functions via "theta = arctan(y/x) adjusted for quadrant"
+  requires integer_comparison via "determine quadrant to adjust arctan result"
+  -- Level C: quadrant-aware arctan computation (atan2)
+
+-- =========================================================================
+-- Stage 13: Vectors
+-- =========================================================================
+
+concept vector_addition
+  domain geometry
+  description "u + v = (u_x + v_x, u_y + v_y): component-wise addition of 2D vectors"
+  input vector_2d vector_2d
+  output vector_2d
+  requires real_number_arithmetic via "vector components are real numbers"
+  requires integer_addition via "add corresponding components"
+  -- Level A:
+  --   rx = ux + vx
+  --   ry = uy + vy
+  --   emit(rx, ry)
+
+concept vector_scalar_multiply
+  domain geometry
+  description "c * v = (c*v_x, c*v_y): scale both components by scalar c"
+  input expr vector_2d
+  output vector_2d
+  requires multiplication via "multiply each component by scalar"
+  -- Level A:
+  --   rx = c * vx
+  --   ry = c * vy
+  --   emit(rx, ry)
+
+concept dot_product
+  domain geometry
+  description "u . v = u_x*v_x + u_y*v_y = |u||v|cos(theta): scalar product of two vectors"
+  input vector_2d vector_2d
+  output expr
+  requires multiplication via "multiply corresponding components"
+  requires integer_addition via "sum the products"
+  requires trig_functions via "geometric interpretation: |u||v|cos(theta)"
+  -- Level A:
+  --   px = ux * vx
+  --   py = uy * vy
+  --   result = px + py
+  --   emit(result)
+
+concept vector_magnitude
+  domain geometry
+  description "|v| = sqrt(v_x^2 + v_y^2): length of vector"
+  input vector_2d
+  output expr
+  requires distance_formula via "vector magnitude is distance from origin"
+  requires exponentiation via "square components"
+  requires integer_square_root via "take square root of sum"
+  -- Level A:
+  --   vx2 = lookup(exponentiation, vx, 2)
+  --   vy2 = lookup(exponentiation, vy, 2)
+  --   mag = lookup(integer_square_root, vx2 + vy2)
+  --   emit(mag)
+
+-- =========================================================================
+-- Interface export
+-- =========================================================================
+
+interface geometry
+  exports concepts angle_measurement radian_degree_conversion
+  exports concepts triangle_area polygon_perimeter pythagorean_theorem special_right_triangles
+  exports concepts similar_triangles proportional_reasoning
+  exports concepts circle_circumference circle_area arc_length_sector_area
+  exports concepts distance_formula midpoint_formula conic_sections
+  exports concepts translation reflection
+  exports concepts unit_circle trig_ratios_right_triangle trig_functions
+  exports concepts pythagorean_trig_identity angle_sum_formulas double_angle_formulas
+  exports concepts law_of_sines law_of_cosines inverse_trig_functions
+  exports concepts polar_coordinates cartesian_to_polar
+  exports concepts vector_addition vector_scalar_multiply dot_product vector_magnitude

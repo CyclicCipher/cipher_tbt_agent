@@ -1,0 +1,389 @@
+-- mathematics/06_odes.ctkg
+-- Ordinary Differential Equations: from definition through Laplace transforms.
+--
+-- Extends 00_types.ctkg through 05_calculus.ctkg.
+-- This domain represents the culmination of the K-college curriculum.
+-- All processes at this level are Level C (symbolic/CAS) unless noted.
+--
+-- Curriculum order:
+--   Stage 1:  ODE definition and terminology
+--   Stage 2:  Direction fields (geometric view)
+--   Stage 3:  Separable ODEs
+--   Stage 4:  First-order linear ODEs (integrating factor)
+--   Stage 5:  Exact ODEs
+--   Stage 6:  Substitution methods (homogeneous, Bernoulli)
+--   Stage 7:  Existence and uniqueness theorem
+--   Stage 8:  Second-order linear homogeneous ODEs
+--   Stage 9:  Characteristic equation (constant coefficients)
+--   Stage 10: Method of undetermined coefficients (particular solution)
+--   Stage 11: Variation of parameters (general particular solution)
+--   Stage 12: Cauchy-Euler equation
+--   Stage 13: Systems of ODEs (matrix form)
+--   Stage 14: Laplace transform (definition and table)
+--   Stage 15: Inverse Laplace transform (partial fractions)
+--   Stage 16: Solving ODEs via Laplace transforms
+
+-- =========================================================================
+-- Stage 1: ODE Definition and Terminology
+-- =========================================================================
+
+concept ode_definition
+  domain odes
+  description "F(x, y, y', y'', ..., y^(n)) = 0: equation relating function y and its derivatives"
+  input equation nat
+  output ode_type
+  requires derivative_definition via "ODEs contain derivatives; understanding derivative is prerequisite"
+  requires polynomial_expression via "many ODEs have polynomial coefficients"
+  requires classification_of_ode via "classify ODE by order, linearity, and structural type"
+  -- Level C: parse equation to determine type and order
+
+concept classification_of_ode
+  domain odes
+  description "Classify ODE by order (highest derivative), linearity, homogeneity, and coefficient type"
+  input equation
+  output ode_type
+  requires derivative_definition via "order determined by the highest derivative present"
+  requires linear_equation via "linear ODE: y and all its derivatives appear to degree 1"
+  requires polynomial_expression via "check whether coefficients are constant, polynomial, etc."
+  -- Level C: pattern-match on expression structure
+
+-- =========================================================================
+-- Stage 2: Direction Fields
+-- =========================================================================
+
+concept direction_field
+  domain odes
+  description "Slope field: draw slope y' = f(x,y) at grid of (x,y) points; visualise solution behavior"
+  input equation
+  output expr
+  requires ode_definition via "direction field visualises the ODE's right-hand side f(x,y)"
+  requires algebraic_substitution via "evaluate f(x,y) at many (x,y) grid points"
+  requires slope_of_line via "each field element is a small line segment with slope f(x,y)"
+  -- Level C: symbolic evaluation at grid points and geometric rendering
+
+concept euler_method
+  domain odes
+  description "Numerical approximation: y_{n+1} = y_n + h*f(x_n, y_n) with step size h"
+  input equation expr interval nat
+  output expr_seq
+  requires direction_field via "Euler method follows direction field step by step"
+  requires real_number_arithmetic via "arithmetic on y values and step sizes"
+  requires algebraic_substitution via "evaluate f(x_n, y_n) at each step"
+  -- Level B: fold over n steps computing y_{n+1} from (x_n, y_n)
+
+-- =========================================================================
+-- Stage 3: Separable ODEs
+-- =========================================================================
+
+concept separable_ode
+  domain odes
+  description "g(y) dy = f(x) dx: separate variables and integrate both sides independently"
+  input equation
+  output ode_solution
+  requires ode_definition via "separable ODE is a special case where variables separate"
+  requires antiderivative via "integrate both sides after separating variables"
+  requires implicit_differentiation via "solution may be expressed implicitly as G(y) = F(x) + C"
+  requires exponential_function via "exponential solutions arise when f(x) or g(y) is exponential"
+  requires integration_by_substitution via "integration after separation may need substitution"
+  -- Level C:
+  --   1. Rewrite as g(y) dy = f(x) dx
+  --   2. Integrate both sides: integral(g(y)dy) = integral(f(x)dx)
+  --   3. Solve for y if possible
+
+-- =========================================================================
+-- Stage 4: First-Order Linear ODEs
+-- =========================================================================
+
+concept first_order_linear_ode
+  domain odes
+  description "y' + P(x)y = Q(x): solved by integrating factor mu(x) = exp(integral(P(x)dx))"
+  input equation
+  output ode_solution
+  requires separable_ode via "constant P(x) case reduces to separable ODE; general method extends this"
+  requires exponential_and_log_derivatives via "integrating factor involves e^integral(P)"
+  requires antiderivative via "compute integral(P(x)dx) for integrating factor"
+  requires product_rule via "mu*y' + mu*P*y = (mu*y)' comes from product rule"
+  requires fundamental_theorem_calculus_2 via "integrate (mu*y)' = mu*Q to get mu*y = integral(mu*Q)"
+  -- Level C:
+  --   1. Identify P(x) and Q(x)
+  --   2. Compute mu(x) = exp(integral(P(x)dx))
+  --   3. Multiply both sides by mu: (mu*y)' = mu*Q
+  --   4. Integrate both sides: mu*y = integral(mu*Q) + C
+  --   5. Divide by mu: y = (integral(mu*Q) + C) / mu
+
+-- =========================================================================
+-- Stage 5: Exact ODEs
+-- =========================================================================
+
+concept exact_ode
+  domain odes
+  description "M(x,y)dx + N(x,y)dy = 0 is exact if dM/dy = dN/dx; solve via F_x=M, F_y=N"
+  input equation
+  output ode_solution
+  requires first_order_linear_ode via "first-order linear ODE is a special case of exact ODE"
+  requires partial_derivative via "exactness condition dM/dy = dN/dx requires partial derivatives"
+  requires antiderivative via "find F with F_x = M by integrating M with respect to x"
+  requires algebraic_substitution via "differentiate partial integral and match to N"
+  -- Level C:
+  --   1. Check dM/dy = dN/dx (exactness)
+  --   2. Compute F = integral(M dx) treating y as constant
+  --   3. Differentiate F with respect to y, set equal to N, solve for the y-only function g(y)
+  --   4. Solution is F(x,y) = C
+
+-- =========================================================================
+-- Stage 6: Substitution Methods
+-- =========================================================================
+
+concept ode_bernoulli
+  domain odes
+  description "y' + P(x)y = Q(x)*y^n: substitute v = y^(1-n) to linearize"
+  input equation
+  output ode_solution
+  requires first_order_linear_ode via "Bernoulli ODE becomes linear after substitution v = y^(1-n)"
+  requires algebraic_substitution via "substitute v = y^(1-n) and derive equation for v"
+  requires chain_rule via "express y' in terms of v'"
+  requires power_rule via "differentiate y = v^(1/(1-n)) using power rule"
+  -- Level C: substitution + chain rule + first_order_linear_ode
+
+concept ode_homogeneous_substitution
+  domain odes
+  description "y' = F(y/x): substitute v = y/x (so y = vx) to separate variables"
+  input equation
+  output ode_solution
+  requires separable_ode via "substitution v = y/x converts to separable ODE in v and x"
+  requires product_rule via "y = vx implies y' = v'x + v (product rule)"
+  requires algebraic_substitution via "substitute v = y/x and y' = v'x + v"
+  -- Level C: substitution pipeline
+
+-- =========================================================================
+-- Stage 7: Existence and Uniqueness
+-- =========================================================================
+
+concept existence_uniqueness_theorem
+  domain odes
+  description "Picard-Lindelof: if f and df/dy continuous near (x0,y0), unique solution through (x0,y0)"
+  input equation expr
+  output bool
+  requires continuity via "f(x,y) must be continuous near initial point"
+  requires partial_derivative via "df/dy must also be continuous (Lipschitz condition)"
+  requires classification_of_ode via "theorem applies to first-order ODEs y' = f(x,y)"
+  -- Level C: verify continuity conditions; theorem is existential
+
+-- =========================================================================
+-- Stage 8: Second-Order Linear Homogeneous ODEs
+-- =========================================================================
+
+concept second_order_linear_homogeneous
+  domain odes
+  description "a(x)y'' + b(x)y' + c(x)y = 0: general solution y = c1*y1 + c2*y2 (superposition)"
+  input equation
+  output ode_solution
+  requires first_order_linear_ode via "second-order is built from two first-order factors"
+  requires linear_system_substitution via "apply initial conditions to find constants c1, c2"
+  requires exponential_function via "exponential functions are natural solutions"
+  -- Level C: superposition principle requires linear algebra (Wronskian)
+
+-- =========================================================================
+-- Stage 9: Constant Coefficient Homogeneous ODEs
+-- =========================================================================
+
+concept characteristic_equation
+  domain odes
+  description "ay'' + by' + cy = 0: assume y = e^(rx), get characteristic equation ar^2 + br + c = 0"
+  input expr_seq
+  output expr_seq
+  requires second_order_linear_homogeneous via "characteristic equation method applies to constant-coefficient case"
+  requires quadratic_formula via "solve ar^2 + br + c = 0 for roots r1, r2"
+  requires exponential_function via "y = e^(rx) is the trial solution form"
+  requires complex_number via "complex roots give oscillatory solutions: e^(alpha+beta*i)x"
+  -- Level C:
+  --   ar^2 + br + c = 0
+  --   r = quadratic_formula(a, b, c)
+
+concept solution_from_roots
+  domain odes
+  description "Real distinct: c1*e^(r1*x)+c2*e^(r2*x); repeated: (c1+c2*x)*e^(rx); complex: e^(ax)(c1*cos(bx)+c2*sin(bx))"
+  input expr_seq
+  output expr
+  requires characteristic_equation via "roots r1, r2 determine solution form"
+  requires exponential_function via "each basis solution involves e^(rx)"
+  requires trig_functions via "complex roots lead to sin and cos basis functions"
+  requires complex_number via "identify real/imaginary parts of complex roots"
+  -- Level C: case analysis on discriminant of characteristic equation
+
+-- =========================================================================
+-- Stage 10: Undetermined Coefficients
+-- =========================================================================
+
+concept undetermined_coefficients
+  domain odes
+  description "ay''+by'+cy=g(x): guess form of particular solution based on g(x), substitute, solve"
+  input equation
+  output expr
+  requires solution_from_roots via "particular solution added to homogeneous solution"
+  requires polynomial_expression via "g(x) polynomial -> guess polynomial of same degree"
+  requires exponential_function via "g(x) exponential -> guess same exponential form"
+  requires trig_functions via "g(x) sin/cos -> guess A*sin + B*cos combination"
+  requires linear_system_substitution via "solve for undetermined coefficients by matching terms"
+  -- Level C: classify g(x), form trial solution, substitute, solve for coefficients
+
+-- =========================================================================
+-- Stage 11: Variation of Parameters
+-- =========================================================================
+
+concept variation_of_parameters
+  domain odes
+  description "y_p = u1*y1 + u2*y2 where u1', u2' determined by Wronskian system; works for any g(x)"
+  input equation
+  output expr
+  requires solution_from_roots via "variation of parameters builds on homogeneous solutions y1, y2"
+  requires linear_system_elimination via "solve the Wronskian system for u1' and u2'"
+  requires integration_by_substitution via "integrate u1' and u2' to find u1 and u2"
+  requires integration_by_parts via "integration of u1' and u2' may need integration by parts"
+  -- Level C:
+  --   Wronskian W = y1*y2' - y2*y1'
+  --   u1' = -y2*g/W, u2' = y1*g/W
+  --   u1 = integral(u1'), u2 = integral(u2')
+
+-- =========================================================================
+-- Stage 12: Cauchy-Euler Equation
+-- =========================================================================
+
+concept cauchy_euler_equation
+  domain odes
+  description "ax^2*y'' + bx*y' + cy = 0: substitute x = e^t (or try y = x^m) to get constant coefficients"
+  input equation
+  output ode_solution
+  requires characteristic_equation via "after substitution x=e^t, equation has constant coefficients"
+  requires exponential_function via "substitution x = e^t converts variable to constant coefficients"
+  requires solution_from_roots via "apply characteristic equation solution method after substitution"
+  -- Level C: substitution x = e^t reduces to constant-coefficient problem
+
+-- =========================================================================
+-- Stage 13: Systems of ODEs
+-- =========================================================================
+
+concept system_of_odes
+  domain odes
+  description "x' = Ax: vector of first-order ODEs expressed as matrix equation; solve via eigenvalues"
+  input matrix_2x2 vector_2d
+  output ode_solution
+  requires second_order_linear_homogeneous via "higher-order ODE converts to system via y1=y, y2=y', ..."
+  requires solution_from_roots via "eigenvalues of A play role of roots in scalar ODE"
+  requires complex_number via "complex eigenvalues give oscillatory solutions"
+  requires linear_system_elimination via "find eigenvalues via det(A - lambda*I) = 0"
+  -- Level C: eigenvalue computation, eigenvector solution, general solution assembly
+
+-- =========================================================================
+-- Stage 14: Laplace Transform
+-- =========================================================================
+
+concept laplace_transform
+  domain odes
+  description "L{f(t)} = integral_0^inf e^(-st) * f(t) dt: converts ODE to algebraic equation in s"
+  input expr
+  output expr
+  requires definite_integral via "Laplace transform is an improper integral with exponential kernel"
+  requires improper_integral via "integral from 0 to infinity requires improper integration"
+  requires exponential_function via "kernel e^(-st) is an exponential; converges for Re(s) > s0"
+  requires function_limit via "convergence of transform requires limit as T->infinity"
+  -- Level C: evaluate integral for specific f(t) forms
+
+concept laplace_transform_table
+  domain odes
+  description "Standard transform pairs: L{1}=1/s, L{t^n}=n!/s^(n+1), L{e^(at)}=1/(s-a), L{sin,cos}"
+  input expr
+  output expr
+  requires laplace_transform via "each table entry is proved from the integral definition"
+  requires factorial via "L{t^n} requires n! in numerator"
+  requires trig_functions via "L{sin(bt)} = b/(s^2+b^2), L{cos(bt)} = s/(s^2+b^2)"
+  requires partial_fraction_decomposition via "inverse requires partial fractions of table entries"
+  -- Level C: lookup table (the 'built-in knowledge' for this domain)
+
+concept laplace_linearity_and_shift
+  domain odes
+  description "L{af+bg} = aL{f}+bL{g}; first shift: L{e^(at)f(t)} = F(s-a)"
+  input expr expr
+  output expr
+  requires laplace_transform_table via "shift theorem combines basic table entries"
+  requires integral_linearity via "Laplace transform is linear by linearity of integration"
+  -- Level C: apply shift theorem to obtain F(s-a) from F(s)
+
+concept laplace_of_derivative
+  domain odes
+  description "L{y'} = s*L{y} - y(0); L{y''} = s^2*L{y} - sy(0) - y'(0): key to solving ODEs"
+  input expr expr
+  output expr
+  requires laplace_transform via "differentiation theorem proved by integration by parts"
+  requires integration_by_parts via "prove L{y'} = sL{y} - y(0) via parts"
+  requires fundamental_theorem_calculus_2 via "boundary evaluation uses FTC 2"
+  -- Level C: integration by parts proof for each derivative order
+
+-- =========================================================================
+-- Stage 15: Inverse Laplace Transform
+-- =========================================================================
+
+concept inverse_laplace_transform
+  domain odes
+  description "L^{-1}{F(s)} = f(t): recover time-domain function from s-domain using partial fractions"
+  input expr
+  output expr
+  requires laplace_transform_table via "inverse uses table pairs in reverse"
+  requires partial_fraction_decomposition via "decompose F(s) into table-recognisable pieces"
+  requires laplace_linearity_and_shift via "linearity and shift theorems applied in reverse"
+  -- Level C: decompose then look up each piece in transform table
+
+adjunction laplace_inverse
+  forward laplace_transform
+  inverse inverse_laplace_transform
+  unit L^{-1}[L{f(t)}] = f(t)
+  counit L[L^{-1}{F(s)}] = F(s)
+
+-- =========================================================================
+-- Stage 16: Solving ODEs via Laplace Transforms
+-- =========================================================================
+
+concept ode_via_laplace
+  domain odes
+  description "Transform ODE to algebraic equation in Y(s); solve for Y(s); invert to get y(t)"
+  input equation expr_seq
+  output ode_solution
+  requires laplace_of_derivative via "transforms y' and y'' to s-domain using derivative rule"
+  requires laplace_linearity_and_shift via "transform each term of the ODE"
+  requires laplace_transform_table via "transform right-hand side forcing function g(t)"
+  requires linear_equation via "solve for Y(s) = L{y(t)}: algebraic equation in s"
+  requires inverse_laplace_transform via "invert Y(s) to get solution y(t)"
+  -- Level C:
+  --   1. Apply L to both sides: use L{y'} = sY - y(0), L{y''} = s^2*Y - sy(0) - y'(0)
+  --   2. Solve algebraically for Y(s)
+  --   3. Decompose Y(s) via partial fractions
+  --   4. Apply inverse Laplace using table
+
+concept impulse_response
+  domain odes
+  description "Solution to y'' + by' + cy = delta(t): Laplace gives Y(s) = 1/char_poly(s)"
+  input expr_seq
+  output ode_solution
+  requires ode_via_laplace via "impulse response is a special case with delta function forcing"
+  requires characteristic_equation via "denominator of Y(s) is the characteristic polynomial"
+  requires laplace_transform_table via "L{delta(t)} = 1 (the Dirac delta transform)"
+  requires inverse_laplace_transform via "invert 1/(char_poly(s)) via partial fractions"
+  -- Level C: Dirac delta as the impulse; h(t) encodes all ODE dynamics
+
+-- =========================================================================
+-- Interface export
+-- =========================================================================
+
+interface odes
+  exports concepts ode_definition classification_of_ode
+  exports concepts direction_field euler_method
+  exports concepts separable_ode
+  exports concepts first_order_linear_ode
+  exports concepts exact_ode ode_bernoulli ode_homogeneous_substitution
+  exports concepts existence_uniqueness_theorem
+  exports concepts second_order_linear_homogeneous characteristic_equation solution_from_roots
+  exports concepts undetermined_coefficients variation_of_parameters
+  exports concepts cauchy_euler_equation system_of_odes
+  exports concepts laplace_transform laplace_transform_table laplace_linearity_and_shift
+  exports concepts laplace_of_derivative inverse_laplace_transform
+  exports concepts ode_via_laplace impulse_response

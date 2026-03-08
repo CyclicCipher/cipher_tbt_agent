@@ -1,0 +1,101 @@
+-- mathematics/00_types.ctkg
+-- Shared type definitions for the full mathematics curriculum.
+--
+-- These types extend the arithmetic.ctkg foundation with:
+--   - Integer types (signed, rational, real, complex)
+--   - Symbolic expression types for algebra and calculus
+--   - Geometric types (vectors, intervals)
+--   - Classification enumerations (trig functions, ODE types)
+--
+-- This file must be loaded alongside arithmetic.ctkg.
+-- All types here are available to all mathematics/*.ctkg domains.
+
+-- =========================================================================
+-- Integer and rational types
+-- =========================================================================
+
+-- Sign of a signed integer (POS, NEG, ZERO are mutually exclusive)
+type sign = symbol(POS, NEG, ZERO)
+
+-- Nonzero digit (denominators must be nonzero)
+type nonzero_digit = symbol(1, 2, 3, 4, 5, 6, 7, 8, 9) ordered
+
+-- Signed integer as (sign, magnitude) pair
+type signed_int = tuple(sign, nat) ordered metric invertible
+
+-- Simple fraction: numerator (nat) over nonzero denominator
+-- Represents any rational p/q where q != 0
+type simple_fraction = tuple(nat, nonzero_digit)
+
+-- =========================================================================
+-- Extended operator types
+-- =========================================================================
+
+-- Extended arithmetic operator (adds MUL, DIV, MOD, EXP to ADD, SUB)
+type math_op = symbol(ADD, SUB, MUL, DIV, MOD, EXP)
+
+-- Comparison/order relation (extends cmp_result with GEQ, LEQ, NEQ)
+type order_rel = symbol(GT, LT, EQ, GEQ, LEQ, NEQ)
+
+-- =========================================================================
+-- Geometric and angular types
+-- =========================================================================
+
+-- Angle measurement system
+type angle_unit = symbol(DEG, RAD)
+
+-- Trigonometric function identifier
+type trig_fn_name = symbol(SIN, COS, TAN, CSC, SEC, COT)
+
+-- Inverse trigonometric function identifier
+type inv_trig_fn_name = symbol(ARCSIN, ARCCOS, ARCTAN)
+
+-- 2D Euclidean vector (x-component, y-component) as expression pair
+type vector_2d = tuple(expr, expr)
+
+-- Closed interval [lower, upper] for integration bounds
+type interval = tuple(expr, expr)
+
+-- =========================================================================
+-- Algebraic and analytic types
+-- =========================================================================
+
+-- Sequence of expressions: polynomial coefficients, series terms, etc.
+-- Ordered from degree 0 upward: [a0, a1, a2, ...] for a0 + a1*x + a2*x^2
+type expr_seq = seq(expr)
+
+-- Equation as (lhs_expr, rhs_expr) pair
+type equation = tuple(expr, expr)
+
+-- System of two equations
+type equation_pair = tuple(equation, equation)
+
+-- =========================================================================
+-- Differential equation types
+-- =========================================================================
+
+-- ODE classification by structural type
+type ode_type = symbol(SEPARABLE, LINEAR_FIRST, EXACT, BERNOULLI, HOMOGENEOUS_CONST, UNDETERMINED_COEFFICIENTS, VARIATION_PARAMS, CAUCHY_EULER, LAPLACE_METHOD)
+
+-- Pair of natural numbers (quotient, remainder) for division output
+type nat_pair = tuple(nat, nat)
+
+-- ODE solution type: (homogeneous_part, particular_part) as expressions
+type ode_solution = tuple(expr, expr)
+
+-- =========================================================================
+-- Matrix types (for systems of ODEs, linear algebra)
+-- =========================================================================
+
+-- 2x2 matrix (row-major order): (a11, a12, a21, a22)
+type matrix_2x2 = tuple(expr, expr, expr, expr)
+
+-- =========================================================================
+-- Interface export
+-- =========================================================================
+
+interface mathematics_types
+  exports types sign nonzero_digit signed_int simple_fraction
+  exports types math_op order_rel angle_unit trig_fn_name inv_trig_fn_name
+  exports types vector_2d interval expr_seq equation equation_pair
+  exports types ode_type ode_solution matrix_2x2

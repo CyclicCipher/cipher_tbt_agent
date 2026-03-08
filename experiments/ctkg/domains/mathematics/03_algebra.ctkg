@@ -1,0 +1,427 @@
+-- mathematics/03_algebra.ctkg
+-- Algebra: from variable expressions through sequences and logarithms.
+--
+-- Extends 00_types.ctkg + 01_elementary.ctkg + 02_number_systems.ctkg.
+-- All process blocks at this level are Level C (symbolic/rewrite).
+-- The prerequisite graph is the primary curriculum artifact.
+--
+-- Curriculum order:
+--   Stage 1:  Variable expressions and algebraic substitution
+--   Stage 2:  Simplification (combining like terms)
+--   Stage 3:  Linear equations in one variable
+--   Stage 4:  Linear inequalities
+--   Stage 5:  Coordinate system and graphing lines
+--   Stage 6:  Systems of linear equations
+--   Stage 7:  Polynomial expressions
+--   Stage 8:  Polynomial operations (+, -, *)
+--   Stage 9:  Factoring (GCF, trinomial, difference of squares)
+--   Stage 10: Quadratic equations (factoring + quadratic formula)
+--   Stage 11: Rational expressions and equations
+--   Stage 12: Radical expressions and equations
+--   Stage 13: Exponential functions and expressions
+--   Stage 14: Logarithms (definition, laws, change of base)
+--   Stage 15: Exponential and logarithmic equations
+--   Stage 16: Arithmetic and geometric sequences
+
+-- =========================================================================
+-- Stage 1: Variable Expressions
+-- =========================================================================
+
+concept variable_expression
+  domain algebra
+  description "An expression containing variables (unknowns) and constants: 3x + 2, x^2 - 5x + 6"
+  input expr
+  output expr
+  requires real_number_arithmetic via "constants in expressions are real numbers"
+  requires order_of_operations via "evaluate sub-expressions respecting precedence"
+  -- Level C: variables are symbolic atoms; expressions are syntax trees
+
+concept algebraic_substitution
+  domain algebra
+  description "Evaluate an expression by replacing each variable with a given value"
+  input expr expr
+  output expr
+  requires variable_expression via "substitution requires an expression with free variables"
+  requires order_of_operations via "evaluate after substitution respecting PEMDAS"
+  -- Level C: pattern-match variable names, replace, then evaluate
+
+-- =========================================================================
+-- Stage 2: Algebraic Simplification
+-- =========================================================================
+
+concept combine_like_terms
+  domain algebra
+  description "Collect terms with the same variable part: 3x + 2x = 5x"
+  input expr
+  output expr
+  requires variable_expression via "like terms share the same variable factors"
+  requires real_number_arithmetic via "add numeric coefficients of like terms"
+  -- Level C: group terms by symbolic monomial basis
+
+concept distributive_property
+  domain algebra
+  description "a(b + c) = ab + ac: distribute multiplication over addition"
+  input expr
+  output expr
+  requires variable_expression via "distribution applies to algebraic expressions"
+  requires multiplication via "multiply each term inside the parentheses"
+  requires combine_like_terms via "collect resulting like terms after distribution"
+  -- Level C: rewrite rule (DISTRIBUTE left-to-right)
+
+-- =========================================================================
+-- Stage 3: Linear Equations
+-- =========================================================================
+
+concept linear_equation
+  domain algebra
+  description "Solve ax + b = c for x: subtract b, divide by a; unique solution when a != 0"
+  input equation
+  output expr
+  requires combine_like_terms via "simplify both sides by combining like terms"
+  requires distributive_property via "expand parentheses before isolating variable"
+  requires integer_addition via "add the same quantity to both sides"
+  requires division via "divide both sides by the coefficient of x"
+  -- Level C: symbolic rewrite: x = (c - b) / a
+
+concept linear_inequality
+  domain algebra
+  description "Solve ax + b < c; inequality flips when multiplying/dividing by negative"
+  input expr expr
+  output expr
+  requires linear_equation via "same isolation steps as linear equation"
+  requires negative_number_concept via "sign flip rule requires understanding of negatives"
+  requires integer_comparison via "verify direction of inequality after solution"
+  -- Level C: extend linear_equation with inequality direction tracking
+
+-- =========================================================================
+-- Stage 4: Coordinate System and Lines
+-- =========================================================================
+
+concept coordinate_plane
+  domain algebra
+  description "Cartesian plane: points as (x, y) pairs; four quadrants; axes at x=0 and y=0"
+  input expr expr
+  output vector_2d
+  requires integer_comparison via "determine quadrant by comparing x and y to zero"
+  requires real_number_arithmetic via "coordinates are real numbers"
+  -- Level C: geometric interpretation of coordinate pairs
+
+concept slope_of_line
+  domain algebra
+  description "Slope m = (y2-y1)/(x2-x1): rise over run; measures steepness and direction"
+  input vector_2d vector_2d
+  output expr
+  requires integer_subtraction via "compute rise = y2 - y1 and run = x2 - x1"
+  requires division via "divide rise by run"
+  requires comparison via "detect vertical line (run = 0, slope undefined)"
+  -- Level A:
+  --   rise = y2 - y1
+  --   run = x2 - x1
+  --   m = lookup(division, rise, run)
+  --   emit(m)
+
+concept linear_function
+  domain algebra
+  description "y = mx + b: slope-intercept form; slope m and y-intercept b"
+  input expr expr expr
+  output equation
+  requires slope_of_line via "slope m characterizes rate of change"
+  requires coordinate_plane via "y-intercept b is where line crosses y-axis"
+  requires algebraic_substitution via "evaluate y = mx + b at given x"
+  -- Level C: produce equation as symbolic expression
+
+-- =========================================================================
+-- Stage 5: Systems of Linear Equations
+-- =========================================================================
+
+concept linear_system_substitution
+  domain algebra
+  description "Solve 2-equation, 2-variable system by expressing one variable in terms of the other"
+  input equation_pair
+  output vector_2d
+  requires linear_equation via "solve one equation for one variable"
+  requires algebraic_substitution via "substitute into the second equation"
+  requires linear_function via "each equation defines a line; intersection is solution"
+  -- Level C: symbolic two-step substitution procedure
+
+concept linear_system_elimination
+  domain algebra
+  description "Solve system by adding/subtracting equations to eliminate one variable"
+  input equation_pair
+  output vector_2d
+  requires linear_system_substitution via "elimination is equivalent to substitution; different strategy"
+  requires multiplication via "scale equations to create matching coefficients"
+  requires integer_addition via "add/subtract equations to eliminate a variable"
+  -- Level C: coefficient-matching elimination
+
+-- =========================================================================
+-- Stage 6: Polynomials
+-- =========================================================================
+
+concept polynomial_expression
+  domain algebra
+  description "A polynomial: a_n*x^n + ... + a_1*x + a_0; defined by degree and coefficients"
+  input expr_seq
+  output expr
+  requires variable_expression via "polynomial is a structured algebraic expression"
+  requires exponentiation via "each term uses x^n for its power"
+  requires multiplication via "coefficients multiply powers of x"
+  requires single_digit_addition via "sum the terms"
+  -- Level C: polynomial evaluation via Horner's method:
+  --   p(x) = a_n * x^n + ... can be evaluated as (...((a_n*x + a_{n-1})*x + a_{n-2})*...)
+
+concept polynomial_addition
+  domain algebra
+  description "Add polynomials by adding coefficients of matching degrees"
+  input expr_seq expr_seq
+  output expr_seq
+  requires polynomial_expression via "addition requires identifying degrees of each term"
+  requires combine_like_terms via "add coefficients of matching degree (same as combining like terms)"
+  requires real_number_arithmetic via "coefficient arithmetic"
+  -- Level C: zip coefficient arrays by degree, adding element-wise
+
+concept polynomial_multiplication
+  domain algebra
+  description "Multiply polynomials: distribute each term of one poly over every term of the other"
+  input expr_seq expr_seq
+  output expr_seq
+  requires polynomial_addition via "collect and add like terms in the product"
+  requires distributive_property via "each term multiplies all terms of the other polynomial"
+  requires exponentiation via "x^a * x^b = x^(a+b): degree addition for monomial product"
+  -- Level C: convolution of coefficient arrays
+
+-- =========================================================================
+-- Stage 7: Factoring
+-- =========================================================================
+
+concept factor_by_gcf
+  domain algebra
+  description "Factor out greatest common factor: 6x^2 + 9x = 3x(2x + 3)"
+  input expr
+  output expr
+  requires polynomial_expression via "identify terms of the polynomial"
+  requires greatest_common_divisor via "find GCD of all numeric coefficients"
+  requires distributive_property via "verify factoring by distributing back"
+  -- Level C: symbolic GCF extraction
+
+concept factor_difference_of_squares
+  domain algebra
+  description "a^2 - b^2 = (a+b)(a-b): recognise and factor difference-of-squares pattern"
+  input expr
+  output expr
+  requires polynomial_expression via "identify expression as difference of two perfect squares"
+  requires integer_square_root via "extract square roots of each squared term"
+  requires polynomial_multiplication via "verify: (a+b)(a-b) = a^2 - b^2"
+  -- Level C: pattern-match then apply factoring identity
+
+concept factor_trinomial
+  domain algebra
+  description "Factor x^2 + bx + c = (x+p)(x+q) where p+q=b, p*q=c"
+  input expr_seq
+  output expr
+  requires factor_by_gcf via "first factor out any GCF before trinomial factoring"
+  requires integer_addition via "find two numbers that add to b"
+  requires multiplication via "and multiply to c (p+q=b, p*q=c)"
+  requires prime_factorization via "enumerate factor pairs of c to find p and q"
+  -- Level C: search over factor pairs of c
+
+-- =========================================================================
+-- Stage 8: Quadratic Equations
+-- =========================================================================
+
+concept quadratic_equation_by_factoring
+  domain algebra
+  description "Solve ax^2 + bx + c = 0 by factoring the left side and applying zero-product property"
+  input equation
+  output expr_seq
+  requires factor_trinomial via "factor quadratic into two linear factors"
+  requires linear_equation via "each factor set to zero gives one linear equation to solve"
+  -- Level C: factor then solve each factor = 0
+
+concept quadratic_formula
+  domain algebra
+  description "x = (-b +/- sqrt(b^2 - 4ac)) / 2a: solutions for any quadratic ax^2+bx+c=0"
+  input expr_seq
+  output expr_seq
+  requires quadratic_equation_by_factoring via "formula extends factoring to non-factorable quadratics"
+  requires real_number_arithmetic via "arithmetic on coefficients a, b, c"
+  requires irrational_number_concept via "discriminant sqrt may yield irrational solutions"
+  requires complex_number via "negative discriminant yields complex roots"
+  requires integer_subtraction via "compute discriminant b^2 - 4ac"
+  requires multiplication via "compute b^2 and 4ac"
+  -- Level C: symbolic formula application
+
+-- =========================================================================
+-- Stage 9: Rational Expressions
+-- =========================================================================
+
+concept rational_expression
+  domain algebra
+  description "A ratio of two polynomials: P(x)/Q(x); undefined where Q(x) = 0"
+  input expr_seq expr_seq
+  output expr
+  requires polynomial_expression via "numerator and denominator are polynomials"
+  requires fraction_equivalence via "rational expression equivalence parallels fraction equivalence"
+  requires linear_equation via "find where denominator = 0 (domain restriction)"
+  -- Level C: symbolic polynomial fraction
+
+concept rational_expression_simplification
+  domain algebra
+  description "Reduce P(x)/Q(x) by cancelling common polynomial factors"
+  input expr expr
+  output expr
+  requires rational_expression via "input is a rational expression"
+  requires factor_by_gcf via "factor numerator and denominator"
+  requires factor_trinomial via "factor quadratic numerators/denominators"
+  requires fraction_simplification via "same idea as numeric fraction simplification"
+  -- Level C: factor both, cancel common factors
+
+-- =========================================================================
+-- Stage 10: Radical Expressions
+-- =========================================================================
+
+concept radical_expression
+  domain algebra
+  description "n-th root expressions: sqrt(x), cube_root(x), x^(1/n); domain: x >= 0 for even n"
+  input nat expr
+  output expr
+  requires irrational_number_concept via "radicals often produce irrationals"
+  requires exponentiation via "x^(1/n) is the n-th root; inverse of x^n"
+  requires real_number_arithmetic via "simplification uses real arithmetic"
+  -- Level C: symbolic radical simplification
+
+concept radical_equation
+  domain algebra
+  description "Solve equations with radicals by isolating radical then raising both sides to n-th power"
+  input equation
+  output expr
+  requires radical_expression via "equation contains radical expression"
+  requires exponentiation via "raise both sides to n to eliminate radical"
+  requires linear_equation via "solving the resulting equation after eliminating radical"
+  requires algebraic_substitution via "check solution in original equation (extraneous roots possible)"
+  -- Level C: isolate radical, apply inverse, verify
+
+-- =========================================================================
+-- Stage 11: Exponential Functions
+-- =========================================================================
+
+concept exponential_function
+  domain algebra
+  description "f(x) = a^x: continuous extension of integer exponentiation to real x"
+  input expr expr
+  output expr
+  requires exponentiation via "a^x extends integer exponentiation"
+  requires real_number_arithmetic via "exponent x can be any real number"
+  requires fraction_division via "rational exponents: a^(p/q) = (q-th root of a)^p"
+  -- Level C: requires real-valued exponentiation definition
+
+-- =========================================================================
+-- Stage 12: Logarithms
+-- =========================================================================
+
+concept logarithm
+  domain algebra
+  description "log_b(x) = y iff b^y = x: inverse of exponential function"
+  input expr expr
+  output expr
+  requires exponential_function via "logarithm is the inverse of b^x"
+  requires real_number_arithmetic via "both base and argument are positive reals"
+  -- Level C: defined by inverse relationship to exponentiation
+
+adjunction exp_log
+  forward exponential_function
+  inverse logarithm
+  unit log_b(b^x) = x
+  counit b^(log_b(x)) = x
+
+concept logarithm_laws
+  domain algebra
+  description "log(ab)=log(a)+log(b), log(a/b)=log(a)-log(b), log(a^n)=n*log(a)"
+  input expr
+  output expr
+  requires logarithm via "laws govern how logarithms distribute over multiplication and powers"
+  requires real_number_arithmetic via "apply laws to simplify expressions"
+  -- Level C: rewrite rules applied to logarithmic expressions
+
+concept change_of_base
+  domain algebra
+  description "log_b(x) = log_k(x) / log_k(b): convert to any convenient base"
+  input expr expr expr
+  output expr
+  requires logarithm via "both the original and new-base logarithms required"
+  requires logarithm_laws via "change-of-base formula derived from logarithm laws"
+  requires division via "divide log_k(x) by log_k(b)"
+
+-- =========================================================================
+-- Stage 13: Exponential and Logarithmic Equations
+-- =========================================================================
+
+concept exponential_equation
+  domain algebra
+  description "Solve a^f(x) = b: take log of both sides, apply log laws, solve for x"
+  input equation
+  output expr
+  requires exponential_function via "equation involves an exponential"
+  requires logarithm via "apply log to both sides to linearize the exponent"
+  requires logarithm_laws via "use log laws to bring exponent down"
+  requires linear_equation via "solve the resulting linear equation for x"
+  -- Level C: symbolic log-linearization
+
+concept logarithmic_equation
+  domain algebra
+  description "Solve log_b(f(x)) = c: exponentiate both sides (b^c), then solve"
+  input equation
+  output expr
+  requires logarithm via "equation involves logarithm"
+  requires exponential_function via "exponentiate both sides to undo log"
+  requires linear_equation via "solve resulting equation"
+  requires algebraic_substitution via "check domain restrictions (argument must be positive)"
+  -- Level C: symbolic exponentiation of both sides
+
+-- =========================================================================
+-- Stage 14: Sequences
+-- =========================================================================
+
+concept arithmetic_sequence
+  domain algebra
+  description "a_n = a_1 + (n-1)d: each term adds constant difference d"
+  input nat expr expr
+  output expr
+  requires linear_function via "arithmetic sequence is a linear function of index n"
+  requires integer_multiplication via "compute (n-1)*d"
+  requires integer_addition via "add a_1 to get a_n"
+  -- Level A (after integer_multiplication known):
+  --   step = lookup(integer_multiplication, n - 1, d)
+  --   result = a1 + step
+  --   emit(result)
+
+concept geometric_sequence
+  domain algebra
+  description "a_n = a_1 * r^(n-1): each term multiplies by constant ratio r"
+  input nat expr expr
+  output expr
+  requires exponential_function via "geometric sequence is an exponential function of index"
+  requires multiplication via "a_n = a_1 * r^(n-1)"
+  requires exponentiation via "compute r^(n-1)"
+  -- Level A:
+  --   power = lookup(exponentiation, r, n - 1)
+  --   result = lookup(multiplication, a1, power)
+  --   emit(result)
+
+-- =========================================================================
+-- Interface export
+-- =========================================================================
+
+interface algebra
+  exports concepts variable_expression algebraic_substitution
+  exports concepts combine_like_terms distributive_property
+  exports concepts linear_equation linear_inequality coordinate_plane slope_of_line linear_function
+  exports concepts linear_system_substitution linear_system_elimination
+  exports concepts polynomial_expression polynomial_addition polynomial_multiplication
+  exports concepts factor_by_gcf factor_difference_of_squares factor_trinomial
+  exports concepts quadratic_equation_by_factoring quadratic_formula
+  exports concepts rational_expression rational_expression_simplification
+  exports concepts radical_expression radical_equation
+  exports concepts exponential_function logarithm logarithm_laws change_of_base
+  exports concepts exponential_equation logarithmic_equation
+  exports concepts arithmetic_sequence geometric_sequence
