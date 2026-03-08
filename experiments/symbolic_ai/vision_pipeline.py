@@ -65,6 +65,17 @@ _QUANT_BITS = 3
 # Index i → two-character string matching _quantize output for a 1×1 patch at level i.
 _GRAY_LUT_3BIT = ['00', '10', '20', '30', '40', '50', '60', '70']
 
+# Flat lookup table for opponent-color hashing (128 entries).
+# Index = l_bin*16 + rg_bin*4 + by_bin, where:
+#   l_bin  ∈ 0..7  — luminance (3 bits, same as _GRAY_LUT_3BIT levels)
+#   rg_bin ∈ 0..3  — red-green opponent (0 = G-heavy, 3 = R-heavy)
+#   by_bin ∈ 0..3  — blue-yellow opponent (0 = Y-heavy, 3 = B-heavy)
+# Token format: 'C{l}{rg}{by}' — 4-char strings, e.g. 'C000' (dark, neutral) or 'C731'
+_COLOR_LUT_FLAT = [f'C{l}{rg}{by}'
+                   for l in range(8)
+                   for rg in range(4)
+                   for by in range(4)]
+
 
 def _load_patch_fns():
     """Import patch helper functions from modalities.visual_symbol."""
@@ -421,6 +432,8 @@ def foveal_sequence(image,
         arr = np.array(image, dtype=np.float32)
         if arr.max() > 1.0:
             arr /= 255.0
+        is_color = arr.ndim == 3 and arr.shape[2] >= 3
+        rgb_img = arr[..., :3] if is_color else None
         gray = _to_gray_f32(arr) if arr.ndim > 2 else arr
     except Exception:
         return []
@@ -439,15 +452,28 @@ def foveal_sequence(image,
     crop_rows = ch // fine_patch
     crop_cols = cw // fine_patch
 
-    import numpy as np
-
     # --- Vectorized content hashes ---
-    # NOTE: do NOT call _to_gray_f32(patch) here.  `crop` is already a
-    # float32 slice of the globally-normalised `gray` image, so each
-    # pixel is already in [0, 1].  Re-normalising a 1×1 patch (the
-    # default fine_patch=1 case) sets min==max, causing _to_gray_f32 to
-    # return all-zeros and collapsing every pixel to hash '00'.
-    if fine_patch == 1:
+    if is_color and fine_patch == 1:
+        # Color path: opponent-color tokens 'C{l}{rg}{by}' (128 distinct values).
+        # Human-like: L-M (red-green) and S-(L+M) (blue-yellow) opponent channels.
+        rgb = rgb_img[r0:r1, c0:c1]          # (ch, cw, 3), float32 [0,1]
+        r_ch = rgb[..., 0]
+        g_ch = rgb[..., 1]
+        b_ch = rgb[..., 2]
+        lum    = 0.299 * r_ch + 0.587 * g_ch + 0.114 * b_ch   # Y ∈ [0, 1]
+        rg_opp = r_ch - g_ch                                    # R-G ∈ [-1, 1]
+        by_opp = b_ch - 0.5 * (r_ch + g_ch)                    # B-Y ∈ [-0.5, 0.5]
+        l_bin  = np.clip(np.round(lum * 7), 0, 7).astype(np.uint8)
+        rg_bin = np.clip(np.floor((rg_opp + 1.0) * 2), 0, 3).astype(np.uint8)
+        by_bin = np.clip(np.floor((by_opp + 0.5) * 4), 0, 3).astype(np.uint8)
+        idx = (l_bin * 16 + rg_bin * 4 + by_bin).ravel()
+        content_hashes = [_COLOR_LUT_FLAT[i] for i in idx]
+    elif fine_patch == 1:
+        # Grayscale path.
+        # NOTE: do NOT call _to_gray_f32(patch) here. crop is already a
+        # float32 slice of the globally-normalised gray image — each pixel
+        # is already in [0,1]. Re-normalising a 1×1 patch collapses every
+        # pixel to '00'.
         levels = (1 << quant_bits) - 1
         q = np.clip(np.round(crop * levels), 0, levels).astype(np.uint8)
         lut = _GRAY_LUT_3BIT if quant_bits == 3 else None
@@ -488,6 +514,69 @@ def foveal_sequence(image,
     # Interleave pos + content
     tokens = [v for pair in zip(pos_tokens, content_hashes) for v in pair]
     return tokens
+
+
+def foveal_radius_from_viewing_distance(
+    screen_width_px: int = 1920,
+    screen_width_inches: float = 20.8,
+    viewing_distance_inches: float = 24.0,
+    fovea_degrees: float = 2.0,
+) -> int:
+    """Compute foveal crop radius (pixels) matching human foveal acuity.
+
+    Human fovea covers ~2° of visual angle with full acuity.  This function
+    converts that angle to pixels given the screen's physical dimensions and
+    the user's viewing distance.
+
+    Typical cases at 24-inch viewing distance (2 feet):
+        Laptop 15.6"  (13.5" wide, 1920px): 61 px radius  → use foveal_radius_px=61
+        Desktop 24"   (20.8" wide, 1920px): 40 px radius  → use foveal_radius_px=40
+        Desktop 27"   (23.5" wide, 1920px): 36 px radius  → use foveal_radius_px=36
+
+    Default screen_width_inches=20.8 matches a 24" 16:9 monitor
+    (24 × 16/√(16²+9²) ≈ 20.9").
+
+    Args:
+        screen_width_px:       Horizontal pixel count (e.g. 1920).
+        screen_width_inches:   Physical screen width in inches.
+        viewing_distance_inches: Eye-to-screen distance in inches (24 = ~2 feet).
+        fovea_degrees:         Foveal half-angle in degrees (2° = standard fovea).
+
+    Returns:
+        Foveal crop radius in pixels (always ≥ 16).
+    """
+    import math
+    half_width = screen_width_inches / 2
+    half_angle_deg = math.degrees(math.atan(half_width / viewing_distance_inches))
+    pixels_per_degree = screen_width_px / (2 * half_angle_deg)
+    # fovea_degrees is radius (half the full foveal diameter)
+    return max(16, int(round(pixels_per_degree * fovea_degrees)))
+
+
+def peripheral_patch_from_viewing_distance(
+    screen_width_px: int = 1920,
+    screen_width_inches: float = 20.8,
+    viewing_distance_inches: float = 24.0,
+    peripheral_degrees: float = 0.8,
+) -> int:
+    """Compute peripheral patch size (pixels) for a given angular resolution.
+
+    The peripheral scan should be coarse enough to span the whole image quickly
+    but fine enough to localise objects.  A patch size corresponding to ~0.8°
+    of visual angle gives good results (similar to parafoveal resolution).
+
+    Returns the nearest power-of-two patch size ≥ 8 pixels.
+    """
+    import math
+    half_width = screen_width_inches / 2
+    half_angle_deg = math.degrees(math.atan(half_width / viewing_distance_inches))
+    pixels_per_degree = screen_width_px / (2 * half_angle_deg)
+    patch = int(round(pixels_per_degree * peripheral_degrees))
+    # Round to nearest power of two, minimum 8
+    p = 8
+    while p * 2 <= patch:
+        p *= 2
+    return p
 
 
 def _phase2_worker(args):
@@ -668,6 +757,136 @@ class FovealVisionLearner:
                            'saliency': sal_val,
                            'sequence': seq})
         return result
+
+    def scan(self, image, n_saccades: int = None,
+             use_topdown: bool = True) -> list:
+        """Multi-saccade active inference loop with inhibition of return (IOR).
+
+        This is the biologically accurate alternative to fixate(): instead of
+        selecting N fixations in one pass of the saliency map, scan() issues
+        saccades one at a time.  After each fixation it:
+
+        1. **Inhibition of return** — zeros saliency in a radius around the
+           fixated patch so the same region is not revisited.
+
+        2. **Top-down fill-in** (use_topdown=True, default) — uses the trained
+           peripheral SequenceLearner to propagate predictions outward from the
+           fixated patch hashes.  Patches whose actual content matches the
+           top-down prediction are marked as "explained" (saliency set to 0).
+           This models the Rao & Ballard (1999) PC loop: higher-area predictions
+           suppress lower-area firing where no prediction error remains.
+
+        Args:
+            image:       Full image (HxW or HxWxC).
+            n_saccades:  Maximum saccade count.  Defaults to self.n_fixations.
+            use_topdown: Enable predictive fill-in (default True).
+
+        Returns:
+            List of fixation dicts (same schema as fixate()):
+                'center_px':  (px, py) pixel coordinates.
+                'saliency':   Peripheral saliency value at fixation.
+                'sequence':   Interleaved foveal token list.
+        """
+        try:
+            import numpy as np
+        except ImportError:
+            return self.fixate(image)
+
+        if n_saccades is None:
+            n_saccades = self.n_fixations
+
+        sal = saliency_map(image, self.peripheral, self.peripheral_patch)
+        if sal is None:
+            return []
+
+        rows, cols = sal.shape
+        remaining = sal.copy()
+        fixations = []
+
+        # Pre-extract the full peripheral patch hash sequence (scanline order)
+        # so top-down fill-in can index into it by (r, c).
+        if use_topdown:
+            try:
+                arr = np.array(image, dtype=np.float32)
+                if arr.max() > 1.0:
+                    arr /= 255.0
+                _to_gray_f32, _, _quantize = _load_patch_fns()
+                gray_full = _to_gray_f32(arr) if arr.ndim > 2 else arr
+                H, W = gray_full.shape
+                ps = self.peripheral_patch
+                if self.quant_bits == 3:
+                    r_count = H // ps
+                    c_count = W // ps
+                    gc = gray_full[:r_count * ps, :c_count * ps]
+                    blocks = gc.reshape(r_count, ps, c_count, ps)
+                    means = blocks.mean(axis=(1, 3))
+                    q_arr = np.clip(np.round(means * 7), 0, 7).astype(np.uint8)
+                    ph_grid = [[_GRAY_LUT_3BIT[q_arr[r, c]]
+                                for c in range(c_count)]
+                               for r in range(r_count)]
+                else:
+                    ph_grid = None
+            except Exception:
+                ph_grid = None
+        else:
+            ph_grid = None
+
+        learner_obj = self.peripheral.learner   # SequenceLearner internals
+
+        for _ in range(n_saccades):
+            if remaining.max() <= 0:
+                break
+
+            # --- Pick next fixation (highest residual saliency) ---
+            r_idx, c_idx = np.unravel_index(remaining.argmax(), remaining.shape)
+            px = int(c_idx * self.peripheral_patch + self.peripheral_patch // 2)
+            py = int(r_idx * self.peripheral_patch + self.peripheral_patch // 2)
+            sal_val = float(sal[r_idx, c_idx])
+
+            # --- Foveal scan ---
+            seq = foveal_sequence(image, px, py, self.foveal_radius_px,
+                                  self.foveal_patch, self.n_pos_bins,
+                                  self.quant_bits, self.relative_pos)
+            fixations.append({'center_px': (px, py),
+                              'saliency': sal_val,
+                              'sequence': seq})
+
+            # --- Inhibition of return: suppress fixated neighbourhood ---
+            ior_r = max(1, self.foveal_radius_px // self.peripheral_patch)
+            r0 = max(0, r_idx - ior_r)
+            r1 = min(rows, r_idx + ior_r + 1)
+            c0 = max(0, c_idx - ior_r)
+            c1 = min(cols, c_idx + ior_r + 1)
+            remaining[r0:r1, c0:c1] = 0.0
+
+            # --- Top-down fill-in: propagate from anchor patches ---
+            # Run the peripheral Markov chain forward from the fixated patch.
+            # Any neighbour that the model correctly predicts is "explained"
+            # (saliency → 0).  Unpredicted neighbours remain salient.
+            if ph_grid is not None and hasattr(learner_obj, 'logprob'):
+                for dr in range(-2, 3):
+                    for dc in range(-2, 3):
+                        nr, nc = r_idx + dr, c_idx + dc
+                        if nr < 0 or nr >= rows or nc < 0 or nc >= cols:
+                            continue
+                        if remaining[nr, nc] <= 0:
+                            continue
+                        # Try to predict patch (nr, nc) from its two left/above
+                        # neighbours using the peripheral SequenceLearner.
+                        try:
+                            h0_r = max(0, nr - 2)
+                            h1_r = max(0, nr - 1)
+                            h0 = ph_grid[h0_r][nc]
+                            h1 = ph_grid[h1_r][nc]
+                            h2 = ph_grid[nr][nc]
+                            lp = learner_obj.logprob(h0, h1, h2)
+                            if lp is not None and lp > -1.0:
+                                # Patch is well-predicted → explained
+                                remaining[nr, nc] = 0.0
+                        except Exception:
+                            pass
+
+        return fixations
 
     def saliency(self, image) -> 'np.ndarray | None':
         """Return the 2D peripheral saliency map for a single image."""
