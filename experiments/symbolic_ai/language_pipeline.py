@@ -608,32 +608,36 @@ def logprob_chain_ctx(
 
 def evaluate_all(
     ai:                 'SymbolicAI',
-    test_texts:         list[str],
-    base_assignment:    dict[str, int],
+    test_texts:         list,
+    base_assignment:    dict,
     context_assignment: dict,
-    train_pairs:        set[tuple[str, str]],
+    train_pairs:        set,
+    nc_soft:            dict | None = None,
+    wgc_soft:           dict | None = None,
     verbose:            bool = True,
 ) -> dict:
-    """Evaluate flat bigram, E1 chain, and E2 context-sensitive chain together.
+    """Evaluate flat bigram, E1 chain, E2 context chain, and (optional) E3 soft chain.
 
-    Extends evaluate() to include E2 metrics alongside E1 and flat bigram.
+    E3 is enabled when nc_soft and wgc_soft are provided (precomputed soft dists).
     """
-    _banner('Evaluation: flat bigram vs E1 chain vs E2 context-sensitive chain')
+    has_e3 = nc_soft is not None and wgc_soft is not None
+    banner_suffix = 'E3 soft' if has_e3 else 'E2 ctx'
+    _banner(f'Evaluation: flat bigram vs E1 chain vs E2 ctx vs {banner_suffix}')
 
     r = dict(
         total=0,
-        # Flat bigram
         flat_correct=0, flat_answered=0,
         flat_unseen_correct=0, flat_unseen_answered=0,
         flat_logloss=0.0, flat_logloss_n=0,
-        # E1 category chain
         chain_correct=0, chain_answered=0,
         chain_unseen_correct=0, chain_unseen_answered=0,
         chain_logloss=0.0, chain_logloss_n=0,
-        # E2 context-sensitive chain
         ctx_correct=0, ctx_answered=0,
         ctx_unseen_correct=0, ctx_unseen_answered=0,
         ctx_logloss=0.0, ctx_logloss_n=0,
+        e3_correct=0, e3_answered=0,
+        e3_unseen_correct=0, e3_unseen_answered=0,
+        e3_logloss=0.0, e3_logloss_n=0,
         unseen_total=0,
     )
 
@@ -689,62 +693,357 @@ def evaluate_all(
             if lp is not None:
                 r['ctx_logloss'] -= lp; r['ctx_logloss_n'] += 1
 
+            # --- E3 soft retrieval (optional) ---
+            if has_e3:
+                e3_pred = predict_chain_e3(
+                    ai, w1, w2, base_assignment, nc_soft, wgc_soft)
+                if e3_pred is not None:
+                    r['e3_answered'] += 1
+                    if e3_pred == w3:
+                        r['e3_correct'] += 1
+                        if is_unseen:
+                            r['e3_unseen_correct'] += 1
+                    if is_unseen:
+                        r['e3_unseen_answered'] += 1
+                lp = logprob_chain_e3(
+                    ai, w1, w2, w3, base_assignment, nc_soft, wgc_soft)
+                if lp is not None:
+                    r['e3_logloss'] -= lp; r['e3_logloss_n'] += 1
+
     if verbose:
         T  = r['total']
         UT = r['unseen_total']
 
         def pct(n, d): return f'{100*n/d:.1f}%' if d else 'N/A'
-        def ppl(loss, n): return f'{2 ** (loss / n):.1f}' if n else 'N/A'
+        def ppl(loss, n): return f'{2**(loss/n):.1f}' if n else 'N/A'
+
+        if has_e3:
+            hdr = f'  {"Metric":<36} {"Flat":>8} {"E1 chain":>9} {"E2 ctx":>8} {"E3 soft":>9}'
+            sep = f'  {"-"*70}'
+            def row(label, fv, cv, xv, ev):
+                return f'  {label:<36} {fv:>8} {cv:>9} {xv:>8} {ev:>9}'
+        else:
+            hdr = f'  {"Metric":<38} {"Flat":>8} {"E1 chain":>10} {"E2 ctx":>10}'
+            sep = f'  {"-"*66}'
+            def row(label, fv, cv, xv, ev=None):
+                return f'  {label:<38} {fv:>8} {cv:>10} {xv:>10}'
 
         print(f'\n  Test trigrams: {T:,}  (unseen pairs: {UT:,} = {pct(UT, T)})')
         print()
-        print(f'  {"Metric":<38} {"Flat":>8} {"E1 chain":>10} {"E2 ctx":>10}')
-        print(f'  {"-"*66}')
-        print(f'  {"Coverage (answered/total)":<38} '
-              f'{pct(r["flat_answered"],T):>8} '
-              f'{pct(r["chain_answered"],T):>10} '
-              f'{pct(r["ctx_answered"],T):>10}')
-        print(f'  {"Top-1 accuracy (of answered)":<38} '
-              f'{pct(r["flat_correct"],r["flat_answered"]):>8} '
-              f'{pct(r["chain_correct"],r["chain_answered"]):>10} '
-              f'{pct(r["ctx_correct"],r["ctx_answered"]):>10}')
-        print(f'  {"Top-1 accuracy (of total)":<38} '
-              f'{pct(r["flat_correct"],T):>8} '
-              f'{pct(r["chain_correct"],T):>10} '
-              f'{pct(r["ctx_correct"],T):>10}')
-        print(f'  {"Perplexity (lower=better)":<38} '
-              f'{ppl(r["flat_logloss"],r["flat_logloss_n"]):>8} '
-              f'{ppl(r["chain_logloss"],r["chain_logloss_n"]):>10} '
-              f'{ppl(r["ctx_logloss"],r["ctx_logloss_n"]):>10}')
+        print(hdr); print(sep)
+
+        fa = r['flat_answered']; fc = r['flat_correct']
+        ca = r['chain_answered']; cc = r['chain_correct']
+        xa = r['ctx_answered'];   xc = r['ctx_correct']
+        ea = r['e3_answered'];    ec = r['e3_correct']
+
+        fua = r['flat_unseen_answered'];  fuc = r['flat_unseen_correct']
+        cua = r['chain_unseen_answered']; cuc = r['chain_unseen_correct']
+        xua = r['ctx_unseen_answered'];   xuc = r['ctx_unseen_correct']
+        eua = r['e3_unseen_answered'];    euc = r['e3_unseen_correct']
+
+        print(row('Coverage (answered/total)',
+                  pct(fa,T), pct(ca,T), pct(xa,T), pct(ea,T)))
+        print(row('Top-1 accuracy (of answered)',
+                  pct(fc,fa), pct(cc,ca), pct(xc,xa), pct(ec,ea)))
+        print(row('Top-1 accuracy (of total)',
+                  pct(fc,T), pct(cc,T), pct(xc,T), pct(ec,T)))
+        print(row('Perplexity (lower=better)',
+                  ppl(r['flat_logloss'],r['flat_logloss_n']),
+                  ppl(r['chain_logloss'],r['chain_logloss_n']),
+                  ppl(r['ctx_logloss'],r['ctx_logloss_n']),
+                  ppl(r['e3_logloss'],r['e3_logloss_n'])))
         print()
-        print(f'  === UNSEEN WORD PAIRS ===')
-        print(f'  {"Coverage (answered/unseen)":<38} '
-              f'{pct(r["flat_unseen_answered"],UT):>8} '
-              f'{pct(r["chain_unseen_answered"],UT):>10} '
-              f'{pct(r["ctx_unseen_answered"],UT):>10}')
-        print(f'  {"Acc. of answered (unseen)":<38} '
-              f'{pct(r["flat_unseen_correct"],r["flat_unseen_answered"]):>8} '
-              f'{pct(r["chain_unseen_correct"],r["chain_unseen_answered"]):>10} '
-              f'{pct(r["ctx_unseen_correct"],r["ctx_unseen_answered"]):>10}')
-        print(f'  {"Acc. of total (unseen)":<38} '
-              f'{pct(r["flat_unseen_correct"],UT):>8} '
-              f'{pct(r["chain_unseen_correct"],UT):>10} '
-              f'{pct(r["ctx_unseen_correct"],UT):>10}')
+        print('  === UNSEEN WORD PAIRS ===')
+        print(row('Coverage (answered/unseen)',
+                  pct(fua,UT), pct(cua,UT), pct(xua,UT), pct(eua,UT)))
+        print(row('Acc. of answered (unseen)',
+                  pct(fuc,fua), pct(cuc,cua), pct(xuc,xua), pct(euc,eua)))
+        print(row('Acc. of total (unseen)',
+                  pct(fuc,UT), pct(cuc,UT), pct(xuc,UT), pct(euc,UT)))
         print()
 
-        # Verdict
-        e1_unseen = r['chain_unseen_correct'] / max(r['chain_unseen_answered'], 1)
-        e2_unseen = r['ctx_unseen_correct']   / max(r['ctx_unseen_answered'],   1)
-        flat_unseen = r['flat_unseen_correct'] / max(r['flat_unseen_answered'],  1)
-        best = max(e1_unseen, e2_unseen, flat_unseen)
-        if best == e2_unseen and r['ctx_unseen_answered'] > 0 and e2_unseen > flat_unseen:
-            print('  RESULT: E2 context-sensitive chain is BEST on unseen pairs.')
-        elif best == e1_unseen and r['chain_unseen_answered'] > 0 and e1_unseen > flat_unseen:
-            print('  RESULT: E1 category chain is BEST on unseen pairs.')
+        # Verdict: compare all enabled phases on unseen-pair accuracy.
+        scores = {
+            'Flat': fuc / max(fua, 1),
+            'E1':   cuc / max(cua, 1),
+            'E2':   xuc / max(xua, 1),
+        }
+        if has_e3:
+            scores['E3'] = euc / max(eua, 1)
+        best_name = max(scores, key=scores.get)
+        if best_name != 'Flat' and scores[best_name] > scores['Flat']:
+            print(f'  RESULT: {best_name} is BEST on unseen pairs '
+                  f'({100*scores[best_name]:.1f}% vs Flat {100*scores["Flat"]:.1f}%).')
         else:
             print('  RESULT: Flat bigram matches or exceeds chains on unseen pairs.')
 
     return r
+
+
+# ---------------------------------------------------------------------------
+# Phase E3: Soft Retrieval (Attention-Equivalent)
+# ---------------------------------------------------------------------------
+
+def build_cluster_word_dists(
+    assignment:  dict,
+    clusters:    dict,
+    train_texts: list,
+    verbose:     bool = True,
+) -> dict:
+    """Frequency-weighted word distribution for each cluster.
+
+    Weights cluster members by corpus frequency, giving more influence to
+    frequent words when comparing cluster similarity via JSD.
+    """
+    import collections
+    _banner('Phase E3: Building cluster word distributions')
+
+    word_freq: collections.Counter = collections.Counter()
+    for text in train_texts:
+        word_freq.update(text.split())
+
+    cluster_dists: dict = {}
+    for cid, members in clusters.items():
+        freq_total = sum(word_freq.get(w, 1) for w in members)
+        cluster_dists[cid] = {w: word_freq.get(w, 1) / freq_total for w in members}
+
+    if verbose:
+        print(f'  Clusters with word distributions: {len(cluster_dists)}')
+        for cid in sorted(cluster_dists.keys())[:3]:
+            top = sorted(cluster_dists[cid].items(), key=lambda kv: -kv[1])[:4]
+            print(f'    C{cid:02d}: {" ".join(f"{w}({p:.3f})" for w, p in top)}')
+
+    return cluster_dists
+
+
+def _jsd(p: dict, q: dict) -> float:
+    """Jensen-Shannon divergence (base-2) between distributions p and q.
+    Symmetric and bounded: 0.0 = identical, 1.0 = fully disjoint vocabularies.
+    """
+    result = 0.0
+    for k in set(p) | set(q):
+        pk = p.get(k, 0.0)
+        qk = q.get(k, 0.0)
+        mk = 0.5 * (pk + qk)
+        if mk < 1e-12:
+            continue
+        if pk > 1e-12:
+            result += 0.5 * pk * math.log2(pk / mk)
+        if qk > 1e-12:
+            result += 0.5 * qk * math.log2(qk / mk)
+    return result
+
+
+def build_cluster_similarity_matrix(
+    cluster_dists: dict,
+    K:             int,
+    temperature:   float = 2.0,
+    verbose:       bool = True,
+) -> list:
+    """K×K matrix of cluster similarities: sim(c, c') = exp(-T × JSD(P_c, P_c')).
+
+    Temperature controls selectivity:
+        T high → only very similar clusters contribute (approaches E1 exact-match).
+        T low  → even dissimilar clusters contribute (more diffuse smoothing).
+    """
+    _banner('Phase E3: Building cluster similarity matrix')
+
+    matrix = [[0.0] * K for _ in range(K)]
+    for i in range(K):
+        di = cluster_dists.get(i, {})
+        for j in range(K):
+            dj = cluster_dists.get(j, {})
+            matrix[i][j] = 1.0 if i == j else math.exp(-temperature * _jsd(di, dj))
+
+    if verbose:
+        pairs = [(matrix[i][j], i, j)
+                 for i in range(K) for j in range(i + 1, K)]
+        pairs.sort(reverse=True)
+        print(f'  Similarity matrix ({K}×{K}), temperature={temperature}:')
+        print(f'  Most similar off-diagonal cluster pairs:')
+        for sim, i, j in pairs[:5]:
+            print(f'    C{i:02d} ↔ C{j:02d}: {sim:.3f}')
+        avg_off = sum(s for s, _, _ in pairs) / max(len(pairs), 1)
+        print(f'  Average off-diagonal similarity: {avg_off:.3f}')
+
+    return matrix
+
+
+def precompute_dist_cache(
+    ai:           'SymbolicAI',
+    concept_name: str,
+) -> dict:
+    """Precompute output distribution for each unique stored input key.
+
+    Returns {input_key: {output_key: probability}}.
+    Avoids repeated iteration over store.examples in hot loops.
+    """
+    import collections
+    store = ai.stores.get(concept_name)
+    if store is None:
+        return {}
+
+    key_counts: dict = collections.defaultdict(lambda: collections.defaultdict(float))
+    key_totals: dict = collections.defaultdict(float)
+
+    for stored_inputs, stored_outputs in store.examples:
+        key_counts[stored_inputs][stored_outputs] += 1
+        key_totals[stored_inputs] += 1
+
+    return {
+        key: {out: cnt / key_totals[key] for out, cnt in counts.items()}
+        for key, counts in key_counts.items()
+    }
+
+
+def ask_weighted_soft(
+    query_key:  tuple,
+    dist_cache: dict,
+    sim_matrix: list,
+    K:          int,
+) -> dict | None:
+    """Soft-weighted retrieval — the distributional analogue of self-attention.
+
+    Computes:
+        P_soft(output | query) ∝ Σ_key w(query, key) × P(output | key)
+    where:
+        w(query, key) = Π_i sim_matrix[ int(query[i]) ][ int(key[i]) ]
+
+    Replaces exact-match lookup with similarity-weighted aggregation over ALL
+    stored keys. Keys with zero weight are skipped for efficiency.
+    """
+    import collections
+    weighted_output: dict = collections.defaultdict(float)
+    total_weight = 0.0
+
+    for stored_key, out_dist in dist_cache.items():
+        if len(stored_key) != len(query_key):
+            continue
+
+        weight = 1.0
+        for qi_s, ki_s in zip(query_key, stored_key):
+            try:
+                qi, ki = int(qi_s), int(ki_s)
+                w = (sim_matrix[qi][ki]
+                     if 0 <= qi < K and 0 <= ki < K
+                     else (1.0 if qi == ki else 0.0))
+            except (ValueError, TypeError):
+                w = 1.0 if qi_s == ki_s else 0.0
+            weight *= w
+            if weight < 1e-12:
+                break
+
+        if weight < 1e-12:
+            continue
+
+        for out, prob in out_dist.items():
+            weighted_output[out] += weight * prob
+        total_weight += weight
+
+    if total_weight < 1e-12:
+        return None
+
+    return {k: v / total_weight for k, v in weighted_output.items()}
+
+
+def precompute_all_soft_dists(
+    dist_cache: dict,
+    sim_matrix: list,
+    K:          int,
+    arity:      int,
+    verbose:    bool = True,
+) -> dict:
+    """Precompute soft distributions for all K^arity possible query keys.
+
+    Runs once before evaluation; then predict/logprob are O(1) lookups.
+    For K=12, arity=2: 144 queries; arity=3: 1728 queries.
+    """
+    import itertools
+
+    all_queries = list(itertools.product(range(K), repeat=arity))
+    n = len(all_queries)
+    if verbose:
+        print(f'  Precomputing soft dists: {n} queries (K={K}, arity={arity})')
+
+    soft_dists: dict = {}
+    for query_ids in all_queries:
+        qkey = tuple(str(q) for q in query_ids)
+        soft_dists[qkey] = ask_weighted_soft(qkey, dist_cache, sim_matrix, K)
+
+    n_pop = sum(1 for d in soft_dists.values() if d is not None)
+    if verbose:
+        print(f'  Populated: {n_pop}/{n}')
+
+    return soft_dists
+
+
+def predict_chain_e3(
+    ai:         'SymbolicAI',
+    w1:         str,
+    w2:         str,
+    assignment: dict,
+    nc_soft:    dict,
+    wgc_soft:   dict,
+) -> str | None:
+    """Phase E3: Predict w3 via similarity-weighted chain (with E1 fallback).
+
+    Uses precomputed soft distributions for O(1) inference. Falls back to
+    E1 exact-match if the word is OOV or soft lookup returns nothing.
+    """
+    c1 = assignment.get(w1)
+    c2 = assignment.get(w2)
+    if c1 is None or c2 is None:
+        return None
+
+    c3_dist = nc_soft.get((str(c1), str(c2)))
+    if c3_dist is None:
+        return predict_chain(ai, w1, w2, assignment)
+
+    c3_tup = max(c3_dist, key=c3_dist.get)
+    c3_str = c3_tup[0] if isinstance(c3_tup, tuple) else str(c3_tup)
+
+    w3_dist = wgc_soft.get((str(c1), str(c2), c3_str))
+    if w3_dist is None:
+        return predict_chain(ai, w1, w2, assignment)
+
+    best = max(w3_dist, key=w3_dist.get)
+    return best[0] if isinstance(best, tuple) else str(best)
+
+
+def logprob_chain_e3(
+    ai:         'SymbolicAI',
+    w1:         str,
+    w2:         str,
+    w3:         str,
+    assignment: dict,
+    nc_soft:    dict,
+    wgc_soft:   dict,
+) -> float | None:
+    """Log₂ probability via E3 soft-retrieval chain (with E1 fallback)."""
+    c1 = assignment.get(w1)
+    c2 = assignment.get(w2)
+    c3 = assignment.get(w3)
+    if c1 is None or c2 is None or c3 is None:
+        return None
+
+    c3_dist = nc_soft.get((str(c1), str(c2)))
+    if c3_dist is None:
+        return logprob_chain(ai, w1, w2, w3, assignment)
+
+    p_c3 = c3_dist.get((str(c3),), 0.0)
+    if p_c3 < 1e-12:
+        return logprob_chain(ai, w1, w2, w3, assignment)
+
+    w3_dist = wgc_soft.get((str(c1), str(c2), str(c3)))
+    if w3_dist is None:
+        return None
+
+    p_w3 = w3_dist.get((w3,), 0.0)
+    if p_w3 < 1e-12:
+        return None
+
+    return math.log2(p_c3 * p_w3)
 
 
 # ---------------------------------------------------------------------------
@@ -771,8 +1070,11 @@ def main() -> None:
                    help='Context-sensitive cluster count for E2 (default: n_clusters)')
     p.add_argument('--ctx_min_count', type=int, default=3,
                    help='Min occurrences for a (c_prev,word) pair to get a context cluster (default: 3)')
-    p.add_argument('--phase',        choices=['e1', 'e2', 'both'], default='both',
-                   help='Which phase to run: e1, e2, or both (default: both)')
+    p.add_argument('--phase',        choices=['e1', 'e2', 'e3', 'both', 'all'],
+                   default='all',
+                   help='Phases to run: e1, e2, e3, both (E1+E2), all (E1+E2+E3) (default: all)')
+    p.add_argument('--e3_temperature', type=float, default=2.0,
+                   help='E3 similarity temperature: higher=more selective (default: 2.0)')
     p.add_argument('--save',         metavar='PATH',
                    help='Save AI checkpoint after training')
     p.add_argument('--load',         metavar='PATH',
@@ -781,13 +1083,17 @@ def main() -> None:
     args = p.parse_args()
 
     n_ctx = args.n_ctx_clusters or args.n_clusters
+    run_e2 = args.phase in ('e2', 'both', 'e3', 'all')
+    run_e3 = args.phase in ('e3', 'all')
 
-    _banner('Language Pipeline: Category-Chain Word Prediction (E1 + E2)')
+    _banner('Language Pipeline: Category-Chain Word Prediction (E1+E2+E3)')
     print(f'  Corpus:           {args.corpus}')
     print(f'  Train:            {args.n_train} lines  ({args.split*100:.0f}%)')
     print(f'  E1 clusters (K):  {args.n_clusters}')
     print(f'  E2 ctx clusters:  {n_ctx}')
     print(f'  Phase:            {args.phase}')
+    if run_e3:
+        print(f'  E3 temperature:   {args.e3_temperature}')
 
     # Locate corpus.
     d = (args.corpus if os.path.isdir(args.corpus)
@@ -843,8 +1149,10 @@ def main() -> None:
     # ---- Phase selection ----
     context_assignment: dict = {}
     ctx_clusters: dict = {}
+    nc_soft: dict | None = None
+    wgc_soft: dict | None = None
 
-    if args.phase in ('e2', 'both'):
+    if run_e2:
         # ---- Step 5: Build E2 context-sensitive cluster assignment ----
         context_assignment, ctx_clusters = build_trigram_assignment(
             train_texts, assignment, n_clusters=n_ctx,
@@ -855,17 +1163,34 @@ def main() -> None:
             # ---- Step 6: Train E2 context-sensitive chain ----
             train_chain_ctx(ai, train_texts, assignment, context_assignment, verbose=True)
 
+    if run_e3:
+        # ---- Step 7: Build E3 soft retrieval components ----
+        _banner('Phase E3: Soft Retrieval')
+        K = len(clusters)
+        cluster_dists = build_cluster_word_dists(assignment, clusters, train_texts, verbose=True)
+        sim_matrix = build_cluster_similarity_matrix(
+            cluster_dists, K=K, temperature=args.e3_temperature, verbose=True)
+
+        print()
+        nc_cache  = precompute_dist_cache(ai, 'next_cat')
+        wgc_cache = precompute_dist_cache(ai, 'word_given_cat')
+        print(f'  Precomputed dist caches: next_cat={len(nc_cache)} keys, '
+              f'word_given_cat={len(wgc_cache)} keys')
+
+        nc_soft  = precompute_all_soft_dists(nc_cache,  sim_matrix, K, arity=2, verbose=True)
+        wgc_soft = precompute_all_soft_dists(wgc_cache, sim_matrix, K, arity=3, verbose=True)
+
     # ---- Evaluation ----
     if args.phase == 'e1':
         evaluate(ai, test_texts, assignment, train_pairs, verbose=True)
+    elif not context_assignment and not run_e3:
+        print('  WARNING: E2 clustering failed; falling back to E1-only evaluation.')
+        evaluate(ai, test_texts, assignment, train_pairs, verbose=True)
     else:
-        # Full three-way comparison: flat vs E1 vs E2
-        if context_assignment:
-            evaluate_all(ai, test_texts, assignment, context_assignment,
-                         train_pairs, verbose=True)
-        else:
-            print('  WARNING: E2 clustering failed; falling back to E1-only evaluation.')
-            evaluate(ai, test_texts, assignment, train_pairs, verbose=True)
+        evaluate_all(ai, test_texts, assignment, context_assignment,
+                     train_pairs,
+                     nc_soft=nc_soft, wgc_soft=wgc_soft,
+                     verbose=True)
 
     # ---- Save ----
     if args.save:
@@ -888,8 +1213,11 @@ def main() -> None:
     ratio_e2 = V**2 / max(K * KC, 1)
     print(f'  E1 compression vs flat:   {ratio_e1:.0f}x')
     print(f'  E2 compression vs flat:   {ratio_e2:.0f}x')
-    print()
-    print('  Next step (Phase E3): soft retrieval for contextual representations.')
+    if run_e3:
+        print('  E3 soft retrieval: ENABLED (similarity-weighted aggregation)')
+        print(f'  E3 temperature: {args.e3_temperature}')
+    else:
+        print('  Next step (Phase E3): --phase e3 or --phase all for soft retrieval.')
 
 
 if __name__ == '__main__':
