@@ -1,0 +1,62 @@
+# tits.adapter.yaml — TiTS (Trials in Tainted Space) game adapter config
+# Phase S.2b
+#
+# Usage:
+#   python modalities/adapter_wizard.py --train            # build GlyphReader (once)
+#   python modalities/adapter_wizard.py --verify           # check live frame reading
+#   python tits_test.py                                    # T0–T3 (no game required)
+#   python tits_test.py --phase t1                         # T1+ (TiTS must be running)
+#   python tits_test.py --phase t4 --steps 200             # agent plays
+
+name: tits
+platform: screen_capture
+
+# ------------------------------------------------------------------
+# Window identification
+# TiTS (Electron app) window title. If capture fails, try:
+#   "Trials in Tainted Space" or "TiTS-public-0.9.153"
+# ------------------------------------------------------------------
+window_title: "Trials in Tainted Space"
+
+# ------------------------------------------------------------------
+# GlyphReader — pre-trained character recogniser
+# Run: python modalities/adapter_wizard.py --train
+# ------------------------------------------------------------------
+glyph_reader: glyph_reader.pkl
+calibrate_on_connect: true     # fine-tune cluster centroids to TiTS font
+
+# ------------------------------------------------------------------
+# Stat regexes — applied to stats_text + narrative text from ScreenReader
+#
+# Each key becomes a field in the obs dict.
+# One capture group  → float stored as key
+# Two capture groups → key=current, key_max=maximum
+# ------------------------------------------------------------------
+stats:
+  hp:      'HP[:\s]+(\d+)\s*/\s*(\d+)'
+  lust:    'Lust[:\s]+(\d+)\s*/\s*(\d+)'
+  level:   'Lv(?:l|el)?\.?\s*(\d+)'
+  credits: 'Credits?[:\s]+([\d,]+)'
+  xp:      'XP[:\s]+(\d+)\s*/\s*(\d+)'
+
+# ------------------------------------------------------------------
+# New-game automation
+# Executes on connect() when new_game block is present.
+# Each step: { click: "Button label" } or { type: "text" }
+# Labels are fuzzy-matched against ScreenReader button detections.
+# ------------------------------------------------------------------
+new_game:
+  steps:
+    - click: "New Game"
+    - click: "Mercenary"        # starting class
+    - type:  "TiTS-Agent"       # character name
+    - click: "Confirm"          # confirm name
+    - click: "Steele"           # default surname (if prompted)
+    - click: "Female"           # gender selection (arbitrary choice)
+    - click: "Confirm"          # confirm character creation
+
+# ------------------------------------------------------------------
+# Capture settings (passed to ScreenModality)
+# ------------------------------------------------------------------
+capture_fps: 10
+dry_run: false

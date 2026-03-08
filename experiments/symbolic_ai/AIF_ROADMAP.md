@@ -497,15 +497,138 @@ For complex multi-minute decisions: Level 3 planner uses k=10+.
 | R5 — Goal Learning | COMPLETE | 2026-03-07 | `goal_learning.py` written (`discover_goals`, `DiscoveredGoal`, `update_generative_model`); smoke test PASS |
 | R6 — Visual Symbol Learning | COMPLETE | 2026-03-07 | `visual_symbol.py`; VisualSymbolLearner + discover_visual_symbols(); smoke test PASS |
 | R7 — New Game Adapter | COMPLETE | 2026-03-07 | `action.py` (Action type hierarchy) + `screen_modality.py` (ScreenModality base); smoke test PASS |
-| R8 — Multi-step Rollouts | COMPLETE | 2026-03-07 | `beam_search()` in generative_model.py; AIFEngine._beam_decide(); backward compat 3/3 PASS |
+| R8 -- Multi-step Rollouts | COMPLETE | 2026-03-07 | `beam_search()` in generative_model.py; AIFEngine._beam_decide(); backward compat 3/3 PASS |
+| S.0 -- Learned Visual Reading | COMPLETE | 2026-03-07 | `glyph_reader.py` (97% accuracy), `text_scanner.py`, `screen_reader.py` |
+| S.1 -- Config-Driven Adapter | COMPLETE | 2026-03-07 | `generic_modality.py`, `adapter_wizard.py` |
+| S.2 -- TiTS Adapter | COMPLETE | 2026-03-07 | `tits_modality.py`, `tits_adapter.py`, `tits.adapter.yaml` |
+| S.3 -- TiTS Tests | COMPLETE | 2026-03-07 | `tits_test.py`; T0 97% PASS, T3 PASS |
+
+---
+
+## Phase S: Trials in Tainted Space Adapter (Learned Visual Reading)
+
+**Goal:** First real game adapter. Agent reads screen pixels to understand TiTS.
+No pre-built OCR — character recognition is learned from examples, like a human.
+
+**Inviolable design principle (established this phase):**
+> The agent must read computer screens the same way a human does -- from rendered
+> pixels, by learning what characters look like. Pre-built OCR (tesseract, easyocr)
+> is ruled out because it fails on equations (subscripts, exponents) and stylised
+> fonts, and introduces an unverifiable external dependency.
+
+### S.0: Learned Visual Reading
+
+**Files:** `modalities/glyph_reader.py`, `modalities/text_scanner.py`, `modalities/screen_reader.py`
+
+**GlyphReader** (glyph_reader.py):
+- Trains on PIL-rendered ASCII + math charset (94 chars x 5 sizes = 1410 patches)
+- Nearest-centroid classifier over pixel patch representations
+- T0 accuracy: 97% (3 misses: 'I', '.', '|' -- single-pixel strokes in bitmap font)
+- Real TTF fonts (game-specific) close the gap via `calibrate(frame)`
+
+**TextScanner** (text_scanner.py):
+- Phase A (layout): gradient-magnitude energy map -> connected-component bounding boxes
+- Phase B (reading): left-to-right saccadic fixation sequence within each region
+- Classifies regions as: text | button | status_bar | image | background
+
+**ScreenReader** (screen_reader.py):
+- Unified interface: `reader.read(frame)` -> `FrameReading(narrative, buttons, stats_text)`
+- `ScreenReader.train_and_save()` / `ScreenReader.load()` for persistence
+
+### S.1: Config-Driven Adapter
+
+**Files:** `modalities/generic_modality.py`, `modalities/adapter_wizard.py`
+
+**GenericModality** covers any text-UI game with zero game-specific code:
+- Loads `.adapter.yaml` (window_title, stat regex patterns, new_game steps)
+- `build_obs(frame)` -> `{screen, text, admissible, score, done, **stats}`
+- `send_text(label)` -> finds button by centroid or falls back to keyboard type
+
+**adapter_wizard.py** CLI:
+```bash
+python modalities/adapter_wizard.py --train            # build GlyphReader (once, ~10s)
+python modalities/adapter_wizard.py --smoke            # T0 accuracy self-test
+python modalities/adapter_wizard.py --verify           # read live game frame
+python modalities/adapter_wizard.py --info             # cluster label map
+```
+
+### S.2: TiTS-Specific Adapter
+
+**Files:** `modalities/tits_modality.py`, `modalities/tits_adapter.py`, `tits.adapter.yaml`
+
+**TiTSModality** (3 method overrides on GenericModality):
+- `_detect_combat(buttons)` -- 2+ combat keywords in admissible set
+- `_detect_game_over(text)` -- pattern match on known defeat phrases
+- `_derive_tits_score(obs)` -- quest_score + level_bonus + credit_bonus
+
+**TiTSWorldModel** + drives + goals:
+- `hp_drive` (urgency=1.0): deficit fires when HP < 100%
+- `lust_drive` (urgency=0.65): deficit fires when lust_frac > 0.30
+- `explore_drive` (urgency=0.35): always-on exploration pressure
+- Goals: survive (safety) > manage_lust (safety) > heal > combat_act > explore
+
+**tits.adapter.yaml**:
+- window_title, glyph_reader path, stat regexes (hp/lust/level/credits/xp)
+- new_game steps: click "New Game" > class > name > confirm
+
+### S.3: Tests
+
+**File:** `tits_test.py`
+
+| Phase | What | Status |
+|-------|------|--------|
+| T0 | GlyphReader accuracy on PIL charset | PASS (97%) |
+| T1 | Live frame reading (game running) | Requires TiTS running |
+| T2 | New-game sequence automation | Requires TiTS at main menu |
+| T3 | FEP drive deficit assertions | PASS |
+| T4 | Agent plays N steps | Requires TiTS running |
+
+```bash
+python tits_test.py                          # T0 + T3 (no game needed)
+python tits_test.py --phase t1               # + live frame reading
+python tits_test.py --phase t4 --steps 200  # agent plays 200 steps
+```
+
+### S.4: OCR -> CTKG Persistence (PLANNED, deferred)
+
+Once GlyphReader achieves high accuracy on real TiTS + Danganronpa fonts
+(validated via T1 + live calibration), the trained knowledge will be
+serialized to `ctkg/domains/ocr.ctkg` as BuiltinFact entries:
+
+```
+# ocr.ctkg (sketch)
+type glyph_patch = seq(nat(0..255), 256)   # 16x16 flattened patch
+type char_label  = symbol(ASCII + math_symbols)
+
+concept glyph_recognition:
+    requires pixel_processing
+    fact centroid_0: (glyph_patch, char_label) = ([...], 'A')
+    fact centroid_1: (glyph_patch, char_label) = ([...], 'B')
+    ...
+```
+
+Future agents load this as built-in knowledge and refine it via calibration.
+The same incremental improvement pattern as `arithmetic.ctkg`.
+
+### Three-Game Roadmap
+
+All three games use the SAME ScreenReader (trained once).
+Adapter per game = `.adapter.yaml` + optional 100-200 line subclass.
+
+| Game | Phase | Non-text signals | Status |
+|------|-------|-----------------|--------|
+| TiTS | S | Combat layout, game-over | COMPLETE (offline) |
+| Danganronpa | D | Scene type (trial/explore), evidence | PLANNED |
+| Persona 5 Royal | P | 3D navigation, stylised UI | PLANNED |
 
 ---
 
 ## Validation Checklist
 
 After each phase, verify:
-- [ ] `python run_experiment.py` — all 17 phases PASS (symbolic AI unchanged)
-- [ ] `python textworld_test.py` — NanoTextEnv 3/3 PASS, MicroTextWorld 5×3/3 PASS
-- [ ] `python textworld_test.py --plan` — Phase Q4 quest completion 3/3 PASS
-- [ ] (After R3) `python textworld_test.py --aif` — same success with AIFEngine
-- [ ] (After R5) `python textworld_test.py --discover-goals` — goals discovered, not manual
+- [ ] `python run_experiment.py` -- all 16 phases PASS (symbolic AI unchanged)
+- [ ] `python textworld_test.py` -- NanoTextEnv 3/3 PASS, MicroTextWorld 5x3/3 PASS
+- [ ] `python textworld_test.py --plan` -- Phase Q4 quest completion 3/3 PASS
+- [ ] (After R3) `python textworld_test.py --aif` -- same success with AIFEngine
+- [ ] (After R5) `python textworld_test.py --discover-goals` -- goals discovered, not manual
+- [ ] (After S.0) `python tits_test.py` -- T0 97% PASS, T3 PASS
