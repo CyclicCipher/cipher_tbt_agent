@@ -195,10 +195,50 @@ def segment_line_image(
 # Read a single line image -> string
 # ===========================================================================
 
+def _load_gray_segments(
+    image_path: str,
+    glyph_reader,
+    target_h: int = _TARGET_H,
+):
+    """Shared image loading + segmentation used by read_line and read_line_viterbi.
+
+    Returns (segs, gray, patch_size) or (None, None, None) on error.
+    segs: List[(x0, x1, is_space)]
+    gray: (target_h, W) float32 image
+    """
+    from PIL import Image
+    from modalities.visual_symbol import _to_gray_f32
+
+    patch_size = glyph_reader.patch_size
+
+    try:
+        img = Image.open(image_path)
+    except Exception:
+        return None, None, None
+
+    if img.mode != "L":
+        img = img.convert("L")
+
+    H, W = img.height, img.width
+    if H == 0 or W == 0:
+        return None, None, None
+
+    scale = target_h / H
+    new_w = max(patch_size, int(W * scale))
+    img_small = img.resize((new_w, target_h), Image.LANCZOS)
+
+    from modalities.visual_symbol import _to_gray_f32 as _tgf
+    gray = _tgf(np.array(img_small))
+    segs = segment_line_image(gray, min_seg_w=_MIN_SEG_W)
+    return segs, gray, patch_size
+
+
 def read_line(
     image_path: str,
     glyph_reader,
     target_h: int = _TARGET_H,
+    lang_prior=None,
+    alpha: float = 0.6,
 ) -> str:
     """Read a GT4HistOCR line image; return the predicted string.
 
@@ -207,53 +247,73 @@ def read_line(
       2. Resize to normalise line height to target_h pixels
       3. Segment by vertical projection
       4. For each character segment: resize to patch_size x patch_size, read_patch()
+         (or read_patch_topk() + Viterbi if lang_prior is provided)
       5. Insert spaces for wide gaps
+
+    Parameters
+    ----------
+    lang_prior  Optional LanguagePrior instance.  If provided, uses Viterbi
+                decoding to combine GlyphReader visual scores with character
+                bigram transition probabilities.  This corrects systematic
+                misreads using knowledge of Early Modern Latin / German Fraktur.
+    alpha       Visual weight for Viterbi (0=pure language, 1=pure visual).
+                Default 0.6 (favour visual but allow language corrections).
     """
     from PIL import Image
-    from modalities.visual_symbol import _to_gray_f32
 
-    patch_size = glyph_reader.patch_size
-
-    # Load and normalise height
-    try:
-        img = Image.open(image_path)
-    except Exception:
+    segs, gray, patch_size = _load_gray_segments(image_path, glyph_reader, target_h)
+    if segs is None:
         return ""
 
-    if img.mode != "L":
-        img = img.convert("L")
-
-    H, W = img.height, img.width
-    if H == 0 or W == 0:
-        return ""
-
-    # Scale to target_h
-    scale = target_h / H
-    new_w = max(patch_size, int(W * scale))
-    img_small = img.resize((new_w, target_h), Image.LANCZOS)
-    gray = _to_gray_f32(np.array(img_small))   # (target_h, new_w) float32
-
-    # Segment
-    segs = segment_line_image(gray, min_seg_w=_MIN_SEG_W)
-
-    # Read each segment
     chars: List[str] = []
-    for x0, x1, is_space in segs:
-        if is_space:
-            chars.append(" ")
-            continue
-        # Crop and resize to patch_size x patch_size
-        seg = gray[:, x0:x1]   # (target_h, seg_w) float32
-        if seg.size == 0:
-            continue
-        # PIL resize to square patch
-        seg_img = Image.fromarray((seg * 255).clip(0, 255).astype(np.uint8), mode="L")
-        patch_img = seg_img.resize((patch_size, patch_size), Image.LANCZOS)
-        patch = np.array(patch_img, dtype=np.uint8)
 
-        result = glyph_reader.read_patch(patch)
-        if result.char and result.char != " ":
-            chars.append(result.char)
+    if lang_prior is None:
+        # -------------------------------------------------------------------
+        # Greedy top-1 decoding (no language prior)
+        # -------------------------------------------------------------------
+        for x0, x1, is_space in segs:
+            if is_space:
+                chars.append(" ")
+                continue
+            seg = gray[:, x0:x1]
+            if seg.size == 0:
+                continue
+            seg_img = Image.fromarray(
+                (seg * 255).clip(0, 255).astype(np.uint8), mode="L"
+            )
+            patch_img = seg_img.resize((patch_size, patch_size), Image.LANCZOS)
+            patch = np.array(patch_img, dtype=np.uint8)
+            result = glyph_reader.read_patch(patch)
+            if result.char and result.char != " ":
+                chars.append(result.char)
+    else:
+        # -------------------------------------------------------------------
+        # Viterbi decoding with language prior
+        # Groups non-space segments within each word, then spaces between words.
+        # -------------------------------------------------------------------
+        word_candidates: List[List[Tuple[str, float]]] = []  # current word
+        for x0, x1, is_space in segs:
+            if is_space:
+                # Flush current word through Viterbi
+                if word_candidates:
+                    chars.append(lang_prior.viterbi(word_candidates, alpha=alpha))
+                    word_candidates = []
+                chars.append(" ")
+                continue
+            seg = gray[:, x0:x1]
+            if seg.size == 0:
+                continue
+            seg_img = Image.fromarray(
+                (seg * 255).clip(0, 255).astype(np.uint8), mode="L"
+            )
+            patch_img = seg_img.resize((patch_size, patch_size), Image.LANCZOS)
+            patch = np.array(patch_img, dtype=np.uint8)
+            topk = glyph_reader.read_patch_topk(patch, k=8)
+            if topk:
+                word_candidates.append(topk)
+        # Flush final word
+        if word_candidates:
+            chars.append(lang_prior.viterbi(word_candidates, alpha=alpha))
 
     return "".join(chars).strip()
 
@@ -320,6 +380,8 @@ def evaluate_corpus(
     calibrate_frac: float = 0.1,
     verbose: bool = False,
     show_n_errors: int = 5,
+    lang_prior=None,
+    alpha: float = 0.6,
 ) -> Dict:
     """Evaluate GlyphReader on a corpus; return metrics dict.
 
@@ -331,6 +393,8 @@ def evaluate_corpus(
     calibrate_frac  Fraction of lines used for calibration (not evaluated)
     verbose         Print per-book breakdown
     show_n_errors   Number of worst-CER examples to show
+    lang_prior      Optional LanguagePrior for Viterbi decoding (see read_line)
+    alpha           Visual weight for Viterbi (default 0.6)
     """
     from PIL import Image
     from modalities.visual_symbol import _to_gray_f32
@@ -398,7 +462,7 @@ def evaluate_corpus(
             if not gt_norm:
                 continue
 
-            pred = read_line(img_path, glyph_reader)
+            pred = read_line(img_path, glyph_reader, lang_prior=lang_prior, alpha=alpha)
             c = cer(pred, gt_norm)
             w = wer(pred, gt_norm)
 
@@ -519,7 +583,7 @@ def run_pos_clustering(all_text: str, n_clusters: int = 8) -> None:
 # Single-line demo
 # ===========================================================================
 
-def demo_single_line(line_path: str, glyph_reader) -> None:
+def demo_single_line(line_path: str, glyph_reader, lang_prior=None, alpha: float = 0.6) -> None:
     """Read a single GT4HistOCR line image and show result vs GT."""
     gt_path = (line_path.replace(".bin.png", ".gt.txt")
                         .replace(".nrm.png", ".gt.txt"))
@@ -528,15 +592,19 @@ def demo_single_line(line_path: str, glyph_reader) -> None:
         with open(gt_path, encoding="utf-8", errors="replace") as f:
             gt = normalise_gt(f.read().strip())
 
-    pred = read_line(line_path, glyph_reader)
+    pred_base = read_line(line_path, glyph_reader)
 
     print(f"\n  Image: {os.path.basename(line_path)}")
     print(f"  GT:   {gt!r}")
-    print(f"  PRED: {pred!r}")
+    print(f"  PRED (greedy): {pred_base!r}")
     if gt:
-        c = cer(pred, gt)
-        w = wer(pred, gt)
-        print(f"  CER={c:.3f}  WER={w:.3f}")
+        print(f"  CER (greedy)={cer(pred_base, gt):.3f}  WER={wer(pred_base, gt):.3f}")
+
+    if lang_prior is not None:
+        pred_vit = read_line(line_path, glyph_reader, lang_prior=lang_prior, alpha=alpha)
+        print(f"  PRED (viterbi, alpha={alpha}): {pred_vit!r}")
+        if gt:
+            print(f"  CER (viterbi)={cer(pred_vit, gt):.3f}  WER={wer(pred_vit, gt):.3f}")
 
 
 # ===========================================================================
@@ -572,6 +640,13 @@ def main() -> None:
                         help="Show per-book breakdown")
     parser.add_argument("--pos",        action="store_true",
                         help="Run Phase O POS clustering on all read text")
+    parser.add_argument("--lang-prior", default=None, metavar="PATH",
+                        help="Path to a LanguagePrior .pkl (from train_lang.py). "
+                             "Enables Viterbi decoding: combines GlyphReader "
+                             "visual scores with character bigram transitions.")
+    parser.add_argument("--alpha",      type=float, default=0.6,
+                        help="Visual weight for Viterbi decoding [0,1]. "
+                             "1.0=pure visual, 0.0=pure language. Default 0.6.")
     args = parser.parse_args()
 
     # ------------------------------------------------------------------
@@ -604,10 +679,26 @@ def main() -> None:
         gr.train(verbose=True)
 
     # ------------------------------------------------------------------
+    # Load language prior (optional)
+    # ------------------------------------------------------------------
+    lang_prior = None
+    if args.lang_prior:
+        from modalities.language_prior import LanguagePrior
+        lp_path = args.lang_prior
+        if not os.path.isabs(lp_path):
+            lp_path = os.path.join(_HERE, lp_path)
+        if os.path.exists(lp_path):
+            print(f"Loading LanguagePrior from {lp_path!r} ...")
+            lang_prior = LanguagePrior.load(lp_path)
+            print(f"  {lang_prior.summary()}")
+        else:
+            print(f"WARNING: lang-prior not found: {lp_path!r} -- running without")
+
+    # ------------------------------------------------------------------
     # Single-line demo mode
     # ------------------------------------------------------------------
     if args.line:
-        demo_single_line(args.line, gr)
+        demo_single_line(args.line, gr, lang_prior=lang_prior, alpha=args.alpha)
         return
 
     # ------------------------------------------------------------------
@@ -624,10 +715,12 @@ def main() -> None:
         gr_base = copy.deepcopy(gr)
         print("\n  [Before calibration]")
         res_base = evaluate_corpus(corpus_dir, gr_base, n=args.n,
-                                   calibrate_frac=0.0, verbose=False)
+                                   calibrate_frac=0.0, verbose=False,
+                                   lang_prior=lang_prior, alpha=args.alpha)
         print("\n  [After calibration]")
         res_cal = evaluate_corpus(corpus_dir, gr, n=args.n,
-                                  calibrate_frac=0.1, verbose=args.verbose)
+                                  calibrate_frac=0.1, verbose=args.verbose,
+                                  lang_prior=lang_prior, alpha=args.alpha)
         print(f"\n  Calibration improvement:")
         print(f"    CER: {res_base['cer']:.3f} -> {res_cal['cer']:.3f}  "
               f"(delta {res_base['cer']-res_cal['cer']:+.3f})")
@@ -636,7 +729,8 @@ def main() -> None:
         result = res_cal
     else:
         result = evaluate_corpus(corpus_dir, gr, n=args.n,
-                                 calibrate_frac=0.1, verbose=args.verbose)
+                                 calibrate_frac=0.1, verbose=args.verbose,
+                                 lang_prior=lang_prior, alpha=args.alpha)
 
     # ------------------------------------------------------------------
     # Phase O POS clustering (optional)

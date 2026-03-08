@@ -9,6 +9,7 @@ THE MODEL MUST BE GENERAL. No font-specific logic. Structure from distributions.
 """
 from __future__ import annotations
 
+import math
 import pickle
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -212,6 +213,65 @@ class GlyphReader:
             if d < best_d:
                 best_d, best_cid = d, cid
         return best_cid
+
+    def read_patch_topk(
+        self,
+        patch:    np.ndarray,
+        k:        int = 8,
+        x_center: int = 0,
+        y_center: int = 0,
+    ) -> List[Tuple[str, float]]:
+        """Return top-K (char, score) pairs sorted by score descending.
+
+        Scores are softmax-normalised over L2 distances to character centroids.
+        Use this instead of read_patch() when you want a distribution over
+        candidates (e.g. for Viterbi decoding with a language prior).
+
+        Parameters
+        ----------
+        patch     Grayscale pixel patch (any dtype; will be converted).
+        k         Number of top candidates to return.
+
+        Returns
+        -------
+        List of (char, probability) tuples, length <= k, sorted best-first.
+        """
+        if not self._trained:
+            return [("", 1.0)]
+
+        gray = _to_gray_f32(patch)
+        flat = gray.ravel()
+        plen = len(flat)
+
+        # Compute L2 distance to every centroid
+        dists: List[Tuple[int, float]] = []
+        for cid, centroid in self._centroids.items():
+            c = centroid[:plen]
+            if len(c) != plen:
+                continue
+            d = float(np.sum((flat - c) ** 2))
+            dists.append((cid, d))
+
+        if not dists:
+            return [("", 1.0)]
+
+        dists.sort(key=lambda x: x[1])
+        top_k = dists[:k]
+
+        # Softmax over negative distances (with numeric stability via shift)
+        min_d = top_k[0][1]
+        # Adaptive temperature: scale by mean distance so scores aren't
+        # collapsed to a single spike when all distances are small.
+        T_scale = max(1.0, sum(d for _, d in top_k) / len(top_k))
+        scores = [(cid, math.exp(-(d - min_d) / T_scale)) for cid, d in top_k]
+        total = sum(s for _, s in scores) or 1.0
+
+        result = []
+        for cid, s in scores:
+            ch = self._labels.get(cid, "")
+            if ch:
+                result.append((ch, s / total))
+        return result if result else [("", 1.0)]
 
     def calibrate(
         self,
