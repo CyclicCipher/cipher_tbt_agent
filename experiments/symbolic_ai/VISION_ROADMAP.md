@@ -176,26 +176,49 @@ pos_token = f'D{dr_bin},{dc_bin}'
 
 ## Upcoming Phases
 
-### V6 — Classification chain (NEXT)
+### V6 — Classification chain ✅ DONE
 
-After V5 gives us translation-invariant foveal sequences, add a CTKG concept:
+After V5 gives us translation-invariant foveal sequences, the V6 classifier head
+maps `(position_bin, foveal_cluster_id)` features to class labels.
+
+**Architecture:** Naive Bayes over `(pos_token, cluster_id)` features.
 
 ```
-concept image_class
-    input  foveal_category_sequence   # category histogram from foveal E1/E3
-    output class_label
+Foveal sequence  ['D-2,0', '05', 'D-2,1', '03', ...]
+        │
+        ▼  _foveal_seq_to_features()
+        │  foveal.assignment maps content_token → cluster_id
+        │
+        ▼  Features: ['D-2,0:12', 'D-2,1:7', ...]
+        │            pos:cluster_id strings
+        │
+        ▼  image_class concept in foveal.ai
+        │  ai.teach('image_class', (feature,), (label,))
+        │  → frequency table P(label | feature)
+        │
+        ▼  Classify: sum log P(class | feature) over all features
+           argmax → predicted class
 ```
 
-Train by calling `ai.teach('image_class', foveal_histogram, label)` for each
-training crop. `freq_consolidate` learns `P(class | foveal_pattern)`.
+**New methods on `FovealVisionLearner`:**
+- `teach_class(images, label)` — registers `image_class` in `foveal.ai`, teaches P(label | pos:cluster) for all fixation features
+- `classify(image) → str` — sums log P(class | feature) over fixation features, argmax
+- `evaluate_classification(images, labels) → dict` — overall + per-class accuracy
+- `top_features(class_label, topn) → list` — most discriminative `(pos:cluster, P)` pairs
 
-Then E6 beam search discovers the composition:
+**Interpretable rules** (via `top_features`):
 ```
-foveal_sequence → foveal_categories → class_label
+Class 'horizontal':
+    D-4,-4:3  P(class|feat)=0.83   # bottom-left cluster 3 → horizontal stripe
+    D4,0:3    P(class|feat)=0.81   # top-centre cluster 3 → horizontal stripe
+Class 'vertical':
+    D0,-4:3   P(class|feat)=0.79   # left-centre cluster 3 → vertical stripe
+    D0,4:3    P(class|feat)=0.77   # right-centre cluster 3 → vertical stripe
 ```
 
-The discovered chain is a symbolic rule: "if position D-2,0 has edge-category AND
-D-1,1 has fur-category AND D-3,0 has ear-shape-category → cat". Fully interpretable.
+**CLI demo:** `python vision_pipeline.py --classify`
+
+Trains on 80% of 30 horizontal + 30 vertical stripe images, evaluates on 20%.
 
 ### V7 — Multi-object scene graph (FUTURE)
 

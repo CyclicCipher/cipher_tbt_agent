@@ -42,6 +42,8 @@ Architecture (FovealVisionLearner):
 from __future__ import annotations
 
 import argparse
+import collections
+import math
 import os
 import sys
 from typing import Any, List
@@ -456,10 +458,15 @@ def foveal_sequence(image,
                 pos_c = int(c / crop_cols * n_pos_bins)
                 pos_token = f'P{pos_r},{pos_c}'
 
-            # Sub-patch content hash
+            # Sub-patch content hash.
+            # NOTE: do NOT call _to_gray_f32(patch) here.  `crop` is already a
+            # float32 slice of the globally-normalised `gray` image, so each
+            # pixel is already in [0, 1].  Re-normalising a 1×1 patch (the
+            # default fine_patch=1 case) sets min==max, causing _to_gray_f32 to
+            # return all-zeros and collapsing every pixel to hash '00'.
             patch = crop[r * fine_patch:(r + 1) * fine_patch,
                          c * fine_patch:(c + 1) * fine_patch]
-            content_hash = _quantize(_to_gray_f32(patch), quant_bits)
+            content_hash = _quantize(patch, quant_bits)
 
             tokens.append(pos_token)
             tokens.append(content_hash)
@@ -533,6 +540,13 @@ class FovealVisionLearner:
                                         quant_bits=quant_bits,
                                         n_clusters=n_peripheral_clusters)
         self.foveal = SequenceLearner(n_clusters=n_foveal_clusters)
+        # V6 classification state
+        self._known_classes: set = set()
+        # Frequency table for Naive Bayes: feat → {class → count}
+        # Maintained separately from ai.teach() because ask_dist() returns
+        # probabilities not counts, making Laplace smoothing impossible.
+        self._feat_counts: dict = collections.defaultdict(
+            lambda: collections.defaultdict(int))
 
     def fit_images(self, images: list, verbose: bool = True) -> None:
         """Train both learners on a list of images.
@@ -657,13 +671,245 @@ class FovealVisionLearner:
         return self.foveal.evaluate(test_seqs, train_pairs=train_pairs,
                                     verbose=verbose)
 
+    # ---- V6: Classification chain -------------------------------------------
+
+    def _foveal_seq_to_features(self, seq: list) -> list:
+        """Convert interleaved [pos_tok, content_tok, ...] → ['pos:cluster', ...].
+
+        Each (position_token, content_cluster_id) pair becomes one feature string
+        like 'D-2,0:15'.  The cluster ID is looked up from the trained foveal
+        SequenceLearner's category assignment table.
+
+        Returns an empty list if the foveal learner has not been trained yet.
+        """
+        asgn = self.foveal.assignment
+        if not asgn:
+            return []
+        features = []
+        for i in range(0, len(seq) - 1, 2):
+            pos_tok = str(seq[i])
+            content_tok = str(seq[i + 1])
+            cluster_id = asgn.get(content_tok)
+            if cluster_id is not None:
+                features.append(f'{pos_tok}:{cluster_id}')
+        return features
+
+    def teach_class(self, images: list, label: str,
+                    verbose: bool = True) -> None:
+        """Train the V6 classifier head on labeled images.
+
+        Maps each (position_bin, foveal_cluster_id) feature observed in
+        the foveal fixations of every image to the given class label.
+        Stored as an 'image_class' concept in self.foveal.ai — each example
+        teaches P(label | pos:cluster_id) via frequency consolidation.
+
+        Must call fit_images() first so foveal.assignment is populated.
+
+        Args:
+            images: List of HxW or HxWxC numpy arrays.
+            label:  Class label string (e.g. 'cat', 'horizontal').
+            verbose: Print progress.
+        """
+        ai = self.foveal.ai
+        # Register concept on first call
+        if 'image_class' not in ai.graph.concepts:
+            ai.add_concept(name='image_class', domain='vision',
+                           input_type=['pos_cat_feature'],
+                           output_type=['class_label'])
+
+        self._known_classes.add(label)
+        n_examples = 0
+        for img in images:
+            for fix in self.fixate(img):
+                features = self._foveal_seq_to_features(fix['sequence'])
+                for feat in features:
+                    ai.teach('image_class', (feat,), (label,))
+                    self._feat_counts[feat][label] += 1   # for Laplace-smoothed classify
+                    n_examples += 1
+
+        if verbose:
+            print(f'  teach_class {label!r}: {len(images)} images → '
+                  f'{n_examples:,} feature examples')
+
+    def classify(self, image, laplace_k: float = 1.0) -> str | None:
+        """Classify a single image using the V6 classifier head.
+
+        For each fixation, converts the foveal sequence to (pos, cluster_id)
+        features and accumulates log P(class | feature) from the trained
+        image_class concept.  Returns the class with the highest log-prob sum
+        (Naive Bayes over position-cluster features).
+
+        Laplace smoothing (laplace_k > 0) prevents zero-probability features
+        from being silently skipped.  Without smoothing, features exclusive to
+        one class provide no evidence against the other class, which biases the
+        classifier toward whichever class has more zero-probability features in
+        the test image.  With smoothing, each unseen (class, feature) pair
+        gets a small floor probability = laplace_k / (count + laplace_k * n_cls).
+
+        Returns None if teach_class() has not been called yet.
+        """
+        if not self._known_classes:
+            return None
+        n_cls = len(self._known_classes)
+        log_scores: dict = {c: 0.0 for c in self._known_classes}
+        n_features = 0
+
+        for fix in self.fixate(image):
+            features = self._foveal_seq_to_features(fix['sequence'])
+            for feat in features:
+                counts = self._feat_counts.get(feat)
+                if counts is None:
+                    continue  # completely unseen feature — no information
+                total = sum(counts.values())
+                for cls in self._known_classes:
+                    # Laplace-smoothed Naive Bayes:
+                    #   p = (count + k) / (total + k * n_classes)
+                    # k=laplace_k prevents zero-probability features from being
+                    # silently skipped, which would wrongly ignore evidence that
+                    # a feature is exclusive to the OTHER class.
+                    p = (counts.get(cls, 0) + laplace_k) / (total + laplace_k * n_cls)
+                    log_scores[cls] += math.log2(p)
+                n_features += 1
+
+        if n_features == 0:
+            return None
+        return max(log_scores, key=log_scores.get)
+
+    def evaluate_classification(self, test_images: list, test_labels: list,
+                                verbose: bool = True) -> dict:
+        """Evaluate classification accuracy on labeled test images.
+
+        Args:
+            test_images: List of HxW or HxWxC numpy arrays.
+            test_labels: Corresponding ground-truth class label strings.
+            verbose:     Print accuracy table.
+
+        Returns:
+            {'accuracy': float, 'correct': int, 'total': int,
+             'per_class': {label: {'correct': int, 'total': int}}}
+        """
+        per_class: dict = collections.defaultdict(lambda: {'correct': 0, 'total': 0})
+        correct = total = 0
+
+        for img, gt_label in zip(test_images, test_labels):
+            pred = self.classify(img)
+            per_class[gt_label]['total'] += 1
+            total += 1
+            if pred == gt_label:
+                correct += 1
+                per_class[gt_label]['correct'] += 1
+
+        acc = correct / total if total else 0.0
+        if verbose:
+            print(f'\n  Classification accuracy: {correct}/{total} = {100*acc:.1f}%')
+            for cls in sorted(per_class):
+                pc = per_class[cls]
+                cls_acc = pc['correct'] / pc['total'] if pc['total'] else 0.0
+                print(f'    {cls!r:20} {pc["correct"]}/{pc["total"]} = '
+                      f'{100*cls_acc:.1f}%')
+
+        return {'accuracy': acc, 'correct': correct, 'total': total,
+                'per_class': dict(per_class)}
+
+    def top_features(self, class_label: str, topn: int = 10) -> list:
+        """Most discriminative (pos:cluster) features for a class label.
+
+        Returns [(feature_str, P(class | feature)), ...] sorted descending.
+        These are the symbolic rules the classifier learned:
+            'D-3,0:12' → P(cat | ...) = 0.92  # ear-shape at top-centre
+
+        Args:
+            class_label: The class to inspect.
+            topn:        Number of top features to return.
+
+        Returns:
+            List of (feature_string, probability) tuples.
+        """
+        store = self.foveal.ai.stores.get('image_class')
+        if store is None:
+            return []
+
+        # Accumulate counts: feature → class → count
+        feat_class: dict = collections.defaultdict(
+            lambda: collections.defaultdict(int))
+        feat_totals: dict = collections.defaultdict(int)
+        for inp, out in store.examples:
+            feat = inp[0]   # e.g. 'D-2,0:15'
+            cls  = out[0]   # e.g. 'horizontal'
+            feat_class[feat][cls] += 1
+            feat_totals[feat] += 1
+
+        scored = []
+        for feat, total in feat_totals.items():
+            cnt = feat_class[feat].get(class_label, 0)
+            if cnt == 0:
+                continue
+            p = cnt / total
+            scored.append((feat, p))
+
+        return sorted(scored, key=lambda x: -x[1])[:topn]
+
 
 # ---------------------------------------------------------------------------
 # Demo / CLI
 # ---------------------------------------------------------------------------
 
-def _synthetic_images(n: int = 50, h: int = 64, w: int = 128, seed: int = 42):
-    """Generate synthetic grayscale images with stripe patterns."""
+def _binary_half_images(n: int = 30, h: int = 64, w: int = 128, seed: int = 42,
+                        direction: str = 'horizontal') -> list:
+    """Generate binary half-images for the V6 classification demo.
+
+    Each image is half-black, half-white, divided by a sharp boundary:
+    - 'horizontal': boundary runs left-right (dark top + bright bottom or vice versa)
+    - 'vertical':   boundary runs top-bottom (dark left + bright right or vice versa)
+
+    The sharp boundary creates a maximally salient peripheral region.  The
+    fixation lands on the boundary edge, and the foveal crop contains:
+        horizontal → content varies along the row axis (top vs bottom differ)
+        vertical   → content varies along the column axis (left vs right differ)
+
+    These produce distinct (pos:cluster) features because bright pixels appear at
+    different relative positions (D-3,0 vs D0,-3) in the two classes.
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        return []
+
+    rng = np.random.default_rng(seed)
+    images = []
+    for _ in range(n):
+        img = np.zeros((h, w), dtype=np.float32)
+        flip = bool(rng.integers(2))   # randomly swap which half is bright
+        if direction == 'horizontal':
+            mid = int(rng.integers(h // 3, 2 * h // 3))  # boundary row
+            if flip:
+                img[:mid, :] = 1.0
+            else:
+                img[mid:, :] = 1.0
+        else:
+            mid = int(rng.integers(w // 3, 2 * w // 3))  # boundary column
+            if flip:
+                img[:, :mid] = 1.0
+            else:
+                img[:, mid:] = 1.0
+        # Add small amount of noise so peripheral saliency varies
+        img += rng.random((h, w), dtype=np.float32) * 0.05
+        img = np.clip(img, 0.0, 1.0)
+        images.append(img)
+    return images
+
+
+def _synthetic_images(n: int = 50, h: int = 64, w: int = 128, seed: int = 42,
+                      direction: str = 'horizontal'):
+    """Generate synthetic grayscale images with stripe patterns.
+
+    Args:
+        n:         Number of images.
+        h, w:      Height and width in pixels.
+        seed:      Random seed.
+        direction: 'horizontal' (stripes run left-right) or
+                   'vertical'   (stripes run top-bottom).
+    """
     try:
         import numpy as np
     except ImportError:
@@ -674,10 +920,15 @@ def _synthetic_images(n: int = 50, h: int = 64, w: int = 128, seed: int = 42):
     images = []
     for i in range(n):
         img = rng.random((h, w), dtype=np.float32)
-        # Add horizontal stripe pattern to create spatial regularity
         period = rng.integers(8, 32)
-        stripe = (np.arange(h) % period < period // 2).astype(np.float32)
-        img = 0.5 * img + 0.5 * stripe[:, None]
+        if direction == 'vertical':
+            # Stripes run top-to-bottom (vary along columns)
+            stripe = (np.arange(w) % period < period // 2).astype(np.float32)
+            img = 0.5 * img + 0.5 * stripe[None, :]
+        else:
+            # Stripes run left-to-right (vary along rows)  [default]
+            stripe = (np.arange(h) % period < period // 2).astype(np.float32)
+            img = 0.5 * img + 0.5 * stripe[:, None]
         images.append(img)
     return images
 
@@ -692,6 +943,8 @@ def main() -> None:
                    help='Run on synthetic random-stripe images')
     p.add_argument('--foveal',     action='store_true',
                    help='Use FovealVisionLearner (saliency + pixel-accurate fovea)')
+    p.add_argument('--classify',   action='store_true',
+                   help='V6 demo: classify horizontal vs vertical stripes')
     p.add_argument('--corpus',     default=None,
                    help='Path to directory of .png images')
     p.add_argument('--n_images',   type=int, default=100)
@@ -705,6 +958,60 @@ def main() -> None:
     p.add_argument('--n_fixations', type=int, default=3,
                    help='Max fixation points per image')
     args = p.parse_args()
+
+    if args.classify:
+        # --- V6: Classification demo — horizontal vs vertical stripes ---
+        print('=== FovealVisionLearner Classification Demo (V6) ===')
+        print('  Task: classify images by stripe orientation')
+        print('  horizontal → stripes run left-right  (brightness varies row-to-row)')
+        print('  vertical   → stripes run top-bottom  (brightness varies column-to-column)')
+        n_per_class = max(args.n_images // 2, 10)
+        h_imgs = _synthetic_images(n=n_per_class, direction='horizontal', seed=42)
+        v_imgs = _synthetic_images(n=n_per_class, direction='vertical',   seed=7)
+        if not h_imgs or not v_imgs:
+            return
+
+        n_train = int(n_per_class * 0.8)
+        train_h, test_h = h_imgs[:n_train], h_imgs[n_train:]
+        train_v, test_v = v_imgs[:n_train], v_imgs[n_train:]
+        all_train = train_h + train_v
+
+        # Phase 1: Learn spatial grammar unsupervised (E0-E6 on both classes)
+        print(f'\n  [Phase 1] Training FovealVisionLearner on {len(all_train)} '
+              f'unlabeled images...')
+        learner = FovealVisionLearner(
+            peripheral_patch=args.patch_size,
+            foveal_patch=args.foveal_patch,
+            foveal_radius_px=args.foveal_radius,
+            n_fixations=args.n_fixations,
+            n_peripheral_clusters=args.n_clusters,
+            n_foveal_clusters=args.n_clusters * 2,
+        )
+        learner.fit_images(all_train, verbose=True)
+
+        # Phase 2: Teach class labels (V6 classifier head)
+        print('\n  [Phase 2] Teaching class labels...')
+        learner.teach_class(train_h, 'horizontal', verbose=True)
+        learner.teach_class(train_v, 'vertical',   verbose=True)
+
+        # Phase 3: Evaluate on held-out test set
+        print('\n  [Phase 3] Evaluating on held-out test images...')
+        test_imgs   = test_h + test_v
+        test_labels = ['horizontal'] * len(test_h) + ['vertical'] * len(test_v)
+        learner.evaluate_classification(test_imgs, test_labels, verbose=True)
+
+        # Phase 4: Print most discriminative features (interpretable rules)
+        print('\n  [Phase 4] Top discriminative features (symbolic rules):')
+        for cls in ['horizontal', 'vertical']:
+            print(f'\n  Class {cls!r}:')
+            feats = learner.top_features(cls, topn=6)
+            if feats:
+                for feat, p in feats:
+                    pos, cluster = feat.rsplit(':', 1)
+                    print(f'    {pos} cluster={cluster}  P(class|feat)={p:.2f}')
+            else:
+                print('    (no features found)')
+        return
 
     if args.demo:
         images = _synthetic_images(n=args.n_images)
