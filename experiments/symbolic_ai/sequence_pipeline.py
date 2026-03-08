@@ -295,6 +295,13 @@ class SequenceLearner:
             print(f'  Vocab: {len(self.assignment):,}  '
                   f'Clusters: {len(self.clusters)}')
 
+        # Free E0 bigram examples — clustering is done, raw pairs no longer needed.
+        # _index dicts remain intact for O(1) lookups via ask()/ask_dist().
+        for _c in ('next_token', 'prev_token'):
+            _s = self.ai.stores.get(_c)
+            if _s is not None:
+                _s.examples.clear()
+
         # --- E1: category chain ---
         _register_concepts(self.ai, [
             ('next_cat',       ['cat','cat'],      ['cat'],  'sequence'),
@@ -343,6 +350,16 @@ class SequenceLearner:
                 n_wgc = sum(1 for d in self._wgc_soft.values() if d)
                 print(f'  E3: nc_soft {n_nc}/{self._K**2}  '
                       f'wgc_soft {n_wgc}/{self._K**3}')
+
+            # Free E1 examples — all information is now in self._nc_soft / _wgc_soft.
+            # This is the main memory-leak fix: without this, every bigram and trigram
+            # taught during E0/E1 stays in the ExampleStore lists indefinitely.
+            # For large image sequences (fine_patch=1 on real photos) this can grow
+            # to tens of millions of Python tuples (>> 10 GB).
+            for _c in ('next_cat', 'token_given_cat'):
+                _s = self.ai.stores.get(_c)
+                if _s is not None:
+                    _s.examples.clear()
 
     # ---- Prediction ----------------------------------------------------------
 
