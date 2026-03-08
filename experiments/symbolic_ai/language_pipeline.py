@@ -1,0 +1,498 @@
+"""language_pipeline.py — Category-chain word prediction (language.ctkg Phase E1).
+
+Tests the central thesis of language.ctkg: using category-compressed context
+(distributional POS-like clusters) generalises to unseen word pairs far better
+than flat word bigrams.
+
+Architecture (mirrors language.ctkg):
+    word_pos        : word → cluster_id           (from induce_hierarchy_bidir)
+    next_cat        : cat × cat → cat             (K^2 entries, K=n_clusters)
+    word_given_cat  : cat × cat × cat → word      (K^3 entries — generalises)
+    next_word(w1,w2) = word_given_cat(
+                           word_pos(w1), word_pos(w2),
+                           next_cat(word_pos(w1), word_pos(w2)))
+
+Compression example (K=12, V=5000):
+    Flat bigram:     V^2 = 25,000,000 entries
+    Category chain:  K^3 = 1,728 entries  (~14,000x fewer)
+    word_given_cat covers the K^3 combinations; next_word_hier covers the V^2.
+    Most POS trigrams are seen during training even if word trigrams aren't.
+
+Key test:
+    Evaluate on trigrams where (w_{t-1}, w_t) was NEVER seen in training.
+    Flat bigram: cannot predict (returns None).
+    Category chain: can still route via (cat_{t-1}, cat_t) → cat_{t+1} → word.
+
+Usage:
+    # Basic: 2000 train lines, 500 test lines, 12 word clusters
+    python language_pipeline.py --corpus EarlyModernLatin --n_train 2000 --n_test 500
+
+    # More clusters for richer categories
+    python language_pipeline.py --corpus EarlyModernLatin --n_train 2000 --n_clusters 20
+
+    # Save AI checkpoint for reuse
+    python language_pipeline.py --corpus EarlyModernLatin --n_train 2000 --save chain.pkl
+"""
+from __future__ import annotations
+
+import argparse
+import collections
+import math
+import os
+import sys
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+if os.path.join(_HERE, '..') not in sys.path:
+    sys.path.insert(0, os.path.join(_HERE, '..'))
+
+import io
+if hasattr(sys.stdout, 'buffer') and getattr(sys.stdout, 'encoding', 'utf-8').lower() != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
+from ctkg.parser import parse_file, merge as ctkg_merge
+from engine import SymbolicAI
+from discover_structure import (
+    run_pipeline, _stream_texts, _banner, _DATA_DIR, _DEFAULT_CLUSTERS, _DEFAULT_PMI,
+)
+
+try:
+    from ocr_test import find_pairs, normalise_gt  # type: ignore[import]
+except ImportError:
+    import glob, random as _random
+    def find_pairs(d, max_n=None, shuffle=False, seed=0):
+        pairs = []
+        for gt in glob.glob(os.path.join(d, '**', '*.gt.txt'), recursive=True):
+            pairs.append((None, gt))
+        if shuffle:
+            rng = _random.Random(seed)
+            rng.shuffle(pairs)
+        return pairs[:max_n] if max_n else pairs
+    def normalise_gt(raw: str) -> str:
+        return raw.strip()
+
+
+# ---------------------------------------------------------------------------
+# Step 1: Build word cluster assignment
+# ---------------------------------------------------------------------------
+
+def build_assignment(
+    ai:         SymbolicAI,
+    n_clusters: int = 12,
+) -> dict[str, int]:
+    """Recover word → cluster_id mapping by re-running bidir clustering on the AI.
+
+    Requires that 'next_word_hier' and 'prev_word_hier' are already trained
+    (i.e. run_pipeline with n_levels >= 3 has been called).
+    """
+    result = ai.induce_hierarchy_bidir(
+        'next_word_hier', 'prev_word_hier', n_clusters=n_clusters,
+    )
+    if 'error' in result:
+        print(f'  WARNING: {result["error"]}')
+        return {}
+    assignment = result.get('assignment', {})
+    clusters   = result.get('clusters', {})
+    return assignment, clusters
+
+
+# ---------------------------------------------------------------------------
+# Step 2: Train chain concepts
+# ---------------------------------------------------------------------------
+
+def train_chain(
+    ai:         SymbolicAI,
+    texts:      list[str],
+    assignment: dict[str, int],
+    verbose:    bool = True,
+) -> tuple[int, int]:
+    """Train next_cat and word_given_cat from texts + cluster assignment.
+
+    Registers both concepts in the AI if not already present.
+    Uses trigrams: for each (w1, w2, w3) in the text:
+        c1 = assignment[w1], c2 = assignment[w2], c3 = assignment[w3]
+        teach next_cat:       (c1, c2) → c3
+        teach word_given_cat: (c1, c2, c3) → w3
+
+    Args:
+        texts:      Normalised text lines (training portion only).
+        assignment: word → cluster_id from build_assignment.
+        verbose:    Print progress.
+
+    Returns:
+        (n_trigrams_used, n_trigrams_skipped) — skipped when any word is OOV.
+    """
+    _banner('Training category chain (next_cat + word_given_cat)')
+
+    for cname, desc, in_types, out_types in [
+        ('next_cat',       'Category bigram: (cat1,cat2) → cat3',
+         ['cat', 'cat'], ['cat']),
+        ('word_given_cat', 'Word given category context: (cat1,cat2,cat3) → word',
+         ['cat', 'cat', 'cat'], ['word']),
+    ]:
+        if cname not in ai.stores:
+            ai.add_concept(
+                name=cname, domain='language',
+                description=desc,
+                input_type=in_types, output_type=out_types, tier='theorem',
+            )
+
+    n_used = 0
+    n_skip = 0
+    for text in texts:
+        tokens = text.split()
+        for i in range(len(tokens) - 2):
+            w1, w2, w3 = tokens[i], tokens[i + 1], tokens[i + 2]
+            c1 = assignment.get(w1)
+            c2 = assignment.get(w2)
+            c3 = assignment.get(w3)
+            if c1 is None or c2 is None or c3 is None:
+                n_skip += 1
+                continue
+            c1s, c2s, c3s = str(c1), str(c2), str(c3)
+            ai.teach('next_cat',       (c1s, c2s),       (c3s,))
+            ai.teach('word_given_cat', (c1s, c2s, c3s),  (w3,))
+            n_used += 1
+
+    if verbose:
+        n_cat_entries  = len(ai.stores.get('next_cat',       type('', (), {'examples': []})()).examples)
+        n_word_entries = len(ai.stores.get('word_given_cat', type('', (), {'examples': []})()).examples)
+        n_cat_unique   = len({inp for inp, _ in ai.stores['next_cat'].examples})       if 'next_cat'       in ai.stores else 0
+        n_word_unique  = len({inp for inp, _ in ai.stores['word_given_cat'].examples}) if 'word_given_cat' in ai.stores else 0
+        print(f'  Trigrams used:  {n_used:,}   skipped (OOV): {n_skip:,}')
+        print(f'  next_cat:       {n_cat_entries:,} examples  '
+              f'{n_cat_unique:,} unique (c1,c2) inputs')
+        print(f'  word_given_cat: {n_word_entries:,} examples  '
+              f'{n_word_unique:,} unique (c1,c2,c3) inputs')
+
+    return n_used, n_skip
+
+
+# ---------------------------------------------------------------------------
+# Step 3: Prediction functions
+# ---------------------------------------------------------------------------
+
+def predict_chain(
+    ai:         SymbolicAI,
+    w1:         str,
+    w2:         str,
+    assignment: dict[str, int],
+) -> str | None:
+    """Predict w3 via the category chain: (w1,w2) → (c1,c2) → c3 → w3."""
+    c1 = assignment.get(w1)
+    c2 = assignment.get(w2)
+    if c1 is None or c2 is None:
+        return None
+    c3_tup = ai.ask('next_cat', (str(c1), str(c2)))
+    if c3_tup is None:
+        return None
+    c3 = c3_tup[0] if isinstance(c3_tup, tuple) else str(c3_tup)
+    w3_tup = ai.ask('word_given_cat', (str(c1), str(c2), c3))
+    if w3_tup is None:
+        return None
+    return w3_tup[0] if isinstance(w3_tup, tuple) else str(w3_tup)
+
+
+def predict_flat(
+    ai: SymbolicAI,
+    w2: str,
+) -> str | None:
+    """Predict next word using the flat word bigram (next_word_hier)."""
+    result = ai.ask('next_word_hier', (w2,))
+    if result is None:
+        return None
+    return result[0] if isinstance(result, tuple) else str(result)
+
+
+def logprob_chain(
+    ai:         SymbolicAI,
+    w1:         str,
+    w2:         str,
+    w3:         str,
+    assignment: dict[str, int],
+) -> float | None:
+    """Log₂ probability of w3 given (w1, w2) via chain. None if OOV."""
+    c1 = assignment.get(w1)
+    c2 = assignment.get(w2)
+    c3 = assignment.get(w3)
+    if c1 is None or c2 is None or c3 is None:
+        return None
+    # P(c3 | c1, c2)
+    cat_dist = ai.ask_dist('next_cat', (str(c1), str(c2)))
+    if cat_dist is None:
+        return None
+    c3_tup = (str(c3),)
+    p_c3 = cat_dist.get(c3_tup, 0.0)
+    if p_c3 < 1e-12:
+        return None
+    # P(w3 | c1, c2, c3)
+    word_dist = ai.ask_dist('word_given_cat', (str(c1), str(c2), str(c3)))
+    if word_dist is None:
+        return None
+    p_w3 = word_dist.get((w3,), 0.0)
+    if p_w3 < 1e-12:
+        return None
+    return math.log2(p_c3 * p_w3)
+
+
+def logprob_flat(
+    ai: SymbolicAI,
+    w2: str,
+    w3: str,
+) -> float | None:
+    """Log₂ probability of w3 given w2 via flat bigram. None if OOV."""
+    dist = ai.ask_dist('next_word_hier', (w2,))
+    if dist is None:
+        return None
+    p = dist.get((w3,), 0.0)
+    if p < 1e-12:
+        return None
+    return math.log2(p)
+
+
+# ---------------------------------------------------------------------------
+# Step 4: Evaluation
+# ---------------------------------------------------------------------------
+
+def evaluate(
+    ai:          SymbolicAI,
+    test_texts:  list[str],
+    assignment:  dict[str, int],
+    train_pairs: set[tuple[str, str]],
+    verbose:     bool = True,
+) -> dict:
+    """Evaluate category chain vs flat bigram on test trigrams.
+
+    Args:
+        train_pairs: Set of (w2, w3) pairs seen in training, for seen/unseen split.
+
+    Returns dict with keys:
+        total, chain_correct, flat_correct, chain_answered, flat_answered,
+        unseen_total, chain_unseen_correct, flat_unseen_correct,
+        chain_unseen_answered, flat_unseen_answered,
+        chain_logloss, flat_logloss  (only over answered positions)
+    """
+    _banner('Evaluation: category chain vs flat bigram')
+
+    r = dict(
+        total=0,
+        chain_correct=0, flat_correct=0,
+        chain_answered=0, flat_answered=0,
+        unseen_total=0,
+        chain_unseen_correct=0, flat_unseen_correct=0,
+        chain_unseen_answered=0, flat_unseen_answered=0,
+        chain_logloss=0.0, flat_logloss=0.0,
+        chain_logloss_n=0, flat_logloss_n=0,
+    )
+
+    for text in test_texts:
+        tokens = text.split()
+        for i in range(len(tokens) - 2):
+            w1, w2, w3 = tokens[i], tokens[i + 1], tokens[i + 2]
+            is_unseen = (w2, w3) not in train_pairs
+
+            r['total'] += 1
+            if is_unseen:
+                r['unseen_total'] += 1
+
+            # Chain prediction.
+            chain_pred = predict_chain(ai, w1, w2, assignment)
+            if chain_pred is not None:
+                r['chain_answered'] += 1
+                if chain_pred == w3:
+                    r['chain_correct'] += 1
+                    if is_unseen:
+                        r['chain_unseen_correct'] += 1
+                if is_unseen:
+                    r['chain_unseen_answered'] += 1
+
+            # Flat bigram prediction.
+            flat_pred = predict_flat(ai, w2)
+            if flat_pred is not None:
+                r['flat_answered'] += 1
+                if flat_pred == w3:
+                    r['flat_correct'] += 1
+                    if is_unseen:
+                        r['flat_unseen_correct'] += 1
+                if is_unseen:
+                    r['flat_unseen_answered'] += 1
+
+            # Log-probabilities for perplexity.
+            lp_chain = logprob_chain(ai, w1, w2, w3, assignment)
+            if lp_chain is not None:
+                r['chain_logloss'] -= lp_chain   # nats accumulate as positive loss
+                r['chain_logloss_n'] += 1
+
+            lp_flat = logprob_flat(ai, w2, w3)
+            if lp_flat is not None:
+                r['flat_logloss'] -= lp_flat
+                r['flat_logloss_n'] += 1
+
+    if verbose:
+        T  = r['total']
+        CA = r['chain_answered']
+        FA = r['flat_answered']
+        CC = r['chain_correct']
+        FC = r['flat_correct']
+        UT = r['unseen_total']
+        CUA = r['chain_unseen_answered']
+        FUA = r['flat_unseen_answered']
+        CUC = r['chain_unseen_correct']
+        FUC = r['flat_unseen_correct']
+
+        def pct(n, d): return f'{100*n/d:.1f}%' if d else 'N/A'
+
+        chain_ppl = 2 ** (r['chain_logloss'] / max(r['chain_logloss_n'], 1))
+        flat_ppl  = 2 ** (r['flat_logloss']  / max(r['flat_logloss_n'],  1))
+
+        print(f'\n  Test trigrams:   {T:,}  (unseen pairs: {UT:,} = {pct(UT, T)})')
+        print()
+        print(f'  {"Metric":<32} {"Chain":>10} {"Flat":>10}')
+        print(f'  {"-"*52}')
+        print(f'  {"Coverage (answered/total)":<32} '
+              f'{pct(CA,T):>10} {pct(FA,T):>10}')
+        print(f'  {"Top-1 accuracy (of answered)":<32} '
+              f'{pct(CC,CA):>10} {pct(FC,FA):>10}')
+        print(f'  {"Top-1 accuracy (of total)":<32} '
+              f'{pct(CC,T):>10} {pct(FC,T):>10}')
+        print()
+        print(f'  === UNSEEN WORD PAIRS ===')
+        print(f'  {"Coverage (answered/unseen)":<32} '
+              f'{pct(CUA,UT):>10} {pct(FUA,UT):>10}')
+        print(f'  {"Top-1 accuracy (of answered)":<32} '
+              f'{pct(CUC,CUA):>10} {pct(FUC,FUA):>10}')
+        print(f'  {"Top-1 accuracy (of unseen total)":<32} '
+              f'{pct(CUC,UT):>10} {pct(FUC,UT):>10}')
+        print()
+        print(f'  Perplexity (2^avg_logloss): chain={chain_ppl:.1f}  flat={flat_ppl:.1f}')
+        print(f'  (lower = better;  N answered: chain={r["chain_logloss_n"]:,}  '
+              f'flat={r["flat_logloss_n"]:,})')
+        print()
+
+        # Summary verdict
+        chain_acc_unseen = CUC / max(CUA, 1)
+        flat_acc_unseen  = FUC / max(FUA, 1)
+        if chain_acc_unseen > flat_acc_unseen and CUA > 0:
+            print(f'  RESULT: Category chain is BETTER on unseen pairs '
+                  f'({pct(CUC,CUA)} vs {pct(FUC,FUA)}). Thesis supported.')
+        elif CUA == 0:
+            print(f'  RESULT: Chain answered no unseen pairs — corpus too small or '
+                  f'n_clusters too high.')
+        else:
+            print(f'  RESULT: Flat bigram matches or exceeds chain on unseen pairs. '
+                  f'Consider more clusters or larger corpus.')
+
+    return r
+
+
+# ---------------------------------------------------------------------------
+# Main pipeline
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    p = argparse.ArgumentParser(
+        description='Category-chain word prediction (language.ctkg Phase E1).',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__,
+    )
+    p.add_argument('--corpus',     default='EarlyModernLatin',
+                   help='Corpus name or path')
+    p.add_argument('--n_train',    type=int, default=2000,
+                   help='Max training lines (default: 2000)')
+    p.add_argument('--n_test',     type=int, default=None,
+                   help='Max test lines (default: 20%% of n_train)')
+    p.add_argument('--split',      type=float, default=0.8,
+                   help='Train fraction (default: 0.8)')
+    p.add_argument('--n_clusters', type=int, default=12,
+                   help='Word cluster count for category chain (default: 12)')
+    p.add_argument('--save',       metavar='PATH',
+                   help='Save AI checkpoint after training')
+    p.add_argument('--load',       metavar='PATH',
+                   help='Load existing checkpoint')
+    p.add_argument('--seed',       type=int, default=42)
+    args = p.parse_args()
+
+    _banner('Language Pipeline: Category-Chain Word Prediction')
+    print(f'  Corpus:     {args.corpus}')
+    print(f'  Train:      {args.n_train} lines  ({args.split*100:.0f}%)')
+    print(f'  Clusters:   {args.n_clusters}')
+
+    # Locate corpus.
+    d = (args.corpus if os.path.isdir(args.corpus)
+         else os.path.join(_DATA_DIR, args.corpus))
+    if not os.path.isdir(d):
+        print(f'ERROR: corpus not found: {args.corpus!r}')
+        sys.exit(1)
+
+    # Load ALL pairs shuffled, then split.
+    total_n = args.n_train + (args.n_test or max(args.n_train // 4, 100))
+    pairs = find_pairs(d, max_n=total_n, shuffle=True, seed=args.seed)
+    texts = _stream_texts(pairs)
+
+    n_train = min(args.n_train, int(len(texts) * args.split))
+    train_texts = texts[:n_train]
+    test_texts  = texts[n_train:n_train + (args.n_test or max(n_train // 4, 50))]
+    print(f'  Lines:      {len(train_texts)} train  {len(test_texts)} test')
+
+    # ---- Step 1: Run multi-scale discovery on training corpus ----
+    # We run up to level 3 (word level) so next_word_hier + prev_word_hier
+    # are trained.  Char and morpheme levels are prerequisite.
+    print('\n  Running multi-scale discovery on training corpus...')
+    ai, chunk_maps = run_pipeline(
+        texts=train_texts,
+        n_levels=3,           # char → morpheme → word
+        max_merges=500,
+        save_path=None,
+        load_path=args.load,
+        verbose=False,        # suppress per-level output here
+    )
+
+    # ---- Step 2: Build cluster assignment ----
+    _banner('Building word cluster assignment')
+    assignment, clusters = build_assignment(ai, n_clusters=args.n_clusters)
+    print(f'  Vocab size in assignment: {len(assignment):,}')
+    print(f'  Clusters formed: {len(clusters)}')
+    for cid in sorted(clusters.keys())[:6]:
+        sample = clusters[cid][:8]
+        print(f'    C{cid:02d} ({len(clusters[cid])} members): '
+              f'{" ".join(repr(w) for w in sample)}')
+    if len(clusters) > 6:
+        print(f'    ... {len(clusters) - 6} more clusters')
+
+    # ---- Step 3: Train chain concepts on training corpus ----
+    train_chain(ai, train_texts, assignment, verbose=True)
+
+    # ---- Step 4: Collect training pairs for seen/unseen split ----
+    train_pairs: set[tuple[str, str]] = set()
+    for text in train_texts:
+        tokens = text.split()
+        for i in range(len(tokens) - 1):
+            train_pairs.add((tokens[i], tokens[i + 1]))
+    print(f'\n  Training word bigrams (for seen/unseen split): {len(train_pairs):,}')
+
+    # ---- Step 5: Evaluate on test corpus ----
+    results = evaluate(ai, test_texts, assignment, train_pairs, verbose=True)
+
+    # ---- Save ----
+    if args.save:
+        ai.save_checkpoint(args.save)
+        print(f'  Checkpoint saved: {args.save}')
+
+    # ---- Category chain summary ----
+    _banner('Category chain summary')
+    K = len(clusters)
+    V = len(assignment)
+    print(f'  Word vocabulary:      {V:,}')
+    print(f'  Category count (K):   {K}')
+    print(f'  next_cat entries:     K^2 ~ {K**2:,}  (vs V^2 = {V**2:,})')
+    print(f'  word_given_cat:       K^3 ~ {K**3:,}  (vs V^3 = {V**3:,})')
+    ratio = V**2 / max(K**2, 1)
+    print(f'  Compression ratio:    {ratio:.0f}x (bigram state space)')
+    print()
+    print('  Next step (Phase E2): trigram context for clustering.')
+    print('  Next step (Phase E3): soft retrieval for contextual representations.')
+
+
+if __name__ == '__main__':
+    main()
