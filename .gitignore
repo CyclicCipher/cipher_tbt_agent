@@ -75,3 +75,8 @@ experiments/ePC_Mamba/diagnostics_copy_epc_epoch_30.png
 experiments/ePC_Mamba/diagnostics_copy_epc_epoch_40.png
 experiments/ePC_Mamba/diagnostics_copy_epc_epoch_50.png
 experiments/ePC_Mamba/diagnostics_copy_epc_final.png
+
+# GT4HistOCR benchmark data (4GB -- too large to track)
+experiments/symbolic_ai/data/GT4HistOCR/
+# Trained GlyphReader pickles
+experiments/symbolic_ai/glyph_reader*.pkl
