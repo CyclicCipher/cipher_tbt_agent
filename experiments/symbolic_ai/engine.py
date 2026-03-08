@@ -484,6 +484,125 @@ class SymbolicAI:
             'kl_flat':       self.kl(flat_concept),
         }
 
+    def induce_hierarchy_bidir(
+        self,
+        fwd_concept:  str,
+        bwd_concept:  str,
+        n_clusters:   int           = 9,
+        min_examples: int           = 1,
+        vocab_size:   Optional[int] = None,
+        method:       str           = 'auto',
+    ) -> Dict:
+        """Discover latent categories using bidirectional context.
+
+        Combines forward distributions (from ``fwd_concept``) and backward
+        distributions (from ``bwd_concept``) before clustering.  Atoms with
+        similar successors AND similar predecessors cluster together, producing
+        richer categories than forward-only clustering.
+
+        At each scale of the multi-scale discovery pipeline::
+
+            Level 0: fwd='next_char',      bwd='prev_char'
+            Level 1: fwd='next_morph',     bwd='prev_morph'
+            Level 2: fwd='next_word_hier', bwd='prev_word_hier'
+            Level 3: fwd='next_phrase',    bwd='prev_phrase'
+
+        The forward distribution captures *what an atom predicts*.
+        The backward distribution captures *what predicts an atom*.
+        Together they identify the atom's full distributional signature.
+
+        Args:
+            fwd_concept:  Concept name whose ExampleStore holds forward bigrams
+                          ``(atom,) → (next_atom,)``.
+            bwd_concept:  Concept name whose ExampleStore holds backward bigrams
+                          ``(atom,) → (prev_atom,)``.
+            n_clusters:   Target number of latent categories.
+            min_examples: Minimum total observation count to include an atom.
+            vocab_size:   Cap vocabulary to top-N atoms before clustering.
+            method:       Clustering algorithm ('auto', 'agglomerative', 'kmeans').
+
+        Returns dict with keys:
+            'clusters':   {cluster_id: [atom_list]} sorted by frequency.
+            'assignment': {atom: cluster_id}
+            'n_eligible': Number of unique atoms included.
+            'n_clusters': Actual number of clusters formed.
+        """
+        import collections as _col
+
+        fwd_store = self.stores.get(fwd_concept)
+        bwd_store = self.stores.get(bwd_concept)
+        have_fwd  = fwd_store is not None and len(fwd_store) > 0
+        have_bwd  = bwd_store is not None and len(bwd_store) > 0
+        if not have_fwd and not have_bwd:
+            return {'error': f'No examples for {fwd_concept!r} or {bwd_concept!r}'}
+
+        # Extract raw counts from each store.
+        fwd_raw: Dict[str, Dict[str, int]] = _col.defaultdict(_col.Counter)
+        if have_fwd:
+            for inputs, outputs in fwd_store.examples:
+                if len(inputs) >= 1 and len(outputs) >= 1:
+                    fwd_raw[inputs[-1]][outputs[0]] += 1
+
+        bwd_raw: Dict[str, Dict[str, int]] = _col.defaultdict(_col.Counter)
+        if have_bwd:
+            for inputs, outputs in bwd_store.examples:
+                if len(inputs) >= 1 and len(outputs) >= 1:
+                    bwd_raw[inputs[-1]][outputs[0]] += 1
+
+        # Build joint distributions with namespaced context keys.
+        # Forward context: ('fwd', next_atom) — what X predicts.
+        # Backward context: ('bwd', prev_atom) — what predicts X.
+        # Namespacing prevents forward and backward contexts from colliding.
+        all_atoms = set(fwd_raw) | set(bwd_raw)
+        combined_dists:  Dict[tuple, Dict[tuple, float]] = {}
+        combined_counts: Dict[tuple, int] = {}
+
+        for atom in all_atoms:
+            d: Dict[tuple, float] = {}
+            fwd_total = sum(fwd_raw[atom].values()) if fwd_raw[atom] else 0
+            bwd_total = sum(bwd_raw[atom].values()) if bwd_raw[atom] else 0
+            for nxt, cnt in fwd_raw[atom].items():
+                d[('fwd', nxt)] = cnt / fwd_total
+            for prv, cnt in bwd_raw[atom].items():
+                d[('bwd', prv)] = cnt / bwd_total
+            if not d:
+                continue
+            combined_dists[( atom,)] = d
+            combined_counts[(atom,)] = fwd_total + bwd_total
+
+        raw_assignment = discover_categories_from_dists(
+            combined_dists, combined_counts,
+            n_clusters=n_clusters, min_examples=min_examples,
+            vocab_size=vocab_size, method=method,
+        )
+        if not raw_assignment:
+            return {'error': 'Not enough examples for bidirectional clustering'}
+
+        # Build cluster → member list, sort each cluster by total frequency.
+        clusters_raw: Dict[int, List[str]] = {}
+        for (atom,), cid in raw_assignment.items():
+            clusters_raw.setdefault(cid, []).append(atom)
+
+        freq = {atom: combined_counts.get((atom,), 0) for atom in all_atoms}
+        for cid in clusters_raw:
+            clusters_raw[cid].sort(key=lambda a: -freq.get(a, 0))
+
+        # Renumber clusters by size (largest = C0) for consistent display.
+        by_size = sorted(clusters_raw.items(), key=lambda kv: -len(kv[1]))
+        renumber: Dict[int, int] = {old: new for new, (old, _) in enumerate(by_size)}
+        clusters = {renumber[old]: members for old, members in clusters_raw.items()}
+        assignment = {
+            atom: renumber[raw_cid]
+            for (atom,), raw_cid in raw_assignment.items()
+        }
+
+        return {
+            'clusters':   clusters,
+            'assignment': assignment,
+            'n_eligible': len(raw_assignment),
+            'n_clusters': len(clusters),
+        }
+
     def chunk_store(
         self,
         concept_name: str,

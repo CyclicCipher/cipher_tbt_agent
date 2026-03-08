@@ -148,6 +148,9 @@ def run_char_level(
 ) -> dict:
     """Level 0: character bigrams -> char categories + char chunk_map.
 
+    Collects forward (next_char) AND backward (prev_char) bigrams in a single
+    corpus pass, then clusters using bidirectional context for richer categories.
+
     Returns:
         {
           'clusters':   {cid: [char_list]}
@@ -157,33 +160,38 @@ def run_char_level(
           'n_unique':   int
         }
     """
-    _banner('Level 0: Character bigrams')
+    _banner('Level 0: Character bigrams (bidirectional)')
 
-    concept = 'next_char'
-    if concept not in ai.stores:
-        ai.add_concept(
-            name=concept, domain='scale_hierarchy',
-            description='Character bigram forward distribution',
-            input_type=['char'], output_type=['char'], tier='theorem',
-        )
+    fwd_concept = 'next_char'
+    bwd_concept = 'prev_char'
+    for cname, desc in [(fwd_concept, 'Character bigram forward distribution'),
+                        (bwd_concept, 'Character bigram backward distribution')]:
+        if cname not in ai.stores:
+            ai.add_concept(
+                name=cname, domain='scale_hierarchy',
+                description=desc,
+                input_type=['char'], output_type=['char'], tier='theorem',
+            )
 
     n_pairs = 0
     for text in texts:
         for i in range(len(text) - 1):
-            ai.teach(concept, (text[i],), (text[i + 1],))
+            a, b = text[i], text[i + 1]
+            ai.teach(fwd_concept, (a,), (b,))   # a → b
+            ai.teach(bwd_concept, (b,), (a,))   # b ← a
             n_pairs += 1
 
-    n_unique = len(ai.stores[concept])
+    n_unique = len(ai.stores[fwd_concept])
     if verbose:
         print(f'  {len(texts)} lines, {n_pairs:,} char pairs, '
-              f'{n_unique:,} unique transitions')
+              f'{n_unique:,} unique forward transitions')
 
-    result = ai.induce_hierarchy(concept, n_clusters=n_clusters)
+    result = ai.induce_hierarchy_bidir(fwd_concept, bwd_concept, n_clusters=n_clusters)
     clusters = result.get('clusters', {})
 
-    _print_clusters(clusters, ai, concept, label='char', top_n=6)
+    _print_clusters(clusters, ai, fwd_concept, label='char', top_n=6)
 
-    chunk_rules = ai.chunk_store(concept, min_pmi=min_pmi, max_merges=max_merges)
+    chunk_rules = ai.chunk_store(fwd_concept, min_pmi=min_pmi, max_merges=max_merges)
     chunk_map   = {(a, b): c for a, b, c, _ in chunk_rules}
 
     if verbose:
@@ -220,15 +228,20 @@ def run_subword_level(
     Returns same structure as run_char_level.
     """
     name = _LEVEL_NAMES[level]
-    _banner(f'Level {level}: {name} bigrams')
+    _banner(f'Level {level}: {name} bigrams (bidirectional)')
 
-    concept = f'next_{name}'
-    if concept not in ai.stores:
-        ai.add_concept(
-            name=concept, domain='scale_hierarchy',
-            description=f'{name.capitalize()} bigram forward distribution',
-            input_type=[name], output_type=[name], tier='theorem',
-        )
+    fwd_concept = f'next_{name}'
+    bwd_concept = f'prev_{name}'
+    for cname, desc in [
+        (fwd_concept, f'{name.capitalize()} bigram forward distribution'),
+        (bwd_concept, f'{name.capitalize()} bigram backward distribution'),
+    ]:
+        if cname not in ai.stores:
+            ai.add_concept(
+                name=cname, domain='scale_hierarchy',
+                description=desc,
+                input_type=[name], output_type=[name], tier='theorem',
+            )
 
     n_pairs = 0
     for text in texts:
@@ -244,20 +257,22 @@ def run_subword_level(
             morph_seq.append(' ')   # word boundary marker
 
         for i in range(len(morph_seq) - 1):
-            ai.teach(concept, (morph_seq[i],), (morph_seq[i + 1],))
+            a, b = morph_seq[i], morph_seq[i + 1]
+            ai.teach(fwd_concept, (a,), (b,))   # a → b
+            ai.teach(bwd_concept, (b,), (a,))   # b ← a
             n_pairs += 1
 
-    n_unique = len(ai.stores[concept])
+    n_unique = len(ai.stores[fwd_concept])
     if verbose:
         print(f'  {len(texts)} lines, {n_pairs:,} {name} pairs, '
               f'{n_unique:,} unique {name}s')
 
-    result = ai.induce_hierarchy(concept, n_clusters=n_clusters)
+    result = ai.induce_hierarchy_bidir(fwd_concept, bwd_concept, n_clusters=n_clusters)
     clusters = result.get('clusters', {})
 
-    _print_clusters(clusters, ai, concept, label=name, top_n=8)
+    _print_clusters(clusters, ai, fwd_concept, label=name, top_n=8)
 
-    chunk_rules = ai.chunk_store(concept, min_pmi=min_pmi, max_merges=max_merges)
+    chunk_rules = ai.chunk_store(fwd_concept, min_pmi=min_pmi, max_merges=max_merges)
     chunk_map   = {(a, b): c for a, b, c, _ in chunk_rules}
 
     if verbose:
@@ -298,17 +313,23 @@ def run_token_level(
                     word sequences into higher-level atoms.  Empty at level 2.
     """
     name = _LEVEL_NAMES[level]
-    _banner(f'Level {level}: {name} bigrams')
+    _banner(f'Level {level}: {name} bigrams (bidirectional)')
 
-    concept = f'next_{name}'
+    fwd_concept = f'next_{name}'
+    bwd_concept = f'prev_{name}'
     if name == 'word':
-        concept = 'next_word_hier'   # avoids conflict with language.ctkg's next_word
-    if concept not in ai.stores:
-        ai.add_concept(
-            name=concept, domain='scale_hierarchy',
-            description=f'{name.capitalize()} bigram forward distribution',
-            input_type=[name], output_type=[name], tier='theorem',
-        )
+        fwd_concept = 'next_word_hier'   # avoids conflict with language.ctkg's next_word
+        bwd_concept = 'prev_word_hier'
+    for cname, desc in [
+        (fwd_concept, f'{name.capitalize()} bigram forward distribution'),
+        (bwd_concept, f'{name.capitalize()} bigram backward distribution'),
+    ]:
+        if cname not in ai.stores:
+            ai.add_concept(
+                name=cname, domain='scale_hierarchy',
+                description=desc,
+                input_type=[name], output_type=[name], tier='theorem',
+            )
 
     n_pairs = 0
     for text in texts:
@@ -320,21 +341,23 @@ def run_token_level(
         for cm in chunk_maps:
             seq = apply_chunks(seq, cm)
         for i in range(len(seq) - 1):
-            ai.teach(concept, (seq[i],), (seq[i + 1],))
+            a, b = seq[i], seq[i + 1]
+            ai.teach(fwd_concept, (a,), (b,))   # a → b
+            ai.teach(bwd_concept, (b,), (a,))   # b ← a
             n_pairs += 1
 
-    n_unique = len(ai.stores[concept])
+    n_unique = len(ai.stores[fwd_concept])
     if verbose:
         print(f'  {len(texts)} lines, {n_pairs:,} {name} pairs, '
               f'{n_unique:,} unique {name}s')
 
-    result = ai.induce_hierarchy(concept, n_clusters=n_clusters)
+    result = ai.induce_hierarchy_bidir(fwd_concept, bwd_concept, n_clusters=n_clusters)
     clusters = result.get('clusters', {})
 
-    _print_clusters(clusters, ai, concept, label=name, top_n=10)
+    _print_clusters(clusters, ai, fwd_concept, label=name, top_n=10)
 
     chunk_rules = ai.chunk_store(
-        concept, min_pmi=min_pmi, max_merges=max_merges, separator=separator,
+        fwd_concept, min_pmi=min_pmi, max_merges=max_merges, separator=separator,
     )
     chunk_map = {(a, b): c for a, b, c, _ in chunk_rules}
 

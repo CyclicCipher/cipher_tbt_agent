@@ -57,9 +57,22 @@ concept next_char
   tier theorem
 
   -- Trained: ai.teach('next_char', (ch,), (ch_next,)) for all adjacent chars
-  -- Clustered: ai.induce_hierarchy('next_char', n_clusters=12)
+  -- Clustered: ai.induce_hierarchy_bidir('next_char', 'prev_char', n_clusters=12)
   -- Discovers: Q-before-U, script boundaries, ligatures, case-ending patterns
   -- Example clusters: {Q,q}→u, Greek={α,β,γ...}, punctuation={.,;,:}
+
+concept prev_char
+  domain scale_hierarchy
+  description "Character bigram backward distribution — categorical dual of next_char"
+  input char
+  output char
+  requires next_char via "bidirectional pair"
+  tier theorem
+
+  -- Trained: ai.teach('prev_char', (ch,), (ch_prev,)) for all adjacent chars
+  -- Combined with next_char for richer distributional clustering.
+  -- P(prev | X) constrains what CAN precede X, complementing P(next | X).
+  -- E.g. 'u' follows 'q' (next_char) AND 'q' precedes 'u' (prev_char confirms it).
 
 -- =========================================================================
 -- Level 1: Morphemes (compressed from chars by PMI chunking)
@@ -89,6 +102,14 @@ concept next_morph
   -- Trained on corpus with char chunks applied
   -- Discovers: morphological categories (prefix cluster, suffix cluster, root)
 
+concept prev_morph
+  domain scale_hierarchy
+  description "Morpheme bigram backward distribution — categorical dual of next_morph"
+  input morpheme
+  output morpheme
+  requires next_morph via "bidirectional pair"
+  tier theorem
+
 -- =========================================================================
 -- Level 2: Words (natural whitespace boundary or compressed from morphemes)
 -- =========================================================================
@@ -113,6 +134,18 @@ concept next_word_hier
   -- Same machinery as Phase O discover_test.py — POS-like clusters without labels
   -- Discovers: DET-like, NOUN-like, VERB-like, PREP-like clusters
 
+concept prev_word_hier
+  domain scale_hierarchy
+  description "Word bigram backward distribution — categorical dual of next_word_hier"
+  input word
+  output word
+  requires next_word_hier via "bidirectional pair"
+  tier theorem
+
+  -- Combined with next_word_hier: word preceded by DET must be NOUN/ADJ,
+  -- so clustering on both forward (what follows DET) and backward (what precedes
+  -- NOUN) gives sharper POS-like categories than forward-only clustering.
+
 -- =========================================================================
 -- Level 3: Phrases (high-PMI word n-grams)
 -- =========================================================================
@@ -136,6 +169,14 @@ concept next_phrase
   requires chunk_words
   tier theorem
 
+concept prev_phrase
+  domain scale_hierarchy
+  description "Phrase bigram backward distribution — categorical dual of next_phrase"
+  input phrase
+  output phrase
+  requires next_phrase via "bidirectional pair"
+  tier theorem
+
 -- =========================================================================
 -- Level 4: Clauses
 -- =========================================================================
@@ -154,6 +195,14 @@ concept next_clause
   input clause
   output clause
   requires chunk_phrases
+  tier theorem
+
+concept prev_clause
+  domain scale_hierarchy
+  description "Clause bigram backward distribution — categorical dual of next_clause"
+  input clause
+  output clause
+  requires next_clause via "bidirectional pair"
   tier theorem
 
 -- =========================================================================
@@ -176,6 +225,14 @@ concept next_sent
   requires chunk_clauses
   tier theorem
 
+concept prev_sent
+  domain scale_hierarchy
+  description "Sentence bigram backward distribution — categorical dual of next_sent"
+  input sentence
+  output sentence
+  requires next_sent via "bidirectional pair"
+  tier theorem
+
 -- =========================================================================
 -- Level 6: Paragraphs
 -- =========================================================================
@@ -194,6 +251,14 @@ concept next_para
   input paragraph
   output paragraph
   requires chunk_sents
+  tier theorem
+
+concept prev_para
+  domain scale_hierarchy
+  description "Paragraph bigram backward distribution — categorical dual of next_para"
+  input paragraph
+  output paragraph
+  requires next_para via "bidirectional pair"
   tier theorem
 
 -- =========================================================================
@@ -216,6 +281,14 @@ concept next_concept
   requires chunk_paras
   tier theorem
 
+concept prev_concept
+  domain scale_hierarchy
+  description "Concept bigram backward distribution — categorical dual of next_concept"
+  input concept
+  output concept
+  requires next_concept via "bidirectional pair"
+  tier theorem
+
 -- =========================================================================
 -- Interface
 -- =========================================================================
@@ -223,5 +296,7 @@ concept next_concept
 interface scale_hierarchy
   exports types char morpheme word phrase clause sentence paragraph concept
   exports types char_cat morph_cat word_cat phrase_cat clause_cat sent_cat
-  exports concepts next_char next_morph next_word_hier next_phrase next_clause next_sent next_para next_concept
+  exports concepts next_char prev_char next_morph prev_morph next_word_hier prev_word_hier
+  exports concepts next_phrase prev_phrase next_clause prev_clause next_sent prev_sent
+  exports concepts next_para prev_para next_concept prev_concept
   exports concepts chunk_chars chunk_morphs chunk_words chunk_phrases chunk_clauses chunk_sents chunk_paras
