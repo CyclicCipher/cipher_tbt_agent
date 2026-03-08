@@ -395,6 +395,7 @@ def build_trigram_assignment(
     train_texts:     list[str],
     base_assignment: dict[str, int],
     n_clusters:      int = 12,
+    min_examples:    int = 3,
     verbose:         bool = True,
 ) -> tuple[dict, dict]:
     """Phase E2: context-sensitive clustering.
@@ -450,7 +451,7 @@ def build_trigram_assignment(
         print(f'  Target clusters: {n_clusters}')
 
     raw_assignment = discover_categories_from_dists(
-        dists, counts, n_clusters=n_clusters, min_examples=1,
+        dists, counts, n_clusters=n_clusters, min_examples=min_examples,
     )
     if not raw_assignment:
         if verbose:
@@ -554,19 +555,25 @@ def predict_chain_ctx(
     base_assignment:    dict[str, int],
     context_assignment: dict,
 ) -> str | None:
-    """Phase E2: Predict w3 via context-sensitive chain."""
-    c1    = base_assignment.get(w1)
+    """Phase E2: Predict w3 via context-sensitive chain, falling back to E1.
+
+    If (c1, w2) is in context_assignment, uses E2 (next_cat_ctx + word_given_cat_ctx).
+    Otherwise falls back to E1 (next_cat + word_given_cat) to preserve coverage.
+    """
+    c1     = base_assignment.get(w1)
     c2_ctx = context_assignment.get((c1, w2)) if c1 is not None else None
-    if c2_ctx is None:
-        return None
-    c3_tup = ai.ask('next_cat_ctx', (str(c1), str(c2_ctx)))
-    if c3_tup is None:
-        return None
-    c3 = c3_tup[0] if isinstance(c3_tup, tuple) else str(c3_tup)
-    w3_tup = ai.ask('word_given_cat_ctx', (str(c1), str(c2_ctx), c3))
-    if w3_tup is None:
-        return None
-    return w3_tup[0] if isinstance(w3_tup, tuple) else str(w3_tup)
+
+    if c2_ctx is not None:
+        # E2 path: context-sensitive clusters available
+        c3_tup = ai.ask('next_cat_ctx', (str(c1), str(c2_ctx)))
+        if c3_tup is not None:
+            c3 = c3_tup[0] if isinstance(c3_tup, tuple) else str(c3_tup)
+            w3_tup = ai.ask('word_given_cat_ctx', (str(c1), str(c2_ctx), c3))
+            if w3_tup is not None:
+                return w3_tup[0] if isinstance(w3_tup, tuple) else str(w3_tup)
+
+    # E1 fallback: use base cluster of w2
+    return predict_chain(ai, w1, w2, base_assignment)
 
 
 def logprob_chain_ctx(
@@ -577,26 +584,26 @@ def logprob_chain_ctx(
     base_assignment:    dict[str, int],
     context_assignment: dict,
 ) -> float | None:
-    """Log₂ probability of w3 given (w1, w2) via E2 context-sensitive chain."""
+    """Log₂ probability of w3 given (w1, w2) via E2 chain with E1 fallback."""
     c1      = base_assignment.get(w1)
     c2_base = base_assignment.get(w2)
     c2_ctx  = context_assignment.get((c1, w2))      if c1      is not None else None
     c3_ctx  = context_assignment.get((c2_base, w3)) if c2_base is not None else None
-    if c1 is None or c2_ctx is None or c3_ctx is None:
-        return None
-    cat_dist = ai.ask_dist('next_cat_ctx', (str(c1), str(c2_ctx)))
-    if cat_dist is None:
-        return None
-    p_c3 = cat_dist.get((str(c3_ctx),), 0.0)
-    if p_c3 < 1e-12:
-        return None
-    word_dist = ai.ask_dist('word_given_cat_ctx', (str(c1), str(c2_ctx), str(c3_ctx)))
-    if word_dist is None:
-        return None
-    p_w3 = word_dist.get((w3,), 0.0)
-    if p_w3 < 1e-12:
-        return None
-    return math.log2(p_c3 * p_w3)
+
+    if c2_ctx is not None and c3_ctx is not None:
+        cat_dist = ai.ask_dist('next_cat_ctx', (str(c1), str(c2_ctx)))
+        if cat_dist is not None:
+            p_c3 = cat_dist.get((str(c3_ctx),), 0.0)
+            if p_c3 >= 1e-12:
+                word_dist = ai.ask_dist('word_given_cat_ctx',
+                                        (str(c1), str(c2_ctx), str(c3_ctx)))
+                if word_dist is not None:
+                    p_w3 = word_dist.get((w3,), 0.0)
+                    if p_w3 >= 1e-12:
+                        return math.log2(p_c3 * p_w3)
+
+    # E1 fallback
+    return logprob_chain(ai, w1, w2, w3, base_assignment)
 
 
 def evaluate_all(
@@ -762,6 +769,8 @@ def main() -> None:
                    help='Word cluster count for E1 category chain (default: 12)')
     p.add_argument('--n_ctx_clusters', type=int, default=None,
                    help='Context-sensitive cluster count for E2 (default: n_clusters)')
+    p.add_argument('--ctx_min_count', type=int, default=3,
+                   help='Min occurrences for a (c_prev,word) pair to get a context cluster (default: 3)')
     p.add_argument('--phase',        choices=['e1', 'e2', 'both'], default='both',
                    help='Which phase to run: e1, e2, or both (default: both)')
     p.add_argument('--save',         metavar='PATH',
@@ -838,7 +847,8 @@ def main() -> None:
     if args.phase in ('e2', 'both'):
         # ---- Step 5: Build E2 context-sensitive cluster assignment ----
         context_assignment, ctx_clusters = build_trigram_assignment(
-            train_texts, assignment, n_clusters=n_ctx, verbose=True,
+            train_texts, assignment, n_clusters=n_ctx,
+            min_examples=args.ctx_min_count, verbose=True,
         )
 
         if context_assignment:
