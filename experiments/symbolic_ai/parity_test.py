@@ -47,16 +47,7 @@ if hasattr(sys.stdout, 'buffer') and getattr(sys.stdout, 'encoding', 'utf-8').lo
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
 from discover_structure import run_pipeline, _stream_texts, _banner, _DATA_DIR
-from language_pipeline import (
-    build_assignment, train_chain,
-    build_trigram_assignment, train_chain_ctx,
-    build_cluster_succ_dists, build_cluster_similarity_matrix,
-    precompute_dist_cache, precompute_all_soft_dists,
-    tune_mixture_alpha,
-    evaluate_all, logprob_chain, logprob_flat,
-    logprob_chain_ctx, logprob_chain_e3,
-    predict_chain_e3,
-)
+from sequence_pipeline import SequenceLearner, sequences_from_texts
 
 try:
     from ocr_test import find_pairs
@@ -620,8 +611,8 @@ def main() -> None:
     # Symbolic side
     # ========================================================
 
-    # Step 1: Discovery
-    print('\n  [Symbolic] Running multi-scale discovery...')
+    # Step 1: Discovery (multi-scale hierarchy for richer clusters)
+    _banner('Symbolic: Multi-scale discovery')
     ai, chunk_maps = run_pipeline(
         texts=train_texts,
         n_levels=3,
@@ -631,47 +622,24 @@ def main() -> None:
         verbose=False,
     )
 
-    # Step 2: E1 clusters
-    _banner('Building E1 word cluster assignment')
-    assignment, clusters = build_assignment(ai, n_clusters=args.n_clusters)
-    K = len(clusters)
-    print(f'  Vocab: {len(assignment):,}   Clusters: {K}')
-
-    # Step 3: Train E1 chain
-    train_chain(ai, train_texts, assignment, verbose=True)
-
-    # Step 4: E2 context-sensitive
-    context_assignment, ctx_clusters = build_trigram_assignment(
-        train_texts, assignment, n_clusters=n_ctx,
-        min_examples=args.ctx_min_count, verbose=False,
+    # Steps 2-6: E1-E3 via SequenceLearner
+    _banner('Symbolic: E1-E3 category chain + soft retrieval')
+    learner = SequenceLearner(ai=ai, n_clusters=args.n_clusters)
+    learner.fit(
+        sequences_from_texts(train_texts),
+        bigram_concept='next_word_hier',
+        e3_temperature=args.e3_temperature,
+        phases='e1e3',
+        verbose=True,
     )
-    if context_assignment:
-        train_chain_ctx(ai, train_texts, assignment, context_assignment, verbose=False)
 
-    # Step 5: E3 soft retrieval
-    _banner('Phase E3: Soft Retrieval (successor-distribution similarity)')
-    succ_dists = build_cluster_succ_dists(ai, clusters, verbose=False)
-    sim_matrix = build_cluster_similarity_matrix(
-        succ_dists, K=K, temperature=args.e3_temperature, verbose=True)
-
-    nc_cache  = precompute_dist_cache(ai, 'next_cat')
-    wgc_cache = precompute_dist_cache(ai, 'word_given_cat')
-    nc_soft   = precompute_all_soft_dists(nc_cache,  sim_matrix, K, arity=2, verbose=True)
-    wgc_soft  = precompute_all_soft_dists(wgc_cache, sim_matrix, K, arity=3, verbose=True)
-
-    # Step 6: Dev split for α tuning (10% of test)
+    # Step 7: Evaluate
     n_dev = max(len(test_texts) // 10, 20)
-    dev_texts  = test_texts[:n_dev]
     eval_texts = test_texts[n_dev:]
-    alpha = tune_mixture_alpha(
-        ai, dev_texts, assignment, nc_soft, wgc_soft, verbose=False)
-    print(f'  Mixture α = {alpha:.2f}')
-
-    # Step 7: Evaluate symbolic model
-    print()
-    symbolic_results = evaluate_all(
-        ai, eval_texts, assignment, context_assignment, train_pairs,
-        nc_soft=nc_soft, wgc_soft=wgc_soft, verbose=True,
+    symbolic_results = learner.evaluate(
+        sequences_from_texts(eval_texts),
+        train_pairs=train_pairs,
+        verbose=True,
     )
 
     if args.save:

@@ -80,6 +80,49 @@ Reverse problems (Stage 3): `? + 4 = 0 7 WORK 0 3` — given result + one operan
 
 **Syntax generators (NEW):** `generators/syntax.py` — PosTagGenerator (Stage 1), NpChunkGenerator (Stage 2), PpChunkGenerator (Stage 3), VpChunkGenerator (Stage 4), ClauseStructureGenerator (Stage 5). All take pre-annotated WikiText-2 sentences, produce fixed-length scratchpad output (STOP-padded to max_words). Each stage uses the same sentence pool with different output format. BIO tagging scheme for chunk stages (B_NP/I_NP/O_NP etc.).
 
+### Symbolic AI Runtime (experiments/symbolic_ai/) — IMPLEMENTED + E0-E6 COMPLETE
+
+A standalone symbolic AI built on the CTKG process language. Two complementary systems:
+
+**1. Deterministic synthesis** — generalizes from ≤10 examples with 100% accuracy.
+**2. Sequence learning (E0-E6)** — Broca's area principle: one algorithm for all token domains.
+
+Key files:
+- `sequence_pipeline.py` — `SequenceLearner`: E0-E6 pipeline for any discrete token sequences; `sequences_from_texts()` for text
+- `vision_pipeline.py` — `VisionLearner`: image patches via SequenceLearner (patch→sequence→E0-E6)
+- `parity_test.py` — E3 soft retrieval vs 2-layer transformer (E3 wins on unseen pairs)
+- `interpreter.py` — ProcessInterpreter: executes process lines (List[str] → tuple output)
+- `memory.py` — ExampleStore: stores (inputs, outputs) pairs + KL divergence metric
+- `synthesis.py` — Synthesizer: template search + distributional category discovery
+- `engine.py` — SymbolicAI class; `ai._interp` is the ProcessInterpreter attribute
+- `agent_loop.py` — Minecraft agent loop; smoke test passes; full run awaits Phase K
+- `modalities/vision.py` — 15 image primitives; `modalities/vision_cortex.py` — VisualCortex
+- `modalities/minecraft.py` — MinecraftModality stub (Phase K custom interface pending)
+
+**E0-E6 sequence learning results (EarlyModernLatin, 5K train):**
+E3 soft retrieval: 1.0% unseen-pair accuracy vs transformer: 0.4%.
+K³=1,728 `token_given_cat` entries vs V²=25M word-bigrams. See ROADMAP.md for full table.
+
+**E6 meta-synthesis:** beam search discovers `context_triple ∘ word_given_cat` (100% coverage)
+and `slot_context ∘ slot_occupants` (100% coverage) from examples alone.
+
+**Minecraft agent (Phases A–J complete; Phase K next):** MinecraftModality,
+CTKG edge types (CausalEdge/CompositionEdge/InstanceEdge/TemporalEdge), dynamic
+CTKG extension, effectful interpreter, online synthesis, causal templates, exploration
+policy, checkpoint system, agent_loop.py, VisualCortex.
+**MineDojo is abandoned** (broken dependencies, cannot be fixed). Phase K replaces
+the MineDojo API with a custom interface: dxcam (screen capture) + pynput
+(keyboard/mouse) + mcrcon (RCON for homeostatic data). Works with any Minecraft
+version and any modded installation; supports player co-op on a local server.
+
+**Complete primitive set (interpreter.py):**
+- Level 1: `succ`, `pred`, `compare`, `fold`, `fold_until`, `fn(param,body)`, `pair`, `triple`, `first`, `second`, `third`, `if`, `equal`, `lookup`, `emit`
+- Level C (symbolic AST): `sym_num`, `sym_var`, `sym_add`, `sym_sub`, `sym_mul`, `sym_pow`, `sym_neg`, `sym_eval`, `sym_diff`, `sym_subst`, `sym_str`
+- Syntactic: `==`, `+`, `-` (inline operators in process lines)
+- Literal names: `X`, `Y`, `Z`, `T` resolve as strings (for symbolic variables)
+
+**Theoretical minimum (17 forms):** `succ`, `fold_until`, `fn`, `if`, `pair`, `first`, `second`, `lookup`, `emit`, `sym_num`, `sym_var`, `sym_add`, `sym_mul`, `sym_pow`, `sym_diff`, `sym_eval`, `sym_subst`. Everything else is derivable.
+
 ### CTKG (experiments/ctkg/) — IMPLEMENTED + DSL + SHEAVES + MARKOV
 
 Category Theory Knowledge Graph — a directed acyclic graph where nodes are concepts/skills and edges are prerequisite relationships. Built on a universal type system of primitives (`symbol`, `seq`, `tuple`, `tagged` + structure annotations) that compose into any domain-specific type. Includes functors (structure-preserving maps between domains), adjunctions (forward/inverse pairs), sheaf consistency checking for multi-domain composition, and probabilistic structure (Markov category).
@@ -107,7 +150,7 @@ Category Theory Knowledge Graph — a directed acyclic graph where nodes are con
 
 **Three curriculum patterns:** Process (composition/functors — step-by-step execution), Relationship (adjunctions/natural transformations — paired forward/inverse computations), Constraint (limits/pullbacks — multi-constraint satisfaction).
 
-**Three levels of process primitives:** Level 1 (Computation: succ, pred, compare, fold, scan, emit, lookup, if), Level 2 (Logic: equal, and, or, not, implies, forall, exists), Level 3 (Transform: quote, match, substitute, rewrite, decompose, compose). Level 1 does arithmetic. Level 2 proves properties. Level 3 improves algorithms.
+**Three levels of process primitives:** Level 1 (Computation: succ, pred, compare, fold, fold_until, fn, pair, triple, first, second, third, if, equal, lookup, emit — all implemented in interpreter.py), Level 2 (Logic: and, or, not, implies, forall, exists — not yet implemented), Level C (Symbolic AST: sym_num, sym_var, sym_add, sym_sub, sym_mul, sym_pow, sym_neg, sym_eval, sym_diff, sym_subst, sym_str — implemented). Level 1 does arithmetic. Level 2 proves properties. Level C manipulates expressions as data (meta-reasoning).
 
 **Commercial architecture:** Layer 1 (Graph data — `.ctkg` files, customer provides), Layer 2 (Computation rules — declarative, customer provides), Layer 3 (Engine — we provide: parser, validator, curriculum generator, trainer).
 
@@ -156,11 +199,23 @@ predictive-coding-agent/
 ├── CONTINUATION.md        # Compositional arithmetic curriculum plan (ACTIVE)
 ├── experiments/
 │   ├── ctkg/              # Category Theory Knowledge Graph (IMPLEMENTED + DSL + SHEAVES)
-│   │   ├── DESIGN.md      # Architecture, DSL grammar, sheaf consistency, commercial arch
+│   │   ├── DESIGN.md      # Architecture, DSL grammar, sheaf consistency, symbolic AI runtime
 │   │   ├── graph.py       # Concept, Prerequisite, Functor, Adjunction, Interface, KnowledgeGraph
 │   │   ├── parser.py      # DSL parser: parse(), parse_file(), merge(), sheaf_merge()
-│   │   ├── test_parser.py # 11 tests (types, domains, sheaf consistency, interfaces)
+│   │   ├── test_parser.py # 16 tests (types, domains, sheaf consistency, interfaces, entropy, d-sep)
 │   │   └── domains/       # arithmetic.py/.ctkg, logic.py/.ctkg, syntax.py/universal_syntax.ctkg/english_syntax.ctkg
+│   ├── symbolic_ai/       # Symbolic AI runtime (E0-E6 complete; Minecraft Phases A–J complete)
+│   │   ├── sequence_pipeline.py # SequenceLearner: E0-E6 for any discrete token domain
+│   │   ├── vision_pipeline.py   # VisionLearner: image patches → SequenceLearner
+│   │   ├── parity_test.py       # E3 vs transformer comparison
+│   │   ├── interpreter.py # ProcessInterpreter: Level 1 + Level C primitives
+│   │   ├── memory.py      # ExampleStore + KL divergence metric
+│   │   ├── synthesis.py   # Template synthesizer + distributional category discovery
+│   │   ├── engine.py      # SymbolicAI class (ai._interp is the interpreter)
+│   │   ├── agent_loop.py  # Minecraft agent loop (smoke test passes; Phase K pending)
+│   │   └── modalities/    # vision.py, vision_cortex.py, minecraft.py (Phase K stub)
+│   │       # minecraft.ctkg — 50 concepts, CausalEdge/CompositionEdge/InstanceEdge/TemporalEdge
+│   │       # MINEDOJO.md — design doc (MineDojo abandoned; Phase K custom interface next)
 │   ├── scratchpad/        # Scratchpad framework (model-agnostic)
 │   │   ├── framework.py   # Vocab, Problem, Step, Grader, ProblemGenerator
 │   │   ├── DESIGN_GUIDE.md # Curriculum design principles (category theory, prerequisites)
