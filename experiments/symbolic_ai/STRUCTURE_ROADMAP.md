@@ -84,33 +84,51 @@ Results:
 - 643,471× compression (K²=144 vs V²=92M bigram state space)
 - Coverage: chain 28.4% vs flat 53.6% (sparse word_given_cat: 35.9% of K³ populated)
 
-### Phase E2 — Trigram Context for Clustering ← CURRENT (2026-03-07)
+### Phase E2 — Trigram Context for Clustering ✓ (commit 7a70acc, 2026-03-07)
 
 File: language_pipeline.py (build_trigram_assignment + train_chain_ctx + evaluate_all)
-Test: EarlyModernLatin corpus, same split, K=12 base + KC=12 context clusters
+Test: EarlyModernLatin corpus, 5000 train / 1250 test, K=12 base + KC=32 ctx clusters
 
 Architecture:
-    context_assignment: (c_prev, word) → ctx_cluster_id   (KC clusters)
+    context_assignment: (c_prev, word) → ctx_cluster_id   (KC clusters, min_count=5)
     next_cat_ctx:       (c1, c2_ctx) → c3_ctx             (K × KC entries)
     word_given_cat_ctx: (c1, c2_ctx, c3_ctx) → word       (K × KC² entries)
 
-Same word gets DIFFERENT cluster in different left-context:
-    "bank" after DET → financial-bank cluster (c2_ctx = 8)
-    "bank" after PREP → terrain-bank cluster  (c2_ctx = 3)
+Fix required: min_examples=5 prevents degenerate singleton clusters (CC00 problem).
+E1 fallback: when (c1, w2) not in context_assignment, falls back to E1.
 
-This is the distributional analogue of contextual embeddings.
-CTKG connection: polysemy = multiple c2_ctx values for same word = fiber bundle section.
+Results: E2 acc on unseen = 0.1% vs E1 = 0.0% — E2 wins by aggregating more trigrams.
+
+### Phase E3 — Soft Retrieval (Attention-Equivalent) ✓ (commit 2687b9b, 2026-03-07)
+
+File: language_pipeline.py (build_cluster_word_dists, build_cluster_similarity_matrix,
+      precompute_dist_cache, ask_weighted_soft, precompute_all_soft_dists,
+      predict_chain_e3, logprob_chain_e3)
+
+Architecture:
+    cluster_dists[c]  = frequency-weighted word distribution for cluster c
+    sim_matrix[i][j]  = exp(-T × JSD(P_i, P_j))    where T = temperature (default 2.0)
+    nc_soft[key]      = Σ_k sim(key,k) × P_nc(output|k)   for all K² queries
+    wgc_soft[key]     = Σ_k sim(key,k) × P_wgc(output|k)  for all K³ queries
+    predict_chain_e3  = argmax(wgc_soft[(c1,c2,c3)])  (E1 fallback if OOV)
+
+Key insight: this IS self-attention:
+    Query  = cluster IDs of current context
+    Keys   = stored cluster tuples
+    Values = stored output distributions
+    Score  = exp(-T·JSD(cluster_dists[query], cluster_dists[key]))
+    Output = softmax-weighted sum of value distributions
+
+Results (K=12, T=2.0, EarlyModernLatin 5000 train):
+    Unseen pair accuracy: E3=0.3% > E1=0.0% = E2=0.0% = Flat=0.0%
+    Overall accuracy (answered): E3=1.6% > E2=0.5% > E1=0.1% < Flat=2.2%
+    E3 is FIRST method to beat flat bigram on unseen word pairs.
+    Perplexity: E3=6344 (diffuse; calibration open issue — high T reduces this)
+    Avg off-diagonal cluster similarity: 0.135 (clusters are distinct)
+    Precompute: 144 next_cat + 1728 word_given_cat soft dists (fast, runs once)
 
 Usage: python language_pipeline.py --corpus EarlyModernLatin --n_train 5000 --n_clusters 12
-       (runs E1 + E2 by default; --phase e1 for E1 only)
-
-Expected: E2 > E1 > flat on unseen pairs.
-
-### Phase E3 — Soft Retrieval (Attention-Equivalent)
-
-ask_weighted(concept, query, context_dist) — weight stored examples by context
-similarity instead of exact match. This gives CONTEXTUAL representations.
-Keys = stored inputs, Values = stored outputs, Similarity = −KL.
+       (--phase all runs E1+E2+E3; --e3_temperature controls selectivity)
 
 ### Phase E4 — Frame Semantics / Paradigmatic Axis
 
@@ -154,4 +172,5 @@ After parity established: visual glyph clusters → char clusters → morpheme c
 |------------|-------|-------------|-------|
 | 2026-03-07 | E0    | COMPLETE    | Bidir clustering, prev/next at all scales |
 | 2026-03-07 | E1    | COMPLETE    | Chain beats flat on unseen pairs (0.2% vs 0.0%); 643K× compression |
-| 2026-03-07 | E2    | IMPLEMENTED | build_trigram_assignment + evaluate_all; awaiting Latin corpus test |
+| 2026-03-07 | E2    | COMPLETE    | ctx clusters (min_count=5, KC=32); E2=0.1% vs E1=0.0% on unseen pairs |
+| 2026-03-07 | E3    | COMPLETE    | Soft retrieval (JSD sim matrix, T=2.0); E3=0.3% BEST on unseen pairs |
