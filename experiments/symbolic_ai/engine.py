@@ -31,7 +31,8 @@ from interpreter import ProcessInterpreter
 from memory import ExampleStore
 from modalities.base import Modality
 from synthesis import (CONCEPT_TO_PRIM, Synthesizer,
-                       discover_categories, discover_categories_from_dists)
+                       discover_categories, discover_categories_from_dists,
+                       chunk_sequences, apply_chunks)
 
 
 def _inputs_equal(a: tuple, b: tuple) -> bool:
@@ -482,6 +483,64 @@ class SymbolicAI:
             'concept_names': concept_names,
             'kl_flat':       self.kl(flat_concept),
         }
+
+    def chunk_store(
+        self,
+        concept_name: str,
+        min_pmi:      float = 3.0,
+        min_count:    int   = 5,
+        max_merges:   int   = 500,
+        separator:    str   = '',
+    ) -> List[Tuple]:
+        """Discover high-PMI adjacent atom pairs in a concept's ExampleStore.
+
+        Reads the (input, output) bigram pairs from ``concept_name``'s
+        ExampleStore, computes Pointwise Mutual Information for each pair,
+        and returns all pairs exceeding ``min_pmi`` as merge rules for the
+        next level of the scale hierarchy.
+
+        This is the bridge between scales: after teaching ``next_char`` with
+        character bigrams and calling ``induce_hierarchy``, call
+        ``chunk_store('next_char')`` to discover which character pairs should
+        be compressed into morpheme-level atoms.
+
+        Args:
+            concept_name:  Name of a bigram concept (next_char, next_word, …).
+                           Its ExampleStore must store single-element inputs and
+                           outputs: teach('next_X', (a,), (b,)).
+            min_pmi:       Minimum PMI threshold in bits.  3.0 for char level,
+                           2.0 for word level.
+            min_count:     Minimum bigram occurrence count.  Filters noise.
+            max_merges:    Maximum merge rules to return (highest PMI first).
+            separator:     String between merged atoms.  '' for char→morph
+                           (concatenation), ' ' for word→phrase.
+
+        Returns:
+            List of (atom_a, atom_b, compound, pmi) sorted by PMI descending.
+            Build a chunk_map with::
+
+                chunk_map = {(a, b): c for a, b, c, _ in ai.chunk_store('next_char')}
+                morphemes = apply_chunks(char_sequence, chunk_map)
+
+            Returns [] if the concept store is empty or missing.
+        """
+        store = self.stores.get(concept_name)
+        if store is None or len(store) == 0:
+            return []
+
+        bigrams: Dict[Tuple, int] = {}
+        for inputs, outputs in store.examples:
+            if len(inputs) == 1 and len(outputs) == 1:
+                key = (inputs[0], outputs[0])
+                bigrams[key] = bigrams.get(key, 0) + 1
+
+        return chunk_sequences(
+            bigrams,
+            min_pmi=min_pmi,
+            min_count=min_count,
+            max_merges=max_merges,
+            separator=separator,
+        )
 
     # ------------------------------------------------------------------
     # KL divergence / consolidation trigger

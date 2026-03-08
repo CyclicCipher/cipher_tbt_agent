@@ -1300,6 +1300,116 @@ def discover_categories_from_dists(
     return result_agg
 
 
+def semantic_bootstrap(
+    tokens:       List[str],
+    assignment:   Dict[tuple, int],   # Phase O output: {(word,): cluster_id}
+    global_freq:  Dict[str, int],     # word → raw count, from _stream_to_dists
+    window:       int = 5,
+    n_subclusters: int = 3,
+    min_count:    int = 5,
+) -> Dict[str, 'Tuple[int, int]']:
+    """Second-order distributional clustering: semantic fields within POS clusters.
+
+    Two-level distributional hypothesis:
+      Level 1 (Phase O):  words with similar SUCCESSORS  → same syntactic category
+      Level 2 (here):     words with similar NEIGHBOURS  → same semantic field
+
+    Algorithm:
+      1. Build word × word co-occurrence matrix over the token stream (window=5).
+      2. Apply PPMI weighting (Positive PMI — zero-floors negatives).
+      3. For each POS cluster from Phase O: run k-means on the PPMI row-vectors
+         of member words.  Re-uses the existing _kmeans_cluster() helper.
+      4. Return a compound label (pos_cluster_id, semantic_subcluster_id).
+
+    Args:
+        tokens:        Flat token list (same stream used by Phase O).
+        assignment:    Phase O result: {(word,): pos_cluster_id}.
+        global_freq:   Word counts from _stream_to_dists (or Counter over tokens).
+        window:        Context window radius (default 5 → ±5 tokens).
+        n_subclusters: Number of semantic sub-clusters per POS category.
+        min_count:     Words below this count are placed in sub-cluster 0 directly.
+
+    Returns:
+        Dict mapping each assigned word string to (pos_cluster_id, sem_subcluster_id).
+        Words not in `assignment` or below min_count are omitted.
+    """
+    import numpy as np
+
+    # ------------------------------------------------------------------ #
+    # Step 1: vocabulary — only words that appear in the Phase O result   #
+    # and have enough occurrences to build a reliable co-occurrence row.  #
+    # ------------------------------------------------------------------ #
+    pos_words: Dict[str, int] = {}   # word_str → pos_cluster_id
+    for (w,), cid in assignment.items():
+        if global_freq.get(w, 0) >= min_count:
+            pos_words[w] = cid
+
+    if not pos_words:
+        return {}
+
+    word_list = sorted(pos_words.keys())
+    word_idx  = {w: i for i, w in enumerate(word_list)}
+    n         = len(word_list)
+
+    # ------------------------------------------------------------------ #
+    # Step 2: co-occurrence matrix (raw counts, symmetric window)         #
+    # ------------------------------------------------------------------ #
+    cooc = np.zeros((n, n), dtype=np.float32)
+    for i, tok in enumerate(tokens):
+        if tok not in word_idx:
+            continue
+        wi = word_idx[tok]
+        lo = max(0, i - window)
+        hi = min(len(tokens), i + window + 1)
+        for j in range(lo, hi):
+            if i == j:
+                continue
+            nb = tokens[j]
+            if nb in word_idx:
+                cooc[wi, word_idx[nb]] += 1.0
+
+    # ------------------------------------------------------------------ #
+    # Step 3: PPMI — Positive Pointwise Mutual Information                #
+    # PPMI(w, c) = max(0, log2( P(w,c) / (P(w)·P(c)) ))                 #
+    # ------------------------------------------------------------------ #
+    total     = cooc.sum() + 1e-12
+    row_sums  = cooc.sum(axis=1, keepdims=True) + 1e-12
+    col_sums  = cooc.sum(axis=0, keepdims=True) + 1e-12
+    with np.errstate(divide='ignore', invalid='ignore'):
+        pmi = np.log2((total * cooc) / (row_sums * col_sums) + 1e-12)
+    ppmi = np.maximum(pmi, 0.0)   # zero-floor: PPMI
+
+    # L2-normalise each row for cosine similarity in k-means
+    norms = np.linalg.norm(ppmi, axis=1, keepdims=True) + 1e-12
+    ppmi_norm = ppmi / norms
+
+    # ------------------------------------------------------------------ #
+    # Step 4: For each POS cluster, k-means on member PPMI rows          #
+    # ------------------------------------------------------------------ #
+    pos_clusters: Dict[int, List[str]] = {}
+    for w, cid in pos_words.items():
+        pos_clusters.setdefault(cid, []).append(w)
+
+    result: Dict[str, 'Tuple[int, int]'] = {}
+
+    for pos_cid, members in pos_clusters.items():
+        if len(members) < n_subclusters:
+            # Too few words to cluster — all go to sub-cluster 0
+            for w in members:
+                result[w] = (pos_cid, 0)
+            continue
+
+        indices = [word_idx[w] for w in members]
+        rows    = ppmi_norm[indices, :]          # (n_members, vocab)
+
+        sub_assignments = _kmeans_cluster(rows, k=n_subclusters)
+
+        for w, sc in zip(members, sub_assignments):
+            result[w] = (pos_cid, int(sc))
+
+    return result
+
+
 def _test_template(
     template: List[str],
     store: ExampleStore,
@@ -1330,3 +1440,133 @@ def _test_template(
         return True
     finally:
         interpreter.engine_ask = old_ask
+
+
+# ---------------------------------------------------------------------------
+# PMI chunking — multi-scale hierarchical structure discovery
+# ---------------------------------------------------------------------------
+
+def chunk_sequences(
+    bigram_counts: Dict[Tuple, int],
+    min_pmi:       float = 3.0,
+    min_count:     int   = 5,
+    max_merges:    int   = 500,
+    separator:     str   = '',
+) -> List[Tuple]:
+    """Discover high-PMI adjacent atom pairs for sequence compression.
+
+    Given a corpus represented as bigram counts {(a, b): count}, finds all
+    adjacent pairs whose Pointwise Mutual Information exceeds ``min_pmi``.
+    These pairs form "chunks" — a and b appear together far more often than
+    chance, indicating they constitute a cohesive unit at the next scale.
+
+    This is the core of the multi-scale discovery pipeline.  Apply the
+    returned chunk list via :func:`apply_chunks` to compress a sequence of
+    level-L atoms into level-(L+1) atoms.
+
+    Typical PMI values
+    ------------------
+    Random co-occurring pairs:   PMI ≈ 0
+    Weak collocations:           PMI ≈ 1–2
+    Strong morphological units:  PMI ≈ 3–6 (e.g. 'qu' in Latin, 'th' in English)
+    Near-deterministic pairs:    PMI ≈ 7+  (e.g. Q→u, combining marks)
+
+    Args:
+        bigram_counts:  Raw co-occurrence counts {(a, b): count}.
+                        Build from an ExampleStore with::
+
+                            bigrams = {}
+                            for (inp,), (out,) in store.examples:
+                                bigrams[(inp, out)] = bigrams.get((inp, out), 0) + 1
+
+        min_pmi:        Minimum PMI threshold in bits.  3.0 is conservative
+                        (recommended for char level).  Use 2.0 at word level
+                        where typical PMI is lower.
+        min_count:      Minimum bigram count.  Filters hapax legomena.
+        max_merges:     Maximum rules to return (sorted by PMI descending).
+        separator:      String inserted between merged atoms.
+                        ''   for char→morpheme (concatenation: 'q'+'u'→'qu')
+                        ' '  for word→phrase  ('id'+'est'→'id est')
+
+    Returns:
+        List of (atom_a, atom_b, compound, pmi) sorted by PMI descending,
+        capped at ``max_merges`` entries.
+    """
+    import math as _math
+
+    # Unigram counts: a is how often a appeared as the LEFT element
+    unigrams: Dict[str, int] = {}
+    total = 0
+    for (a, b), cnt in bigram_counts.items():
+        unigrams[a] = unigrams.get(a, 0) + cnt
+        total += cnt
+
+    if total == 0:
+        return []
+
+    results = []
+    for (a, b), cnt in bigram_counts.items():
+        if cnt < min_count:
+            continue
+        p_ab = cnt / total
+        p_a  = unigrams.get(a, 0) / total
+        # P(b) approximated as P(b appears as right element anywhere).
+        # For tight sequences this is close to P(b) as unigram.
+        p_b_right = unigrams.get(b, 0) / total
+        if p_a < 1e-12 or p_b_right < 1e-12:
+            continue
+        pmi = _math.log2(p_ab / (p_a * p_b_right))
+        if pmi >= min_pmi:
+            compound = separator.join([a, b]) if separator else a + b
+            results.append((a, b, compound, pmi))
+
+    results.sort(key=lambda x: -x[3])
+    return results[:max_merges]
+
+
+def apply_chunks(
+    sequence:  List[str],
+    chunk_map: Dict[Tuple, str],
+    n_passes:  int = 8,
+) -> List[str]:
+    """Apply a PMI chunk map to compress a sequence of atoms.
+
+    Greedily merges adjacent pairs left-to-right when they appear in
+    ``chunk_map``, then repeats until no further merges are possible or
+    ``n_passes`` is exhausted.  Multiple passes handle chain merges::
+
+        seq       = ['q', 'u', 'o', 'd']
+        chunk_map = {('q','u'): 'qu', ('o','d'): 'od', ('qu','od'): 'quod'}
+        apply_chunks(seq, chunk_map)  # → ['quod']
+        # Pass 1: q+u → qu, o+d → od  → ['qu', 'od']
+        # Pass 2: qu+od → quod         → ['quod']
+
+    Args:
+        sequence:   List of atoms at level L.
+        chunk_map:  ``{(a, b): compound}`` — typically built from
+                    ``{(a, b, compound, pmi) for a, b, compound, pmi in chunk_rules}``.
+        n_passes:   Upper bound on greedy passes.  Chain merges of depth k
+                    require at most k passes; 8 is sufficient for typical PMI rules.
+
+    Returns:
+        Compressed atom list at level L+1.
+    """
+    seq = list(sequence)
+    for _ in range(n_passes):
+        changed = False
+        new_seq: List[str] = []
+        i = 0
+        while i < len(seq):
+            if i + 1 < len(seq):
+                compound = chunk_map.get((seq[i], seq[i + 1]))
+                if compound is not None:
+                    new_seq.append(compound)
+                    i += 2
+                    changed = True
+                    continue
+            new_seq.append(seq[i])
+            i += 1
+        seq = new_seq
+        if not changed:
+            break
+    return seq
