@@ -30,8 +30,9 @@ Full image
     ▼  Foveal crop (radius=48px around each fixation)
     │  fine_patch=1 → pixel-accurate 1×1 tiles
     │
-    ▼  Interleaved token sequence
-    │  ['P0,0', hash_px, 'P0,1', hash_px, ..., 'P7,7', hash_px]
+    ▼  Interleaved token sequence  [V5: object-relative positions]
+    │  ['D0,0', hash_px, 'D0,1', hash_px, ..., 'D3,3', hash_px]
+    │   ↑ D = Delta from fixation centre (translation-invariant)
     │
     ▼  SequenceLearner (E0-E6, n_clusters=64)
        Learns spatial grammar of attended objects
@@ -45,13 +46,17 @@ Position tokens are interleaved with content tokens in the foveal sequence.
 The SequenceLearner treats them as ordinary vocabulary items — the category
 chain learns which positions predict which content.
 
-**Token format:** `f'P{pos_r},{pos_c}'` where `pos_r, pos_c ∈ [0, n_pos_bins-1]`.
-Default: 8×8 = 64 distinct position tokens per crop.
+**V5 token format (default):** `f'D{dr},{dc}'` where `dr, dc ∈ [-n_pos_bins//2, n_pos_bins//2-1]`.
+Anchor = fixation centre (crop centre = NMS saliency peak). Default: 8×8 = 64 distinct
+position tokens, centred at `D0,0`, corners at `D-4,-4` and `D3,3`.
+
+**V4 token format (legacy, `relative_pos=False`):** `f'P{pos_r},{pos_c}'` where
+`pos_r, pos_c ∈ [0, n_pos_bins-1]`. Origin at top-left corner of crop.
 
 **Why interleaved, not appended:**
-Position + content are coupled — `P3,2` followed by a specific hash
+Position + content are coupled — `D0,0` followed by a specific hash
 constitutes one "feature at a location" observation. The E1 trigram
-`(P3,1, hash_A, P3,2)` predicts the next position; `(hash_A, P3,2, hash_B)`
+`(D0,-1, hash_A, D0,0)` predicts the next position; `(hash_A, D0,0, hash_B)`
 predicts the next content at that position. Both are useful.
 
 **Biological analogue:**
@@ -100,10 +105,10 @@ Returns pixel-coordinate centres, ordered by descending saliency.
 
 `foveal_sequence(image, px_cx, px_cy, radius_px, fine_patch=1, n_pos_bins=8)`
 
-Crops image around fixation centre, scans at `fine_patch` resolution (default 1 pixel),
-interleaves `['P{r},{c}', content_hash, ...]`. At `fine_patch=1`, each hash is a
-single pixel quantized to 3-bit greyscale (8 levels: '00'..'07'). Sufficient to
-read text strokes, whiskers, fine edges — anything a human can read, the AI can read.
+Crops image around fixation centre, scans at `fine_patch` resolution (default 1 pixel).
+At `fine_patch=1`, each hash is a single pixel quantized to 3-bit greyscale
+(8 levels: '00'..'07'). Sufficient to read text strokes, whiskers, fine edges —
+anything a human can read, the AI can read.
 
 ### V4 — FovealVisionLearner ✅ DONE
 
@@ -127,31 +132,53 @@ Two internal learners:
 | `n_pos_bins` | 8 | 8×8 = 64 position tokens — coarse grid cell analogue |
 | `n_foveal_clusters` | 64 | Richer than peripheral; fine patches have higher vocabulary |
 
+### V5 — Object-relative reference frame ✅ DONE
+
+`foveal_sequence(..., relative_pos=True)` — default since V5.
+
+After cropping to a salient region, V4 used **crop-relative** position tokens
+(`P{pos_r},{pos_c}`, top-left corner = `P0,0`) — still tied to where in the image
+the saccade landed.
+
+V5 anchors at the **fixation centre** (= crop centre = the NMS saliency peak
+selected by `select_fixations`). All positions are expressed as `(Δrow, Δcol)` bins
+from that anchor: `'D{dr},{dc}'` where `dr,dc ∈ [-n_pos_bins//2, n_pos_bins//2-1]`.
+
+**Why the fixation centre = the highest-saliency point:**
+`select_fixations` returns the pixel-coordinate centre of the patch with the
+highest prediction error after non-max suppression. That centre is always the
+crop centre by construction. Anchoring at the crop centre therefore anchors at
+"the most surprising point in this region" — without any secondary saliency pass
+inside the crop.
+
+**Result:** A cat ear fixated from the left side of the image and the same ear fixated
+from the right side produce identical token sequences. The object's spatial grammar is
+translation-invariant — learned once, recognised anywhere.
+
+**Token format comparison:**
+
+| V4 (`relative_pos=False`) | V5 (`relative_pos=True`, default) |
+|---------------------------|-------------------------------------|
+| `P0,0` … `P7,7` | `D-4,-4` … `D3,3` |
+| Origin: crop top-left | Origin: fixation centre (crop centre) |
+| Position = absolute crop offset | Position = object-relative delta |
+| 64 distinct tokens | 64 distinct tokens |
+
+**Core implementation:**
+```python
+anchor_r = crop_rows // 2;  anchor_c = crop_cols // 2
+dr_bin = int((r - anchor_r) * n_pos_bins / crop_rows)   # ∈ [-half, half-1]
+dc_bin = int((c - anchor_c) * n_pos_bins / crop_cols)
+pos_token = f'D{dr_bin},{dc_bin}'
+```
+
 ---
 
 ## Upcoming Phases
 
-### V5 — Object-relative reference frame (NEXT)
-
-After cropping to a salient region, position is currently **crop-relative** (top-left
-of crop = P0,0). This is already better than absolute image coordinates, but still
-tied to where in the image the saccade landed.
-
-True object-relative position: anchor at the **highest-saliency pixel within the crop**
-(the most surprising point = most likely the object's distinctive feature). Re-express
-all other positions as `(Δrow, Δcol)` from the anchor.
-
-Result: a cat ear at top-left and a cat ear at top-right produce the same sequence.
-The object's spatial signature is viewpoint-invariant.
-
-**Implementation:**
-- In `foveal_sequence`: find peak pixel by prediction error within crop
-- Replace absolute `(pos_r, pos_c)` with relative `(delta_r, delta_c)` bins
-- Clip Δ to [-n_pos_bins//2, n_pos_bins//2] per axis
-
 ### V6 — Classification chain (NEXT)
 
-After V4 gives us foveal sequences, add a CTKG concept:
+After V5 gives us translation-invariant foveal sequences, add a CTKG concept:
 
 ```
 concept image_class
@@ -167,8 +194,8 @@ Then E6 beam search discovers the composition:
 foveal_sequence → foveal_categories → class_label
 ```
 
-The discovered chain is a symbolic rule: "if position P3,2 has edge-category AND
-P4,3 has fur-category AND P2,1 has ear-shape-category → cat". Fully interpretable.
+The discovered chain is a symbolic rule: "if position D-2,0 has edge-category AND
+D-1,1 has fur-category AND D-3,0 has ear-shape-category → cat". Fully interpretable.
 
 ### V7 — Multi-object scene graph (FUTURE)
 
@@ -225,7 +252,8 @@ experiments/symbolic_ai/
 | Peripheral clusters | 8 |
 | Foveal crops | 72 (24 images × 3 fixations) |
 | Foveal token pairs | 219,064 |
-| Foveal vocab (position + content) | 65 unique tokens (64 pos + 1 content type for stripes) |
+| Foveal vocab V4 (position + content) | 65 unique tokens (64 `P` pos + 1 content) |
+| Foveal vocab V5 (position + content) | 65 unique tokens (64 `D` pos + 1 content) |
 | Foveal clusters | 16 |
 | Foveal E1 accuracy | 59.9% (vs flat bigram 50.7%) |
 | Sequence length per crop | ~3,072 tokens (96×96 px / 1px × 2 for pos+content interleave) |

@@ -29,10 +29,15 @@ Usage (demo):
 Architecture (FovealVisionLearner):
     Peripheral scan (full image, coarse patches)
         → prediction error per patch → saliency map
-        → non-max suppression → N fixation points
+        → non-max suppression → N fixation points (= saliency peaks)
     Foveal scan (crop around each fixation, fine_patch=1 pixel)
         → interleaved [pos_token, content_hash, pos_token, ...] sequence
         → SequenceLearner learns spatial grammar of attended objects
+
+    V5 position encoding (default, relative_pos=True):
+        Tokens 'D{dr},{dc}' are relative to the fixation centre (= crop centre
+        = the saliency peak). A cat ear at any image position → same token
+        sequence. Translation-invariant without any explicit data augmentation.
 """
 from __future__ import annotations
 
@@ -336,14 +341,12 @@ def foveal_sequence(image,
                     radius_px: int = 48,
                     fine_patch: int = 1,
                     n_pos_bins: int = 8,
-                    quant_bits: int = _QUANT_BITS) -> list:
+                    quant_bits: int = _QUANT_BITS,
+                    relative_pos: bool = True) -> list:
     """Extract a pixel-accurate sequence from a foveal crop with position tokens.
 
     Each sub-patch in the crop produces two tokens:
         [pos_token, content_hash, pos_token, content_hash, ...]
-
-    where pos_token = 'P{row_bin},{col_bin}' (coarse spatial bin within the
-    crop) and content_hash is the quantized grayscale value of the sub-patch.
 
     Position tokens are ordinary tokens in the SequenceLearner vocabulary — the
     category chain naturally learns which positions predict which content, encoding
@@ -353,13 +356,41 @@ def foveal_sequence(image,
     as a 3-bit grey level (hex string '00'..'07').  Enough to distinguish text
     strokes, fine edges, fur direction, pupil shape, etc.
 
+    **V5 — Object-relative reference frame (relative_pos=True, default):**
+
+    Position tokens are anchored at the fixation centre (= the crop centre =
+    the non-max-suppression saliency peak selected by select_fixations).
+    All positions are expressed as (Δrow, Δcol) bins from that anchor:
+
+        'D{dr},{dc}'  where dr,dc ∈ [-n_pos_bins//2, n_pos_bins//2 - 1]
+
+    Result: the same object appearing at any location in the image always
+    produces the same token sequence, because the fixation always lands on
+    the salient point and positions are measured relative to it.
+
+    Example with n_pos_bins=8 (range [-4, 3] per axis):
+        Anchor at crop centre (D0,0).
+        Top-left corner of crop → D-4,-4.
+        Bottom-right corner    → D3,3.
+        A cat ear at the top of any crop → D-3,something.
+
+    **V4 — Crop-relative reference frame (relative_pos=False):**
+
+    Position tokens are measured from the top-left corner of the crop:
+
+        'P{pos_r},{pos_c}'  where pos_r,pos_c ∈ [0, n_pos_bins-1]
+
+    This was V4 behaviour; retained for comparison.
+
     Args:
-        image:       Full image (HxW or HxWxC, float32 [0,1] or uint8).
+        image:        Full image (HxW or HxWxC, float32 [0,1] or uint8).
         px_cx, px_cy: Fixation centre in pixel coordinates.
-        radius_px:   Half-width of the foveal crop in pixels.
-        fine_patch:  Sub-patch size in pixels (1 = pixel-accurate, 2 = 2×2).
-        n_pos_bins:  Position grid bins per axis (8 → 8×8 = 64 positions).
-        quant_bits:  Quantization depth for content hash (3 → 8 grey levels).
+        radius_px:    Half-width of the foveal crop in pixels.
+        fine_patch:   Sub-patch size in pixels (1 = pixel-accurate, 2 = 2×2).
+        n_pos_bins:   Position grid bins per axis (8 → 8×8 = 64 positions).
+        quant_bits:   Quantization depth for content hash (3 → 8 grey levels).
+        relative_pos: True (default) → object-relative 'D{dr},{dc}' tokens (V5).
+                      False → crop-corner-relative 'P{pos_r},{pos_c}' tokens (V4).
 
     Returns:
         Flat list of alternating position strings and content hash strings.
@@ -397,12 +428,33 @@ def foveal_sequence(image,
     crop_cols = cw // fine_patch
     tokens: list = []
 
+    # Pre-compute anchor and clipping bounds for relative position (V5)
+    if relative_pos:
+        anchor_r = crop_rows // 2
+        anchor_c = crop_cols // 2
+        half = n_pos_bins // 2  # e.g. 4 for n_pos_bins=8 → range [-4, 3]
+
     for r in range(crop_rows):
         for c in range(crop_cols):
-            # Coarse position bin (0..n_pos_bins-1 per axis)
-            pos_r = int(r / crop_rows * n_pos_bins)
-            pos_c = int(c / crop_cols * n_pos_bins)
-            pos_token = f'P{pos_r},{pos_c}'
+            if relative_pos:
+                # V5 — Object-relative: anchor at fixation centre (crop centre).
+                # The fixation centre IS the NMS saliency peak, so this is
+                # equivalent to anchoring at the most surprising point in the crop.
+                # Identical objects at different image positions → identical sequences.
+                dr = r - anchor_r
+                dc = c - anchor_c
+                # Map to bins: int(dr * n_pos_bins / crop_rows) ≈ dr / (crop_size / n_bins)
+                # Natural range: [-n_pos_bins//2, n_pos_bins//2 - 1]. Clip for safety.
+                dr_bin = int(dr * n_pos_bins / crop_rows)
+                dc_bin = int(dc * n_pos_bins / crop_cols)
+                dr_bin = max(-half, min(half - 1, dr_bin))
+                dc_bin = max(-half, min(half - 1, dc_bin))
+                pos_token = f'D{dr_bin},{dc_bin}'
+            else:
+                # V4 — Crop-relative: position measured from top-left corner.
+                pos_r = int(r / crop_rows * n_pos_bins)
+                pos_c = int(c / crop_cols * n_pos_bins)
+                pos_token = f'P{pos_r},{pos_c}'
 
             # Sub-patch content hash
             patch = crop[r * fine_patch:(r + 1) * fine_patch,
@@ -453,7 +505,8 @@ class FovealVisionLearner:
                  n_pos_bins: int = 8,
                  n_peripheral_clusters: int = 32,
                  n_foveal_clusters: int = 64,
-                 quant_bits: int = _QUANT_BITS):
+                 quant_bits: int = _QUANT_BITS,
+                 relative_pos: bool = True):
         """
         Args:
             peripheral_patch:      Coarse patch size for saliency map (pixels).
@@ -464,6 +517,9 @@ class FovealVisionLearner:
             n_peripheral_clusters: Cluster count for peripheral VisionLearner.
             n_foveal_clusters:     Cluster count for foveal SequenceLearner.
             quant_bits:            Quantization depth shared by both learners.
+            relative_pos:          True (default, V5) → 'D{dr},{dc}' tokens anchored
+                                   at fixation centre; False (V4) → 'P{r},{c}' tokens
+                                   from crop top-left corner.
         """
         self.peripheral_patch  = peripheral_patch
         self.foveal_patch      = foveal_patch
@@ -471,6 +527,7 @@ class FovealVisionLearner:
         self.n_fixations       = n_fixations
         self.n_pos_bins        = n_pos_bins
         self.quant_bits        = quant_bits
+        self.relative_pos      = relative_pos
 
         self.peripheral = VisionLearner(patch_size=peripheral_patch,
                                         quant_bits=quant_bits,
@@ -512,7 +569,7 @@ class FovealVisionLearner:
             for px, py in fixations:
                 seq = foveal_sequence(img, px, py, self.foveal_radius_px,
                                       self.foveal_patch, self.n_pos_bins,
-                                      self.quant_bits)
+                                      self.quant_bits, self.relative_pos)
                 if seq:
                     foveal_seqs.append(seq)
             if not fixations:
@@ -557,7 +614,7 @@ class FovealVisionLearner:
             sal_val = float(sal[r_idx, c_idx])
             seq = foveal_sequence(image, px, py, self.foveal_radius_px,
                                   self.foveal_patch, self.n_pos_bins,
-                                  self.quant_bits)
+                                  self.quant_bits, self.relative_pos)
             result.append({'center_px': (px, py),
                            'saliency': sal_val,
                            'sequence': seq})
