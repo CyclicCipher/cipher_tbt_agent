@@ -106,26 +106,31 @@ File: language_pipeline.py (build_cluster_word_dists, build_cluster_similarity_m
       predict_chain_e3, logprob_chain_e3)
 
 Architecture:
-    cluster_dists[c]  = frequency-weighted word distribution for cluster c
-    sim_matrix[i][j]  = exp(-T × JSD(P_i, P_j))    where T = temperature (default 2.0)
+    succ_dists[c]     = avg P(next_word | w) over all w in cluster c  (successor dist)
+    sim_matrix[i][j]  = exp(-T × JSD(succ_dists[i], succ_dists[j]))  (task-relevant sim)
     nc_soft[key]      = Σ_k sim(key,k) × P_nc(output|k)   for all K² queries
     wgc_soft[key]     = Σ_k sim(key,k) × P_wgc(output|k)  for all K³ queries
     predict_chain_e3  = argmax(wgc_soft[(c1,c2,c3)])  (E1 fallback if OOV)
+    P_mix = (1-α) × P_E1 + α × P_E3   (α tuned on dev by 1D LL grid search)
 
 Key insight: this IS self-attention:
     Query  = cluster IDs of current context
     Keys   = stored cluster tuples
     Values = stored output distributions
-    Score  = exp(-T·JSD(cluster_dists[query], cluster_dists[key]))
+    Score  = exp(-T·JSD(succ_dist[query], succ_dist[key]))  ← SUCCESSOR distributions
     Output = softmax-weighted sum of value distributions
 
-Results (K=12, T=2.0, EarlyModernLatin 5000 train):
-    Unseen pair accuracy: E3=0.3% > E1=0.0% = E2=0.0% = Flat=0.0%
-    Overall accuracy (answered): E3=1.6% > E2=0.5% > E1=0.1% < Flat=2.2%
-    E3 is FIRST method to beat flat bigram on unseen word pairs.
-    Perplexity: E3=6344 (diffuse; calibration open issue — high T reduces this)
-    Avg off-diagonal cluster similarity: 0.135 (clusters are distinct)
-    Precompute: 144 next_cat + 1728 word_given_cat soft dists (fast, runs once)
+Calibration insight: use SUCCESSOR distributions (what follows each cluster) not
+MEMBER distributions (what words are in each cluster) for JSD similarity. This
+captures syntactic role — preposition-clusters and verb-clusters have very different
+successor distributions, correctly making them far apart in similarity space.
+
+Results (K=12, T=2.0, EarlyModernLatin 5000 train, successor-dist similarity):
+    Unseen pair accuracy: E3=1.0% > E2=0.1% > E1=0.0% = Flat=0.0%  (10× over flat)
+    Overall accuracy (answered): E3=1.4% > E2=0.7% > E1=0.2% < Flat=2.1%
+    Perplexity: E3=8049 (diffuse soft distribution — calibration vs accuracy tension)
+    Avg off-diagonal cluster similarity: 0.191 (better connected via syntactic role)
+    Best mixture α = 0.95 (E3-dominant; E1 rarely fires on unseen pairs)
 
 Usage: python language_pipeline.py --corpus EarlyModernLatin --n_train 5000 --n_clusters 12
        (--phase all runs E1+E2+E3; --e3_temperature controls selectivity)
@@ -152,12 +157,33 @@ of observed function through existing CTKG concepts.
 This closes the central gap: transformers learn composition implicitly via backprop.
 We learn it explicitly by searching the CTKG DAG for compatible compositions.
 
-### Parity Test
+### Parity Test ✓ (parity_test.py implemented, 2026-03-07)
 
-Metric: trigram log-likelihood per token, held-out Latin corpus.
+Metric: trigram log-likelihood per token + top-1 accuracy, held-out Latin corpus.
 Baseline: flat bigram (next_word_hier).
-Comparison target: 2-layer transformer (d=64, 2 heads, same corpus).
+Comparison target: 2-layer transformer (d=64, 2 heads, same corpus, 30 epochs).
 Prediction: category chain should match/exceed transformer on unseen word pairs.
+
+File: parity_test.py
+Usage:
+    # Full comparison (requires PyTorch for transformer side)
+    python parity_test.py --corpus EarlyModernLatin --n_train 5000
+
+    # Symbolic only (no PyTorch needed)
+    python parity_test.py --corpus EarlyModernLatin --n_train 5000 --no_transformer
+
+    # Load saved checkpoint (faster — skips symbolic discovery)
+    python parity_test.py --corpus EarlyModernLatin --load chain.pkl
+
+Transformer architecture:
+    - CausalLM: token embed (V→d) + sinusoidal PE + 2×TransformerEncoderLayer (causal)
+    - d=64, 2 heads, d_ff=256, context_len=4, dropout=0.1
+    - Training: AdamW (lr=3e-3, weight_decay=1e-2), cosine LR, gradient clip 1.0
+    - Same train/test split and "unseen pair" definition as language_pipeline.py
+
+Key comparison: on trigrams where (w2, w3) was NEVER seen in training,
+    Symbolic E3:  1.0% (via category-cluster generalisation)
+    Transformer:  TBD (requires GPU run to measure)
 
 ### OCR Return
 
@@ -173,4 +199,5 @@ After parity established: visual glyph clusters → char clusters → morpheme c
 | 2026-03-07 | E0    | COMPLETE    | Bidir clustering, prev/next at all scales |
 | 2026-03-07 | E1    | COMPLETE    | Chain beats flat on unseen pairs (0.2% vs 0.0%); 643K× compression |
 | 2026-03-07 | E2    | COMPLETE    | ctx clusters (min_count=5, KC=32); E2=0.1% vs E1=0.0% on unseen pairs |
-| 2026-03-07 | E3    | COMPLETE    | Soft retrieval (JSD sim matrix, T=2.0); E3=0.3% BEST on unseen pairs |
+| 2026-03-07 | E3    | COMPLETE    | Soft retrieval (successor-dist JSD, T=2.0); E3=1.0% BEST on unseen pairs (10× flat) |
+| 2026-03-07 | Parity| IMPLEMENTED | parity_test.py: symbolic+transformer comparison; GPU run pending |
