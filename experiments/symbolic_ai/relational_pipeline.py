@@ -187,29 +187,42 @@ class RelationalLearner:
     def fit(self, triples: list[tuple[Any, str, Any]],
             e3_temperature: float = 2.0,
             verbose: bool = True,
-            max_atoms: int = 500) -> None:
+            max_atoms: int = 50_000) -> None:
         """Fit E0-E3 on a list of (atom_a, relation_name, atom_b) triples.
 
         Args:
             max_atoms: If the number of unique atoms exceeds this threshold,
-                       skip the E0-E3 cluster pipeline (which builds a dense
-                       n_atoms × n_compound_tokens matrix that OOMs for large KGs)
-                       and use atom-level bigrams + per-relation unigram only.
-                       Default 500 is safe for char/word level data; for FB15k-237
-                       (14K entities) the cluster matrix would be ~31 GB.
+                       skip the E0-E3 cluster pipeline and use atom-level
+                       bigrams + per-relation unigram only.
+
+                       The dense matrix size is V × n_compound_tokens where
+                       n_compound_tokens ≈ n_relations × V (forward + backward).
+                       For text with 2 relations: V=4,289 → ~4,289² × 2 × 4 B
+                       ≈ 147 MB — fine.  For FB15k-237 with 237 relations:
+                       V=14K → 14K × (237×14K) × 4 B ≈ 220 GB — OOM.
+
+                       Default 50,000 is safe for text data (single-digit
+                       relation count).  For large multi-relational KGs, lower
+                       this to ~500.
         """
-        # Count unique atoms before allocating anything
+        # Count unique atoms and relations before allocating anything
         atoms_seen: set = set()
+        rels_seen:  set = set()
         for a, r, b in triples:
             atoms_seen.add(str(a))
             atoms_seen.add(str(b))
+            rels_seen.add(str(r))
         n_unique = len(atoms_seen)
+        n_rels   = max(len(rels_seen), 1)
+
+        # Actual estimate: V × (n_relations × V) × 4 bytes (forward + backward)
+        est_bytes = n_unique * (n_rels * n_unique) * 4 * 2
+        est_gb    = est_bytes / 1_000_000_000
 
         if n_unique > max_atoms:
             if verbose:
-                print(f'  Large-KG mode: {n_unique:,} atoms > {max_atoms} — '
-                      f'skipping cluster pipeline (would allocate '
-                      f'~{n_unique * len(triples) * 4 // 1_000_000_000:.0f}+ GB), '
+                print(f'  Large-KG mode: {n_unique:,} atoms × {n_rels} relations'
+                      f' — cluster matrix ≈{est_gb:.1f} GB, skipping E0-E3; '
                       f'using atom bigrams + rel unigram only.')
             self._fit_large_kg(triples, verbose=verbose)
             return
@@ -3545,18 +3558,24 @@ class HierarchicalRelationalLearner:
                            delimiter.  Only applied at the first level where
                            the atoms are base characters; at higher levels
                            (word tokens, phrase tokens) boundaries are PMI-only.
+    max_atoms              Passed to RelationalLearner.fit() at every level.
+                           Controls when the large-KG fallback triggers (skips
+                           E0-E6 clustering).  Default 50,000 keeps the full
+                           pipeline active for all text-data levels.  Lower to
+                           ~500 only for large multi-relational knowledge graphs.
     """
 
     def __init__(self,
                  n_clusters:           int | None       = None,
                  pmi_threshold:        float            = 0.5,
                  max_merges_per_level: int              = 50,
-                 max_levels:           int              = 6,
+                 max_levels:           int              = 20,
                  next_rel:             str              = 'next',
                  min_merge_count:      int              = 3,
                  use_segment:          bool             = True,
                  boundary_threshold:   float | None     = None,
                  boundary_atoms:       set[str] | None  = None,
+                 max_atoms:            int              = 50_000,
                  ) -> None:
         self.n_clusters           = n_clusters
         self.pmi_threshold        = pmi_threshold
@@ -3567,6 +3586,7 @@ class HierarchicalRelationalLearner:
         self.use_segment          = use_segment
         self.boundary_threshold   = boundary_threshold
         self.boundary_atoms       = boundary_atoms
+        self.max_atoms            = max_atoms
 
         self.levels:   list[RelationalLearner]  = []
         self.vocab:    AtomVocabulary           = AtomVocabulary()
@@ -3610,7 +3630,7 @@ class HierarchicalRelationalLearner:
 
             # Step 2: fit RelationalLearner
             learner = RelationalLearner(n_clusters=self.n_clusters)
-            learner.fit(triples, verbose=verbose)
+            learner.fit(triples, verbose=verbose, max_atoms=self.max_atoms)
             self.levels.append(learner)
             self._seqs_at.append(current_seqs)
 
