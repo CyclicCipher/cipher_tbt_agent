@@ -557,14 +557,24 @@ def _build_rel_succ_dists(ai: SymbolicAI, clusters: dict) -> dict:
     """Successor distributions per cluster for E3 similarity.
 
     Uses rel_next distributions for each atom in the cluster.
-    MUST be called before examples.clear() — ask_dist() iterates examples.
+    MUST be called before examples.clear() — we scan examples here.
+
+    One O(N) pass via build_full_freq_table() instead of V×O(N) scans
+    through freq_dist() (the naive approach).
     """
+    store = ai.stores.get('rel_next')
+    if store is None or len(store) == 0:
+        return {cid: {} for cid in clusters}
+
+    # Single O(N) pass: build full conditional distribution for all atoms.
+    full_table = store.build_full_freq_table()   # {(atom,): {(compound,): prob}}
+
     succ: dict = {}
     for cid, members in clusters.items():
         merged: dict = collections.defaultdict(float)
         n = 0
         for tok in members:
-            d = ai.ask_dist('rel_next', (str(tok),))
+            d = full_table.get((str(tok),))
             if d is None:
                 continue
             for out_tup, prob in d.items():
@@ -955,18 +965,31 @@ class SecondOrderGrammar:
                            None (default) → auto-detect via Kneedle algorithm.
             verbose:       Print distributions and clusters.
         """
-        # Build adjacency
-        out_edges: dict[str, list] = collections.defaultdict(list)
+        # O(N) chain count via in/out aggregation.
+        # Naïve triple-loop is O(N × avg_out_degree) = O(N²/V), hanging on
+        # large corpora (180B iterations for 2.2M triples over 27 chars).
+        #
+        # chain_count[r1][r2] = Σ_b  in_count[b][r1] × out_count[b][r2]
+        # where:
+        #   in_count[b][r1]  = # triples (?, r1, b)   [edges arriving at b]
+        #   out_count[b][r2] = # triples (b, r2, ?)   [edges leaving b]
+        #
+        # O(N) to build counts, O(V × R²) to aggregate.
+        in_count:  dict[str, dict[str, int]] = collections.defaultdict(
+            lambda: collections.defaultdict(int))
+        out_count: dict[str, dict[str, int]] = collections.defaultdict(
+            lambda: collections.defaultdict(int))
         for a, r, b in triples:
-            out_edges[str(a)].append((str(r), str(b)))
+            r_s, b_s, a_s = str(r), str(b), str(a)
+            in_count[b_s][r_s]  += 1
+            out_count[a_s][r_s] += 1
 
-        # Accumulate (r1, r2) co-occurrences from chains
         seq_counts: dict[str, dict[str, float]] = collections.defaultdict(
             lambda: collections.defaultdict(float))
-        for a_s, edges_a in out_edges.items():
-            for r1, b_s in edges_a:
-                for r2, _ in out_edges.get(b_s, []):
-                    seq_counts[r1][r2] += 1.0
+        for b_s in set(in_count) & set(out_count):
+            for r1, cnt_in in in_count[b_s].items():
+                for r2, cnt_out in out_count[b_s].items():
+                    seq_counts[r1][r2] += float(cnt_in * cnt_out)
         self._n_chains = sum(
             int(cnt) for d in seq_counts.values() for cnt in d.values())
 
