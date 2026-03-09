@@ -2,15 +2,13 @@
 
 ## What This Project Is
 
-A biologically-inspired AI system targeting the Danganronpa visual novel as an evaluation environment. Originally built on predictive coding (PC), now pivoting to backprop with potential modifications for local-learning-like benefits.
+**The goal is symbolic AGI.** Danganronpa (visual novel, murder mystery reasoning) is the long-term evaluation environment. TiTS (browser RPG) is the near-term stepping stone. These are subgoals for testing a general symbolic intelligence on real perceptual and linguistic input — not the goal itself.
 
-Current focus: **Compositional Arithmetic Curriculum** — Testing whether a prerequisite-complete curriculum (counting → ordinality → comparison → counting-based addition/subtraction → multi-digit column arithmetic) enables generalization that direct training cannot. Key insight (Mistake #44): single-digit addition is NOT a fact stage — it decomposes into counting-up via the successor function. Uses the Mamba3 backbone. See `CONTINUATION.md`.
+**Active priority: Symbolic AGI — overhauling the RelationalLearner to implement hierarchical Merge for all-scale pattern learning.** See `experiments/symbolic_ai/MERGE_ROADMAP.md`.
 
-**Naja** (WY chunkwise) is complete and numerically verified (Phase 5a+5b+5c). Ablation testing (Phase 5d) showed all benchmarks are memorization, not generalization (Mistake #42). This motivated the compositionality pivot.
+The architecture is built around the **CTKG** (Category Theory Knowledge Graph), which is the formal cognitive architecture of the symbolic AGI — not a training aid or curriculum generator, but the knowledge representation and reasoning system itself. Categorical composition (morphism composition = Merge = Broca's area operation) is the unifying operation. The RelationalLearner discovers structure from data and populates the CTKG. The interpreter executes CTKG process primitives. The synthesis layer discovers compositional rules from examples.
 
-**Active priority: Compositional arithmetic curriculum in `experiments/Mamba3/`.** See `CONTINUATION.md`.
-
-Previous focus: **JEPA** — JEPA-style latent prediction on Mamba3 backbone (still in `experiments/energy_reasoning/`).
+**Neural network approaches (Mamba3, Naja, JEPA) are paused** due to resource constraints: 4GB VRAM is insufficient for meaningful training on the target tasks. These codebases are preserved but are not the active priority. Do not suggest training runs or neural network modifications as solutions to current problems. The Compositional Arithmetic Curriculum and JEPA work are on hold indefinitely.
 
 **ePC (energy-based predictive coding) has been archived.** After fixing all known bugs, ePC was 15x slower than backprop with zero accuracy benefit. See Mistake #38.
 
@@ -80,16 +78,18 @@ Reverse problems (Stage 3): `? + 4 = 0 7 WORK 0 3` — given result + one operan
 
 **Syntax generators (NEW):** `generators/syntax.py` — PosTagGenerator (Stage 1), NpChunkGenerator (Stage 2), PpChunkGenerator (Stage 3), VpChunkGenerator (Stage 4), ClauseStructureGenerator (Stage 5). All take pre-annotated WikiText-2 sentences, produce fixed-length scratchpad output (STOP-padded to max_words). Each stage uses the same sentence pool with different output format. BIO tagging scheme for chunk stages (B_NP/I_NP/O_NP etc.).
 
-### Symbolic AI Runtime (experiments/symbolic_ai/) — IMPLEMENTED + E0-E6 COMPLETE
+### Symbolic AI Runtime (experiments/symbolic_ai/) — ACTIVE PRIORITY
 
 A standalone symbolic AI built on the CTKG process language. Two complementary systems:
 
 **1. Deterministic synthesis** — generalizes from ≤10 examples with 100% accuracy.
-**2. Sequence learning (E0-E6)** — Broca's area principle: one algorithm for all token domains.
+**2. Relational learning (E0-E6 + R0-R6 + Merge)** — Broca's area principle: one algorithm for all token domains, all scales.
+
+**CRITICAL: `relational_pipeline.py` / `RelationalLearner` is the ACTIVE pipeline. `sequence_pipeline.py` / `SequenceLearner` is OUTDATED — never reference or extend it.**
 
 Key files:
-- `sequence_pipeline.py` — `SequenceLearner`: E0-E6 pipeline for any discrete token sequences; `sequences_from_texts()` for text
-- `vision_pipeline.py` — `VisionLearner`: image patches via SequenceLearner (patch→sequence→E0-E6)
+- `relational_pipeline.py` — `RelationalLearner`: E0-E6 + R0-R6 pipeline; `ContextBeliefState`; `update_online()`. THE active learning component.
+- `vision_pipeline.py` — `VisionLearner`: image patches via RelationalLearner (patch→sequence→E0-E6)
 - `parity_test.py` — E3 soft retrieval vs 2-layer transformer (E3 wins on unseen pairs)
 - `interpreter.py` — ProcessInterpreter: executes process lines (List[str] → tuple output)
 - `memory.py` — ExampleStore: stores (inputs, outputs) pairs + KL divergence metric
@@ -125,10 +125,12 @@ version and any modded installation; supports player co-op on a local server.
 
 ### CTKG (experiments/ctkg/) — IMPLEMENTED + DSL + SHEAVES + MARKOV
 
-Category Theory Knowledge Graph — a directed acyclic graph where nodes are concepts/skills and edges are prerequisite relationships. Built on a universal type system of primitives (`symbol`, `seq`, `tuple`, `tagged` + structure annotations) that compose into any domain-specific type. Includes functors (structure-preserving maps between domains), adjunctions (forward/inverse pairs), sheaf consistency checking for multi-domain composition, and probabilistic structure (Markov category).
+Category Theory Knowledge Graph — the **formal cognitive architecture of the symbolic AGI**. Nodes are concepts/skills; edges are prerequisite (compositional) relationships. The CTKG IS the knowledge representation system, not a training aid for neural networks. Its type system and categorical operations define what the RelationalLearner is trying to discover: the type hierarchy, compositional structure, and functor relations that the system should converge to after seeing enough data.
 
-1. **Curriculum compiler** (IMPLEMENTED) — topological sort = valid curriculum, type checking catches missing prerequisites before training. `validate()` checks 7 error types including `UndefinedType`.
-2. **Structured training data** (IMPLEMENTED) — `generate_curriculum()` produces ordered stages with replay policies from the graph structure.
+Built on a universal type system of primitives (`symbol`, `seq`, `tuple`, `tagged` + structure annotations) that compose into any domain-specific type. Includes functors (structure-preserving maps between domains), adjunctions (forward/inverse pairs), sheaf consistency checking for multi-domain composition, and probabilistic structure (Markov category).
+
+1. **Compositional structure** (IMPLEMENTED) — topological sort = valid composition order, type checking catches missing prerequisites. `validate()` checks 7 error types including `UndefinedType`.
+2. **Curriculum generation** (IMPLEMENTED, secondary) — `generate_curriculum()` produces ordered stages. Originally designed for neural network training; now useful as a structure-discovery validation tool (does the RelationalLearner recover this order from data alone?)
 3. **DSL parser** (IMPLEMENTED) — `.ctkg` indentation-based file format for declarative graph definition. Supports type, concept, functor, adjunction, interface blocks. `parse_file()` returns KnowledgeGraph.
 4. **Universal type system** (IMPLEMENTED) — `TypeDef` with constructors (`symbol`, `nat`, `seq`, `tuple`, `tagged`, `expr`, `proposition`), structure annotations (`ordered`, `metric`, `invertible`, etc.), and 4 builtin types. Validation catches undefined type references.
 5. **Sheaf consistency** (IMPLEMENTED) — `sheaf_check()` validates that overlapping type/concept definitions agree across domains. `sheaf_merge()` enforces consistency on merge. `Interface` blocks declare exported types/concepts per domain. `SheafViolation` error for incompatible overlaps.

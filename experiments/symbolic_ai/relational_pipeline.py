@@ -3046,3 +3046,593 @@ if __name__ == '__main__':
           f'(expected: 1-2)')
     passed_5b = n_tree >= 2
     print(f'Level 5b smoke test {"PASSED" if passed_5b else "FAILED"}')
+
+
+# ===========================================================================
+# M1-M4: Hierarchical Merge — all-scale pattern learning
+#
+# Broca's area principle: one algorithm (RelationalLearner), applied
+# recursively via Merge (categorical composition) at every scale present
+# in the data.  The discovered hierarchy converges toward the CTKG structure.
+#
+# Classes added:
+#   MergedAtom              — hierarchical unit (preserves internal structure)
+#   AtomVocabulary          — growing vocabulary, greedy BPE-style tokenizer
+#   MergeDetector           — PMI-based merge candidate ranking (M1)
+#   HierarchicalRelationalLearner — multi-level stack (M2 + M3)
+#   MultiLevelContextBelief — top-down prediction across levels (M4)
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# MergedAtom
+# ---------------------------------------------------------------------------
+
+class MergedAtom:
+    """A higher-level atom created by merging two adjacent atoms.
+
+    Preserves internal structure (left, right constituents) so that the merge
+    tree is always recoverable.  Acts as a string for downstream processing —
+    all RelationalLearner operations receive ``str(atom)`` so MergedAtom
+    participates transparently.
+
+    Attributes
+    ----------
+    surface  Canonical string key (e.g. '[a+b]').
+    left     Left constituent: str (base) or MergedAtom (composite).
+    right    Right constituent: str (base) or MergedAtom (composite).
+    level    Merge depth: 0 = base token, N = Nth composition.
+    label    Distributional label discovered by E3 at level+1 (filled in later).
+    """
+
+    __slots__ = ('surface', 'left', 'right', 'level', 'label')
+
+    def __init__(self, surface: str, left: Any, right: Any,
+                 level: int, label: str = '') -> None:
+        self.surface = surface
+        self.left    = left
+        self.right   = right
+        self.level   = level
+        self.label   = label
+
+    def __str__(self)  -> str:  return self.surface
+    def __repr__(self) -> str:  return f'MergedAtom({self.surface!r}, lvl={self.level})'
+    def __hash__(self) -> int:  return hash(self.surface)
+    def __eq__(self, other) -> bool: return self.surface == str(other)
+
+    def leaves(self) -> list[str]:
+        """Return all base-level atoms (depth-first left-to-right)."""
+        left_leaves  = (self.left.leaves()  if isinstance(self.left,  MergedAtom)
+                        else [str(self.left)])
+        right_leaves = (self.right.leaves() if isinstance(self.right, MergedAtom)
+                        else [str(self.right)])
+        return left_leaves + right_leaves
+
+
+# ---------------------------------------------------------------------------
+# AtomVocabulary
+# ---------------------------------------------------------------------------
+
+class AtomVocabulary:
+    """Dynamic vocabulary that grows as Merge operations are applied.
+
+    Tokenization strategy: BPE-style greedy left-to-right application of
+    merge rules in discovery order.  Each merge rule replaces all occurrences
+    of an adjacent pair with the merged surface string in a single left-to-right
+    pass.  Rules are applied in the order they were added.
+
+    Example::
+
+        vocab = AtomVocabulary()
+        vocab.add_merge('q', 'u')   # → '[q+u]'
+        vocab.tokenize(['q', 'u', 'i', 's'])
+        # → ['[q+u]', 'i', 's']
+    """
+
+    def __init__(self) -> None:
+        # Ordered list of (left_surface, right_surface, MergedAtom)
+        self._merges: list[tuple[str, str, MergedAtom]] = []
+        # Surface → MergedAtom (for lookup)
+        self._by_surface: dict[str, MergedAtom] = {}
+        # Fast merge-pair lookup: (left_surf, right_surf) → merged_surf
+        self._pair_to_surface: dict[tuple[str, str], str] = {}
+
+    def add_merge(self, left: Any, right: Any) -> MergedAtom:
+        """Create and register a new MergedAtom for the (left, right) pair."""
+        l_s = str(left)
+        r_s = str(right)
+        surface = f'[{l_s}+{r_s}]'
+        if surface in self._by_surface:
+            return self._by_surface[surface]   # idempotent
+        level_l = left.level  if isinstance(left,  MergedAtom) else 0
+        level_r = right.level if isinstance(right, MergedAtom) else 0
+        merged = MergedAtom(surface=surface, left=left, right=right,
+                            level=max(level_l, level_r) + 1)
+        self._merges.append((l_s, r_s, merged))
+        self._by_surface[surface] = merged
+        self._pair_to_surface[(l_s, r_s)] = surface
+        return merged
+
+    def tokenize(self, sequence: list) -> list[str]:
+        """Apply all known merge rules to a sequence, returning merged tokens.
+
+        Applies rules left-to-right in discovery order (BPE convention).
+        Each rule is applied in a single pass over the current token list.
+        """
+        tokens: list[str] = [str(t) for t in sequence]
+        for l_s, r_s, merged in self._merges:
+            surf = merged.surface
+            if l_s not in tokens:          # fast skip
+                continue
+            i = 0
+            new_tokens: list[str] = []
+            while i < len(tokens):
+                if (i + 1 < len(tokens)
+                        and tokens[i] == l_s
+                        and tokens[i + 1] == r_s):
+                    new_tokens.append(surf)
+                    i += 2
+                else:
+                    new_tokens.append(tokens[i])
+                    i += 1
+            tokens = new_tokens
+        return tokens
+
+    def lookup(self, surface: str) -> 'MergedAtom | None':
+        return self._by_surface.get(surface)
+
+    def n_merges(self) -> int:
+        return len(self._merges)
+
+    def summary(self, top_n: int = 20) -> list[str]:
+        return [f'[{l}+{r}] (lvl {m.level})'
+                for l, r, m in self._merges[:top_n]]
+
+
+# ---------------------------------------------------------------------------
+# MergeDetector  (M1)
+# ---------------------------------------------------------------------------
+
+class MergeDetector:
+    """M1: PMI-based merge candidate detection from a fitted RelationalLearner.
+
+    Pointwise Mutual Information for an adjacent pair (A, B):
+
+        PMI(A→B) = log₂ P(B | A, rel) − log₂ P(B | rel)
+
+    where P(B | rel) is the marginal (relation unigram) and
+    P(B | A, rel) is the atom-level bigram.
+
+    High PMI: A and B co-occur far more than chance → they form a unit.
+    Low PMI:  boundary — the transition is no more predictable than random.
+
+    This is exactly the transitional-probability signal that Saffran et al.
+    showed infants use to segment the speech stream into word-like units.
+    """
+
+    def __init__(self, learner: 'RelationalLearner',
+                 next_rel: str = 'next') -> None:
+        self._learner  = learner
+        self._next_rel = next_rel
+
+    def detect(self,
+               threshold: float | None = None,
+               top_k:     int   | None = None,
+               min_count: int          = 2,
+               ) -> list[tuple[str, str, float]]:
+        """Return ranked merge candidates as (left_atom, right_atom, pmi).
+
+        Args
+        ----
+        threshold  Minimum PMI in bits.  None → include all positive-PMI pairs.
+        top_k      Return at most this many.  None → return all above threshold.
+        min_count  Minimum raw co-occurrence count (filters rare pairs).
+
+        Returns
+        -------
+        [(left, right, pmi), ...] sorted by PMI descending.
+        """
+        r_s      = self._next_rel
+        learner  = self._learner
+        marginal = getattr(learner, '_rel_unigram',  {}).get(r_s, {})
+        atom_bgs = getattr(learner, '_atom_bigrams', {})
+        counts   = getattr(learner, '_atom_counts',  {})
+
+        if not marginal or not atom_bgs:
+            return []
+
+        candidates: list[tuple[str, str, float]] = []
+
+        for (atom, rel), dist in atom_bgs.items():
+            if rel != r_s:
+                continue
+            raw = counts.get((atom, rel), {})
+            for target, p_cond in dist.items():
+                # Count filter
+                cnt = raw.get(target, 0) if hasattr(raw, 'get') else 0
+                if cnt < min_count:
+                    continue
+                p_marg = marginal.get(target, 1e-12)
+                if p_marg < 1e-12:
+                    continue
+                pmi = math.log2(max(p_cond, 1e-12) / p_marg)
+                if threshold is not None and pmi < threshold:
+                    continue
+                candidates.append((atom, target, pmi))
+
+        candidates.sort(key=lambda x: -x[2])
+        if top_k is not None:
+            candidates = candidates[:top_k]
+        return candidates
+
+    def boundary_pmi(self, seq: list[str]) -> list[float]:
+        """Return PMI at each boundary position in a sequence.
+
+        Returns a list of length len(seq)-1: boundary_pmi[i] is the PMI
+        between seq[i] and seq[i+1].  Low PMI = likely word/unit boundary.
+        """
+        r_s      = self._next_rel
+        learner  = self._learner
+        marginal = getattr(learner, '_rel_unigram',  {}).get(r_s, {})
+        atom_bgs = getattr(learner, '_atom_bigrams', {})
+
+        result = []
+        for i in range(len(seq) - 1):
+            a, b = str(seq[i]), str(seq[i + 1])
+            dist     = atom_bgs.get((a, r_s), {})
+            p_cond   = dist.get(b, 1e-12)
+            p_marg   = marginal.get(b, 1e-12)
+            pmi      = math.log2(max(p_cond, 1e-12) / max(p_marg, 1e-12))
+            result.append(pmi)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# Helper: sequences → triples
+# ---------------------------------------------------------------------------
+
+def _sequences_to_next_triples(sequences: list[list],
+                                next_rel: str = 'next',
+                                ) -> list[tuple[str, str, str]]:
+    """Convert sequences to (atom_i, next_rel, atom_{i+1}) triples."""
+    triples: list[tuple[str, str, str]] = []
+    for seq in sequences:
+        for i in range(len(seq) - 1):
+            triples.append((str(seq[i]), next_rel, str(seq[i + 1])))
+    return triples
+
+
+# ---------------------------------------------------------------------------
+# HierarchicalRelationalLearner  (M2 + M3)
+# ---------------------------------------------------------------------------
+
+class HierarchicalRelationalLearner:
+    """M2/M3: Multi-level RelationalLearner with iterative Merge.
+
+    Implements Broca's area / categorical composition:
+
+        Level 0: base atoms  (characters, words, patches, …)
+        Level N: merged atoms discovered from level N-1 statistics
+
+    At each level:
+      1. Build (atom_i, 'next', atom_{i+1}) triples from current sequences.
+      2. Fit a RelationalLearner — learns P(target | atom, rel) at this scale.
+      3. Run MergeDetector — find high-PMI adjacent pairs.
+      4. Add those pairs to AtomVocabulary and re-tokenize all sequences.
+      5. Repeat with merged sequences at the next level.
+
+    All levels remain active.  ``predict_dist(atom, rel, level=N)`` queries
+    level N.  ``infer_chain`` can chain across a single level or be called
+    at any level independently.
+
+    The discovered type structure at each level feeds into CTKG grounding (M6).
+
+    Parameters
+    ----------
+    n_clusters             K for each RelationalLearner (None = auto-detect).
+    pmi_threshold          Minimum PMI (bits) to accept a merge candidate.
+    max_merges_per_level   Hard cap on merges per level (avoids over-merging).
+    max_levels             Maximum recursion depth.
+    next_rel               Name of the sequential relation (default 'next').
+    min_merge_count        Minimum co-occurrence count for merge candidates.
+    """
+
+    def __init__(self,
+                 n_clusters:           int | None = None,
+                 pmi_threshold:        float      = 0.5,
+                 max_merges_per_level: int        = 50,
+                 max_levels:           int        = 6,
+                 next_rel:             str        = 'next',
+                 min_merge_count:      int        = 3,
+                 ) -> None:
+        self.n_clusters           = n_clusters
+        self.pmi_threshold        = pmi_threshold
+        self.max_merges_per_level = max_merges_per_level
+        self.max_levels           = max_levels
+        self.next_rel             = next_rel
+        self.min_merge_count      = min_merge_count
+
+        self.levels:   list[RelationalLearner]  = []
+        self.vocab:    AtomVocabulary           = AtomVocabulary()
+        # Sequences as seen at each level (for diagnostics / re-use)
+        self._seqs_at: list[list[list[str]]]   = []
+
+    # ------------------------------------------------------------------
+    # Fit
+
+    def fit(self, sequences: list[list],
+            verbose: bool = True) -> None:
+        """Fit hierarchically from base sequences.
+
+        Args
+        ----
+        sequences  List of token sequences.  Each token can be any str-able.
+        verbose    Print level-by-level progress.
+        """
+        current_seqs: list[list[str]] = [
+            [str(t) for t in seq] for seq in sequences
+        ]
+
+        for level in range(self.max_levels):
+            n_tok   = sum(len(s) for s in current_seqs)
+            vocab_s = {t for s in current_seqs for t in s}
+            if verbose:
+                print(f'\n  [Merge L{level}] '
+                      f'{len(vocab_s)} unique atoms, {n_tok:,} tokens')
+
+            if not vocab_s or n_tok < 2:
+                if verbose:
+                    print(f'  [Merge L{level}] Too few tokens — stopping.')
+                break
+
+            # Step 1: build triples
+            triples = _sequences_to_next_triples(current_seqs, self.next_rel)
+            if not triples:
+                if verbose:
+                    print(f'  [Merge L{level}] No triples — stopping.')
+                break
+
+            # Step 2: fit RelationalLearner
+            learner = RelationalLearner(n_clusters=self.n_clusters)
+            learner.fit(triples, verbose=verbose)
+            self.levels.append(learner)
+            self._seqs_at.append(current_seqs)
+
+            # Step 3: detect merge candidates
+            detector   = MergeDetector(learner, next_rel=self.next_rel)
+            candidates = detector.detect(
+                threshold=self.pmi_threshold,
+                top_k=self.max_merges_per_level,
+                min_count=self.min_merge_count,
+            )
+
+            if not candidates:
+                if verbose:
+                    print(f'  [Merge L{level}] No candidates above '
+                          f'PMI={self.pmi_threshold:.2f} — stopping.')
+                break
+
+            if verbose:
+                top5 = [(l, r, f'{p:.2f}') for l, r, p in candidates[:5]]
+                print(f'  [Merge L{level}] {len(candidates)} candidates. '
+                      f'Top-5: {top5}')
+
+            # Step 4: register merges and re-tokenize
+            for left, right, _pmi in candidates:
+                self.vocab.add_merge(left, right)
+
+            new_seqs = [self.vocab.tokenize(seq) for seq in current_seqs]
+
+            # Step 5: check for progress
+            new_vocab = {t for s in new_seqs for t in s}
+            if new_vocab == vocab_s:
+                if verbose:
+                    print(f'  [Merge L{level}] Vocabulary unchanged — stopping.')
+                break
+
+            current_seqs = new_seqs
+
+        if verbose:
+            print(f'\n  HierarchicalRelationalLearner ready: '
+                  f'{len(self.levels)} levels, {self.vocab.n_merges()} merges.')
+            if self.vocab.n_merges():
+                print(f'  Top merges: {self.vocab.summary(10)}')
+
+    # ------------------------------------------------------------------
+    # Prediction
+
+    def predict_dist(self, atom: Any, relation: str,
+                     level: int = 0) -> dict[str, float]:
+        """P(target | atom, relation) at the requested level."""
+        if level >= len(self.levels):
+            return {}
+        return self.levels[level].predict_dist(atom, relation)
+
+    def infer_chain(self, atom: Any, relations: list[str],
+                    level: int = 0, topk: int = 5,
+                    ) -> list[tuple[str, float]]:
+        """Multi-hop inference at the requested level."""
+        if level >= len(self.levels):
+            return []
+        return self.levels[level].infer_chain(atom, relations, topk=topk)
+
+    # ------------------------------------------------------------------
+    # Merge-level query helpers
+
+    def merged_form(self, base_atom: str) -> str:
+        """Return the highest-level surface form that contains base_atom."""
+        tokens = self.vocab.tokenize([base_atom])
+        return tokens[0] if tokens else base_atom
+
+    def boundary_pmis(self, sequence: list[str]) -> list[float]:
+        """PMI at each boundary in the raw (level-0) sequence.
+
+        Wraps MergeDetector.boundary_pmi() on the level-0 learner.
+        Low values mark likely unit boundaries.
+        """
+        if not self.levels:
+            return []
+        return MergeDetector(self.levels[0], self.next_rel).boundary_pmi(sequence)
+
+    def level_summary(self) -> None:
+        """Print a summary of vocabulary and merge structure at each level."""
+        for i, (learner, seqs) in enumerate(
+                zip(self.levels, self._seqs_at)):
+            vocab = {t for s in seqs for t in s}
+            print(f'  Level {i}: {len(vocab)} unique atoms, '
+                  f'{sum(len(s) for s in seqs):,} tokens, '
+                  f'K={learner._K} clusters')
+
+
+# ---------------------------------------------------------------------------
+# MultiLevelContextBelief  (M4)
+# ---------------------------------------------------------------------------
+
+class MultiLevelContextBelief:
+    """M4: Top-down context prediction via stacked ContextBeliefStates.
+
+    Maintains one ContextBeliefState per fitted level.  Observations update
+    all levels simultaneously (using the merge vocabulary to map base atoms
+    to their merged forms).  Higher-level beliefs constrain lower-level
+    predictions via a weighted blend.
+
+    Top-down blend at level 0::
+
+        P_conditioned(t | rel) =
+            (1 − α) · P_level0(t | belief, rel)
+          +       α · P_level1_projected(t | belief, rel)
+
+    The level-1 prediction is marginalised back to level-0 atoms via the
+    constituent structure of each MergedAtom (``leaves()``).
+
+    Parameters
+    ----------
+    hier_learner      A fitted HierarchicalRelationalLearner.
+    top_down_weight   α — blending weight for upper-level signal (0 = no blend).
+    decay_rate        Per-step belief decay toward uniform (passed to each CBS).
+    obs_sharpness     Bayesian update sharpness (passed to each CBS).
+    """
+
+    def __init__(self,
+                 hier_learner:    HierarchicalRelationalLearner,
+                 top_down_weight: float = 0.3,
+                 decay_rate:      float = 0.90,
+                 obs_sharpness:   float = 0.97,
+                 ) -> None:
+        self._hier  = hier_learner
+        self._alpha = top_down_weight
+        self._beliefs: list[ContextBeliefState] = [
+            ContextBeliefState(learner,
+                               decay_rate=decay_rate,
+                               obs_sharpness=obs_sharpness)
+            for learner in hier_learner.levels
+        ]
+
+    # ------------------------------------------------------------------
+    # Update
+
+    def observe(self, atom: Any) -> None:
+        """Update all levels given a new base atom.
+
+        Level 0 observes the raw atom.
+        Level N observes the merged form of the atom at that level.
+        """
+        a_s = str(atom)
+        if not self._beliefs:
+            return
+        self._beliefs[0].observe(a_s)
+
+        if len(self._beliefs) > 1:
+            tokens = self._hier.vocab.tokenize([a_s])
+            merged = tokens[0] if tokens else a_s
+            for lvl in range(1, len(self._beliefs)):
+                # At level N, observe the merged surface that was active
+                self._beliefs[lvl].observe(merged)
+
+    def transition(self, relation: str) -> None:
+        """Propagate all level beliefs through their transition matrices."""
+        for belief in self._beliefs:
+            belief.transition(relation)
+
+    def decay(self) -> None:
+        """Decay all levels toward uniform prior."""
+        for belief in self._beliefs:
+            belief.decay()
+
+    # ------------------------------------------------------------------
+    # Prediction
+
+    def predict_dist_conditioned(self, relation: str,
+                                 level: int = 0,
+                                 ) -> dict[str, float]:
+        """Top-down conditioned P(target | belief, relation) at given level.
+
+        Blends level-N prediction with a projection from level N+1.
+        The level N+1 prediction is distributed uniformly over the constituent
+        base atoms of each MergedAtom (structural top-down signal).
+        """
+        if level >= len(self._beliefs):
+            return {}
+
+        base_dist = self._beliefs[level].predict_target_dist(relation)
+        alpha = self._alpha
+
+        if alpha == 0.0 or level + 1 >= len(self._beliefs):
+            return base_dist
+
+        upper_dist_merged = self._beliefs[level + 1].predict_target_dist(relation)
+        if not upper_dist_merged:
+            return base_dist
+
+        # Project merged predictions down to base atoms via constituent leaves
+        projected: dict[str, float] = {}
+        for merged_surf, p in upper_dist_merged.items():
+            ma = self._hier.vocab.lookup(merged_surf)
+            if ma is not None:
+                leaves = ma.leaves()
+                share  = p / max(len(leaves), 1)
+                for leaf in leaves:
+                    projected[leaf] = projected.get(leaf, 0.0) + share
+            else:
+                # Surface is a base atom at the upper level
+                projected[merged_surf] = projected.get(merged_surf, 0.0) + p
+
+        if not projected:
+            return base_dist
+
+        # Normalise
+        total = sum(projected.values())
+        if total > 0:
+            projected = {k: v / total for k, v in projected.items()}
+
+        # Blend
+        all_keys = set(base_dist) | set(projected)
+        combined = {
+            k: (1.0 - alpha) * base_dist.get(k, 0.0)
+               +       alpha  * projected.get(k, 0.0)
+            for k in all_keys
+        }
+        total2 = sum(combined.values())
+        if total2 > 0:
+            return {k: v / total2 for k, v in combined.items()}
+        return base_dist
+
+    # ------------------------------------------------------------------
+    # Diagnostics
+
+    def entropy(self, level: int = 0) -> float:
+        """Shannon entropy of the belief at the given level (bits)."""
+        if level >= len(self._beliefs):
+            return 0.0
+        return self._beliefs[level].entropy()
+
+    def reset(self) -> None:
+        """Reset all beliefs to uniform prior."""
+        for b in self._beliefs:
+            b.reset()
+
+    def __repr__(self) -> str:
+        levels_str = ', '.join(
+            f'L{i}:{b.entropy():.1f}b' for i, b in enumerate(self._beliefs)
+        )
+        return f'MultiLevelContextBelief({levels_str})'
