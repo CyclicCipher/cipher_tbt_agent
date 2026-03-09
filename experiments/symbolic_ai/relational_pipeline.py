@@ -1633,6 +1633,264 @@ class RelationalSenseSplitter:
 
 
 # ---------------------------------------------------------------------------
+# R3: RelationalAlgebra — Structural Meta-Synthesis (E6)
+# ---------------------------------------------------------------------------
+
+
+class RelationalAlgebra:
+    """R3/E6: Discover composition rules R_i ∘ R_j = R_k.
+
+    Tests whether the 2-hop transition matrix for every (R_i, R_j) pair
+    approximates any single-hop relation R_k.  If yes, records the rule.
+    Builds the full relational composition table.
+
+    Example (Latin chars):
+        next ∘ next ≈ skip2f    (two forward steps = skip-by-2)
+        prev ∘ prev ≈ skip2b
+        next ∘ prev ≈ identity  (forward then back = stay in place)
+
+    Example (knowledge graph):
+        capital_of ∘ in_continent = cities_in_continent
+        PARENT ∘ PARENT = GRANDPARENT
+    """
+
+    def __init__(self) -> None:
+        self.composition_table: dict = {}  # (r_i, r_j) → (r_k | None, jsd)
+        self.relations:          list = []
+
+    # ------------------------------------------------------------------
+    # Fitting
+    # ------------------------------------------------------------------
+
+    def fit(self,
+            learner:       'RelationalLearner',
+            triples:       list | None = None,
+            verbose:       bool        = False,
+            max_jsd:       float       = 0.3,
+            ) -> 'RelationalAlgebra':
+        """
+        Args:
+            learner:  Fitted RelationalLearner (provides ``assignment``).
+            triples:  Raw (atom, rel, atom) triples.  When provided, builds
+                      atom-level V×V matrices (higher resolution than K×K).
+                      For V≤300, this is fast enough in pure Python.
+                      For V>300, falls back to K×K category-level matrices.
+            max_jsd:  Maximum row-weighted average JSD to accept a rule.
+        """
+        if triples is not None:
+            V = len(learner.assignment)
+            use_atom_level = (V <= 300)
+        else:
+            use_atom_level = False
+
+        if use_atom_level:
+            return self._fit_atom_level(learner, triples, verbose, max_jsd)
+        else:
+            return self._fit_cat_level(learner, verbose, max_jsd)
+
+    def _fit_atom_level(self,
+                        learner: 'RelationalLearner',
+                        triples: list,
+                        verbose: bool,
+                        max_jsd: float,
+                        ) -> 'RelationalAlgebra':
+        """Atom-level V×V matrices — high resolution, O(V³) composition."""
+        atoms   = sorted(learner.assignment.keys())
+        V       = len(atoms)
+        idx     = {a: i for i, a in enumerate(atoms)}
+
+        # Count raw triples
+        raw: dict = collections.defaultdict(int)             # (rel, src_i, tgt_j) → count
+        rel_src_total: dict = collections.defaultdict(       # rel → {src_i → total}
+            lambda: collections.defaultdict(int))
+
+        relations_seen: set = set()
+        for a, r, b in triples:
+            a_s, r_s, b_s = str(a), str(r), str(b)
+            if a_s not in idx or b_s not in idx:
+                continue
+            i, j = idx[a_s], idx[b_s]
+            raw[(r_s, i, j)]     += 1
+            rel_src_total[r_s][i] += 1
+            relations_seen.add(r_s)
+
+        relations = sorted(relations_seen)
+        self.relations = relations
+
+        # Build V×V probability matrices
+        def _make_mat(rel: str) -> list:
+            mat = [[0.0] * V for _ in range(V)]
+            for i, tot in rel_src_total[rel].items():
+                if tot <= 0:
+                    continue
+                for j in range(V):
+                    c = raw.get((rel, i, j), 0)
+                    if c:
+                        mat[i][j] = c / tot
+            return mat
+
+        mats = {r: _make_mat(r) for r in relations}
+
+        # Atom frequencies for weighted JSD
+        atom_freq = [1] * V  # uniform weight — all atoms equally important
+
+        self._finish(mats, relations, V, atom_freq, max_jsd, verbose)
+        return self
+
+    def _fit_cat_level(self,
+                       learner: 'RelationalLearner',
+                       verbose: bool,
+                       max_jsd: float,
+                       ) -> 'RelationalAlgebra':
+        """Category-level K×K matrices — lower resolution, works without triples."""
+        trans = getattr(learner, '_trans', {})
+        K     = learner._K or 0
+
+        if not trans or K == 0:
+            if verbose:
+                print('  R3: _trans empty — skipping')
+            return self
+
+        relations = sorted(trans.keys())
+        self.relations = relations
+
+        cat_freq = [0] * K
+        for cat in learner.assignment.values():
+            if 0 <= cat < K:
+                cat_freq[cat] += 1
+
+        def _make_mat(rel: str) -> list:
+            mat = [[0.0] * K for _ in range(K)]
+            for c_src, dist in trans.get(rel, {}).items():
+                try:
+                    i = int(c_src)
+                except (ValueError, TypeError):
+                    continue
+                if not (0 <= i < K):
+                    continue
+                tot = sum(dist.values())
+                if tot <= 0:
+                    continue
+                for c_tgt, p in dist.items():
+                    try:
+                        j = int(c_tgt)
+                    except (ValueError, TypeError):
+                        continue
+                    if 0 <= j < K:
+                        mat[i][j] = p / tot
+            return mat
+
+        mats = {r: _make_mat(r) for r in relations}
+        self._finish(mats, relations, K, cat_freq, max_jsd, verbose)
+        return self
+
+    def _finish(self,
+                mats:      dict,
+                relations: list,
+                N:         int,
+                weights:   list,
+                max_jsd:   float,
+                verbose:   bool,
+                ) -> None:
+        """Matrix multiply, compare, build composition table."""
+
+        def _compose(m1: list, m2: list) -> list:
+            res = [[0.0] * N for _ in range(N)]
+            for i in range(N):
+                for k in range(N):
+                    if m1[i][k] > 1e-10:
+                        for j in range(N):
+                            res[i][j] += m1[i][k] * m2[k][j]
+            return res
+
+        def _row_jsd(a: list, b: list) -> float:
+            m = [(a[x] + b[x]) / 2.0 for x in range(N)]
+            def _h(v: list) -> float:
+                return -sum(x * math.log2(x) for x in v if x > 1e-15)
+            return max(0.0, _h(m) - (_h(a) + _h(b)) / 2.0)
+
+        def _mat_jsd(m1: list, m2: list) -> float:
+            w_sum = j_sum = 0.0
+            for i in range(N):
+                w = weights[i]
+                if w > 0:
+                    j_sum += w * _row_jsd(m1[i], m2[i])
+                    w_sum += w
+            return j_sum / w_sum if w_sum > 0 else 1.0
+
+        # First pass: find best-match JSD for every pair
+        best_matches: list = []  # (r_i, r_j, best_r, best_jsd)
+        for r_i in relations:
+            for r_j in relations:
+                m_comp   = _compose(mats[r_i], mats[r_j])
+                best_r:   str | None = None
+                best_jsd: float      = float('inf')
+                for r_k in relations:
+                    d = _mat_jsd(m_comp, mats[r_k])
+                    if d < best_jsd:
+                        best_jsd = d
+                        best_r   = r_k
+                best_matches.append((r_i, r_j, best_r, best_jsd))
+
+        # Auto-detect threshold from gap in best-JSD values (Kneedle)
+        all_jsds = sorted(jsd for _, _, _, jsd in best_matches)
+        auto_thr = _gap_threshold(all_jsds)
+        threshold = min(max_jsd, auto_thr) if auto_thr < float('inf') else max_jsd
+
+        if verbose:
+            print(f'  R3: auto-threshold={threshold:.3f}  '
+                  f'(from gap in {len(all_jsds)} JSD values)')
+
+        table: dict = {}
+        for r_i, r_j, best_r, best_jsd in best_matches:
+            confirmed = (best_jsd <= threshold)
+            table[(r_i, r_j)] = (best_r if confirmed else None, best_jsd)
+
+        self.composition_table = table
+
+        if verbose:
+            for (r_i, r_j), (r_k, jsd) in sorted(table.items()):
+                arrow = f'= {r_k}' if r_k else '= ? (novel)'
+                print(f'  R3: {r_i} ∘ {r_j} {arrow}  (JSD={jsd:.3f})')
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def compose(self, rel1: str, rel2: str) -> str | None:
+        """Return the equivalent single relation for rel1 ∘ rel2, or None."""
+        entry = self.composition_table.get((rel1, rel2))
+        return entry[0] if entry else None
+
+    def report(self) -> str:
+        lines = [
+            '=' * 65,
+            'R3  RELATIONAL ALGEBRA  (composition rules R_i ∘ R_j = R_k)',
+            '=' * 65,
+        ]
+        if not self.composition_table:
+            lines.append('  No composition rules computed.')
+        else:
+            confirmed = [(ri, rj, rk, jsd)
+                         for (ri, rj), (rk, jsd) in sorted(self.composition_table.items())
+                         if rk is not None]
+            novel     = [(ri, rj, jsd)
+                         for (ri, rj), (rk, jsd) in sorted(self.composition_table.items())
+                         if rk is None]
+            if confirmed:
+                lines.append('  Confirmed rules:')
+                for ri, rj, rk, jsd in confirmed:
+                    lines.append(f'    {ri} ∘ {rj} = {rk}  (JSD={jsd:.3f})')
+            if novel:
+                lines.append('  Novel (no matching single relation):')
+                for ri, rj, jsd in novel:
+                    lines.append(f'    {ri} ∘ {rj} = ?  (min_JSD={jsd:.3f})')
+        lines.append('')
+        lines.append('=' * 65)
+        return '\n'.join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Level 5a: RawOffsetLearner — Symmetry Discovery
 # ---------------------------------------------------------------------------
 

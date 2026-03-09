@@ -153,7 +153,16 @@ The relational equivalent discovers rules like:
 4. Use this to predict multi-hop relational triples.
 
 **Deliverable:** `RelationalAlgebra` class; `compose(rel1, rel2) → rel3` lookup
-**Progress:** ⬜ Not started
+**Progress:** ✅ Implemented
+
+**Latin result (3 books):** Two genuine composition rules discovered (auto-threshold JSD<0.131):
+- `next ∘ next = skip2f` (JSD=0.124) — two forward steps = skip-by-2
+- `prev ∘ prev = skip2b` (JSD=0.105) — two backward steps = skip-by-2 back
+All other compositions classified as "novel" (no matching single relation in our set).
+
+**Note:** R3 uses atom-level (V=27) matrices, not category-level (K=10).
+Auto-K E0 is correct for distributional clustering; R3 needs finer resolution
+because at K=10, all 4 relations have ~80% C0→C0 mass and look identical.
 
 ---
 
@@ -239,7 +248,7 @@ No neural network. No training on this specific question.
 | **R0** | **Geometry detection** | ✅ Done | 8262d89 |
 | **R1** | **Relational E4: paradigmatic substitutability** | ✅ Done | — |
 | **R2** | **Relational E5: sense disambiguation** | ✅ Done | — |
-| R3 | Relational E6: structural meta-synthesis | ⬜ | — |
+| **R3** | **Relational E6: structural meta-synthesis** | ✅ Done | — |
 | R4 | Geometry-adapted distance metric | ⬜ | — |
 | R5 | Multi-hop prediction benchmark | ⬜ | — |
 | R6 | Compositional relational inference | ⬜ | — |

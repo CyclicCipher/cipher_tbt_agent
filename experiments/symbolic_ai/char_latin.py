@@ -45,6 +45,7 @@ if (hasattr(sys.stdout, 'buffer') and
 from relational_pipeline import (
     RelationalLearner, RelationClusterer, SecondOrderGrammar,
     GeometryDetector, RelationalParadigmDiscoverer, RelationalSenseSplitter,
+    RelationalAlgebra,
 )
 
 # ---------------------------------------------------------------------------
@@ -312,6 +313,10 @@ def main() -> None:
     sense = RelationalSenseSplitter()
     sense.fit(sequences, verbose=True)
 
+    print(f'\nR3: Relational algebra (E6)...')
+    algebra = RelationalAlgebra()
+    algebra.fit(learner, triples=triples, verbose=True)
+
     report(learner, rel_clusterer, grammar, triples)
     print()
     print(geo.report())
@@ -319,6 +324,8 @@ def main() -> None:
     print(paradigm.report(learner))
     print()
     print(sense.report())
+    print()
+    print(algebra.report())
 
 
 if __name__ == '__main__':
