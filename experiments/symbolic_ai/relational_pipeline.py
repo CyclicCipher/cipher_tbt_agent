@@ -184,6 +184,9 @@ class RelationalLearner:
             ('next_cat_rel',        ['cat', 'rel'],       ['cat'],  'relational'),
             ('token_given_cat_rel', ['cat', 'rel', 'cat'],['atom'], 'relational'),
         ])
+        # Build transition matrix for GeometryDetector in the same pass.
+        from collections import defaultdict, Counter as _Counter
+        _trans_raw: dict = defaultdict(lambda: defaultdict(_Counter))
         n_used = n_skip = 0
         for a, r, b in triples:
             a_s, r_s, b_s = str(a), str(r), str(b)
@@ -196,7 +199,17 @@ class RelationalLearner:
                           (str(c_a), r_s), (str(c_b),))
             self.ai.teach('token_given_cat_rel',
                           (str(c_a), r_s, str(c_b)), (b_s,))
+            _trans_raw[r_s][str(c_a)][str(c_b)] += 1
             n_used += 1
+        # Normalise and store for GeometryDetector.
+        self._trans: dict = {}
+        for rel, src_map in _trans_raw.items():
+            self._trans[rel] = {}
+            for c_src, ctr in src_map.items():
+                total = sum(ctr.values())
+                if total > 0:
+                    self._trans[rel][c_src] = {c: n / total
+                                               for c, n in ctr.items()}
         if verbose:
             print(f'  E1: {n_used:,} triples used, {n_skip:,} OOV skipped')
             m = _rss_mb()
@@ -1004,6 +1017,310 @@ class SecondOrderGrammar:
     def next_rel_distribution(self, relation: str) -> dict[str, float]:
         """Full distribution over next relations."""
         return dict(self.next_rel_dist.get(str(relation), {}))
+
+
+# ---------------------------------------------------------------------------
+# R0: GeometryDetector — What shape is the data?
+# ---------------------------------------------------------------------------
+
+class GeometryDetector:
+    """R0: Infer the underlying geometry of a relational dataset.
+
+    Given a fitted RelationalLearner + RelationClusterer, computes four
+    structure metrics and classifies the topology without any prior assumption
+    about dimensionality, curvature, or direction.
+
+    Metrics
+    -------
+    symmetry_score : float in [0, 1]
+        1 = fully undirected (every relation has a near-identical reverse).
+        0 = fully directed (no relation pair is mutually inverse).
+        Computed by testing whether T[r] ≈ T[r']ᵀ for all relation pairs.
+
+    effective_rank : int
+        Approximate rank of the aggregate K×K category transition matrix.
+        1 → linear structure.  2 → planar.  K → full graph.
+        Estimated via the fraction of cumulative singular-value mass.
+
+    growth_profile : List[int]
+        |reachable categories| at hop distance d = 0, 1, 2, ...
+        Exponential growth → hyperbolic (tree-like).
+        Polynomial d → Euclidean d-dimensional.
+        Plateau after D steps → bounded/spherical or dense graph.
+
+    has_cycles : bool
+        Whether the category transition graph has any directed cycle.
+        False → DAG / tree.  True → cyclic / circular / general graph.
+
+    Topology labels
+    ---------------
+    directed_linear      symmetry≈0, rank=1, growth~d, no broad cycles
+    undirected_linear    symmetry≈1, rank=1, growth~d
+    directed_2d          symmetry≈0, rank=2, growth~d²
+    undirected_2d        symmetry≈1, rank=2, growth~d²
+    hyperbolic           growth exponential (tree-like)
+    spherical            growth peaks then shrinks (bounded)
+    directed_graph       symmetry≈0, high rank, general
+    undirected_graph     symmetry≈1, high rank, general
+    """
+
+    def __init__(self) -> None:
+        self.symmetry_score:  float      = 0.0
+        self.effective_rank:  int        = 0
+        self.growth_profile:  list       = []
+        self.has_cycles:      bool       = False
+        self.curvature:       str        = 'unknown'
+        self.topology:        str        = 'unknown'
+        self._trans:          dict       = {}   # {rel: {c_src: {c_tgt: prob}}}
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def fit(self,
+            learner:      'RelationalLearner',
+            rel_clusterer: 'RelationClusterer',
+            ) -> 'GeometryDetector':
+        """Detect geometry from a fitted RelationalLearner + RelationClusterer."""
+        self._trans  = self._build_trans(learner)
+        K            = learner._K
+        relations    = list(self._trans.keys())
+
+        self.symmetry_score  = self._compute_symmetry(relations, K)
+        self.effective_rank  = self._compute_rank(relations, K)
+        self.growth_profile  = self._compute_growth(relations, K)
+        self.has_cycles      = self._compute_cycles(relations, K)
+        self.curvature       = self._classify_curvature()
+        self.topology        = self._classify_topology()
+        return self
+
+    def report(self) -> str:
+        lines = [
+            '=' * 65,
+            'R0  GEOMETRY DETECTION',
+            '=' * 65,
+            f'  Symmetry score : {self.symmetry_score:.3f}  '
+            f'(1=undirected, 0=directed)',
+            f'  Effective rank : {self.effective_rank}  '
+            f'(proxy for embedding dimension)',
+            f'  Has cycles     : {self.has_cycles}',
+            f'  Curvature      : {self.curvature}',
+            f'  Topology       : {self.topology}',
+            '',
+            f'  Growth profile (|reachable categories| at hop d):',
+        ]
+        for d, n in enumerate(self.growth_profile):
+            bar = '█' * min(40, n)
+            lines.append(f'    hop {d}: {n:3d}  {bar}')
+        lines.append('=' * 65)
+        return '\n'.join(lines)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _build_trans(self, learner: 'RelationalLearner') -> dict:
+        """Return the T[rel][c_src][c_tgt] matrix built during learner.fit()."""
+        return getattr(learner, '_trans', {})
+
+    def _compute_symmetry(self, relations: list, K: int) -> float:
+        """Symmetry score: mean max-transpose-similarity over all relation pairs.
+
+        For each ordered pair (r, r'), compute the JSD between the flattened
+        transition matrix T[r] and the transpose T[r']ᵀ.  A low JSD means r'
+        is the reverse of r → symmetric (undirected) relation pair.
+        The symmetry score is 1 - mean(min_JSD over partner) over all relations.
+        """
+        import math as _math
+
+        def _flat(r: str, transpose: bool) -> list:
+            mat = self._trans.get(r, {})
+            cats = sorted({c for m in mat.values() for c in m} | set(mat))
+            n = len(cats)
+            if n == 0:
+                return []
+            idx = {c: i for i, c in enumerate(cats)}
+            vec = [0.0] * (n * n)
+            for c_src, row in mat.items():
+                i = idx.get(c_src)
+                if i is None:
+                    continue
+                for c_tgt, p in row.items():
+                    j = idx.get(c_tgt)
+                    if j is None:
+                        continue
+                    pos = (j * n + i) if transpose else (i * n + j)
+                    vec[pos] = p
+            total = sum(vec)
+            if total < 1e-12:
+                return vec
+            return [v / total for v in vec]
+
+        def _jsd_vecs(p: list, q: list) -> float:
+            if len(p) != len(q) or not p:
+                return 1.0
+            result = 0.0
+            for pi, qi in zip(p, q):
+                mi = 0.5 * (pi + qi)
+                if pi > 1e-12 and mi > 1e-12:
+                    result += 0.5 * pi * _math.log2(pi / mi)
+                if qi > 1e-12 and mi > 1e-12:
+                    result += 0.5 * qi * _math.log2(qi / mi)
+            return max(0.0, min(1.0, result))
+
+        if len(relations) < 2:
+            return 1.0
+
+        scores = []
+        for r in relations:
+            p = _flat(r, transpose=False)
+            if not p:
+                continue
+            min_jsd = min(
+                _jsd_vecs(p, _flat(r2, transpose=True))
+                for r2 in relations
+            )
+            scores.append(1.0 - min_jsd)
+        return sum(scores) / len(scores) if scores else 0.0
+
+    def _compute_rank(self, relations: list, K: int) -> int:
+        """Effective rank of the aggregate K×K transition matrix via SVD."""
+        try:
+            import numpy as np
+        except ImportError:
+            return -1   # numpy not available
+
+        all_cats = sorted({
+            c
+            for mat in self._trans.values()
+            for c_src, row in mat.items()
+            for c in [c_src] + list(row)
+        })
+        n = len(all_cats)
+        if n == 0:
+            return 0
+        idx = {c: i for i, c in enumerate(all_cats)}
+        T = np.zeros((n, n), dtype=np.float64)
+        for mat in self._trans.values():
+            for c_src, row in mat.items():
+                i = idx.get(c_src)
+                if i is None:
+                    continue
+                for c_tgt, p in row.items():
+                    j = idx.get(c_tgt)
+                    if j is None:
+                        continue
+                    T[i, j] += p
+        total = T.sum()
+        if total > 0:
+            T /= total
+        sv = np.linalg.svd(T, compute_uv=False)
+        cum = sv.cumsum() / (sv.sum() + 1e-12)
+        # Effective rank = number of singular values needed for 90% of mass.
+        rank = int(np.searchsorted(cum, 0.90)) + 1
+        return rank
+
+    def _compute_growth(self, relations: list, K: int,
+                        max_hops: int = 10) -> list:
+        """BFS on the category graph to measure |reachable| at each hop."""
+        # Build adjacency: c_src → set of c_tgt (across all relations).
+        adj: dict = {}
+        for mat in self._trans.values():
+            for c_src, row in mat.items():
+                adj.setdefault(c_src, set()).update(row.keys())
+
+        all_cats = list(adj.keys())
+        if not all_cats:
+            return [0]
+
+        # Pick the most-connected seed.
+        seed = max(all_cats, key=lambda c: len(adj.get(c, set())))
+        visited = {seed}
+        frontier = {seed}
+        profile = [1]
+        for _ in range(max_hops):
+            next_f = set()
+            for c in frontier:
+                next_f.update(adj.get(c, set()) - visited)
+            if not next_f:
+                break
+            visited.update(next_f)
+            profile.append(len(next_f))
+            frontier = next_f
+        return profile
+
+    def _compute_cycles(self, relations: list, K: int) -> bool:
+        """Detect directed cycles in the category graph via DFS."""
+        adj: dict = {}
+        for mat in self._trans.values():
+            for c_src, row in mat.items():
+                adj.setdefault(c_src, set()).update(row.keys())
+
+        visited: set = set()
+        in_stack: set = set()
+
+        def _dfs(node: str) -> bool:
+            visited.add(node)
+            in_stack.add(node)
+            for nb in adj.get(node, set()):
+                if nb not in visited:
+                    if _dfs(nb):
+                        return True
+                elif nb in in_stack:
+                    return True
+            in_stack.discard(node)
+            return False
+
+        for node in list(adj.keys()):
+            if node not in visited:
+                if _dfs(node):
+                    return True
+        return False
+
+    def _classify_curvature(self) -> str:
+        """Infer curvature from growth profile shape."""
+        p = self.growth_profile
+        if len(p) < 2:
+            return 'unknown'
+        # If all nodes reachable in 1 hop → dense / complete graph.
+        if len(p) == 2 and p[1] > 0:
+            return 'dense (all nodes reachable in 1 hop)'
+        if len(p) < 3:
+            return 'unknown'
+        diffs = [p[i+1] - p[i] for i in range(len(p)-1)]
+        if not diffs:
+            return 'unknown'
+        increasing = sum(1 for i in range(len(diffs)-1) if diffs[i+1] > diffs[i])
+        decreasing = sum(1 for i in range(len(diffs)-1) if diffs[i+1] < diffs[i])
+        total = len(diffs) - 1
+        if total == 0:
+            return 'zero (Euclidean/flat)'
+        if increasing / total > 0.6:
+            return 'negative (hyperbolic/tree)'
+        if decreasing / total > 0.6:
+            return 'positive (spherical/bounded)'
+        return 'zero (Euclidean/flat)'
+
+    def _classify_topology(self) -> str:
+        s = self.symmetry_score
+        r = self.effective_rank
+        cyc = self.has_cycles
+        curv = self.curvature
+
+        if 'hyperbolic' in curv:
+            return 'hyperbolic (tree/DAG)'
+        if r <= 1:
+            if s > 0.7:
+                return 'undirected_linear'
+            return 'directed_linear'
+        if r == 2:
+            if s > 0.7:
+                return 'undirected_2d'
+            return 'directed_2d'
+        # High rank.
+        if s > 0.7:
+            return 'undirected_graph'
+        return 'directed_graph'
 
 
 # ---------------------------------------------------------------------------

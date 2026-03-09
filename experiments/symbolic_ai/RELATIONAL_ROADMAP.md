@@ -1,0 +1,235 @@
+# Relational Learner Roadmap
+## Structure-Agnostic Learning: Any Geometry, Any Dimension
+
+**Core thesis:** The RelationalLearner should discover the structure of any relational dataset
+without prior assumptions about geometry, dimension, or curvature — whether the data is
+1D sequential, 2D grid, circular, hyperbolic (tree), general graph, or anything else.
+The data tells us the shape. We listen.
+
+**Competition target:** Match or exceed graph neural networks (GNNs) on relational
+prediction tasks, while remaining fully symbolic, interpretable, and training-free.
+
+---
+
+## Current State (E0–E3)
+
+| Level | What it learns | Status |
+|-------|---------------|--------|
+| E0 | Compound bigrams: (atom,rel,atom) → distributional signatures | ✅ Done |
+| E1 | Category chains: P(c_tgt \| c_src, rel) | ✅ Done |
+| E2 | Context-sensitive clustering (sense disambiguation) | ❌ Not implemented (SequenceLearner only) |
+| E3 | Soft retrieval: similarity-weighted prediction | ✅ Done |
+| L2 | Relation clustering: which relations are equivalent? | ✅ Done |
+| L4 | Second-order grammar: P(r2 \| r1) | ✅ Done |
+
+SequenceLearner has E4, E5, E6. RelationalLearner stops at E3.
+The geometry of the data is never detected or exploited.
+
+---
+
+## Gap Analysis: Why RelationalLearner ≠ GNN
+
+| Capability | GNN | RelationalLearner (current) |
+|-----------|-----|---------------------------|
+| Detect data dimensionality | Implicit in architecture | ❌ |
+| Handle directed vs undirected | Yes (separate models) | Partially (L2 clusters) |
+| Detect curvature (flat/hyperbolic/spherical) | Via hyperbolic GNN variants | ❌ |
+| Paradigmatic substitutability | Via node embeddings | ❌ |
+| Sense disambiguation (polysemy in relations) | Via attention heads | ❌ |
+| Compositional relational inference | Via message passing | ❌ |
+| Metric adaptation to geometry | Hyperbolic/spherical variants | ❌ |
+| Multi-hop prediction | Via k-layer message passing | L4 (1 hop only) |
+
+---
+
+## Roadmap
+
+### R0 — Geometry Detection
+*Know what shape the data is before trying to learn it.*
+
+**Goal:** From the fitted L1 (atom categories) + L2 (relation clusters) + E1 distributions,
+automatically classify the underlying geometry.
+
+**Algorithm:**
+1. **Symmetry score** — For each relation pair (r, r'), test if the transition matrix
+   T[r] ≈ T[r']ᵀ (transpose). High symmetry → undirected. Low → directed.
+2. **Effective rank** — SVD of the aggregate K×K category transition matrix.
+   Rank ≈ 1 → linear. Rank ≈ 2 → planar. Rank = K → full graph.
+3. **Growth rate curve** — Starting from a seed category, measure |reachable| at each
+   hop distance d. Exponential growth → hyperbolic (tree). Polynomial d → Euclidean d-dim.
+   Saturation → bounded (spherical or finite dense graph).
+4. **Cycle detection** — Does the category graph have cycles? No cycles → DAG/tree.
+   Cycles of length L → periodic/circular structure with period L.
+
+**Topology classification:**
+```
+symmetry≈1, rank≈1, growth~d      → undirected linear (or circular)
+symmetry≈0, rank≈1, growth~d      → directed linear (1D sequence)
+symmetry≈1, rank≈2, growth~d²     → undirected 2D grid
+symmetry≈0, rank≈2, growth~d²     → directed 2D grid
+symmetry≈1, growth exponential     → undirected tree (hyperbolic)
+symmetry≈0, growth exponential     → directed DAG (hyperbolic)
+symmetry≈1, growth flat            → dense undirected graph / spherical
+rank=K, no dominant pattern        → general graph
+```
+
+**Deliverable:** `GeometryDetector` class in `relational_pipeline.py`
+**Progress:** ✅ Implemented
+
+---
+
+### R1 — Relational E4: Paradigmatic Substitutability
+*Which atoms are interchangeable in the same relational role?*
+
+SequenceLearner E4 finds which tokens fill the same slot (c_prev, c_next).
+The relational equivalent: which atoms appear in the same set of (relation, partner) contexts?
+
+**Algorithm:**
+1. For each atom a, build its "relational role signature":
+   `role_sig(a) = distribution over (rel_cluster, target_cat) pairs`
+   This captures: "atom a tends to be the source of R0-relations to C3-category atoms,
+   and the target of R1-relations from C1-category atoms."
+2. Cluster atoms by role signature JSD → "role categories" (distinct from distributional
+   categories from E0).
+3. `role_occupants(role_cat) → [atom, ...]` — all atoms with the same relational role.
+
+**Why this matters:** E0 clusters atoms by *who their neighbors are*. E4 clusters atoms
+by *what role they play in the relational structure*. In a knowledge graph:
+- E0: Paris, London, Berlin cluster together (similar neighbor types)
+- E4: Paris, London, Berlin are in the same ROLE (capital-of relation source)
+
+These two types of similarity are orthogonal and both necessary for generalization.
+
+**Deliverable:** `RelationalParadigmDiscoverer` class; `role_occupants(role_cat)` query
+**Progress:** ⬜ Not started
+
+---
+
+### R2 — Relational E5: Sense Disambiguation
+*An atom that plays multiple distinct relational roles should be split.*
+
+**Goal:** Detect and separate atoms with polysemous relational behavior.
+
+**Algorithm:**
+1. For each atom a, collect all observed relational contexts:
+   `contexts(a) = [(rel, partner_cat, direction), ...]`
+2. Cluster these contexts by JSD → sense clusters for atom a.
+3. If atom a has k > 1 clearly separated sense clusters, split it into a_0, a_1, ..., a_{k-1}.
+4. Re-run E0-E3 with the split atoms.
+
+**Why this matters:** In Latin, the character 'v' sometimes functions as a vowel (= 'u')
+and sometimes as a consonant. In a knowledge graph, 'Mercury' is both a planet and a Roman
+god. The relational contexts are qualitatively different — sense disambiguation separates them.
+
+**Deliverable:** `relational_sense_split(learner, triples, min_sense_jsd)` function
+**Progress:** ⬜ Not started
+
+---
+
+### R3 — Relational E6: Structural Meta-Synthesis
+*Discover the compositional rule governing the graph — without being told.*
+
+SequenceLearner E6 uses beam search to find chains like `context_triple ∘ word_given_cat`.
+The relational equivalent discovers rules like:
+- "capital_of ∘ country_of = same_continent" (relation composition)
+- "IS_A ∘ HAS = transitively_has" (property inheritance)
+- "PARENT ∘ PARENT = GRANDPARENT" (structural recursion)
+
+**Algorithm:**
+1. For each pair of relation clusters (R_i, R_j), test whether
+   `P(c_tgt | c_src, R_i ∘ R_j) ≈ P(c_tgt | c_src, R_k)` for some R_k.
+2. If yes → record the composition rule R_i ∘ R_j = R_k.
+3. Build the "relation algebra" — the full set of composition rules.
+4. Use this to predict multi-hop relational triples.
+
+**Deliverable:** `RelationalAlgebra` class; `compose(rel1, rel2) → rel3` lookup
+**Progress:** ⬜ Not started
+
+---
+
+### R4 — Geometry-Adapted Distance Metric
+*Use the right ruler for the right space.*
+
+Once R0 detects the geometry, R4 adapts the E3 similarity metric accordingly.
+
+| Geometry | Distance metric | Similarity kernel |
+|----------|----------------|-------------------|
+| Euclidean (flat) | L2 / cosine | Gaussian exp(-d²/σ²) |
+| Hyperbolic (tree) | Poincaré distance | exp(-d_hyp / T) |
+| Spherical | Geodesic arc length | cos(angle) |
+| Circular | Circular distance | cos(2π·d/L) |
+| General graph | Graph edit distance / diffusion | Heat kernel on graph |
+
+Current E3 uses JSD everywhere (implicitly Euclidean). R4 replaces JSD with the
+geometry-appropriate metric for the detected topology.
+
+**Algorithm:**
+1. From R0: detect topology.
+2. Select appropriate distance metric.
+3. Recompute the similarity matrix `_build_sim_matrix` with new metric.
+4. Measure: does geometry-adapted E3 have lower triple prediction error than JSD-E3?
+
+**Deliverable:** `metric='auto'` parameter on `RelationalLearner` that selects metric
+from R0 geometry detection.
+**Progress:** ⬜ Not started
+
+---
+
+### R5 — Multi-Hop Prediction Benchmark
+*Compete with GNNs on standard relational prediction tasks.*
+
+**Goal:** Benchmark RelationalLearner (with R0–R4) against GNN baselines on:
+1. **Latin corpus** (char-level): triple prediction accuracy
+2. **WordNet** (lexical relations): hypernym/synonym prediction
+3. **FB15k-237** (knowledge graph): standard KG completion benchmark
+
+**Baselines:**
+- TransE (embedding-based, flat)
+- RotatE (circular geometry)
+- PoincaréEmbed (hyperbolic)
+- Graph attention network (GAT)
+
+**Our advantage:** No training. One pass over data. Interpretable. Composable via CTKG.
+
+**Success metric:** Hits@10 (fraction of true triples in top-10 predictions) within
+20% of the best neural baseline on at least 2/3 benchmarks.
+
+**Progress:** ⬜ Not started
+
+---
+
+### R6 — Compositional Relational Inference
+*Answer multi-hop relational queries without ever seeing them in training.*
+
+**Goal:** Given a question like "What language family does Latin belong to?" — answer it
+by chaining relational algebra (R3): Latin IS_A Romance → Romance IS_A Indo-European.
+No neural network. No training on this specific question.
+
+**Algorithm:**
+1. Parse query as: source atom → (relation chain) → ? target atom
+2. For each relation in the chain, apply E3 soft retrieval.
+3. Compose posterior distributions across the chain.
+4. Return top-k atoms by final posterior mass.
+
+**Deliverable:** `RelationalLearner.infer_chain(atom, [rel1, rel2, ...])` method
+**Progress:** ⬜ Not started
+
+---
+
+## Progress Tracker
+
+| Phase | Description | Status | Commit |
+|-------|-------------|--------|--------|
+| E0 | Compound bigrams | ✅ Done | 4b99f3b |
+| E1 | Category chains | ✅ Done | 4b99f3b |
+| E3 | Soft retrieval | ✅ Done | 4b99f3b |
+| L2 | Relation clustering | ✅ Done | 4b99f3b |
+| L4 | Second-order grammar | ✅ Done | 918c5e7 |
+| Auto-K | Bitter-lesson K selection | ✅ Done | f89ca0c |
+| **R0** | **Geometry detection** | ✅ Done | — |
+| R1 | Relational E4: paradigmatic substitutability | ⬜ | — |
+| R2 | Relational E5: sense disambiguation | ⬜ | — |
+| R3 | Relational E6: structural meta-synthesis | ⬜ | — |
+| R4 | Geometry-adapted distance metric | ⬜ | — |
+| R5 | Multi-hop prediction benchmark | ⬜ | — |
+| R6 | Compositional relational inference | ⬜ | — |

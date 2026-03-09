@@ -43,7 +43,7 @@ if (hasattr(sys.stdout, 'buffer') and
                                   errors='replace')
 
 from relational_pipeline import (
-    RelationalLearner, RelationClusterer, SecondOrderGrammar,
+    RelationalLearner, RelationClusterer, SecondOrderGrammar, GeometryDetector,
 )
 
 # ---------------------------------------------------------------------------
@@ -299,7 +299,13 @@ def main() -> None:
     grammar = SecondOrderGrammar()
     grammar.fit(triples, verbose=True)
 
+    print(f'\nR0: Detecting geometry...')
+    geo = GeometryDetector()
+    geo.fit(learner, rel_clusterer)
+
     report(learner, rel_clusterer, grammar, triples)
+    print()
+    print(geo.report())
 
 
 if __name__ == '__main__':
