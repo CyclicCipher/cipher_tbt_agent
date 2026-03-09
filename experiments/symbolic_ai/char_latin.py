@@ -627,6 +627,46 @@ def main() -> None:
             chain = pch2.reason_chain(tok, ['next', 'next'], level=0, topk=5)
             chain_str = ', '.join(f'{t!r}:{p:.2f}' for t, p in chain)
             print(f'  reason_chain({tok!r}, [next,next]) → {chain_str}')
+
+        print(f'\n{"=" * 65}')
+        print('M17: Cross-domain functors + sheaf consistency')
+        print('=' * 65)
+
+        # Build Interface for the loaded model (domain A).
+        kg_a = pch2.build_interface('latin_A')
+        iface_a = list(kg_a.interfaces.values())[0]
+        print(f'  Interface latin_A: {len(iface_a.types)} types, '
+              f'{len(iface_a.concepts)} concepts')
+
+        # Self-functor: align pch2 with itself (should give perfect match).
+        result = pch2.build_functor(pch2, sim_threshold=0.8,
+                                    domain_self='latin_A', domain_other='latin_A2')
+        n_mapped = sum(len(m) for m in result['mapping'].values())
+        n_viol   = len(result['sheaf_violations'])
+        print(f'  Self-functor: {n_mapped} type pairs matched across '
+              f'{len(result["mapping"])} levels')
+        print(f'  Sheaf check: {n_viol} violation(s) '
+              f'(expect 0 for identical types)')
+        for lv, lmap in sorted(result['mapping'].items()):
+            pairs = ', '.join(f'{k}→{j}' for k, j in sorted(lmap.items()))
+            print(f'    L{lv}: {pairs}')
+
+        # Adjunctions: verify next/prev round-trip quality.
+        adj_kg = pch2.build_adjunction()
+        print(f'\n  Adjunctions (next∘prev round-trip quality per level):')
+        for lv in sorted(pch2._adjunction_quality):
+            q = pch2._adjunction_quality[lv]
+            bar = '█' * int(q * 20)
+            print(f'    L{lv}: {q:.3f}  {bar}')
+
+        # Wire functor + adjunctions into a merged CTKG.
+        kg_a.sheaf_merge(adj_kg)
+        kg_a.adjunctions.update(adj_kg.adjunctions)
+        n_adjs = len(kg_a.adjunctions)
+        n_funcs = len(result['kg'].functors)
+        print(f'\n  Final CTKG: {len(kg_a.types)} types, '
+              f'{len(kg_a.concepts)} concepts, '
+              f'{n_adjs} adjunction(s), {n_funcs} functor(s)')
         return
 
     print(f'\nBuilding triples...')

@@ -4797,6 +4797,286 @@ class PredictiveCodingHierarchy:
         # infer_chain already returns List[Tuple[atom, prob]] sorted descending.
         return learner.infer_chain(start_token, relations, topk=topk)
 
+    # ------------------------------------------------------------------
+    # M17 — Cross-Domain Functors + Sheaf Consistency
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _transition_profile(learner, k: int, rels: list) -> list:
+        """Eigen-profile of type k: sorted transition probabilities per relation.
+
+        Captures the *shape* of the transition distribution (concentrated vs.
+        diffuse, fast vs. slow decay) without reference to specific target
+        category indices.  This makes profiles comparable across two
+        independently-trained PCH instances whose category labels differ.
+
+        Returns a flat float vector of length ``len(rels) * top_n``.
+        """
+        top_n = 8
+        trans = getattr(learner, '_trans', {})
+        vec: list = []
+        for rel in rels:
+            dist = trans.get(rel, {}).get(str(k), {})
+            sorted_probs = sorted(dist.values(), reverse=True)
+            # Pad / truncate to top_n
+            vec.extend(sorted_probs[:top_n] + [0.0] * (top_n - len(sorted_probs)))
+        return vec
+
+    @staticmethod
+    def _cosine_sim(a: list, b: list) -> float:
+        dot = sum(x * y for x, y in zip(a, b))
+        na  = math.sqrt(sum(x * x for x in a))
+        nb  = math.sqrt(sum(y * y for y in b))
+        return dot / (na * nb + 1e-12)
+
+    def build_interface(self, domain_name: str = 'pch') -> 'KnowledgeGraph':
+        """M17: Build a CTKG KnowledgeGraph with an Interface exporting all discovered types.
+
+        The Interface block lists every ``type_L{level}_{k}`` and every
+        ``cat_L{level}_{k}`` as exported symbols.  This is required before
+        calling :meth:`sheaf_check` or :meth:`build_functor` on two PCH
+        instances whose categories may overlap in meaning.
+
+        Parameters
+        ----------
+        domain_name
+            Domain identifier used in the Interface block and Concept domain
+            fields.
+
+        Returns
+        -------
+        KnowledgeGraph
+            A fresh graph containing TypeDef entries, Concept entries, and a
+            single Interface listing all exported names.
+        """
+        from ctkg.graph import Interface, TypeDef, Concept  # type: ignore
+
+        kg          = KnowledgeGraph()
+        type_names: list  = []
+        conc_names: list  = []
+
+        for level in range(self.n_levels):
+            learner = self.learners[level]
+            K       = getattr(learner, '_K', 0)
+            if K < 2:
+                continue
+
+            # Type constructor follows M18e universal type hierarchy (simplified).
+            constructor  = 'symbol'  if level == 0 else ('seq' if level <= 2 else 'tuple')
+            annotations  = {'ordered'} if level < 3 else set()
+
+            for k in range(K):
+                tname = f'type_L{level}_{k}'
+                kg.types[tname] = TypeDef(
+                    name        = tname,
+                    constructor = constructor,
+                    annotations = annotations,
+                    description = (f'Discovered type: level={level} category={k} '
+                                   f'domain={domain_name}'),
+                )
+                type_names.append(tname)
+
+            # Category concepts (one per cluster).
+            clusters = getattr(learner, 'clusters', {})
+            for cid, members in clusters.items():
+                cname = f'cat_L{level}_{cid}'
+                top   = sorted(members)[:5]
+                kg.concepts[cname] = Concept(
+                    name        = cname,
+                    description = (f'L{level} cluster {cid}: '
+                                   + ', '.join(repr(m) for m in top)
+                                   + (f' +{len(members)-5} more' if len(members) > 5 else '')),
+                    domain      = domain_name,
+                    input_type  = [f'type_L{level}_{cid}'],
+                    output_type = [f'type_L{level}_{cid}'],
+                )
+                conc_names.append(cname)
+
+        kg.interfaces[domain_name] = Interface(
+            name     = domain_name,
+            types    = type_names,
+            concepts = conc_names,
+        )
+        return kg
+
+    def build_functor(
+        self,
+        other:         'PredictiveCodingHierarchy',
+        level:         int | None = None,
+        sim_threshold: float      = 0.7,
+        domain_self:   str        = 'pch_A',
+        domain_other:  str        = 'pch_B',
+    ) -> dict:
+        """M17: Align type categories between two PCH instances.
+
+        For each active level (or the specified *level*), compares the
+        transition eigen-profiles of every type pair using cosine similarity.
+        A greedy bipartite matching yields ``{self_k: other_j}`` pairs whose
+        profiles exceed *sim_threshold*.
+
+        The resulting :class:`ctkg.graph.Functor` witnesses that structurally
+        identical categories are the same abstract concept, enabling
+        cross-domain prediction transfer: given self's current type belief,
+        map it to other's equivalent type and borrow other's ``_nc_cache``
+        for next-token prediction.
+
+        Runs ``sheaf_check()`` on the two Interface graphs to verify that
+        shared type names are structurally compatible.
+
+        Parameters
+        ----------
+        other
+            The second PCH instance to align with.
+        level
+            If given, only align this level; otherwise all active levels.
+        sim_threshold
+            Minimum cosine similarity to accept a type match.
+        domain_self, domain_other
+            Names used to label the two sides of the functor.
+
+        Returns
+        -------
+        dict with keys:
+            ``'mapping'``           — ``{level: {self_k: other_j}}``
+            ``'functor'``           — :class:`ctkg.graph.Functor`
+            ``'sheaf_violations'``  — list of :class:`ctkg.graph.SheafViolation`
+            ``'kg'``                — :class:`KnowledgeGraph` containing the Functor
+        """
+        from ctkg.graph import Functor  # type: ignore
+
+        rels_to_use   = [self.next_rel, 'prev']
+        levels_to_try = [level] if level is not None else range(self.n_levels)
+        mapping: dict = {}   # {level: {self_k: other_j}}
+
+        for lv in levels_to_try:
+            sl = self.learners[lv]
+            ol = other.learners[lv]
+            K_self  = getattr(sl, '_K', 0)
+            K_other = getattr(ol, '_K', 0)
+            if K_self < 2 or K_other < 2:
+                continue
+
+            profiles_self  = {k: self._transition_profile(sl, k, rels_to_use)
+                              for k in range(K_self)}
+            profiles_other = {j: self._transition_profile(ol, j, rels_to_use)
+                              for j in range(K_other)}
+
+            # Greedy matching: for each self type, find best-matching other type.
+            level_map: dict = {}
+            used_other: set = set()
+            for k in range(K_self):
+                best_j, best_sim = None, -1.0
+                for j in range(K_other):
+                    if j in used_other:
+                        continue
+                    sim = self._cosine_sim(profiles_self[k], profiles_other[j])
+                    if sim > best_sim:
+                        best_sim, best_j = sim, j
+                if best_j is not None and best_sim >= sim_threshold:
+                    level_map[k]   = best_j
+                    used_other.add(best_j)
+
+            if level_map:
+                mapping[lv] = level_map
+
+        # Build Functor in a fresh KnowledgeGraph.
+        concept_map: dict = {}
+        for lv, lmap in mapping.items():
+            for k, j in lmap.items():
+                concept_map[f'cat_L{lv}_{k}'] = f'cat_L{lv}_{j}'
+
+        functor = Functor(
+            name          = f'{domain_self}_to_{domain_other}',
+            source_domain = domain_self,
+            target_domain = domain_other,
+            concept_map   = concept_map,
+            preserves     = ['type_transitions'],
+        )
+        kg                 = KnowledgeGraph()
+        kg.functors[functor.name] = functor
+
+        # Sheaf check: build Interface for each side, verify structural compatibility.
+        kg_self  = self.build_interface(domain_self)
+        kg_other = other.build_interface(domain_other)
+        violations = kg_self.sheaf_check(kg_other)
+
+        self._functor_kg      = kg
+        self._functor_mapping = mapping
+        return {
+            'mapping':          mapping,
+            'functor':          functor,
+            'sheaf_violations': violations,
+            'kg':               kg,
+        }
+
+    def build_adjunction(self, level: int | None = None) -> 'KnowledgeGraph':
+        """M17: Build CTKG Adjunction objects for next/prev inverse pairs.
+
+        At every level, 'next' and 'prev' form an adjoint pair: following
+        'next' then 'prev' should approximately recover the original token
+        (the *unit* of the adjunction).  This was confirmed numerically in
+        R3 (next∘prev ≈ identity).
+
+        Verifies each level by sampling the top-5 most common tokens and
+        computing ``infer_chain(tok, ['next', 'prev'])``.  The round-trip
+        quality (probability mass on the original token after 2 hops) is
+        stored in the Adjunction's ``unit`` field and in
+        ``self._adjunction_quality``.
+
+        Parameters
+        ----------
+        level
+            If given, only build the adjunction for this level; otherwise
+            all active levels.
+
+        Returns
+        -------
+        KnowledgeGraph
+            Fresh graph with one :class:`ctkg.graph.Adjunction` per active level.
+        """
+        from ctkg.graph import Adjunction  # type: ignore
+        from collections import Counter as _Counter
+
+        levels_to_try = [level] if level is not None else range(self.n_levels)
+        kg = KnowledgeGraph()
+        quality_map: dict = {}
+
+        for lv in levels_to_try:
+            learner    = self.learners[lv]
+            K          = getattr(learner, '_K', 0)
+            assignment = getattr(learner, 'assignment', {})
+            if K < 2 or not assignment:
+                continue
+
+            # Sample the 5 most frequent tokens (by category population).
+            cat_counts = _Counter(assignment.values())
+            samples    = sorted(assignment, key=lambda a: -cat_counts.get(
+                assignment.get(a, 0), 0))[:5]
+
+            round_trip_scores: list = []
+            for tok in samples:
+                dist = learner.infer_chain(str(tok), [self.next_rel, 'prev'], topk=20)
+                # P(original | round-trip)
+                p_orig = next((p for t, p in dist if t == str(tok)), 0.0)
+                round_trip_scores.append(p_orig)
+
+            quality = (sum(round_trip_scores) / len(round_trip_scores)
+                       if round_trip_scores else 0.0)
+            quality_map[lv] = quality
+
+            adj = Adjunction(
+                name    = f'next_prev_L{lv}',
+                forward = 'next',
+                inverse = 'prev',
+                unit    = f'next∘prev round-trip quality={quality:.3f}',
+                counit  = f'prev∘next (symmetric)',
+            )
+            kg.adjunctions[adj.name] = adj
+
+        self._adjunction_kg      = kg
+        self._adjunction_quality = quality_map
+        return kg
+
     def level_summary(self) -> None:
         """Print per-level diagnostics to stdout."""
         print(f'\nPredictiveCodingHierarchy  n_levels={self.n_levels}')

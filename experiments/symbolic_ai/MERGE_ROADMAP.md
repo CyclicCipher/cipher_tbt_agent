@@ -608,7 +608,7 @@ level's characteristic surprisal scale.
 
 ---
 
-### M17 — Cross-Domain Functors + Sheaf Consistency — PLANNED
+### M17 — Cross-Domain Functors + Sheaf Consistency — DONE
 
 **Problem**: PCH operates on one domain at a time.  There is no way to say "the
 category I discovered for Latin nominatives IS the same category as English subjects."
