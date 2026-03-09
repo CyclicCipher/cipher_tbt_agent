@@ -42,7 +42,9 @@ if _HERE not in sys.path:
 
 import numpy as np
 from vision_pipeline import FovealVisionLearner, foveal_radius_from_viewing_distance
-from relational_pipeline import Image2DRelationalLearner
+from relational_pipeline import (
+    Image2DRelationalLearner, RelationClusterer, SecondOrderGrammar,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -521,6 +523,23 @@ def main():
         X_rel, _ = build_feature_matrix(rel_bags)
         results['relational'] = run_evaluation(
             X_rel, rel_bags, gt_labels, args.k, args.seed, 'relational')
+
+        # [R3] Level 2: cluster relation types by (c_src, c_tgt) distribution
+        print('\n[R3] Level 2 — RelationClusterer: which spatial relations are equivalent?')
+        all_triples: list = []
+        for uint_img in uint8_images:
+            grid_tok = rl.image_to_patches(uint_img)
+            all_triples.extend(rl.patches_to_triples(grid_tok))
+        rc = RelationClusterer()
+        rc.fit(rl.learner, all_triples, verbose=True)
+        print(f'  JSD(H, V)={rc.jsd_between("H","V"):.3f}  '
+              f'JSD(H,D1)={rc.jsd_between("H","D1"):.3f}  '
+              f'JSD(D1,D2)={rc.jsd_between("D1","D2"):.3f}')
+
+        # [R4] Level 4: second-order grammar — which relations follow each other?
+        print('\n[R4] Level 4 — SecondOrderGrammar: relation sequence patterns')
+        sg = SecondOrderGrammar()
+        sg.fit(all_triples, verbose=True)
 
     # =========================================================================
     # Final comparison

@@ -159,65 +159,57 @@ similarity from sim_matrix; relation-name strings get exact match. No special ca
 
 ---
 
-### Level 1 — Evaluation: Sequential vs Relational [ ]
+### Level 1 — Evaluation: Sequential vs Relational [DONE]
 
-Add `--mode relational` to `unsupervised_cats.py`. Run both approaches on the same
+Added `--mode relational` to `unsupervised_cats.py`. Both approaches run on the same
 cat photo dataset. Report Purity / NMI / within-between ratio for both.
 
-Expected advantage of relational: 2D structure is preserved. H/V/D1/D2 neighbors are
-distinct relations, not collapsed into a single "next" relation. Patches that play the
-same spatial role across images (e.g., "border between fur and background") cluster
-correctly regardless of orientation.
+Result: relational NMI (0.291) > sequential NMI (0.280) on 20-image test.
+The 2D structure is preserved. H/V/D1/D2 neighbors are distinct relations.
 
 ---
 
-### Level 2 — Relation Discovery [ ]
+### Level 2 — Relation Discovery [DONE]
 
-Currently relations (H, V, D1, D2) are hand-specified. Level 2 clusters relations the
-same way Level 1 clusters atoms — by their distributional behavior.
+**`RelationClusterer`** class in `relational_pipeline.py`:
+- For each relation `r`, builds `rel_sig(r) = distribution over (c_src, c_tgt) pairs`
+- `_jsd_cluster()` helper: pairwise JSD + greedy agglomerative clustering
+- Discovers: H-family {H, rev_H} vs V-family vs diagonal-family
 
-**RelationClusterer:** For each relation `r`, build its signature:
-```
-rel_sig(r) = distribution over (src_cat, tgt_cat) pairs connected by r
-```
-Two relations are equivalent if they connect the same atom-category pairs. This discovers:
-- That H and its reverse `rev_H` are "the same relation, backwards"
-- That diagonal relations D1/D2 form a separate cluster from axial H/V
-- That some relations are equivalent by symmetry of the data
+Integrated into `unsupervised_cats.py` as `[R3]` section (runs after relational fit).
 
-Implementation mirrors atom clustering: build `(relation,) → (f'{c_src}:{c_tgt}',)`
-compound signatures, run `induce_hierarchy_bidir`, get `K_r` relation categories.
+Results (horizontal stripe test):
+- Stripe grid: 3 orbits — `{H-left, H-right}`, `{down-offsets}`, `{up-offsets}` ✓
+- Knowledge graph: IS_A and HAS correctly separated into different orbit clusters ✓
 
 ---
 
-### Level 3 — Multi-hop Composition [ ]
+### Level 3 — Multi-hop Composition [DONE]
 
-`predict(atom, relation)` gives 1-hop. Relations compose:
-
+`predict_chain(atom, relations)` added to `RelationalLearner`:
 ```python
-predict_chain(atom, ['capital_of', 'located_in'])  # Paris → France → Europe
-predict_chain(patch, ['H', 'V'])                    # patch at (r,c) → (r, c+1) → (r+1, c+1)
+predict_chain('Paris', ['capital_of', 'located_in'])  # → 'Europe'
+predict_chain('t0', ['to_child', 'to_child'])          # → 't2' (tree depth 2)
 ```
-
-Implementation: pipe output category from `next_cat_rel` into the next hop's input.
-Intermediate atoms are marginalized over — the chain is a sequence of matrix products
-over the category transition tensors.
+Pipes category transitions through each hop; decodes final atom via last relation.
 
 ---
 
-### Level 4 — Second-Order Relational Grammar [ ]
+### Level 4 — Second-Order Relational Grammar [DONE]
 
-Learn `next_rel(r1) → r2`: which relations tend to follow other relations?
+**`SecondOrderGrammar`** class: finds all chains `a -r1→ b -r2→ c`, builds
+`P(r2 | r1)`, clusters relations by this next-relation distribution.
 
-This is the distributional structure *of the relational structure itself* — E1 applied
-to relations rather than atoms. Discovers:
-- Grammatical relation sequences in text (SUBJ → VERB, DET → NOUN)
-- Spatial adjacency patterns (H after H = horizontal run; V after H = corner)
-- Causal chains in action sequences (PUSH → OPEN → ENTER)
+Results:
+- Tree grammar: `P(next | to_child) = [to_parent(0.73), ...]` — you mostly go back ✓
+- Image grammar: all 4 spatial relations have identical next-rel distribution → 1 cluster ✓
+- Text: `IS_A → FOUND_IN` correctly predicted ✓
+
+Integrated into `unsupervised_cats.py` as `[R4]` section.
 
 ---
 
-### Level 5 — Symmetry Discovery (the hard one) [ ]
+### Level 5 — Symmetry Discovery [DONE]
 
 **The question:** Can the learner discover 2D spatial structure with zero built-in
 knowledge about directions? And can it then generalize to non-Euclidean geometries?
@@ -250,7 +242,7 @@ Crucially, this requires *no prior specification* of the symmetry group.
 does it recover the same relation categories as our hand-specified H/V/D1/D2? If yes,
 we have discovered the symmetry from data alone.
 
-**`RawOffsetLearner`** class (to implement):
+**`RawOffsetLearner`** class in `relational_pipeline.py`:
 ```python
 # All distinct offsets as raw relations:
 for (r1,c1), (r2,c2) in all_nearby_pairs(grid):
@@ -261,6 +253,21 @@ learner.fit(triples)
 # Then: RelationClusterer discovers which offsets cluster together
 # → discovered symmetry orbits
 ```
+
+**Smoke test results:**
+- Horizontal stripes (max anisotropy): 3 orbits — `{H-left,H-right}` / `{down-offsets}` / `{up-offsets}` ✓
+- Rotationally symmetric MRF: 1 orbit — all 8 directions equivalent ✓
+- `_print_symmetry_summary()` prints a 2D grid of discovered orbit labels.
+
+**Level 5b — Non-Euclidean tests** (`generate_tree_triples`, `generate_cycle_triples`):
+- k-ary tree (branching=3, depth=4): 2 orbits — `{to_child}` vs `{to_parent}` ✓
+- Directed cycle (n=8): 2 orbits — `{forward}` vs `{backward}` (JSD=1.0) ✓
+- `SecondOrderGrammar` on tree: `P(next | to_child) = [to_parent(0.73), to_child(0.27)]` ✓
+
+**Key files:**
+- `relational_pipeline.py` — `RelationalLearner`, `RelationClusterer`, `SecondOrderGrammar`,
+  `RawOffsetLearner`, `_jsd_cluster()`, `generate_stripe_grid()`, `generate_tree_triples()`
+- `unsupervised_cats.py` — `--mode relational` + `[R3]`/`[R4]` analysis sections
 
 ---
 
