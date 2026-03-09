@@ -1478,6 +1478,161 @@ class RelationalParadigmDiscoverer:
 
 
 # ---------------------------------------------------------------------------
+# R2: RelationalSenseSplitter — Sense Disambiguation (E5)
+# ---------------------------------------------------------------------------
+
+
+def _jsd_dists(p: dict, q: dict) -> float:
+    """Jensen-Shannon divergence between two dict-based probability distributions."""
+    all_keys = set(p) | set(q)
+    m = {k: (p.get(k, 0.0) + q.get(k, 0.0)) / 2.0 for k in all_keys}
+
+    def _h(d: dict) -> float:
+        return -sum(v * math.log2(v) for v in d.values() if v > 1e-15)
+
+    return max(0.0, _h(m) - (_h(p) + _h(q)) / 2.0)
+
+
+class RelationalSenseSplitter:
+    """R2/E5: Detect atoms with polysemous relational behavior.
+
+    An atom is polysemous if its *forward* distribution (what follows it) changes
+    significantly depending on its *backward* context (what precedes it).
+
+    Algorithm:
+    1. Scan sequences.  At each position i, record (prev_atom, atom, next_atom).
+    2. For each atom 'a', build conditional forward distributions
+       P(next | prev=x) for every observed prev_atom x.
+    3. Cluster these conditional distributions by JSD (auto-K).
+    4. If ≥2 clusters survive with inter-cluster JSD ≥ min_sense_jsd → polysemy.
+
+    Example (Latin):
+        'v' sometimes acts as a vowel (u) and sometimes as a consonant.
+        After vowels, P(next) ≈ consonant-heavy (consonant onset).
+        After consonants, P(next) ≈ vowel-heavy (vowel continuation).
+        → two sense clusters → 'v' is polysemous.
+    """
+
+    def __init__(self) -> None:
+        self.polysemous: dict = {}  # atom → {n_senses, max_jsd, ...}
+
+    def fit(self,
+            sequences:         list,
+            verbose:           bool  = False,
+            min_sense_jsd:     float = 0.3,
+            min_context_count: int   = 5,
+            ) -> 'RelationalSenseSplitter':
+        """
+        Args:
+            sequences:         Original token sequences (list of list of str/char).
+            min_sense_jsd:     Minimum inter-cluster JSD to confirm polysemy.
+            min_context_count: Minimum occurrences of a (prev, atom) pair to include.
+        """
+        # tri_counts[atom][prev_atom] → Counter(next_atom → count)
+        tri_counts: dict = collections.defaultdict(
+            lambda: collections.defaultdict(collections.Counter))
+
+        for seq in sequences:
+            n = len(seq)
+            for i in range(1, n - 1):
+                atom = str(seq[i])
+                prev = str(seq[i - 1])
+                nxt  = str(seq[i + 1])
+                tri_counts[atom][prev][nxt] += 1
+
+        polysemous: dict = {}
+
+        for atom in sorted(tri_counts):
+            # Build conditional distributions P(next | prev=x)
+            cond: dict = {}
+            for prev_atom, next_ctr in tri_counts[atom].items():
+                total = sum(next_ctr.values())
+                if total >= min_context_count:
+                    cond[prev_atom] = {k: v / total for k, v in next_ctr.items()}
+
+            if len(cond) < 2:
+                continue  # not enough context diversity
+
+            # Cluster conditional distributions by JSD (auto-K via Kneedle)
+            assignment, clusters = _jsd_cluster(cond, verbose=False)
+
+            if len(clusters) < 2:
+                continue
+
+            # Merge per-cluster: average of member distributions
+            cluster_profiles: dict = {}
+            for rid, members in clusters.items():
+                merged: dict = {}
+                for m in members:
+                    for k, v in cond[m].items():
+                        merged[k] = merged.get(k, 0.0) + v / len(members)
+                cluster_profiles[rid] = merged
+
+            # Max pairwise JSD between cluster profiles
+            rids = sorted(cluster_profiles)
+            max_jsd = 0.0
+            for a in range(len(rids)):
+                for b in range(a + 1, len(rids)):
+                    max_jsd = max(max_jsd,
+                                  _jsd_dists(cluster_profiles[rids[a]],
+                                             cluster_profiles[rids[b]]))
+
+            if max_jsd < min_sense_jsd:
+                continue
+
+            polysemous[atom] = {
+                'n_senses':          len(clusters),
+                'max_jsd':           max_jsd,
+                'cluster_assign':    assignment,   # prev_atom → sense_id
+                'sense_profiles':    cluster_profiles,  # sense_id → P(next)
+            }
+
+            if verbose:
+                for sid in sorted(cluster_profiles):
+                    top_prevs = [p for p, s in assignment.items() if s == sid][:5]
+                    top_next  = sorted(cluster_profiles[sid].items(),
+                                       key=lambda kv: -kv[1])[:4]
+                    top_str   = ', '.join(f'{k}({v:.2f})' for k, v in top_next)
+                    print(f'  E5: {atom!r} sense {sid} '
+                          f'(prev ∈ {top_prevs}): next → {top_str}')
+
+        self.polysemous = polysemous
+
+        if verbose:
+            print(f'  E5: {len(polysemous)} polysemous atoms '
+                  f'(of {len(tri_counts)} total atoms)')
+
+        return self
+
+    def report(self) -> str:
+        lines = [
+            '=' * 65,
+            'R2  SENSE DISAMBIGUATION  (polysemous atoms, E5)',
+            '=' * 65,
+        ]
+        if not self.polysemous:
+            lines.append('  No polysemous atoms detected.')
+        else:
+            for atom, info in sorted(self.polysemous.items()):
+                lines.append(
+                    f'\n  Atom {atom!r}: {info["n_senses"]} senses  '
+                    f'(max_JSD={info["max_jsd"]:.3f})')
+                for sid in sorted(info['sense_profiles']):
+                    profile = info['sense_profiles'][sid]
+                    top_next = sorted(profile.items(),
+                                      key=lambda kv: -kv[1])[:5]
+                    top_str  = ', '.join(f'{k}({v:.2f})' for k, v in top_next)
+                    prevs = [p for p, s in info['cluster_assign'].items()
+                             if s == sid]
+                    lines.append(f'    Sense {sid}  '
+                                 f'(prev ∈ {prevs[:8]}): '
+                                 f'next → {top_str}')
+        lines.append('')
+        lines.append('=' * 65)
+        return '\n'.join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Level 5a: RawOffsetLearner — Symmetry Discovery
 # ---------------------------------------------------------------------------
 

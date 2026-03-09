@@ -125,8 +125,14 @@ use `use_atom_partners=True` (V-dimensional) to avoid E0 mega-cluster collapse.
 and sometimes as a consonant. In a knowledge graph, 'Mercury' is both a planet and a Roman
 god. The relational contexts are qualitatively different — sense disambiguation separates them.
 
-**Deliverable:** `relational_sense_split(learner, triples, min_sense_jsd)` function
-**Progress:** ⬜ Not started
+**Deliverable:** `RelationalSenseSplitter` class; `.polysemous` dict; `.report()`
+**Progress:** ✅ Implemented
+
+**Latin result (3 books):** 4 polysemous atoms detected:
+- 'v': 2 senses — consonant (word-initial, next→i 36%) vs vowel (after 'i'→'s' 100%, the "ivs"/"ius" spelling)
+- 't': 3 senses — normal 't', after 'q' (qu-cluster artifact), after 'y' (Greek loanword "yth" cluster)
+- 'y': 2 senses — two phonological contexts (after 'd' vs after consonants)
+- ' ': 6 senses — word-boundary effects vary by preceding word-final letter
 
 ---
 
@@ -232,7 +238,7 @@ No neural network. No training on this specific question.
 | Auto-K | Bitter-lesson K selection | ✅ Done | f89ca0c |
 | **R0** | **Geometry detection** | ✅ Done | 8262d89 |
 | **R1** | **Relational E4: paradigmatic substitutability** | ✅ Done | — |
-| R2 | Relational E5: sense disambiguation | ⬜ | — |
+| **R2** | **Relational E5: sense disambiguation** | ✅ Done | — |
 | R3 | Relational E6: structural meta-synthesis | ⬜ | — |
 | R4 | Geometry-adapted distance metric | ⬜ | — |
 | R5 | Multi-hop prediction benchmark | ⬜ | — |

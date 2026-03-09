@@ -44,7 +44,7 @@ if (hasattr(sys.stdout, 'buffer') and
 
 from relational_pipeline import (
     RelationalLearner, RelationClusterer, SecondOrderGrammar,
-    GeometryDetector, RelationalParadigmDiscoverer,
+    GeometryDetector, RelationalParadigmDiscoverer, RelationalSenseSplitter,
 )
 
 # ---------------------------------------------------------------------------
@@ -308,11 +308,17 @@ def main() -> None:
     paradigm = RelationalParadigmDiscoverer()
     paradigm.fit(learner, triples, verbose=True)
 
+    print(f'\nR2: Sense disambiguation (E5)...')
+    sense = RelationalSenseSplitter()
+    sense.fit(sequences, verbose=True)
+
     report(learner, rel_clusterer, grammar, triples)
     print()
     print(geo.report())
     print()
     print(paradigm.report(learner))
+    print()
+    print(sense.report())
 
 
 if __name__ == '__main__':
