@@ -238,6 +238,100 @@ def _run_benchmark(sequences: list[list[str]],
           + '  '.join(f'{hits_model[k]:.3f}' for k in ks))
 
 
+def _run_context_benchmark(
+        train_seqs:  list[list[str]],
+        test_seqs:   list[list[str]],
+        learner:     RelationalLearner,
+        context_lens: tuple = (0, 3, 10, 30),
+        n_sample:    int = 5000,
+        rel:         str = 'next',
+) -> None:
+    """R5+: Context-aware Hits@K using ContextBeliefState.
+
+    Processes each test sequence CHARACTER BY CHARACTER, maintaining a running
+    ContextBeliefState for a window of preceding characters.  At each position,
+    predicts the next character using:
+
+      context_len=0  (baseline): learner.predict_dist(char, rel) — stateless
+      context_len=N: ContextBeliefState built from the N preceding chars
+
+    The improvement (if any) is the epistemic gain from knowing where in the
+    category sequence the agent currently is — a category-level context signal
+    on top of the atom-level bigram.
+
+    Prints a comparison table for all context_lens.
+    """
+    import random
+    from relational_pipeline import ContextBeliefState
+
+    # Collect (sequence, position) pairs where we can evaluate
+    max_ctx = max(context_lens)
+    test_positions: list[tuple[list[str], int]] = []
+    for seq in test_seqs:
+        for i in range(max_ctx, len(seq) - 1):
+            test_positions.append((seq, i))
+    if not test_positions:
+        print('  No test positions available.')
+        return
+    if len(test_positions) > n_sample:
+        random.seed(42)
+        test_positions = random.sample(test_positions, n_sample)
+    n_eval = len(test_positions)
+
+    ks = (1, 3, 10)
+
+    # Evaluate each context length
+    results: dict[int, dict] = {}
+    for ctx_len in context_lens:
+        hits = {k: 0 for k in ks}
+        no_dist = 0
+
+        for seq, pos in test_positions:
+            true_next = seq[pos + 1]
+            cur_char  = seq[pos]
+
+            if ctx_len == 0:
+                # Stateless: atom-level bigram / category fallback
+                dist = learner.predict_dist(cur_char, rel)
+            else:
+                # Contextual: walk back ctx_len steps, accumulate belief
+                cb = ContextBeliefState(learner)
+                start = max(0, pos - ctx_len + 1)
+                for i in range(start, pos + 1):
+                    cb.observe(seq[i])
+                    if i < pos:
+                        cb.transition(rel)
+                dist = cb.predict_target_dist(rel)
+
+            if not dist:
+                no_dist += 1
+                continue
+
+            ranked = sorted(dist.items(), key=lambda kv: -kv[1])
+            true_rank = next(
+                (i + 1 for i, (tok, _) in enumerate(ranked) if tok == true_next),
+                len(ranked) + 1,
+            )
+            for k in ks:
+                if true_rank <= k:
+                    hits[k] += 1
+
+        results[ctx_len] = {
+            'hits':    {k: hits[k] / n_eval for k in ks},
+            'no_dist': no_dist,
+        }
+
+    print(f'\n  Context-aware Hits@K  (n={n_eval:,}, rel={rel!r})')
+    print(f'  {"context_len":>12s}  H@1     H@3     H@10   no_dist')
+    print(f'  {"-" * 50}')
+    for ctx_len in context_lens:
+        r = results[ctx_len]
+        label = f'ctx={ctx_len}' + (' (stateless)' if ctx_len == 0 else '')
+        print(f'  {label:>20s}  '
+              + '  '.join(f'{r["hits"][k]:.3f}' for k in ks)
+              + f'   {r["no_dist"]}')
+
+
 def _demo_infer_chain(learner: RelationalLearner,
                       algebra: 'RelationalAlgebra') -> None:
     """R6: Demo compositional relational inference with infer_chain()."""
@@ -453,6 +547,25 @@ def main() -> None:
 
     print(f'\nR5: Benchmark (train/test split Hits@K)...')
     _run_benchmark(sequences, args.relations)
+
+    # R5+: context-aware variant using ContextBeliefState
+    print(f'\nR5+: Context-aware benchmark (ContextBeliefState)...')
+    import random as _rng
+    _rng.seed(42)
+    n = len(sequences)
+    idx = list(range(n))
+    _rng.shuffle(idx)
+    split = max(1, int(n * 0.8))
+    _train_seqs = [sequences[i] for i in idx[:split]]
+    _test_seqs  = [sequences[i] for i in idx[split:]] or sequences
+    _ctx_learner = RelationalLearner()
+    _ctx_learner.fit(
+        build_triples(_train_seqs, args.relations), verbose=False)
+    _run_context_benchmark(
+        _train_seqs, _test_seqs, _ctx_learner,
+        context_lens=(0, 3, 10, 30),
+        n_sample=5000,
+    )
 
     print(f'\nR4: Geometry-adapted metric...')
     topology = geo.topology
