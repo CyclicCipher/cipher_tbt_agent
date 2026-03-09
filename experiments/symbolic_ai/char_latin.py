@@ -81,7 +81,16 @@ def load_sequences(corpus_dir: str, n_books: int | None = None,
 
     Books (subdirectories) are kept SEPARATE — no cross-book adjacency.
     Files are loaded in sorted filename order (= page/line reading order).
+
+    Welded sequences are cached in welded_cache/ (next to the corpus dir) so
+    the 10K+ .gt.txt files are only opened once ever.  Subsequent runs load
+    one plain-text file per book instead of thousands of tiny files.
     """
+    cache_dir = os.path.join(
+        os.path.dirname(os.path.abspath(corpus_dir)), 'welded_cache'
+    )
+    os.makedirs(cache_dir, exist_ok=True)
+
     pattern = os.path.join(corpus_dir, '**', '*.gt.txt')
     all_paths = sorted(glob.glob(pattern, recursive=True))
 
@@ -95,19 +104,30 @@ def load_sequences(corpus_dir: str, n_books: int | None = None,
 
     sequences = []
     for book_dir in book_dirs:
-        chars: list[str] = []
-        for path in sorted(book_files[book_dir]):
-            try:
-                with open(path, encoding='utf-8', errors='replace') as f:
-                    raw = f.read().strip()
-            except OSError:
-                continue
-            norm = _normalise(raw)
-            if not norm:
-                continue
-            if chars:
-                chars.append(' ')
-            chars.extend(list(norm))
+        book_name = os.path.basename(book_dir)
+        cache_path = os.path.join(cache_dir, book_name + '.txt')
+
+        if os.path.exists(cache_path):
+            with open(cache_path, encoding='utf-8') as f:
+                chars = list(f.read())
+        else:
+            chars = []
+            for path in sorted(book_files[book_dir]):
+                try:
+                    with open(path, encoding='utf-8', errors='replace') as f:
+                        raw = f.read().strip()
+                except OSError:
+                    continue
+                norm = _normalise(raw)
+                if not norm:
+                    continue
+                if chars:
+                    chars.append(' ')
+                chars.extend(list(norm))
+            if len(chars) >= min_chars:
+                with open(cache_path, 'w', encoding='utf-8') as f:
+                    f.write(''.join(chars))
+
         if len(chars) >= min_chars:
             sequences.append(chars)
 

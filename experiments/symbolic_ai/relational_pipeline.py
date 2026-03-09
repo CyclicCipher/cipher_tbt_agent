@@ -496,8 +496,14 @@ class RelationalLearner:
         """
         a_s = str(atom)
         r_s = str(relation)
-        # Fast path: atom-level bigram (precise, char-specific)
-        bg = getattr(self, '_atom_bigrams', {}).get((a_s, r_s))
+        key = (a_s, r_s)
+        # Counts path: online updates go here; lazily normalise from raw counts.
+        counts = getattr(self, '_atom_counts', {}).get(key)
+        if counts is not None:
+            total = getattr(self, '_atom_totals', {}).get(key, 1)
+            return {t: c / total for t, c in counts.items()} if total > 0 else {}
+        # Batch-fitted bigrams (no subsequent online updates for this key).
+        bg = getattr(self, '_atom_bigrams', {}).get(key)
         if bg is not None:
             return dict(bg)
         # Fallback: category-level soft retrieval (OOV in small-V models)
@@ -516,7 +522,11 @@ class RelationalLearner:
                         result[tok] = result.get(tok, 0.0) + p_cb * p_t
                 if result:
                     return result
-        # Final fallback: per-relation unigram P(t|r) — works in large-KG mode
+        # Final fallback: per-relation unigram — rebuild lazily from raw counts.
+        rel_counts = getattr(self, '_rel_counts', {}).get(r_s)
+        if rel_counts is not None:
+            total_r = getattr(self, '_rel_totals', {}).get(r_s, 1)
+            return {t: c / total_r for t, c in rel_counts.items()} if total_r > 0 else {}
         return dict(self._rel_unigram.get(r_s, {}))
 
     def update_online(self, atom: Any, rel: Any, target: Any) -> None:
@@ -563,9 +573,7 @@ class RelationalLearner:
             self._atom_totals[key] = sum(self._atom_counts[key].values())
         self._atom_counts[key][b_s] += 1
         self._atom_totals[key] += 1
-        total = self._atom_totals[key]
-        self._atom_bigrams[key] = {t: c / total
-                                   for t, c in self._atom_counts[key].items()}
+        # _atom_bigrams rebuilt lazily in predict_dist; no dict comprehension here.
 
         # --- per-relation unigram update ------------------------------------
         if r_s not in self._rel_counts:
@@ -577,11 +585,7 @@ class RelationalLearner:
             self._rel_totals[r_s] = sum(self._rel_counts[r_s].values())
         self._rel_counts[r_s][b_s] += 1
         self._rel_totals[r_s] += 1
-        total_r = self._rel_totals[r_s]
-        if not hasattr(self, '_rel_unigram') or self._rel_unigram is None:
-            self._rel_unigram = {}
-        self._rel_unigram[r_s] = {t: c / total_r
-                                  for t, c in self._rel_counts[r_s].items()}
+        # _rel_unigram rebuilt lazily in predict_dist; no dict comprehension here.
 
     def atom_neighbors(self, atom: Any, topn: int = 8) -> list[tuple]:
         """Atoms most similar in relational role (by category similarity).
@@ -4286,19 +4290,34 @@ class PredictiveCodingHierarchy:
     # ------------------------------------------------------------------
 
     def _surprisal(self, level: int, token: str) -> float:
-        """Return -log2 P(token | prev_token) at *level*.
+        """Return -log2 P(token | prev_token) at *level* — O(1).
 
-        Returns 0.0 during the cold-start grace period or when the learner
-        has no prediction distribution for the previous token.
+        Bypasses predict_dist to avoid building a full normalized dict.
+        Looks up the raw count for (prev, token) and divides by the stored
+        total — one dict lookup and one float division.
+        Returns 0.0 during the cold-start grace period or before any data.
         """
         prev = self._prev[level]
         if prev is None or self._seen[level] < self.min_tokens_active:
             return 0.0
-        dist = self.learners[level].predict_dist(prev, self.next_rel)
-        if not dist:
-            return 0.0
-        p = dist.get(token, 1e-10)
-        return -math.log2(p)
+        learner = self.learners[level]
+        key = (str(prev), self.next_rel)
+        counts = getattr(learner, '_atom_counts', None)
+        if counts is not None:
+            ctr = counts.get(key)
+            if ctr is not None:
+                c = ctr.get(token, 0)
+                total = learner._atom_totals.get(key, 1)
+                p = c / total if c > 0 else 1e-10
+                return -math.log2(p)
+        # Unigram fallback (unfitted or OOV key).
+        rel_counts = getattr(learner, '_rel_counts', {}).get(self.next_rel)
+        if rel_counts:
+            c = rel_counts.get(token, 0)
+            total_r = getattr(learner, '_rel_totals', {}).get(self.next_rel, 1)
+            p = c / total_r if c > 0 else 1e-10
+            return -math.log2(p)
+        return 0.0
 
     def _effective_threshold(self, level: int) -> float:
         """Adaptive boundary threshold for *level* — O(1).
