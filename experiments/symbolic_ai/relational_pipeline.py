@@ -185,14 +185,18 @@ class RelationalLearner:
             ('next_cat_rel',        ['cat', 'rel'],       ['cat'],  'relational'),
             ('token_given_cat_rel', ['cat', 'rel', 'cat'],['atom'], 'relational'),
         ])
-        # Build transition matrix for GeometryDetector in the same pass.
+        # Build transition matrix (GeometryDetector) AND atom-level bigrams
+        # (V-level prediction pathway) in a single O(N) pass.
         from collections import defaultdict, Counter as _Counter
-        _trans_raw: dict = defaultdict(lambda: defaultdict(_Counter))
+        _trans_raw:   dict = defaultdict(lambda: defaultdict(_Counter))
+        _atom_raw:    dict = defaultdict(_Counter)  # (atom, rel) → Counter(target)
         n_used = n_skip = 0
         for a, r, b in triples:
             a_s, r_s, b_s = str(a), str(r), str(b)
             c_a = self.assignment.get(a_s)
             c_b = self.assignment.get(b_s)
+            # Atom-level bigram (always — even for OOV categories)
+            _atom_raw[(a_s, r_s)][b_s] += 1
             if c_a is None or c_b is None:
                 n_skip += 1
                 continue
@@ -202,6 +206,13 @@ class RelationalLearner:
                           (str(c_a), r_s, str(c_b)), (b_s,))
             _trans_raw[r_s][str(c_a)][str(c_b)] += 1
             n_used += 1
+        # Normalise atom bigrams and store.
+        self._atom_bigrams: dict = {}
+        for (atom, rel), ctr in _atom_raw.items():
+            total = sum(ctr.values())
+            if total > 0:
+                self._atom_bigrams[(atom, rel)] = {
+                    k: v / total for k, v in ctr.items()}
         # Normalise and store for GeometryDetector.
         self._trans: dict = {}
         for rel, src_map in _trans_raw.items():
@@ -290,72 +301,60 @@ class RelationalLearner:
                     topk: int = 5) -> list[tuple[Any, float]]:
         """R6: Distribution-preserving multi-hop relational inference.
 
-        Propagates a probability distribution through the chain of relations,
-        marginalising over intermediate categories at each step.
+        Propagates an atom-level probability distribution through each relation,
+        using _atom_bigrams (empirical char-specific distributions) as the fast
+        path and category-level E3 soft retrieval as the OOV fallback.
 
         Returns:
             [(atom, probability), ...] sorted descending, top-k entries.
 
         Example (Latin):
             learner.infer_chain('q', ['next', 'next'])
-            # 'q' → typically 'u' → then what follows 'u' most often
+            # 'q' → 'u' (0.99) → then what follows 'u' most often
 
             learner.infer_chain('q', ['skip2f'])
             # Should give same result (R3 showed next∘next ≈ skip2f)
         """
-        a_s = str(atom)
-        c_a = self.assignment.get(a_s)
-        if c_a is None:
-            return []
+        atom_dist: dict = {str(atom): 1.0}
+        atom_bigs = getattr(self, '_atom_bigrams', {})
 
-        # Start: delta distribution on the source atom's category
-        c_dist: dict = {str(c_a): 1.0}
-
-        # Propagate through each relation
         for rel in relations:
-            c_next: dict = {}
-            for c_src_key, p_src in c_dist.items():
+            r_s = str(rel)
+            next_dist: dict = {}
+            for src_atom, p_src in atom_dist.items():
                 if p_src < 1e-10:
                     continue
-                hop = self._get_nc_soft((c_src_key, rel))
-                if not hop:
-                    continue
-                for c_tgt_key, p_hop in hop.items():
-                    c_tgt = (c_tgt_key[0] if isinstance(c_tgt_key, tuple)
-                             else str(c_tgt_key))
-                    c_next[c_tgt] = c_next.get(c_tgt, 0.0) + p_src * p_hop
-            if not c_next:
+                # Fast path: empirical atom-level bigram
+                tgt_dist = atom_bigs.get((src_atom, r_s))
+                if not tgt_dist:
+                    # OOV fallback: category-level E3 soft retrieval
+                    tgt_dist = self.predict_dist(src_atom, r_s)
+                for tgt, p_tgt in tgt_dist.items():
+                    next_dist[tgt] = next_dist.get(tgt, 0.0) + p_src * p_tgt
+            if not next_dist:
                 return []
-            c_dist = c_next
+            total = sum(next_dist.values())
+            atom_dist = {k: v / total for k, v in next_dist.items()}
 
-        # Decode: for each (c_src, c_tgt) in the posterior, get P(atom)
-        # Use the last relation for decoding
-        r_last = relations[-1]
-        atom_dist: dict = {}
-        for c_tgt_key, p_ct in c_dist.items():
-            # We don't track c_src precisely after multi-hop, use c_a as proxy
-            t_dist = self._get_wgc_soft((str(c_a), r_last, str(c_tgt_key)))
-            if not t_dist:
-                continue
-            for tok_key, p_t in t_dist.items():
-                tok = tok_key[0] if isinstance(tok_key, tuple) else str(tok_key)
-                atom_dist[tok] = atom_dist.get(tok, 0.0) + p_ct * p_t
-
-        if not atom_dist:
-            return []
-        total = sum(atom_dist.values())
-        ranked = sorted(((tok, p / total) for tok, p in atom_dist.items()),
-                        key=lambda x: -x[1])
+        ranked = sorted(atom_dist.items(), key=lambda kv: -kv[1])
         return ranked[:topk]
 
     def predict(self, atom: Any, relation: str) -> Any | None:
-        """Predict most likely target atom given source atom and relation name."""
+        """Predict most likely target atom given source atom and relation name.
+
+        Uses atom-level bigrams (fast path) for seen atoms, falls back to
+        category-level E3 soft retrieval for OOV generalisation.
+        """
         a_s = str(atom)
         r_s = str(relation)
+        # Fast path: atom-level bigram
+        bg = getattr(self, '_atom_bigrams', {}).get((a_s, r_s))
+        if bg:
+            return max(bg, key=bg.get)
+        # Fallback: category-level E3 soft retrieval (OOV)
         c_a = self.assignment.get(a_s)
         if c_a is None:
             return None
-        # E3 soft
         c_b_dist = self._get_nc_soft((str(c_a), r_s))
         if c_b_dist:
             c_b_tup = max(c_b_dist, key=c_b_dist.get)
@@ -364,7 +363,7 @@ class RelationalLearner:
             if atom_dist:
                 best = max(atom_dist, key=atom_dist.get)
                 return best[0] if isinstance(best, tuple) else str(best)
-        # E1 fallback (uses _index, works after examples.clear())
+        # E1 fallback
         c_b_t = self.ai.ask('next_cat_rel', (str(c_a), r_s))
         if c_b_t is None:
             return None
@@ -377,10 +376,19 @@ class RelationalLearner:
     def predict_dist(self, atom: Any, relation: str) -> dict[Any, float]:
         """Full distribution over target atoms: P(target | atom, relation).
 
-        Marginalises over c_tgt: P(b|a,r) = Σ_{c_tgt} P(c_tgt|c_a,r) · P(b|c_a,r,c_tgt).
+        Fast path (seen atoms): returns the atom-level bigram distribution directly
+        — V-level precision, no category abstraction overhead.
+
+        Fallback (OOV atoms): marginalises over c_tgt via soft category retrieval,
+        providing generalisation to atoms not seen in training.
         """
         a_s = str(atom)
         r_s = str(relation)
+        # Fast path: atom-level bigram (precise, char-specific)
+        bg = getattr(self, '_atom_bigrams', {}).get((a_s, r_s))
+        if bg is not None:
+            return dict(bg)
+        # Fallback: category-level soft retrieval (OOV generalisation)
         c_a = self.assignment.get(a_s)
         if c_a is None:
             return {}
