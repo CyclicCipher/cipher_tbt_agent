@@ -52,11 +52,35 @@ from relational_pipeline import (
 # Corpus loading
 # ---------------------------------------------------------------------------
 
-CORPUS_DIR = os.path.join(_HERE, 'data', 'GT4HistOCR', 'corpus', 'EarlyModernLatin')
+_CORPUS_ROOT = os.path.join(_HERE, 'data', 'GT4HistOCR', 'corpus')
+CORPUS_DIR   = os.path.join(_CORPUS_ROOT, 'EarlyModernLatin')
+
+# All corpora available in the dataset.
+ALL_CORPUS_DIRS = [
+    os.path.join(_CORPUS_ROOT, 'EarlyModernLatin'),       # 12 books — Latin
+    os.path.join(_CORPUS_ROOT, 'Kallimachos'),            #  9 books — Early Modern Latin/German
+    os.path.join(_CORPUS_ROOT, 'RIDGES-Fraktur'),         # 20 books — Early Modern German
+    os.path.join(_CORPUS_ROOT, 'RefCorpus-ENHG-Incunabula'),  #  9 books — ENHG incunabula
+    os.path.join(_CORPUS_ROOT, 'dta19'),                  # 39 books — 19th-century German
+]
 
 
 def _normalise(text: str) -> str:
-    """Normalize Early Modern Latin text to a-z + space only."""
+    """Normalise any historical text (Latin or German) to a-z + space only.
+
+    German-specific substitutions applied before stripping:
+      ß  → ss   (standard romanisation)
+      ä  → ae   (matches how Latin æ ligature is handled)
+      ö  → oe   (matches Latin œ ligature)
+      ü  → ue
+    All remaining diacritics are stripped via NFD decomposition.
+    """
+    # German special characters
+    text = text.replace('ß', 'ss').replace('ẞ', 'ss')
+    text = text.replace('ä', 'ae').replace('Ä', 'ae')
+    text = text.replace('ö', 'oe').replace('Ö', 'oe')
+    text = text.replace('ü', 'ue').replace('Ü', 'ue')
+    # Latin ligatures / abbreviations
     text = text.replace('ſ', 's')
     text = text.replace('æ', 'ae').replace('Æ', 'ae')
     text = text.replace('œ', 'oe').replace('Œ', 'oe')
@@ -139,6 +163,35 @@ def load_sequences(corpus_dir: str, n_books: int | None = None,
         for i, bd in enumerate(book_dirs[:len(sequences)]):
             print(f'  {os.path.basename(bd)}: {lengths[i]:,} chars')
     return sequences
+
+
+def load_all_corpora(n_books_per_corpus: int | None = None,
+                     corpus_dirs: list | None = None) -> list[list[str]]:
+    """Load all corpora (Latin + German), returning one sequence per book.
+
+    Each corpus is loaded separately so book-level identity is preserved.
+    Books from different corpora are simply concatenated into one flat list —
+    the PCH treats them as independent documents (no cross-book adjacency).
+
+    Parameters
+    ----------
+    n_books_per_corpus
+        If given, load at most this many books from EACH corpus.
+    corpus_dirs
+        Explicit list of corpus directories to load.  Defaults to
+        ``ALL_CORPUS_DIRS`` (all five corpora).
+    """
+    dirs = corpus_dirs if corpus_dirs is not None else ALL_CORPUS_DIRS
+    all_seqs: list = []
+    for d in dirs:
+        if not os.path.isdir(d):
+            print(f'  [skip] {d} — not found')
+            continue
+        seqs = load_sequences(d, n_books=n_books_per_corpus)
+        all_seqs.extend(seqs)
+    total = sum(len(s) for s in all_seqs)
+    print(f'\nAll corpora: {len(all_seqs)} books, {total:,} total characters.')
+    return all_seqs
 
 
 # ---------------------------------------------------------------------------
@@ -514,8 +567,14 @@ def main() -> None:
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--n_books', type=int, default=None,
-                        help='Limit to first N books (default: all)')
+                        help='Limit books per corpus (default: all)')
     parser.add_argument('--corpus_dir', default=CORPUS_DIR)
+    parser.add_argument('--all_corpora', action='store_true',
+                        help='Load all 5 corpora (Latin + German) instead of '
+                             'just EarlyModernLatin')
+    parser.add_argument('--save_path', default=None,
+                        help='Override compressed-model save path '
+                             '(default: pch_compressed.pkl or pch_all_corpora.pkl)')
     parser.add_argument('--relations', nargs='+',
                         default=['next', 'prev', 'skip2f', 'skip2b'],
                         choices=['next', 'prev', 'skip2f', 'skip2b'],
@@ -528,12 +587,18 @@ def main() -> None:
                             '"pch" = online PredictiveCodingHierarchy (M8, default)'))
     args = parser.parse_args()
 
-    print(f'Corpus:    {args.corpus_dir}')
-    print(f'Books:     {args.n_books or "all"}')
+    if args.all_corpora:
+        print(f'Corpora:   ALL ({len(ALL_CORPUS_DIRS)} directories)')
+    else:
+        print(f'Corpus:    {args.corpus_dir}')
+    print(f'Books:     {args.n_books or "all"} per corpus')
     print(f'Relations: {args.relations}')
     print()
 
-    sequences = load_sequences(args.corpus_dir, n_books=args.n_books)
+    if args.all_corpora:
+        sequences = load_all_corpora(n_books_per_corpus=args.n_books)
+    else:
+        sequences = load_sequences(args.corpus_dir, n_books=args.n_books)
     if not sequences:
         print('ERROR: No sequences loaded.')
         sys.exit(1)
@@ -586,7 +651,12 @@ def main() -> None:
         print('=' * 65)
         pch.compress(verbose=True)
         import os as _os
-        _ckpt = _os.path.join(_os.path.dirname(__file__), 'pch_compressed.pkl')
+        if args.save_path:
+            _ckpt = args.save_path
+        elif args.all_corpora:
+            _ckpt = _os.path.join(_os.path.dirname(__file__), 'pch_all_corpora.pkl')
+        else:
+            _ckpt = _os.path.join(_os.path.dirname(__file__), 'pch_compressed.pkl')
         pch.save_compressed(_ckpt)
         # Verify round-trip.
         from relational_pipeline import PredictiveCodingHierarchy as _PCH
