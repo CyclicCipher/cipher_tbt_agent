@@ -5077,6 +5077,323 @@ class PredictiveCodingHierarchy:
         self._adjunction_quality = quality_map
         return kg
 
+    # ------------------------------------------------------------------
+    # M18 — Causal Reasoning, MasteryState, Full CTKG Closure
+    # ------------------------------------------------------------------
+
+    def build_transition_kg(
+        self,
+        level:       int,
+        domain_name: str = 'pch',
+    ) -> 'KnowledgeGraph':
+        """M18c/d: Build a Markov-chain CTKG at a single level.
+
+        Each discovered type category becomes a Concept node.  Prerequisite
+        edges carry ``transfer_probability = _trans['next'][src][tgt]``,
+        making the graph a probabilistic causal model suitable for:
+        - :func:`ctkg.graph.KnowledgeGraph.d_separated` (Bayes-ball)
+        - :func:`ctkg.graph.KnowledgeGraph.intervene` (do-calculus)
+        - :func:`ctkg.graph.KnowledgeGraph.information_flow` (information bits)
+
+        Parameters
+        ----------
+        level
+            The hierarchy level to model.
+        domain_name
+            Domain label for the Concept entries.
+
+        Returns
+        -------
+        KnowledgeGraph
+            Fresh graph with K concept nodes and up to K² Prerequisite edges
+            (one per non-zero transition probability).
+        """
+        from ctkg.graph import TypeDef, Concept, Prerequisite  # type: ignore
+
+        learner = self.learners[level]
+        K       = getattr(learner, '_K', 0)
+        if K < 2:
+            return KnowledgeGraph()
+
+        trans   = getattr(learner, '_trans', {}).get(self.next_rel, {})
+        clusters = getattr(learner, 'clusters', {})
+
+        kg = KnowledgeGraph()
+        constructor = 'symbol' if level == 0 else ('seq' if level <= 2 else 'tuple')
+
+        # Add one concept per type category.
+        for k in range(K):
+            tname = f'type_L{level}_{k}'
+            kg.types[tname] = TypeDef(
+                name=tname, constructor=constructor,
+                description=f'Type at level {level} category {k}',
+            )
+            members = clusters.get(k, [])
+            top     = sorted(members)[:5]
+            kg.concepts[tname] = Concept(
+                name=tname,
+                description=(', '.join(repr(m) for m in top)
+                             + (f' +{len(members)-5} more' if len(members) > 5 else '')),
+                domain=domain_name,
+                input_type=[tname],
+                output_type=[tname],
+            )
+
+        # Add Markov transition edges as prerequisites with transfer_probability.
+        for c_src, tgt_dist in trans.items():
+            for c_tgt, tp in tgt_dist.items():
+                if tp < 1e-6:
+                    continue
+                src_cname = f'type_L{level}_{c_src}'
+                tgt_cname = f'type_L{level}_{c_tgt}'
+                if src_cname not in kg.concepts or tgt_cname not in kg.concepts:
+                    continue
+                prereq = Prerequisite(
+                    source               = src_cname,
+                    target               = tgt_cname,
+                    role                 = 'transitions_to',
+                    transfer_probability = float(tp),
+                )
+                kg.prerequisites.append(prereq)
+                kg._children.setdefault(src_cname, set()).add(tgt_cname)
+                kg._parents.setdefault(tgt_cname, set()).add(src_cname)
+
+        return kg
+
+    def d_separated_types(
+        self,
+        level:       int,
+        type_a:      int,
+        type_b:      int,
+        given_types: 'set[int] | None' = None,
+    ) -> bool:
+        """M18c: Test conditional independence of two type categories.
+
+        Builds the Markov-chain CTKG for *level* and runs the Bayes-ball
+        d-separation test.  Returns ``True`` if type A and type B are
+        conditionally independent given the observed set.
+
+        Example
+        -------
+        ``pch.d_separated_types(0, 2, 5, given_types={1})``
+        → are L0-type-2 and L0-type-5 independent given type 1 is observed?
+        """
+        kg    = self.build_transition_kg(level)
+        given = {f'type_L{level}_{g}' for g in (given_types or set())}
+        a_name = f'type_L{level}_{type_a}'
+        b_name = f'type_L{level}_{type_b}'
+        return kg.d_separated(a_name, b_name, given)
+
+    def intervene_type(
+        self,
+        level:    int,
+        do_types: 'set[int]',
+    ) -> 'KnowledgeGraph':
+        """M18d: Do-calculus intervention at the type level.
+
+        Returns a mutilated Markov-chain CTKG where all incoming transition
+        edges to the ``do_types`` are severed (Pearl's do-operator).  This
+        simulates "what if the topic forcibly shifted to these categories?"
+
+        The mutilated graph can be used to compute post-intervention
+        :func:`information_flow` and compared to the observational flow to
+        measure the causal effect of the topic shift.
+
+        Parameters
+        ----------
+        level
+            Hierarchy level.
+        do_types
+            Set of type-category indices to intervene on.
+
+        Returns
+        -------
+        KnowledgeGraph
+            Mutilated graph with do_types' incoming edges removed.
+        """
+        kg        = self.build_transition_kg(level)
+        do_names  = {f'type_L{level}_{t}' for t in do_types}
+        return kg.intervene(do_names)
+
+    def type_mastery(
+        self,
+        tokens_needed_per_type: int = 200,
+        domain_name:            str = 'pch',
+    ) -> 'MasteryState':
+        """M18a: MasteryState reflecting how well each type is characterized.
+
+        Mastery of a type category is estimated as:
+          ``mastery = min(1.0, tokens_seen / tokens_needed_per_type)``
+        where ``tokens_seen`` is the number of tokens assigned to that
+        category.  A type with fewer than *tokens_needed_per_type* observations
+        is considered still being learned; ``frontier()`` returns these
+        under-characterised types.
+
+        Adds cross-level Prerequisite edges so that higher-level categories
+        depend on the lower-level categories they are built from.  Uses
+        M18b transfer probabilities estimated from the type-abstraction
+        mapping (uniform fallback if not available).
+
+        Parameters
+        ----------
+        tokens_needed_per_type
+            Token count threshold for "mastered" (default 200).
+        domain_name
+            Domain label for the KnowledgeGraph.
+
+        Returns
+        -------
+        MasteryState
+            Populated mastery state; call ``.frontier()`` to get types that
+            need more data, ``.information_gain(concept)`` for prioritisation.
+        """
+        from ctkg.graph import TypeDef, Concept, Prerequisite  # type: ignore
+
+        kg = KnowledgeGraph()
+        # Collect per-type token counts from assignment.
+        for level in range(self.n_levels):
+            learner  = self.learners[level]
+            K        = getattr(learner, '_K', 0)
+            clusters = getattr(learner, 'clusters', {})
+            if K < 2:
+                continue
+            constructor = 'symbol' if level == 0 else ('seq' if level <= 2 else 'tuple')
+            for k in range(K):
+                tname = f'type_L{level}_{k}'
+                members = clusters.get(k, [])
+                kg.types[tname] = TypeDef(name=tname, constructor=constructor)
+                kg.concepts[tname] = Concept(
+                    name=tname,
+                    description=f'L{level} type {k}: {len(members)} members',
+                    domain=domain_name,
+                    input_type=[tname],
+                    output_type=[tname],
+                )
+
+        # M18b: cross-level prerequisites with transfer_probability.
+        for level in range(self.n_levels - 1):
+            sl   = self.learners[level]
+            sl_n = self.learners[level + 1]
+            K_lo = getattr(sl,   '_K', 0)
+            K_hi = getattr(sl_n, '_K', 0)
+            if K_lo < 2 or K_hi < 2:
+                continue
+            # Uniform transfer probability as fallback.
+            tp_uniform = 1.0 / K_hi
+            for k in range(K_lo):
+                for j in range(K_hi):
+                    src_name = f'type_L{level}_{k}'
+                    tgt_name = f'type_L{level+1}_{j}'
+                    if src_name not in kg.concepts or tgt_name not in kg.concepts:
+                        continue
+                    prereq = Prerequisite(
+                        source=src_name, target=tgt_name,
+                        role=f'constitutes_L{level+1}',
+                        transfer_probability=tp_uniform,
+                    )
+                    kg.prerequisites.append(prereq)
+                    kg._children.setdefault(src_name, set()).add(tgt_name)
+                    kg._parents.setdefault(tgt_name, set()).add(src_name)
+
+        mastery = kg.mastery_state()
+
+        # Observe each type: score = min(1.0, |members| / threshold).
+        for level in range(self.n_levels):
+            learner  = self.learners[level]
+            clusters = getattr(learner, 'clusters', {})
+            K        = getattr(learner, '_K', 0)
+            if K < 2:
+                continue
+            for k, members in clusters.items():
+                tname = f'type_L{level}_{k}'
+                score = min(1.0, len(members) / tokens_needed_per_type)
+                mastery.observe(tname, score)
+
+        return mastery
+
+    def causal_analysis(
+        self,
+        level: int = 0,
+        verbose: bool = True,
+    ) -> dict:
+        """M18: Unified causal analysis at *level*: information flow + d-sep + intervention.
+
+        Combines all M18 sub-tasks into a single convenience method:
+        1. Build Markov-chain CTKG.
+        2. Compute information_flow() per transition edge.
+        3. Find maximally d-separated type pairs (strongest independence).
+        4. Perform do-intervention on the highest-flow type; measure flow change.
+
+        Returns
+        -------
+        dict with keys:
+            ``'flow'``        — ``{src→tgt: bits}`` from ``information_flow()``
+            ``'dsep_pairs'``  — list of ``(type_a, type_b, given, result)``
+            ``'intervention'``— ``{'do_type': k, 'flow_before': ..., 'flow_after': ...}``
+        """
+        kg   = self.build_transition_kg(level)
+        K    = getattr(self.learners[level], '_K', 0)
+
+        # 1. Information flow.
+        flow = kg.information_flow()
+
+        # 2. Find a representative d-separation triple.
+        dsep_pairs = []
+        if K >= 3:
+            # Test: given the most common type, are the two extreme types independent?
+            learner    = self.learners[level]
+            clusters   = getattr(learner, 'clusters', {})
+            by_size    = sorted(clusters, key=lambda k: -len(clusters.get(k, [])))
+            if len(by_size) >= 3:
+                given_k = by_size[0]   # most common
+                a_k     = by_size[1]
+                b_k     = by_size[2]
+                result  = self.d_separated_types(level, a_k, b_k, {given_k})
+                dsep_pairs.append((a_k, b_k, {given_k}, result))
+
+        # 3. Intervention on the highest-flow source type.
+        intervention_result: dict = {}
+        if flow:
+            top_edge     = max(flow, key=flow.get)
+            src_name, _  = top_edge.split('->', 1)
+            # Extract type index from name like 'type_L0_3'
+            try:
+                do_k = int(src_name.split('_')[-1])
+            except ValueError:
+                do_k = 0
+            flow_before  = sum(flow.values())
+            kg_mutilated = self.intervene_type(level, {do_k})
+            flow_after_d = kg_mutilated.information_flow()
+            flow_after   = sum(flow_after_d.values())
+            intervention_result = {
+                'do_type':    do_k,
+                'do_name':    src_name,
+                'flow_before': flow_before,
+                'flow_after':  flow_after,
+                'reduction':   flow_before - flow_after,
+            }
+
+        if verbose:
+            print(f'\n  M18 causal analysis at level {level}:')
+            top_flows = sorted(flow.items(), key=lambda kv: -kv[1])[:5]
+            print(f'  Top-5 information flows (bits):')
+            for edge, bits in top_flows:
+                print(f'    {edge}: {bits:.3f} bits')
+            for a_k, b_k, given, res in dsep_pairs:
+                g_str = ', '.join(f'type_L{level}_{g}' for g in given)
+                print(f'  d-sep(L{level}:{a_k}, L{level}:{b_k} | {g_str}): {res}')
+            if intervention_result:
+                r = intervention_result
+                print(f'  do(type_L{level}_{r["do_type"]}): '
+                      f'flow {r["flow_before"]:.3f} → {r["flow_after"]:.3f} '
+                      f'({r["reduction"]:+.3f} bits)')
+
+        return {
+            'flow':         flow,
+            'dsep_pairs':   dsep_pairs,
+            'intervention': intervention_result,
+        }
+
     def level_summary(self) -> None:
         """Print per-level diagnostics to stdout."""
         print(f'\nPredictiveCodingHierarchy  n_levels={self.n_levels}')

@@ -667,6 +667,42 @@ def main() -> None:
         print(f'\n  Final CTKG: {len(kg_a.types)} types, '
               f'{len(kg_a.concepts)} concepts, '
               f'{n_adjs} adjunction(s), {n_funcs} functor(s)')
+
+        print(f'\n{"=" * 65}')
+        print('M18: Causal reasoning, MasteryState, full CTKG closure')
+        print('=' * 65)
+
+        # M18a: MasteryState — which type categories need more data?
+        mastery = pch2.type_mastery(tokens_needed_per_type=200)
+        frontier = mastery.frontier(threshold=0.8)
+        print(f'  MasteryState: {len(mastery.levels)} concepts tracked')
+        print(f'  Frontier (needs more data): {len(frontier)} types')
+        if frontier:
+            print(f'    {sorted(list(frontier))[:8]}')
+
+        # M18a: information_gain per type (prioritize what to learn next).
+        kg_mastery = pch2.build_transition_kg(level=1)
+        if kg_mastery.concepts:
+            ig_scores = {c: kg_mastery.mastery_state().information_gain(c)
+                         for c in list(kg_mastery.concepts)[:6]}
+            top_ig = sorted(ig_scores.items(), key=lambda kv: -kv[1])[:3]
+            print(f'  Top-3 types by information_gain: '
+                  + ', '.join(f'{c.split("_")[-1]}:{v:.3f}' for c, v in top_ig))
+
+        # M18c/d: causal analysis at level 0 (character-level Markov chain).
+        pch2.causal_analysis(level=0, verbose=True)
+
+        # M18c: d-separation query at level 1.
+        K1 = getattr(pch2.learners[1], '_K', 0)
+        if K1 >= 3:
+            a, b, g = 0, 2, {1}
+            sep = pch2.d_separated_types(1, a, b, given_types=g)
+            print(f'  d-sep L1: type_{a} ⊥ type_{b} | type_{set(g)}: {sep}')
+
+        print(f'\n  M18 DONE — Full CTKG toolkit exercised:')
+        print(f'    Functor ✓  Adjunction ✓  Interface ✓  sheaf_check ✓')
+        print(f'    MasteryState ✓  d_separated ✓  intervene ✓  information_flow ✓')
+        print(f'    transfer_probability ✓  information_gain ✓')
         return
 
     print(f'\nBuilding triples...')

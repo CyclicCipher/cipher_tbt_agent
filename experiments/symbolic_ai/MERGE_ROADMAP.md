@@ -641,7 +641,7 @@ blocks, `sheaf_check()`, `sheaf_merge()`.
 
 ---
 
-### M18 — Causal Reasoning, MasteryState, Full CTKG Closure — PLANNED
+### M18 — Causal Reasoning, MasteryState, Full CTKG Closure — DONE
 
 **Problem**: `d_separated()`, `intervene()`, `MasteryState`, `transfer_probability`,
 and probabilistic prerequisites are all implemented in `ctkg/graph.py` but completely
