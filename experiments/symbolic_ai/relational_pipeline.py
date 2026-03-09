@@ -3636,3 +3636,189 @@ class MultiLevelContextBelief:
             f'L{i}:{b.entropy():.1f}b' for i, b in enumerate(self._beliefs)
         )
         return f'MultiLevelContextBelief({levels_str})'
+
+
+# ---------------------------------------------------------------------------
+# M5: Structural relation extraction
+# ---------------------------------------------------------------------------
+
+def extract_structural_relations(
+        hier: HierarchicalRelationalLearner,
+) -> dict[str, list[tuple[str, str, str]]]:
+    """M5: Extract constituency and distributional relations from a fitted
+    HierarchicalRelationalLearner.
+
+    Two kinds of relations are returned:
+
+    1. **Constituency** (exact, from merge tree):
+       (merged_surface, 'left_of',  left_surface)
+       (merged_surface, 'right_of', right_surface)
+       (left_surface,  'part_of',   merged_surface)
+       (right_surface, 'part_of',   merged_surface)
+
+       These are always available and form the hierarchical parse tree.
+
+    2. **Distributional** (from E3 clusters at each level):
+       (atom_surface, 'has_type_L{N}', cluster_label)
+
+       Where cluster_label = 'type_{cluster_id}' from the RelationalLearner
+       at level N.  Atoms in the same cluster share a distributional category
+       — these are the CTKG types discovered from data.
+
+    Returns
+    -------
+    dict with keys:
+        'constituency'    — [(subject, relation, object), ...]
+        'distributional'  — [(atom, 'has_type_LN', type_label), ...]
+    """
+    constituency:   list[tuple[str, str, str]] = []
+    distributional: list[tuple[str, str, str]] = []
+
+    # --- Constituency relations from merge history ---
+    for l_s, r_s, merged in hier.vocab._merges:
+        m_s = merged.surface
+        constituency.append((m_s,  'left_of',  l_s))
+        constituency.append((m_s,  'right_of', r_s))
+        constituency.append((l_s,  'part_of',  m_s))
+        constituency.append((r_s,  'part_of',  m_s))
+
+    # --- Distributional type labels from E3 clusters at each level ---
+    for lvl, (learner, seqs) in enumerate(
+            zip(hier.levels, hier._seqs_at)):
+        assignment = getattr(learner, 'assignment', {})
+        if not assignment:
+            continue
+        label_prefix = f'type_L{lvl}'
+        for atom_s, cluster_id in assignment.items():
+            type_label = f'{label_prefix}_{cluster_id}'
+            distributional.append((atom_s, f'has_type_L{lvl}', type_label))
+
+    return {
+        'constituency':   constituency,
+        'distributional': distributional,
+    }
+
+
+def label_merged_atoms(hier: HierarchicalRelationalLearner) -> None:
+    """M5: Fill in the ``label`` field of each MergedAtom using the E3 cluster
+    assignment at the level where the atom first appears as a token.
+
+    After this call, ``MergedAtom.label`` holds e.g. 'type_L1_2' (level 1,
+    cluster 2), which is the distributional category discovered at that level.
+    This label IS the CTKG type for this merge unit.
+    """
+    for l_s, r_s, merged in hier.vocab._merges:
+        # The merged atom is a token at level merged.level
+        target_level = merged.level
+        if target_level >= len(hier.levels):
+            continue
+        learner    = hier.levels[target_level]
+        assignment = getattr(learner, 'assignment', {})
+        cluster_id = assignment.get(merged.surface)
+        if cluster_id is not None:
+            merged.label = f'type_L{target_level}_{cluster_id}'
+
+
+# ---------------------------------------------------------------------------
+# M6: CTKG grounding — export discovered structure as .ctkg
+# ---------------------------------------------------------------------------
+
+def export_ctkg(
+        hier:        HierarchicalRelationalLearner,
+        domain_name: str  = 'discovered',
+        out_path:    str | None = None,
+) -> str:
+    """M6: Export the structure discovered by HierarchicalRelationalLearner
+    as a CTKG domain file (.ctkg DSL format).
+
+    The export encodes:
+
+    - **Types**: one per distributional cluster per level.
+      Level-0 clusters → ``symbol`` base type.
+      Level-N clusters (N > 0) → ``seq(type_L{N-1}_*)`` (sequence of lower type).
+
+    - **Concepts**: one per MergedAtom (named merge unit).
+      Each concept has a ``requires`` edge to its left and right constituent
+      concepts (categorical composition = prerequisite structure).
+
+    - **Interface**: exports all type names for cross-domain use.
+
+    This file is the bridge between statistical learning (RelationalLearner)
+    and the formal cognitive architecture (CTKG).  A hand-authored domain file
+    for the same domain should overlap with this generated one — the degree of
+    overlap is the validation metric for M6.
+
+    Parameters
+    ----------
+    hier         A fitted HierarchicalRelationalLearner (call label_merged_atoms
+                 first to populate MergedAtom.label fields).
+    domain_name  Name for the generated domain block.
+    out_path     If given, write to this file.  Otherwise return the string.
+
+    Returns
+    -------
+    The .ctkg file content as a string.
+    """
+    label_merged_atoms(hier)
+    lines: list[str] = []
+
+    lines.append(f'# Auto-generated CTKG domain: {domain_name}')
+    lines.append(f'# Source: HierarchicalRelationalLearner '
+                 f'({len(hier.levels)} levels, {hier.vocab.n_merges()} merges)')
+    lines.append('')
+
+    # --- Collect all type labels ---
+    type_labels: set[str] = set()
+    for lvl, learner in enumerate(hier.levels):
+        assignment = getattr(learner, 'assignment', {})
+        for cluster_id in set(assignment.values()):
+            type_labels.add(f'type_L{lvl}_{cluster_id}')
+
+    # --- Type blocks ---
+    lines.append('# Types discovered by E3 clustering at each level')
+    for label in sorted(type_labels):
+        lvl_str = label.split('_')[1]   # 'L0', 'L1', …
+        lvl     = int(lvl_str[1:])
+        if lvl == 0:
+            lines.append(f'type {label} = symbol')
+        else:
+            lines.append(f'type {label} = seq(type_L{lvl - 1}_*)')
+    lines.append('')
+
+    # --- Concept blocks for MergedAtoms ---
+    lines.append('# Concepts: discovered merge units (categorical compositions)')
+    seen_concepts: set[str] = set()
+
+    def _safe_name(s: str) -> str:
+        """Convert a surface string to a valid CTKG identifier."""
+        return s.replace('[', 'M').replace(']', '').replace('+', '_').replace(' ', '_')
+
+    for l_s, r_s, merged in hier.vocab._merges:
+        concept_name = _safe_name(merged.surface)
+        left_name    = _safe_name(l_s)
+        right_name   = _safe_name(r_s)
+        type_label   = merged.label or f'type_L{merged.level}_unknown'
+
+        if concept_name in seen_concepts:
+            continue
+        seen_concepts.add(concept_name)
+
+        lines.append(f'concept {concept_name}')
+        lines.append(f'    type {type_label}')
+        lines.append(f'    requires {left_name} via "left_constituent"')
+        lines.append(f'    requires {right_name} via "right_constituent"')
+        lines.append('')
+
+    # --- Interface block ---
+    lines.append('interface')
+    for label in sorted(type_labels):
+        lines.append(f'    exports type {label}')
+    lines.append('')
+
+    content = '\n'.join(lines)
+
+    if out_path:
+        with open(out_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+    return content
