@@ -500,6 +500,12 @@ def main() -> None:
                         default=['next', 'prev', 'skip2f', 'skip2b'],
                         choices=['next', 'prev', 'skip2f', 'skip2b'],
                         help='Relations to include (default: all four)')
+    parser.add_argument('--mode', default='pch',
+                        choices=['rl', 'hrl', 'pch'],
+                        help=(
+                            'Pipeline to run after the base R0-R6 analysis. '
+                            '"rl" = base only; "hrl" = batch HRL (M1-M7); '
+                            '"pch" = online PredictiveCodingHierarchy (M8, default)'))
     args = parser.parse_args()
 
     print(f'Corpus:    {args.corpus_dir}')
@@ -590,42 +596,75 @@ def main() -> None:
     print()
     print(algebra.report())
 
-    # M1-M6: Hierarchical Merge — all-scale pattern learning
-    print(f'\n{"=" * 65}')
-    print('Hierarchical Merge: all-scale pattern learning')
-    print('=' * 65)
-    from relational_pipeline import (
-        HierarchicalRelationalLearner,
-        MergeDetector,
-        extract_structural_relations,
-        export_ctkg,
-    )
-    hrl = HierarchicalRelationalLearner(
-        pmi_threshold=0.3,
-        max_merges_per_level=30,
-        max_levels=4,
-        min_merge_count=5,
-    )
-    hrl.fit(_train_seqs, verbose=True)
+    # M1-M7 / M8: Hierarchical Merge — mode-controlled
+    if args.mode == 'rl':
+        pass   # base R0-R6 only; no Merge pipeline
 
-    print('\nMerge summary (top 20):')
-    for s in hrl.vocab.summary(20):
-        print(f'  {s}')
+    elif args.mode == 'hrl':
+        # Batch HRL (M1-M7)
+        print(f'\n{"=" * 65}')
+        print('Hierarchical Merge (HRL, batch): all-scale pattern learning')
+        print('=' * 65)
+        from relational_pipeline import (
+            HierarchicalRelationalLearner,
+            MergeDetector,
+            extract_structural_relations,
+            export_ctkg,
+        )
+        hrl = HierarchicalRelationalLearner(
+            pmi_threshold=0.3,
+            max_merges_per_level=30,
+            max_levels=4,
+            min_merge_count=5,
+        )
+        hrl.fit(_train_seqs, verbose=True)
 
-    # Boundary PMI on a sample sentence
-    sample = list('in principio erat verbum')
-    print(f'\nBoundary PMIs for {repr("".join(sample))}:')
-    pmis = hrl.boundary_pmis(sample)
-    for i, (ch, pmi) in enumerate(zip(sample[:-1], pmis)):
-        marker = '|' if pmi < 0.5 else ' '
-        print(f'  {repr(ch)}→{repr(sample[i+1])}  PMI={pmi:+.2f}  {marker}')
+        print('\nMerge summary (top 20):')
+        for s in hrl.vocab.summary(20):
+            print(f'  {s}')
 
-    # Export CTKG
-    ctkg_str = export_ctkg(hrl, domain_name='latin_chars')
-    n_lines = ctkg_str.count('\n')
-    print(f'\nCTKG export: {n_lines} lines, '
-          f'{len([l for l in ctkg_str.splitlines() if l.startswith("type")])} types, '
-          f'{len([l for l in ctkg_str.splitlines() if l.startswith("concept")])} concepts')
+        # Boundary PMI on a sample sentence
+        sample = list('in principio erat verbum')
+        print(f'\nBoundary PMIs for {repr("".join(sample))}:')
+        pmis = hrl.boundary_pmis(sample)
+        for i, (ch, pmi) in enumerate(zip(sample[:-1], pmis)):
+            marker = '|' if pmi < 0.5 else ' '
+            print(f'  {repr(ch)}→{repr(sample[i+1])}  PMI={pmi:+.2f}  {marker}')
+
+        # Export CTKG
+        ctkg_str = export_ctkg(hrl, domain_name='latin_chars')
+        n_lines = ctkg_str.count('\n')
+        print(f'\nCTKG export: {n_lines} lines, '
+              f'{len([l for l in ctkg_str.splitlines() if l.startswith("type")])} types, '
+              f'{len([l for l in ctkg_str.splitlines() if l.startswith("concept")])} concepts')
+
+    else:  # mode == 'pch'  (default)
+        # Online PredictiveCodingHierarchy (M8)
+        print(f'\n{"=" * 65}')
+        print('PredictiveCodingHierarchy (online, surprisal-based) — M8')
+        print('=' * 65)
+        from relational_pipeline import PredictiveCodingHierarchy
+        pch = PredictiveCodingHierarchy(
+            n_levels=10,
+            max_chunk_size=7,
+            adaptive_threshold=True,
+            surprise_k=0.5,
+            min_tokens_active=20,
+        )
+        print('Processing corpus (cold-start, all books)...')
+        pch.process_corpus(_train_seqs)
+        pch.level_summary()
+
+        # Export CTKG
+        ctkg_str = pch.export_ctkg(domain_name='latin_pch')
+        n_lines  = ctkg_str.count('\n')
+        print(f'\nCTKG export: {n_lines} lines, '
+              f'{len([l for l in ctkg_str.splitlines() if l.startswith("type")])} types, '
+              f'{len([l for l in ctkg_str.splitlines() if l.startswith("concept")])} concepts')
+        if n_lines > 0:
+            print('\n--- CTKG preview (first 40 lines) ---')
+            for line in ctkg_str.splitlines()[:40]:
+                print(f'  {line}')
 
 
 if __name__ == '__main__':

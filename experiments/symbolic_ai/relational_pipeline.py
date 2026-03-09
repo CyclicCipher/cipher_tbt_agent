@@ -4123,3 +4123,339 @@ def export_ctkg(
             f.write(content)
 
     return content
+
+
+# =============================================================================
+# M8  PredictiveCodingHierarchy — online surprisal-based hierarchical learning
+# =============================================================================
+
+class PredictiveCodingHierarchy:
+    """Broca's-area-inspired hierarchical predictive coding over token sequences.
+
+    Replaces ``HierarchicalRelationalLearner`` as the primary inference pipeline.
+
+    Key properties:
+
+    - **Online** (token-by-token): each token is processed immediately.
+    - **Simultaneous multi-level**: emitting a chunk at level N instantly feeds
+      level N+1 within the *same* ``process()`` call.
+    - **Bounded working memory**: ``max_chunk_size`` (default 7, Miller's 7±2)
+      prevents paragraph-swallowing.
+    - **Surprisal-based boundaries**: prediction error drives segmentation, not PMI.
+    - **Adaptive threshold**: self-calibrates to the running surprisal distribution
+      at each level (mean + k*std), so no per-domain tuning is needed.
+    - **Cold-start safe**: works with unfitted learners; relies on
+      ``update_online()`` to build up prediction distributions incrementally.
+
+    Usage (cold-start)::
+
+        pch = PredictiveCodingHierarchy()
+        pch.process_corpus(sequences)   # list[list[str]], one sub-list per document
+        pch.level_summary()
+
+    Usage (warm-start from a pre-trained HRL)::
+
+        hrl = HierarchicalRelationalLearner(...)
+        hrl.fit(sequences)
+        pch = PredictiveCodingHierarchy.from_hrl(hrl)
+        pch.process_corpus(sequences)
+    """
+
+    def __init__(
+        self,
+        n_levels:           int   = 10,
+        max_chunk_size:     int   = 7,
+        surprise_threshold: float = 2.0,
+        adaptive_threshold: bool  = True,
+        surprise_k:         float = 0.5,
+        min_tokens_active:  int   = 20,
+        top_down_weight:    float = 0.3,
+        next_rel:           str   = 'next',
+    ) -> None:
+        """
+        Parameters
+        ----------
+        n_levels
+            Number of hierarchical levels (default 10).  The hierarchy stops
+            propagating at the highest level that receives input.
+        max_chunk_size
+            Hard cap on working-memory buffer length.  When a buffer reaches
+            this size it is flushed regardless of surprisal.  Default 7
+            (Miller 1956, "The Magical Number Seven").
+        surprise_threshold
+            Fixed boundary threshold in bits.  Only used when
+            ``adaptive_threshold=False`` or during the cold-start grace period.
+        adaptive_threshold
+            If True (default) the threshold at each level is
+            ``mean(surprisal) + surprise_k * std(surprisal)`` computed over
+            a rolling window of the last 1 000 observations.
+        surprise_k
+            Standard-deviation multiplier for the adaptive threshold (default
+            0.5).  Smaller values = more boundaries; larger = fewer.
+        min_tokens_active
+            Number of tokens a level must have seen before surprisal-based
+            boundaries are enabled.  During this grace period only the hard
+            ``max_chunk_size`` cap produces boundaries (cold-start safety).
+        top_down_weight
+            Reserved for future top-down modulation; stored but not yet used.
+        next_rel
+            Relation name for sequential adjacency (default ``'next'``).
+        """
+        self.n_levels           = n_levels
+        self.max_chunk_size     = max_chunk_size
+        self.surprise_threshold = surprise_threshold
+        self.adaptive_threshold = adaptive_threshold
+        self.surprise_k         = surprise_k
+        self.min_tokens_active  = min_tokens_active
+        self.top_down_weight    = top_down_weight
+        self.next_rel           = next_rel
+
+        # One RelationalLearner per level (initially unfitted — cold start).
+        self.learners: list[RelationalLearner] = [
+            RelationalLearner() for _ in range(n_levels)
+        ]
+
+        # Shared merge/segment registry (grows as chunks are emitted).
+        self.vocab: AtomVocabulary = AtomVocabulary()
+
+        # Per-level bounded working-memory buffers.
+        self._buffers: list[list] = [[] for _ in range(n_levels)]
+
+        # Previous token at each level (for bigram prediction context).
+        self._prev: list = [None] * n_levels
+
+        # Total tokens processed at each level (used for cold-start gate).
+        self._seen: list[int] = [0] * n_levels
+
+        # Rolling surprisal history per level (bounded to last 1 000 values).
+        self._surp_hist: list = [
+            collections.deque(maxlen=1000) for _ in range(n_levels)
+        ]
+
+    # ------------------------------------------------------------------
+    # Core internals
+    # ------------------------------------------------------------------
+
+    def _surprisal(self, level: int, token: str) -> float:
+        """Return -log2 P(token | prev_token) at *level*.
+
+        Returns 0.0 during the cold-start grace period or when the learner
+        has no prediction distribution for the previous token.
+        """
+        prev = self._prev[level]
+        if prev is None or self._seen[level] < self.min_tokens_active:
+            return 0.0
+        dist = self.learners[level].predict_dist(prev, self.next_rel)
+        if not dist:
+            return 0.0
+        p = dist.get(token, 1e-10)
+        return -math.log2(p)
+
+    def _effective_threshold(self, level: int) -> float:
+        """Adaptive boundary threshold for *level*.
+
+        With ``adaptive_threshold=True`` returns mean + k*std over the
+        rolling surprisal history.  Falls back to ``surprise_threshold``
+        when fewer than 10 samples have been collected.
+        """
+        if not self.adaptive_threshold:
+            return self.surprise_threshold
+        hist = self._surp_hist[level]
+        if len(hist) < 10:
+            return self.surprise_threshold
+        n    = len(hist)
+        mean = sum(hist) / n
+        var  = sum((x - mean) ** 2 for x in hist) / n
+        std  = math.sqrt(var) if var > 0.0 else 0.0
+        return mean + self.surprise_k * std
+
+    def _emit_buffer(self, level: int) -> None:
+        """Flush the working-memory buffer at *level*.
+
+        Creates a composite atom:
+        - len == 1  → pass through as-is (no composition)
+        - len == 2  → ``MergedAtom`` (binary Merge)
+        - len  > 2  → ``SegmentedAtom`` (n-ary ordered Segment)
+
+        The chunk is immediately fed to level+1, implementing the
+        **simultaneous multi-level** property within a single ``process()``
+        call.
+        """
+        buf = self._buffers[level]
+        if not buf:
+            return
+
+        if len(buf) == 1:
+            chunk = str(buf[0])
+        elif len(buf) == 2:
+            chunk = self.vocab.add_merge(str(buf[0]), str(buf[1])).surface
+        else:
+            chunk = self.vocab.add_segment(
+                [str(a) for a in buf], level=level + 1
+            ).surface
+
+        # Clear before recursing to prevent accidental double-flush.
+        self._buffers[level] = []
+
+        # Propagate chunk to the next level (simultaneous multi-level).
+        if level + 1 < self.n_levels:
+            self._process_level(level + 1, chunk)
+
+    def _process_level(self, level: int, token: str) -> None:
+        """Process one *token* at the given *level*.
+
+        Order of operations (deliberate):
+
+        1. Predict  — compute surprisal *before* incorporating the observation
+                      so the measurement is uncontaminated.
+        2. Learn    — ``update_online`` incorporates the new (prev, token)
+                      bigram immediately.
+        3. Boundary — if surprisal exceeds the adaptive threshold, flush the
+                      current buffer (emitting a chunk) before appending.
+        4. Buffer   — append token to working memory.
+        5. Cap      — if buffer is full, force-flush (bounded working memory).
+        """
+        # 1. Predict.
+        surp = self._surprisal(level, token)
+        self._surp_hist[level].append(surp)
+
+        # 2. Learn.
+        prev = self._prev[level]
+        if prev is not None:
+            self.learners[level].update_online(prev, self.next_rel, token)
+        self._prev[level] = token
+        self._seen[level] += 1
+
+        # 3. Boundary detection: flush *before* adding the surprising token.
+        threshold = self._effective_threshold(level)
+        if surp > threshold and self._buffers[level]:
+            self._emit_buffer(level)
+
+        # 4. Append to working memory.
+        self._buffers[level].append(token)
+
+        # 5. Hard cap (Miller's 7±2 prevents paragraph-swallowing).
+        if len(self._buffers[level]) >= self.max_chunk_size:
+            self._emit_buffer(level)
+
+    def _reset_buffers(self) -> None:
+        """Flush all level buffers and reset context pointers.
+
+        Called at document boundaries so the last token of document N does
+        not act as prediction context for the first token of document N+1.
+        The ``_seen`` counters are intentionally *not* reset here — the
+        cold-start grace period applies only at the very start of corpus
+        processing.
+        """
+        for level in range(self.n_levels):
+            self._emit_buffer(level)
+            self._prev[level] = None
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def process(self, token: str) -> None:
+        """Process one base-level token."""
+        self._process_level(0, str(token))
+
+    def process_sequence(self, sequence) -> None:
+        """Process a sequence of base-level tokens, then flush all buffers."""
+        for token in sequence:
+            self._process_level(0, str(token))
+        # End-of-sequence: drain remaining working memory up the hierarchy.
+        for level in range(self.n_levels):
+            self._emit_buffer(level)
+
+    def process_corpus(self, sequences) -> None:
+        """Process multiple sequences (e.g. books), resetting context between them.
+
+        Parameters
+        ----------
+        sequences
+            ``list[list[str]]`` — one sub-list per independent document.
+            Context is reset between documents (``_reset_buffers``), so
+            tokens from different books never form bigrams.
+        """
+        for seq in sequences:
+            self._reset_buffers()          # document boundary: flush + clear prev
+            for token in seq:
+                self._process_level(0, str(token))
+        # Final flush after the last document.
+        for level in range(self.n_levels):
+            self._emit_buffer(level)
+
+    def level_summary(self) -> None:
+        """Print per-level diagnostics to stdout."""
+        print(f'\nPredictiveCodingHierarchy  n_levels={self.n_levels}')
+        print(f'  max_chunk_size={self.max_chunk_size}  '
+              f'adaptive={self.adaptive_threshold}  '
+              f'k={self.surprise_k}  '
+              f'grace={self.min_tokens_active}')
+        header = (f'  {"Level":>6}  {"Tokens":>10}  {"VocabSz":>8}  '
+                  f'{"MeanSurp":>10}  {"Threshold":>10}')
+        print(header)
+        active = 0
+        for lvl in range(self.n_levels):
+            seen = self._seen[lvl]
+            if seen == 0:
+                break
+            active += 1
+            hist   = self._surp_hist[lvl]
+            mean_s = sum(hist) / len(hist) if hist else 0.0
+            thresh = self._effective_threshold(lvl)
+            bg     = getattr(self.learners[lvl], '_atom_bigrams', {})
+            vocab_sz = len({a for (a, _) in bg})
+            print(f'  {lvl:>6}  {seen:>10,}  {vocab_sz:>8,}  '
+                  f'{mean_s:>10.3f}  {thresh:>10.3f}')
+        print(f'  Active levels      : {active}')
+        print(f'  Merges registered  : {self.vocab.n_merges():,}')
+        print(f'  Segments registered: {self.vocab.n_segments():,}')
+
+    def export_ctkg(
+        self,
+        domain_name: str       = 'discovered',
+        out_path:    str | None = None,
+    ) -> str:
+        """Export the discovered compositional structure as a .ctkg DSL string.
+
+        Delegates to the module-level ``export_ctkg()`` function via a
+        lightweight shim that exposes the ``vocab`` and ``levels`` attributes
+        that ``export_ctkg`` expects.
+        """
+        class _Shim:
+            pass
+        shim        = _Shim()
+        shim.vocab  = self.vocab
+        shim.levels = self.learners
+        return export_ctkg(shim, domain_name=domain_name, out_path=out_path)
+
+    # ------------------------------------------------------------------
+    # Warm-start factory
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def from_hrl(
+        cls,
+        hrl: 'HierarchicalRelationalLearner',
+        **kwargs,
+    ) -> 'PredictiveCodingHierarchy':
+        """Initialise PCH from a pre-trained HierarchicalRelationalLearner.
+
+        Borrows the fitted RelationalLearners (with E3 cluster structure) from
+        HRL so that level-0 surprisal is immediately meaningful.  Higher levels
+        start cold and warm up online as the corpus is processed.
+
+        Parameters
+        ----------
+        hrl
+            A fitted ``HierarchicalRelationalLearner``.
+        **kwargs
+            Additional constructor arguments forwarded to ``__init__``.
+        """
+        pch = cls(**kwargs)
+        for i, learner in enumerate(hrl.levels):
+            if i < pch.n_levels:
+                pch.learners[i] = learner
+        pch.vocab = hrl.vocab   # share the merge/segment registry
+        return pch

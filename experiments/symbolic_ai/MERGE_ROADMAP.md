@@ -270,6 +270,47 @@ Goal: given raw text and no human annotation, the system produces a `.ctkg`
 file that captures the compositional structure of the domain. This file can
 then be validated against a hand-authored `.ctkg` file for the same domain.
 
+### M7 — Segment + boundary_atoms (DONE)
+Added `SegmentedAtom` (n-ary ordered composition), `segment_by_boundary()` in
+`MergeDetector`, `boundary_atoms={' '}` for unconditional word splits in text,
+and `use_segment=True` in `HierarchicalRelationalLearner`.  Also fixed:
+`max_levels` 6→20, large-KG threshold 500→50,000, OOM fix (`vocab_size=2000`
+cap in `discover_categories_from_dists`).
+
+Remaining problems after M7 (motivation for M8):
+- **K=2 at word level**: sparse word distributions defeat K-means at L1+.
+- **Paragraph-swallowing**: adaptive mean-PMI threshold grows unboundedly.
+- **Sub-word fragmentation**: PMI threshold mismatches at character level.
+- Root cause: batch segmentation is architecturally wrong for this problem.
+
+### M8 — PredictiveCodingHierarchy (online, surprisal-based) — IN PROGRESS
+**Class:** `PredictiveCodingHierarchy` in `relational_pipeline.py` (appended
+after line 4125).
+
+Replaces `HierarchicalRelationalLearner` as the primary inference pipeline.
+Implements Broca's area architecture: online prediction, simultaneous
+multi-level processing, bounded working memory, and surprisal-driven
+boundaries.
+
+**Key properties:**
+- Online (token-by-token); all levels process in lockstep within each call.
+- `max_chunk_size=7` (Miller's 7±2) prevents paragraph-swallowing.
+- Adaptive threshold (`mean + k*std` of running surprisal history) replaces
+  fixed PMI threshold; self-calibrates per level, no domain tuning needed.
+- Cold-start safe: unfitted learners warm up via `update_online()`.
+- `from_hrl(hrl)` class method for warm-start from a pre-trained HRL.
+
+**Why this fixes the three M7 failures:**
+
+| Problem | Root cause | Fix |
+|---------|-----------|-----|
+| K=2 at word level | K-means on sparse distributions | No batch K-means at L1+; word categories emerge from `_atom_bigrams` |
+| Paragraph swallowing | Unbounded segment size | `max_chunk_size=7` hard cap |
+| Sub-word fragmentation | Miscalibrated PMI threshold | Adaptive threshold self-calibrates |
+
+**Demo:** `python char_latin.py --mode pch` (new default).
+**HRL still available:** `python char_latin.py --mode hrl`.
+
 ---
 
 ## Success Criteria
