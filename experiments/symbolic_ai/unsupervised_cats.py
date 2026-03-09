@@ -42,6 +42,7 @@ if _HERE not in sys.path:
 
 import numpy as np
 from vision_pipeline import FovealVisionLearner, foveal_radius_from_viewing_distance
+from relational_pipeline import Image2DRelationalLearner
 
 
 # ---------------------------------------------------------------------------
@@ -94,6 +95,35 @@ def load_images(cats_dir: str, resize: int, n_images: int | None = None,
 # ---------------------------------------------------------------------------
 # Feature bags
 # ---------------------------------------------------------------------------
+
+def image_to_relational_bag(rl: Image2DRelationalLearner, image,
+                            n_spatial_bins: int = 4) -> collections.Counter:
+    """Convert an image to a spatial feature bag using relational patch clustering.
+
+    Divides the patch grid into n_spatial_bins × n_spatial_bins quadrants.
+    Feature key: f'r{row_bin}c{col_bin}:{cluster_id}'.
+
+    This is the relational equivalent of image_to_feature_bag: patch clusters
+    based on 2D neighborhood context rather than 1D sequential context.
+    """
+    grid = rl.image_to_patches(image)
+    bag: collections.Counter = collections.Counter()
+    rows = len(grid)
+    if not rows:
+        return bag
+    cols = len(grid[0])
+    nb = n_spatial_bins
+    for r in range(rows):
+        for c in range(cols):
+            patch = grid[r][c]
+            cid = rl.assignment.get(patch)
+            if cid is None:
+                continue
+            r_bin = min(nb - 1, int(nb * r / rows))
+            c_bin = min(nb - 1, int(nb * c / cols))
+            bag[f'r{r_bin}c{c_bin}:{cid}'] += 1
+    return bag
+
 
 def image_to_feature_bag(fvl: FovealVisionLearner, image) -> collections.Counter:
     """Run fixate() and return a Counter of (pos:cluster_id) feature strings."""
@@ -291,6 +321,65 @@ def saliency_stats(fvl: FovealVisionLearner, images: list,
 
 
 # ---------------------------------------------------------------------------
+# Shared evaluation runner (used by both sequential and relational paths)
+# ---------------------------------------------------------------------------
+
+def run_evaluation(X: np.ndarray, bags: list, gt_labels: list[str],
+                   k: int, seed: int, mode_label: str) -> dict:
+    """Run the shared evaluation pipeline on a pre-built TF-IDF feature matrix.
+
+    Steps: within/between similarity → k-means → purity + NMI → contingency table.
+    Returns a dict with purity, nmi, ratio keys for comparison.
+    """
+    poses = sorted(set(gt_labels))
+
+    print(f'\n[E1:{mode_label}] Within-pose vs between-pose feature similarity...')
+    sim = within_between_similarity(X, gt_labels)
+    print(f'  Within-pose  cosine sim: {sim["within_mean"]:.4f} ± {sim["within_std"]:.4f}')
+    print(f'  Between-pose cosine sim: {sim["between_mean"]:.4f} ± {sim["between_std"]:.4f}')
+    print(f'  Ratio (within/between):  {sim["ratio"]:.3f}')
+
+    print(f'\n[E2:{mode_label}] K-means clustering (k={k})...')
+    cluster_labels = kmeans(X, k=k, seed=seed)
+    for c in range(k):
+        count = int((cluster_labels == c).sum())
+        pose_breakdown = collections.Counter(
+            gt_labels[i] for i in range(len(gt_labels)) if cluster_labels[i] == c)
+        top_pose = pose_breakdown.most_common(1)[0] if pose_breakdown else ('?', 0)
+        print(f'  Cluster {c}: {count} images  '
+              f'(majority={top_pose[0]}, {top_pose[1]}/{count})')
+
+    purity  = cluster_purity(cluster_labels, gt_labels)
+    nmi_val = nmi(cluster_labels, gt_labels)
+    print(f'\n[E3:{mode_label}] Cluster quality...')
+    print(f'  Purity: {purity:.3f}  (random baseline ≈ {1/k:.3f})')
+    print(f'  NMI:    {nmi_val:.3f}  (0 = no information, 1 = perfect)')
+
+    print(f'\n[E4:{mode_label}] Contingency table (rows=cluster, cols=pose)...')
+    header = '         ' + '  '.join(f'{p[:8]:>8}' for p in poses)
+    print('  ' + header)
+    for c in range(k):
+        row = f'  Cluster {c}'
+        for pose in poses:
+            cnt = sum(1 for i in range(len(gt_labels))
+                      if cluster_labels[i] == c and gt_labels[i] == pose)
+            row += f'  {cnt:>8}'
+        print(row)
+
+    print(f'\n[E5:{mode_label}] Top features per cluster')
+    top = top_cluster_features(cluster_labels, bags, k, topn=5)
+    for c in range(k):
+        pose_breakdown = collections.Counter(
+            gt_labels[i] for i in range(len(gt_labels)) if cluster_labels[i] == c)
+        majority = pose_breakdown.most_common(1)[0][0] if pose_breakdown else '?'
+        print(f'  Cluster {c} (mainly {majority}):')
+        for feat, cnt in top[c]:
+            print(f'    {feat:24s}  count={cnt}')
+
+    return {'purity': purity, 'nmi': nmi_val, 'ratio': sim['ratio']}
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -301,12 +390,21 @@ def main():
                     help='Limit total images (None = use all 75)')
     ap.add_argument('--resize',   type=int, default=400,
                     help='Resize all images to this square size (px)')
+    ap.add_argument('--mode', choices=['sequential', 'relational', 'both'],
+                    default='sequential',
+                    help='sequential=FovealVisionLearner (1D), '
+                         'relational=Image2DRelationalLearner (2D H/V/D1/D2), '
+                         'both=run both and compare')
     ap.add_argument('--peripheral_patch', type=int, default=32)
     ap.add_argument('--foveal_radius',    type=int, default=None,
                     help='Foveal radius px (default: calibrated to 24" screen, 24" dist)')
     ap.add_argument('--foveal_patch',     type=int, default=4,
                     help='Foveal sub-patch size in px (1=pixel-accurate but huge sequences; '
                          '4 reduces tokens 16× and prevents memory explosion)')
+    ap.add_argument('--relational_patch', type=int, default=16,
+                    help='Patch size for Image2DRelationalLearner (px)')
+    ap.add_argument('--relational_clusters', type=int, default=32,
+                    help='n_clusters for Image2DRelationalLearner')
     ap.add_argument('--n_fixations',      type=int, default=5)
     ap.add_argument('--k',                type=int, default=4,
                     help='Number of clusters (should match pose group count)')
@@ -322,9 +420,7 @@ def main():
     print('=' * 60)
     print('Unsupervised Cat Photo Experiment')
     print('=' * 60)
-    print(f'  resize={args.resize}px  peripheral_patch={args.peripheral_patch}px  '
-          f'foveal_radius={args.foveal_radius}px  foveal_patch={args.foveal_patch}px  '
-          f'n_fixations={args.n_fixations}')
+    print(f'  mode={args.mode}  resize={args.resize}px')
 
     # --- Load images ---
     print(f'\n[1] Loading images from {args.cats_dir}...')
@@ -339,130 +435,111 @@ def main():
         print('ERROR: need at least 4 images.')
         return
 
-    # --- Train FovealVisionLearner (unsupervised) ---
-    print('\n[2] Training FovealVisionLearner (no labels)...')
-    fvl = FovealVisionLearner(
-        peripheral_patch=args.peripheral_patch,
-        foveal_patch=args.foveal_patch,
-        foveal_radius_px=args.foveal_radius,
-        n_fixations=args.n_fixations,
-        n_peripheral_clusters=32,
-        n_foveal_clusters=64,
-        peripheral_color=True,    # use color in peripheral scan
-    )
-    fvl.fit_images(images, verbose=True)
+    results: dict[str, dict] = {}
 
-    print(f'\n  Peripheral vocab size: {len(fvl.peripheral.learner.assignment)}')
-    print(f'  Foveal assignment entries: {len(fvl.foveal.assignment)}')
+    # =========================================================================
+    # Sequential path (FovealVisionLearner)
+    # =========================================================================
+    if args.mode in ('sequential', 'both'):
+        print('\n' + '─' * 60)
+        print('MODE: sequential (FovealVisionLearner + foveal sequences)')
+        print('─' * 60)
 
-    # --- Saliency analysis: is attention focused? ---
-    print('\n[3] Saliency concentration by pose group...')
-    print('  (fraction of saliency in top-25% of patches;'
-          ' higher = more focused attention)')
-    conc = saliency_stats(fvl, images, gt_labels)
-    for pose in sorted(conc):
-        print(f'    {pose}: {conc[pose]:.3f}')
-    overall_conc = float(np.mean(list(conc.values())))
-    print(f'    overall: {overall_conc:.3f}  '
-          f'(baseline uniform = {0.25:.3f})')
-    if overall_conc > 0.45:
-        print('  → FOCUSED: model attends to specific regions (cat found?)')
-    else:
-        print('  → DIFFUSE: attention spread uniformly (no clear structure yet)')
+        if args.foveal_radius is None:
+            args.foveal_radius = max(32, args.resize // 5)
+        print(f'  peripheral_patch={args.peripheral_patch}px  '
+              f'foveal_radius={args.foveal_radius}px  '
+              f'foveal_patch={args.foveal_patch}px  '
+              f'n_fixations={args.n_fixations}')
 
-    # --- Build feature bags ---
-    print('\n[4] Building foveal feature bags...')
-    bags = [image_to_feature_bag(fvl, img) for img in images]
-    total_feats = sum(len(b) for b in bags)
-    vocab_size = len({f for b in bags for f in b})
-    print(f'  Total feature instances: {total_feats:,}')
-    print(f'  Unique (pos:cluster) features: {vocab_size}')
-    mean_bag_size = total_feats / len(bags) if bags else 0
-    print(f'  Mean features per image: {mean_bag_size:.0f}')
+        print('\n[S1] Training FovealVisionLearner (no labels)...')
+        fvl = FovealVisionLearner(
+            peripheral_patch=args.peripheral_patch,
+            foveal_patch=args.foveal_patch,
+            foveal_radius_px=args.foveal_radius,
+            n_fixations=args.n_fixations,
+            n_peripheral_clusters=32,
+            n_foveal_clusters=64,
+            peripheral_color=True,
+        )
+        fvl.fit_images(images, verbose=True)
+        print(f'  Peripheral vocab: {len(fvl.peripheral.learner.assignment)}  '
+              f'Foveal assignment: {len(fvl.foveal.assignment)}')
 
-    # --- Within vs between similarity ---
-    print('\n[5] Within-pose vs between-pose feature similarity...')
-    X, vocab = build_feature_matrix(bags)
-    sim = within_between_similarity(X, gt_labels)
-    print(f'  Within-pose  cosine sim: {sim["within_mean"]:.4f} ± {sim["within_std"]:.4f}')
-    print(f'  Between-pose cosine sim: {sim["between_mean"]:.4f} ± {sim["between_std"]:.4f}')
-    print(f'  Ratio (within/between):  {sim["ratio"]:.3f}')
-    if sim['ratio'] > 1.15:
-        print('  → STRUCTURE FOUND: same-pose images are more similar than different-pose')
-    elif sim['ratio'] > 1.05:
-        print('  → WEAK STRUCTURE: slight tendency for same-pose images to cluster')
-    else:
-        print('  → NO STRUCTURE: model treats all images the same (no pose signal)')
+        print('\n[S2] Saliency concentration by pose group...')
+        conc = saliency_stats(fvl, images, gt_labels)
+        overall_conc = float(np.mean(list(conc.values()))) if conc else 0.0
+        for pose in sorted(conc):
+            print(f'    {pose}: {conc[pose]:.3f}')
+        print(f'    overall: {overall_conc:.3f}  (baseline uniform = 0.250)')
 
-    # --- K-means clustering ---
-    print(f'\n[6] K-means clustering (k={args.k})...')
-    cluster_labels = kmeans(X, k=args.k, seed=args.seed)
-    for c in range(args.k):
-        count = (cluster_labels == c).sum()
-        pose_breakdown = collections.Counter(
-            gt_labels[i] for i in range(len(gt_labels)) if cluster_labels[i] == c)
-        top_pose = pose_breakdown.most_common(1)[0] if pose_breakdown else ('?', 0)
-        print(f'  Cluster {c}: {count} images  '
-              f'(majority={top_pose[0]}, {top_pose[1]}/{count})')
+        print('\n[S3] Building foveal feature bags...')
+        seq_bags = [image_to_feature_bag(fvl, img) for img in images]
+        print(f'  Unique features: {len({f for b in seq_bags for f in b})}  '
+              f'Mean bag size: {sum(len(b) for b in seq_bags)/len(seq_bags):.0f}')
 
-    # --- Cluster quality ---
-    print('\n[7] Cluster quality...')
-    purity = cluster_purity(cluster_labels, gt_labels)
-    nmi_val = nmi(cluster_labels, gt_labels)
-    print(f'  Purity: {purity:.3f}  (random baseline ≈ {1/args.k:.3f})')
-    print(f'  NMI:    {nmi_val:.3f}  (0 = no information, 1 = perfect)')
-    if purity > 0.6 and nmi_val > 0.2:
-        print('  → STRONG: pose structure recovered from unsupervised features')
-    elif purity > 0.4 or nmi_val > 0.1:
-        print('  → PARTIAL: some pose structure visible — model learned something')
-    else:
-        print('  → WEAK: clusters do not correspond to pose groups')
+        X_seq, _ = build_feature_matrix(seq_bags)
+        results['sequential'] = run_evaluation(
+            X_seq, seq_bags, gt_labels, args.k, args.seed, 'sequential')
+        results['sequential']['saliency'] = overall_conc
 
-    # --- Contingency table ---
-    print('\n[8] Contingency table (rows=cluster, cols=pose group)...')
-    poses = sorted(set(gt_labels))
-    header = '         ' + '  '.join(f'{p[:8]:>8}' for p in poses)
-    print('  ' + header)
-    for c in range(args.k):
-        row = f'  Cluster {c}'
-        for pose in poses:
-            cnt = sum(1 for i in range(len(gt_labels))
-                      if cluster_labels[i] == c and gt_labels[i] == pose)
-            row += f'  {cnt:>8}'
-        print(row)
+    # =========================================================================
+    # Relational path (Image2DRelationalLearner)
+    # =========================================================================
+    if args.mode in ('relational', 'both'):
+        print('\n' + '─' * 60)
+        print('MODE: relational (Image2DRelationalLearner + H/V/D1/D2 triples)')
+        print('─' * 60)
+        print(f'  relational_patch={args.relational_patch}px  '
+              f'relational_clusters={args.relational_clusters}')
 
-    # --- Top features per cluster ---
-    print('\n[9] Most common foveal features per cluster')
-    print('    (format: pos_bin:cluster_id  e.g. D-2,1:15 = position Δrow=-2,Δcol=1, cluster 15)')
-    top = top_cluster_features(cluster_labels, bags, args.k, topn=6)
-    for c in range(args.k):
-        pose_breakdown = collections.Counter(
-            gt_labels[i] for i in range(len(gt_labels)) if cluster_labels[i] == c)
-        majority = pose_breakdown.most_common(1)[0][0] if pose_breakdown else '?'
-        print(f'  Cluster {c} (mainly {majority}):')
-        for feat, cnt in top[c]:
-            print(f'    {feat:20s}  count={cnt}')
+        print('\n[R1] Training Image2DRelationalLearner (no labels)...')
+        rl = Image2DRelationalLearner(
+            patch_size=args.relational_patch,
+            n_clusters=args.relational_clusters,
+        )
+        # Convert images to uint8 for patch extraction
+        uint8_images = [(img * 255).astype(np.uint8) for img in images]
+        rl.fit_images(uint8_images, verbose=True)
+        print(f'  Unique patch types: {len(rl.assignment)}  '
+              f'Clusters: {len(rl.clusters)}')
 
-    # --- Overall summary ---
+        print('\n[R2] Building relational feature bags...')
+        rel_bags = [image_to_relational_bag(rl, img) for img in uint8_images]
+        print(f'  Unique features: {len({f for b in rel_bags for f in b})}  '
+              f'Mean bag size: {sum(len(b) for b in rel_bags)/len(rel_bags):.0f}')
+
+        X_rel, _ = build_feature_matrix(rel_bags)
+        results['relational'] = run_evaluation(
+            X_rel, rel_bags, gt_labels, args.k, args.seed, 'relational')
+
+    # =========================================================================
+    # Final comparison
+    # =========================================================================
     print('\n' + '=' * 60)
     print('Summary')
     print('=' * 60)
-    print(f'  Images: {len(images)}  Clusters: {args.k}')
-    print(f'  Saliency concentration: {overall_conc:.3f}  '
-          f'(>0.45 = focused, baseline=0.25)')
-    print(f'  Within/between sim ratio: {sim["ratio"]:.3f}  (>1.15 = pose structure)')
-    print(f'  Cluster purity: {purity:.3f}  NMI: {nmi_val:.3f}')
+    print(f'  Images: {len(images)}  k={args.k}  random-baseline purity ≈ {1/args.k:.3f}')
 
-    learned = []
-    if overall_conc > 0.45:
-        learned.append('salient regions (attends to objects)')
-    if sim['ratio'] > 1.05:
-        learned.append('pose-discriminative texture patterns')
-    if purity > 0.4:
-        learned.append('partially recoverable pose clusters')
-    if not learned:
-        learned.append('nothing clearly discriminative yet')
-    print(f'  Evidence of learning: {"; ".join(learned)}')
+    if len(results) == 1:
+        mode, r = next(iter(results.items()))
+        print(f'\n  Mode: {mode}')
+        if 'saliency' in r:
+            print(f'  Saliency concentration: {r["saliency"]:.3f}')
+        print(f'  Within/between ratio: {r["ratio"]:.3f}')
+        print(f'  Cluster purity:       {r["purity"]:.3f}')
+        print(f'  NMI:                  {r["nmi"]:.3f}')
+    else:
+        print(f'\n  {"Metric":<28} {"sequential":>12} {"relational":>12}')
+        print(f'  {"-"*52}')
+        rs, rr = results.get('sequential', {}), results.get('relational', {})
+        print(f'  {"Within/between ratio":<28} {rs.get("ratio",0):>12.3f} {rr.get("ratio",0):>12.3f}')
+        print(f'  {"Cluster purity":<28} {rs.get("purity",0):>12.3f} {rr.get("purity",0):>12.3f}')
+        print(f'  {"NMI":<28} {rs.get("nmi",0):>12.3f} {rr.get("nmi",0):>12.3f}')
+        best_purity = 'relational' if rr.get('purity', 0) > rs.get('purity', 0) else 'sequential'
+        best_nmi    = 'relational' if rr.get('nmi', 0) > rs.get('nmi', 0) else 'sequential'
+        print(f'\n  Best purity → {best_purity}')
+        print(f'  Best NMI    → {best_nmi}')
 
 
 if __name__ == '__main__':

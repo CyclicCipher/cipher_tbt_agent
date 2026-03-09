@@ -141,6 +141,129 @@ experiments/symbolic_ai/
 
 ---
 
+## Relational Learning Pipeline — IN PROGRESS
+
+The relational pipeline generalizes E0-E3 from sequences (1D, linearized) to arbitrary
+relational structures: knowledge graphs, 2D images, 3D point clouds, hyperbolic trees,
+graphs. No linearization. Relations are first-class citizens.
+
+**Key file:** `relational_pipeline.py` — `RelationalLearner`, `Image2DRelationalLearner`
+
+**Compound bigram trick:** Each triple `(a, r, b)` becomes `rel_next(a,) → (f'{r}:{b}',)`.
+An atom's distributional signature encodes ALL its relational neighbors simultaneously.
+`induce_hierarchy_bidir()` then clusters atoms by these compound signatures.
+
+**E3 hybrid keys:** `_ask_soft((str(c_src), relation_name))` — integer keys get soft
+similarity from sim_matrix; relation-name strings get exact match. No special casing:
+`_ask_soft` already handles mixed key types.
+
+---
+
+### Level 1 — Evaluation: Sequential vs Relational [ ]
+
+Add `--mode relational` to `unsupervised_cats.py`. Run both approaches on the same
+cat photo dataset. Report Purity / NMI / within-between ratio for both.
+
+Expected advantage of relational: 2D structure is preserved. H/V/D1/D2 neighbors are
+distinct relations, not collapsed into a single "next" relation. Patches that play the
+same spatial role across images (e.g., "border between fur and background") cluster
+correctly regardless of orientation.
+
+---
+
+### Level 2 — Relation Discovery [ ]
+
+Currently relations (H, V, D1, D2) are hand-specified. Level 2 clusters relations the
+same way Level 1 clusters atoms — by their distributional behavior.
+
+**RelationClusterer:** For each relation `r`, build its signature:
+```
+rel_sig(r) = distribution over (src_cat, tgt_cat) pairs connected by r
+```
+Two relations are equivalent if they connect the same atom-category pairs. This discovers:
+- That H and its reverse `rev_H` are "the same relation, backwards"
+- That diagonal relations D1/D2 form a separate cluster from axial H/V
+- That some relations are equivalent by symmetry of the data
+
+Implementation mirrors atom clustering: build `(relation,) → (f'{c_src}:{c_tgt}',)`
+compound signatures, run `induce_hierarchy_bidir`, get `K_r` relation categories.
+
+---
+
+### Level 3 — Multi-hop Composition [ ]
+
+`predict(atom, relation)` gives 1-hop. Relations compose:
+
+```python
+predict_chain(atom, ['capital_of', 'located_in'])  # Paris → France → Europe
+predict_chain(patch, ['H', 'V'])                    # patch at (r,c) → (r, c+1) → (r+1, c+1)
+```
+
+Implementation: pipe output category from `next_cat_rel` into the next hop's input.
+Intermediate atoms are marginalized over — the chain is a sequence of matrix products
+over the category transition tensors.
+
+---
+
+### Level 4 — Second-Order Relational Grammar [ ]
+
+Learn `next_rel(r1) → r2`: which relations tend to follow other relations?
+
+This is the distributional structure *of the relational structure itself* — E1 applied
+to relations rather than atoms. Discovers:
+- Grammatical relation sequences in text (SUBJ → VERB, DET → NOUN)
+- Spatial adjacency patterns (H after H = horizontal run; V after H = corner)
+- Causal chains in action sequences (PUSH → OPEN → ENTER)
+
+---
+
+### Level 5 — Symmetry Discovery (the hard one) [ ]
+
+**The question:** Can the learner discover 2D spatial structure with zero built-in
+knowledge about directions? And can it then generalize to non-Euclidean geometries?
+
+**Setup:** Replace hand-specified H/V/D1/D2 with raw pixel offsets `(dr, dc)`.
+Every distinct offset is a separate "relation" initially. The learner must *discover*
+which offsets are equivalent — i.e., discover the symmetry group.
+
+**Why it works:** Two offsets are distributionally equivalent iff they connect the
+same *category distributions* of atoms. In natural images:
+- Horizontal left/right offsets tend to connect similar texture patches → cluster together
+- Vertical offsets have different statistics (sky/ground asymmetry) → separate cluster
+- The discovered clusters ARE the discovered symmetry orbits
+
+**Connection to Klein's Erlangen Programme:**
+> Geometry is the study of properties invariant under a symmetry group.
+
+We invert this: given distributional data, discover the invariances → discover the geometry.
+Crucially, this requires *no prior specification* of the symmetry group.
+
+**Non-Euclidean extension:**
+| Space | Raw "relation" | Expected discovery |
+|-------|---------------|-------------------|
+| Euclidean 2D | pixel offset (dr,dc) | dihedral-8 orbit structure |
+| Sphere | geodesic arc (θ,φ) | SO(3) orbit structure |
+| Hyperbolic plane | Poincaré offset | exponentially growing orbits |
+| Graph | edge label | automorphism group of graph |
+
+**The key test:** If we feed the learner images with no built-in directional structure,
+does it recover the same relation categories as our hand-specified H/V/D1/D2? If yes,
+we have discovered the symmetry from data alone.
+
+**`RawOffsetLearner`** class (to implement):
+```python
+# All distinct offsets as raw relations:
+for (r1,c1), (r2,c2) in all_nearby_pairs(grid):
+    triples.append((grid[r1][c1], f'{r2-r1},{c2-c1}', grid[r2][c2]))
+
+learner = RelationalLearner(n_clusters=K_atoms)
+learner.fit(triples)
+# Then: RelationClusterer discovers which offsets cluster together
+# → discovered symmetry orbits
+```
+
+---
+
 ## Theoretical Basis
 
 **E1-E3 = Transformer attention without parameters:**
