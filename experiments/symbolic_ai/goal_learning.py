@@ -251,9 +251,7 @@ def discover_goals(
     if not causal_history or not drives:
         return []
 
-    skip = set(skip_keys or ['admissible', 'description', 'text', 'raw_obs',
-                              'info', 'unvisited', 'unexplored_exits',
-                              'unlock_cmds', 'quest_item', 'quest_dest'])
+    skip = set(skip_keys or [])
 
     results: List[DiscoveredGoal] = []
 

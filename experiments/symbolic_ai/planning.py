@@ -921,7 +921,7 @@ class DecisionEngine:
             elif ev.get('type') == 'lost':
                 item = ev.get('item', '')
                 if item and self.belief is not None:
-                    prev_loc = prev_state.get('location', '_unknown')
+                    prev_loc = prev_state.get(self._loc_key, '_unknown')
                     self.belief.observe(item, '_inv', False)
                     self.belief.observe(item, prev_loc, True)
 

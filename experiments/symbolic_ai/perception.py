@@ -229,8 +229,7 @@ class VariationalBelief:
         certainty  Override sharpness for all updates in this call.
         skip_keys  Variable names to ignore (e.g., 'admissible', 'description').
         """
-        skip = set(skip_keys or ['admissible', 'description', 'text',
-                                  'info', 'raw_obs'])
+        skip = set(skip_keys or [])
         for key, val in obs_dict.items():
             if key in skip:
                 continue

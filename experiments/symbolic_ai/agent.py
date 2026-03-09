@@ -76,7 +76,7 @@ class EpisodeResult:
     success     Caller-defined success criterion met?  (optional; None = unknown)
     duration_s  Wall-clock time for the episode in seconds.
     trace       Per-step records: list of dicts with keys
-                'step', 'location', 'action', 'reason', 'score', 'done'.
+                'step', 'context', 'action', 'reason', 'score', 'done'.
     """
     score:      float
     steps:      int
@@ -108,6 +108,7 @@ def run_episode(
     success_fn:      Optional[Callable[[dict], bool]] = None,
     on_step:         Optional[Callable[[int, dict, str, str, float], None]] = None,
     verbose:         bool                       = False,
+    domain:          Optional[Any]              = None,
 ) -> EpisodeResult:
     """Run one episode of the agent in the environment.
 
@@ -156,6 +157,11 @@ def run_episode(
     verbose
         If True, print step-by-step trace to stdout.
 
+    domain
+        Optional ``DomainConfig`` from domain_protocol.py.  Provides the
+        context extraction function (e.g. current room / scene) used in
+        verbose output and trace records.  If None, context is always ''.
+
     Returns
     -------
     EpisodeResult
@@ -200,8 +206,8 @@ def run_episode(
         action, reason = engine.decide(state, rng)
 
         if verbose:
-            loc = state.get('location', '?')
-            print(f'  step {step:>3}: [{loc}] {action!r}  ({reason})')
+            ctx = domain.context_of(state) if domain else state.get('context', '?')
+            print(f'  step {step:>3}: [{ctx}] {action!r}  ({reason})')
 
         # Execute action in environment.
         result     = env.step(action)
@@ -230,13 +236,14 @@ def run_episode(
             on_step(step, new_state, action, reason, score_new)
 
         # Trace record.
+        ctx_val = domain.context_of(state) if domain else ''
         trace.append({
-            'step':     step,
-            'location': state.get('location', ''),
-            'action':   action,
-            'reason':   reason,
-            'score':    score_new,
-            'done':     done,
+            'step':    step,
+            'context': ctx_val,
+            'action':  action,
+            'reason':  reason,
+            'score':   score_new,
+            'done':    done,
         })
 
         score = score_new

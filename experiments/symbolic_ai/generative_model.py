@@ -179,14 +179,22 @@ class TransitionModel:
     model that generalises across similar states and actions.
     """
 
-    def __init__(self, saturation: int = 5) -> None:
-        # (location, action) → list of observed deltas {key: new_value}
+    def __init__(
+        self,
+        saturation:  int                           = 5,
+        context_fn:  Optional[Callable[[dict], str]] = None,
+    ) -> None:
+        # (context, action) → list of observed deltas {key: new_value}
         self._deltas: Dict[Tuple[str, str], List[Dict[str, Any]]] = (
             collections.defaultdict(list)
         )
-        # (location, action) → observation count
+        # (context, action) → observation count
         self._counts: collections.Counter = collections.Counter()
         self._saturation = saturation
+        # Domain adapter: extracts context identifier from state dict.
+        # Default: '' (all transitions share one context, suitable for
+        # non-navigational domains or single-room games).
+        self._context_fn: Callable[[dict], str] = context_fn or (lambda s: '')
 
     # ------------------------------------------------------------------
 
@@ -206,7 +214,10 @@ class TransitionModel:
         next_state   State dict after the action.
         reward       Optional scalar reward signal (for future model improvements).
         """
-        loc   = prev_state.get('location', '')
+        try:
+            loc = str(self._context_fn(prev_state))
+        except Exception:
+            loc = ''
         key   = (loc, action)
         delta = self._delta(prev_state, next_state)
         self._deltas[key].append(delta)
@@ -247,7 +258,10 @@ class TransitionModel:
         If the (location, action) pair has never been observed, returns
         (state unchanged, confidence=0.0), indicating maximum uncertainty.
         """
-        loc = state.get('location', '')
+        try:
+            loc = str(self._context_fn(state))
+        except Exception:
+            loc = ''
         key = (loc, action)
         n   = self._counts[key]
 
@@ -266,13 +280,19 @@ class TransitionModel:
         return predicted, confidence
 
     def confidence(self, state: dict, action: str) -> float:
-        """Return confidence in our model of (state, action) ∈ [0, 1]."""
-        loc = state.get('location', '')
+        """Return confidence in our model of (context, action) ∈ [0, 1]."""
+        try:
+            loc = str(self._context_fn(state))
+        except Exception:
+            loc = ''
         return min(1.0, self._counts[(loc, action)] / self._saturation)
 
     def is_novel(self, state: dict, action: str) -> bool:
-        """True if we have never observed this (location, action) pair."""
-        loc = state.get('location', '')
+        """True if we have never observed this (context, action) pair."""
+        try:
+            loc = str(self._context_fn(state))
+        except Exception:
+            loc = ''
         return self._counts[(loc, action)] == 0
 
 
