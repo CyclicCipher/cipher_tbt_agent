@@ -985,22 +985,37 @@ class AIFEngine:
         exploratory.  Tune based on game complexity.
     is_nav_fn, state_loc_key, state_inv_key, state_score_key
         Same semantics as DecisionEngine.  Game-agnostic parameterisation.
+    context_belief
+        Optional ``ContextBeliefState`` (from relational_pipeline.py).
+        Bayes filter over RelationalLearner's K atom categories.  When provided:
+          - ``feedback()`` calls ``observe(new_atom)``, ``transition(action)``,
+            and ``update_online(prev, action, new)`` each step.
+          - ``_evaluate_action()`` subtracts a context-conditioned epistemic
+            term from G:  ΔG = -epistemic_weight × (H_before - H_after).
+            Positive info_gain reduces G → drives context-resolving actions.
+    context_atom_fn
+        ``(state: dict) -> str``.  Extracts the atom representing the agent's
+        current context (e.g. ``lambda s: s.get('location', '')``).
+        Usually ``DomainConfig.context_of`` from domain_protocol.py.
+        Required when ``context_belief`` is provided; ignored otherwise.
     """
 
     def __init__(
         self,
-        generative_model: Any,                          # GenerativeModel
-        affordances:      AffordanceModel,
-        goal_stack:       Optional[GoalStack]   = None,
-        episodic:         Optional[EpisodicBuffer] = None,
-        belief:           Any                   = None,  # VariationalBelief
-        goals:            Optional[List[Any]]   = None,
-        policy_horizon:   int                   = 1,
-        epistemic_weight: float                 = 0.5,
-        is_nav_fn:        Optional[Callable]    = None,
-        state_loc_key:    str                   = 'location',
-        state_inv_key:    str                   = 'inventory',
-        state_score_key:  str                   = 'score',
+        generative_model:  Any,                          # GenerativeModel
+        affordances:       AffordanceModel,
+        goal_stack:        Optional[GoalStack]   = None,
+        episodic:          Optional[EpisodicBuffer] = None,
+        belief:            Any                   = None,  # VariationalBelief
+        goals:             Optional[List[Any]]   = None,
+        policy_horizon:    int                   = 1,
+        epistemic_weight:  float                 = 0.5,
+        is_nav_fn:         Optional[Callable]    = None,
+        state_loc_key:     str                   = 'location',
+        state_inv_key:     str                   = 'inventory',
+        state_score_key:   str                   = 'score',
+        context_belief:    Any                   = None,  # ContextBeliefState
+        context_atom_fn:   Optional[Callable]    = None,
     ) -> None:
         self.model             = generative_model
         self.affordances       = affordances
@@ -1014,6 +1029,9 @@ class AIFEngine:
         self._inv_key          = state_inv_key
         self._score_key        = state_score_key
         self._step: int        = 0
+        # RelationalLearner short-term memory (gap 3 wiring).
+        self.context_belief    = context_belief   # ContextBeliefState | None
+        self._context_atom_fn  = context_atom_fn  # state -> atom str | None
 
         # Navigation detection (same default as DecisionEngine).
         if is_nav_fn is not None:
@@ -1066,11 +1084,30 @@ class AIFEngine:
         When policy_horizon > 1, this method is NOT called — beam_search()
         is used instead by decide() to evaluate full k-step policies.
         """
-        return self.model.expected_free_energy(
+        G = self.model.expected_free_energy(
             policy          = [action],
             state           = state,
             horizon         = 1,
         )
+
+        # Context-conditioned epistemic term from ContextBeliefState.
+        # info_gain = H[context_before] - H[P(target | context, action)]
+        # Positive when action resolves context uncertainty → reduces G → preferred.
+        if self.context_belief is not None:
+            import math as _math
+            try:
+                h_before = self.context_belief.entropy()
+                tgt_dist = self.context_belief.predict_target_dist(action)
+                if tgt_dist:
+                    h_after = -sum(
+                        p * _math.log2(p + 1e-12)
+                        for p in tgt_dist.values() if p > 0
+                    )
+                    G -= self.epistemic_weight * (h_before - h_after)
+            except Exception:
+                pass  # never crash on context belief errors
+
+        return G
 
     def _beam_decide(self, state: dict) -> Tuple[str, str]:
         """Multi-step EFE minimisation via beam search (Phase R8).
@@ -1218,6 +1255,22 @@ class AIFEngine:
             self.belief.decay()
             # Then sharp update from new observation.
             self.belief.update_from_obs(new_state)
+
+        # --- ContextBeliefState update (RelationalLearner short-term memory) ---
+        if self.context_belief is not None and self._context_atom_fn is not None:
+            try:
+                prev_atom = str(self._context_atom_fn(prev_state))
+                new_atom  = str(self._context_atom_fn(new_state))
+                # Observe new atom → concentrate category belief.
+                self.context_belief.observe(new_atom)
+                # Propagate through relation = action taken.
+                self.context_belief.transition(action)
+                # In-episode online learning: teach this transition.
+                if prev_atom and new_atom:
+                    self.context_belief._learner.update_online(
+                        prev_atom, action, new_atom)
+            except Exception:
+                pass  # never let context_belief errors crash the episode
 
         # --- EpisodicBuffer update ----------------------------------------
         if self.episodic is not None:
