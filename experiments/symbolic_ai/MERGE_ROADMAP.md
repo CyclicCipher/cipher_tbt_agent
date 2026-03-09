@@ -309,9 +309,8 @@ boundaries.
 | Sub-word fragmentation | Miscalibrated PMI threshold | Adaptive threshold self-calibrates |
 
 **Demo:** `python char_latin.py --mode pch` (new default).
-**HRL still available:** `python char_latin.py --mode hrl`.
 
-### M9 — PCH + Multi-Scale R0-R6 Analysis — IN PROGRESS
+### M9 — PCH + Multi-Scale R0-R6 Analysis — DONE
 
 **Motivation:** PCH builds `_atom_counts` at every level but never clusters atoms
 into categories.  R0-R6 needs those categories to produce a meaningful CTKG.  M9
@@ -358,7 +357,7 @@ These become first-class CTKG nodes rather than raw chunk strings.
 
 ---
 
-### M10 — Cross-Level Constituency Analysis — PLANNED
+### M10 — Cross-Level Constituency Analysis — DONE
 
 **Motivation:** R0-R6 run *within* each level discovers relations among peers
 (word follows word, phrase follows phrase).  Running R0-R6 *across* levels on the
@@ -400,13 +399,15 @@ DSL, mapping level-L atom types to level-L+1 chunk types.
 
 ---
 
-### M11 — Cleanup — PLANNED
+### M11 — Cleanup — DONE
 
-After M9 and M10 are tested:
-- Remove `HierarchicalRelationalLearner` batch pipeline (replaced by PCH).
-- Remove `MergeDetector` PMI-batch methods (boundary detection now in PCH).
-- Simplify `char_latin.py`: remove `--mode rl` and `--mode hrl` if they're fully
-  subsumed, or keep `--mode rl` only as a single-level diagnostic.
+Removed `HierarchicalRelationalLearner`, `MergeDetector`, `MultiLevelContextBelief`,
+`extract_structural_relations`, and `_sequences_to_next_triples` from
+`relational_pipeline.py` (~668 lines deleted).
+Removed `--mode hrl` from `char_latin.py`; only `--mode rl` and `--mode pch` remain.
+`export_ctkg()` and `label_merged_atoms()` kept (used by PCH via duck-typed shim).
+`SegmentedAtom` kept (used by AtomVocabulary and PCH._emit_buffer).
+File shrunk from 5193 → ~4525 lines.
 - Archive `sequence_pipeline.py` (already marked outdated; confirm no new callers).
 
 ---

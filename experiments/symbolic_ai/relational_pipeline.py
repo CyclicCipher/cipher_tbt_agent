@@ -3510,9 +3510,6 @@ if __name__ == '__main__':
 #   MergedAtom              — binary composition (Merge); left + right
 #   SegmentedAtom           — n-ary sequence composition (Segment); constituents
 #   AtomVocabulary          — growing vocabulary; handles both atom types
-#   MergeDetector           — PMI landscape: merge candidates + boundary PMIs
-#   HierarchicalRelationalLearner — iterative Merge+Segment stack (M2+M3)
-#   MultiLevelContextBelief — top-down prediction (M4)
 # ===========================================================================
 
 
@@ -3726,675 +3723,7 @@ class AtomVocabulary:
                 for l, r, m in self._merges[:top_n]]
 
 
-# ---------------------------------------------------------------------------
-# MergeDetector  (M1)
-# ---------------------------------------------------------------------------
-
-class MergeDetector:
-    """M1: PMI-based merge candidate detection from a fitted RelationalLearner.
-
-    Pointwise Mutual Information for an adjacent pair (A, B):
-
-        PMI(A→B) = log₂ P(B | A, rel) − log₂ P(B | rel)
-
-    where P(B | rel) is the marginal (relation unigram) and
-    P(B | A, rel) is the atom-level bigram.
-
-    High PMI: A and B co-occur far more than chance → they form a unit.
-    Low PMI:  boundary — the transition is no more predictable than random.
-
-    This is exactly the transitional-probability signal that Saffran et al.
-    showed infants use to segment the speech stream into word-like units.
-    """
-
-    def __init__(self, learner: 'RelationalLearner',
-                 next_rel: str = 'next') -> None:
-        self._learner  = learner
-        self._next_rel = next_rel
-
-    def detect(self,
-               threshold: float | None = None,
-               top_k:     int   | None = None,
-               min_count: int          = 2,
-               ) -> list[tuple[str, str, float]]:
-        """Return ranked merge candidates as (left_atom, right_atom, pmi).
-
-        Args
-        ----
-        threshold  Minimum PMI in bits.  None → include all positive-PMI pairs.
-        top_k      Return at most this many.  None → return all above threshold.
-        min_count  Minimum raw co-occurrence count (filters rare pairs).
-
-        Returns
-        -------
-        [(left, right, pmi), ...] sorted by PMI descending.
-        """
-        r_s      = self._next_rel
-        learner  = self._learner
-        marginal = getattr(learner, '_rel_unigram',  {}).get(r_s, {})
-        atom_bgs = getattr(learner, '_atom_bigrams', {})
-        counts   = getattr(learner, '_atom_counts',  {})
-
-        if not marginal or not atom_bgs:
-            return []
-
-        candidates: list[tuple[str, str, float]] = []
-
-        for (atom, rel), dist in atom_bgs.items():
-            if rel != r_s:
-                continue
-            raw = counts.get((atom, rel), {})
-            for target, p_cond in dist.items():
-                # Count filter
-                cnt = raw.get(target, 0) if hasattr(raw, 'get') else 0
-                if cnt < min_count:
-                    continue
-                p_marg = marginal.get(target, 1e-12)
-                if p_marg < 1e-12:
-                    continue
-                pmi = math.log2(max(p_cond, 1e-12) / p_marg)
-                if threshold is not None and pmi < threshold:
-                    continue
-                candidates.append((atom, target, pmi))
-
-        candidates.sort(key=lambda x: -x[2])
-        if top_k is not None:
-            candidates = candidates[:top_k]
-        return candidates
-
-    def boundary_pmi(self, seq: list[str]) -> list[float]:
-        """Return PMI at each boundary position in a sequence.
-
-        Returns a list of length len(seq)-1: boundary_pmi[i] is the PMI
-        between seq[i] and seq[i+1].  Low PMI = likely word/unit boundary.
-        """
-        r_s      = self._next_rel
-        learner  = self._learner
-        marginal = getattr(learner, '_rel_unigram',  {}).get(r_s, {})
-        atom_bgs = getattr(learner, '_atom_bigrams', {})
-
-        result = []
-        for i in range(len(seq) - 1):
-            a, b = str(seq[i]), str(seq[i + 1])
-            dist     = atom_bgs.get((a, r_s), {})
-            p_cond   = dist.get(b, 1e-12)
-            p_marg   = marginal.get(b, 1e-12)
-            pmi      = math.log2(max(p_cond, 1e-12) / max(p_marg, 1e-12))
-            result.append(pmi)
-        return result
-
-    def segment_by_boundary(self,
-                            sequence:       list[str],
-                            threshold:      float | None    = None,
-                            level:          int             = 1,
-                            boundary_atoms: set[str] | None = None,
-                            ) -> list:
-        """Split a sequence into SegmentedAtoms at low-PMI or explicit boundaries.
-
-        Two complementary boundary mechanisms:
-
-        1. **Explicit boundary atoms** (``boundary_atoms`` parameter):
-           Tokens that unconditionally create a segment break.  For written
-           text, pass ``boundary_atoms={' '}`` — the space character is an
-           unambiguous word delimiter.  Each boundary atom forms its own
-           single-element output; PMI segmentation is applied recursively
-           within the chunks between them.
-
-        2. **PMI-based boundaries** (``threshold`` parameter):
-           Position i is a boundary if PMI(seq[i], seq[i+1]) < threshold.
-           If threshold is None (default), the mean PMI of the chunk is used.
-
-        Rationale: at the character level, written Latin space-boundary PMI
-        (mean≈0.48) and intra-word PMI (mean≈0.68) are too close for a single
-        threshold to cleanly separate them.  Explicit ``boundary_atoms={' '}``
-        handles level 0; pure PMI handles higher levels where no delimiter exists.
-
-        Single-atom outputs are returned as plain strings (no SegmentedAtom wrap).
-        Multi-atom segments become SegmentedAtom, preserving the full composition
-        chain via ``leaves()``.
-
-        Parameters
-        ----------
-        sequence        Atom strings at the current level.
-        threshold       PMI cutoff.  None = adaptive mean of each chunk.
-        level           Level label assigned to resulting SegmentedAtoms.
-        boundary_atoms  Tokens that always create a segment break.
-                        Each such token forms its own single-element output.
-                        For text data use ``{' '}``.
-        """
-        if len(sequence) < 2:
-            return list(sequence)
-
-        # --- Stage 1: split at explicit boundary atoms ---
-        if boundary_atoms and any(t in boundary_atoms for t in sequence):
-            chunks: list[list[str]] = []
-            current: list[str] = []
-            for t in sequence:
-                if t in boundary_atoms:
-                    if current:
-                        chunks.append(current)
-                        current = []
-                    chunks.append([t])       # boundary atom = its own chunk
-                else:
-                    current.append(t)
-            if current:
-                chunks.append(current)
-
-            # Apply PMI segmentation within each non-boundary chunk, then flatten
-            result: list = []
-            for chunk in chunks:
-                if len(chunk) == 1:
-                    result.append(chunk[0])
-                else:
-                    result.extend(self.segment_by_boundary(
-                        chunk, threshold=threshold, level=level,
-                        boundary_atoms=None,   # already split; avoid double-pass
-                    ))
-            return result
-
-        # --- Stage 2: PMI-based boundary detection ---
-        pmis = self.boundary_pmi(sequence)
-
-        if threshold is None:
-            threshold = sum(pmis) / len(pmis) if pmis else 0.0
-
-        segments: list = []
-        start = 0
-        for i, p in enumerate(pmis):
-            if p < threshold:
-                # Boundary between position i and i+1 — close current segment
-                chunk = sequence[start: i + 1]
-                if len(chunk) > 1:
-                    segments.append(SegmentedAtom(list(chunk), level=level))
-                elif chunk:
-                    segments.append(chunk[0])
-                start = i + 1
-
-        # Remaining atoms after last boundary
-        if start < len(sequence):
-            chunk = sequence[start:]
-            if len(chunk) > 1:
-                segments.append(SegmentedAtom(list(chunk), level=level))
-            elif chunk:
-                segments.append(chunk[0])
-
-        return segments
-
-
-# ---------------------------------------------------------------------------
-# Helper: sequences → triples
-# ---------------------------------------------------------------------------
-
-def _sequences_to_next_triples(sequences: list[list],
-                                next_rel: str = 'next',
-                                ) -> list[tuple[str, str, str]]:
-    """Convert sequences to (atom_i, next_rel, atom_{i+1}) triples."""
-    triples: list[tuple[str, str, str]] = []
-    for seq in sequences:
-        for i in range(len(seq) - 1):
-            triples.append((str(seq[i]), next_rel, str(seq[i + 1])))
-    return triples
-
-
-# ---------------------------------------------------------------------------
-# HierarchicalRelationalLearner  (M2 + M3)
-# ---------------------------------------------------------------------------
-
-class HierarchicalRelationalLearner:
-    """M2/M3: Multi-level RelationalLearner with iterative Merge.
-
-    Implements Broca's area / categorical composition:
-
-        Level 0: base atoms  (characters, words, patches, …)
-        Level N: merged atoms discovered from level N-1 statistics
-
-    At each level:
-      1. Build (atom_i, 'next', atom_{i+1}) triples from current sequences.
-      2. Fit a RelationalLearner — learns P(target | atom, rel) at this scale.
-      3. Run MergeDetector — find high-PMI adjacent pairs.
-      4. Add those pairs to AtomVocabulary and re-tokenize all sequences.
-      5. Repeat with merged sequences at the next level.
-
-    All levels remain active.  ``predict_dist(atom, rel, level=N)`` queries
-    level N.  ``infer_chain`` can chain across a single level or be called
-    at any level independently.
-
-    The discovered type structure at each level feeds into CTKG grounding (M6).
-
-    Parameters
-    ----------
-    n_clusters             K for each RelationalLearner (None = auto-detect).
-    pmi_threshold          Minimum PMI (bits) to accept a merge candidate.
-    max_merges_per_level   Hard cap on merges per level (avoids over-merging).
-    max_levels             Maximum recursion depth.
-    next_rel               Name of the sequential relation (default 'next').
-    min_merge_count        Minimum co-occurrence count for merge candidates.
-    use_segment            If True (default), after each Merge step, segment
-                           the merged sequences at low-PMI boundaries to form
-                           the next level's atoms.  This allows the hierarchy
-                           to climb all the way from characters to words to
-                           phrases to clauses in a single fit() call.
-    boundary_threshold     PMI cutoff for segmentation.  None (default) =
-                           adaptive: use the mean PMI of each sequence so
-                           boundaries are below-average-predictability joins.
-    boundary_atoms         Tokens that always create an unconditional segment
-                           break, regardless of PMI.  For written text, pass
-                           ``{' '}`` so the space character is always a word
-                           delimiter.  Only applied at the first level where
-                           the atoms are base characters; at higher levels
-                           (word tokens, phrase tokens) boundaries are PMI-only.
-    max_atoms              Passed to RelationalLearner.fit() at every level.
-                           Controls when the large-KG fallback triggers (skips
-                           E0-E6 clustering).  Default 50,000 keeps the full
-                           pipeline active for all text-data levels.  Lower to
-                           ~500 only for large multi-relational knowledge graphs.
-    """
-
-    def __init__(self,
-                 n_clusters:           int | None       = None,
-                 pmi_threshold:        float            = 0.5,
-                 max_merges_per_level: int              = 50,
-                 max_levels:           int              = 20,
-                 next_rel:             str              = 'next',
-                 min_merge_count:      int              = 3,
-                 use_segment:          bool             = True,
-                 boundary_threshold:   float | None     = None,
-                 boundary_atoms:       set[str] | None  = None,
-                 max_atoms:            int              = 50_000,
-                 ) -> None:
-        self.n_clusters           = n_clusters
-        self.pmi_threshold        = pmi_threshold
-        self.max_merges_per_level = max_merges_per_level
-        self.max_levels           = max_levels
-        self.next_rel             = next_rel
-        self.min_merge_count      = min_merge_count
-        self.use_segment          = use_segment
-        self.boundary_threshold   = boundary_threshold
-        self.boundary_atoms       = boundary_atoms
-        self.max_atoms            = max_atoms
-
-        self.levels:   list[RelationalLearner]  = []
-        self.vocab:    AtomVocabulary           = AtomVocabulary()
-        # Sequences as seen at each level (for diagnostics / re-use)
-        self._seqs_at: list[list[list[str]]]   = []
-
-    # ------------------------------------------------------------------
-    # Fit
-
-    def fit(self, sequences: list[list],
-            verbose: bool = True) -> None:
-        """Fit hierarchically from base sequences.
-
-        Args
-        ----
-        sequences  List of token sequences.  Each token can be any str-able.
-        verbose    Print level-by-level progress.
-        """
-        current_seqs: list[list[str]] = [
-            [str(t) for t in seq] for seq in sequences
-        ]
-
-        for level in range(self.max_levels):
-            n_tok   = sum(len(s) for s in current_seqs)
-            vocab_s = {t for s in current_seqs for t in s}
-            if verbose:
-                print(f'\n  [Merge L{level}] '
-                      f'{len(vocab_s)} unique atoms, {n_tok:,} tokens')
-
-            if not vocab_s or n_tok < 2:
-                if verbose:
-                    print(f'  [Merge L{level}] Too few tokens — stopping.')
-                break
-
-            # Step 1: build triples
-            triples = _sequences_to_next_triples(current_seqs, self.next_rel)
-            if not triples:
-                if verbose:
-                    print(f'  [Merge L{level}] No triples — stopping.')
-                break
-
-            # Step 2: fit RelationalLearner
-            learner = RelationalLearner(n_clusters=self.n_clusters)
-            learner.fit(triples, verbose=verbose, max_atoms=self.max_atoms)
-            self.levels.append(learner)
-            self._seqs_at.append(current_seqs)
-
-            # Step 3: detect merge candidates
-            detector   = MergeDetector(learner, next_rel=self.next_rel)
-            candidates = detector.detect(
-                threshold=self.pmi_threshold,
-                top_k=self.max_merges_per_level,
-                min_count=self.min_merge_count,
-            )
-
-            if not candidates:
-                if verbose:
-                    print(f'  [Merge L{level}] No candidates above '
-                          f'PMI={self.pmi_threshold:.2f} — stopping.')
-                break
-
-            if verbose:
-                top5 = [(l, r, f'{p:.2f}') for l, r, p in candidates[:5]]
-                print(f'  [Merge L{level}] {len(candidates)} candidates. '
-                      f'Top-5: {top5}')
-
-            # Step 4: register merges and re-tokenize
-            for left, right, _pmi in candidates:
-                self.vocab.add_merge(left, right)
-
-            new_seqs = [self.vocab.tokenize(seq) for seq in current_seqs]
-
-            # Step 5 (optional): Segment at low-PMI boundaries.
-            # This is the dual of Merge: Merge joins high-PMI adjacent pairs
-            # (sub-word units), Segment splits at low-PMI positions (word/
-            # phrase boundaries).  Together they climb the full hierarchy:
-            #   chars → [Merge] → morpheme tokens → [Segment] → words
-            #   words → [Merge] → word-bigram tokens → [Segment] → phrases
-            if self.use_segment:
-                seg_detector  = MergeDetector(learner, next_rel=self.next_rel)
-                segmented: list[list[str]] = []
-                for seq in new_seqs:
-                    # boundary_atoms only used at level 0 (char→word);
-                    # at higher levels boundaries are discovered from PMI.
-                    b_atoms = self.boundary_atoms if level == 0 else None
-                    seg_atoms = seg_detector.segment_by_boundary(
-                        seq,
-                        threshold=self.boundary_threshold,
-                        level=level + 1,
-                        boundary_atoms=b_atoms,
-                    )
-                    # Register SegmentedAtoms in vocabulary
-                    for sa in seg_atoms:
-                        if isinstance(sa, SegmentedAtom):
-                            self.vocab.add_segment(sa.constituents,
-                                                   level=level + 1)
-                    segmented.append([str(a) for a in seg_atoms])
-
-                new_seqs = segmented
-                if verbose:
-                    n_seg   = self.vocab.n_segments()
-                    example = new_seqs[0][:8] if new_seqs else []
-                    print(f'  [Seg   L{level}] {n_seg} segments registered. '
-                          f'First tokens: {example}')
-
-            # Step 6: check for progress
-            new_vocab = {t for s in new_seqs for t in s}
-            if new_vocab == vocab_s:
-                if verbose:
-                    print(f'  [Merge L{level}] Vocabulary unchanged — stopping.')
-                break
-
-            current_seqs = new_seqs
-
-        if verbose:
-            print(f'\n  HierarchicalRelationalLearner ready: '
-                  f'{len(self.levels)} levels, {self.vocab.n_merges()} merges, '
-                  f'{self.vocab.n_segments()} segments.')
-            if self.vocab.n_merges():
-                print(f'  Top merges: {self.vocab.summary(10)}')
-
-    # ------------------------------------------------------------------
-    # Prediction
-
-    def predict_dist(self, atom: Any, relation: str,
-                     level: int = 0) -> dict[str, float]:
-        """P(target | atom, relation) at the requested level."""
-        if level >= len(self.levels):
-            return {}
-        return self.levels[level].predict_dist(atom, relation)
-
-    def infer_chain(self, atom: Any, relations: list[str],
-                    level: int = 0, topk: int = 5,
-                    ) -> list[tuple[str, float]]:
-        """Multi-hop inference at the requested level."""
-        if level >= len(self.levels):
-            return []
-        return self.levels[level].infer_chain(atom, relations, topk=topk)
-
-    # ------------------------------------------------------------------
-    # Merge-level query helpers
-
-    def merged_form(self, base_atom: str) -> str:
-        """Return the highest-level surface form that contains base_atom."""
-        tokens = self.vocab.tokenize([base_atom])
-        return tokens[0] if tokens else base_atom
-
-    def boundary_pmis(self, sequence: list[str]) -> list[float]:
-        """PMI at each boundary in the raw (level-0) sequence.
-
-        Wraps MergeDetector.boundary_pmi() on the level-0 learner.
-        Low values mark likely unit boundaries.
-        """
-        if not self.levels:
-            return []
-        return MergeDetector(self.levels[0], self.next_rel).boundary_pmi(sequence)
-
-    def level_summary(self) -> None:
-        """Print a summary of vocabulary and merge structure at each level."""
-        for i, (learner, seqs) in enumerate(
-                zip(self.levels, self._seqs_at)):
-            vocab = {t for s in seqs for t in s}
-            print(f'  Level {i}: {len(vocab)} unique atoms, '
-                  f'{sum(len(s) for s in seqs):,} tokens, '
-                  f'K={learner._K} clusters')
-
-
-# ---------------------------------------------------------------------------
-# MultiLevelContextBelief  (M4)
-# ---------------------------------------------------------------------------
-
-class MultiLevelContextBelief:
-    """M4: Top-down context prediction via stacked ContextBeliefStates.
-
-    Maintains one ContextBeliefState per fitted level.  Observations update
-    all levels simultaneously (using the merge vocabulary to map base atoms
-    to their merged forms).  Higher-level beliefs constrain lower-level
-    predictions via a weighted blend.
-
-    Top-down blend at level 0::
-
-        P_conditioned(t | rel) =
-            (1 − α) · P_level0(t | belief, rel)
-          +       α · P_level1_projected(t | belief, rel)
-
-    The level-1 prediction is marginalised back to level-0 atoms via the
-    constituent structure of each MergedAtom (``leaves()``).
-
-    Parameters
-    ----------
-    hier_learner      A fitted HierarchicalRelationalLearner.
-    top_down_weight   α — blending weight for upper-level signal (0 = no blend).
-    decay_rate        Per-step belief decay toward uniform (passed to each CBS).
-    obs_sharpness     Bayesian update sharpness (passed to each CBS).
-    """
-
-    def __init__(self,
-                 hier_learner:    HierarchicalRelationalLearner,
-                 top_down_weight: float = 0.3,
-                 decay_rate:      float = 0.90,
-                 obs_sharpness:   float = 0.97,
-                 ) -> None:
-        self._hier  = hier_learner
-        self._alpha = top_down_weight
-        self._beliefs: list[ContextBeliefState] = [
-            ContextBeliefState(learner,
-                               decay_rate=decay_rate,
-                               obs_sharpness=obs_sharpness)
-            for learner in hier_learner.levels
-        ]
-
-    # ------------------------------------------------------------------
-    # Update
-
-    def observe(self, atom: Any) -> None:
-        """Update all levels given a new base atom.
-
-        Level 0 observes the raw atom.
-        Level N observes the merged form of the atom at that level.
-        """
-        a_s = str(atom)
-        if not self._beliefs:
-            return
-        self._beliefs[0].observe(a_s)
-
-        if len(self._beliefs) > 1:
-            tokens = self._hier.vocab.tokenize([a_s])
-            merged = tokens[0] if tokens else a_s
-            for lvl in range(1, len(self._beliefs)):
-                # At level N, observe the merged surface that was active
-                self._beliefs[lvl].observe(merged)
-
-    def transition(self, relation: str) -> None:
-        """Propagate all level beliefs through their transition matrices."""
-        for belief in self._beliefs:
-            belief.transition(relation)
-
-    def decay(self) -> None:
-        """Decay all levels toward uniform prior."""
-        for belief in self._beliefs:
-            belief.decay()
-
-    # ------------------------------------------------------------------
-    # Prediction
-
-    def predict_dist_conditioned(self, relation: str,
-                                 level: int = 0,
-                                 ) -> dict[str, float]:
-        """Top-down conditioned P(target | belief, relation) at given level.
-
-        Blends level-N prediction with a projection from level N+1.
-        The level N+1 prediction is distributed uniformly over the constituent
-        base atoms of each MergedAtom (structural top-down signal).
-        """
-        if level >= len(self._beliefs):
-            return {}
-
-        base_dist = self._beliefs[level].predict_target_dist(relation)
-        alpha = self._alpha
-
-        if alpha == 0.0 or level + 1 >= len(self._beliefs):
-            return base_dist
-
-        upper_dist_merged = self._beliefs[level + 1].predict_target_dist(relation)
-        if not upper_dist_merged:
-            return base_dist
-
-        # Project merged predictions down to base atoms via constituent leaves
-        projected: dict[str, float] = {}
-        for merged_surf, p in upper_dist_merged.items():
-            ma = self._hier.vocab.lookup(merged_surf)
-            if ma is not None:
-                leaves = ma.leaves()
-                share  = p / max(len(leaves), 1)
-                for leaf in leaves:
-                    projected[leaf] = projected.get(leaf, 0.0) + share
-            else:
-                # Surface is a base atom at the upper level
-                projected[merged_surf] = projected.get(merged_surf, 0.0) + p
-
-        if not projected:
-            return base_dist
-
-        # Normalise
-        total = sum(projected.values())
-        if total > 0:
-            projected = {k: v / total for k, v in projected.items()}
-
-        # Blend
-        all_keys = set(base_dist) | set(projected)
-        combined = {
-            k: (1.0 - alpha) * base_dist.get(k, 0.0)
-               +       alpha  * projected.get(k, 0.0)
-            for k in all_keys
-        }
-        total2 = sum(combined.values())
-        if total2 > 0:
-            return {k: v / total2 for k, v in combined.items()}
-        return base_dist
-
-    # ------------------------------------------------------------------
-    # Diagnostics
-
-    def entropy(self, level: int = 0) -> float:
-        """Shannon entropy of the belief at the given level (bits)."""
-        if level >= len(self._beliefs):
-            return 0.0
-        return self._beliefs[level].entropy()
-
-    def reset(self) -> None:
-        """Reset all beliefs to uniform prior."""
-        for b in self._beliefs:
-            b.reset()
-
-    def __repr__(self) -> str:
-        levels_str = ', '.join(
-            f'L{i}:{b.entropy():.1f}b' for i, b in enumerate(self._beliefs)
-        )
-        return f'MultiLevelContextBelief({levels_str})'
-
-
-# ---------------------------------------------------------------------------
-# M5: Structural relation extraction
-# ---------------------------------------------------------------------------
-
-def extract_structural_relations(
-        hier: HierarchicalRelationalLearner,
-) -> dict[str, list[tuple[str, str, str]]]:
-    """M5: Extract constituency and distributional relations from a fitted
-    HierarchicalRelationalLearner.
-
-    Two kinds of relations are returned:
-
-    1. **Constituency** (exact, from merge tree):
-       (merged_surface, 'left_of',  left_surface)
-       (merged_surface, 'right_of', right_surface)
-       (left_surface,  'part_of',   merged_surface)
-       (right_surface, 'part_of',   merged_surface)
-
-       These are always available and form the hierarchical parse tree.
-
-    2. **Distributional** (from E3 clusters at each level):
-       (atom_surface, 'has_type_L{N}', cluster_label)
-
-       Where cluster_label = 'type_{cluster_id}' from the RelationalLearner
-       at level N.  Atoms in the same cluster share a distributional category
-       — these are the CTKG types discovered from data.
-
-    Returns
-    -------
-    dict with keys:
-        'constituency'    — [(subject, relation, object), ...]
-        'distributional'  — [(atom, 'has_type_LN', type_label), ...]
-    """
-    constituency:   list[tuple[str, str, str]] = []
-    distributional: list[tuple[str, str, str]] = []
-
-    # --- Constituency relations from merge history ---
-    for l_s, r_s, merged in hier.vocab._merges:
-        m_s = merged.surface
-        constituency.append((m_s,  'left_of',  l_s))
-        constituency.append((m_s,  'right_of', r_s))
-        constituency.append((l_s,  'part_of',  m_s))
-        constituency.append((r_s,  'part_of',  m_s))
-
-    # --- Distributional type labels from E3 clusters at each level ---
-    for lvl, (learner, seqs) in enumerate(
-            zip(hier.levels, hier._seqs_at)):
-        assignment = getattr(learner, 'assignment', {})
-        if not assignment:
-            continue
-        label_prefix = f'type_L{lvl}'
-        for atom_s, cluster_id in assignment.items():
-            type_label = f'{label_prefix}_{cluster_id}'
-            distributional.append((atom_s, f'has_type_L{lvl}', type_label))
-
-    return {
-        'constituency':   constituency,
-        'distributional': distributional,
-    }
-
-
-def label_merged_atoms(hier: HierarchicalRelationalLearner) -> None:
+def label_merged_atoms(hier) -> None:
     """M5: Fill in the ``label`` field of each MergedAtom using the E3 cluster
     assignment at the level where the atom first appears as a token.
 
@@ -4419,12 +3748,13 @@ def label_merged_atoms(hier: HierarchicalRelationalLearner) -> None:
 # ---------------------------------------------------------------------------
 
 def export_ctkg(
-        hier:        HierarchicalRelationalLearner,
+        hier,
         domain_name: str  = 'discovered',
         out_path:    str | None = None,
 ) -> str:
-    """M6: Export the structure discovered by HierarchicalRelationalLearner
-    as a CTKG domain file (.ctkg DSL format).
+    """M6: Export discovered hierarchy structure as a CTKG domain file (.ctkg DSL format).
+
+    ``hier`` must expose ``.vocab`` (AtomVocabulary) and ``.levels`` (list of RelationalLearner).
 
     The export encodes:
 
@@ -4445,8 +3775,8 @@ def export_ctkg(
 
     Parameters
     ----------
-    hier         A fitted HierarchicalRelationalLearner (call label_merged_atoms
-                 first to populate MergedAtom.label fields).
+    hier         Object with .vocab (AtomVocabulary) and .levels (list of
+                 RelationalLearner).  label_merged_atoms is called automatically.
     domain_name  Name for the generated domain block.
     out_path     If given, write to this file.  Otherwise return the string.
 
@@ -4458,7 +3788,7 @@ def export_ctkg(
     lines: list[str] = []
 
     lines.append(f'# Auto-generated CTKG domain: {domain_name}')
-    lines.append(f'# Source: HierarchicalRelationalLearner '
+    lines.append(f'# Source: PredictiveCodingHierarchy '
                  f'({len(hier.levels)} levels, {hier.vocab.n_merges()} merges)')
     lines.append('')
 
@@ -4590,8 +3920,6 @@ class _RunningStats:
 class PredictiveCodingHierarchy:
     """Broca's-area-inspired hierarchical predictive coding over token sequences.
 
-    Replaces ``HierarchicalRelationalLearner`` as the primary inference pipeline.
-
     Key properties:
 
     - **Online** (token-by-token): each token is processed immediately.
@@ -4611,12 +3939,10 @@ class PredictiveCodingHierarchy:
         pch.process_corpus(sequences)   # list[list[str]], one sub-list per document
         pch.level_summary()
 
-    Usage (warm-start from a pre-trained HRL)::
+    Usage (warm-start by injecting pre-fitted RelationalLearners)::
 
-        hrl = HierarchicalRelationalLearner(...)
-        hrl.fit(sequences)
-        pch = PredictiveCodingHierarchy.from_hrl(hrl)
-        pch.process_corpus(sequences)
+        pch = PredictiveCodingHierarchy.from_hrl(prior_pch)
+        pch.process_corpus(new_sequences)
     """
 
     def __init__(
@@ -5169,19 +4495,19 @@ class PredictiveCodingHierarchy:
     @classmethod
     def from_hrl(
         cls,
-        hrl: 'HierarchicalRelationalLearner',
+        hrl,
         **kwargs,
     ) -> 'PredictiveCodingHierarchy':
-        """Initialise PCH from a pre-trained HierarchicalRelationalLearner.
+        """Warm-start a new PCH from an object that exposes ``.levels`` and ``.vocab``.
 
-        Borrows the fitted RelationalLearners (with E3 cluster structure) from
-        HRL so that level-0 surprisal is immediately meaningful.  Higher levels
-        start cold and warm up online as the corpus is processed.
+        Borrows fitted RelationalLearners so that surprisal is immediately
+        meaningful.  Higher levels start cold and warm up online.
 
         Parameters
         ----------
         hrl
-            A fitted ``HierarchicalRelationalLearner``.
+            Any object with ``.levels`` (list[RelationalLearner]) and
+            ``.vocab`` (AtomVocabulary) — e.g. a previously trained PCH.
         **kwargs
             Additional constructor arguments forwarded to ``__init__``.
         """

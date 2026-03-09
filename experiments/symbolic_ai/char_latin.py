@@ -521,10 +521,10 @@ def main() -> None:
                         choices=['next', 'prev', 'skip2f', 'skip2b'],
                         help='Relations to include (default: all four)')
     parser.add_argument('--mode', default='pch',
-                        choices=['rl', 'hrl', 'pch'],
+                        choices=['rl', 'pch'],
                         help=(
                             'Pipeline to run after the base R0-R6 analysis. '
-                            '"rl" = base only; "hrl" = batch HRL (M1-M7); '
+                            '"rl" = base only; '
                             '"pch" = online PredictiveCodingHierarchy (M8, default)'))
     args = parser.parse_args()
 
@@ -659,44 +659,6 @@ def main() -> None:
     # M1-M7 / M8: Hierarchical Merge — mode-controlled
     if args.mode == 'rl':
         pass   # base R0-R6 only; no Merge pipeline
-
-    elif args.mode == 'hrl':
-        # Batch HRL (M1-M7)
-        print(f'\n{"=" * 65}')
-        print('Hierarchical Merge (HRL, batch): all-scale pattern learning')
-        print('=' * 65)
-        from relational_pipeline import (
-            HierarchicalRelationalLearner,
-            MergeDetector,
-            extract_structural_relations,
-            export_ctkg,
-        )
-        hrl = HierarchicalRelationalLearner(
-            pmi_threshold=0.3,
-            max_merges_per_level=30,
-            max_levels=4,
-            min_merge_count=5,
-        )
-        hrl.fit(_train_seqs, verbose=True)
-
-        print('\nMerge summary (top 20):')
-        for s in hrl.vocab.summary(20):
-            print(f'  {s}')
-
-        # Boundary PMI on a sample sentence
-        sample = list('in principio erat verbum')
-        print(f'\nBoundary PMIs for {repr("".join(sample))}:')
-        pmis = hrl.boundary_pmis(sample)
-        for i, (ch, pmi) in enumerate(zip(sample[:-1], pmis)):
-            marker = '|' if pmi < 0.5 else ' '
-            print(f'  {repr(ch)}→{repr(sample[i+1])}  PMI={pmi:+.2f}  {marker}')
-
-        # Export CTKG
-        ctkg_str = export_ctkg(hrl, domain_name='latin_chars')
-        n_lines = ctkg_str.count('\n')
-        print(f'\nCTKG export: {n_lines} lines, '
-              f'{len([l for l in ctkg_str.splitlines() if l.startswith("type")])} types, '
-              f'{len([l for l in ctkg_str.splitlines() if l.startswith("concept")])} concepts')
 
     # (mode == 'pch' handled by early return above)
 
