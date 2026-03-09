@@ -158,15 +158,19 @@ class RelationalLearner:
         self._rel_counts:  dict = dict(_rel_raw)    # rel → Counter(target)
 
         self._atom_bigrams = {}
+        self._atom_totals: dict = {}
         for (atom, rel), ctr in _atom_raw.items():
             total = sum(ctr.values())
+            self._atom_totals[(atom, rel)] = total
             if total > 0:
                 self._atom_bigrams[(atom, rel)] = {
                     k: v / total for k, v in ctr.items()}
 
         self._rel_unigram = {}
+        self._rel_totals: dict = {}
         for rel, ctr in _rel_raw.items():
             total = sum(ctr.values())
+            self._rel_totals[rel] = total
             if total > 0:
                 self._rel_unigram[rel] = {k: v / total for k, v in ctr.items()}
 
@@ -190,32 +194,40 @@ class RelationalLearner:
             max_atoms: int = 50_000) -> None:
         """Fit E0-E3 on a list of (atom_a, relation_name, atom_b) triples.
 
+        Fast path: bypasses ExampleStore entirely.  One O(N) pass collects
+        compound bigram signatures (fwd + bwd), atom bigrams, and rel unigrams.
+        Clustering and E3 cache construction proceed directly from raw dicts,
+        eliminating 8M+ engine.teach() calls.
+
         Args:
             max_atoms: If the number of unique atoms exceeds this threshold,
                        skip the E0-E3 cluster pipeline and use atom-level
                        bigrams + per-relation unigram only.
-
-                       The dense matrix size is V × n_compound_tokens where
-                       n_compound_tokens ≈ n_relations × V (forward + backward).
-                       For text with 2 relations: V=4,289 → ~4,289² × 2 × 4 B
-                       ≈ 147 MB — fine.  For FB15k-237 with 237 relations:
-                       V=14K → 14K × (237×14K) × 4 B ≈ 220 GB — OOM.
-
-                       Default 50,000 is safe for text data (single-digit
-                       relation count).  For large multi-relational KGs, lower
-                       this to ~500.
         """
-        # Count unique atoms and relations before allocating anything
+        from collections import defaultdict, Counter as _Counter
+
+        if verbose:
+            m = _rss_mb()
+            if m:
+                print(f'  RSS at fit() start = {m:.0f} MB')
+
+        # ── PASS 1 (O(N)): collect ALL data in one iteration ────────────────
+        fwd_raw:   dict = defaultdict(_Counter)   # atom → {"rel:tgt": count}
+        bwd_raw:   dict = defaultdict(_Counter)   # atom → {"rev_rel:src": count}
+        _atom_raw: dict = defaultdict(_Counter)   # (atom, rel) → Counter(tgt)
+        _rel_raw:  dict = defaultdict(_Counter)   # rel → Counter(tgt)
         atoms_seen: set = set()
         rels_seen:  set = set()
         for a, r, b in triples:
-            atoms_seen.add(str(a))
-            atoms_seen.add(str(b))
-            rels_seen.add(str(r))
+            a_s, r_s, b_s = str(a), str(r), str(b)
+            atoms_seen.add(a_s); atoms_seen.add(b_s); rels_seen.add(r_s)
+            fwd_raw[a_s][f'{r_s}:{b_s}'] += 1
+            bwd_raw[b_s][f'rev_{r_s}:{a_s}'] += 1
+            _atom_raw[(a_s, r_s)][b_s] += 1
+            _rel_raw[r_s][b_s] += 1
+
         n_unique = len(atoms_seen)
         n_rels   = max(len(rels_seen), 1)
-
-        # Actual estimate: V × (n_relations × V) × 4 bytes (forward + backward)
         est_bytes = n_unique * (n_rels * n_unique) * 4 * 2
         est_gb    = est_bytes / 1_000_000_000
 
@@ -224,108 +236,166 @@ class RelationalLearner:
                 print(f'  Large-KG mode: {n_unique:,} atoms × {n_rels} relations'
                       f' — cluster matrix ≈{est_gb:.1f} GB, skipping E0-E3; '
                       f'using atom bigrams + rel unigram only.')
-            self._fit_large_kg(triples, verbose=verbose)
+            # Reuse already-collected data — no need to re-scan triples.
+            self._atom_counts = dict(_atom_raw)
+            self._rel_counts  = dict(_rel_raw)
+            self._atom_totals = {k: sum(v.values()) for k, v in _atom_raw.items()}
+            self._rel_totals  = {r: sum(v.values()) for r, v in _rel_raw.items()}
+            self._atom_bigrams = {}
+            for key, ctr in _atom_raw.items():
+                t = self._atom_totals[key]
+                if t > 0:
+                    self._atom_bigrams[key] = {k: v / t for k, v in ctr.items()}
+            self._rel_unigram = {}
+            for rel, ctr in _rel_raw.items():
+                t = self._rel_totals[rel]
+                if t > 0:
+                    self._rel_unigram[rel] = {k: v / t for k, v in ctr.items()}
+            self.assignment = {}; self.clusters = {}; self._K = 0
+            if verbose:
+                print(f'  atom_bigrams: {len(self._atom_bigrams):,} (h,r) pairs')
+                print(f'  rel_unigram:  {len(self._rel_unigram):,} relations')
+                m = _rss_mb()
+                if m:
+                    print(f'  RSS after large-KG fit = {m:.0f} MB')
             return
 
-        if verbose:
-            m = _rss_mb()
-            if m:
-                print(f'  RSS at fit() start = {m:.0f} MB')
-
-        # E0: discover compound bigrams
-        if 'rel_next' not in ai_stores(self.ai):
-            self.discover(triples, verbose=verbose)
-        if verbose:
-            m = _rss_mb()
-            if m:
-                print(f'  RSS after E0 discover = {m:.0f} MB')
-
-        # Cluster atoms by compound bigram distributions
+        # ── E0: compound signatures (replaces discover + induce_hierarchy_bidir)
         if verbose:
             print(f'  Clustering {self._K} atom categories '
                   f'from rel_next/rel_prev...')
-        # vocab_size caps the context column count in the dense clustering
-        # matrix: matrix shape = n_atoms × vocab_size × 4 bytes.
-        # At word level (n_atoms=50K) without cap: 50K × 100K × 4 = 20 GB → OOM.
-        # With vocab_size=2000: 50K × 2K × 4 = 400 MB → fine.
-        # 2000 context types is sufficient for Brown-style distributional clustering.
-        _vocab_size = min(2000, n_unique * 2) if n_unique > 50 else None
-        result = self.ai.induce_hierarchy_bidir(
-            'rel_next', 'rel_prev', n_clusters=self._K,
-            vocab_size=_vocab_size)
-        if 'error' in result:
-            print(f'  WARNING: clustering failed: {result["error"]}')
-            return
-        self.assignment = result.get('assignment', {})
-        self.clusters   = result.get('clusters', {})
-        self._K         = result.get('n_clusters', len(self.clusters))
-        if verbose:
-            print(f'  Atoms: {len(self.assignment):,}  '
-                  f'Clusters: {self._K}')
 
-        # Build E3 successor distributions BEFORE clearing E0 examples
-        # (ask_dist uses store.examples, which is gone after .clear())
+        all_atoms_v = sorted(set(fwd_raw) | set(bwd_raw))
+        atom_freq:   dict = {}
+        sigs:        dict = {}
+        for atom in all_atoms_v:
+            fwd_t = sum(fwd_raw[atom].values())
+            bwd_t = sum(bwd_raw[atom].values())
+            d: dict = {}
+            if fwd_t > 0:
+                for k, cnt in fwd_raw[atom].items():
+                    d[('fwd', k)] = cnt / fwd_t
+            if bwd_t > 0:
+                for k, cnt in bwd_raw[atom].items():
+                    d[('bwd', k)] = cnt / bwd_t
+            if d:
+                sigs[atom] = d
+                atom_freq[atom] = fwd_t + bwd_t
+
+        # Cap output-vocabulary dimension (mirrors vocab_size in induce_hierarchy_bidir)
+        _vocab_size = min(2000, n_unique * 2) if n_unique > 50 else None
+        if _vocab_size is not None:
+            out_freq: _Counter = _Counter()
+            for atom, sig in sigs.items():
+                w = atom_freq.get(atom, 1)
+                for ctx_key, p in sig.items():
+                    out_freq[ctx_key] += p * w
+            top_out = {k for k, _ in out_freq.most_common(_vocab_size)}
+            capped: dict = {}
+            for atom, sig in sigs.items():
+                restricted = {k: v for k, v in sig.items() if k in top_out}
+                mass = sum(restricted.values())
+                if mass > 1e-12:
+                    capped[atom] = {k: v / mass for k, v in restricted.items()}
+            sigs = capped
+
+        assignment, clusters = _jsd_cluster(sigs, n_clusters=self._K)
+        self.assignment = assignment
+        self.clusters   = clusters
+        self._K         = len(clusters)
+        if verbose:
+            print(f'  Atoms: {len(self.assignment):,}  Clusters: {self._K}')
+
+        # ── E3: cluster successor distributions for sim_matrix ──────────────
         if verbose:
             print('  E3: building successor distributions...')
-        succ_dists = _build_rel_succ_dists(self.ai, self.clusters)
-        self._succ_dists = succ_dists   # stored for R4 adapt_metric()
-        sim_matrix = _build_sim_matrix(succ_dists, self._K, e3_temperature)
+        succ: dict = {}
+        for cid, members in clusters.items():
+            merged: dict = collections.defaultdict(float)
+            n = 0
+            for tok in members:
+                ctr = fwd_raw.get(tok)
+                if ctr is None:
+                    continue
+                total = sum(ctr.values())
+                if total == 0:
+                    continue
+                for k, cnt in ctr.items():
+                    merged[k] += cnt / total
+                n += 1
+            succ[cid] = {k: v / n for k, v in merged.items()} if n else {}
+        self._succ_dists = succ
+        sim_matrix = _build_sim_matrix(succ, self._K, e3_temperature)
 
-        # Free E0 bigram examples — clustering is complete
-        for _c in ('rel_next', 'rel_prev'):
-            _s = self.ai.stores.get(_c)
-            if _s is not None:
-                _s.examples.clear()
-        if verbose:
-            m = _rss_mb()
-            if m:
-                print(f'  RSS after E0 clear = {m:.0f} MB')
-
-        # E1: category chain conditioned on relation name
-        _register_concepts(self.ai, [
-            ('next_cat_rel',        ['cat', 'rel'],       ['cat'],  'relational'),
-            ('token_given_cat_rel', ['cat', 'rel', 'cat'],['atom'], 'relational'),
-        ])
-        # Build transition matrix (GeometryDetector) AND atom-level bigrams
-        # (V-level prediction pathway) in a single O(N) pass.
-        from collections import defaultdict, Counter as _Counter
-        _trans_raw:   dict = defaultdict(lambda: defaultdict(_Counter))
-        _atom_raw:    dict = defaultdict(_Counter)  # (atom, rel) → Counter(target)
-        n_used = n_skip = 0
-        for a, r, b in triples:
-            a_s, r_s, b_s = str(a), str(r), str(b)
-            c_a = self.assignment.get(a_s)
-            c_b = self.assignment.get(b_s)
-            # Atom-level bigram (always — even for OOV categories)
-            _atom_raw[(a_s, r_s)][b_s] += 1
-            if c_a is None or c_b is None:
-                n_skip += 1
-                continue
-            self.ai.teach('next_cat_rel',
-                          (str(c_a), r_s), (str(c_b),))
-            self.ai.teach('token_given_cat_rel',
-                          (str(c_a), r_s, str(c_b)), (b_s,))
-            _trans_raw[r_s][str(c_a)][str(c_b)] += 1
-            n_used += 1
-        # Normalise atom bigrams and store.
-        self._atom_counts: dict = dict(_atom_raw)  # raw counts for update_online()
+        # ── Atom bigrams + totals ────────────────────────────────────────────
+        self._atom_counts:  dict = dict(_atom_raw)
         self._atom_bigrams: dict = {}
+        self._atom_totals:  dict = {}
         for (atom, rel), ctr in _atom_raw.items():
             total = sum(ctr.values())
+            self._atom_totals[(atom, rel)] = total
             if total > 0:
                 self._atom_bigrams[(atom, rel)] = {
                     k: v / total for k, v in ctr.items()}
-        # Build rel unigram counts (mirrors _fit_large_kg for update_online() compat).
-        from collections import Counter as _Counter2
-        _rel_raw2: dict = collections.defaultdict(_Counter2)
-        for a, r, b in triples:
-            _rel_raw2[str(r)][str(b)] += 1
-        self._rel_counts: dict = dict(_rel_raw2)
-        self._rel_unigram: dict = {
-            r: {t: c / sum(ctr.values()) for t, c in ctr.items()}
-            for r, ctr in _rel_raw2.items() if sum(ctr.values()) > 0
-        }
-        # Normalise and store for GeometryDetector.
+
+        self._rel_counts:  dict = dict(_rel_raw)
+        self._rel_unigram: dict = {}
+        self._rel_totals:  dict = {}
+        for rel, ctr in _rel_raw.items():
+            total = sum(ctr.values())
+            self._rel_totals[rel] = total
+            if total > 0:
+                self._rel_unigram[rel] = {k: v / total for k, v in ctr.items()}
+
+        if verbose:
+            m = _rss_mb()
+            if m:
+                print(f'  RSS after E1 = {m:.0f} MB')
+
+        # ── E1 caches: nc / wgc / _trans — O(V×R×V) from _atom_raw ─────────
+        # Build directly from atom-level counts: avoids second O(N) triple scan
+        # AND replaces ai.teach() calls + _precompute_dist_cache() entirely.
+        _register_concepts(self.ai, [
+            ('next_cat_rel',        ['cat', 'rel'],        ['cat'],  'relational'),
+            ('token_given_cat_rel', ['cat', 'rel', 'cat'], ['atom'], 'relational'),
+        ])
+        _trans_raw: dict = defaultdict(lambda: defaultdict(_Counter))
+        nc_raw:     dict = defaultdict(_Counter)   # (ca_s, r_s) → Counter(cb_s)
+        wgc_raw:    dict = defaultdict(_Counter)   # (ca_s, r_s, cb_s) → Counter(b_s)
+        n_used = n_skip = 0
+        for (a_s, r_s), ctr in _atom_raw.items():
+            c_a = assignment.get(a_s)
+            if c_a is None:
+                n_skip += len(ctr)
+                continue
+            ca_s = str(c_a)
+            for b_s, cnt in ctr.items():
+                c_b = assignment.get(b_s)
+                if c_b is None:
+                    n_skip += cnt
+                    continue
+                cb_s = str(c_b)
+                nc_raw[(ca_s, r_s)][cb_s]          += cnt
+                wgc_raw[(ca_s, r_s, cb_s)][b_s]    += cnt
+                _trans_raw[r_s][ca_s][cb_s]         += cnt
+                n_used                              += cnt
+
+        if verbose:
+            print(f'  E1: {n_used:,} triples used, {n_skip:,} OOV skipped')
+
+        # nc_cache / wgc_cache: tuple output keys to match _precompute_dist_cache
+        nc_cache:  dict = {}
+        for k, ctr in nc_raw.items():
+            total = sum(ctr.values())
+            if total > 0:
+                nc_cache[k] = {(t,): c / total for t, c in ctr.items()}
+
+        wgc_cache: dict = {}
+        for k, ctr in wgc_raw.items():
+            total = sum(ctr.values())
+            if total > 0:
+                wgc_cache[k] = {(t,): c / total for t, c in ctr.items()}
+
         self._trans: dict = {}
         for rel, src_map in _trans_raw.items():
             self._trans[rel] = {}
@@ -334,17 +404,7 @@ class RelationalLearner:
                 if total > 0:
                     self._trans[rel][c_src] = {c: n / total
                                                for c, n in ctr.items()}
-        if verbose:
-            print(f'  E1: {n_used:,} triples used, {n_skip:,} OOV skipped')
-            m = _rss_mb()
-            if m:
-                print(f'  RSS after E1 = {m:.0f} MB')
 
-        # Build E3 dist caches from E1 examples before clearing
-        nc_cache  = _precompute_dist_cache(self.ai, 'next_cat_rel')
-        wgc_cache = _precompute_dist_cache(self.ai, 'token_given_cat_rel')
-
-        # Store for lazy retrieval
         self._nc_cache   = nc_cache
         self._wgc_cache  = wgc_cache
         self._sim_matrix = sim_matrix
@@ -353,16 +413,10 @@ class RelationalLearner:
 
         if verbose:
             print(f'  E3: nc_cache {len(nc_cache)} keys  '
-                  f'wgc_cache {len(wgc_cache)} keys  (lazy — computed on first query)')
+                  f'wgc_cache {len(wgc_cache)} keys')
             m = _rss_mb()
             if m:
                 print(f'  RSS after E3 cache = {m:.0f} MB')
-
-        # Free E1 examples — all information now in nc_cache / wgc_cache
-        for _c in ('next_cat_rel', 'token_given_cat_rel'):
-            _s = self.ai.stores.get(_c)
-            if _s is not None:
-                _s.examples.clear()
 
     # ---- Prediction ---------------------------------------------------------
 
@@ -1334,15 +1388,39 @@ def _jsd_cluster(sigs: dict[str, dict],
             for k, v in sigs[name].items():
                 mat[i, key_idx[k]] = v
 
-        jsd_arr = np.zeros((n, n), dtype=np.float64)
-        for i in range(n):
-            for j in range(i + 1, n):
-                m = (mat[i] + mat[j]) / 2
-                def _h(p: 'np.ndarray') -> float:
-                    mask = p > 1e-15
-                    return float(-np.sum(p[mask] * np.log2(p[mask])))
-                d = max(0.0, _h(m) - (_h(mat[i]) + _h(mat[j])) / 2)
-                jsd_arr[i, j] = jsd_arr[j, i] = d
+        # Vectorised pairwise JSD — precompute per-row entropy then broadcast.
+        eps = 1e-15
+        with np.errstate(divide='ignore', invalid='ignore'):
+            log_mat = np.where(mat > eps, np.log2(mat), 0.0)
+        row_ents = -np.einsum('id,id->i', mat, log_mat)   # (n,)
+
+        # Full broadcast (n×n×D) when memory is manageable (< 128 MB).
+        if n * n * D * 8 < 128 * 1024 * 1024:
+            mix = (mat[:, None, :] + mat[None, :, :]) * 0.5  # (n, n, D)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                log_mix = np.where(mix > eps, np.log2(mix), 0.0)
+            H_mix = -np.einsum('ijd,ijd->ij', mix, log_mix)   # (n, n)
+            jsd_arr = np.maximum(
+                0.0, H_mix - (row_ents[:, None] + row_ents[None, :]) * 0.5)
+            np.fill_diagonal(jsd_arr, 0.0)
+        else:
+            # Row-by-row to stay within memory budget.
+            jsd_arr = np.zeros((n, n), dtype=np.float64)
+            for i in range(n):
+                mix_i = (mat[i:i+1, :] + mat) * 0.5        # (n, D)
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    log_mix_i = np.where(mix_i > eps, np.log2(mix_i), 0.0)
+                H_mix_i = -np.einsum('jd,jd->j', mix_i, log_mix_i)  # (n,)
+                jsd_arr[i] = np.maximum(
+                    0.0, H_mix_i - (row_ents[i] + row_ents) * 0.5)
+            np.fill_diagonal(jsd_arr, 0.0)
+
+        # Sort all upper-triangle pairs by JSD using numpy argsort.
+        i_idx, j_idx = np.triu_indices(n, k=1)
+        jsd_vals = jsd_arr[i_idx, j_idx]
+        order = np.argsort(jsd_vals, kind='stable')
+        pairs = [(float(jsd_vals[o]), int(i_idx[o]), int(j_idx[o]))
+                 for o in order]
 
         def _get(i: int, j: int) -> float:
             return float(jsd_arr[i, j])
@@ -1361,10 +1439,12 @@ def _jsd_cluster(sigs: dict[str, dict],
         def _get(i: int, j: int) -> float:  # type: ignore[misc]
             return jsd_list[i][j]
 
+        pairs = sorted((_get(i, j), i, j)
+                       for i in range(n) for j in range(i + 1, n))
+
     # Greedy agglomerative clustering (single-link, ascending JSD)
     assignment = list(range(n))
     n_active = n
-    pairs = sorted((_get(i, j), i, j) for i in range(n) for j in range(i + 1, n))
 
     # Auto-detect threshold from pairwise JSD distribution (Kneedle algorithm)
     if n_clusters is None and jsd_threshold is None:
@@ -1425,14 +1505,14 @@ class RelationClusterer:
         self._jsd:       dict[tuple, float] = {}  # {(r1, r2): jsd_value}
 
     def fit(self, learner: 'RelationalLearner',
-            triples: list[tuple[Any, str, Any]],
+            triples: list[tuple[Any, str, Any]] | None = None,
             jsd_threshold: float | None = None,
             verbose: bool = True) -> None:
         """Cluster relation types using atom assignments from a fitted RelationalLearner.
 
         Args:
             learner:       A fitted RelationalLearner (learner.assignment populated).
-            triples:       The same (atom, relation, atom) triples used to fit learner.
+            triples:       Ignored — kept for backward compat. Uses learner._atom_counts.
             jsd_threshold: JSD below which two relations are merged (n_clusters=None).
                            None (default) → auto-detect via Kneedle algorithm.
             verbose:       Print cluster assignments.
@@ -1440,14 +1520,18 @@ class RelationClusterer:
         rel_counts: dict[str, dict] = collections.defaultdict(
             lambda: collections.defaultdict(float))
         n_missing = 0
-        for a, r, b in triples:
-            a_s, r_s, b_s = str(a), str(r), str(b)
+        # O(V×R×V) instead of O(N) triple scan — uses learner._atom_counts
+        for (a_s, r_s), ctr in learner._atom_counts.items():
             c_a = learner.assignment.get(a_s)
-            c_b = learner.assignment.get(b_s)
-            if c_a is None or c_b is None:
-                n_missing += 1
+            if c_a is None:
+                n_missing += sum(ctr.values())
                 continue
-            rel_counts[r_s][(c_a, c_b)] += 1.0
+            for b_s, cnt in ctr.items():
+                c_b = learner.assignment.get(b_s)
+                if c_b is None:
+                    n_missing += cnt
+                    continue
+                rel_counts[r_s][(c_a, c_b)] += float(cnt)
 
         if not rel_counts:
             return
@@ -1513,40 +1597,46 @@ class SecondOrderGrammar:
         self.clusters:      dict[int, list[str]] = {}  # cluster_id → [rel_names]
         self._n_chains: int = 0
 
-    def fit(self, triples: list[tuple[Any, str, Any]],
+    def fit(self, triples: list[tuple[Any, str, Any]] | None = None,
             n_clusters: int | None = None,
             jsd_threshold: float | None = None,
-            verbose: bool = True) -> None:
+            verbose: bool = True,
+            learner: 'RelationalLearner | None' = None) -> None:
         """Learn next_rel distributions from chains in the triple set.
 
         Finds all (a -r1→ b) AND (b -r2→ c) chains, accumulates (r1, r2) pairs,
         then clusters relations by JSD of their P(next_rel | r) distributions.
 
         Args:
-            triples:       (atom, relation, atom) triples.
+            triples:       (atom, relation, atom) triples. Ignored when learner provided.
             n_clusters:    Target cluster count.  None → JSD-threshold merging.
             jsd_threshold: Merge threshold when n_clusters is None.
                            None (default) → auto-detect via Kneedle algorithm.
             verbose:       Print distributions and clusters.
+            learner:       Fitted RelationalLearner. When provided, uses learner._atom_counts
+                           for O(V×R×V) chain counting instead of O(N) triple scan.
         """
-        # O(N) chain count via in/out aggregation.
-        # Naïve triple-loop is O(N × avg_out_degree) = O(N²/V), hanging on
-        # large corpora (180B iterations for 2.2M triples over 27 chars).
-        #
         # chain_count[r1][r2] = Σ_b  in_count[b][r1] × out_count[b][r2]
         # where:
         #   in_count[b][r1]  = # triples (?, r1, b)   [edges arriving at b]
         #   out_count[b][r2] = # triples (b, r2, ?)   [edges leaving b]
         #
-        # O(N) to build counts, O(V × R²) to aggregate.
+        # O(V×R×V) when learner._atom_counts available, else O(N) from triples.
         in_count:  dict[str, dict[str, int]] = collections.defaultdict(
             lambda: collections.defaultdict(int))
         out_count: dict[str, dict[str, int]] = collections.defaultdict(
             lambda: collections.defaultdict(int))
-        for a, r, b in triples:
-            r_s, b_s, a_s = str(r), str(b), str(a)
-            in_count[b_s][r_s]  += 1
-            out_count[a_s][r_s] += 1
+        if learner is not None and hasattr(learner, '_atom_counts'):
+            for (a_s, r_s), ctr in learner._atom_counts.items():
+                total = sum(ctr.values())
+                out_count[a_s][r_s] += total
+                for b_s, cnt in ctr.items():
+                    in_count[b_s][r_s] += cnt
+        else:
+            for a, r, b in (triples or []):
+                r_s, b_s, a_s = str(r), str(b), str(a)
+                in_count[b_s][r_s]  += 1
+                out_count[a_s][r_s] += 1
 
         seq_counts: dict[str, dict[str, float]] = collections.defaultdict(
             lambda: collections.defaultdict(float))
@@ -1956,11 +2046,11 @@ class RelationalParadigmDiscoverer:
 
     def fit(self,
             learner:           'RelationalLearner',
-            triples:           list,
+            triples:           list | None = None,
             verbose:           bool = False,
             use_atom_partners: bool = True,
             ) -> 'RelationalParadigmDiscoverer':
-        """Fit role signatures from (atom, relation, atom) triples.
+        """Fit role signatures from learner._atom_counts (or triples as fallback).
 
         Args:
             use_atom_partners: If True (default), partner atoms are identified by
@@ -1969,8 +2059,7 @@ class RelationalParadigmDiscoverer:
                 If False, use E0 category id as partner label (K-dimensional),
                 which is more abstract but loses sub-category distinctions.
 
-        One O(N) pass to build raw counts, then O(V²×D) clustering where V
-        is the number of unique atoms and D is the role-signature dimension.
+        O(V×R×V) from learner._atom_counts — no triple scan needed.
         For character-level data: V=27, D≤R×V≈108 → instant.
         """
         from collections import defaultdict, Counter as _Ctr
@@ -1978,20 +2067,38 @@ class RelationalParadigmDiscoverer:
         src_raw: dict = defaultdict(_Ctr)   # atom → {'>rel:partner': count}
         tgt_raw: dict = defaultdict(_Ctr)   # atom → {'<rel:partner': count}
 
-        for a, r, b in triples:
-            a_s, r_s, b_s = str(a), str(r), str(b)
-            if use_atom_partners:
-                partner_a = b_s   # partner of a is b (surface form)
-                partner_b = a_s   # partner of b is a (surface form)
-            else:
-                c_a = learner.assignment.get(a_s)
-                c_b = learner.assignment.get(b_s)
-                if c_a is None or c_b is None:
-                    continue
-                partner_a = str(c_b)
-                partner_b = str(c_a)
-            src_raw[a_s][f'>{r_s}:{partner_a}'] += 1   # a is source
-            tgt_raw[b_s][f'<{r_s}:{partner_b}'] += 1   # b is target
+        if hasattr(learner, '_atom_counts'):
+            # O(V×R×V) — use precomputed counts from learner
+            for (a_s, r_s), ctr in learner._atom_counts.items():
+                if use_atom_partners:
+                    for b_s, cnt in ctr.items():
+                        src_raw[a_s][f'>{r_s}:{b_s}'] += cnt   # a is source
+                        tgt_raw[b_s][f'<{r_s}:{a_s}'] += cnt   # b is target
+                else:
+                    c_a = learner.assignment.get(a_s)
+                    if c_a is None:
+                        continue
+                    for b_s, cnt in ctr.items():
+                        c_b = learner.assignment.get(b_s)
+                        if c_b is None:
+                            continue
+                        src_raw[a_s][f'>{r_s}:{c_b!s}'] += cnt
+                        tgt_raw[b_s][f'<{r_s}:{c_a!s}'] += cnt
+        else:
+            for a, r, b in (triples or []):
+                a_s, r_s, b_s = str(a), str(r), str(b)
+                if use_atom_partners:
+                    partner_a = b_s
+                    partner_b = a_s
+                else:
+                    c_a = learner.assignment.get(a_s)
+                    c_b = learner.assignment.get(b_s)
+                    if c_a is None or c_b is None:
+                        continue
+                    partner_a = str(c_b)
+                    partner_b = str(c_a)
+                src_raw[a_s][f'>{r_s}:{partner_a}'] += 1
+                tgt_raw[b_s][f'<{r_s}:{partner_b}'] += 1
 
         # Merge source and target counts into a single normalised signature.
         all_atoms = set(src_raw) | set(tgt_raw)
@@ -2253,15 +2360,15 @@ class RelationalAlgebra:
             ) -> 'RelationalAlgebra':
         """
         Args:
-            learner:  Fitted RelationalLearner (provides ``assignment``).
-            triples:  Raw (atom, rel, atom) triples.  When provided, builds
-                      atom-level V×V matrices (higher resolution than K×K).
-                      For V≤300, this is fast enough in pure Python.
-                      For V>300, falls back to K×K category-level matrices.
+            learner:  Fitted RelationalLearner (provides ``assignment`` + ``_atom_counts``).
+            triples:  Ignored — kept for backward compat. Uses learner._atom_counts when
+                      available (V≤300 → atom-level matrices, else K×K category-level).
             max_jsd:  Maximum row-weighted average JSD to accept a rule.
         """
-        if triples is not None:
-            V = len(learner.assignment)
+        V = len(learner.assignment)
+        if hasattr(learner, '_atom_counts') and V <= 300:
+            use_atom_level = True
+        elif triples is not None:
             use_atom_level = (V <= 300)
         else:
             use_atom_level = False
@@ -2273,7 +2380,7 @@ class RelationalAlgebra:
 
     def _fit_atom_level(self,
                         learner: 'RelationalLearner',
-                        triples: list,
+                        triples: list | None,
                         verbose: bool,
                         max_jsd: float,
                         ) -> 'RelationalAlgebra':
@@ -2282,20 +2389,33 @@ class RelationalAlgebra:
         V       = len(atoms)
         idx     = {a: i for i, a in enumerate(atoms)}
 
-        # Count raw triples
+        # Count raw triples — O(V×R×V) from _atom_counts, else O(N) from triples
         raw: dict = collections.defaultdict(int)             # (rel, src_i, tgt_j) → count
         rel_src_total: dict = collections.defaultdict(       # rel → {src_i → total}
             lambda: collections.defaultdict(int))
 
         relations_seen: set = set()
-        for a, r, b in triples:
-            a_s, r_s, b_s = str(a), str(r), str(b)
-            if a_s not in idx or b_s not in idx:
-                continue
-            i, j = idx[a_s], idx[b_s]
-            raw[(r_s, i, j)]     += 1
-            rel_src_total[r_s][i] += 1
-            relations_seen.add(r_s)
+        if hasattr(learner, '_atom_counts'):
+            for (a_s, r_s), ctr in learner._atom_counts.items():
+                if a_s not in idx:
+                    continue
+                i = idx[a_s]
+                relations_seen.add(r_s)
+                for b_s, cnt in ctr.items():
+                    if b_s not in idx:
+                        continue
+                    j = idx[b_s]
+                    raw[(r_s, i, j)]      += cnt
+                    rel_src_total[r_s][i] += cnt
+        else:
+            for a, r, b in (triples or []):
+                a_s, r_s, b_s = str(a), str(r), str(b)
+                if a_s not in idx or b_s not in idx:
+                    continue
+                i, j = idx[a_s], idx[b_s]
+                raw[(r_s, i, j)]     += 1
+                rel_src_total[r_s][i] += 1
+                relations_seen.add(r_s)
 
         relations = sorted(relations_seen)
         self.relations = relations
@@ -2375,41 +2495,41 @@ class RelationalAlgebra:
                 max_jsd:   float,
                 verbose:   bool,
                 ) -> None:
-        """Matrix multiply, compare, build composition table."""
+        """Matrix multiply, compare, build composition table (numpy)."""
+        import numpy as _np
 
-        def _compose(m1: list, m2: list) -> list:
-            res = [[0.0] * N for _ in range(N)]
-            for i in range(N):
-                for k in range(N):
-                    if m1[i][k] > 1e-10:
-                        for j in range(N):
-                            res[i][j] += m1[i][k] * m2[k][j]
-            return res
+        # Convert to numpy arrays once
+        np_mats = {r: _np.array(mats[r], dtype=_np.float64) for r in relations}
+        w_arr   = _np.array(weights, dtype=_np.float64)
+        w_sum   = float(w_arr.sum())
+        if w_sum <= 0:
+            w_arr = _np.ones(N, dtype=_np.float64)
+            w_sum = float(N)
 
-        def _row_jsd(a: list, b: list) -> float:
-            m = [(a[x] + b[x]) / 2.0 for x in range(N)]
-            def _h(v: list) -> float:
-                return -sum(x * math.log2(x) for x in v if x > 1e-15)
-            return max(0.0, _h(m) - (_h(a) + _h(b)) / 2.0)
+        eps = 1e-15
 
-        def _mat_jsd(m1: list, m2: list) -> float:
-            w_sum = j_sum = 0.0
-            for i in range(N):
-                w = weights[i]
-                if w > 0:
-                    j_sum += w * _row_jsd(m1[i], m2[i])
-                    w_sum += w
-            return j_sum / w_sum if w_sum > 0 else 1.0
+        def _row_entropy(m: '_np.ndarray') -> '_np.ndarray':
+            """Row-wise Shannon entropy (base 2) of (N,N) matrix."""
+            with _np.errstate(divide='ignore', invalid='ignore'):
+                lm = _np.where(m > eps, _np.log2(m + eps), 0.0)
+            return -_np.einsum('ij,ij->i', m, lm)
+
+        def _mat_jsd(m1: '_np.ndarray', m2: '_np.ndarray') -> float:
+            mix = (m1 + m2) * 0.5
+            row_jsd = _np.maximum(
+                0.0,
+                _row_entropy(mix) - (_row_entropy(m1) + _row_entropy(m2)) * 0.5)
+            return float(_np.dot(row_jsd, w_arr)) / w_sum
 
         # First pass: find best-match JSD for every pair
         best_matches: list = []  # (r_i, r_j, best_r, best_jsd)
         for r_i in relations:
             for r_j in relations:
-                m_comp   = _compose(mats[r_i], mats[r_j])
+                m_comp   = np_mats[r_i] @ np_mats[r_j]   # numpy matmul
                 best_r:   str | None = None
                 best_jsd: float      = float('inf')
                 for r_k in relations:
-                    d = _mat_jsd(m_comp, mats[r_k])
+                    d = _mat_jsd(m_comp, np_mats[r_k])
                     if d < best_jsd:
                         best_jsd = d
                         best_r   = r_k

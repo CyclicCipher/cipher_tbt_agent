@@ -590,11 +590,11 @@ def main() -> None:
 
     print(f'\nL2: Fitting RelationClusterer...')
     rel_clusterer = RelationClusterer()
-    rel_clusterer.fit(learner, triples, verbose=True)
+    rel_clusterer.fit(learner, verbose=True)
 
     print(f'\nL4: Fitting SecondOrderGrammar...')
     grammar = SecondOrderGrammar()
-    grammar.fit(triples, verbose=True)
+    grammar.fit(verbose=True, learner=learner)
 
     print(f'\nR0: Detecting geometry...')
     geo = GeometryDetector()
@@ -602,7 +602,7 @@ def main() -> None:
 
     print(f'\nR1: Discovering paradigmatic roles (E4)...')
     paradigm = RelationalParadigmDiscoverer()
-    paradigm.fit(learner, triples, verbose=True)
+    paradigm.fit(learner, verbose=True)
 
     print(f'\nR2: Sense disambiguation (E5)...')
     sense = RelationalSenseSplitter()
@@ -610,7 +610,7 @@ def main() -> None:
 
     print(f'\nR3: Relational algebra (E6)...')
     algebra = RelationalAlgebra()
-    algebra.fit(learner, triples=triples, verbose=True)
+    algebra.fit(learner, verbose=True)
 
     print(f'\nR5: Benchmark (train/test split Hits@K)...')
     _run_benchmark(sequences, args.relations)
