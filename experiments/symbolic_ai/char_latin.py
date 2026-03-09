@@ -517,6 +517,47 @@ def main() -> None:
     if not sequences:
         print('ERROR: No sequences loaded.')
         sys.exit(1)
+    total_chars = sum(len(s) for s in sequences)
+    print(f'Loaded {len(sequences)} books, {total_chars:,} total characters.')
+
+    # Fast path: --mode pch skips the entire R0-R6 analysis.
+    if args.mode == 'pch':
+        print(f'\n{"=" * 65}')
+        print('PredictiveCodingHierarchy (online, surprisal-based) — M8')
+        print('=' * 65)
+        from relational_pipeline import PredictiveCodingHierarchy
+        pch = PredictiveCodingHierarchy(
+            n_levels=10,
+            max_chunk_size=7,
+            adaptive_threshold=True,
+            surprise_k=0.5,
+            min_tokens_active=20,
+        )
+        print(f'Processing {len(sequences)} books ({total_chars:,} chars)...')
+        for i, seq in enumerate(sequences):
+            pch._reset_buffers()
+            for token in seq:
+                pch._process_level(0, str(token))
+            for lvl in range(pch.n_levels):
+                pch._emit_buffer(lvl)
+            print(f'  book {i + 1:>2}/{len(sequences)}  '
+                  f'{len(seq):>7,} chars  '
+                  f'L0:{pch._seen[0]:>8,}  '
+                  f'L1:{pch._seen[1]:>6,}  '
+                  f'L2:{pch._seen[2]:>5,}',
+                  flush=True)
+        pch.level_summary()
+
+        ctkg_str = pch.export_ctkg(domain_name='latin_pch')
+        n_lines  = ctkg_str.count('\n')
+        print(f'\nCTKG export: {n_lines} lines, '
+              f'{len([l for l in ctkg_str.splitlines() if l.startswith("type")])} types, '
+              f'{len([l for l in ctkg_str.splitlines() if l.startswith("concept")])} concepts')
+        if n_lines > 0:
+            print('\n--- CTKG preview (first 40 lines) ---')
+            for line in ctkg_str.splitlines()[:40]:
+                print(f'  {line}')
+        return
 
     print(f'\nBuilding triples...')
     triples = build_triples(sequences, args.relations)
@@ -638,33 +679,7 @@ def main() -> None:
               f'{len([l for l in ctkg_str.splitlines() if l.startswith("type")])} types, '
               f'{len([l for l in ctkg_str.splitlines() if l.startswith("concept")])} concepts')
 
-    else:  # mode == 'pch'  (default)
-        # Online PredictiveCodingHierarchy (M8)
-        print(f'\n{"=" * 65}')
-        print('PredictiveCodingHierarchy (online, surprisal-based) — M8')
-        print('=' * 65)
-        from relational_pipeline import PredictiveCodingHierarchy
-        pch = PredictiveCodingHierarchy(
-            n_levels=10,
-            max_chunk_size=7,
-            adaptive_threshold=True,
-            surprise_k=0.5,
-            min_tokens_active=20,
-        )
-        print('Processing corpus (cold-start, all books)...')
-        pch.process_corpus(_train_seqs)
-        pch.level_summary()
-
-        # Export CTKG
-        ctkg_str = pch.export_ctkg(domain_name='latin_pch')
-        n_lines  = ctkg_str.count('\n')
-        print(f'\nCTKG export: {n_lines} lines, '
-              f'{len([l for l in ctkg_str.splitlines() if l.startswith("type")])} types, '
-              f'{len([l for l in ctkg_str.splitlines() if l.startswith("concept")])} concepts')
-        if n_lines > 0:
-            print('\n--- CTKG preview (first 40 lines) ---')
-            for line in ctkg_str.splitlines()[:40]:
-                print(f'  {line}')
+    # (mode == 'pch' handled by early return above)
 
 
 if __name__ == '__main__':

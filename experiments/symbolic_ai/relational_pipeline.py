@@ -545,6 +545,11 @@ class RelationalLearner:
             self._atom_counts = {}
         if not hasattr(self, '_rel_counts') or self._rel_counts is None:
             self._rel_counts = {}
+        # Running totals avoid O(V) sum(counter.values()) on every update.
+        if not hasattr(self, '_atom_totals') or self._atom_totals is None:
+            self._atom_totals = {}
+        if not hasattr(self, '_rel_totals') or self._rel_totals is None:
+            self._rel_totals = {}
 
         # --- atom-level bigram update ---------------------------------------
         if key not in self._atom_counts:
@@ -555,8 +560,10 @@ class RelationalLearner:
             self._atom_counts[key] = _Ctr(
                 {t: max(1, round(p * _pc)) for t, p in existing.items()}
             ) if existing else _Ctr()
+            self._atom_totals[key] = sum(self._atom_counts[key].values())
         self._atom_counts[key][b_s] += 1
-        total = sum(self._atom_counts[key].values())
+        self._atom_totals[key] += 1
+        total = self._atom_totals[key]
         self._atom_bigrams[key] = {t: c / total
                                    for t, c in self._atom_counts[key].items()}
 
@@ -567,8 +574,10 @@ class RelationalLearner:
             self._rel_counts[r_s] = _Ctr(
                 {t: max(1, round(p * _pc_r)) for t, p in existing_r.items()}
             ) if existing_r else _Ctr()
+            self._rel_totals[r_s] = sum(self._rel_counts[r_s].values())
         self._rel_counts[r_s][b_s] += 1
-        total_r = sum(self._rel_counts[r_s].values())
+        self._rel_totals[r_s] += 1
+        total_r = self._rel_totals[r_s]
         if not hasattr(self, '_rel_unigram') or self._rel_unigram is None:
             self._rel_unigram = {}
         self._rel_unigram[r_s] = {t: c / total_r
@@ -4129,6 +4138,46 @@ def export_ctkg(
 # M8  PredictiveCodingHierarchy — online surprisal-based hierarchical learning
 # =============================================================================
 
+class _RunningStats:
+    """O(1) sliding-window mean and standard deviation.
+
+    Maintains a fixed-size circular buffer.  On each ``append`` the oldest
+    evicted value is subtracted from the running sum/sum-of-squares and the
+    new value is added — keeping mean and std in O(1) rather than the O(n)
+    recomputation that a plain deque+sum approach requires.
+    """
+    __slots__ = ('_buf', '_sum', '_sum_sq', '_maxlen')
+
+    def __init__(self, maxlen: int = 1000) -> None:
+        self._maxlen = maxlen
+        self._buf    = collections.deque(maxlen=maxlen)
+        self._sum    = 0.0
+        self._sum_sq = 0.0
+
+    def append(self, x: float) -> None:
+        if len(self._buf) == self._maxlen:
+            old          = self._buf[0]   # about to be evicted
+            self._sum    -= old
+            self._sum_sq -= old * old
+        self._buf.append(x)
+        self._sum    += x
+        self._sum_sq += x * x
+
+    def __len__(self) -> int:
+        return len(self._buf)
+
+    def mean(self) -> float:
+        n = len(self._buf)
+        return self._sum / n if n > 0 else 0.0
+
+    def std(self) -> float:
+        n = len(self._buf)
+        if n < 2:
+            return 0.0
+        mean = self._sum / n
+        var  = self._sum_sq / n - mean * mean
+        return math.sqrt(max(0.0, var))
+
 class PredictiveCodingHierarchy:
     """Broca's-area-inspired hierarchical predictive coding over token sequences.
 
@@ -4227,9 +4276,9 @@ class PredictiveCodingHierarchy:
         # Total tokens processed at each level (used for cold-start gate).
         self._seen: list[int] = [0] * n_levels
 
-        # Rolling surprisal history per level (bounded to last 1 000 values).
-        self._surp_hist: list = [
-            collections.deque(maxlen=1000) for _ in range(n_levels)
+        # O(1) sliding-window running stats per level (mean + std for adaptive threshold).
+        self._surp_hist: list[_RunningStats] = [
+            _RunningStats(maxlen=1000) for _ in range(n_levels)
         ]
 
     # ------------------------------------------------------------------
@@ -4252,22 +4301,18 @@ class PredictiveCodingHierarchy:
         return -math.log2(p)
 
     def _effective_threshold(self, level: int) -> float:
-        """Adaptive boundary threshold for *level*.
+        """Adaptive boundary threshold for *level* — O(1).
 
-        With ``adaptive_threshold=True`` returns mean + k*std over the
-        rolling surprisal history.  Falls back to ``surprise_threshold``
-        when fewer than 10 samples have been collected.
+        With ``adaptive_threshold=True`` returns mean + k*std using the
+        O(1) ``_RunningStats`` running statistics.  Falls back to
+        ``surprise_threshold`` when fewer than 10 samples have been collected.
         """
         if not self.adaptive_threshold:
             return self.surprise_threshold
         hist = self._surp_hist[level]
         if len(hist) < 10:
             return self.surprise_threshold
-        n    = len(hist)
-        mean = sum(hist) / n
-        var  = sum((x - mean) ** 2 for x in hist) / n
-        std  = math.sqrt(var) if var > 0.0 else 0.0
-        return mean + self.surprise_k * std
+        return hist.mean() + self.surprise_k * hist.std()
 
     def _emit_buffer(self, level: int) -> None:
         """Flush the working-memory buffer at *level*.
@@ -4402,7 +4447,7 @@ class PredictiveCodingHierarchy:
                 break
             active += 1
             hist   = self._surp_hist[lvl]
-            mean_s = sum(hist) / len(hist) if hist else 0.0
+            mean_s = hist.mean()
             thresh = self._effective_threshold(lvl)
             bg     = getattr(self.learners[lvl], '_atom_bigrams', {})
             vocab_sz = len({a for (a, _) in bg})
