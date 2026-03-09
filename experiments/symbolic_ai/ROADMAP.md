@@ -264,6 +264,79 @@ learner.fit(triples)
 
 ---
 
+## Research Connections (found 2026-03-08)
+
+These papers directly validate and extend the relational pipeline.
+
+### Patch2Vec (Fried et al., 2017)
+*"Similarity of two patches can be learned from the prevalence of their spatial proximity in natural images."*
+
+Exactly our approach. They train a CNN with triplet loss where positive pairs = spatially adjacent
+patches. We use k-means codebook + distributional clustering instead of a CNN. Same distributional
+hypothesis, different implementation. **Validates our architecture.**
+
+Key limitation they found: no fixed patch dictionary — every new texture may be unprecedented.
+This is exactly the unique-patch problem we hit. Their fix: CNN embedding. Our fix: codebook.
+
+### SymmetryLens (Efe & Ozakin, 2024) — arXiv:2410.05232
+*Information-theoretic symmetry discovery: loss = symmetry + locality.*
+
+**This is our Level 5 algorithm, in continuous form.** They discover which transformations preserve
+the data distribution by jointly optimizing:
+- **Symmetry**: p(x) ≈ p(g·x) — transformation g preserves the distribution
+- **Locality**: nearby samples are transformed similarly
+
+Our discrete analog:
+- **Symmetry**: two offsets are equivalent if they connect the same category distributions (JSD ≈ 0)
+- **Locality**: nearby offset vectors have similar distributional profiles
+
+They demonstrate: pixel translation in CNNs is discoverable from natural image data alone.
+For our RawOffsetLearner (Level 5a), the same principle applies: raw offsets (dr,dc) cluster
+into equivalence classes by distributional profile → discovered symmetry orbits.
+
+**The connection**: our RelationClusterer (Level 2) applied to raw offsets (Level 5a) IS
+symmetry discovery in the sense of SymmetryLens — just discretized.
+
+GitHub: https://github.com/onurefe/SymmetryLens
+
+### LieGAN (Yang et al., ICML 2023) — arXiv:2302.00236
+GAN-based discovery of Lie group symmetries. Generator produces transformations that preserve
+the data distribution. Discovers SO(2), SO(3), Lorentz group SO(1,3)+ from data.
+Limitation: search space restricted to general linear groups; fails for nonlinear symmetries.
+
+LaLiGAN (2023) extends to nonlinear symmetries via latent-space linearization.
+
+### Seg-HGNN (Mondal et al., BMVC 2024) — arXiv:2409.06589
+*Hyperbolic GNN for unsupervised image segmentation. 7.5k parameters. Beats much larger models.*
+
+Key finding: **part-whole hierarchies in visual scenes are naturally hyperbolic**. The exponential
+growth of neighborhoods in hyperbolic space matches the exponential growth of part-whole
+relationships (pixel → texture → part → object → scene).
+
+Uses **Lorentz model** (hyperboloid), not Poincaré ball — numerically more stable, critical
+for low-VRAM (4GB) training.
+
+**Relevance to Level 5b**: our RawOffsetLearner on spherical/hyperbolic data should see
+exponentially growing distributional diversity at each hop in hyperbolic space, vs. polynomial
+growth in Euclidean. This is the observable signature that distinguishes hyperbolic geometry
+from Euclidean without being told which geometry applies.
+
+### Spatial Pyramid Matching (Lazebnik et al., CVPR 2006)
+BoVW with spatial structure at 3 levels: 1 + 4 + 16 = 21 cells. Level 0 = whole image,
+Level 1 = 2×2, Level 2 = 4×4. Concatenated → 21× richer representation than flat BoVW.
+Our current 4×4 grid is already Level 2; adding Levels 0 and 1 is a direct improvement.
+
+### DINOv2 (Meta, 2023)
+Frozen ViT-S/14 features are semantically consistent across images without any training.
+The "unique patch" problem disappears — patches of the same semantic content (fur, eye,
+background) cluster in feature space even across different images.
+
+**Path forward for image pipeline**: use DINOv2 features as the patch representation
+instead of raw pixels → codebook k-means on 384-dim DINOv2 features → relational learning.
+This is a hybrid symbolic+neural approach. Pure symbolic remains the long-term goal.
+
+---
+
 ## Theoretical Basis
 
 **E1-E3 = Transformer attention without parameters:**
