@@ -283,7 +283,7 @@ Remaining problems after M7 (motivation for M8):
 - **Sub-word fragmentation**: PMI threshold mismatches at character level.
 - Root cause: batch segmentation is architecturally wrong for this problem.
 
-### M8 — PredictiveCodingHierarchy (online, surprisal-based) — IN PROGRESS
+### M8 — PredictiveCodingHierarchy (online, surprisal-based) — DONE
 **Class:** `PredictiveCodingHierarchy` in `relational_pipeline.py` (appended
 after line 4125).
 
@@ -310,6 +310,104 @@ boundaries.
 
 **Demo:** `python char_latin.py --mode pch` (new default).
 **HRL still available:** `python char_latin.py --mode hrl`.
+
+### M9 — PCH + Multi-Scale R0-R6 Analysis — IN PROGRESS
+
+**Motivation:** PCH builds `_atom_counts` at every level but never clusters atoms
+into categories.  R0-R6 needs those categories to produce a meaningful CTKG.  M9
+closes that gap by running the full R0-R6 pipeline on every active PCH level after
+`process_corpus()` completes.
+
+**Sub-phases:**
+
+#### M9a — Track reverse bigrams in PCH  ✓ (planned: one extra `update_online` call)
+PCH currently only calls `update_online(prev, 'next', token)`.  Add
+`update_online(token, 'prev', prev)` in `_process_level()` so that each level's
+`_atom_counts` contains both forward and reverse bigrams.  This doubles the context
+richness for E0 clustering at higher levels at negligible cost.
+
+#### M9b — Collect chunk sequences per level  ✓ (planned: log to `_chunk_seqs`)
+`RelationalSenseSplitter` needs raw sequences (not just counts) to build conditional
+distributions P(next | prev=x).  Add `_chunk_seqs: list[list[list[str]]]` to PCH —
+per-level, per-document list of emitted chunk strings.  Log each emitted chunk in
+`_emit_buffer()`.
+
+#### M9c — `RelationalLearner.cluster_from_counts()`  ✓ (planned: new method)
+After PCH online learning, each level's learner has `_atom_counts` but no E0
+categories (`assignment`/`clusters` are absent).  Add
+`cluster_from_counts(verbose=False)` to `RelationalLearner` that reconstructs
+compound E0 signatures directly from `_atom_counts`, runs `_jsd_cluster()`, and
+builds `assignment`, `clusters`, `_trans`, `_nc_cache`, `_wgc_cache`,
+`_succ_dists`, `_sim_matrix` — exactly the E0+E1+E3 portion of `fit()` without any
+triple scan (O(V×R×V) only).
+
+#### M9d — `PCH.analyse(verbose=True)`  ✓ (planned: new method)
+After `process_corpus()`:
+1. For each active level L: call `learners[L].cluster_from_counts()`.
+2. Run `RelationClusterer`, `SecondOrderGrammar`, `GeometryDetector`,
+   `RelationalParadigmDiscoverer`, `RelationalSenseSplitter`,
+   `RelationalAlgebra` on that level's fitted learner.
+3. Store all results in `self.analyses: list[dict]` indexed by level.
+Returns rich multi-scale CTKG structure — word categories at L1, phrase
+categories at L2, etc.
+
+#### M9e — Extend `export_ctkg()` with multi-scale categories  ✓ (planned)
+If `self.analyses` is populated, emit per-level `concept` blocks into the CTKG
+DSL:  atom-category assignments, role clusters, sense nodes, composition rules.
+These become first-class CTKG nodes rather than raw chunk strings.
+
+---
+
+### M10 — Cross-Level Constituency Analysis — PLANNED
+
+**Motivation:** R0-R6 run *within* each level discovers relations among peers
+(word follows word, phrase follows phrase).  Running R0-R6 *across* levels on the
+constituency structure discovers what character-types occupy word boundaries, what
+word-types form what phrase-types, etc.  This is the novel direction not covered
+by any prior work.
+
+**What "cross-level triples" means:**
+
+For every chunk in `AtomVocabulary`:
+- `MergedAtom(surface, left=A, right=B)`:
+  - `(surface, 'left_const',  A)` and `(surface, 'right_const', B)`
+  - `(A, 'is_left_of',  surface)` and `(B, 'is_right_of', surface)`
+- `SegmentedAtom(surface, parts=[p0,p1,...,pN])`:
+  - `(surface, 'part_0', p0)`, …, `(surface, 'part_N', pN)`
+  - `(p0, 'at_pos_0_of', surface)`, etc.
+
+A `RelationalLearner` fitted on these triples learns the distributional structure
+of constituency: which atom-types are interchangeable as left constituents, which
+right-constituent types are predicted by left-constituent type, etc.
+
+**Sub-phases:**
+
+#### M10a — `PCH.analyse_cross_level(verbose=True)`
+1. Build cross-level triples from `self.vocab` (MergedAtoms + SegmentedAtoms).
+2. Fit a new `RelationalLearner` on these triples.
+3. Run R0-R6 on it.
+4. Store as `self.cross_level_analysis`.
+Key expected discoveries:
+- Role clusters: atoms that appear only as L constituents vs. only as R constituents
+  vs. both → predicts the "head vs. modifier" distinction without supervision.
+- Relational algebra: `left_const ∘ right_const` vs. `right_const ∘ left_const`
+  — are left-first or right-first constituency patterns dominant?
+- Second-order grammar: which part relations follow other part relations.
+
+#### M10b — Export cross-level structure to CTKG
+Emit the cross-level categories and composition rules as functor blocks in the CTKG
+DSL, mapping level-L atom types to level-L+1 chunk types.
+
+---
+
+### M11 — Cleanup — PLANNED
+
+After M9 and M10 are tested:
+- Remove `HierarchicalRelationalLearner` batch pipeline (replaced by PCH).
+- Remove `MergeDetector` PMI-batch methods (boundary detection now in PCH).
+- Simplify `char_latin.py`: remove `--mode rl` and `--mode hrl` if they're fully
+  subsumed, or keep `--mode rl` only as a single-level diagnostic.
+- Archive `sequence_pipeline.py` (already marked outdated; confirm no new callers).
 
 ---
 

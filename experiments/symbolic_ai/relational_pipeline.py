@@ -641,6 +641,184 @@ class RelationalLearner:
         self._rel_totals[r_s] += 1
         # _rel_unigram rebuilt lazily in predict_dist; no dict comprehension here.
 
+    def cluster_from_counts(
+        self,
+        verbose:          bool = False,
+        max_cluster_atoms: int = 100,
+    ) -> None:
+        """Run E0+E1+E3 clustering from already-collected ``_atom_counts``.
+
+        After online learning (e.g. via PCH's ``update_online()`` calls) the
+        learner has raw bigram counts but no distributional categories.  This
+        method reconstructs compound E0 signatures from ``_atom_counts`` and
+        runs the clustering pipeline — equivalent to the E0/E1/E3 portion of
+        ``fit()`` but without any triple scan (O(V×R×V) only).
+
+        Parameters
+        ----------
+        max_cluster_atoms
+            Maximum number of atoms to cluster.  At word level V can be in the
+            thousands, making O(V²) JSD clustering impractically slow.  We
+            restrict to the ``max_cluster_atoms`` most frequent atoms (those with
+            highest total bigram count).  Default 300 — yields sub-second
+            clustering at every level while covering the vast majority of tokens.
+
+        Sets ``assignment``, ``clusters``, ``_trans``, ``_nc_cache``,
+        ``_wgc_cache``, ``_succ_dists``, ``_sim_matrix`` on self.
+        """
+        from collections import defaultdict, Counter as _Counter
+
+        counts = getattr(self, '_atom_counts', None)
+        if not counts:
+            if verbose:
+                print('  cluster_from_counts: no _atom_counts — skipping')
+            return
+
+        # ── Reconstruct fwd_raw / bwd_raw from _atom_counts ─────────────────
+        fwd_raw: dict = defaultdict(_Counter)   # atom → {'rel:tgt': count}
+        bwd_raw: dict = defaultdict(_Counter)   # atom → {'rev_rel:src': count}
+        _rel_raw: dict = defaultdict(_Counter)
+
+        for (a_s, r_s), ctr in counts.items():
+            for b_s, cnt in ctr.items():
+                fwd_raw[a_s][f'{r_s}:{b_s}']     += cnt
+                bwd_raw[b_s][f'rev_{r_s}:{a_s}'] += cnt
+                _rel_raw[r_s][b_s]                += cnt
+
+        all_atoms_v = sorted(set(fwd_raw) | set(bwd_raw))
+        n_unique = len(all_atoms_v)
+        if n_unique < 2:
+            return
+
+        # ── E0: compound signatures ──────────────────────────────────────────
+        sigs:      dict = {}
+        atom_freq: dict = {}
+        for atom in all_atoms_v:
+            fwd_t = sum(fwd_raw[atom].values())
+            bwd_t = sum(bwd_raw[atom].values())
+            d: dict = {}
+            if fwd_t > 0:
+                for k, cnt in fwd_raw[atom].items():
+                    d[('fwd', k)] = cnt / fwd_t
+            if bwd_t > 0:
+                for k, cnt in bwd_raw[atom].items():
+                    d[('bwd', k)] = cnt / bwd_t
+            if d:
+                sigs[atom] = d
+                atom_freq[atom] = fwd_t + bwd_t
+
+        # ── Restrict to top-N most frequent atoms (O(V²) JSD cap) ───────────
+        if len(sigs) > max_cluster_atoms:
+            top_atoms = sorted(sigs, key=lambda a: -atom_freq.get(a, 0))
+            top_set   = set(top_atoms[:max_cluster_atoms])
+            sigs      = {a: s for a, s in sigs.items() if a in top_set}
+            if verbose:
+                print(f'  cluster_from_counts: V={n_unique} → top {max_cluster_atoms} atoms')
+
+        # Cap output vocab (mirrors fit() behaviour).
+        n_for_cap  = len(sigs)
+        _vocab_size = min(2000, n_for_cap * 2) if n_for_cap > 50 else None
+        if _vocab_size is not None:
+            out_freq: _Counter = _Counter()
+            for atom, sig in sigs.items():
+                w = atom_freq.get(atom, 1)
+                for ctx_key, p in sig.items():
+                    out_freq[ctx_key] += p * w
+            top_out = {k for k, _ in out_freq.most_common(_vocab_size)}
+            capped: dict = {}
+            for atom, sig in sigs.items():
+                restricted = {k: v for k, v in sig.items() if k in top_out}
+                mass = sum(restricted.values())
+                if mass > 1e-12:
+                    capped[atom] = {k: v / mass for k, v in restricted.items()}
+            sigs = capped
+
+        if len(sigs) < 2:
+            return
+
+        assignment, clusters = _jsd_cluster(sigs, n_clusters=self._K,
+                                             verbose=verbose)
+        self.assignment = assignment
+        self.clusters   = clusters
+        self._K         = len(clusters)
+
+        # ── E3: succ_dists → sim_matrix ──────────────────────────────────────
+        succ: dict = {}
+        for cid, members in clusters.items():
+            merged: dict = collections.defaultdict(float)
+            n = 0
+            for tok in members:
+                ctr = fwd_raw.get(tok)
+                if not ctr:
+                    continue
+                total = sum(ctr.values())
+                if total == 0:
+                    continue
+                for k, cnt in ctr.items():
+                    merged[k] += cnt / total
+                n += 1
+            succ[cid] = {k: v / n for k, v in merged.items()} if n else {}
+        self._succ_dists = succ
+        self._sim_matrix = _build_sim_matrix(succ, self._K)
+
+        # ── E1: nc_cache / wgc_cache / _trans ────────────────────────────────
+        from collections import defaultdict as _dd
+        _trans_raw  = _dd(lambda: _dd(_Counter))
+        nc_raw      = _dd(_Counter)
+        wgc_raw     = _dd(_Counter)
+
+        for (a_s, r_s), ctr in counts.items():
+            c_a = assignment.get(a_s)
+            if c_a is None:
+                continue
+            ca_s = str(c_a)
+            for b_s, cnt in ctr.items():
+                c_b = assignment.get(b_s)
+                if c_b is None:
+                    continue
+                cb_s = str(c_b)
+                nc_raw[(ca_s, r_s)][cb_s]        += cnt
+                wgc_raw[(ca_s, r_s, cb_s)][b_s]  += cnt
+                _trans_raw[r_s][ca_s][cb_s]       += cnt
+
+        nc_cache: dict = {}
+        for k, ctr in nc_raw.items():
+            total = sum(ctr.values())
+            if total > 0:
+                nc_cache[k] = {(t,): c / total for t, c in ctr.items()}
+
+        wgc_cache: dict = {}
+        for k, ctr in wgc_raw.items():
+            total = sum(ctr.values())
+            if total > 0:
+                wgc_cache[k] = {(t,): c / total for t, c in ctr.items()}
+
+        _trans: dict = {}
+        for rel, src_map in _trans_raw.items():
+            _trans[rel] = {}
+            for c_src, ctr in src_map.items():
+                total = sum(ctr.values())
+                if total > 0:
+                    _trans[rel][c_src] = {c: n / total for c, n in ctr.items()}
+
+        # ── Update rel stats ─────────────────────────────────────────────────
+        self._rel_unigram = {}
+        self._rel_totals  = {}
+        for rel, ctr in _rel_raw.items():
+            total = sum(ctr.values())
+            self._rel_totals[rel] = total
+            if total > 0:
+                self._rel_unigram[rel] = {k: v / total for k, v in ctr.items()}
+
+        self._nc_cache   = nc_cache
+        self._wgc_cache  = wgc_cache
+        self._trans      = _trans
+        self._nc_soft    = {}
+        self._wgc_soft   = {}
+
+        if verbose:
+            print(f'  cluster_from_counts: V={n_unique} atoms → K={self._K} clusters')
+
     def atom_neighbors(self, atom: Any, topn: int = 8) -> list[tuple]:
         """Atoms most similar in relational role (by category similarity).
 
@@ -1442,32 +1620,103 @@ def _jsd_cluster(sigs: dict[str, dict],
         pairs = sorted((_get(i, j), i, j)
                        for i in range(n) for j in range(i + 1, n))
 
-    # Greedy agglomerative clustering (single-link, ascending JSD)
-    assignment = list(range(n))
-    n_active = n
+    # UPGMA agglomerative clustering (average-link) with lazy-deletion heap.
+    # Average-link avoids single-link chaining (which collapses all atoms into K=1).
+    # Heap gives O(n² log n) vs O(n³) for the naive submatrix approach.
+    #
+    # Threshold strategy: when n_clusters is None we run ALL merges to completion,
+    # collect the sequence of merge distances, then apply _gap_threshold on those
+    # distances (not original pairwise JSDs) to find the dendrogram cut point.
+    # This is more principled than thresholding on raw pairwise JSDs.
 
-    # Auto-detect threshold from pairwise JSD distribution (Kneedle algorithm)
-    if n_clusters is None and jsd_threshold is None:
-        all_jsds = [d for d, _, _ in pairs]
-        jsd_threshold = _gap_threshold(all_jsds)
+    import heapq as _hq
 
-    for d, i, j in pairs:
-        if n_clusters is not None and n_active <= n_clusters:
-            break
-        if n_clusters is None and d > jsd_threshold:
-            break
-        ci, cj = assignment[i], assignment[j]
-        if ci == cj:
-            continue
-        for idx in range(n):
-            if assignment[idx] == cj:
-                assignment[idx] = ci
-        n_active -= 1
+    # Build initial distance matrix (n×n float list for in-place UPGMA updates)
+    try:
+        import numpy as _np_upgma
+        _D = jsd_arr.tolist()
+    except (ImportError, NameError):
+        _D = [[_get(i, j) for j in range(n)] for i in range(n)]
 
-    # Remap to 0..K-1
-    old_ids = sorted(set(assignment))
+    _sizes   = [1] * n
+    _active  = set(range(n))
+
+    # Build initial heap: all upper-triangle pairs sorted by JSD.
+    _heap: list = [(float(_D[i][j]), i, j)
+                   for i in range(n) for j in range(i + 1, n)]
+    _hq.heapify(_heap)
+
+    # Map: original atom index → current cluster representative.
+    _label = list(range(n))
+
+    if n_clusters is not None:
+        # ── Fixed-K mode: stop when target cluster count is reached ────────────
+        while _heap and len(_active) > n_clusters:
+            while _heap:
+                min_d, ci_idx, cj_idx = _hq.heappop(_heap)
+                if ci_idx in _active and cj_idx in _active:
+                    break
+            else:
+                break
+            ni, nj = _sizes[ci_idx], _sizes[cj_idx]
+            for k in _active:
+                if k == ci_idx or k == cj_idx:
+                    continue
+                new_d = (ni * _D[ci_idx][k] + nj * _D[cj_idx][k]) / (ni + nj)
+                _D[ci_idx][k] = _D[k][ci_idx] = new_d
+                _hq.heappush(_heap, (new_d, min(ci_idx, k), max(ci_idx, k)))
+            _sizes[ci_idx] += nj
+            _active.discard(cj_idx)
+            for idx in range(n):
+                if _label[idx] == cj_idx:
+                    _label[idx] = ci_idx
+    else:
+        # ── Auto-K mode: full dendrogram + gap detection ────────────────────────
+        # Run all merges, recording merge distances in order.
+        _merge_log: list[tuple[float, int, int]] = []   # (dist, ci, cj)
+        _snapshots: list[list[int]]               = []  # _label after each merge
+
+        while _heap and len(_active) > 1:
+            while _heap:
+                min_d, ci_idx, cj_idx = _hq.heappop(_heap)
+                if ci_idx in _active and cj_idx in _active:
+                    break
+            else:
+                break
+            ni, nj = _sizes[ci_idx], _sizes[cj_idx]
+            for k in _active:
+                if k == ci_idx or k == cj_idx:
+                    continue
+                new_d = (ni * _D[ci_idx][k] + nj * _D[cj_idx][k]) / (ni + nj)
+                _D[ci_idx][k] = _D[k][ci_idx] = new_d
+                _hq.heappush(_heap, (new_d, min(ci_idx, k), max(ci_idx, k)))
+            _sizes[ci_idx] += nj
+            _active.discard(cj_idx)
+            for idx in range(n):
+                if _label[idx] == cj_idx:
+                    _label[idx] = ci_idx
+            _merge_log.append((min_d, ci_idx, cj_idx))
+            _snapshots.append(_label[:])
+
+        # Apply gap detection on merge distances.
+        if jsd_threshold is None:
+            merge_dists = [d for d, _, _ in _merge_log]
+            jsd_threshold = _gap_threshold(merge_dists)
+
+        # Find the latest snapshot whose next merge distance exceeds the threshold.
+        # That snapshot gives the dendrogram cut.
+        best_snap = _snapshots[-1] if _snapshots else _label[:]
+        for step_idx, (d, _, _) in enumerate(_merge_log):
+            if d > jsd_threshold:
+                best_snap = (_snapshots[step_idx - 1] if step_idx > 0
+                             else list(range(n)))
+                break
+        _label = best_snap
+
+    # Remap active root IDs → 0..K-1
+    old_ids = sorted(set(_label))
     remap = {old: new for new, old in enumerate(old_ids)}
-    final = [remap[a] for a in assignment]
+    final = [remap[_label[i]] for i in range(n)]
 
     asgn = {names[i]: final[i] for i in range(n)}
     clus: dict[int, list[str]] = collections.defaultdict(list)
@@ -2049,6 +2298,7 @@ class RelationalParadigmDiscoverer:
             triples:           list | None = None,
             verbose:           bool = False,
             use_atom_partners: bool = True,
+            max_atoms:         int  = 200,
             ) -> 'RelationalParadigmDiscoverer':
         """Fit role signatures from learner._atom_counts (or triples as fallback).
 
@@ -2058,6 +2308,8 @@ class RelationalParadigmDiscoverer:
                 can separate fine-grained roles even when E0 has a mega-cluster.
                 If False, use E0 category id as partner label (K-dimensional),
                 which is more abstract but loses sub-category distinctions.
+            max_atoms: Cap the number of atoms clustered (top-N by frequency).
+                       Prevents O(V²×D) blowup at word/chunk levels where V≫200.
 
         O(V×R×V) from learner._atom_counts — no triple scan needed.
         For character-level data: V=27, D≤R×V≈108 → instant.
@@ -2066,6 +2318,7 @@ class RelationalParadigmDiscoverer:
 
         src_raw: dict = defaultdict(_Ctr)   # atom → {'>rel:partner': count}
         tgt_raw: dict = defaultdict(_Ctr)   # atom → {'<rel:partner': count}
+        atom_freq: dict = {}                # atom → total count (for capping)
 
         if hasattr(learner, '_atom_counts'):
             # O(V×R×V) — use precomputed counts from learner
@@ -2074,6 +2327,8 @@ class RelationalParadigmDiscoverer:
                     for b_s, cnt in ctr.items():
                         src_raw[a_s][f'>{r_s}:{b_s}'] += cnt   # a is source
                         tgt_raw[b_s][f'<{r_s}:{a_s}'] += cnt   # b is target
+                        atom_freq[a_s] = atom_freq.get(a_s, 0) + cnt
+                        atom_freq[b_s] = atom_freq.get(b_s, 0) + cnt
                 else:
                     c_a = learner.assignment.get(a_s)
                     if c_a is None:
@@ -2084,6 +2339,8 @@ class RelationalParadigmDiscoverer:
                             continue
                         src_raw[a_s][f'>{r_s}:{c_b!s}'] += cnt
                         tgt_raw[b_s][f'<{r_s}:{c_a!s}'] += cnt
+                        atom_freq[a_s] = atom_freq.get(a_s, 0) + cnt
+                        atom_freq[b_s] = atom_freq.get(b_s, 0) + cnt
         else:
             for a, r, b in (triples or []):
                 a_s, r_s, b_s = str(a), str(r), str(b)
@@ -2099,6 +2356,8 @@ class RelationalParadigmDiscoverer:
                     partner_b = str(c_a)
                 src_raw[a_s][f'>{r_s}:{partner_a}'] += 1
                 tgt_raw[b_s][f'<{r_s}:{partner_b}'] += 1
+                atom_freq[a_s] = atom_freq.get(a_s, 0) + 1
+                atom_freq[b_s] = atom_freq.get(b_s, 0) + 1
 
         # Merge source and target counts into a single normalised signature.
         all_atoms = set(src_raw) | set(tgt_raw)
@@ -2114,6 +2373,32 @@ class RelationalParadigmDiscoverer:
                 total += v
             if total > 0:
                 sigs[atom] = {k: v / total for k, v in combined.items()}
+
+        # Cap to top-max_atoms most frequent atoms (prevents O(V²×D) blowup).
+        if len(sigs) > max_atoms:
+            top = sorted(sigs, key=lambda a: -atom_freq.get(a, 0))[:max_atoms]
+            top_set = set(top)
+            sigs = {a: s for a, s in sigs.items() if a in top_set}
+
+        # Cap context dimension (D) to prevent sparse O(n²×D) blowup.
+        # At word level each atom partners with unique words → D ~ 2×V.
+        # Keeping the top-2N most informative context keys keeps D manageable.
+        _vocab_cap = min(2000, len(sigs) * 2) if len(sigs) > 10 else None
+        if _vocab_cap is not None:
+            from collections import Counter as _Ctr2
+            ctx_freq: _Ctr2 = _Ctr2()
+            for a, sig in sigs.items():
+                w = atom_freq.get(a, 1)
+                for k, p in sig.items():
+                    ctx_freq[k] += p * w
+            top_ctx = {k for k, _ in ctx_freq.most_common(_vocab_cap)}
+            capped_sigs: dict = {}
+            for a, sig in sigs.items():
+                r = {k: v for k, v in sig.items() if k in top_ctx}
+                mass = sum(r.values())
+                if mass > 1e-12:
+                    capped_sigs[a] = {k: v / mass for k, v in r.items()}
+            sigs = capped_sigs
 
         self._role_sigs = sigs
 
@@ -2147,7 +2432,7 @@ class RelationalParadigmDiscoverer:
             members = sorted(self.role_clusters[rid])
             # Show E0 category membership alongside, for comparison.
             if learner is not None:
-                cats = sorted({learner.assignment.get(m, '?') for m in members})
+                cats = sorted({str(learner.assignment.get(m, '?')) for m in members})
                 cat_str = f'  [E0 cats: {cats}]'
             else:
                 cat_str = ''
@@ -4405,6 +4690,12 @@ class PredictiveCodingHierarchy:
             _RunningStats(maxlen=1000) for _ in range(n_levels)
         ]
 
+        # Per-level corpus of chunk sequences (needed by RelationalSenseSplitter).
+        # _chunk_seqs[level] is a list of sequences; each sequence is the ordered
+        # list of chunk strings emitted at that level during one document.
+        self._chunk_seqs:     list[list[list[str]]] = [[] for _ in range(n_levels)]
+        self._chunk_cur_doc:  list[list[str]]       = [[] for _ in range(n_levels)]
+
     # ------------------------------------------------------------------
     # Core internals
     # ------------------------------------------------------------------
@@ -4481,6 +4772,9 @@ class PredictiveCodingHierarchy:
         # Clear before recursing to prevent accidental double-flush.
         self._buffers[level] = []
 
+        # Log the emitted chunk for RelationalSenseSplitter.
+        self._chunk_cur_doc[level].append(chunk)
+
         # Propagate chunk to the next level (simultaneous multi-level).
         if level + 1 < self.n_levels:
             self._process_level(level + 1, chunk)
@@ -4503,10 +4797,11 @@ class PredictiveCodingHierarchy:
         surp = self._surprisal(level, token)
         self._surp_hist[level].append(surp)
 
-        # 2. Learn.
+        # 2. Learn — forward AND reverse bigrams for richer E0 signatures.
         prev = self._prev[level]
         if prev is not None:
             self.learners[level].update_online(prev, self.next_rel, token)
+            self.learners[level].update_online(token, 'prev', prev)
         self._prev[level] = token
         self._seen[level] += 1
 
@@ -4534,6 +4829,10 @@ class PredictiveCodingHierarchy:
         for level in range(self.n_levels):
             self._emit_buffer(level)
             self._prev[level] = None
+            # Finalise the current document's chunk sequence for this level.
+            if self._chunk_cur_doc[level]:
+                self._chunk_seqs[level].append(self._chunk_cur_doc[level])
+                self._chunk_cur_doc[level] = []
 
     # ------------------------------------------------------------------
     # Public API
@@ -4568,6 +4867,11 @@ class PredictiveCodingHierarchy:
         # Final flush after the last document.
         for level in range(self.n_levels):
             self._emit_buffer(level)
+        # Finalise any remaining current-doc chunk sequences.
+        for level in range(self.n_levels):
+            if self._chunk_cur_doc[level]:
+                self._chunk_seqs[level].append(self._chunk_cur_doc[level])
+                self._chunk_cur_doc[level] = []
 
     def level_summary(self) -> None:
         """Print per-level diagnostics to stdout."""
@@ -4596,23 +4900,267 @@ class PredictiveCodingHierarchy:
         print(f'  Merges registered  : {self.vocab.n_merges():,}')
         print(f'  Segments registered: {self.vocab.n_segments():,}')
 
+    def analyse(self, verbose: bool = True) -> list[dict]:
+        """Run full R0-R6 analysis on every active PCH level.
+
+        For each level that has seen at least ``min_tokens_active`` tokens:
+
+        1. Call ``cluster_from_counts()`` on the level's RelationalLearner to
+           produce E0 distributional categories (``assignment`` / ``clusters``).
+        2. Run RelationClusterer (L2), SecondOrderGrammar (L4),
+           GeometryDetector (R0), RelationalParadigmDiscoverer (R1),
+           RelationalSenseSplitter (R2), RelationalAlgebra (R3).
+        3. Store the results in ``self.analyses[level]``.
+
+        Returns ``self.analyses`` (list indexed by level).
+        """
+        self.analyses: list[dict] = [{} for _ in range(self.n_levels)]
+
+        for level in range(self.n_levels):
+            if self._seen[level] < max(self.min_tokens_active, 10):
+                break   # higher levels not active
+
+            learner = self.learners[level]
+            if verbose:
+                n_atoms = len(getattr(learner, '_atom_counts', {}) or {})
+                print(f'\n── Level {level}: {self._seen[level]:,} tokens, '
+                      f'{n_atoms} (atom,rel) pairs ──')
+
+            # E0: cluster atoms from online-collected _atom_counts.
+            learner.cluster_from_counts(verbose=verbose)
+            n_cats = len(getattr(learner, 'clusters', {}))
+            if n_cats == 0:
+                if verbose:
+                    print(f'  Level {level}: too few atoms for clustering — skip')
+                continue
+
+            # L2: relation clustering.
+            rc = RelationClusterer()
+            rc.fit(learner, verbose=verbose)
+
+            # L4: second-order grammar.
+            sog = SecondOrderGrammar()
+            sog.fit(verbose=verbose, learner=learner)
+
+            # R0: graph geometry.
+            geo = GeometryDetector()
+            geo.fit(learner, rc)
+            if verbose:
+                print(geo.report())
+
+            # R1: paradigmatic roles.
+            rpd = RelationalParadigmDiscoverer()
+            rpd.fit(learner, verbose=verbose)
+            if verbose:
+                print(rpd.report(learner))
+
+            # R2: sense disambiguation — needs raw chunk sequences.
+            rss = RelationalSenseSplitter()
+            level_seqs = self._chunk_seqs[level] if level > 0 else []
+            # Level 0 sequences come from the original corpus (not chunk_seqs).
+            # Caller should pass them via analyse(sequences=...) if desired.
+            if level_seqs:
+                rss.fit(level_seqs, verbose=verbose)
+                if verbose:
+                    print(rss.report())
+
+            # R3: relational algebra.
+            ra = RelationalAlgebra()
+            ra.fit(learner, verbose=verbose)
+            if verbose:
+                print(ra.report())
+
+            self.analyses[level] = {
+                'rel_clusterer':  rc,
+                'grammar':        sog,
+                'geometry':       geo,
+                'paradigm':       rpd,
+                'sense':          rss,
+                'algebra':        ra,
+            }
+
+        return self.analyses
+
+    def analyse_with_sequences(
+        self,
+        base_sequences,
+        verbose: bool = True,
+    ) -> list[dict]:
+        """Like ``analyse()`` but also runs RelationalSenseSplitter at level 0.
+
+        Parameters
+        ----------
+        base_sequences
+            The original token sequences used in ``process_corpus()`` — needed
+            so RelationalSenseSplitter can see the raw level-0 context.
+        """
+        self.analyses = [{} for _ in range(self.n_levels)]
+        # Temporarily stash level-0 sequences so analyse() can use them.
+        self._chunk_seqs[0] = list(base_sequences)
+        result = self.analyse(verbose=verbose)
+        self._chunk_seqs[0] = []   # restore (these are raw seqs, not chunk seqs)
+        return result
+
+    def analyse_cross_level(self, verbose: bool = True) -> dict:
+        """Run R0-R6 on the cross-level constituency triples from ``self.vocab``.
+
+        Builds triples of the form:
+          - ``(chunk,  'left_const',  left_part)``
+          - ``(chunk,  'right_const', right_part)``
+          - ``(left_part,  'is_left_of',  chunk)``
+          - ``(right_part, 'is_right_of', chunk)``
+        from every MergedAtom and SegmentedAtom in the vocabulary, then fits a
+        fresh RelationalLearner on them and runs the full R0-R6 pipeline.
+
+        Discoveries expected:
+        - Which atom-types appear only as left constituents, only as right, or
+          both → head-vs-modifier distinction without supervision.
+        - Composition rules: ``left_const ∘ right_const`` — are left-first
+          or right-first patterns dominant?
+        - Paradigmatic substitution classes across levels.
+
+        Returns ``self.cross_level_analysis`` dict.
+        """
+        # ── Build cross-level triples ────────────────────────────────────────
+        triples: list = []
+
+        for l_s, r_s, atom in self.vocab._merges:
+            s = atom.surface
+            triples.append((s,   'left_const',  l_s))
+            triples.append((s,   'right_const', r_s))
+            triples.append((l_s, 'is_left_of',  s))
+            triples.append((r_s, 'is_right_of', s))
+
+        for atom in self.vocab._segments:
+            s = atom.surface
+            for i, part in enumerate(atom.constituents):
+                part_s  = str(part)
+                triples.append((s,      f'part_{i}',     part_s))
+                triples.append((part_s, f'at_pos_{i}_of', s))
+
+        if not triples:
+            if verbose:
+                print('  analyse_cross_level: no Merge/Segment atoms yet — skipping')
+            self.cross_level_analysis = {}
+            return {}
+
+        if verbose:
+            print(f'\n── Cross-level analysis: {len(triples):,} constituency triples ──')
+
+        # ── Build _atom_counts via online updates (avoids slow batch fit()) ──
+        # Batch RelationalLearner.fit() triggers E0 clustering on V=5,000-10,000
+        # atoms which causes OOM/timeout.  Instead, feed triples as online updates
+        # to build _atom_counts, then cluster_from_counts() with a small atom cap.
+        cl_learner = RelationalLearner()
+        for a_s, r_s, b_s in triples:
+            cl_learner.update_online(str(a_s), str(r_s), str(b_s))
+        cl_learner.cluster_from_counts(max_cluster_atoms=100, verbose=verbose)
+
+        # ── Run R0-R6 ────────────────────────────────────────────────────────
+        rc  = RelationClusterer();  rc.fit(cl_learner, verbose=verbose)
+        sog = SecondOrderGrammar(); sog.fit(verbose=verbose, learner=cl_learner)
+        geo = GeometryDetector();   geo.fit(cl_learner, rc)
+        rpd = RelationalParadigmDiscoverer(); rpd.fit(cl_learner, verbose=verbose)
+        rss = RelationalSenseSplitter()       # no raw sequences at cross-level
+        ra  = RelationalAlgebra();            ra.fit(cl_learner, verbose=verbose)
+
+        if verbose:
+            print(geo.report())
+            print(rpd.report(cl_learner))
+            print(ra.report())
+
+        self.cross_level_analysis = {
+            'learner':        cl_learner,
+            'rel_clusterer':  rc,
+            'grammar':        sog,
+            'geometry':       geo,
+            'paradigm':       rpd,
+            'sense':          rss,
+            'algebra':        ra,
+        }
+        return self.cross_level_analysis
+
     def export_ctkg(
         self,
         domain_name: str       = 'discovered',
         out_path:    str | None = None,
     ) -> str:
-        """Export the discovered compositional structure as a .ctkg DSL string.
+        """Export the full PCH structure as a .ctkg DSL string.
 
-        Delegates to the module-level ``export_ctkg()`` function via a
-        lightweight shim that exposes the ``vocab`` and ``levels`` attributes
-        that ``export_ctkg`` expects.
+        Includes:
+        - Compositional units (MergedAtom/SegmentedAtom hierarchy).
+        - Per-level E0 distributional categories (if ``analyse()`` was called).
+        - Per-level R1 paradigmatic role clusters.
+        - Per-level R3 relational composition rules.
+        - Cross-level constituency analysis (if ``analyse_cross_level()`` called).
         """
         class _Shim:
             pass
         shim        = _Shim()
         shim.vocab  = self.vocab
         shim.levels = self.learners
-        return export_ctkg(shim, domain_name=domain_name, out_path=out_path)
+        content = export_ctkg(shim, domain_name=domain_name, out_path=None)
+
+        # Append multi-scale analysis if available.
+        extra: list[str] = []
+        analyses = getattr(self, 'analyses', [])
+        for level, analysis in enumerate(analyses):
+            if not analysis:
+                continue
+            learner = self.learners[level]
+            assignment = getattr(learner, 'assignment', {})
+            clusters   = getattr(learner, 'clusters',   {})
+            if not clusters:
+                continue
+
+            extra.append(f'\n# ── Level {level} distributional categories ──')
+            for cid, members in sorted(clusters.items()):
+                cname = f'cat_L{level}_{cid}'
+                top   = sorted(members)[:8]
+                extra.append(f'concept {cname}')
+                extra.append(f'    # members: {", ".join(repr(m) for m in top)}'
+                             + (f' (+{len(members)-8} more)' if len(members)>8 else ''))
+                extra.append('')
+
+            rpd = analysis.get('paradigm')
+            if rpd and rpd.role_clusters:
+                extra.append(f'# ── Level {level} paradigmatic roles ──')
+                for rid, members in sorted(rpd.role_clusters.items()):
+                    rname = f'role_L{level}_{rid}'
+                    extra.append(f'concept {rname}')
+                    extra.append(f'    # role members: {", ".join(repr(m) for m in sorted(members)[:8])}')
+                    extra.append('')
+
+            ra = analysis.get('algebra')
+            if ra and ra.composition_table:
+                extra.append(f'# ── Level {level} relational algebra ──')
+                extra.append(f'# {ra.report().strip()}')
+                extra.append('')
+
+        cla = getattr(self, 'cross_level_analysis', {})
+        if cla:
+            cl_learner = cla.get('learner')
+            if cl_learner:
+                cl_clusters = getattr(cl_learner, 'clusters', {})
+                if cl_clusters:
+                    extra.append('\n# ── Cross-level constituency categories ──')
+                    for cid, members in sorted(cl_clusters.items()):
+                        extra.append(f'concept cross_cat_{cid}')
+                        extra.append(f'    # members: {", ".join(repr(m) for m in sorted(members)[:8])}')
+                        extra.append('')
+            cl_ra = cla.get('algebra')
+            if cl_ra and cl_ra.composition_table:
+                extra.append('# ── Cross-level relational algebra ──')
+                extra.append(f'# {cl_ra.report().strip()}')
+                extra.append('')
+
+        if extra:
+            content = content.rstrip() + '\n' + '\n'.join(extra) + '\n'
+
+        if out_path:
+            import pathlib
+            pathlib.Path(out_path).write_text(content, encoding='utf-8')
+        return content
 
     # ------------------------------------------------------------------
     # Warm-start factory

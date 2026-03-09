@@ -540,10 +540,10 @@ def main() -> None:
     total_chars = sum(len(s) for s in sequences)
     print(f'Loaded {len(sequences)} books, {total_chars:,} total characters.')
 
-    # Fast path: --mode pch skips the entire R0-R6 analysis.
+    # PCH: full online pipeline + multi-scale R0-R6 + cross-level analysis.
     if args.mode == 'pch':
         print(f'\n{"=" * 65}')
-        print('PredictiveCodingHierarchy (online, surprisal-based) — M8')
+        print('PredictiveCodingHierarchy + Multi-Scale R0-R6 (M9/M10)')
         print('=' * 65)
         from relational_pipeline import PredictiveCodingHierarchy
         pch = PredictiveCodingHierarchy(
@@ -554,19 +554,18 @@ def main() -> None:
             min_tokens_active=20,
         )
         print(f'Processing {len(sequences)} books ({total_chars:,} chars)...')
-        for i, seq in enumerate(sequences):
-            pch._reset_buffers()
-            for token in seq:
-                pch._process_level(0, str(token))
-            for lvl in range(pch.n_levels):
-                pch._emit_buffer(lvl)
-            print(f'  book {i + 1:>2}/{len(sequences)}  '
-                  f'{len(seq):>7,} chars  '
-                  f'L0:{pch._seen[0]:>8,}  '
-                  f'L1:{pch._seen[1]:>6,}  '
-                  f'L2:{pch._seen[2]:>5,}',
-                  flush=True)
+        pch.process_corpus(sequences)
         pch.level_summary()
+
+        print(f'\n{"=" * 65}')
+        print('M9: Multi-scale R0-R6 analysis')
+        print('=' * 65)
+        pch.analyse_with_sequences(sequences, verbose=True)
+
+        print(f'\n{"=" * 65}')
+        print('M10: Cross-level constituency analysis')
+        print('=' * 65)
+        pch.analyse_cross_level(verbose=True)
 
         ctkg_str = pch.export_ctkg(domain_name='latin_pch')
         n_lines  = ctkg_str.count('\n')
@@ -574,8 +573,8 @@ def main() -> None:
               f'{len([l for l in ctkg_str.splitlines() if l.startswith("type")])} types, '
               f'{len([l for l in ctkg_str.splitlines() if l.startswith("concept")])} concepts')
         if n_lines > 0:
-            print('\n--- CTKG preview (first 40 lines) ---')
-            for line in ctkg_str.splitlines()[:40]:
+            print('\n--- CTKG preview (first 50 lines) ---')
+            for line in ctkg_str.splitlines()[:50]:
                 print(f'  {line}')
         return
 
