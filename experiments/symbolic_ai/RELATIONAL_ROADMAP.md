@@ -227,14 +227,11 @@ mega-cluster C0 means JSD is already near-optimal. Larger improvements expected 
 |-------------------------|-------|-------|-------|
 | Random                  | 0.040 | 0.120 | 0.400 |
 | Unigram (most-frequent) | 0.141 | 0.335 | 0.792 |
-| RelationalLearner E3    | 0.143 | 0.148 | 0.494 |
+| RelationalLearner       | **0.197** | **0.470** | **0.870** |
 
-**Analysis:** E3 H@1 barely beats unigram (14.3% vs 14.1%) but falls behind at H@3/H@10.
-Root cause: K=10 mega-cluster C0 (18 common chars) coarsens predictions — all target mass
-concentrates within C0, not distributed to specific chars within C0. Fix: use V-level
-(atom-level) bigram tables directly for prediction (bypassing clustering). The clustering
-is right for structural discovery (R0-R4); for fine-grained prediction a bigram baseline
-outperforms it. Next: FB15k-237 and WordNet benchmarks (require data downloads).
+Two-level architecture: `_atom_bigrams` (empirical char-specific distributions) as fast
+path; category-level E3 as OOV fallback. Beats unigram at all K. H@3 +13.5pp above
+unigram, H@10 +7.8pp above unigram. Next: FB15k-237 and WordNet (require data downloads).
 
 ---
 
@@ -258,10 +255,10 @@ No neural network. No training on this specific question.
 Propagates P(c) through each T[rel] matrix and decodes atoms from the final category
 distribution. Correct for any topology; much richer than greedy `predict_chain()`.
 
-**Latin result:** next∘next and skip2f give similar top-1 predictions (space, x, v) —
-verifying R3's `next∘next=skip2f` rule. Predictions degenerate due to K=10 mega-cluster
-(all C0 atoms give identical 2-hop distributions). For knowledge graphs with V distinct
-entity types (each in its own category), infer_chain gives entity-specific inference chains.
+**Latin result:** Atom-level propagation (commit 0213f7f) gives meaningful char-specific
+chains. `'q' → next → next` → `n(0.14), s(0.14), i(0.12)` (no mega-cluster collapse).
+R3 algebra confirmed at atom level: `next∘next` and `skip2f` give similar distributions
+for all test atoms. OOV fallback to E3 handles unseen atoms.
 
 ---
 
@@ -280,5 +277,6 @@ entity types (each in its own category), infer_chain gives entity-specific infer
 | **R2** | **Relational E5: sense disambiguation** | ✅ Done | — |
 | **R3** | **Relational E6: structural meta-synthesis** | ✅ Done | — |
 | **R4** | **Geometry-adapted distance metric** | ✅ Done | — |
-| **R5** | **Multi-hop prediction benchmark** | 🔶 Latin done | — |
-| **R6** | **Compositional relational inference** | ✅ Done | — |
+| **R5** | **Multi-hop prediction benchmark** | 🔶 Latin done | d99f060 |
+| **R6** | **Compositional relational inference** | ✅ Done | 0213f7f |
+| **Two-level** | **_atom_bigrams fast path + atom-level infer_chain** | ✅ Done | 0213f7f |
