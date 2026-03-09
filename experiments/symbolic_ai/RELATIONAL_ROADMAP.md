@@ -219,7 +219,22 @@ mega-cluster C0 means JSD is already near-optimal. Larger improvements expected 
 **Success metric:** Hits@10 (fraction of true triples in top-10 predictions) within
 20% of the best neural baseline on at least 2/3 benchmarks.
 
-**Progress:** ⬜ Not started
+**Progress:** 🔶 Implemented on Latin corpus; FB15k-237/WordNet need dataset downloads.
+
+**Latin result (3 books, 80/20 train/test split, V=25 atoms):**
+
+| Model                   | H@1   | H@3   | H@10  |
+|-------------------------|-------|-------|-------|
+| Random                  | 0.040 | 0.120 | 0.400 |
+| Unigram (most-frequent) | 0.141 | 0.335 | 0.792 |
+| RelationalLearner E3    | 0.143 | 0.148 | 0.494 |
+
+**Analysis:** E3 H@1 barely beats unigram (14.3% vs 14.1%) but falls behind at H@3/H@10.
+Root cause: K=10 mega-cluster C0 (18 common chars) coarsens predictions — all target mass
+concentrates within C0, not distributed to specific chars within C0. Fix: use V-level
+(atom-level) bigram tables directly for prediction (bypassing clustering). The clustering
+is right for structural discovery (R0-R4); for fine-grained prediction a bigram baseline
+outperforms it. Next: FB15k-237 and WordNet benchmarks (require data downloads).
 
 ---
 
@@ -256,5 +271,5 @@ No neural network. No training on this specific question.
 | **R2** | **Relational E5: sense disambiguation** | ✅ Done | — |
 | **R3** | **Relational E6: structural meta-synthesis** | ✅ Done | — |
 | **R4** | **Geometry-adapted distance metric** | ✅ Done | — |
-| R5 | Multi-hop prediction benchmark | ⬜ | — |
+| **R5** | **Multi-hop prediction benchmark** | 🔶 Latin done | — |
 | R6 | Compositional relational inference | ⬜ | — |

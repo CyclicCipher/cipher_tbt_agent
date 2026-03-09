@@ -156,6 +156,88 @@ def build_triples(sequences: list[list[str]],
 # Reporting
 # ---------------------------------------------------------------------------
 
+def _hits_at_k(learner: RelationalLearner,
+               test_triples: list[tuple[str, str, str]],
+               rel: str = 'next',
+               ks: tuple = (1, 3, 10),
+               n_sample: int = 10000) -> dict[int, float]:
+    """Compute Hits@K for a given relation on held-out test triples."""
+    import random
+    subset = [t for t in test_triples if t[1] == rel]
+    if not subset:
+        return {k: 0.0 for k in ks}
+    if len(subset) > n_sample:
+        subset = random.sample(subset, n_sample)
+    hits = {k: 0 for k in ks}
+    for a, r, b in subset:
+        dist = learner.predict_dist(a, r)
+        if not dist:
+            continue
+        ranked = sorted(dist.items(), key=lambda kv: -kv[1])
+        true_rank = next((i + 1 for i, (tok, _) in enumerate(ranked)
+                          if tok == b), len(ranked) + 1)
+        for k in ks:
+            if true_rank <= k:
+                hits[k] += 1
+    n = len(subset)
+    return {k: hits[k] / n for k in ks}
+
+
+def _run_benchmark(sequences: list[list[str]],
+                   relations: list[str]) -> None:
+    """R5: Train/test split benchmark — compare RelationalLearner against baselines."""
+    import random
+
+    # 80/20 sequence split (preserve book-level integrity)
+    n = len(sequences)
+    random.seed(42)
+    idx = list(range(n))
+    random.shuffle(idx)
+    split = max(1, int(n * 0.8))
+    train_seqs = [sequences[i] for i in idx[:split]]
+    test_seqs  = [sequences[i] for i in idx[split:]]
+
+    if not test_seqs:
+        test_seqs = sequences  # fallback: use all if only 1 book
+
+    train_triples = build_triples(train_seqs, relations)
+    test_triples  = build_triples(test_seqs,  relations)
+
+    # Train on 80%
+    train_learner = RelationalLearner()
+    train_learner.fit(train_triples, verbose=False)
+
+    # Baselines: random and unigram frequency
+    all_targets = [b for _, r, b in test_triples if r == 'next']
+    from collections import Counter
+    freq = Counter(all_targets)
+    top_chars = [c for c, _ in freq.most_common()]
+    V = len(top_chars)
+
+    ks = (1, 3, 10)
+    print(f'\n  Train triples: {len(train_triples):,}  '
+          f'Test triples: {len(test_triples):,}')
+
+    hits_model = _hits_at_k(train_learner, test_triples, rel='next', ks=ks)
+
+    print(f'\n  Hits@K on "next" relation  (V={V} atoms)')
+    print(f'  {"":20s} H@1     H@3     H@10')
+    print(f'  {"Random":20s} '
+          + '  '.join(f'{k/V:.3f}' for k in ks))
+    print(f'  {"Unigram (most-freq)":20s} '
+          + '  '.join(f'{sum(1 for c in top_chars[:k]) / V if k <= V else 1.0:.3f}'
+                      if False else f'{k/V:.3f}' for k in ks))
+    # Correct unigram: Hits@K = fraction of test triples where true target is in top-K by frequency
+    unigram_hits = {k: sum(1 for a, r, b in test_triples
+                           if r == 'next' and b in top_chars[:k])
+                    / max(1, sum(1 for _, r, _ in test_triples if r == 'next'))
+                    for k in ks}
+    print(f'  {"Unigram":20s} '
+          + '  '.join(f'{unigram_hits[k]:.3f}' for k in ks))
+    print(f'  {"RelationalLearner E3":20s} '
+          + '  '.join(f'{hits_model[k]:.3f}' for k in ks))
+
+
 def _eval_accuracy(learner: RelationalLearner,
                    triples: list[tuple[str, str, str]],
                    n_sample: int = 5000,
@@ -335,6 +417,9 @@ def main() -> None:
     print(f'\nR3: Relational algebra (E6)...')
     algebra = RelationalAlgebra()
     algebra.fit(learner, triples=triples, verbose=True)
+
+    print(f'\nR5: Benchmark (train/test split Hits@K)...')
+    _run_benchmark(sequences, args.relations)
 
     print(f'\nR4: Geometry-adapted metric...')
     topology = geo.topology
