@@ -489,6 +489,202 @@ probability vector over chunk categories, updated O(K_N²) per emitted chunk.
 
 ---
 
+---
+
+## M14 — Compression Pass — DONE
+
+**Problem**: The CTKG export grows *linearly* with data — 167K concept instances for
+12 books of Latin, producing a 58 MB file from 535 KB of raw text.  This is
+anti-compression.  The system accumulates every MergedAtom/SegmentedAtom as an
+explicit entry rather than discarding it once its *type* has been assigned.
+
+**Information-theoretic diagnosis**: the types + transition matrices already ARE the
+compressed representation.  Approximate storage for 12 books of Latin:
+- Type assignments (surface → type_id, all levels): ~200 KB
+- Transition matrices T[level][rel][K×K], all levels: ~500 KB
+- Type-abstraction rules (tuple → cluster_id): ~50 KB
+- Relational algebra laws: < 1 KB
+- **Total compressed knowledge: ~750 KB** — versus 58 MB CTKG export.
+
+For the 4 GB polymath goal: 100 domains × ~1 MB compressed = ~100 MB for expert-level
+knowledge across all major human domains.
+
+**Root cause**: `vocab._merges` and `vocab._segments` grow forever; `_atom_counts`
+is kept post-analysis; `export_ctkg()` exports every instance.
+
+**Fix — two components**:
+
+1. **`PCH.compress()`**: post-analysis, delete concept instances; keep only the type
+   system.  Specifically clear `vocab._merges`, `vocab._segments`, `vocab._by_surface`,
+   `vocab._pair_to_surface`; clear `_atom_counts` and `_atom_totals` on every learner.
+   After this call, the object is a *type-only model* — it can classify new tokens and
+   predict distributions, but cannot produce a full CTKG export.
+
+2. **`PCH.save_compressed(path)` / `PCH.load_compressed(path)`**: serialise only the
+   minimal type system (assignment dicts, transition matrices, K values, type-abstraction
+   rules) to a compact binary format (pickle or msgpack).  Target: ≤ 1 MB for 12 books.
+
+3. **Proper CTKG type annotations**: upgrade `export_ctkg()` so level-N types use the
+   CTKG universal type constructors — `seq(type_L{N-1}_*)` for levels ≥ 1 (currently
+   all types are emitted as plain `symbol`).
+
+**CTKG features activated**: universal type constructors (`seq`, `tagged`), `Interface`
+blocks per level (exported so a functor can map into them later).
+
+**Implementation**:
+- `PCH.compress()`: clear vocab structures + learner raw counts; set `_compressed=True`.
+- `PCH.save_compressed(path)`: pickle `{levels: [{_K, assignment, clusters, _trans,
+  _nc_cache, _wgc_cache, _succ_dists, _sim_matrix, _rel_unigram}], type_rules: [...]}`.
+- `PCH.load_compressed(path)`: restore above; rebuild `learners` from saved dicts.
+- `export_ctkg()`: add `seq(type_L{N-1}_*)` as the type body for levels ≥ 1.
+
+---
+
+### M15 — Type-Level Inference Engine — DONE
+
+**Problem**: `predict_target_dist()` and `infer_chain()` are implemented but never
+called from PCH.  The system builds beliefs and categories but never *uses* them for
+prediction.  It is a knowledge-discovery engine without an inference engine.
+
+**Goal**: close the loop — the compressed type model should support:
+1. Next-token prediction: O(K²) per step (not O(V²)).
+2. Multi-hop reasoning: `infer_chain()` for "given we're in a verb phrase, what
+   follows 3 steps later?"
+3. Perplexity evaluation: measure type-level prediction quality as a compression metric.
+
+**CTKG features activated**: `predict_target_dist()` (first real use), `infer_chain()`
+(first real use from PCH context).
+
+**Implementation**:
+- `PCH.predict_next(tokens) → dict[str, float]`: run tokens through process() (frozen),
+  then call `_beliefs[0].predict_target_dist('next')` for the next-token distribution.
+- `PCH.predict_type(level, rel) → dict[int, float]`: type-level marginal.
+- `PCH.evaluate_perplexity(sequences) → float`: per-token cross-entropy under the
+  type model; compare vs. flat n-gram baseline.
+- `PCH.reason_chain(start_token, relations) → dict`: wraps `infer_chain()` using the
+  belief-active learner at the appropriate level.
+
+---
+
+### M16 — Gated DeltaNet Belief Update — DONE
+
+**Problem**: `ContextBeliefState.decay()` is implemented but never called.  Belief
+updates are non-gated: every observation applies a fixed 97% sharp concentration
+regardless of how expected or surprising the token was.  This means:
+- Highly surprising tokens (boundary events) don't reset the context sufficiently.
+- Highly expected tokens don't preserve the context they should confirm.
+- Document boundaries don't reset beliefs.
+
+**Why DeltaNet is the right inspiration** (Yang et al. 2025, Gated DeltaNet):
+The delta rule performs a selective **erase-then-write**: `S_t = α_t S_{t-1} + write`.
+The gate `α_t` is data-dependent.  For belief states the analogous operation is:
+
+```
+alpha = exp(−beta × normalised_surprisal)   # ∈ (0,1]
+B_t = decay(alpha) then observe(atom)       # erase old context proportionally
+```
+
+- `alpha = 1` (zero surprisal, completely expected): no decay; belief gently updated.
+- `alpha ≈ 0` (high surprisal, boundary event): strong decay toward uniform *before*
+  the new observation; old context erased, fresh inference.
+- Document boundary: explicit `decay(rate=0)` → full reset.
+
+Normalised surprisal: `surp / adaptive_threshold` so the gate is calibrated to each
+level's characteristic surprisal scale.
+
+**CTKG features activated**: `ContextBeliefState.decay()` (first active use).
+
+**Implementation**:
+- `ContextBeliefState.observe_gated(atom, surprisal, threshold, beta=1.0)`:
+  `alpha = exp(−beta × surp/threshold)`; call `self.decay(rate=alpha)` then
+  `self.observe(atom)`.
+- `PCH.__init__`: add `_emit_surp: list[float] = [0.0] * n_levels`.
+- `PCH._process_level()`: store `self._emit_surp[level] = surp` before boundary-
+  triggered `_emit_buffer()`.
+- `PCH._emit_buffer()`: replace `belief.observe(chunk)` with
+  `belief.observe_gated(chunk, self._emit_surp[level], self._effective_threshold(level))`.
+- `PCH._reset_buffers()`: after flushing each level, call `belief.decay(rate=0.0)`
+  (full reset at document boundary — equivalent to hidden-state reset between episodes).
+
+---
+
+### M17 — Cross-Domain Functors + Sheaf Consistency — PLANNED
+
+**Problem**: PCH operates on one domain at a time.  There is no way to say "the
+category I discovered for Latin nominatives IS the same category as English subjects."
+The CTKG's `Functor`, `Adjunction`, `Interface`, and `sheaf_check()` machinery is
+entirely unused.
+
+**Goal**: two PCH instances (e.g. Latin + English, or text + mathematics) should be
+linkable by a functor that maps type categories from one domain to the other.  Shared
+structure costs nothing — the same transition matrices apply.
+
+**The category-theoretic argument**: if Latin L3 type 7 and English L3 type 12 have
+the same *relational profile* (same transitions under 'next'/'prev'), they ARE the
+same abstract category — the functor witnesses this identity.  Cross-domain
+generalisation is free once the functor is built.
+
+**CTKG features activated**: `Functor`, `Adjunction` (parse↔generate), `Interface`
+blocks, `sheaf_check()`, `sheaf_merge()`.
+
+**Implementation**:
+- `PCH.build_interface() → str`: emit a `.ctkg`-format `interface` block listing all
+  discovered type IDs as exported symbols.  Enables functor targets.
+- `PCH.build_functor(other_pch, sim_threshold=0.7) → dict[int, int]`: align type
+  categories between two PCH instances by comparing their `_succ_dists` (JSD
+  similarity) and `_trans` matrices.  Return `{self_type_id: other_type_id}` mapping.
+- Emit `.ctkg` `functor` blocks; wire into `ctkg.parser.merge()` + `sheaf_merge()`.
+- `PCH.build_adjunction(level) → Adjunction`: discover left/right inverse pairs at
+  a level (e.g. 'next'/'prev' are adjoint; found automatically via R3 algebra).
+- Benchmark: functor-transferred prediction (use Latin transitions for English text
+  via functor) should beat uninformed baseline.
+
+---
+
+### M18 — Causal Reasoning, MasteryState, Full CTKG Closure — PLANNED
+
+**Problem**: `d_separated()`, `intervene()`, `MasteryState`, `transfer_probability`,
+and probabilistic prerequisites are all implemented in `ctkg/graph.py` but completely
+disconnected from the PCH learning pipeline.
+
+**Goal**: every implemented feature in the CTKG toolkit should be exercised.
+
+**Sub-tasks**:
+
+**M18a — MasteryState integration**: after each `analyse()` pass, instantiate a
+`MasteryState` for the PCH's CTKG.  Track per-type mastery: a type is "mastered" when
+its `_trans` matrix has converged (Frobenius norm of update < ε).  Use
+`mastery_state.frontier()` to prioritise which domains to train next.
+
+**M18b — Probabilistic prerequisites (`transfer_probability`)**: the CTKG prerequisite
+edges emitted by `export_ctkg()` currently have implicit probability 1.0.  Replace
+with empirically estimated transfer probabilities: P(type_L{N+1}_k | type_LN_j) from
+the type-abstraction mapping.  These are the learned "soft prerequisite" weights.
+
+**M18c — d-separation queries**: build a PCH-level CTKG (types as nodes, transitions
+as edges) and run `d_separated(type_A, type_B, given={type_C})` to ask "are these
+two type categories conditionally independent given a third?" Useful for pruning
+redundant types and discovering irrelevant features.
+
+**M18d — Causal intervention (`intervene()`)**: for a given document, simulate "what
+if the topic were different?" by intervening on higher-level type beliefs and measuring
+the effect on lower-level predictions.  Implements do-calculus at the type level.
+
+**M18e — Universal type constructors**: upgrade type annotations so every level uses
+the correct CTKG type constructor:
+- L0: `symbol` (base sensory atoms)
+- L1: `seq(symbol, ordered)` (CV bigrams)
+- L2: `seq(type_L1_*, metric)` (morpheme fragments — metric because JSD distance defined)
+- L3: `seq(type_L2_*, ordered)` (word-level, head-final)
+- L4+: `tuple(type_L3_*, ...)` (phrase-level — n-ary unordered in free-word-order Latin)
+
+**CTKG features fully activated after M18**:
+`d_separated()`, `intervene()`, `MasteryState`, `mastery_state.frontier()`,
+`transfer_probability`, `concept_entropy()`, `mutual_information()`,
+`conditional_entropy()`, `information_flow()`, `sym_*` constructors in type bodies.
+
+---
+
 ## Success Criteria
 
 | Criterion | Test |

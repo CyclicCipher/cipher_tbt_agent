@@ -568,7 +568,7 @@ def main() -> None:
         pch.analyse_cross_level(verbose=True)
 
         print(f'\n{"=" * 65}')
-        print('M13: Init belief cascade + frozen reprocess')
+        print('M13/M16: Init belief cascade + gated-DeltaNet reprocess')
         print('=' * 65)
         pch.init_beliefs()
         n_beliefs = sum(1 for b in pch._beliefs if b is not None)
@@ -578,13 +578,55 @@ def main() -> None:
 
         ctkg_str = pch.export_ctkg(domain_name='latin_pch')
         n_lines  = ctkg_str.count('\n')
-        print(f'\nCTKG export: {n_lines} lines, '
-              f'{len([l for l in ctkg_str.splitlines() if l.startswith("type")])} types, '
-              f'{len([l for l in ctkg_str.splitlines() if l.startswith("concept")])} concepts')
+        n_types    = len([l for l in ctkg_str.splitlines() if l.startswith('type')])
+        n_concepts = len([l for l in ctkg_str.splitlines() if l.startswith('concept')])
+
+        print(f'\n{"=" * 65}')
+        print('M14: Compression pass + save (type-only model)')
+        print('=' * 65)
+        pch.compress(verbose=True)
+        import os as _os
+        _ckpt = _os.path.join(_os.path.dirname(__file__), 'pch_compressed.pkl')
+        pch.save_compressed(_ckpt)
+        # Verify round-trip.
+        from relational_pipeline import PredictiveCodingHierarchy as _PCH
+        pch2 = _PCH.load_compressed(_ckpt)
+        pch2.init_beliefs()
+        print(f'  Load verified: {sum(1 for b in pch2._beliefs if b is not None)} beliefs restored')
+
+        print(f'\nCTKG export (pre-compression): {n_lines} lines, '
+              f'{n_types} types, {n_concepts} concepts')
         if n_lines > 0:
             print('\n--- CTKG preview (first 50 lines) ---')
             for line in ctkg_str.splitlines()[:50]:
                 print(f'  {line}')
+
+        print(f'\n{"=" * 65}')
+        print('M15: Type-level inference — perplexity + reasoning chains')
+        print('=' * 65)
+        # Re-init beliefs on the loaded (compressed) model for clean evaluation.
+        pch2.init_beliefs()
+
+        # Perplexity on a held-out book (last book, if multiple).
+        eval_seqs = sequences[-1:] if len(sequences) > 1 else sequences
+        ppl = pch2.evaluate_perplexity(eval_seqs, level=0)
+        # Baseline = uniform over observed vocab (log2 V).
+        V0 = len(getattr(pch2.learners[0], 'assignment', {}) or {})
+        if V0 < 2:
+            V0 = len(set(c for seq in eval_seqs for c in seq))
+        import math as _math
+        baseline = _math.log2(V0) if V0 > 1 else 1.0
+        print(f'  Level-0 bigram perplexity (held-out book): {ppl:.3f} bits/token')
+        print(f'  Uniform baseline (log2 V={V0}):            {baseline:.3f} bits/token')
+        print(f'  Compression gain: {baseline - ppl:.3f} bits/token')
+
+        # Reasoning chain demo: what follows a word in the most common category?
+        # Pick 3 representative surface forms and show 2-hop predictions.
+        demo_tokens = [' ', 'e', 't']
+        for tok in demo_tokens:
+            chain = pch2.reason_chain(tok, ['next', 'next'], level=0, topk=5)
+            chain_str = ', '.join(f'{t!r}:{p:.2f}' for t, p in chain)
+            print(f'  reason_chain({tok!r}, [next,next]) → {chain_str}')
         return
 
     print(f'\nBuilding triples...')

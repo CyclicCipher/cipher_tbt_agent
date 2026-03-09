@@ -1175,6 +1175,46 @@ class ContextBeliefState:
             self._belief[k] = d * self._belief[k] + (1.0 - d) * uniform
         self._normalize()
 
+    def observe_gated(
+        self,
+        atom:       Any,
+        surprisal:  float,
+        threshold:  float = 1.0,
+        beta:       float = 1.0,
+    ) -> None:
+        """Gated DeltaNet-inspired belief update.
+
+        Inspired by Gated DeltaNet (Yang et al. 2025): the delta rule performs
+        a selective **erase-then-write** whose amplitude is controlled by a
+        data-dependent gate ``α_t``.  Here:
+
+        1. Compute gate:  ``alpha = exp(−beta × surp / threshold)``
+           - ``surprisal ≈ 0``  (expected token)   → ``alpha ≈ 1`` → almost no erase.
+           - ``surprisal >> threshold`` (boundary)  → ``alpha ≈ 0`` → strong erase,
+             old context wiped before the new observation is written.
+        2. Decay (erase): ``belief = alpha * belief + (1-alpha) * uniform``.
+        3. Observe (write): standard sharp Bayesian update with ``obs_sharpness``.
+
+        For document-boundary resets call ``decay(rate=0.0)`` explicitly —
+        ``_reset_buffers`` does this automatically.
+
+        Parameters
+        ----------
+        atom
+            The emitted chunk surface string.
+        surprisal
+            −log₂ P(atom | context) computed just before emission.
+        threshold
+            Adaptive boundary threshold at this level; used to normalise
+            surprisal so the gate is calibrated across levels.
+        beta
+            Gate sharpness (default 1.0).  Larger values make the erase more
+            sensitive to deviations from the threshold.
+        """
+        alpha = math.exp(-beta * surprisal / max(threshold, 1e-6))
+        self.decay(rate=alpha)
+        self.observe(atom)
+
     # ------------------------------------------------------------------
     # Query
 
@@ -4188,6 +4228,10 @@ class PredictiveCodingHierarchy:
         # M13: frozen flag — set during reprocess() to skip update_online.
         self._frozen: bool = False
 
+        # M16: surprisal at the time _emit_buffer() is called (for gated DeltaNet).
+        # Set by _process_level before boundary-triggered emission; 0.0 otherwise.
+        self._emit_surp: list[float] = [0.0] * n_levels
+
     # ------------------------------------------------------------------
     # Core internals
     # ------------------------------------------------------------------
@@ -4286,10 +4330,13 @@ class PredictiveCodingHierarchy:
         # Log the emitted chunk for RelationalSenseSplitter.
         self._chunk_cur_doc[level].append(chunk)
 
-        # M13: Bayes filter update — observe emitted chunk, then predict next.
+        # M13/M16: Gated DeltaNet belief update — erase proportional to surprisal,
+        # then write observation, then predict next category.
         belief = self._beliefs[level]
         if belief is not None:
-            belief.observe(chunk)
+            surp      = self._emit_surp[level]
+            threshold = self._effective_threshold(level)
+            belief.observe_gated(chunk, surp, threshold)
             belief.transition(self.next_rel)
 
         # Propagate chunk to the next level (simultaneous multi-level).
@@ -4326,6 +4373,7 @@ class PredictiveCodingHierarchy:
         # 3. Boundary detection: flush *before* adding the surprising token.
         threshold = self._effective_threshold(level)
         if surp > threshold and self._buffers[level]:
+            self._emit_surp[level] = surp   # M16: record triggering surprisal
             self._emit_buffer(level)
 
         # 4. Append to working memory.
@@ -4345,8 +4393,13 @@ class PredictiveCodingHierarchy:
         processing.
         """
         for level in range(self.n_levels):
+            self._emit_surp[level] = 0.0   # M16: forced flush — no surprisal gate
             self._emit_buffer(level)
             self._prev[level] = None
+            # M16: document-boundary full belief reset (hidden-state reset between episodes).
+            belief = self._beliefs[level]
+            if belief is not None:
+                belief.decay(rate=0.0)   # → uniform prior
             # Finalise the current document's chunk sequence for this level.
             if self._chunk_cur_doc[level]:
                 self._chunk_seqs[level].append(self._chunk_cur_doc[level])
@@ -4436,6 +4489,313 @@ class PredictiveCodingHierarchy:
             self.process_corpus(sequences)
         finally:
             self._frozen = False
+
+    def compress(self, verbose: bool = True) -> None:
+        """M14: Discard concept instances; retain only the type system.
+
+        After ``analyse()`` the expensive data — ``vocab._merges``,
+        ``vocab._segments``, ``vocab._by_surface``, and per-level
+        ``_atom_counts`` / ``_atom_totals`` — is no longer needed for
+        inference.  This method clears those structures, shrinking the object
+        from O(corpus) to O(K² × levels).
+
+        After ``compress()`` the PCH can still:
+        - Classify new surface strings via ``cluster_from_type_abstraction``.
+        - Predict next-token distributions via ``ContextBeliefState.predict_target_dist``.
+        - Export a *type-only* CTKG (no concept instances).
+
+        It can no longer:
+        - Add new ``MergedAtom`` / ``SegmentedAtom`` entries to the vocab.
+        - Produce the full concept-instance CTKG export.
+
+        Sets ``self._compressed = True``.
+        """
+        # Clear vocab concept instances.
+        self.vocab._merges.clear()
+        self.vocab._segments.clear()
+        self.vocab._by_surface.clear()
+        self.vocab._pair_to_surface.clear()
+
+        # Clear raw count tables on every learner (subsumed by type-level stats).
+        cleared_levels = 0
+        for learner in self.learners:
+            for attr in ('_atom_counts', '_atom_totals', '_atom_bigrams',
+                         '_rel_counts', '_succ_dists'):
+                if hasattr(learner, attr):
+                    getattr(learner, attr).clear()
+            cleared_levels += 1
+
+        # Clear chunk sequence logs (large lists of strings).
+        self._chunk_seqs    = [[] for _ in range(self.n_levels)]
+        self._chunk_cur_doc = [[] for _ in range(self.n_levels)]
+
+        self._compressed = True
+        if verbose:
+            print(f'PCH compressed: vocab + raw counts cleared '
+                  f'({cleared_levels} learner levels)')
+
+    def save_compressed(self, path: str) -> None:
+        """M14: Serialise the type-only model to a compact pickle file.
+
+        Stores only what is needed for inference:
+        - Per-level: ``_K``, ``assignment``, ``clusters``, ``_trans``,
+          ``_nc_cache``, ``_wgc_cache``, ``_sim_matrix``, ``_rel_unigram``,
+          ``_rel_totals``.
+        - PCH-level hyperparameters and ``_seen`` counters.
+
+        Does *not* require ``compress()`` to have been called first.
+        """
+        import pickle
+
+        def _extract_learner(learner: 'RelationalLearner') -> dict:
+            return {
+                '_K':           getattr(learner, '_K',           1),
+                'assignment':   getattr(learner, 'assignment',   {}),
+                'clusters':     {k: list(v) for k, v in
+                                 getattr(learner, 'clusters', {}).items()},
+                '_trans':       getattr(learner, '_trans',        {}),
+                '_nc_cache':    getattr(learner, '_nc_cache',     {}),
+                '_wgc_cache':   getattr(learner, '_wgc_cache',    {}),
+                '_sim_matrix':  getattr(learner, '_sim_matrix',   []),
+                '_rel_unigram': getattr(learner, '_rel_unigram',  {}),
+                '_rel_totals':  getattr(learner, '_rel_totals',   {}),
+            }
+
+        payload = {
+            'version':          1,
+            'n_levels':         self.n_levels,
+            'max_chunk_size':   self.max_chunk_size,
+            'surprise_threshold': self.surprise_threshold,
+            'adaptive_threshold': self.adaptive_threshold,
+            'surprise_k':       self.surprise_k,
+            'min_tokens_active': self.min_tokens_active,
+            'top_down_weight':  self.top_down_weight,
+            'next_rel':         self.next_rel,
+            '_seen':            list(self._seen),
+            'levels':           [_extract_learner(l) for l in self.learners],
+        }
+
+        with open(path, 'wb') as f:
+            pickle.dump(payload, f, protocol=4)
+
+        size_kb = len(pickle.dumps(payload, protocol=4)) / 1024
+        print(f'PCH saved → {path}  ({size_kb:.1f} KB)')
+
+    @classmethod
+    def load_compressed(cls, path: str) -> 'PredictiveCodingHierarchy':
+        """M14: Restore a type-only model from a ``save_compressed`` pickle.
+
+        Returns a :class:`PredictiveCodingHierarchy` with all type-level
+        caches populated and ``_compressed=True``.  Ready for inference via
+        ``init_beliefs()`` + ``predict_next()``.
+        """
+        import pickle
+
+        with open(path, 'rb') as f:
+            payload = pickle.load(f)
+
+        pch = cls(
+            n_levels=payload['n_levels'],
+            max_chunk_size=payload['max_chunk_size'],
+            surprise_threshold=payload['surprise_threshold'],
+            adaptive_threshold=payload['adaptive_threshold'],
+            surprise_k=payload['surprise_k'],
+            min_tokens_active=payload['min_tokens_active'],
+            top_down_weight=payload['top_down_weight'],
+            next_rel=payload['next_rel'],
+        )
+        pch._seen = list(payload['_seen'])
+        pch._compressed = True
+
+        for i, d in enumerate(payload['levels']):
+            learner = pch.learners[i]
+            learner._K           = d['_K']
+            learner.assignment   = d['assignment']
+            learner.clusters     = {k: set(v) for k, v in d['clusters'].items()}
+            learner._trans       = d['_trans']
+            learner._nc_cache    = d['_nc_cache']
+            learner._wgc_cache   = d['_wgc_cache']
+            learner._sim_matrix  = d['_sim_matrix']
+            learner._rel_unigram = d['_rel_unigram']
+            learner._rel_totals  = d['_rel_totals']
+            # Restore soft-cache stubs so predict_dist doesn't error.
+            learner._nc_soft  = {}
+            learner._wgc_soft = {}
+
+        return pch
+
+    # ------------------------------------------------------------------
+    # M15: Type-Level Inference
+    # ------------------------------------------------------------------
+
+    def predict_next(
+        self,
+        tokens,
+        level:     int = 0,
+        rel:       str | None = None,
+        topk:      int = 20,
+    ) -> list[tuple]:
+        """M15: Context-conditioned P(next | context tokens) at *level*.
+
+        Runs the given token sequence through :meth:`process_sequence`
+        (frozen — no online learning) to update the belief state at *level*,
+        then calls :meth:`ContextBeliefState.predict_target_dist` to get the
+        surface-form distribution.
+
+        Returns a list of ``(surface_string, probability)`` tuples sorted
+        descending by probability, up to *topk* results.
+
+        Requirements
+        ------------
+        - :meth:`init_beliefs` must have been called (belief states exist).
+        - The learner at *level* must have ``_nc_cache`` / ``_wgc_cache``
+          (either from training or from :meth:`load_compressed`).
+
+        Parameters
+        ----------
+        tokens
+            Sequence of base-level tokens (e.g. characters).  Fed through
+            the hierarchy exactly once (frozen pass) to prime the belief.
+        level
+            Which level to query.  Level 0 = character prediction, level 3
+            ≈ word prediction.  Default 0.
+        rel
+            Relation to predict along (default ``self.next_rel``).
+        topk
+            Maximum number of results to return.
+        """
+        rel = rel or self.next_rel
+        belief = self._beliefs[level]
+        if belief is None:
+            return []
+
+        # Prime the belief with the context tokens (frozen pass).
+        old_frozen = self._frozen
+        self._frozen = True
+        try:
+            for tok in tokens:
+                self._process_level(0, str(tok))
+        finally:
+            self._frozen = old_frozen
+
+        dist = belief.predict_target_dist(rel)
+        items = sorted(dist.items(), key=lambda kv: -kv[1])
+        return items[:topk]
+
+    def predict_type(self, level: int, rel: str | None = None) -> dict:
+        """M15: Type-level marginal P(next_type | current_belief) at *level*.
+
+        Uses :class:`ContextBeliefState` transition matrix directly —
+        O(K²) per call.  Does not consume any new tokens.
+
+        Returns ``{type_id: probability}`` after propagating the current
+        belief through the ``_trans[rel]`` matrix.
+        """
+        rel = rel or self.next_rel
+        belief = self._beliefs[level]
+        if belief is None:
+            return {}
+        # We want P(c_next) = Σ_{c} P(c) * T[rel][c → c_next]
+        learner = self.learners[level]
+        trans = getattr(learner, '_trans', {}).get(rel, {})
+        if not trans:
+            return dict(belief._belief)
+        result: dict = {}
+        for c_src, p_src in belief._belief.items():
+            if p_src < 1e-12:
+                continue
+            c_next_dist = trans.get(str(c_src), {})
+            for c_next_s, p_t in c_next_dist.items():
+                try:
+                    c_next = int(c_next_s)
+                except (ValueError, TypeError):
+                    continue
+                result[c_next] = result.get(c_next, 0.0) + p_src * p_t
+        total = sum(result.values())
+        if total > 0:
+            return {k: v / total for k, v in result.items()}
+        return {}
+
+    def evaluate_perplexity(
+        self,
+        sequences,
+        level:     int = 0,
+        rel:       str | None = None,
+    ) -> float:
+        """M15: Per-token cross-entropy (in bits) under the learner's bigram model.
+
+        Uses the empirical ``predict_dist(prev, rel)`` at *level* — the same
+        fast-path that drives online prediction — to score each token given its
+        predecessor.  This avoids the chunk/character semantics mismatch that
+        arises when using the belief state (which only updates at chunk-emission
+        boundaries, not per raw token).
+
+        Lower is better.  A flat unigram baseline gives log2(K) bits.
+
+        Parameters
+        ----------
+        sequences
+            List of token sequences (same format as :meth:`process_corpus`).
+        level
+            Hierarchy level.  For level 0 these are the raw base tokens; for
+            level N they should be ``self._chunk_seqs[N]`` (per-document lists
+            of chunk surface strings).
+        rel
+            Relation (default ``self.next_rel``).
+        """
+        rel     = rel or self.next_rel
+        learner = self.learners[level]
+
+        total_nll = 0.0
+        n_tokens  = 0
+        for seq in sequences:
+            prev = None
+            for tok in seq:
+                tok_s = str(tok)
+                if prev is not None:
+                    dist = learner.predict_dist(prev, rel)
+                    p    = dist.get(tok_s, 1e-10)
+                    total_nll += -math.log2(p)
+                    n_tokens  += 1
+                prev = tok_s
+
+        return total_nll / n_tokens if n_tokens > 0 else float('inf')
+
+    def reason_chain(
+        self,
+        start_token: str,
+        relations:   list,
+        level:       int = 0,
+        topk:        int = 10,
+    ) -> list[tuple]:
+        """M15: Multi-hop type reasoning via infer_chain().
+
+        Looks up *start_token*'s category at *level*, then calls
+        :meth:`RelationalLearner.infer_chain` to propagate distributions
+        through the *relations* sequence.  Returns ``(surface, prob)`` pairs
+        for the final distribution.
+
+        Example::
+
+            pch.reason_chain('in', ['next', 'next'], level=3, topk=5)
+            # → what usually comes 2 words after a preposition
+
+        Parameters
+        ----------
+        start_token
+            A surface string whose category is looked up in the learner.
+        relations
+            Ordered list of relation names to chain through.
+        level
+            Learner level to query.
+        topk
+            Max results.
+        """
+        learner = self.learners[level]
+        if not hasattr(learner, 'assignment'):
+            return []
+        # infer_chain already returns List[Tuple[atom, prob]] sorted descending.
+        return learner.infer_chain(start_token, relations, topk=topk)
 
     def level_summary(self) -> None:
         """Print per-level diagnostics to stdout."""
