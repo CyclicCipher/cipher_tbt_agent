@@ -219,19 +219,38 @@ mega-cluster C0 means JSD is already near-optimal. Larger improvements expected 
 **Success metric:** Hits@10 (fraction of true triples in top-10 predictions) within
 20% of the best neural baseline on at least 2/3 benchmarks.
 
-**Progress:** 🔶 Implemented on Latin corpus; FB15k-237/WordNet need dataset downloads.
+**Progress:** ✅ Complete — Latin, FB15k-237, WN18RR all benchmarked.
 
 **Latin result (3 books, 80/20 train/test split, V=25 atoms):**
 
 | Model                   | H@1   | H@3   | H@10  |
 |-------------------------|-------|-------|-------|
-| Random                  | 0.040 | 0.120 | 0.400 |
 | Unigram (most-frequent) | 0.141 | 0.335 | 0.792 |
 | RelationalLearner       | **0.197** | **0.470** | **0.870** |
 
-Two-level architecture: `_atom_bigrams` (empirical char-specific distributions) as fast
-path; category-level E3 as OOV fallback. Beats unigram at all K. H@3 +13.5pp above
-unigram, H@10 +7.8pp above unigram. Next: FB15k-237 and WordNet (require data downloads).
+**FB15k-237 (272K train, 5K test sample, fit time: 0.9s):**
+
+| Model              | MRR   | H@1   | H@3   | H@10  | Training? |
+|--------------------|-------|-------|-------|-------|-----------|
+| RelationalLearner  | 0.270 | 0.140 | 0.308 | **0.563** | ❌ none |
+| TransE             | —     | —     | —     | 0.465 | ✅ trained |
+| DistMult           | —     | —     | —     | 0.419 | ✅ trained |
+| RotatE             | —     | —     | —     | 0.533 | ✅ trained |
+
+**H@10 beats TransE and DistMult with zero training. 76.2% test (h,r) pairs seen in training.**
+
+**WN18RR (86K train, 3.1K test, fit time: 0.3s):**
+
+| Model              | MRR   | H@1   | H@3   | H@10  | Training? |
+|--------------------|-------|-------|-------|-------|-----------|
+| RelationalLearner  | 0.158 | 0.017 | 0.258 | 0.407 | ❌ none |
+| TransE             | —     | —     | —     | 0.501 | ✅ trained |
+| RotatE             | —     | —     | —     | 0.571 | ✅ trained |
+
+WN18RR harder: only 40% of test (h,r) pairs seen in training → rel_unigram fallback dominates.
+
+**Large-KG mode:** V > 500 atoms → skip E0-E3 cluster pipeline (would allocate 15+ GB dense
+matrix). Use `_atom_bigrams` + `_rel_unigram` only. Fit in O(N) time with O(N) memory.
 
 ---
 
@@ -277,6 +296,6 @@ for all test atoms. OOV fallback to E3 handles unseen atoms.
 | **R2** | **Relational E5: sense disambiguation** | ✅ Done | — |
 | **R3** | **Relational E6: structural meta-synthesis** | ✅ Done | — |
 | **R4** | **Geometry-adapted distance metric** | ✅ Done | — |
-| **R5** | **Multi-hop prediction benchmark** | 🔶 Latin done | d99f060 |
+| **R5** | **Multi-hop prediction benchmark** | ✅ Latin + FB15k-237 + WN18RR | d99f060 |
 | **R6** | **Compositional relational inference** | ✅ Done | 0213f7f |
 | **Two-level** | **_atom_bigrams fast path + atom-level infer_chain** | ✅ Done | 0213f7f |

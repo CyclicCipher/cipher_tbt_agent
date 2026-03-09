@@ -98,6 +98,8 @@ class RelationalLearner:
         self._nc_cache:  dict = {}   # raw dist cache from next_cat_rel
         self._wgc_cache: dict = {}   # raw dist cache from token_given_cat_rel
         self._sim_matrix: list = []  # K×K JSD-based similarity matrix
+        self._atom_bigrams: dict = {}   # (atom, rel) → {target: prob}  (fast path)
+        self._rel_unigram:  dict = {}   # rel → {target: prob}  (OOV fallback)
 
     # ---- E0: bigram discovery -----------------------------------------------
 
@@ -127,12 +129,87 @@ class RelationalLearner:
         if verbose:
             print(f'  E0: taught {n:,} triples as compound bigrams')
 
+    # ---- Large-KG mode (no cluster pipeline) --------------------------------
+
+    def _fit_large_kg(self, triples: list[tuple[Any, str, Any]],
+                      verbose: bool = True) -> None:
+        """Build atom bigrams + per-relation unigram in a single O(N) pass.
+
+        Used when n_unique_atoms > max_atoms (e.g. FB15k-237 with 14K entities).
+        The E0-E3 cluster pipeline would allocate a dense matrix of size
+        n_atoms × n_compound_tokens ≈ 14K × 544K × 4 bytes ≈ 30 GB — unacceptable.
+
+        For large KGs, atom-level bigrams ARE the right model:
+          - Fast path:  P(t | h, r) from _atom_bigrams  (exact empirical dist)
+          - OOV fallback: P(t | r) from _rel_unigram    (marginal over all h)
+        No clustering is needed or useful: each entity is semantically distinct.
+        """
+        from collections import defaultdict, Counter as _Counter
+        _atom_raw: dict = defaultdict(_Counter)  # (h, r) → Counter(t)
+        _rel_raw:  dict = defaultdict(_Counter)  # r → Counter(t)
+
+        for a, r, b in triples:
+            a_s, r_s, b_s = str(a), str(r), str(b)
+            _atom_raw[(a_s, r_s)][b_s] += 1
+            _rel_raw[r_s][b_s] += 1
+
+        self._atom_bigrams = {}
+        for (atom, rel), ctr in _atom_raw.items():
+            total = sum(ctr.values())
+            if total > 0:
+                self._atom_bigrams[(atom, rel)] = {
+                    k: v / total for k, v in ctr.items()}
+
+        self._rel_unigram = {}
+        for rel, ctr in _rel_raw.items():
+            total = sum(ctr.values())
+            if total > 0:
+                self._rel_unigram[rel] = {k: v / total for k, v in ctr.items()}
+
+        # assignment stays empty — no clustering
+        self.assignment = {}
+        self.clusters   = {}
+        self._K         = 0
+
+        if verbose:
+            print(f'  atom_bigrams: {len(self._atom_bigrams):,} (h,r) pairs')
+            print(f'  rel_unigram:  {len(self._rel_unigram):,} relations')
+            m = _rss_mb()
+            if m:
+                print(f'  RSS after large-KG fit = {m:.0f} MB')
+
     # ---- E0-E3: fit ---------------------------------------------------------
 
     def fit(self, triples: list[tuple[Any, str, Any]],
             e3_temperature: float = 2.0,
-            verbose: bool = True) -> None:
-        """Fit E0-E3 on a list of (atom_a, relation_name, atom_b) triples."""
+            verbose: bool = True,
+            max_atoms: int = 500) -> None:
+        """Fit E0-E3 on a list of (atom_a, relation_name, atom_b) triples.
+
+        Args:
+            max_atoms: If the number of unique atoms exceeds this threshold,
+                       skip the E0-E3 cluster pipeline (which builds a dense
+                       n_atoms × n_compound_tokens matrix that OOMs for large KGs)
+                       and use atom-level bigrams + per-relation unigram only.
+                       Default 500 is safe for char/word level data; for FB15k-237
+                       (14K entities) the cluster matrix would be ~31 GB.
+        """
+        # Count unique atoms before allocating anything
+        atoms_seen: set = set()
+        for a, r, b in triples:
+            atoms_seen.add(str(a))
+            atoms_seen.add(str(b))
+        n_unique = len(atoms_seen)
+
+        if n_unique > max_atoms:
+            if verbose:
+                print(f'  Large-KG mode: {n_unique:,} atoms > {max_atoms} — '
+                      f'skipping cluster pipeline (would allocate '
+                      f'~{n_unique * len(triples) * 4 // 1_000_000_000:.0f}+ GB), '
+                      f'using atom bigrams + rel unigram only.')
+            self._fit_large_kg(triples, verbose=verbose)
+            return
+
         if verbose:
             m = _rss_mb()
             if m:
@@ -388,23 +465,24 @@ class RelationalLearner:
         bg = getattr(self, '_atom_bigrams', {}).get((a_s, r_s))
         if bg is not None:
             return dict(bg)
-        # Fallback: category-level soft retrieval (OOV generalisation)
+        # Fallback: category-level soft retrieval (OOV in small-V models)
         c_a = self.assignment.get(a_s)
-        if c_a is None:
-            return {}
-        c_b_dist = self._get_nc_soft((str(c_a), r_s))
-        if not c_b_dist:
-            return {}
-        result: dict = {}
-        for c_b_key, p_cb in c_b_dist.items():
-            c_b = c_b_key[0] if isinstance(c_b_key, tuple) else str(c_b_key)
-            t_dist = self._get_wgc_soft((str(c_a), r_s, c_b))
-            if not t_dist:
-                continue
-            for tok_key, p_t in t_dist.items():
-                tok = tok_key[0] if isinstance(tok_key, tuple) else str(tok_key)
-                result[tok] = result.get(tok, 0.0) + p_cb * p_t
-        return result
+        if c_a is not None:
+            c_b_dist = self._get_nc_soft((str(c_a), r_s))
+            if c_b_dist:
+                result: dict = {}
+                for c_b_key, p_cb in c_b_dist.items():
+                    c_b = c_b_key[0] if isinstance(c_b_key, tuple) else str(c_b_key)
+                    t_dist = self._get_wgc_soft((str(c_a), r_s, c_b))
+                    if not t_dist:
+                        continue
+                    for tok_key, p_t in t_dist.items():
+                        tok = tok_key[0] if isinstance(tok_key, tuple) else str(tok_key)
+                        result[tok] = result.get(tok, 0.0) + p_cb * p_t
+                if result:
+                    return result
+        # Final fallback: per-relation unigram P(t|r) — works in large-KG mode
+        return dict(self._rel_unigram.get(r_s, {}))
 
     def atom_neighbors(self, atom: Any, topn: int = 8) -> list[tuple]:
         """Atoms most similar in relational role (by category similarity).
