@@ -689,9 +689,44 @@ def _patch_hash(patch) -> str:
 # Level 2: RelationClusterer
 # ---------------------------------------------------------------------------
 
+def _gap_threshold(jsd_values: list, sensitivity: float = 0.1) -> float:
+    """Data-driven merge threshold via Kneedle algorithm on sorted pairwise JSDs.
+
+    Normalizes the sorted JSD values to the unit square [0,1]×[0,1], then
+    finds the point of maximum perpendicular distance from the diagonal y=x.
+    The midpoint just before that knee is the merge threshold.
+
+    If the curve is nearly linear (max distance < sensitivity), there is no
+    clear cluster boundary → returns float('inf') → everything stays merged.
+
+    This replaces the hardcoded jsd_threshold with a data-driven value that
+    scales with the actual distribution of pairwise distances in the data.
+    """
+    n = len(jsd_values)
+    if n == 0:
+        return float('inf')
+    vals = sorted(float(v) for v in jsd_values)
+    y_min, y_max = vals[0], vals[-1]
+    if y_max - y_min < 1e-9:
+        return float('inf')  # all equal → no structure to split
+    if n == 1:
+        return vals[0] / 2.0 if vals[0] >= 0.3 else float('inf')
+    x_norm = [i / (n - 1) for i in range(n)]
+    y_norm = [(v - y_min) / (y_max - y_min) for v in vals]
+    # Perpendicular distance from the diagonal y = x (in unit square)
+    distances = [abs(y_norm[i] - x_norm[i]) for i in range(n)]
+    max_dist = max(distances)
+    if max_dist < sensitivity:
+        return float('inf')  # nearly linear → no meaningful knee → 1 cluster
+    knee_idx = distances.index(max_dist)
+    if knee_idx == 0:
+        return (vals[0] + vals[1]) / 2.0 if n > 1 else vals[0] / 2.0
+    return (vals[knee_idx - 1] + vals[knee_idx]) / 2.0
+
+
 def _jsd_cluster(sigs: dict[str, dict],
                  n_clusters: int | None = None,
-                 jsd_threshold: float = 0.1,
+                 jsd_threshold: float | None = None,
                  verbose: bool = False) -> tuple[dict, dict]:
     """Cluster named distributions by pairwise Jensen-Shannon divergence.
 
@@ -699,6 +734,7 @@ def _jsd_cluster(sigs: dict[str, dict],
         sigs:          {name: {key: probability}} — normalized distributions.
         n_clusters:    Target cluster count.  None → merge while JSD < threshold.
         jsd_threshold: Merge threshold when n_clusters is None.
+                       None (default) → auto-detect via _gap_threshold() (Kneedle).
         verbose:       Print cluster assignments.
 
     Returns:
@@ -755,6 +791,12 @@ def _jsd_cluster(sigs: dict[str, dict],
     assignment = list(range(n))
     n_active = n
     pairs = sorted((_get(i, j), i, j) for i in range(n) for j in range(i + 1, n))
+
+    # Auto-detect threshold from pairwise JSD distribution (Kneedle algorithm)
+    if n_clusters is None and jsd_threshold is None:
+        all_jsds = [d for d, _, _ in pairs]
+        jsd_threshold = _gap_threshold(all_jsds)
+
     for d, i, j in pairs:
         if n_clusters is not None and n_active <= n_clusters:
             break
@@ -810,7 +852,7 @@ class RelationClusterer:
 
     def fit(self, learner: 'RelationalLearner',
             triples: list[tuple[Any, str, Any]],
-            jsd_threshold: float = 0.1,
+            jsd_threshold: float | None = None,
             verbose: bool = True) -> None:
         """Cluster relation types using atom assignments from a fitted RelationalLearner.
 
@@ -818,6 +860,7 @@ class RelationClusterer:
             learner:       A fitted RelationalLearner (learner.assignment populated).
             triples:       The same (atom, relation, atom) triples used to fit learner.
             jsd_threshold: JSD below which two relations are merged (n_clusters=None).
+                           None (default) → auto-detect via Kneedle algorithm.
             verbose:       Print cluster assignments.
         """
         rel_counts: dict[str, dict] = collections.defaultdict(
@@ -898,7 +941,7 @@ class SecondOrderGrammar:
 
     def fit(self, triples: list[tuple[Any, str, Any]],
             n_clusters: int | None = None,
-            jsd_threshold: float = 0.1,
+            jsd_threshold: float | None = None,
             verbose: bool = True) -> None:
         """Learn next_rel distributions from chains in the triple set.
 
@@ -909,6 +952,7 @@ class SecondOrderGrammar:
             triples:       (atom, relation, atom) triples.
             n_clusters:    Target cluster count.  None → JSD-threshold merging.
             jsd_threshold: Merge threshold when n_clusters is None.
+                           None (default) → auto-detect via Kneedle algorithm.
             verbose:       Print distributions and clusters.
         """
         # Build adjacency
@@ -1017,12 +1061,13 @@ class RawOffsetLearner:
         codebook_size:   K-means codebook for patch tokenization.
         n_rel_clusters:  Target number of offset clusters (None = JSD-threshold).
         jsd_threshold:   Merge threshold when n_rel_clusters is None.
+                         None (default) → auto-detect via Kneedle algorithm.
     """
 
     def __init__(self, patch_size: int = 16, n_atom_clusters: int = 32,
                  max_offset: int = 1, codebook_size: int = 64,
                  n_rel_clusters: int | None = None,
-                 jsd_threshold: float = 0.05):
+                 jsd_threshold: float | None = None):
         self.patch_size     = patch_size
         self.n_atom_clusters = n_atom_clusters
         self.max_offset     = max_offset
