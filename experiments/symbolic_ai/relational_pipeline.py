@@ -49,6 +49,7 @@ if os.path.join(_HERE, '..') not in sys.path:
     sys.path.insert(0, os.path.join(_HERE, '..'))
 
 from engine import SymbolicAI
+from synthesis import _gap_threshold
 from sequence_pipeline import (
     _jsd, _rss_mb, _ask_soft, _build_sim_matrix,
     _precompute_dist_cache,
@@ -85,7 +86,7 @@ class RelationalLearner:
         This is handled automatically by _ask_soft — no special casing needed.
     """
 
-    def __init__(self, ai: SymbolicAI | None = None, n_clusters: int = 12):
+    def __init__(self, ai: SymbolicAI | None = None, n_clusters: int | None = None):
         self.ai = ai or SymbolicAI(KnowledgeGraph())
         self.n_clusters = n_clusters
         self.assignment: dict = {}   # atom_str → cluster_id (int)
@@ -156,9 +157,10 @@ class RelationalLearner:
             return
         self.assignment = result.get('assignment', {})
         self.clusters   = result.get('clusters', {})
+        self._K         = result.get('n_clusters', len(self.clusters))
         if verbose:
             print(f'  Atoms: {len(self.assignment):,}  '
-                  f'Clusters: {len(self.clusters)}')
+                  f'Clusters: {self._K}')
 
         # Build E3 successor distributions BEFORE clearing E0 examples
         # (ask_dist uses store.examples, which is gone after .clear())
@@ -698,40 +700,6 @@ def _patch_hash(patch) -> str:
 # ---------------------------------------------------------------------------
 # Level 2: RelationClusterer
 # ---------------------------------------------------------------------------
-
-def _gap_threshold(jsd_values: list, sensitivity: float = 0.1) -> float:
-    """Data-driven merge threshold via Kneedle algorithm on sorted pairwise JSDs.
-
-    Normalizes the sorted JSD values to the unit square [0,1]×[0,1], then
-    finds the point of maximum perpendicular distance from the diagonal y=x.
-    The midpoint just before that knee is the merge threshold.
-
-    If the curve is nearly linear (max distance < sensitivity), there is no
-    clear cluster boundary → returns float('inf') → everything stays merged.
-
-    This replaces the hardcoded jsd_threshold with a data-driven value that
-    scales with the actual distribution of pairwise distances in the data.
-    """
-    n = len(jsd_values)
-    if n == 0:
-        return float('inf')
-    vals = sorted(float(v) for v in jsd_values)
-    y_min, y_max = vals[0], vals[-1]
-    if y_max - y_min < 1e-9:
-        return float('inf')  # all equal → no structure to split
-    if n == 1:
-        return vals[0] / 2.0 if vals[0] >= 0.3 else float('inf')
-    x_norm = [i / (n - 1) for i in range(n)]
-    y_norm = [(v - y_min) / (y_max - y_min) for v in vals]
-    # Perpendicular distance from the diagonal y = x (in unit square)
-    distances = [abs(y_norm[i] - x_norm[i]) for i in range(n)]
-    max_dist = max(distances)
-    if max_dist < sensitivity:
-        return float('inf')  # nearly linear → no meaningful knee → 1 cluster
-    knee_idx = distances.index(max_dist)
-    if knee_idx == 0:
-        return (vals[0] + vals[1]) / 2.0 if n > 1 else vals[0] / 2.0
-    return (vals[knee_idx - 1] + vals[knee_idx]) / 2.0
 
 
 def _jsd_cluster(sigs: dict[str, dict],

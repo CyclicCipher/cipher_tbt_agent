@@ -861,6 +861,130 @@ def _generate_minecraft_templates(
 # Phase O: Unsupervised category discovery (distributional hypothesis)
 # ---------------------------------------------------------------------------
 
+def _gap_threshold(jsd_values: list, sensitivity: float = 0.1) -> float:
+    """Data-driven merge threshold via Kneedle algorithm on sorted pairwise JSDs.
+
+    Normalises the sorted JSD values to the unit square [0,1]×[0,1], finds the
+    point of maximum perpendicular distance from the diagonal y=x, and returns
+    the midpoint just before that knee as the merge threshold.
+
+    If the curve is nearly linear (max distance < sensitivity) there is no clear
+    cluster boundary → returns float('inf') → all items stay in one cluster.
+    """
+    n = len(jsd_values)
+    if n == 0:
+        return float('inf')
+    vals = sorted(float(v) for v in jsd_values)
+    y_min, y_max = vals[0], vals[-1]
+    if y_max - y_min < 1e-9:
+        return float('inf')
+    if n == 1:
+        return vals[0] / 2.0 if vals[0] >= 0.3 else float('inf')
+    x_norm = [i / (n - 1) for i in range(n)]
+    y_norm = [(v - y_min) / (y_max - y_min) for v in vals]
+    distances = [abs(y_norm[i] - x_norm[i]) for i in range(n)]
+    max_dist = max(distances)
+    if max_dist < sensitivity:
+        return float('inf')
+    knee_idx = distances.index(max_dist)
+    if knee_idx == 0:
+        return (vals[0] + vals[1]) / 2.0 if n > 1 else vals[0] / 2.0
+    return (vals[knee_idx - 1] + vals[knee_idx]) / 2.0
+
+
+def _auto_k_agglom(
+    vecs_list:   List[List[float]],
+    jsd_func,
+    sensitivity: float = 0.1,
+) -> int:
+    """Find optimal K for agglomerative clustering via Kneedle on merge costs.
+
+    Runs a complete dendrogram (O(V³), instant for V≤200), records the JSD cost
+    at each merge step, applies _gap_threshold to find where the cost jumps, and
+    returns the number of clusters that remain before that jump.
+    """
+    n = len(vecs_list)
+    if n <= 1:
+        return 1
+    vecs   = [v[:] for v in vecs_list]
+    sizes  = [1] * n
+    active = list(range(n))
+    costs: List[float] = []
+
+    while len(active) > 1:
+        best_d = float('inf')
+        bi = bj = -1
+        for ii in range(len(active)):
+            for jj in range(ii + 1, len(active)):
+                d = jsd_func(vecs[active[ii]], vecs[active[jj]])
+                if d < best_d:
+                    best_d = d
+                    bi, bj = active[ii], active[jj]
+        if bi < 0:
+            break
+        costs.append(best_d)
+        ni, nj = sizes[bi], sizes[bj]
+        total = ni + nj
+        vecs[bi] = [(ni * a + nj * b) / total for a, b in zip(vecs[bi], vecs[bj])]
+        sizes[bi] = total
+        active.remove(bj)
+
+    thr = _gap_threshold(costs, sensitivity)
+    if thr == float('inf'):
+        return 1
+    n_merges_before = sum(1 for c in costs if c < thr)
+    return max(1, n - n_merges_before)
+
+
+def _auto_k_kmeans(
+    matrix,
+    k_min:       int   = 2,
+    k_max:       int   = None,
+    sensitivity: float = 0.1,
+) -> int:
+    """Find optimal K for k-means via Kneedle on the (K, inertia) elbow curve.
+
+    Runs k-means for K in [k_min, k_max], normalises the resulting inertia curve
+    to the unit square, and returns the K at maximum perpendicular distance from
+    the diagonal (the elbow). Falls back to k_min if no clear elbow is found.
+    """
+    import numpy as np
+    n = len(matrix)
+    if k_max is None:
+        k_max = min(20, max(k_min, n // 5))
+    if k_max <= k_min:
+        return k_min
+
+    ks = list(range(k_min, k_max + 1))
+    inertias: List[float] = []
+    for k in ks:
+        asgn = _kmeans_cluster(matrix, k)
+        asgn_arr = np.array(asgn, dtype=np.int32)
+        centroids = np.zeros((k, matrix.shape[1]), dtype=np.float64)
+        counts    = np.zeros(k, dtype=np.int64)
+        for i, a in enumerate(asgn_arr):
+            centroids[a] += matrix[i]
+            counts[a]    += 1
+        counts = np.where(counts == 0, 1, counts)
+        centroids /= counts[:, None]
+        inertia = float(np.sum((matrix.astype(np.float64) - centroids[asgn_arr]) ** 2))
+        inertias.append(inertia)
+
+    n_pts = len(ks)
+    if n_pts < 3:
+        return k_min
+    I_min, I_max = inertias[-1], inertias[0]
+    if I_max - I_min < 1e-9:
+        return k_min
+    x_norm = [i / (n_pts - 1) for i in range(n_pts)]
+    y_norm = [(v - I_min) / (I_max - I_min) for v in inertias]
+    distances = [abs(y_norm[i] - x_norm[i]) for i in range(n_pts)]
+    max_dist = max(distances)
+    if max_dist < sensitivity:
+        return k_min
+    return ks[distances.index(max_dist)]
+
+
 def _kmeans_cluster(
     matrix:      'np.ndarray',
     k:           int,
@@ -935,7 +1059,7 @@ def _kmeans_cluster(
 
 def discover_categories(
     store:        ExampleStore,
-    n_clusters:   int            = 9,
+    n_clusters:   Optional[int]  = None,
     min_examples: int            = 1,
     vocab_size:   Optional[int]  = None,
     method:       str            = 'auto',
@@ -997,9 +1121,10 @@ def discover_categories(
     if not eligible:
         return {}
 
-    n_clusters = min(n_clusters, len(eligible))
-    if n_clusters <= 1:
-        return {inp: 0 for inp in eligible}
+    if n_clusters is not None:
+        n_clusters = min(n_clusters, len(eligible))
+        if n_clusters <= 1:
+            return {inp: 0 for inp in eligible}
 
     # ------------------------------------------------------------------
     # Step 2: Build empirical output distributions.
@@ -1012,7 +1137,8 @@ def discover_categories(
     if not eligible:
         return {}
 
-    n_clusters = min(n_clusters, len(eligible))
+    if n_clusters is not None:
+        n_clusters = min(n_clusters, len(eligible))
 
     # ------------------------------------------------------------------
     # Step 3: Build shared output vocabulary (optionally capped).
@@ -1070,7 +1196,9 @@ def discover_categories(
     if want_kmeans:
         try:
             import numpy as np
-            matrix          = np.array(vecs_list, dtype=np.float32)
+            matrix = np.array(vecs_list, dtype=np.float32)
+            if n_clusters is None:
+                n_clusters = _auto_k_kmeans(matrix)
             raw_assignments = _kmeans_cluster(matrix, n_clusters)
             kmeans_ok       = True
         except ImportError:
@@ -1131,7 +1259,7 @@ def discover_categories(
 def discover_categories_from_dists(
     dists:        Dict[tuple, Dict[tuple, float]],
     input_counts: Dict[tuple, int],
-    n_clusters:   int           = 9,
+    n_clusters:   Optional[int] = None,
     min_examples: int           = 1,
     vocab_size:   Optional[int] = None,
     method:       str           = 'auto',
@@ -1187,9 +1315,10 @@ def discover_categories_from_dists(
     if not eligible:
         return {}
 
-    n_clusters = min(n_clusters, len(eligible))
-    if n_clusters <= 1:
-        return {inp: 0 for inp in eligible}
+    if n_clusters is not None:
+        n_clusters = min(n_clusters, len(eligible))
+        if n_clusters <= 1:
+            return {inp: 0 for inp in eligible}
 
     # ------------------------------------------------------------------
     # Step 2: Build shared output vocabulary (optionally capped).
@@ -1247,7 +1376,9 @@ def discover_categories_from_dists(
     if want_kmeans:
         try:
             import numpy as np
-            matrix          = np.array(vecs_list, dtype=np.float32)
+            matrix = np.array(vecs_list, dtype=np.float32)
+            if n_clusters is None:
+                n_clusters = _auto_k_kmeans(matrix)
             raw_assignments = _kmeans_cluster(matrix, n_clusters)
             kmeans_ok       = True
         except ImportError:
@@ -1266,6 +1397,9 @@ def discover_categories_from_dists(
             if qi > 1e-12 and mi > 1e-12:
                 result += 0.5 * qi * _math.log2(qi / mi)
         return max(0.0, result)
+
+    if n_clusters is None:
+        n_clusters = _auto_k_agglom(vecs_list, jsd)
 
     vecs:    List[List[float]]  = vecs_list
     members: List[List[tuple]] = [[inp] for inp in eligible]

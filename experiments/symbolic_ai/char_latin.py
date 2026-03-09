@@ -265,8 +265,6 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--n_books', type=int, default=None,
                         help='Limit to first N books (default: all)')
-    parser.add_argument('--n_clusters', type=int, default=8,
-                        help='Character cluster count (default: 8)')
     parser.add_argument('--corpus_dir', default=CORPUS_DIR)
     parser.add_argument('--relations', nargs='+',
                         default=['next', 'prev', 'skip2f', 'skip2b'],
@@ -276,7 +274,6 @@ def main() -> None:
 
     print(f'Corpus:    {args.corpus_dir}')
     print(f'Books:     {args.n_books or "all"}')
-    print(f'Clusters:  {args.n_clusters}')
     print(f'Relations: {args.relations}')
     print()
 
@@ -290,8 +287,8 @@ def main() -> None:
     print(f'  {len(triples):,} triples  '
           f'({len(set((a, r) for a, r, b in triples)):,} unique (atom,relation) pairs)')
 
-    print(f'\nL1: Fitting RelationalLearner (n_clusters={args.n_clusters})...')
-    learner = RelationalLearner(n_clusters=args.n_clusters)
+    print(f'\nL1: Fitting RelationalLearner (auto K)...')
+    learner = RelationalLearner()
     learner.fit(triples, verbose=True)
 
     print(f'\nL2: Fitting RelationClusterer...')

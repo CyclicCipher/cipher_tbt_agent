@@ -363,7 +363,7 @@ class SymbolicAI:
     def induce_hierarchy(
         self,
         flat_concept:  str,
-        n_clusters:    int           = 9,
+        n_clusters:    Optional[int] = None,
         min_examples:  int           = 1,
         vocab_size:    Optional[int] = None,
         method:        str           = 'auto',
@@ -488,7 +488,7 @@ class SymbolicAI:
         self,
         fwd_concept:  str,
         bwd_concept:  str,
-        n_clusters:   int           = 9,
+        n_clusters:   Optional[int] = None,
         min_examples: int           = 1,
         vocab_size:   Optional[int] = None,
         method:       str           = 'auto',
