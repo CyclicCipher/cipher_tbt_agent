@@ -3386,39 +3386,75 @@ class MergeDetector:
         return result
 
     def segment_by_boundary(self,
-                            sequence:  list[str],
-                            threshold: float | None = None,
-                            level:     int          = 1,
+                            sequence:       list[str],
+                            threshold:      float | None    = None,
+                            level:          int             = 1,
+                            boundary_atoms: set[str] | None = None,
                             ) -> list:
-        """Split a sequence into SegmentedAtoms at low-PMI positions.
+        """Split a sequence into SegmentedAtoms at low-PMI or explicit boundaries.
 
-        A position i is a boundary if PMI(seq[i], seq[i+1]) < threshold.
-        If threshold is None (default), the mean PMI over the sequence is
-        used — boundaries are below-average-predictability transitions, which
-        naturally aligns with word/phrase edges.
+        Two complementary boundary mechanisms:
 
-        Single-atom segments are returned as plain strings (no wrapping).
-        Multi-atom segments become SegmentedAtom objects, preserving the
-        full composition chain via ``leaves()``.
+        1. **Explicit boundary atoms** (``boundary_atoms`` parameter):
+           Tokens that unconditionally create a segment break.  For written
+           text, pass ``boundary_atoms={' '}`` — the space character is an
+           unambiguous word delimiter.  Each boundary atom forms its own
+           single-element output; PMI segmentation is applied recursively
+           within the chunks between them.
 
-        This is the dual of ``detect()``: both operate on the same PMI
-        landscape — high PMI → Merge (join), low PMI → Segment (split).
-        Together they allow the system to climb char → morpheme → word →
-        phrase → clause in a single ``fit()`` pass.
+        2. **PMI-based boundaries** (``threshold`` parameter):
+           Position i is a boundary if PMI(seq[i], seq[i+1]) < threshold.
+           If threshold is None (default), the mean PMI of the chunk is used.
+
+        Rationale: at the character level, written Latin space-boundary PMI
+        (mean≈0.48) and intra-word PMI (mean≈0.68) are too close for a single
+        threshold to cleanly separate them.  Explicit ``boundary_atoms={' '}``
+        handles level 0; pure PMI handles higher levels where no delimiter exists.
+
+        Single-atom outputs are returned as plain strings (no SegmentedAtom wrap).
+        Multi-atom segments become SegmentedAtom, preserving the full composition
+        chain via ``leaves()``.
 
         Parameters
         ----------
-        sequence   List of atom strings at the current level.
-        threshold  PMI cutoff.  None = mean PMI of this sequence (adaptive).
-        level      Level label assigned to the resulting SegmentedAtoms.
-
-        Returns
-        -------
-        List of str | SegmentedAtom — the next-level atom sequence.
+        sequence        Atom strings at the current level.
+        threshold       PMI cutoff.  None = adaptive mean of each chunk.
+        level           Level label assigned to resulting SegmentedAtoms.
+        boundary_atoms  Tokens that always create a segment break.
+                        Each such token forms its own single-element output.
+                        For text data use ``{' '}``.
         """
         if len(sequence) < 2:
             return list(sequence)
 
+        # --- Stage 1: split at explicit boundary atoms ---
+        if boundary_atoms and any(t in boundary_atoms for t in sequence):
+            chunks: list[list[str]] = []
+            current: list[str] = []
+            for t in sequence:
+                if t in boundary_atoms:
+                    if current:
+                        chunks.append(current)
+                        current = []
+                    chunks.append([t])       # boundary atom = its own chunk
+                else:
+                    current.append(t)
+            if current:
+                chunks.append(current)
+
+            # Apply PMI segmentation within each non-boundary chunk, then flatten
+            result: list = []
+            for chunk in chunks:
+                if len(chunk) == 1:
+                    result.append(chunk[0])
+                else:
+                    result.extend(self.segment_by_boundary(
+                        chunk, threshold=threshold, level=level,
+                        boundary_atoms=None,   # already split; avoid double-pass
+                    ))
+            return result
+
+        # --- Stage 2: PMI-based boundary detection ---
         pmis = self.boundary_pmi(sequence)
 
         if threshold is None:
@@ -3503,17 +3539,24 @@ class HierarchicalRelationalLearner:
     boundary_threshold     PMI cutoff for segmentation.  None (default) =
                            adaptive: use the mean PMI of each sequence so
                            boundaries are below-average-predictability joins.
+    boundary_atoms         Tokens that always create an unconditional segment
+                           break, regardless of PMI.  For written text, pass
+                           ``{' '}`` so the space character is always a word
+                           delimiter.  Only applied at the first level where
+                           the atoms are base characters; at higher levels
+                           (word tokens, phrase tokens) boundaries are PMI-only.
     """
 
     def __init__(self,
-                 n_clusters:           int | None  = None,
-                 pmi_threshold:        float       = 0.5,
-                 max_merges_per_level: int         = 50,
-                 max_levels:           int         = 6,
-                 next_rel:             str         = 'next',
-                 min_merge_count:      int         = 3,
-                 use_segment:          bool        = True,
-                 boundary_threshold:   float | None = None,
+                 n_clusters:           int | None       = None,
+                 pmi_threshold:        float            = 0.5,
+                 max_merges_per_level: int              = 50,
+                 max_levels:           int              = 6,
+                 next_rel:             str              = 'next',
+                 min_merge_count:      int              = 3,
+                 use_segment:          bool             = True,
+                 boundary_threshold:   float | None     = None,
+                 boundary_atoms:       set[str] | None  = None,
                  ) -> None:
         self.n_clusters           = n_clusters
         self.pmi_threshold        = pmi_threshold
@@ -3523,6 +3566,7 @@ class HierarchicalRelationalLearner:
         self.min_merge_count      = min_merge_count
         self.use_segment          = use_segment
         self.boundary_threshold   = boundary_threshold
+        self.boundary_atoms       = boundary_atoms
 
         self.levels:   list[RelationalLearner]  = []
         self.vocab:    AtomVocabulary           = AtomVocabulary()
@@ -3605,10 +3649,14 @@ class HierarchicalRelationalLearner:
                 seg_detector  = MergeDetector(learner, next_rel=self.next_rel)
                 segmented: list[list[str]] = []
                 for seq in new_seqs:
+                    # boundary_atoms only used at level 0 (char→word);
+                    # at higher levels boundaries are discovered from PMI.
+                    b_atoms = self.boundary_atoms if level == 0 else None
                     seg_atoms = seg_detector.segment_by_boundary(
                         seq,
                         threshold=self.boundary_threshold,
                         level=level + 1,
+                        boundary_atoms=b_atoms,
                     )
                     # Register SegmentedAtoms in vocabulary
                     for sa in seg_atoms:
