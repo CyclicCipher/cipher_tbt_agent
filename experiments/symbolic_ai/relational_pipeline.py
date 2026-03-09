@@ -742,10 +742,58 @@ class RelationalLearner:
         self.clusters   = clusters
         self._K         = len(clusters)
 
+        self._rebuild_caches_from_assignment(assignment, clusters, _rel_raw=_rel_raw)
+
+        if verbose:
+            print(f'  cluster_from_counts: V={n_unique} atoms → K={self._K} clusters')
+
+    def _rebuild_caches_from_assignment(
+        self,
+        assignment: dict,
+        clusters:   dict,
+        _rel_raw:   'dict | None' = None,
+    ) -> None:
+        """Rebuild E1/E3 caches from any ``assignment`` dict.
+
+        Called by ``cluster_from_counts()`` (after JSD clustering) and by
+        ``cluster_from_type_abstraction()`` (after type-tuple grouping).
+        Reconstructs the forward-context distributions from ``self._atom_counts``
+        and derives cluster-level transition matrices.
+
+        Parameters
+        ----------
+        assignment
+            ``{surface_str: cluster_id}`` mapping every atom to its cluster.
+        clusters
+            ``{cluster_id: set_or_list_of_surface_strings}`` inverse mapping.
+        _rel_raw
+            Optional pre-computed ``{rel: {target: count}}`` dict (passed by
+            ``cluster_from_counts`` to avoid a second scan of ``_atom_counts``).
+            If *None* the dict is reconstructed internally.
+        """
+        import collections as _col
+        from collections import Counter as _Counter
+
+        counts = getattr(self, '_atom_counts', {})
+
+        # ── Reconstruct fwd_raw (and optionally _rel_raw) ────────────────────
+        fwd_raw: dict = _col.defaultdict(_Counter)
+        if _rel_raw is None:
+            _rel_raw_local: dict = _col.defaultdict(_Counter)
+            for (a_s, r_s), ctr in counts.items():
+                for b_s, cnt in ctr.items():
+                    fwd_raw[a_s][f'{r_s}:{b_s}'] += cnt
+                    _rel_raw_local[r_s][b_s]      += cnt
+            _rel_raw = _rel_raw_local
+        else:
+            for (a_s, r_s), ctr in counts.items():
+                for b_s, cnt in ctr.items():
+                    fwd_raw[a_s][f'{r_s}:{b_s}'] += cnt
+
         # ── E3: succ_dists → sim_matrix ──────────────────────────────────────
         succ: dict = {}
         for cid, members in clusters.items():
-            merged: dict = collections.defaultdict(float)
+            merged: dict = _col.defaultdict(float)
             n = 0
             for tok in members:
                 ctr = fwd_raw.get(tok)
@@ -762,10 +810,9 @@ class RelationalLearner:
         self._sim_matrix = _build_sim_matrix(succ, self._K)
 
         # ── E1: nc_cache / wgc_cache / _trans ────────────────────────────────
-        from collections import defaultdict as _dd
-        _trans_raw  = _dd(lambda: _dd(_Counter))
-        nc_raw      = _dd(_Counter)
-        wgc_raw     = _dd(_Counter)
+        _trans_raw  = _col.defaultdict(lambda: _col.defaultdict(_Counter))
+        nc_raw      = _col.defaultdict(_Counter)
+        wgc_raw     = _col.defaultdict(_Counter)
 
         for (a_s, r_s), ctr in counts.items():
             c_a = assignment.get(a_s)
@@ -810,14 +857,127 @@ class RelationalLearner:
             if total > 0:
                 self._rel_unigram[rel] = {k: v / total for k, v in ctr.items()}
 
-        self._nc_cache   = nc_cache
-        self._wgc_cache  = wgc_cache
-        self._trans      = _trans
-        self._nc_soft    = {}
-        self._wgc_soft   = {}
+        self._nc_cache  = nc_cache
+        self._wgc_cache = wgc_cache
+        self._trans     = _trans
+        self._nc_soft   = {}
+        self._wgc_soft  = {}
+
+    def cluster_from_type_abstraction(
+        self,
+        vocab:            'AtomVocabulary',
+        lower_assignment: dict,
+        verbose:          bool = False,
+        max_alphabet:     int  = 15,
+        max_tuple_len:    int  = 2,
+    ) -> None:
+        """Assign clusters by constituent type-tuple — symbolic parameter sharing.
+
+        For each atom seen at this level, look up its :class:`MergedAtom` /
+        :class:`SegmentedAtom` record in ``vocab`` and map each direct
+        constituent to its type-id in ``lower_assignment``.  Two surface strings
+        receive the same cluster iff they have the *same constituent type-sequence*.
+
+        This is the symbolic analogue of weight sharing in neural networks:
+        ``[the+king]`` and ``[a+king]`` receive the same abstract type if both
+        ``the`` and ``a`` have type ``DET`` in ``lower_assignment`` — so the
+        upper learner generalises across surface forms that share structure.
+
+        Called as a fallback by :meth:`PCH.analyse` when
+        ``cluster_from_counts`` yields K≤1 at level≥1 (surface forms too sparse
+        for JSD clustering).
+
+        Parameters
+        ----------
+        vocab
+            Shared :class:`AtomVocabulary` from the parent
+            :class:`PredictiveCodingHierarchy`.
+        lower_assignment
+            ``assignment`` dict of the level directly below (level−1
+            :class:`RelationalLearner`): ``{surface_str: type_id}``.
+        max_alphabet
+            Keep only the ``max_alphabet`` most-frequent constituent types;
+            map everything else to ``'__OTHER__'``.  Limits alphabet size so
+            the number of distinct type-tuples stays manageable.  Default 15.
+        max_tuple_len
+            For chunks with more than ``max_tuple_len`` constituents, use only
+            the first and last constituent types (boundary signature).  Default
+            2, giving at most ``(max_alphabet+1)²`` possible type-tuples.
+        """
+        import collections as _col
+
+        counts = getattr(self, '_atom_counts', None)
+        if not counts:
+            return
+
+        all_surfaces = sorted({a_s for (a_s, _) in counts})
+
+        # ── Count constituent type frequencies to build coarsening map ────────
+        type_freq: dict = _col.Counter()
+        for surf in all_surfaces:
+            atom = vocab.lookup(surf)
+            if atom is None:
+                t = str(lower_assignment.get(surf, surf))
+                type_freq[t] += 1
+            elif isinstance(atom, MergedAtom):
+                type_freq[str(lower_assignment.get(str(atom.left),  str(atom.left)))]  += 1
+                type_freq[str(lower_assignment.get(str(atom.right), str(atom.right)))] += 1
+            else:   # SegmentedAtom
+                for c in atom.constituents:
+                    type_freq[str(lower_assignment.get(str(c), str(c)))] += 1
+
+        top_types = {t for t, _ in type_freq.most_common(max_alphabet)}
+        OTHER = '__OTHER__'
+
+        def coarsen(raw) -> str:
+            t = str(raw)
+            return t if t in top_types else OTHER
+
+        # ── Map each surface → coarsened type-tuple ───────────────────────────
+        type_tuple_map: dict = {}
+        for surf in all_surfaces:
+            atom = vocab.lookup(surf)
+            if atom is None:
+                tup = (coarsen(lower_assignment.get(surf, surf)),)
+            elif isinstance(atom, MergedAtom):
+                tup = (coarsen(lower_assignment.get(str(atom.left),  str(atom.left))),
+                       coarsen(lower_assignment.get(str(atom.right), str(atom.right))))
+            else:   # SegmentedAtom
+                full = tuple(coarsen(lower_assignment.get(str(c), str(c)))
+                             for c in atom.constituents)
+                # Truncate long tuples to boundary signature (first, last)
+                tup = (full[0], full[-1]) if len(full) > max_tuple_len else full
+            type_tuple_map[surf] = tup
+
+        # ── Deterministic grouping by type-tuple → clusters ──────────────────
+        tuple_to_cid: dict = {}
+        next_cid   = 0
+        assignment: dict = {}
+        clusters:   dict = {}
+        for surf, tup in type_tuple_map.items():
+            if tup not in tuple_to_cid:
+                tuple_to_cid[tup] = next_cid
+                clusters[next_cid] = set()
+                next_cid += 1
+            cid = tuple_to_cid[tup]
+            assignment[surf] = cid
+            clusters[cid].add(surf)
+
+        if len(clusters) < 2:
+            if verbose:
+                print(f'  cluster_from_type_abstraction: only {len(clusters)} '
+                      f'cluster(s) — skipping')
+            return
+
+        self.assignment = assignment
+        self.clusters   = clusters
+        self._K         = len(clusters)
+
+        self._rebuild_caches_from_assignment(assignment, clusters)
 
         if verbose:
-            print(f'  cluster_from_counts: V={n_unique} atoms → K={self._K} clusters')
+            print(f'  cluster_from_type_abstraction: {len(all_surfaces)} atoms '
+                  f'→ K={self._K} type-clusters')
 
     def atom_neighbors(self, atom: Any, topn: int = 8) -> list[tuple]:
         """Atoms most similar in relational role (by category similarity).
@@ -4022,6 +4182,12 @@ class PredictiveCodingHierarchy:
         self._chunk_seqs:     list[list[list[str]]] = [[] for _ in range(n_levels)]
         self._chunk_cur_doc:  list[list[str]]       = [[] for _ in range(n_levels)]
 
+        # M13: per-level Bayes filters — populated by init_beliefs() after analyse().
+        self._beliefs: list = [None] * n_levels
+
+        # M13: frozen flag — set during reprocess() to skip update_online.
+        self._frozen: bool = False
+
     # ------------------------------------------------------------------
     # Core internals
     # ------------------------------------------------------------------
@@ -4062,13 +4228,32 @@ class PredictiveCodingHierarchy:
         With ``adaptive_threshold=True`` returns mean + k*std using the
         O(1) ``_RunningStats`` running statistics.  Falls back to
         ``surprise_threshold`` when fewer than 10 samples have been collected.
+
+        M13 top-down modulation (active only after ``init_beliefs()``):
+        when the belief at this level has high entropy (we're uncertain about
+        the current chunk category), reduce the threshold so we create more
+        boundaries — smaller chunks give higher-level learners more data points
+        to resolve the ambiguity.
         """
         if not self.adaptive_threshold:
-            return self.surprise_threshold
-        hist = self._surp_hist[level]
-        if len(hist) < 10:
-            return self.surprise_threshold
-        return hist.mean() + self.surprise_k * hist.std()
+            base = self.surprise_threshold
+        else:
+            hist = self._surp_hist[level]
+            if len(hist) < 10:
+                base = self.surprise_threshold
+            else:
+                base = hist.mean() + self.surprise_k * hist.std()
+
+        # M13: top-down entropy modulation (only when belief is active).
+        belief = self._beliefs[level]
+        if belief is not None and self.top_down_weight > 0.0:
+            K = max(getattr(self.learners[level], '_K', 1), 1)
+            H_max = math.log2(K) if K > 1 else 1.0
+            H     = belief.entropy()
+            uncertainty = min(H / H_max, 1.0)   # normalised [0, 1]
+            base = base * (1.0 - self.top_down_weight * uncertainty)
+
+        return base
 
     def _emit_buffer(self, level: int) -> None:
         """Flush the working-memory buffer at *level*.
@@ -4101,6 +4286,12 @@ class PredictiveCodingHierarchy:
         # Log the emitted chunk for RelationalSenseSplitter.
         self._chunk_cur_doc[level].append(chunk)
 
+        # M13: Bayes filter update — observe emitted chunk, then predict next.
+        belief = self._beliefs[level]
+        if belief is not None:
+            belief.observe(chunk)
+            belief.transition(self.next_rel)
+
         # Propagate chunk to the next level (simultaneous multi-level).
         if level + 1 < self.n_levels:
             self._process_level(level + 1, chunk)
@@ -4124,8 +4315,9 @@ class PredictiveCodingHierarchy:
         self._surp_hist[level].append(surp)
 
         # 2. Learn — forward AND reverse bigrams for richer E0 signatures.
+        #    Skipped during frozen reprocess() pass.
         prev = self._prev[level]
-        if prev is not None:
+        if prev is not None and not self._frozen:
             self.learners[level].update_online(prev, self.next_rel, token)
             self.learners[level].update_online(token, 'prev', prev)
         self._prev[level] = token
@@ -4199,6 +4391,52 @@ class PredictiveCodingHierarchy:
                 self._chunk_seqs[level].append(self._chunk_cur_doc[level])
                 self._chunk_cur_doc[level] = []
 
+    def init_beliefs(self) -> None:
+        """M13: Create a ContextBeliefState for every active, fitted level.
+
+        Must be called *after* :meth:`analyse` (or :meth:`analyse_with_sequences`)
+        so that each ``RelationalLearner`` already has ``assignment``, ``_K``,
+        ``_trans``, ``_nc_cache``, and ``_wgc_cache`` populated.
+
+        After this call, :meth:`_emit_buffer` updates the belief at each
+        level and :meth:`_effective_threshold` applies top-down entropy
+        modulation.  Run :meth:`reprocess` to do a frozen second pass that
+        benefits from the active beliefs.
+        """
+        self._beliefs = [None] * self.n_levels
+        for level in range(self.n_levels):
+            learner = self.learners[level]
+            assignment = getattr(learner, 'assignment', {})
+            if len(assignment) >= 2:
+                self._beliefs[level] = ContextBeliefState(learner)
+
+    def reprocess(self, sequences) -> None:
+        """M13: Frozen second pass — re-run corpus with active belief states.
+
+        Online learning (``update_online``) is disabled: the learner weights
+        are frozen so the second pass only uses beliefs for surprisal and
+        top-down threshold modulation.  Call this after
+        :meth:`process_corpus` → :meth:`analyse` → :meth:`init_beliefs`.
+
+        Parameters
+        ----------
+        sequences
+            Same corpus passed to :meth:`process_corpus`.
+        """
+        # Reset all beliefs to uniform prior before the second pass.
+        for belief in self._beliefs:
+            if belief is not None:
+                belief.reset()
+        # Reset buffers and context pointers (but not _seen, so cold-start stays off).
+        for level in range(self.n_levels):
+            self._buffers[level] = []
+            self._prev[level]    = None
+        self._frozen = True
+        try:
+            self.process_corpus(sequences)
+        finally:
+            self._frozen = False
+
     def level_summary(self) -> None:
         """Print per-level diagnostics to stdout."""
         print(f'\nPredictiveCodingHierarchy  n_levels={self.n_levels}')
@@ -4255,6 +4493,19 @@ class PredictiveCodingHierarchy:
             # E0: cluster atoms from online-collected _atom_counts.
             learner.cluster_from_counts(verbose=verbose)
             n_cats = len(getattr(learner, 'clusters', {}))
+
+            # M12: type-abstraction fallback for sparse upper levels.
+            # When JSD clustering yields K≤1 (surface forms too unique to cluster),
+            # group atoms by the type-tuple of their direct constituents instead.
+            # Analogous to weight sharing: chunks with the same abstract structure
+            # are generalised together regardless of surface form.
+            if n_cats <= 1 and level >= 1:
+                lower_assign = getattr(self.learners[level - 1], 'assignment', {})
+                if lower_assign:
+                    learner.cluster_from_type_abstraction(
+                        self.vocab, lower_assign, verbose=verbose)
+                    n_cats = len(getattr(learner, 'clusters', {}))
+
             if n_cats == 0:
                 if verbose:
                     print(f'  Level {level}: too few atoms for clustering — skip')

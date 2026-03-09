@@ -558,7 +558,7 @@ def main() -> None:
         pch.level_summary()
 
         print(f'\n{"=" * 65}')
-        print('M9: Multi-scale R0-R6 analysis')
+        print('M9: Multi-scale R0-R6 analysis (M12: type-abstracted clustering)')
         print('=' * 65)
         pch.analyse_with_sequences(sequences, verbose=True)
 
@@ -566,6 +566,15 @@ def main() -> None:
         print('M10: Cross-level constituency analysis')
         print('=' * 65)
         pch.analyse_cross_level(verbose=True)
+
+        print(f'\n{"=" * 65}')
+        print('M13: Init belief cascade + frozen reprocess')
+        print('=' * 65)
+        pch.init_beliefs()
+        n_beliefs = sum(1 for b in pch._beliefs if b is not None)
+        print(f'  Belief states initialised: {n_beliefs} levels')
+        pch.reprocess(sequences)
+        print('  Frozen reprocess complete.')
 
         ctkg_str = pch.export_ctkg(domain_name='latin_pch')
         n_lines  = ctkg_str.count('\n')

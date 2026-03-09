@@ -412,6 +412,83 @@ File shrunk from 5193 → ~4525 lines.
 
 ---
 
+### M12 — Type-Abstracted Clustering — DONE
+
+**Problem**: Levels 4-9 collapse to K=1 because each phrase/clause is unique or
+near-unique — there is no statistical basis for clustering raw surface strings
+that appear only once.
+
+**Root cause (the parameter-sharing gap)**: neural networks generalize across
+sparse surface forms by placing similar tokens near each other in a shared weight
+space.  PCH has no such sharing: "magnum imperium" and "parvum regnum" are
+different strings even though both are adj+noun NPs.
+
+**Fix — compositional type abstraction**: represent each level-N chunk by the
+*type-tuple* of its level-(N-1) constituents rather than by its surface string.
+If level-3 clusters have labelled word categories, then any adj+noun phrase maps
+to `(adj_cat, noun_cat)` regardless of the specific words.  Two chunks are in
+the same category iff their constituent type-sequences match.  This is O(V×depth)
+to compute and produces deterministic, linguistically grounded categories.
+
+**Implementation**:
+- `RelationalLearner._rebuild_caches_from_assignment(assignment)` — extract the
+  E1/E3 cache-building block so it can be reused after any assignment method.
+- `RelationalLearner.cluster_from_type_abstraction(vocab, lower_assignment)` —
+  new method: look up each chunk's constituents, map to lower-level type IDs,
+  group by type-tuple, call `_rebuild_caches_from_assignment`.
+- `PCH.analyse()` — after raw `cluster_from_counts()`, if K≤1 and level≥1 and
+  lower-level assignment exists, call `cluster_from_type_abstraction` as fallback.
+
+**Expected result**: levels 4-9 gain meaningful categories (e.g. K≈50-200 at L4,
+K≈20-80 at L5) based on constituency type structure rather than repeated surface
+strings.  The same corpus that gave K=1 everywhere above L3 should now produce
+structured phrase/clause/sentence categories.
+
+---
+
+### M13 — Multi-Level Belief Cascade — DONE
+
+**Problem**: no long-range context.  PCH's working memory is bounded at 7 tokens.
+To predict the next word in a long document you need to know the topic, characters,
+narrative arc — none of which fit in 7 tokens.
+
+**Why attention is the wrong solution**: O(n²) cost, violates domain-agnosticism
+(assumes 1D sequence), opaque (no explicit state).
+
+**Solution — hierarchical Bayes filter (Rao & Ballard 1999 predictive coding)**:
+After `analyse()` has built cluster assignments at every level, instantiate one
+`ContextBeliefState` per active level.  The belief at level N is a K_N-dimensional
+probability vector over chunk categories, updated O(K_N²) per emitted chunk.
+
+- **Effective context window**: infinite (the state summarises ALL past tokens,
+  compressed to K categories, not stored explicitly).
+- **Domain-agnostic**: `ContextBeliefState` uses the `_trans` matrix built from
+  whatever relations exist at that level — 'next'/'prev' for sequences, H/V for
+  images, graph adjacency for knowledge graphs.  No architectural change needed.
+- **Top-down modulation**: the belief at level N+1 (phrase/clause) constrains
+  level N (word): when the higher belief is high-entropy (uncertain), LOWER the
+  boundary threshold at level N (create more boundaries to resolve uncertainty).
+  When high-certainty, RAISE the threshold (fewer spurious cuts).
+
+**Two-pass design** (avoids chicken-and-egg with clustering):
+1. `process_corpus()` — cold start, collects statistics
+2. `analyse()` — builds categories; `init_beliefs()` — creates belief states
+3. `process_corpus()` (second pass, frozen model) — boundaries guided by beliefs;
+   categories at all levels improve
+4. `analyse()` again — re-run with better segmentation
+
+**Implementation**:
+- `PCH.__init__`: add `_beliefs: list[ContextBeliefState | None]` (all None).
+- `PCH.init_beliefs()`: after `analyse()`, instantiate one CBS per active level.
+- `PCH._emit_buffer()`: `_beliefs[level].observe(chunk); .transition(rel)`.
+- `PCH._effective_threshold()`: subtract `top_down_weight * base * uncertainty`
+  where `uncertainty = belief.entropy() / log2(K)`.  High entropy above → lower
+  threshold → more boundaries → resolve uncertainty.
+- `PCH.reprocess(sequences)`: frozen second pass (no `update_online`) using
+  active beliefs.
+
+---
+
 ## Success Criteria
 
 | Criterion | Test |
