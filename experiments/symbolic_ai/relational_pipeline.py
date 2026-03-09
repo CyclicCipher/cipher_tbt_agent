@@ -153,6 +153,10 @@ class RelationalLearner:
             _atom_raw[(a_s, r_s)][b_s] += 1
             _rel_raw[r_s][b_s] += 1
 
+        # Save raw counts for update_online() before normalising.
+        self._atom_counts: dict = dict(_atom_raw)   # (atom, rel) → Counter(target)
+        self._rel_counts:  dict = dict(_rel_raw)    # rel → Counter(target)
+
         self._atom_bigrams = {}
         for (atom, rel), ctr in _atom_raw.items():
             total = sum(ctr.values())
@@ -284,12 +288,23 @@ class RelationalLearner:
             _trans_raw[r_s][str(c_a)][str(c_b)] += 1
             n_used += 1
         # Normalise atom bigrams and store.
+        self._atom_counts: dict = dict(_atom_raw)  # raw counts for update_online()
         self._atom_bigrams: dict = {}
         for (atom, rel), ctr in _atom_raw.items():
             total = sum(ctr.values())
             if total > 0:
                 self._atom_bigrams[(atom, rel)] = {
                     k: v / total for k, v in ctr.items()}
+        # Build rel unigram counts (mirrors _fit_large_kg for update_online() compat).
+        from collections import Counter as _Counter2
+        _rel_raw2: dict = collections.defaultdict(_Counter2)
+        for a, r, b in triples:
+            _rel_raw2[str(r)][str(b)] += 1
+        self._rel_counts: dict = dict(_rel_raw2)
+        self._rel_unigram: dict = {
+            r: {t: c / sum(ctr.values()) for t, c in ctr.items()}
+            for r, ctr in _rel_raw2.items() if sum(ctr.values()) > 0
+        }
         # Normalise and store for GeometryDetector.
         self._trans: dict = {}
         for rel, src_map in _trans_raw.items():
@@ -484,6 +499,61 @@ class RelationalLearner:
         # Final fallback: per-relation unigram P(t|r) — works in large-KG mode
         return dict(self._rel_unigram.get(r_s, {}))
 
+    def update_online(self, atom: Any, rel: Any, target: Any) -> None:
+        """Incorporate one new (atom, rel, target) observation into the model.
+
+        Updates ``_atom_bigrams`` and ``_rel_unigram`` in O(1) without
+        rerunning the E0-E3 cluster pipeline.  Intended for in-episode
+        online learning: the agent observes a transition and immediately
+        strengthens the corresponding prediction.
+
+        Requires ``_atom_counts`` / ``_rel_counts`` to be present (populated
+        by both ``fit()`` and ``_fit_large_kg()`` automatically).  If the
+        learner has never been fitted, the dicts are created on first call.
+
+        Args:
+            atom    Source atom (will be str-coerced).
+            rel     Relation name (will be str-coerced).
+            target  Target atom observed (will be str-coerced).
+        """
+        from collections import Counter as _Ctr
+        a_s, r_s, b_s = str(atom), str(rel), str(target)
+        key = (a_s, r_s)
+
+        # Ensure count dicts exist (tolerate un-fitted learner).
+        if not hasattr(self, '_atom_counts') or self._atom_counts is None:
+            self._atom_counts = {}
+        if not hasattr(self, '_rel_counts') or self._rel_counts is None:
+            self._rel_counts = {}
+
+        # --- atom-level bigram update ---------------------------------------
+        if key not in self._atom_counts:
+            # Seed from existing normalised distribution (×10 pseudo-count)
+            # so new observations don't dominate immediately.
+            existing = getattr(self, '_atom_bigrams', {}).get(key, {})
+            _pc = 10
+            self._atom_counts[key] = _Ctr(
+                {t: max(1, round(p * _pc)) for t, p in existing.items()}
+            ) if existing else _Ctr()
+        self._atom_counts[key][b_s] += 1
+        total = sum(self._atom_counts[key].values())
+        self._atom_bigrams[key] = {t: c / total
+                                   for t, c in self._atom_counts[key].items()}
+
+        # --- per-relation unigram update ------------------------------------
+        if r_s not in self._rel_counts:
+            existing_r = getattr(self, '_rel_unigram', {}).get(r_s, {})
+            _pc_r = 50
+            self._rel_counts[r_s] = _Ctr(
+                {t: max(1, round(p * _pc_r)) for t, p in existing_r.items()}
+            ) if existing_r else _Ctr()
+        self._rel_counts[r_s][b_s] += 1
+        total_r = sum(self._rel_counts[r_s].values())
+        if not hasattr(self, '_rel_unigram') or self._rel_unigram is None:
+            self._rel_unigram = {}
+        self._rel_unigram[r_s] = {t: c / total_r
+                                  for t, c in self._rel_counts[r_s].items()}
+
     def atom_neighbors(self, atom: Any, topn: int = 8) -> list[tuple]:
         """Atoms most similar in relational role (by category similarity).
 
@@ -557,6 +627,192 @@ class RelationalLearner:
         # Clear lazy caches
         self._nc_soft  = {}
         self._wgc_soft = {}
+
+
+# ---------------------------------------------------------------------------
+# ContextBeliefState  — Bayesian running context for RelationalLearner
+# ---------------------------------------------------------------------------
+
+class ContextBeliefState:
+    """Bayes filter over RelationalLearner's K atom categories.
+
+    Maintains a probability distribution P(c_t) over category IDs, updated by:
+      - ``observe(atom)``: sharp concentration on atom's known category.
+      - ``transition(relation)``: propagate belief through the category
+        transition matrix T[relation][c_src → c_tgt].
+      - ``decay()``: entropy increase between observations.
+
+    This provides context-conditioned prediction: ``predict_target_dist()``
+    returns P(target | current category belief, relation), which marginalises
+    over the belief state rather than conditioning on a single point estimate.
+
+    This is strictly more expressive than querying ``learner.predict_dist()``
+    directly: a point-query ignores distributional uncertainty, while the Bayes
+    filter propagates and updates that uncertainty over time.
+
+    Design principle: general (domain-agnostic).  Plugs into AIFEngine via::
+
+        engine._context_belief = ContextBeliefState(learner)
+        # In feedback():
+        engine._context_belief.observe(state['location'])
+        engine._context_belief.transition(action)
+
+    Parameters
+    ----------
+    learner
+        A fitted ``RelationalLearner``.  Must have ``.assignment``, ``._K``,
+        ``._trans`` (category transition matrices per relation), ``._nc_cache``,
+        ``._wgc_cache``, ``._sim_matrix``.
+    decay_rate
+        Per-step decay toward uniform prior.  0.9 = slow decay (persists ~9
+        steps).  0.5 = fast decay (half-life 1 step).
+    obs_sharpness
+        Concentration on observed category.  0.97 = 97% mass on category.
+    """
+
+    def __init__(
+        self,
+        learner:        'RelationalLearner',
+        decay_rate:     float = 0.90,
+        obs_sharpness:  float = 0.97,
+    ) -> None:
+        self._learner       = learner
+        self._decay_rate    = decay_rate
+        self._obs_sharpness = obs_sharpness
+        self._belief: dict[int, float] = {}
+        self.reset()
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+
+    def reset(self) -> None:
+        """Reset to uniform prior over all K categories."""
+        K = getattr(self._learner, '_K', 0) or 1
+        self._belief = {c: 1.0 / K for c in range(K)}
+
+    # ------------------------------------------------------------------
+    # Update
+
+    def observe(self, atom: Any, certainty: float | None = None) -> None:
+        """Sharp Bayesian update: concentrate belief on atom's category.
+
+        If atom is OOV (not in learner.assignment), the belief is unchanged.
+        """
+        a_s = str(atom)
+        c = self._learner.assignment.get(a_s)
+        if c is None or c not in self._belief:
+            return  # OOV — cannot update
+        sharp = certainty if certainty is not None else self._obs_sharpness
+        # Concentrate mass on observed category; redistribute residual.
+        other_total = max(
+            sum(p for k, p in self._belief.items() if k != c), 1e-12)
+        for k in self._belief:
+            if k == c:
+                self._belief[k] = sharp
+            else:
+                self._belief[k] = (1.0 - sharp) * (self._belief[k] / other_total)
+        self._normalize()
+
+    def transition(self, relation: str) -> None:
+        """Propagate belief through the category transition matrix for relation.
+
+        P(c_next) = Σ_{c_prev} P(c_prev) · T[relation][c_prev → c_next]
+
+        If no transition data exists for relation, belief is unchanged (the
+        relation is unknown; uncertainty cannot decrease).
+        """
+        trans = getattr(self._learner, '_trans', {}).get(str(relation), {})
+        if not trans:
+            return
+        next_belief: dict[int, float] = {}
+        for c_prev, p_prev in self._belief.items():
+            if p_prev < 1e-12:
+                continue
+            c_prev_s = str(c_prev)
+            c_next_dist = trans.get(c_prev_s, {})
+            for c_next_s, p_t in c_next_dist.items():
+                try:
+                    c_next = int(c_next_s)
+                except (ValueError, TypeError):
+                    continue
+                next_belief[c_next] = next_belief.get(c_next, 0.0) + p_prev * p_t
+        if next_belief:
+            total = sum(next_belief.values())
+            if total > 0:
+                self._belief = {k: v / total for k, v in next_belief.items()}
+
+    def decay(self, rate: float | None = None) -> None:
+        """Decay toward uniform prior (one step of unobserved time passes)."""
+        d = rate if rate is not None else self._decay_rate
+        K = max(len(self._belief), 1)
+        uniform = 1.0 / K
+        for k in self._belief:
+            self._belief[k] = d * self._belief[k] + (1.0 - d) * uniform
+        self._normalize()
+
+    # ------------------------------------------------------------------
+    # Query
+
+    def predict_target_dist(self, relation: str) -> dict[Any, float]:
+        """Context-conditioned P(target | belief_state, relation).
+
+        Marginalises over the current category belief:
+          P(t | rel) = Σ_c P(c) · Σ_{c'} P(c' | c, rel) · P(t | c, rel, c')
+
+        Returns an empty dict if no transition/category data is available.
+        """
+        learner = self._learner
+        r_s     = str(relation)
+        result: dict = {}
+
+        for c_src, p_src in self._belief.items():
+            if p_src < 1e-12:
+                continue
+            c_src_s  = str(c_src)
+            c_b_dist = learner._get_nc_soft((c_src_s, r_s))
+            if not c_b_dist:
+                continue
+            for c_b_key, p_cb in c_b_dist.items():
+                c_b = c_b_key[0] if isinstance(c_b_key, tuple) else str(c_b_key)
+                t_dist = learner._get_wgc_soft((c_src_s, r_s, c_b))
+                if not t_dist:
+                    continue
+                for tok_key, p_t in t_dist.items():
+                    tok = tok_key[0] if isinstance(tok_key, tuple) else str(tok_key)
+                    result[tok] = result.get(tok, 0.0) + p_src * p_cb * p_t
+
+        total = sum(result.values())
+        if total > 0:
+            return {k: v / total for k, v in result.items()}
+        return {}
+
+    def most_likely_category(self) -> tuple[int, float]:
+        """(category_id, probability) of the most probable category."""
+        if not self._belief:
+            return -1, 0.0
+        best = max(self._belief, key=self._belief.__getitem__)
+        return best, self._belief[best]
+
+    def entropy(self) -> float:
+        """Shannon entropy of the category belief in bits."""
+        import math
+        return -sum(
+            p * math.log2(p + 1e-12)
+            for p in self._belief.values() if p > 0
+        )
+
+    def __repr__(self) -> str:
+        best, prob = self.most_likely_category()
+        return (f'ContextBeliefState(K={len(self._belief)}, '
+                f'best={best}, P={prob:.2f}, H={self.entropy():.2f} bits)')
+
+    # ------------------------------------------------------------------
+    # Private
+
+    def _normalize(self) -> None:
+        total = sum(self._belief.values()) or 1e-12
+        for k in self._belief:
+            self._belief[k] /= total
 
 
 # ---------------------------------------------------------------------------
