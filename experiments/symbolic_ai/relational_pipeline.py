@@ -244,8 +244,15 @@ class RelationalLearner:
         if verbose:
             print(f'  Clustering {self._K} atom categories '
                   f'from rel_next/rel_prev...')
+        # vocab_size caps the context column count in the dense clustering
+        # matrix: matrix shape = n_atoms × vocab_size × 4 bytes.
+        # At word level (n_atoms=50K) without cap: 50K × 100K × 4 = 20 GB → OOM.
+        # With vocab_size=2000: 50K × 2K × 4 = 400 MB → fine.
+        # 2000 context types is sufficient for Brown-style distributional clustering.
+        _vocab_size = min(2000, n_unique * 2) if n_unique > 50 else None
         result = self.ai.induce_hierarchy_bidir(
-            'rel_next', 'rel_prev', n_clusters=self._K)
+            'rel_next', 'rel_prev', n_clusters=self._K,
+            vocab_size=_vocab_size)
         if 'error' in result:
             print(f'  WARNING: clustering failed: {result["error"]}')
             return
