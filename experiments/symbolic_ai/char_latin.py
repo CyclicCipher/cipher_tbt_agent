@@ -43,7 +43,8 @@ if (hasattr(sys.stdout, 'buffer') and
                                   errors='replace')
 
 from relational_pipeline import (
-    RelationalLearner, RelationClusterer, SecondOrderGrammar, GeometryDetector,
+    RelationalLearner, RelationClusterer, SecondOrderGrammar,
+    GeometryDetector, RelationalParadigmDiscoverer,
 )
 
 # ---------------------------------------------------------------------------
@@ -303,9 +304,15 @@ def main() -> None:
     geo = GeometryDetector()
     geo.fit(learner, rel_clusterer)
 
+    print(f'\nR1: Discovering paradigmatic roles (E4)...')
+    paradigm = RelationalParadigmDiscoverer()
+    paradigm.fit(learner, triples, verbose=True)
+
     report(learner, rel_clusterer, grammar, triples)
     print()
     print(geo.report())
+    print()
+    print(paradigm.report(learner))
 
 
 if __name__ == '__main__':

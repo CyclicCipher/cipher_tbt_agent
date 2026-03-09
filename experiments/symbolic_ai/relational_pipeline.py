@@ -1324,6 +1324,160 @@ class GeometryDetector:
 
 
 # ---------------------------------------------------------------------------
+# R1: RelationalParadigmDiscoverer — Relational E4
+# ---------------------------------------------------------------------------
+
+class RelationalParadigmDiscoverer:
+    """R1/E4: Cluster atoms by the relational *role* they play in the graph.
+
+    Orthogonal to E0 clustering:
+
+    - **E0** clusters atoms by *what neighbors they have* (distributional context).
+      Two atoms cluster together if similar tokens tend to follow/precede them.
+
+    - **E4** clusters atoms by *what role they play* — which relation types they
+      participate in, and what *category* of atom they connect to as source or target.
+      Two atoms cluster together if they are interchangeable without changing the
+      relational skeleton.
+
+    Role signature of atom *a*:
+        ``role_sig(a) = P(direction, relation, partner_category)``
+
+        - ``'>rel:c_tgt'`` — *a* is the SOURCE of a *rel*-relation to a *c_tgt*-atom.
+        - ``'<rel:c_src'`` — *a* is the TARGET of a *rel*-relation from a *c_src*-atom.
+
+    This is built at **category level** (partner identified by E0 cluster id, not
+    surface form), so it generalises across surface variation.
+
+    Example (knowledge graph):
+        E0 might cluster {Paris, London, Berlin} together (similar neighbours).
+        E4 clusters them into *roles*: all three are ``capital_of`` **sources**
+        pointing to ``country``-category targets → same role, substitutable.
+
+    Example (Latin chars):
+        Space has a unique role: it is target of word-final chars and source of
+        word-initial chars.  'q' has a unique role: always source of a next-relation
+        to 'u'.  Common vowels may share a role distinct from common consonants if
+        their category-level skip patterns differ.
+    """
+
+    def __init__(self) -> None:
+        self.role_assignment: dict = {}   # atom_str → role_id
+        self.role_clusters:   dict = {}   # role_id → [atom_str]
+        self._K_roles:        int  = 0
+        self._role_sigs:      dict = {}   # atom_str → {key: prob}  (for inspection)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def fit(self,
+            learner:           'RelationalLearner',
+            triples:           list,
+            verbose:           bool = False,
+            use_atom_partners: bool = True,
+            ) -> 'RelationalParadigmDiscoverer':
+        """Fit role signatures from (atom, relation, atom) triples.
+
+        Args:
+            use_atom_partners: If True (default), partner atoms are identified by
+                their surface form.  This gives a V-dimensional role signature and
+                can separate fine-grained roles even when E0 has a mega-cluster.
+                If False, use E0 category id as partner label (K-dimensional),
+                which is more abstract but loses sub-category distinctions.
+
+        One O(N) pass to build raw counts, then O(V²×D) clustering where V
+        is the number of unique atoms and D is the role-signature dimension.
+        For character-level data: V=27, D≤R×V≈108 → instant.
+        """
+        from collections import defaultdict, Counter as _Ctr
+
+        src_raw: dict = defaultdict(_Ctr)   # atom → {'>rel:partner': count}
+        tgt_raw: dict = defaultdict(_Ctr)   # atom → {'<rel:partner': count}
+
+        for a, r, b in triples:
+            a_s, r_s, b_s = str(a), str(r), str(b)
+            if use_atom_partners:
+                partner_a = b_s   # partner of a is b (surface form)
+                partner_b = a_s   # partner of b is a (surface form)
+            else:
+                c_a = learner.assignment.get(a_s)
+                c_b = learner.assignment.get(b_s)
+                if c_a is None or c_b is None:
+                    continue
+                partner_a = str(c_b)
+                partner_b = str(c_a)
+            src_raw[a_s][f'>{r_s}:{partner_a}'] += 1   # a is source
+            tgt_raw[b_s][f'<{r_s}:{partner_b}'] += 1   # b is target
+
+        # Merge source and target counts into a single normalised signature.
+        all_atoms = set(src_raw) | set(tgt_raw)
+        sigs: dict = {}
+        for atom in all_atoms:
+            combined: dict = {}
+            total = 0
+            for k, v in src_raw.get(atom, {}).items():
+                combined[k] = combined.get(k, 0) + v
+                total += v
+            for k, v in tgt_raw.get(atom, {}).items():
+                combined[k] = combined.get(k, 0) + v
+                total += v
+            if total > 0:
+                sigs[atom] = {k: v / total for k, v in combined.items()}
+
+        self._role_sigs = sigs
+
+        if not sigs:
+            if verbose:
+                print('  E4: no data — skipping')
+            return self
+
+        assignment, clusters = _jsd_cluster(sigs, verbose=False)
+        self.role_assignment = assignment
+        self.role_clusters   = clusters
+        self._K_roles        = len(clusters)
+
+        if verbose:
+            print(f'  E4: {len(sigs)} atoms → {self._K_roles} role categories')
+
+        return self
+
+    def role_occupants(self, role_id: int) -> list:
+        """Atoms sharing role *role_id* (substitutable in the same slot)."""
+        return self.role_clusters.get(role_id, [])
+
+    def report(self, learner: 'RelationalLearner | None' = None) -> str:
+        """Human-readable role cluster summary with cross-reference to E0 clusters."""
+        lines = [
+            '=' * 65,
+            'R1  PARADIGMATIC ROLES  (atoms by relational role, E4)',
+            '=' * 65,
+        ]
+        for rid in sorted(self.role_clusters):
+            members = sorted(self.role_clusters[rid])
+            # Show E0 category membership alongside, for comparison.
+            if learner is not None:
+                cats = sorted({learner.assignment.get(m, '?') for m in members})
+                cat_str = f'  [E0 cats: {cats}]'
+            else:
+                cat_str = ''
+            # Show top role-signature keys for the first member.
+            top_sig = ''
+            if members and self._role_sigs:
+                sig = self._role_sigs.get(members[0], {})
+                top = sorted(sig.items(), key=lambda kv: -kv[1])[:3]
+                top_sig = '  top: ' + ', '.join(f'{k}({v:.2f})' for k, v in top)
+            label = ' '.join(members) if len(members) <= 12 else (
+                ' '.join(members[:12]) + f' +{len(members)-12}')
+            lines.append(f'  Role {rid:2d}: [{label}]{cat_str}{top_sig}')
+        lines.append('')
+        lines.append(f'  {self._K_roles} role categories  '
+                     f'({len(self.role_assignment)} atoms)')
+        lines.append('=' * 65)
+        return '\n'.join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Level 5a: RawOffsetLearner — Symmetry Discovery
 # ---------------------------------------------------------------------------
 

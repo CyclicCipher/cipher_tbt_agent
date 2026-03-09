@@ -101,7 +101,11 @@ by *what role they play in the relational structure*. In a knowledge graph:
 These two types of similarity are orthogonal and both necessary for generalization.
 
 **Deliverable:** `RelationalParadigmDiscoverer` class; `role_occupants(role_cat)` query
-**Progress:** ⬜ Not started
+**Progress:** ✅ Implemented
+
+**Latin result (3 books):** 27 atoms → 2 role categories. Auto-K correctly finds one
+natural boundary: 'w' (non-Latin, unusual bigrams) vs all other chars. Role signatures
+use `use_atom_partners=True` (V-dimensional) to avoid E0 mega-cluster collapse.
 
 ---
 
@@ -226,8 +230,8 @@ No neural network. No training on this specific question.
 | L2 | Relation clustering | ✅ Done | 4b99f3b |
 | L4 | Second-order grammar | ✅ Done | 918c5e7 |
 | Auto-K | Bitter-lesson K selection | ✅ Done | f89ca0c |
-| **R0** | **Geometry detection** | ✅ Done | — |
-| R1 | Relational E4: paradigmatic substitutability | ⬜ | — |
+| **R0** | **Geometry detection** | ✅ Done | 8262d89 |
+| **R1** | **Relational E4: paradigmatic substitutability** | ✅ Done | — |
 | R2 | Relational E5: sense disambiguation | ⬜ | — |
 | R3 | Relational E6: structural meta-synthesis | ⬜ | — |
 | R4 | Geometry-adapted distance metric | ⬜ | — |
