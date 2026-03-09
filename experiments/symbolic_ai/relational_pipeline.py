@@ -975,6 +975,42 @@ class RelationalLearner:
 
         self._rebuild_caches_from_assignment(assignment, clusters)
 
+        # ── Cross-level functor maps (for build_cross_level_functor) ──────────
+        # _constituent_type_map[lower_type_str] = {upper_cid: probability}
+        # Records: given a constituent of lower type k, which upper cluster j
+        # does the composed chunk tend to belong to?
+        ctmap_raw: dict = _col.defaultdict(_col.Counter)
+        for surf, cid in assignment.items():
+            atom = vocab.lookup(surf)
+            if atom is None:
+                lower_t = str(lower_assignment.get(surf, surf))
+                ctmap_raw[lower_t][cid] += 1
+            elif isinstance(atom, MergedAtom):
+                for c_surf in (str(atom.left), str(atom.right)):
+                    lower_t = str(lower_assignment.get(c_surf, c_surf))
+                    ctmap_raw[lower_t][cid] += 1
+            else:   # SegmentedAtom
+                for c in atom.constituents:
+                    lower_t = str(lower_assignment.get(str(c), str(c)))
+                    ctmap_raw[lower_t][cid] += 1
+
+        self._constituent_type_map: dict = {}
+        for lower_t, ctr in ctmap_raw.items():
+            total = sum(ctr.values())
+            self._constituent_type_map[lower_t] = {c: n / total
+                                                   for c, n in ctr.items()}
+
+        # _upper_to_constituent[upper_cid] = dominant lower type string
+        # Inverse map used for the Decompose functor G: L_{N+1} → L_N.
+        upper_to_lower_raw: dict = _col.defaultdict(_col.Counter)
+        for lower_t, cid_dist in self._constituent_type_map.items():
+            for cid, p in cid_dist.items():
+                upper_to_lower_raw[cid][lower_t] += p
+        self._upper_to_constituent: dict = {
+            cid: max(ctr, key=ctr.get)
+            for cid, ctr in upper_to_lower_raw.items()
+        }
+
         if verbose:
             print(f'  cluster_from_type_abstraction: {len(all_surfaces)} atoms '
                   f'→ K={self._K} type-clusters')
@@ -4559,10 +4595,13 @@ class PredictiveCodingHierarchy:
                 '_sim_matrix':  getattr(learner, '_sim_matrix',   []),
                 '_rel_unigram': getattr(learner, '_rel_unigram',  {}),
                 '_rel_totals':  getattr(learner, '_rel_totals',   {}),
+                # Cross-level functor maps (from cluster_from_type_abstraction)
+                '_constituent_type_map': getattr(learner, '_constituent_type_map', {}),
+                '_upper_to_constituent': getattr(learner, '_upper_to_constituent', {}),
             }
 
         payload = {
-            'version':          1,
+            'version':          2,
             'n_levels':         self.n_levels,
             'max_chunk_size':   self.max_chunk_size,
             'surprise_threshold': self.surprise_threshold,
@@ -4616,8 +4655,10 @@ class PredictiveCodingHierarchy:
             learner._nc_cache    = d['_nc_cache']
             learner._wgc_cache   = d['_wgc_cache']
             learner._sim_matrix  = d['_sim_matrix']
-            learner._rel_unigram = d['_rel_unigram']
-            learner._rel_totals  = d['_rel_totals']
+            learner._rel_unigram         = d['_rel_unigram']
+            learner._rel_totals          = d['_rel_totals']
+            learner._constituent_type_map = d.get('_constituent_type_map', {})
+            learner._upper_to_constituent = d.get('_upper_to_constituent', {})
             # Restore soft-cache stubs so predict_dist doesn't error.
             learner._nc_soft  = {}
             learner._wgc_soft = {}
@@ -5075,6 +5116,243 @@ class PredictiveCodingHierarchy:
 
         self._adjunction_kg      = kg
         self._adjunction_quality = quality_map
+        return kg
+
+    def build_cross_level_functor(
+        self,
+        level_lo:    int,
+        domain_name: str = 'pch',
+    ) -> dict:
+        """M17+: Composition functor F: L_{N} → L_{N+1} within a single PCH.
+
+        Unlike :meth:`build_functor` (which aligns two *independently-trained*
+        PCH instances by profile similarity), this functor is grounded in the
+        actual constituent structure discovered during
+        :meth:`cluster_from_type_abstraction`.
+
+        For each lower-level type *k*, ``F(k)`` is the upper-level cluster *j*
+        that most often contains chunks whose direct constituents are of type *k*.
+        This is a true functional dependency: the upper type IS determined by the
+        lower types it was built from.
+
+        Falls back to transition-profile cosine similarity when
+        ``_constituent_type_map`` is absent (e.g. JSD-clustered lower levels
+        where M12 type-abstraction was not invoked).
+
+        Parameters
+        ----------
+        level_lo
+            Source level N.  Target is automatically N+1.
+        domain_name
+            Domain prefix for concept names.
+
+        Returns
+        -------
+        dict with keys:
+            ``'functor'``     — :class:`ctkg.graph.Functor` F: L_N → L_{N+1}
+            ``'concept_map'`` — ``{cat_LN_k: cat_L{N+1}_j}``
+            ``'kg'``          — :class:`KnowledgeGraph` containing the functor
+        """
+        from ctkg.graph import Functor  # type: ignore
+
+        level_hi = level_lo + 1
+        if level_hi >= self.n_levels:
+            return {}
+
+        sl_lo = self.learners[level_lo]
+        sl_hi = self.learners[level_hi]
+        K_lo  = getattr(sl_lo, '_K', 0)
+        K_hi  = getattr(sl_hi, '_K', 0)
+        if K_lo < 2 or K_hi < 2:
+            return {}
+
+        concept_map: dict = {}
+
+        # Primary: use constituent_type_map from M12 type-abstraction.
+        ctmap = getattr(sl_hi, '_constituent_type_map', {})
+        if ctmap:
+            for k in range(K_lo):
+                dist = ctmap.get(str(k), {})
+                if dist:
+                    best_j = max(dist, key=dist.get)
+                    concept_map[f'cat_L{level_lo}_{k}'] = f'cat_L{level_hi}_{best_j}'
+
+        if not concept_map:
+            # Fallback: transition eigen-profile similarity.
+            rels = [self.next_rel, 'prev']
+            profiles_lo = {k: self._transition_profile(sl_lo, k, rels)
+                           for k in range(K_lo)}
+            profiles_hi = {j: self._transition_profile(sl_hi, j, rels)
+                           for j in range(K_hi)}
+            used: set = set()
+            for k in range(K_lo):
+                best_j, best_sim = None, -1.0
+                for j in range(K_hi):
+                    if j in used:
+                        continue
+                    sim = self._cosine_sim(profiles_lo[k], profiles_hi[j])
+                    if sim > best_sim:
+                        best_sim, best_j = sim, j
+                if best_j is not None and best_sim > 0.2:
+                    concept_map[f'cat_L{level_lo}_{k}'] = f'cat_L{level_hi}_{best_j}'
+                    used.add(best_j)
+
+        functor = Functor(
+            name          = f'compose_L{level_lo}_L{level_hi}',
+            source_domain = f'{domain_name}_L{level_lo}',
+            target_domain = f'{domain_name}_L{level_hi}',
+            concept_map   = concept_map,
+            preserves     = ['constituent_structure', 'type_transitions'],
+        )
+        kg = KnowledgeGraph()
+        kg.functors[functor.name] = functor
+        return {'functor': functor, 'concept_map': concept_map, 'kg': kg}
+
+    def build_compose_decompose_adjunction(
+        self,
+        level_lo:    int,
+        domain_name: str = 'pch',
+    ) -> dict:
+        """M17+: The fundamental Compose ⊣ Decompose adjunction of the hierarchy.
+
+        This is the adjunction that Merge itself implements:
+
+        - **F = Compose** (left adjoint): L_N → L_{N+1}
+          Maps each lower type *k* to the upper type *j* it most often
+          composes into.  Built by :meth:`build_cross_level_functor`.
+
+        - **G = Decompose** (right adjoint): L_{N+1} → L_N
+          Maps each upper type *j* back to its dominant lower constituent type.
+          Built from ``_upper_to_constituent`` (the inverse of the composition
+          map, also recorded during :meth:`cluster_from_type_abstraction`).
+
+        **Unit** (η: id_{L_N} → G∘F): following F then G should recover the
+        original lower type.  Unit quality = fraction of lower types for which
+        G(F(k)) = k.
+
+        **Counit** (ε: F∘G → id_{L_{N+1}}): following G then F should recover
+        the original upper type.  Counit quality = fraction of upper types for
+        which F(G(j)) = j.
+
+        High quality on both sides ≈ the hierarchy has clean, unambiguous
+        constituent structure at this boundary.  Low quality ≈ many-to-one
+        merging (lossy composition).
+
+        Parameters
+        ----------
+        level_lo
+            Lower level N.  Upper level is N+1.
+        domain_name
+            Domain prefix for concept names.
+
+        Returns
+        -------
+        dict with keys:
+            ``'adjunction'``    — :class:`ctkg.graph.Adjunction`
+            ``'F'``             — Compose concept map ``{cat_LN_k: cat_L{N+1}_j}``
+            ``'G'``             — Decompose concept map ``{cat_L{N+1}_j: cat_LN_k}``
+            ``'unit_quality'``  — float in [0, 1]: G∘F round-trip accuracy
+            ``'counit_quality'``— float in [0, 1]: F∘G round-trip accuracy
+            ``'kg'``            — :class:`KnowledgeGraph` with the Adjunction
+        """
+        from ctkg.graph import Adjunction  # type: ignore
+
+        level_hi = level_lo + 1
+        if level_hi >= self.n_levels:
+            return {}
+
+        sl_lo = self.learners[level_lo]
+        sl_hi = self.learners[level_hi]
+        K_lo  = getattr(sl_lo, '_K', 0)
+        K_hi  = getattr(sl_hi, '_K', 0)
+        if K_lo < 2 or K_hi < 2:
+            return {}
+
+        # Compose functor F.
+        compose_result = self.build_cross_level_functor(level_lo, domain_name)
+        F = compose_result.get('concept_map', {})  # {cat_LN_k: cat_L{N+1}_j}
+
+        # Decompose functor G: built from _upper_to_constituent.
+        G: dict = {}
+        upper_to_const = getattr(sl_hi, '_upper_to_constituent', {})
+        for j, lower_t_str in upper_to_const.items():
+            G[f'cat_L{level_hi}_{j}'] = f'cat_L{level_lo}_{lower_t_str}'
+
+        # Unit quality: fraction of lower types k where G(F(k)) == k.
+        unit_correct = unit_total = 0
+        for k in range(K_lo):
+            src = f'cat_L{level_lo}_{k}'
+            mid = F.get(src)
+            if mid is None:
+                continue
+            dest = G.get(mid)
+            unit_total += 1
+            if dest == src:
+                unit_correct += 1
+        unit_quality = unit_correct / unit_total if unit_total > 0 else 0.0
+
+        # Counit quality: fraction of upper types j where F(G(j)) == j.
+        counit_correct = counit_total = 0
+        for j in range(K_hi):
+            src = f'cat_L{level_hi}_{j}'
+            mid = G.get(src)
+            if mid is None:
+                continue
+            dest = F.get(mid)
+            counit_total += 1
+            if dest == src:
+                counit_correct += 1
+        counit_quality = counit_correct / counit_total if counit_total > 0 else 0.0
+
+        adj = Adjunction(
+            name    = f'compose_decompose_L{level_lo}_{level_hi}',
+            forward = f'compose_L{level_lo}_L{level_hi}',
+            inverse = f'decompose_L{level_hi}_L{level_lo}',
+            unit    = (f'G∘F={unit_quality:.3f} '
+                       f'({unit_correct}/{unit_total} lower types round-trip)'),
+            counit  = (f'F∘G={counit_quality:.3f} '
+                       f'({counit_correct}/{counit_total} upper types round-trip)'),
+        )
+        kg = KnowledgeGraph()
+        kg.adjunctions[adj.name] = adj
+        return {
+            'adjunction':    adj,
+            'F':             F,
+            'G':             G,
+            'unit_quality':  unit_quality,
+            'counit_quality': counit_quality,
+            'kg':            kg,
+        }
+
+    def build_all_compose_decompose_adjunctions(
+        self,
+        domain_name: str = 'pch',
+    ) -> 'KnowledgeGraph':
+        """Build Compose⊣Decompose adjunctions for every adjacent level pair.
+
+        Sweeps levels 0→1, 1→2, ..., (N-2)→(N-1) and collects all
+        adjunctions into a single :class:`KnowledgeGraph`.
+
+        Returns
+        -------
+        KnowledgeGraph
+            Contains one :class:`~ctkg.graph.Adjunction` per active adjacent
+            pair, plus all cross-level :class:`~ctkg.graph.Functor` objects.
+        """
+        kg = KnowledgeGraph()
+        self._compose_decompose_results: dict = {}
+
+        for level_lo in range(self.n_levels - 1):
+            result = self.build_compose_decompose_adjunction(level_lo, domain_name)
+            if not result:
+                continue
+            self._compose_decompose_results[level_lo] = result
+            kg.adjunctions[result['adjunction'].name] = result['adjunction']
+            # Also register the compose functor in the merged KG.
+            f_result = self.build_cross_level_functor(level_lo, domain_name)
+            if f_result:
+                kg.functors[f_result['functor'].name] = f_result['functor']
+
         return kg
 
     # ------------------------------------------------------------------

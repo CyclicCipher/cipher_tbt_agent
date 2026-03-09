@@ -668,6 +668,24 @@ def main() -> None:
               f'{len(kg_a.concepts)} concepts, '
               f'{n_adjs} adjunction(s), {n_funcs} functor(s)')
 
+        # ── Within-domain: Compose⊣Decompose adjunctions ─────────────────────
+        print(f'\n  Compose⊣Decompose adjunctions (within-domain, cross-level):')
+        cd_kg = pch2.build_all_compose_decompose_adjunctions('latin')
+        cd_results = getattr(pch2, '_compose_decompose_results', {})
+        for lv_lo, res in sorted(cd_results.items()):
+            u   = res['unit_quality']
+            cu  = res['counit_quality']
+            nF  = len(res['F'])
+            nG  = len(res['G'])
+            bar_u  = '█' * int(u  * 20)
+            bar_cu = '█' * int(cu * 20)
+            print(f'    L{lv_lo}→L{lv_lo+1}:  '
+                  f'F={nF} pairs  G={nG} pairs  '
+                  f'unit={u:.3f} {bar_u}  counit={cu:.3f} {bar_cu}')
+        print(f'  Cross-level KG: '
+              f'{len(cd_kg.functors)} functor(s), '
+              f'{len(cd_kg.adjunctions)} adjunction(s)')
+
         print(f'\n{"=" * 65}')
         print('M18: Causal reasoning, MasteryState, full CTKG closure')
         print('=' * 65)
