@@ -286,6 +286,68 @@ class RelationalLearner:
         best = max(atom_dist, key=atom_dist.get)
         return best[0] if isinstance(best, tuple) else str(best)
 
+    def infer_chain(self, atom: Any, relations: list[str],
+                    topk: int = 5) -> list[tuple[Any, float]]:
+        """R6: Distribution-preserving multi-hop relational inference.
+
+        Propagates a probability distribution through the chain of relations,
+        marginalising over intermediate categories at each step.
+
+        Returns:
+            [(atom, probability), ...] sorted descending, top-k entries.
+
+        Example (Latin):
+            learner.infer_chain('q', ['next', 'next'])
+            # 'q' → typically 'u' → then what follows 'u' most often
+
+            learner.infer_chain('q', ['skip2f'])
+            # Should give same result (R3 showed next∘next ≈ skip2f)
+        """
+        a_s = str(atom)
+        c_a = self.assignment.get(a_s)
+        if c_a is None:
+            return []
+
+        # Start: delta distribution on the source atom's category
+        c_dist: dict = {str(c_a): 1.0}
+
+        # Propagate through each relation
+        for rel in relations:
+            c_next: dict = {}
+            for c_src_key, p_src in c_dist.items():
+                if p_src < 1e-10:
+                    continue
+                hop = self._get_nc_soft((c_src_key, rel))
+                if not hop:
+                    continue
+                for c_tgt_key, p_hop in hop.items():
+                    c_tgt = (c_tgt_key[0] if isinstance(c_tgt_key, tuple)
+                             else str(c_tgt_key))
+                    c_next[c_tgt] = c_next.get(c_tgt, 0.0) + p_src * p_hop
+            if not c_next:
+                return []
+            c_dist = c_next
+
+        # Decode: for each (c_src, c_tgt) in the posterior, get P(atom)
+        # Use the last relation for decoding
+        r_last = relations[-1]
+        atom_dist: dict = {}
+        for c_tgt_key, p_ct in c_dist.items():
+            # We don't track c_src precisely after multi-hop, use c_a as proxy
+            t_dist = self._get_wgc_soft((str(c_a), r_last, str(c_tgt_key)))
+            if not t_dist:
+                continue
+            for tok_key, p_t in t_dist.items():
+                tok = tok_key[0] if isinstance(tok_key, tuple) else str(tok_key)
+                atom_dist[tok] = atom_dist.get(tok, 0.0) + p_ct * p_t
+
+        if not atom_dist:
+            return []
+        total = sum(atom_dist.values())
+        ranked = sorted(((tok, p / total) for tok, p in atom_dist.items()),
+                        key=lambda x: -x[1])
+        return ranked[:topk]
+
     def predict(self, atom: Any, relation: str) -> Any | None:
         """Predict most likely target atom given source atom and relation name."""
         a_s = str(atom)

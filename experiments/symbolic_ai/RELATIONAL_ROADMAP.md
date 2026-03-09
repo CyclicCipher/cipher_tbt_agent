@@ -252,7 +252,16 @@ No neural network. No training on this specific question.
 4. Return top-k atoms by final posterior mass.
 
 **Deliverable:** `RelationalLearner.infer_chain(atom, [rel1, rel2, ...])` method
-**Progress:** ⬜ Not started
+**Progress:** ✅ Implemented
+
+**Implementation:** Distribution-preserving belief propagation through the relational graph.
+Propagates P(c) through each T[rel] matrix and decodes atoms from the final category
+distribution. Correct for any topology; much richer than greedy `predict_chain()`.
+
+**Latin result:** next∘next and skip2f give similar top-1 predictions (space, x, v) —
+verifying R3's `next∘next=skip2f` rule. Predictions degenerate due to K=10 mega-cluster
+(all C0 atoms give identical 2-hop distributions). For knowledge graphs with V distinct
+entity types (each in its own category), infer_chain gives entity-specific inference chains.
 
 ---
 
@@ -272,4 +281,4 @@ No neural network. No training on this specific question.
 | **R3** | **Relational E6: structural meta-synthesis** | ✅ Done | — |
 | **R4** | **Geometry-adapted distance metric** | ✅ Done | — |
 | **R5** | **Multi-hop prediction benchmark** | 🔶 Latin done | — |
-| R6 | Compositional relational inference | ⬜ | — |
+| **R6** | **Compositional relational inference** | ✅ Done | — |

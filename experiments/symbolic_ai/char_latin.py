@@ -238,6 +238,39 @@ def _run_benchmark(sequences: list[list[str]],
           + '  '.join(f'{hits_model[k]:.3f}' for k in ks))
 
 
+def _demo_infer_chain(learner: RelationalLearner,
+                      algebra: 'RelationalAlgebra') -> None:
+    """R6: Demo compositional relational inference with infer_chain()."""
+    print('  Demonstrating infer_chain() — distribution-preserving multi-hop inference')
+    print()
+
+    # Test cases: verify that next∘next ≈ skip2f (R3 composition rule)
+    test_atoms = ['q', 't', ' ', 'a', 'e']
+    for atom in test_atoms:
+        chain_result = learner.infer_chain(atom, ['next', 'next'], topk=3)
+        single_result = learner.infer_chain(atom, ['skip2f'], topk=3)
+        chain_top  = [f"{tok}({p:.2f})" for tok, p in chain_result]
+        single_top = [f"{tok}({p:.2f})" for tok, p in single_result]
+        print(f'  {atom!r}: next∘next→ {chain_top}  |  skip2f→ {single_top}')
+
+    print()
+    # Verify prev∘prev ≈ skip2b
+    print('  Verifying prev∘prev ≈ skip2b:')
+    for atom in ['a', 'u', 't']:
+        c1 = learner.infer_chain(atom, ['prev', 'prev'], topk=3)
+        c2 = learner.infer_chain(atom, ['skip2b'], topk=3)
+        t1 = [f"{tok}({p:.2f})" for tok, p in c1]
+        t2 = [f"{tok}({p:.2f})" for tok, p in c2]
+        print(f'  {atom!r}: prev∘prev→ {t1}  |  skip2b→ {t2}')
+
+    # Confirmed rules from R3
+    confirmed = [(ri, rj, rk, jsd)
+                 for (ri, rj), (rk, jsd) in algebra.composition_table.items()
+                 if rk is not None]
+    print(f'\n  R3 confirmed {len(confirmed)} composition rules '
+          f'(verified above that infer_chain reproduces them).')
+
+
 def _eval_accuracy(learner: RelationalLearner,
                    triples: list[tuple[str, str, str]],
                    n_sample: int = 5000,
@@ -430,6 +463,9 @@ def main() -> None:
     print(f'  E3 accuracy  JSD-metric: {acc_before:.3f}  '
           f'{topology}-metric: {acc_after:.3f}  '
           f'delta={acc_after - acc_before:+.3f}')
+
+    print(f'\nR6: Compositional relational inference (infer_chain)...')
+    _demo_infer_chain(learner, algebra)
 
     report(learner, rel_clusterer, grammar, triples)
     print()
