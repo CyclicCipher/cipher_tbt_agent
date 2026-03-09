@@ -405,6 +405,12 @@ def main():
                     help='Patch size for Image2DRelationalLearner (px)')
     ap.add_argument('--relational_clusters', type=int, default=32,
                     help='n_clusters for Image2DRelationalLearner')
+    ap.add_argument('--relational_bits', type=int, default=2,
+                    help='Patch quantization bits for relational learner '
+                         '(2=4 levels coarse, 3=8 levels finer, 0=raw MD5)')
+    ap.add_argument('--relational_codebook', type=int, default=64,
+                    help='K-means codebook size for relational learner (0 = no codebook, '
+                         'fall back to quantize_bits). Codebook forces vocabulary repetition.')
     ap.add_argument('--n_fixations',      type=int, default=5)
     ap.add_argument('--k',                type=int, default=4,
                     help='Number of clusters (should match pose group count)')
@@ -491,12 +497,15 @@ def main():
         print('MODE: relational (Image2DRelationalLearner + H/V/D1/D2 triples)')
         print('─' * 60)
         print(f'  relational_patch={args.relational_patch}px  '
-              f'relational_clusters={args.relational_clusters}')
+              f'relational_clusters={args.relational_clusters}  '
+              f'relational_bits={args.relational_bits}')
 
         print('\n[R1] Training Image2DRelationalLearner (no labels)...')
         rl = Image2DRelationalLearner(
             patch_size=args.relational_patch,
             n_clusters=args.relational_clusters,
+            quantize_bits=args.relational_bits,
+            codebook_size=args.relational_codebook,
         )
         # Convert images to uint8 for patch extraction
         uint8_images = [(img * 255).astype(np.uint8) for img in images]

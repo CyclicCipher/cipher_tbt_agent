@@ -340,19 +340,46 @@ class Image2DRelationalLearner:
         V  — vertical:   (r,c) → (r+1, c)
         D1 — diagonal SE: (r,c) → (r+1, c+1)
         D2 — diagonal SW: (r,c) → (r+1, c-1)
+
+    Patch vocabulary:
+        Raw MD5 hashes (quantize_bits=0) make almost every natural-image patch
+        unique → singleton bigram distributions → clustering has no signal.
+        Perceptual quantization (quantize_bits=2 or 3) collapses visually similar
+        patches to the same token, forcing the vocabulary repetition that
+        distributional clustering needs.  Default is quantize_bits=2 (4 grey
+        levels, very coarse) which gives enough recurrence even on small datasets.
+        Use quantize_bits=3 (8 levels) for larger datasets.
     """
 
     ALL_RELATIONS = ('H', 'V', 'D1', 'D2')
     _OFFSETS = {'H': (0, 1), 'V': (1, 0), 'D1': (1, 1), 'D2': (1, -1)}
 
     def __init__(self, patch_size: int = 8, n_clusters: int = 12,
-                 relations: tuple[str, ...] | None = None):
+                 relations: tuple[str, ...] | None = None,
+                 quantize_bits: int = 2,
+                 codebook_size: int = 64):
         self.patch_size = patch_size
         self.relations = relations or self.ALL_RELATIONS
+        self.quantize_bits = quantize_bits
+        self.codebook_size = codebook_size
         self.learner = RelationalLearner(n_clusters=n_clusters)
+        self._codebook: 'np.ndarray | None' = None  # (codebook_size, D)
 
     def image_to_patches(self, image) -> list[list[str]]:
-        """Convert image (H×W×C or H×W numpy array) to 2D grid of patch hash strings."""
+        """Convert image (H×W×C or H×W numpy array) to 2D grid of patch token strings.
+
+        Token assignment priority (in order):
+          1. Codebook (k-means BoVW): if self._codebook is not None, assigns each
+             patch to its nearest centroid → token = f'c{centroid_id}'.
+             Enforces exactly codebook_size distinct tokens, guaranteeing recurrence.
+          2. Perceptual quantization: if quantize_bits > 0, applies grayscale +
+             local contrast normalization + bit quantization. Still mostly unique
+             for natural images.
+          3. Raw MD5 hash (quantize_bits == 0): always unique per patch.
+
+        Codebook must be built first via fit_images(). Calling image_to_patches()
+        before fit_images() falls back to quantization / MD5.
+        """
         import numpy as np
         arr = np.asarray(image, dtype=np.uint8)
         ps = self.patch_size
@@ -362,8 +389,17 @@ class Image2DRelationalLearner:
         for r in range(rows):
             row = []
             for c in range(cols):
-                patch = arr[r*ps:(r+1)*ps, c*ps:(c+1)*ps]
-                row.append(_patch_hash(patch))
+                patch_raw = arr[r*ps:(r+1)*ps, c*ps:(c+1)*ps]
+                if self._codebook is not None:
+                    vec = _preprocess_patch(patch_raw)
+                    dists = np.sum((self._codebook - vec) ** 2, axis=1)
+                    cid = int(np.argmin(dists))
+                    token = f'c{cid}'
+                elif self.quantize_bits > 0:
+                    token = _quantize_patch(patch_raw, self.quantize_bits)
+                else:
+                    token = _patch_hash(patch_raw)
+                row.append(token)
             grid.append(row)
         return grid
 
@@ -388,20 +424,71 @@ class Image2DRelationalLearner:
         return triples
 
     def fit_images(self, images: list, verbose: bool = True) -> None:
-        """Extract patches + triples from all images, then run E0-E3."""
-        all_triples: list[tuple[str, str, str]] = []
+        """Build patch codebook, then extract triples and run E0-E3.
+
+        Step 1: Extract all raw patches from all images.
+        Step 2: K-means codebook (codebook_size centroids) on grayscale patch vectors.
+                This collapses visually similar patches to the same token, guaranteeing
+                that the vocabulary (exactly codebook_size tokens) recurs across images.
+                Without this, natural-image patches are nearly all unique → singleton
+                bigram distributions → distributional clustering has no signal.
+        Step 3: Re-tokenize all patches via nearest centroid.
+        Step 4: Build H/V/D1/D2 triples and fit RelationalLearner E0-E3.
+        """
+        import numpy as np
         n_images = len(images)
         report_every = max(1, n_images // 5)
+
+        # --- Step 1: collect all raw patches ---
+        all_raw_patches: list = []
+        all_grids_raw: list = []   # (rows, cols) arrays of raw patch arrays
         for i, img in enumerate(images):
             if verbose and (i == 0 or (i + 1) % report_every == 0):
                 print(f'  Extracting patches: {i+1}/{n_images}')
-            grid = self.image_to_patches(img)
-            all_triples.extend(self.patches_to_triples(grid))
+            arr = np.asarray(img, dtype=np.uint8)
+            ps = self.patch_size
+            h, w = arr.shape[:2]
+            rows, cols = h // ps, w // ps
+            grid_raw = []
+            for r in range(rows):
+                row_raw = []
+                for c in range(cols):
+                    patch = arr[r*ps:(r+1)*ps, c*ps:(c+1)*ps]
+                    row_raw.append(patch)
+                    all_raw_patches.append(patch)
+                grid_raw.append(row_raw)
+            all_grids_raw.append(grid_raw)
+
+        if verbose:
+            print(f'  Raw patches: {len(all_raw_patches):,}  '
+                  f'Building codebook (k={self.codebook_size})...')
+
+        # --- Step 2: K-means codebook ---
+        self._codebook = _build_patch_codebook(all_raw_patches, self.codebook_size,
+                                               verbose=verbose)
+
+        # --- Step 3+4: tokenize via codebook, build triples, fit ---
+        all_triples: list[tuple[str, str, str]] = []
+        for grid_raw in all_grids_raw:
+            rows = len(grid_raw)
+            cols = len(grid_raw[0]) if rows else 0
+            # Build token grid via nearest centroid
+            token_grid = []
+            for r in range(rows):
+                row_tok = []
+                for c in range(cols):
+                    vec = _preprocess_patch(grid_raw[r][c])
+                    dists = np.sum((self._codebook - vec) ** 2, axis=1)
+                    cid = int(np.argmin(dists))
+                    row_tok.append(f'c{cid}')
+                token_grid.append(row_tok)
+            all_triples.extend(self.patches_to_triples(token_grid))
+
         if verbose:
             unique = len({a for a, _, _ in all_triples} |
                          {b for _, _, b in all_triples})
             print(f'  Total triples: {len(all_triples):,}  '
-                  f'Unique patches: {unique:,}')
+                  f'Unique visual words: {unique:,} / {self.codebook_size}')
         self.learner.fit(all_triples, verbose=verbose)
 
     @property
@@ -445,15 +532,112 @@ def _build_rel_succ_dists(ai: SymbolicAI, clusters: dict) -> dict:
     return succ
 
 
+def _preprocess_patch(patch_uint8) -> 'np.ndarray':
+    """Grayscale + local contrast normalization → flattened float32 vector.
+
+    Same preprocessing as VisionLearner's _to_gray_f32, without quantization.
+    Used as input to k-means codebook construction and nearest-centroid assignment.
+    """
+    import numpy as np
+    arr = np.asarray(patch_uint8, dtype=np.float32)
+    if arr.ndim == 3 and arr.shape[2] >= 3:
+        gray = (0.299 * arr[:, :, 0] +
+                0.587 * arr[:, :, 1] +
+                0.114 * arr[:, :, 2])
+    elif arr.ndim == 3:
+        gray = arr[:, :, 0]
+    else:
+        gray = arr
+    mn, mx = float(gray.min()), float(gray.max())
+    if mx - mn > 1e-6:
+        gray = (gray - mn) / (mx - mn)
+    else:
+        gray = np.zeros_like(gray)
+    return gray.ravel()
+
+
+def _build_patch_codebook(patches: list, k: int, max_iter: int = 30,
+                           verbose: bool = False) -> 'np.ndarray':
+    """K-means codebook on preprocessed patch vectors.
+
+    Returns (k, D) float32 centroid array where D = patch_size².
+    Guarantees exactly k visual-word tokens, forcing vocabulary repetition
+    that distributional clustering requires.
+    """
+    import numpy as np
+    X = np.array([_preprocess_patch(p) for p in patches], dtype=np.float32)
+    n, D = X.shape
+    k = min(k, n)
+    rng = np.random.default_rng(42)
+    centres = X[rng.choice(n, size=k, replace=False)].copy()
+    labels = np.zeros(n, dtype=np.int32)
+    for it in range(max_iter):
+        # Assignment: squared L2
+        dists = np.sum((X[:, None, :] - centres[None, :, :]) ** 2, axis=2)
+        new_labels = np.argmin(dists, axis=1)
+        if np.all(new_labels == labels) and it > 0:
+            break
+        labels = new_labels
+        for c in range(k):
+            mask = labels == c
+            if mask.any():
+                centres[c] = X[mask].mean(axis=0)
+    if verbose:
+        counts = np.bincount(labels, minlength=k)
+        print(f'  Codebook k={k}: '
+              f'min={counts.min()} max={counts.max()} '
+              f'mean={counts.mean():.1f} patches/word')
+    return centres
+
+
+def _quantize_patch(patch_uint8, bits: int) -> str:
+    """Perceptually quantize a uint8 patch to a compact token string.
+
+    Applies the same preprocessing as VisionLearner:
+      1. Grayscale (ITU-R BT.601 luminance)
+      2. Local contrast normalization (min-max per patch → [0, 1])
+      3. n-bit quantization (2 = 4 levels, 3 = 8 levels)
+      4. Bit packing → hex string
+
+    Patches that are visually similar collapse to the same token, forcing
+    vocabulary repetition necessary for distributional clustering.
+    """
+    import numpy as np
+    arr = np.asarray(patch_uint8, dtype=np.float32)
+    # Grayscale
+    if arr.ndim == 3 and arr.shape[2] >= 3:
+        gray = (0.299 * arr[:, :, 0] +
+                0.587 * arr[:, :, 1] +
+                0.114 * arr[:, :, 2])
+    elif arr.ndim == 3:
+        gray = arr[:, :, 0]
+    else:
+        gray = arr
+    # Local contrast normalization
+    mn, mx = float(gray.min()), float(gray.max())
+    if mx - mn > 1e-6:
+        gray = (gray - mn) / (mx - mn)
+    else:
+        gray = np.zeros_like(gray)
+    # Quantize
+    levels = (1 << bits) - 1
+    q = np.clip(np.round(gray.ravel() * levels), 0, levels).astype(np.uint8)
+    if bits <= 4:
+        if len(q) % 2 != 0:
+            q = np.concatenate([q, np.zeros(1, dtype=np.uint8)])
+        packed = (q[0::2] << 4) | q[1::2]
+        return 'q' + packed.tobytes().hex()
+    return 'q' + q.tobytes().hex()
+
+
 def _patch_hash(patch) -> str:
-    """Short hash string for a numpy patch array (MD5 hex prefix)."""
+    """Raw MD5 hash of uint8 patch pixels (unique per distinct pixel pattern)."""
     import hashlib
     import numpy as np
     arr = np.asarray(patch, dtype=np.uint8)
     try:
         h = hashlib.md5(arr.tobytes(), usedforsecurity=False).hexdigest()[:8]
     except TypeError:
-        # Python < 3.9: usedforsecurity not supported
         h = hashlib.md5(arr.tobytes()).hexdigest()[:8]
     return f'p{h}'
 
