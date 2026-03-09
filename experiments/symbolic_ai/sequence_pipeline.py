@@ -66,6 +66,19 @@ def sequences_from_texts(texts: list[str]) -> list[list[str]]:
 
 
 # ---------------------------------------------------------------------------
+# Memory diagnostics
+# ---------------------------------------------------------------------------
+
+def _rss_mb() -> float:
+    """Return current process RSS in MB, or 0.0 if psutil is unavailable."""
+    try:
+        import psutil, os
+        return psutil.Process(os.getpid()).memory_info().rss / 1_048_576
+    except Exception:
+        return 0.0
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers (pure functions — no class dependency)
 # ---------------------------------------------------------------------------
 
@@ -218,9 +231,15 @@ class SequenceLearner:
         self.assignment: dict = {}   # token → cluster_id
         self.clusters:   dict = {}   # cluster_id → [tokens]
         self._K: int = n_clusters
-        # E3 state:
-        self._nc_soft:  dict = {}
-        self._wgc_soft: dict = {}
+        # E3 state — lazy: soft distributions computed on first query, then cached.
+        # Eager precomputation of all K³ combinations caused O(K³×V) memory blow-up
+        # (e.g. K=64, V=5000 → 5 GB tensor; 24 GB for Latin corpus). Now we store
+        # the raw dist caches and sim_matrix, and call _ask_soft() on demand.
+        self._nc_soft:   dict = {}   # lazy cache: (c1,c2) → {c3: prob}
+        self._wgc_soft:  dict = {}   # lazy cache: (c1,c2,c3) → {token: prob}
+        self._nc_cache:  dict = {}   # raw {(c1,c2): {c3: prob}} from next_cat
+        self._wgc_cache: dict = {}   # raw {(c1,c2,c3): {token: prob}} from token_given_cat
+        self._sim_matrix: list = []  # K×K JSD-based similarity matrix
         self._alpha: float = 0.95
         # E4 state:
         self._frame_profiles: dict = {}
@@ -272,6 +291,11 @@ class SequenceLearner:
         run_e2 = 'e2' in phases
         run_e3 = 'e3' in phases
 
+        if verbose:
+            _m0 = _rss_mb()
+            if _m0:
+                print(f'  RSS at fit() start = {_m0:.0f} MB')
+
         # --- E0: ensure bigrams exist ---
         next_concept = bigram_concept or 'next_token'
         prev_concept = 'prev_' + next_concept.split('next_', 1)[-1]
@@ -279,6 +303,10 @@ class SequenceLearner:
             self.discover(sequences, verbose=verbose)
             next_concept = 'next_token'
             prev_concept = 'prev_token'
+        if verbose:
+            _m = _rss_mb()
+            if _m:
+                print(f'  RSS after E0 discover = {_m:.0f} MB')
 
         # --- Cluster tokens by bidir bigram distributions ---
         if verbose:
@@ -301,6 +329,10 @@ class SequenceLearner:
             _s = self.ai.stores.get(_c)
             if _s is not None:
                 _s.examples.clear()
+        if verbose:
+            _m = _rss_mb()
+            if _m:
+                print(f'  RSS after E0 clear = {_m:.0f} MB')
 
         # --- E1: category chain ---
         _register_concepts(self.ai, [
@@ -322,6 +354,9 @@ class SequenceLearner:
                 n_used += 1
         if verbose:
             print(f'  E1: {n_used:,} trigrams used, {n_skip:,} OOV skipped')
+            _m = _rss_mb()
+            if _m:
+                print(f'  RSS after E1 = {_m:.0f} MB')
 
         # --- E2: context-sensitive clusters ---
         if run_e2:
@@ -343,19 +378,26 @@ class SequenceLearner:
             sim_matrix = _build_sim_matrix(succ_dists, self._K, e3_temperature)
             nc_cache   = _precompute_dist_cache(self.ai, 'next_cat')
             wgc_cache  = _precompute_dist_cache(self.ai, 'token_given_cat')
-            self._nc_soft  = _precompute_all_soft_numpy(nc_cache,  sim_matrix, self._K, 2)
-            self._wgc_soft = _precompute_all_soft_numpy(wgc_cache, sim_matrix, self._K, 3)
-            if verbose:
-                n_nc  = sum(1 for d in self._nc_soft.values()  if d)
-                n_wgc = sum(1 for d in self._wgc_soft.values() if d)
-                print(f'  E3: nc_soft {n_nc}/{self._K**2}  '
-                      f'wgc_soft {n_wgc}/{self._K**3}')
 
-            # Free E1 examples — all information is now in self._nc_soft / _wgc_soft.
-            # This is the main memory-leak fix: without this, every bigram and trigram
-            # taught during E0/E1 stays in the ExampleStore lists indefinitely.
-            # For large image sequences (fine_patch=1 on real photos) this can grow
-            # to tens of millions of Python tuples (>> 10 GB).
+            # Store caches for LAZY soft retrieval. Do NOT precompute all K³ keys:
+            # that creates a (K,K,K,V) tensor + K³ Python dicts which is O(K³×V) memory.
+            # At K=64, V=72 (vision) → ~1.5 GB; V=5000 (Latin text) → >20 GB.
+            # Instead: compute _ask_soft() on first query, cache result.
+            self._nc_cache   = nc_cache
+            self._wgc_cache  = wgc_cache
+            self._sim_matrix = sim_matrix
+            self._nc_soft    = {}   # lazy: populated by _get_nc_soft()
+            self._wgc_soft   = {}   # lazy: populated by _get_wgc_soft()
+
+            if verbose:
+                print(f'  E3: nc_cache {len(nc_cache)} keys  '
+                      f'wgc_cache {len(wgc_cache)} keys  '
+                      f'(lazy — soft dists computed on first query)')
+                _mem = _rss_mb()
+                if _mem:
+                    print(f'  E3: RSS after caching = {_mem:.0f} MB')
+
+            # Free E1 examples — all information is now in _nc_cache / _wgc_cache.
             for _c in ('next_cat', 'token_given_cat'):
                 _s = self.ai.stores.get(_c)
                 if _s is not None:
@@ -371,7 +413,10 @@ class SequenceLearner:
         return self._predict_e3(t1, t2) or self._predict_e1(t1, t2)
 
     def predict_dist(self, context: tuple) -> dict[Any, float]:
-        """Full distribution over next tokens given context."""
+        """Full distribution over next tokens given context.
+
+        Marginalises over c3: P(t3|c1,c2) = Σ_c3 P(c3|c1,c2) · P(t3|c1,c2,c3).
+        """
         if len(context) < 2:
             return {}
         t1, t2 = str(context[-2]), str(context[-1])
@@ -379,12 +424,19 @@ class SequenceLearner:
         c2 = self.assignment.get(t2)
         if c1 is None or c2 is None:
             return {}
-        d = self._wgc_soft.get((str(c1), str(c2)))
-        if d:
-            # Collapse tuple keys → plain token strings
-            return {(k[0] if isinstance(k, tuple) else k): v
-                    for k, v in d.items()}
-        return {}
+        c3_dist = self._get_nc_soft((str(c1), str(c2)))
+        if not c3_dist:
+            return {}
+        result: dict = {}
+        for c3_key, p_c3 in c3_dist.items():
+            c3 = c3_key[0] if isinstance(c3_key, tuple) else str(c3_key)
+            t3_dist = self._get_wgc_soft((str(c1), str(c2), c3))
+            if not t3_dist:
+                continue
+            for tok_key, p_t3 in t3_dist.items():
+                tok = tok_key[0] if isinstance(tok_key, tuple) else str(tok_key)
+                result[tok] = result.get(tok, 0.0) + p_c3 * p_t3
+        return result
 
     def logprob(self, *tokens: Any) -> float | None:
         """Log₂ P(tokens[-1] | tokens[-3], tokens[-2]). None if not computable."""
@@ -396,7 +448,7 @@ class SequenceLearner:
         c3 = self.assignment.get(t3)
         if c1 is None or c2 is None or c3 is None:
             return None
-        c3_dist = self._nc_soft.get((str(c1), str(c2)))
+        c3_dist = self._get_nc_soft((str(c1), str(c2)))
         if c3_dist is None:
             # E1 fallback
             cat_d = self.ai.ask_dist('next_cat', (str(c1), str(c2)))
@@ -414,7 +466,7 @@ class SequenceLearner:
         p_c3 = c3_dist.get((str(c3),), 0.0)
         if p_c3 < 1e-12:
             return None
-        t3_dist = self._wgc_soft.get((str(c1), str(c2), str(c3)))
+        t3_dist = self._get_wgc_soft((str(c1), str(c2), str(c3)))
         if t3_dist is None:
             return None
         p_t3 = t3_dist.get((t3,), 0.0)
@@ -687,6 +739,20 @@ class SequenceLearner:
 
     # ---- Private helpers -----------------------------------------------------
 
+    def _get_nc_soft(self, key: tuple) -> dict | None:
+        """Lazy soft retrieval for next_cat. Computes and caches on first access."""
+        if key not in self._nc_soft:
+            self._nc_soft[key] = _ask_soft(key, self._nc_cache,
+                                           self._sim_matrix, self._K)
+        return self._nc_soft[key]
+
+    def _get_wgc_soft(self, key: tuple) -> dict | None:
+        """Lazy soft retrieval for token_given_cat. Computes and caches on first access."""
+        if key not in self._wgc_soft:
+            self._wgc_soft[key] = _ask_soft(key, self._wgc_cache,
+                                            self._sim_matrix, self._K)
+        return self._wgc_soft[key]
+
     def _predict_e1(self, t1: str, t2: str) -> str | None:
         c1 = self.assignment.get(t1)
         c2 = self.assignment.get(t2)
@@ -706,12 +772,12 @@ class SequenceLearner:
         c2 = self.assignment.get(t2)
         if c1 is None or c2 is None:
             return None
-        c3d = self._nc_soft.get((str(c1), str(c2)))
+        c3d = self._get_nc_soft((str(c1), str(c2)))
         if c3d is None:
             return None
         c3_tup = max(c3d, key=c3d.get)
         c3 = c3_tup[0] if isinstance(c3_tup, tuple) else str(c3_tup)
-        wd = self._wgc_soft.get((str(c1), str(c2), c3))
+        wd = self._get_wgc_soft((str(c1), str(c2), c3))
         if wd is None:
             return None
         best = max(wd, key=wd.get)
