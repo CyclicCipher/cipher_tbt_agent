@@ -3049,18 +3049,32 @@ if __name__ == '__main__':
 
 
 # ===========================================================================
-# M1-M4: Hierarchical Merge — all-scale pattern learning
+# M1-M4+: Hierarchical Merge + Segment — all-scale pattern learning
 #
 # Broca's area principle: one algorithm (RelationalLearner), applied
 # recursively via Merge (categorical composition) at every scale present
 # in the data.  The discovered hierarchy converges toward the CTKG structure.
 #
-# Classes added:
-#   MergedAtom              — hierarchical unit (preserves internal structure)
-#   AtomVocabulary          — growing vocabulary, greedy BPE-style tokenizer
-#   MergeDetector           — PMI-based merge candidate ranking (M1)
-#   HierarchicalRelationalLearner — multi-level stack (M2 + M3)
-#   MultiLevelContextBelief — top-down prediction across levels (M4)
+# Two dual operations on the PMI landscape:
+#   HIGH PMI → MERGE:   tight bigrams are unit-internal → join them
+#   LOW PMI  → SEGMENT: loose bigrams are boundaries → split here
+#
+# Together they climb the full hierarchy: chars → morphemes → words →
+# collocations → phrases → clauses → sentences → paragraphs.
+#
+# Design principle (user): the surface string of any atom is a read-off,
+# not the definition.  The definition IS the composition chain back to base
+# sensory atoms.  Both MergedAtom (binary) and SegmentedAtom (n-ary) expose
+# leaves() to recover that chain.  In the CTKG, the concept exists without
+# a name; the string is kept only for human interpretability.
+#
+# Classes:
+#   MergedAtom              — binary composition (Merge); left + right
+#   SegmentedAtom           — n-ary sequence composition (Segment); constituents
+#   AtomVocabulary          — growing vocabulary; handles both atom types
+#   MergeDetector           — PMI landscape: merge candidates + boundary PMIs
+#   HierarchicalRelationalLearner — iterative Merge+Segment stack (M2+M3)
+#   MultiLevelContextBelief — top-down prediction (M4)
 # ===========================================================================
 
 
@@ -3110,6 +3124,69 @@ class MergedAtom:
 
 
 # ---------------------------------------------------------------------------
+# SegmentedAtom
+# ---------------------------------------------------------------------------
+
+class SegmentedAtom:
+    """A higher-level atom created by segmenting a contiguous run of atoms.
+
+    Produced when the PMI between the last atom of the run and the first atom
+    of the next run drops below a boundary threshold — the run is a unit.
+
+    Design principle: the surface string is a read-off for human
+    interpretability, NOT the definition.  The definition is the ordered
+    sequence of constituents, which chains back to base sensory atoms via
+    ``leaves()``.  In the CTKG this concept is represented purely by its
+    ordered ``requires`` edges — no name is strictly necessary.
+
+    Attributes
+    ----------
+    surface       Derived string: join of constituent surface strings.
+                  (e.g. 'principio' from ['p','r','i','n','c','i','p','i','o'])
+    constituents  Ordered list of atoms making up this unit.  Each element is
+                  either a str (base atom), MergedAtom, or SegmentedAtom.
+    level         Level at which this segmentation was performed.
+    label         Distributional label from E3 clustering (filled in later).
+    """
+
+    __slots__ = ('surface', 'constituents', 'level', 'label')
+
+    def __init__(self, constituents: list, level: int,
+                 label: str = '') -> None:
+        self.constituents = constituents
+        self.level        = level
+        self.label        = label
+        # Surface derived from constituents — string is a read-off, not definition
+        self.surface      = ''.join(str(c) for c in constituents)
+
+    def __str__(self)  -> str:  return self.surface
+    def __repr__(self) -> str:
+        return f'SegmentedAtom({self.surface!r}, n={len(self.constituents)}, lvl={self.level})'
+    def __hash__(self) -> int:  return hash(self.surface)
+    def __eq__(self, other) -> bool: return self.surface == str(other)
+
+    def leaves(self) -> list[str]:
+        """Ordered base-level atoms, recovering the full composition chain."""
+        result: list[str] = []
+        for c in self.constituents:
+            if hasattr(c, 'leaves'):
+                result.extend(c.leaves())
+            else:
+                result.append(str(c))
+        return result
+
+    def structure(self) -> list:
+        """Return constituents as a nested list for inspection."""
+        parts = []
+        for c in self.constituents:
+            if isinstance(c, (MergedAtom, SegmentedAtom)):
+                parts.append(c.structure())
+            else:
+                parts.append(str(c))
+        return parts
+
+
+# ---------------------------------------------------------------------------
 # AtomVocabulary
 # ---------------------------------------------------------------------------
 
@@ -3132,8 +3209,10 @@ class AtomVocabulary:
     def __init__(self) -> None:
         # Ordered list of (left_surface, right_surface, MergedAtom)
         self._merges: list[tuple[str, str, MergedAtom]] = []
-        # Surface → MergedAtom (for lookup)
-        self._by_surface: dict[str, MergedAtom] = {}
+        # Ordered list of SegmentedAtoms
+        self._segments: list[SegmentedAtom] = []
+        # Surface → MergedAtom | SegmentedAtom (for lookup)
+        self._by_surface: dict[str, Any] = {}
         # Fast merge-pair lookup: (left_surf, right_surf) → merged_surf
         self._pair_to_surface: dict[tuple[str, str], str] = {}
 
@@ -3178,11 +3257,31 @@ class AtomVocabulary:
             tokens = new_tokens
         return tokens
 
-    def lookup(self, surface: str) -> 'MergedAtom | None':
+    def add_segment(self, constituents: list, level: int = 1) -> 'SegmentedAtom':
+        """Create and register a SegmentedAtom for the given constituents.
+
+        The surface string is derived from the constituents (read-off only).
+        The definition IS the ordered constituent list — recoverable via
+        ``leaves()`` all the way back to base sensory atoms.
+        """
+        seg = SegmentedAtom(constituents=list(constituents), level=level)
+        surface = seg.surface
+        if surface in self._by_surface:
+            existing = self._by_surface[surface]
+            if isinstance(existing, SegmentedAtom):
+                return existing
+        self._by_surface[surface] = seg
+        self._segments.append(seg)
+        return seg
+
+    def lookup(self, surface: str) -> 'MergedAtom | SegmentedAtom | None':
         return self._by_surface.get(surface)
 
     def n_merges(self) -> int:
         return len(self._merges)
+
+    def n_segments(self) -> int:
+        return len(self._segments)
 
     def summary(self, top_n: int = 20) -> list[str]:
         return [f'[{l}+{r}] (lvl {m.level})'
@@ -3286,6 +3385,67 @@ class MergeDetector:
             result.append(pmi)
         return result
 
+    def segment_by_boundary(self,
+                            sequence:  list[str],
+                            threshold: float | None = None,
+                            level:     int          = 1,
+                            ) -> list:
+        """Split a sequence into SegmentedAtoms at low-PMI positions.
+
+        A position i is a boundary if PMI(seq[i], seq[i+1]) < threshold.
+        If threshold is None (default), the mean PMI over the sequence is
+        used — boundaries are below-average-predictability transitions, which
+        naturally aligns with word/phrase edges.
+
+        Single-atom segments are returned as plain strings (no wrapping).
+        Multi-atom segments become SegmentedAtom objects, preserving the
+        full composition chain via ``leaves()``.
+
+        This is the dual of ``detect()``: both operate on the same PMI
+        landscape — high PMI → Merge (join), low PMI → Segment (split).
+        Together they allow the system to climb char → morpheme → word →
+        phrase → clause in a single ``fit()`` pass.
+
+        Parameters
+        ----------
+        sequence   List of atom strings at the current level.
+        threshold  PMI cutoff.  None = mean PMI of this sequence (adaptive).
+        level      Level label assigned to the resulting SegmentedAtoms.
+
+        Returns
+        -------
+        List of str | SegmentedAtom — the next-level atom sequence.
+        """
+        if len(sequence) < 2:
+            return list(sequence)
+
+        pmis = self.boundary_pmi(sequence)
+
+        if threshold is None:
+            threshold = sum(pmis) / len(pmis) if pmis else 0.0
+
+        segments: list = []
+        start = 0
+        for i, p in enumerate(pmis):
+            if p < threshold:
+                # Boundary between position i and i+1 — close current segment
+                chunk = sequence[start: i + 1]
+                if len(chunk) > 1:
+                    segments.append(SegmentedAtom(list(chunk), level=level))
+                elif chunk:
+                    segments.append(chunk[0])
+                start = i + 1
+
+        # Remaining atoms after last boundary
+        if start < len(sequence):
+            chunk = sequence[start:]
+            if len(chunk) > 1:
+                segments.append(SegmentedAtom(list(chunk), level=level))
+            elif chunk:
+                segments.append(chunk[0])
+
+        return segments
+
 
 # ---------------------------------------------------------------------------
 # Helper: sequences → triples
@@ -3335,15 +3495,25 @@ class HierarchicalRelationalLearner:
     max_levels             Maximum recursion depth.
     next_rel               Name of the sequential relation (default 'next').
     min_merge_count        Minimum co-occurrence count for merge candidates.
+    use_segment            If True (default), after each Merge step, segment
+                           the merged sequences at low-PMI boundaries to form
+                           the next level's atoms.  This allows the hierarchy
+                           to climb all the way from characters to words to
+                           phrases to clauses in a single fit() call.
+    boundary_threshold     PMI cutoff for segmentation.  None (default) =
+                           adaptive: use the mean PMI of each sequence so
+                           boundaries are below-average-predictability joins.
     """
 
     def __init__(self,
-                 n_clusters:           int | None = None,
-                 pmi_threshold:        float      = 0.5,
-                 max_merges_per_level: int        = 50,
-                 max_levels:           int        = 6,
-                 next_rel:             str        = 'next',
-                 min_merge_count:      int        = 3,
+                 n_clusters:           int | None  = None,
+                 pmi_threshold:        float       = 0.5,
+                 max_merges_per_level: int         = 50,
+                 max_levels:           int         = 6,
+                 next_rel:             str         = 'next',
+                 min_merge_count:      int         = 3,
+                 use_segment:          bool        = True,
+                 boundary_threshold:   float | None = None,
                  ) -> None:
         self.n_clusters           = n_clusters
         self.pmi_threshold        = pmi_threshold
@@ -3351,6 +3521,8 @@ class HierarchicalRelationalLearner:
         self.max_levels           = max_levels
         self.next_rel             = next_rel
         self.min_merge_count      = min_merge_count
+        self.use_segment          = use_segment
+        self.boundary_threshold   = boundary_threshold
 
         self.levels:   list[RelationalLearner]  = []
         self.vocab:    AtomVocabulary           = AtomVocabulary()
@@ -3423,7 +3595,36 @@ class HierarchicalRelationalLearner:
 
             new_seqs = [self.vocab.tokenize(seq) for seq in current_seqs]
 
-            # Step 5: check for progress
+            # Step 5 (optional): Segment at low-PMI boundaries.
+            # This is the dual of Merge: Merge joins high-PMI adjacent pairs
+            # (sub-word units), Segment splits at low-PMI positions (word/
+            # phrase boundaries).  Together they climb the full hierarchy:
+            #   chars → [Merge] → morpheme tokens → [Segment] → words
+            #   words → [Merge] → word-bigram tokens → [Segment] → phrases
+            if self.use_segment:
+                seg_detector  = MergeDetector(learner, next_rel=self.next_rel)
+                segmented: list[list[str]] = []
+                for seq in new_seqs:
+                    seg_atoms = seg_detector.segment_by_boundary(
+                        seq,
+                        threshold=self.boundary_threshold,
+                        level=level + 1,
+                    )
+                    # Register SegmentedAtoms in vocabulary
+                    for sa in seg_atoms:
+                        if isinstance(sa, SegmentedAtom):
+                            self.vocab.add_segment(sa.constituents,
+                                                   level=level + 1)
+                    segmented.append([str(a) for a in seg_atoms])
+
+                new_seqs = segmented
+                if verbose:
+                    n_seg   = self.vocab.n_segments()
+                    example = new_seqs[0][:8] if new_seqs else []
+                    print(f'  [Seg   L{level}] {n_seg} segments registered. '
+                          f'First tokens: {example}')
+
+            # Step 6: check for progress
             new_vocab = {t for s in new_seqs for t in s}
             if new_vocab == vocab_s:
                 if verbose:
@@ -3434,7 +3635,8 @@ class HierarchicalRelationalLearner:
 
         if verbose:
             print(f'\n  HierarchicalRelationalLearner ready: '
-                  f'{len(self.levels)} levels, {self.vocab.n_merges()} merges.')
+                  f'{len(self.levels)} levels, {self.vocab.n_merges()} merges, '
+                  f'{self.vocab.n_segments()} segments.')
             if self.vocab.n_merges():
                 print(f'  Top merges: {self.vocab.summary(10)}')
 
@@ -3785,14 +3987,20 @@ def export_ctkg(
             lines.append(f'type {label} = seq(type_L{lvl - 1}_*)')
     lines.append('')
 
-    # --- Concept blocks for MergedAtoms ---
-    lines.append('# Concepts: discovered merge units (categorical compositions)')
+    # --- Concept blocks for MergedAtoms and SegmentedAtoms ---
+    lines.append('# Concepts: discovered compositional units')
+    lines.append('#   MergedAtom  → left_constituent + right_constituent (binary Merge)')
+    lines.append('#   SegmentedAtom → position_0, position_1, … (ordered Segment)')
+    lines.append('#   In the CTKG, the surface string is a read-off only.')
+    lines.append('#   The definition IS the ordered requires chain back to base atoms.')
     seen_concepts: set[str] = set()
 
     def _safe_name(s: str) -> str:
         """Convert a surface string to a valid CTKG identifier."""
-        return s.replace('[', 'M').replace(']', '').replace('+', '_').replace(' ', '_')
+        return (s.replace('[', 'M').replace(']', '').replace('+', '_')
+                 .replace(' ', '_SP_').replace("'", '_AP_'))
 
+    # MergedAtoms: binary composition (left_constituent + right_constituent)
     for l_s, r_s, merged in hier.vocab._merges:
         concept_name = _safe_name(merged.surface)
         left_name    = _safe_name(l_s)
@@ -3807,6 +4015,24 @@ def export_ctkg(
         lines.append(f'    type {type_label}')
         lines.append(f'    requires {left_name} via "left_constituent"')
         lines.append(f'    requires {right_name} via "right_constituent"')
+        lines.append('')
+
+    # SegmentedAtoms: ordered sequence composition (position_0, position_1, …)
+    # The ordered requires edges ARE the definition — no name is strictly needed.
+    lines.append('# Segmented units: n-ary ordered composition')
+    for seg in hier.vocab._segments:
+        concept_name = _safe_name(seg.surface)
+        type_label   = seg.label or f'type_L{seg.level}_unknown'
+
+        if concept_name in seen_concepts:
+            continue
+        seen_concepts.add(concept_name)
+
+        lines.append(f'concept {concept_name}')
+        lines.append(f'    type {type_label}')
+        for pos, constituent in enumerate(seg.constituents):
+            part_name = _safe_name(str(constituent))
+            lines.append(f'    requires {part_name} via "position_{pos}"')
         lines.append('')
 
     # --- Interface block ---
