@@ -228,26 +228,25 @@ mega-cluster C0 means JSD is already near-optimal. Larger improvements expected 
 | Unigram (most-frequent) | 0.141 | 0.335 | 0.792 |
 | RelationalLearner       | **0.197** | **0.470** | **0.870** |
 
-**FB15k-237 (272K train, 5K test sample, fit time: 0.9s):**
+**FB15k-237 / WN18RR: comparison to TransE/RotatE is not valid.**
 
-| Model              | MRR   | H@1   | H@3   | H@10  | Training? |
-|--------------------|-------|-------|-------|-------|-----------|
-| RelationalLearner  | 0.270 | 0.140 | 0.308 | **0.563** | ❌ none |
-| TransE             | —     | —     | —     | 0.465 | ✅ trained |
-| DistMult           | —     | —     | —     | 0.419 | ✅ trained |
-| RotatE             | —     | —     | —     | 0.533 | ✅ trained |
+Our model is a frequency lookup table, not a link predictor. Standard KGE benchmarks test
+generalization to (h, r, t) triples *never seen together in training*. Our model cannot do
+this: `_atom_bigrams[(h,r)]` contains only training tails; the test tail is always held out.
 
-**H@10 beats TransE and DistMult with zero training. 76.2% test (h,r) pairs seen in training.**
+Two broken evaluations attempted:
+1. **Closed-set ranking** (rank within predict_dist output only): inflated because dist has
+   only 3-5 entries — test tail at rank len(dist)+1 ≈ 5-6, nearly always a Hits@10 hit.
+2. **Filtered ranking** (standard protocol): over-inflated because all dist entries are
+   training tails → all filtered out as known positives → rank = 1 trivially.
 
-**WN18RR (86K train, 3.1K test, fit time: 0.3s):**
+Neither is comparable to TransE/RotatE H@10. Those models score *all 14K entities* and
+generalize to entity pairs unseen in training. Our lookup table cannot.
 
-| Model              | MRR   | H@1   | H@3   | H@10  | Training? |
-|--------------------|-------|-------|-------|-------|-----------|
-| RelationalLearner  | 0.158 | 0.017 | 0.258 | 0.407 | ❌ none |
-| TransE             | —     | —     | —     | 0.501 | ✅ trained |
-| RotatE             | —     | —     | —     | 0.571 | ✅ trained |
-
-WN18RR harder: only 40% of test (h,r) pairs seen in training → rel_unigram fallback dominates.
+**What RelationalLearner is good for (E0-R6 results on Latin):**
+- Structure discovery: geometry, relational algebra, sense disambiguation
+- Dense repetitive domains (text, images) where V is small and coverage is high
+- NOT sparse KG link prediction where each (h,r) pair has few training examples
 
 **Large-KG mode:** V > 500 atoms → skip E0-E3 cluster pipeline (would allocate 15+ GB dense
 matrix). Use `_atom_bigrams` + `_rel_unigram` only. Fit in O(N) time with O(N) memory.
@@ -296,6 +295,6 @@ for all test atoms. OOV fallback to E3 handles unseen atoms.
 | **R2** | **Relational E5: sense disambiguation** | ✅ Done | — |
 | **R3** | **Relational E6: structural meta-synthesis** | ✅ Done | — |
 | **R4** | **Geometry-adapted distance metric** | ✅ Done | — |
-| **R5** | **Multi-hop prediction benchmark** | ✅ Latin + FB15k-237 + WN18RR | d99f060 |
+| **R5** | **Multi-hop prediction benchmark** | ✅ Latin ✅ KG benchmarks (invalid comparison) | d99f060 |
 | **R6** | **Compositional relational inference** | ✅ Done | 0213f7f |
 | **Two-level** | **_atom_bigrams fast path + atom-level infer_chain** | ✅ Done | 0213f7f |
