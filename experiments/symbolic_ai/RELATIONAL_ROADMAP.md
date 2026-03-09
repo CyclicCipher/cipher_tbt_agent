@@ -188,9 +188,15 @@ geometry-appropriate metric for the detected topology.
 3. Recompute the similarity matrix `_build_sim_matrix` with new metric.
 4. Measure: does geometry-adapted E3 have lower triple prediction error than JSD-E3?
 
-**Deliverable:** `metric='auto'` parameter on `RelationalLearner` that selects metric
-from R0 geometry detection.
-**Progress:** ⬜ Not started
+**Deliverable:** `adapt_metric(topology)` method on `RelationalLearner`; `_build_sim_matrix_adapted()`.
+**Progress:** ✅ Implemented
+
+**Latin result (3 books):** directed_2d → 2D classical MDS sim matrix. JSD-metric: 0.159
+vs directed_2d-metric: 0.160 (delta=+0.001). Marginal improvement expected: K=10 with
+mega-cluster C0 means JSD is already near-optimal. Larger improvements expected on:
+- Hyperbolic data (knowledge graphs): BFS hop-count metric vs JSD
+- Circular data (time series): cosine metric vs JSD
+- Linear data (token sequences): 1D MDS position distance vs JSD
 
 ---
 
@@ -249,6 +255,6 @@ No neural network. No training on this specific question.
 | **R1** | **Relational E4: paradigmatic substitutability** | ✅ Done | — |
 | **R2** | **Relational E5: sense disambiguation** | ✅ Done | — |
 | **R3** | **Relational E6: structural meta-synthesis** | ✅ Done | — |
-| R4 | Geometry-adapted distance metric | ⬜ | — |
+| **R4** | **Geometry-adapted distance metric** | ✅ Done | — |
 | R5 | Multi-hop prediction benchmark | ⬜ | — |
 | R6 | Compositional relational inference | ⬜ | — |

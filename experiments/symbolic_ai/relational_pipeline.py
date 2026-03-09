@@ -167,6 +167,7 @@ class RelationalLearner:
         if verbose:
             print('  E3: building successor distributions...')
         succ_dists = _build_rel_succ_dists(self.ai, self.clusters)
+        self._succ_dists = succ_dists   # stored for R4 adapt_metric()
         sim_matrix = _build_sim_matrix(succ_dists, self._K, e3_temperature)
 
         # Free E0 bigram examples — clustering is complete
@@ -380,6 +381,34 @@ class RelationalLearner:
             self._wgc_soft[key] = _ask_soft(
                 key, self._wgc_cache, self._sim_matrix, self._K)
         return self._wgc_soft[key]
+
+    # ---- R4: geometry-adapted metric ----------------------------------------
+
+    def adapt_metric(self, topology: str,
+                     temperature: float = 2.0) -> None:
+        """R4: Rebuild E3 sim matrix using the geometry-appropriate metric.
+
+        Replaces the default JSD-based sim matrix with one tuned to the
+        detected data topology (from GeometryDetector).
+
+        Topology → metric:
+            directed_linear / undirected_linear → 1D MDS position distance
+            directed_2d / undirected_2d         → 2D classical MDS L2 distance
+            hyperbolic                           → BFS category-graph hops
+            dense / general_graph / *            → JSD (default, no change)
+
+        Clears the lazy E3 caches so next predictions use the new metric.
+        """
+        succ_dists = getattr(self, '_succ_dists', {})
+        if not succ_dists or self._K == 0:
+            return
+
+        self._sim_matrix = _build_sim_matrix_adapted(
+            succ_dists, self._K, topology, temperature,
+            trans=getattr(self, '_trans', {}))
+        # Clear lazy caches
+        self._nc_soft  = {}
+        self._wgc_soft = {}
 
 
 # ---------------------------------------------------------------------------
@@ -598,6 +627,123 @@ def _build_rel_succ_dists(ai: SymbolicAI, clusters: dict) -> dict:
             n += 1
         succ[cid] = ({k: v / n for k, v in merged.items()} if n else {})
     return succ
+
+
+def _build_sim_matrix_adapted(succ_dists: dict, K: int,
+                               topology: str, temperature: float = 2.0,
+                               trans: dict | None = None) -> list:
+    """R4: Build K×K similarity matrix tuned to the detected geometry.
+
+    Metric selection by topology:
+        directed_linear / undirected_linear → 1D MDS embedding, |pos_i - pos_j|
+        directed_2d / undirected_2d         → 2D classical MDS, L2 distance
+        hyperbolic                           → BFS hop-count on category graph
+        dense / general_graph / *            → JSD (default)
+
+    Returns:
+        K×K float matrix where m[i][j] = exp(-T * d(i, j)).
+    """
+    import numpy as np
+
+    # Build K×K JSD pairwise distance matrix (always computed as base)
+    D = np.zeros((K, K))
+    for i in range(K):
+        di = succ_dists.get(i, {})
+        for j in range(i + 1, K):
+            dj = succ_dists.get(j, {})
+            d = _jsd(di, dj)
+            D[i, j] = D[j, i] = d
+
+    topo = topology.lower()
+
+    # ---- 1D MDS (linear topology) -----------------------------------------
+    if topo in ('directed_linear', 'undirected_linear', 'linear'):
+        dim = 1
+    # ---- 2D MDS (planar topology) ------------------------------------------
+    elif topo in ('directed_2d', 'undirected_2d', 'grid'):
+        dim = 2
+    # ---- BFS hop-count (hyperbolic / tree topology) ------------------------
+    elif topo in ('hyperbolic', 'directed_dag', 'undirected_tree', 'tree'):
+        # Build category adjacency from _trans (if available)
+        adj: list = [set() for _ in range(K)]
+        if trans:
+            for rel, src_map in trans.items():
+                for c_src, tgt_map in src_map.items():
+                    try:
+                        i = int(c_src)
+                    except (ValueError, TypeError):
+                        continue
+                    for c_tgt in tgt_map:
+                        try:
+                            j = int(c_tgt)
+                        except (ValueError, TypeError):
+                            continue
+                        if 0 <= i < K and 0 <= j < K:
+                            adj[i].add(j)
+                            adj[j].add(i)
+        # BFS hop distances
+        hop = np.full((K, K), K, dtype=float)
+        for src in range(K):
+            hop[src, src] = 0
+            queue = [src]
+            visited = {src}
+            dist = 0
+            while queue:
+                nxt = []
+                dist += 1
+                for node in queue:
+                    for nb in adj[node]:
+                        if nb not in visited:
+                            visited.add(nb)
+                            hop[src, nb] = dist
+                            nxt.append(nb)
+                queue = nxt
+        max_hop = hop[hop < K].max() if (hop < K).any() else 1.0
+        dist_mat = hop / max(max_hop, 1.0)
+        m = [[math.exp(-temperature * dist_mat[i][j]) if i != j else 1.0
+              for j in range(K)] for i in range(K)]
+        return m
+
+    # ---- dense / general_graph / unknown → JSD (no change) ----------------
+    else:
+        m = [[0.0] * K for _ in range(K)]
+        for i in range(K):
+            di = succ_dists.get(i, {})
+            for j in range(K):
+                m[i][j] = (1.0 if i == j
+                           else math.exp(-temperature * D[i, j]))
+        return m
+
+    # ---- Classical MDS for linear or 2D topologies ------------------------
+    n = K
+    D2 = D ** 2
+    # Double-centering
+    row_mean = D2.mean(axis=1, keepdims=True)
+    col_mean = D2.mean(axis=0, keepdims=True)
+    grand_mean = D2.mean()
+    B = -0.5 * (D2 - row_mean - col_mean + grand_mean)
+
+    # Eigendecompose (B is symmetric PSD)
+    eigvals, eigvecs = np.linalg.eigh(B)
+    # Sort descending
+    idx = np.argsort(eigvals)[::-1]
+    eigvals = eigvals[idx]
+    eigvecs = eigvecs[:, idx]
+
+    # Take top 'dim' components (clamp negative eigenvalues to 0)
+    lam = np.maximum(eigvals[:dim], 0.0)
+    coords = eigvecs[:, :dim] * np.sqrt(lam)  # K × dim
+
+    # L2 pairwise distances in embedding space
+    m = [[0.0] * K for _ in range(K)]
+    for i in range(K):
+        for j in range(K):
+            if i == j:
+                m[i][j] = 1.0
+            else:
+                d = float(np.linalg.norm(coords[i] - coords[j]))
+                m[i][j] = math.exp(-temperature * d)
+    return m
 
 
 def _preprocess_patch(patch_uint8) -> 'np.ndarray':

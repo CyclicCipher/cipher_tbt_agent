@@ -156,6 +156,25 @@ def build_triples(sequences: list[list[str]],
 # Reporting
 # ---------------------------------------------------------------------------
 
+def _eval_accuracy(learner: RelationalLearner,
+                   triples: list[tuple[str, str, str]],
+                   n_sample: int = 5000,
+                   rel: str = 'next') -> float:
+    """Estimate E3 top-1 prediction accuracy on a random sample of triples."""
+    import random
+    subset = [t for t in triples if t[1] == rel]
+    if not subset:
+        return 0.0
+    if len(subset) > n_sample:
+        subset = random.sample(subset, n_sample)
+    correct = 0
+    for a, r, b in subset:
+        pred = learner.predict(a, r)
+        if pred == b:
+            correct += 1
+    return correct / len(subset)
+
+
 def _label(chars: list[str]) -> str:
     has_spc = ' ' in chars
     letters = ''.join(sorted(c for c in chars if c != ' '))
@@ -316,6 +335,16 @@ def main() -> None:
     print(f'\nR3: Relational algebra (E6)...')
     algebra = RelationalAlgebra()
     algebra.fit(learner, triples=triples, verbose=True)
+
+    print(f'\nR4: Geometry-adapted metric...')
+    topology = geo.topology
+    acc_before = _eval_accuracy(learner, triples, n_sample=5000)
+    learner.adapt_metric(topology)
+    acc_after = _eval_accuracy(learner, triples, n_sample=5000)
+    print(f'  Topology: {topology}')
+    print(f'  E3 accuracy  JSD-metric: {acc_before:.3f}  '
+          f'{topology}-metric: {acc_after:.3f}  '
+          f'delta={acc_after - acc_before:+.3f}')
 
     report(learner, rel_clusterer, grammar, triples)
     print()
