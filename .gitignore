@@ -63,3 +63,7 @@ experiments/ePC_Mamba/diagnostics_copy_epc_final.png
 
 # Trained GlyphReader pickles
 experiments/symbolic_ai/glyph_reader*.pkl
+
+# PCH training run logs and checkpoints (generated artifacts)
+experiments/symbolic_ai/*.log
+experiments/symbolic_ai/pch_*.pkl
