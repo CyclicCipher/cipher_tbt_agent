@@ -246,12 +246,45 @@ be used in the Phase 3 CTKG-guided generation: the CTKG selects the high-level p
 
 ---
 
+## Tokenisation Strategy
+
+**Character-level is the correct tokenisation for mathematical notation.**
+
+Mathematical expressions are inherently compositional — they must NOT be treated as atomic
+tokens.  Word-level splitting (on spaces) would produce monomers like `3x^2`, `cos(x)`,
+`x^3` as indivisible units, which would require the system to memorise each expression
+independently and prevent generalisation across related forms.
+
+Character-level tokenisation — splitting on every individual character — lets the
+composition hierarchy discover the internal structure automatically:
+
+| Expression | Atom sequence | Compositions learned |
+|---|---|---|
+| `x^2` | `x` `^` `2` | `(x,^,2)` |
+| `x^3` | `x` `^` `3` | `(x,^,3)` — shares `x^` prefix with above |
+| `x^4` | `x` `^` `4` | generalises from `x^2`, `x^3` without new training |
+| `sin(x)` | `s` `i` `n` `(` `x` `)` | `sin` as sub-composition; `(x)` suffix |
+| `cos(x)` | `c` `o` `s` `(` `x` `)` | shares `(x)` composition with `sin(x)` |
+| `sin(2x)` | `s` `i` `n` `(` `2` `x` `)` | shares `sin(` prefix; `2x` sub-composition |
+
+This means:
+- Training on `x^2` and `x^3` gives the system most of what it needs to generate `x^4`.
+- Training on `sin(x)` and `cos(x)` shares the `(x)` suffix composition, so `tan(x)` is
+  partially covered.
+- Polynomial coefficients (e.g. `3x^2`) decompose as `3` · `x^2`, sharing the `x^2`
+  composition regardless of which coefficient appears.
+
+The vocabulary is small (ASCII digits, lowercase letters, `^`, `(`, `)`, `+`, `-`, `=`,
+`.`, `/`, space, newline ≈ 50 chars) so there is no vocabulary explosion at character level.
+
+---
+
 ## Open Questions / Risks
 
 | Risk | Mitigation |
 |---|---|
-| Character-level MorphismGraph not rich enough for ODE generation | Use word-level tokenisation (split on spaces) for Phase 0 to reduce vocabulary explosion |
 | Greedy decoder gets stuck in a loop | Add position penalty (reduce probability of repeating the last K tokens) |
 | 120 training examples insufficient | Supplement with CLTK or Gutenberg corpus for language priming before ODE training |
+| Compositions grow too slowly on short training corpus | Character-level ensures many shared sub-sequences (e.g. `x^` prefix reused across all polynomial terms); compositions accumulate quickly |
 | Phase 1 NL parsing requires significantly more data | Use a fixed set of 5–10 sentence templates per ODE family; expand gradually |
 | Diagram reading (Phase 2) requires vision pipeline that's not yet wired | Phase 2 is a separate milestone; do not block Phase 0/1 on it |
