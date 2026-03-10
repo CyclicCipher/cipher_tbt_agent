@@ -215,10 +215,32 @@ composition C at level N, its image under the coproduct functor is the pair
 
 ---
 
-## Prediction: P(next | context)
+## Prediction and Generation
 
-Given the current parse stack, the predictor produces a probability
-distribution over the next symbol for each outgoing edge type.
+There are two distinct modes. The key principle governing both:
+
+> **Predict at the highest level where the context fully constrains the
+> output, then expand downward using learned decomposition rules until the
+> required output resolution is reached.**
+
+Predicting one pixel at a time when the goal is "a blue elephant" is the
+wrong level. The model has learned a hierarchy (pixels → patches → textures →
+parts → objects → scenes). Generation at pixel level without first committing
+to high-level structure produces incoherence. The correct approach is always
+top-down: constrain at the highest applicable level, then decompose.
+
+This also makes generation quality honest: if the model has never seen enough
+elephants to form a stable "elephant" Composition at level 4, it cannot
+generate one coherently. It will have to assemble from level-3 parts, which
+may not fit together. The system accurately reflects the limits of what it has
+learned.
+
+---
+
+### predict() — next-symbol prediction (bottom-up, transformer-replacement mode)
+
+Given the current parse stack, produces P(next symbol | context) for each
+outgoing edge type.
 
 ```
 predict(parse_stack, edge_type) → dict[symbol → probability]:
@@ -242,6 +264,57 @@ predict(parse_stack, edge_type) → dict[symbol → probability]:
 
 **Complexity**: O(degree(S)) per prediction, where degree = number of distinct
 outgoing edges from S. In a compressed grammar, degree ≪ V.
+
+---
+
+### generate() — top-down expansion (generative mode)
+
+Generation is **analysis-by-synthesis**: the coproduct Δ run in reverse.
+The same composition rules learned during observation are applied downward to
+expand a high-level goal into a fully-specified output. There is no separate
+generative model — the coproduct IS the generative model.
+
+```
+generate(goal_symbol, target_level) → list[Atom]:
+
+    1. If level(goal_symbol) == target_level: return [goal_symbol].
+
+    2. Look up the decomposition rules for goal_symbol in the MorphismGraph.
+       These are the rules created by create_composition() during learning:
+       goal_symbol was formed by merging (S1, S2), so Δ(goal_symbol) = (S1, S2).
+
+    3. If multiple decompositions exist (the symbol appears in multiple rules):
+       sample from P(decomposition | goal_symbol) weighted by rule frequency.
+       This is the learned distribution over how this symbol is typically
+       realised — not a free parameter.
+
+    4. Recurse: generate(S1, target_level) + generate(S2, target_level).
+```
+
+**Example — "blue elephant" image generation:**
+- Level 4 symbol `[elephant:blue]` → Δ → (`[torso:blue]`, `[limbs:grey]`,
+  `[trunk:grey]`, `[ears:grey]`) at level 3
+- Each level-3 part → Δ → texture regions at level 2
+- Each region → Δ → colour patches at level 1
+- Each patch → Δ → individual pixel colour tokens at level 0
+
+At no point does the system predict pixels without high-level constraint.
+Each expansion step is O(degree) in the number of known decompositions for
+that symbol.
+
+**When the goal symbol is underspecified** (e.g. "an elephant" without a
+colour): the missing attribute is sampled from the marginal distribution
+observed during training. P(colour | elephant) is an edge in the MorphismGraph.
+This is not hallucination — it is the system's honest posterior over what
+elephants typically look like.
+
+**When the goal symbol has never been seen** (zero-shot generation): back off
+to its CTKG type. P(decomposition | type(goal)) uses the type-level transition
+matrix. Generation quality degrades gracefully — the output will be a
+plausible instance of the type, not a specific known instance.
+
+**Complexity**: O(output_size × degree) total, where output_size = number of
+atoms in the fully expanded output. Linear in the size of what is generated.
 
 ---
 
