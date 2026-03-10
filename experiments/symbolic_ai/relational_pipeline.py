@@ -2598,7 +2598,7 @@ class RelationalParadigmDiscoverer:
             triples:           list | None = None,
             verbose:           bool = False,
             use_atom_partners: bool = True,
-            max_atoms:         int  = 200,
+            max_atoms:         int  = 5000,
             ) -> 'RelationalParadigmDiscoverer':
         """Fit role signatures from learner._atom_counts (or triples as fallback).
 
@@ -2609,7 +2609,10 @@ class RelationalParadigmDiscoverer:
                 If False, use E0 category id as partner label (K-dimensional),
                 which is more abstract but loses sub-category distinctions.
             max_atoms: Cap the number of atoms clustered (top-N by frequency).
-                       Prevents O(V²×D) blowup at word/chunk levels where V≫200.
+                       5000 is large enough to cover any character- or morpheme-level
+                       vocabulary.  The context dimension is independently capped
+                       (min(2000, 2×V) keys) and _jsd_cluster uses row-by-row
+                       fallback when memory exceeds 128 MB, so blowup is prevented.
 
         O(V×R×V) from learner._atom_counts — no triple scan needed.
         For character-level data: V=27, D≤R×V≈108 → instant.
@@ -2674,7 +2677,8 @@ class RelationalParadigmDiscoverer:
             if total > 0:
                 sigs[atom] = {k: v / total for k, v in combined.items()}
 
-        # Cap to top-max_atoms most frequent atoms (prevents O(V²×D) blowup).
+        # Cap to top-max_atoms most frequent atoms (safety valve; max_atoms=5000
+        # is large enough for any character/morpheme vocabulary in practice).
         if len(sigs) > max_atoms:
             top = sorted(sigs, key=lambda a: -atom_freq.get(a, 0))[:max_atoms]
             top_set = set(top)
@@ -2993,19 +2997,18 @@ class RelationalAlgebra:
         """
         Args:
             learner:  Fitted RelationalLearner (provides ``assignment`` + ``_atom_counts``).
-            triples:  Ignored — kept for backward compat. Uses learner._atom_counts when
-                      available (V≤300 → atom-level matrices, else K×K category-level).
+            triples:  Fallback corpus when learner._atom_counts is unavailable.
+                      When _atom_counts is present, it is always used regardless of V.
             max_jsd:  Maximum row-weighted average JSD to accept a rule.
-        """
-        V = len(learner.assignment)
-        if hasattr(learner, '_atom_counts') and V <= 300:
-            use_atom_level = True
-        elif triples is not None:
-            use_atom_level = (V <= 300)
-        else:
-            use_atom_level = False
 
-        if use_atom_level:
+        Uses atom-level V×V matrices whenever learner._atom_counts is available —
+        dense numpy handles V up to ~1000+ without issue.  Falls back to K×K
+        category-level matrices only when _atom_counts is absent (e.g. loaded
+        from a compressed checkpoint without raw counts).
+        """
+        if hasattr(learner, '_atom_counts') and learner._atom_counts:
+            return self._fit_atom_level(learner, triples, verbose, max_jsd)
+        elif triples is not None:
             return self._fit_atom_level(learner, triples, verbose, max_jsd)
         else:
             return self._fit_cat_level(learner, verbose, max_jsd)
@@ -3016,14 +3019,20 @@ class RelationalAlgebra:
                         verbose: bool,
                         max_jsd: float,
                         ) -> 'RelationalAlgebra':
-        """Atom-level V×V matrices — high resolution, O(V³) composition."""
+        """Atom-level V×V matrices — high resolution, O(V³) composition.
+
+        Sparse-aware: only observed (i,j) pairs are stored during counting,
+        so _make_mat iterates the observed non-zeros rather than all V² cells.
+        Dense numpy handles V up to ~1000+ without issue.
+        """
         atoms   = sorted(learner.assignment.keys())
         V       = len(atoms)
         idx     = {a: i for i, a in enumerate(atoms)}
 
-        # Count raw triples — O(V×R×V) from _atom_counts, else O(N) from triples
-        raw: dict = collections.defaultdict(int)             # (rel, src_i, tgt_j) → count
-        rel_src_total: dict = collections.defaultdict(       # rel → {src_i → total}
+        # Sparse count collection: by_src[rel][i][j] → count
+        by_src: dict = collections.defaultdict(
+            lambda: collections.defaultdict(lambda: collections.defaultdict(int)))
+        rel_src_total: dict = collections.defaultdict(   # rel → {src_i → total}
             lambda: collections.defaultdict(int))
 
         relations_seen: set = set()
@@ -3037,7 +3046,7 @@ class RelationalAlgebra:
                     if b_s not in idx:
                         continue
                     j = idx[b_s]
-                    raw[(r_s, i, j)]      += cnt
+                    by_src[r_s][i][j]     += cnt
                     rel_src_total[r_s][i] += cnt
         else:
             for a, r, b in (triples or []):
@@ -3045,23 +3054,22 @@ class RelationalAlgebra:
                 if a_s not in idx or b_s not in idx:
                     continue
                 i, j = idx[a_s], idx[b_s]
-                raw[(r_s, i, j)]     += 1
+                by_src[r_s][i][j]     += 1
                 rel_src_total[r_s][i] += 1
                 relations_seen.add(r_s)
 
         relations = sorted(relations_seen)
         self.relations = relations
 
-        # Build V×V probability matrices
+        # Build V×V probability matrices — sparse fill: only iterate observed pairs.
         def _make_mat(rel: str) -> list:
             mat = [[0.0] * V for _ in range(V)]
-            for i, tot in rel_src_total[rel].items():
+            for i, row in by_src[rel].items():
+                tot = rel_src_total[rel].get(i, 0)
                 if tot <= 0:
                     continue
-                for j in range(V):
-                    c = raw.get((rel, i, j), 0)
-                    if c:
-                        mat[i][j] = c / tot
+                for j, c in row.items():
+                    mat[i][j] = c / tot
             return mat
 
         mats = {r: _make_mat(r) for r in relations}
