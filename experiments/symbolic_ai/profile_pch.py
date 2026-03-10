@@ -84,6 +84,18 @@ def memory_snapshot(pch, label=''):
                 rows.append((f'L{lvl}.{attr}', _deep_size(d)))
         h = pch._surp_hist[lvl]
         rows.append((f'L{lvl}._surp_hist', _deep_size(h)))
+    # chunk sequences (needed for R0-R6 sense splitter)
+    for lvl, seqs in enumerate(pch._chunk_seqs):
+        if seqs:
+            rows.append((f'L{lvl}._chunk_seqs', _deep_size(seqs)))
+    # surface string lengths by level (to understand exponential growth)
+    surf_by_level: dict = {}
+    for seg in pch.vocab._segments:
+        lv = getattr(seg, 'level', 1)
+        surf_by_level.setdefault(lv, []).append(len(seg.surface))
+    for lv, lens in sorted(surf_by_level.items()):
+        avg = sum(lens) / len(lens) if lens else 0
+        rows.append((f'L{lv}.segment_surfaces(n={len(lens)},avg={avg:.0f}ch)', sum(lens)))
 
     rows.sort(key=lambda r: -r[1])
     ds_total = sum(r[1] for r in rows)

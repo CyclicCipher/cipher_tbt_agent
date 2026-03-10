@@ -685,26 +685,51 @@ class RelationalLearner:
                 print('  cluster_from_counts: no _atom_counts — skipping')
             return
 
-        # ── Reconstruct fwd_raw / bwd_raw from _atom_counts ─────────────────
+        # ── Pre-filter to top-N atoms BEFORE building bwd_raw ───────────────
+        # Building bwd_raw over all atoms creates O(unique_targets × unique_sources)
+        # temporary dict entries — for large corpora this causes multi-GB spikes.
+        # Solution: compute forward totals first (one pass, no large allocs),
+        # select the top-N atoms, then only build fwd/bwd for those atoms.
+        fwd_totals: dict = defaultdict(int)
+        n_unique_fwd: int = 0
+        for (a_s, r_s), ctr in counts.items():
+            total = sum(ctr.values())
+            fwd_totals[a_s] += total
+            if a_s not in fwd_totals:
+                n_unique_fwd += 1
+        n_unique = len(fwd_totals)
+        if n_unique < 2:
+            return
+        # Determine which atoms to include.
+        if len(fwd_totals) > max_cluster_atoms:
+            top_set: set = set(
+                sorted(fwd_totals, key=lambda a: -fwd_totals[a])[:max_cluster_atoms]
+            )
+            if verbose:
+                print(f'  cluster_from_counts: V={n_unique} → top {max_cluster_atoms} atoms')
+        else:
+            top_set = set(fwd_totals)
+
+        # ── Reconstruct fwd_raw / bwd_raw for top atoms only ─────────────────
         fwd_raw: dict = defaultdict(_Counter)   # atom → {'rel:tgt': count}
         bwd_raw: dict = defaultdict(_Counter)   # atom → {'rev_rel:src': count}
         _rel_raw: dict = defaultdict(_Counter)
 
         for (a_s, r_s), ctr in counts.items():
+            if a_s not in top_set:
+                for b_s, cnt in ctr.items():
+                    _rel_raw[r_s][b_s] += cnt
+                continue
             for b_s, cnt in ctr.items():
                 fwd_raw[a_s][f'{r_s}:{b_s}']     += cnt
-                bwd_raw[b_s][f'rev_{r_s}:{a_s}'] += cnt
+                if b_s in top_set:
+                    bwd_raw[b_s][f'rev_{r_s}:{a_s}'] += cnt
                 _rel_raw[r_s][b_s]                += cnt
-
-        all_atoms_v = sorted(set(fwd_raw) | set(bwd_raw))
-        n_unique = len(all_atoms_v)
-        if n_unique < 2:
-            return
 
         # ── E0: compound signatures ──────────────────────────────────────────
         sigs:      dict = {}
         atom_freq: dict = {}
-        for atom in all_atoms_v:
+        for atom in top_set:
             fwd_t = sum(fwd_raw[atom].values())
             bwd_t = sum(bwd_raw[atom].values())
             d: dict = {}
@@ -717,14 +742,6 @@ class RelationalLearner:
             if d:
                 sigs[atom] = d
                 atom_freq[atom] = fwd_t + bwd_t
-
-        # ── Restrict to top-N most frequent atoms (O(V²) JSD cap) ───────────
-        if len(sigs) > max_cluster_atoms:
-            top_atoms = sorted(sigs, key=lambda a: -atom_freq.get(a, 0))
-            top_set   = set(top_atoms[:max_cluster_atoms])
-            sigs      = {a: s for a, s in sigs.items() if a in top_set}
-            if verbose:
-                print(f'  cluster_from_counts: V={n_unique} → top {max_cluster_atoms} atoms')
 
         # Cap output vocab (mirrors fit() behaviour).
         n_for_cap  = len(sigs)
