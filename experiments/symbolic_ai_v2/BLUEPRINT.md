@@ -423,6 +423,55 @@ independently testable with a toy example in < 1 second.
 
 ---
 
+## Data Representation
+
+Full specification (bit layouts, serialization format, Rust mapping) is in
+`DATA_FORMATS.md`. Key decisions summarised here.
+
+### Edge types are small integers, not strings
+
+Edge types (topology directions) are encoded as `uint8` at the MorphismGraph
+boundary. A global `EdgeTypeRegistry` maps human-readable names to integers at
+graph creation. The inner observation loop never touches strings.
+
+Max edge types by topology: 2 (1D), 4 (2D 4-conn), 8 (2D 8-conn / 3D 6-conn+time),
+28 (3D 26-conn+time = worst perceptual case). All fit in `uint8` with room to spare.
+
+### Symbol IDs are sequential integers
+
+Symbols are created in order (0, 1, 2, …). The symbol table is a list, not a
+dict — indexed directly by ID in O(1). No hash overhead for symbol lookup.
+
+Symbol count grows with corpus size and has no cap. The 89-book Latin corpus
+produced ~1.2M compositions.
+
+### Key encoding for edge and pair tables
+
+```
+Edge key  : (src: u32,  etype: u8,  tgt: u32)          → 9 bytes
+Pair key  : (Q:   u32,  e1:   u8,  P:  u32,
+             e2:  u8,   S:    u32)                      → 14 bytes
+```
+
+**Python (validation phase):** plain tuple keys. Correct for all corpus sizes,
+no overflow risk, minimal implementation complexity.
+
+**Rust (production rewrite):** typed structs hashed with AHash. The 14-byte
+`PairKey` fits in a single cache line and hashes in one SIMD operation.
+
+Packed int64 pair keys (sometimes proposed as an optimisation) only work when
+symbol IDs are small. With 28 edge types (5 bits), symbol IDs are limited to
+131,072 — the 89-book corpus already exceeds this. Packed keys are not used.
+
+### Checkpoint format
+
+Numpy `.npz` arrays (symbol table, edge COO, pair COO, rules) plus a JSON
+header with schema version and edge type registry. Load time is a single
+`numpy.load()` call. Estimated size: ~90 MB raw → 12–23 MB with zstd
+(pairs discarded after training; only needed during learning).
+
+---
+
 ## Complexity summary
 
 | Operation | Complexity | Notes |
