@@ -715,6 +715,27 @@ def main() -> None:
         print(f'  Uniform baseline (log2 V={V0}):            {baseline:.3f} bits/token')
         print(f'  Compression gain: {baseline - ppl:.3f} bits/token')
 
+        # M19: also test at L1/L2 where chunk beliefs carry more semantic content.
+        # _chunk_seqs is empty after load_compressed(); run a frozen pass to fill it.
+        pch2._chunk_seqs     = [[] for _ in range(pch2.n_levels)]
+        pch2._chunk_seqs_tok = [0] * pch2.n_levels
+        pch2.reprocess(eval_seqs)   # frozen pass: fills _chunk_seqs, doesn't learn
+        pch2.init_beliefs()         # re-init beliefs after reprocess reset them
+        for _lvl in (1, 2):
+            _eval = pch2._chunk_seqs[_lvl] if _lvl < len(pch2._chunk_seqs) else []
+            if not _eval:
+                continue
+            _ppl    = pch2.evaluate_perplexity(_eval, level=_lvl)
+            _ppl_bc = pch2.evaluate_perplexity(_eval, level=_lvl,
+                                               belief_conditioned=True, belief_weight=0.5)
+            _assign = getattr(pch2.learners[_lvl], 'assignment', {}) or {}
+            _V = len(_assign) or len(set(c for s in _eval for c in s))
+            _bl = _math.log2(_V) if _V > 1 else 1.0
+            print(f'  Level-{_lvl} bigram ppl: {_ppl:.3f}  '
+                  f'belief-cond: {_ppl_bc:.3f}  '
+                  f'(Δ={_ppl - _ppl_bc:+.3f})  '
+                  f'baseline (log2 {_V}): {_bl:.3f}')
+
         # Reasoning chain demo: what follows a word in the most common category?
         # Pick 3 representative surface forms and show 2-hop predictions.
         demo_tokens = [' ', 'e', 't']

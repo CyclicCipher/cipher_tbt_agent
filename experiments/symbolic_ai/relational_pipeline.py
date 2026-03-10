@@ -6134,9 +6134,11 @@ class PredictiveCodingHierarchy:
             }
 
             if not verbose:
-                n_roles  = len(getattr(rpd, 'role_categories', []))
-                n_rules  = len(getattr(ra,  'rules',           []))
-                n_novel  = len(getattr(ra,  'novel',           []))
+                # Correct attribute names (role_clusters, composition_table).
+                n_roles  = len(getattr(rpd, 'role_clusters', {}))
+                ctable   = getattr(ra, 'composition_table', {})
+                n_rules  = sum(1 for rk, _ in ctable.values() if rk is not None)
+                n_novel  = sum(1 for rk, _ in ctable.values() if rk is None)
                 geom_lbl = getattr(geo, 'topology', '?')
                 print(f'  L{level:02d}  cats={n_cats}  roles={n_roles}  '
                       f'geom={geom_lbl}  rules={n_rules}(+{n_novel} novel)')
