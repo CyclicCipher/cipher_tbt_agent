@@ -833,15 +833,67 @@ def _build_succ_dists(ai: SymbolicAI, clusters: dict,
 
 
 def _build_sim_matrix(succ_dists: dict, K: int,
-                       temperature: float = 2.0) -> list:
-    """K×K similarity matrix: sim(i,j) = exp(-T·JSD(succ[i], succ[j]))."""
-    m = [[0.0] * K for _ in range(K)]
+                       temperature: float = 2.0):
+    """K×K similarity matrix: sim(i,j) = exp(-T·JSD(succ[i], succ[j])).
+
+    Returns a 2-D numpy float64 array (backwards-compatible with
+    list-of-lists indexing used in _ask_soft).
+    Falls back to pure-Python list-of-lists if numpy is unavailable.
+
+    Complexity: O(K·V) numpy ops per row, K rows → O(K²·V) numpy
+    vs O(K²·D) Python dict iterations in the old version.
+    For K=95, V=200 this is ~10-100× faster than the Python version.
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        # Pure-Python fallback (original algorithm).
+        m = [[0.0] * K for _ in range(K)]
+        for i in range(K):
+            di = succ_dists.get(i, {})
+            for j in range(K):
+                m[i][j] = (1.0 if i == j
+                           else math.exp(-temperature * _jsd(di, succ_dists.get(j, {}))))
+        return m
+
+    if K == 0:
+        return np.eye(0, dtype=np.float64)
+
+    # ── Build K×V dense probability matrix ──────────────────────────────
+    all_tokens = sorted({tok for d in succ_dists.values() for tok in d})
+    V = len(all_tokens)
+    if V == 0:
+        return np.eye(K, dtype=np.float64)
+
+    tok_idx = {t: idx for idx, t in enumerate(all_tokens)}
+    P = np.zeros((K, V), dtype=np.float64)
+    for cid, dist in succ_dists.items():
+        if isinstance(cid, int) and 0 <= cid < K:
+            for tok, prob in dist.items():
+                j = tok_idx.get(tok)
+                if j is not None:
+                    P[cid, j] = prob
+
+    # ── Vectorised pairwise JSD via H(mix) − ½(H(p)+H(q)) ──────────────
+    # Same algorithm as _jsd_cluster's numpy path.
+    eps = 1e-15
+    with np.errstate(divide='ignore', invalid='ignore'):
+        log_P = np.where(P > eps, np.log2(P), 0.0)
+    H_P = -np.einsum('iv,iv->i', P, log_P)  # (K,) per-row entropies
+
+    # Row-by-row broadcast avoids K²·V peak allocation.
+    JSD = np.zeros((K, K), dtype=np.float64)
     for i in range(K):
-        di = succ_dists.get(i, {})
-        for j in range(K):
-            m[i][j] = (1.0 if i == j
-                       else math.exp(-temperature * _jsd(di, succ_dists.get(j, {}))))
-    return m
+        mix = (P[i:i+1, :] + P) * 0.5               # (K, V)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            log_mix = np.where(mix > eps, np.log2(mix), 0.0)
+        H_mix = -np.einsum('jv,jv->j', mix, log_mix)  # (K,)
+        JSD[i] = np.maximum(0.0, H_mix - (H_P[i] + H_P) * 0.5)
+    np.fill_diagonal(JSD, 0.0)
+
+    sim = np.exp(-temperature * JSD)
+    np.fill_diagonal(sim, 1.0)
+    return sim
 
 
 def _build_ctx_assignment(sequences: list, base_assignment: dict,

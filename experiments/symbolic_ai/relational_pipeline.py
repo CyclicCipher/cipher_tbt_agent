@@ -770,7 +770,10 @@ class RelationalLearner:
         self.clusters   = clusters
         self._K         = len(clusters)
 
-        self._rebuild_caches_from_assignment(assignment, clusters, _rel_raw=_rel_raw)
+        # Pass fwd_raw to avoid a second O(E) scan of _atom_counts inside
+        # _rebuild_caches_from_assignment (eliminates the double-scan).
+        self._rebuild_caches_from_assignment(
+            assignment, clusters, _rel_raw=_rel_raw, _fwd_raw=fwd_raw)
 
         if verbose:
             print(f'  cluster_from_counts: V={n_unique} atoms → K={self._K} clusters')
@@ -780,6 +783,7 @@ class RelationalLearner:
         assignment: dict,
         clusters:   dict,
         _rel_raw:   'dict | None' = None,
+        _fwd_raw:   'dict | None' = None,
     ) -> None:
         """Rebuild E1/E3 caches from any ``assignment`` dict.
 
@@ -798,6 +802,10 @@ class RelationalLearner:
             Optional pre-computed ``{rel: {target: count}}`` dict (passed by
             ``cluster_from_counts`` to avoid a second scan of ``_atom_counts``).
             If *None* the dict is reconstructed internally.
+        _fwd_raw
+            Optional pre-computed ``{atom: {'rel:target': count}}`` dict (passed
+            by ``cluster_from_counts`` to eliminate the second O(E) scan of
+            ``_atom_counts``).  If *None* fwd_raw is reconstructed from counts.
         """
         import collections as _col
         from collections import Counter as _Counter
@@ -805,18 +813,30 @@ class RelationalLearner:
         counts = getattr(self, '_atom_counts', {})
 
         # ── Reconstruct fwd_raw (and optionally _rel_raw) ────────────────────
-        fwd_raw: dict = _col.defaultdict(_Counter)
-        if _rel_raw is None:
-            _rel_raw_local: dict = _col.defaultdict(_Counter)
-            for (a_s, r_s), ctr in counts.items():
-                for b_s, cnt in ctr.items():
-                    fwd_raw[a_s][f'{r_s}:{b_s}'] += cnt
-                    _rel_raw_local[r_s][b_s]      += cnt
-            _rel_raw = _rel_raw_local
+        if _fwd_raw is not None:
+            # Caller already built fwd_raw — skip the O(E) scan entirely.
+            fwd_raw: dict = _fwd_raw
+            if _rel_raw is None:
+                # Need to build _rel_raw from counts (rare: only when called
+                # without a pre-computed _rel_raw, e.g. from type-abstraction).
+                _rel_raw_local: dict = _col.defaultdict(_Counter)
+                for (a_s, r_s), ctr in counts.items():
+                    for b_s, cnt in ctr.items():
+                        _rel_raw_local[r_s][b_s] += cnt
+                _rel_raw = _rel_raw_local
         else:
-            for (a_s, r_s), ctr in counts.items():
-                for b_s, cnt in ctr.items():
-                    fwd_raw[a_s][f'{r_s}:{b_s}'] += cnt
+            fwd_raw = _col.defaultdict(_Counter)
+            if _rel_raw is None:
+                _rel_raw_local = _col.defaultdict(_Counter)
+                for (a_s, r_s), ctr in counts.items():
+                    for b_s, cnt in ctr.items():
+                        fwd_raw[a_s][f'{r_s}:{b_s}'] += cnt
+                        _rel_raw_local[r_s][b_s]      += cnt
+                _rel_raw = _rel_raw_local
+            else:
+                for (a_s, r_s), ctr in counts.items():
+                    for b_s, cnt in ctr.items():
+                        fwd_raw[a_s][f'{r_s}:{b_s}'] += cnt
 
         # ── E3: succ_dists → sim_matrix ──────────────────────────────────────
         succ: dict = {}
@@ -1578,14 +1598,34 @@ def _build_sim_matrix_adapted(succ_dists: dict, K: int,
     """
     import numpy as np
 
-    # Build K×K JSD pairwise distance matrix (always computed as base)
-    D = np.zeros((K, K))
-    for i in range(K):
-        di = succ_dists.get(i, {})
-        for j in range(i + 1, K):
-            dj = succ_dists.get(j, {})
-            d = _jsd(di, dj)
-            D[i, j] = D[j, i] = d
+    # Build K×K JSD pairwise distance matrix — vectorised (same as _jsd_cluster).
+    # Old: O(K²·D) Python dict iterations.  New: O(K·V) numpy ops per row.
+    _all_toks = sorted({tok for dd in succ_dists.values() for tok in dd})
+    _V = len(_all_toks)
+    if _V > 0:
+        _tok_idx = {t: ii for ii, t in enumerate(_all_toks)}
+        _P = np.zeros((K, _V), dtype=np.float64)
+        for _cid, _dd in succ_dists.items():
+            if isinstance(_cid, int) and 0 <= _cid < K:
+                for _tok, _prob in _dd.items():
+                    _jj = _tok_idx.get(_tok)
+                    if _jj is not None:
+                        _P[_cid, _jj] = _prob
+        _eps = 1e-15
+        with np.errstate(divide='ignore', invalid='ignore'):
+            _log_P = np.where(_P > _eps, np.log2(_P), 0.0)
+        _H_P = -np.einsum('iv,iv->i', _P, _log_P)   # (K,)
+        D = np.zeros((K, K), dtype=np.float64)
+        for _i in range(K):
+            _mix = (_P[_i:_i+1, :] + _P) * 0.5
+            with np.errstate(divide='ignore', invalid='ignore'):
+                _log_mix = np.where(_mix > _eps, np.log2(_mix), 0.0)
+            _H_mix = -np.einsum('jv,jv->j', _mix, _log_mix)
+            D[_i] = np.maximum(0.0, _H_mix - (_H_P[_i] + _H_P) * 0.5)
+        np.fill_diagonal(D, 0.0)
+        D = (D + D.T) * 0.5  # symmetrise for numerical safety
+    else:
+        D = np.zeros((K, K), dtype=np.float64)
 
     topo = topology.lower()
 
@@ -1633,19 +1673,17 @@ def _build_sim_matrix_adapted(succ_dists: dict, K: int,
                 queue = nxt
         max_hop = hop[hop < K].max() if (hop < K).any() else 1.0
         dist_mat = hop / max(max_hop, 1.0)
-        m = [[math.exp(-temperature * dist_mat[i][j]) if i != j else 1.0
-              for j in range(K)] for i in range(K)]
-        return m
+        # Vectorised: exp(-T * dist_mat), diagonal forced to 1.
+        sim = np.exp(-temperature * dist_mat)
+        np.fill_diagonal(sim, 1.0)
+        return sim
 
     # ---- dense / general_graph / unknown → JSD (no change) ----------------
     else:
-        m = [[0.0] * K for _ in range(K)]
-        for i in range(K):
-            di = succ_dists.get(i, {})
-            for j in range(K):
-                m[i][j] = (1.0 if i == j
-                           else math.exp(-temperature * D[i, j]))
-        return m
+        # D is already the numpy JSD matrix; just apply exp(-T·D) vectorised.
+        sim = np.exp(-temperature * D)
+        np.fill_diagonal(sim, 1.0)
+        return sim
 
     # ---- Classical MDS for linear or 2D topologies ------------------------
     n = K
@@ -1667,16 +1705,14 @@ def _build_sim_matrix_adapted(succ_dists: dict, K: int,
     lam = np.maximum(eigvals[:dim], 0.0)
     coords = eigvecs[:, :dim] * np.sqrt(lam)  # K × dim
 
-    # L2 pairwise distances in embedding space
-    m = [[0.0] * K for _ in range(K)]
-    for i in range(K):
-        for j in range(K):
-            if i == j:
-                m[i][j] = 1.0
-            else:
-                d = float(np.linalg.norm(coords[i] - coords[j]))
-                m[i][j] = math.exp(-temperature * d)
-    return m
+    # L2 pairwise distances — vectorised via broadcasting.
+    # Old: O(K²) Python loop calling np.linalg.norm K² times.
+    # New: one broadcast subtraction + einsum → O(K²·dim) numpy.
+    diff = coords[:, None, :] - coords[None, :, :]   # K × K × dim
+    dist_mat = np.sqrt((diff ** 2).sum(axis=-1))       # K × K
+    sim = np.exp(-temperature * dist_mat)
+    np.fill_diagonal(sim, 1.0)
+    return sim
 
 
 def _preprocess_patch(patch_uint8) -> 'np.ndarray':
@@ -4290,8 +4326,12 @@ class PredictiveCodingHierarchy:
         # Per-level corpus of chunk sequences (needed by RelationalSenseSplitter).
         # _chunk_seqs[level] is a list of sequences; each sequence is the ordered
         # list of chunk strings emitted at that level during one document.
+        # Storage is capped at _CHUNK_SEQ_TOK_CAP total tokens per level to bound
+        # RAM and R2 scan time (200 K is ample for trigram sense detection).
         self._chunk_seqs:     list[list[list[str]]] = [[] for _ in range(n_levels)]
         self._chunk_cur_doc:  list[list[str]]       = [[] for _ in range(n_levels)]
+        self._chunk_seqs_tok: list[int]             = [0]  * n_levels  # running token count
+        self._CHUNK_SEQ_TOK_CAP: int = 200_000
 
         # M13: per-level Bayes filters — populated by init_beliefs() after analyse().
         self._beliefs: list = [None] * n_levels
@@ -4483,8 +4523,11 @@ class PredictiveCodingHierarchy:
             if belief is not None:
                 belief.decay(rate=0.0)   # → uniform prior
             # Finalise the current document's chunk sequence for this level.
+            # Cap storage to _CHUNK_SEQ_TOK_CAP tokens to bound RAM + R2 scan time.
             if self._chunk_cur_doc[level]:
-                self._chunk_seqs[level].append(self._chunk_cur_doc[level])
+                if self._chunk_seqs_tok[level] < self._CHUNK_SEQ_TOK_CAP:
+                    self._chunk_seqs[level].append(self._chunk_cur_doc[level])
+                    self._chunk_seqs_tok[level] += len(self._chunk_cur_doc[level])
                 self._chunk_cur_doc[level] = []
 
     # ------------------------------------------------------------------
@@ -4521,9 +4564,12 @@ class PredictiveCodingHierarchy:
         for level in range(self.n_levels):
             self._emit_buffer(level)
         # Finalise any remaining current-doc chunk sequences.
+        # Cap storage to _CHUNK_SEQ_TOK_CAP tokens to bound RAM + R2 scan time.
         for level in range(self.n_levels):
             if self._chunk_cur_doc[level]:
-                self._chunk_seqs[level].append(self._chunk_cur_doc[level])
+                if self._chunk_seqs_tok[level] < self._CHUNK_SEQ_TOK_CAP:
+                    self._chunk_seqs[level].append(self._chunk_cur_doc[level])
+                    self._chunk_seqs_tok[level] += len(self._chunk_cur_doc[level])
                 self._chunk_cur_doc[level] = []
 
     def init_beliefs(self) -> None:
@@ -4608,8 +4654,9 @@ class PredictiveCodingHierarchy:
             cleared_levels += 1
 
         # Clear chunk sequence logs (large lists of strings).
-        self._chunk_seqs    = [[] for _ in range(self.n_levels)]
-        self._chunk_cur_doc = [[] for _ in range(self.n_levels)]
+        self._chunk_seqs     = [[] for _ in range(self.n_levels)]
+        self._chunk_cur_doc  = [[] for _ in range(self.n_levels)]
+        self._chunk_seqs_tok = [0]  * self.n_levels
 
         self._compressed = True
         if verbose:
@@ -5821,7 +5868,17 @@ class PredictiveCodingHierarchy:
             # Level 0 sequences come from the original corpus (not chunk_seqs).
             # Caller should pass them via analyse(sequences=...) if desired.
             if level_seqs:
-                rss.fit(level_seqs, verbose=verbose)
+                # Cap total tokens fed to R2 to avoid O(N) scan on large corpora.
+                # 200 K tokens provides ample trigram statistics for sense detection.
+                _RSS_CAP = 200_000
+                _rss_total = 0
+                _rss_seqs: list = []
+                for _s in level_seqs:
+                    if _rss_total >= _RSS_CAP:
+                        break
+                    _rss_seqs.append(_s)
+                    _rss_total += len(_s)
+                rss.fit(_rss_seqs, verbose=verbose)
                 if verbose:
                     print(rss.report())
 
