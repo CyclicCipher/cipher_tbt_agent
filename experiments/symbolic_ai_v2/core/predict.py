@@ -138,18 +138,23 @@ def perplexity_multilevel(
     sequences: list,
     topology: Topology,
 ) -> float:
-    """Cross-entropy perplexity using composition context when available.
+    """Cross-entropy perplexity using the full composition hierarchy as context.
 
-    At each position, looks up whether the preceding bigram (prev, etype, current)
-    matches a known composition C stored in mg.rules_inv.  If C has outgoing edge
-    statistics in mg._out (recorded by MorphismGraph._pending_comp_ctx during
-    training), uses C as the prediction context instead of just the raw atom prev.
+    Mirrors the buffer compression that MorphismGraph._compress_buf_tail()
+    applies during training:
 
-    This approximates a trigram (or higher) model using the composition hierarchy,
-    without any extra storage beyond what the MorphismGraph already maintains.
+      ctx_id starts as None.
+      After observing atom sid via edge etype from ctx_id:
+        - if (ctx_id, etype, sid) is a known composition C  → ctx_id = C
+        - otherwise                                          → ctx_id = sid
 
-    Falls back to bigram context if no composition is found, or to the marginal
-    distribution if neither context has been observed.
+    This means ctx_id tracks the deepest composition that covers the recent
+    history, exactly as _buf[-1] does during training.  Predictions use
+    ctx_id (which may be a depth-k composition for any k), falling back to
+    the raw atom context and then to the marginal if no edges are found.
+
+    Replaces the old two-level (prev_id + comp_ctx) scheme, which was
+    limited to depth-1 compositions.
 
     Returns bits/token.  Lower is better.  Baseline: log2(vocab_size).
     """
@@ -157,28 +162,31 @@ def perplexity_multilevel(
     total_tokens = 0
 
     for seq in sequences:
-        prev_id:  Optional[int] = None
-        comp_ctx: Optional[int] = None   # composition that ended at prev_id
+        # ctx_id  : compressed context (atom or composition of any depth),
+        #           mirrors _buf[-1] during training.
+        # atom_id : always the raw previous atom, used as fallback.
+        ctx_id:  Optional[int] = None
+        atom_id: Optional[int] = None
 
         for value, etype in topology.stream_tokens(seq):
             sid = mg.atoms.get(value)
             if sid is None:
-                # Unseen atom: same handling as perplexity()
+                # Unseen atom: penalise uniformly over known atoms.
                 n_atoms = max(mg.n_atoms(), 1)
-                if prev_id is not None:
+                if ctx_id is not None:
                     total_bits   += math.log2(n_atoms)
                     total_tokens += 1
-                prev_id  = None
-                comp_ctx = None
+                ctx_id  = None
+                atom_id = None
                 continue
 
-            if prev_id is not None and etype is not None:
-                # Try composition context → atom context → marginal
-                dist: dict[int, float] = {}
-                if comp_ctx is not None:
-                    dist = mg.predict_dist(comp_ctx, etype)
-                if not dist:
-                    dist = mg.predict_dist(prev_id, etype)
+            if ctx_id is not None and etype is not None:
+                # 1. Compressed-context prediction (depth-k composition)
+                dist = mg.predict_dist(ctx_id, etype)
+                # 2. Fall back to raw-atom bigram if no edges from ctx_id
+                if not dist and atom_id is not None:
+                    dist = mg.predict_dist(atom_id, etype)
+                # 3. Fall back to corpus-wide marginal
                 if not dist:
                     dist = _marginal_dist(mg, etype)
 
@@ -190,13 +198,15 @@ def perplexity_multilevel(
                 total_bits   += -math.log2(p)
                 total_tokens += 1
 
-            # Update composition context for the NEXT prediction step.
-            # The composition is (prev_id →[etype]→ sid) if that bigram is known.
-            if prev_id is not None and etype is not None:
-                comp_ctx = mg.rules_inv.get((prev_id, etype, sid))
+            # Advance compressed context:
+            #   if (ctx_id →[etype]→ sid) is a known composition, use it;
+            #   otherwise reset to the raw atom sid.
+            if ctx_id is not None and etype is not None:
+                comp = mg.rules_inv.get((ctx_id, etype, sid))
+                ctx_id = comp if comp is not None else sid
             else:
-                comp_ctx = None
-            prev_id = sid
+                ctx_id = sid
+            atom_id = sid
 
     if total_tokens == 0:
         return 0.0

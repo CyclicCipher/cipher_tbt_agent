@@ -210,6 +210,11 @@ class MorphismGraph:
             self._buf = [(S, edge_type)]
         else:
             self._buf.append((S, edge_type))
+            # Compress the tail: if the last two entries (P, S) form a known
+            # composition C, replace them with C.  Repeat until stable.
+            # This feeds composition IDs back into the buffer so that the
+            # *next* pair-check sees (Q, C, new_token) — enabling depth > 1.
+            self._compress_buf_tail()
 
         return is_boundary
 
@@ -267,6 +272,35 @@ class MorphismGraph:
         self.rules[sid]        = rule_key
         self.rules_inv[rule_key] = sid
         return sid
+
+    def _compress_buf_tail(self) -> None:
+        """Greedily compress the buffer tail.
+
+        While the last two entries (L →[e]→ R) in _buf match a known
+        composition C, merge them: pop R, replace L with C (inheriting L's
+        incoming edge).  Repeats until the tail pair is not a known
+        composition.
+
+        This is what allows depth > 1: once C = (L, e, R) exists and the
+        buffer ends with [..., L, R], we replace the tail with C.  On the
+        *next* observe() call the pair check sees (..., C, new_token), and
+        if that triple appears twice a depth-2 composition is created.
+
+        Runs in O(d) where d is the depth gained on this step (typically 1).
+        """
+        while len(self._buf) >= 2:
+            right_id,  right_etype = self._buf[-1]   # right_etype = edge L→R
+            left_id,   left_etype  = self._buf[-2]   # left_etype  = edge ?→L
+            if right_etype is None:
+                break
+            comp_id = self.rules_inv.get((left_id, right_etype, right_id))
+            if comp_id is None:
+                break
+            # Merge: discard R, replace L with the composition.
+            # The composition inherits L's incoming edge (edge from L's
+            # predecessor to the new composition symbol).
+            self._buf.pop()
+            self._buf[-1] = (comp_id, left_etype)
 
     # ── Segment boundary ──────────────────────────────────────────────────────
 
