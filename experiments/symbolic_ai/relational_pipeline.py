@@ -100,6 +100,12 @@ class RelationalLearner:
         self._sim_matrix: list = []  # K×K JSD-based similarity matrix
         self._atom_bigrams: dict = {}   # (atom, rel) → {target: prob}  (fast path)
         self._rel_unigram:  dict = {}   # rel → {target: prob}  (OOV fallback)
+        # Online-learning raw counts — pre-initialized so update_online needs no hasattr guards.
+        self._atom_counts:  dict = {}   # (atom, rel) → {target: int}
+        self._rel_counts:   dict = {}   # rel → {target: int}
+        self._atom_totals:  dict = {}   # (atom, rel) → int
+        self._rel_totals:   dict = {}   # rel → int
+        self._max_online_vocab: int = 50_000  # overridden by PCH
 
     # ---- E0: bigram discovery -----------------------------------------------
 
@@ -600,44 +606,49 @@ class RelationalLearner:
             rel     Relation name (will be str-coerced).
             target  Target atom observed (will be str-coerced).
         """
-        from collections import Counter as _Ctr
+        _Ctr = collections.Counter   # already imported at module level; avoids importlib lookups
         a_s, r_s, b_s = str(atom), str(rel), str(target)
         key = (a_s, r_s)
 
-        # Ensure count dicts exist (tolerate un-fitted learner).
-        if not hasattr(self, '_atom_counts') or self._atom_counts is None:
-            self._atom_counts = {}
-        if not hasattr(self, '_rel_counts') or self._rel_counts is None:
-            self._rel_counts = {}
-        # Running totals avoid O(V) sum(counter.values()) on every update.
-        if not hasattr(self, '_atom_totals') or self._atom_totals is None:
-            self._atom_totals = {}
-        if not hasattr(self, '_rel_totals') or self._rel_totals is None:
-            self._rel_totals = {}
-
         # --- atom-level bigram update ---------------------------------------
+        # Hard vocab cap: once we exceed _max_online_vocab keys, new (atom,rel)
+        # pairs only update the unigram fallback.  This bounds memory to
+        # O(max_online_vocab × avg_successors) regardless of corpus size.
+        _max_vocab = getattr(self, '_max_online_vocab', 50_000)
         if key not in self._atom_counts:
-            # Seed from existing normalised distribution (×10 pseudo-count)
-            # so new observations don't dominate immediately.
-            existing = getattr(self, '_atom_bigrams', {}).get(key, {})
-            _pc = 10
-            self._atom_counts[key] = _Ctr(
-                {t: max(1, round(p * _pc)) for t, p in existing.items()}
-            ) if existing else _Ctr()
-            self._atom_totals[key] = sum(self._atom_counts[key].values())
-        self._atom_counts[key][b_s] += 1
-        self._atom_totals[key] += 1
+            if len(self._atom_counts) < _max_vocab:
+                # Fast path: plain dict (no Counter overhead).
+                # Pseudo-count seed from _atom_bigrams only when non-empty.
+                existing = getattr(self, '_atom_bigrams', {}).get(key, {})
+                if existing:
+                    _pc = 10
+                    self._atom_counts[key] = _Ctr(
+                        {t: max(1, round(p * _pc)) for t, p in existing.items()}
+                    )
+                    self._atom_totals[key] = sum(self._atom_counts[key].values())
+                else:
+                    self._atom_counts[key] = {}   # plain dict — 10× faster than Counter()
+                    self._atom_totals[key] = 0
+        ct = self._atom_counts.get(key)
+        if ct is not None:
+            ct[b_s] = ct.get(b_s, 0) + 1    # explicit get avoids Counter default-int overhead
+            self._atom_totals[key] += 1
         # _atom_bigrams rebuilt lazily in predict_dist; no dict comprehension here.
 
         # --- per-relation unigram update ------------------------------------
         if r_s not in self._rel_counts:
             existing_r = getattr(self, '_rel_unigram', {}).get(r_s, {})
-            _pc_r = 50
-            self._rel_counts[r_s] = _Ctr(
-                {t: max(1, round(p * _pc_r)) for t, p in existing_r.items()}
-            ) if existing_r else _Ctr()
-            self._rel_totals[r_s] = sum(self._rel_counts[r_s].values())
-        self._rel_counts[r_s][b_s] += 1
+            if existing_r:
+                _pc_r = 50
+                self._rel_counts[r_s] = _Ctr(
+                    {t: max(1, round(p * _pc_r)) for t, p in existing_r.items()}
+                )
+                self._rel_totals[r_s] = sum(self._rel_counts[r_s].values())
+            else:
+                self._rel_counts[r_s] = {}
+                self._rel_totals[r_s] = 0
+        rc = self._rel_counts[r_s]
+        rc[b_s] = rc.get(b_s, 0) + 1
         self._rel_totals[r_s] += 1
         # _rel_unigram rebuilt lazily in predict_dist; no dict comprehension here.
 
@@ -4191,6 +4202,8 @@ class PredictiveCodingHierarchy:
         min_tokens_active:  int   = 20,
         top_down_weight:    float = 0.3,
         next_rel:           str   = 'next',
+        max_online_vocab:   int   = 50_000,
+        threshold_recompute_every: int = 50,
     ) -> None:
         """
         Parameters
@@ -4229,11 +4242,16 @@ class PredictiveCodingHierarchy:
         self.min_tokens_active  = min_tokens_active
         self.top_down_weight    = top_down_weight
         self.next_rel           = next_rel
+        self.max_online_vocab   = max_online_vocab
+        self.threshold_recompute_every = threshold_recompute_every
 
         # One RelationalLearner per level (initially unfitted — cold start).
         self.learners: list[RelationalLearner] = [
             RelationalLearner() for _ in range(n_levels)
         ]
+        # Propagate vocab cap to learners.
+        for lrn in self.learners:
+            lrn._max_online_vocab = max_online_vocab
 
         # Shared merge/segment registry (grows as chunks are emitted).
         self.vocab: AtomVocabulary = AtomVocabulary()
@@ -4267,6 +4285,11 @@ class PredictiveCodingHierarchy:
         # M16: surprisal at the time _emit_buffer() is called (for gated DeltaNet).
         # Set by _process_level before boundary-triggered emission; 0.0 otherwise.
         self._emit_surp: list[float] = [0.0] * n_levels
+
+        # Speed: cached adaptive threshold per level.  Recomputed every
+        # threshold_recompute_every tokens instead of every token.
+        self._threshold_cache: list[float] = [surprise_threshold] * n_levels
+        self._threshold_age:   list[int]   = [0] * n_levels
 
     # ------------------------------------------------------------------
     # Core internals
@@ -4407,7 +4430,13 @@ class PredictiveCodingHierarchy:
         self._seen[level] += 1
 
         # 3. Boundary detection: flush *before* adding the surprising token.
-        threshold = self._effective_threshold(level)
+        # Threshold is recomputed every threshold_recompute_every tokens (cache miss)
+        # rather than every token — threshold changes slowly, so this is accurate.
+        self._threshold_age[level] += 1
+        if self._threshold_age[level] >= self.threshold_recompute_every:
+            self._threshold_cache[level] = self._effective_threshold(level)
+            self._threshold_age[level] = 0
+        threshold = self._threshold_cache[level]
         if surp > threshold and self._buffers[level]:
             self._emit_surp[level] = surp   # M16: record triggering surprisal
             self._emit_buffer(level)
@@ -4610,6 +4639,7 @@ class PredictiveCodingHierarchy:
             'min_tokens_active': self.min_tokens_active,
             'top_down_weight':  self.top_down_weight,
             'next_rel':         self.next_rel,
+            'max_online_vocab': self.max_online_vocab,
             '_seen':            list(self._seen),
             'levels':           [_extract_learner(l) for l in self.learners],
         }
@@ -4642,6 +4672,7 @@ class PredictiveCodingHierarchy:
             min_tokens_active=payload['min_tokens_active'],
             top_down_weight=payload['top_down_weight'],
             next_rel=payload['next_rel'],
+            max_online_vocab=payload.get('max_online_vocab', 50_000),
         )
         pch._seen = list(payload['_seen'])
         pch._compressed = True
