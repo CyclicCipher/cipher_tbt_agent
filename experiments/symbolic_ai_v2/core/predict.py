@@ -1,9 +1,10 @@
 """Prediction: P(next token | context, edge_type).
 
-predict()          — fast path (edge counts) + fallback (marginal), returns
-                     a ranked list of (symbol_id, probability) pairs.
-predict_by_value() — same but maps IDs back to string values.
-perplexity()       — cross-entropy in bits/token on a test corpus.
+predict()              — fast path (edge counts) + fallback (marginal), returns
+                         a ranked list of (symbol_id, probability) pairs.
+predict_by_value()     — same but maps IDs back to string values.
+perplexity()           — cross-entropy in bits/token on a test corpus.
+perplexity_multilevel()— same but uses composition context when available.
 
 Prediction strategy (see BLUEPRINT.md §"predict()"):
   1. Fast path: normalised edge counts from output index, O(degree).
@@ -125,6 +126,76 @@ def perplexity(
                 total_bits   += -math.log2(p)
                 total_tokens += 1
 
+            prev_id = sid
+
+    if total_tokens == 0:
+        return 0.0
+    return total_bits / total_tokens
+
+
+def perplexity_multilevel(
+    mg: MorphismGraph,
+    sequences: list,
+    topology: Topology,
+) -> float:
+    """Cross-entropy perplexity using composition context when available.
+
+    At each position, looks up whether the preceding bigram (prev, etype, current)
+    matches a known composition C stored in mg.rules_inv.  If C has outgoing edge
+    statistics in mg._out (recorded by MorphismGraph._pending_comp_ctx during
+    training), uses C as the prediction context instead of just the raw atom prev.
+
+    This approximates a trigram (or higher) model using the composition hierarchy,
+    without any extra storage beyond what the MorphismGraph already maintains.
+
+    Falls back to bigram context if no composition is found, or to the marginal
+    distribution if neither context has been observed.
+
+    Returns bits/token.  Lower is better.  Baseline: log2(vocab_size).
+    """
+    total_bits   = 0.0
+    total_tokens = 0
+
+    for seq in sequences:
+        prev_id:  Optional[int] = None
+        comp_ctx: Optional[int] = None   # composition that ended at prev_id
+
+        for value, etype in topology.stream_tokens(seq):
+            sid = mg.atoms.get(value)
+            if sid is None:
+                # Unseen atom: same handling as perplexity()
+                n_atoms = max(mg.n_atoms(), 1)
+                if prev_id is not None:
+                    total_bits   += math.log2(n_atoms)
+                    total_tokens += 1
+                prev_id  = None
+                comp_ctx = None
+                continue
+
+            if prev_id is not None and etype is not None:
+                # Try composition context → atom context → marginal
+                dist: dict[int, float] = {}
+                if comp_ctx is not None:
+                    dist = mg.predict_dist(comp_ctx, etype)
+                if not dist:
+                    dist = mg.predict_dist(prev_id, etype)
+                if not dist:
+                    dist = _marginal_dist(mg, etype)
+
+                p = dist.get(sid, 0.0)
+                if p <= 0.0:
+                    n_tgts = max(len(dist) + 1, 1)
+                    p = 1.0 / (n_tgts * 10)
+
+                total_bits   += -math.log2(p)
+                total_tokens += 1
+
+            # Update composition context for the NEXT prediction step.
+            # The composition is (prev_id →[etype]→ sid) if that bigram is known.
+            if prev_id is not None and etype is not None:
+                comp_ctx = mg.rules_inv.get((prev_id, etype, sid))
+            else:
+                comp_ctx = None
             prev_id = sid
 
     if total_tokens == 0:

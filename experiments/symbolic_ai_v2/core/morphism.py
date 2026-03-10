@@ -99,6 +99,13 @@ class MorphismGraph:
         self._n_obs:        int = 0   # total observations
         self._n_boundaries: int = 0   # total segment boundaries emitted
 
+        # Composition-level edge recording.
+        # After observe() detects that the right sub-pair (P →[e2]→ S) matches a
+        # known composition C, this is set to C's symbol ID.  The NEXT observe()
+        # call records edge (C →[incoming_etype]→ next_token) into edges / _out,
+        # enabling predict_dist(C_id, etype) for multi-level (trigram+) prediction.
+        self._pending_comp_ctx: Optional[int] = None
+
     # ── Atom management ───────────────────────────────────────────────────────
 
     def _get_or_create_atom(self, value: str) -> int:
@@ -144,6 +151,7 @@ class MorphismGraph:
 
         # ── First observation or start of a new chunk after a boundary ──────
         if not self._buf:
+            self._pending_comp_ctx = None  # no incoming edge; can't record comp edge
             self._buf.append((S, edge_type))
             return False
 
@@ -154,6 +162,17 @@ class MorphismGraph:
         new_edge_count = self.edges.get(edge_key, 0) + 1
         self.edges[edge_key] = new_edge_count
         self._inc_out(P, edge_type, S, new_edge_count)
+
+        # ── Record composition-level edge if a composition was pending ────────
+        # _pending_comp_ctx holds the ID of the composition that ended at P.
+        # Now that we know P was followed by S via edge_type, record that edge
+        # from the composition into the same edges / _out table.
+        if self._pending_comp_ctx is not None and edge_type is not None:
+            cid      = self._pending_comp_ctx
+            self._pending_comp_ctx = None
+            comp_cnt = self.edges.get((cid, edge_type, S), 0) + 1
+            self.edges[(cid, edge_type, S)] = comp_cnt
+            self._inc_out(cid, edge_type, S, comp_cnt)
 
         # ── Check pair (Q →[e1]→ P →[e2]→ S) ───────────────────────────────
         #   e1 = the edge from Q to P = the incoming edge stored for P in _buf
@@ -177,6 +196,13 @@ class MorphismGraph:
                 # Second time → create composition for (P →[e2]→ S)
                 self._create_composition(P, e2, S)
 
+            # If the right sub-pair (P →[e2]→ S) is a known composition,
+            # mark it so the NEXT observe() records what follows it.
+            # This fires on every occurrence (count ≥ 2), not only on creation.
+            comp_key = (P, e2, S)
+            if comp_key in self.rules_inv:
+                self._pending_comp_ctx = self.rules_inv[comp_key]
+
         # ── Buffer management ─────────────────────────────────────────────────
         if is_boundary:
             # Emit everything up to and including P; S starts the next chunk.
@@ -196,6 +222,7 @@ class MorphismGraph:
         if self._buf:
             self._emit_chunk(list(self._buf))
             self._buf = []
+        self._pending_comp_ctx = None  # no next token to record against
 
     def observe_sequence(self, data: Any, topology: Topology) -> None:
         """Process a full sequence using stream_tokens() from topology."""

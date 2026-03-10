@@ -116,9 +116,14 @@ def test_perplexity_scales():
 
 
 def test_no_memory_growth():
-    """Edge table size should be O(V²) in the alphabet, not O(sequence length)."""
+    """Edge table size must saturate with alphabet size, not grow with sequence length.
+
+    MorphismGraph stores atom-level bigram edges (at most V²) plus composition-level
+    edges (at most V² compositions × V targets = V³).  The total is O(V³) regardless
+    of how long the sequence is — it does NOT grow with sequence length.
+    """
     topo = sequence_1d()
-    alphabet = list("abcdefghij")   # 10 chars, max 10×10 = 100 bigram edge types
+    alphabet = list("abcdefghij")   # V = 10 chars
 
     for length in (100, 1_000, 10_000):
         _RNG2 = random.Random(1)
@@ -126,9 +131,11 @@ def test_no_memory_growth():
         mg  = MorphismGraph()
         mg.observe_sequence(seq, topo)
         n_edges = mg.n_edges()
-        max_possible = len(alphabet) ** 2      # V² upper bound
+        V = len(alphabet)
+        # atom bigrams: V²; composition-level edges: ≤ V² compositions × V targets = V³
+        max_possible = V ** 2 + V ** 3    # O(V³) — independent of sequence length
         assert n_edges <= max_possible, (
-            f"length={length}: {n_edges} edges > V²={max_possible} (memory leak?)"
+            f"length={length}: {n_edges} edges > V²+V³={max_possible} (memory leak?)"
         )
         print(f"  no_memory_growth length={length:6d}: {n_edges} edges (max {max_possible})")
 
