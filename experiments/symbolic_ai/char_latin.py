@@ -575,6 +575,10 @@ def main() -> None:
     parser.add_argument('--save_path', default=None,
                         help='Override compressed-model save path '
                              '(default: pch_compressed.pkl or pch_all_corpora.pkl)')
+    parser.add_argument('--verbose', action='store_true', default=False,
+                        help='Verbose E0-R6 analysis output (default: compact summary only)')
+    parser.add_argument('--skip-reprocess', action='store_true', default=False,
+                        help='Skip the M13 frozen second-pass (saves ~same time as first pass)')
     parser.add_argument('--relations', nargs='+',
                         default=['next', 'prev', 'skip2f', 'skip2b'],
                         choices=['next', 'prev', 'skip2f', 'skip2b'],
@@ -625,12 +629,12 @@ def main() -> None:
         print(f'\n{"=" * 65}')
         print('M9: Multi-scale R0-R6 analysis (M12: type-abstracted clustering)')
         print('=' * 65)
-        pch.analyse_with_sequences(sequences, verbose=True)
+        pch.analyse_with_sequences(sequences, verbose=args.verbose)
 
         print(f'\n{"=" * 65}')
         print('M10: Cross-level constituency analysis')
         print('=' * 65)
-        pch.analyse_cross_level(verbose=True)
+        pch.analyse_cross_level(verbose=args.verbose)
 
         print(f'\n{"=" * 65}')
         print('M13/M16: Init belief cascade + gated-DeltaNet reprocess')
@@ -638,18 +642,31 @@ def main() -> None:
         pch.init_beliefs()
         n_beliefs = sum(1 for b in pch._beliefs if b is not None)
         print(f'  Belief states initialised: {n_beliefs} levels')
-        pch.reprocess(sequences)
-        print('  Frozen reprocess complete.')
+        if not args.skip_reprocess:
+            pch.reprocess(sequences)
+            print('  Frozen reprocess complete.')
+        else:
+            print('  (reprocess skipped via --skip-reprocess)')
 
-        ctkg_str = pch.export_ctkg(domain_name='latin_pch')
-        n_lines  = ctkg_str.count('\n')
-        n_types    = len([l for l in ctkg_str.splitlines() if l.startswith('type')])
-        n_concepts = len([l for l in ctkg_str.splitlines() if l.startswith('concept')])
+        # Compute CTKG stats directly — avoid building a multi-MB string for large runs.
+        n_concepts = pch.vocab.n_merges() + pch.vocab.n_segments()
+        n_types = sum(
+            len(set(getattr(lrn, 'assignment', {}).values()))
+            for lrn in pch.learners
+        )
+        # Only generate the full string when small enough to be useful.
+        _MAX_CTKG_CONCEPTS = 10_000
+        if n_concepts <= _MAX_CTKG_CONCEPTS:
+            ctkg_str = pch.export_ctkg(domain_name='latin_pch')
+            n_lines = ctkg_str.count('\n')
+        else:
+            ctkg_str = ''
+            n_lines = 0
 
         print(f'\n{"=" * 65}')
         print('M14: Compression pass + save (type-only model)')
         print('=' * 65)
-        pch.compress(verbose=True)
+        pch.compress(verbose=args.verbose)
         import os as _os
         if args.save_path:
             _ckpt = args.save_path
@@ -664,9 +681,9 @@ def main() -> None:
         pch2.init_beliefs()
         print(f'  Load verified: {sum(1 for b in pch2._beliefs if b is not None)} beliefs restored')
 
-        print(f'\nCTKG export (pre-compression): {n_lines} lines, '
-              f'{n_types} types, {n_concepts} concepts')
-        if n_lines > 0:
+        print(f'\nCTKG stats (pre-compression): {n_types} types, {n_concepts} concepts'
+              + (f', {n_lines} lines' if n_lines else ' (skipped: vocab too large)'))
+        if ctkg_str:
             print('\n--- CTKG preview (first 50 lines) ---')
             for line in ctkg_str.splitlines()[:50]:
                 print(f'  {line}')

@@ -5822,6 +5822,14 @@ class PredictiveCodingHierarchy:
                 'algebra':        ra,
             }
 
+            if not verbose:
+                n_roles  = len(getattr(rpd, 'role_categories', []))
+                n_rules  = len(getattr(ra,  'rules',           []))
+                n_novel  = len(getattr(ra,  'novel',           []))
+                geom_lbl = getattr(geo, 'topology', '?')
+                print(f'  L{level:02d}  cats={n_cats}  roles={n_roles}  '
+                      f'geom={geom_lbl}  rules={n_rules}(+{n_novel} novel)')
+
         return self.analyses
 
     def analyse_with_sequences(
