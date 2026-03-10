@@ -4707,9 +4707,10 @@ class PredictiveCodingHierarchy:
             learner._rel_totals          = d['_rel_totals']
             learner._constituent_type_map = d.get('_constituent_type_map', {})
             learner._upper_to_constituent = d.get('_upper_to_constituent', {})
-            # Restore soft-cache stubs so predict_dist doesn't error.
-            learner._nc_soft  = {}
-            learner._wgc_soft = {}
+            # Pre-populate soft caches from exact cache entries so predict_dist
+            # never triggers _ask_soft's O(K⁴) lazy warm-up on large-K models.
+            learner._nc_soft  = dict(d['_nc_cache'])
+            learner._wgc_soft = dict(d['_wgc_cache'])
 
         return pch
 

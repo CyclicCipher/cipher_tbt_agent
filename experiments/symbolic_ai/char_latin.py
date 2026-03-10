@@ -715,9 +715,9 @@ def main() -> None:
             chain_str = ', '.join(f'{t!r}:{p:.2f}' for t, p in chain)
             print(f'  reason_chain({tok!r}, [next,next]) → {chain_str}')
 
-        print(f'\n{"=" * 65}')
+        print(f'\n{"=" * 65}', flush=True)
         print('M17: Cross-domain functors + sheaf consistency')
-        print('=' * 65)
+        print('=' * 65, flush=True)
 
         # Build Interface for the loaded model (domain A).
         kg_a = pch2.build_interface('latin_A')
@@ -773,9 +773,9 @@ def main() -> None:
               f'{len(cd_kg.functors)} functor(s), '
               f'{len(cd_kg.adjunctions)} adjunction(s)')
 
-        print(f'\n{"=" * 65}')
+        print(f'\n{"=" * 65}', flush=True)
         print('M18: Causal reasoning, MasteryState, full CTKG closure')
-        print('=' * 65)
+        print('=' * 65, flush=True)
 
         # M18a: MasteryState — which type categories need more data?
         mastery = pch2.type_mastery(tokens_needed_per_type=200)
@@ -807,7 +807,7 @@ def main() -> None:
         print(f'\n  M18 DONE — Full CTKG toolkit exercised:')
         print(f'    Functor ✓  Adjunction ✓  Interface ✓  sheaf_check ✓')
         print(f'    MasteryState ✓  d_separated ✓  intervene ✓  information_flow ✓')
-        print(f'    transfer_probability ✓  information_gain ✓')
+        print(f'    transfer_probability ✓  information_gain ✓', flush=True)
         return
 
     print(f'\nBuilding triples...')
