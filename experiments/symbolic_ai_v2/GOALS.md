@@ -103,6 +103,29 @@ specifically on a 1D sequence. Topology is an input parameter, not an assumption
 Adding a new modality means defining a graph topology over its tokens. No new
 core logic. The morphism discovery algorithm is topology-agnostic.
 
+### 8. Bounded memory: principled forgetting
+
+**The model's memory must not grow unboundedly with corpus size.**  A symbolic AGI
+that has read all of Wikipedia must fit in ≤ 1 GB, not 350 GB.
+
+The `pairs` table is the primary growth source: every novel triple `(Q,e1,P,e2,S)`
+creates an entry. Two pruning mechanisms, both zero-threshold and MDL-grounded:
+
+**a. Composition-triggered pair pruning** (automatic, O(degree) per composition):
+When Composition C = (P →[e]→ S) is created, every pair entry `(Q,e₁,P,e,S)` is
+permanently dead: future occurrences of (P,e,S) are absorbed into C by
+`_compress_buf_tail` *before* reaching the pair-check step.  Removed immediately
+via reverse-index `_pairs_rdigram: (P,e,S) → set[pair_key]`.  Not an approximation
+— provably correct: those pairs cannot trigger boundaries again.
+
+**b. Stability-window singleton pruning** (triggered by `prune(max_age)`):
+A pair with count=1 not incremented in `max_age` boundaries has expected
+informational value below its storage cost.  Under a geometric recurrence model,
+P(recur) ≈ 1/(age+2) → 0.  May cause one false boundary if the triple does recur
+(acceptable approximation).
+
+**Target**: `|pairs|` bounded by O(V² · D) after model saturation, not O(n).
+
 ---
 
 ## Tests that must all pass (not just perplexity)

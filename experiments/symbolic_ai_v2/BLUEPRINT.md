@@ -371,6 +371,94 @@ reasoning about recency and context of knowledge.
 
 ---
 
+## Pruning and Forgetting
+
+### Why the `pairs` table is the memory leak
+
+`edges` is bounded by O(V²) where V = unique symbol count.  `rules` is bounded by
+the number of compositions (one per repeated digram).  But `pairs` — the trigram
+table — grows O(unique-triples), which for natural language over a large corpus
+reaches hundreds of billions of entries.  The model cannot scale to Wikipedia-size
+data without bounding this table.
+
+### Mechanism 1: Composition-triggered pair pruning (zero-threshold, automatic)
+
+**Invariant**: Once Composition C = (P →[e]→ S) exists in `rules_inv`, any pair
+entry `(Q, e₁, P, e, S)` is permanently dead.
+
+**Proof**: The pair check in `observe()` examines `(buf[-2], buf[-1], S)`.  After
+C is created, every time the buffer contains P followed by S via edge e, the call to
+`_compress_buf_tail()` replaces `(P, S)` with C.  The tail of the buffer becomes
+`(C, ...)`, so the next pair check is `(Q, e₁, C, e₂, S')` — a *different* triple
+involving C, not P.  The triple `(Q, e₁, P, e, S)` can never appear in a pair check
+again.  Keeping its entry wastes memory with zero benefit.
+
+**Implementation**: A reverse index `_pairs_rdigram: dict[(P,e,S) → set[pair_key]]`
+maps each right-digram to all pair keys that contain it.  In `_create_composition`,
+after registering the new rule, call `_prune_rdigram(P, e, S)`:
+
+```
+_prune_rdigram(P, e, S):
+    keys = _pairs_rdigram.pop((P,e,S), ∅)
+    for k in keys:
+        del pairs[k]
+        del _pair_born[k]   # birth-time index (see Mechanism 2)
+    n_pruned += len(keys)
+```
+
+Cost: O(degree_rdigram) per composition creation ≈ O(1) amortised.
+
+### Mechanism 2: Stability-window singleton pruning (Bayesian approximation)
+
+A pair with count=1 that has not been incremented in `max_age` boundaries is a
+"stale singleton".  Its informational value decays as follows: under a geometric
+recurrence model, the probability that this triple recurs in the next boundary is
+roughly 1/(age+2).  For age ≥ 100 boundaries, this is < 1%.  The expected MDL
+benefit of retaining the entry is then < 0.01 × log₂(|pairs|) bits — less than
+the ~40–80 bytes it occupies.
+
+**Effect of pruning**: If the triple does eventually recur, one false boundary fires
+(the triple appears novel again).  The chunk is split one position earlier than it
+would have been.  This is a mild local error with no effect on composition creation
+(which uses the separate digram trigger) or prediction quality.
+
+**API**: `prune(max_singleton_age: int = 500) → int` — call at document boundaries
+or whenever memory pressure is detected.  Returns number of entries removed.
+
+```
+prune(max_age):
+    cutoff = n_boundaries - max_age
+    dead = {k for k, cnt in pairs.items()
+            if cnt == 1 and _pair_born.get(k, 0) <= cutoff}
+    for k in dead:
+        del pairs[k]; del _pair_born[k]
+        rdig = (k[2], k[3], k[4])
+        _pairs_rdigram.get(rdig, set()).discard(k)
+    n_pruned += len(dead)
+    return len(dead)
+```
+
+### Additional data structures required
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `_pairs_rdigram` | `dict[tuple, set[tuple]]` | Right-digram → pair_keys for O(1) composition-triggered pruning |
+| `_pair_born` | `dict[tuple, int]` | pair_key → boundary-number at insertion, for stability-window pruning |
+| `_n_pruned` | `int` | Running count of pruned entries, for diagnostics |
+
+### Expected memory behaviour
+
+After the composition hierarchy saturates for a given corpus:
+- Mechanism 1 removes pairs as fast as new compositions absorb their digrams
+- Mechanism 2 removes remaining stale singletons at document boundaries
+- Steady-state `|pairs|` ≈ O(V² · frontier_width) where frontier_width is the
+  number of new digrams being explored before composition — bounded, not growing
+
+For all of Wikipedia (V ≈ 50K chars), the target is `|pairs|` < 10M entries after
+convergence, well within a 1 GB budget alongside edges and rules.
+
+---
+
 ## File structure
 
 ```

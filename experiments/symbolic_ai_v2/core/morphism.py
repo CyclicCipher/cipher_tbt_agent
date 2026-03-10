@@ -81,6 +81,15 @@ class MorphismGraph:
         self.edges:     dict[tuple, int]        = {}   # (src, etype, tgt) → count
         self.pairs:     dict[tuple, int]        = {}   # (Q,e1,P,e2,S) → count
 
+        # Pruning support (GOALS.md §8, BLUEPRINT.md §"Pruning and Forgetting")
+        # _pairs_rdigram: right-digram → set of pair_keys containing it.
+        #   Used by composition-triggered pruning to find dead pairs in O(degree).
+        # _pair_born: pair_key → boundary-count at insertion, for singleton pruning.
+        # _n_pruned: cumulative count of entries removed from pairs.
+        self._pairs_rdigram: dict[tuple, set]   = {}   # (P,e,S) → set[pair_key]
+        self._pair_born:     dict[tuple, int]   = {}   # pair_key → boundary at birth
+        self._n_pruned:      int                = 0
+
         # Composition rules
         self.rules:     dict[int, tuple]        = {}   # comp_id → (l, etype, r)
         self.rules_inv: dict[tuple, int]        = {}   # (l, etype, r) → comp_id
@@ -208,8 +217,14 @@ class MorphismGraph:
             self.pairs[pair_key] = old_count + 1
 
             if old_count == 0:
-                # First time this triple is seen → segment boundary
+                # First time this triple is seen → segment boundary.
+                # Register in reverse index and record birth-boundary for pruning.
                 is_boundary = True
+                rdig = (P, e2, S)
+                if rdig not in self._pairs_rdigram:
+                    self._pairs_rdigram[rdig] = set()
+                self._pairs_rdigram[rdig].add(pair_key)
+                self._pair_born[pair_key] = self._n_boundaries
             # (composition creation moved to digram-based trigger above)
 
             # If the right sub-pair (P →[e2]→ S) is a known composition,
@@ -289,8 +304,10 @@ class MorphismGraph:
         self.rules_inv[rule_key] = sid
 
         # Retroactively rewrite earlier (left →[etype]→ right) in the buffer.
-        # This ensures compositions are as deep as possible from the first use.
         self._rewrite_buf(left, etype, right, sid)
+        # Prune all pair-table entries whose right sub-pair is (left, etype, right).
+        # They are permanently dead: future occurrences get compressed to sid first.
+        self._prune_rdigram(left, etype, right)
         return sid
 
     def _compress_buf_tail(self) -> None:
@@ -355,6 +372,56 @@ class MorphismGraph:
             # before the last entry, which is the current left constituent).
             # A full-buffer recompress is too expensive; local sweeps suffice.
             self._compress_buf_tail()
+
+    # ── Pruning ───────────────────────────────────────────────────────────────
+
+    def _prune_rdigram(self, P: int, etype: int, S: int) -> None:
+        """Remove all pair-table entries whose right sub-pair is (P, etype, S).
+
+        Called automatically from _create_composition().  Once Composition
+        C = (P →[etype]→ S) exists, _compress_buf_tail() absorbs (P, S) into C
+        before the pair-check step runs — so these pairs can never trigger a
+        segment boundary again.  Removing them is provably correct (not an
+        approximation) and frees memory in O(degree_rdigram).
+        """
+        rdig = (P, etype, S)
+        keys = self._pairs_rdigram.pop(rdig, None)
+        if not keys:
+            return
+        for k in keys:
+            self.pairs.pop(k, None)
+            self._pair_born.pop(k, None)
+        self._n_pruned += len(keys)
+
+    def prune(self, max_singleton_age: int = 500) -> int:
+        """Prune stale singleton pairs (count=1, not seen for max_singleton_age boundaries).
+
+        A pair with count=1 that has not been incremented in max_singleton_age
+        boundaries is a "stale singleton".  Under a geometric recurrence model,
+        P(recur) ≈ 1/(age+2).  For age >= 100 this is < 1%; the expected MDL
+        benefit of retaining the entry is negligible compared to its storage cost.
+
+        Side-effect: if a pruned triple does eventually recur it triggers one
+        false boundary (the triple appears novel again).  This is an acceptable
+        approximation with no impact on composition creation or prediction.
+
+        Call at document boundaries or when memory pressure is detected.
+        Returns the number of entries removed.
+        """
+        cutoff = self._n_boundaries - max_singleton_age
+        dead = [k for k, cnt in self.pairs.items()
+                if cnt == 1 and self._pair_born.get(k, 0) <= cutoff]
+        for k in dead:
+            del self.pairs[k]
+            self._pair_born.pop(k, None)
+            rdig = (k[2], k[3], k[4])
+            s = self._pairs_rdigram.get(rdig)
+            if s is not None:
+                s.discard(k)
+                if not s:
+                    del self._pairs_rdigram[rdig]
+        self._n_pruned += len(dead)
+        return len(dead)
 
     # ── Segment boundary ──────────────────────────────────────────────────────
 
@@ -438,6 +505,7 @@ class MorphismGraph:
     def n_edges(self)        -> int: return len(self.edges)
     def n_pairs(self)        -> int: return len(self.pairs)
     def n_digrams(self)      -> int: return len(self.digrams)
+    def n_pruned(self)       -> int: return self._n_pruned
 
     def edge_count(self, src: int, etype: int, tgt: int) -> int:
         """Return the observed count for edge (src →[etype]→ tgt), or 0 if unseen."""
@@ -458,6 +526,7 @@ class MorphismGraph:
             f"compositions={self.n_compositions()}, "
             f"edges={self.n_edges()}, "
             f"pairs={self.n_pairs()}, "
+            f"pruned={self._n_pruned}, "
             f"observations={self._n_obs}, "
             f"boundaries={self._n_boundaries})"
         )
