@@ -7,99 +7,150 @@ code.
 
 ---
 
+## The central insight
+
+Grammar induction is not the goal. **Compositional morphism discovery** is the
+goal. Grammar is just what that operation looks like when the domain is symbols
+in sequence. Logic is what it looks like when the domain is propositions.
+Mathematics is what it looks like when the domain is quantities. Causality is
+what it looks like when the domain is events.
+
+All of these reduce to the same operation: find f: A → B, find g: B → C, derive
+g∘f: A → C.
+
+The CTKG work proved this empirically. Starting from toddler-level arithmetic
+(successor, addition as iterated counting), the system composed morphisms upward
+through multiplication, exponentiation, polynomials, and into calculus and fluid
+dynamics — without being told that any of those higher concepts existed. It
+discovered them as compositions of what it already knew.
+
+The v1 mistake was building a grammar layer (PCH, Merge) *separately* from the
+reasoning layer (CTKG) and then trying to bridge them. The bridge was always a
+seam that leaked. In v2 there is no bridge: every discovered pattern is
+immediately a morphism. The architecture does not distinguish between "learning
+grammar" and "learning logic" — both are morphism discovery in a category.
+
+This also changes what correctness means. A system that only achieves low
+perplexity on Latin text has learned grammar but not reasoning. A system that
+only solves arithmetic problems has learned one domain but not transfer. The
+v2 system must demonstrably do both — and demonstrate that they share the same
+internal mechanism.
+
+---
+
 ## Non-negotiable requirements
 
 ### 1. Active inference from day one
 The agent is not a passive pattern-matcher. It holds a generative model of its
-environment and takes actions (including the action of forming new hypotheses) to
-minimise expected free energy. Perception, learning, and action are unified under
-one objective. There is no separate "learning phase" followed by an "inference
-phase" — both happen on every token.
+environment (the current CTKG) and acts — including the act of forming new
+hypotheses — to minimise expected free energy. Perception, learning, and action
+are unified under one objective. There is no separate "learning phase" followed
+by an "inference phase"; both happen on every observation.
 
 ### 2. Long context and short-term memory from day one
 The system must demonstrably recall and reason over information arbitrarily far
 back in context. Short-term memory = the uncompressed recent buffer. Long-term
-memory = the compressed grammar/knowledge graph (information that has been
-abstracted and stored as reusable structure). Both are tested explicitly:
+memory = the compressed morphism graph (information abstracted into reusable
+structure). Both are tested explicitly:
 - Needle-in-haystack retrieval at controlled distances (100, 1K, 10K, 100K tokens)
-- Multi-hop reasoning over information spread across long context
+- Multi-hop reasoning over facts spread across long context
 
 ### 3. Full use of the CTKG category-theoretic toolkit from day one
-Structure learning, generalisation, and compression use the tools already built in
-`experiments/ctkg/`:
-- Functors for cross-domain type alignment
-- Adjunctions for learning inverse operations
-- Sheaf consistency for multi-modal composition
+Every learned pattern is a CTKG morphism. The CTKG is not a downstream consumer
+of the agent's output — it IS the agent's internal representation, updated on
+every observation. This means:
+- Functors for cross-domain type alignment and transfer
+- Adjunctions for discovering inverse operations (e.g. add/subtract, encode/decode)
+- Sheaf consistency for multi-modal composition (text + image + graph)
 - d-separation and do-calculus for causal reasoning
-- MasteryState for progressive capability tracking
-The CTKG is not a downstream consumer of the agent's output; it IS the agent's
-internal representation.
+- MasteryState for tracking what has been consolidated vs. what is still uncertain
+- Information flow / mutual information for identifying what matters
 
 ### 4. No superlinear algorithms
-Every core operation — token processing, grammar update, prediction, memory
-retrieval — must be O(n) or O(n log n) in the number of tokens processed, and
-O(k) or O(k log k) in the size of the current model (where k grows with
-vocabulary/grammar size). Specifically forbidden:
-- O(n²) pairwise JSD or similarity computation
+Every core operation must be O(n) or O(n log n) in the number of observations
+processed, and O(k) or O(k log k) in the current model size k. Specifically
+forbidden:
+- O(n²) pairwise distance/similarity computation
 - O(V³) dense matrix multiplication
-- O(K⁴) soft-cache warm-up
-- Any dense V×V or K×K matrix that grows with vocabulary size
-Where matrix operations are needed, use sparse representations throughout.
+- Any dense matrix that grows with vocabulary or grammar size
+Where matrices are needed, use sparse representations throughout. If an algorithm
+cannot be made subquadratic, it is the wrong algorithm.
 
 ### 5. Zero hardcoded thresholds or hyperparameters
-Every decision boundary must be derived from the data using an information-
-theoretic or Bayesian criterion. The only acceptable "threshold" is one that
-is mathematically entailed by MDL or posterior probability (e.g. "merge a pair
-iff it occurs ≥ 2 times" follows from MDL and has no free parameter). No:
+Every decision boundary must follow from an information-theoretic or Bayesian
+criterion derived from the data. The one acceptable "threshold" is the MDL count
+criterion (merge a pair iff count ≥ 2), which has no free parameter because it
+is mathematically equivalent to "this pair reduces description length." No:
 - Fixed surprisal thresholds
-- Vocabulary size caps
+- Vocabulary or cluster size caps
 - Similarity cutoffs
-- Arbitrary temperature or weight constants
+- Arbitrary weights or temperature constants
 
 ### 6. Drop-in transformer replacement with lower perplexity
 The system must produce a well-defined probability distribution P(next token |
-context) at every step. It must be benchmarkable against a transformer on the
-same corpus using the same perplexity metric. The goal is to beat transformer
-perplexity on the Latin test corpus by using structural compression rather than
-parameter interpolation. Testable from day one on the existing Latin datasets.
+context) at every step and be benchmarkable against a transformer on the same
+corpus with the same perplexity metric. The structural compression of morphism
+discovery should strictly dominate parameter interpolation on structured data.
+Testable from day one on the existing Latin datasets.
 
 ### 7. Any input topology from day one
-The core algorithm operates on a **graph** of co-occurrence relationships, not
-specifically on a 1D sequence. Sequences, images, video, and graphs are all
-instances of the same abstraction:
-- 1D sequence → path graph (edges connect position i to i+1)
-- 2D image → grid graph (edges connect pixel to its 4 or 8 neighbours)
-- Video → temporal stack of grid graphs
-- Relational data → arbitrary graph
-Adding a new modality requires only defining a graph topology over its tokens.
-No new core logic is needed.
+The core algorithm operates on an arbitrary graph of observations, not
+specifically on a 1D sequence. Topology is an input parameter, not an assumption:
+- 1D sequence → path graph (edge: position i → i+1)
+- 2D image → grid graph (edge: pixel → its 4/8 neighbours)
+- Video → temporal grid stack
+- Relational data → arbitrary labelled graph
+Adding a new modality means defining a graph topology over its tokens. No new
+core logic. The morphism discovery algorithm is topology-agnostic.
+
+---
+
+## Tests that must all pass (not just perplexity)
+
+These are the benchmarks that distinguish a grammar inducer from a reasoning
+agent. All must pass from day one; if the architecture cannot support them,
+the architecture is wrong.
+
+| Test | What it checks |
+|------|---------------|
+| Latin perplexity < transformer baseline | Grammar induction |
+| Arithmetic: count → add → multiply → polynomial | Compositional reasoning |
+| Needle-in-haystack @ 10K tokens | Long-context memory |
+| Cross-domain functor (Latin ↔ arithmetic) | Transfer / analogy |
+| Causal intervention (do-calculus) on learned graph | Causal reasoning |
+| New modality (2D image) with zero new core code | Topology-agnostic design |
 
 ---
 
 ## What v1 taught us (mistakes not to repeat)
 
-- **Don't build a pipeline.** A pipeline (E0→E1→...→R6→PCH) means every stage
-  depends on every previous stage. One miscalibrated parameter cascades everywhere.
-  v2 has one algorithm with one data structure.
+- **Don't build a pipeline.** E0→E1→...→R6→PCH meant every stage depended on
+  every previous one. One miscalibrated parameter cascaded everywhere. v2 has
+  one algorithm with one data structure.
 
-- **Don't separate learning from inference.** v1 had a training phase and an
-  inference phase. This forced batch processing, which caused paragraph-swallowing
-  (unbounded segment growth) and made online use impossible.
+- **Don't separate learning from inference.** v1's batch training phase caused
+  paragraph-swallowing and made online use impossible. In v2 every observation
+  immediately updates the model.
 
-- **Don't use K-means.** Cluster identity should emerge from the grammar, not be
-  imposed by an algorithm that requires choosing K. In v2, "categories" are grammar
-  rules — they form and dissolve based on evidence.
+- **Don't impose categories.** K-means requires choosing K and an initialisation.
+  In v2 categories are morphisms — they form when evidence supports them and
+  dissolve when it doesn't.
 
-- **Don't use dense similarity matrices.** O(V²) pairwise comparisons were the
-  root cause of every performance cliff in v1 (V≤300 cap, max_atoms=200, etc.).
+- **Don't use dense matrices.** O(V²) was the root cause of every performance
+  cliff in v1 (V≤300 cap, max_atoms=200, O(K⁴) warm-up). All of these were
+  symptoms of the wrong data structure.
 
-- **Test in seconds, not minutes.** If a correctness check requires running the
-  full corpus, the architecture is wrong. Every invariant must be testable on a
-  toy example in < 1 second.
+- **Don't conflate grammar with reasoning.** Grammar is a special case of morphism
+  discovery. Building a grammar-specific system and then bolting on reasoning
+  creates the seam that v1's CTKG bridge was trying (and failing) to paper over.
 
-- **One file = one concept.** v1's relational_pipeline.py grew to 6,365 lines
-  because there was no principled separation of concerns. v2 files stay small by
-  design.
+- **Test in seconds.** If a correctness check requires running the full corpus,
+  the architecture is wrong. Every invariant must be testable on a toy example
+  in < 1 second.
+
+- **One file = one concept.** v1's relational_pipeline.py reached 6,365 lines.
+  v2 files stay small by design; complexity is managed through interfaces, not
+  by putting everything in one place.
 
 ---
 
@@ -107,46 +158,55 @@ No new core logic is needed.
 
 ```
 symbolic_ai_v2/
-├── GOALS.md              ← this file
+├── GOALS.md                  ← this file
 ├── core/
-│   ├── grammar.py        ← online grammar learner (the entire algorithm)
-│   ├── graph.py          ← input topology abstraction (sequence/image/graph)
-│   ├── memory.py         ← short-term buffer + long-term grammar as memory
-│   └── predict.py        ← P(next | context) from current grammar state
-├── ctkg_bridge.py        ← maps grammar rules → CTKG types/morphisms
-├── active_inference.py   ← free energy minimisation over grammar beliefs
+│   ├── morphism.py           ← the one algorithm: observe edge → update morphism graph
+│   ├── topology.py           ← graph topology abstraction (sequence/image/relational)
+│   ├── memory.py             ← short-term buffer + long-term morphism compression
+│   └── predict.py            ← P(next | context) from current morphism graph
+├── reasoning/
+│   ├── active_inference.py   ← free energy minimisation; action selection
+│   └── ctkg_live.py          ← live CTKG that updates on every observation
 └── tests/
-    ├── latin_test.py     ← perplexity benchmark on EarlyModernLatin corpus
-    ├── long_context_test.py  ← needle-in-haystack recall at controlled distances
-    └── topology_test.py  ← verify same algorithm handles 1D/2D/graph input
+    ├── latin_test.py         ← perplexity benchmark vs transformer
+    ├── arithmetic_test.py    ← count → add → multiply compositional chain
+    ├── long_context_test.py  ← needle-in-haystack at controlled distances
+    ├── topology_test.py      ← same core logic handles 1D/2D/graph
+    └── transfer_test.py      ← functor alignment across two domains
 ```
 
-Total target: < 1500 lines of core logic. Each file independently testable.
+Total target: < 1500 lines of core logic. Each file independently testable in
+< 1 second on a toy example.
 
 ---
 
 ## Key open questions (to resolve before writing code)
 
-1. **Grammar representation**: Sequitur (digram uniqueness) vs. RePair
-   (global optimum) vs. online Bayesian grammar induction. Sequitur is O(n) and
-   online; RePair is batch and O(n log n) but finds the globally optimal grammar.
-   The choice affects long-context performance.
+1. **Morphism graph representation**: A sparse directed multigraph where nodes
+   are observed tokens/abstractions and edges are typed relations with counts.
+   The right data structure is likely a dict-of-dicts (adjacency list) with
+   edge types as the outer key. Open: how to represent *compositions* of
+   morphisms efficiently without materialising all paths.
 
-2. **Prediction from a grammar**: Given a partial parse of the current context,
-   how do we assign P(next token)? Options: (a) empirical rule-continuation
-   frequencies, (b) Kneser-Ney smoothing over grammar rules, (c) Bayesian
-   predictive distribution over grammars.
+2. **O(n) composition discovery**: Sequitur's digram uniqueness gives O(n)
+   grammar induction for sequences. The equivalent for general graphs is an
+   open research question. Candidate: maintain a priority queue of
+   (edge-pair, count) and merge pairs greedily when count ≥ 2. This extends
+   Sequitur to arbitrary topologies.
 
-3. **Active inference objective**: Free energy = -log P(observations | model) +
-   KL(posterior || prior). In the grammar setting, the model IS the grammar and
-   the posterior IS the parse. How do we define the prior over grammars? MDL
-   gives a natural answer: the prior favours grammars that compress the data.
+3. **Prediction from a morphism graph**: P(next | context) requires
+   marginalising over all current parse/composition states. For O(n log n)
+   prediction: maintain a running parse stack and use rule-continuation
+   frequencies. Smoothing across abstraction levels replaces Kneser-Ney.
 
-4. **Graph input normalisation**: For image patches, what constitutes a "token"?
-   The graph topology handles adjacency, but we need a token vocabulary. Opponent-
-   colour tokens (from v1 VisionLearner) are a good candidate.
+4. **Free energy grounding**: Free energy = description length of observations
+   under current morphism graph + description length of graph itself (MDL).
+   Minimising this jointly drives both perception (update graph to compress
+   observations better) and action (choose observations that most reduce
+   description length). Need to confirm this reduces to standard AIF equations.
 
-5. **CTKG bridge granularity**: Should every grammar rule become a CTKG concept,
-   or only rules that appear at a frequency threshold? (Answer: no threshold —
-   every rule is a concept, and rarely-used rules are simply low-probability
-   morphisms.)
+5. **CTKG update granularity**: Every observed edge is a morphism candidate.
+   Low-count morphisms live in a "tentative" buffer; they graduate to confirmed
+   CTKG concepts when count ≥ 2 (MDL threshold). Composition (functor,
+   adjunction discovery) runs lazily when a morphism is promoted, not on
+   every observation.
