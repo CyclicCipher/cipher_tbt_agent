@@ -2700,6 +2700,53 @@ class RelationalParadigmDiscoverer:
                     capped_sigs[a] = {k: v / mass for k, v in r.items()}
             sigs = capped_sigs
 
+        # ------------------------------------------------------------------
+        # M20: PPMI normalisation — remove language/domain-frequency bias.
+        #
+        # Raw probability signatures P(ctx | atom) encode *both* functional
+        # role and domain-frequency: a context that appears uniformly across
+        # all atoms (e.g. a very common character) gets high raw probability
+        # but carries zero role information.  PPMI = max(0, log₂ P(ctx|a) /
+        # P(ctx)) retains only the *excess* predictability above baseline,
+        # making signatures domain-agnostic (same algorithm works on pixels,
+        # audio, or sensorimotor sequences, not just natural language).
+        #
+        # Reference: Levy & Goldberg 2014 (NeurIPS) — skip-gram word2vec
+        # implicitly computes SVD on the shifted-PMI matrix; PPMI is the
+        # standard language-agnostic normalisation used in cross-lingual
+        # distributional clustering (Christodoulopoulos et al., EMNLP 2010).
+        #
+        # After PPMI, each signature is re-normalised to sum=1 so that the
+        # downstream JSD-based clustering step remains unchanged.
+        # ------------------------------------------------------------------
+        if sigs:
+            # Compute marginal P(ctx) = weighted average over all atoms,
+            # where the weight is the atom's relative total frequency.
+            total_mass = sum(atom_freq.get(a, 1) for a in sigs)
+            if total_mass <= 0:
+                total_mass = len(sigs)
+            ctx_marginal: dict = {}
+            for a, sig in sigs.items():
+                w = atom_freq.get(a, 1) / total_mass
+                for ctx, p in sig.items():
+                    ctx_marginal[ctx] = ctx_marginal.get(ctx, 0.0) + p * w
+            # Apply PPMI: max(0, log₂(P(ctx|a) / P(ctx))), then re-normalise.
+            ppmi_sigs: dict = {}
+            for a, sig in sigs.items():
+                ppmi: dict = {}
+                for ctx, p_ctx_given_a in sig.items():
+                    p_ctx = ctx_marginal.get(ctx, 1e-15)
+                    val   = p_ctx_given_a / max(p_ctx, 1e-15)
+                    ppmi_val = math.log2(val) if val > 1.0 else 0.0   # max(0, log)
+                    if ppmi_val > 0.0:
+                        ppmi[ctx] = ppmi_val
+                if ppmi:
+                    mass = sum(ppmi.values())
+                    ppmi_sigs[a] = {k: v / mass for k, v in ppmi.items()}
+                # Atoms with all-zero PPMI (indistinguishable from background)
+                # are omitted: they carry no role information.
+            sigs = ppmi_sigs if ppmi_sigs else sigs   # fall back to raw if all zero
+
         self._role_sigs = sigs
 
         if not sigs:
@@ -3106,11 +3153,46 @@ class RelationalAlgebra:
                 _row_entropy(mix) - (_row_entropy(m1) + _row_entropy(m2)) * 0.5)
             return float(_np.dot(row_jsd, w_arr)) / w_sum
 
-        # First pass: find best-match JSD for every pair
-        best_matches: list = []  # (r_i, r_j, best_r, best_jsd)
+        # M22: MDL self-normalising criterion.
+        #
+        # Old approach: accept A∘B ≈ C when JSD(M_AB, M_C) < threshold, where
+        # the threshold was a free parameter (Kneedle auto-detect + max_jsd cap).
+        # This failed on multilingual data because the Kneedle gap vanishes when
+        # V is large and matrices are sparse.
+        #
+        # New approach (bitter lesson): no threshold.  Accept A∘B ≈ C if and
+        # only if C explains the composed transition BETTER THAN CHANCE:
+        #
+        #   JSD(M_AB, M_C) < JSD(M_AB, M_uniform)
+        #
+        # JSD(p, uniform) = (log2(N) − H(p)) / 2  per row, where N = vocab size
+        # and H(p) is the row entropy of M_AB.  This baseline is computed from
+        # M_AB alone — no free parameter.  It adapts automatically: sparse/flat
+        # rows (near-uniform M_AB) produce a low baseline and are hard to beat;
+        # peaked rows produce a high baseline and are easy to beat if M_C is
+        # sharp.  The criterion is equivalent to "C reduces description length
+        # relative to a flat prior" — the minimal MDL condition.
+        #
+        # Reference: Sequitur (Nevill-Manning & Witten 1997) + MDL theory.
+
+        def _baseline_jsd(m_comp: '_np.ndarray') -> float:
+            """JSD(M_AB, M_uniform) — MDL baseline for composition M_AB."""
+            N          = m_comp.shape[1]
+            H_comp_row = _row_entropy(m_comp)           # entropy of each row of M_AB
+            H_max      = math.log2(N) if N > 1 else 1.0
+            # JSD(p, uniform) = [H((p+u)/2) - (H(p)+H(u))/2]
+            # H(uniform) = log2(N); H((p+u)/2) = H(mix where u=1/N uniform)
+            # Compact form: (H_max - H_comp_row) / 2  per row (since uniform
+            # has H=H_max and the mixture entropy is between H(p) and H_max).
+            row_baseline = _np.maximum(0.0, (H_max - H_comp_row) * 0.5)
+            return float(_np.dot(row_baseline, w_arr)) / w_sum
+
+        # First pass: find best-match JSD for every pair AND its MDL baseline.
+        best_matches: list = []  # (r_i, r_j, best_r, best_jsd, mdl_baseline)
         for r_i in relations:
             for r_j in relations:
-                m_comp   = np_mats[r_i] @ np_mats[r_j]   # numpy matmul
+                m_comp    = np_mats[r_i] @ np_mats[r_j]   # numpy matmul
+                baseline  = _baseline_jsd(m_comp)          # MDL baseline (no param)
                 best_r:   str | None = None
                 best_jsd: float      = float('inf')
                 for r_k in relations:
@@ -3118,20 +3200,17 @@ class RelationalAlgebra:
                     if d < best_jsd:
                         best_jsd = d
                         best_r   = r_k
-                best_matches.append((r_i, r_j, best_r, best_jsd))
-
-        # Auto-detect threshold from gap in best-JSD values (Kneedle)
-        all_jsds = sorted(jsd for _, _, _, jsd in best_matches)
-        auto_thr = _gap_threshold(all_jsds)
-        threshold = min(max_jsd, auto_thr) if auto_thr < float('inf') else max_jsd
+                best_matches.append((r_i, r_j, best_r, best_jsd, baseline))
 
         if verbose:
-            print(f'  R3: auto-threshold={threshold:.3f}  '
-                  f'(from gap in {len(all_jsds)} JSD values)')
+            print(f'  R3: MDL baseline criterion (no threshold) — '
+                  f'{len(best_matches)} pairs evaluated')
 
         table: dict = {}
-        for r_i, r_j, best_r, best_jsd in best_matches:
-            confirmed = (best_jsd <= threshold)
+        for r_i, r_j, best_r, best_jsd, baseline in best_matches:
+            # Accept iff best candidate beats the MDL baseline (better than chance)
+            # AND (for numerical robustness) JSD is below the old max_jsd hard cap.
+            confirmed = (best_jsd < baseline) and (best_jsd <= max_jsd)
             table[(r_i, r_j)] = (best_r if confirmed else None, best_jsd)
 
         self.composition_table = table
@@ -4257,6 +4336,8 @@ class PredictiveCodingHierarchy:
         next_rel:           str   = 'next',
         max_online_vocab:   int   = 50_000,
         threshold_recompute_every: int = 50,
+        mdl_boundaries:     bool  = False,
+        min_merge_count:    int   = 2,
     ) -> None:
         """
         Parameters
@@ -4286,6 +4367,21 @@ class PredictiveCodingHierarchy:
             Reserved for future top-down modulation; stored but not yet used.
         next_rel
             Relation name for sequential adjacency (default ``'next'``).
+        mdl_boundaries
+            M21: If True, use MDL pair-count criterion (Sequitur-inspired) as
+            an *additional* boundary signal alongside surprisal.  A boundary
+            is emitted before token T whenever the global pair count for
+            (buffer[-1], T) is below ``min_merge_count`` — i.e., the pair has
+            not yet appeared often enough to justify a grammar rule.  When the
+            pair is seen ``min_merge_count`` times it is freely merged.  This
+            replaces threshold calibration with a theoretically-grounded
+            criterion: the minimum number of repetitions that yields any
+            description-length reduction is exactly 2.
+        min_merge_count
+            M21: Minimum global occurrence count for a pair before it is
+            considered "worth a grammar rule" and can be merged without a
+            boundary.  Default 2 (Sequitur's digram-uniqueness threshold —
+            the absolute minimum for any compression benefit).
         """
         self.n_levels           = n_levels
         self.max_chunk_size     = max_chunk_size
@@ -4297,6 +4393,13 @@ class PredictiveCodingHierarchy:
         self.next_rel           = next_rel
         self.max_online_vocab   = max_online_vocab
         self.threshold_recompute_every = threshold_recompute_every
+        # M21: MDL pair-count boundaries (Sequitur-inspired).
+        self.mdl_boundaries     = mdl_boundaries
+        self.min_merge_count    = min_merge_count
+        # M21: global pair counts accumulated across the whole corpus per level.
+        # NOT reset at document boundaries — counts must be corpus-wide to give
+        # a correct MDL estimate of pair frequency.
+        self._pair_counts: list[dict] = [{} for _ in range(n_levels)]
 
         # One RelationalLearner per level (initially unfitted — cold start).
         self.learners: list[RelationalLearner] = [
@@ -4486,7 +4589,16 @@ class PredictiveCodingHierarchy:
         self._prev[level] = token
         self._seen[level] += 1
 
+        # 2b. M21: Update global pair count for (prev, token).
+        # Done before boundary check so counts are corpus-wide and accurate.
+        if prev is not None and self.mdl_boundaries:
+            pair_key = (str(prev), token)
+            self._pair_counts[level][pair_key] = (
+                self._pair_counts[level].get(pair_key, 0) + 1)
+
         # 3. Boundary detection: flush *before* adding the surprising token.
+
+        # 3a. Surprise-based boundary (original).
         # Threshold is recomputed every threshold_recompute_every tokens (cache miss)
         # rather than every token — threshold changes slowly, so this is accurate.
         self._threshold_age[level] += 1
@@ -4497,6 +4609,22 @@ class PredictiveCodingHierarchy:
         if surp > threshold and self._buffers[level]:
             self._emit_surp[level] = surp   # M16: record triggering surprisal
             self._emit_buffer(level)
+
+        # 3b. M21: MDL pair-count boundary (Sequitur-inspired).
+        # Emit a boundary before *token* if the pair (buffer[-1], token) has
+        # not been seen enough times globally to justify a grammar rule.
+        # The minimum threshold min_merge_count=2 is the Sequitur invariant:
+        # a pair must appear at least twice before a rule reduces DL at all.
+        # This criterion is checked AFTER the surprise boundary (both can fire
+        # independently), and is skipped during the cold-start grace period.
+        if (self.mdl_boundaries
+                and self._buffers[level]
+                and self._seen[level] >= self.min_tokens_active):
+            last   = str(self._buffers[level][-1])
+            pcount = self._pair_counts[level].get((last, token), 0)
+            if pcount < self.min_merge_count:
+                self._emit_surp[level] = surp
+                self._emit_buffer(level)
 
         # 4. Append to working memory.
         self._buffers[level].append(token)
@@ -4657,6 +4785,9 @@ class PredictiveCodingHierarchy:
         self._chunk_seqs     = [[] for _ in range(self.n_levels)]
         self._chunk_cur_doc  = [[] for _ in range(self.n_levels)]
         self._chunk_seqs_tok = [0]  * self.n_levels
+
+        # Clear M21 pair counts (not saved in checkpoint; rebuilt on next run).
+        self._pair_counts = [{} for _ in range(self.n_levels)]
 
         self._compressed = True
         if verbose:
@@ -4856,47 +4987,152 @@ class PredictiveCodingHierarchy:
     def evaluate_perplexity(
         self,
         sequences,
-        level:     int = 0,
-        rel:       str | None = None,
+        level:             int   = 0,
+        rel:               str | None = None,
+        belief_conditioned: bool  = False,
+        belief_weight:     float = 0.5,
     ) -> float:
-        """M15: Per-token cross-entropy (in bits) under the learner's bigram model.
+        """M15/M19: Per-token cross-entropy (in bits) under the learner's model.
 
-        Uses the empirical ``predict_dist(prev, rel)`` at *level* — the same
-        fast-path that drives online prediction — to score each token given its
-        predecessor.  This avoids the chunk/character semantics mismatch that
-        arises when using the belief state (which only updates at chunk-emission
-        boundaries, not per raw token).
+        **Bigram mode** (``belief_conditioned=False``, default):
+        Uses the empirical ``predict_dist(prev, rel)`` fast-path — V-level
+        precision, no category abstraction overhead.
 
-        Lower is better.  A flat unigram baseline gives log2(K) bits.
+        **Belief-conditioned mode** (``belief_conditioned=True``, M19):
+        Interpolates the bigram with the belief-state prediction:
+
+            P(next | prev, belief) =
+                (1 − α) · P_bigram(next | prev)
+              +  α      · P_belief(next | belief, rel)
+
+        where α = belief_weight × (1 − H(belief)/log₂K) scales with belief
+        *sharpness*: a diffuse (near-uniform) belief contributes nothing and
+        the prediction falls back to the pure bigram; a concentrated belief
+        contributes its full long-range contextual signal.
+
+        Beliefs are updated *after* scoring each token (no future leakage):
+        ``belief.observe(tok); belief.transition(rel)``.  Beliefs reset at
+        each sequence boundary to match how the model was trained.
 
         Parameters
         ----------
         sequences
             List of token sequences (same format as :meth:`process_corpus`).
         level
-            Hierarchy level.  For level 0 these are the raw base tokens; for
-            level N they should be ``self._chunk_seqs[N]`` (per-document lists
-            of chunk surface strings).
+            Hierarchy level.
         rel
             Relation (default ``self.next_rel``).
+        belief_conditioned
+            If True, use M19 belief-interpolated prediction.
+        belief_weight
+            Maximum interpolation weight toward the belief component (0–1).
+            The effective weight is further scaled by belief sharpness.
         """
         rel     = rel or self.next_rel
         learner = self.learners[level]
 
+        # Fetch belief state if requested and available.
+        beliefs = getattr(self, 'beliefs', [])
+        belief  = beliefs[level] if (belief_conditioned and level < len(beliefs)) else None
+
         total_nll = 0.0
         n_tokens  = 0
         for seq in sequences:
+            if belief is not None:
+                belief.reset()
             prev = None
             for tok in seq:
                 tok_s = str(tok)
                 if prev is not None:
-                    dist = learner.predict_dist(prev, rel)
-                    p    = dist.get(tok_s, 1e-10)
+                    if belief is not None:
+                        dist = self.predict_dist_conditioned(
+                            level, prev, rel, belief_weight=belief_weight)
+                    else:
+                        dist = learner.predict_dist(prev, rel)
+                    p = dist.get(tok_s, 1e-10)
                     total_nll += -math.log2(p)
                     n_tokens  += 1
+                    # Update belief AFTER scoring to avoid future leakage.
+                    if belief is not None:
+                        belief.observe(tok_s)
+                        belief.transition(rel)
                 prev = tok_s
 
         return total_nll / n_tokens if n_tokens > 0 else float('inf')
+
+    # ------------------------------------------------------------------
+    # M19 — Belief-Conditioned Prediction
+    # ------------------------------------------------------------------
+
+    def predict_dist_conditioned(
+        self,
+        level:        int,
+        atom:         str,
+        rel:          str | None = None,
+        belief_weight: float = 0.5,
+    ) -> dict:
+        """M19: Belief-interpolated token prediction.
+
+        Combines the immediate atom-level bigram (precise local conditioning)
+        with the belief-state's long-range contextual prediction:
+
+            P(next | atom, belief) =
+                (1 − α) · P_bigram(next | atom, rel)
+              +  α      · P_belief(next | belief_state, rel)
+
+        α = belief_weight × (1 − H(belief) / log₂K)
+
+        When belief is uniform (maximum entropy, no information) α = 0 and
+        the result is identical to the pure bigram.  When belief is concentrated
+        on a single category α = belief_weight, giving the belief component
+        its maximum contribution.
+
+        Parameters
+        ----------
+        level
+            PCH hierarchy level.
+        atom
+            Current surface token (string-coerced).
+        rel
+            Relation to predict along (default ``self.next_rel``).
+        belief_weight
+            Maximum weight on the belief component (0–1).  Effective weight
+            is further scaled by belief sharpness.
+        """
+        rel = rel or self.next_rel
+
+        learner   = self.learners[level]
+        p_bigram  = learner.predict_dist(atom, rel)
+
+        # Fetch belief state; fall back to pure bigram if unavailable.
+        beliefs = getattr(self, 'beliefs', [])
+        if level >= len(beliefs) or beliefs[level] is None:
+            return p_bigram
+
+        belief_state = beliefs[level]
+        p_belief     = belief_state.predict_target_dist(rel)
+        if not p_belief:
+            return p_bigram
+
+        # Compute belief sharpness: 0 = uniform, 1 = point mass.
+        bvec      = belief_state._belief
+        K         = max(len(bvec), 1)
+        H_belief  = -sum(p * math.log2(max(p, 1e-15)) for p in bvec.values())
+        H_uniform = math.log2(K) if K > 1 else 1.0
+        sharpness = max(0.0, 1.0 - H_belief / H_uniform)
+        alpha     = belief_weight * sharpness
+
+        if alpha < 1e-9:
+            return p_bigram
+
+        # Interpolate: (1-α)·bigram + α·belief.
+        all_toks = set(p_bigram) | set(p_belief)
+        result   = {}
+        for tok in all_toks:
+            result[tok] = ((1.0 - alpha) * p_bigram.get(tok, 1e-10)
+                           + alpha       * p_belief.get(tok, 1e-10))
+        total = sum(result.values())
+        return {k: v / total for k, v in result.items()} if total > 0 else p_bigram
 
     def reason_chain(
         self,

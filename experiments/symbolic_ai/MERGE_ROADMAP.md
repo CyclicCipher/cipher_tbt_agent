@@ -704,6 +704,157 @@ goal.
 
 ---
 
+### M19 — Belief-Conditioned Prediction — PLANNED
+
+**Motivation:** M13 wired belief states into PCH but they only influence
+segmentation (via `_effective_threshold`). They do not influence *prediction*.
+`evaluate_perplexity` uses raw bigrams, bypassing beliefs entirely. This means
+we have never tested whether multi-level belief propagation captures any
+long-range structure. Long-range dependencies *must* influence what gets
+predicted, not just where boundaries fall.
+
+**Theory:** `ContextBeliefState.predict_target_dist(rel)` already computes
+`P(target | belief, rel) = Σ_c P(c|belief) · Σ_{c'} P(c'|c,rel) · P(t|c,rel,c')`.
+What is missing is interpolation with the immediate atom-level bigram:
+
+```
+P(next | current_atom, belief) =
+  (1 - α) · P_bigram(next | current_atom)      # exact local conditioning
+  +  α    · P_belief(next | belief, rel)         # long-range context
+```
+
+where α = `belief_weight × (1 - H(belief)/log₂K)` — scales with belief
+sharpness, so a diffuse (uncertain) belief falls back to the bigram, while a
+concentrated belief contributes its full long-range signal.
+
+**Changes:**
+- `relational_pipeline.py`: add `PCH.predict_dist_conditioned(level, atom, rel, belief_weight=0.5)`
+- `relational_pipeline.py`: extend `PCH.evaluate_perplexity(belief_conditioned=False, belief_weight=0.5)`
+  — if `belief_conditioned=True`, reprocess the held-out sequence while
+  updating beliefs (observe + transition after each token) and score each
+  token under the interpolated distribution.
+- `char_latin.py`: M15 block prints both bigram and belief-conditioned
+  perplexity; prints Δ bits to quantify the long-range gain.
+
+**Verification:** belief-conditioned perplexity < bigram perplexity at level 0.
+At higher levels (word/phrase chunks) the gap should be larger.  If the gap is
+≤ 0, the belief cascade is not capturing long-range structure.
+
+---
+
+### M20 — PPMI Normalization for R1 (Language-Agnostic Roles) — PLANNED
+
+**Motivation:** R1 (`RelationalParadigmDiscoverer`) clusters atoms by
+role signature `P(direction, rel, partner)`.  On heterogeneous / multilingual
+corpora this fails: raw probability signatures encode *which language the atom
+belongs to* just as strongly as *which functional role it plays*.  The
+distributional signal is drowned in domain-frequency noise.
+
+**Theory:** Positive Pointwise Mutual Information (PPMI) normalises for
+marginal frequency.  `PPMI(a, ctx) = max(0, log P(ctx|a) / P(ctx))`.  A
+context that appears uniformly across all atoms (e.g. a very common character
+in all languages) gets PPMI ≈ 0 — it carries no role information.  A context
+that is distinctive to a specific functional role (e.g. `>next:u` for the
+atom `q`) gets high PPMI regardless of absolute frequency.  PPMI is the
+implicit objective of skip-gram word2vec (Levy & Goldberg 2014) and has been
+shown empirically to be language-agnostic for cross-lingual distributional
+clustering.
+
+**Algorithm must work on any domain** (pixels, audio, sensorimotor):
+PPMI depends only on co-occurrence counts — no language assumptions.
+
+**Changes:**
+- `relational_pipeline.py`: in `RelationalParadigmDiscoverer.fit()`, after raw
+  `sigs` dict is built (currently: `{atom: {ctx: raw_prob}}`), apply PPMI
+  transform: compute marginal `P(ctx)` across all atoms weighted by frequency,
+  then replace `p_ctx_given_a` with `max(0, log2(p_ctx_given_a / p_ctx + ε))`.
+  Re-normalise to sum=1 before passing to the JSD-based clustering step (so
+  downstream code is unchanged).
+
+**Verification:** R1 finds non-zero roles on the 89-book multilingual corpus.
+Roles should reflect functional categories (vowel/consonant at L0, function
+word / content word at higher levels), not language identity.
+
+---
+
+### M21 — MDL Boundary Detection (Replaces Surprise Threshold) — PLANNED
+
+**Motivation:** The surprise threshold (`mean + k·std`) is a hand-tuned
+heuristic.  The bitter lesson: any parameter that requires calibration is
+wrong — the right criterion must emerge from the data alone.  Sequitur
+(Nevill-Manning & Witten 1997) provides the theoretically minimal criterion:
+a pair of adjacent tokens is merged into a rule *if and only if* doing so
+reduces the total description length.  The minimum condition for a compression
+benefit is that the pair appears at least twice — creating a rule for a pair
+that appears once is always neutral or harmful for DL.
+
+**Theory:** Sequitur's *digram uniqueness* invariant: no adjacent pair of
+symbols appears more than once in the grammar without a rule covering it.
+This is equivalent to: *emit a boundary before any pair whose merge has not
+yet been seen at least once before*; merge the pair when it recurs.  The
+threshold is `min_count = 2`, which is theoretically justified (the smallest
+count that admits any compression benefit) and requires no calibration.
+
+**Algorithm must work on any domain:** pair counting is domain-agnostic.
+Sequitur has been applied to DNA sequences, MIDI music, and Java bytecode
+with the identical algorithm.
+
+**Changes:**
+- `relational_pipeline.py`: PCH gains `_pair_counts: list[Counter]` (one per
+  level) and `_mdl_boundaries: bool` constructor flag (default `True` when
+  `adaptive_threshold=False`; co-exists with surprise mode for ablation).
+- When `_mdl_boundaries=True`, `_process_level` uses pair-count criterion:
+  emit boundary if `_pair_counts[level][(buffer[-1], token)] < min_merge_count`
+  (default 2). After appending, increment `_pair_counts[level][(prev, token)]`.
+- `max_chunk_size` is retained as a hard cap (prevents pathological merges on
+  very long repeated sequences), but `surprise_threshold` / `adaptive_threshold`
+  / `surprise_k` become optional.
+
+**Verification:** Run on 89-book corpus with `--mdl-boundaries`.  Expect
+similar or better perplexity with no threshold parameters.  Run on a toy
+sequence (e.g. `abcabcabc`) and verify the boundaries correspond to `abc|abc|abc`.
+
+---
+
+### M22 — MDL Criterion for R3 (Relational Algebra) — PLANNED
+
+**Motivation:** R3 accepts `A∘B ≈ C` when `JSD(M_A·M_B, M_C) < threshold`.
+This threshold (currently Kneedle auto-detection + `max_jsd=0.3` cap) is a
+free parameter.  On multilingual corpora with large vocabulary (V > 300),
+atom-level matrices become sparse and the Kneedle gap vanishes, producing 0
+rules.  Both problems — the threshold and the sparsity — have the same fix:
+replace the threshold with a self-normalising MDL baseline.
+
+**Theory:** The MDL criterion for "does C explain the composed transition
+better than no model?" is:
+
+```
+DL(data | M_C) < DL(data | uniform)
+⟺  JSD(M_AB, M_C) < JSD(M_AB, M_uniform)
+```
+
+`JSD(M_AB, M_uniform)` is computable from M_AB alone (no threshold needed):
+`JSD(p, uniform) = (log₂V − H(p)) / 2` per row, averaged by atom frequency.
+This adapts automatically: sparse rows (near-uniform) set a low baseline;
+peaked rows set a high baseline.  A candidate C is accepted only if it beats
+*its own baseline*, not a fixed constant.  No parameter.
+
+**Sparsity fix:** when V > 300 (multilingual), fall back to K×K category-level
+matrices.  K is always small (≤ 100) and the matrices are dense.  The MDL
+criterion applies identically at the category level.
+
+**Changes:**
+- `relational_pipeline.py`: in `RelationalAlgebra._finish()`, replace the
+  Kneedle threshold lines with the MDL baseline comparison.  Remove `max_jsd`
+  parameter (or keep as a hard cap only to prevent trivially-obvious non-matches
+  from being accepted due to numerical noise).
+
+**Verification:** R3 finds `next∘next = skip2f` and `prev∘prev = skip2b` on
+the 89-book multilingual corpus (these hold by definition and should always be
+discovered).  Also runs at higher PCH levels where K is larger.
+
+---
+
 ## What Does Not Change
 
 The RelationalLearner's core mechanisms are correct and stay:

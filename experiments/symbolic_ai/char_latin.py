@@ -579,6 +579,9 @@ def main() -> None:
                         help='Verbose E0-R6 analysis output (default: compact summary only)')
     parser.add_argument('--skip-reprocess', action='store_true', default=False,
                         help='Skip the M13 frozen second-pass (saves ~same time as first pass)')
+    parser.add_argument('--mdl-boundaries', action='store_true', default=False,
+                        help='M21: use MDL pair-count criterion (Sequitur-inspired) '
+                             'alongside surprisal for boundary detection')
     parser.add_argument('--relations', nargs='+',
                         default=['next', 'prev', 'skip2f', 'skip2b'],
                         choices=['next', 'prev', 'skip2f', 'skip2b'],
@@ -621,6 +624,7 @@ def main() -> None:
             adaptive_threshold=True,
             surprise_k=0.5,
             min_tokens_active=20,
+            mdl_boundaries=args.mdl_boundaries,
         )
         print(f'Processing {len(sequences)} books ({total_chars:,} chars)...')
         pch.process_corpus(sequences)
@@ -697,6 +701,8 @@ def main() -> None:
         # Perplexity on a held-out book (last book, if multiple).
         eval_seqs = sequences[-1:] if len(sequences) > 1 else sequences
         ppl = pch2.evaluate_perplexity(eval_seqs, level=0)
+        ppl_bc = pch2.evaluate_perplexity(
+            eval_seqs, level=0, belief_conditioned=True, belief_weight=0.5)
         # Baseline = uniform over observed vocab (log2 V).
         V0 = len(getattr(pch2.learners[0], 'assignment', {}) or {})
         if V0 < 2:
@@ -704,6 +710,8 @@ def main() -> None:
         import math as _math
         baseline = _math.log2(V0) if V0 > 1 else 1.0
         print(f'  Level-0 bigram perplexity (held-out book): {ppl:.3f} bits/token')
+        print(f'  Level-0 belief-conditioned perplexity:     {ppl_bc:.3f} bits/token'
+              f'  (Δ={ppl - ppl_bc:+.3f} bits — M19)')
         print(f'  Uniform baseline (log2 V={V0}):            {baseline:.3f} bits/token')
         print(f'  Compression gain: {baseline - ppl:.3f} bits/token')
 
