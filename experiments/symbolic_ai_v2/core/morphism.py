@@ -99,6 +99,11 @@ class MorphismGraph:
         self._n_obs:        int = 0   # total observations
         self._n_boundaries: int = 0   # total segment boundaries emitted
 
+        # Digram counts for composition trigger.
+        # Separate from triple pair counts: triggers composition when a
+        # (left, etype, right) digram is seen twice regardless of context Q.
+        self.digrams: dict[tuple, int] = {}
+
         # Composition-level edge recording.
         # After observe() detects that the right sub-pair (P →[e2]→ S) matches a
         # known composition C, this is set to C's symbol ID.  The NEXT observe()
@@ -174,7 +179,20 @@ class MorphismGraph:
             self.edges[(cid, edge_type, S)] = comp_cnt
             self._inc_out(cid, edge_type, S, comp_cnt)
 
-        # ── Check pair (Q →[e1]→ P →[e2]→ S) ───────────────────────────────
+        # ── Digram-based composition trigger ─────────────────────────────────
+        # Create a Composition whenever (P →[edge_type]→ S) has been seen twice,
+        # regardless of which context Q preceded it.  More aggressive than the
+        # old triple-based trigger, so depth grows faster.
+        if edge_type is not None:
+            dgram_key = (P, edge_type, S)
+            if dgram_key not in self.rules_inv:
+                old_dgram = self.digrams.get(dgram_key, 0)
+                self.digrams[dgram_key] = old_dgram + 1
+                if old_dgram == 1:
+                    # Second occurrence → create composition + rewrite earlier buf
+                    self._create_composition(P, edge_type, S)
+
+        # ── Check pair (Q →[e1]→ P →[e2]→ S) for boundary detection ─────────
         #   e1 = the edge from Q to P = the incoming edge stored for P in _buf
         #   e2 = edge_type = the incoming edge of S (edge from P to S)
         #   Pairs are only checked when both edges are valid (non-None).
@@ -192,13 +210,11 @@ class MorphismGraph:
             if old_count == 0:
                 # First time this triple is seen → segment boundary
                 is_boundary = True
-            elif old_count == 1:
-                # Second time → create composition for (P →[e2]→ S)
-                self._create_composition(P, e2, S)
+            # (composition creation moved to digram-based trigger above)
 
             # If the right sub-pair (P →[e2]→ S) is a known composition,
             # mark it so the NEXT observe() records what follows it.
-            # This fires on every occurrence (count ≥ 2), not only on creation.
+            # This fires on every occurrence (count >= 2), not only on creation.
             comp_key = (P, e2, S)
             if comp_key in self.rules_inv:
                 self._pending_comp_ctx = self.rules_inv[comp_key]
@@ -269,8 +285,12 @@ class MorphismGraph:
         sid = len(self.symbols)
         comp = Composition(sid=sid, level=c_level, left=left, etype=etype, right=right)
         self.symbols.append(comp)
-        self.rules[sid]        = rule_key
+        self.rules[sid]          = rule_key
         self.rules_inv[rule_key] = sid
+
+        # Retroactively rewrite earlier (left →[etype]→ right) in the buffer.
+        # This ensures compositions are as deep as possible from the first use.
+        self._rewrite_buf(left, etype, right, sid)
         return sid
 
     def _compress_buf_tail(self) -> None:
@@ -301,6 +321,40 @@ class MorphismGraph:
             # predecessor to the new composition symbol).
             self._buf.pop()
             self._buf[-1] = (comp_id, left_etype)
+
+    def _rewrite_buf(self, left: int, etype: int, right: int, comp_id: int) -> None:
+        """Retroactively replace (left →[etype]→ right) pairs in the buffer.
+
+        Scans _buf[0 .. len-2] (up to but not including the current tail,
+        which is the left constituent of the composition we just created).
+        For each position i where buf[i] = (left, ...) and
+        buf[i+1] = (right, etype), replace with (comp_id, buf[i][1]) and
+        remove buf[i+1].
+
+        After rewriting, runs _compress_buf_tail() to propagate any new
+        compositions that the rewrite may have enabled.
+        """
+        n = len(self._buf) - 1   # exclude current tail (= left constituent)
+        i = 0
+        changed = False
+        while i < n - 1:         # i+1 must also be before the tail
+            if (self._buf[i][0] == left
+                    and self._buf[i+1][0] == right
+                    and self._buf[i+1][1] == etype):
+                self._buf[i] = (comp_id, self._buf[i][1])
+                self._buf.pop(i + 1)
+                n -= 1
+                changed = True
+                # don't advance i — the new comp_id at position i might
+                # itself form a composition with the next entry
+            else:
+                i += 1
+        if changed:
+            # Re-compress the entire buffer to propagate cascading merges.
+            # We run _compress_buf_tail() only on the inner portion (stop
+            # before the last entry, which is the current left constituent).
+            # A full-buffer recompress is too expensive; local sweeps suffice.
+            self._compress_buf_tail()
 
     # ── Segment boundary ──────────────────────────────────────────────────────
 
@@ -383,6 +437,7 @@ class MorphismGraph:
     def n_compositions(self) -> int: return len(self.rules)
     def n_edges(self)        -> int: return len(self.edges)
     def n_pairs(self)        -> int: return len(self.pairs)
+    def n_digrams(self)      -> int: return len(self.digrams)
 
     def edge_count(self, src: int, etype: int, tgt: int) -> int:
         """Return the observed count for edge (src →[etype]→ tgt), or 0 if unseen."""
