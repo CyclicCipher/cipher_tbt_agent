@@ -48,9 +48,19 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 
 from experiments.symbolic_ai_v2.core.topology  import sequence_1d
-from experiments.symbolic_ai_v2.core.morphism  import MorphismGraph
-from experiments.symbolic_ai_v2.core.predict   import perplexity, perplexity_multilevel
-from experiments.symbolic_ai_v2.reasoning.active_inference import free_energy
+from experiments.symbolic_ai_v2.core.morphism  import MorphismGraph, Atom
+from experiments.symbolic_ai_v2.core.predict   import (
+    perplexity, perplexity_multilevel,
+    SequenceGoal, generate as _generate,
+    _marginal_dist, _predict_via_rules,
+    _predict_via_variable_binding, _predict_via_chain, _predict_via_backward_chain,
+)
+from experiments.symbolic_ai_v2.reasoning.active_inference  import free_energy
+from experiments.symbolic_ai_v2.reasoning.rule_store        import build_rule_store
+from experiments.symbolic_ai_v2.reasoning.variable_binding  import (
+    build_variable_binding, predict_via_frame_match,
+)
+from experiments.symbolic_ai_v2.corpus.math_generator import LEVELS
 
 # ---------------------------------------------------------------------------
 # Config
@@ -139,6 +149,11 @@ def _benchmark_language(folder: Path) -> dict:
     for doc in train_docs:
         mg.observe_sequence(doc, topo)
         mg.prune()          # drop stale singletons at document boundary
+    # Full AI stack: algebraic rule discovery + variable binding.
+    # Harmless for language (no math operators present); ensures equal footing
+    # with the math domain for Phase 17c transfer experiments.
+    build_rule_store(mg, topo)
+    build_variable_binding(mg, topo)
     train_secs = time.time() - t0
 
     train_chars = sum(len(d) for d in train_docs)
@@ -211,6 +226,181 @@ def _benchmark_language(folder: Path) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Math accuracy helper
+# ---------------------------------------------------------------------------
+
+def _math_accuracy(mg: MorphismGraph, test_seqs: list, topo) -> float:
+    """Top-1 accuracy on math test sequences using the full back-off chain."""
+    correct = 0
+    total   = 0
+    for seq in test_seqs:
+        if len(seq) < 2:
+            continue
+        pairs = list(topo.stream_tokens(seq))
+        if len(pairs) < 2:
+            continue
+        ctx_id   = None
+        atom_buf : list[str] = []
+        valid    = True
+        for value, etype in pairs[:-1]:
+            sid = mg.atoms.get(value)
+            if sid is None:
+                valid = False; break
+            atom_buf.append(value)
+            if len(atom_buf) > SequenceGoal.ATOM_BUF_SIZE:
+                atom_buf.pop(0)
+            if ctx_id is not None and etype is not None:
+                comp = mg.rules_inv.get((ctx_id, etype, sid))
+                ctx_id = comp if comp is not None else sid
+            else:
+                ctx_id = sid
+        total += 1
+        if not valid or ctx_id is None:
+            continue
+        last_value, last_etype = pairs[-1]
+        if last_etype is None:
+            continue
+        last_sid = mg.atoms.get(last_value)
+        dist = _predict_via_rules(mg, ctx_id, last_etype)
+        if not dist:
+            dist = _predict_via_variable_binding(mg, ctx_id, last_etype)
+        if not dist:
+            dist = predict_via_frame_match(mg, atom_buf)
+        if not dist:
+            dist = _predict_via_chain(mg, atom_buf)
+        if not dist:
+            dist = _predict_via_backward_chain(mg, atom_buf)
+        if not dist:
+            dist = mg.predict_dist(ctx_id, last_etype)
+        if not dist:
+            dist = _marginal_dist(mg, last_etype)
+        if not dist:
+            continue
+        best_id = max(dist, key=dist.get)
+        last_sid = mg.atoms.get(last_value)
+        hit = False
+        if last_sid is not None and best_id == last_sid:
+            hit = True
+        else:
+            best_sym = mg.symbols[best_id]
+            if isinstance(best_sym, Atom) and best_sym.value == last_value:
+                hit = True
+            elif not isinstance(best_sym, Atom):
+                atom_seq = _generate(mg, best_id, target_level=0)
+                if atom_seq:
+                    leaf = mg.symbols[atom_seq[-1]]
+                    if isinstance(leaf, Atom) and leaf.value == last_value:
+                        hit = True
+        if hit:
+            correct += 1
+    return correct / max(total, 1)
+
+
+# ---------------------------------------------------------------------------
+# Math domain benchmark
+# ---------------------------------------------------------------------------
+
+def _benchmark_math() -> dict:
+    """Benchmark math discovery using the full model stack (sequence_1d).
+
+    Uses the same sequence_1d topology as the language benchmark so that
+    math and language are on equal footing for Phase 17c transfer experiments.
+    All 11 LEVELS are trained progressively (3× repetition like math_benchmark.py).
+    """
+    topo = sequence_1d()
+    mg   = MorphismGraph(topo)   # LiveCTKG auto-wired
+
+    all_train: list[list[str]] = []
+    all_test:  list[list[str]] = []
+    for _name, gen_fn in LEVELS:
+        train, test = gen_fn()
+        all_train.extend(train * 3)
+        all_test.extend(test)
+
+    # Approximate char count: average token length ~3, avg seq length ~6 tokens
+    # → ~18 chars/seq × (len(all_train)/3) ≈ small; reported but not hard-asserted
+    # in the multilevel test (below _MIN_TRAIN_FOR_MULTILEVEL).
+    t0 = time.time()
+    for seq in all_train:
+        mg.observe_sequence(seq, topo)
+    mg.prune()
+    build_rule_store(mg, topo)
+    build_variable_binding(mg, topo)
+    train_secs  = time.time() - t0
+
+    # Use character count analogue: sum of token lengths + spaces
+    train_chars = sum(len(' '.join(s)) for s in all_train)
+    test_chars  = sum(len(' '.join(s)) for s in all_test)
+
+    baseline    = math.log2(max(mg.n_atoms(), 2))
+    ppl_bi      = perplexity(mg, all_test, topo)
+    ppl_multi   = perplexity_multilevel(mg, all_test, topo)
+    total_secs  = time.time() - t0
+
+    acc         = _math_accuracy(mg, all_test, topo)
+
+    max_level   = max((mg.symbols[s].level for s in mg.rules), default=0)
+    n_bounds    = mg._n_boundaries
+    boundary_rate    = n_bounds / max(train_chars, 1)
+    avg_segment_len  = train_chars / max(n_bounds, 1)
+
+    fe = free_energy(mg)
+
+    ctkg          = mg._ctkg
+    n_ctkg_types  = len(ctkg.global_kg.types)
+    n_ctkg_conc   = len(ctkg.global_kg.concepts)
+    n_ctkg_merges = ctkg._n_merges
+    n_ctkg_viols  = ctkg._n_violations
+
+    depth_hist, depth_total = _depth_distribution(mg, all_test, topo)
+    pct_comp  = sum(v for k, v in depth_hist.items() if k > 0) / max(depth_total, 1)
+    mean_depth = sum(k * v for k, v in depth_hist.items()) / max(depth_total, 1)
+
+    rules     = getattr(mg, '_algebraic_rules', {})
+    rule_list = sorted(rules.keys()) if rules else []
+
+    return {
+        "skipped":          False,
+        "domain":           "math",
+        "n_docs":           len(LEVELS),
+        "n_train":          len(LEVELS),
+        "n_test":           len(LEVELS),
+        "train_chars":      train_chars,
+        "test_chars":       test_chars,
+        "n_atoms":          mg.n_atoms(),
+        "n_compositions":   mg.n_compositions(),
+        "n_edges":          mg.n_edges(),
+        "baseline_bits":    baseline,
+        "bigram_ppl":       ppl_bi,
+        "multilevel_ppl":   ppl_multi,
+        "bigram_gain":      baseline - ppl_bi,
+        "multilevel_gain":  baseline - ppl_multi,
+        "ml_improvement":   ppl_bi - ppl_multi,
+        "train_secs":       train_secs,
+        "total_secs":       total_secs,
+        # Grammar
+        "max_comp_level":   max_level,
+        "n_boundaries":     n_bounds,
+        "boundary_rate":    boundary_rate,
+        "avg_segment_len":  avg_segment_len,
+        # MDL
+        "free_energy":      fe,
+        # LiveCTKG
+        "n_ctkg_types":     n_ctkg_types,
+        "n_ctkg_concepts":  n_ctkg_conc,
+        "n_ctkg_merges":    n_ctkg_merges,
+        "n_ctkg_viols":     n_ctkg_viols,
+        # Context depth
+        "depth_hist":       dict(depth_hist),
+        "pct_comp_context": pct_comp,
+        "mean_ctx_depth":   mean_depth,
+        # Math-specific
+        "math_accuracy":    acc,
+        "algebraic_rules":  rule_list,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Global results cache
 # ---------------------------------------------------------------------------
 
@@ -225,11 +415,16 @@ def _all_benchmarks() -> dict[str, dict]:
         _RESULTS = {}
         return _RESULTS
     _RESULTS = {}
-    for subfolder in sorted(CORPUS_ROOT.iterdir()):
-        if subfolder.is_dir():
-            lang = subfolder.name
-            print(f"  Benchmarking: {lang} ...", flush=True)
-            _RESULTS[lang] = _benchmark_language(subfolder)
+    # Language domains from corpus files
+    if CORPUS_ROOT.exists():
+        for subfolder in sorted(CORPUS_ROOT.iterdir()):
+            if subfolder.is_dir():
+                lang = subfolder.name
+                print(f"  Benchmarking: {lang} ...", flush=True)
+                _RESULTS[lang] = _benchmark_language(subfolder)
+    # Math domain — always available (generated, no files needed)
+    print(f"  Benchmarking: math ...", flush=True)
+    _RESULTS["math"] = _benchmark_math()
     return _RESULTS
 
 
@@ -426,14 +621,15 @@ def test_summary_table():
 
     W = 20
     print()
-    print(f"  {'Language':<{W}}  {'train':>8}  {'baseline':>8}  "
+    print(f"  {'Domain':<{W}}  {'train':>8}  {'baseline':>8}  "
           f"{'bigram':>7}  {'multilev':>8}  {'ML gain':>7}  "
-          f"{'max_lvl':>7}  {'seg_len':>7}  {'ctkg_c':>6}  {'F(bits)':>10}")
-    print(f"  {'-' * (W + 82)}")
+          f"{'max_lvl':>7}  {'seg_len':>7}  {'ctkg_c':>6}  {'F(bits)':>10}  {'math_acc':>8}")
+    print(f"  {'-' * (W + 95)}")
     for lang, r in results.items():
         if r.get("skipped"):
             print(f"  {lang:<{W}}  SKIPPED ({r.get('reason', '?')})")
             continue
+        acc_str = f"{r['math_accuracy']*100:7.1f}%" if 'math_accuracy' in r else "     n/a"
         print(
             f"  {lang:<{W}}"
             f"  {r['train_chars']:>8,}"
@@ -445,7 +641,14 @@ def test_summary_table():
             f"  {r['avg_segment_len']:>7.1f}"
             f"  {r['n_ctkg_concepts']:>6,}"
             f"  {r['free_energy']:>10,.0f}"
+            f"  {acc_str}"
         )
+    print()
+    # Math domain: print discovered algebraic rules
+    math_r = results.get("math")
+    if math_r and not math_r.get("skipped"):
+        rules = math_r.get("algebraic_rules", [])
+        print(f"  Math algebraic rules discovered: {rules}")
     print()
     print(f"  Context depth (% comp / mean level / max level):")
     for lang, r in results.items():
@@ -456,7 +659,8 @@ def test_summary_table():
               f"mean={r['mean_ctx_depth']:.2f}  "
               f"max={max(hist, default=0)}")
     print()
-    print(f"  Target to beat a small transformer: < 2.0 bits/char")
+    print(f"  Target (language): < 2.0 bits/char")
+    print(f"  Target (math):     > 80% test accuracy")
     total = sum(r["total_secs"] for r in results.values() if not r.get("skipped"))
     print(f"  Total benchmark time: {total:.1f}s")
 
