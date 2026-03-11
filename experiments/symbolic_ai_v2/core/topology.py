@@ -280,3 +280,107 @@ def grid_3d(connectivity: int = 6, time_edges: bool = False) -> Topology:
 
     tag = f"grid_3d_{connectivity}conn{'_time' if time_edges else ''}"
     return Topology(tag, reg)   # stream_edges() raises NotImplementedError until filled in
+
+
+# ── Math topology ─────────────────────────────────────────────────────────────
+
+# Hard-coded vocabulary sets for the math benchmark corpus.
+# Each set defines which tokens belong to that syntactic category.
+# Unknown tokens default to 'op' (operator).
+
+_MATH_OPS: frozenset[str] = frozenset({
+    'add', 'sub', 'mul', 'div', 'pow', 'sq', 'sqrt',
+    'd', 'int', 'succ', 'pred',
+    'conserve', 'bernoulli', 'ke', 'pe', 'ftc',
+    'eval', 'at',
+})
+_MATH_EQ:  frozenset[str] = frozenset({'eq', 'and'})
+_MATH_VAR: frozenset[str] = frozenset({'x', 'C', 'dx', 'half', 'third'})
+
+
+def math_topology() -> Topology:
+    """Topology for mathematical formula sequences.
+
+    Four edge type codes encoding the syntactic role of the TARGET token:
+
+      op  (0) — operator token  (add, mul, d, int, succ, ...)
+      num (1) — numeric literal (0..99, decimal strings)
+      var (2) — variable / special symbol (x, C, dx, half, third)
+      eq  (3) — equality / connective (eq, and)
+
+    FCA on these four edge types discovers meaningful structural types:
+      - All numeric literals cluster together (observed on 'num' edges)
+      - All operators cluster together (observed on 'op' edges)
+      - Type back-off then generalises: "this context expects a number"
+        even for numeric values never seen before in this context.
+
+    With sequence_1d (single 'next' etype), FCA degenerates to one global
+    group (all atoms get type 'next_group').  math_topology() gives FCA
+    four structurally distinct edge types, enabling meaningful adjunctions.
+    """
+    reg = EdgeTypeRegistry()
+    reg.register('op')   # code 0
+    reg.register('num')  # code 1
+    reg.register('var')  # code 2
+    reg.register('eq')   # code 3
+
+    class _MathTopo(Topology):
+        def stream_tokens(self, data: Any) -> Iterator[tuple[Any, Optional[int]]]:
+            op_e  = self.registry.code('op')
+            num_e = self.registry.code('num')
+            var_e = self.registry.code('var')
+            eq_e  = self.registry.code('eq')
+            first = True
+            for token in data:
+                t = str(token)
+                if first:
+                    yield t, None
+                    first = False
+                    continue
+                if t in _MATH_OPS:
+                    etype = op_e
+                elif t in _MATH_EQ:
+                    etype = eq_e
+                elif t in _MATH_VAR:
+                    etype = var_e
+                else:
+                    try:
+                        float(t)
+                        etype = num_e
+                    except ValueError:
+                        etype = op_e   # unknown token → treat as operator
+                yield t, etype
+
+    return _MathTopo('math', reg)
+
+
+def agent_topology() -> Topology:
+    """Topology for agent environments with structural intero/extero distinction.
+
+    Three edge type codes:
+
+      extero (0) — sequential exteroceptive observation (world state tokens)
+      intero (1) — sequential interoceptive observation (agent-body tokens)
+      action (2) — action token: the agent's chosen action, fed by AgentLoop
+                   between the current observation and the next one.
+
+    This makes the self/world boundary structural, not a naming convention.
+    The MorphismGraph learns separate composition hierarchies for each stream:
+      - extero-extero: room contents, object properties, exits
+      - intero-intero: hunger, health, inventory
+      - action-intero: action → change in agent state  (affordance: what I gain)
+      - action-extero: action → change in world state  (affordance: what changes)
+
+    The AgentLoop feeds action tokens automatically, so every Environment that
+    uses agent_topology() gets the structural intero/extero/action distinction
+    without any per-experiment boilerplate.
+
+    stream_tokens() is NOT used for agent environments; tokens are fed one at
+    a time via mg.observe(value, etype) from Environment.observe().
+    """
+    reg = EdgeTypeRegistry()
+    reg.register("extero")   # code 0
+    reg.register("intero")   # code 1
+    reg.register("action")   # code 2
+
+    return Topology("agent", reg)

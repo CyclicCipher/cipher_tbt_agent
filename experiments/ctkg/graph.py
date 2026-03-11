@@ -1307,32 +1307,47 @@ class KnowledgeGraph:
         """
         violations: List[SheafViolation] = []
 
-        # Check overlapping types (excluding builtins — those always agree)
-        for name, my_type in self.types.items():
+        # Check overlapping types — always iterate the SMALLER dict and look
+        # up in the larger one.  sheaf_check is symmetric (overlap detection is
+        # commutative) so swapping iteration order doesn't change results.
+        # Keeping cost O(min(|self.types|, |other.types|)) rather than
+        # O(|self.types|) matters enormously when one graph is a large global
+        # CTKG and the other is a tiny per-chunk local KG.
+        if len(self.types) <= len(other.types):
+            small_types, big_types = self.types, other.types
+        else:
+            small_types, big_types = other.types, self.types
+
+        for name, t_small in small_types.items():
             if name in BUILTIN_TYPES:
                 continue
-            other_type = other.types.get(name)
-            if other_type is None or name in BUILTIN_TYPES:
+            t_big = big_types.get(name)
+            if t_big is None:
                 continue
-            if not types_compatible(my_type, other_type):
+            if not types_compatible(t_small, t_big):
                 violations.append(SheafViolation(
                     f"Type '{name}' defined incompatibly across domains: "
-                    f"{my_type!r} vs {other_type!r}"))
+                    f"{t_small!r} vs {t_big!r}"))
 
-        # Check overlapping concepts
-        for name, my_concept in self.concepts.items():
-            other_concept = other.concepts.get(name)
-            if other_concept is None:
+        # Check overlapping concepts — same min-side iteration.
+        if len(self.concepts) <= len(other.concepts):
+            small_conc, big_conc = self.concepts, other.concepts
+        else:
+            small_conc, big_conc = other.concepts, self.concepts
+
+        for name, c_small in small_conc.items():
+            c_big = big_conc.get(name)
+            if c_big is None:
                 continue
             # Input/output types must match
-            if my_concept.input_type != other_concept.input_type:
+            if c_small.input_type != c_big.input_type:
                 violations.append(SheafViolation(
                     f"Concept '{name}' input types differ: "
-                    f"{my_concept.input_type} vs {other_concept.input_type}"))
-            if my_concept.output_type != other_concept.output_type:
+                    f"{c_small.input_type} vs {c_big.input_type}"))
+            if c_small.output_type != c_big.output_type:
                 violations.append(SheafViolation(
                     f"Concept '{name}' output types differ: "
-                    f"{my_concept.output_type} vs {other_concept.output_type}"))
+                    f"{c_small.output_type} vs {c_big.output_type}"))
 
         return violations
 

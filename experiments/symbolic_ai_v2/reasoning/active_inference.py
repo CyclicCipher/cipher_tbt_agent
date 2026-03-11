@@ -13,6 +13,23 @@ Functions:
   prediction_error(mg, context_id, etype, tgt_id)  — -log2 P(tgt | ctx, etype)
   free_energy(mg)                                   — MDL cost of current model
   expected_info_gain(mg, context_id, etype)         — EIG for choosing an edge
+
+Classes:
+  ActiveInferenceTracker  — wraps MorphismGraph; registers an on_observe hook
+                            so PE is computed BEFORE every model update.
+                            Works even when code calls mg.observe() directly
+                            (not through the tracker), because the hook fires
+                            inside MorphismGraph.observe().
+
+Usage:
+    topo = sequence_1d()
+    mg   = MorphismGraph()
+    ait  = ActiveInferenceTracker(mg)
+    for text in corpus:
+        ait.observe_sequence(text, topo)
+        ait.flush()
+    print(ait.log_line())
+    print(f"free_energy = {free_energy(mg):.1f} bits")
 """
 
 from __future__ import annotations
@@ -139,3 +156,116 @@ def best_action(
     if not candidate_etypes:
         return None
     return max(candidate_etypes, key=lambda et: expected_info_gain(mg, context_id, et))
+
+
+# ── Active-inference wrapper ───────────────────────────────────────────────────
+
+class ActiveInferenceTracker:
+    """Attaches an on_observe hook to a MorphismGraph.
+
+    Registers itself via mg.on_observe() so prediction_error is computed
+    BEFORE every model update — even when callers invoke mg.observe()
+    directly, bypassing this wrapper.  This makes active-inference tracking
+    structural rather than opt-in.
+
+    Tracks:
+      - running mean prediction error (bits/token)
+      - total observations processed
+      - list of recent PE values (bounded to _MAX_HIST entries)
+
+    The observe() / observe_sequence() / flush() convenience methods forward
+    to the underlying graph with the same signatures, so existing code that
+    wraps mg through the tracker continues to work unchanged.
+    """
+
+    _MAX_HIST = 10_000   # cap on history length to avoid unbounded memory
+
+    def __init__(self, mg: MorphismGraph) -> None:
+        self.mg = mg
+
+        # Running statistics
+        self._pe_sum:   float = 0.0
+        self._pe_count: int   = 0
+        self._pe_last:  float = 0.0
+        self._pe_hist:  list[float] = []   # recent surprisal values
+
+        # Register the hook — fires BEFORE every mg.observe() model update
+        mg.on_observe(self._hook)
+
+    def _hook(self, ctx_id: Optional[int], etype: Optional[int], tgt_id: int, graph: MorphismGraph) -> None:
+        """Pre-observation hook: compute PE from the prior state of graph.
+
+        ctx_id is None on the first token (no incoming context edge), in which
+        case we record PE = 0.0 (no prediction was possible).
+        etype is None for the same reason; both None checks are equivalent.
+        """
+        if ctx_id is None or etype is None:
+            pe = 0.0
+        else:
+            pe = prediction_error(graph, ctx_id, etype, tgt_id)
+
+        self._pe_last   = pe
+        self._pe_sum   += pe
+        self._pe_count += 1
+        if len(self._pe_hist) < self._MAX_HIST:
+            self._pe_hist.append(pe)
+
+    # ── Convenience API (mirrors MorphismGraph) ───────────────────────────────
+
+    def observe(self, value: object, etype: int) -> float:
+        """Forward to mg.observe(); hook fires automatically.
+
+        Returns the surprisal (bits) that the hook recorded for this token.
+        """
+        self.mg.observe(value, etype)
+        return self._pe_last
+
+    def observe_sequence(self, data: object, topology) -> None:
+        """Forward to mg.observe_sequence(); hook fires for each token."""
+        self.mg.observe_sequence(data, topology)
+
+    def flush(self) -> None:
+        """Flush the underlying MorphismGraph buffer."""
+        self.mg.flush()
+
+    def process_corpus(self, sequences: list, topology) -> None:
+        """Process a list of sequences with flush between each."""
+        for seq in sequences:
+            self.observe_sequence(seq, topology)
+            self.flush()
+
+    # ── Statistics ────────────────────────────────────────────────────────────
+
+    @property
+    def pe_mean(self) -> float:
+        """Running mean prediction error in bits/token."""
+        return self._pe_sum / max(self._pe_count, 1)
+
+    @property
+    def pe_last(self) -> float:
+        """Surprisal of the most recent observation."""
+        return self._pe_last
+
+    @property
+    def n_observations(self) -> int:
+        """Total tokens processed."""
+        return self._pe_count
+
+    def free_energy(self) -> float:
+        """MDL cost of the current model (delegates to module-level function)."""
+        return free_energy(self.mg)
+
+    def log_line(self) -> str:
+        """One-line summary suitable for printing during training."""
+        return (
+            f"ActiveInference("
+            f"n={self._pe_count}, "
+            f"pe_mean={self.pe_mean:.3f} bits, "
+            f"pe_last={self._pe_last:.3f} bits, "
+            f"F={self.free_energy():.1f} bits, "
+            f"compositions={self.mg.n_compositions()}, "
+            f"pairs={self.mg.n_pairs()})"
+        )
+
+    def __repr__(self) -> str:
+        return self.log_line()

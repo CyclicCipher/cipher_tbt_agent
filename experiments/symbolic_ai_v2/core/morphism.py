@@ -47,7 +47,14 @@ class Symbol:
 
 @dataclass(slots=True)
 class Atom(Symbol):
-    value: str   # the raw observation string
+    value:       str               # the raw observation string
+    predicted:   bool = False      # True if created by a rule, not observed in the corpus
+    concept_ids: frozenset = frozenset()  # FCA type IDs (Phase 19 L1): which
+                                          # distributional types this atom belongs to.
+                                          # Populated by LiveCTKG.on_segment() after
+                                          # each FCA pass.  Empty until first pass.
+                                          # frozenset is immutable: update via
+                                          # atom.concept_ids = atom.concept_ids | {id}
 
 
 @dataclass(slots=True)
@@ -72,7 +79,19 @@ class MorphismGraph:
       decompose(sid)                        — (left, etype, right) for compositions
     """
 
-    def __init__(self) -> None:
+    def __init__(self, topology=None) -> None:
+        """Create a MorphismGraph.
+
+        topology : optional Topology instance.  If provided, LiveCTKG is
+                   automatically wired as a segment-boundary callback, making
+                   FCA adjunction back-off available in all prediction functions
+                   without any further setup.
+
+                   ActiveInferenceTracker is NOT auto-wired here: its
+                   O(|edges|) hook is prohibitively slow for large corpora.
+                   Attach it explicitly when needed:
+                       ait = ActiveInferenceTracker(mg)
+        """
         # Symbol table — list-indexed by ID for O(1) access
         self.symbols:   list[Symbol]            = []
         self.atoms:     dict[str, int]          = {}   # value → atom ID
@@ -104,6 +123,12 @@ class MorphismGraph:
         # Segment-boundary callbacks: called with (chunk_buf, graph) on each boundary
         self._callbacks: list[Callable] = []
 
+        # Pre-observation hooks: called with (ctx_id, etype, tgt_id) BEFORE
+        # any model update.  ctx_id is None on the first token (no context).
+        # Used by ActiveInferenceTracker to compute prediction_error from the
+        # prior; does NOT modify graph state.
+        self._observe_hooks: list[Callable] = []
+
         # Running counters
         self._n_obs:        int = 0   # total observations
         self._n_boundaries: int = 0   # total segment boundaries emitted
@@ -120,6 +145,47 @@ class MorphismGraph:
         # enabling predict_dist(C_id, etype) for multi-level (trigram+) prediction.
         self._pending_comp_ctx: Optional[int] = None
 
+        # FCA type registry (Phase 19 L1 — Marcus type-token distinction).
+        # _fca_type_ids: maps a frozenset of edge-type ints (the FCA attribute set,
+        #   i.e. the distributional signature of a type) to a stable integer type ID.
+        # _fca_types: inverse list — type_id → frozenset[int] of edge types.
+        # These are updated by LiveCTKG.on_segment() after each FCA pass.
+        # Atom.concept_ids stores the set of type IDs each atom belongs to.
+        self._fca_type_ids: dict[frozenset, int] = {}
+        self._fca_types:    list[frozenset]      = []
+
+        # Optional full-capability sub-systems (set by _wire when topology is given)
+        self._ctkg = None   # LiveCTKG: FCA + CTKG sheaf, enables type back-off
+        self._ait  = None   # ActiveInferenceTracker: not auto-wired (see docstring)
+
+        if topology is not None:
+            self._wire(topology)
+
+    # ── Full-capability wiring ────────────────────────────────────────────────
+
+    def _wire(self, topology) -> None:
+        """Attach full capabilities for *topology*.
+
+        Wires LiveCTKG as a segment-boundary callback.  After each chunk,
+        FCA discovers formal concepts, which are sheaf-merged into a global
+        CTKG.  The resulting atom_type_map() is then used automatically by
+        predict() / perplexity_multilevel() for FCA adjunction back-off:
+        when a context has no direct edges, the back-off pools edges from
+        all atoms that share the same structural type.
+
+        Uses lazy imports to avoid the circular-import chain
+            morphism → ctkg_live → morphism  (safe at call time).
+
+        ActiveInferenceTracker is intentionally not wired here.  Its hook
+        runs O(|edges|) per observation and is prohibitively slow during
+        large-corpus training.  Attach it explicitly if needed:
+            from reasoning.active_inference import ActiveInferenceTracker
+            ait = ActiveInferenceTracker(mg)
+        """
+        from ..reasoning.ctkg_live import LiveCTKG  # lazy — safe after module init
+        self._ctkg = LiveCTKG(topology)
+        self.on_segment(self._ctkg.on_segment)
+
     # ── Atom management ───────────────────────────────────────────────────────
 
     def _get_or_create_atom(self, value: str) -> int:
@@ -131,6 +197,62 @@ class MorphismGraph:
             self.symbols.append(atom)
             self.atoms[value] = sid
         return sid
+
+    def get_or_create_atom(self, value: str, coarse_type: str = '') -> int:
+        """Return atom ID for value, creating a *predicted* atom if unseen.
+
+        Unlike the private _get_or_create_atom (used during corpus ingestion),
+        this marks newly created atoms as predicted=True so they can be
+        distinguished from observed atoms.  Predicted atoms have zero edges
+        initially; they participate in prediction but not endofunctor building.
+
+        coarse_type is stored for Phase 19 type-membership tracking but not
+        yet attached to the Atom dataclass (kept in mg._predicted_coarse_types).
+        """
+        sid = self.atoms.get(value)
+        if sid is not None:
+            return sid
+        sid = len(self.symbols)
+        atom = Atom(sid=sid, level=0, value=value, predicted=True)
+        self.symbols.append(atom)
+        self.atoms[value] = sid
+        if coarse_type:
+            if not hasattr(self, '_predicted_coarse_types'):
+                self._predicted_coarse_types: dict[int, str] = {}
+            self._predicted_coarse_types[sid] = coarse_type
+        return sid
+
+    # ── FCA type registry (Phase 19 L1 — Marcus type-token distinction) ────────
+
+    def fca_type_id(self, attr_set: frozenset) -> int:
+        """Return the stable integer ID for the FCA type identified by attr_set.
+
+        attr_set is a frozenset of edge-type integers — the distributional
+        signature shared by all atoms in a formal concept's extent.  Two atoms
+        in different chunks with identical edge-type sets get the same type ID.
+
+        Creates a new type ID the first time attr_set is seen.  Subsequent calls
+        with the same attr_set return the same integer (stable across chunks).
+        """
+        tid = self._fca_type_ids.get(attr_set)
+        if tid is None:
+            tid = len(self._fca_types)
+            self._fca_type_ids[attr_set] = tid
+            self._fca_types.append(attr_set)
+        return tid
+
+    def atoms_of_type(self, type_id: int) -> list[int]:
+        """Return all atom IDs currently registered as members of type_id.
+
+        Linear scan — O(|atoms|).  Intended for offline analysis and rule
+        indexing, not for inner-loop prediction.  For prediction, consult
+        atom.concept_ids directly.
+        """
+        result = []
+        for sid, sym in enumerate(self.symbols):
+            if isinstance(sym, Atom) and type_id in sym.concept_ids:
+                result.append(sid)
+        return result
 
     # ── Output index maintenance ──────────────────────────────────────────────
 
@@ -162,6 +284,14 @@ class MorphismGraph:
         """
         self._n_obs += 1
         S = self._get_or_create_atom(value)
+
+        # ── Fire pre-observation hooks (BEFORE any model update) ─────────────
+        # Hooks see the prior state: edges not yet incremented, no new compositions.
+        # ctx_id is None on the first token (nothing in buffer yet).
+        if self._observe_hooks:
+            ctx_id = self._buf[-1][0] if self._buf else None
+            for hook in self._observe_hooks:
+                hook(ctx_id, edge_type, S, self)
 
         # ── First observation or start of a new chunk after a boundary ──────
         if not self._buf:
@@ -439,6 +569,21 @@ class MorphismGraph:
         """
         self._callbacks.append(callback)
 
+    def on_observe(self, hook: Callable) -> None:
+        """Register a pre-observation hook: hook(ctx_id, etype, tgt_id, graph).
+
+        Called BEFORE any model update, so the hook sees the PRIOR distribution.
+        This is the correct moment for computing prediction_error / free-energy.
+
+        ctx_id  : int | None  — symbol_id of the previous token; None = first token
+        etype   : int | None  — edge type from ctx to tgt; None = first token
+        tgt_id  : int         — symbol_id of the current observation
+        graph   : MorphismGraph — the graph (prior state, not yet updated)
+
+        Hook must be side-effect-free w.r.t. the graph (read-only access only).
+        """
+        self._observe_hooks.append(hook)
+
     # ── Prediction ────────────────────────────────────────────────────────────
 
     def predict_dist(self, src_id: int, etype: int) -> dict[int, float]:
@@ -447,6 +592,21 @@ class MorphismGraph:
         Fast path: normalised edge counts from the output index.
         Returns an empty dict if src_id has never been observed as a source
         for edge type etype (callers should apply a back-off in that case).
+
+        Hopf coproduct smoothing (BLUEPRINT §predict() step 4):
+        When src_id is a Composition C = (left →[e]→ right), the direct
+        distribution is blended with the right constituent's distribution:
+
+            result = (1 - w) * direct + w * right_constituent
+
+        where w = 1 / (1 + direct_count) decreases as more direct edges
+        are observed from C.  This encodes the Hopf algebra identity
+            Δ(C) = C ⊗ 1 + 1 ⊗ right
+        as a convex smoothing: trust the composition's own history more as
+        it accumulates evidence, but never discard the constituent prior.
+
+        Only applies to Compositions; Atoms always return the raw distribution.
+        Right constituent is read directly from _out (no recursion).
         """
         out_src = self._out.get(src_id)
         if out_src is None:
@@ -457,7 +617,32 @@ class MorphismGraph:
         total = sum(out_etype.values())
         if total == 0:
             return {}
-        return {tgt: cnt / total for tgt, cnt in out_etype.items()}
+        direct = {tgt: cnt / total for tgt, cnt in out_etype.items()}
+
+        # Hopf smoothing: only for Compositions (Atoms have no rule entry)
+        rule = self.rules.get(src_id)
+        if rule is None:
+            return direct   # Atom: no smoothing
+
+        _left, _e, right = rule
+
+        # Read right-constituent distribution directly from _out (no recursion)
+        right_emap = (self._out.get(right) or {}).get(etype) or {}
+        if not right_emap:
+            return direct   # Constituent has no data: no smoothing
+        right_total = sum(right_emap.values())
+        if right_total == 0:
+            return direct
+
+        constituent = {tgt: cnt / right_total for tgt, cnt in right_emap.items()}
+
+        # Convex blend: w decreases as direct evidence accumulates
+        w = 1.0 / (1.0 + total)
+        all_keys = set(direct) | set(constituent)
+        return {
+            k: (1.0 - w) * direct.get(k, 0.0) + w * constituent.get(k, 0.0)
+            for k in all_keys
+        }
 
     def predict_dist_by_value(
         self, value: str, etype: int
@@ -496,6 +681,101 @@ class MorphismGraph:
             return [goal_id]
         left_id, _etype, right_id = rule
         return self.generate(left_id, target_level) + self.generate(right_id, target_level)
+
+    # ── Sense disambiguation ──────────────────────────────────────────────────
+
+    def split_atom(
+        self,
+        atom_id: int,
+        sense_a_etypes: set[int],
+        sense_b_etypes: set[int],
+    ) -> int:
+        """Split atom_id into two atoms based on an edge-type partition.
+
+        Creates a new Atom B (value = original_value + "__s2") and
+        redistributes all edges that involve atom_id via sense_b_etypes:
+
+          For each edge (src, e, tgt) where e ∈ sense_b_etypes:
+            - If src == atom_id: new edge src = atom_B_id
+            - If tgt == atom_id: new edge tgt = atom_B_id
+            - If both (self-loop): both endpoints become atom_B_id
+
+        Composition rules in self.rules that reference atom_id via a
+        sense_b_etype are updated in-place to use atom_B_id.
+
+        The pairs/digrams tables are NOT updated; they are approximations
+        that will naturally self-correct as new observations arrive.
+        The active buffer (_buf) is not updated; split_atom is called at
+        segment boundaries, not mid-sequence.
+
+        Returns atom_B_id.
+        """
+        sym = self.symbols[atom_id]
+        if not isinstance(sym, Atom):
+            raise ValueError(f"split_atom: symbol {atom_id} is not an Atom")
+
+        # 1. Create new Atom B
+        new_value = sym.value + "__s2"
+        atom_B_id = len(self.symbols)
+        atom_B    = Atom(sid=atom_B_id, level=0, value=new_value)
+        self.symbols.append(atom_B)
+        self.atoms[new_value] = atom_B_id
+
+        # 2. Redistribute edges involving atom_id via sense_b_etypes.
+        #    Build the move list BEFORE any modification to avoid dict-mutation.
+        to_move: list[tuple[int, int, int, int, int, int]] = []
+        for (src, e, tgt), cnt in self.edges.items():
+            if e not in sense_b_etypes:
+                continue
+            if src != atom_id and tgt != atom_id:
+                continue
+            new_src = atom_B_id if src == atom_id else src
+            new_tgt = atom_B_id if tgt == atom_id else tgt
+            to_move.append((src, e, tgt, cnt, new_src, new_tgt))
+
+        for src, e, tgt, cnt, new_src, new_tgt in to_move:
+            # Update edges dict
+            del self.edges[(src, e, tgt)]
+            self.edges[(new_src, e, new_tgt)] = cnt
+
+            # Update _out: remove OLD entry, add NEW entry
+            src_map = self._out.get(src)
+            if src_map is not None:
+                e_map = src_map.get(e)
+                if e_map is not None:
+                    e_map.pop(tgt, None)
+                    if not e_map:
+                        del src_map[e]
+                    if not src_map:
+                        del self._out[src]
+
+            if new_src not in self._out:
+                self._out[new_src] = {}
+            if e not in self._out[new_src]:
+                self._out[new_src][e] = {}
+            self._out[new_src][e][new_tgt] = cnt
+
+        # 3. Update composition rules that reference atom_id via sense_b_etypes.
+        rules_to_update = [
+            (comp_id, left, e, right)
+            for comp_id, (left, e, right) in self.rules.items()
+            if e in sense_b_etypes and (left == atom_id or right == atom_id)
+        ]
+        for comp_id, left, e, right in rules_to_update:
+            old_key  = (left, e, right)
+            new_left  = atom_B_id if left  == atom_id else left
+            new_right = atom_B_id if right == atom_id else right
+            new_key  = (new_left, e, new_right)
+            del self.rules[comp_id]
+            del self.rules_inv[old_key]
+            self.rules[comp_id] = new_key
+            self.rules_inv[new_key] = comp_id
+            comp_sym = self.symbols[comp_id]
+            if isinstance(comp_sym, Composition):
+                comp_sym.left  = new_left
+                comp_sym.right = new_right
+
+        return atom_B_id
 
     # ── Inspection ────────────────────────────────────────────────────────────
 
