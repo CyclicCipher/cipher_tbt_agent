@@ -812,4 +812,62 @@ def predict_via_frame_match(
                 except Exception:
                     pass
 
+    # ── Variadic fold: [..., vadd, N1, ..., Nk, eq] for k >= 3 ───────────────
+    # Applies the binary vadd/add rule iteratively: result = N1 + N2 + ... + Nk.
+    # The binary frame above handles k == 2; this handles k >= 3.
+    if 'vadd' in atom_values:
+        vadd_pos = len(atom_values) - 1 - list(reversed(atom_values)).index('vadd')
+        between = atom_values[vadd_pos + 1 : -1]   # tokens between vadd and eq
+        if len(between) >= 3:
+            num_ranks = [_value_rank(v, mg, rank_map) for v in between]
+            if all(r is not None for r in num_ranks):
+                vadd_rule = rules.get('vadd') or rules.get('add')
+                if vadd_rule is not None and vadd_rule.arity == 2:
+                    try:
+                        acc = num_ranks[0]
+                        for r in num_ranks[1:]:
+                            acc = vadd_rule.fn(acc, r)
+                        out = _result_atom(mg, acc, inv_rank_map, vadd_rule.confidence)
+                        if out:
+                            return out
+                    except Exception:
+                        pass
+
+    # ── NL numeral scan: implicit-operator fallback for word problems ──────────
+    # When the buffer ends with 'eq' and contains >= 2 numerals but no explicit
+    # operator frame matched above, try binary rules on the last two numerals.
+    # Handles NL word problems where the operator is encoded in prose:
+    #   'alice has 3 apples bob gives her 4 how many eq'
+    #   -> last two numerals: (3, 4)  -> add(3, 4) = 7
+    # Priority order: add > sub > mul  (add is the default word-problem operation).
+    # Confidence is discounted vs. explicit frames so Hopf memorisation wins
+    # for training instances while the rule wins for novel (N1, N2) pairs.
+    num_strs = [v for v in atom_values[:-1]
+                if _value_rank(v, mg, rank_map) is not None
+                and _is_numeral_str(v)]
+    if len(num_strs) >= 2:
+        n1 = _value_rank(num_strs[-2], mg, rank_map)
+        n2 = _value_rank(num_strs[-1], mg, rank_map)
+        if n1 is not None and n2 is not None:
+            for rule_name in ('add', 'sub', 'mul'):
+                rule = rules.get(rule_name)
+                if rule is not None and rule.arity == 2:
+                    try:
+                        result_rank = rule.fn(n1, n2)
+                        out = _result_atom(mg, result_rank, inv_rank_map,
+                                           rule.confidence * 0.8)
+                        if out:
+                            return out
+                    except Exception:
+                        pass
+
     return {}
+
+
+def _is_numeral_str(s: str) -> bool:
+    """Return True if s looks like a number (int or float)."""
+    try:
+        float(s)
+        return True
+    except (ValueError, TypeError):
+        return False

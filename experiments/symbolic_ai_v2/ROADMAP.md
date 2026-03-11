@@ -1045,14 +1045,15 @@ unchanged.
 
 ---
 
-## Current test count: 225/225 passing (+ 35 math_benchmark = 260 total)
+## Current test count: 237/237 passing (+ 35 math_benchmark = 272 total)
 
-**Overall: 225/225 tests passing across all symbolic_ai_v2 test files.**
-**Phase 20 adds 19 new tests (phase20_qa_test.py).**
+**Overall: 237/237 tests passing across all symbolic_ai_v2 test files.**
+**Phase 21 adds 12 new tests (phase21_test.py).**
 
 | Phase | Tests | Status |
 |-------|-------|--------|
-| Phase 20 — Q&A / word problems / variadic equations | 19 new tests | ✅ |
+| Phase 21 — NL generalisation + variadic fold | 12 new tests | ✅ |
+| Phase 20 — Q&A / word problems / variadic equations | 19 tests | ✅ |
 | Phase 19 L1 — FCA concept_ids + type registry | 8 tests | ✅ |
 | Phase 19 L2 — RelationalRule | 3 tests | ✅ |
 | Phase 19 L3 — Novel atom creation | 3 tests | ✅ |
@@ -1093,6 +1094,10 @@ unchanged.
     Level 3: `get_or_create_atom()` + `predicted=True` flag for novel outputs;
     + `fixed=True` on `AlgebraicRule`, `SheafViolation` on homeostatic violations
 23. ✅ **Phase 20**: Multi-token Q&A, word problems, variadic equations (19/19 tests)
-24. ⬜ **Phase 17c**: Cross-domain transfer benchmark (unblocked after 18+19)
+24. ✅ **Phase 21**: NL generalisation + variadic fold (12/12 tests)
+    - Level D: NL word problems generalise to unseen (N1,N2) pairs via numeral scan
+      (ATOM_BUF_SIZE raised 8→16 to fit 11-token NL prompts)
+    - Level E: variadic fold — `vadd N1 ... Nk eq` for k≥3 via iterated binary rule
+25. ⬜ **Phase 17c**: Cross-domain transfer benchmark (unblocked after 18+19)
 25. ⬜ **Phase 8**: `memory_growth_test.py` — sub-linear growth under pruning
 26. ⬜ **GOALS.md §6**: perplexity < 2.0 bits/char on EarlyModernLatin

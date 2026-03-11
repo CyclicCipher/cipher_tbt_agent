@@ -73,9 +73,10 @@ class SequenceGoal:
         """Return True if atom_id is the last atom in the predicted sequence."""
         return bool(self.atoms) and self.atoms[-1] == atom_id
 
-    # Atom buffer size — wide enough for linear_eval (7 tokens) and
-    # conservation (7 tokens) and Bernoulli (8 tokens).
-    ATOM_BUF_SIZE: int = 8
+    # Atom buffer size — wide enough for linear_eval (7 tokens),
+    # conservation (7 tokens), Bernoulli (8 tokens), and NL word problems
+    # (up to 12 tokens: alice has N1 apples bob gives her N2 how many eq).
+    ATOM_BUF_SIZE: int = 16
 
 
 def predict(
