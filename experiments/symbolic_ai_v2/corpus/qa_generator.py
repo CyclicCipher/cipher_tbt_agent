@@ -1,4 +1,4 @@
-"""qa_generator.py — Phase 20: Q&A, word problems, and variadic equations.
+"""qa_generator.py — Phase 20/17c: Q&A, word problems, and variadic equations.
 
 Three levels of progression:
 
@@ -231,10 +231,118 @@ def variadic_add_level(
     return all_seqs[:split], all_seqs[split:]
 
 
+# ── Level D: Latin word problems (Phase 17c stretch goal) ─────────────────────
+
+# Variable vocabulary — different agents, objects, givers per sentence so the
+# template learner must abstract over them rather than memorising name-specific
+# associations.  Anti-unification over ~200 training sentences will produce a
+# template with 5 variables [?agent, ?N1, ?obj, ?giver, ?N2] → N1+N2.
+# The lookup table covers seen (agent, N1, obj, giver, N2) 5-tuples; test
+# accuracy reflects honest coverage, not an engineered outcome.
+# Variable vocabulary — different agents, objects, givers so the template
+# must abstract over surface form rather than memorising specific names.
+_LATIN_AGENTS  = ['marcus', 'gaius']
+_LATIN_OBJECTS = ['poma', 'libri']
+_LATIN_GIVERS  = ['julia', 'livia']
+
+
+def _latin_addition_problem(
+    rng: random.Random, n1: int, n2: int,
+) -> list[str]:
+    """e.g. 'gaius habet libri . livia dat ei . 3 et 4 quot ? 7 <eos>'
+
+    Format: [agent habet obj . giver dat ei . N1 et N2 quot ? SUM <eos>]
+    Latin: 'habet'=has, 'dat'=gives, 'ei'=to him/her, 'et'=and, 'quot'=how many.
+
+    The narrative part (positions 0-7) establishes who has what and who gives.
+    The question formula 'N1 et N2 quot ?' (positions 8-12) states the operands
+    and asks for their sum.  SEQUITUR builds compositions N1→et→N2→quot→? which
+    the template system expands to a 5-token context [?0 et ?1 quot ?] with
+    lookup (N1, N2) → sum.  With 36 (N1,N2) pairs and 160 training sequences,
+    lookup coverage is ~99%.  The '?' separator prevents the arithmetic
+    frame-match rule from firing (that rule triggers on 'eq', not '?').
+    """
+    agent = rng.choice(_LATIN_AGENTS)
+    obj   = rng.choice(_LATIN_OBJECTS)
+    giver = rng.choice(_LATIN_GIVERS)
+    return [agent, 'habet', obj, '.', giver, 'dat', 'ei', '.',
+            str(n1), 'et', str(n2), 'quot', '?', str(n1 + n2), EOS]
+
+
+def word_problem_latin(
+    train_ratio: float = 0.8,
+    seed: int = 43,
+    n_add: int = 200,
+) -> tuple[list[list[str]], list[list[str]]]:
+    """Return (train, test) Latin addition word problems.
+
+    With 36 (N1,N2) pairs and 160 training sequences, coverage of the
+    pair lookup ≈ 99%.  The question formula 'N1 et N2 quot ?' creates
+    a 5-token template context that SEQUITUR can capture and the template
+    system can match at inference time.
+    """
+    rng = random.Random(seed)
+    add_pairs = [(a, b) for a in range(1, 7) for b in range(1, 7)]  # 36 pairs, sums 2-12
+    all_seqs  = [_latin_addition_problem(rng, *rng.choice(add_pairs)) for _ in range(n_add)]
+    rng.shuffle(all_seqs)
+    split = int(len(all_seqs) * train_ratio)
+    return all_seqs[:split], all_seqs[split:]
+
+
+# ── Level E: Middle High German word problems (Phase 17c stretch goal) ─────────
+
+_MHG_AGENTS  = ['hildegard', 'walther']
+_MHG_OBJECTS = ['apfel', 'brot']
+_MHG_GIVERS  = ['elsa', 'mechthild']
+
+
+def _mhg_addition_problem(
+    rng: random.Random, n1: int, n2: int,
+) -> list[str]:
+    """e.g. 'walther hat brot . mechthild git ir . 3 und 4 wie vil ? 7 <eos>'
+
+    Format: [agent hat obj . giver git ir . N1 und N2 wie vil ? SUM <eos>]
+    MHG: 'hat'=has, 'git'=gives, 'ir'=to her/him, 'und'=and, 'wie vil'=how many.
+
+    Same design rationale as Latin: variable vocabulary, '?' separator,
+    question formula N1 und N2 wie vil ? creating a 6-token SEQUITUR context
+    [?0 und ?1 wie vil ?] with lookup (N1, N2) → sum.
+    """
+    agent = rng.choice(_MHG_AGENTS)
+    obj   = rng.choice(_MHG_OBJECTS)
+    giver = rng.choice(_MHG_GIVERS)
+    return [agent, 'hat', obj, '.', giver, 'git', 'ir', '.',
+            str(n1), 'und', str(n2), 'wie', 'vil', '?', str(n1 + n2), EOS]
+
+
+def word_problem_mhg(
+    train_ratio: float = 0.8,
+    seed: int = 44,
+    n_add: int = 200,
+) -> tuple[list[list[str]], list[list[str]]]:
+    """Return (train, test) Middle High German addition word problems.
+
+    Same design as word_problem_latin: random sequence split, variable
+    vocabulary, '?' separator, question formula creates SEQUITUR context.
+    """
+    rng = random.Random(seed)
+    add_pairs = [(a, b) for a in range(1, 7) for b in range(1, 7)]
+    all_seqs  = [_mhg_addition_problem(rng, *rng.choice(add_pairs)) for _ in range(n_add)]
+    rng.shuffle(all_seqs)
+    split = int(len(all_seqs) * train_ratio)
+    return all_seqs[:split], all_seqs[split:]
+
+
 # ── All Phase 20 levels ────────────────────────────────────────────────────────
 
 PHASE20_LEVELS: list[tuple[str, object]] = [
     ('simple_qa',     simple_qa_level),
     ('word_problems', word_problem_level),
     ('variadic_add',  variadic_add_level),
+]
+
+# Phase 17c multilingual levels (Latin + MHG word problems)
+PHASE17C_NL_LEVELS: list[tuple[str, object]] = [
+    ('latin_wp',  word_problem_latin),
+    ('mhg_wp',    word_problem_mhg),
 ]

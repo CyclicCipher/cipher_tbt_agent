@@ -621,3 +621,167 @@ URL: https://github.com/jbrkr/Category_Theory_Natural_Language_Processing_NLP
 | ILP (Cropper et al. 2021) | **Post-hoc verifier only** | Supervised; use to extract interpretable rules after unsupervised discovery |
 | Word2Vec / GloVe | **Baseline only** | Approximate, opaque; v2 should exceed them on structured benchmarks |
 | Solomonoff induction | **Theoretical ceiling** | V2 is tractable approximation via SEQUITUR + MDL |
+
+---
+
+## 8. Gary Marcus — Algebraic Rules and Variable Binding
+
+*Research compiled 2026-03-11 (web search + primary sources).*
+
+### 8.1 Core claim
+
+Marcus (2001, *The Algebraic Mind*) argues that human cognition is driven by **algebraic rules** — operations over abstract variables — rather than by statistical association. The minimum mechanism requires:
+
+1. **Variables**: abstract placeholders (slots), not specific items or weighted features.
+2. **Variable binding**: instantiating a variable with a specific token via pointer indirection, not via distributed weighted sum.
+3. **Operations over bound variables**: rules defined over the slots, not over the slot contents.
+
+The critical diagnostic: **can the system produce correct output for inputs with zero statistical overlap with training data?** Pure statistical systems cannot; systems with true variables can.
+
+### 8.2 Empirical foundation — infant A-B-A study
+
+Marcus, Vijayan, Bandi Rao & Vishton (1999, *Science*): 7-month-old infants habituated to ABA-structured nonsense syllable sequences, then tested on completely novel syllables arranged in ABA vs. ABB structure. Infants discriminated — demonstrating that they had extracted the abstract structural rule (`slot[0] == slot[2]`) and applied it to items with zero phonological overlap with training.
+
+**Computational claim**:
+- **Negative**: The result cannot be explained by transitional probabilities or simple recurrent network interpolation.
+- **Positive**: Infants extracted the relational rule as an algebraic predicate over variables, not as a pattern over specific syllables.
+
+*Note*: A 2022 multi-lab replication (Geambasu et al., *Developmental Science*, N=96) failed to replicate. The computational argument stands independently of the empirical result.
+
+### 8.3 Two-level structure: innate machinery vs. learned rules
+
+Marcus's position is not hard nativism:
+- **The specific rules** (ABA, English past tense suffix) are **learned** from data.
+- **The machinery** (variable binding capacity, structural abstraction substrate) is **innate** — present before learning begins because it is what makes rule-learning possible.
+
+Parallel to Chomsky's UG: specific grammars are learned; the capacity for recursive phrase structure is innate. Marcus makes the same argument one level deeper — the algebraic abstraction capacity is the innate part.
+
+### 8.4 Neural implementation: PFC/BG pointer indirection
+
+Marcus's preferred biological implementation (Marcus, Marblestone & Dean 2014, "The Atoms of Neural Computation"):
+
+- Activity patterns in PFC area A encode **pointers/addresses** that instruct the basal ganglia to gate operations on PFC area B, **regardless of B's contents**.
+- A variable IS an address, not a value.
+- This is pointer indirection — the standard implementation of a universally quantified variable in von Neumann architectures.
+
+Alternative implementations Marcus acknowledges as valid:
+- **Smolensky tensor products** (1990): outer product of role vector × filler vector encodes variable-value binding in a distributed, mathematically structured tensor.
+- **Binding by synchrony** (Shastri & Ajjanagadde 1993): variables and values synchronized in neural firing patterns; mathematically equivalent to tensor products over temporal role vectors.
+
+### 8.5 Relationship to classical symbolic AI
+
+Marcus's rules are **functionally equivalent to condition-action production rules** (ACT-R, Soar): if variable X is bound to an item satisfying type condition C, produce output O over X. He does not claim the mind uses full first-order logic with proof search — only that it implements the representational substrate (variables, binding, constituent structure) that makes algebraic rules possible.
+
+**Key difference from lookup tables**: A lookup table `σ(arg_id) = result_id` only covers seen pairs. An algebraic rule `M = N + "ed"` covers *any* N, including novel inputs. Both are implementable in a connectionist network; only the latter satisfies Marcus's criterion.
+
+### 8.6 Past tense debate (Rumelhart-McClelland 1986 vs. Pinker-Prince 1988 vs. Marcus 1995/2001)
+
+The English past tense is the central test case:
+- **Regular verbs** (`walk → walked`): rule-governed — suffix concatenation over variable X. Generalizes to novel verbs (`rick → ricked`) with zero degradation.
+- **Irregular verbs** (`go → went`): lexically stored — each pair is a memory entry. Does not generalize to novel forms.
+
+Marcus's prediction: statistical models fail on **rare regular verbs** (which the rule handles perfectly) and show spurious sensitivity to **phonological similarity** (which the rule should be insensitive to). Both failures are documented.
+
+### 8.7 Implications for variable_binding.py / Phase 19
+
+The hypothesis enumeration approach (`_fit_suffix`, `_fit_prefix`, `_fit_ordinal`, ...) is **wrong in design**, not just incomplete. It puts the intelligence in the engineer (enumerating hypothesis classes) rather than in a general mechanism.
+
+**Marcus-aligned design** for our architecture:
+
+| Layer | Marcus concept | v2 implementation |
+|-------|---------------|------------------|
+| Variables | Typed slots | Edge types in MorphismGraph |
+| Variable binding | Pointer indirection | `mg.rules_inv[(ctx_id, etype, arg_id)] → comp_id` |
+| Operations over variables | Rules defined over slots, not contents | AlgebraicRule with `fn` operating on slot contents |
+| Type constraint | Variables are typed; rules respect types | Topology edge types constrain which hypothesis space applies |
+| Lexical memory | Irregular verbs, arbitrary mappings | MorphismGraph edge counts (statistical associations) |
+| Rule learning | Discover rules from data | Symbolic regression within type-appropriate hypothesis space |
+
+**The correct Phase 19 design**: pass topology type information into `fit_rule`; only attempt arithmetic hypotheses for atoms appearing via `num`-typed edges. For atoms appearing via other edge types, return `None` — the MorphismGraph statistical associations are the complete and correct representation. No string suffix hypotheses needed: if no algebraic rule exists, the system correctly falls back to associative memory (MorphismGraph edges).
+
+**The derivatives problem** is not solvable by extending the hypothesis space. The arguments to `d` are composition nodes (structured objects), not atoms. Solving derivatives requires `f∘g` compositional rules — rules over structured variables — which is a separate, larger extension.
+
+### 8.8 Relevant implementations satisfying Marcus's requirements
+
+| System | Mechanism | Status |
+|--------|-----------|--------|
+| Smolensky TPR (1990) | Outer product variable-value binding | Theoretical; requires designed role structure |
+| Holographic Reduced Representations (Plate 1995) | Circular convolution approximation to TPR | Lossy but practical |
+| Neural Theorem Provers / DeepProbLog | Differentiable logic programming | Gradient-learnable rule discovery |
+| NS-CL (Mao et al. 2019, MIT) | Neural perception + symbolic programs | Outperforms pure DL on CLEVR |
+| Lake, Ullman, Tenenbaum & Gershman (2017) | Probabilistic program induction, causal models | Most aligned with Marcus; Marcus/Davis: "a good start" |
+| PFC/BG indirection (Kriete et al. 2013) | Biologically grounded pointer indirection | Demonstrates neural variable binding |
+| MorphismGraph (v2, this work) | Edge-type variables + Graph-SEQUITUR composition | Satisfies Marcus at composition level; `AlgebraicRule` satisfies at rule level |
+
+### 8.9 Key sources
+
+- Marcus, G.F. (2001). *The Algebraic Mind*. MIT Press.
+- Marcus et al. (1999). Rule learning by seven-month-old infants. *Science* 283(5398), 77–80.
+- Marcus, Marblestone & Dean (2014). The atoms of neural computation. *Science* 346(6209), 551–552. arXiv:1410.8826.
+- Marcus, G.F. (2018). Deep learning: A critical appraisal. arXiv:1801.00631.
+- Marcus, G.F. (2020). The next decade in AI. arXiv:2002.06177.
+- Geambasu et al. (2022/2023). Robustness of the rule-learning effect: replication failure. *Developmental Science*.
+- Lake, Ullman, Tenenbaum & Gershman (2017). Building machines that learn and think like people. *Behavioral and Brain Sciences* 40, e253. arXiv:1604.00289.
+- Smolensky, P. (1990). Tensor product variable binding and the representation of symbolic structures in connectionist systems. *Artificial Intelligence* 46(1–2), 159–216.
+- Belle & Marcus. The future is neuro-symbolic. AAAI.
+
+---
+
+## 9. Phase 24–26 Implementation Notes (2026-03-11)
+
+### 9.1 Phase 24 — Domain-Agnostic Adjunction Detection
+
+`reasoning/adjunction_detect.py` implements `detect_adjunctions(mg, topo)`.  Given
+a trained MorphismGraph and Topology, it scans all pairs of edge types (r1, r2) and
+computes unit/counit coverage: what fraction of "r1-then-r2" roundtrips return to
+the origin (unit) and vice versa (counit).  Returns `AdjunctionCandidate` objects
+sorted by `score = (unit_coverage + counit_coverage) / 2`.
+
+Key design decisions:
+- Works entirely on `mg._out` (no knowledge of arithmetic, grammar, or any other domain).
+- `is_exact` if both coverages ≥ 0.95 and score > 0.9.
+- Handles single-edge-type topologies correctly (returns empty list).
+- 8 tests, all pass.  Runtime < 0.5 s on 10K edges.
+
+### 9.2 Phase 25 — Template-Based Rule Matcher
+
+`reasoning/templates.py` implements `build_templates(mg, topo)` and
+`predict_via_template(mg, atom_buf, templates)`.
+
+Algorithm:
+1. `_collect_observations`: expand every node in `mg._out` to base atoms via
+   `mg.generate(src, target_level=0)`.  Record `(ctx_atom_ids, etype, tgt_atom_id)`.
+2. Group by `(etype, ctx_len)`.  Skip groups with < 2 distinct contexts.
+3. Anti-unify context sequences with `lgg_all` (Phase 22).  Keep only templates
+   with ≥ 1 Variable (otherwise nothing to generalise over).
+4. Build lookup: `{var_value_tuple: most_common_tgt_id}`.
+5. Try `fold_detect` (Phase 23) on variable portions — gives generalisation to
+   unseen inputs if a base case exists.
+6. Annotate with adjunction info from `detect_adjunctions` (Phase 24).
+7. Sort by `(len(lhs), coverage)` descending — longer (more specific) templates
+   first, then by coverage within same length.
+
+**Key insight**: Templates are sorted by specificity (`len(lhs)`) first, then
+coverage.  Without this, a 1-atom template with high coverage defeats a 4-atom
+template that is actually the right answer.  E.g., `['?0'] etype=1` (coverage=732)
+must NOT fire before `['add', '?0', '?1', 'eq'] etype=1` (coverage=260).
+
+10 tests, all pass.  Performance < 2 s on math corpus.
+
+### 9.3 Phase 26 — Full Reasoning Layer Replacement
+
+Wired templates into `predict.py` as step 0 of both back-off chains:
+
+1. `_predict_via_templates(mg, atom_buf)` — reads `mg._templates` (set by
+   `build_templates_and_store`), calls `predict_via_template`, wraps as `{id: 1.0}`.
+2. Inserted at step 0 in `perplexity_multilevel` back-off chain.
+3. Inserted at step 0 in `generate_until_eos` back-off chain (before frame match).
+4. Added `build_templates_and_store(mg, topo)` convenience function to `templates.py`.
+
+**The original failure fixed**: `rule_store.py` (Phase 17a) yielded 0 endofunctors
+for language-only models because it required arithmetic-specific patterns.  After
+Phase 26, `build_templates_and_store` on a morphology corpus (dog→dogs, cat→cats,
+etc.) yields > 0 templates.  The domain-agnostic anti-unification correctly
+discovers `[?0] → ?0+'s'` patterns without any domain knowledge.
+
+6 integration tests, all pass.

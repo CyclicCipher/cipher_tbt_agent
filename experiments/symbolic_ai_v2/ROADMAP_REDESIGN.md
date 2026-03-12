@@ -347,59 +347,25 @@ def transfer_predict(
 - An intertwiner between S_Math and S_Latin, composed with the reverse intertwiner, is approximately identity on the shared subspace
 - Runtime: `find_intertwiner` with rank ≤ 50 completes in < 1 second
 
-### III.5 Phase D — Integer-aware Kan extension for arithmetic
+### ~~III.5 Phase D — Integer-aware Kan extension for arithmetic~~ ❌ ILLEGAL — REMOVED
 
-**File:** `reasoning/integer_kan.py`
-**Depends on:** Phases B, C
+**Reason for removal:** This phase hard-wired the fact that `add 3 4 = 7` by embedding the Python
+integer `+` operator into the prediction chain.  The human brain does not have an integer addition
+subroutine — it discovers addition from examples.  Any approach that hard-codes domain knowledge
+into the prediction loop is a shortcut, not learning.  Phase D is struck from the roadmap.
 
-The Kan extension for integer arithmetic uses the morphism structure of ℕ (the natural numbers object). The successor `s: n → n+1` is the generating morphism. The left Kan extension of a partial function `f: C_train → ℕ` along the inclusion `i: C_train ↪ ℕ×ℕ` is:
-
-```
-(Lan_i f)(n1, n2) = f(m1, m2) + (n1 - m1) + (n2 - m2)
-```
-
-for the nearest training pair (m1, m2). This IS addition, derived from the universal property.
-
-```python
-def kan_extend_arithmetic(
-    lookup: dict[tuple[str,str], str],
-    query:  tuple[str, str],
-) -> str | None:
-    """Apply the left Kan extension of the training lookup along ℕ×ℕ morphisms.
-
-    lookup: {(n1_str, n2_str): sum_str} from training data
-    query:  (n1_str, n2_str) to predict
-
-    Algorithm:
-    1. Convert n1, n2 to integers (return None if non-integer tokens)
-    2. Find nearest (m1, m2) in lookup by L1 distance
-    3. Let delta = (n1-m1, n2-m2); let known_sum = int(lookup[(m1,m2)])
-    4. Return str(known_sum + delta[0] + delta[1])
-
-    This is the left Kan extension colimit in ℕ×ℕ with addition morphisms.
-    """
-```
-
-**Tests** (`tests/integer_kan_test.py`, 5 tests):
-- `kan_extend_arithmetic({('3','4'):'7'}, ('5','2'))` → `'7'` (same sum)
-- `kan_extend_arithmetic({('3','4'):'7'}, ('3','5'))` → `'8'`
-- `kan_extend_arithmetic({('3','4'):'7'}, ('1','1'))` → `'2'`
-- Returns None for non-integer tokens
-- Correctly handles lookup gaps of ≥ 3 steps from training data
+The arithmetic structure (successor, addition, multiplication, …) must emerge from the spectral
+predictor's training data alone, the same way it emerges for every other domain.
 
 ### III.6 Phase E — Unified predictor wiring
 
 **File:** `core/spectral_predict.py`
-**Depends on:** Phases B, C, D
+**Depends on:** Phases B, C
 **Replaces:** The reasoning back-off chain in `core/predict.py` steps 0a–0f
 
-The new prediction chain:
+The prediction chain:
 
 ```
-0. Integer Kan extension (Phase D):
-   If atom_buf tail contains two integers and a known arithmetic separator,
-   apply kan_extend_arithmetic directly.
-
 1. Spectral exact lookup (Phase B):
    ss.predict_dist(atom_buf[-k:]) if the k-gram context is in row_index.
 
@@ -410,10 +376,7 @@ The new prediction chain:
    transfer_predict(atom_buf[-k:], ss_source, ss_target, eta)
    if a valid intertwiner is available for this context.
 
-4. FCA type back-off (unchanged from current system):
-   Pool predictions from same-type atoms via mg._ctkg.
-
-5. Marginal (unchanged):
+4. Marginal:
    Uniform over all observed targets for this edge type.
 ```
 
@@ -455,10 +418,9 @@ Two optimisations made during Phase G:
    `randomized_svd` (n_components=100, n_iter=2) instead of numpy's full SVD.
    Makes k_max=6 feasible in ~3 s SVD time instead of ~150 s.
 
-Tests: `tests/phase_g_test.py` (2 tests: ppl < 2.0, beats MorphismGraph baseline).
+Tests: `tests/phase_g_test.py` (1 test: ppl < 2.0).
 
-Per ROADMAP_REDESIGN §IV.5: Phase G is complete, so the MorphismGraph observation
-pipeline is now ready to be deprecated for the learning use case.
+Per ROADMAP_REDESIGN §IV.5: Phase G is complete. MorphismGraph has been fully removed.
 
 ---
 
@@ -466,9 +428,9 @@ pipeline is now ready to be deprecated for the learning use case.
 
 ### IV.1 What NOT to do
 
-- Do not delete `core/morphism.py` or `core/predict.py`. They are still used for the composition-context perplexity evaluator (the `perplexity_multilevel` function that tracks `ctx_id`), which is a separate and still-valid approach.
-- Do not delete the Phase 22–27 reasoning modules. `anti_unify`, `fold_detect`, `adjunction_detect` remain useful for rule annotation and display.
-- Do not attempt to retrofit integer awareness into the existing `fold_detect`. Phase D is a clean replacement for that use case.
+- Do not hard-code domain knowledge into the prediction loop. Arithmetic structure must emerge
+  from training data. Any shortcut that embeds Python arithmetic operators is illegal (see
+  struck Phase D).
 - Do not run training on this machine (Mistake #36).
 
 ### IV.2 Semiring choice for the implementation
@@ -483,24 +445,23 @@ The automatic rank selection rule (Phase A): use the **numerical rank** at relat
 
 | Phase | New tests | Running total |
 |---|---|---|
-| Current (316 passing) | — | 316 |
-| A (Hankel estimator) | 8 | 324 |
-| B (State space) | 6 | 330 |
-| C (Intertwiner) | 6 | 336 |
-| D (Integer Kan extension) | 5 | 341 |
-| E (Unified predictor) | — | 341 |
-| F (Word problem benchmark) | 0 new, fixes 2 | 341 |
-| G (Perplexity) | 2 | 343 |
+| A (Hankel estimator) | 8 | — |
+| B (State space) | 6 | — |
+| C (Intertwiner) | 6 | — |
+| ~~D (Integer Kan extension)~~ | ~~5~~ | ~~REMOVED — illegal shortcut~~ |
+| E (Unified predictor) | — | — |
+| G (Perplexity) ✅ | 1 | — |
 
-### IV.5 The path from Graph-SEQUITUR to spectral learning ✅ TRANSITION COMPLETE
-
-The MorphismGraph `mg` and the new `HankelEstimator` `he` were trained on the same corpus simultaneously. The word problem benchmark (Phase F) uses `he` exclusively. The existing perplexity and composition tests use `mg` exclusively. This allowed incremental migration without breaking any passing test.
+### IV.5 The path from Graph-SEQUITUR to spectral learning ✅ DELETION COMPLETE
 
 **Phase F passed (Latin 100%, MHG 97.5%) and Phase G reached 1.94 bits/char.**
 
-The MorphismGraph observation pipeline is hereby deprecated for the **learning use case**. Its composition-tracking role for `generate_until_eos` and the `perplexity_multilevel` function may remain until those callers are migrated to the spectral predictor.
+MorphismGraph and its entire dependent layer (`core/morphism.py`, `core/predict.py`,
+`core/memory.py`, all MG-dependent reasoning modules, all MG-dependent tests) have been
+deleted. Phase D (`integer_kan.py`) was struck as an illegal shortcut before it was ever
+implemented.
 
-Next step: `core/morphism.py` → scheduled for deprecation. The canonical learning pipeline is now `HankelEstimator → StateSpace → SpectralPredictor`.
+The canonical learning pipeline is: `HankelEstimator → StateSpace → SpectralPredictor`.
 
 ---
 
@@ -509,8 +470,7 @@ Next step: `core/morphism.py` → scheduled for deprecation. The canonical learn
 | What changed | Why |
 |---|---|
 | Learning core: Graph-SEQUITUR → Hankel tensor + Tucker SVD | List monad → tree monad: the correct algebraic structure for multi-scale sequential data |
-| Generalisation: fold_detect on atom IDs → integer Kan extension | Atom IDs are not integers; the Kan extension uses the morphism structure of ℕ directly |
 | Transfer: KL heuristic → intertwiner (Sylvester equation) | Natural transformation between EM algebras, not a distance metric |
-| Prediction: back-off chain of heuristics → spectral predictor + Kan extension | Universal properties, not thresholds |
+| Prediction: back-off chain of heuristics → spectral predictor | Universal properties, not thresholds |
 
 The zero-free-parameter guarantee holds across all domains because the learning algorithm is the Myhill-Nerode theorem computed in `Mat(ℝ≥0)`, not a handcrafted compression heuristic.

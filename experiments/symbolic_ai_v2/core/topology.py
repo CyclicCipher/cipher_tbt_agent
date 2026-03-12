@@ -1,18 +1,18 @@
 """Graph topology: edge type registry and built-in topologies.
 
-A Topology converts raw input data into a stream of observations.  Two formats:
+A Topology describes the structural relationships between positions in an
+input stream.  Two formats:
 
   stream_tokens(data) → Iterator[(value, Optional[int])]
       Sequential (1D) data.  First element has edge_type_int = None.
-      Fed one token at a time to MorphismGraph.observe().
+      Accepted for API compatibility by SpectralPredictor.train() (topo param).
 
   stream_edges(data) → Iterator[(src_value, edge_type_int, tgt_value)]
       2D+ data where a sequential scan would introduce raster artefacts at
-      dimension boundaries.  Fed to MorphismGraph.observe_edge() [future].
+      dimension boundaries.
 
-Edge types are small integers inside the MorphismGraph; human-readable names
-are registered once at Topology creation.  This removes string hashing from
-the inner observation loop.  Max 256 types (u8-compatible for Rust rewrite).
+Edge types are small integers; human-readable names are registered once at
+Topology creation.  Max 256 types (u8-compatible for Rust rewrite).
 
 Worst perceptual case: 3D 26-connected + time = 28 edge types (5 bits).
 All built-in topologies fit comfortably within uint8.
@@ -384,3 +384,85 @@ def agent_topology() -> Topology:
     reg.register("action")   # code 2
 
     return Topology("agent", reg)
+
+
+def phase17c_topology() -> tuple[Topology, Topology, Topology, Topology]:
+    """Four topology objects sharing one registry for Phase 17c co-training.
+
+    Returns (math_topo, lang_topo, latin_topo, mhg_topo).
+
+    All four share a single EdgeTypeRegistry, preventing etype code collisions
+    in a single MorphismGraph.
+
+    Edge type codes:
+      op    (0) — math operator target (rarely emitted for simple corpus)
+      num   (1) — math numeric literal target
+      var   (2) — math variable/special token target
+      eq    (3) — math equality/connective target
+      lang  (4) — general language corpus token
+      latin (5) — Latin NL word problem token
+      mhg   (6) — MHG NL word problem token
+
+    With separate codes per language, _collect_observations groups Latin
+    compositions in (5, ctx_len) and MHG in (6, ctx_len) — separate from
+    each other and from math (etypes 1/3 for our standard corpus).
+    lgg_all then finds language-specific constants: 'et'/'quot'/'?' in Latin
+    templates and 'und'/'wie'/'vil'/'?' in MHG templates.
+    """
+    reg = EdgeTypeRegistry()
+    reg.register('op')    # 0
+    reg.register('num')   # 1
+    reg.register('var')   # 2
+    reg.register('eq')    # 3
+    reg.register('lang')  # 4
+    reg.register('latin') # 5
+    reg.register('mhg')   # 6
+
+    class _MathTopo17c(Topology):
+        def stream_tokens(self, data: Any) -> Iterator[tuple[Any, Optional[int]]]:
+            op_e  = self.registry.code('op')
+            num_e = self.registry.code('num')
+            var_e = self.registry.code('var')
+            eq_e  = self.registry.code('eq')
+            first = True
+            for token in data:
+                t = str(token)
+                if first:
+                    yield t, None
+                    first = False
+                    continue
+                if t in _MATH_OPS:
+                    etype = op_e
+                elif t in _MATH_EQ:
+                    etype = eq_e
+                elif t in _MATH_VAR:
+                    etype = var_e
+                else:
+                    try:
+                        float(t)
+                        etype = num_e
+                    except ValueError:
+                        etype = op_e
+                yield t, etype
+
+    class _FixedCodeTopo(Topology):
+        """Sequence topology that emits a single fixed edge type for all tokens."""
+        def __init__(self, name: str, registry: EdgeTypeRegistry, etype_name: str) -> None:
+            super().__init__(name, registry)
+            self._etype_name = etype_name
+
+        def stream_tokens(self, data: Any) -> Iterator[tuple[Any, Optional[int]]]:
+            code = self.registry.code(self._etype_name)
+            first = True
+            for token in data:
+                if first:
+                    yield str(token), None
+                    first = False
+                else:
+                    yield str(token), code
+
+    math_topo  = _MathTopo17c('phase17c_math', reg)
+    lang_topo  = _FixedCodeTopo('phase17c_lang',  reg, 'lang')
+    latin_topo = _FixedCodeTopo('phase17c_latin', reg, 'latin')
+    mhg_topo   = _FixedCodeTopo('phase17c_mhg',   reg, 'mhg')
+    return math_topo, lang_topo, latin_topo, mhg_topo

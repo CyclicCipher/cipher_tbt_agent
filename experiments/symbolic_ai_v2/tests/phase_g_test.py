@@ -1,19 +1,20 @@
 """phase_g_test.py — Phase G: SpectralPredictor perplexity target.
 
-Two tests (ROADMAP_REDESIGN §III.8 / §IV.4):
-  1. test_spectral_ppl_below_2 — SpectralPredictor(k_max=6) achieves
-     < 2.0 bits/char on the held-out Latin corpus.
-  2. test_spectral_beats_morphism_baseline — SpectralPredictor ppl is
-     strictly lower than the MorphismGraph bigram perplexity on the same
-     split, confirming the spectral architecture strictly dominates the
-     previous bigram-context back-off chain.
+One test (ROADMAP_REDESIGN §III.8):
+  test_spectral_ppl_below_2 — SpectralPredictor(k_max=6) achieves
+  < 2.0 bits/char on the held-out Latin corpus.
+
+The MorphismGraph baseline comparison test has been removed following
+MorphismGraph deprecation (ROADMAP_REDESIGN §IV.5).  The comparison result
+(SpectralPredictor 1.94 < MorphismGraph bigram 3.49) is documented in
+ROADMAP_REDESIGN §III.8.
 
 Corpus: experiments/symbolic_ai_v2/corpus/latin books/ (always present,
 no external data files required).  Uses an 80/20 character split over all
 16 books concatenated.
 
-These tests are SLOW (train ≈ 20s, ppl ≈ 3s) and are marked no_ait to
-disable the O(|edges|) ActiveInference autouse fixture.
+This test is SLOW (train ≈ 20s, ppl ≈ 3s) and is marked no_ait to disable
+the ActiveInference autouse fixture (now a no-op; kept for documentation).
 
 Run:
   ./venv/Scripts/python.exe -m pytest experiments/symbolic_ai_v2/tests/phase_g_test.py -v -s
@@ -56,7 +57,7 @@ def _load_split() -> tuple[list[str], list[str]]:
 
 _TRAIN: list[str] | None = None
 _TEST:  list[str] | None = None
-_SP    = None  # SpectralPredictor, shared between the two tests
+_SP    = None  # SpectralPredictor, lazily trained once
 
 
 def _get_predictor():
@@ -85,33 +86,3 @@ def test_spectral_ppl_below_2():
     )
 
 
-# ── Test 2: SpectralPredictor beats MorphismGraph bigram baseline ─────────────
-
-def test_spectral_beats_morphism_baseline():
-    """SpectralPredictor ppl must be strictly lower than MorphismGraph bigram
-    perplexity on the same train/test split.
-
-    The MorphismGraph bigram is the previous-generation baseline; the
-    SpectralPredictor replaces it with multi-gram Hankel learning.
-    """
-    sp, train, test = _get_predictor()
-    sp_ppl = sp.perplexity(test)
-
-    from experiments.symbolic_ai_v2.core.topology import sequence_1d
-    from experiments.symbolic_ai_v2.core.morphism import MorphismGraph
-    from experiments.symbolic_ai_v2.core.predict  import perplexity as mg_perplexity
-
-    topo = sequence_1d()
-    mg   = MorphismGraph()
-    # Train MorphismGraph on the same training data.
-    # Use a single long sequence (same as the SpectralPredictor).
-    mg.observe_sequence("".join(train), topo)
-
-    # MorphismGraph perplexity on the same test chars, treated as char sequences.
-    mg_ppl = mg_perplexity(mg, ["".join(test)], topo)
-
-    print(f"\n  spectral ppl = {sp_ppl:.4f}  mg_bigram ppl = {mg_ppl:.4f}")
-    assert sp_ppl < mg_ppl, (
-        f"SpectralPredictor ppl {sp_ppl:.4f} >= MorphismGraph bigram "
-        f"ppl {mg_ppl:.4f} — spectral architecture should strictly dominate"
-    )
