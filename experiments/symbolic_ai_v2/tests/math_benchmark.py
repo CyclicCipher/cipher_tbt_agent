@@ -1,21 +1,20 @@
 """math_benchmark.py — SpectralPredictor accuracy on the math corpus.
 
 For each level of the math corpus (counting → Bernoulli), trains a
-SpectralPredictor on the training sequences and measures how often it
-correctly predicts the final token of each test sequence.
+SpectralPredictor on the training sequences and measures top-1 accuracy
+on the final token of both training and test sequences.
 
 Metric: top-1 accuracy on the final token, given the full prefix.
 This is the hardest reasonable test: the model sees the complete
 question (e.g. 'add 3 4 eq') and must predict the answer ('7').
 
+Train vs test gap reveals memorisation vs generalisation:
+  - train ≈ test  → generalising
+  - train >> test → memorising (cannot extrapolate)
+  - train ≈ 0     → structure not discoverable from these examples at all
+
 Run:
     ./venv/Scripts/python.exe experiments/symbolic_ai_v2/tests/math_benchmark.py
-
-Output:
-    Level            train   test    acc
-    counting           23      7   xx.x%
-    successor         ...
-    ...
 """
 
 from __future__ import annotations
@@ -32,15 +31,11 @@ from experiments.symbolic_ai_v2.core.spectral_predict import SpectralPredictor
 K_MAX = 6
 
 
-def accuracy_on_level(
-    train_seqs: list[list[str]],
-    test_seqs:  list[list[str]],
-) -> float:
-    """Train SpectralPredictor on train_seqs; measure final-token top-1 on test_seqs."""
-    sp = SpectralPredictor.train(train_seqs, k_max=K_MAX)
-
+def _top1(sp: SpectralPredictor, seqs: list[list[str]]) -> tuple[int, int]:
+    """Return (n_correct, n_total) for final-token top-1 accuracy."""
     correct = 0
-    for seq in test_seqs:
+    total   = 0
+    for seq in seqs:
         if len(seq) < 2:
             continue
         prefix = seq[:-1]
@@ -49,17 +44,33 @@ def accuracy_on_level(
         pred   = max(dist, key=dist.get) if dist else None
         if pred == target:
             correct += 1
+        total += 1
+    return correct, total
 
-    return correct / len(test_seqs) if test_seqs else 0.0
+
+def benchmark_level(
+    train_seqs: list[list[str]],
+    test_seqs:  list[list[str]],
+) -> tuple[float, float]:
+    """Return (train_acc, test_acc)."""
+    sp = SpectralPredictor.train(train_seqs, k_max=K_MAX)
+    tr_c, tr_n = _top1(sp, train_seqs)
+    te_c, te_n = _top1(sp, test_seqs)
+    return (tr_c / tr_n if tr_n else 0.0,
+            te_c / te_n if te_n else 0.0)
 
 
 def main() -> None:
-    print(f"\n{'Level':<18} {'train':>6} {'test':>6}  {'acc':>7}")
-    print("-" * 42)
+    print(f"\n{'Level':<18} {'#train':>7} {'#test':>6}  {'train':>7} {'test':>7}  {'gap':>7}")
+    print("-" * 60)
 
     for name, train, test in all_levels():
-        acc = accuracy_on_level(train, test)
-        print(f"{name:<18} {len(train):>6} {len(test):>6}  {acc:>6.1%}")
+        tr_acc, te_acc = benchmark_level(train, test)
+        gap = tr_acc - te_acc
+        print(
+            f"{name:<18} {len(train):>7} {len(test):>6}"
+            f"  {tr_acc:>6.1%} {te_acc:>6.1%}  {gap:>+6.1%}"
+        )
 
     print()
 

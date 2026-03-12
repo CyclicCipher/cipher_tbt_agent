@@ -40,6 +40,7 @@ from .hankel import HankelEstimator
 from .state_space import StateSpace
 from .topology import Topology
 from ..reasoning.intertwiner import transfer_predict
+from ..reasoning.frame_solver import FrameSolver
 
 
 # ── Intertwiner configuration ─────────────────────────────────────────────────
@@ -60,7 +61,7 @@ class IntertwinedDomain:
 # ── SpectralPredictor ─────────────────────────────────────────────────────────
 
 class SpectralPredictor:
-    """Unified 4-level spectral predictor.
+    """Unified 5-level spectral predictor.
 
     Training
     --------
@@ -70,6 +71,13 @@ class SpectralPredictor:
     Prediction
     ----------
     predictor.predict(atom_buf) → dict[str, float]
+
+    The 5-level back-off chain:
+      1. Spectral exact lookup   — raw_dist k-gram hit
+      2. FrameSolver             — adjunction-based (succ⊣pred, add⊣sub, self-adj)
+      3. Spectral Kan extension  — nearest-neighbour in state space
+      4. Cross-domain transfer   — intertwiner (if configured)
+      5. Marginal                — uniform over observed vocabulary
 
     Generation
     ----------
@@ -82,10 +90,12 @@ class SpectralPredictor:
         *,
         intertwined:   Optional[list[IntertwinedDomain]] = None,
         atom_buf_size: int = 16,
+        frame_solver:  Optional[FrameSolver] = None,
     ) -> None:
         self.ss            = ss
         self.intertwined   = intertwined  or []
         self.atom_buf_size = atom_buf_size
+        self._frame_solver = frame_solver
 
         # Pre-compute marginal distribution over all col_keys
         self._marginal: dict[str, float] = {}
@@ -119,7 +129,8 @@ class SpectralPredictor:
         for seq in seqs:
             he.observe(seq, topo)
         ss = he.build_state_space(k_max=k_max, rank=rank)
-        return cls(ss, intertwined=intertwined)
+        fs = FrameSolver.build(ss.raw_dist)
+        return cls(ss, intertwined=intertwined, frame_solver=fs)
 
     # ── Core prediction ───────────────────────────────────────────────────
 
@@ -137,16 +148,29 @@ class SpectralPredictor:
         """
         buf = atom_buf[-self.atom_buf_size:]
 
-        # ── Step 1: Spectral exact lookup (k = k_max → 1) ────────────────
+        # ── Steps 1+2: Exact lookup and FrameSolver, interleaved per k ───
+        # At each context length k (longest first), try exact lookup then
+        # FrameSolver before shrinking the context.  This prevents a shorter
+        # k-gram exact hit (e.g. ('32','eq') → pred(32)=31) from shadowing a
+        # FrameSolver adjunction answer at the full frame context
+        # (e.g. ('succ','32','eq') → succ⊣pred gives 33).
         for k in range(self.ss.k_max, 0, -1):
             if len(buf) < k:
                 continue
             ctx = tuple(buf[-k:])
+
+            # Step 1: Spectral exact lookup
             dist = self.ss.predict_dist(ctx)
             if dist:
                 return dist
 
-        # ── Step 2: Spectral Kan extension (Yoneda-correct) ───────────────
+            # Step 2: FrameSolver adjunction-based prediction
+            if self._frame_solver is not None:
+                dist = self._frame_solver.predict(ctx)
+                if dist:
+                    return dist
+
+        # ── Step 3: Spectral Kan extension (Yoneda-correct) ───────────────
         if buf:
             fallback = self.ss.col_keys
             for k in range(min(self.ss.k_max, len(buf)), 0, -1):
@@ -155,7 +179,7 @@ class SpectralPredictor:
                 if dist:
                     return dist
 
-        # ── Step 3: Cross-domain transfer ────────────────────────────────
+        # ── Step 4: Cross-domain transfer ────────────────────────────────
         for dom in self.intertwined:
             for k in range(dom.ss_source.k_max, 0, -1):
                 if len(buf) < k:
@@ -165,7 +189,7 @@ class SpectralPredictor:
                 if dist:
                     return dist
 
-        # ── Step 4: Marginal ─────────────────────────────────────────────
+        # ── Step 5: Marginal ─────────────────────────────────────────────
         return self._marginal.copy()
 
     # ── Perplexity ────────────────────────────────────────────────────────

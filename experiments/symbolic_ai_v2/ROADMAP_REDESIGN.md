@@ -357,27 +357,36 @@ into the prediction loop is a shortcut, not learning.  Phase D is struck from th
 The arithmetic structure (successor, addition, multiplication, …) must emerge from the spectral
 predictor's training data alone, the same way it emerges for every other domain.
 
-### III.6 Phase E — Unified predictor wiring
+### III.6 Phase E — Unified predictor wiring ✅ COMPLETE
 
 **File:** `core/spectral_predict.py`
-**Depends on:** Phases B, C
+**Depends on:** Phases B, C, H
 **Replaces:** The reasoning back-off chain in `core/predict.py` steps 0a–0f
 
-The prediction chain:
+The 5-level prediction chain (interleaved at each k):
 
 ```
-1. Spectral exact lookup (Phase B):
-   ss.predict_dist(atom_buf[-k:]) if the k-gram context is in row_index.
+For each k from k_max down to 1:
+  1. Spectral exact lookup (Phase B):
+     ss.predict_dist(atom_buf[-k:]) if the k-gram context is in raw_dist.
+     Zero noise (raw MLE, not SVD reconstruction). Returns on hit.
 
-2. Spectral Kan extension (Phase B):
-   ss.predict_unseen(atom_buf[-k:]) — nearest-neighbour in state space.
+  2. FrameSolver adjunction lookup (Phase H):
+     frame_solver.predict(atom_buf[-k:]) — operator frame adjunction.
+     Fires when ctx ends in 'eq' and an adjunction covers the query.
+     Interleaved with exact lookup at same k to prevent short-context
+     shadow (e.g. ('32','eq')→pred answer shadowing succ(32) query).
 
-3. Cross-domain transfer (Phase C):
-   transfer_predict(atom_buf[-k:], ss_source, ss_target, eta)
-   if a valid intertwiner is available for this context.
+(After all k levels exhausted:)
+  3. Spectral Kan extension (Phase B):
+     ss.predict_unseen(atom_buf[-k:]) — nearest-neighbour in state space.
 
-4. Marginal:
-   Uniform over all observed targets for this edge type.
+  4. Cross-domain transfer (Phase C):
+     transfer_predict(atom_buf[-k:], ss_source, ss_target, eta)
+     if a valid intertwiner is available for this context.
+
+  5. Marginal:
+     Uniform over all observed targets for this edge type.
 ```
 
 ### III.7 Phase F — Word problem benchmark
@@ -390,6 +399,52 @@ This phase has no new code — it is the integration test that validates the arc
 Additional regression: all 316 currently passing tests must continue to pass.
 
 ### III.8 Phase G — Perplexity target ✅ COMPLETE
+
+### III.9 Phase H — FrameSolver: adjunction-based prediction ✅ COMPLETE
+
+**File:** `reasoning/frame_solver.py`
+**Depends on:** Phase B (StateSpace.raw_dist)
+**Wired into:** Phase E (`SpectralPredictor`, Level 2, interleaved with exact lookup per k)
+
+Discovers **operator frames** from `raw_dist` — deterministic mappings of the form
+`op arg₁ … argₙ eq → answer` (contexts ending in `'eq'` with probability ≥ 0.95)
+— and detects three categorical adjunction types between them:
+
+```
+Type U (arity 1):  op1(a)   = b  ↔  op2(b)   = a      e.g. succ ⊣ pred
+Type A (arity 2):  op1(a,b) = c  ↔  op2(c,b) = a      e.g. add  ⊣ sub
+Type B (arity 2):  op(a,b)  = c  ↔  op(a,c)  = b      e.g. sub self-adjoint
+```
+
+No hardcoded rules. No type checks. No arithmetic operators. A token named `'succ'`
+is treated identically to one named `'red'` — only the co-occurrence geometry matters
+(Yoneda lemma). Detection implements the categorical unit/counit coverage conditions.
+
+**Math benchmark results** (verified 2026-03-11):
+
+| Level       | Before FrameSolver | After FrameSolver | Novel accuracy | Mechanism |
+|-------------|-------------------|-------------------|----------------|-----------|
+| counting    | 100.0%            | 100.0%            | 100.0%         | exact     |
+| successor   | 0.0%              | **90.0%**         | **90.0%**      | Type U (succ⊣pred) |
+| subtraction | 0.0%              | **85.0%**         | **85.0%**      | Type B (sub self-adjoint) |
+| addition    | 65.8%*            | 65.8%*            | 0.0%**         | no adjoint in corpus |
+| multiplication | 65.8%*         | 65.8%*            | 0.0%**         | no adjoint in corpus |
+| powers      | 7.7%              | 7.7%              | —              | requires log/root |
+| integrals   | 100.0%            | 100.0%            | —              | memorised |
+| others      | low               | low               | —              | multi-step required |
+
+\* Inflated by duplicate facts in train/test split. True novel accuracy = 0%.
+\*\* Corpus contains only `add` (or only `mul`) facts; no inverse operator present.
+    Add⊣sub adjunction requires both operators in training. This is a corpus design
+    choice, not an architectural failure — the system correctly discovers nothing when
+    no adjunction exists in the data.
+
+**Critical fix during Phase H:** FrameSolver must be interleaved with exact lookup
+at each k-level, not applied after all k-levels of exact lookup. Without interleaving,
+the k=2 exact hit for `('32', 'eq')` → `31` (from `pred(32)=31` in training)
+shadows the k=3 FrameSolver answer for `('succ', '32', 'eq')` → `33`.
+
+Tests: `tests/frame_solver_test.py` (15 tests: Types U, A, B detection + prediction + noise guard).
 
 **Depends on:** Phase E
 **Target:** < 2.0 bits/char on EarlyModernLatin  **ACHIEVED: 1.94 bits/char**
@@ -449,8 +504,9 @@ The automatic rank selection rule (Phase A): use the **numerical rank** at relat
 | B (State space) | 6 | — |
 | C (Intertwiner) | 6 | — |
 | ~~D (Integer Kan extension)~~ | ~~5~~ | ~~REMOVED — illegal shortcut~~ |
-| E (Unified predictor) | — | — |
+| E (Unified predictor) ✅ | — | — |
 | G (Perplexity) ✅ | 1 | — |
+| H (FrameSolver) ✅ | 15 | — |
 
 ### IV.5 The path from Graph-SEQUITUR to spectral learning ✅ DELETION COMPLETE
 
@@ -472,5 +528,13 @@ The canonical learning pipeline is: `HankelEstimator → StateSpace → Spectral
 | Learning core: Graph-SEQUITUR → Hankel tensor + Tucker SVD | List monad → tree monad: the correct algebraic structure for multi-scale sequential data |
 | Transfer: KL heuristic → intertwiner (Sylvester equation) | Natural transformation between EM algebras, not a distance metric |
 | Prediction: back-off chain of heuristics → spectral predictor | Universal properties, not thresholds |
+| Adjunction reasoning: FrameSolver (Types U, A, B) | Categorical unit/counit conditions; Yoneda-compliant (no type checks, no arithmetic operators) |
 
 The zero-free-parameter guarantee holds across all domains because the learning algorithm is the Myhill-Nerode theorem computed in `Mat(ℝ≥0)`, not a handcrafted compression heuristic.
+
+**Completed phases:** A (Hankel), B (StateSpace), C (Intertwiner), E (SpectralPredictor), G (perplexity 1.94 < 2.0 ✅), H (FrameSolver, succ 90%, sub 85% ✅)
+
+**Open problems:**
+- Successor/subtraction 10–15% residual: numbers not in any training frame (neither direct nor inverse seen). Requires chain induction beyond frame lookup.
+- Addition/multiplication 0% novel: inverse operator not in corpus. Fundamentally correct — the adjunction cannot be discovered without both operators present.
+- Powers, conservation, Bernoulli: require multi-step frame composition (chained adjunctions). Not addressed by single-step FrameSolver.
