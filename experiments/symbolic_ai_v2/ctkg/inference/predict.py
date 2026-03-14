@@ -58,6 +58,7 @@ from experiments.symbolic_ai_v2.ctkg.learning.process_discover import (
     discover_binary_fold_rules,
     unary_chain_predict,
 )
+from dataclasses import dataclass, field
 from experiments.symbolic_ai_v2.ctkg.core.kan_extension import KanExtension
 from experiments.symbolic_ai_v2.ctkg.core.working_memory import (
     parse_prefix,
@@ -65,6 +66,33 @@ from experiments.symbolic_ai_v2.ctkg.core.working_memory import (
     WorkingMemory,
 )
 from experiments.symbolic_ai_v2.ctkg.core.spine import Spine
+
+
+@dataclass
+class TraceProgram:
+    """Discovered computation program for a trace-format op (Level 1c).
+
+    For trace ops like eval/linsolve, the output has the form:
+        [step, *step_tokens, ans, *ans_tokens]
+    where step_tokens = fold(arg0, arg1) and ans_tokens = fold(step, other)
+    or ans_tokens = adj_search(other, step).
+
+    All indices are into the list of a-prefixed operands extracted from the
+    input_tokens (tokens matching 'a[0-9]+'; structural tokens like 'x', 'at'
+    are ignored).  No operator name or semantic is hardcoded.
+    """
+
+    op_atom: str
+    # Step computation: step = step_op(arg0, arg1)
+    step_op: str
+    step_arg0_idx: tuple               # indices into a_operands forming arg0
+    step_arg1_idx: tuple               # indices into a_operands forming arg1
+    # Ans computation
+    ans_is_adj_search: bool            # True → enumerate x s.t. ans_op(other, x)=step
+    ans_op: str                        # fold rule op (or fwd op for adj_search)
+    ans_step_is_arg0: bool             # True → ans=fold(step, other); False → fold(other, step)
+    ans_other_idx: tuple               # a-operand indices for the non-step arg
+    evidence: int                      # training examples verified
 
 # Fixpoint iteration parameters (architecture §Prediction step 3)
 _FP_MAX_ITER: int = 20
@@ -176,6 +204,19 @@ class Predictor:
                     rk = adj.right_op
                     if rk not in self._adj_solve_map:
                         self._adj_solve_map[rk] = (adj.left_op, adj.preserved_position)
+            # Level 1c: Trace program synthesis — discover computation structure
+            # of trace-format ops (eval, linsolve, …) from training chain_table.
+            # dict[op_atom → dict[n_operands → TraceProgram]] to handle variable arity.
+            # Called once at init; result used as fallback when chain_table misses.
+            self._trace_programs: dict[str, dict[int, TraceProgram]] = _discover_trace_programs(
+                self._chain_rules,
+                self._fold_rules,
+                self._fc_lookup,
+                self._compose_succ_map,
+                self._compose_carry_el,
+                self._compose_carry_out,
+                self._compose_zero,
+            )
         else:
             self._fc_lookup = {}
             self._adj_lookup = {}
@@ -188,6 +229,7 @@ class Predictor:
             self._compose_zero = ""
             self._compose_cache = {}
             self._adj_solve_map = {}
+            self._trace_programs: dict[str, dict[int, TraceProgram]] = {}
 
         # Pre-build MorphismGraph transition matrix (concept_id → concept_id → weight)
         self._trans = _build_transition(morphism_graph)
@@ -245,6 +287,30 @@ class Predictor:
                 result = _chain_predict(chain_rule, chain_state.input_tokens, chain_state.output_tokens, use_eq_table=use_eq)
                 if result is not None:
                     return result
+
+                # Level 1c: Trace program fallback (generalization for novel inputs).
+                # Fires when chain_table lookup returned None (test input not in training).
+                # Synthesized trace program computes step/ans via fold rules + adj_search.
+                if not use_eq and self._trace_programs:
+                    prog_map = self._trace_programs.get(chain_state.op)
+                    if prog_map is not None:
+                        # Pick program matching the actual number of a-operands
+                        n_ops = sum(
+                            1 for t in chain_state.input_tokens
+                            if t.startswith("a") and len(t) > 1 and t[1:].isdigit()
+                        )
+                        prog = prog_map.get(n_ops)
+                        if prog is not None:
+                            trace_result = _trace_program_predict(
+                                prog, chain_state.input_tokens,
+                                chain_state.output_tokens,
+                                self._fc_lookup, self._fold_rules,
+                                self._compose_succ_map, self._compose_carry_el,
+                                self._compose_carry_out, self._compose_zero,
+                                self._compose_cache,
+                            )
+                            if trace_result is not None:
+                                return trace_result
 
         # Pass discovered op_atoms — not a hardcoded list
         state = parse_prefix(prefix, op_atoms=self._op_atoms)
@@ -1104,3 +1170,316 @@ def _compose(
     if result is not None:
         cache[cache_key] = result
     return result
+
+
+# ---------------------------------------------------------------------------
+# Trace program synthesis (Level 1c) — CT_REFERENCE §19
+# ---------------------------------------------------------------------------
+
+def _discover_trace_programs(
+    chain_rules: dict,
+    fold_rules: dict,
+    fc_lookup: dict,
+    succ_map: dict,
+    carry_el: str,
+    carry_out: tuple,
+    zero_digit: str,
+) -> dict:
+    """Synthesize TraceProgram for each trace-format chain op.
+
+    For each op in chain_rules with a non-empty chain_table, analyzes
+    training (input → step/ans output) examples to discover which fold
+    rule compositions explain the step and ans tokens.
+
+    No operator names or semantics are hardcoded.  Discovery is purely
+    data-driven: we try all (fold_op × arg_positions) combinations and
+    keep those that are 100% consistent with training examples.
+
+    Returns dict mapping op_atom → TraceProgram.
+    """
+    cache: dict = {}
+    programs: dict = {}
+
+    for op_atom, cr in chain_rules.items():
+        if not cr.chain_table:
+            continue
+
+        # --- Parse training samples ---
+        parsed = []
+        for input_key, output_toks in cr.chain_table.items():
+            if "ans" not in output_toks:
+                continue
+            ans_idx = output_toks.index("ans")
+            # step_toks: tokens between 'step' and 'ans'
+            step_toks = tuple(output_toks[1:ans_idx])
+            ans_toks = tuple(output_toks[ans_idx + 1:])
+            # a-operands: tokens with 'a' prefix followed by digit(s)
+            a_ops = [
+                tok[1:] for tok in input_key
+                if tok.startswith("a") and len(tok) > 1 and tok[1:].isdigit()
+            ]
+            if len(a_ops) < 2 or not step_toks or not ans_toks:
+                continue
+            parsed.append((a_ops, step_toks, ans_toks))
+
+        if len(parsed) < 3:
+            continue
+
+        # Discover programs for each distinct n (number of a-operands).
+        # An op may appear in both 3-arg and 4-arg variants (e.g. linsolve with
+        # 1-digit vs 2-digit c).  Each variant needs its own TraceProgram.
+        from collections import Counter as _Counter
+        n_counts = _Counter(len(s[0]) for s in parsed)
+        for n, n_count in n_counts.items():
+            if n < 2 or n_count < 3:
+                continue
+            _discover_one_arity(
+                op_atom, n,
+                [s for s in parsed if len(s[0]) == n],
+                fold_rules, fc_lookup,
+                succ_map, carry_el, carry_out, zero_digit,
+                cache, programs,
+            )
+
+    return programs
+
+
+def _discover_one_arity(
+    op_atom: str,
+    n: int,
+    parsed: list,
+    fold_rules: dict,
+    fc_lookup: dict,
+    succ_map: dict,
+    carry_el: str,
+    carry_out: tuple,
+    zero_digit: str,
+    cache: dict,
+    programs: dict,
+) -> None:
+    """Discover and register a TraceProgram for one specific arity n."""
+
+    # --- Discover step program ---
+    # Try (fold_op, arg_i, arg_j) with single-token args.
+    step_prog = None
+    for fop in fold_rules:
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                ev = sum(
+                    1 for a_ops, step, _ in parsed
+                    if _compose(
+                        fop, ((a_ops[i],), (a_ops[j],)),
+                        fc_lookup, fold_rules,
+                        succ_map, carry_el, carry_out, zero_digit, cache,
+                    ) == step
+                )
+                if ev == len(parsed):
+                    step_prog = (fop, (i,), (j,))
+                    break
+            if step_prog:
+                break
+        if step_prog:
+            break
+
+    # Try 2-token grouped args (e.g. linsolve's c = arg[gi]+arg[gi+1]).
+    if step_prog is None:
+        for fop in fold_rules:
+            for gi in range(n - 1):
+                for j in range(n):
+                    if j in (gi, gi + 1):
+                        continue
+                    # Group (gi, gi+1) as arg0, j as arg1
+                    ev = sum(
+                        1 for a_ops, step, _ in parsed
+                        if _compose(
+                            fop,
+                            ((a_ops[gi], a_ops[gi + 1]), (a_ops[j],)),
+                            fc_lookup, fold_rules,
+                            succ_map, carry_el, carry_out, zero_digit, cache,
+                        ) == step
+                    )
+                    if ev == len(parsed):
+                        step_prog = (fop, (gi, gi + 1), (j,))
+                        break
+                    # j as arg0, group (gi, gi+1) as arg1
+                    ev = sum(
+                        1 for a_ops, step, _ in parsed
+                        if _compose(
+                            fop,
+                            ((a_ops[j],), (a_ops[gi], a_ops[gi + 1])),
+                            fc_lookup, fold_rules,
+                            succ_map, carry_el, carry_out, zero_digit, cache,
+                        ) == step
+                    )
+                    if ev == len(parsed):
+                        step_prog = (fop, (j,), (gi, gi + 1))
+                        break
+                if step_prog:
+                    break
+            if step_prog:
+                break
+
+    if step_prog is None:
+        return
+
+    step_op_name, step_a0_idx, step_a1_idx = step_prog
+
+    # Pre-compute actual step results for all samples
+    step_results = []
+    for a_ops, _, _ in parsed:
+        a0 = tuple(a_ops[i] for i in step_a0_idx)
+        a1 = tuple(a_ops[i] for i in step_a1_idx)
+        sr = _compose(step_op_name, (a0, a1), fc_lookup, fold_rules,
+                      succ_map, carry_el, carry_out, zero_digit, cache)
+        step_results.append(sr)
+
+    # --- Discover ans program (given step) ---
+    ans_prog = None
+
+    # Try fold(step, a-op[k]) and fold(a-op[k], step)
+    for fop in fold_rules:
+        for k in range(n):
+            # step first
+            ev = sum(
+                1 for (a_ops, _, ans), sr in zip(parsed, step_results)
+                if sr is not None and _compose(
+                    fop, (sr, (a_ops[k],)),
+                    fc_lookup, fold_rules,
+                    succ_map, carry_el, carry_out, zero_digit, cache,
+                ) == ans
+            )
+            if ev == len(parsed):
+                ans_prog = (fop, True, (k,), False)
+                break
+            # other first
+            ev = sum(
+                1 for (a_ops, _, ans), sr in zip(parsed, step_results)
+                if sr is not None and _compose(
+                    fop, ((a_ops[k],), sr),
+                    fc_lookup, fold_rules,
+                    succ_map, carry_el, carry_out, zero_digit, cache,
+                ) == ans
+            )
+            if ev == len(parsed):
+                ans_prog = (fop, False, (k,), False)
+                break
+        if ans_prog:
+            break
+
+    # Try adj_search: enumerate x s.t. fold(a-op[k], x) = step
+    if ans_prog is None:
+        for fop in fold_rules:
+            for k in range(n):
+                ev = sum(
+                    1 for (a_ops, _, ans), sr in zip(parsed, step_results)
+                    if sr is not None and _compose_adjoint_search(
+                        "adj_search",
+                        sr + (a_ops[k],),
+                        (fop, 1),
+                        fc_lookup, fold_rules,
+                        succ_map, carry_el, carry_out, zero_digit, cache,
+                    ) == ans
+                )
+                if ev == len(parsed):
+                    ans_prog = (fop, False, (k,), True)
+                    break
+            if ans_prog:
+                break
+
+    if ans_prog is None:
+        return
+
+    ans_op_name, ans_step_first, ans_other_idx, ans_is_adj = ans_prog
+    prog = TraceProgram(
+        op_atom=op_atom,
+        step_op=step_op_name,
+        step_arg0_idx=step_a0_idx,
+        step_arg1_idx=step_a1_idx,
+        ans_is_adj_search=ans_is_adj,
+        ans_op=ans_op_name,
+        ans_step_is_arg0=ans_step_first,
+        ans_other_idx=ans_other_idx,
+        evidence=len(parsed),
+    )
+    # Store keyed by (op_atom, n) to support variable-arity ops
+    programs.setdefault(op_atom, {})[n] = prog
+
+
+def _trace_program_predict(
+    prog: "TraceProgram",
+    input_tokens: list,
+    output_tokens_so_far: list,
+    fc_lookup: dict,
+    fold_rules: dict,
+    succ_map: dict,
+    carry_el: str,
+    carry_out: tuple,
+    zero_digit: str,
+    cache: dict,
+) -> Optional[dict]:
+    """Level 1c: predict next token using a discovered TraceProgram.
+
+    Extracts a-prefixed operands from input_tokens, runs the two-step
+    computation (step, ans) using fold rules / adj_search, then returns
+    a point mass for the k-th token of the expected trace output.
+    """
+    # Extract a-prefixed operands (strip 'a' prefix, preserve order)
+    a_operands = [
+        tok[1:] for tok in input_tokens
+        if tok.startswith("a") and len(tok) > 1 and tok[1:].isdigit()
+    ]
+    if len(a_operands) < 2:
+        return None
+
+    # Validate that all required positions are in bounds
+    max_idx = max(
+        max(prog.step_arg0_idx, default=-1),
+        max(prog.step_arg1_idx, default=-1),
+        max(prog.ans_other_idx, default=-1),
+    )
+    if max_idx >= len(a_operands):
+        return None
+
+    # Build args from discovered position specs
+    a0 = tuple(a_operands[i] for i in prog.step_arg0_idx)
+    a1 = tuple(a_operands[i] for i in prog.step_arg1_idx)
+    step_result = _compose(prog.step_op, (a0, a1), fc_lookup, fold_rules,
+                           succ_map, carry_el, carry_out, zero_digit, cache)
+    if step_result is None:
+        return None
+
+    # Compute ans
+    other = tuple(a_operands[i] for i in prog.ans_other_idx)
+    if prog.ans_is_adj_search:
+        # Find x s.t. ans_op(x, other) = step_result
+        # _compose_adjoint_search interprets: b_tuple = input_flat[-1:], c_tuple = input_flat[:-1]
+        # So input_flat = (*step_result, *other) gives b=other, c=step_result → find x s.t. ans_op(x, other)=step
+        ans_result = _compose_adjoint_search(
+            "adj_search",
+            step_result + other,
+            (prog.ans_op, 1),
+            fc_lookup, fold_rules,
+            succ_map, carry_el, carry_out, zero_digit, cache,
+        )
+    elif prog.ans_step_is_arg0:
+        ans_result = _compose(prog.ans_op, (step_result, other),
+                              fc_lookup, fold_rules,
+                              succ_map, carry_el, carry_out, zero_digit, cache)
+    else:
+        ans_result = _compose(prog.ans_op, (other, step_result),
+                              fc_lookup, fold_rules,
+                              succ_map, carry_el, carry_out, zero_digit, cache)
+
+    if ans_result is None:
+        return None
+
+    # Assemble full expected output and index into it
+    full_output = ["step"] + list(step_result) + ["ans"] + list(ans_result)
+    k = len(output_tokens_so_far)
+    if k < len(full_output):
+        return {full_output[k]: 1.0}
+    if k == len(full_output):
+        return {"<eos>": 1.0}
+    return None
