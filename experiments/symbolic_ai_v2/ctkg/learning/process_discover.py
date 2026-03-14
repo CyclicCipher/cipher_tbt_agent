@@ -619,8 +619,6 @@ def discover_compose_chains(
         if not seq:
             continue
         op = seq[0]
-        if op in ARITHMETIC_OPS:
-            continue  # handled by fold rules
 
         # Strip trailing eos
         body = seq[1:]
@@ -630,7 +628,11 @@ def discover_compose_chains(
         if not body:
             continue
 
-        # Check for step/ans format (takes priority over eq format)
+        # Check for step/ans format (takes priority over eq format).
+        # step/ans traces (e.g. power_trace: pow a4 a3 step 4 step 16 ans 64)
+        # use namespaced a-prefix inputs and are DISTINCT from the fold-rule
+        # eq-format sequences (pow 4 3 eq 64).  Include them in chain_rules
+        # even for arithmetic ops so trace programs can be synthesised.
         step_ans_idx = None
         for i, tok in enumerate(body):
             if tok in (STEP_TOKEN, ANS_TOKEN):
@@ -646,7 +648,9 @@ def discover_compose_chains(
                     chain_tables[op][key] = output_tokens
             continue
 
-        # eq format
+        # eq format: skip ARITHMETIC_OPS (handled by fold rules / process rules)
+        if op in ARITHMETIC_OPS:
+            continue
         if EQ_TOKEN in body:
             eq_idx = body.index(EQ_TOKEN)
             input_tokens = tuple(body[:eq_idx])
