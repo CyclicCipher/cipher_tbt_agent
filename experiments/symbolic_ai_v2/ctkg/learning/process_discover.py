@@ -1333,6 +1333,14 @@ def discover_binary_fold_rules(fc: FreeCategoryGraph) -> dict[str, BinaryFoldRul
             if not base_observations:
                 continue  # No base case observed for this axis
 
+            # Require at least 3 distinct base observations to avoid spurious
+            # identity detection from a single data point.  For example,
+            # sub(0, b=0) = 0 is the only base observation for sub ind=0,
+            # which accidentally looks like "identity" even though sub(0, b)
+            # is undefined for b > 0.  add/mul/pow all have 8-10 base obs.
+            if len(base_observations) < 3:
+                continue
+
             # Determine base_fixed: is base(other) == (other,) or a fixed token?
             identity_count = sum(1 for other_d, out in base_observations if out == (other_d,))
             fixed_counts: dict[str, int] = {}
