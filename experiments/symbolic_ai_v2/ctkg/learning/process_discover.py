@@ -585,8 +585,94 @@ def discover_compose_chains(
     eos_token: str = "<eos>",
     digit_alphabet=None,
 ) -> list[ChainRule]:
-    """Stub — returns [] under the Option B architecture."""
-    return []
+    """Discover ChainRule objects from step/ans and eq-format sequences.
+
+    Scans the training corpus for sequences that use step/ans delimiters
+    (trace format: [op, inputs..., step, out..., ans, final..., <eos>]) or
+    eq delimiters (eq format: [op, inputs..., eq, out..., <eos>]).
+
+    Builds a chain_table and eq_table for each discovered op:
+      chain_table[(input_tokens)] = full_output_tokens (step/ans format)
+      eq_table[(input_tokens)]    = output_tokens (eq format, after eq)
+
+    These tables let Level 1b predict any trace-format sequence seen during
+    training (memorisation baseline).  Test generalisation comes from the
+    composition engine (Level 0.7) when the chain_table misses.
+
+    Simple arithmetic ops (add, sub, mul, pow, succ, pred) are excluded to
+    avoid shadowing Level 1a (process rules) and Level 0.7 (fold rules).
+    """
+    from collections import defaultdict
+
+    STEP_TOKEN = "step"
+    ANS_TOKEN = "ans"
+    EQ_TOKEN = "eq"
+
+    # Ops handled by fold rules / process rules — exclude from chain_rules
+    # so Level 1b doesn't shadow Level 1a / Level 0.7 for arithmetic.
+    ARITHMETIC_OPS = frozenset({"add", "sub", "mul", "pow", "succ", "pred"})
+
+    chain_tables: dict[str, dict[tuple, list[str]]] = defaultdict(dict)
+    eq_tables: dict[str, dict[tuple, list[str]]] = defaultdict(dict)
+
+    for seq in corpus:
+        if not seq:
+            continue
+        op = seq[0]
+        if op in ARITHMETIC_OPS:
+            continue  # handled by fold rules
+
+        # Strip trailing eos
+        body = seq[1:]
+        if body and body[-1] == eos_token:
+            body = body[:-1]
+
+        if not body:
+            continue
+
+        # Check for step/ans format (takes priority over eq format)
+        step_ans_idx = None
+        for i, tok in enumerate(body):
+            if tok in (STEP_TOKEN, ANS_TOKEN):
+                step_ans_idx = i
+                break
+
+        if step_ans_idx is not None:
+            input_tokens = tuple(body[:step_ans_idx])
+            output_tokens = list(body[step_ans_idx:])
+            if input_tokens and output_tokens:
+                key = input_tokens
+                if key not in chain_tables[op]:
+                    chain_tables[op][key] = output_tokens
+            continue
+
+        # eq format
+        if EQ_TOKEN in body:
+            eq_idx = body.index(EQ_TOKEN)
+            input_tokens = tuple(body[:eq_idx])
+            output_tokens = list(body[eq_idx + 1:])
+            if input_tokens:
+                key = input_tokens
+                if key not in eq_tables[op]:
+                    eq_tables[op][key] = output_tokens
+
+    # Build ChainRule objects (one per op with non-empty tables)
+    rules: list[ChainRule] = []
+    all_ops = set(chain_tables.keys()) | set(eq_tables.keys())
+    for op in sorted(all_ops):
+        ct = dict(chain_tables.get(op, {}))
+        et = dict(eq_tables.get(op, {}))
+        support = len(ct) + len(et)
+        if support == 0:
+            continue
+        rules.append(ChainRule(
+            op_atom=op,
+            chain_table=ct,
+            eq_table=et,
+            support=support,
+        ))
+
+    return rules
 
 
 def complete_succ_map(
@@ -1145,7 +1231,8 @@ class BinaryFoldRule:
     op: str
     induction_arg: int          # 0 or 1
     base_fixed: Optional[str]   # None = identity; str = fixed token
-    step_op: Optional[str]      # None = succ; str = binary op name
+    step_op: Optional[str]      # None = unary step; str = binary op name
+    step_inverse: bool = False  # True → step is pred (inverse of succ); False → succ
     evidence: int = 0           # number of training triples that verified this rule
 
 
@@ -1282,7 +1369,7 @@ def discover_binary_fold_rules(fc: FreeCategoryGraph) -> dict[str, BinaryFoldRul
                 continue
 
             # Test step candidates
-            # Candidate 1: succ (unary).
+            # Candidate 1a: succ (unary forward step).
             # Skip pairs where _succ_tuple returns None (succ_map gap from
             # the 80/20 split) — require consistency only on checkable pairs.
             succ_checkable = [
@@ -1293,11 +1380,33 @@ def discover_binary_fold_rules(fc: FreeCategoryGraph) -> dict[str, BinaryFoldRul
             if succ_checkable and succ_ev == len(succ_checkable):
                 rule = BinaryFoldRule(op=op, induction_arg=ind_arg,
                                       base_fixed=base_fixed, step_op=None,
-                                      evidence=succ_ev)
+                                      step_inverse=False, evidence=succ_ev)
                 if succ_ev > best_ev:
                     best_ev = succ_ev
                     best_rule = rule
                 continue  # succ step found; no need to check binary ops
+
+            # Candidate 1b: pred (unary inverse step — for sub-like ops).
+            # Tests: op(succ(n), d) = pred(op(n, d)).
+            # This is the NNO fold rule for subtraction:
+            #   sub(a, 0) = a  and  sub(a, succ(b)) = pred(sub(a, b))
+            def _pred_tuple(t: tuple) -> Optional[tuple]:
+                r = unary_chain_predict(succ_step_map, carry_element, carry_out, list(t), inverse=True)
+                return tuple(r) if r is not None else None
+
+            pred_checkable = [
+                (p, n) for p, n, _ in consec_pairs
+                if _pred_tuple(p) is not None
+            ]
+            pred_ev = sum(1 for p, n in pred_checkable if _pred_tuple(p) == n)
+            if pred_checkable and pred_ev == len(pred_checkable):
+                rule = BinaryFoldRule(op=op, induction_arg=ind_arg,
+                                      base_fixed=base_fixed, step_op=None,
+                                      step_inverse=True, evidence=pred_ev)
+                if pred_ev > best_ev:
+                    best_ev = pred_ev
+                    best_rule = rule
+                continue  # pred step found; no need to check binary ops
 
             # Candidate 2: binary step op G — G(out_prev, other_d) == out_next
             # Only check entries where out_prev is a single token (in step_lookup)

@@ -166,6 +166,16 @@ class Predictor:
             self._compose_cache: dict[tuple, tuple] = {}
             fc_ops = frozenset(edge.op for edge in fc.edges)
             self._op_atoms = self._op_atoms | fc_ops
+            # Adjunction-mediated inverse solve: for ops that are the right-side
+            # of an n-ary adjunction (e.g. sub = right-side of add⊣sub), derive
+            # the answer by enumerating candidates via the left (forward) op.
+            # Maps right_op → (left_op, preserved_position).
+            self._adj_solve_map: dict[str, tuple] = {}
+            for adj in fc.adjunctions:
+                if adj.preserved_position is not None:
+                    rk = adj.right_op
+                    if rk not in self._adj_solve_map:
+                        self._adj_solve_map[rk] = (adj.left_op, adj.preserved_position)
         else:
             self._fc_lookup = {}
             self._adj_lookup = {}
@@ -177,6 +187,7 @@ class Predictor:
             self._compose_carry_out = ()
             self._compose_zero = ""
             self._compose_cache = {}
+            self._adj_solve_map = {}
 
         # Pre-build MorphismGraph transition matrix (concept_id → concept_id → weight)
         self._trans = _build_transition(morphism_graph)
@@ -247,22 +258,16 @@ class Predictor:
             if result is not None:
                 return result
 
-        # Level 0: Direct left-context n-gram lookup.
-        # For the prediction position n = len(prefix), the left-context key
-        # r{R}|{-R,tok}|...|{-1,tok} is looked up in the left-only Hankel index.
-        # This fires for any seen prefix and gives exact counts — same mechanism
-        # for natural language and arithmetic.  Falls through on a cache miss
-        # (novel left context or shorter-than-r prefix).
-        if prefix:
-            lkey = HankelCount._left_key(prefix, len(prefix), self._r)
-            ngram_dist = self._hankel.get_left_distribution(lkey)
-            if ngram_dist:
-                return ngram_dist
+        # Levels 0.5–0.7 fire BEFORE Level 0 (n-gram) for eq-format sequences.
+        # Structural composition and adjunction give exact (point-mass) answers;
+        # the n-gram is a soft-distribution fallback that fires when all
+        # structural levels miss.  Keeping structural first prevents a weak
+        # n-gram distribution from masking a correct compositional derivation.
 
         # Level 0.5: FC edge + adjunction-based exact lookup (CT_REFERENCE §4,17).
         # For sequences containing 'eq', extracts op=prefix[0] and
         # input_tuple=prefix[1:eq_idx], then looks up the expected output in:
-        #   1. fc_lookup  — direct edge seen during training (same coverage as Level 0)
+        #   1. fc_lookup  — direct edge seen during training
         #   2. adj_lookup — adjoint edge seen in training, adjunction infers the answer
         #                   (e.g. pred(4)→3 in training ⟹ succ(3)=4 even if succ(3) is OOD)
         # Falls through if neither lookup has an entry for this (op, input_tuple).
@@ -288,7 +293,9 @@ class Predictor:
         # (op, inputs), decomposes via the NNO fold rule until a base case or
         # FC-lookup hit is found.  This is categorical composition — no tables,
         # no flood-fill, just the rule applied on demand.
-        if self._fold_rules and self._compose_succ_map and prefix and 'eq' in prefix:
+        # Also handles adjoint operators (e.g. sub) by enumerating candidates
+        # via the forward (left) op: sub(c,b) = a where add(a,b) = c.
+        if (self._fold_rules or self._adj_solve_map) and self._compose_succ_map and prefix and 'eq' in prefix:
             compose_result = _compose_predict(
                 prefix,
                 self._fc_lookup,
@@ -298,9 +305,22 @@ class Predictor:
                 self._compose_carry_out,
                 self._compose_zero,
                 self._compose_cache,
+                self._adj_solve_map,
             )
             if compose_result is not None:
                 return compose_result
+
+        # Level 0: Direct left-context n-gram lookup.
+        # For the prediction position n = len(prefix), the left-context key
+        # r{R}|{-R,tok}|...|{-1,tok} is looked up in the left-only Hankel index.
+        # This fires for any seen prefix and gives exact counts — same mechanism
+        # for natural language and arithmetic.  Falls through on a cache miss
+        # (novel left context or shorter-than-r prefix).
+        if prefix:
+            lkey = HankelCount._left_key(prefix, len(prefix), self._r)
+            ngram_dist = self._hankel.get_left_distribution(lkey)
+            if ngram_dist:
+                return ngram_dist
 
         # Level 2: Fixpoint iteration + Markov morphism marginalization
         type_dist: dict[ConceptId, float] = {}
@@ -872,8 +892,15 @@ def _compose_predict(
     carry_out: tuple,
     zero_digit: str,
     cache: dict[tuple, tuple],
+    adj_solve_map: Optional[dict[str, tuple]] = None,
 ) -> Optional[dict[str, float]]:
-    """Level 0.7 entry point: parse prefix, call _compose, return point mass."""
+    """Level 0.7 entry point: parse prefix, call _compose, return point mass.
+
+    First tries direct fold-rule composition (_compose).  If that fails (no
+    rule, or op is an adjoint op like sub), falls back to adjunction-mediated
+    search (_compose_adjoint_search): for sub(c, b) = a, enumerates a from
+    zero via succ_map and applies the forward op (add) until add(a, b) = c.
+    """
     if not prefix or 'eq' not in prefix:
         return None
     eq_idx = prefix.index('eq')
@@ -886,14 +913,27 @@ def _compose_predict(
     if not input_tuple:
         return None
 
-    # Convert flat input_tuple into structured args.
-    # For the benchmark all primary inputs are single-digit, so each arg is
-    # one token.  Multi-digit args arise only in recursive intermediate calls
-    # and are handled inside _compose itself.
-    args: list[tuple[str, ...]] = tuple((t,) for t in input_tuple)
+    # --- Try fold-rule composition first ---
+    # Only fire when input_tuple has exactly 2 tokens (both args single-digit).
+    # For multi-digit inputs (e.g. sub(11, 4) → ('1','1','4')), the flat
+    # token tuple can't be split into args without arity information, so we
+    # skip the fold rule and let the adjunction search handle it instead.
+    result = None
+    if len(input_tuple) == 2:
+        args: tuple = tuple((t,) for t in input_tuple)
+        result = _compose(op, args, fc_lookup, fold_rules,
+                          succ_map, carry_el, carry_out, zero_digit, cache)
 
-    result = _compose(op, args, fc_lookup, fold_rules,
-                      succ_map, carry_el, carry_out, zero_digit, cache)
+    # --- Adjunction-mediated search (FALLBACK for inverse ops: sub, div, …) ---
+    # Fires only when _compose returned None: either no fold rule, or the
+    # input had multi-digit tokens we couldn't split.
+    # Enumerates candidates via the left (forward) op without any int() calls.
+    if result is None and adj_solve_map and op in adj_solve_map:
+        result = _compose_adjoint_search(
+            op, input_tuple, adj_solve_map[op],
+            fc_lookup, fold_rules, succ_map, carry_el, carry_out, zero_digit, cache,
+        )
+
     if result is None:
         return None
 
@@ -902,6 +942,67 @@ def _compose_predict(
         return {result[k]: 1.0}
     if k == len(result):
         return {'<eos>': 1.0}
+    return None
+
+
+def _compose_adjoint_search(
+    op: str,
+    input_flat: tuple,
+    adj_info: tuple,
+    fc_lookup: dict[tuple, tuple],
+    fold_rules: dict[str, "BinaryFoldRule"],
+    succ_map: dict[str, str],
+    carry_el: str,
+    carry_out: tuple,
+    zero_digit: str,
+    cache: dict[tuple, tuple],
+) -> Optional[tuple]:
+    """Solve op(input_flat) via adjunction + composition.
+
+    For an adjunction left_op ⊣ op (preserved_position p):
+        op(c_flat + b_flat) = a  iff  left_op(a_flat + b_flat) = c_flat
+
+    where b_flat is the preserved argument (1 token at the end of input_flat)
+    and c_flat is the target output (all preceding tokens).
+
+    Enumerates candidate a_flat from zero_digit via succ_map, computes
+    left_op(a, b) using the composition engine, and returns the first a
+    where the result equals c_flat.  Handles multi-digit c_flat correctly
+    (e.g. sub(11, 4) = 7 iff add(7, 4) = 11).
+
+    Returns the answer as a flat tuple (e.g. ('7',)), or None if not found.
+    """
+    fwd_op, _preserved_pos = adj_info
+
+    # b = last 1 token (preserved single-digit arg of the forward op)
+    # c = all preceding tokens (target output of the forward op)
+    if len(input_flat) < 2:
+        return None
+    b_tuple: tuple = input_flat[-1:]   # e.g. ('4',) for sub(11, 4)
+    c_tuple: tuple = input_flat[:-1]   # e.g. ('1', '1') for sub(11, 4)
+
+    # Enumerate a from zero_digit upward, compute fwd_op(a, b), find match
+    a_tuple: tuple = (zero_digit,)
+    seen: set = set()
+    while a_tuple not in seen:
+        seen.add(a_tuple)
+        # Compute fwd_op(a, b) via composition
+        fwd_result = _compose(
+            fwd_op, (a_tuple, b_tuple), fc_lookup, fold_rules,
+            succ_map, carry_el, carry_out, zero_digit, cache,
+        )
+        if fwd_result == c_tuple:
+            return a_tuple
+        # Advance a by one step (succ)
+        next_a = unary_chain_predict(succ_map, carry_el, carry_out, list(a_tuple), inverse=False)
+        if next_a is None:
+            break
+        next_a_tuple = tuple(next_a)
+        # Stop if we've wrapped around (succ carries into multi-digit)
+        if len(next_a_tuple) > len(c_tuple):
+            break
+        a_tuple = next_a_tuple
+
     return None
 
 
@@ -988,9 +1089,10 @@ def _compose(
 
     # --- Apply step ---
     if rule.step_op is None:
-        # Step is succ (unary)
+        # Step is succ (forward) or pred (inverse), depending on step_inverse
+        inverse_step = getattr(rule, 'step_inverse', False)
         stepped = unary_chain_predict(
-            succ_map, carry_el, carry_out, list(sub_result), inverse=False
+            succ_map, carry_el, carry_out, list(sub_result), inverse=inverse_step
         )
         result = tuple(stepped) if stepped is not None else None
     else:
