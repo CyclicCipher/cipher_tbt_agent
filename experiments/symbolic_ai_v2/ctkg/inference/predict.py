@@ -69,48 +69,30 @@ from experiments.symbolic_ai_v2.ctkg.core.spine import Spine
 
 
 @dataclass
-class TraceProgram:
-    """Discovered computation program for a trace-format op (Level 1c).
+class SlotProgram:
+    """Discovered computation program using structural pattern matching (Level 1c).
 
-    For trace ops like eval/linsolve, the output has the form:
-        [step, *step_tokens, ans, *ans_tokens]
-    or for two-step ops like bernoulli:
-        [step, *step1_tokens, step, *step2_tokens, ans, *ans_tokens]
+    Replaces TraceProgram with a segment-based representation that:
+    - Groups by input structural shape (pattern_key) instead of digit count
+    - Handles N-step outputs uniformly (no separate one/two-step code paths)
+    - Supports pattern-implied constants in output (e.g. same token in all
+      examples with a given structural pattern)
 
-    All indices are into the list of a-prefixed operands extracted from the
-    input_tokens (tokens matching 'a[0-9]+'; structural tokens like 'x', 'at'
-    are ignored).  No operator name or semantic is hardcoded.
+    segments is a list of segment specs, one per variable-width block:
+      ('K', tok)              — constant token (same in every training example)
+      ('E',)                  — echo all input digit tokens verbatim
+      ('G', j)                — single input digit at position j (ECHO_ARG)
+      ('F', op, src_a, src_b, w) — fold_rule(src_a, src_b), zero-padded to w tokens
+      ('A', op, step_src, oth, w) — adj_search result, zero-padded to w tokens
+
+    src types used inside 'F' and 'A':
+      ('I', j0, j1)   — input_digits[j0:j1+1]
+      ('S', seg_idx)  — result tuple stored by prior segment seg_idx
     """
-
     op_atom: str
-    # Step computation: step = step_op(arg0, arg1)
-    step_op: str
-    step_arg0_idx: tuple               # indices into a_operands forming arg0
-    step_arg1_idx: tuple               # indices into a_operands forming arg1
-    # Ans computation
-    ans_is_adj_search: bool            # True → enumerate x s.t. ans_op(other, x)=step
-    ans_op: str                        # fold rule op (or fwd op for adj_search)
-    ans_step_is_arg0: bool             # True → ans=fold(step, other); False → fold(other, step)
-    ans_other_idx: tuple               # a-operand indices for the non-step arg
-    evidence: int                      # training examples verified
-    # Fix 1: zero-padding widths for output formatting
-    step_width: int = 1                # zero-pad step output to this many tokens
-    ans_width: int = 1                 # zero-pad ans output to this many tokens
-    # Fix 3b: two-step extension (step2_op == "" means single-step program)
-    step2_op: str = ""
-    step2_arg0_idx: tuple = ()
-    step2_arg1_idx: tuple = ()
-    # For two-step: ans = ans_outer_op(inner, step_outer)
-    #   inner = ans_op(step_inner_or_arg, arg_or_step_inner)
-    #   step_inner is step[ans_inner_step] (1 or 2)
-    #   step_outer is step[ans_outer_step] (1 or 2)
-    ans_inner_step: int = 1            # which step feeds into inner fold
-    ans_outer_op: str = ""             # outer fold op; "" = no outer (single-step ans)
-    ans_outer_step: int = 2            # which step is outer fold arg
-    ans_outer_inner_is_left: bool = True  # True: outer=outer_op(inner, step_outer)
-    # Fix 3: ECHO_INPUT direct-fold ans (step_op == 'ECHO_INPUT')
-    # When non-empty, ans = ans_op(a_ops[ans_other_idx], a_ops[ans_arg1_idx])
-    ans_arg1_idx: tuple = ()
+    pattern_key: tuple          # structural input shape (digits replaced by '_')
+    segments: list              # list of segment specs (see above)
+    evidence: int               # number of training examples verified
 
 # Fixpoint iteration parameters (architecture §Prediction step 3)
 _FP_MAX_ITER: int = 20
@@ -224,9 +206,9 @@ class Predictor:
                         self._adj_solve_map[rk] = (adj.left_op, adj.preserved_position)
             # Level 1c: Trace program synthesis — discover computation structure
             # of trace-format ops (eval, linsolve, …) from training chain_table.
-            # dict[op_atom → dict[n_operands → TraceProgram]] to handle variable arity.
+            # dict[op_atom → dict[pattern_key → list[SlotProgram]]] for variable structures.
             # Called once at init; result used as fallback when chain_table misses.
-            self._trace_programs: dict[str, dict[int, TraceProgram]] = _discover_trace_programs(
+            self._trace_programs: dict[str, list] = _discover_trace_programs(
                 self._chain_rules,
                 self._fold_rules,
                 self._fc_lookup,
@@ -247,7 +229,7 @@ class Predictor:
             self._compose_zero = ""
             self._compose_cache = {}
             self._adj_solve_map = {}
-            self._trace_programs: dict[str, dict[int, TraceProgram]] = {}
+            self._trace_programs: dict[str, list] = {}
 
         # Pre-build MorphismGraph transition matrix (concept_id → concept_id → weight)
         self._trans = _build_transition(morphism_graph)
@@ -320,10 +302,15 @@ class Predictor:
                     # program with ans_only=True so it generalises eq-format OOD.
                     op_has_fold = chain_state.op in self._fold_rules
                     if prog_map is not None and (not use_eq or not op_has_fold):
-                        n_ops = sum(1 for t in chain_state.input_tokens if t.isdigit())
-                        prog = prog_map.get(n_ops) if n_ops > 0 else None
-                        if prog is not None:
-                            trace_result = _trace_program_predict(
+                        # Iterate all programs for this op; use _pattern_key_matches
+                        # (supports literal digits at structural positions) to find
+                        # compatible programs.  The first consistent one wins.
+                        for prog in prog_map:
+                            if not _pattern_key_matches(
+                                prog.pattern_key, chain_state.input_tokens
+                            ):
+                                continue
+                            trace_result = _slot_program_predict(
                                 prog, chain_state.input_tokens,
                                 chain_state.output_tokens,
                                 self._fc_lookup, self._fold_rules,
@@ -1230,6 +1217,398 @@ def _zpad(toks: tuple, width: int) -> tuple:
     return ('0',) * (width - len(toks)) + toks
 
 
+def _parse_into_value_blocks(output_toks: list) -> list:
+    """Split output token list into constant ('K') and value ('V') segments.
+
+    Returns a list of:
+      ('K', tok)         — structural/constant token (step, ans, <eos>, or any
+                           non-digit token embedded in a value region, e.g. 'mul', 'x')
+      ('V', value_tuple) — run of consecutive digit tokens
+
+    Non-digit tokens within a value region (e.g. 'mul' in 'ans mul 6 x')
+    are treated as structural constants so that the discovery algorithm can
+    work on the purely numeric sub-segments independently.
+    """
+    result = []
+    i = 0
+    while i < len(output_toks):
+        tok = output_toks[i]
+        if not tok.isdigit():
+            result.append(('K', tok))
+            i += 1
+        else:
+            j = i
+            while j < len(output_toks) and output_toks[j].isdigit():
+                j += 1
+            result.append(('V', tuple(output_toks[i:j])))
+            i = j
+    return result
+
+
+def _discover_value_segment(
+    value_tuples: list,
+    in_digits_list: list,
+    seg_results: dict,
+    fold_rules: dict,
+    fc_lookup: dict,
+    succ_map: dict,
+    carry_el: str,
+    carry_out: tuple,
+    zero_digit: str,
+    cache: dict,
+) -> tuple:
+    """Find what computation produces a variable value segment.
+
+    Tries (in order):
+      1. All-constant (all examples same value)
+      2. Echo all input digits verbatim
+      3. Echo single input digit at position j
+      4. fold(in_slice, in_slice) — widths 1 and 2
+      5. fold(seg_result, in_slice) and fold(in_slice, seg_result) — prior segments
+      5b. fold(fold(seg, in_slice), seg) — nested fold for bernoulli-style 3-operand ans
+      6. fold(seg_i, seg_j) — two prior computed segments
+      7. adj_search(seg_result + in_slice) — adjoint search
+
+    Returns (segment_spec, computed_results) or (None, None).
+    Width w in 'F'/'A' specs is the minimum observed token count (for zero-padding).
+    Using minimum avoids over-padding when ans widths vary (e.g., sq: 1..3 digits).
+    """
+    if not value_tuples:
+        return None, None
+
+    # Width for zero-padding: use consistent width only when ALL training examples
+    # agree.  For variable-length outputs (e.g. sq ans, pow ans) use width=1 so
+    # _zpad never adds spurious leading zeros.
+    widths = [len(v) for v in value_tuples]
+    width = widths[0] if len(set(widths)) == 1 else 1
+    actual_n = len(in_digits_list[0]) if in_digits_list else 0
+
+    def _matches(result, expected):
+        if result is None:
+            return False
+        return _lz_strip(result) == _lz_strip(expected)
+
+    # 1. All-constant block — only when ≥2 examples agree; deferred to last resort
+    #    for single-example groups (where any value appears constant trivially).
+    const_candidate = None
+    if all(v == value_tuples[0] for v in value_tuples) and len(value_tuples) >= 2:
+        const_candidate = value_tuples[0]
+        return ('CONST_BLOCK', const_candidate), [const_candidate for _ in value_tuples]
+
+    # 2. Echo all input digits verbatim
+    if all(tuple(in_d) == v for in_d, v in zip(in_digits_list, value_tuples)):
+        return ('E',), [tuple(in_d) for in_d in in_digits_list]
+
+    # 3. Echo single input digit at position j
+    for j in range(actual_n):
+        if all(_lz_strip((in_d[j],)) == _lz_strip(v)
+               for in_d, v in zip(in_digits_list, value_tuples)):
+            computed = [(in_d[j],) for in_d in in_digits_list]
+            return ('G', j), computed
+
+    # 3b. pred / succ of a single input digit (NNO predecessor/successor).
+    #     Covers ans = N-1 in derivative_trace pow x N output.
+    if succ_map:
+        pred_map = {v: k for k, v in succ_map.items()}
+        for j in range(actual_n):
+            # pred: pred_map[in[j]]
+            pred_vals = [pred_map.get(in_d[j]) for in_d in in_digits_list]
+            if all(pv is not None and _lz_strip((pv,)) == _lz_strip(v)
+                   for pv, v in zip(pred_vals, value_tuples)):
+                return ('P', j), [(pv,) for pv in pred_vals]
+            # succ: succ_map[in[j]]
+            succ_vals = [succ_map.get(in_d[j]) for in_d in in_digits_list]
+            if all(sv is not None and _lz_strip((sv,)) == _lz_strip(v)
+                   for sv, v in zip(succ_vals, value_tuples)):
+                return ('SC', j), [(sv,) for sv in succ_vals]
+
+    # 4. fold(in_slice, in_slice)
+    for fop in fold_rules:
+        for w0 in (1, 2):
+            for s0 in range(actual_n - w0 + 1):
+                src_a = ('I', s0, s0 + w0 - 1)
+                for w1 in (1, 2):
+                    for s1 in range(actual_n - w1 + 1):
+                        src_b = ('I', s1, s1 + w1 - 1)
+                        computed = [
+                            _compose(fop,
+                                     (tuple(in_d[s0:s0 + w0]), tuple(in_d[s1:s1 + w1])),
+                                     fc_lookup, fold_rules,
+                                     succ_map, carry_el, carry_out, zero_digit, cache)
+                            for in_d in in_digits_list
+                        ]
+                        if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
+                            return ('F', fop, src_a, src_b, width), computed
+
+    # 4b. adj_search(in_slice, K_const): find x where fold_op(x, K) = in[j:j+w].
+    #     Covers integral step = R where mul(R, m) = RM (m is pattern-implied).
+    #     Tries small constants K ∈ {'2'..'9'} as the divisor.
+    for fop in fold_rules:
+        for w0 in (1, 2):
+            for s0 in range(actual_n - w0 + 1):
+                src = ('I', s0, s0 + w0 - 1)
+                for k_digit in ('2', '3', '4', '5', '6', '7', '8', '9'):
+                    k_tuple = (k_digit,)
+                    computed = []
+                    ok = True
+                    for in_d, val in zip(in_digits_list, value_tuples):
+                        in_slice = tuple(in_d[s0:s0 + w0])
+                        result = _compose_adjoint_search(
+                            "adj_search", in_slice + k_tuple, (fop, 1),
+                            fc_lookup, fold_rules,
+                            succ_map, carry_el, carry_out, zero_digit, cache,
+                            b_width=1,
+                        )
+                        if result is None or not _matches(result, val):
+                            ok = False
+                            break
+                        computed.append(result)
+                    if ok and computed:
+                        return ('AK', fop, src, k_digit, width), computed
+
+    # 5. fold(seg, in_slice) and fold(in_slice, seg)
+    for seg_idx, seg_result_list in seg_results.items():
+        if any(r is None for r in seg_result_list):
+            continue
+        for fop in fold_rules:
+            for w1 in (1, 2):
+                for s1 in range(actual_n - w1 + 1):
+                    src_b = ('I', s1, s1 + w1 - 1)
+                    computed = [
+                        _compose(fop, (sr, tuple(in_d[s1:s1 + w1])),
+                                 fc_lookup, fold_rules,
+                                 succ_map, carry_el, carry_out, zero_digit, cache)
+                        for sr, in_d in zip(seg_result_list, in_digits_list)
+                    ]
+                    if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
+                        return ('F', fop, ('S', seg_idx), src_b, width), computed
+                    computed = [
+                        _compose(fop, (tuple(in_d[s1:s1 + w1]), sr),
+                                 fc_lookup, fold_rules,
+                                 succ_map, carry_el, carry_out, zero_digit, cache)
+                        for sr, in_d in zip(seg_result_list, in_digits_list)
+                    ]
+                    if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
+                        return ('F', fop, src_b, ('S', seg_idx), width), computed
+
+    # 5b. fold(fold(seg_i, in_slice), seg_j) — nested fold for bernoulli-style 3-operand ans
+    # Handles: ans = outer_op(inner_op(seg_i, in_slice), seg_j) and variants
+    seg_idxs_nf = [k for k, v in seg_results.items() if not any(r is None for r in v)]
+    for seg_idx_i in seg_idxs_nf:
+        si_list = seg_results[seg_idx_i]
+        for fop_inner in fold_rules:
+            for w1 in (1, 2):
+                for s1 in range(actual_n - w1 + 1):
+                    oth_src = ('I', s1, s1 + w1 - 1)
+                    for inner_left in (True, False):
+                        if inner_left:
+                            inner_vals = [
+                                _compose(fop_inner, (sri, tuple(in_d[s1:s1 + w1])),
+                                         fc_lookup, fold_rules,
+                                         succ_map, carry_el, carry_out, zero_digit, cache)
+                                for sri, in_d in zip(si_list, in_digits_list)
+                            ]
+                            inner_src_a = ('S', seg_idx_i)
+                            inner_src_b = oth_src
+                        else:
+                            inner_vals = [
+                                _compose(fop_inner, (tuple(in_d[s1:s1 + w1]), sri),
+                                         fc_lookup, fold_rules,
+                                         succ_map, carry_el, carry_out, zero_digit, cache)
+                                for sri, in_d in zip(si_list, in_digits_list)
+                            ]
+                            inner_src_a = oth_src
+                            inner_src_b = ('S', seg_idx_i)
+                        if any(v is None for v in inner_vals):
+                            continue
+                        # Outer: fold_outer(inner, seg_j) or fold_outer(seg_j, inner)
+                        for seg_idx_j in seg_idxs_nf:
+                            sj_list = seg_results[seg_idx_j]
+                            for fop_outer in fold_rules:
+                                computed = [
+                                    _compose(fop_outer, (iv, srj),
+                                             fc_lookup, fold_rules,
+                                             succ_map, carry_el, carry_out, zero_digit, cache)
+                                    for iv, srj in zip(inner_vals, sj_list)
+                                ]
+                                if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
+                                    inner_spec = ('F', fop_inner, inner_src_a, inner_src_b)
+                                    return ('F', fop_outer, inner_spec, ('S', seg_idx_j), width), computed
+                                computed = [
+                                    _compose(fop_outer, (srj, iv),
+                                             fc_lookup, fold_rules,
+                                             succ_map, carry_el, carry_out, zero_digit, cache)
+                                    for iv, srj in zip(inner_vals, sj_list)
+                                ]
+                                if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
+                                    inner_spec = ('F', fop_inner, inner_src_a, inner_src_b)
+                                    return ('F', fop_outer, ('S', seg_idx_j), inner_spec, width), computed
+
+    # 6. fold(seg_i, seg_j) — two prior segments
+    seg_idxs = [k for k, v in seg_results.items() if not any(r is None for r in v)]
+    for ii in range(len(seg_idxs)):
+        si = seg_idxs[ii]
+        si_list = seg_results[si]
+        for jj in range(ii, len(seg_idxs)):
+            sj = seg_idxs[jj]
+            sj_list = seg_results[sj]
+            for fop in fold_rules:
+                computed = [
+                    _compose(fop, (sri, srj),
+                             fc_lookup, fold_rules,
+                             succ_map, carry_el, carry_out, zero_digit, cache)
+                    for sri, srj in zip(si_list, sj_list)
+                ]
+                if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
+                    return ('F', fop, ('S', si), ('S', sj), width), computed
+                computed = [
+                    _compose(fop, (srj, sri),
+                             fc_lookup, fold_rules,
+                             succ_map, carry_el, carry_out, zero_digit, cache)
+                    for sri, srj in zip(si_list, sj_list)
+                ]
+                if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
+                    return ('F', fop, ('S', sj), ('S', si), width), computed
+
+    # 7. adj_search: fold(x, b) = seg_result; b from in_slice
+    for seg_idx, seg_result_list in seg_results.items():
+        if any(r is None for r in seg_result_list):
+            continue
+        for fop in fold_rules:
+            for w1 in (1, 2):
+                for s1 in range(actual_n - w1 + 1):
+                    oth_src = ('I', s1, s1 + w1 - 1)
+                    b_width = w1
+                    computed = [
+                        _compose_adjoint_search(
+                            "adj_search",
+                            sr + tuple(in_d[s1:s1 + w1]),
+                            (fop, 1),
+                            fc_lookup, fold_rules,
+                            succ_map, carry_el, carry_out, zero_digit, cache,
+                            b_width=b_width,
+                        )
+                        for sr, in_d in zip(seg_result_list, in_digits_list)
+                    ]
+                    if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
+                        return ('A', fop, ('S', seg_idx), oth_src, width), computed
+
+    # 8. Last-resort: all-constant block (for single-example groups where the
+    #    early check was skipped because len(value_tuples) < 2).
+    if all(v == value_tuples[0] for v in value_tuples):
+        toks = value_tuples[0]
+        return ('CONST_BLOCK', toks), [toks for _ in value_tuples]
+
+    return None, None
+
+
+def _discover_slot_program(
+    op_atom: str,
+    pattern_key: tuple,
+    parsed: list,
+    fold_rules: dict,
+    fc_lookup: dict,
+    succ_map: dict,
+    carry_el: str,
+    carry_out: tuple,
+    zero_digit: str,
+    cache: dict,
+) -> "Optional[SlotProgram]":
+    """Discover a SlotProgram for one (op_atom, pattern_key) group.
+
+    parsed is a list of (in_digits, output_tokens) pairs, one per training example.
+    Returns a SlotProgram or None if no consistent program is found.
+    """
+    if not parsed:
+        return None
+
+    # Parse all training examples into segment structure
+    parsed_segs = [(in_d, _parse_into_value_blocks(out_toks))
+                   for in_d, out_toks in parsed]
+
+    # Verify all examples share the same segment-type skeleton
+    skeleton = [s[0] for s in parsed_segs[0][1]]
+    for _, segs in parsed_segs[1:]:
+        if [s[0] for s in segs] != skeleton:
+            return None
+
+    n_segs = len(parsed_segs[0][1])
+    result_segments: list = []
+    seg_results: dict = {}  # seg_idx -> list of result tuples (one per example)
+
+    for seg_idx in range(n_segs):
+        seg_type = skeleton[seg_idx]
+
+        if seg_type == 'K':
+            tok = parsed_segs[0][1][seg_idx][1]
+            if not all(segs[seg_idx][1] == tok for _, segs in parsed_segs):
+                return None
+            result_segments.append(('K', tok))
+            seg_results[seg_idx] = [None] * len(parsed)
+        else:
+            # 'V': variable value block — discover the computation
+            value_tuples = [segs[seg_idx][1] for _, segs in parsed_segs]
+            in_digits_list = [in_d for in_d, _ in parsed_segs]
+            prior_results = {k: v for k, v in seg_results.items()
+                             if k < seg_idx and v[0] is not None}
+
+            spec, computed = _discover_value_segment(
+                value_tuples, in_digits_list, prior_results,
+                fold_rules, fc_lookup, succ_map, carry_el, carry_out, zero_digit, cache,
+            )
+            if spec is None:
+                return None
+            result_segments.append(spec)
+            seg_results[seg_idx] = computed if computed is not None else [None] * len(parsed)
+
+    return SlotProgram(
+        op_atom=op_atom,
+        pattern_key=pattern_key,
+        segments=result_segments,
+        evidence=len(parsed),
+    )
+
+
+def _refine_pattern_key(pattern_key: tuple, examples: list) -> tuple:
+    """Embed structural (constant) digit values back into the pattern_key.
+
+    A wildcard '_' at position p is structural if ALL training examples share
+    the same digit value at the corresponding in_digits index.  Those positions
+    are replaced with the specific digit value so that the SlotProgram's
+    pattern_key uniquely identifies the computation structure.
+
+    Example: pow b e group with e=2 → ('_','2') instead of ('_','_'),
+    enabling unambiguous dispatch without needing partial output.
+    """
+    wild_indices = [i for i, t in enumerate(pattern_key) if t == '_']
+    if not wild_indices:
+        return pattern_key
+    refined = list(pattern_key)
+    for j, pk_idx in enumerate(wild_indices):
+        vals = {in_digits[j] for in_digits, _ in examples if j < len(in_digits)}
+        if len(vals) == 1:
+            refined[pk_idx] = next(iter(vals))
+    return tuple(refined)
+
+
+def _pattern_key_matches(pattern_key: tuple, input_tokens: list) -> bool:
+    """Check if input_tokens are compatible with a (possibly refined) pattern_key.
+
+    '_' is a wildcard matching any single digit token.
+    Literal non-'_' entries must match exactly.
+    Length must match.
+    """
+    if len(pattern_key) != len(input_tokens):
+        return False
+    for pk_tok, in_tok in zip(pattern_key, input_tokens):
+        if pk_tok == '_':
+            if not in_tok.isdigit():
+                return False
+        elif pk_tok != in_tok:
+            return False
+    return True
+
+
 def _discover_trace_programs(
     chain_rules: dict,
     fold_rules: dict,
@@ -1239,17 +1618,15 @@ def _discover_trace_programs(
     carry_out: tuple,
     zero_digit: str,
 ) -> dict:
-    """Synthesize TraceProgram for each trace-format chain op.
+    """Synthesize SlotProgram for each trace-format chain op.
 
-    For each op in chain_rules with a non-empty chain_table, analyzes
-    training (input → step/ans output) examples to discover which fold
-    rule compositions explain the step and ans tokens.
+    Groups training examples by (pattern_key, skeleton_key), then refines
+    pattern_keys: digit positions that are constant within a skeleton group
+    (structural positions — e.g. exponent in pow b e) are embedded as literals.
+    This disambiguates programs at dispatch time without requiring partial output.
 
-    No operator names or semantics are hardcoded.  Discovery is purely
-    data-driven: we try all (fold_op × arg_positions) combinations and
-    keep those that are 100% consistent with training examples.
-
-    Returns dict mapping op_atom → dict[n_operands → TraceProgram].
+    Returns dict mapping op_atom → list[SlotProgram] (flat list per op).
+    Dispatch uses _pattern_key_matches() to find the right program for any input.
     """
     cache: dict = {}
     programs: dict = {}
@@ -1258,775 +1635,52 @@ def _discover_trace_programs(
         if not cr.chain_table:
             continue
 
-        # --- Parse training samples, splitting by step-count format ---
-        parsed_1step: list = []   # (a_ops, step_toks, ans_toks)
-        parsed_2step: list = []   # (a_ops, step1_toks, step2_toks, ans_toks)
-
+        # Group by (pattern_key, skeleton_key)
+        # pattern_key: replace ALL digits with '_' (base structural shape).
+        # skeleton_key: ALL non-digit tokens in output — distinguishes different
+        #   output shapes (e.g. 'mul _ x' vs 'mul _ sq x' vs 'mul _ pow x _').
+        # After grouping, refine pattern_keys: digit positions that are CONSTANT
+        #   within a skeleton group are structural (they determine the output shape)
+        #   and are embedded back as literal values — e.g. exponent '2' in pow b 2.
+        groups: dict = {}
         for input_key, output_toks in cr.chain_table.items():
-            if "ans" not in output_toks:
+            if 'ans' not in output_toks:
                 continue
-            ans_idx = output_toks.index("ans")
-            ans_toks = tuple(output_toks[ans_idx + 1:])
-
-            # Collect all 'step' positions before 'ans'
-            step_positions = [
-                i for i, t in enumerate(output_toks[:ans_idx]) if t == "step"
-            ]
-
-            # operands: digit tokens in the input (positional)
-            a_ops = [tok for tok in input_key if tok.isdigit()]
-            if len(a_ops) < 2 or not ans_toks:
+            in_digits = [tok for tok in input_key if tok.isdigit()]
+            if not in_digits:
                 continue
+            pattern_key = tuple('_' if t.isdigit() else t for t in input_key)
+            skeleton_key = tuple(t for t in output_toks if not t.isdigit())
+            groups.setdefault((pattern_key, skeleton_key), []).append(
+                (in_digits, list(output_toks))
+            )
 
-            if len(step_positions) == 1:
-                step_toks = tuple(output_toks[step_positions[0] + 1:ans_idx])
-                if step_toks:
-                    parsed_1step.append((a_ops, step_toks, ans_toks))
-            elif len(step_positions) == 2:
-                s1 = step_positions[0]
-                s2 = step_positions[1]
-                step1_toks = tuple(output_toks[s1 + 1:s2])
-                step2_toks = tuple(output_toks[s2 + 1:ans_idx])
-                if step1_toks and step2_toks:
-                    parsed_2step.append((a_ops, step1_toks, step2_toks, ans_toks))
-            # Ops with 0 or >2 steps are not yet handled
+        for (pattern_key, _skel), examples in groups.items():
+            if len(examples) < 1:
+                continue
+            refined_pk = _refine_pattern_key(pattern_key, examples)
+            prog = _discover_slot_program(
+                op_atom, refined_pk, examples,
+                fold_rules, fc_lookup, succ_map, carry_el, carry_out, zero_digit, cache,
+            )
+            if prog is not None:
+                programs.setdefault(op_atom, []).append(prog)
 
-        from collections import Counter as _Counter
-
-        # Discover single-step programs
-        if len(parsed_1step) >= 3:
-            n_counts = _Counter(len(s[0]) for s in parsed_1step)
-            for n, n_count in n_counts.items():
-                if n < 2 or n_count < 3:
-                    continue
-                _discover_one_arity(
-                    op_atom, n,
-                    [s for s in parsed_1step if len(s[0]) == n],
-                    fold_rules, fc_lookup,
-                    succ_map, carry_el, carry_out, zero_digit,
-                    cache, programs,
-                )
-
-        # Discover two-step programs
-        if len(parsed_2step) >= 3:
-            n_counts = _Counter(len(s[0]) for s in parsed_2step)
-            for n, n_count in n_counts.items():
-                if n < 2 or n_count < 3:
-                    continue
-                _discover_two_step_arity(
-                    op_atom, n,
-                    [s for s in parsed_2step if len(s[0]) == n],
-                    fold_rules, fc_lookup,
-                    succ_map, carry_el, carry_out, zero_digit,
-                    cache, programs,
-                )
+        # Sort programs by specificity: most-specific pattern_key first.
+        # A pattern_key with more literal (non-'_') tokens is more specific and
+        # should be tried before wildcard patterns to avoid premature matches.
+        # Example: ('_','2') before ('_','_') for pow b 2 vs pow b e dispatch.
+        if op_atom in programs:
+            programs[op_atom].sort(
+                key=lambda p: sum(1 for t in p.pattern_key if t != '_'),
+                reverse=True,
+            )
 
     return programs
 
 
-def _discover_one_arity(
-    op_atom: str,
-    n: int,
-    parsed: list,
-    fold_rules: dict,
-    fc_lookup: dict,
-    succ_map: dict,
-    carry_el: str,
-    carry_out: tuple,
-    zero_digit: str,
-    cache: dict,
-    programs: dict,
-) -> None:
-    """Discover and register a single-step TraceProgram for one specific arity n.
-
-    Uses _lz_strip for comparisons so zero-padded training outputs (e.g. '08')
-    match unpadded _compose results (e.g. '8').  Allows i==j for self-application
-    like sq/bernoulli step.  Also tries both-2-token-groups for step (Fix 4).
-    """
-
-    # Determine expected step_width from training data.
-    # Only use a non-trivial width (>1) if ALL training examples have the
-    # same step length — that signals intentional zero-padding (e.g. _v2()).
-    # Mixed lengths mean the step is not zero-padded; use width=1.
-    all_step_lens = [len(s[1]) for s in parsed]
-    if all_step_lens and len(set(all_step_lens)) == 1:
-        step_width = all_step_lens[0]
-    else:
-        step_width = 1
-
-    # Same logic for ans_width.
-    all_ans_lens = [len(s[2]) for s in parsed]
-    if all_ans_lens and len(set(all_ans_lens)) == 1:
-        ans_width = all_ans_lens[0]
-    else:
-        ans_width = 1
-
-    def _step_matches(result, expected):
-        """Compare _compose result against (possibly zero-padded) training step."""
-        if result is None:
-            return False
-        return _lz_strip(result) == _lz_strip(expected)
-
-    # --- Discover step program ---
-    # First check echo patterns before trying fold rules.
-    # ECHO_INPUT: step tokens == the operand tokens verbatim (e.g. sq echoes its arg)
-    # ECHO_ARG:   step tokens == (a_ops[k],) for some single operand k
-    step_prog = None
-
-    if all(s_toks == tuple(ao)
-           for ao, s_toks, _ in parsed):
-        step_prog = ('ECHO_INPUT', (), ())
-
-    if step_prog is None:
-        for k in range(n):
-            if all(_lz_strip((ao[k],)) == _lz_strip(s_toks)
-                   for ao, s_toks, _ in parsed):
-                step_prog = ('ECHO_ARG', (k,), ())
-                break
-
-    # Try (fold_op, arg_i, arg_j) with single-token args (allow i==j for sq/bern).
-    if step_prog is None:
-        for fop in fold_rules:
-            for i in range(n):
-                for j in range(n):
-                    # Fix 3a: allow i==j for self-application like mul(v, v)
-                    ev = sum(
-                        1 for a_ops, step, _ in parsed
-                        if _step_matches(
-                            _compose(
-                                fop, ((a_ops[i],), (a_ops[j],)),
-                                fc_lookup, fold_rules,
-                                succ_map, carry_el, carry_out, zero_digit, cache,
-                            ),
-                            step,
-                        )
-                    )
-                    if ev == len(parsed):
-                        step_prog = (fop, (i,), (j,))
-                        break
-                if step_prog:
-                    break
-            if step_prog:
-                break
-
-    # Try 2-token grouped args: one group + one single.
-    if step_prog is None:
-        for fop in fold_rules:
-            for gi in range(n - 1):
-                for j in range(n):
-                    if j in (gi, gi + 1):
-                        continue
-                    # Group (gi, gi+1) as arg0, j as arg1
-                    ev = sum(
-                        1 for a_ops, step, _ in parsed
-                        if _step_matches(
-                            _compose(
-                                fop,
-                                ((a_ops[gi], a_ops[gi + 1]), (a_ops[j],)),
-                                fc_lookup, fold_rules,
-                                succ_map, carry_el, carry_out, zero_digit, cache,
-                            ),
-                            step,
-                        )
-                    )
-                    if ev == len(parsed):
-                        step_prog = (fop, (gi, gi + 1), (j,))
-                        break
-                    # j as arg0, group (gi, gi+1) as arg1
-                    ev = sum(
-                        1 for a_ops, step, _ in parsed
-                        if _step_matches(
-                            _compose(
-                                fop,
-                                ((a_ops[j],), (a_ops[gi], a_ops[gi + 1])),
-                                fc_lookup, fold_rules,
-                                succ_map, carry_el, carry_out, zero_digit, cache,
-                            ),
-                            step,
-                        )
-                    )
-                    if ev == len(parsed):
-                        step_prog = (fop, (j,), (gi, gi + 1))
-                        break
-                if step_prog:
-                    break
-            if step_prog:
-                break
-
-    # Fix 4: Try both args as 2-token groups (e.g. cs1/cs2: add(c, d)).
-    if step_prog is None:
-        for fop in fold_rules:
-            for gi in range(n - 1):
-                for gj in range(gi + 2, n - 1):
-                    ev = sum(
-                        1 for a_ops, step, _ in parsed
-                        if _step_matches(
-                            _compose(
-                                fop,
-                                (
-                                    (a_ops[gi], a_ops[gi + 1]),
-                                    (a_ops[gj], a_ops[gj + 1]),
-                                ),
-                                fc_lookup, fold_rules,
-                                succ_map, carry_el, carry_out, zero_digit, cache,
-                            ),
-                            step,
-                        )
-                    )
-                    if ev == len(parsed):
-                        step_prog = (fop, (gi, gi + 1), (gj, gj + 1))
-                        break
-                if step_prog:
-                    break
-            if step_prog:
-                break
-
-    if step_prog is None:
-        return
-
-    step_op_name, step_a0_idx, step_a1_idx = step_prog
-    step_is_echo_input = (step_op_name == 'ECHO_INPUT')
-    step_is_echo_arg   = (step_op_name == 'ECHO_ARG')
-
-    # Pre-compute actual step results (unpadded) for all samples.
-    # ECHO_INPUT: step = literal input tokens (not digit tuples) — None here.
-    # ECHO_ARG:   step = (a_ops[k],) for the specified k.
-    # Otherwise:  step = _compose(fold_op, ...).
-    step_results = []
-    for a_ops, _, _ in parsed:
-        if step_is_echo_arg:
-            sr = (a_ops[step_a0_idx[0]],)
-        elif step_is_echo_input:
-            sr = None  # not a digit tuple; handled in direct-fold ans synthesis
-        else:
-            a0 = tuple(a_ops[i] for i in step_a0_idx)
-            a1 = tuple(a_ops[i] for i in step_a1_idx)
-            sr = _compose(step_op_name, (a0, a1), fc_lookup, fold_rules,
-                          succ_map, carry_el, carry_out, zero_digit, cache)
-        step_results.append(sr)
-
-    # --- Discover ans program (given step) ---
-    ans_prog = None
-
-    # ECHO_INPUT ans: step is not a digit tuple — try fold_op(a_group0, a_group1)
-    # directly from a_ops (ignoring the step result). Creates program directly.
-    if step_is_echo_input:
-        for fop in fold_rules:
-            found = False
-            for w0 in (1, 2):
-                for s0 in range(n - w0 + 1):
-                    idx0 = tuple(range(s0, s0 + w0))
-                    for w1 in (1, 2):
-                        for s1 in range(n - w1 + 1):
-                            idx1 = tuple(range(s1, s1 + w1))
-                            ev = sum(
-                                1 for a_ops, _, ans_t in parsed
-                                if _step_matches(
-                                    _compose(
-                                        fop,
-                                        (tuple(a_ops[i] for i in idx0),
-                                         tuple(a_ops[i] for i in idx1)),
-                                        fc_lookup, fold_rules,
-                                        succ_map, carry_el, carry_out, zero_digit, cache,
-                                    ),
-                                    ans_t,
-                                )
-                            )
-                            if ev == len(parsed):
-                                found = True
-                                prog = TraceProgram(
-                                    op_atom=op_atom,
-                                    step_op='ECHO_INPUT',
-                                    step_arg0_idx=(),
-                                    step_arg1_idx=(),
-                                    ans_is_adj_search=False,
-                                    ans_op=fop,
-                                    ans_step_is_arg0=False,
-                                    ans_other_idx=idx0,
-                                    ans_arg1_idx=idx1,
-                                    evidence=len(parsed),
-                                    step_width=step_width,
-                                    ans_width=ans_width,
-                                )
-                                programs.setdefault(op_atom, {})[n] = prog
-                                return
-                            if found:
-                                break
-                        if found:
-                            break
-                    if found:
-                        break
-                if found:
-                    break
-        return  # ECHO_INPUT but no ans found
-
-    # Fold-rule ans synthesis (for non-ECHO_INPUT steps):
-    # Try fold(step, a-op[k]) and fold(a-op[k], step) — single-token k
-    for fop in fold_rules:
-        for k in range(n):
-            # step first
-            ev = sum(
-                1 for (a_ops, _, ans), sr in zip(parsed, step_results)
-                if sr is not None and _step_matches(
-                    _compose(
-                        fop, (sr, (a_ops[k],)),
-                        fc_lookup, fold_rules,
-                        succ_map, carry_el, carry_out, zero_digit, cache,
-                    ),
-                    ans,
-                )
-            )
-            if ev == len(parsed):
-                ans_prog = (fop, True, (k,), False, 1)  # b_width=1
-                break
-            # other first
-            ev = sum(
-                1 for (a_ops, _, ans), sr in zip(parsed, step_results)
-                if sr is not None and _step_matches(
-                    _compose(
-                        fop, ((a_ops[k],), sr),
-                        fc_lookup, fold_rules,
-                        succ_map, carry_el, carry_out, zero_digit, cache,
-                    ),
-                    ans,
-                )
-            )
-            if ev == len(parsed):
-                ans_prog = (fop, False, (k,), False, 1)
-                break
-        if ans_prog:
-            break
-
-    # Fix 4: Try fold with 2-token group as other arg
-    if ans_prog is None:
-        for fop in fold_rules:
-            for gi in range(n - 1):
-                other_idx = (gi, gi + 1)
-                # step first, 2-token other
-                ev = sum(
-                    1 for (a_ops, _, ans), sr in zip(parsed, step_results)
-                    if sr is not None and _step_matches(
-                        _compose(
-                            fop,
-                            (sr, (a_ops[gi], a_ops[gi + 1])),
-                            fc_lookup, fold_rules,
-                            succ_map, carry_el, carry_out, zero_digit, cache,
-                        ),
-                        ans,
-                    )
-                )
-                if ev == len(parsed):
-                    ans_prog = (fop, True, other_idx, False, 2)
-                    break
-                # other first, 2-token other
-                ev = sum(
-                    1 for (a_ops, _, ans), sr in zip(parsed, step_results)
-                    if sr is not None and _step_matches(
-                        _compose(
-                            fop,
-                            ((a_ops[gi], a_ops[gi + 1]), sr),
-                            fc_lookup, fold_rules,
-                            succ_map, carry_el, carry_out, zero_digit, cache,
-                        ),
-                        ans,
-                    )
-                )
-                if ev == len(parsed):
-                    ans_prog = (fop, False, other_idx, False, 2)
-                    break
-            if ans_prog:
-                break
-
-    # Try adj_search: enumerate x s.t. fold(x, b) = step; b is single-token
-    if ans_prog is None:
-        for fop in fold_rules:
-            for k in range(n):
-                ev = sum(
-                    1 for (a_ops, _, ans), sr in zip(parsed, step_results)
-                    if sr is not None and _step_matches(
-                        _compose_adjoint_search(
-                            "adj_search",
-                            sr + (a_ops[k],),
-                            (fop, 1),
-                            fc_lookup, fold_rules,
-                            succ_map, carry_el, carry_out, zero_digit, cache,
-                        ),
-                        ans,
-                    )
-                )
-                if ev == len(parsed):
-                    ans_prog = (fop, False, (k,), True, 1)
-                    break
-            if ans_prog:
-                break
-
-    # Fix 4: adj_search with 2-token preserved arg
-    if ans_prog is None:
-        for fop in fold_rules:
-            for gi in range(n - 1):
-                other_idx = (gi, gi + 1)
-                ev = sum(
-                    1 for (a_ops, _, ans), sr in zip(parsed, step_results)
-                    if sr is not None and _step_matches(
-                        _compose_adjoint_search(
-                            "adj_search",
-                            sr + (a_ops[gi], a_ops[gi + 1]),
-                            (fop, 1),
-                            fc_lookup, fold_rules,
-                            succ_map, carry_el, carry_out, zero_digit, cache,
-                            b_width=2,
-                        ),
-                        ans,
-                    )
-                )
-                if ev == len(parsed):
-                    ans_prog = (fop, False, other_idx, True, 2)
-                    break
-            if ans_prog:
-                break
-
-    if ans_prog is None:
-        return
-
-    ans_op_name, ans_step_first, ans_other_idx, ans_is_adj, _b_width = ans_prog
-    prog = TraceProgram(
-        op_atom=op_atom,
-        step_op=step_op_name,
-        step_arg0_idx=step_a0_idx,
-        step_arg1_idx=step_a1_idx,
-        ans_is_adj_search=ans_is_adj,
-        ans_op=ans_op_name,
-        ans_step_is_arg0=ans_step_first,
-        ans_other_idx=ans_other_idx,
-        evidence=len(parsed),
-        step_width=step_width,
-        ans_width=ans_width,
-    )
-    # Store keyed by (op_atom, n) to support variable-arity ops
-    programs.setdefault(op_atom, {})[n] = prog
-
-
-def _discover_two_step_arity(
-    op_atom: str,
-    n: int,
-    parsed: list,   # (a_ops, step1_toks, step2_toks, ans_toks)
-    fold_rules: dict,
-    fc_lookup: dict,
-    succ_map: dict,
-    carry_el: str,
-    carry_out: tuple,
-    zero_digit: str,
-    cache: dict,
-    programs: dict,
-) -> None:
-    """Discover and register a two-step TraceProgram for one arity n.
-
-    Handles outputs with format: step <step1> step <step2> ans <ans>
-    e.g. Bernoulli: step V1^2 step V2^2 ans P2
-
-    Synthesizes step1, step2, and an ans chain:
-        inner = ans_op(step_inner, other) or ans_op(other, step_inner)
-        ans   = ans_outer_op(inner, step_outer) or ans_outer_op(step_outer, inner)
-    """
-
-    def _matches(result, expected):
-        if result is None:
-            return False
-        return _lz_strip(result) == _lz_strip(expected)
-
-    all_ans_lens_2s = [len(s[3]) for s in parsed]
-    if all_ans_lens_2s and len(set(all_ans_lens_2s)) == 1:
-        ans_width = all_ans_lens_2s[0]
-    else:
-        ans_width = 1
-
-    # ---- Step1 synthesis (allow i==j) ----
-    step1_prog = None
-    for fop in fold_rules:
-        for i in range(n):
-            for j in range(n):
-                ev = sum(
-                    1 for a_ops, s1, s2, ans in parsed
-                    if _matches(
-                        _compose(fop, ((a_ops[i],), (a_ops[j],)),
-                                 fc_lookup, fold_rules,
-                                 succ_map, carry_el, carry_out, zero_digit, cache),
-                        s1,
-                    )
-                )
-                if ev == len(parsed):
-                    step1_prog = (fop, (i,), (j,))
-                    break
-            if step1_prog:
-                break
-        if step1_prog:
-            break
-
-    # ECHO_ARG fallback for step1: step = a_ops[k] for some k
-    if step1_prog is None:
-        for k in range(n):
-            if all(_lz_strip((a_ops[k],)) == _lz_strip(s1)
-                   for a_ops, s1, s2, ans in parsed):
-                step1_prog = ('ECHO_ARG', (k,), ())
-                break
-
-    if step1_prog is None:
-        return
-
-    s1_op, s1_a0_idx, s1_a1_idx = step1_prog
-
-    # ---- Step2 synthesis (allow i==j) ----
-    step2_prog = None
-    for fop in fold_rules:
-        for i in range(n):
-            for j in range(n):
-                ev = sum(
-                    1 for a_ops, s1, s2, ans in parsed
-                    if _matches(
-                        _compose(fop, ((a_ops[i],), (a_ops[j],)),
-                                 fc_lookup, fold_rules,
-                                 succ_map, carry_el, carry_out, zero_digit, cache),
-                        s2,
-                    )
-                )
-                if ev == len(parsed):
-                    step2_prog = (fop, (i,), (j,))
-                    break
-            if step2_prog:
-                break
-        if step2_prog:
-            break
-
-    if step2_prog is None:
-        return
-
-    s2_op, s2_a0_idx, s2_a1_idx = step2_prog
-
-    # Pre-compute step results
-    s1_is_echo_arg = (s1_op == 'ECHO_ARG')
-    s2_is_echo_arg = (s2_op == 'ECHO_ARG')
-    step1_results = []
-    step2_results = []
-    for a_ops, _, _, _ in parsed:
-        if s1_is_echo_arg:
-            step1_results.append((a_ops[s1_a0_idx[0]],))
-        else:
-            a0 = tuple(a_ops[i] for i in s1_a0_idx)
-            a1 = tuple(a_ops[i] for i in s1_a1_idx)
-            step1_results.append(_compose(s1_op, (a0, a1), fc_lookup, fold_rules,
-                                          succ_map, carry_el, carry_out, zero_digit, cache))
-        if s2_is_echo_arg:
-            step2_results.append((a_ops[s2_a0_idx[0]],))
-        else:
-            b0 = tuple(a_ops[i] for i in s2_a0_idx)
-            b1 = tuple(a_ops[i] for i in s2_a1_idx)
-            step2_results.append(_compose(s2_op, (b0, b1), fc_lookup, fold_rules,
-                                          succ_map, carry_el, carry_out, zero_digit, cache))
-
-    # ---- Ans synthesis: inner = inner_op(step_j, other) outer = outer_op(inner, step_k) ----
-    # Try all combinations: inner_step ∈ {1,2}, outer_step ∈ {1,2}, inner_step ≠ outer_step,
-    # inner_op ∈ fold_rules, outer_op ∈ fold_rules, k ∈ range(n), left/right orderings.
-    ans_prog = None
-
-    step_results_by_idx = {1: step1_results, 2: step2_results}
-
-    for inner_step_idx in (1, 2):
-        outer_step_idx = 3 - inner_step_idx  # the other one
-        inner_sr_list = step_results_by_idx[inner_step_idx]
-        outer_sr_list = step_results_by_idx[outer_step_idx]
-
-        for inner_op in fold_rules:
-            for k in range(n):
-                # inner: inner_op(step_inner, a[k])
-                inner_vals_a = [
-                    _compose(inner_op, (sr, (a_ops[k],)),
-                             fc_lookup, fold_rules,
-                             succ_map, carry_el, carry_out, zero_digit, cache)
-                    for (a_ops, _, _, _), sr in zip(parsed, inner_sr_list)
-                ]
-                # inner: inner_op(a[k], step_inner)
-                inner_vals_b = [
-                    _compose(inner_op, ((a_ops[k],), sr),
-                             fc_lookup, fold_rules,
-                             succ_map, carry_el, carry_out, zero_digit, cache)
-                    for (a_ops, _, _, _), sr in zip(parsed, inner_sr_list)
-                ]
-
-                for inner_step_is_arg0, inner_vals in (
-                    (True, inner_vals_a), (False, inner_vals_b)
-                ):
-                    for outer_op in fold_rules:
-                        # outer: outer_op(inner, step_outer)
-                        ev = sum(
-                            1 for (_, _, _, ans), iv, osr in
-                            zip(parsed, inner_vals, outer_sr_list)
-                            if iv is not None and osr is not None and _matches(
-                                _compose(outer_op, (iv, osr),
-                                         fc_lookup, fold_rules,
-                                         succ_map, carry_el, carry_out, zero_digit, cache),
-                                ans,
-                            )
-                        )
-                        if ev == len(parsed):
-                            ans_prog = (inner_op, inner_step_idx, inner_step_is_arg0, (k,),
-                                        outer_op, outer_step_idx, True)
-                            break
-                        # outer: outer_op(step_outer, inner)
-                        ev = sum(
-                            1 for (_, _, _, ans), iv, osr in
-                            zip(parsed, inner_vals, outer_sr_list)
-                            if iv is not None and osr is not None and _matches(
-                                _compose(outer_op, (osr, iv),
-                                         fc_lookup, fold_rules,
-                                         succ_map, carry_el, carry_out, zero_digit, cache),
-                                ans,
-                            )
-                        )
-                        if ev == len(parsed):
-                            ans_prog = (inner_op, inner_step_idx, inner_step_is_arg0, (k,),
-                                        outer_op, outer_step_idx, False)
-                            break
-                    if ans_prog:
-                        break
-                if ans_prog:
-                    break
-            if ans_prog:
-                break
-        if ans_prog:
-            break
-
-    # Passthrough inner: inner = step directly (no fold), then outer = outer_op(inner, step_outer)
-    # Handles cases like pow e=3: ans = mul(step1=base, step2=base^2) = mul(step2, step1)
-    if ans_prog is None:
-        for inner_step_idx in (1, 2):
-            outer_step_idx = 3 - inner_step_idx
-            inner_sr_list = step_results_by_idx[inner_step_idx]
-            outer_sr_list = step_results_by_idx[outer_step_idx]
-            for outer_op in fold_rules:
-                ev = sum(
-                    1 for (_, _, _, ans), iv, osr in
-                    zip(parsed, inner_sr_list, outer_sr_list)
-                    if iv is not None and osr is not None and _matches(
-                        _compose(outer_op, (iv, osr),
-                                 fc_lookup, fold_rules,
-                                 succ_map, carry_el, carry_out, zero_digit, cache),
-                        ans,
-                    )
-                )
-                if ev == len(parsed):
-                    ans_prog = ('', inner_step_idx, True, (),
-                                outer_op, outer_step_idx, True)
-                    break
-                ev = sum(
-                    1 for (_, _, _, ans), iv, osr in
-                    zip(parsed, inner_sr_list, outer_sr_list)
-                    if iv is not None and osr is not None and _matches(
-                        _compose(outer_op, (osr, iv),
-                                 fc_lookup, fold_rules,
-                                 succ_map, carry_el, carry_out, zero_digit, cache),
-                        ans,
-                    )
-                )
-                if ev == len(parsed):
-                    ans_prog = ('', inner_step_idx, True, (),
-                                outer_op, outer_step_idx, False)
-                    break
-            if ans_prog:
-                break
-
-    # 2-token inner_other_idx: handles Bernoulli-style P1 which is a 2-digit argument
-    if ans_prog is None:
-        for inner_step_idx in (1, 2):
-            outer_step_idx = 3 - inner_step_idx
-            inner_sr_list = step_results_by_idx[inner_step_idx]
-            outer_sr_list = step_results_by_idx[outer_step_idx]
-            for inner_op in fold_rules:
-                for gi in range(n - 1):
-                    inner_other_idx = (gi, gi + 1)
-                    inner_vals_a = [
-                        _compose(inner_op, (sr, (a_ops[gi], a_ops[gi + 1])),
-                                 fc_lookup, fold_rules,
-                                 succ_map, carry_el, carry_out, zero_digit, cache)
-                        for (a_ops, _, _, _), sr in zip(parsed, inner_sr_list)
-                    ]
-                    inner_vals_b = [
-                        _compose(inner_op, ((a_ops[gi], a_ops[gi + 1]), sr),
-                                 fc_lookup, fold_rules,
-                                 succ_map, carry_el, carry_out, zero_digit, cache)
-                        for (a_ops, _, _, _), sr in zip(parsed, inner_sr_list)
-                    ]
-                    for inner_step_is_arg0, inner_vals in (
-                        (True, inner_vals_a), (False, inner_vals_b)
-                    ):
-                        for outer_op in fold_rules:
-                            ev = sum(
-                                1 for (_, _, _, ans), iv, osr in
-                                zip(parsed, inner_vals, outer_sr_list)
-                                if iv is not None and osr is not None and _matches(
-                                    _compose(outer_op, (iv, osr),
-                                             fc_lookup, fold_rules,
-                                             succ_map, carry_el, carry_out, zero_digit, cache),
-                                    ans,
-                                )
-                            )
-                            if ev == len(parsed):
-                                ans_prog = (inner_op, inner_step_idx, inner_step_is_arg0,
-                                            inner_other_idx, outer_op, outer_step_idx, True)
-                                break
-                            ev = sum(
-                                1 for (_, _, _, ans), iv, osr in
-                                zip(parsed, inner_vals, outer_sr_list)
-                                if iv is not None and osr is not None and _matches(
-                                    _compose(outer_op, (osr, iv),
-                                             fc_lookup, fold_rules,
-                                             succ_map, carry_el, carry_out, zero_digit, cache),
-                                    ans,
-                                )
-                            )
-                            if ev == len(parsed):
-                                ans_prog = (inner_op, inner_step_idx, inner_step_is_arg0,
-                                            inner_other_idx, outer_op, outer_step_idx, False)
-                                break
-                        if ans_prog:
-                            break
-                    if ans_prog:
-                        break
-                if ans_prog:
-                    break
-            if ans_prog:
-                break
-
-    if ans_prog is None:
-        return
-
-    (inner_op, inner_step_i, inner_step_is_arg0, inner_other_idx,
-     outer_op, outer_step_i, outer_inner_is_left) = ans_prog
-
-    prog = TraceProgram(
-        op_atom=op_atom,
-        step_op=s1_op,
-        step_arg0_idx=s1_a0_idx,
-        step_arg1_idx=s1_a1_idx,
-        ans_is_adj_search=False,
-        ans_op=inner_op,
-        ans_step_is_arg0=inner_step_is_arg0,
-        ans_other_idx=inner_other_idx,
-        evidence=len(parsed),
-        step_width=1,
-        ans_width=ans_width,
-        step2_op=s2_op,
-        step2_arg0_idx=s2_a0_idx,
-        step2_arg1_idx=s2_a1_idx,
-        ans_inner_step=inner_step_i,
-        ans_outer_op=outer_op,
-        ans_outer_step=outer_step_i,
-        ans_outer_inner_is_left=outer_inner_is_left,
-    )
-    programs.setdefault(op_atom, {})[n] = prog
-
-
-def _trace_program_predict(
-    prog: "TraceProgram",
+def _slot_program_predict(
+    prog: "SlotProgram",
     input_tokens: list,
     output_tokens_so_far: list,
     fc_lookup: dict,
@@ -2038,148 +1692,145 @@ def _trace_program_predict(
     cache: dict,
     ans_only: bool = False,
 ) -> Optional[dict]:
-    """Level 1c: predict next token using a discovered TraceProgram.
+    """Level 1c: predict next token using a discovered SlotProgram.
 
-    Extracts a-prefixed operands from input_tokens, runs the step/ans
-    computation using fold rules / adj_search, then returns a point mass
-    for the k-th token of the expected trace output.
+    Evaluates each segment of the program against input_tokens, assembles
+    the full expected output sequence, and returns a point mass for the
+    k-th token (where k = len(output_tokens_so_far)).
 
-    Handles both single-step (step2_op=="") and two-step programs.
-    Applies zero-padding to match training format (step_width, ans_width).
+    In ans_only mode (eq-format sequences), strips everything up to and
+    including 'ans' so only the final answer tokens are returned.
     """
-    # Operands: digit tokens in the input, extracted by position.
-    a_operands = [tok for tok in input_tokens if tok.isdigit()]
-    if len(a_operands) < 2:
+    in_digits = [tok for tok in input_tokens if tok.isdigit()]
+
+    def _eval_src(src):
+        if src[0] == 'I':
+            _, j0, j1 = src
+            return tuple(in_digits[j0:j1 + 1])
+        elif src[0] == 'S':
+            return seg_computed.get(src[1])
+        elif src[0] == 'F':
+            # Nested fold spec: ('F', op, src_a, src_b) — 4 elements, no width
+            _, op, src_a, src_b = src
+            a = _eval_src(src_a)
+            b = _eval_src(src_b)
+            if a is None or b is None:
+                return None
+            return _compose(op, (a, b), fc_lookup, fold_rules,
+                            succ_map, carry_el, carry_out, zero_digit, cache)
         return None
 
-    # Validate that all required positions are in bounds
-    idx_pool = (
-        list(prog.step_arg0_idx) + list(prog.step_arg1_idx) +
-        list(prog.ans_other_idx) + list(prog.ans_arg1_idx) +
-        list(prog.step2_arg0_idx) + list(prog.step2_arg1_idx)
-    )
-    if idx_pool and max(idx_pool) >= len(a_operands):
-        return None
+    seg_computed: dict = {}  # seg_idx -> result tuple
+    output_seq: list = []
 
-    # ---- Compute step1 ----
-    if prog.step_op == 'ECHO_ARG':
-        if not prog.step_arg0_idx:
-            return None
-        step1_result = (a_operands[prog.step_arg0_idx[0]],)
-        step1_padded = _zpad(step1_result, prog.step_width)
-    elif prog.step_op == 'ECHO_INPUT':
-        step1_result = None   # output is a-tokens, computed below
-        step1_padded = ()     # unused in ECHO_INPUT path
-    else:
-        a0 = tuple(a_operands[i] for i in prog.step_arg0_idx)
-        a1 = tuple(a_operands[i] for i in prog.step_arg1_idx)
-        step1_result = _compose(prog.step_op, (a0, a1), fc_lookup, fold_rules,
-                                succ_map, carry_el, carry_out, zero_digit, cache)
-        if step1_result is None:
-            return None
-        step1_padded = _zpad(step1_result, prog.step_width)
+    for seg_idx, seg in enumerate(prog.segments):
+        if seg[0] == 'K':
+            output_seq.append(seg[1])
+            seg_computed[seg_idx] = None
+        elif seg[0] == 'CONST_BLOCK':
+            output_seq.extend(seg[1])
+            seg_computed[seg_idx] = seg[1]
+        elif seg[0] == 'E':
+            output_seq.extend(in_digits)
+            seg_computed[seg_idx] = tuple(in_digits)
+        elif seg[0] == 'G':
+            j = seg[1]
+            if j >= len(in_digits):
+                return None
+            tok = in_digits[j]
+            output_seq.append(tok)
+            seg_computed[seg_idx] = (tok,)
+        elif seg[0] == 'F':
+            _, op, src_a_spec, src_b_spec, width = seg
+            src_a = _eval_src(src_a_spec)
+            src_b = _eval_src(src_b_spec)
+            if src_a is None or src_b is None:
+                return None
+            result = _compose(op, (src_a, src_b), fc_lookup, fold_rules,
+                              succ_map, carry_el, carry_out, zero_digit, cache)
+            if result is None:
+                return None
+            padded = _zpad(result, width)
+            output_seq.extend(padded)
+            seg_computed[seg_idx] = result
+        elif seg[0] == 'A':
+            _, op, step_src_spec, oth_src_spec, width = seg
+            step_src = _eval_src(step_src_spec)
+            oth_src = _eval_src(oth_src_spec)
+            if step_src is None or oth_src is None:
+                return None
+            b_width = len(oth_src)
+            result = _compose_adjoint_search(
+                "adj_search",
+                step_src + oth_src,
+                (op, 1),
+                fc_lookup, fold_rules,
+                succ_map, carry_el, carry_out, zero_digit, cache,
+                b_width=b_width,
+            )
+            if result is None:
+                return None
+            padded = _zpad(result, width)
+            output_seq.extend(padded)
+            seg_computed[seg_idx] = result
+        elif seg[0] == 'P':
+            # Predecessor of input digit at position j (inverse of succ_map).
+            j = seg[1]
+            if j >= len(in_digits):
+                return None
+            pred_map_local = {v: k for k, v in succ_map.items()} if succ_map else {}
+            tok = pred_map_local.get(in_digits[j])
+            if tok is None:
+                return None
+            output_seq.append(tok)
+            seg_computed[seg_idx] = (tok,)
+        elif seg[0] == 'SC':
+            # Successor of input digit at position j.
+            j = seg[1]
+            if j >= len(in_digits):
+                return None
+            tok = succ_map.get(in_digits[j]) if succ_map else None
+            if tok is None:
+                return None
+            output_seq.append(tok)
+            seg_computed[seg_idx] = (tok,)
+        elif seg[0] == 'AK':
+            # adj_search(in_slice, K_const): find x where fold_op(x, K) = in[j:j+w].
+            _, op, src_spec, k_digit, width = seg
+            in_slice = _eval_src(src_spec)
+            if in_slice is None:
+                return None
+            k_tuple = (k_digit,)
+            result = _compose_adjoint_search(
+                "adj_search",
+                in_slice + k_tuple,
+                (op, 1),
+                fc_lookup, fold_rules,
+                succ_map, carry_el, carry_out, zero_digit, cache,
+                b_width=1,
+            )
+            if result is None:
+                return None
+            padded = _zpad(result, width)
+            output_seq.extend(padded)
+            seg_computed[seg_idx] = result
 
-    # ---- Two-step program ----
-    if prog.step2_op:
-        b0 = tuple(a_operands[i] for i in prog.step2_arg0_idx)
-        b1 = tuple(a_operands[i] for i in prog.step2_arg1_idx)
-        step2_result = _compose(prog.step2_op, (b0, b1), fc_lookup, fold_rules,
-                                succ_map, carry_el, carry_out, zero_digit, cache)
-        if step2_result is None:
-            return None
-        step2_padded = _zpad(step2_result, prog.step_width)
-
-        step_results = {1: step1_result, 2: step2_result}
-
-        # Compute inner: passthrough (no fold) or ans_op(step_inner, other)
-        inner_sr = step_results[prog.ans_inner_step]
-        if prog.ans_op == '':
-            # Passthrough: inner = step directly (no inner fold)
-            inner_val = inner_sr
-        else:
-            other = tuple(a_operands[i] for i in prog.ans_other_idx)
-            if prog.ans_step_is_arg0:
-                inner_val = _compose(prog.ans_op, (inner_sr, other),
-                                     fc_lookup, fold_rules,
-                                     succ_map, carry_el, carry_out, zero_digit, cache)
-            else:
-                inner_val = _compose(prog.ans_op, (other, inner_sr),
-                                     fc_lookup, fold_rules,
-                                     succ_map, carry_el, carry_out, zero_digit, cache)
-        if inner_val is None:
-            return None
-
-        # Compute outer: ans_outer_op(inner, step_outer) or reversed
-        outer_sr = step_results[prog.ans_outer_step]
-        if prog.ans_outer_inner_is_left:
-            ans_result = _compose(prog.ans_outer_op, (inner_val, outer_sr),
-                                  fc_lookup, fold_rules,
-                                  succ_map, carry_el, carry_out, zero_digit, cache)
-        else:
-            ans_result = _compose(prog.ans_outer_op, (outer_sr, inner_val),
-                                  fc_lookup, fold_rules,
-                                  succ_map, carry_el, carry_out, zero_digit, cache)
-        if ans_result is None:
-            return None
-
-        ans_padded = _zpad(ans_result, prog.ans_width)
-        full_output = (
-            ["step"] + list(step1_padded) +
-            ["step"] + list(step2_padded) +
-            ["ans"] + list(ans_padded)
-        )
-
-    else:
-        # ---- Single-step program ----
-        if prog.step_op == 'ECHO_INPUT' and prog.ans_arg1_idx:
-            # ECHO_INPUT: step tokens are a-prefixed input tokens.
-            # Ans computed directly from a_operands (no step result needed).
-            other = tuple(a_operands[i] for i in prog.ans_other_idx)
-            arg1  = tuple(a_operands[i] for i in prog.ans_arg1_idx)
-            ans_result = _compose(prog.ans_op, (other, arg1),
-                                  fc_lookup, fold_rules,
-                                  succ_map, carry_el, carry_out, zero_digit, cache)
-        else:
-            other = tuple(a_operands[i] for i in prog.ans_other_idx)
-            if prog.ans_is_adj_search:
-                b_width = len(prog.ans_other_idx)
-                ans_result = _compose_adjoint_search(
-                    "adj_search",
-                    step1_result + other,
-                    (prog.ans_op, 1),
-                    fc_lookup, fold_rules,
-                    succ_map, carry_el, carry_out, zero_digit, cache,
-                    b_width=b_width,
-                )
-            elif prog.ans_step_is_arg0:
-                ans_result = _compose(prog.ans_op, (step1_result, other),
-                                      fc_lookup, fold_rules,
-                                      succ_map, carry_el, carry_out, zero_digit, cache)
-            else:
-                ans_result = _compose(prog.ans_op, (other, step1_result),
-                                      fc_lookup, fold_rules,
-                                      succ_map, carry_el, carry_out, zero_digit, cache)
-
-        if ans_result is None:
-            return None
-
-        ans_padded = _zpad(ans_result, prog.ans_width)
-        if prog.step_op == 'ECHO_INPUT':
-            step1_toks_out = list(a_operands)
-        else:
-            step1_toks_out = list(step1_padded)
-        full_output = ["step"] + step1_toks_out + ["ans"] + list(ans_padded)
-
-    # ans_only mode: for eq-format sequences (no step/ans in output)
-    # output only the final answer digits, not the full trace.
     if ans_only:
-        output_seq = list(ans_padded)
-    else:
-        output_seq = full_output
+        if 'ans' in output_seq:
+            ans_start = output_seq.index('ans') + 1
+            output_seq = output_seq[ans_start:]
+        else:
+            return None
 
     k = len(output_tokens_so_far)
+    # Consistency check: the program's output must agree with all tokens generated so far.
+    # This filters out programs whose skeleton doesn't match the partial output
+    # (e.g. an e=2 program that predicts 'step' when output already shows 'ans').
+    if k > 0:
+        if list(output_seq[:k]) != list(output_tokens_so_far):
+            return None
     if k < len(output_seq):
         return {output_seq[k]: 1.0}
     if k == len(output_seq):
-        return {"<eos>": 1.0}
+        return {'<eos>': 1.0}
     return None
