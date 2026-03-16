@@ -49,7 +49,6 @@ from experiments.symbolic_ai_v2.ctkg.learning.process_discover import (
     ChainRule,
     FreeCategoryGraph,
     BinaryFoldRule,
-    apply_process_rule,
     build_fc_lookup,
     build_adj_lookup,
     build_unary_chain_maps,
@@ -57,6 +56,15 @@ from experiments.symbolic_ai_v2.ctkg.learning.process_discover import (
     complete_succ_map,
     discover_binary_fold_rules,
     unary_chain_predict,
+    fold_rules_as_rewrite_rules,
+    build_binary_functional_maps,
+)
+from experiments.symbolic_ai_v2.ctkg.learning.relation_store import (
+    RelationStore,
+    RelationRule,
+    discover_relation_rules,
+    predict_from_relation_rules,
+    _merge_digit_runs as _rs_merge_digit_runs,
 )
 from dataclasses import dataclass, field
 from experiments.symbolic_ai_v2.ctkg.core.kan_extension import KanExtension
@@ -68,36 +76,85 @@ from experiments.symbolic_ai_v2.ctkg.core.working_memory import (
 from experiments.symbolic_ai_v2.ctkg.core.spine import Spine
 
 
-@dataclass
-class SlotProgram:
-    """Discovered computation program using structural pattern matching (Level 1c).
-
-    Replaces TraceProgram with a segment-based representation that:
-    - Groups by input structural shape (pattern_key) instead of digit count
-    - Handles N-step outputs uniformly (no separate one/two-step code paths)
-    - Supports pattern-implied constants in output (e.g. same token in all
-      examples with a given structural pattern)
-
-    segments is a list of segment specs, one per variable-width block:
-      ('K', tok)              — constant token (same in every training example)
-      ('E',)                  — echo all input digit tokens verbatim
-      ('G', j)                — single input digit at position j (ECHO_ARG)
-      ('F', op, src_a, src_b, w) — fold_rule(src_a, src_b), zero-padded to w tokens
-      ('A', op, step_src, oth, w) — adj_search result, zero-padded to w tokens
-
-    src types used inside 'F' and 'A':
-      ('I', j0, j1)   — input_digits[j0:j1+1]
-      ('S', seg_idx)  — result tuple stored by prior segment seg_idx
-    """
-    op_atom: str
-    pattern_key: tuple          # structural input shape (digits replaced by '_')
-    segments: list              # list of segment specs (see above)
-    evidence: int               # number of training examples verified
-
 # Fixpoint iteration parameters (architecture §Prediction step 3)
 _FP_MAX_ITER: int = 20
 _FP_EPS: float = 1e-4
 _FP_CYCLE_K: int = 5   # number of snapshots to keep for cycle detection
+
+
+def _build_multidigit_arith_rules(
+    bfm: dict[str, dict[tuple[str, str], str]],
+) -> list:
+    """Generate add/sub ground rules for two-digit × single-digit operands.
+
+    Covers cases like add('36','3')→'39' that arise when a multi-digit
+    intermediate (e.g. mul(6,6)='36') is fed into a second arithmetic op.
+
+    No int() calls: uses only string slicing and bfm lookups.
+    Only generates rules whose result is ≤2 digits (enough for linear_eval).
+    """
+    from experiments.symbolic_ai_v2.ctkg.core.term_algebra import atom as _atom, node as _node
+    from experiments.symbolic_ai_v2.ctkg.learning.rule_discover import RewriteRule
+
+    add_map = bfm.get('add', {})
+    sub_map = bfm.get('sub', {})
+    rules: list[RewriteRule] = []
+
+    # Collect two-digit values that appear as bfm results
+    two_digit_vals: set[str] = set()
+    for op_map in bfm.values():
+        for result in op_map.values():
+            if len(result) == 2:
+                two_digit_vals.add(result)
+
+    # All single-digit keys
+    single_digits: set[str] = set()
+    for (a, b) in add_map:
+        single_digits.add(a)
+        single_digits.add(b)
+
+    for R in two_digit_vals:
+        tens, ones = R[0], R[1]
+        for b in single_digits:
+            # --- add(R, b) ---
+            sum_ones = add_map.get((ones, b))
+            if sum_ones is not None:
+                if len(sum_ones) == 1:
+                    # No carry
+                    result = tens + sum_ones
+                    rules.append(RewriteRule(
+                        lhs=_node('add', _atom(R), _atom(b)),
+                        rhs=_atom(result),
+                        algebra_name='add', evidence=1,
+                    ))
+                elif len(sum_ones) == 2:
+                    # sum_ones is '1X' — carry of 1 into tens
+                    carry_digit, new_ones = sum_ones[0], sum_ones[1]
+                    new_tens = add_map.get((tens, carry_digit))
+                    if new_tens is not None and len(new_tens) == 1:
+                        result = new_tens + new_ones
+                        rules.append(RewriteRule(
+                            lhs=_node('add', _atom(R), _atom(b)),
+                            rhs=_atom(result),
+                            algebra_name='add', evidence=1,
+                        ))
+
+            # --- sub(R, b) ---
+            # ones - b: if ones >= b (no borrow), use sub_map directly
+            diff_ones = sub_map.get((ones, b))
+            if diff_ones is not None and len(diff_ones) == 1:
+                result = tens + diff_ones
+                rules.append(RewriteRule(
+                    lhs=_node('sub', _atom(R), _atom(b)),
+                    rhs=_atom(result),
+                    algebra_name='sub', evidence=1,
+                ))
+            # borrow case: tens > 0, borrow 1 from tens
+            # new_ones = (10 + ones_val) - b  — but we must do this without int()
+            # Use: borrow_ones = add_map[('10'[1], ones)] minus b via sub_map
+            # Skip for now — borrow requires knowing '10' representation
+
+    return rules
 
 
 class Predictor:
@@ -204,19 +261,356 @@ class Predictor:
                     rk = adj.right_op
                     if rk not in self._adj_solve_map:
                         self._adj_solve_map[rk] = (adj.left_op, adj.preserved_position)
-            # Level 1c: Trace program synthesis — discover computation structure
-            # of trace-format ops (eval, linsolve, …) from training chain_table.
-            # dict[op_atom → dict[pattern_key → list[SlotProgram]]] for variable structures.
-            # Called once at init; result used as fallback when chain_table misses.
-            self._trace_programs: dict[str, list] = _discover_trace_programs(
-                self._chain_rules,
-                self._fold_rules,
-                self._fc_lookup,
-                self._compose_succ_map,
-                self._compose_carry_el,
-                self._compose_carry_out,
-                self._compose_zero,
+            # Level 1c: surface-form-agnostic rewrite rules via anti-unification.
+            # Builds a corpus of (op + inputs eq output) sequences from chain_rule
+            # tables, discovers arities (seeded with the NNO alphabet so digit-name
+            # tokens like 'zero'..'nine' are correctly treated as arity-0 atoms),
+            # then discovers RewriteRules via anti-unification.
+            # Phase V: multi-digit merging for chain_table ans_part; sq normalization;
+            # pred/succ functional alignment; ground pred/succ rules for verification.
+            # No .isdigit() calls anywhere in this path — Iron Rule compliant.
+            nno_atoms: frozenset[str] = (
+                frozenset(self._compose_succ_map.keys())
+                | frozenset(self._compose_succ_map.values())
             )
+            _eq_corpus: list[list[str]] = []
+            for cr in (chain_rules or []):
+                for inp_toks, out_toks in (cr.eq_table or {}).items():
+                    _eq_corpus.append(
+                        [cr.op_atom] + list(inp_toks) + ['eq'] + list(out_toks)
+                    )
+                for inp_toks, out_toks in (cr.chain_table or {}).items():
+                    out_list = list(out_toks)
+                    if 'ans' in out_list:
+                        ans_idx = out_list.index('ans')
+                        ans_part = out_list[ans_idx + 1:]
+                        if ans_part:
+                            # Phase V: merge consecutive NNO-alphabet tokens in
+                            # ans_part only (e.g. ['1','2'] → ['12'] for coefficient
+                            # 12 in derivative outputs).  eq_table entries use
+                            # separate single-digit args and must NOT be merged.
+                            merged_ans = _merge_digit_runs(ans_part, nno_atoms)
+                            _eq_corpus.append(
+                                [cr.op_atom] + list(inp_toks) + ['eq'] + merged_ans
+                            )
+            if _eq_corpus:
+                from experiments.symbolic_ai_v2.ctkg.core.expr_parser import (
+                    discover_arities, TERMINATORS,
+                )
+                from experiments.symbolic_ai_v2.ctkg.learning.rule_discover import discover_rules
+                from experiments.symbolic_ai_v2.ctkg.core.term_algebra import (
+                    atom as _atom, node as _node, var as _var,
+                )
+                from experiments.symbolic_ai_v2.ctkg.core.rewrite import RewriteRule
+
+                # Seed extra atoms: NNO alphabet + any compound tokens from merging
+                extra_seeds: dict = {t: 0 for t in nno_atoms}
+                for seq in _eq_corpus:
+                    for tok in seq:
+                        if tok not in TERMINATORS and len(tok) > 1:
+                            if all(c in nno_atoms for c in tok):
+                                extra_seeds[tok] = 0
+
+                self._arities: dict = discover_arities(_eq_corpus, extra_seeds=extra_seeds)
+                self._atoms: frozenset[str] = frozenset(
+                    t for t, a in self._arities.items() if a == 0
+                )
+
+                # Phase V: build normalization rules and functional maps.
+                # sq(V)→pow(V,2): structural identity applied to both input/output.
+                # atom('x')→pow(x,1): output-only normalization for uniform grouping.
+                # Inverse: pow(x,1)→x for post-processing after cata_reduce.
+                # These rules are not value-specific — Iron Rule compliant.
+                sq_norm = RewriteRule(
+                    lhs=_node('sq', _var('V0')),
+                    rhs=_node('pow', _var('V0'), _atom('2')),
+                    algebra_name='sq_norm', evidence=1,
+                )
+                _one_tok = self._compose_succ_map.get(self._compose_zero, '1')
+                # mul(V0, x) → mul(V0, pow(x,1)): normalize bare-x polynomial
+                # output to pow(x,1) so anti-unification aligns n=1 with n>1.
+                # More specific than x→pow(x,1): does not replace x inside pow(x,N).
+                x_pow1_norm = RewriteRule(
+                    lhs=_node('mul', _var('_V_coeff'), _atom('x')),
+                    rhs=_node('mul', _var('_V_coeff'), _node('pow', _atom('x'), _atom(_one_tok))),
+                    algebra_name='mul_x_pow1_norm', evidence=1,
+                )
+                # Inverse: pow(x, one) → x  (denormalize before unparsing)
+                pow_x1_inv = RewriteRule(
+                    lhs=_node('pow', _atom('x'), _atom(_one_tok)),
+                    rhs=_atom('x'),
+                    algebra_name='pow_x1_inv', evidence=1,
+                )
+
+                # Build ground pred/succ rules for verification and inference.
+                ground_nno: list = []
+                for d_from, d_to in self._compose_succ_map.items():
+                    ground_nno.append(RewriteRule(
+                        lhs=_node('succ', _atom(d_from)),
+                        rhs=_atom(d_to),
+                        algebra_name='succ', evidence=1,
+                    ))
+                    ground_nno.append(RewriteRule(
+                        lhs=_node('pred', _atom(d_to)),
+                        rhs=_atom(d_from),
+                        algebra_name='pred', evidence=1,
+                    ))
+
+                # Functional maps for _align_rhs_variables: detect W = pred(V) etc.
+                _pred_map = {v: k for k, v in self._compose_succ_map.items()}
+                _succ_map = dict(self._compose_succ_map)
+                functional_maps = {
+                    'pred': _pred_map,
+                    'succ': _succ_map,
+                }
+
+                # Discover rules with normalization + functional alignment.
+                # Use sq_norm on both sides; x_pow1_norm on outputs only; ground NNO
+                # for verification; functional maps for pred/succ alignment.
+                norm_rules = [sq_norm]
+                if 'sq' in self._arities and 'pow' in self._arities:
+                    pass  # sq_norm is safe when both operators are known
+                else:
+                    norm_rules = []   # don't normalize if operators not in arities
+
+                output_norm_rules = []
+                if 'x' in self._arities and 'pow' in self._arities:
+                    output_norm_rules = [x_pow1_norm]
+
+                # Phase VIII: binary functional maps for W = op(V0,V1) alignment
+                # (e.g. coefficient = mul(coeff_in, exponent) in power rule).
+                _binary_fmaps = build_binary_functional_maps(
+                    fc,
+                    self._compose_succ_map,
+                    self._compose_carry_el,
+                    self._compose_carry_out,
+                    self._compose_zero,
+                ) if self._compose_succ_map else {}
+
+                # Extend _binary_fmaps with multi-digit add/sub entries so that
+                # the two-level binary functional match in _align_rhs_variables
+                # can discover composition rules like eval(A,x,B,at,C)→add(mul(A,C),B)
+                # even when mul(A,C) is two-digit (e.g. mul('6','6')='36').
+                # Uses only string operations — no int() calls.
+                if _binary_fmaps:
+                    _add_map = _binary_fmaps.get('add', {})
+                    _sub_map = _binary_fmaps.get('sub', {})
+                    _two_digit_vals: set[str] = set()
+                    for _op_m in _binary_fmaps.values():
+                        for _res in _op_m.values():
+                            if len(_res) == 2:
+                                _two_digit_vals.add(_res)
+                    _single_digits: set[str] = set()
+                    for (_a, _b) in _add_map:
+                        _single_digits.add(_a)
+                        _single_digits.add(_b)
+                    _extended_add: dict[tuple, str] = {}
+                    _extended_sub: dict[tuple, str] = {}
+                    for _R in _two_digit_vals:
+                        _tens, _ones = _R[0], _R[1]
+                        for _b in _single_digits:
+                            # add(R, b)
+                            _s1 = _add_map.get((_ones, _b))
+                            if _s1 is not None:
+                                if len(_s1) == 1:
+                                    _extended_add[(_R, _b)] = _tens + _s1
+                                elif len(_s1) == 2:
+                                    _carry, _new_ones = _s1[0], _s1[1]
+                                    _nt = _add_map.get((_tens, _carry))
+                                    if _nt is not None and len(_nt) == 1:
+                                        _extended_add[(_R, _b)] = _nt + _new_ones
+                            # sub(R, b)
+                            _d1 = _sub_map.get((_ones, _b))
+                            if _d1 is not None and len(_d1) == 1:
+                                _extended_sub[(_R, _b)] = _tens + _d1
+                    if _extended_add:
+                        _binary_fmaps = dict(_binary_fmaps)
+                        _binary_fmaps['add'] = {**_binary_fmaps.get('add', {}), **_extended_add}
+                    if _extended_sub:
+                        if 'add' not in _binary_fmaps:
+                            _binary_fmaps = dict(_binary_fmaps)
+                        _binary_fmaps['sub'] = {**_binary_fmaps.get('sub', {}), **_extended_sub}
+
+                # Complete BFM for all single-digit × single-digit pairs using
+                # the NNO compose engine.  The FC-based _binary_fmaps only covers
+                # (op, a, b) pairs SEEN in training; OOD pairs (e.g. mul(6,5) when
+                # that example is in the test split) cause RelationRule lookups to
+                # fail.  Using _compose fills the gaps without int() calls.
+                if self._compose_succ_map and _binary_fmaps:
+                    _all_digits_list: list[str] = []
+                    _dc = self._compose_zero
+                    _dc_seen: set[str] = {_dc}
+                    _all_digits_list.append(_dc)
+                    while True:
+                        _dn = self._compose_succ_map.get(_dc)
+                        if _dn is None or _dn in _dc_seen:
+                            break
+                        _all_digits_list.append(_dn)
+                        _dc_seen.add(_dn)
+                        _dc = _dn
+                    for _arith_op in ('mul', 'add', 'sub'):
+                        if _arith_op not in _binary_fmaps:
+                            continue
+                        _op_map = dict(_binary_fmaps[_arith_op])
+                        _updated = False
+                        for _da in _all_digits_list:
+                            for _db in _all_digits_list:
+                                if (_da, _db) not in _op_map:
+                                    _cr = _compose(
+                                        _arith_op, ((_da,), (_db,)),
+                                        self._fc_lookup, self._fold_rules,
+                                        self._compose_succ_map,
+                                        self._compose_carry_el,
+                                        self._compose_carry_out,
+                                        self._compose_zero,
+                                        self._compose_cache,
+                                    )
+                                    if _cr is not None:
+                                        _op_map[(_da, _db)] = ''.join(_cr)
+                                        _updated = True
+                        if _updated:
+                            _binary_fmaps = dict(_binary_fmaps)
+                            _binary_fmaps[_arith_op] = _op_map
+
+                # Ground binary functional rules for verification: mul(3,4)→12 etc.
+                # These let cata_reduce fully evaluate sub-expressions produced by
+                # structural rules (e.g. mul(mul(c,n), pow(x,pred(n))) needs mul(c,n)
+                # to reduce to its numeric result for consistency checking).
+                # Only include pure digit×digit arithmetic ops (add, mul, sub) —
+                # NOT pow/succ/pred/sq/sqrt since those appear in structural positions
+                # and would interfere with rule verification.
+                _ARITH_OPS = frozenset({'add', 'mul', 'sub'})
+                ground_bfm: list[RewriteRule] = []
+                for _op_name, _op_map in (_binary_fmaps or {}).items():
+                    if _op_name not in _ARITH_OPS:
+                        continue
+                    for (_d1, _d2), _res in _op_map.items():
+                        ground_bfm.append(RewriteRule(
+                            lhs=_node(_op_name, _atom(_d1), _atom(_d2)),
+                            rhs=_atom(_res),
+                            algebra_name=_op_name,
+                            evidence=1,
+                        ))
+
+                self._rewrite_rules: list = discover_rules(
+                    _eq_corpus, self._arities,
+                    norm_rules=norm_rules,
+                    output_norm_rules=output_norm_rules,
+                    functional_maps=functional_maps,
+                    aux_rules=ground_nno + ground_bfm,
+                    binary_functional_maps=_binary_fmaps or None,
+                )
+                # Add ground NNO rules + inference-time normalization.
+                # sq_norm fires bottom-up on inputs so that sq(x) → pow(x,2)
+                # before the structural derivative rule is tried.
+                self._rewrite_rules.extend(ground_nno)
+                if norm_rules:
+                    self._rewrite_rules.extend(norm_rules)  # sq(V)→pow(V,2) etc.
+
+                # Post-rules: denormalize outputs back to corpus surface form.
+                # pow(x,1)→x (inverse of x_pow1_norm) and pow(x,2)→sq(x) (inverse of sq_norm).
+                sq_inv = RewriteRule(
+                    lhs=_node('pow', _var('V0'), _atom('2')),
+                    rhs=_node('sq', _var('V0')),
+                    algebra_name='sq_inv', evidence=1,
+                ) if norm_rules else None
+                self._post_rules: list = []
+                if output_norm_rules:
+                    self._post_rules.append(pow_x1_inv)
+                if sq_inv is not None:
+                    self._post_rules.append(sq_inv)
+
+                # Phase VIII: NNO ground arithmetic rules so that sub-expressions
+                # like mul('3','2') reduce to '6' within structural rules.
+                # Generated from BinaryFoldRule NNO induction; no int() calls.
+                self._nno_rules: list = fold_rules_as_rewrite_rules(
+                    fc,
+                    self._compose_succ_map,
+                    self._compose_carry_el,
+                    self._compose_carry_out,
+                    self._compose_zero,
+                ) if self._compose_succ_map else []
+                # Extend with multi-digit add/sub rules (e.g. add('36','3')→'39')
+                # so structural composition rules like add(mul(A,C), B) can be
+                # fully evaluated when the mul result is two digits.
+                if _binary_fmaps:
+                    self._nno_rules.extend(
+                        _build_multidigit_arith_rules(_binary_fmaps)
+                    )
+
+                # ---- RelationStore: per-role rule discovery ----
+                # Hypergraph approach: each sequence is a named-role tuple.
+                # Discover a separate RewriteRule for each output role (step, ans).
+                # This handles trace-format ops (step/ans structure) that
+                # _cata_predict can't handle (it produces only the final answer).
+                # No discover_arities() needed for ops with input separators.
+                _rs = RelationStore()
+                _rs_seqs: list[list[str]] = []
+                for cr in (chain_rules or []):
+                    for inp_toks, out_toks in (cr.chain_table or {}).items():
+                        _rs_seqs.append([cr.op_atom] + list(inp_toks) + list(out_toks))
+                _rs.update_batch(_rs_seqs)
+
+                # Build step_corpus only for ops with input separators (clean schema)
+                _step_corpus: list[list[str]] = _rs.eq_corpus_for_role(
+                    'step',
+                    ops=_rs.ops_with_input_seps(),
+                    merge_digits=True,
+                    nno_atoms=nno_atoms,
+                )
+
+                # Discover step rules via same anti-unification pipeline as ans rules.
+                # Step values may be multi-digit (e.g. '10' for 2*5).  After merging,
+                # these compound tokens are NOT in self._arities (which was built from
+                # ans_corpus only).  Extend arities with all compound step-output tokens
+                # before calling discover_rules so the parser can handle them.
+                if _step_corpus:
+                    from experiments.symbolic_ai_v2.ctkg.core.expr_parser import TERMINATORS as _TERM
+                    _step_arities = dict(self._arities)
+                    for _seq in _step_corpus:
+                        for _tok in _seq:
+                            if _tok not in _TERM and len(_tok) > 1:
+                                if all(c in nno_atoms for c in _tok):
+                                    _step_arities.setdefault(_tok, 0)
+                    self._step_rules: list = discover_rules(
+                        _step_corpus, _step_arities,
+                        norm_rules=norm_rules,
+                        output_norm_rules=None,  # step outputs are plain digits
+                        functional_maps=functional_maps,
+                        aux_rules=ground_nno + ground_bfm,
+                        binary_functional_maps=_binary_fmaps or None,
+                    )
+                    self._step_rules.extend(ground_nno)
+                else:
+                    self._step_rules: list = []
+
+                # Record which ops have a step rule (for trace prediction routing)
+                self._trace_ops: frozenset[str] = _rs.ops_with_input_seps()
+
+                # ---- Arity-free RelationRule discovery (hypergraph approach) ----
+                # For each op with clean input separators, discover rules that map
+                # named input roles → output roles using the BFM directly.
+                # No discover_arities(), no prefix S-expression, no parse tree.
+                self._rs = _rs
+                self._binary_fmaps: dict = _binary_fmaps or {}
+                self._relation_rules: dict[str, list[RelationRule]] = {}
+                for _op in _rs.ops_with_input_seps():
+                    _op_rels = _rs.get_relations(_op)
+                    _op_rr = discover_relation_rules(_op_rels, _binary_fmaps or {})
+                    if _op_rr:
+                        self._relation_rules[_op] = _op_rr
+
+            else:
+                self._arities = {}
+                self._atoms = nno_atoms
+                self._rewrite_rules = []
+                self._post_rules: list = []
+                self._nno_rules: list = []
+                self._step_rules: list = []
+                self._trace_ops: frozenset[str] = frozenset()
+                self._rs = None
+                self._binary_fmaps: dict = {}
+                self._relation_rules: dict[str, list[RelationRule]] = {}
         else:
             self._fc_lookup = {}
             self._adj_lookup = {}
@@ -229,7 +623,16 @@ class Predictor:
             self._compose_zero = ""
             self._compose_cache = {}
             self._adj_solve_map = {}
-            self._trace_programs: dict[str, list] = {}
+            self._arities = {}
+            self._atoms: frozenset[str] = frozenset()
+            self._rewrite_rules: list = []
+            self._post_rules: list = []
+            self._nno_rules: list = []
+            self._step_rules: list = []
+            self._trace_ops: frozenset[str] = frozenset()
+            self._rs = None
+            self._binary_fmaps: dict = {}
+            self._relation_rules: dict[str, list[RelationRule]] = {}
 
         # Pre-build MorphismGraph transition matrix (concept_id → concept_id → weight)
         self._trans = _build_transition(morphism_graph)
@@ -288,51 +691,67 @@ class Predictor:
                 if result is not None:
                     return result
 
-                # Level 1c: Trace program fallback (generalization for novel inputs).
-                # Fires when chain_table lookup returned None (test input not in training).
-                # Synthesized trace program computes step/ans via fold rules + adj_search.
-                # Applies to both step-format and eq-format sequences (eq-format sequences
-                # like linear_eval still use step/ans in their output).
-                if self._trace_programs:
-                    prog_map = self._trace_programs.get(chain_state.op)
-                    # For eq-format sequences, skip trace programs when the op
-                    # already has a fold rule (pow, add, mul, …) — fold rules are
-                    # exact and structurally correct for those ops.  For ops without
-                    # a fold rule (eval, linsolve, cs4, bern_p1, …), fire the trace
-                    # program with ans_only=True so it generalises eq-format OOD.
-                    op_has_fold = chain_state.op in self._fold_rules
-                    if prog_map is not None and (not use_eq or not op_has_fold):
-                        # Iterate all programs for this op; use _pattern_key_matches
-                        # (supports literal digits at structural positions) to find
-                        # compatible programs.  The first consistent one wins.
-                        for prog in prog_map:
-                            if not _pattern_key_matches(
-                                prog.pattern_key, chain_state.input_tokens
-                            ):
-                                continue
-                            trace_result = _slot_program_predict(
-                                prog, chain_state.input_tokens,
-                                chain_state.output_tokens,
-                                self._fc_lookup, self._fold_rules,
-                                self._compose_succ_map, self._compose_carry_el,
-                                self._compose_carry_out, self._compose_zero,
-                                self._compose_cache,
-                                ans_only=use_eq,
-                            )
-                            if trace_result is not None:
-                                return trace_result
+                # Level 1c-relational: arity-free hypergraph rule prediction.
+                # Uses RelationRules discovered from named-role tuples — no arities,
+                # no prefix S-expressions, no parse tree.  Fires for any op with a
+                # clean input separator schema (the rel predictor handles k=0..end).
+                # Guard: skip when 'eq' is already in the prefix — those sequences
+                # use eq-format output, not step/ans trace format.  The relational
+                # rules were discovered from chain_table (trace-format) sequences only.
+                if (self._relation_rules
+                        and chain_state.op in self._relation_rules
+                        and self._rs is not None
+                        and "eq" not in prefix):
+                    _rel_input = [chain_state.op] + list(chain_state.input_tokens)
+                    _rel_output = predict_from_relation_rules(
+                        _rel_input, self._rs, self._relation_rules, self._binary_fmaps
+                    )
+                    if _rel_output is not None:
+                        _rk = len(chain_state.output_tokens)
+                        if _rk < len(_rel_output):
+                            return {_rel_output[_rk]: 1.0}
+                        if _rk == len(_rel_output):
+                            return {'<eos>': 1.0}
+
+                # Level 1c-trace: per-role rule application for trace-format ops.
+                # Arity-based fallback for when relational rules haven't been discovered.
+                # Only fires after a 'step'/'ans' delimiter is already in output_tokens.
+                _out_has_trace = (
+                    'step' in chain_state.output_tokens
+                    or 'ans' in chain_state.output_tokens
+                )
+                if self._step_rules and chain_state.op in self._trace_ops and _out_has_trace:
+                    _all_rules = self._rewrite_rules + self._nno_rules
+                    trace_result = _trace_cata_predict(
+                        chain_state.op, chain_state.input_tokens,
+                        chain_state.output_tokens,
+                        self._step_rules, _all_rules,
+                        self._arities, self._post_rules,
+                        self._atoms,
+                    )
+                    if trace_result is not None:
+                        return trace_result
+
+                # Level 1c: cata_reduce (surface-form-agnostic rule application).
+                # Phase VIII: structural rules + NNO ground arithmetic rules.
+                # Structural rules (e.g. d(mul(V0,pow(x,V1)))→mul(mul(V0,V1),pow(x,pred(V1))))
+                # fire at the root; NNO rules (add('3','2')→'5' etc.) fire at leaves.
+                # cata_reduce bottom-up traversal handles this naturally.
+                # No .isdigit() calls — Iron Rule compliant.
+                _all_rules = self._rewrite_rules + self._nno_rules
+                if _all_rules:
+                    cata_result = _cata_predict(
+                        chain_state.op, chain_state.input_tokens,
+                        chain_state.output_tokens,
+                        _all_rules, self._arities,
+                        post_rules=self._post_rules,
+                        nno_atoms=self._atoms,
+                    )
+                    if cata_result is not None:
+                        return cata_result
 
         # Pass discovered op_atoms — not a hardcoded list
         state = parse_prefix(prefix, op_atoms=self._op_atoms)
-
-        # Level 1a: Process rule (deterministic, fold-type)
-        if state.phase == "OUTPUT" and state.op in self._rules:
-            rule = self._rules[state.op]
-            result = _process_predict(
-                rule, state.input_digits, state.output_digits, self._rules
-            )
-            if result is not None:
-                return result
 
         # Levels 0.5–0.7 fire BEFORE Level 0 (n-gram) for eq-format sequences.
         # Structural composition and adjunction give exact (point-mass) answers;
@@ -907,28 +1326,6 @@ def _morphism_marginalize(
     return {a: v / total for a, v in result.items()}
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers: process rule
-# ---------------------------------------------------------------------------
-
-def _process_predict(
-    rule: ProcessRule,
-    input_digits: list[str],
-    output_digits_so_far: list[str],
-    rules_dict: Optional[dict[str, ProcessRule]] = None,
-) -> Optional[dict[str, float]]:
-    """Return {next_digit: 1.0} or {'<eos>': 1.0} from process rule, or None."""
-    full_output = apply_process_rule(rule, input_digits, rules_dict or {})
-    if full_output is None:
-        return None
-    k = len(output_digits_so_far)
-    if k < len(full_output):
-        return {full_output[k]: 1.0}
-    if k == len(full_output):
-        return {"<eos>": 1.0}
-    return None
-
-
 def _chain_predict(
     rule: ChainRule,
     input_tokens: list[str],
@@ -1187,650 +1584,203 @@ def _compose(
 
 
 # ---------------------------------------------------------------------------
-# Trace program synthesis (Level 1c) — CT_REFERENCE §19
+# Phase V helpers: compound-token merging/splitting for multi-digit outputs
 # ---------------------------------------------------------------------------
 
-def _lz_strip(toks: tuple) -> tuple:
-    """Strip leading '0' tokens from a digit tuple (for zero-padded comparison).
 
-    Examples:
-        _lz_strip(('0', '8')) -> ('8',)
-        _lz_strip(('0', '0')) -> ('0',)   # keep at least one digit
-        _lz_strip(('1', '3')) -> ('1', '3')
+def _merge_digit_runs(toks: list[str], nno_atoms: frozenset) -> list[str]:
+    """Merge consecutive single-char NNO tokens into one compound atom.
+
+    Example: ['1', '2'] → ['12'] (coefficient 12 in derivative output).
+    Only merges runs of single-character tokens that are all in nno_atoms.
+    Multi-character tokens and non-NNO tokens are left unchanged.
     """
-    i = 0
-    while i < len(toks) - 1 and toks[i] == '0':
-        i += 1
-    return toks[i:]
-
-
-def _zpad(toks: tuple, width: int) -> tuple:
-    """Zero-pad a digit tuple to the given width.
-
-    Examples:
-        _zpad(('8',), 2)      -> ('0', '8')
-        _zpad(('1', '3'), 2)  -> ('1', '3')
-        _zpad(('5',), 1)      -> ('5',)
-    """
-    if len(toks) >= width:
-        return toks
-    return ('0',) * (width - len(toks)) + toks
-
-
-def _parse_into_value_blocks(output_toks: list) -> list:
-    """Split output token list into constant ('K') and value ('V') segments.
-
-    Returns a list of:
-      ('K', tok)         — structural/constant token (step, ans, <eos>, or any
-                           non-digit token embedded in a value region, e.g. 'mul', 'x')
-      ('V', value_tuple) — run of consecutive digit tokens
-
-    Non-digit tokens within a value region (e.g. 'mul' in 'ans mul 6 x')
-    are treated as structural constants so that the discovery algorithm can
-    work on the purely numeric sub-segments independently.
-    """
-    result = []
-    i = 0
-    while i < len(output_toks):
-        tok = output_toks[i]
-        if not tok.isdigit():
-            result.append(('K', tok))
-            i += 1
+    result: list[str] = []
+    run: list[str] = []
+    for tok in toks:
+        if len(tok) == 1 and tok in nno_atoms:
+            run.append(tok)
         else:
-            j = i
-            while j < len(output_toks) and output_toks[j].isdigit():
-                j += 1
-            result.append(('V', tuple(output_toks[i:j])))
-            i = j
+            if run:
+                result.append(''.join(run))
+                run = []
+            result.append(tok)
+    if run:
+        result.append(''.join(run))
     return result
 
 
-def _discover_value_segment(
-    value_tuples: list,
-    in_digits_list: list,
-    seg_results: dict,
-    fold_rules: dict,
-    fc_lookup: dict,
-    succ_map: dict,
-    carry_el: str,
-    carry_out: tuple,
-    zero_digit: str,
-    cache: dict,
-) -> tuple:
-    """Find what computation produces a variable value segment.
+def _split_compound(tok: str, nno_atoms: frozenset) -> list[str]:
+    """Split a compound NNO token back to individual single-char tokens.
 
-    Tries (in order):
-      1. All-constant (all examples same value)
-      2. Echo all input digits verbatim
-      3. Echo single input digit at position j
-      4. fold(in_slice, in_slice) — widths 1 and 2
-      5. fold(seg_result, in_slice) and fold(in_slice, seg_result) — prior segments
-      5b. fold(fold(seg, in_slice), seg) — nested fold for bernoulli-style 3-operand ans
-      6. fold(seg_i, seg_j) — two prior computed segments
-      7. adj_search(seg_result + in_slice) — adjoint search
-
-    Returns (segment_spec, computed_results) or (None, None).
-    Width w in 'F'/'A' specs is the minimum observed token count (for zero-padding).
-    Using minimum avoids over-padding when ans widths vary (e.g., sq: 1..3 digits).
+    Example: '12' → ['1', '2'] (when nno_atoms contains '1' and '2').
+    Returns [tok] unchanged if tok is already single-char or not all-NNO.
     """
-    if not value_tuples:
-        return None, None
-
-    # Width for zero-padding: use consistent width only when ALL training examples
-    # agree.  For variable-length outputs (e.g. sq ans, pow ans) use width=1 so
-    # _zpad never adds spurious leading zeros.
-    widths = [len(v) for v in value_tuples]
-    width = widths[0] if len(set(widths)) == 1 else 1
-    actual_n = len(in_digits_list[0]) if in_digits_list else 0
-
-    def _matches(result, expected):
-        if result is None:
-            return False
-        return _lz_strip(result) == _lz_strip(expected)
-
-    # 1. All-constant block — only when ≥2 examples agree; deferred to last resort
-    #    for single-example groups (where any value appears constant trivially).
-    const_candidate = None
-    if all(v == value_tuples[0] for v in value_tuples) and len(value_tuples) >= 2:
-        const_candidate = value_tuples[0]
-        return ('CONST_BLOCK', const_candidate), [const_candidate for _ in value_tuples]
-
-    # 2. Echo all input digits verbatim
-    if all(tuple(in_d) == v for in_d, v in zip(in_digits_list, value_tuples)):
-        return ('E',), [tuple(in_d) for in_d in in_digits_list]
-
-    # 3. Echo single input digit at position j
-    for j in range(actual_n):
-        if all(_lz_strip((in_d[j],)) == _lz_strip(v)
-               for in_d, v in zip(in_digits_list, value_tuples)):
-            computed = [(in_d[j],) for in_d in in_digits_list]
-            return ('G', j), computed
-
-    # 3b. pred / succ of a single input digit (NNO predecessor/successor).
-    #     Covers ans = N-1 in derivative_trace pow x N output.
-    if succ_map:
-        pred_map = {v: k for k, v in succ_map.items()}
-        for j in range(actual_n):
-            # pred: pred_map[in[j]]
-            pred_vals = [pred_map.get(in_d[j]) for in_d in in_digits_list]
-            if all(pv is not None and _lz_strip((pv,)) == _lz_strip(v)
-                   for pv, v in zip(pred_vals, value_tuples)):
-                return ('P', j), [(pv,) for pv in pred_vals]
-            # succ: succ_map[in[j]]
-            succ_vals = [succ_map.get(in_d[j]) for in_d in in_digits_list]
-            if all(sv is not None and _lz_strip((sv,)) == _lz_strip(v)
-                   for sv, v in zip(succ_vals, value_tuples)):
-                return ('SC', j), [(sv,) for sv in succ_vals]
-
-    # 4. fold(in_slice, in_slice)
-    for fop in fold_rules:
-        for w0 in (1, 2):
-            for s0 in range(actual_n - w0 + 1):
-                src_a = ('I', s0, s0 + w0 - 1)
-                for w1 in (1, 2):
-                    for s1 in range(actual_n - w1 + 1):
-                        src_b = ('I', s1, s1 + w1 - 1)
-                        computed = [
-                            _compose(fop,
-                                     (tuple(in_d[s0:s0 + w0]), tuple(in_d[s1:s1 + w1])),
-                                     fc_lookup, fold_rules,
-                                     succ_map, carry_el, carry_out, zero_digit, cache)
-                            for in_d in in_digits_list
-                        ]
-                        if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
-                            return ('F', fop, src_a, src_b, width), computed
-
-    # 4b. adj_search(in_slice, K_const): find x where fold_op(x, K) = in[j:j+w].
-    #     Covers integral step = R where mul(R, m) = RM (m is pattern-implied).
-    #     Tries small constants K ∈ {'2'..'9'} as the divisor.
-    for fop in fold_rules:
-        for w0 in (1, 2):
-            for s0 in range(actual_n - w0 + 1):
-                src = ('I', s0, s0 + w0 - 1)
-                for k_digit in ('2', '3', '4', '5', '6', '7', '8', '9'):
-                    k_tuple = (k_digit,)
-                    computed = []
-                    ok = True
-                    for in_d, val in zip(in_digits_list, value_tuples):
-                        in_slice = tuple(in_d[s0:s0 + w0])
-                        result = _compose_adjoint_search(
-                            "adj_search", in_slice + k_tuple, (fop, 1),
-                            fc_lookup, fold_rules,
-                            succ_map, carry_el, carry_out, zero_digit, cache,
-                            b_width=1,
-                        )
-                        if result is None or not _matches(result, val):
-                            ok = False
-                            break
-                        computed.append(result)
-                    if ok and computed:
-                        return ('AK', fop, src, k_digit, width), computed
-
-    # 5. fold(seg, in_slice) and fold(in_slice, seg)
-    for seg_idx, seg_result_list in seg_results.items():
-        if any(r is None for r in seg_result_list):
-            continue
-        for fop in fold_rules:
-            for w1 in (1, 2):
-                for s1 in range(actual_n - w1 + 1):
-                    src_b = ('I', s1, s1 + w1 - 1)
-                    computed = [
-                        _compose(fop, (sr, tuple(in_d[s1:s1 + w1])),
-                                 fc_lookup, fold_rules,
-                                 succ_map, carry_el, carry_out, zero_digit, cache)
-                        for sr, in_d in zip(seg_result_list, in_digits_list)
-                    ]
-                    if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
-                        return ('F', fop, ('S', seg_idx), src_b, width), computed
-                    computed = [
-                        _compose(fop, (tuple(in_d[s1:s1 + w1]), sr),
-                                 fc_lookup, fold_rules,
-                                 succ_map, carry_el, carry_out, zero_digit, cache)
-                        for sr, in_d in zip(seg_result_list, in_digits_list)
-                    ]
-                    if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
-                        return ('F', fop, src_b, ('S', seg_idx), width), computed
-
-    # 5b. fold(fold(seg_i, in_slice), seg_j) — nested fold for bernoulli-style 3-operand ans
-    # Handles: ans = outer_op(inner_op(seg_i, in_slice), seg_j) and variants
-    seg_idxs_nf = [k for k, v in seg_results.items() if not any(r is None for r in v)]
-    for seg_idx_i in seg_idxs_nf:
-        si_list = seg_results[seg_idx_i]
-        for fop_inner in fold_rules:
-            for w1 in (1, 2):
-                for s1 in range(actual_n - w1 + 1):
-                    oth_src = ('I', s1, s1 + w1 - 1)
-                    for inner_left in (True, False):
-                        if inner_left:
-                            inner_vals = [
-                                _compose(fop_inner, (sri, tuple(in_d[s1:s1 + w1])),
-                                         fc_lookup, fold_rules,
-                                         succ_map, carry_el, carry_out, zero_digit, cache)
-                                for sri, in_d in zip(si_list, in_digits_list)
-                            ]
-                            inner_src_a = ('S', seg_idx_i)
-                            inner_src_b = oth_src
-                        else:
-                            inner_vals = [
-                                _compose(fop_inner, (tuple(in_d[s1:s1 + w1]), sri),
-                                         fc_lookup, fold_rules,
-                                         succ_map, carry_el, carry_out, zero_digit, cache)
-                                for sri, in_d in zip(si_list, in_digits_list)
-                            ]
-                            inner_src_a = oth_src
-                            inner_src_b = ('S', seg_idx_i)
-                        if any(v is None for v in inner_vals):
-                            continue
-                        # Outer: fold_outer(inner, seg_j) or fold_outer(seg_j, inner)
-                        for seg_idx_j in seg_idxs_nf:
-                            sj_list = seg_results[seg_idx_j]
-                            for fop_outer in fold_rules:
-                                computed = [
-                                    _compose(fop_outer, (iv, srj),
-                                             fc_lookup, fold_rules,
-                                             succ_map, carry_el, carry_out, zero_digit, cache)
-                                    for iv, srj in zip(inner_vals, sj_list)
-                                ]
-                                if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
-                                    inner_spec = ('F', fop_inner, inner_src_a, inner_src_b)
-                                    return ('F', fop_outer, inner_spec, ('S', seg_idx_j), width), computed
-                                computed = [
-                                    _compose(fop_outer, (srj, iv),
-                                             fc_lookup, fold_rules,
-                                             succ_map, carry_el, carry_out, zero_digit, cache)
-                                    for iv, srj in zip(inner_vals, sj_list)
-                                ]
-                                if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
-                                    inner_spec = ('F', fop_inner, inner_src_a, inner_src_b)
-                                    return ('F', fop_outer, ('S', seg_idx_j), inner_spec, width), computed
-
-    # 6. fold(seg_i, seg_j) — two prior segments
-    seg_idxs = [k for k, v in seg_results.items() if not any(r is None for r in v)]
-    for ii in range(len(seg_idxs)):
-        si = seg_idxs[ii]
-        si_list = seg_results[si]
-        for jj in range(ii, len(seg_idxs)):
-            sj = seg_idxs[jj]
-            sj_list = seg_results[sj]
-            for fop in fold_rules:
-                computed = [
-                    _compose(fop, (sri, srj),
-                             fc_lookup, fold_rules,
-                             succ_map, carry_el, carry_out, zero_digit, cache)
-                    for sri, srj in zip(si_list, sj_list)
-                ]
-                if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
-                    return ('F', fop, ('S', si), ('S', sj), width), computed
-                computed = [
-                    _compose(fop, (srj, sri),
-                             fc_lookup, fold_rules,
-                             succ_map, carry_el, carry_out, zero_digit, cache)
-                    for sri, srj in zip(si_list, sj_list)
-                ]
-                if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
-                    return ('F', fop, ('S', sj), ('S', si), width), computed
-
-    # 7. adj_search: fold(x, b) = seg_result; b from in_slice
-    for seg_idx, seg_result_list in seg_results.items():
-        if any(r is None for r in seg_result_list):
-            continue
-        for fop in fold_rules:
-            for w1 in (1, 2):
-                for s1 in range(actual_n - w1 + 1):
-                    oth_src = ('I', s1, s1 + w1 - 1)
-                    b_width = w1
-                    computed = [
-                        _compose_adjoint_search(
-                            "adj_search",
-                            sr + tuple(in_d[s1:s1 + w1]),
-                            (fop, 1),
-                            fc_lookup, fold_rules,
-                            succ_map, carry_el, carry_out, zero_digit, cache,
-                            b_width=b_width,
-                        )
-                        for sr, in_d in zip(seg_result_list, in_digits_list)
-                    ]
-                    if all(_matches(c, v) for c, v in zip(computed, value_tuples)):
-                        return ('A', fop, ('S', seg_idx), oth_src, width), computed
-
-    # 8. Last-resort: all-constant block (for single-example groups where the
-    #    early check was skipped because len(value_tuples) < 2).
-    if all(v == value_tuples[0] for v in value_tuples):
-        toks = value_tuples[0]
-        return ('CONST_BLOCK', toks), [toks for _ in value_tuples]
-
-    return None, None
+    if len(tok) <= 1:
+        return [tok]
+    if all(c in nno_atoms for c in tok):
+        return list(tok)
+    return [tok]
 
 
-def _discover_slot_program(
-    op_atom: str,
-    pattern_key: tuple,
-    parsed: list,
-    fold_rules: dict,
-    fc_lookup: dict,
-    succ_map: dict,
-    carry_el: str,
-    carry_out: tuple,
-    zero_digit: str,
-    cache: dict,
-) -> "Optional[SlotProgram]":
-    """Discover a SlotProgram for one (op_atom, pattern_key) group.
-
-    parsed is a list of (in_digits, output_tokens) pairs, one per training example.
-    Returns a SlotProgram or None if no consistent program is found.
-    """
-    if not parsed:
-        return None
-
-    # Parse all training examples into segment structure
-    parsed_segs = [(in_d, _parse_into_value_blocks(out_toks))
-                   for in_d, out_toks in parsed]
-
-    # Verify all examples share the same segment-type skeleton
-    skeleton = [s[0] for s in parsed_segs[0][1]]
-    for _, segs in parsed_segs[1:]:
-        if [s[0] for s in segs] != skeleton:
-            return None
-
-    n_segs = len(parsed_segs[0][1])
-    result_segments: list = []
-    seg_results: dict = {}  # seg_idx -> list of result tuples (one per example)
-
-    for seg_idx in range(n_segs):
-        seg_type = skeleton[seg_idx]
-
-        if seg_type == 'K':
-            tok = parsed_segs[0][1][seg_idx][1]
-            if not all(segs[seg_idx][1] == tok for _, segs in parsed_segs):
-                return None
-            result_segments.append(('K', tok))
-            seg_results[seg_idx] = [None] * len(parsed)
-        else:
-            # 'V': variable value block — discover the computation
-            value_tuples = [segs[seg_idx][1] for _, segs in parsed_segs]
-            in_digits_list = [in_d for in_d, _ in parsed_segs]
-            prior_results = {k: v for k, v in seg_results.items()
-                             if k < seg_idx and v[0] is not None}
-
-            spec, computed = _discover_value_segment(
-                value_tuples, in_digits_list, prior_results,
-                fold_rules, fc_lookup, succ_map, carry_el, carry_out, zero_digit, cache,
-            )
-            if spec is None:
-                return None
-            result_segments.append(spec)
-            seg_results[seg_idx] = computed if computed is not None else [None] * len(parsed)
-
-    return SlotProgram(
-        op_atom=op_atom,
-        pattern_key=pattern_key,
-        segments=result_segments,
-        evidence=len(parsed),
-    )
+# ---------------------------------------------------------------------------
+# Level 1c-trace: per-role prediction for trace-format ops (RelationStore)
+# ---------------------------------------------------------------------------
 
 
-def _refine_pattern_key(pattern_key: tuple, examples: list) -> tuple:
-    """Embed structural (constant) digit values back into the pattern_key.
-
-    A wildcard '_' at position p is structural if ALL training examples share
-    the same digit value at the corresponding in_digits index.  Those positions
-    are replaced with the specific digit value so that the SlotProgram's
-    pattern_key uniquely identifies the computation structure.
-
-    Example: pow b e group with e=2 → ('_','2') instead of ('_','_'),
-    enabling unambiguous dispatch without needing partial output.
-    """
-    wild_indices = [i for i, t in enumerate(pattern_key) if t == '_']
-    if not wild_indices:
-        return pattern_key
-    refined = list(pattern_key)
-    for j, pk_idx in enumerate(wild_indices):
-        vals = {in_digits[j] for in_digits, _ in examples if j < len(in_digits)}
-        if len(vals) == 1:
-            refined[pk_idx] = next(iter(vals))
-    return tuple(refined)
-
-
-def _pattern_key_matches(pattern_key: tuple, input_tokens: list) -> bool:
-    """Check if input_tokens are compatible with a (possibly refined) pattern_key.
-
-    '_' is a wildcard matching any single digit token.
-    Literal non-'_' entries must match exactly.
-    Length must match.
-    """
-    if len(pattern_key) != len(input_tokens):
-        return False
-    for pk_tok, in_tok in zip(pattern_key, input_tokens):
-        if pk_tok == '_':
-            if not in_tok.isdigit():
-                return False
-        elif pk_tok != in_tok:
-            return False
-    return True
-
-
-def _discover_trace_programs(
-    chain_rules: dict,
-    fold_rules: dict,
-    fc_lookup: dict,
-    succ_map: dict,
-    carry_el: str,
-    carry_out: tuple,
-    zero_digit: str,
-) -> dict:
-    """Synthesize SlotProgram for each trace-format chain op.
-
-    Groups training examples by (pattern_key, skeleton_key), then refines
-    pattern_keys: digit positions that are constant within a skeleton group
-    (structural positions — e.g. exponent in pow b e) are embedded as literals.
-    This disambiguates programs at dispatch time without requiring partial output.
-
-    Returns dict mapping op_atom → list[SlotProgram] (flat list per op).
-    Dispatch uses _pattern_key_matches() to find the right program for any input.
-    """
-    cache: dict = {}
-    programs: dict = {}
-
-    for op_atom, cr in chain_rules.items():
-        if not cr.chain_table:
-            continue
-
-        # Group by (pattern_key, skeleton_key)
-        # pattern_key: replace ALL digits with '_' (base structural shape).
-        # skeleton_key: ALL non-digit tokens in output — distinguishes different
-        #   output shapes (e.g. 'mul _ x' vs 'mul _ sq x' vs 'mul _ pow x _').
-        # After grouping, refine pattern_keys: digit positions that are CONSTANT
-        #   within a skeleton group are structural (they determine the output shape)
-        #   and are embedded back as literal values — e.g. exponent '2' in pow b 2.
-        groups: dict = {}
-        for input_key, output_toks in cr.chain_table.items():
-            if 'ans' not in output_toks:
-                continue
-            in_digits = [tok for tok in input_key if tok.isdigit()]
-            if not in_digits:
-                continue
-            pattern_key = tuple('_' if t.isdigit() else t for t in input_key)
-            skeleton_key = tuple(t for t in output_toks if not t.isdigit())
-            groups.setdefault((pattern_key, skeleton_key), []).append(
-                (in_digits, list(output_toks))
-            )
-
-        for (pattern_key, _skel), examples in groups.items():
-            if len(examples) < 1:
-                continue
-            refined_pk = _refine_pattern_key(pattern_key, examples)
-            prog = _discover_slot_program(
-                op_atom, refined_pk, examples,
-                fold_rules, fc_lookup, succ_map, carry_el, carry_out, zero_digit, cache,
-            )
-            if prog is not None:
-                programs.setdefault(op_atom, []).append(prog)
-
-        # Sort programs by specificity: most-specific pattern_key first.
-        # A pattern_key with more literal (non-'_') tokens is more specific and
-        # should be tried before wildcard patterns to avoid premature matches.
-        # Example: ('_','2') before ('_','_') for pow b 2 vs pow b e dispatch.
-        if op_atom in programs:
-            programs[op_atom].sort(
-                key=lambda p: sum(1 for t in p.pattern_key if t != '_'),
-                reverse=True,
-            )
-
-    return programs
-
-
-def _slot_program_predict(
-    prog: "SlotProgram",
-    input_tokens: list,
-    output_tokens_so_far: list,
-    fc_lookup: dict,
-    fold_rules: dict,
-    succ_map: dict,
-    carry_el: str,
-    carry_out: tuple,
-    zero_digit: str,
-    cache: dict,
-    ans_only: bool = False,
+def _trace_cata_predict(
+    op: str,
+    input_tokens: list[str],
+    output_tokens_so_far: list[str],
+    step_rules: list,
+    ans_rules: list,
+    arities: dict,
+    post_rules: Optional[list],
+    nno_atoms: frozenset,
 ) -> Optional[dict]:
-    """Level 1c: predict next token using a discovered SlotProgram.
+    """Level 1c-trace: predict the next token in a trace-format (step/ans) sequence.
 
-    Evaluates each segment of the program against input_tokens, assembles
-    the full expected output sequence, and returns a point mass for the
-    k-th token (where k = len(output_tokens_so_far)).
+    Trace format: [step, step_val..., ans, ans_val..., <eos>]
 
-    In ans_only mode (eq-format sequences), strips everything up to and
-    including 'ans' so only the final answer tokens are returned.
+    This function computes the full expected trace by:
+      1. Applying step_rules to the input tree → step_result tokens
+      2. Applying ans_rules to the input tree → ans_result tokens
+      3. Building expected_trace = ['step'] + step_result + ['ans'] + ans_result
+      4. Returning a point mass for position k = len(output_tokens_so_far)
+
+    Handles the output_tokens_so_far correctly: it includes the delimiter tokens
+    ('step', 'ans') as part of the sequence, so k indexes into the full trace.
+
+    Returns None if either rule fails to fire or the partial output contradicts
+    the expected trace.
     """
-    in_digits = [tok for tok in input_tokens if tok.isdigit()]
+    from experiments.symbolic_ai_v2.ctkg.core.expr_parser import parse, unparse
+    from experiments.symbolic_ai_v2.ctkg.core.rewrite import cata_reduce
 
-    def _eval_src(src):
-        if src[0] == 'I':
-            _, j0, j1 = src
-            return tuple(in_digits[j0:j1 + 1])
-        elif src[0] == 'S':
-            return seg_computed.get(src[1])
-        elif src[0] == 'F':
-            # Nested fold spec: ('F', op, src_a, src_b) — 4 elements, no width
-            _, op, src_a, src_b = src
-            a = _eval_src(src_a)
-            b = _eval_src(src_b)
-            if a is None or b is None:
-                return None
-            return _compose(op, (a, b), fc_lookup, fold_rules,
-                            succ_map, carry_el, carry_out, zero_digit, cache)
+    seq = [op] + list(input_tokens)
+    inp_tree = parse(seq, arities)
+    if inp_tree is None:
         return None
 
-    seg_computed: dict = {}  # seg_idx -> result tuple
-    output_seq: list = []
+    _max_steps = max(10000, 200 * max(len(step_rules), len(ans_rules), 1))
 
-    for seg_idx, seg in enumerate(prog.segments):
-        if seg[0] == 'K':
-            output_seq.append(seg[1])
-            seg_computed[seg_idx] = None
-        elif seg[0] == 'CONST_BLOCK':
-            output_seq.extend(seg[1])
-            seg_computed[seg_idx] = seg[1]
-        elif seg[0] == 'E':
-            output_seq.extend(in_digits)
-            seg_computed[seg_idx] = tuple(in_digits)
-        elif seg[0] == 'G':
-            j = seg[1]
-            if j >= len(in_digits):
-                return None
-            tok = in_digits[j]
-            output_seq.append(tok)
-            seg_computed[seg_idx] = (tok,)
-        elif seg[0] == 'F':
-            _, op, src_a_spec, src_b_spec, width = seg
-            src_a = _eval_src(src_a_spec)
-            src_b = _eval_src(src_b_spec)
-            if src_a is None or src_b is None:
-                return None
-            result = _compose(op, (src_a, src_b), fc_lookup, fold_rules,
-                              succ_map, carry_el, carry_out, zero_digit, cache)
-            if result is None:
-                return None
-            padded = _zpad(result, width)
-            output_seq.extend(padded)
-            seg_computed[seg_idx] = result
-        elif seg[0] == 'A':
-            _, op, step_src_spec, oth_src_spec, width = seg
-            step_src = _eval_src(step_src_spec)
-            oth_src = _eval_src(oth_src_spec)
-            if step_src is None or oth_src is None:
-                return None
-            b_width = len(oth_src)
-            result = _compose_adjoint_search(
-                "adj_search",
-                step_src + oth_src,
-                (op, 1),
-                fc_lookup, fold_rules,
-                succ_map, carry_el, carry_out, zero_digit, cache,
-                b_width=b_width,
-            )
-            if result is None:
-                return None
-            padded = _zpad(result, width)
-            output_seq.extend(padded)
-            seg_computed[seg_idx] = result
-        elif seg[0] == 'P':
-            # Predecessor of input digit at position j (inverse of succ_map).
-            j = seg[1]
-            if j >= len(in_digits):
-                return None
-            pred_map_local = {v: k for k, v in succ_map.items()} if succ_map else {}
-            tok = pred_map_local.get(in_digits[j])
-            if tok is None:
-                return None
-            output_seq.append(tok)
-            seg_computed[seg_idx] = (tok,)
-        elif seg[0] == 'SC':
-            # Successor of input digit at position j.
-            j = seg[1]
-            if j >= len(in_digits):
-                return None
-            tok = succ_map.get(in_digits[j]) if succ_map else None
-            if tok is None:
-                return None
-            output_seq.append(tok)
-            seg_computed[seg_idx] = (tok,)
-        elif seg[0] == 'AK':
-            # adj_search(in_slice, K_const): find x where fold_op(x, K) = in[j:j+w].
-            _, op, src_spec, k_digit, width = seg
-            in_slice = _eval_src(src_spec)
-            if in_slice is None:
-                return None
-            k_tuple = (k_digit,)
-            result = _compose_adjoint_search(
-                "adj_search",
-                in_slice + k_tuple,
-                (op, 1),
-                fc_lookup, fold_rules,
-                succ_map, carry_el, carry_out, zero_digit, cache,
-                b_width=1,
-            )
-            if result is None:
-                return None
-            padded = _zpad(result, width)
-            output_seq.extend(padded)
-            seg_computed[seg_idx] = result
+    # Compute step result
+    step_tree = cata_reduce(inp_tree, step_rules, max_steps=_max_steps)
+    if step_tree == inp_tree:
+        return None  # step rule did not fire
 
-    if ans_only:
-        if 'ans' in output_seq:
-            ans_start = output_seq.index('ans') + 1
-            output_seq = output_seq[ans_start:]
-        else:
-            return None
+    if post_rules:
+        step_tree = cata_reduce(step_tree, post_rules, max_steps=_max_steps)
+
+    step_toks = unparse(step_tree)
+    if nno_atoms:
+        step_toks = _expand_compound(step_toks, nno_atoms)
+
+    # Compute ans result
+    ans_tree = cata_reduce(inp_tree, ans_rules, max_steps=_max_steps)
+    if ans_tree == inp_tree:
+        return None  # ans rule did not fire
+
+    if post_rules:
+        ans_tree = cata_reduce(ans_tree, post_rules, max_steps=_max_steps)
+
+    ans_toks = unparse(ans_tree)
+    if nno_atoms:
+        ans_toks = _expand_compound(ans_toks, nno_atoms)
+
+    # Build the full expected trace
+    expected = ['step'] + list(step_toks) + ['ans'] + list(ans_toks)
 
     k = len(output_tokens_so_far)
-    # Consistency check: the program's output must agree with all tokens generated so far.
-    # This filters out programs whose skeleton doesn't match the partial output
-    # (e.g. an e=2 program that predicts 'step' when output already shows 'ans').
-    if k > 0:
-        if list(output_seq[:k]) != list(output_tokens_so_far):
-            return None
-    if k < len(output_seq):
-        return {output_seq[k]: 1.0}
-    if k == len(output_seq):
+
+    # Verify consistency with already-generated tokens
+    if k > 0 and list(expected[:k]) != list(output_tokens_so_far):
+        return None  # contradiction
+
+    if k < len(expected):
+        return {expected[k]: 1.0}
+    if k == len(expected):
         return {'<eos>': 1.0}
     return None
+
+
+def _expand_compound(tokens: list[str], nno_atoms: frozenset[str]) -> list[str]:
+    """Expand compound NNO tokens back to individual chars.
+
+    E.g. ['12', 'x'] → ['1', '2', 'x'] when '1' and '2' are in nno_atoms.
+    Tokens whose chars are NOT all in nno_atoms are left unchanged.
+    """
+    result: list[str] = []
+    for tok in tokens:
+        if len(tok) > 1 and all(c in nno_atoms for c in tok):
+            result.extend(list(tok))
+        else:
+            result.append(tok)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Level 1c: cata_reduce prediction (CT_REFERENCE §19 — Iron Rule compliant)
+# ---------------------------------------------------------------------------
+
+
+def _cata_predict(
+    op: str,
+    input_tokens: list[str],
+    output_tokens_so_far: list[str],
+    rewrite_rules: list,
+    arities: dict,
+    post_rules: Optional[list] = None,
+    nno_atoms: frozenset = frozenset(),
+) -> Optional[dict]:
+    """Level 1c: apply discovered RewriteRules to predict the next output token.
+
+    Parses [op] + input_tokens as a prefix expression, applies cata_reduce,
+    unparses the result, then returns a point mass for the k-th output token
+    (where k = len(output_tokens_so_far)).
+
+    post_rules: applied after the main cata_reduce (e.g. pow(x,1)→x inverse norm).
+    nno_atoms: used to expand compound tokens in out_toks back to single chars.
+
+    Returns None when:
+    - The input cannot be parsed (unknown arity or multi-token atom sequences).
+    - No rule fires (output tree == input tree).
+    - The output tree's unparsed tokens conflict with already-generated tokens.
+    """
+    from experiments.symbolic_ai_v2.ctkg.core.expr_parser import parse, unparse
+    from experiments.symbolic_ai_v2.ctkg.core.rewrite import cata_reduce
+
+    seq = [op] + list(input_tokens)
+    inp_tree = parse(seq, arities)
+    if inp_tree is None:
+        return None
+
+    # Scale max_steps with rule set size: each node tries all rules once per pass,
+    # plus one restart depth.  200 steps/rule gives enough headroom for depth-5 trees.
+    _max_steps = max(10000, 200 * len(rewrite_rules))
+    out_tree = cata_reduce(inp_tree, rewrite_rules, max_steps=_max_steps)
+    if out_tree == inp_tree:
+        return None  # no rule fired
+
+    # Apply post-normalization (e.g. pow(x,1)→x) to match corpus surface form
+    if post_rules:
+        out_tree = cata_reduce(out_tree, post_rules, max_steps=_max_steps)
+
+    out_toks = unparse(out_tree)
+
+    # Expand any compound NNO tokens back to individual chars to match corpus
+    if nno_atoms:
+        expanded: list[str] = []
+        for t in out_toks:
+            expanded.extend(_split_compound(t, nno_atoms))
+        out_toks = expanded
+
+    k = len(output_tokens_so_far)
+    if k > 0 and list(out_toks[:k]) != list(output_tokens_so_far):
+        return None  # generated tokens contradict this rule
+    if k < len(out_toks):
+        return {out_toks[k]: 1.0}
+    if k == len(out_toks):
+        return {'<eos>': 1.0}
+    return None
+
