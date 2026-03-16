@@ -69,6 +69,10 @@ from experiments.symbolic_ai_v2.ctkg.core.working_memory import (
     WorkingMemory,
 )
 from experiments.symbolic_ai_v2.ctkg.core.spine import Spine
+from experiments.symbolic_ai_v2.ctkg.core.context_category import (
+    ContextCategory,
+    ContextId,
+)
 
 
 
@@ -418,6 +422,9 @@ class Predictor:
             self._kleisli_chains: dict[str, dict[str, list[RelationRule]]] = {}
             self._kleisli_disc_roles: dict[str, str] = {}
 
+        # Phase XIX: context category for sheaf-theoretic dispatch.
+        self._ctx_cat = ContextCategory()
+
         # Phase X: heuristic attributes (_trans, _kan, _vocab) removed.
 
     # ------------------------------------------------------------------
@@ -437,6 +444,15 @@ class Predictor:
         Mapping from atom string to probability.  Process rule levels return
         a point mass {atom: 1.0}; distribution levels return soft distributions.
         """
+        # Phase XIX — Context Category dispatch.
+        # Classify the current prefix into a context object from the context
+        # category C.  All subsequent format guards use is_refinement() instead
+        # of bare 'eq' in prefix / 'step' in prefix string tests.  The context
+        # category replaces ad-hoc string matching with a principled presheaf
+        # section structure: a prediction rule registered at context c fires
+        # whenever the current context IS-A c (refines c).
+        ctx = self._ctx_cat.classify(prefix)
+
         # Level 1b: Chain rule (deterministic, step/ans and eq-mixed formats)
         #
         # MUST fire before Level 1a (fold rules) because chain-op sequences
@@ -461,9 +477,11 @@ class Predictor:
                 and chain_state.op in self._chain_rules
             ):
                 chain_rule = self._chain_rules[chain_state.op]
-                # Use eq_table when the prefix contains 'eq' (eq-format sequences
-                # like plain derivatives/integrals); chain_table for step/ans format.
-                use_eq = "eq" in prefix
+                # Restriction map ρ_{EQ → ANY}: specialise the chain rule section
+                # (registered at ANY) to eq-format vs trace-format context.
+                # use_eq=True  → restrict to ContextId.EQ  (use eq_table)
+                # use_eq=False → restrict to ContextId.TRACE/INPUT (use chain_table)
+                use_eq = self._ctx_cat.is_refinement(ctx, ContextId.EQ)
                 result = _chain_predict(chain_rule, chain_state.input_tokens, chain_state.output_tokens, use_eq_table=use_eq)
                 if result is not None:
                     return result
@@ -576,10 +594,11 @@ class Predictor:
 
 
         # Level 1d: Equalizer solve — BFM enumeration (Phase XVII).
+        # Presheaf section at ContextId.EQ: only fires in equation-format prefixes.
         # Handles 'lsolve A x B from C eq V' by enumerating all candidates v
         # and evaluating add(mul(A, v), B) == C via BFM lookups.
         # No int() calls; same code path for any op with the same algebraic form.
-        if self._compose_succ_map and self._binary_fmaps and 'eq' in prefix:
+        if self._compose_succ_map and self._binary_fmaps and self._ctx_cat.is_refinement(ctx, ContextId.EQ):
             eq_result = _equalizer_predict(
                 prefix,
                 self._binary_fmaps,
@@ -613,13 +632,15 @@ class Predictor:
         state = parse_prefix(prefix, op_atoms=self._op_atoms)
 
         # Level 0.5: FC direct + adjunction-based exact lookup (CT_REFERENCE §4,17).
-        if (self._fc_lookup or self._adj_lookup) and prefix and 'eq' in prefix:
+        # Presheaf section at ContextId.EQ.
+        if (self._fc_lookup or self._adj_lookup) and prefix and self._ctx_cat.is_refinement(ctx, ContextId.EQ):
             fc_result = _fc_and_adj_predict(prefix, self._fc_lookup, self._adj_lookup)
             if fc_result is not None:
                 return fc_result
 
         # Level 0.6: NNO chain prediction with carry/borrow propagation (CT_REFERENCE §19).
-        if (self._unary_chain_maps or self._unary_carry_maps) and prefix and 'eq' in prefix:
+        # Presheaf section at ContextId.EQ.
+        if (self._unary_chain_maps or self._unary_carry_maps) and prefix and self._ctx_cat.is_refinement(ctx, ContextId.EQ):
             nno_result = _nno_chain_predict(
                 prefix, self._unary_chain_maps, self._unary_carry_maps
             )
@@ -627,7 +648,8 @@ class Predictor:
                 return nno_result
 
         # Level 0.7: Composition engine — NNO fold rule (CT_REFERENCE §19).
-        if (self._fold_rules or self._adj_solve_map) and self._compose_succ_map and prefix and 'eq' in prefix:
+        # Presheaf section at ContextId.EQ.
+        if (self._fold_rules or self._adj_solve_map) and self._compose_succ_map and prefix and self._ctx_cat.is_refinement(ctx, ContextId.EQ):
             compose_result = _compose_predict(
                 prefix,
                 self._fc_lookup,
