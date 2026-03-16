@@ -56,9 +56,17 @@ class LetStep:
     Represents: let *name* = *expr* in …
     *expr* may reference input variables (p0, p1, …) and earlier output
     role names (step, step0, ans).
+
+    Phase XXII — probability monad:
+        *confidence* is the empirical reliability of the RelationRule that
+        generated this step (evidence / total_obs).  eval_term multiplies
+        confidences across all steps (Kleisli composition in Dist): the
+        resulting prediction has probability equal to the product of each
+        step's individual confidence.
     """
-    name: str   # output role name, e.g. 'step', 'step0', 'ans', 'eq'
-    expr: Expr  # expression tree (var() nodes for role references)
+    name: str             # output role name, e.g. 'step', 'step0', 'ans', 'eq'
+    expr: Expr            # expression tree (var() nodes for role references)
+    confidence: float = 1.0  # Phase XXII: from RelationRule.confidence
 
 
 @dataclass
@@ -169,13 +177,19 @@ def eval_term(
     # evaluated when its delimiter has already been consumed (i.e. when we need
     # at least one character of the result), so BFM misses in later steps do
     # not prevent prediction of earlier delimiters.
+    #
+    # Phase XXII — Kleisli confidence propagation:
+    #   acc_conf tracks the product of all step confidences consumed so far.
+    #   The returned distribution {token: acc_conf} encodes the probability
+    #   that the next token is correct given the full chain of rule applications.
     k = len(output_so_far)
     pos = 0  # current position within the virtual full-output sequence
+    acc_conf: float = 1.0  # accumulated Kleisli confidence
 
     for step, delim in zip(term.steps, term.output_delims):
         # --- delimiter token ---
         if pos == k:
-            return {delim: 1.0}
+            return {delim: acc_conf}
         if output_so_far[pos] != delim:
             return None  # prefix mismatch
         pos += 1
@@ -185,18 +199,19 @@ def eval_term(
         if result_str is None:
             return None  # BFM miss on a needed step
         env[step.name] = result_str  # β-bind for subsequent steps
+        acc_conf *= step.confidence  # Kleisli multiplication
 
         # --- character tokens of the result ---
         for ch in result_str:
             if pos == k:
-                return {ch: 1.0}
+                return {ch: acc_conf}
             if output_so_far[pos] != ch:
                 return None  # prefix mismatch
             pos += 1
 
     # All steps consumed; if we are exactly at k the sequence is complete.
     if pos == k:
-        return {'<eos>': 1.0}
+        return {'<eos>': acc_conf}
     return None
 
 
@@ -241,7 +256,9 @@ def synthesize_from_rules(
 
     for rr in op_rules:
         expr = node(rr.op_name, var(rr.arg1), var(rr.arg2))
-        steps.append(LetStep(name=rr.output_role, expr=expr))
+        # Phase XXII: carry rule confidence into the LetStep for Kleisli propagation
+        conf = getattr(rr, 'confidence', 1.0)
+        steps.append(LetStep(name=rr.output_role, expr=expr, confidence=conf))
         # Determine the output delimiter for this step
         role = rr.output_role
         if role.startswith('step'):

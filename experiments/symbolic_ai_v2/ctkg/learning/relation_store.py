@@ -37,7 +37,10 @@ Usage in predict.py:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from experiments.symbolic_ai_v2.ctkg.core.dependent_type import TypeTerm
 
 
 # ---------------------------------------------------------------------------
@@ -471,28 +474,66 @@ class RelationRule:
 
     No tree parsing, no arities, no prefix notation.
     Just a binary functional map lookup on named role values.
+
+    Phase XXI — dependent type annotations (optional):
+        arg1_type, arg2_type, output_type carry the type of each role's value
+        as discovered from the NNO chain.  ordinal=None in these fields means
+        the rule is universally quantified over all NNO ordinals (the rule
+        applies for *any* digit, not just a specific one).
+
+    Phase XXII — probability monad:
+        total_obs is the denominator for confidence: the number of training
+        examples seen for this (op, output_role) regardless of match/mismatch.
+        confidence = evidence / total_obs  ∈ (0, 1].
+        evaluate() returns a Kleisli morphism A → Dist(B) encoded as
+        dict[str, float] instead of Optional[str].
     """
     output_role: str
     op_name: str
     arg1: str  # role name for first argument
     arg2: str  # role name for second argument
     evidence: int = 0
+    # Phase XXII
+    total_obs: int = 0
+    # Phase XXI — type annotations (None = not yet inferred)
+    arg1_type: Optional['TypeTerm'] = None   # type: ignore[type-arg]
+    arg2_type: Optional['TypeTerm'] = None
+    output_type: Optional['TypeTerm'] = None
+
+    @property
+    def confidence(self) -> float:
+        """Empirical probability that this rule correctly predicts the output.
+
+        confidence = evidence / total_obs.
+        Defaults to 1.0 when total_obs is unset (legacy rules or deterministic
+        ops where every observed example matched).
+        """
+        if self.total_obs <= 0:
+            return 1.0
+        return self.evidence / self.total_obs
 
     def evaluate(
         self,
         role_values: dict[str, str],
         bfm: dict[str, dict[tuple, str]],
-    ) -> Optional[str]:
-        """Evaluate this rule given a dict of role_name → value_string.
+    ) -> 'dict[str, float]':
+        """Evaluate this rule as a Kleisli morphism A → Dist(B).
 
-        Returns the result string, or None if inputs are unavailable or
-        the bfm lookup misses.
+        Phase XXII: returns a distribution dict[result_str → probability]
+        rather than Optional[str].  For a deterministic BFM lookup the
+        distribution has at most one entry with probability == self.confidence.
+
+        Returns {} (empty dict) if inputs are unavailable or the bfm lookup
+        misses — analogous to the previous None return.
         """
         v1 = role_values.get(self.arg1)
         v2 = role_values.get(self.arg2)
         if v1 is None or v2 is None:
-            return None
-        return bfm.get(self.op_name, {}).get((v1, v2))
+            return {}
+        result = bfm.get(self.op_name, {}).get((v1, v2))
+        if result is None:
+            return {}
+        return {result: self.confidence}
 
 
 def discover_relation_rules(
@@ -501,6 +542,7 @@ def discover_relation_rules(
     min_evidence: int = 2,
     unknown_tolerance: float = 0.20,
     mismatch_tolerance: float = 0.0,
+    type_context: Optional[dict[str, 'TypeTerm']] = None,
 ) -> list[RelationRule]:
     """Discover RelationRules from a list of Relations.
 
@@ -530,6 +572,10 @@ def discover_relation_rules(
         rejects the rule).  Use a small positive value (e.g. 0.25) for ops
         where the training corpus intentionally mixes different sub-cases
         (e.g. sq(n) for n≥10 produces 3-digit answers not in the BFM).
+    type_context : dict[str, TypeTerm], optional
+        Phase XXI: mapping from token string to TypeTerm.  When provided,
+        each discovered rule is annotated with the type tags of its arg1,
+        arg2, and output values (universally quantified — ordinal=None).
 
     Returns
     -------
@@ -621,12 +667,29 @@ def discover_relation_rules(
                     if (n_match >= min_evidence
                             and n_unknown / n <= unknown_tolerance
                             and n_mismatch / n <= mismatch_tolerance):
+                        # Phase XXI: infer types from a sample example
+                        a1_type = a2_type = out_type = None
+                        if type_context and examples:
+                            sample_rv, sample_tv = examples[0]
+                            from experiments.symbolic_ai_v2.ctkg.core.dependent_type import (
+                                TypeTerm, rule_type_tag, token_type,
+                            )
+                            a1_type = rule_type_tag(sample_rv, role_a, type_context)
+                            a2_type = rule_type_tag(sample_rv, role_b, type_context)
+                            out_type = TypeTerm(
+                                tag=token_type(sample_tv, type_context).tag,
+                                ordinal=None,  # universally quantified
+                            )
                         role_rules.append(RelationRule(
                             output_role=target_role,
                             op_name=op_name,
                             arg1=role_a,
                             arg2=role_b,
                             evidence=n_match,
+                            total_obs=n,       # Phase XXII
+                            arg1_type=a1_type,  # Phase XXI
+                            arg2_type=a2_type,
+                            output_type=out_type,
                         ))
 
         discovered.extend(role_rules)
@@ -675,9 +738,10 @@ def predict_from_relation_rules(
     # Apply rules in the discovered order
     output_parts: list[tuple[str, str]] = []  # [(role_name, result_str)]
     for rule in op_rules:
-        result = rule.evaluate(role_values, bfm)
-        if result is None:
+        result_dist = rule.evaluate(role_values, bfm)
+        if not result_dist:
             return None  # rule failed — can't complete the prediction
+        result = max(result_dist, key=result_dist.get)
         role_values[rule.output_role] = result
         output_parts.append((rule.output_role, result))
 
@@ -770,10 +834,10 @@ def predict_alternatives_from_rules(
             # when multiple rules agree (copairing: f+g when f=g on a branch).
             result_evidence: dict[str, float] = {}
             for rule in role_rules:
-                result = rule.evaluate(role_vals, bfm)
-                if result is not None:
-                    result_evidence[result] = (
-                        result_evidence.get(result, 0.0) + rule.evidence
+                result_dist = rule.evaluate(role_vals, bfm)
+                for result_str in result_dist:
+                    result_evidence[result_str] = (
+                        result_evidence.get(result_str, 0.0) + rule.evidence
                     )
             if not result_evidence:
                 continue   # no rule fires — this path is dead

@@ -606,11 +606,11 @@ class Predictor:
                             # Apply rules in dependency order
                             _kl_ok = True
                             for _kl_rule in _kl_rules:
-                                _kl_res = _kl_rule.evaluate(_kl_vals, self._binary_fmaps)
-                                if _kl_res is None:
+                                _kl_dist = _kl_rule.evaluate(_kl_vals, self._binary_fmaps)
+                                if not _kl_dist:
                                     _kl_ok = False
                                     break
-                                _kl_vals[_kl_rule.output_role] = _kl_res
+                                _kl_vals[_kl_rule.output_role] = max(_kl_dist, key=_kl_dist.get)
                             if _kl_ok:
                                 # Rebuild predicted output with original delimiters
                                 _kl_out: list[str] = []
