@@ -56,10 +56,15 @@ from experiments.symbolic_ai_v2.corpus.math_generator import (
     bernoulli_trace_seqs,
     derivative_trace_seqs,
     integral_trace_seqs,
+    linear_solve_seqs,
 )
 from experiments.symbolic_ai_v2.ctkg.learning.hankel_count import HankelCount
 from experiments.symbolic_ai_v2.ctkg.learning.em_loop import em_loop
-from experiments.symbolic_ai_v2.ctkg.learning.mdl_prune import mdl_prune
+from experiments.symbolic_ai_v2.ctkg.learning.mdl_prune import (
+    mdl_prune,
+    semantic_deduplicate,
+    compute_storage_policy,
+)
 from experiments.symbolic_ai_v2.ctkg.learning.lens_update import compute_gradients, apply_gradients
 from experiments.symbolic_ai_v2.ctkg.learning.process_discover import (
     discover_processes,
@@ -86,6 +91,7 @@ LEVELS = [
     ("multiplication",        multiplication_seqs,        False),
     ("powers",                power_seqs,                 False),
     ("linear_eval",           linear_eval_seqs,           False),
+    ("linear_solve",          linear_solve_seqs,          False),
     ("derivatives",           derivative_seqs,            False),
     ("integrals",             integral_seqs,              False),
     # Phase D: step/ans traces
@@ -254,6 +260,20 @@ def run_benchmark() -> bool:
     vocab_size = len(list(hc.vocabulary()))
     mg = mdl_prune(mg, vocab_size=vocab_size, lambda_prune=0.05, min_support=2)
     print(f"After MDL pruning: {len(list(mg.morphisms()))} morphisms retained")
+
+    # ---- Phase VII: Semantic deduplication ----
+    mg_before_dedup = len(list(mg.morphisms()))
+    mg = semantic_deduplicate(mg, rules=[])
+    mg_after_dedup = len(list(mg.morphisms()))
+    print(f"After semantic dedup: {mg_after_dedup} morphisms "
+          f"({mg_before_dedup - mg_after_dedup} duplicates removed)")
+
+    # ---- Storage policy ----
+    storage_policy = compute_storage_policy(mg, rules=[], k_steps=5)
+    n_store = sum(1 for v in storage_policy.values() if v)
+    n_recon = sum(1 for v in storage_policy.values() if not v)
+    print(f"Storage policy: {n_store} store, {n_recon} reconstructible "
+          f"(of {len(storage_policy)} morph types)")
     print()
 
     # ---- Free category construction (CT_REFERENCE §17) ----
@@ -376,7 +396,49 @@ def run_benchmark() -> bool:
         if memorised:
             print(f"MEMORISED (recall OK, OOD fails): {', '.join(memorised)}")
         print("RESULT: SOME LEVELS FAILED OR DID NOT GENERALISE")
+
+    # ---- Knowledge graph inspection ----
+    _print_kg_summary(mg, lattice, "math")
+
     return all_pass
+
+
+def _print_kg_summary(mg: object, lattice: object, corpus_label: str) -> None:
+    """Print a compact summary of the knowledge graph for comparison."""
+    print()
+    print(f"=== Knowledge Graph Summary [{corpus_label}] ===")
+
+    # Objects
+    objs = list(mg.objects())
+    print(f"Objects (concepts): {len(objs)}")
+    for obj in sorted(objs, key=lambda o: o.label):
+        print(f"  [{obj.obj_id:3d}] {obj.label:<30} support={obj.concept.support:.1f}")
+
+    # Morphisms by type
+    from collections import Counter
+    type_counts: Counter = Counter()
+    type_evidence: dict = {}
+    for m in mg.morphisms(include_identity=False):
+        type_counts[m.morph_type] += 1
+        type_evidence[m.morph_type] = type_evidence.get(m.morph_type, 0) + m.evidence_count
+    print(f"\nMorphism types ({len(type_counts)} distinct, "
+          f"{sum(type_counts.values())} total non-identity):")
+    for mt, cnt in sorted(type_counts.items(), key=lambda x: -x[1])[:20]:
+        ev = type_evidence[mt]
+        print(f"  {mt:<40} count={cnt:3d}  evidence={ev:6.0f}")
+    if len(type_counts) > 20:
+        print(f"  ... ({len(type_counts) - 20} more types)")
+
+    # Concepts summary
+    concepts = list(lattice.concepts)
+    print(f"\nConcepts in lattice: {len(concepts)}")
+    top = sorted(concepts, key=lambda c: -c.support)[:10]
+    for c in top:
+        top_intent = sorted(c.intent_weights.items(), key=lambda x: -x[1])[:3]
+        intent_str = ', '.join(f'{k}:{v:.2f}' for k, v in top_intent)
+        print(f"  [{c.concept_id:3d}] support={c.support:6.1f}  intent=[{intent_str}]")
+
+    print()
 
 
 if __name__ == "__main__":

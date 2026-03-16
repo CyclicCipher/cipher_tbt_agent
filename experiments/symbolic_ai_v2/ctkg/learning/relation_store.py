@@ -7,11 +7,14 @@ structural tokens:
                    phase.  Every token between two consecutive output delimiters
                    belongs to that output role.
 
-  INPUT_SEPS     — tokens like 'x', 'at', 'dx' that appear at consistent
-                   positions in the input segment and act as named separators
-                   between input argument groups.  These are LEARNED from data:
-                   a token qualifies as an input separator if it appears at the
-                   same position in ≥80% of training sequences for that op.
+  INPUT_SEPS     — tokens that appear at consistent positions in the input
+                   segment and act as named separators between input argument
+                   groups.  These are LEARNED from data: a token qualifies as
+                   an input separator if it appears at the same position in
+                   ≥80% of training sequences for that op.  Any token can be
+                   a separator — there is NO pre-seeded keyword list.  This is
+                   the Iron Rule: separator identity is discovered from
+                   distributional statistics alone.
 
 The result is a Relation dict with structured input and output roles:
 
@@ -44,14 +47,9 @@ from typing import Optional
 # Tokens that mark the start of an output role segment.
 OUTPUT_DELIMS: frozenset[str] = frozenset({'eq', 'step', 'ans', '<eos>'})
 
-# Candidate tokens for input separators.  A token must be in this set AND
-# appear at a consistent position in the training data to become a separator.
-# This set is pre-seeded with known structural keywords; it does NOT include
-# digit tokens or operator names.
-KNOWN_INPUT_SEPS: frozenset[str] = frozenset({'x', 'at', 'dx'})
-
 # Fraction of training sequences that must agree on a position for it to be
-# treated as a structural separator.
+# treated as a structural separator.  Any token (not a pre-seeded list) can
+# qualify — Iron Rule compliance.
 _SEP_THRESHOLD: float = 0.80
 
 
@@ -62,6 +60,11 @@ _SEP_THRESHOLD: float = 0.80
 @dataclass
 class Relation:
     """Structured representation of one training/test sequence.
+
+    This is the canonical representation for multi-input operations /
+    hyperedges in the CTKG (see CTKG_ARCHITECTURE.md).  It is strictly
+    more expressive than MultiMorphism (ctkg/core/operad.py), which is
+    the degenerate anonymous/positional special case.
 
     Parameters
     ----------
@@ -74,10 +77,21 @@ class Relation:
     output_roles : list of (role_name, tokens)
         Output phases, keyed by their opening delimiter token
         ('eq', 'step', 'ans').  Ordered in sequence order.
+    input_type_dists : list of (role_name, type_dist), optional
+        Type distributions for each input role (derived from ConceptLattice
+        when available).  Parallel to input_roles; empty list = not set.
+    output_type_dists : list of (role_name, type_dist), optional
+        Type distributions for each output role (derived from ConceptLattice
+        when available).  Parallel to output_roles; empty list = not set.
     """
     op: str
     input_roles: list[tuple[str, list[str]]] = field(default_factory=list)
     output_roles: list[tuple[str, list[str]]] = field(default_factory=list)
+    # Optional type-distribution fields (Phase XI extension).
+    # type_dist = dict[ConceptId, float]; kept as plain dict to avoid
+    # circular imports with operad.py / concept_lattice.py.
+    input_type_dists: list[tuple[str, dict]] = field(default_factory=list)
+    output_type_dists: list[tuple[str, dict]] = field(default_factory=list)
 
     # ------------------------------------------------------------------
     # Convenience accessors
@@ -126,9 +140,10 @@ class RelationStore:
          passing to ``discover_rules()``.
 
     The store handles operators whose input sections contain natural separators
-    ('x', 'at', 'dx').  For operators with no internal separators (e.g.
-    'linsolve' with concatenated digit arguments), all input tokens are grouped
-    under a single unnamed role and the discovery falls back to the existing
+    (e.g. 'x', 'at', 'dx' for symbolic math ops — discovered from data, not
+    hard-coded).  For operators with no internal separators (e.g. 'linsolve'
+    with concatenated digit arguments), all input tokens are grouped under a
+    single unnamed role and the discovery falls back to the existing
     arity-aware pipeline.
     """
 
@@ -136,7 +151,10 @@ class RelationStore:
         # op → list of Relation objects
         self._relations: dict[str, list[Relation]] = {}
         # op → learned input schema: sorted [(position_in_input, sep_token), ...]
+        # Positional schemas use role names 'p0','p1',... as the sep_token field
         self._schemas: dict[str, list[tuple[int, str]]] = {}
+        # op → frozenset of all observed output role names ('step','ans','eq',...)
+        self._output_role_names: dict[str, frozenset[str]] = {}
 
     # ------------------------------------------------------------------
     # Building
@@ -160,10 +178,15 @@ class RelationStore:
         for op, op_seqs in raw.items():
             schema = self._schemas.get(op, [])
             rels = self._relations.setdefault(op, [])
+            out_roles: set[str] = set()
             for seq in op_seqs:
                 rel = _extract_relation(seq, schema)
                 if rel is not None:
                     rels.append(rel)
+                    for rname, _ in rel.output_roles:
+                        out_roles.add(rname)
+            existing = self._output_role_names.get(op, frozenset())
+            self._output_role_names[op] = existing | frozenset(out_roles)
 
     # ------------------------------------------------------------------
     # Querying
@@ -180,6 +203,10 @@ class RelationStore:
     def has_input_seps(self, op: str) -> bool:
         """Return True if *op* has learned input separators."""
         return bool(self._schemas.get(op))
+
+    def all_output_role_names(self, op: str) -> frozenset[str]:
+        """Return all output role names observed for *op* in training data."""
+        return self._output_role_names.get(op, frozenset())
 
     def extract_relation(self, seq: list[str]) -> Optional[Relation]:
         """Extract a Relation from a new (possibly OOD) sequence."""
@@ -260,6 +287,27 @@ class RelationStore:
         """
         return frozenset(op for op, schema in self._schemas.items() if schema)
 
+    def ops_with_schema(self) -> frozenset[str]:
+        """Return ops that have any learned schema (separator-based or positional).
+
+        Includes:
+        - Ops with named input separators (e.g. 'eval' with 'x','at')
+        - Ops with positional schemas (fixed-length separator-free inputs)
+        """
+        return frozenset(op for op, schema in self._schemas.items() if schema)
+
+    def ops_with_positional_schema(self) -> frozenset[str]:
+        """Return ops that have a positional schema (no separators, fixed length).
+
+        Positional role names match the pattern p0, p1, ... as assigned by
+        _learn_input_schema when no separator tokens are found.
+        """
+        result: set[str] = set()
+        for op, schema in self._schemas.items():
+            if schema and schema[0][1].startswith('p') and schema[0][1][1:].isdigit():
+                result.add(op)
+        return frozenset(result)
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -269,8 +317,9 @@ def _learn_input_schema(seqs: list[list[str]]) -> list[tuple[int, str]]:
     """Identify input-separator positions for an operator.
 
     Returns a sorted list of (position_in_input_segment, separator_token)
-    pairs.  A token qualifies if it is in KNOWN_INPUT_SEPS and appears at
-    the same position in ≥80% of training sequences for this op.
+    pairs.  A token qualifies if it appears at the same position in ≥80% of
+    training sequences for this op.  Any token can become a separator — no
+    pre-seeded keyword list (Iron Rule compliance).
 
     The *position_in_input_segment* counts tokens WITHIN the input segment
     (i.e. after the op token and before the first OUTPUT_DELIM).
@@ -294,20 +343,34 @@ def _learn_input_schema(seqs: list[list[str]]) -> list[tuple[int, str]]:
     n = len(input_segs)
     threshold = _SEP_THRESHOLD * n
 
-    # Count occurrences of each KNOWN_INPUT_SEP at each position
+    # Count occurrences of EVERY token at each position.
+    # Any token that appears at the same position in ≥80% of sequences
+    # is a structural separator — discovered purely from data.
     # pos_counts[pos][tok] = count
     pos_counts: dict[int, dict[str, int]] = {}
     for seg in input_segs:
         for i, tok in enumerate(seg):
-            if tok in KNOWN_INPUT_SEPS:
-                pos_counts.setdefault(i, {}).setdefault(tok, 0)
-                pos_counts[i][tok] += 1
+            pos_counts.setdefault(i, {}).setdefault(tok, 0)
+            pos_counts[i][tok] += 1
 
     schema: list[tuple[int, str]] = []
     for pos, tok_counts in sorted(pos_counts.items()):
         for tok, cnt in tok_counts.items():
             if cnt >= threshold:
                 schema.append((pos, tok))
+
+    if schema:
+        return schema
+
+    # No separator tokens found.  Check if ALL input segments have the same
+    # length — if so, assign positional role names 'p0','p1',...,'p{L-1}'.
+    # Positional schemas are detected in _extract_relation by checking whether
+    # the first schema entry's role name starts with 'p' and is a digit string.
+    lengths = {len(seg) for seg in input_segs}
+    if len(lengths) == 1:
+        L = next(iter(lengths))
+        if L > 0:
+            return [(i, f'p{i}') for i in range(L)]
 
     return schema
 
@@ -340,7 +403,20 @@ def _extract_relation(seq: list[str], schema: list[tuple[int, str]]) -> Optional
 
     # ---- Parse input_tokens into roles using schema ----
     input_roles: list[tuple[str, list[str]]] = []
-    if schema:
+    _is_positional = bool(
+        schema
+        and schema[0][1].startswith('p')
+        and schema[0][1][1:].isdigit()
+    )
+    if _is_positional:
+        # Positional schema: each schema entry (pos, 'p{pos}') assigns the
+        # token at that position to its own role.  Tokens beyond the schema
+        # length (e.g. OOD sequences with extra digits) are dropped so that
+        # rule evaluation stays within the discovered positional structure.
+        for pos, role_name in schema:
+            if pos < len(input_tokens):
+                input_roles.append((role_name, [input_tokens[pos]]))
+    elif schema:
         sorted_schema = sorted(schema, key=lambda x: x[0])
         prev_end = 0
         prev_sep = ''
@@ -424,6 +500,7 @@ def discover_relation_rules(
     bfm: dict[str, dict[tuple, str]],
     min_evidence: int = 2,
     unknown_tolerance: float = 0.20,
+    mismatch_tolerance: float = 0.0,
 ) -> list[RelationRule]:
     """Discover RelationRules from a list of Relations.
 
@@ -447,6 +524,12 @@ def discover_relation_rules(
         Minimum number of matching examples for a rule to be accepted.
     unknown_tolerance : float
         Maximum fraction of examples that can be 'unknown' (missing from bfm).
+    mismatch_tolerance : float
+        Maximum fraction of examples that can be 'mismatch' (bfm returns a
+        different value than the target).  Default 0.0 = strict (any mismatch
+        rejects the rule).  Use a small positive value (e.g. 0.25) for ops
+        where the training corpus intentionally mixes different sub-cases
+        (e.g. sq(n) for n≥10 produces 3-digit answers not in the BFM).
 
     Returns
     -------
@@ -504,9 +587,13 @@ def discover_relation_rules(
             available_source_roles.append(target_role)
             continue
 
-        # Try all binary functional combinations
-        best_rule: Optional[RelationRule] = None
-        best_evidence = 0
+        # Try all binary functional combinations.
+        # Phase XV (Coproducts): collect ALL qualifying rules, not just the best.
+        # Multiple rules for the same output_role represent a coproduct A ⊔ B:
+        # the output type is the disjoint union of all supported interpretations.
+        # For deterministic ops (arithmetic) this degenerates to a single rule;
+        # for genuinely ambiguous ops (NLP) multiple rules carry different weights.
+        role_rules: list[RelationRule] = []
 
         source_roles = list(available_source_roles)
 
@@ -515,7 +602,7 @@ def discover_relation_rules(
                 for role_b in source_roles:
                     n_match = 0
                     n_unknown = 0
-                    mismatch = False
+                    n_mismatch = 0
                     for role_vals, target_val in examples:
                         va = role_vals.get(role_a)
                         vb = role_vals.get(role_b)
@@ -527,27 +614,25 @@ def discover_relation_rules(
                             n_unknown += 1
                             continue
                         if result != target_val:
-                            mismatch = True
-                            break
-                        n_match += 1
+                            n_mismatch += 1
+                        else:
+                            n_match += 1
                     n = len(examples)
-                    if (not mismatch
-                            and n_match >= min_evidence
-                            and n_unknown / n <= unknown_tolerance):
-                        if n_match > best_evidence:
-                            best_evidence = n_match
-                            best_rule = RelationRule(
-                                output_role=target_role,
-                                op_name=op_name,
-                                arg1=role_a,
-                                arg2=role_b,
-                                evidence=n_match,
-                            )
+                    if (n_match >= min_evidence
+                            and n_unknown / n <= unknown_tolerance
+                            and n_mismatch / n <= mismatch_tolerance):
+                        role_rules.append(RelationRule(
+                            output_role=target_role,
+                            op_name=op_name,
+                            arg1=role_a,
+                            arg2=role_b,
+                            evidence=n_match,
+                        ))
 
-        if best_rule is not None:
-            discovered.append(best_rule)
+        discovered.extend(role_rules)
 
-        # Make this role available as a source for subsequent rules
+        # Make this role available as a source for subsequent rules.
+        # Use the highest-evidence rule's result for deterministic chaining.
         available_source_roles.append(target_role)
 
     return sorted(discovered, key=lambda r: -r.evidence)
@@ -605,6 +690,236 @@ def predict_from_relation_rules(
     return output_toks
 
 
+def predict_alternatives_from_rules(
+    seq: list[str],
+    store: 'RelationStore',
+    rules_by_op: dict[str, list[RelationRule]],
+    bfm: dict[str, dict[tuple, str]],
+) -> list[tuple[list[str], float]]:
+    """Return all consistent output alternatives with evidence weights (Phase XV).
+
+    This is the coproduct-aware prediction function.  Where
+    ``predict_from_relation_rules`` commits to one output (the best rule),
+    this function returns ALL outputs that can be produced by ANY combination
+    of qualifying rules, weighted by cumulative rule evidence.
+
+    The result is a list of ``(output_token_list, weight)`` pairs:
+
+    - **One element** when all applicable rules for every output role agree on
+      the same result (the deterministic case — arithmetic, fully-determined ops).
+      The coproduct degenerates to a point; weight = 1.0.
+
+    - **Multiple elements** when competing rules for some output role give
+      different results (the genuinely ambiguous case — NLP lexical ambiguity,
+      underspecified contexts).  Weights are proportional to evidence and sum
+      to 1.0 over the full set of alternatives.
+
+    Categorical structure
+    --------------------
+    Each output role's set of competing results is an object in the coproduct
+    A₁ ⊔ A₂ ⊔ ... ⊔ Aₖ of alternative interpretations.  The evidence weights
+    are the Markov kernel (CT_REFERENCE §15) from the input to the coproduct:
+    a morphism in Stoch rather than Set.  ``predict_next`` uses these weights
+    to produce a soft prediction — a Kleisli morphism in the probability monad
+    rather than a deterministic function.
+
+    Returns an empty list if no rules fire.
+    """
+    from collections import defaultdict
+
+    if not seq:
+        return []
+    rel = store.extract_relation(seq)
+    if rel is None:
+        return []
+    op = rel.op
+    op_rules = rules_by_op.get(op)
+    if not op_rules:
+        return []
+
+    # Build initial role_values from input roles
+    role_values_base: dict[str, str] = {}
+    for sep, toks in rel.input_roles:
+        rname = sep if sep else ''
+        if toks:
+            role_values_base[rname] = ''.join(toks)
+
+    # Group rules by output_role, preserving the dependency order (step → ans).
+    rules_by_role: dict[str, list[RelationRule]] = defaultdict(list)
+    role_order: list[str] = []
+    seen_roles: set[str] = set()
+    for rule in sorted(op_rules, key=lambda r: -r.evidence):
+        if rule.output_role not in seen_roles:
+            seen_roles.add(rule.output_role)
+            role_order.append(rule.output_role)
+        rules_by_role[rule.output_role].append(rule)
+
+    # Walk the dependency chain, branching on each output role that has
+    # competing results.  Each "path" is (role_values, cumulative_weight,
+    # output_parts).  Branching is the coproduct injection; merging
+    # (same result from multiple rules) is the copairing.
+    paths: list[tuple[dict[str, str], float, list[tuple[str, str]]]] = [
+        (dict(role_values_base), 1.0, [])
+    ]
+
+    for role_name in role_order:
+        role_rules = rules_by_role[role_name]
+        new_paths: list[tuple[dict[str, str], float, list[tuple[str, str]]]] = []
+        for role_vals, weight, output_parts in paths:
+            # Collect all results this role can produce, summing evidence
+            # when multiple rules agree (copairing: f+g when f=g on a branch).
+            result_evidence: dict[str, float] = {}
+            for rule in role_rules:
+                result = rule.evaluate(role_vals, bfm)
+                if result is not None:
+                    result_evidence[result] = (
+                        result_evidence.get(result, 0.0) + rule.evidence
+                    )
+            if not result_evidence:
+                continue   # no rule fires — this path is dead
+            total = sum(result_evidence.values())
+            for result_str, ev in result_evidence.items():
+                new_rv = dict(role_vals)
+                new_rv[role_name] = result_str
+                new_paths.append((
+                    new_rv,
+                    weight * ev / total,
+                    output_parts + [(role_name, result_str)],
+                ))
+        paths = new_paths
+        if not paths:
+            return []
+
+    # Convert paths to (output_token_list, weight) pairs.
+    alternatives: list[tuple[list[str], float]] = []
+    for _, weight, output_parts in paths:
+        output_toks: list[str] = []
+        for role_name, result_str in output_parts:
+            output_toks.append(role_name)
+            output_toks.extend(list(result_str))
+        alternatives.append((output_toks, weight))
+
+    return alternatives
+
+
+def discover_kleisli_chains(
+    relations: list['Relation'],
+    bfm: dict[str, dict[tuple, str]],
+    min_evidence: int = 2,
+    mismatch_tolerance: float = 0.25,
+) -> tuple[Optional[str], dict[str, list['RelationRule']]]:
+    """Discover Kleisli chain rules for variable-depth output ops.
+
+    For ops where different inputs produce different numbers of 'step' tokens
+    (e.g. pow(base, exp) has exp-1 intermediate steps), groups relations by
+    the value of a discriminator role — the input role whose value uniquely
+    determines the step count.  For each group, reindexes repeated 'step'
+    output roles as 'step_0', 'step_1', ..., then discovers RelationRules
+    per depth group.
+
+    Returns
+    -------
+    (disc_role_name, {disc_val: ordered_rules})
+    Returns (None, {}) if the op has fixed depth or no discriminator is found.
+    """
+    if not relations:
+        return None, {}
+
+    # Count step tokens per relation
+    step_counts = [
+        sum(1 for rname, _ in rel.output_roles if rname == 'step')
+        for rel in relations
+    ]
+    unique_depths = set(step_counts)
+
+    # Fixed depth — standard discover_relation_rules suffices
+    if len(unique_depths) <= 1:
+        return None, {}
+
+    if not relations[0].input_roles:
+        return None, {}
+
+    input_role_names = [sep if sep else '' for sep, _ in relations[0].input_roles]
+
+    # Find discriminator: the input role whose value uniquely determines step count
+    disc_role: Optional[str] = None
+    for role_name in input_role_names:
+        val_to_depths: dict[str, set[int]] = {}
+        for rel, n_steps in zip(relations, step_counts):
+            val = None
+            for sep, toks in rel.input_roles:
+                rn = sep if sep else ''
+                if rn == role_name and toks:
+                    val = ''.join(toks)
+                    break
+            if val is not None:
+                val_to_depths.setdefault(val, set()).add(n_steps)
+        if val_to_depths and all(len(v) == 1 for v in val_to_depths.values()):
+            disc_role = role_name
+            break
+
+    if disc_role is None:
+        return None, {}
+
+    # Group relations by discriminator value
+    groups: dict[str, list[Relation]] = {}
+    for rel in relations:
+        val = None
+        for sep, toks in rel.input_roles:
+            rn = sep if sep else ''
+            if rn == disc_role and toks:
+                val = ''.join(toks)
+                break
+        if val is not None:
+            groups.setdefault(val, []).append(rel)
+
+    result: dict[str, list[RelationRule]] = {}
+
+    for disc_val, group_rels in groups.items():
+        if len(group_rels) < min_evidence:
+            continue
+
+        # Reindex repeated 'step' output roles: step → step_0, step_1, ...
+        def _reindex(rel: 'Relation') -> 'Relation':
+            new_out: list[tuple[str, list[str]]] = []
+            step_idx = 0
+            for rname, toks in rel.output_roles:
+                if rname == 'step':
+                    new_out.append((f'step_{step_idx}', list(toks)))
+                    step_idx += 1
+                else:
+                    new_out.append((rname, list(toks)))
+            return Relation(op=rel.op, input_roles=rel.input_roles, output_roles=new_out)
+
+        reindexed = [_reindex(r) for r in group_rels]
+
+        # Expected output roles for this group (from the first relation)
+        expected_roles: set[str] = {rname for rname, _ in reindexed[0].output_roles}
+
+        rules = discover_relation_rules(
+            reindexed, bfm,
+            min_evidence=min_evidence,
+            mismatch_tolerance=mismatch_tolerance,
+        )
+
+        if not rules:
+            continue
+
+        covered = {r.output_role for r in rules}
+        if not expected_roles.issubset(covered):
+            continue  # incomplete chain — would produce wrong output structure
+
+        # Sort rules in dependency order (step_0, step_1, ..., ans)
+        role_order = [rname for rname, _ in reindexed[0].output_roles]
+        ordered = sorted(
+            rules,
+            key=lambda r: role_order.index(r.output_role) if r.output_role in role_order else 999,
+        )
+        result[disc_val] = ordered
+
+    return disc_role, result
+
+
 def _merge_digit_runs(tokens: list[str], nno_atoms: frozenset[str]) -> list[str]:
     """Merge consecutive NNO-alphabet tokens into a single compound token.
 
@@ -626,3 +941,17 @@ def _merge_digit_runs(tokens: list[str], nno_atoms: frozenset[str]) -> list[str]
     if run:
         result.append(''.join(run))
     return result
+
+
+def _split_compound(tok: str, nno_atoms: frozenset[str]) -> list[str]:
+    """Split a compound NNO token back to individual single-char tokens.
+
+    Inverse of _merge_digit_runs for single tokens.
+    E.g. '12' → ['1', '2'] when '1' and '2' are in nno_atoms.
+    Returns [tok] unchanged if single-char or not all-NNO.
+    """
+    if len(tok) <= 1:
+        return [tok]
+    if all(c in nno_atoms for c in tok):
+        return list(tok)
+    return [tok]

@@ -625,6 +625,30 @@ def integral_trace_seqs() -> tuple[list, list]:
     return _split(seqs, test_frac=0.2, seed=13)
 
 
+# ── Level 6b: Linear solve (equalizer) ────────────────────────────────────────
+
+def linear_solve_seqs() -> tuple[list, list]:
+    """lsolve A x B from C eq V — find V such that A*V + B = C.
+
+    This is the categorical equalizer of (λv. A*v + B) and (λv. C):
+    enumerate all candidates and return the one where both sides agree.
+
+    Format: lsolve A x B from C eq V
+    Same range as linear_eval: A ∈ 1..6, B ∈ 0..5, V ∈ 0..7, C = A*V + B.
+    """
+    seqs = []
+    for a in range(1, 7):
+        for b in range(0, 6):
+            for v in range(0, 8):
+                c = a * v + b
+                if c <= 50:
+                    seqs.append(
+                        ['lsolve'] + _digits(a) + ['x'] + _digits(b) +
+                        ['from'] + _digits(c) + ['eq'] + _digits(v)
+                    )
+    return _split(seqs, test_frac=0.2, seed=17)
+
+
 # ── All levels ─────────────────────────────────────────────────────────────────
 
 LEVELS: list[tuple[str, callable]] = [
