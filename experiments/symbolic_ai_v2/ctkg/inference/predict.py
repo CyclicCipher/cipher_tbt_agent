@@ -73,6 +73,11 @@ from experiments.symbolic_ai_v2.ctkg.core.context_category import (
     ContextCategory,
     ContextId,
 )
+from experiments.symbolic_ai_v2.ctkg.core.lambda_term import (
+    LambdaTerm,
+    lambda_predict,
+    synthesize_library,
+)
 
 
 
@@ -422,6 +427,18 @@ class Predictor:
             self._kleisli_chains: dict[str, dict[str, list[RelationRule]]] = {}
             self._kleisli_disc_roles: dict[str, str] = {}
 
+        # Phase XX: synthesise LambdaTerms from RelationRules.
+        # Each RelationRule sequence is lifted to an explicit lambda term
+        # (LetStep chain) over the Expr algebra.  This enables:
+        #   1. Provably generative prediction (not table lookup).
+        #   2. Creative transfer: novel ops handled via structural similarity.
+        if self._rs is not None and self._relation_rules:
+            self._lambda_library: dict[str, LambdaTerm] = synthesize_library(
+                self._relation_rules, self._rs
+            )
+        else:
+            self._lambda_library = {}
+
         # Phase XIX: context category for sheaf-theoretic dispatch.
         self._ctx_cat = ContextCategory()
 
@@ -485,6 +502,21 @@ class Predictor:
                 result = _chain_predict(chain_rule, chain_state.input_tokens, chain_state.output_tokens, use_eq_table=use_eq)
                 if result is not None:
                     return result
+
+                # Level 1b-λ: Lambda term evaluation (Phase XX).
+                # Presheaf section at ContextId.ANY (all formats).
+                # Evaluates the op's LambdaTerm (synthesised from RelationRules)
+                # on the observed input tokens.  More general than chain table
+                # lookup (Level 1b) — fires for OOD inputs not in the table.
+                # Creative transfer fires when op has no lambda term but a
+                # structurally compatible term exists in the library.
+                if self._lambda_library and not use_eq:
+                    _lt_result = lambda_predict(
+                        prefix, self._lambda_library, self._binary_fmaps,
+                        allow_transfer=True,
+                    )
+                    if _lt_result is not None:
+                        return _lt_result
 
                 # Level 1c-relational: arity-free hypergraph rule prediction.
                 # Uses RelationRules discovered from named-role tuples — no arities,
@@ -592,6 +624,22 @@ class Predictor:
                                 if _kl_rk == len(_kl_out):
                                     return {'<eos>': 1.0}
 
+
+        # Level 1b-λ (outer): creative transfer for ops NOT in chain_op_atoms.
+        # Fires for novel ops (not seen in training) that are structurally
+        # compatible with a known lambda term in the library (Phase XX).
+        # Presheaf section at ContextId.TRACE/INPUT (non-eq-format).
+        if (self._lambda_library
+                and not self._ctx_cat.is_refinement(ctx, ContextId.EQ)
+                and prefix):
+            _op_candidate = prefix[0] if prefix else ''
+            if _op_candidate not in self._chain_op_atoms:
+                _lt_outer = lambda_predict(
+                    prefix, self._lambda_library, self._binary_fmaps,
+                    allow_transfer=True,
+                )
+                if _lt_outer is not None:
+                    return _lt_outer
 
         # Level 1d: Equalizer solve — BFM enumeration (Phase XVII).
         # Presheaf section at ContextId.EQ: only fires in equation-format prefixes.
