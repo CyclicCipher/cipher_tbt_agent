@@ -1,1 +1,1 @@
-# symbolic_ai_v2/core — the single algorithm on a single data structure
+# experiments/symbolic_ai_v2/core — topology and environment infrastructure

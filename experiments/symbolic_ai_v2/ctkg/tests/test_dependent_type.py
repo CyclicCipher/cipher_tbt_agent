@@ -25,6 +25,7 @@ if _REPO_ROOT not in sys.path:
 
 import pytest
 
+from experiments.symbolic_ai_v2.ctkg.core.node import TOKEN_GRAPH, enc
 from experiments.symbolic_ai_v2.ctkg.core.dependent_type import (
     TypeTerm,
     NNO_DIGIT,
@@ -44,12 +45,22 @@ from experiments.symbolic_ai_v2.ctkg.learning.relation_store import (
 )
 
 
-# Anonymization bijection from anon_math_benchmark
-DIGIT_PERM = {'0': 'g', '1': 'b', '2': 'h', '3': 'e', '4': 'c',
-              '5': 'f', '6': 'a', '7': 'i', '8': 'd', '9': 'j'}
+# ---------------------------------------------------------------------------
+# Test fixtures: NodeId-keyed succ chains
+# ---------------------------------------------------------------------------
 
-SUCC_STD = {str(i): str(i + 1) for i in range(9)}   # 0→1, ..., 8→9
-SUCC_ANON = {DIGIT_PERM[str(i)]: DIGIT_PERM[str(i + 1)] for i in range(9)}
+# Standard digit chain 0→1→...→9 (NodeId keys)
+SUCC_STD: dict = {enc(str(i)): enc(str(i + 1)) for i in range(9)}
+
+# Anonymized digit chain using a fixed permutation
+DIGIT_PERM_STR = {'0': 'g', '1': 'b', '2': 'h', '3': 'e', '4': 'c',
+                  '5': 'f', '6': 'a', '7': 'i', '8': 'd', '9': 'j'}
+DIGIT_PERM: dict = {enc(k): enc(v) for k, v in DIGIT_PERM_STR.items()}
+
+SUCC_ANON: dict = {
+    enc(DIGIT_PERM_STR[str(i)]): enc(DIGIT_PERM_STR[str(i + 1)])
+    for i in range(9)
+}
 
 
 # ---------------------------------------------------------------------------
@@ -59,19 +70,19 @@ SUCC_ANON = {DIGIT_PERM[str(i)]: DIGIT_PERM[str(i + 1)] for i in range(9)}
 class TestWalkChain:
     def test_linear_chain_starts_at_zero(self):
         chain = _walk_chain(SUCC_STD)
-        assert chain[0] == '0'
+        assert chain[0] == enc('0')
 
     def test_linear_chain_ordered(self):
         chain = _walk_chain(SUCC_STD)
-        assert chain == [str(i) for i in range(10)]
+        assert chain == [enc(str(i)) for i in range(10)]
 
     def test_single_element(self):
-        chain = _walk_chain({'a': 'b'})
-        assert chain == ['a', 'b']
+        chain = _walk_chain({enc('a'): enc('b')})
+        assert chain == [enc('a'), enc('b')]
 
     def test_cyclic_chain_length(self):
         # Fully cyclic: no element without a predecessor
-        cyc = {'0': '1', '1': '2', '2': '0'}
+        cyc = {enc('0'): enc('1'), enc('1'): enc('2'), enc('2'): enc('0')}
         chain = _walk_chain(cyc)
         assert len(chain) == 3
 
@@ -84,38 +95,41 @@ class TestInferTokenTypes:
     def test_nno_digits_assigned(self):
         types = infer_token_types(SUCC_STD)
         for i in range(10):
-            assert types[str(i)].tag == 'NNO_DIGIT'
+            assert types[enc(str(i))].tag == 'NNO_DIGIT'
 
     def test_ordinals_correct(self):
         types = infer_token_types(SUCC_STD)
         for i in range(10):
-            assert types[str(i)].ordinal == i
+            assert types[enc(str(i))].ordinal == i
 
     def test_structural_token(self):
         types = infer_token_types(SUCC_STD)
-        assert types['step'].tag == 'STRUCTURAL'
-        assert types['ans'].tag == 'STRUCTURAL'
+        from experiments.symbolic_ai_v2.ctkg.core.node import STEP_NODE, ANS_NODE
+        assert types[STEP_NODE].tag == 'STRUCTURAL'
+        assert types[ANS_NODE].tag == 'STRUCTURAL'
 
     def test_carry_token_not_in_chain(self):
         # '0' and '1' ARE in the standard chain, so they get NNO_DIGIT
         types = infer_token_types(SUCC_STD)
-        assert types['0'].tag == 'NNO_DIGIT'
-        assert types['1'].tag == 'NNO_DIGIT'
+        assert types[enc('0')].tag == 'NNO_DIGIT'
+        assert types[enc('1')].tag == 'NNO_DIGIT'
 
     def test_custom_carry_not_in_chain(self):
         # Custom carry token not present in the chain
-        types = infer_token_types({'a': 'b', 'b': 'c'},
-                                  carry_tokens=frozenset({'x'}))
-        assert types['x'].tag == 'NNO_CARRY'
+        types = infer_token_types(
+            {enc('a'): enc('b'), enc('b'): enc('c')},
+            carry_tokens=frozenset({enc('x')}),
+        )
+        assert types[enc('x')].tag == 'NNO_CARRY'
 
     def test_unknown_for_unrecognized_token(self):
         types = infer_token_types(SUCC_STD)
-        assert token_type('zzz', types) == UNKNOWN
+        assert token_type(enc('zzz'), types) == UNKNOWN
 
     def test_anonymized_chain_gets_same_ordinals(self):
         types_anon = infer_token_types(SUCC_ANON)
         for i in range(9):   # succ chain 0→1...8→9 only, 9 has no successor
-            anon_tok = DIGIT_PERM[str(i)]
+            anon_tok = enc(DIGIT_PERM_STR[str(i)])
             assert types_anon[anon_tok].ordinal == i
 
 
@@ -161,7 +175,7 @@ class TestAnonymizationTheorem:
         types_anon = infer_token_types(SUCC_ANON)
         # Swap two entries in the bijection to break ordinal alignment
         bad_perm = dict(DIGIT_PERM)
-        bad_perm['0'], bad_perm['1'] = bad_perm['1'], bad_perm['0']
+        bad_perm[enc('0')], bad_perm[enc('1')] = bad_perm[enc('1')], bad_perm[enc('0')]
         assert not types_compatible_under_bijection(types_std, types_anon, bad_perm)
 
     def test_empty_bijection_trivially_passes(self):
@@ -174,13 +188,31 @@ class TestAnonymizationTheorem:
 # RelationRule type annotation integration
 # ---------------------------------------------------------------------------
 
-def _make_bfm():
+class _MockEngine:
+    """Minimal engine wrapping a BFM dict for test compatibility."""
+    def __init__(self, bfm: dict) -> None:
+        self._bfm = bfm
+
+    def compute(self, op: str, a: str, b: str):
+        result = self._bfm.get(op, {}).get((a, b))
+        return (result,) if result is not None else None
+
+    def compute_tup(self, op: str, a_tup: tuple, b_tup: tuple):
+        if len(a_tup) == 1 and len(b_tup) == 1:
+            return self.compute(op, a_tup[0], b_tup[0])
+        return None
+
+    def known_ops(self) -> list:
+        return list(self._bfm.keys())
+
+
+def _make_engine():
     bfm = {'add': {}}
     for a in range(10):
         for b in range(10):
             if a + b < 10:
                 bfm['add'][(str(a), str(b))] = str(a + b)
-    return bfm
+    return _MockEngine(bfm)
 
 
 def _make_add_relations():
@@ -195,9 +227,9 @@ def _make_add_relations():
 
 class TestRelationRuleTypes:
     def test_without_type_context_types_are_none(self):
-        bfm = _make_bfm()
+        engine = _make_engine()
         rels = _make_add_relations()
-        rules = discover_relation_rules(rels, bfm)
+        rules = discover_relation_rules(rels, engine)
         assert rules
         rule = rules[0]
         assert rule.arg1_type is None
@@ -205,10 +237,10 @@ class TestRelationRuleTypes:
         assert rule.output_type is None
 
     def test_with_type_context_types_assigned(self):
-        bfm = _make_bfm()
+        engine = _make_engine()
         rels = _make_add_relations()
         type_ctx = infer_token_types(SUCC_STD)
-        rules = discover_relation_rules(rels, bfm, type_context=type_ctx)
+        rules = discover_relation_rules(rels, engine, type_context=type_ctx)
         assert rules
         rule = rules[0]
         assert rule.arg1_type is not None
@@ -218,10 +250,10 @@ class TestRelationRuleTypes:
 
     def test_type_ordinals_universally_quantified(self):
         # Rule type annotations have ordinal=None (universally quantified)
-        bfm = _make_bfm()
+        engine = _make_engine()
         rels = _make_add_relations()
         type_ctx = infer_token_types(SUCC_STD)
-        rules = discover_relation_rules(rels, bfm, type_context=type_ctx)
+        rules = discover_relation_rules(rels, engine, type_context=type_ctx)
         assert rules
         rule = rules[0]
         # Rules are universally quantified — ordinal=None

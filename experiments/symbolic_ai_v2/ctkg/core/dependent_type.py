@@ -31,20 +31,28 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
+from experiments.symbolic_ai_v2.ctkg.core.node import (
+    TOKEN_GRAPH,
+    NodeId,
+    EQ_NODE,
+    STEP_NODE,
+    ANS_NODE,
+    EOS_NODE,
+    PAD_NODE,
+)
+
 
 # ---------------------------------------------------------------------------
 # Structural tokens — always typed STRUCTURAL regardless of position
 # ---------------------------------------------------------------------------
 
-STRUCTURAL_TOKENS: frozenset[str] = frozenset({
-    'step', 'ans', 'eq', '<eos>', '<pad>',
-    'succ', 'pred', 'add', 'sub', 'mul', 'div', 'pow', 'sq',
-    'linear_eval', 'linear_trace', 'linear_solve',
-    'bern_p1', 'bern_p2', 'bernoulli_trace',
-    'algebra_trace', 'conservation_scenario',
-    'power_trace', 'derivative_trace', 'integral_trace',
-    'derivatives', 'integrals', 'powers',
-    'a', 'x', 'at', 'dx',   # separator tokens for trace ops
+STRUCTURAL_TOKENS: frozenset[NodeId] = frozenset({
+    # Format separators and end-of-sequence markers — domain-independent.
+    # Operator names (succ, add, mul, …) and domain-specific separators
+    # (linear_eval, bern_p1, …) are NOT included here: they may coincide
+    # with vocabulary tokens in NL mode and must be inferred from the
+    # relation store's schema, not hardcoded.
+    STEP_NODE, ANS_NODE, EQ_NODE, EOS_NODE, PAD_NODE,
 })
 
 
@@ -101,7 +109,7 @@ UNKNOWN = TypeTerm(tag='UNKNOWN')
 # Chain walking
 # ---------------------------------------------------------------------------
 
-def _walk_chain(succ_chain: dict[str, str]) -> list[str]:
+def _walk_chain(succ_chain: dict[NodeId, NodeId]) -> list[NodeId]:
     """Walk succ_chain from the zero element (no predecessor) in order.
 
     Returns the ordered list [zero, succ(zero), succ²(zero), ...].
@@ -112,8 +120,8 @@ def _walk_chain(succ_chain: dict[str, str]) -> list[str]:
     zero_candidates = sources - values
     zero = next(iter(zero_candidates)) if zero_candidates else next(iter(sources))
 
-    chain: list[str] = []
-    seen: set[str] = set()
+    chain: list[NodeId] = []
+    seen: set[NodeId] = set()
     cur = zero
     while cur in succ_chain and cur not in seen:
         chain.append(cur)
@@ -129,27 +137,27 @@ def _walk_chain(succ_chain: dict[str, str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def infer_token_types(
-    succ_chain: dict[str, str],
-    carry_tokens: frozenset[str] = frozenset({'0', '1'}),
-    structural_tokens: frozenset[str] = STRUCTURAL_TOKENS,
-) -> dict[str, TypeTerm]:
+    succ_chain: dict[NodeId, NodeId],
+    carry_tokens: frozenset[NodeId] = frozenset(),
+    structural_tokens: frozenset[NodeId] = STRUCTURAL_TOKENS,
+) -> dict[NodeId, TypeTerm]:
     """Assign TypeTerms to all tokens reachable from succ_chain.
 
     Parameters
     ----------
-    succ_chain : dict[str, str]
-        The NNO successor map tok → succ(tok).
-    carry_tokens : frozenset[str]
+    succ_chain : dict[NodeId, NodeId]
+        The NNO successor map tok → succ(tok), with NodeId keys and values.
+    carry_tokens : frozenset[NodeId]
         Tokens that act as carry values.  If a carry token is also in the
         NNO chain, it gets NNO_DIGIT type (chain takes priority).
-    structural_tokens : frozenset[str]
+    structural_tokens : frozenset[NodeId]
         Operator/delimiter tokens — always STRUCTURAL.
 
     Returns
     -------
-    dict mapping each known token to its TypeTerm.
+    dict mapping each known NodeId to its TypeTerm.
     """
-    result: dict[str, TypeTerm] = {}
+    result: dict[NodeId, TypeTerm] = {}
 
     # NNO chain tokens get ordinal-specific NNO_DIGIT types
     chain = _walk_chain(succ_chain)
@@ -169,25 +177,29 @@ def infer_token_types(
     return result
 
 
-def token_type(tok: str, type_context: dict[str, TypeTerm]) -> TypeTerm:
+def token_type(tok: NodeId, type_context: dict[NodeId, TypeTerm]) -> TypeTerm:
     """Look up tok's type, returning UNKNOWN if not in context."""
     return type_context.get(tok, UNKNOWN)
 
 
 def rule_type_tag(
-    role_values: dict[str, str],
-    role_name: str,
-    type_context: dict[str, TypeTerm],
+    role_values: dict[NodeId, tuple],
+    role_name: NodeId,
+    type_context: dict[NodeId, TypeTerm],
 ) -> TypeTerm:
     """Return the type tag (ordinal=None) for the token at *role_name*.
 
     Used when annotating RelationRule inputs: we want the structural type
     (tag only, no specific ordinal) so the rule is universally quantified.
+
+    role_values maps role NodeId → tuple of value NodeIds.
     """
-    val = role_values.get(role_name)
-    if val is None:
+    val_tup = role_values.get(role_name)
+    if val_tup is None or len(val_tup) == 0:
         return UNKNOWN
-    tt = type_context.get(val, UNKNOWN)
+    # Use the first element of the value tuple for type inference
+    val_nid = val_tup[0]
+    tt = type_context.get(val_nid, UNKNOWN)
     # Strip ordinal for rule annotations (universal quantification)
     return TypeTerm(tag=tt.tag, ordinal=None)
 
@@ -197,9 +209,9 @@ def rule_type_tag(
 # ---------------------------------------------------------------------------
 
 def types_compatible_under_bijection(
-    types_a: dict[str, TypeTerm],
-    types_b: dict[str, TypeTerm],
-    bijection: dict[str, str],
+    types_a: dict[NodeId, TypeTerm],
+    types_b: dict[NodeId, TypeTerm],
+    bijection: dict[NodeId, NodeId],
 ) -> bool:
     """Return True iff bijection maps NNO ordinals consistently.
 

@@ -101,6 +101,16 @@ class ContextCategory:
     how each rule handles the prefix — the rule at c is automatically
     "restricted" to c' by the fact that c' satisfies all constraints of c.
 
+    Parameters
+    ----------
+    eq_token : str
+        The token that separates input from output in eq-format sequences.
+        Default 'eq'; may be an anonymous Unicode symbol.
+    step_token : str
+        Trace-format step delimiter.  Default 'step'.
+    ans_token : str
+        Trace-format answer delimiter.  Default 'ans'.
+
     Usage in predict.py::
 
         ctx = self._ctx_cat.classify(prefix)
@@ -113,6 +123,16 @@ class ContextCategory:
         # chain rule section at ANY to the EQ or TRACE sub-context:
         use_eq = self._ctx_cat.is_refinement(ctx, ContextId.EQ)
     """
+
+    def __init__(
+        self,
+        eq_token: str = "eq",
+        step_token: str = "step",
+        ans_token: str = "ans",
+    ) -> None:
+        self._eq_token = eq_token
+        self._step_token = step_token
+        self._ans_token = ans_token
 
     def is_refinement(self, ctx: ContextId, of: ContextId) -> bool:
         """Return True iff *ctx* IS-A *of* (ctx refines of).
@@ -144,8 +164,8 @@ class ContextCategory:
         """
         if not prefix:
             return ContextId.INPUT
-        if 'eq' in prefix:
+        if self._eq_token in prefix:
             return ContextId.EQ
-        if 'step' in prefix or 'ans' in prefix:
+        if self._step_token in prefix or self._ans_token in prefix:
             return ContextId.TRACE
         return ContextId.INPUT

@@ -337,6 +337,7 @@ def run_benchmark() -> bool:
         k_neighbours=K,
         r=R,
         fc=fc,
+        raw_corpus=train_all,
     )
 
     # ---- Evaluate per level ----
@@ -412,7 +413,8 @@ def _print_kg_summary(mg: object, lattice: object, corpus_label: str) -> None:
     objs = list(mg.objects())
     print(f"Objects (concepts): {len(objs)}")
     for obj in sorted(objs, key=lambda o: o.label):
-        print(f"  [{obj.obj_id:3d}] {obj.label:<30} support={obj.concept.support:.1f}")
+        support = obj.concept.support if obj.concept is not None else 0.0
+        print(f"  [{obj.obj_id:3d}] {obj.label:<30} support={support:.1f}")
 
     # Morphisms by type
     from collections import Counter

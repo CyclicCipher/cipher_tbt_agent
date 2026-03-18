@@ -1,8 +1,18 @@
 """
-Einstein Test Observation Streams — Phase 12 of the Einstein Roadmap.
+Abduction Routing Scaffold Streams — Phase 12 integration test support.
 
-Defines four synthetic observation streams that structurally mirror the
-four historical scenarios that led from Newtonian mechanics to General Relativity.
+THIS MODULE IS NOT THE EINSTEIN TEST.
+
+Defines four SYNTHETIC LINEAR observation scenarios (f(x) = k*x) used to
+verify abduction routing behaviour (which orchestrator level is triggered,
+whether preservation blocks escalation).  These are scalar magnitude proxies
+only — they do not encode Newtonian mechanics, Maxwell's equations, or any
+physics content.
+
+The scenarios are linear because the current infrastructure supports linear
+h∘g compositions (k*x).  When the real Einstein test (Phase 9) is implemented,
+it will use separate, physically-grounded observation streams in
+ctkg/einstein/physics_streams.py — not this module.
 
 Within the constraint that our current latent-variable infrastructure only
 handles linear h∘g compositions (k*x), each scenario is modelled as a

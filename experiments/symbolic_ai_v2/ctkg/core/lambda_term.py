@@ -37,6 +37,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
+from experiments.symbolic_ai_v2.ctkg.core.node import (
+    TOKEN_GRAPH,
+    NodeId,
+    OUTPUT_DELIMS,
+    EOS_NODE,
+)
 from experiments.symbolic_ai_v2.ctkg.core.term_algebra import (
     Expr,
     atom,
@@ -64,7 +70,7 @@ class LetStep:
         resulting prediction has probability equal to the product of each
         step's individual confidence.
     """
-    name: str             # output role name, e.g. 'step', 'step0', 'ans', 'eq'
+    name: NodeId          # output role NodeId, e.g. STEP_NODE, ANS_NODE
     expr: Expr            # expression tree (var() nodes for role references)
     confidence: float = 1.0  # Phase XXII: from RelationRule.confidence
 
@@ -76,32 +82,32 @@ class LambdaTerm:
     Attributes
     ----------
     op:
-        The operator token this term was synthesized for (e.g. 'linear_trace').
+        The operator NodeId this term was synthesized for.
     params:
-        Ordered list of input role names — the lambda parameters
-        (e.g. ['p0', 'p1', 'p2'] for positional ops).
+        Ordered list of input role NodeIds — the lambda parameters
+        (e.g. [P0_NODE, P1_NODE, P2_NODE] for positional ops).
     steps:
         Sequence of let-bindings in dependency order.  Each step's expr
         may reference earlier steps as variables.
     output_delims:
-        The delimiter token that PRECEDES each step's value in the output
-        sequence (e.g. 'step' for intermediate results, 'ans' for the final
-        answer).  len(output_delims) == len(steps).
+        The delimiter NodeId that PRECEDES each step's value in the output
+        sequence (e.g. STEP_NODE for intermediate results, ANS_NODE for the
+        final answer).  len(output_delims) == len(steps).
     evidence:
         Total evidence (training examples) used to synthesize the term.
     """
-    op: str
-    params: list[str]
+    op: NodeId
+    params: list[NodeId]
     steps: list[LetStep]
-    output_delims: list[str]
+    output_delims: list[NodeId]
     evidence: int = 0
 
     def arity(self) -> int:
         """Number of input parameters."""
         return len(self.params)
 
-    def output_signature(self) -> tuple[str, ...]:
-        """Ordered tuple of output delimiter tokens (structural fingerprint)."""
+    def output_signature(self) -> tuple[NodeId, ...]:
+        """Ordered tuple of output delimiter NodeIds (structural fingerprint)."""
         return tuple(self.output_delims)
 
 
@@ -111,39 +117,51 @@ class LambdaTerm:
 
 def eval_expr(
     expr: Expr,
-    env: dict[str, str],
-    bfm: dict[str, dict[tuple, str]],
+    env: dict[NodeId, str],
+    engine,
 ) -> Optional[str]:
     """Evaluate *expr* to a token string given variable bindings *env*.
 
+    env maps role NodeId → string value (values remain strings since
+    engine.compute() operates in the string domain at this boundary).
+
     Rules:
-      - var('x')    → env['x']  (None if not bound)
-      - atom('5')   → env.get('5', '5')  (literal atom if not in env)
-      - node(op, a, b)  → bfm[op][(eval(a), eval(b))]
+      - var(nid)         → env[nid]  (None if not bound)
+      - atom(nid)        → env.get(nid) or TOKEN_GRAPH.decode(nid)
+      - node(op, a, b)   → engine.compute(decode(op), eval(a), eval(b))
 
     Returns None if any lookup misses.
+    Result is '\\x00'-joined for multi-token outputs.
     """
     if expr.is_var:
         return env.get(expr.head)
     if not expr.args:
-        # Leaf atom: resolve as a variable binding if present, else literal
-        return env.get(expr.head, expr.head)
+        # Leaf atom: resolve as variable binding if present, else literal
+        val = env.get(expr.head)
+        if val is not None:
+            return val
+        return TOKEN_GRAPH.decode(expr.head)
     if len(expr.args) == 2:
-        a_val = eval_expr(expr.args[0], env, bfm)
-        b_val = eval_expr(expr.args[1], env, bfm)
+        if engine is None:
+            return None
+        a_val = eval_expr(expr.args[0], env, engine)
+        b_val = eval_expr(expr.args[1], env, engine)
         if a_val is None or b_val is None:
             return None
-        return bfm.get(expr.head, {}).get((a_val, b_val))
-    # Arity != 2 not supported in current BFM; return None
+        result_tup = engine.compute(TOKEN_GRAPH.decode(expr.head), a_val, b_val)
+        if result_tup is None:
+            return None
+        return '\x00'.join(result_tup)
+    # Arity != 2 not supported; return None
     return None
 
 
 def eval_term(
     term: LambdaTerm,
     arg_tokens: list[str],
-    bfm: dict[str, dict[tuple, str]],
-    output_so_far: list[str],
-) -> Optional[dict[str, float]]:
+    engine,
+    output_so_far: list[NodeId],
+) -> Optional[dict[NodeId, float]]:
     """Evaluate *term* and return the next-token prediction.
 
     Parameters
@@ -151,37 +169,26 @@ def eval_term(
     term:
         The lambda term to evaluate.
     arg_tokens:
-        Concrete token values for each parameter, in order.
+        Concrete token string values for each parameter, in order.
         Must satisfy len(arg_tokens) == term.arity().
-    bfm:
-        Binary functional maps {op: {(a,b): result}}.
+    engine:
+        ComposeEngine (replaces BFM dict).
     output_so_far:
-        Tokens already emitted in the output (everything after the first
+        NodeIds already emitted in the output (everything after the first
         output delimiter in the prefix).
 
     Returns
     -------
-    {next_token: 1.0}  if a unique next token is determined.
-    {'<eos>': 1.0}     if the output is complete.
-    None               if evaluation fails (BFM miss, wrong arity, etc.).
+    {next_node_id: probability}  if a unique next token is determined.
+    {EOS_NODE: 1.0}              if the output is complete.
+    None                         if evaluation fails.
     """
     if len(arg_tokens) != term.arity():
         return None
 
-    # Bind input variables
-    env: dict[str, str] = dict(zip(term.params, arg_tokens))
+    # Bind input variables: param NodeId → string value
+    env: dict[NodeId, str] = dict(zip(term.params, arg_tokens))
 
-    # Lazy streaming evaluation: advance through (delim, chars…) groups one at
-    # a time, checking output_so_far for consistency and returning as soon as
-    # we reach the next position to predict.  A step expression is only
-    # evaluated when its delimiter has already been consumed (i.e. when we need
-    # at least one character of the result), so BFM misses in later steps do
-    # not prevent prediction of earlier delimiters.
-    #
-    # Phase XXII — Kleisli confidence propagation:
-    #   acc_conf tracks the product of all step confidences consumed so far.
-    #   The returned distribution {token: acc_conf} encodes the probability
-    #   that the next token is correct given the full chain of rule applications.
     k = len(output_so_far)
     pos = 0  # current position within the virtual full-output sequence
     acc_conf: float = 1.0  # accumulated Kleisli confidence
@@ -195,23 +202,25 @@ def eval_term(
         pos += 1
 
         # --- evaluate the step expression (only now that delimiter is past) ---
-        result_str = eval_expr(step.expr, env, bfm)
+        result_str = eval_expr(step.expr, env, engine)
         if result_str is None:
-            return None  # BFM miss on a needed step
+            return None  # engine miss on a needed step
         env[step.name] = result_str  # β-bind for subsequent steps
         acc_conf *= step.confidence  # Kleisli multiplication
 
-        # --- character tokens of the result ---
-        for ch in result_str:
+        # --- token(s) of the result (split '\x00'-joined multi-token results) ---
+        result_toks = result_str.split('\x00')
+        for tok_str in result_toks:
+            tok_nid = TOKEN_GRAPH.encode(tok_str)
             if pos == k:
-                return {ch: acc_conf}
-            if output_so_far[pos] != ch:
+                return {tok_nid: acc_conf}
+            if output_so_far[pos] != tok_nid:
                 return None  # prefix mismatch
             pos += 1
 
     # All steps consumed; if we are exactly at k the sequence is complete.
     if pos == k:
-        return {'<eos>': acc_conf}
+        return {EOS_NODE: acc_conf}
     return None
 
 
@@ -220,51 +229,52 @@ def eval_term(
 # ---------------------------------------------------------------------------
 
 def synthesize_from_rules(
-    op: str,
+    op: NodeId,
     op_rules: list,     # list[RelationRule] — avoid circular import
-    input_role_names: list[str],
+    input_role_names: list[NodeId],
 ) -> Optional[LambdaTerm]:
     """Synthesise a LambdaTerm from a sequence of RelationRules.
 
     Each RelationRule `output_role = bfm_op(arg1, arg2)` becomes a LetStep:
         LetStep(name=output_role, expr=node(bfm_op, var(arg1), var(arg2)))
 
-    The resulting lambda term represents the complete computation for *op* as
-    an explicit expression tree rather than an opaque lookup table.
-
     Parameters
     ----------
     op:
-        Operator name.
+        Operator NodeId.
     op_rules:
         RelationRules in dependency order (as returned by
-        discover_relation_rules).  Must all belong to the same op.
+        discover_relation_rules).  All fields are NodeIds.
     input_role_names:
-        Ordered list of input role names.  For positional ops these are
-        'p0', 'p1', 'p2', …; for separator ops the separator token names.
-
-    Returns
-    -------
-    LambdaTerm on success, None if op_rules is empty or synthesis fails.
+        Ordered list of input role NodeIds.
     """
     if not op_rules or not input_role_names:
         return None
 
+    from experiments.symbolic_ai_v2.ctkg.core.node import STEP_NODE
+
     steps: list[LetStep] = []
-    delims: list[str] = []
+    delims: list[NodeId] = []
     total_evidence: int = 0
 
     for rr in op_rules:
-        expr = node(rr.op_name, var(rr.arg1), var(rr.arg2))
-        # Phase XXII: carry rule confidence into the LetStep for Kleisli propagation
+        # rr.op_name, rr.arg1, rr.arg2, rr.output_role are all NodeIds
+        # Construct Expr directly — don't call node()/var() which expect strings
+        expr = Expr(
+            head=rr.op_name,
+            args=(
+                Expr(head=rr.arg1, args=(), is_var=True),
+                Expr(head=rr.arg2, args=(), is_var=True),
+            ),
+        )
         conf = getattr(rr, 'confidence', 1.0)
         steps.append(LetStep(name=rr.output_role, expr=expr, confidence=conf))
         # Determine the output delimiter for this step
-        role = rr.output_role
-        if role.startswith('step'):
-            delims.append('step')
+        role_str = TOKEN_GRAPH.decode(rr.output_role)
+        if role_str.startswith('step'):
+            delims.append(STEP_NODE)
         else:
-            delims.append(role)   # 'ans', 'eq', or custom
+            delims.append(rr.output_role)   # ANS_NODE, EQ_NODE, or custom
         total_evidence += getattr(rr, 'evidence', 0)
 
     if not steps:
@@ -280,29 +290,29 @@ def synthesize_from_rules(
 
 
 def synthesize_library(
-    relation_rules: dict[str, list],   # op → list[RelationRule]
-    relation_store,                     # RelationStore
-) -> dict[str, LambdaTerm]:
+    relation_rules: dict[NodeId, list],   # op NodeId → list[RelationRule]
+    relation_store,                        # RelationStore
+) -> dict[NodeId, LambdaTerm]:
     """Build a library of LambdaTerms from all known RelationRules.
 
     Parameters
     ----------
     relation_rules:
-        dict mapping op → [RelationRule, …] as produced by the Predictor's
-        __init__ (only ops with full role coverage are included).
+        dict mapping op NodeId → [RelationRule, …].
     relation_store:
         A RelationStore whose schemas map op → positional or separator schema.
 
     Returns
     -------
-    dict op → LambdaTerm.  Only ops for which synthesis succeeds are included.
+    dict op NodeId → LambdaTerm.
     """
-    library: dict[str, LambdaTerm] = {}
+    library: dict[NodeId, LambdaTerm] = {}
     for op, rules in relation_rules.items():
-        schema = relation_store.get_schema(op)
+        op_str = TOKEN_GRAPH.decode(op)
+        schema = relation_store.get_schema(op_str)
         if not schema:
             continue
-        # Extract role names from schema entries
+        # Roles are already NodeIds (relation_store.get_schema returns list[tuple[int, NodeId]])
         input_role_names = [role for _, role in schema]
         term = synthesize_from_rules(op, rules, input_role_names)
         if term is not None:
@@ -314,63 +324,52 @@ def synthesize_library(
 # Prediction entry point (for predict.py integration)
 # ---------------------------------------------------------------------------
 
-_OUTPUT_DELIM_SET: frozenset[str] = frozenset({'step', 'ans', 'eq', '<eos>'})
-
-
-def _split_prefix(prefix: list[str]) -> tuple[str, list[str], list[str]]:
-    """Split *prefix* into (op, input_tokens, output_so_far).
+def _split_prefix(prefix: list[NodeId]) -> tuple[NodeId, list[str], list[NodeId]]:
+    """Split *prefix* into (op_nid, input_token_strings, output_so_far).
 
     Works for any op and any format (step/ans or eq).  The split point is
-    the first output delimiter token (step, ans, eq, <eos>).
+    the first output delimiter NodeId (STEP_NODE, ANS_NODE, EQ_NODE, EOS_NODE).
 
-    Returns (op, input_tokens, output_so_far).
+    Returns (op_nid, input_token_strings, output_nids).
+    Input tokens are decoded to strings for engine compatibility.
     """
     if not prefix:
-        return '', [], []
+        return 0, [], []
     op = prefix[0]
     split = len(prefix)
     for i, t in enumerate(prefix[1:], 1):
-        if t in _OUTPUT_DELIM_SET:
+        if t in OUTPUT_DELIMS:
             split = i
             break
-    return op, prefix[1:split], prefix[split:]
+    input_nids = prefix[1:split]
+    output_nids = prefix[split:]
+    # Decode input NodeIds to strings for engine.compute() compatibility
+    input_strs = [TOKEN_GRAPH.decode(n) for n in input_nids]
+    return op, input_strs, output_nids
 
 
 def lambda_predict(
-    prefix: list[str],
-    lambda_library: dict[str, LambdaTerm],
-    bfm: dict[str, dict[tuple, str]],
+    prefix: list[NodeId],
+    lambda_library: dict[NodeId, LambdaTerm],
+    engine,
     allow_transfer: bool = True,
-) -> Optional[dict[str, float]]:
+) -> Optional[dict[NodeId, float]]:
     """Predict the next token using the lambda term library.
-
-    Two-phase dispatch:
-
-    Phase 1 — direct lookup:
-        If *op* is in the library, evaluate its lambda term with the
-        observed input tokens.
-
-    Phase 2 — structural transfer (if allow_transfer=True):
-        If *op* is NOT in the library (novel op), find all lambda terms
-        with the same arity and output_signature and try each.  Returns a
-        distribution weighted by evidence if multiple terms agree, or the
-        single-term result if only one fires.  This is the creative transfer
-        mechanism described in CTKG_ARCHITECTURE.md §Phase XX.
 
     Parameters
     ----------
     prefix:
-        The current prefix (all tokens seen so far, including the op).
+        The current prefix as NodeIds (all tokens seen so far, including op).
     lambda_library:
-        dict op → LambdaTerm, produced by synthesize_library().
-    bfm:
-        Binary functional maps.
+        dict op NodeId → LambdaTerm, produced by synthesize_library().
+    engine:
+        ComposeEngine (replaces BFM dict).
     allow_transfer:
-        If False, skip Phase 2 (used in ablation tests).
+        If False, skip structural transfer (used in ablation tests).
 
     Returns
     -------
-    {next_token: probability} or {'<eos>': 1.0}, or None on miss.
+    {next_node_id: probability} or {EOS_NODE: 1.0}, or None on miss.
     """
     op, input_tokens, output_so_far = _split_prefix(prefix)
     if not op:
@@ -379,7 +378,7 @@ def lambda_predict(
     # Phase 1: direct lookup for known op
     term = lambda_library.get(op)
     if term is not None:
-        return eval_term(term, input_tokens, bfm, output_so_far)
+        return eval_term(term, input_tokens, engine, output_so_far)
 
     # Phase 2: creative transfer for novel op
     if not allow_transfer or not input_tokens:
@@ -387,13 +386,12 @@ def lambda_predict(
 
     n_params = len(input_tokens)
     # Determine output_signature prefix already observed (from output_so_far)
-    seen_delims: list[str] = [t for t in output_so_far if t in ('step', 'ans', 'eq')]
+    seen_delims: list[NodeId] = [t for t in output_so_far if t in OUTPUT_DELIMS]
 
     candidates: list[LambdaTerm] = []
     for lib_term in lambda_library.values():
         if lib_term.arity() != n_params:
             continue
-        # Require that the observed delimiters are a prefix of this term's signature
         sig = lib_term.output_signature()
         if len(seen_delims) > len(sig):
             continue
@@ -405,16 +403,16 @@ def lambda_predict(
         return None
 
     # Try each candidate; weight results by evidence
-    results: dict[str, float] = {}
+    results: dict[NodeId, float] = {}
     total_evidence = sum(max(c.evidence, 1) for c in candidates)
     for cterm in candidates:
         w = max(cterm.evidence, 1) / total_evidence
-        result = eval_term(cterm, input_tokens, bfm, output_so_far)
+        result = eval_term(cterm, input_tokens, engine, output_so_far)
         if result is not None:
-            for tok, prob in result.items():
-                results[tok] = results.get(tok, 0.0) + w * prob
+            for nid, prob in result.items():
+                results[nid] = results.get(nid, 0.0) + w * prob
 
     if not results:
         return None
     total = sum(results.values())
-    return {tok: v / total for tok, v in results.items()}
+    return {nid: v / total for nid, v in results.items()}

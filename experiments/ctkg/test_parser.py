@@ -1723,6 +1723,109 @@ def test_minecraft_domain_phase_b():
 
 
 # ---------------------------------------------------------------------------
+# Phase VI: 2-category structure — NaturalTransformation + apply_nat_trans
+# ---------------------------------------------------------------------------
+
+def test_natural_transformation():
+    """Gate test: apply_nat_trans('D', d(pow(x,2))) returns mul(2, x).
+
+    Registers a differentiation NaturalTransformation D : Poly ⟹ Poly
+    with the power rule, constant-fold rule, and ground NNO + pow(x,1)→x
+    as components.  Verifies that apply_nat_trans reduces d(pow(x,2)) → mul(2,x).
+    """
+    from experiments.ctkg.graph import KnowledgeGraph, NaturalTransformation
+    from experiments.symbolic_ai_v2.ctkg.core.term_algebra import atom, node, var
+    from experiments.symbolic_ai_v2.ctkg.core.rewrite import RewriteRule
+
+    errors = []
+
+    # --------------- helpers ---------------
+    def _pow(a, b):  return node('pow', a, b)
+    def _mul(a, b):  return node('mul', a, b)
+    def _pred(a):    return node('pred', a)
+    def _d(a):       return node('d', a)
+    x = atom('x')
+
+    # Ground NNO rules: pred(n+1) → n for digits 1..9
+    succ_map = {'0':'1','1':'2','2':'3','3':'4','4':'5',
+                '5':'6','6':'7','7':'8','8':'9'}
+    ground_nno = []
+    for d_from, d_to in succ_map.items():
+        ground_nno.append(RewriteRule(
+            lhs=_pred(atom(d_to)), rhs=atom(d_from),
+            algebra_name='pred', evidence=1,
+        ))
+
+    # pow(x,1) → x (inverse norm: after pred reduces, unpack pow(x,1))
+    pow_x1_inv = RewriteRule(
+        lhs=_pow(atom('x'), atom('1')), rhs=atom('x'),
+        algebra_name='pow_inv', evidence=1,
+    )
+
+    # Power rule: d(pow(x,V0)) → mul(V0, pow(x, pred(V0)))
+    power_rule = RewriteRule(
+        lhs=_d(_pow(x, var('V0'))),
+        rhs=_mul(var('V0'), _pow(x, _pred(var('V0')))),
+        algebra_name='d', evidence=5,
+    )
+
+    components = [power_rule] + ground_nno + [pow_x1_inv]
+
+    # --------------- build NatTrans ---------------
+    nt = NaturalTransformation(
+        name='D',
+        source_functor='Poly',
+        target_functor='Poly',
+        components=components,
+    )
+
+    graph = KnowledgeGraph()
+    graph.add_nat_trans(nt)
+
+    # Gate: d(pow(x,2)) → mul(2, x)
+    expr = _d(_pow(x, atom('2')))
+    result = graph.apply_nat_trans('D', expr)
+    expected = _mul(atom('2'), x)
+    if result != expected:
+        errors.append(
+            f"apply_nat_trans('D', d(pow(x,2))): expected {expected}, got {result}")
+
+    # OOD: d(pow(x,5)) → mul(5, pow(x,4))
+    expr2 = _d(_pow(x, atom('5')))
+    result2 = graph.apply_nat_trans('D', expr2)
+    expected2 = _mul(atom('5'), _pow(x, atom('4')))
+    if result2 != expected2:
+        errors.append(
+            f"apply_nat_trans('D', d(pow(x,5))): expected {expected2}, got {result2}")
+
+    # Unknown name returns None
+    if graph.apply_nat_trans('nonexistent', expr) is not None:
+        errors.append("apply_nat_trans with unknown name should return None")
+
+    # No-op expression returns None (no rule fires)
+    no_op_expr = _mul(atom('3'), x)
+    if graph.apply_nat_trans('D', no_op_expr) is not None:
+        errors.append(
+            f"apply_nat_trans on non-matching expr should return None, got non-None")
+
+    # Adjunction: unit_nat_trans / counit_nat_trans fields exist
+    from experiments.ctkg.graph import Adjunction
+    adj = Adjunction(
+        name='diff_integral',
+        forward='differentiation',
+        inverse='integration',
+        unit_nat_trans='eta_diff_int',
+        counit_nat_trans='eps_diff_int',
+    )
+    if adj.unit_nat_trans != 'eta_diff_int':
+        errors.append("Adjunction.unit_nat_trans field not stored correctly")
+    if adj.counit_nat_trans != 'eps_diff_int':
+        errors.append("Adjunction.counit_nat_trans field not stored correctly")
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -1760,6 +1863,8 @@ def run_all_tests():
         ('causal_descendants()', test_causal_descendants),
         ('Phase B validation (missing endpoints)', test_phase_b_validation),
         ('Minecraft domain (Phase B)', test_minecraft_domain_phase_b),
+        # Phase VI: 2-category structure
+        ('NaturalTransformation + apply_nat_trans (Phase VI)', test_natural_transformation),
     ]
 
     total = 0

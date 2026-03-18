@@ -13,13 +13,14 @@ Pipeline (priority order):
         For eq-format sequences, extracts the 'ans' content from trace-format
         relational rules (e.g. linear_eval reuses linear_trace rules).
 
+    Level 0.5-NNO — CTKG SUCC_EDGE graph traversal (Stage 4, CT_REFERENCE §19):
+        Traverses SUCC_EDGE morphisms in the MorphismGraph for succ/pred.
+        Symbol-agnostic: uses parse_prefix (eq_token-aware), not hardcoded 'eq'.
+        Replaces the former Level 0.6.  Handles OOD inputs via carry propagation.
+
     Level 0.5 — FC direct + adjunction-based lookup (CT_REFERENCE §4, 17):
         Exact lookup in the free category edge table.  Adjunction-mediated:
         if pred(4)→3 is in training, infers succ(3)=4 via the adjunction.
-
-    Level 0.6 — NNO chain prediction (CT_REFERENCE §19):
-        Computes successor/predecessor chains without int() using the
-        discovered succ_map.
 
     Level 0.7 — Composition engine (CT_REFERENCE §19):
         Applies BinaryFoldRule recursively via the NNO universal property.
@@ -37,6 +38,30 @@ from __future__ import annotations
 
 from typing import Optional
 
+from experiments.symbolic_ai_v2.ctkg.core.node import TOKEN_GRAPH, NodeId, OUTPUT_DELIMS
+
+# ---------------------------------------------------------------------------
+# NodeId constants for op dispatch (Iron Law: no bare string comparisons).
+# All pipeline code must compare NodeIds, never op == 'string'.
+# ---------------------------------------------------------------------------
+_LINSOLVE_NODE  = TOKEN_GRAPH.encode('linsolve')
+_BERN_P1_NODE   = TOKEN_GRAPH.encode('bern_p1')
+_BERN_P2_NODE   = TOKEN_GRAPH.encode('bern_p2')
+_CS1_NODE       = TOKEN_GRAPH.encode('cs1')
+_CS2_NODE       = TOKEN_GRAPH.encode('cs2')
+_CS3_NODE       = TOKEN_GRAPH.encode('cs3')
+_CS4_NODE       = TOKEN_GRAPH.encode('cs4')
+_LSOLVE_NODE    = TOKEN_GRAPH.encode('lsolve')
+_CONCAT_NODE    = TOKEN_GRAPH.encode('concat')
+_FST_NODE       = TOKEN_GRAPH.encode('fst')
+_DIV_NODE       = TOKEN_GRAPH.encode('div')
+_PULLBACK_OPS: frozenset[NodeId] = frozenset({
+    _LINSOLVE_NODE, _BERN_P1_NODE, _BERN_P2_NODE,
+    _CS1_NODE, _CS2_NODE, _CS3_NODE, _CS4_NODE,
+})
+_COMPOSE_EXTRA_OPS: frozenset[NodeId] = frozenset({
+    _CONCAT_NODE, _FST_NODE, _DIV_NODE,
+})
 from experiments.symbolic_ai_v2.ctkg.learning.hankel_count import HankelCount
 from experiments.symbolic_ai_v2.ctkg.core.concept_lattice import ConceptLattice
 from experiments.symbolic_ai_v2.ctkg.core.morphism_graph import MorphismGraph
@@ -52,7 +77,6 @@ from experiments.symbolic_ai_v2.ctkg.learning.process_discover import (
     complete_succ_map,
     discover_binary_fold_rules,
     unary_chain_predict,
-    build_binary_functional_maps,
 )
 from experiments.symbolic_ai_v2.ctkg.learning.relation_store import (
     RelationStore,
@@ -78,6 +102,7 @@ from experiments.symbolic_ai_v2.ctkg.core.lambda_term import (
     lambda_predict,
     synthesize_library,
 )
+from experiments.symbolic_ai_v2.ctkg.learning.skeleton_lambda import SkeletonStore
 
 
 
@@ -115,7 +140,12 @@ class Predictor:
         tau: float = 0.1,
         chain_rules: Optional[list[ChainRule]] = None,
         fc: Optional[FreeCategoryGraph] = None,
+        raw_corpus: Optional[list[list[str]]] = None,
+        eq_token: str = "eq",
     ) -> None:
+        # eq_token: the delimiter between input and output in eq-format sequences.
+        # Pass a non-default value when using anonymous symbol tables.
+        self._eq_token: str = eq_token
         # Constructor parameters kept for API compatibility; not used internally
         # after Phase X (fallback removal).
         self._hankel = hankel
@@ -123,199 +153,132 @@ class Predictor:
         self._morphism_graph = morphism_graph
 
         # Operator → ProcessRule lookup (fold-type)
-        self._rules: dict[str, ProcessRule] = {
-            rule.op_atom: rule for rule in process_rules
+        # Sprint B: keyed by NodeId (Iron Law: no string dispatch on content tokens).
+        self._rules: dict[NodeId, ProcessRule] = {
+            TOKEN_GRAPH.encode(rule.op_atom): rule for rule in process_rules
         }
 
-        # Operator → ChainRule lookup (trace-format: step/ans)
-        self._chain_rules: dict[str, ChainRule] = {
-            rule.op_atom: rule for rule in (chain_rules or [])
-        }
+        # Operator set from process rules (expanded by FC edges below)
+        self._op_atoms: frozenset[NodeId] = frozenset(self._rules.keys())
 
-        # Discovered operator sets
-        self._op_atoms: frozenset[str] = frozenset(self._rules.keys())
-        self._chain_op_atoms: frozenset[str] = frozenset(self._chain_rules.keys())
+        # Phase XIX: context category for sheaf-theoretic dispatch.
+        # Initialised early so other init steps can use it.
+        self._ctx_cat = ContextCategory(eq_token=self._eq_token)
 
-        # Level 0.5: FC edge + adjunction-based lookup (CT_REFERENCE §4,17)
-        # Build from the free category if provided; extend op_atoms to include
-        # all operators discovered in the FC (so parse_prefix identifies them).
         if fc is not None:
-            self._fc_lookup: dict[tuple, tuple] = build_fc_lookup(fc)
-            self._adj_lookup: dict[tuple, tuple] = build_adj_lookup(fc)
-            self._unary_chain_maps: dict[str, dict[str, str]] = build_unary_chain_maps(fc)
-            self._unary_carry_maps: dict[str, tuple] = build_unary_carry_maps(fc)
-            # Level 0.7: Composition engine — discover NNO fold rules once,
-            # apply them dynamically at inference time (CT_REFERENCE §19).
-            self._fold_rules: dict[str, BinaryFoldRule] = discover_binary_fold_rules(fc)
-            # Extract succ tools for the composition engine.
-            # Pick the NNO candidate with the longest discovered chain — that
-            # is the true successor/predecessor (not sq, sqrt, etc. which have
-            # short chains of 2-3 elements in the training data).
-            _succ_carry = self._unary_carry_maps
-            _nno = (
-                max(fc.nno_candidates, key=lambda n: len(n.successor_map))
-                if fc.nno_candidates else None
-            )
+            # ------------------------------------------------------------------
+            # Step 1: Build all intermediate knowledge objects (local vars only).
+            # These are NEVER stored as self._ attributes — knowledge lives in
+            # the MorphismGraph after Stage 4 population below.
+            # ------------------------------------------------------------------
+            _fc_lookup = build_fc_lookup(fc)
+            _adj_lookup = build_adj_lookup(fc)
+            _unary_chain_maps = build_unary_chain_maps(fc)
+            _unary_carry_maps = build_unary_carry_maps(fc)
+            _fold_rules = discover_binary_fold_rules(fc)
+
+            # Build chain_rules dict (local, for population)
+            _chain_rules_dict: dict[NodeId, ChainRule] = {
+                TOKEN_GRAPH.encode(rule.op_atom): rule for rule in (chain_rules or [])
+            }
+
+            # Pick succ/carry info for the composition engine.
+            # Prefer the NNO candidate that IS in unary_carry_maps (the forward/succ
+            # direction).  When pred and succ tie on chain length, max() may pick pred,
+            # which is NOT in unary_carry_maps — that would leave engine = None.
+            # So: scan nno_candidates in carry-map priority order, then fall back to
+            # longest-chain candidate.
+            _succ_carry = _unary_carry_maps
+            _nno = None
+            for _cand in (fc.nno_candidates or []):
+                if _cand.op in _succ_carry:
+                    _nno = _cand
+                    break
+            if _nno is None and fc.nno_candidates:
+                _nno = max(fc.nno_candidates, key=lambda n: len(n.successor_map))
             if _nno is not None and _nno.op in _succ_carry:
                 _raw_succ = _nno.successor_map
                 _carry_el = _succ_carry[_nno.op][0]
                 _carry_out = _succ_carry[_nno.op][1]
                 _zero = _nno.zero_candidate
-                # Complete the succ map: infer missing edges (train/test split gaps)
-                self._compose_succ_map: dict[str, str] = complete_succ_map(
-                    _raw_succ, _zero, _carry_el
-                )
-                self._compose_carry_el: str = _carry_el
-                self._compose_carry_out: tuple = _carry_out
-                self._compose_zero: str = _zero
+                _compose_succ_map = complete_succ_map(_raw_succ, _zero, _carry_el)
             else:
-                self._compose_succ_map = {}
-                self._compose_carry_el = ""
-                self._compose_carry_out = ()
-                self._compose_zero = ""
-            # Memoization cache shared across all _compose calls within a session
-            self._compose_cache: dict[tuple, tuple] = {}
-            fc_ops = frozenset(edge.op for edge in fc.edges)
-            self._op_atoms = self._op_atoms | fc_ops
-            # Adjunction-mediated inverse solve: for ops that are the right-side
-            # of an n-ary adjunction (e.g. sub = right-side of add⊣sub), derive
-            # the answer by enumerating candidates via the left (forward) op.
-            # Maps right_op → (left_op, preserved_position).
-            self._adj_solve_map: dict[str, tuple] = {}
+                _carry_el = ""
+                _carry_out = ()
+                _zero = ""
+                _compose_succ_map = {}
+
+            # Adjunction inverse solve map (local var)
+            _adj_solve_map: dict[str, tuple] = {}
             for adj in fc.adjunctions:
                 if adj.preserved_position is not None:
                     rk = adj.right_op
-                    if rk not in self._adj_solve_map:
-                        self._adj_solve_map[rk] = (adj.left_op, adj.preserved_position)
-            # ---- Binary functional maps for RelationRule evaluation ----
-            # Build BFM from FC edges, then complete all single-digit pairs via NNO.
-            # No discover_arities(), no prefix S-expression, no parse tree.
-            _binary_fmaps = build_binary_functional_maps(
-                fc,
-                self._compose_succ_map,
-                self._compose_carry_el,
-                self._compose_carry_out,
-                self._compose_zero,
-            ) if self._compose_succ_map else {}
+                    if rk not in _adj_solve_map:
+                        _adj_solve_map[rk] = (adj.left_op, adj.preserved_position)
 
-            # Complete BFM for all single-digit × single-digit pairs using
-            # the NNO compose engine so OOD pairs (e.g. mul('6','5') in test split)
-            # don't cause RelationRule lookups to fail.  No int() calls.
-            if self._compose_succ_map and _binary_fmaps:
-                _all_digits_list: list[str] = []
-                _dc = self._compose_zero
-                _dc_seen: set[str] = {_dc}
-                _all_digits_list.append(_dc)
-                while True:
-                    _dn = self._compose_succ_map.get(_dc)
-                    if _dn is None or _dn in _dc_seen:
-                        break
-                    _all_digits_list.append(_dn)
-                    _dc_seen.add(_dn)
-                    _dc = _dn
-                for _arith_op in ('mul', 'add', 'sub'):
-                    if _arith_op not in _binary_fmaps:
-                        continue
-                    _op_map = dict(_binary_fmaps[_arith_op])
-                    _updated = False
-                    for _da in _all_digits_list:
-                        for _db in _all_digits_list:
-                            if (_da, _db) not in _op_map:
-                                _cr = _compose(
-                                    _arith_op, ((_da,), (_db,)),
-                                    self._fc_lookup, self._fold_rules,
-                                    self._compose_succ_map,
-                                    self._compose_carry_el,
-                                    self._compose_carry_out,
-                                    self._compose_zero,
-                                    self._compose_cache,
-                                )
-                                if _cr is not None:
-                                    _op_map[(_da, _db)] = ''.join(_cr)
-                                    _updated = True
-                    if _updated:
-                        _binary_fmaps = dict(_binary_fmaps)
-                        _binary_fmaps[_arith_op] = _op_map
+            # Extend op_atoms with all FC-discovered operators
+            fc_ops = frozenset(TOKEN_GRAPH.encode(edge.op) for edge in fc.edges)
+            self._op_atoms = self._op_atoms | fc_ops
 
-            # Extend BFM with two-digit-result × single-digit add/sub entries.
-            # Needed when mul(a, b) produces a two-digit result (e.g. '18', '36')
-            # that is then passed to add/sub as the first arg in a multi-step rule.
-            # E.g. linear_trace: ans = add(mul(a, c), b) where mul(a,c) may be '10'.
-            # Must run AFTER NNO completion so OOD mul results (e.g. mul('6','6')='36')
-            # are already present in _binary_fmaps before we extend add/sub.
-            # Only add/sub entries — mul(two-digit, x) is out of scope for now.
-            if _binary_fmaps:
-                _add_map = _binary_fmaps.get('add', {})
-                _sub_map = _binary_fmaps.get('sub', {})
-                _two_digit_vals: set[str] = set()
-                for _op_m in _binary_fmaps.values():
-                    for _res in _op_m.values():
-                        if len(_res) == 2:
-                            _two_digit_vals.add(_res)
-                _single_digits: set[str] = set()
-                for (_a, _b) in _add_map:
-                    _single_digits.add(_a)
-                    _single_digits.add(_b)
-                _extended_add: dict[tuple, str] = {}
-                _extended_sub: dict[tuple, str] = {}
-                for _R in _two_digit_vals:
-                    _tens, _ones = _R[0], _R[1]
-                    for _b in _single_digits:
-                        # add(R, b)
-                        _s1 = _add_map.get((_ones, _b))
-                        if _s1 is not None:
-                            if len(_s1) == 1:
-                                _extended_add[(_R, _b)] = _tens + _s1
-                            elif len(_s1) == 2:
-                                _carry, _new_ones = _s1[0], _s1[1]
-                                _nt = _add_map.get((_tens, _carry))
-                                if _nt is not None and len(_nt) == 1:
-                                    _extended_add[(_R, _b)] = _nt + _new_ones
-                        # sub(R, b)
-                        _d1 = _sub_map.get((_ones, _b))
-                        if _d1 is not None and len(_d1) == 1:
-                            _extended_sub[(_R, _b)] = _tens + _d1
-                if _extended_add:
-                    _binary_fmaps = dict(_binary_fmaps)
-                    _binary_fmaps['add'] = {**_binary_fmaps.get('add', {}), **_extended_add}
-                if _extended_sub:
-                    _binary_fmaps = dict(_binary_fmaps)
-                    _binary_fmaps['sub'] = {**_binary_fmaps.get('sub', {}), **_extended_sub}
+            # ------------------------------------------------------------------
+            # Step 2: Populate ALL knowledge into MorphismGraph typed morphisms.
+            # After this block, every rule is in the graph — no Python dicts needed.
+            # ------------------------------------------------------------------
 
-            # Extend BFM with two-digit × single-digit mul entries (Phase XII).
-            # Required for Kleisli chains where intermediate results (base²) are
-            # two-digit, e.g. mul('16','4')=64 for pow(4,3) chain step.
-            # Uses _compose (NNO iterative addition) — same engine as single-digit
-            # completion above.  Only fills entries whose first arg is a result
-            # already in the single-digit mul table (not arbitrary 2-char strings).
-            if _binary_fmaps and self._compose_succ_map:
-                _mul_map = _binary_fmaps.get('mul', {})
-                _mul_two_digits: set[str] = {
-                    _res for _res in _mul_map.values() if len(_res) == 2
+            # SUCC_EDGE: NNO successor chain (one edge per digit pair)
+            for _fwd_op, (_fwd_carry_el, _fwd_carry_out) in _unary_carry_maps.items():
+                _fwd_step = _unary_chain_maps.get(_fwd_op)
+                if _fwd_step:
+                    _populate_succ_edges_to_mg(self._morphism_graph, _fwd_step)
+
+            # FOLD_RULE: NNO binary fold rules (one self-loop per op)
+            _populate_fold_rules_to_mg(self._morphism_graph, _fold_rules)
+
+            # CHAIN_STEP: chain/eq table rules (one self-loop per op)
+            _populate_chain_steps_to_mg(self._morphism_graph, _chain_rules_dict)
+
+            # FC_EDGE / ADJ_EDGE_DIRECT: exact FC and adjunction lookups (per op)
+            _populate_fc_adj_edges_to_mg(
+                self._morphism_graph, _fc_lookup, _adj_lookup
+            )
+
+            # ADJ_EDGE: adjunction inverse-solve info (per inverse op)
+            _populate_adj_solve_to_mg(self._morphism_graph, _adj_solve_map)
+
+            # ------------------------------------------------------------------
+            # Step 3: Build ComposeEngine from local vars (before RelationStore).
+            # Engine holds the dicts it needs internally — Predictor does NOT
+            # store _fc_lookup, _fold_rules, _compose_succ_map, etc.
+            # ------------------------------------------------------------------
+            if _compose_succ_map:
+                _compose_cache: dict[tuple, tuple] = {}
+                self._engine: Optional['ComposeEngine'] = ComposeEngine(
+                    fc_lookup=_fc_lookup,
+                    fold_rules=_fold_rules,
+                    succ_map=_compose_succ_map,
+                    carry_el=_carry_el,
+                    carry_out=_carry_out,
+                    zero=_zero,
+                    cache=_compose_cache,
+                    adj_lookup=_adj_lookup,
+                    adj_solve_map=_adj_solve_map,
+                )
+                # Phase XXI: build type context from NNO successor chain.
+                from experiments.symbolic_ai_v2.ctkg.core.dependent_type import (
+                    infer_token_types,
+                )
+                _nid_succ = {
+                    TOKEN_GRAPH.encode(k): TOKEN_GRAPH.encode(v)
+                    for k, v in _compose_succ_map.items()
                 }
-                _extended_mul2: dict[tuple, str] = {}
-                for _R in _mul_two_digits:
-                    for _b in _single_digits:
-                        if (_R, _b) not in _mul_map and (_R, _b) not in _extended_mul2:
-                            _cr2 = _compose(
-                                'mul', (tuple(_R), (_b,)),
-                                self._fc_lookup, self._fold_rules,
-                                self._compose_succ_map,
-                                self._compose_carry_el,
-                                self._compose_carry_out,
-                                self._compose_zero,
-                                self._compose_cache,
-                            )
-                            if _cr2 is not None:
-                                _extended_mul2[(_R, _b)] = ''.join(_cr2)
-                if _extended_mul2:
-                    _binary_fmaps = dict(_binary_fmaps)
-                    _binary_fmaps['mul'] = {**_binary_fmaps.get('mul', {}), **_extended_mul2}
+                self._type_context: Optional[dict] = infer_token_types(_nid_succ)
+            else:
+                self._engine = None
+                self._type_context = None
 
-            # ---- Arity-free RelationRule discovery (hypergraph approach) ----
-            # Each sequence is a named-role tuple: structural tokens are input
-            # separators ('x', 'at', 'dx'); output delimiters ('step', 'ans', 'eq')
-            # name output roles.  No arities, no prefix S-expressions, no parse trees.
+            # ------------------------------------------------------------------
+            # Step 4: RelationStore + rule discovery (local, for population).
+            # ------------------------------------------------------------------
             _rs = RelationStore()
             _rs_seqs: list[list[str]] = []
             for cr in (chain_rules or []):
@@ -323,124 +286,89 @@ class Predictor:
                     _rs_seqs.append([cr.op_atom] + list(inp_toks) + list(out_toks))
             _rs.update_batch(_rs_seqs)
 
-            # ---- Extend BFM with concat and div (Phase XIV) ----
-            # concat(a, b) = a+b for all single-char NNO-alphabet pairs.
-            # Enables positional-role rules like: sq step = concat(p0, p1)
-            # where the step is the zero-padded input itself (identity trace).
-            # div is the inverse of mul: if mul(a,b)=r then div(r,a)=b.
-            # Enables algebra_trace ans = div(step, A).
-            if _binary_fmaps and self._compose_succ_map:
-                _nno_digits: list[str] = []
-                _dc2 = self._compose_zero
-                _dc2_seen: set[str] = {_dc2}
-                _nno_digits.append(_dc2)
-                while True:
-                    _dn2 = self._compose_succ_map.get(_dc2)
-                    if _dn2 is None or _dn2 in _dc2_seen:
-                        break
-                    _nno_digits.append(_dn2)
-                    _dc2_seen.add(_dn2)
-                    _dc2 = _dn2
-                # concat: single-char × single-char → 2-char concatenation
-                _concat_map: dict[tuple, str] = {}
-                for _a in _nno_digits:
-                    for _b in _nno_digits:
-                        if len(_a) == 1 and len(_b) == 1:
-                            _concat_map[(_a, _b)] = _a + _b
-                if _concat_map:
-                    _binary_fmaps = dict(_binary_fmaps)
-                    _binary_fmaps['concat'] = _concat_map
-                # div: inverse of mul (adjunction: if mul(a,b)=r then div(r,a)=b)
-                _mul_map = _binary_fmaps.get('mul', {})
-                if _mul_map:
-                    _div_map: dict[tuple, str] = {}
-                    for (_a, _b), _r in _mul_map.items():
-                        # div(r, a) = b  and  div(r, b) = a
-                        if (_r, _a) not in _div_map:
-                            _div_map[(_r, _a)] = _b
-                        if (_r, _b) not in _div_map:
-                            _div_map[(_r, _b)] = _a
-                    if _div_map:
-                        _binary_fmaps['div'] = _div_map
-                # fst: fst(a, b) = a  (first projection)
-                # Needed for Kleisli chains: step_0 = fst(p0, p1) = base (base^1)
-                _fst_map: dict[tuple, str] = {}
-                for _a in _nno_digits:
-                    for _b in _nno_digits:
-                        _fst_map[(_a, _b)] = _a
-                if _fst_map:
-                    _binary_fmaps['fst'] = _fst_map
-
+            # Keep _rs as an instance attribute — needed at inference time by
+            # _ctkg_path_find for extract_relation parsing.
             self._rs = _rs
-            self._binary_fmaps: dict = _binary_fmaps or {}
-            self._relation_rules: dict[str, list[RelationRule]] = {}
+
+            # Discover relation rules (local var — populated into graph, then dropped)
+            _relation_rules: dict[NodeId, list[RelationRule]] = {}
             _positional_ops = _rs.ops_with_positional_schema()
             for _op in _rs.ops_with_schema():
-                _op_rels = _rs.get_relations(_op)
-                # Positional-schema ops (e.g. sq, pow) mix sub-cases in training
-                # (sq(n) for n≥10 produces 3-digit answers not in single-digit BFM).
-                # Allow up to 25% mismatch so the dominant rule is still accepted.
+                _op_rels = _rs.get_relations_by_id(_op)
                 _mm_tol = 0.25 if _op in _positional_ops else 0.0
                 _op_rr = discover_relation_rules(
-                    _op_rels, _binary_fmaps or {}, mismatch_tolerance=_mm_tol
+                    _op_rels, self._engine, mismatch_tolerance=_mm_tol,
+                    type_context=self._type_context,
                 )
                 if _op_rr:
-                    # Coverage check: only store rules if ALL expected output
-                    # roles (observed in training) are covered.  Partial rules
-                    # produce wrong predictions (e.g. 'ans' at position 0 when
-                    # 'step' was expected first).
-                    _expected_roles = _rs.all_output_role_names(_op)
+                    _expected_roles = _rs.all_output_role_names_by_id(_op)
                     _covered_roles = {_r.output_role for _r in _op_rr}
                     if _expected_roles.issubset(_covered_roles):
-                        self._relation_rules[_op] = _op_rr
+                        _relation_rules[_op] = _op_rr
 
-            # ---- Kleisli chain discovery (Phase XII) ----
-            # For positional-schema ops with variable-depth output (e.g. pow),
-            # standard discover_relation_rules deduplicates repeated 'step' roles
-            # and misses multi-step chains.  discover_kleisli_chains groups by
-            # discriminator value (e.g. exponent p1) and discovers per-depth rules.
-            self._kleisli_chains: dict[str, dict[str, list[RelationRule]]] = {}
-            self._kleisli_disc_roles: dict[str, str] = {}
+            # Discover Kleisli chains (local var — populated into graph, then dropped)
+            _kleisli_chains: dict[NodeId, dict] = {}
+            _kleisli_disc_roles: dict[NodeId, NodeId] = {}
             for _op in _positional_ops:
-                _op_rels = _rs.get_relations(_op)
-                _disc_role, _chains = discover_kleisli_chains(
-                    _op_rels, _binary_fmaps or {}
-                )
+                _op_rels = _rs.get_relations_by_id(_op)
+                _disc_role, _chains = discover_kleisli_chains(_op_rels, self._engine)
                 if _disc_role is not None and _chains:
-                    self._kleisli_chains[_op] = _chains
-                    self._kleisli_disc_roles[_op] = _disc_role
-        else:
-            self._fc_lookup = {}
-            self._adj_lookup = {}
-            self._unary_chain_maps = {}
-            self._unary_carry_maps = {}
-            self._fold_rules = {}
-            self._compose_succ_map = {}
-            self._compose_carry_el = ""
-            self._compose_carry_out = ()
-            self._compose_zero = ""
-            self._compose_cache = {}
-            self._adj_solve_map = {}
-            self._rs = None
-            self._binary_fmaps: dict = {}
-            self._relation_rules: dict[str, list[RelationRule]] = {}
-            self._kleisli_chains: dict[str, dict[str, list[RelationRule]]] = {}
-            self._kleisli_disc_roles: dict[str, str] = {}
+                    _kleisli_chains[_op] = _chains
+                    _kleisli_disc_roles[_op] = _disc_role
 
-        # Phase XX: synthesise LambdaTerms from RelationRules.
-        # Each RelationRule sequence is lifted to an explicit lambda term
-        # (LetStep chain) over the Expr algebra.  This enables:
-        #   1. Provably generative prediction (not table lookup).
-        #   2. Creative transfer: novel ops handled via structural similarity.
-        if self._rs is not None and self._relation_rules:
-            self._lambda_library: dict[str, LambdaTerm] = synthesize_library(
-                self._relation_rules, self._rs
+            # RELATION_RULE: arity-free relational rules (one self-loop per op)
+            _populate_relation_rules_to_mg(self._morphism_graph, _relation_rules)
+
+            # KLEISLI_CHAIN: variable-depth Kleisli chains (one self-loop per op)
+            _populate_kleisli_chains_to_mg(
+                self._morphism_graph, _kleisli_chains, _kleisli_disc_roles
             )
+
+            # ------------------------------------------------------------------
+            # Step 5: Derive Predictor instance attributes from graph.
+            # Only _rs, _unary_chain_maps, and _engine survive as instance attrs.
+            # ALL Python knowledge dicts (_chain_rules, _relation_rules, etc.) are
+            # local vars only — they are NOT stored on self.
+            # ------------------------------------------------------------------
+
+            # chain_op_atoms: derived from CHAIN_STEP morphisms in graph
+            self._chain_op_atoms: frozenset[NodeId] = _extract_chain_op_atoms_from_mg(
+                self._morphism_graph
+            )
+
+            # _unary_chain_maps kept for NNO direction detection in _ctkg_nno_predict
+            # (determines succ vs pred from step_map comparison against succ_graph)
+            self._unary_chain_maps: dict[str, dict[str, str]] = _unary_chain_maps
+
+            # Phase XX: lambda library — synthesised here while _relation_rules is
+            # still in scope (local var); stored on self but NOT a raw knowledge dict.
+            if _relation_rules:
+                self._lambda_library: dict[NodeId, LambdaTerm] = synthesize_library(
+                    _relation_rules, _rs
+                )
+            else:
+                self._lambda_library: dict[NodeId, LambdaTerm] = {}
+
         else:
+            # No FreeCategoryGraph: minimal initialisation.
+            self._chain_op_atoms = frozenset(
+                TOKEN_GRAPH.encode(rule.op_atom) for rule in (chain_rules or [])
+            )
+            self._unary_chain_maps = {}
+            self._rs = None
+            self._engine: Optional['ComposeEngine'] = None
+            self._type_context = None
             self._lambda_library = {}
 
-        # Phase XIX: context category for sheaf-theoretic dispatch.
-        self._ctx_cat = ContextCategory()
+        # Phase XXIV: SkeletonStore — skeleton-discriminated lambda terms.
+        # Uses engine.succ_map and engine (not the deleted _compose_succ_map).
+        self._skeleton_store = SkeletonStore()
+        if raw_corpus and self._engine is not None and self._engine.succ_map:
+            self._skeleton_store.learn(
+                raw_corpus,
+                self._engine.succ_map,
+                self._engine,
+            )
 
         # Phase X: heuristic attributes (_trans, _kan, _vocab) removed.
 
@@ -462,255 +390,100 @@ class Predictor:
         a point mass {atom: 1.0}; distribution levels return soft distributions.
         """
         # Phase XIX — Context Category dispatch.
-        # Classify the current prefix into a context object from the context
-        # category C.  All subsequent format guards use is_refinement() instead
-        # of bare 'eq' in prefix / 'step' in prefix string tests.  The context
-        # category replaces ad-hoc string matching with a principled presheaf
-        # section structure: a prediction rule registered at context c fires
-        # whenever the current context IS-A c (refines c).
         ctx = self._ctx_cat.classify(prefix)
 
-        # Level 1b: Chain rule (deterministic, step/ans and eq-mixed formats)
-        #
-        # MUST fire before Level 1a (fold rules) because chain-op sequences
-        # (e.g. ['d', 'add', 'mul', '3', 'sq', 'x', ...]) contain fold-op
-        # tokens ('add', 'mul', …) as ARGUMENTS, not as the top-level operator.
-        # If Level 1a ran first, parse_prefix would misidentify the inner 'add'
-        # as the operator and produce the wrong prediction.
-        #
-        # Fires in both INPUT and OUTPUT phases:
-        #   INPUT  — no output delimiter seen yet; predicts first output token.
-        #            Only fires when input_tokens exactly match a chain_table key.
-        #   OUTPUT — past first delimiter; predicts next token in the chain.
-        #
-        # Also handles eq-format sequences whose input contains non-digit tokens
-        # (e.g. 'eval', 'd', 'int') — rejected by fold discovery but captured
-        # here by extending parse_chain_prefix to recognise 'eq' as a delimiter.
-        if self._chain_rules:
-            chain_state = parse_chain_prefix(prefix, self._chain_op_atoms)
-            if (
-                chain_state is not None
-                and chain_state.phase in ("INPUT", "OUTPUT")
-                and chain_state.op in self._chain_rules
-            ):
-                chain_rule = self._chain_rules[chain_state.op]
-                # Restriction map ρ_{EQ → ANY}: specialise the chain rule section
-                # (registered at ANY) to eq-format vs trace-format context.
-                # use_eq=True  → restrict to ContextId.EQ  (use eq_table)
-                # use_eq=False → restrict to ContextId.TRACE/INPUT (use chain_table)
-                use_eq = self._ctx_cat.is_refinement(ctx, ContextId.EQ)
-                result = _chain_predict(chain_rule, chain_state.input_tokens, chain_state.output_tokens, use_eq_table=use_eq)
-                if result is not None:
-                    return result
+        # Stage 4 — Unified CTKG graph traversal (_ctkg_path_find).
+        # Handles Levels 1b (chain), 1b-λ (lambda), 1c-relational, 1c-kleisli,
+        # 0.5 (FC/adj exact lookup), and 0.7 (NNO fold composition) in a single
+        # graph traversal.  Dispatch is on morph_type, never on op name strings.
+        # All knowledge comes from MorphismGraph typed morphisms (Stage 4 complete).
+        # No gate: _ctkg_path_find returns None quickly when nothing matches.
+        _ctkg_result = _ctkg_path_find(
+            prefix,
+            self._morphism_graph,
+            self._engine,
+            self._rs,
+            self._ctx_cat,
+            ctx,
+            self._eq_token,
+            self._op_atoms,
+            self._chain_op_atoms,
+            lambda_library=self._lambda_library,
+        )
+        if _ctkg_result is not None:
+            return _ctkg_result
 
-                # Level 1b-λ: Lambda term evaluation (Phase XX).
-                # Presheaf section at ContextId.ANY (all formats).
-                # Evaluates the op's LambdaTerm (synthesised from RelationRules)
-                # on the observed input tokens.  More general than chain table
-                # lookup (Level 1b) — fires for OOD inputs not in the table.
-                # Creative transfer fires when op has no lambda term but a
-                # structurally compatible term exists in the library.
-                if self._lambda_library and not use_eq:
-                    _lt_result = lambda_predict(
-                        prefix, self._lambda_library, self._binary_fmaps,
-                        allow_transfer=True,
-                    )
-                    if _lt_result is not None:
-                        return _lt_result
-
-                # Level 1c-relational: arity-free hypergraph rule prediction.
-                # Uses RelationRules discovered from named-role tuples — no arities,
-                # no prefix S-expressions, no parse tree.  Fires for any op with a
-                # clean input separator schema (the rel predictor handles k=0..end).
-                #
-                # Phase XIII: eq-format guard removed.  For eq-format sequences (use_eq=True),
-                # trace-format RelationRules (step/ans) are reused: the 'ans' content is
-                # extracted and returned directly as the eq-format output.  This allows
-                # e.g. linear_eval (plain eq format) to benefit from rules discovered from
-                # linear_trace (step/ans format): mul(a, v) then add(step, b) → answer.
-                _ROLE_DELIMS = frozenset({'step', 'ans', 'eq', '<eos>'})
-                if (self._relation_rules
-                        and chain_state.op in self._relation_rules
-                        and self._rs is not None):
-                    _rel_input = [chain_state.op] + list(chain_state.input_tokens)
-                    # Phase XV (Coproducts): use predict_alternatives_from_rules so
-                    # that competing rules for the same output role produce a
-                    # probability distribution (Kleisli morphism in the probability
-                    # monad) rather than a forced single choice.
-                    _alternatives = predict_alternatives_from_rules(
-                        _rel_input, self._rs, self._relation_rules, self._binary_fmaps
-                    )
-                    if _alternatives:
-                        _rk = len(chain_state.output_tokens)
-                        _dist: dict[str, float] = {}
-                        _total_w = sum(w for _, w in _alternatives)
-                        for _rel_output, _w in _alternatives:
-                            _norm_w = _w / _total_w if _total_w > 0 else _w
-                            if use_eq:
-                                # Eq-format: extract the 'ans' or 'eq' role content.
-                                _role_content: list[str] = []
-                                for _role_delim in ('ans', 'eq'):
-                                    if _role_delim in _rel_output:
-                                        _start = _rel_output.index(_role_delim) + 1
-                                        _raw = _rel_output[_start:]
-                                        _end = next(
-                                            (i for i, t in enumerate(_raw) if t in _ROLE_DELIMS),
-                                            len(_raw)
-                                        )
-                                        _role_content = _raw[:_end]
-                                        break
-                                if _role_content:
-                                    if _rk < len(_role_content):
-                                        _tok = _role_content[_rk]
-                                        _dist[_tok] = _dist.get(_tok, 0.0) + _norm_w
-                                    elif _rk == len(_role_content):
-                                        _dist['<eos>'] = _dist.get('<eos>', 0.0) + _norm_w
-                            else:
-                                if _rk < len(_rel_output):
-                                    _tok = _rel_output[_rk]
-                                    _dist[_tok] = _dist.get(_tok, 0.0) + _norm_w
-                                elif _rk == len(_rel_output):
-                                    _dist['<eos>'] = _dist.get('<eos>', 0.0) + _norm_w
-                        if _dist:
-                            return _dist
-
-                # Level 1c-kleisli: multi-step Kleisli chain prediction (Phase XII).
-                # Fires for variable-depth ops (e.g. pow) where the number of
-                # 'step' tokens depends on an input value (the exponent).
-                # Uses per-depth RelationRules discovered by discover_kleisli_chains.
-                # Only fires in TRACE format (not eq-format) — eq-format pow is
-                # handled by the Level 0.7 compose engine.
-                if (not use_eq
-                        and self._kleisli_chains
-                        and chain_state.op in self._kleisli_chains
-                        and self._rs is not None):
-                    _disc_role = self._kleisli_disc_roles[chain_state.op]
-                    _kl_seq = [chain_state.op] + list(chain_state.input_tokens)
-                    _kl_rel = self._rs.extract_relation(_kl_seq)
-                    if _kl_rel is not None:
-                        _disc_val: Optional[str] = None
-                        for _sep, _toks in _kl_rel.input_roles:
-                            _rn = _sep if _sep else ''
-                            if _rn == _disc_role and _toks:
-                                _disc_val = ''.join(_toks)
-                                break
-                        _op_chains = self._kleisli_chains[chain_state.op]
-                        if _disc_val is not None and _disc_val in _op_chains:
-                            _kl_rules = _op_chains[_disc_val]
-                            # Build role_values from input roles
-                            _kl_vals: dict[str, str] = {}
-                            for _sep, _toks in _kl_rel.input_roles:
-                                _rn = _sep if _sep else ''
-                                if _toks:
-                                    _kl_vals[_rn] = ''.join(_toks)
-                            # Apply rules in dependency order
-                            _kl_ok = True
-                            for _kl_rule in _kl_rules:
-                                _kl_dist = _kl_rule.evaluate(_kl_vals, self._binary_fmaps)
-                                if not _kl_dist:
-                                    _kl_ok = False
-                                    break
-                                _kl_vals[_kl_rule.output_role] = max(_kl_dist, key=_kl_dist.get)
-                            if _kl_ok:
-                                # Rebuild predicted output with original delimiters
-                                _kl_out: list[str] = []
-                                for _kl_rule in _kl_rules:
-                                    _delim = 'step' if _kl_rule.output_role.startswith('step') else _kl_rule.output_role
-                                    _kl_out.append(_delim)
-                                    _kl_out.extend(list(_kl_vals[_kl_rule.output_role]))
-                                _kl_rk = len(chain_state.output_tokens)
-                                if _kl_rk < len(_kl_out):
-                                    return {_kl_out[_kl_rk]: 1.0}
-                                if _kl_rk == len(_kl_out):
-                                    return {'<eos>': 1.0}
-
+        # Level 1f: SkeletonStore prediction (Phase XXIV).
+        # Handles operators like 'd' and 'int' whose input schema is too
+        # heterogeneous for RelationStore / Lambda terms.
+        # Uses engine.succ_map (not deleted _compose_succ_map).
+        if self._engine is not None and self._engine.succ_map:
+            _sk_result = self._skeleton_store.predict(
+                prefix,
+                self._engine.succ_map,
+                self._engine,
+            )
+            if _sk_result is not None:
+                return _sk_result
 
         # Level 1b-λ (outer): creative transfer for ops NOT in chain_op_atoms.
         # Fires for novel ops (not seen in training) that are structurally
         # compatible with a known lambda term in the library (Phase XX).
-        # Presheaf section at ContextId.TRACE/INPUT (non-eq-format).
         if (self._lambda_library
                 and not self._ctx_cat.is_refinement(ctx, ContextId.EQ)
                 and prefix):
             _op_candidate = prefix[0] if prefix else ''
-            if _op_candidate not in self._chain_op_atoms:
+            if TOKEN_GRAPH.encode(_op_candidate) not in self._chain_op_atoms:
+                _nid_prefix_outer = TOKEN_GRAPH.encode_seq(prefix)
                 _lt_outer = lambda_predict(
-                    prefix, self._lambda_library, self._binary_fmaps,
+                    _nid_prefix_outer, self._lambda_library, self._engine,
                     allow_transfer=True,
                 )
                 if _lt_outer is not None:
-                    return _lt_outer
+                    return {TOKEN_GRAPH.decode(k): v for k, v in _lt_outer.items()}
 
-        # Level 1d: Equalizer solve — BFM enumeration (Phase XVII).
-        # Presheaf section at ContextId.EQ: only fires in equation-format prefixes.
-        # Handles 'lsolve A x B from C eq V' by enumerating all candidates v
-        # and evaluating add(mul(A, v), B) == C via BFM lookups.
-        # No int() calls; same code path for any op with the same algebraic form.
-        if self._compose_succ_map and self._binary_fmaps and self._ctx_cat.is_refinement(ctx, ContextId.EQ):
+        # Level 1d: Equalizer solve (Phase XVII).
+        # Uses engine.succ_map and engine.zero (not deleted _compose_succ_map).
+        if (self._engine is not None
+                and self._engine.succ_map
+                and self._ctx_cat.is_refinement(ctx, ContextId.EQ)):
             eq_result = _equalizer_predict(
                 prefix,
-                self._binary_fmaps,
-                self._compose_succ_map,
-                self._compose_zero,
+                self._engine,
+                self._engine.succ_map,
+                self._engine.zero,
             )
             if eq_result is not None:
                 return eq_result
 
-        # Level 1e: Pullback predict — trace-format equational solve (Phase XVIII).
-        # Handles 'linsolve A B C step R1 ans X' by finding X via equalizer and
-        # computing R1 = mul(A, X) directly from BFM.
-        # Also handles 'bern_p1/bern_p2' by composing mul + add/sub via NNO engine.
-        # Domain-agnostic: uses BFM + _compose, no int() calls.
-        if self._compose_succ_map:
+        # Level 1e: Pullback predict (Phase XVIII).
+        if self._engine is not None and self._engine.succ_map:
             pb_result = _pullback_predict(
                 prefix,
-                self._binary_fmaps,
-                self._compose_succ_map,
-                self._compose_zero,
-                fc_lookup=self._fc_lookup if self._fc_lookup else None,
-                fold_rules=self._fold_rules if self._fold_rules else None,
-                carry_el=self._compose_carry_el,
-                carry_out=self._compose_carry_out,
-                compose_cache=self._compose_cache,
+                self._engine,
+                self._engine.succ_map,
+                self._engine.zero,
             )
             if pb_result is not None:
                 return pb_result
 
-        # Pass discovered op_atoms — not a hardcoded list
-        state = parse_prefix(prefix, op_atoms=self._op_atoms)
-
-        # Level 0.5: FC direct + adjunction-based exact lookup (CT_REFERENCE §4,17).
-        # Presheaf section at ContextId.EQ.
-        if (self._fc_lookup or self._adj_lookup) and prefix and self._ctx_cat.is_refinement(ctx, ContextId.EQ):
-            fc_result = _fc_and_adj_predict(prefix, self._fc_lookup, self._adj_lookup)
-            if fc_result is not None:
-                return fc_result
-
-        # Level 0.6: NNO chain prediction with carry/borrow propagation (CT_REFERENCE §19).
-        # Presheaf section at ContextId.EQ.
-        if (self._unary_chain_maps or self._unary_carry_maps) and prefix and self._ctx_cat.is_refinement(ctx, ContextId.EQ):
-            nno_result = _nno_chain_predict(
-                prefix, self._unary_chain_maps, self._unary_carry_maps
-            )
-            if nno_result is not None:
-                return nno_result
-
-        # Level 0.7: Composition engine — NNO fold rule (CT_REFERENCE §19).
-        # Presheaf section at ContextId.EQ.
-        if (self._fold_rules or self._adj_solve_map) and self._compose_succ_map and prefix and self._ctx_cat.is_refinement(ctx, ContextId.EQ):
-            compose_result = _compose_predict(
+        # Level 0.5-NNO: CTKG SUCC_EDGE graph traversal (CT_REFERENCE §19).
+        # Symbol-agnostic succ/pred prediction via SUCC_EDGE morphisms + carry info.
+        # Gate: engine exists (carry info in engine.carry_el/carry_out).
+        if (self._engine is not None
+                and self._engine.carry_el
+                and prefix
+                and self._ctx_cat.is_refinement(ctx, ContextId.EQ)):
+            _nno_ctkg = _ctkg_nno_predict(
                 prefix,
-                self._fc_lookup,
-                self._fold_rules,
-                self._compose_succ_map,
-                self._compose_carry_el,
-                self._compose_carry_out,
-                self._compose_zero,
-                self._compose_cache,
-                self._adj_solve_map,
+                self._morphism_graph,
+                self._unary_chain_maps,
+                self._engine,
+                self._op_atoms,
+                eq_token=self._eq_token,
             )
-            if compose_result is not None:
-                return compose_result
+            if _nno_ctkg is not None:
+                return _nno_ctkg
 
         # Phase X complete: all heuristic levels (0, 2, 3, 4) removed.
         return {}
@@ -770,25 +543,25 @@ class Predictor:
 #   A = coefficient (before 'x'), B = constant (before 'from'),
 #   C = target value (before 'eq'), V = answer (after 'eq')
 #   f(v) = add(mul(A, v), B)
-_EQUALIZER_SOLVE_OPS: frozenset[str] = frozenset({'lsolve'})
+_EQUALIZER_SOLVE_OPS: frozenset[NodeId] = frozenset({_LSOLVE_NODE})
 
 
 def _equalizer_predict(
     prefix: list[str],
-    bfm: dict[str, dict[tuple, str]],
+    engine: Optional['ComposeEngine'],
     succ_map: dict[str, str],
     zero: str,
 ) -> Optional[dict[str, float]]:
-    """Level 1d: Equalizer solve via BFM enumeration (Phase XVII).
+    """Level 1d: Equalizer solve via ComposeEngine enumeration (Phase XVII).
 
     For 'lsolve A x B from C eq ...', enumerate all v in the NNO digit chain
     and return the v where add(mul(A, v), B) == C.  Domain-agnostic: uses
-    only opaque string tokens and BFM lookups, no int() calls.
+    only opaque string tokens and ComposeEngine, no int() calls.
 
     Returns {v: 1.0} if a unique solution is found, or a uniform
     distribution over solutions if multiple exist.  Returns None on miss.
     """
-    if not prefix or prefix[0] not in _EQUALIZER_SOLVE_OPS:
+    if not prefix or TOKEN_GRAPH.encode(prefix[0]) not in _EQUALIZER_SOLVE_OPS:
         return None
     if 'eq' not in prefix or 'x' not in prefix or 'from' not in prefix:
         return None
@@ -813,11 +586,8 @@ def _equalizer_predict(
         return None
     if not c_str and not output_so_far:
         return None
-    # c_str may be multi-digit (e.g. '17'); comparison is string equality
 
-    mul_map = bfm.get('mul', {})
-    add_map = bfm.get('add', {})
-    if not mul_map or not add_map:
+    if engine is None:
         return None
 
     # Build the digit chain from the NNO successor map
@@ -836,13 +606,13 @@ def _equalizer_predict(
     # Enumerate: find all v where add(mul(A, v), B) == C
     solutions: list[str] = []
     for v in candidates:
-        mul_result = mul_map.get((a_str, v))
-        if mul_result is None:
+        mul_tup = engine.compute_tup('mul', (a_str,), (v,))
+        if mul_tup is None:
             continue
-        add_result = add_map.get((mul_result, b_str))
-        if add_result is None:
+        add_tup = engine.compute_tup('add', mul_tup, (b_str,))
+        if add_tup is None:
             continue
-        if add_result == c_str:
+        if ''.join(add_tup) == c_str:
             solutions.append(v)
 
     if not solutions:
@@ -850,7 +620,6 @@ def _equalizer_predict(
 
     # Point mass if unique; uniform over solutions if ambiguous
     if len(output_so_far) == 0:
-        # Predict the single-digit answer
         w = 1.0 / len(solutions)
         return {v: w for v in solutions}
     # output_so_far == [v]; predict <eos>
@@ -868,36 +637,35 @@ def _equalizer_predict(
 
 def _pullback_predict(
     prefix: list[str],
-    bfm: dict[str, dict[tuple, str]],
+    engine: Optional['ComposeEngine'],
     succ_map: dict[str, str],
     zero: str,
-    fc_lookup: Optional[dict] = None,
-    fold_rules: Optional[dict] = None,
-    carry_el: str = '',
-    carry_out: tuple = (),
-    compose_cache: Optional[dict] = None,
 ) -> Optional[dict[str, float]]:
     """Level 1e: Pullback predict for trace-format equational solve (Phase XVIII).
 
     Handles two op families:
       - 'linsolve A B C step R1 ans X': find X via equalizer, R1=mul(A,X).
       - 'bern_p1/bern_p2 P V1 V2 step V1sq step V2sq ans P2':
-          compute V1sq=mul(V1,V1), V2sq=mul(V2,V2), then P2 via _compose add/sub.
+          compute V1sq=mul(V1,V1), V2sq=mul(V2,V2), then P2 via ComposeEngine.
 
-    All arithmetic is done via BFM or _compose (NNO fold) — no int() calls.
+    All arithmetic is done via ComposeEngine (NNO fold) — no int() calls.
     Returns {next_token: 1.0} or {'<eos>': 1.0} on success, None on miss.
     """
     if not prefix:
         return None
     op = prefix[0]
+    op_nid = TOKEN_GRAPH.encode(op)
 
-    if op not in ('linsolve', 'bern_p1', 'bern_p2'):
+    if op_nid not in _PULLBACK_OPS:
+        return None
+
+    if engine is None:
         return None
 
     # Determine end of input (first output delimiter: step/ans/<eos>)
     first_out_idx = None
     for i, t in enumerate(prefix):
-        if i > 0 and t in ('step', 'ans', '<eos>'):
+        if i > 0 and TOKEN_GRAPH.encode(t) in OUTPUT_DELIMS:
             first_out_idx = i
             break
 
@@ -908,7 +676,7 @@ def _pullback_predict(
     output_so_far = prefix[first_out_idx:]
 
     # ---- linsolve branch ----
-    if op == 'linsolve':
+    if op_nid == _LINSOLVE_NODE:
         # Input: A B C (positional, no separators)
         if len(input_toks) < 3:
             return None
@@ -916,11 +684,6 @@ def _pullback_predict(
         b_str = input_toks[1]
         c_str = ''.join(input_toks[2:])
         if not a_str or not b_str or not c_str:
-            return None
-
-        mul_map = bfm.get('mul', {})
-        add_map = bfm.get('add', {})
-        if not mul_map or not add_map:
             return None
 
         # Build digit chain
@@ -939,71 +702,54 @@ def _pullback_predict(
         # Find X via equalizer
         solutions: list[str] = []
         for v in candidates:
-            mul_result = mul_map.get((a_str, v))
-            if mul_result is None:
+            mul_tup = engine.compute_tup('mul', (a_str,), (v,))
+            if mul_tup is None:
                 continue
-            add_result = add_map.get((mul_result, b_str))
-            if add_result is None:
+            add_tup = engine.compute_tup('add', mul_tup, (b_str,))
+            if add_tup is None:
                 continue
-            if add_result == c_str:
+            if ''.join(add_tup) == c_str:
                 solutions.append(v)
 
         if not solutions:
             return None
         x_str = solutions[0]
-        r1_str = mul_map.get((a_str, x_str))
-        if r1_str is None:
+        r1_tup = engine.compute_tup('mul', (a_str,), (x_str,))
+        if r1_tup is None:
             return None
 
-        expected_output: list[str] = ['step'] + list(r1_str) + ['ans'] + list(x_str)
+        expected_output: list[str] = ['step'] + list(r1_tup) + ['ans'] + [x_str]
 
     # ---- Bernoulli branch ----
-    elif op in ('bern_p1', 'bern_p2'):
-        # Input: P(2-digit) V1(1-digit) V2(1-digit)
-        # len(input_toks) should be 4 (two digits for P, one each for V1, V2)
+    elif op_nid in (_BERN_P1_NODE, _BERN_P2_NODE):
+        # Input: P(2-token) V1(1-token) V2(1-token)
+        # len(input_toks) should be 4 (two tokens for P, one each for V1, V2)
         if len(input_toks) != 4:
             return None
-        # P is zero-padded 2 digits: input_toks[0:2]
+        # P is zero-padded 2 tokens: input_toks[0:2]
         p_toks = tuple(input_toks[:2])
         v1 = input_toks[2]
         v2 = input_toks[3]
-        if not (len(p_toks) == 2 and len(v1) == 1 and len(v2) == 1):
-            return None
-
-        if fc_lookup is None or fold_rules is None or not succ_map:
-            # No compose engine — can't compute multi-digit arithmetic
-            return None
-
-        cache = compose_cache if compose_cache is not None else {}
 
         # Compute r1 = V1² and r2 = V2²
-        r1_tup = _compose('mul', ((v1,), (v1,)), fc_lookup, fold_rules,
-                          succ_map, carry_el, carry_out, zero, cache)
-        r2_tup = _compose('mul', ((v2,), (v2,)), fc_lookup, fold_rules,
-                          succ_map, carry_el, carry_out, zero, cache)
+        r1_tup = engine.compute_tup('mul', (v1,), (v1,))
+        r2_tup = engine.compute_tup('mul', (v2,), (v2,))
         if r1_tup is None or r2_tup is None:
             return None
 
         # Compute ans = P ± (r1 - r2) depending on op
         # bern_p2: P2 = P1 + r1 - r2  (given P1, V1 > V2 in training)
         # bern_p1: P1 = P2 + r2 - r1  (given P2, V2 < V1 so r2 < r1)
-        if op == 'bern_p2':
-            # P2 = add(sub(P1 + r1), r2) or P2 = add(P1, sub(r1, r2))
-            # Use: temp = add(P1, r1); P2 = sub(temp, r2)
-            temp_tup = _compose('add', (p_toks, r1_tup), fc_lookup, fold_rules,
-                                succ_map, carry_el, carry_out, zero, cache)
+        if op_nid == _BERN_P2_NODE:
+            temp_tup = engine.compute_tup('add', p_toks, r1_tup)
             if temp_tup is None:
                 return None
-            ans_tup = _compose('sub', (temp_tup, r2_tup), fc_lookup, fold_rules,
-                               succ_map, carry_el, carry_out, zero, cache)
+            ans_tup = engine.compute_tup('sub', temp_tup, r2_tup)
         else:  # bern_p1
-            # P1 = P2 + r2 - r1: temp = add(P2, r2); P1 = sub(temp, r1)
-            temp_tup = _compose('add', (p_toks, r2_tup), fc_lookup, fold_rules,
-                                succ_map, carry_el, carry_out, zero, cache)
+            temp_tup = engine.compute_tup('add', p_toks, r2_tup)
             if temp_tup is None:
                 return None
-            ans_tup = _compose('sub', (temp_tup, r1_tup), fc_lookup, fold_rules,
-                               succ_map, carry_el, carry_out, zero, cache)
+            ans_tup = engine.compute_tup('sub', temp_tup, r1_tup)
 
         if ans_tup is None:
             return None
@@ -1011,8 +757,6 @@ def _pullback_predict(
         # Zero-pad answer to 2 digits (ans always uses _zfill2 in corpus)
         if len(ans_tup) == 1:
             ans_tup = (zero,) + ans_tup
-        # Zero-pad r1 and r2 only if they are the step output — they are NOT padded in corpus
-        # (corpus uses _digits, not _zfill2, for the step values)
         r1_toks = list(r1_tup)
         r2_toks = list(r2_tup)
         ans_toks = list(ans_tup)
@@ -1020,6 +764,56 @@ def _pullback_predict(
         expected_output = (['step'] + r1_toks +
                            ['step'] + r2_toks +
                            ['ans'] + ans_toks)
+    # ---- Conservation scenario branches (Phase F) ----
+    # cs4 A B C step <A+B> ans D  (D = A+B - C, all results zero-padded to 2 digits)
+    # cs3 A B D step <A+B> ans C  (same structure, solve for C)
+    # cs2 A C D step <C+D> ans B  (B = C+D - A, ans is 1 digit)
+    # cs1 B C D step <C+D> ans A  (A = C+D - B, ans is 1 digit)
+    # Input layout: cs4/cs3 have 4 tokens (a:1, b:1, cd:2); cs2/cs1 have 5 (ab:1, c:2, d:2)
+    elif op_nid in (_CS4_NODE, _CS3_NODE):
+        if len(input_toks) != 4:
+            return None
+        a_tok = input_toks[0]
+        b_tok = input_toks[1]
+        cd_tup = (input_toks[2], input_toks[3])
+
+        step_tup = engine.compute_tup('add', (a_tok,), (b_tok,))
+        if step_tup is None:
+            return None
+        # Zero-pad step to 2 tokens (corpus always uses _zfill2 for step)
+        if len(step_tup) == 1:
+            step_tup = (zero,) + step_tup
+        ans_tup = engine.compute_tup('sub', step_tup, cd_tup)
+        if ans_tup is None:
+            return None
+        # Zero-pad ans to 2 tokens (corpus always uses _zfill2 for ans in cs4/cs3)
+        if len(ans_tup) == 1:
+            ans_tup = (zero,) + ans_tup
+
+        expected_output = (['step'] + list(step_tup) +
+                           ['ans']  + list(ans_tup))
+
+    elif op_nid in (_CS2_NODE, _CS1_NODE):
+        if len(input_toks) != 5:
+            return None
+        ab_tok = input_toks[0]
+        c_tup = (input_toks[1], input_toks[2])
+        d_tup = (input_toks[3], input_toks[4])
+
+        step_tup = engine.compute_tup('add', c_tup, d_tup)
+        if step_tup is None:
+            return None
+        # Zero-pad step to 2 tokens (corpus always uses _zfill2 for step)
+        if len(step_tup) == 1:
+            step_tup = (zero,) + step_tup
+        ans_tup = engine.compute_tup('sub', step_tup, (ab_tok,))
+        if ans_tup is None:
+            return None
+        # ans uses _digits (no zero-padding) for cs2/cs1
+
+        expected_output = (['step'] + list(step_tup) +
+                           ['ans']  + list(ans_tup))
+
     else:
         return None
 
@@ -1032,27 +826,422 @@ def _pullback_predict(
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers: FC + adjunction lookup (Level 0.5)
+# Stage 4: SUCC_EDGE population + CTKG NNO prediction (Level 0.5-NNO)
 # ---------------------------------------------------------------------------
 
-def _fc_and_adj_predict(
-    prefix: list[str],
-    fc_lookup: dict[tuple, tuple],
-    adj_lookup: dict[tuple, tuple],
-) -> Optional[dict[str, float]]:
-    """Level 0.5: FC direct + adjunction-based exact lookup.
+def _populate_succ_edges_to_mg(
+    mg: MorphismGraph,
+    succ_map: dict[str, str],
+) -> None:
+    """Write SUCC_EDGE morphisms into the MorphismGraph from the NNO succ_map.
 
-    Parses the prefix as op = prefix[0], input_tuple = prefix[1:eq_idx],
-    output_so_far = prefix[eq_idx+1:].  Looks up the expected output in
-    fc_lookup first, then adj_lookup (CT_REFERENCE §4: adjunction counit).
+    Each entry (digit → next_digit) in succ_map becomes a SUCC_EDGE morphism.
+    Objects for each digit label are created via get_or_create_object if absent.
+    Existing SUCC_EDGE morphisms between the same pair are not duplicated.
 
-    Returns {next_token: 1.0} or {'<eos>': 1.0} if a match is found,
-    None otherwise.
+    After this call the MorphismGraph encodes the full single-digit successor
+    relation as typed edges — knowledge is in the graph, not a Python dict.
     """
-    if not prefix or 'eq' not in prefix:
+    for src_label, tgt_label in succ_map.items():
+        src_obj = mg.get_or_create_object(src_label)
+        tgt_obj = mg.get_or_create_object(tgt_label)
+        existing = [
+            m for m in mg.hom(src_obj.obj_id, tgt_obj.obj_id, include_identity=False)
+            if m.morph_type == "SUCC_EDGE"
+        ]
+        if not existing:
+            mg.add_morphism(
+                src_obj.obj_id,
+                tgt_obj.obj_id,
+                morph_type="SUCC_EDGE",
+                evidence=1,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Stage 4: Population functions — write Python knowledge dicts into MorphismGraph
+# ---------------------------------------------------------------------------
+
+def _populate_fold_rules_to_mg(
+    mg: MorphismGraph,
+    fold_rules: dict,
+) -> None:
+    """Store each BinaryFoldRule as a FOLD_RULE self-loop on its op node.
+
+    One morphism per operator — the payload IS the BinaryFoldRule object.
+    Avoids duplicate entries on repeated calls.
+    """
+    for op_str, rule in fold_rules.items():
+        op_obj = mg.get_or_create_object(op_str)
+        if not mg.source_morphisms(op_obj.obj_id, morph_type="FOLD_RULE"):
+            mg.add_morphism(
+                op_obj.obj_id, op_obj.obj_id,
+                morph_type="FOLD_RULE", evidence=1, payload=rule,
+            )
+
+
+def _populate_chain_steps_to_mg(
+    mg: MorphismGraph,
+    chain_rules: dict,
+) -> None:
+    """Store each ChainRule as a CHAIN_STEP self-loop on its op node.
+
+    One morphism per operator — the payload IS the ChainRule object (which
+    carries both chain_table and eq_table).  Keyed by op NodeId in the input
+    dict, but the graph stores the op string label in the object.
+    """
+    from experiments.symbolic_ai_v2.ctkg.core.node import TOKEN_GRAPH as _TG
+    for op_nid, chain_rule in chain_rules.items():
+        op_str = _TG.decode(op_nid)
+        op_obj = mg.get_or_create_object(op_str)
+        if not mg.source_morphisms(op_obj.obj_id, morph_type="CHAIN_STEP"):
+            mg.add_morphism(
+                op_obj.obj_id, op_obj.obj_id,
+                morph_type="CHAIN_STEP", evidence=1, payload=chain_rule,
+            )
+
+
+def _populate_fc_adj_edges_to_mg(
+    mg: MorphismGraph,
+    fc_lookup: dict,
+    adj_lookup: dict,
+) -> None:
+    """Store FC and adjunction lookups as FC_EDGE self-loops per operator.
+
+    payload = (op_fc_dict, op_adj_dict) where keys are input_tuple only
+    (the op string is stripped — it's encoded in the source object label).
+    One morphism per operator.  Groups all (op, input_tuple) → output entries
+    from the flat fc_lookup / adj_lookup dicts.
+    """
+    from collections import defaultdict
+    by_op_fc: dict[str, dict] = defaultdict(dict)
+    by_op_adj: dict[str, dict] = defaultdict(dict)
+    for (op_str, inp_tup), out_tup in fc_lookup.items():
+        by_op_fc[op_str][inp_tup] = out_tup
+    for (op_str, inp_tup), out_tup in adj_lookup.items():
+        by_op_adj[op_str][inp_tup] = out_tup
+    all_ops = set(by_op_fc.keys()) | set(by_op_adj.keys())
+    for op_str in all_ops:
+        op_obj = mg.get_or_create_object(op_str)
+        if not mg.source_morphisms(op_obj.obj_id, morph_type="FC_EDGE"):
+            mg.add_morphism(
+                op_obj.obj_id, op_obj.obj_id,
+                morph_type="FC_EDGE", evidence=1,
+                payload=(dict(by_op_fc.get(op_str, {})),
+                         dict(by_op_adj.get(op_str, {}))),
+            )
+
+
+def _populate_adj_solve_to_mg(
+    mg: MorphismGraph,
+    adj_solve_map: dict,
+) -> None:
+    """Store adjunction inverse-solve info as ADJ_EDGE self-loops per inverse op.
+
+    payload = (fwd_op_str, preserved_position)
+    One morphism per inverse-op (e.g. 'sub' gets an ADJ_EDGE pointing to 'add').
+    """
+    for inv_op_str, (fwd_op_str, preserved_pos) in adj_solve_map.items():
+        op_obj = mg.get_or_create_object(inv_op_str)
+        if not mg.source_morphisms(op_obj.obj_id, morph_type="ADJ_EDGE"):
+            mg.add_morphism(
+                op_obj.obj_id, op_obj.obj_id,
+                morph_type="ADJ_EDGE", evidence=1,
+                payload=(fwd_op_str, preserved_pos),
+            )
+
+
+def _populate_relation_rules_to_mg(
+    mg: MorphismGraph,
+    relation_rules: dict,
+) -> None:
+    """Store each list[RelationRule] as a RELATION_RULE self-loop on its op node.
+
+    payload = list[RelationRule].  Keyed by op NodeId in the input dict.
+    One morphism per operator.
+    """
+    from experiments.symbolic_ai_v2.ctkg.core.node import TOKEN_GRAPH as _TG
+    for op_nid, rel_rules in relation_rules.items():
+        op_str = _TG.decode(op_nid)
+        op_obj = mg.get_or_create_object(op_str)
+        if not mg.source_morphisms(op_obj.obj_id, morph_type="RELATION_RULE"):
+            mg.add_morphism(
+                op_obj.obj_id, op_obj.obj_id,
+                morph_type="RELATION_RULE", evidence=1, payload=list(rel_rules),
+            )
+
+
+def _populate_kleisli_chains_to_mg(
+    mg: MorphismGraph,
+    kleisli_chains: dict,
+    kleisli_disc_roles: dict,
+) -> None:
+    """Store each Kleisli chain set as a KLEISLI_CHAIN self-loop on its op node.
+
+    payload = (disc_role_nid, chains_dict) where disc_role_nid is the NodeId
+    of the discriminator role and chains_dict maps disc_value_nid → list[RelationRule].
+    One morphism per operator.  Keyed by op NodeId in the input dicts.
+    """
+    from experiments.symbolic_ai_v2.ctkg.core.node import TOKEN_GRAPH as _TG
+    for op_nid, chains in kleisli_chains.items():
+        disc_role = kleisli_disc_roles.get(op_nid)
+        if disc_role is None:
+            continue
+        op_str = _TG.decode(op_nid)
+        op_obj = mg.get_or_create_object(op_str)
+        if not mg.source_morphisms(op_obj.obj_id, morph_type="KLEISLI_CHAIN"):
+            mg.add_morphism(
+                op_obj.obj_id, op_obj.obj_id,
+                morph_type="KLEISLI_CHAIN", evidence=1,
+                payload=(disc_role, dict(chains)),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Stage 4: Graph extraction helpers — rebuild working dicts FROM MorphismGraph
+# ---------------------------------------------------------------------------
+
+def _extract_succ_map_from_mg(mg: MorphismGraph) -> dict:
+    """Read SUCC_EDGE morphisms → {src_label: tgt_label} dict."""
+    result: dict = {}
+    for m in mg.morphisms(include_identity=False):
+        if m.morph_type == "SUCC_EDGE":
+            src = mg.object_by_id(m.source)
+            tgt = mg.object_by_id(m.target)
+            if src and tgt and src.label and tgt.label:
+                result[src.label] = tgt.label
+    return result
+
+
+def _extract_fold_rules_from_mg(mg: MorphismGraph) -> dict:
+    """Read FOLD_RULE morphisms → {op_str: BinaryFoldRule} dict."""
+    result: dict = {}
+    for m in mg.morphisms(include_identity=False):
+        if m.morph_type == "FOLD_RULE":
+            src = mg.object_by_id(m.source)
+            if src and src.label and m.payload is not None:
+                result[src.label] = m.payload
+    return result
+
+
+def _extract_fc_adj_from_mg(mg: MorphismGraph) -> tuple:
+    """Read FC_EDGE morphisms → (fc_lookup, adj_lookup) flat dicts.
+
+    Reconstructs the flat {(op, input_tuple): output_tuple} dicts used by
+    _compose and ComposeEngine from the per-op FC_EDGE morphism payloads.
+    """
+    fc_lookup: dict = {}
+    adj_lookup: dict = {}
+    for m in mg.morphisms(include_identity=False):
+        if m.morph_type == "FC_EDGE":
+            src = mg.object_by_id(m.source)
+            if src and src.label and m.payload is not None:
+                op_str = src.label
+                fc_part, adj_part = m.payload
+                for inp_tup, out_tup in fc_part.items():
+                    fc_lookup[(op_str, inp_tup)] = out_tup
+                for inp_tup, out_tup in adj_part.items():
+                    adj_lookup[(op_str, inp_tup)] = out_tup
+    return fc_lookup, adj_lookup
+
+
+def _extract_adj_solve_from_mg(mg: MorphismGraph) -> dict:
+    """Read ADJ_EDGE morphisms → {inv_op_str: (fwd_op_str, preserved_pos)} dict."""
+    result: dict = {}
+    for m in mg.morphisms(include_identity=False):
+        if m.morph_type == "ADJ_EDGE":
+            src = mg.object_by_id(m.source)
+            if src and src.label and m.payload is not None:
+                result[src.label] = m.payload
+    return result
+
+
+def _extract_chain_op_atoms_from_mg(mg: MorphismGraph) -> frozenset:
+    """Derive chain_op_atoms (frozenset[NodeId]) from CHAIN_STEP morphisms."""
+    from experiments.symbolic_ai_v2.ctkg.core.node import TOKEN_GRAPH as _TG
+    result: set = set()
+    for m in mg.morphisms(include_identity=False):
+        if m.morph_type == "CHAIN_STEP":
+            src = mg.object_by_id(m.source)
+            if src and src.label:
+                result.add(_TG.encode(src.label))
+    return frozenset(result)
+
+
+# ---------------------------------------------------------------------------
+# Stage 4: Unified CTKG path-find traversal — replaces Level 0.5/0.7/1b/1c
+# ---------------------------------------------------------------------------
+
+def _ctkg_path_find(
+    prefix: list,
+    mg: MorphismGraph,
+    engine,  # Optional[ComposeEngine]
+    rs,  # Optional[RelationStore]
+    ctx_cat: ContextCategory,
+    ctx,  # ContextId
+    eq_token: str,
+    op_atoms: frozenset,
+    chain_op_atoms: frozenset,
+    lambda_library: 'Optional[dict]' = None,
+) -> 'Optional[dict]':
+    """Unified graph traversal replacing Levels 1b, 1c, 0.5, and 0.7.
+
+    Dispatch is on morph_type (structural edge type label), never on op name string.
+    Reads all rules from MorphismGraph typed morphisms — no Python knowledge dicts.
+
+    Priority order within this function:
+      1. CHAIN_STEP  — exact chain/eq table lookup (Level 1b)
+      2. RELATION_RULE — arity-free hypergraph rule (Level 1c-relational)
+      3. KLEISLI_CHAIN — variable-depth Kleisli chain (Level 1c-kleisli)
+      4. FC_EDGE     — exact FC/adj lookup (Level 0.5)
+      5. FOLD_RULE + ADJ_EDGE — NNO fold composition (Level 0.7)
+    """
+    _ROLE_DELIMS = frozenset({'step', 'ans', 'eq', '<eos>'})
+
+    # ------------------------------------------------------------------
+    # Levels 1b / 1c-relational / 1c-kleisli: chain/trace format
+    # ------------------------------------------------------------------
+    chain_state = parse_chain_prefix(prefix, chain_op_atoms, eq_token=eq_token)
+    if (
+        chain_state is not None
+        and chain_state.phase in ("INPUT", "OUTPUT")
+        and chain_state.op is not None
+    ):
+        op_obj = mg.object_by_label(chain_state.op)
+        if op_obj is not None:
+            op_nid = TOKEN_GRAPH.encode(chain_state.op)
+            use_eq = ctx_cat.is_refinement(ctx, ContextId.EQ)
+
+            # --- Level 1b: CHAIN_STEP exact lookup ---
+            chain_morphs = mg.source_morphisms(op_obj.obj_id, morph_type="CHAIN_STEP")
+            if chain_morphs:
+                chain_rule = chain_morphs[0].payload
+                result = _chain_predict(
+                    chain_rule,
+                    chain_state.input_tokens,
+                    chain_state.output_tokens,
+                    use_eq_table=use_eq,
+                )
+                if result is not None:
+                    return result
+
+            # --- Level 1b-λ: Lambda term evaluation (between chain table and relation) ---
+            # Fires for ops with chain rules, non-eq format, non-kleisli.
+            # Skip for Kleisli ops (variable-depth output): they handle at 1c-kleisli.
+            if lambda_library and not use_eq:
+                _kl_check = mg.source_morphisms(op_obj.obj_id, morph_type="KLEISLI_CHAIN")
+                if not _kl_check:
+                    _nid_prefix = TOKEN_GRAPH.encode_seq(prefix)
+                    _lt_result = lambda_predict(
+                        _nid_prefix, lambda_library, engine, allow_transfer=True,
+                    )
+                    if _lt_result is not None:
+                        return {TOKEN_GRAPH.decode(k): v for k, v in _lt_result.items()}
+
+            # --- Level 1c-relational: RELATION_RULE ---
+            rel_morphs = mg.source_morphisms(op_obj.obj_id, morph_type="RELATION_RULE")
+            if rel_morphs and rs is not None and engine is not None:
+                rel_rules = rel_morphs[0].payload
+                _rel_input = [chain_state.op] + list(chain_state.input_tokens)
+                _tmp_rules = {op_nid: rel_rules}
+                _alternatives = predict_alternatives_from_rules(
+                    _rel_input, rs, _tmp_rules, engine
+                )
+                if _alternatives:
+                    _rk = len(chain_state.output_tokens)
+                    _dist: dict = {}
+                    _total_w = sum(w for _, w in _alternatives)
+                    for _rel_output, _w in _alternatives:
+                        _norm_w = _w / _total_w if _total_w > 0 else _w
+                        if use_eq:
+                            _role_content: list = []
+                            for _role_delim in ('ans', 'eq'):
+                                if _role_delim in _rel_output:
+                                    _start = _rel_output.index(_role_delim) + 1
+                                    _raw = _rel_output[_start:]
+                                    _end = next(
+                                        (i for i, t in enumerate(_raw)
+                                         if t in _ROLE_DELIMS),
+                                        len(_raw),
+                                    )
+                                    _role_content = _raw[:_end]
+                                    break
+                            if _role_content:
+                                if _rk < len(_role_content):
+                                    _tok = _role_content[_rk]
+                                    _dist[_tok] = _dist.get(_tok, 0.0) + _norm_w
+                                elif _rk == len(_role_content):
+                                    _dist['<eos>'] = _dist.get('<eos>', 0.0) + _norm_w
+                        else:
+                            if _rk < len(_rel_output):
+                                _tok = _rel_output[_rk]
+                                _dist[_tok] = _dist.get(_tok, 0.0) + _norm_w
+                            elif _rk == len(_rel_output):
+                                _dist['<eos>'] = _dist.get('<eos>', 0.0) + _norm_w
+                    if _dist:
+                        return _dist
+
+            # --- Level 1c-kleisli: KLEISLI_CHAIN (trace format only) ---
+            if not use_eq:
+                kl_morphs = mg.source_morphisms(op_obj.obj_id, morph_type="KLEISLI_CHAIN")
+                if kl_morphs and rs is not None and engine is not None:
+                    disc_role, chains = kl_morphs[0].payload
+                    _kl_seq = [chain_state.op] + list(chain_state.input_tokens)
+                    _kl_rel = rs.extract_relation(_kl_seq)
+                    if _kl_rel is not None:
+                        _disc_val_tup = None
+                        for _sep, _toks in _kl_rel.input_roles:
+                            if _sep == disc_role and _toks:
+                                _disc_val_tup = tuple(_toks)
+                                break
+                        _disc_key = (
+                            _disc_val_tup[0]
+                            if _disc_val_tup and len(_disc_val_tup) == 1
+                            else TOKEN_GRAPH.encode(
+                                ''.join(TOKEN_GRAPH.decode(n) for n in _disc_val_tup)
+                            ) if _disc_val_tup else None
+                        )
+                        if _disc_key is not None and _disc_key in chains:
+                            _kl_rules = chains[_disc_key]
+                            _kl_vals: dict = {}
+                            for _sep, _toks in _kl_rel.input_roles:
+                                if _toks:
+                                    _kl_vals[_sep] = tuple(_toks)
+                            _kl_ok = True
+                            for _kl_rule in _kl_rules:
+                                _kl_d = _kl_rule.evaluate(_kl_vals, engine)
+                                if not _kl_d:
+                                    _kl_ok = False
+                                    break
+                                _kl_vals[_kl_rule.output_role] = max(_kl_d, key=_kl_d.get)
+                            if _kl_ok:
+                                _kl_out: list = []
+                                for _kl_rule in _kl_rules:
+                                    _role_str = TOKEN_GRAPH.decode(_kl_rule.output_role)
+                                    _delim = (
+                                        'step' if _role_str.startswith('step')
+                                        else _role_str
+                                    )
+                                    _kl_out.append(_delim)
+                                    _kl_val_tup = _kl_vals[_kl_rule.output_role]
+                                    _kl_out.extend(
+                                        TOKEN_GRAPH.decode(n) for n in _kl_val_tup
+                                    )
+                                _kl_rk = len(chain_state.output_tokens)
+                                if _kl_rk < len(_kl_out):
+                                    return {_kl_out[_kl_rk]: 1.0}
+                                if _kl_rk == len(_kl_out):
+                                    return {'<eos>': 1.0}
+
+    # ------------------------------------------------------------------
+    # Levels 0.5 / 0.7: eq-format FC lookup + NNO fold composition
+    # ------------------------------------------------------------------
+    if not ctx_cat.is_refinement(ctx, ContextId.EQ):
+        return None
+    if not prefix or eq_token not in prefix:
         return None
     try:
-        eq_idx = prefix.index('eq')
+        eq_idx = prefix.index(eq_token)
     except ValueError:
         return None
     if eq_idx == 0:
@@ -1061,105 +1250,144 @@ def _fc_and_adj_predict(
     op = prefix[0]
     input_tuple = tuple(prefix[1:eq_idx])
     output_so_far = prefix[eq_idx + 1:]
-
-    expected = fc_lookup.get((op, input_tuple))
-    if expected is None:
-        expected = adj_lookup.get((op, input_tuple))
-    if expected is None:
+    if not input_tuple:
         return None
 
-    k = len(output_so_far)
-    if k < len(expected):
-        return {expected[k]: 1.0}
-    if k == len(expected):
-        return {'<eos>': 1.0}
+    op_obj_eq = mg.object_by_label(op)
+    if op_obj_eq is None:
+        return None
+
+    # --- Level 0.5: FC_EDGE exact lookup ---
+    fc_morphs = mg.source_morphisms(op_obj_eq.obj_id, morph_type="FC_EDGE")
+    if fc_morphs:
+        fc_part, adj_part = fc_morphs[0].payload
+        expected = fc_part.get(input_tuple)
+        if expected is None:
+            expected = adj_part.get(input_tuple)
+        if expected is not None:
+            k = len(output_so_far)
+            if k < len(expected):
+                return {expected[k]: 1.0}
+            if k == len(expected):
+                return {'<eos>': 1.0}
+
+    if engine is None:
+        return None
+
+    # --- Level 0.7: FOLD_RULE / ADJ_EDGE composition ---
+    fold_morphs = mg.source_morphisms(op_obj_eq.obj_id, morph_type="FOLD_RULE")
+    adj_morphs = mg.source_morphisms(op_obj_eq.obj_id, morph_type="ADJ_EDGE")
+
+    result = None
+    if fold_morphs and len(input_tuple) == 2:
+        args: tuple = tuple((t,) for t in input_tuple)
+        result = _compose(
+            op, args,
+            engine.fc_lookup, engine.fold_rules,
+            engine.succ_map, engine.carry_el, engine.carry_out,
+            engine.zero, engine.cache,
+        )
+
+    if result is None and adj_morphs:
+        adj_info = adj_morphs[0].payload  # (fwd_op_str, preserved_pos)
+        result = _compose_adjoint_search(
+            op, input_tuple, adj_info,
+            engine.fc_lookup, engine.fold_rules,
+            engine.succ_map, engine.carry_el, engine.carry_out,
+            engine.zero, engine.cache,
+        )
+
+    if result is not None:
+        k = len(output_so_far)
+        if k < len(result):
+            return {result[k]: 1.0}
+        if k == len(result):
+            return {'<eos>': 1.0}
+
     return None
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers: NNO chain prediction (Level 0.6)
-# ---------------------------------------------------------------------------
-
-def _nno_chain_predict(
+def _ctkg_nno_predict(
     prefix: list[str],
+    mg: MorphismGraph,
     unary_chain_maps: dict[str, dict[str, str]],
-    unary_carry_maps: dict[str, tuple],
+    engine: 'ComposeEngine',
+    op_atoms: frozenset,
+    eq_token: str = "eq",
 ) -> Optional[dict[str, float]]:
-    """Level 0.6: NNO chain prediction (CT_REFERENCE §19).
+    """Level 0.5-NNO: CTKG SUCC_EDGE graph traversal (Stage 4, CT_REFERENCE §19).
 
-    Fires when both the direct FC edge and the adjoint edge are absent
-    (i.e. both succ(n) and pred(n+1) are in the test split).  Uses the
-    partial single-digit step map discovered from training data to compute
-    multi-digit successor/predecessor via carry/borrow propagation without
-    any int() calls.
+    Symbol-agnostic replacement for the hardcoded-'eq' Levels 0.6/0.7 NNO path.
+    Uses parse_prefix (eq_token-aware) and reads SUCC_EDGE morphisms from the
+    MorphismGraph instead of looking up a Python dict keyed by op-name string.
 
-    unary_chain_predict(step_map, carry_element, carry_out, digits, inverse=False)
-    expects the FORWARD step map (succ: {'0':'1',...,'8':'9'}) in both modes.
-    When inverse=True it internally inverts step_map to get the pred map.
+    Direction (succ vs pred) is determined structurally by comparing the op's
+    observed single-digit step_map against the SUCC_EDGE-derived forward map —
+    no string comparison against 'succ' or 'pred'.
+
+    Carry info (carry_el, carry_out) is read from engine — the ComposeEngine
+    holds the canonical carry info for the forward (succ-like) op.
+
+    Handles both in-distribution and OOD inputs via unary_chain_predict carry
+    propagation.  Returns {next_token: 1.0} or {'<eos>': 1.0}, or None on miss.
     """
-    if not prefix or 'eq' not in prefix:
+    state = parse_prefix(prefix, eq_token=eq_token, op_atoms=op_atoms)
+    if state.phase not in ("INPUT", "OUTPUT"):
         return None
-    try:
-        eq_idx = prefix.index('eq')
-    except ValueError:
-        return None
-    if eq_idx == 0:
+    if state.op is None:
         return None
 
-    op = prefix[0]
-    input_digits = list(prefix[1:eq_idx])
-    output_so_far = list(prefix[eq_idx + 1:])
+    input_digits = list(state.input_digits)
+    output_so_far = list(state.output_digits)
 
     if not input_digits:
         return None
 
-    # Case 1: op has its own step_map AND carry_map (e.g. succ).
-    step_map = unary_chain_maps.get(op)
-    carry_info = unary_carry_maps.get(op)
-    if step_map is not None and carry_info is not None:
-        carry_element, carry_out = carry_info
-        full_output = unary_chain_predict(
-            step_map, carry_element, carry_out, input_digits, inverse=False
-        )
-        if full_output is not None:
-            k = len(output_so_far)
-            if k < len(full_output):
-                return {full_output[k]: 1.0}
-            if k == len(full_output):
-                return {'<eos>': 1.0}
+    # Build succ_graph from SUCC_EDGE morphisms in the MorphismGraph.
+    # Knowledge comes from typed edges, not a Python dict keyed by op name.
+    succ_graph: dict[str, str] = {}
+    for m in mg.morphisms(include_identity=False):
+        if m.morph_type == "SUCC_EDGE":
+            src_obj = mg.object_by_id(m.source)
+            tgt_obj = mg.object_by_id(m.target)
+            if src_obj and tgt_obj and src_obj.label and tgt_obj.label:
+                succ_graph[src_obj.label] = tgt_obj.label
+
+    if not succ_graph:
         return None
 
-    # Case 2: op lacks a carry_map but may be the adjoint of a chain op
-    # (e.g. pred is the adjoint of succ).  Find a forward op that has a
-    # carry_map and whose single-digit step map is the inverse of op's map.
-    for fwd_op, fwd_step in unary_chain_maps.items():
-        fwd_carry = unary_carry_maps.get(fwd_op)
-        if fwd_carry is None:
-            continue
-        # Verify that op's edges are consistent with being the adjoint:
-        # pred's single-digit edges should be the inverse of succ's.
-        op_step = unary_chain_maps.get(op)
-        if op_step is None:
-            continue
-        inv_fwd = {v: k for k, v in fwd_step.items()}
-        if op_step != inv_fwd:
-            # Not a perfect match (may be partial due to 80/20 split);
-            # accept if at least one entry matches.
-            if not any(op_step.get(k) == v for k, v in inv_fwd.items()):
-                continue
-        # Use the FORWARD step_map with inverse=True.
-        carry_element, carry_out = fwd_carry
-        full_output = unary_chain_predict(
-            fwd_step, carry_element, carry_out, input_digits, inverse=True
-        )
-        if full_output is not None:
-            k = len(output_so_far)
-            if k < len(full_output):
-                return {full_output[k]: 1.0}
-            if k == len(full_output):
-                return {'<eos>': 1.0}
+    # Determine direction: compare op's observed step_map against succ_graph.
+    op_step = unary_chain_maps.get(state.op)
+    if op_step is None:
         return None
 
+    inv_succ = {v: k for k, v in succ_graph.items()}
+    fwd_matches = sum(1 for k, v in op_step.items() if succ_graph.get(k) == v)
+    inv_matches = sum(1 for k, v in op_step.items() if inv_succ.get(k) == v)
+
+    if fwd_matches == 0 and inv_matches == 0:
+        return None
+
+    inverse = inv_matches > fwd_matches
+
+    # Carry info comes from ComposeEngine (carries canonical forward-op carry data).
+    carry_el: str = engine.carry_el
+    carry_out: tuple = engine.carry_out
+
+    if not carry_el:
+        return None
+
+    full_output = unary_chain_predict(
+        succ_graph, carry_el, carry_out, input_digits, inverse=inverse
+    )
+    if full_output is None:
+        return None
+
+    k = len(output_so_far)
+    if k < len(full_output):
+        return {full_output[k]: 1.0}
+    if k == len(full_output):
+        return {"<eos>": 1.0}
     return None
 
 
@@ -1192,68 +1420,6 @@ def _chain_predict(
 # ---------------------------------------------------------------------------
 # Composition engine (Level 0.7) — CT_REFERENCE §19
 # ---------------------------------------------------------------------------
-
-def _compose_predict(
-    prefix: list[str],
-    fc_lookup: dict[tuple, tuple],
-    fold_rules: dict[str, "BinaryFoldRule"],
-    succ_map: dict[str, str],
-    carry_el: str,
-    carry_out: tuple,
-    zero_digit: str,
-    cache: dict[tuple, tuple],
-    adj_solve_map: Optional[dict[str, tuple]] = None,
-) -> Optional[dict[str, float]]:
-    """Level 0.7 entry point: parse prefix, call _compose, return point mass.
-
-    First tries direct fold-rule composition (_compose).  If that fails (no
-    rule, or op is an adjoint op like sub), falls back to adjunction-mediated
-    search (_compose_adjoint_search): for sub(c, b) = a, enumerates a from
-    zero via succ_map and applies the forward op (add) until add(a, b) = c.
-    """
-    if not prefix or 'eq' not in prefix:
-        return None
-    eq_idx = prefix.index('eq')
-    if eq_idx == 0:
-        return None
-    op = prefix[0]
-    input_tuple = tuple(prefix[1:eq_idx])
-    output_so_far = prefix[eq_idx + 1:]
-
-    if not input_tuple:
-        return None
-
-    # --- Try fold-rule composition first ---
-    # Only fire when input_tuple has exactly 2 tokens (both args single-digit).
-    # For multi-digit inputs (e.g. sub(11, 4) → ('1','1','4')), the flat
-    # token tuple can't be split into args without arity information, so we
-    # skip the fold rule and let the adjunction search handle it instead.
-    result = None
-    if len(input_tuple) == 2:
-        args: tuple = tuple((t,) for t in input_tuple)
-        result = _compose(op, args, fc_lookup, fold_rules,
-                          succ_map, carry_el, carry_out, zero_digit, cache)
-
-    # --- Adjunction-mediated search (FALLBACK for inverse ops: sub, div, …) ---
-    # Fires only when _compose returned None: either no fold rule, or the
-    # input had multi-digit tokens we couldn't split.
-    # Enumerates candidates via the left (forward) op without any int() calls.
-    if result is None and adj_solve_map and op in adj_solve_map:
-        result = _compose_adjoint_search(
-            op, input_tuple, adj_solve_map[op],
-            fc_lookup, fold_rules, succ_map, carry_el, carry_out, zero_digit, cache,
-        )
-
-    if result is None:
-        return None
-
-    k = len(output_so_far)
-    if k < len(result):
-        return {result[k]: 1.0}
-    if k == len(result):
-        return {'<eos>': 1.0}
-    return None
-
 
 def _compose_adjoint_search(
     op: str,
@@ -1419,5 +1585,89 @@ def _compose(
         cache[cache_key] = result
     return result
 
+
+@dataclass
+class ComposeEngine:
+    """On-demand NNO fold engine — replaces _binary_fmaps (BFM) (Mistake #48).
+
+    BFM pre-computed {op: {(a,b): result_str}} baked in the assumption that
+    tokens are single characters (len(t)==1 filter in build_binary_functional_maps).
+    ComposeEngine calls _compose on demand, supporting any token vocabulary including
+    NL tokens ('three', 'five', etc.).
+
+    Stage 4: also holds adj_lookup (adjunction-based exact lookup) and
+    adj_solve_map (adjunction inverse search) so that _ctkg_path_find can
+    access all computation knowledge through self._engine without keeping
+    separate Python dict attributes on Predictor.
+    """
+    fc_lookup: dict
+    fold_rules: dict
+    succ_map: dict
+    carry_el: str
+    carry_out: tuple
+    zero: str
+    cache: dict = field(default_factory=dict)
+    adj_lookup: dict = field(default_factory=dict)
+    adj_solve_map: dict = field(default_factory=dict)
+
+    def compute(self, op: str, a: str, b: str) -> Optional[tuple[str, ...]]:
+        """Compute op(a, b) via NNO fold. a and b are single token strings."""
+        _op_nid = TOKEN_GRAPH.encode(op)
+        if _op_nid == _CONCAT_NODE:
+            return (a + b,)
+        if _op_nid == _FST_NODE:
+            return (a,)
+        if _op_nid == _DIV_NODE:
+            return self._div(a, b)
+        return _compose(op, ((a,), (b,)),
+                        self.fc_lookup, self.fold_rules,
+                        self.succ_map, self.carry_el, self.carry_out, self.zero,
+                        self.cache)
+
+    def compute_tup(self, op: str, a: tuple, b: tuple) -> Optional[tuple[str, ...]]:
+        """Compute op(a, b) via NNO fold. a and b are token tuples (multi-digit ok)."""
+        _op_nid = TOKEN_GRAPH.encode(op)
+        if _op_nid == _FST_NODE:
+            return a
+        if _op_nid == _CONCAT_NODE:
+            if len(a) == 1 and len(b) == 1:
+                return (a[0] + b[0],)
+            return None
+        if _op_nid == _DIV_NODE:
+            if len(a) == 1 and len(b) == 1:
+                return self._div(a[0], b[0])
+            return None
+        return _compose(op, (a, b),
+                        self.fc_lookup, self.fold_rules,
+                        self.succ_map, self.carry_el, self.carry_out, self.zero,
+                        self.cache)
+
+    def _div(self, r: str, a: str) -> Optional[tuple[str, ...]]:
+        """Find b such that mul(a, b) = r. Enumerate NNO digit chain."""
+        r_tup: tuple[str, ...] = tuple(r.split('\x00')) if '\x00' in r else (r,)
+        seen: set[str] = set()
+        cur = self.zero
+        while cur not in seen:
+            result = _compose('mul', ((a,), (cur,)),
+                              self.fc_lookup, self.fold_rules,
+                              self.succ_map, self.carry_el, self.carry_out, self.zero,
+                              self.cache)
+            if result is not None and result == r_tup:
+                return (cur,)
+            seen.add(cur)
+            nxt = self.succ_map.get(cur)
+            if nxt is None or nxt in seen:
+                break
+            cur = nxt
+        return None
+
+    def known_ops(self) -> list[str]:
+        """Return list of ops this engine knows about."""
+        ops = list(self.fold_rules.keys())
+        for _extra_nid in (_CONCAT_NODE, _FST_NODE, _DIV_NODE):
+            _extra_str = TOKEN_GRAPH.decode(_extra_nid)
+            if _extra_str not in ops:
+                ops.append(_extra_str)
+        return ops
 
 

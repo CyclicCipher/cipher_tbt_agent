@@ -61,7 +61,7 @@ propose_paradigm_shift, and that class-A predictions are unaffected.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -101,12 +101,14 @@ class ParadigmShiftResult:
     explanation      : the LatentHypothesis fitted within the new theory.
                        None if the new theory uses a simpler representation.
     anomaly_coverage : fraction of anomaly sets explained by the new theory.
+    wired_morphisms  : MorphIds of WIRED_TO morphisms added via wires_to param.
     """
     old_theory_id:    TheoryId
     new_theory_id:    TheoryId
     bridge_morph_id:  MorphId
     explanation:      Optional[LatentHypothesis]
     anomaly_coverage: float
+    wired_morphisms:  list[MorphId] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +128,7 @@ def propose_paradigm_shift(
     min_coverage:    float = _DEFAULT_MIN_COVERAGE,
     tolerance:       float = 0.10,
     mdl_per_param:   float = 2.0,
+    wires_to:        Optional[list[MorphId]] = None,
 ) -> Optional[ParadigmShiftResult]:
     """Propose a new theory cluster for an irreconcilable anomaly.
 
@@ -217,12 +220,27 @@ def propose_paradigm_shift(
         payload=payload,
     )
 
+    # Wire new concept node to specified morphisms from related theories
+    wired: list[MorphId] = []
+    if wires_to:
+        for target_mid in wires_to:
+            wm = mg.add_morphism(
+                new_theory_id,
+                target_mid,
+                morph_type="WIRED_TO",
+                evidence=1,
+                morph_concept_id=new_theory_id,
+                payload={"wired_source": theory_id, "wired_target": target_mid},
+            )
+            wired.append(wm.morph_id)
+
     return ParadigmShiftResult(
         old_theory_id=theory_id,
         new_theory_id=new_theory_id,
         bridge_morph_id=bridge.morph_id,
         explanation=best_hyp,
         anomaly_coverage=cov.coverage,
+        wired_morphisms=wired,
     )
 
 

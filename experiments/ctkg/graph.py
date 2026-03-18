@@ -215,6 +215,36 @@ class Functor:
 
 
 # ---------------------------------------------------------------------------
+# Natural transformations (2-morphisms in the 2-category)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class NaturalTransformation:
+    """A 2-morphism between functors: α : F ⟹ G.
+
+    In the 2-category of domains:
+      - Objects are domains (KnowledgeGraph subgraphs)
+      - 1-morphisms are Functors (domain-to-domain maps)
+      - 2-morphisms are NaturalTransformations (functor-to-functor maps)
+
+    Each component is a RewriteRule (from ctkg.core.rewrite) that maps
+    F(X) → G(X) for some object X of the source category.  The naturality
+    condition (F(f) ; α_Y = α_X ; G(f)) is checked at rule-discovery time
+    via consistency verification in discover_rules.
+
+    To apply α to an expression: run cata_reduce(expr, components).
+
+    Example — differentiation D : Poly ⟹ Poly:
+        components = [power_rule, constant_rule, sum_rule, product_rule]
+        apply_nat_trans('D', d(pow(x,2))) → mul(2, x)
+    """
+    name: str
+    source_functor: str          # name of functor F (or domain if endofunctor)
+    target_functor: str          # name of functor G (or domain if endofunctor)
+    components: List = field(default_factory=list)  # list of RewriteRule
+
+
+# ---------------------------------------------------------------------------
 # Adjunctions (forward/inverse pairs)
 # ---------------------------------------------------------------------------
 
@@ -222,14 +252,17 @@ class Functor:
 class Adjunction:
     """A forward/inverse concept pair with round-trip verification.
 
-    The unit and counit express that applying forward then inverse
-    (or vice versa) recovers the original.
+    The unit η : Id ⟹ G∘F and counit ε : F∘G ⟹ Id are NaturalTransformations
+    witnessing the adjunction F ⊣ G.  Stored by name (resolve via
+    KnowledgeGraph.natural_transformations).
     """
     name: str
     forward: str   # concept name
     inverse: str   # concept name
-    unit: str = ''    # round-trip expression: forward then inverse
-    counit: str = ''  # round-trip expression: inverse then forward
+    unit: str = ''              # human-readable round-trip (legacy)
+    counit: str = ''            # human-readable round-trip (legacy)
+    unit_nat_trans: str = ''    # name of NaturalTransformation for unit η
+    counit_nat_trans: str = ''  # name of NaturalTransformation for counit ε
 
 
 # ---------------------------------------------------------------------------
@@ -316,8 +349,10 @@ class CompositionEdge:
     one contributing concept; the full recipe has multiple edges sharing
     the same target.
 
-    Categorically: a pullback — arrow from multiple inputs to one output.
-    The adjoint (decomposes_to) is optional; not all composition is reversible.
+    Categorically: a multi-morphism in a multicategory (colored operad) —
+    (A₁, A₂, ..., Aₙ) → B.  This is NOT a pullback; a pullback requires a
+    shared codomain and produces a universal cone over a cospan.  The adjoint
+    (decomposes_to) is optional; not all composition is reversible.
     """
     source: str           # one contributing concept
     target: str           # the composed product concept
@@ -561,6 +596,7 @@ class KnowledgeGraph:
         self.overrides: List[Override] = []
         self.functors: Dict[str, Functor] = {}
         self.adjunctions: Dict[str, Adjunction] = {}
+        self.natural_transformations: Dict[str, NaturalTransformation] = {}
         self.interfaces: Dict[str, Interface] = {}
         self._children: Dict[str, Set[str]] = {}  # parent -> children (prerequisite)
         self._parents: Dict[str, Set[str]] = {}   # child -> parents (prerequisite)
@@ -635,6 +671,40 @@ class KnowledgeGraph:
     def add_temporal_edge(self, edge: TemporalEdge) -> None:
         """Add a temporal edge (sequential action ordering)."""
         self.temporal_edges.append(edge)
+
+    def add_nat_trans(self, nt: NaturalTransformation) -> None:
+        """Register a natural transformation (2-morphism) by name."""
+        self.natural_transformations[nt.name] = nt
+
+    def apply_nat_trans(self, name: str, expr) -> Optional[Any]:
+        """Apply a named natural transformation to an expression.
+
+        Finds the NaturalTransformation by name and runs cata_reduce(expr,
+        components), returning the reduced expression.  Returns None if the
+        transformation is not registered or no component rule fires.
+
+        The caller is responsible for providing ground rules (e.g. pred/succ
+        NNO reduction) as part of the NatTrans components if needed.
+
+        Parameters
+        ----------
+        name : str
+            Name of the NaturalTransformation to apply.
+        expr : Expr
+            Expression to reduce (from ctkg.core.term_algebra).
+
+        Returns
+        -------
+        The reduced Expr, or None if no rule fired or name not found.
+        """
+        nt = self.natural_transformations.get(name)
+        if nt is None or not nt.components:
+            return None
+        from experiments.symbolic_ai_v2.ctkg.core.rewrite import cata_reduce
+        result = cata_reduce(expr, nt.components)
+        if result == expr:
+            return None  # no component fired
+        return result
 
     # -------------------------------------------------------------------
     # Validation (Use Case 1: Curriculum Compiler)

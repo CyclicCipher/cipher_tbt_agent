@@ -150,14 +150,18 @@ class FreeCategoryGraph:
 # Free category construction  (CT_REFERENCE §17)
 # ---------------------------------------------------------------------------
 
-def build_free_category(corpus: list[list[str]]) -> FreeCategoryGraph:
+def build_free_category(
+    corpus: list[list[str]],
+    eq_token: str = "eq",
+) -> FreeCategoryGraph:
     """Build free category FC(G) from eq-delimited training sequences.
 
-    Each sequence [op, a1, ..., ak, 'eq', r1, ..., rm] becomes one directed
-    edge: op(a1,...,ak) → (r1,...,rm).  Arity = len(inputs) discovered from
-    data.  Operator identity is structural: any first-token that appears with
-    an 'eq' delimiter.  Trace-format sequences (step/ans) are ignored here;
-    they have no 'eq' delimiter separating input from output.
+    Each sequence [op, a1, ..., ak, eq_token, r1, ..., rm] becomes one
+    directed edge: op(a1,...,ak) → (r1,...,rm).  Arity = len(inputs)
+    discovered from data.  Operator identity is structural: any first-token
+    that appears with the eq_token delimiter.  Trace-format sequences
+    (step/ans) are ignored here; they have no eq_token delimiter separating
+    input from output.
 
     After building the edge set the function detects NNO structure,
     adjunctions, natural transformations, and equations in-place.
@@ -166,6 +170,10 @@ def build_free_category(corpus: list[list[str]]) -> FreeCategoryGraph:
     ----------
     corpus:
         Raw token sequences.  May mix eq-format and trace-format.
+    eq_token:
+        The delimiter token between input and output in eq-format sequences.
+        Default ``"eq"``; pass an anonymous symbol when using anonymized
+        corpora (Stage 4 symbol-invariance requirement).
 
     Returns
     -------
@@ -181,7 +189,7 @@ def build_free_category(corpus: list[list[str]]) -> FreeCategoryGraph:
         body = seq[1:-1] if seq[-1] == "<eos>" else seq[1:]
 
         try:
-            eq_idx = body.index("eq")
+            eq_idx = body.index(eq_token)
         except ValueError:
             continue
 
@@ -584,6 +592,10 @@ def discover_compose_chains(
     corpus: list[list[str]],
     eos_token: str = "<eos>",
     digit_alphabet=None,
+    eq_token: str = "eq",
+    step_token: str = "step",
+    ans_token: str = "ans",
+    excluded_ops: frozenset = None,
 ) -> list[ChainRule]:
     """Discover ChainRule objects from step/ans and eq-format sequences.
 
@@ -599,18 +611,36 @@ def discover_compose_chains(
     training (memorisation baseline).  Test generalisation comes from the
     composition engine (Level 0.7) when the chain_table misses.
 
-    Simple arithmetic ops (add, sub, mul, pow, succ, pred) are excluded to
-    avoid shadowing Level 1a (process rules) and Level 0.7 (fold rules).
+    Simple arithmetic ops (add, sub, mul, pow, succ, pred) are excluded by
+    default to avoid shadowing Level 1a (process rules) and Level 0.7 (fold
+    rules).  Pass *excluded_ops* to override — e.g. pass ``frozenset()`` when
+    using anonymous symbol tables (anonymous ops are never in the default set).
+
+    Parameters
+    ----------
+    corpus        : list of token sequences.
+    eos_token     : end-of-sequence token (default '<eos>').
+    eq_token      : delimiter between input and output in eq-format sequences
+                    (default 'eq').  Pass the anonymous symbol when training on
+                    a corpus with anonymized role names.
+    step_token    : first step delimiter in trace-format sequences (default 'step').
+    ans_token     : answer delimiter in trace-format sequences (default 'ans').
+    excluded_ops  : set of op names excluded from eq-format lookup (default:
+                    {'add','sub','mul','pow','succ','pred'}).  These ops are
+                    handled by the fold engine / process rules and must not be
+                    shadowed by Level 1b chain lookup.
     """
     from collections import defaultdict
 
-    STEP_TOKEN = "step"
-    ANS_TOKEN = "ans"
-    EQ_TOKEN = "eq"
+    STEP_TOKEN = step_token
+    ANS_TOKEN  = ans_token
+    EQ_TOKEN   = eq_token
 
     # Ops handled by fold rules / process rules — exclude from chain_rules
     # so Level 1b doesn't shadow Level 1a / Level 0.7 for arithmetic.
-    ARITHMETIC_OPS = frozenset({"add", "sub", "mul", "pow", "succ", "pred"})
+    if excluded_ops is None:
+        excluded_ops = frozenset({"add", "sub", "mul", "pow", "succ", "pred"})
+    ARITHMETIC_OPS = excluded_ops
 
     chain_tables: dict[str, dict[tuple, list[str]]] = defaultdict(dict)
     eq_tables: dict[str, dict[tuple, list[str]]] = defaultdict(dict)
@@ -941,7 +971,12 @@ def build_binary_nno_table(
             col, d2, step_map, carry_element, carry_out, combined, all_ops
         )
         if strategy is _SKIP_STEP:
-            return  # No valid fill rule; don't add wrong entries
+            # Write observed seed entries (ground truth from FC); skip inference.
+            for d1_tup, c in col.items():
+                key = store_key_fn(d1_tup, d2)
+                if key not in result:
+                    result[key] = c
+            return
 
         changed = True
         while changed and len(col) < max_col:
@@ -1563,3 +1598,81 @@ def build_adj_lookup(fc: FreeCategoryGraph) -> dict[tuple, tuple]:
             pass  # reverse direction covered when that AdjunctionPair is processed
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Phase VIII — NNO arithmetic as RewriteRules (CT_REFERENCE §19)
+# ---------------------------------------------------------------------------
+
+
+def fold_rules_as_rewrite_rules(
+    fc: FreeCategoryGraph,
+    succ_map: dict[str, str],
+    carry_el: str,
+    carry_out: tuple,
+    zero_digit: str,
+) -> list:
+    """Convert NNO arithmetic to ground RewriteRules for all single-digit pairs.
+
+    Uses build_binary_nno_table to compute op(d1, d2) for all (d1, d2) in the
+    NNO domain × NNO domain — no int() calls, purely structural token algebra.
+
+    For multi-digit results (e.g. add('9','5')=('1','4')), the result is stored
+    as a compound atom '14' so that _cata_predict can split it back via
+    _split_compound at output time (consistent with the Phase V merging logic).
+
+    Returns list[RewriteRule] sorted most-specific first (all ground, no vars).
+    No int() calls anywhere — Iron Rule compliant.
+    """
+    from experiments.symbolic_ai_v2.ctkg.core.rewrite import RewriteRule
+    from experiments.symbolic_ai_v2.ctkg.core.term_algebra import atom as _atom, node as _node
+
+    # Build NNO table: {(op, inputs_tuple): outputs_tuple} for all binary ops.
+    # Call twice: first pass gets add-level ops (step=succ); second pass gets
+    # higher ops (step=add for mul, step=mul for pow) using the first-pass table.
+    nno_table_1 = build_binary_nno_table(fc)
+    nno_table_2 = build_binary_nno_table(fc, prior_tables=nno_table_1)
+    nno_table = {**nno_table_1, **nno_table_2}
+
+    rules: list[RewriteRule] = []
+    seen: set[tuple] = set()
+    for key, val in nno_table.items():
+        op_name = key[0]
+        inputs = key[1]  # e.g. ('3', '5')
+        if len(inputs) != 2:
+            continue
+        if any(len(t) != 1 for t in inputs):
+            continue  # skip multi-digit inputs (keep rules compact)
+        d1, d2 = inputs
+        result_tok = ''.join(val)  # '8' or '14' for multi-digit
+        if not result_tok:
+            continue
+        dedup_key = (op_name, d1, d2)
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        rule = RewriteRule(
+            lhs=_node(op_name, _atom(d1), _atom(d2)),
+            rhs=_atom(result_tok),
+            algebra_name=op_name,
+            evidence=1,
+        )
+        rules.append(rule)
+
+    return rules
+
+
+def build_binary_functional_maps(
+    fc: FreeCategoryGraph,
+    succ_map: dict[str, str],
+    carry_el: str,
+    carry_out: tuple,
+    zero_digit: str,
+) -> dict[str, dict[tuple, str]]:
+    """Stub — replaced by ComposeEngine (Mistake #48).
+
+    BFM filtered len(t)!=1 tokens, breaking NL mode.  The Predictor no longer
+    calls this function; ComposeEngine calls _compose on demand instead.
+    Kept as a stub to avoid breaking any imports.
+    """
+    return {}

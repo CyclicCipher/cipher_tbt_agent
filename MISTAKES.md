@@ -8,6 +8,29 @@ This file catalogues all mistakes made during development — both code bugs and
 
 ## Active Mistakes (Current Relevance)
 
+### #48. Never Use Table Lookup — Violation of the Bitter Lesson (CRITICAL ARCHITECTURAL RULE)
+
+**Rule:** NEVER implement prediction, inference, or computation via pre-computed lookup tables. Every single time a table lookup has been introduced, it produced a new intractable problem. The Bitter Lesson (Sutton 2019) is explicit: methods that rely on hand-crafted structure and stored enumeration lose to methods that use general computation at scale.
+
+**What happened:**
+- BFM (Binary Functional Maps) was introduced as a "performance optimization" — precompute all single-digit × single-digit arithmetic results as a dict lookup.
+- Immediately produced a cascade of intractable problems:
+  1. **NL benchmark failure (Mistake #48a):** BFM stores results as joined character strings (`''.join(tokens)`). NL tokens are multi-character words ('two', 'five'), so `list(result_str)` character-splits them into garbage. Required ~18 simultaneous fixes across the codebase.
+  2. **Input filter breakage (#48b):** `len(t) != 1` filter was added to BFM to reject "multi-digit inputs". Worked for standard mode (single-char digits). Rejected ALL NL tokens (multi-char words) entirely, making the BFM empty in NL mode.
+  3. **Two-digit extension hack (#48c):** Multi-digit intermediate results (e.g. mul(3,6)=18 used as input to add) required special-casing: a separate extension block adding `add('18', b)` entries. This block hardcoded `len(_res) == 2` (character count, not token count) and `_R[0], _R[1]` (character index, not token index), breaking in NL mode.
+  4. **Character/token confusion throughout (#48d):** Every consumer of BFM values (predict_from_relation_rules, predict_alternatives_from_rules, eval_term, Kleisli chain, etc.) used `list(result_str)` to split results back to tokens. This is correct only when every token is a single character.
+- The _compose NNO engine (Level 0.7) already solved the same arithmetic problems correctly using general computation on any token vocabulary. The BFM was never necessary.
+
+**Root cause:** Introduced a table lookup to avoid calling _compose at inference time. The table assumption (single-char tokens, character-level join/split) was baked in everywhere before its brittleness was apparent.
+
+**The fix:** Remove BFM as an inference mechanism. Route all arithmetic through `_compose` (the NNO fold engine), which works on any token vocabulary because it uses structural properties (successor chain) not surface form.
+
+**Principle:** The Bitter Lesson forbids pre-enumerated tables of domain knowledge. The correct approach is always: learn the structure (NNO successor chain), then compute at inference time. "General methods that leverage computation" beat "domain-specific stored enumeration" every time, at every scale.
+
+**Applied rule for this codebase:** If you find yourself writing `dict.get(key)` for any arithmetic, linguistic, or reasoning result, STOP. Use `_compose`, the NNO engine, or the general RelationRule/lambda mechanism instead. No tables.
+
+---
+
 ### #13. Never Skim Research Papers (CRITICAL PROCESS RULE)
 
 **Rule:** When implementing a research paper, READ THE ENTIRE PAPER — every section, every appendix, every supplementary material. Never speculate about implementation details when the answer is in the paper.
@@ -331,3 +354,4 @@ Below are condensed lessons from resolved/archived mistakes. Full debugging narr
 - 2026-02-17: #45 (four Mamba3 bugs: BC bias init/order, trapezoidal dt mismatch, SiLU on x without conv)
 - 2026-02-19: #46 (redundant out_norm, wrong dt_bias init)
 - 2026-02-26: #47 (MIMO creates R× independent states instead of paper's shared-state rank-R updates; also wrong projection dimensions)
+- 2026-03-16: #48 (BFM table lookup violates the Bitter Lesson — every table-lookup decision produced a new intractable problem)

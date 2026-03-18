@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import sys
 import os
+from typing import Optional
 
 _REPO_ROOT = os.path.normpath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..")
@@ -214,6 +215,7 @@ def _eval_level(
 
 def _build_predictor(
     train_all: list[list[str]],
+    raw_corpus: Optional[list[list[str]]] = None,
 ) -> Predictor:
     hc = HankelCount(r_max=R)
     hc.update_batch(train_all)
@@ -271,6 +273,7 @@ def _build_predictor(
         k_neighbours=K,
         r=R,
         fc=fc,
+        raw_corpus=raw_corpus if raw_corpus is not None else train_all,
     )
 
 

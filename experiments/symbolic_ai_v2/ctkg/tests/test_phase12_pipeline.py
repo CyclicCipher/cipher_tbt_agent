@@ -1,51 +1,56 @@
 """
-Phase 12 Integration Test — Einstein Test Observation Streams.
+Phase 12 Integration Test — Abduction Routing Scaffold.
 
-Chains Phases 1–12 (all of the A-track abduction machinery) against four
-synthetic observation streams modeled after the four historical scenarios
-that led from Newtonian mechanics to General Relativity.
+Tests the A-track abduction orchestration machinery (Phases 4–11) against
+four SYNTHETIC LINEAR scenarios (f(x) = k*x) that are STRUCTURAL ANALOGS of
+the historical scenarios leading to GR.  These are NOT the Einstein test.
 
-Scenario mapping
-----------------
-Scenario 1 — Newtonian verification (k=10.2 vs k=10)
+THIS FILE DOES NOT TEST DISCOVERY OF GENERAL RELATIVITY.
+It verifies that the orchestrator routes to the correct abduction level
+(1=revision, 2=latent, 3=coverage, 4=paradigm-shift) given scalar magnitude
+anomalies.  The scenarios are linear proxies only.
+
+Scenario mapping (structural routing only — not physics content)
+----------------------------------------------------------------
+Scenario 1 — small-drift routing (k=10.2 vs k=10)
     Small drift → level 1 revision accepted.
-    Analog: confirming / slightly correcting F=ma.
+    Routing analog for: Newtonian confirmation / small correction.
 
-Scenario 2 — Michelson-Morley null result (k≈0.0001 vs k=10)
-    Near-zero ether drift → revision blocked by strict Newton preservation.
+Scenario 2 — preservation-block routing (k≈0.0001 vs k=10)
+    Near-zero signal vs large theory → revision blocked by preservation ledger.
     Orchestrator escalates to level ≥ 2.
-    Analog: Michelson-Morley → Special Relativity.
+    Routing analog for: MM null result → SR paradigm shift.
 
-Scenario 3 — Mercury perihelion (k=10.3 vs k=10)
-    Tiny GR correction → level 1 accepted.
-    Analog: Mercury precession → GR perturbation term.
+Scenario 3 — minor-correction routing (k=10.3 vs k=10)
+    Tiny drift → level 1 accepted.
+    Routing analog for: Mercury precession → GR perturbation.
 
-Scenario 4 — Maxwell EM (three k=100 anomaly sets)
-    Independent EM measurements → multi-anomaly coverage finds k=100.
-    Analog: Maxwell's equations unifying electricity and magnetism.
+Scenario 4 — multi-set coverage routing (three k=100 anomaly sets)
+    Three independent measurement sets → multi-anomaly coverage finds shared k.
+    Routing analog for: Maxwell EM unification.
 
 Test classes
 ------------
-TestEinsteinStreamBasic (4 tests, one per scenario)
+TestAbductionRoutingBasic (4 tests, one per scenario)
     Each scenario: orchestrator returns success.
 
-TestEinsteinStreamLevels (4 tests)
+TestAbductionRoutingLevels (4 tests)
     Each scenario: level_reached ≥ expected_min_level.
 
-TestEinsteinStreamPreservation (2 tests)
-    MM scenario: old theory (Newton k=10) unchanged after escalation.
-    MM scenario: class-A ledger examples still predicted correctly if possible.
+TestAbductionRoutingPreservation (2 tests)
+    MM-analog: old theory unchanged after escalation.
+    MM-analog: class-A ledger examples still predicted correctly.
 
-TestEinsteinStreamCage (3 tests)
+TestAbductionRoutingCage (3 tests)
     10 seeds: all 4 scenarios succeed.
-    10 seeds: MM always escalates (level ≥ 2).
-    5 seeds: Newton scenario stays at level 1.
+    10 seeds: preservation-block always escalates (level ≥ 2).
+    5 seeds: small-drift scenario stays at level ≤ 3.
 
-TestEinsteinStreamDefectProbe (4 tests)
-    Probe 1: MM old theory unchanged (no contamination).
-    Probe 2: Newton scenario low level (not over-engineered).
+TestAbductionRoutingDefectProbe (4 tests)
+    Probe 1: preservation-block old theory not contaminated.
+    Probe 2: small-drift scenario not over-engineered to paradigm shift.
     Probe 3: two symbol tables → same level for all 4 scenarios.
-    Probe 4: Maxwell scenario coverage ≥ 0.5.
+    Probe 4: multi-set coverage scenario achieves ≥ 0.5 coverage.
 """
 from __future__ import annotations
 
@@ -146,7 +151,7 @@ def _run_scenario(
 # TestEinsteinStreamBasic
 # ---------------------------------------------------------------------------
 
-class TestEinsteinStreamBasic:
+class TestAbductionRoutingBasic:
 
     def test_newtonian_success(self):
         ctx, nid = _ctx()
@@ -177,7 +182,7 @@ class TestEinsteinStreamBasic:
 # TestEinsteinStreamLevels
 # ---------------------------------------------------------------------------
 
-class TestEinsteinStreamLevels:
+class TestAbductionRoutingLevels:
 
     def test_newtonian_level(self):
         ctx, nid = _ctx()
@@ -212,7 +217,7 @@ class TestEinsteinStreamLevels:
 # TestEinsteinStreamPreservation
 # ---------------------------------------------------------------------------
 
-class TestEinsteinStreamPreservation:
+class TestAbductionRoutingPreservation:
 
     def test_mm_old_theory_unchanged(self):
         """After MM scenario, Newton theory must have same morphisms as before."""
@@ -261,7 +266,7 @@ class TestEinsteinStreamPreservation:
 # TestEinsteinStreamCage
 # ---------------------------------------------------------------------------
 
-class TestEinsteinStreamCage:
+class TestAbductionRoutingCage:
 
     def test_cage_all_scenarios_succeed(self):
         for seed in range(10):
@@ -294,7 +299,7 @@ class TestEinsteinStreamCage:
 # TestEinsteinStreamDefectProbe
 # ---------------------------------------------------------------------------
 
-class TestEinsteinStreamDefectProbe:
+class TestAbductionRoutingDefectProbe:
 
     def test_probe1_mm_old_theory_clean(self):
         """MM scenario level 4: old Newton theory is NOT contaminated."""

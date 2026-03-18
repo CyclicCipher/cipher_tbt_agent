@@ -1,0 +1,10 @@
+1. Get the model to get perfect test scores on the math benchmark
+2. Make the math benchmark harder with word problems, more complex derivative and integral problems requiring more rules like the chain rule and integration by parts, laplace transforms, 1st and 2nd order ODE applications problems (like the fluid tank mixing problem), and some quantum mechanics problems. 
+3. Get natural language conversation learning and doing working. It doesn't have to be fancy, it just has to be able to compete with a transformer at being a basic chatbot.
+4. Determine if it can do logical deduction, induction, abduction, with no annoying caveats, in preparation for throwing it into games
+5. The Einstein test - can the model derive the laws of General Relativity using only the information Einstein had?
+6. Get the vision, video, keyboard and mouse systems working and tested fully for the TiTS test
+7. Train on natural language semantics somehow for the TiTS test (how?)
+8. Do the TiTS test, complete all mainline quests (experiments with LLMs show that randomly completing a game is almost impossible, you need true intelligence to complete them)
+9. Do the Danganronpa test, it must win the game with true reasoning and logical deduction instead of trial and error + remembering. 
+10. AGI achieved
