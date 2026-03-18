@@ -926,15 +926,19 @@ lower), not default to linear for both. A system with a hardcoded linear prior f
 | 7 | Latent variable + ontology extension | A-5, A-6, A-8 | ✓ COMPLETE |
 | Supp. | Multi-anomaly coverage, preservation, paradigm shift, orchestrator, synthetic streams | A-6, A-7, A-8 (standalone) | ✓ COMPLETE (supplementary) |
 | 8 | Full IDA benchmark (I/D/A 4–8) | Verification phase | ✓ COMPLETE |
-| 9 | Einstein Test | End-to-end integration | ✗ NOT DONE — 6 formal requirements; 5 blockers; see Phase 9 section |
+| 9 | Einstein Test | End-to-end integration | ✗ NOT DONE — scaffolding only; real test is Phase 18 |
 | 10 | Graph-backed compositional fitting (replaces SchematicLaw hardcoding) | I-5 (real), γ(v) recovery | ✓ COMPLETE |
+| 13 | Parameterized transform discovery | γ(v) with free c; any f(x;θ) | ✗ NOT DONE |
+| 14 | Stream-to-theory pipeline | Theory induction from raw observations | ✗ NOT DONE |
+| 15 | Symmetry-conflict latent generation | Ether hypothesis; hidden variables | ✗ NOT DONE |
+| 16 | Evidence-triggered revision pipeline | Full anomaly → retraction → replacement loop | ✗ NOT DONE |
+| 17 | Concept-grounded paradigm shift | Spacetime; ontology wiring | ✗ NOT DONE |
+| 18 | Full integration — real Phase 9 Einstein test | All 6 formal requirements; 10 seeds | ✗ NOT DONE |
 
-**Phase 10 blocks Phase 9.** Without graph-backed compositional fitting, the Einstein
-test's γ(v) latent is unreachable regardless of how many other phases are complete.
-Phases 1–8 are necessary prerequisites; Phase 10 is the missing architectural piece
-that was concealed by the linear scaffolding.
-
-The phase ordering is: 10 → revised I-5/I-8 IDA benchmark → Phase 9 (real Einstein test).
+**Current implementation order:** 13 → 14 → 15 → 16 → 17 → 18.
+Phases 13–17 are general capabilities independent of the Einstein domain.
+Phase 18 is the application of those capabilities to the Einstein problem.
+After Phase 18, the same pipeline is applied to algorithm discovery without modification.
 
 ---
 
@@ -1223,12 +1227,26 @@ fresh `MorphismGraph`, calls `seed_physics_priors(mg)`, and asserts that the gra
 contains only PRIM_OP morphisms, FRAME_CONCEPT node, MEASUREMENT_SCHEMA, and
 GAUSSIAN_NOISE_MODEL — no physics laws.
 
-**Five remaining blockers before this compliance test can be run for real:**
-1. `compose_search.discover_law` depth-5 recovery of `1/√(1−v²/c²)` — unit test first
-2. `theory.symmetry_group_check(theory, transform_schema)` — not yet implemented
-3. `theory.cross_theory_inference(theory_a, theory_b, observable)` — not yet implemented
-4. `paradigm.propose_paradigm_shift` structured concept node wiring — currently opaque
-5. `ctkg/einstein/physics_streams.py` — the four observation stream generators
+**Status of the five original blockers (as of Phase 10 + test_phase9_einstein.py):**
+
+1. `compose_search.discover_law` — ✓ PARTIAL. Recovers `γ(v)` when c=1 (natural units)
+   via target-transform pass. Does NOT recover `γ(v) = 1/√(1−v²/c²)` when c is a free
+   parameter to be discovered from EM stream data. → **Remaining: Phase 13.**
+2. `theory.symmetry_group_check` — ✓ IMPLEMENTED (`test_theory_extensions.py`). Returns
+   whether a transform leaves theory predictions invariant. NOT yet wired to automatic
+   ether hypothesis generation. → **Remaining: Phase 15.**
+3. `theory.cross_theory_inference` — ✓ IMPLEMENTED (`test_theory_extensions.py`).
+   Composes predictions from two theories via a caller-supplied function. NOT yet
+   integrated into the evidence-triggered revision pipeline. → **Remaining: Phase 16.**
+4. `paradigm.propose_paradigm_shift` — ✓ PARTIAL. Creates theory cluster and bridge
+   morphism. The `wires_to` parameter exists but no general wiring of the new concept to
+   the morphisms it subsumes (spatial + temporal for spacetime). → **Remaining: Phase 17.**
+5. `ctkg/einstein/physics_streams.py` — ✓ IMPLEMENTED. Generates 4+1 observation streams
+   with physically grounded values and anonymous symbols. NOT yet connected to a discovery
+   pipeline (`learn_from_stream` does not exist). → **Remaining: Phase 14.**
+
+Six new blockers (all general capabilities, not Einstein-specific) are specified as
+Phases 13–18 in Part V below. Phase 18 is the real Phase 9 test.
 
 ---
 
@@ -1259,3 +1277,524 @@ primitive symbols are named. Any code path of the form
 **What a violation looks like:** `compose_search.py` iterating over a hardcoded list
 of named primitives (`'mul'`, `'add'`, `'sqrt'`), or `discover_law` taking a
 `SchematicLaw` as an argument rather than returning one.
+
+---
+
+## Part V: Remaining Phases to Phase 9 Completion
+
+All six phases below are **general capabilities**, not Einstein-specific.
+The Einstein test is one application; algorithm discovery after Phase 18 is another.
+Each phase leaves all prior phase tests passing (no regressions).
+
+---
+
+### Phase 13: Parameterized Transform Discovery — ✗ NOT DONE
+
+**Blocking:** Phases 14, 18.
+
+#### The gap
+
+`discover_law` works for `γ(v) = 1/√(1−v²)` (natural units, c=1) because the
+transform pass runs `_zero_param_search` on the T=1/x² target and finds
+`SUB(1.0, SQ(v))` — an exact zero-parameter expression.
+
+It fails for `γ(v) = 1/√(1−v²/c²)` (general c) because the transformed target
+is `1 − v²/c²`. The term `v²/c²` contains c as a free scalar unknown to the
+search. `_zero_param_search` only has fixed atoms `{0.0, 1.0, 2.0, -1.0, 0.5,
+3.0, 0.25}` and cannot synthesise `1/c²` from them.
+
+The general capability gap: `discover_law` cannot find any function `f(x; θ)` whose
+target-transformed form `T(f(x; θ))` contains a non-trivial free scalar θ.
+
+#### The fix
+
+In `_transform_and_search` (`compose_search.py`), after the zero-param search
+fails (mse_t > 1e-3), run a **parameterized search** on the transformed target.
+The parameterized search uses the full `_run_beam` with `n_param_slots=1` and
+`sub_bw = max(10, beam_width // 4)`. If a parameterized sub-expression achieves
+mse_t < 1e-3 on the transformed target, wrap it with T_inv to get the original
+candidate. `_nlopt_rescore_beam` (already called at the end of `discover_law`)
+fits the free parameter on the original observations.
+
+New internal function:
+
+```python
+def _parameterized_transform_search(
+    observations:    list[tuple[dict, float]],
+    prim_specs:      list[PrimSpec],
+    prim_ctx:        EvalContext,
+    var_names:       list[str],
+    all_param_names: list[str],
+    max_depth:       int,
+    beam_width:      int,
+    depth_penalty:   float,
+) -> Optional[tuple[float, Expr]]:
+```
+
+Called from `_transform_and_search` as a fallback when zero-param fails.
+
+#### What it enables (general)
+
+Any function `f(x; θ) = T_inv(g(x, θ))` where T is in `candidate_transforms`
+and `g(x, θ)` is discoverable at depth ≤ max_depth with ≤ n_param_slots params:
+- `γ(v; c) = 1/√(1−v²/c²)` — T=1/x², g = `SUB(1.0, MUL(p0, SQ(v)))`, p0=1/c²
+- Inverse-square law `F(r; k) = k/r²` — T=1/x, g = `MUL(p0, SQ(r))`, p0=1/k
+- Gaussian envelope `A·exp(−x²/σ²)` — after log transform
+
+#### Cage
+
+Run `discover_law` on `γ(v)` data with c=0.3 (not natural units) under 10 anonymous
+symbol seeds. All 10 runs: residual < 0.01, fitted c within 5% of 0.3,
+expression depth ≥ 3. Variance < 5 pp. Gap < 5 pp.
+
+#### Defect probes
+
+**Probe 1 — zero-param preferred when exact:** c=1.0 data must return the zero-param
+form `INV(SQRT(SUB(1.0, SQ(v))))` (residual = 0.0), not the parameterized form with
+fitted p0 ≈ 1.0. Zero-param is simpler (lower MDL) and must win.
+
+**Probe 2 — wrong transform not selected:** Data from `f(x) = SQRT(1.0 − x²)` must
+NOT return a Lorentz-shaped expression; the transform that works for that function is
+T=SQ not T=1/x².
+
+---
+
+### Phase 14: Stream-to-Theory Pipeline — ✗ NOT DONE
+
+**Blocking:** Phases 15, 18.
+
+#### The gap
+
+`physics_streams.py` generates `PhysicsStream` objects (lists of observation sets).
+`discover_law` operates on one observation set at a time. There is no function that:
+1. Takes a `PhysicsStream` (K observation sets)
+2. Calls `discover_law` on each set
+3. Stores each `FittedLaw` as a morphism in `MorphismGraph`
+4. Registers all morphisms in a named theory via `TheoryManager`
+5. Extracts **globally-shared constants** (e.g., wave speed c, which is identical
+   across all EM wave observations) and returns them for use in subsequent discoveries
+
+The last point is critical: c (speed of light) is learned from stream 2 as a fitted
+constant. Stream 3 (Lorentz) needs c as a known value, not a free parameter to
+rediscover. Without constant transfer, the parameterized search in Phase 13 finds
+`p0 ≈ 1/c²` but the system does not know this is the same c from stream 2.
+
+#### The fix
+
+New file: `ctkg/inference/stream_learner.py`
+
+```python
+@dataclass
+class LearnedTheory:
+    theory_id:        TheoryId
+    morph_ids:        list[MorphId]
+    fitted_laws:      list[FittedLaw]
+    shared_constants: dict[str, float]  # name → value, extracted from consensus
+
+def learn_from_stream(
+    stream:        PhysicsStream,
+    mg:            MorphismGraph,
+    tm:            TheoryManager,
+    prim_ctx:      EvalContext,
+    prim_specs:    list[PrimSpec],
+    theory_name:   str,
+    label_prefix:  str                    = "",
+    max_depth:     int                    = 4,
+    beam_width:    int                    = 60,
+    extra_atoms:   Optional[dict[str, float]] = None,
+    consensus_tol: float                  = 0.02,
+) -> LearnedTheory:
+```
+
+`extra_atoms` feeds previously learned constants into the terminal set.
+`shared_constants` are extracted by **constant consensus**: a free parameter
+fitted to the same value (within `consensus_tol`) across ≥ 80% of observation
+sets is promoted and named `f"{stream.name}_{param_name}"`.
+
+#### What it enables (general)
+
+Given any collection of related observation sets — physics experiments, algorithm
+traces, economic time series — `learn_from_stream` produces a named theory
+containing the laws that govern them, with shared constants automatically identified.
+
+#### Cage
+
+`learn_from_stream` on `newtonian_mechanics_stream()` under 10 anonymous seeds:
+`len(learned.morph_ids) == 3`, each residual < 0.01, `learned.theory_id` registered.
+On `em_wave_stream()`: at least one law has residual < 1e-6, `"stream2_c"` in
+`shared_constants` with value within 1% of c. Variance < 5 pp. Gap < 5 pp.
+
+#### Defect probes
+
+**Probe 1 — no spurious law fusion:** Two sets with different functional forms (F=ma
+and p=mv are both linear-multiplicative but over different variables) must produce
+two distinct `FittedLaw` morphisms, not one merged law.
+
+**Probe 2 — constant transfer prevents redundant rediscovery:** Stream 3 run with
+`extra_atoms={"c": c_val}` (c from stream 2) must discover `INV(SQRT(SUB(1.0, SQ(v))))`
+at residual ≈ 0 using c_val as a fixed atom — strictly lower MDL than the
+parameterized form with fitted p0 ≈ 1/c².
+
+---
+
+### Phase 15: Symmetry-Conflict Latent Hypothesis Generation — ✗ NOT DONE
+
+**Blocking:** Phases 16, 18.
+
+#### The gap
+
+The ether hypothesis must be generated by the system, not installed.
+The required logic:
+1. Newton theory has Galilean symmetry (predictions invariant under `x′ = x − vt`)
+2. Maxwell theory has Lorentz symmetry (constant c in all frames; NOT Galilean)
+3. These symmetry groups are incompatible over the shared observable "wave speed"
+4. The minimal latent resolving them: a **preferred frame** in which Maxwell holds
+   as stated → ether hypothesis
+
+`symmetry_group_check` (already in `theory.py`) tests whether a given transform
+leaves a theory invariant. But there is no function that detects the group mismatch
+and generates the latent hypothesis.
+
+#### The fix
+
+Extension to `ctkg/inference/theory.py`:
+
+```python
+@dataclass
+class SymmetryConflict:
+    a_only: list[Callable]   # symmetries of A but not B
+    b_only: list[Callable]   # symmetries of B but not A
+    shared: list[Callable]   # symmetries of both
+
+def compare_symmetry_groups(
+    self,
+    theory_a:    TheoryId,
+    theory_b:    TheoryId,
+    transforms:  list[Callable[[dict], dict]],
+    ctx:         EvalContext,
+    test_inputs: list[dict],
+    tolerance:   float = 0.01,
+) -> SymmetryConflict:
+```
+
+New file: `ctkg/inference/latent_conflict.py`
+
+```python
+@dataclass
+class ConflictLatent:
+    hypothesis_morphism: MorphId   # new LATENT_CONCEPT morphism
+    resolving_transform: Callable  # the transform the latent enables
+    justification:       str       # structural description (not a physics name)
+
+def hypothesise_from_symmetry_conflict(
+    conflict:     SymmetryConflict,
+    theory_a_id:  TheoryId,
+    theory_b_id:  TheoryId,
+    mg:           MorphismGraph,
+    tm:           TheoryManager,
+    label:        str = "__latent_conflict__",
+) -> Optional[ConflictLatent]:
+    """Generate the minimal latent hypothesis resolving a symmetry conflict.
+
+    Generates a LATENT_CONCEPT morphism asserting the existence of a
+    preferred reference point P such that theory_b's invariants hold
+    in the frame of P. P is an opaque ObjectId — no physics semantics.
+    """
+```
+
+#### What it enables (general)
+
+Any two theories with conflicting symmetry groups over a shared observable
+automatically generate a latent reconciliation hypothesis:
+- Galilean (Newton) + Lorentz (Maxwell) → preferred-frame latent (ether)
+- Commutativity + non-commutativity → different-domain hypothesis
+- Classical linearity + quantum nonlinearity → hidden-variable hypothesis
+
+#### Cage
+
+Two anonymous theories T_A (invariant under G: scale x by 2) and T_B (NOT invariant
+under G). Under 10 symbol seeds: `compare_symmetry_groups` returns non-empty
+`a_only`, `hypothesise_from_symmetry_conflict` returns non-None, the returned
+`hypothesis_morphism` has morph_type="LATENT_CONCEPT". Variance < 5 pp. Gap < 5 pp.
+
+#### Defect probes
+
+**Probe 1 — no conflict when groups match:** Both T_A and T_B invariant under G →
+empty conflict, `hypothesise_from_symmetry_conflict` returns None.
+
+**Probe 2 — latent is structural, not nominal:** Two symbol tables must produce
+ConflictLatents with isomorphic subgraph patterns (same morph_type, same body shape
+up to NodeId renaming). Any code storing physics concept names fails.
+
+---
+
+### Phase 16: Evidence-Triggered Theory Revision Pipeline — ✗ NOT DONE
+
+**Blocking:** Phases 17, 18.
+
+#### The gap
+
+`RetractEngine`, `ClosedLoopReviser`, `PredictionLedger`, and `apply_with_preservation`
+all exist and pass their unit tests. There is no integrated pipeline taking a theory
+and anomalous observations and automatically producing detection → attribution →
+retraction → replacement discovery → acceptance/rejection.
+
+#### The fix
+
+New file: `ctkg/inference/revision_pipeline.py`
+
+```python
+@dataclass
+class RevisionPipelineResult:
+    accepted:         bool
+    retracted_mid:    Optional[MorphId]
+    replacement_mid:  Optional[MorphId]
+    discovered_law:   Optional[FittedLaw]
+    rejection_reason: Optional[str]
+
+def auto_revise_on_anomaly(
+    theory_id:      TheoryId,
+    anomalous_obs:  list[tuple[dict, float]],
+    ctx:            EvalContext,
+    mg:             MorphismGraph,
+    tm:             TheoryManager,
+    rev:            ClosedLoopReviser,
+    eng:            RetractEngine,
+    ledger:         PredictionLedger,
+    prim_ctx:       Optional[EvalContext]     = None,
+    prim_specs:     Optional[list[PrimSpec]]  = None,
+    max_depth:      int                       = 4,
+    beam_width:     int                       = 60,
+    tolerance:      float                     = 0.05,
+    label:          str                       = "__auto_revised__",
+    extra_atoms:    Optional[dict[str, float]] = None,
+) -> RevisionPipelineResult:
+    """Detect anomaly → attribute → retract → discover replacement → accept/reject."""
+```
+
+Steps: (1) check residual under theory_id — return "not_anomalous" if low; (2)
+blame_theory for responsible morphism; (3) discover_law(anomalous_obs, extra_atoms)
+for replacement; (4) if poor fit return "poor_fit"; (5) apply_with_preservation.
+
+#### What it enables (general)
+
+Any anomaly-driven revision in any domain:
+- MM null result → retract ether, discover Lorentz correction
+- Mercury anomaly → retract pure Newtonian gravity, discover GR correction
+- Algorithm benchmark regression → retract old heuristic, discover better rule
+
+#### Cage
+
+Anonymous theory T with one law `f(x) = 10*x`. Anomalous observations from
+`f(x) = 50*x`, no preservation. Under 10 seeds: `result.accepted == True`,
+`retracted_mid` is the original law, `replacement_mid` predicts ≈50*x with
+residual < 0.01. Variance < 5 pp. Gap < 5 pp.
+
+#### Defect probes
+
+**Probe 1 — non-anomalous observation is not revised:** Observations agreeing with
+theory → `accepted=False, rejection_reason="not_anomalous"`. No retraction.
+
+**Probe 2 — preservation blocks destructive revision:** Ledger entries confirming
+law is correct for class A + class-B anomalies incompatible with A → `accepted=False,
+rejection_reason` contains "preservation", original morphism un-vetoed.
+
+**Probe 3 — bad replacement is rejected:** If `discover_law` produces replacement
+with residual > 0.1 → `accepted=False, rejection_reason="poor_fit"`. Old law NOT
+retracted. Theory not left empty.
+
+---
+
+### Phase 17: Concept-Grounded Paradigm Shift — ✗ NOT DONE
+
+**Blocking:** Phase 18.
+
+#### The gap
+
+`propose_paradigm_shift` creates a theory cluster and a PARADIGM_SHIFT bridge
+morphism. The `wires_to` parameter accepts existing morphism IDs but has no effect
+on graph structure — the new concept node is an isolated island with no connection
+to the morphisms it is supposed to subsume.
+
+Without wiring, `cross_theory_inference` cannot route predictions through the new
+concept, and the paradigm shift is structurally ungrounded.
+
+The general pattern: a paradigm shift creates a **colimit** over the constituent
+morphisms. The wiring implements the colimit's universal projection and inclusion maps.
+
+#### The fix
+
+New function in `ctkg/inference/paradigm.py`:
+
+```python
+@dataclass
+class WiredParadigmShift:
+    concept_id:      ObjectId
+    bridge_mid:      MorphId
+    projection_mids: list[MorphId]  # concept → each constituent target
+    inclusion_mids:  list[MorphId]  # each constituent target → concept
+
+def wire_paradigm_shift(
+    new_concept_id:     ObjectId,
+    constituent_morphs: list[MorphId],
+    mg:                 MorphismGraph,
+    bridge_mid:         Optional[MorphId] = None,
+    label_prefix:       str               = "__wire__",
+) -> WiredParadigmShift:
+    """Create projection and inclusion morphisms for a new concept node.
+
+    For each M in constituent_morphs:
+    - PROJECTION morphism: new_concept_id → M.target
+    - INCLUSION morphism:  M.target → new_concept_id
+
+    Iron Law: wiring is determined solely by MorphId and ObjectId integers.
+    No domain knowledge. Works identically for spacetime, complex numbers,
+    or any other abstraction.
+    """
+```
+
+`propose_paradigm_shift` calls `wire_paradigm_shift` after creating the bridge
+morphism when `wires_to` is non-empty.
+
+#### What it enables (general)
+
+Any abstract concept emerging from a paradigm shift gets structural grounding:
+spacetime (spatial + temporal), complex numbers (real + imaginary), non-Euclidean
+geometry (metric + curvature). A wired concept can participate in cross-theory
+inference via its projection/inclusion morphisms.
+
+#### Cage
+
+Two anonymous theories T_A (2 morphisms) and T_B (2 morphisms). Paradigm shift
+creates C wired to all 4 constituents. Under 10 seeds: `len(projection_mids) == 4`,
+`len(inclusion_mids) == 4`, each projection connects C to a constituent target,
+subgraph pattern isomorphic across all 10 symbol tables. Variance < 5 pp. Gap < 5 pp.
+
+#### Defect probes
+
+**Probe 1 — empty wires_to produces no extra morphisms:** `wires_to=[]` → exactly
+1 new morphism (the bridge). No spurious projections or inclusions.
+
+**Probe 2 — wired concept reachable via cross_theory_inference:** After wiring,
+`tm.cross_theory_inference(concept_theory, T_A, ...)` must route a prediction
+through C into T_A. Unwired concept returns None.
+
+---
+
+### Phase 18: Full Integration — Real Phase 9 Einstein Test — ✗ NOT DONE
+
+**This is Phase 9 completion. All six formal requirements (Part III) apply.**
+
+#### The gap
+
+The current `test_phase9_einstein.py` constructs the scenario manually and only
+algorithmically discovers γ(v) for c=1. It satisfies none of the six formal
+requirements (Requirements 1 and 5 are hard failures — the ether, spacetime, and
+GR morphisms are installed, not discovered). It is scaffolding.
+
+#### The fix
+
+New file: `ctkg/einstein/run_discovery.py`
+
+```python
+def seed_physics_priors(mg: MorphismGraph) -> None:
+    """Seed ONLY domain-independent mathematical priors into a fresh graph.
+
+    Installs:
+      PRIM_OP morphisms (PRIM_MUL, PRIM_ADD, PRIM_SUB, PRIM_DIV,
+        PRIM_SQRT, PRIM_POW, PRIM_NEG, PRIM_SQ, PRIM_INV)
+      FRAME_CONCEPT ObjectId  (opaque; no physics semantics)
+      MEASUREMENT_SCHEMA:     observations are (value: float, frame_id: ObjectId)
+      GAUSSIAN_NOISE_MODEL:   residuals ≤ σ are consistent with a theory
+
+    Does NOT install: Newtonian laws, Maxwell equations, ether, Galilean
+    transform, c, Lorentz factor, spacetime, curvature, or anything physical.
+    """
+
+def run_discovery(
+    mg:        MorphismGraph,
+    tm:        TheoryManager,
+    streams:   list[PhysicsStream],
+    prim_ctx:  EvalContext,
+    prim_specs: list[PrimSpec],
+    seed:      int = 0,
+) -> GRDiscoveryAudit:
+    """Run the full discovery pipeline on the provided observation streams.
+
+    Stream dispatch by stream.name (Iron Law: string keys in a dict, not
+    physics logic). Order: newtonian_mechanics → em_wave → michelson_morley
+    → lorentz_factor → mercury_precession.
+
+    Each stream handler calls the appropriate Phase 13–17 functions:
+      learn_from_stream (Phase 14)
+      compare_symmetry_groups + hypothesise_from_symmetry_conflict (Phase 15)
+      auto_revise_on_anomaly (Phase 16)
+      wire_paradigm_shift (Phase 17)
+      discover_law with extra_atoms={"c": learned_c} (Phase 13)
+
+    Returns a fully-populated GRDiscoveryAudit.
+    """
+```
+
+Updated `test_phase9_einstein.py` calls `seed_physics_priors` + `run_discovery` +
+`inspect_gr_discovery` + `verify_gr_discovery`. All 6 formal requirements checked.
+
+#### Pass criteria (all required)
+
+1. `verify_gr_discovery(inspect_gr_discovery(mg, tm))` returns True.
+2. `audit.mercury_prediction_error < 0.05` on held-out Mercury observations.
+3. `audit.lorentz_factor_expr` structurally encodes `1/√(1−v²/c²)`.
+4. `audit.ether_morphism is not None` — generated by Phase 15, not installed.
+5. `audit.spacetime_concept` created during `run_discovery`, absent before it.
+6. Graph before `run_discovery` contains only PRIM_OP + structural priors.
+7. Gap (named vs. anonymous) < 5 pp across 10 seeds on all three metrics.
+8. `seed_physics_priors` body contains no physics concept strings.
+
+#### Cage
+
+`run_discovery(mg, tm, all_physics_streams(seed=i))` for i in 0..9 with different
+anonymous symbol tables. All 10 runs: `verify_gr_discovery` returns True,
+`audit.mercury_prediction_error < 0.05`. Std of mercury error across seeds < 0.02.
+
+#### Defect probes
+
+**Probe 1 — discovery criterion:** Lorentz morphism absent before `run_discovery`,
+present after. Any γ-structure morphism in the pre-run dump is a hard FAIL.
+
+**Probe 2 — prior knowledge criterion:** Fresh graph after `seed_physics_priors`
+contains exactly 9 PRIM_OP morphisms + 3 structural concept nodes. No physics laws.
+
+**Probe 3 — ether must be generated:** After stream 2 processed but before stream 3,
+no ether morphism exists. After stream 3, ether exists with morph_type="LATENT_CONCEPT"
+or "RETRACTED". Pre-installed ether is a hard FAIL.
+
+**Probe 4 — held-out Mercury prediction:** GR curvature morphism fitted on first 8
+Mercury observations. Prediction error on remaining 2 < 0.05.
+
+---
+
+### Implementation Order
+
+```
+Phase 13  compose_search.py                    ~30 lines  (single file extension)
+    |
+Phase 14  ctkg/inference/stream_learner.py     ~150 lines (new file)
+    |
+Phase 15  ctkg/inference/theory.py             ~60 lines  (extend: compare_symmetry_groups)
+          ctkg/inference/latent_conflict.py    ~100 lines (new file)
+    |
+Phase 16  ctkg/inference/revision_pipeline.py  ~120 lines (new file)
+    |
+Phase 17  ctkg/inference/paradigm.py           ~80 lines  (extend: wire_paradigm_shift)
+    |
+Phase 18  ctkg/einstein/run_discovery.py       ~200 lines (new file)
+          ctkg/tests/test_phase9_einstein.py   (replace scaffolding)
+```
+
+Total new code: approximately 740 lines across 5 new files and 3 extensions.
+Each phase adds an integration test before proceeding.
+
+The same pipeline (`learn_from_stream → compare_symmetry_groups →
+hypothesise_from_symmetry_conflict → auto_revise_on_anomaly →
+wire_paradigm_shift`) applies without modification to algorithm discovery
+after Phase 18. The domain changes; the inference machinery does not.
