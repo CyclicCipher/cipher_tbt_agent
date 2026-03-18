@@ -167,36 +167,50 @@ def _var_nids_in(expr: Expr) -> frozenset:
     return frozenset(result)
 
 
+
 def _struct_sig(expr: Expr) -> tuple:
-    """Structural diversity signature: (root_op_nid, frozenset_of_var_nids).
-    Expressions with the same signature are structurally similar.
+    """Structural diversity signature: (root_op_nid, frozenset_of_var_nids, tree_size).
+
+    Including tree_size ensures that structurally distinct compositions with the
+    same root operator and variable set (e.g. INV(v) vs INV(SQRT(v))) receive
+    different diversity slots, so deeper building blocks like SUB(1.0, SQ(v))
+    are not crowded out by shallower expressions with the same (op, var_set).
     """
-    return (expr.head, _var_nids_in(expr))
+    return (expr.head, _var_nids_in(expr), _tree_size(expr))
 
 
 def _diverse_keep(
     beam: list[tuple[float, Expr, dict]],
     beam_width: int,
 ) -> list[tuple[float, Expr, dict]]:
-    """Keep top beam_width by MDL score, plus one rep per unseen structural signature.
+    """Keep top beam_width by MDL score, plus the best-MDL item per novel signature.
 
-    Ensures that intermediate subexpressions (e.g. SQ(v), SUB(1, SQ(v))) survive
-    pruning even when their individual residuals on the target data are poor,
-    which is necessary for discovering deeply nested expressions like gamma(v).
+    Does a FULL SCAN of beam[beam_width:] to find the single best-MDL representative
+    per structural signature not already in top-N.  The top beam_width diversity reps
+    by MDL are then added to the result.
+
+    Unlike the old early-stopping version (which stopped after collecting beam_width
+    extras), this full-scan version guarantees that building blocks like SQ(v) or
+    SUB(1, SQ(v)) — which may appear at large positions in the sorted beam — are
+    never dropped simply because the extras quota filled up early.  They compete on
+    merit (MDL) against all other novel-signature candidates.
 
     The result size is at most 2 * beam_width.
     """
     top = beam[:beam_width]
-    seen: set = {_struct_sig(e) for _, e, _ in top}
-    extras: list = []
+    seen_sigs: set = {_struct_sig(e) for _, e, _ in top}
+
+    # Full scan: build best-MDL representative per novel signature.
+    best_per_novel: dict = {}   # sig -> (score, expr, params)
     for item in beam[beam_width:]:
-        if len(extras) >= beam_width:   # cap total at 2x
-            break
         sig = _struct_sig(item[1])
-        if sig not in seen:
-            seen.add(sig)
-            extras.append(item)
-    return top + extras
+        if sig not in seen_sigs:
+            if sig not in best_per_novel or item[0] < best_per_novel[sig][0]:
+                best_per_novel[sig] = item
+
+    # Take the top-beam_width diversity reps by MDL score.
+    diversity_reps = sorted(best_per_novel.values(), key=lambda x: x[0])[:beam_width]
+    return top + diversity_reps
 
 
 def _nlopt_fit(
@@ -273,17 +287,15 @@ def _score_candidate(
     observations: list[tuple[dict, float]],
     prim_ctx: EvalContext,
     depth_penalty: float,
-    ols_fallback_threshold: float = 0.5,
 ) -> tuple[float, dict[str, float]]:
-    """Score an expression candidate. Returns (mdl_score, fitted_params)."""
+    """Score an expression candidate via OLS only. Returns (mdl_score, fitted_params).
+
+    Uses OLS for speed during beam expansion. Non-linear fitting is done
+    separately as a post-processing pass via _nlopt_rescore_beam, applied
+    only to the final beam before discover_law returns.
+    """
     present = _find_param_names(expr, all_param_names)
     fitted, mse = _ols_fit(expr, present, observations, prim_ctx)
-
-    # Fallback to non-linear optimization when OLS gives poor results
-    if (fitted is None or mse > ols_fallback_threshold) and present:
-        fitted_nl, mse_nl = _nlopt_fit(expr, present, observations, prim_ctx)
-        if fitted_nl is not None and mse_nl < (mse if mse != float("inf") else float("inf")):
-            fitted, mse = fitted_nl, mse_nl
 
     if fitted is None:
         return float("inf"), {}
@@ -291,6 +303,210 @@ def _score_candidate(
     size = _tree_size(expr)
     mdl = depth_penalty * size + log_mse
     return mdl, fitted
+
+
+def _nlopt_rescore_beam(
+    beam: list[tuple[float, Expr, dict]],
+    all_param_names: frozenset[str],
+    observations: list[tuple[dict, float]],
+    prim_ctx: EvalContext,
+    depth_penalty: float,
+    top_k: int = 30,
+) -> list[tuple[float, Expr, dict]]:
+    """Re-score the top_k beam candidates with non-linear optimization.
+
+    Called once after beam search completes. Runs _nlopt_fit for each of
+    the top_k candidates (at most top_k scipy calls total — fast). Replaces
+    OLS-fitted params with nlopt-fitted params when nlopt achieves lower MSE.
+
+    This recovers correct parameters for non-linearly parameterized expressions
+    (e.g. gamma(v) = 1/sqrt(1-v^2/c^2) where c appears non-linearly), without
+    the prohibitive cost of calling nlopt during every beam expansion step.
+    """
+    rescored = []
+    for i, (score, expr, fitted_ols) in enumerate(beam):
+        if i >= top_k:
+            rescored.append((score, expr, fitted_ols))
+            continue
+
+        present = _find_param_names(expr, all_param_names)
+        if not present:
+            rescored.append((score, expr, fitted_ols))
+            continue
+
+        fitted_nl, mse_nl = _nlopt_fit(expr, present, observations, prim_ctx)
+        if fitted_nl is not None:
+            log_mse = math.log(mse_nl + _EPS)
+            size = _tree_size(expr)
+            new_score = depth_penalty * size + log_mse
+            if new_score < score:
+                rescored.append((new_score, expr, fitted_nl))
+                continue
+
+        rescored.append((score, expr, fitted_ols))
+
+    rescored.sort(key=lambda x: x[0])
+    return rescored
+
+
+# ---------------------------------------------------------------------------
+# Zero-param search (used for target-transformation discovery)
+# ---------------------------------------------------------------------------
+
+def _zero_param_search(
+    observations: list[tuple[dict, float]],
+    prim_specs: list[PrimSpec],
+    prim_ctx: EvalContext,
+    var_names: list[str],
+    max_depth: int,
+    beam_width: int,
+    depth_penalty: float,
+) -> tuple[float, Expr]:
+    """Beam search over zero-parameter (pure fixed-constant) expressions.
+
+    Like the main beam search but with no free parameters (no p0/p1 slots).
+    Used to discover structurally exact laws under a target transformation.
+
+    Returns (best_mse, best_expr).
+    """
+    no_params: frozenset = frozenset()
+    FIXED_CONSTS_ZP = ("0.0", "1.0", "2.0", "-1.0", "0.5", "3.0", "0.25")
+    terminals: list[Expr] = (
+        [var(v) for v in var_names]
+        + [atom(c) for c in FIXED_CONSTS_ZP]
+    )
+
+    beam_zp: list[tuple[float, Expr, dict]] = []
+    for e in terminals:
+        s, fp = _score_candidate(e, no_params, observations, prim_ctx, depth_penalty)
+        beam_zp.append((s, e, fp))
+    beam_zp.sort(key=lambda x: x[0])
+    beam_zp = _dedup_beam(beam_zp)[:beam_width]
+
+    for _depth in range(max_depth):
+        new_items: list[tuple[float, Expr, dict]] = list(beam_zp)
+        for spec in prim_specs:
+            if spec.arity == 1:
+                for (_, c, _) in beam_zp:
+                    e = Expr(head=spec.nid, args=(c,))
+                    s, fp = _score_candidate(e, no_params, observations, prim_ctx, depth_penalty)
+                    new_items.append((s, e, fp))
+            elif spec.arity == 2:
+                for (_, c1, _) in beam_zp:
+                    for (_, c2, _) in beam_zp:
+                        e = Expr(head=spec.nid, args=(c1, c2))
+                        s, fp = _score_candidate(e, no_params, observations, prim_ctx, depth_penalty)
+                        new_items.append((s, e, fp))
+        new_items.sort(key=lambda x: x[0])
+        new_items = _dedup_beam(new_items)
+        beam_zp = _diverse_keep(new_items, beam_width)
+
+    best_score, best_expr, _ = beam_zp[0]
+    # Compute actual MSE (score includes depth_penalty so we re-evaluate)
+    _, mse = _ols_fit(best_expr, [], observations, prim_ctx)
+    return mse if math.isfinite(mse) else float("inf"), best_expr
+
+
+def _transform_and_search(
+    observations: list[tuple[dict, float]],
+    prim_specs: list[PrimSpec],
+    prim_ctx: EvalContext,
+    var_names: list[str],
+    max_depth: int,
+    beam_width: int,
+    depth_penalty: float,
+) -> Optional[tuple[float, Expr]]:
+    """Try a set of invertible target transformations and search for zero-param laws.
+
+    For each transformation T in a candidate set, transforms the observed outputs
+    by T, runs _zero_param_search on the transformed target, then wraps the
+    discovered expression with T_inv to get a candidate for the original target.
+
+    Returns (mse_on_original, wrapped_expr) for the best candidate whose
+    wrapped expression achieves finite MSE on the ORIGINAL observations, or
+    None if no transform yields a useful candidate.
+
+    Rationale: some exact laws (e.g. γ(v) = 1/√(1-v²)) have intermediate
+    building blocks (1-v², √(1-v²)) that are poor predictors of γ(v) and get
+    pruned by MDL before the full expression can be assembled.  Applying a
+    suitable transformation (e.g. T(x) = 1/x²) reveals a simpler target (1-v²)
+    that is directly discoverable at lower depth.
+    """
+    # Each entry: (T_fn, T_inv_wrap, name)
+    # T_fn: float → float  (applied to each observed output to get new target)
+    # T_inv_wrap: Expr → Expr  (wraps the discovered sub-expression)
+    sqrt_nid = TOKEN_GRAPH.encode("PRIM_SQRT")
+    inv_nid  = TOKEN_GRAPH.encode("PRIM_INV")
+    sq_nid   = TOKEN_GRAPH.encode("PRIM_SQ")
+
+    def _safe_inv(t: float) -> float:
+        return 1.0 / t if abs(t) > 1e-12 else float("inf")
+
+    def _safe_invsq(t: float) -> float:
+        return 1.0 / (t * t) if abs(t) > 1e-12 else float("inf")
+
+    def _safe_sq(t: float) -> float:
+        return t * t
+
+    def _safe_sqrt(t: float) -> float:
+        return math.sqrt(t) if t > 0.0 else float("inf")
+
+    def _safe_invsqrt(t: float) -> float:
+        return 1.0 / math.sqrt(t) if t > 0.0 else float("inf")
+
+    candidate_transforms = [
+        # (T_fn, T_inv_wrap)
+        # T=1/x²  →  T_inv(y) = 1/√y  = INV(SQRT(y))   [key for Lorentz γ(v)]
+        (_safe_invsq,  lambda e: Expr(inv_nid,  (Expr(sqrt_nid, (e,)),))),
+        # T=1/x   →  T_inv(y) = 1/y   = INV(y)
+        (_safe_inv,    lambda e: Expr(inv_nid,  (e,))),
+        # T=x²    →  T_inv(y) = √y    = SQRT(y)
+        (_safe_sq,     lambda e: Expr(sqrt_nid, (e,))),
+        # T=√x    →  T_inv(y) = y²    = SQ(y)
+        (_safe_sqrt,   lambda e: Expr(sq_nid,   (e,))),
+        # T=1/√x  →  T_inv(y) = 1/y² = INV(SQ(y))
+        (_safe_invsqrt, lambda e: Expr(inv_nid, (Expr(sq_nid,  (e,)),))),
+    ]
+
+    best_mse: float = float("inf")
+    best_wrapped: Optional[Expr] = None
+
+    for T_fn, T_inv_wrap in candidate_transforms:
+        # Apply transformation to outputs
+        transformed: list[tuple[dict, float]] = []
+        ok = True
+        for inp, out in observations:
+            t_out = T_fn(out)
+            if not math.isfinite(t_out):
+                ok = False
+                break
+            transformed.append((inp, t_out))
+        if not ok:
+            continue
+
+        # Search for zero-param expression on transformed target
+        sub_bw = max(10, beam_width // 4)   # small beam: fast secondary search
+        mse_t, sub_expr = _zero_param_search(
+            transformed, prim_specs, prim_ctx, var_names,
+            max_depth, sub_bw, depth_penalty,
+        )
+
+        # The MSE on the transformed target must be small to be interesting
+        if not math.isfinite(mse_t) or mse_t > 1e-3:
+            continue
+
+        # Wrap the sub-expression to get candidate for original target
+        wrapped = T_inv_wrap(sub_expr)
+
+        # Evaluate wrapped expression on ORIGINAL observations
+        _, orig_mse = _ols_fit(wrapped, [], observations, prim_ctx)
+        if math.isfinite(orig_mse) and orig_mse < best_mse:
+            best_mse = orig_mse
+            best_wrapped = wrapped
+
+    if best_wrapped is None:
+        return None
+    return best_mse, best_wrapped
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +563,110 @@ def discover_law(
         + [atom(c) for c in _FIXED_CONSTS]
     )
 
+    # ---------------------------------------------------------------------------
+    # Phase 1: Quick small-beam pre-check for parameterized laws.
+    #
+    # Run a cheap beam search with a small beam width and limited depth to see
+    # if a parameterized expression (with p0, p1, ...) already fits the data
+    # well.  If yes, return it immediately: parameterized expressions are the
+    # natural representation for laws like f(x) = k*x, f(x) = a*x² + b, etc.
+    # Returning from here preserves free parameters in the schema (important
+    # for callers that inspect law.params).
+    # ---------------------------------------------------------------------------
+    def _run_beam(bw: int, md: int) -> list[tuple[float, Expr, dict]]:
+        """Run main beam search with given beam_width and max_depth."""
+        _beam: list[tuple[float, Expr, dict]] = []
+        for e in terminals:
+            s, fp = _score_candidate(e, all_param_set, observations, prim_ctx, depth_penalty)
+            _beam.append((s, e, fp))
+        _beam.sort(key=lambda x: x[0])
+        _beam = _dedup_beam(_beam)[:bw]
+        for _ in range(md):
+            _new: list[tuple[float, Expr, dict]] = list(_beam)
+            for spec in prim_specs:
+                if spec.arity == 1:
+                    for (_, c, _) in _beam:
+                        e = Expr(head=spec.nid, args=(c,))
+                        s, fp = _score_candidate(e, all_param_set, observations, prim_ctx, depth_penalty)
+                        _new.append((s, e, fp))
+                elif spec.arity == 2:
+                    for (_, c1, _) in _beam:
+                        for (_, c2, _) in _beam:
+                            e = Expr(head=spec.nid, args=(c1, c2))
+                            s, fp = _score_candidate(e, all_param_set, observations, prim_ctx, depth_penalty)
+                            _new.append((s, e, fp))
+            _new.sort(key=lambda x: x[0])
+            _new = _dedup_beam(_new)
+            _beam = _diverse_keep(_new, bw)
+        return _beam
+
+    quick_bw = max(10, beam_width // 4)
+    quick_md = min(2, max_depth)
+    quick_beam = _run_beam(quick_bw, quick_md)
+    quick_best_expr = quick_beam[0][1]
+    quick_best_fp   = quick_beam[0][2]
+    quick_params    = _find_param_names(quick_best_expr, all_param_set)
+    _, quick_mse    = _ols_fit(quick_best_expr, quick_params, observations, prim_ctx)
+
+    if math.isfinite(quick_mse) and quick_mse < 1e-3:
+        # OLS reported near-zero MSE.  Validate via actual expression evaluation
+        # because OLS linearizes the expression (evaluates with p=1, scales by
+        # fitted coefficient), which may give wrong predictions for non-linear
+        # parameterizations like SQ(MUL(p0, x)) where OLS gives p0=3 but actual
+        # eval gives (3x)²=9x² instead of 3x².
+        preds_q = []
+        for inp, _ in observations:
+            combined_q = {**inp, **quick_best_fp}
+            try:
+                val = eval_expr(quick_best_expr, combined_q, prim_ctx)
+                preds_q.append(val if math.isfinite(val) else float("nan"))
+            except Exception:
+                preds_q.append(float("nan"))
+        valid_q = [(p, t) for (_, t), p in zip(observations, preds_q)
+                   if not math.isnan(p)]
+        actual_mse_q = (sum((p - t) ** 2 for p, t in valid_q) / len(valid_q)
+                        if valid_q else float("inf"))
+
+        if math.isfinite(actual_mse_q) and actual_mse_q < 1e-3:
+            # Simple parameterized law found quickly — return without further search.
+            present_params_q = frozenset(quick_params)
+            schema_q = SchematicLaw(
+                pattern=quick_best_expr,
+                conclusion=quick_best_expr,
+                params=present_params_q,
+                variables=frozenset(var_names),
+                evidence=len(observations),
+            )
+            return FittedLaw(schema=schema_q, params=quick_best_fp,
+                             residual=actual_mse_q)
+
+    # ---------------------------------------------------------------------------
+    # Phase 2: Target-transformation pass for exact zero-param laws.
+    #
+    # For laws like γ(v) = 1/√(1-v²), applying T(x) = 1/x² maps the target
+    # to 1-v², which is discoverable at depth 2.  The transform is inverted
+    # (T_inv = INV(SQRT(·))) to recover the original expression.
+    # ---------------------------------------------------------------------------
+    fast_result = _transform_and_search(
+        observations, prim_specs, prim_ctx, var_names,
+        max_depth, beam_width, depth_penalty,
+    )
+    if fast_result is not None:
+        fast_mse, fast_expr = fast_result
+        if fast_mse < 1e-4:
+            present_params_fast = frozenset(_find_param_names(fast_expr, all_param_set))
+            schema_fast = SchematicLaw(
+                pattern=fast_expr,
+                conclusion=fast_expr,
+                params=present_params_fast,
+                variables=frozenset(var_names),
+                evidence=len(observations),
+            )
+            return FittedLaw(schema=schema_fast, params={}, residual=fast_mse)
+
+    # ---------------------------------------------------------------------------
+    # Phase 3: Full main beam search (complex parameterized laws, fallback).
+    # ---------------------------------------------------------------------------
     # Score all terminals and initialise beam
     # beam: list of (score, expr, fitted_params)  — sorted ascending by score
     beam: list[tuple[float, Expr, dict]] = []
@@ -375,8 +695,32 @@ def discover_law(
         new_items = _dedup_beam(new_items)
         beam = _diverse_keep(new_items, beam_width)
 
-    # Best candidate
-    best_score, best_expr, best_fitted = beam[0]
+    # Post-processing: re-score top candidates with non-linear optimization.
+    combined = _nlopt_rescore_beam(
+        beam, all_param_set, observations, prim_ctx, depth_penalty, top_k=30
+    )
+
+    # Target-transformation pass: try invertible transforms of the output target
+    # to discover zero-param laws whose building blocks have poor MDL against
+    # the original target (e.g. γ(v) = INV(SQRT(SUB(1.0, SQ(v))))).
+    transform_result = _transform_and_search(
+        observations, prim_specs, prim_ctx, var_names,
+        max_depth, beam_width, depth_penalty,
+    )
+
+    # Best candidate: pick the better of (main beam, transform pass)
+    best_score, best_expr, best_fitted = combined[0]
+    if transform_result is not None:
+        tr_mse, tr_expr = transform_result
+        # Main beam residual (for fair comparison — use raw MSE not MDL score)
+        main_mse = combined[0][0]  # This is MDL, not MSE; compute proper MSE below
+        # We compare using MSE on original observations
+        _, main_mse_val = _ols_fit(best_expr,
+                                   sorted(_find_param_names(best_expr, all_param_set)),
+                                   observations, prim_ctx)
+        if tr_mse < main_mse_val:
+            best_expr = tr_expr
+            best_fitted = {}
 
     # Build SchematicLaw from best expression
     present_params = frozenset(_find_param_names(best_expr, all_param_set))
@@ -388,10 +732,22 @@ def discover_law(
         evidence=len(observations),
     )
 
-    # Compute residual with best fitted params
-    _, mse = _ols_fit(
-        best_expr, sorted(present_params), observations, prim_ctx
-    )
+    # Compute final residual with best fitted params (nlopt may have improved them)
+    present_list = sorted(present_params)
+    if best_fitted and present_list:
+        # Evaluate MSE directly using the fitted params
+        preds = []
+        for inp, _ in observations:
+            eval_bindings = {**inp, **best_fitted}
+            try:
+                p = eval_expr(best_expr, eval_bindings, prim_ctx)
+                preds.append(p if math.isfinite(p) else float("nan"))
+            except Exception:
+                preds.append(float("nan"))
+        valid = [(p, t) for (_, t), p in zip(observations, preds) if not math.isnan(p)]
+        mse = sum((p - t) ** 2 for p, t in valid) / len(valid) if valid else float("inf")
+    else:
+        _, mse = _ols_fit(best_expr, present_list, observations, prim_ctx)
 
     return FittedLaw(schema=schema, params=best_fitted, residual=mse if mse != float("inf") else 0.0)
 

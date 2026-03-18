@@ -68,12 +68,15 @@ class TokenGraph:
         self._str_to_id: dict[str, NodeId] = {}
         self._id_to_chars: dict[NodeId, tuple[NodeId, ...]] = {}
         self._next_id: int = _USER_START
+        # Decode cache: avoids repeated ''.join(chr(c) ...) reconstruction
+        self._decode_cache: dict[NodeId, str] = {}
 
         # Pre-register all ASCII printable characters
         for code in range(CHAR_MAX + 1):
             ch = chr(code)
             self._str_to_id[ch] = code
             self._id_to_chars[code] = (code,)
+            self._decode_cache[code] = ch  # pre-warm cache for all ASCII atoms
 
     # ------------------------------------------------------------------
     # Core encoding / decoding
@@ -93,20 +96,28 @@ class TokenGraph:
         nid = self._next_id
         self._next_id += 1
         self._str_to_id[token] = nid
-        # Store character sequence
+        # Store character sequence and pre-warm decode cache
         self._id_to_chars[nid] = tuple(ord(c) for c in token)
+        self._decode_cache[nid] = token
         return nid
 
     def decode(self, node_id: NodeId) -> str:
         """Recover the string for *node_id* by graph traversal.
 
         Traverses _id_to_chars to reconstruct the original token.
-        Returns '<unknown>' for unregistered ids (should not happen in normal use).
+        Returns '<node:N>' for unregistered ids (should not happen in normal use).
+
+        Caches results to avoid repeated chr() join reconstruction.
         """
+        cached = self._decode_cache.get(node_id)
+        if cached is not None:
+            return cached
         char_seq = self._id_to_chars.get(node_id)
         if char_seq is None:
             return f'<node:{node_id}>'
-        return ''.join(chr(c) for c in char_seq)
+        result = ''.join(chr(c) for c in char_seq)
+        self._decode_cache[node_id] = result
+        return result
 
     def encode_seq(self, tokens: list[str]) -> list[NodeId]:
         """Encode a list of string tokens to NodeIds."""
