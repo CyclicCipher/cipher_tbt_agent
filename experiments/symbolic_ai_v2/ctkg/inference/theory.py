@@ -39,7 +39,7 @@ to one registered with 'mul', 'add' strings — the cage tests verify this acros
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Callable, Optional, List
 
 from experiments.symbolic_ai_v2.ctkg.core.morphism_graph import (
     MorphismGraph,
@@ -115,6 +115,25 @@ class SymmetryCheckResult:
     theory_id:     "TheoryId"
     max_deviation: float
     n_tested:      int
+
+
+@dataclass
+class SymmetryConflict:
+    """Comparison of symmetry groups of two theories.
+
+    Attributes
+    ----------
+    a_only : transforms that are symmetries of theory_a but NOT theory_b.
+    b_only : transforms that are symmetries of theory_b but NOT theory_a.
+    shared : transforms that are symmetries of BOTH theories.
+    """
+    a_only: list
+    b_only: list
+    shared: list
+
+    @property
+    def has_conflict(self) -> bool:
+        return bool(self.a_only) or bool(self.b_only)
 
 
 @dataclass
@@ -437,6 +456,48 @@ class TheoryManager:
             theory_a_id=theory_a,
             theory_b_id=theory_b,
         )
+
+    def compare_symmetry_groups(
+        self,
+        theory_a: "TheoryId",
+        theory_b: "TheoryId",
+        transforms: "list",  # list of Callable[[dict[str, float]], dict[str, float]]
+        ctx: EvalContext,
+        test_inputs: "list[dict[str, float]]",
+        tolerance: float = 0.01,
+    ) -> "SymmetryConflict":
+        """Compare symmetry groups of two theories.
+
+        For each transform T in transforms, check if T is a symmetry of theory_a
+        and/or theory_b using symmetry_group_check. Classify each transform as
+        a_only, b_only, or shared.
+
+        Parameters
+        ----------
+        theory_a, theory_b : the two theories to compare.
+        transforms         : list of Callable[[dict], dict] — coordinate transforms to test.
+        ctx                : EvalContext.
+        test_inputs        : list of input binding dicts to test symmetry on.
+        tolerance          : max allowed deviation for 'invariant'.
+
+        Returns
+        -------
+        SymmetryConflict with a_only, b_only, shared lists.
+        """
+        a_only = []
+        b_only = []
+        shared = []
+        for T in transforms:
+            result_a = self.symmetry_group_check(theory_a, T, ctx, test_inputs, tolerance)
+            result_b = self.symmetry_group_check(theory_b, T, ctx, test_inputs, tolerance)
+            if result_a.invariant and result_b.invariant:
+                shared.append(T)
+            elif result_a.invariant and not result_b.invariant:
+                a_only.append(T)
+            elif not result_a.invariant and result_b.invariant:
+                b_only.append(T)
+            # If neither is invariant, T is not a symmetry of either — don't add
+        return SymmetryConflict(a_only=a_only, b_only=b_only, shared=shared)
 
     def blame_theory_all(
         self,

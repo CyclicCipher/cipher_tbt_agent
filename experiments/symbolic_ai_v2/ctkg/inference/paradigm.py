@@ -83,11 +83,28 @@ from experiments.symbolic_ai_v2.ctkg.inference.coverage import score_coverage
 
 _PARADIGM_SHIFT_TYPE = "PARADIGM_SHIFT"
 _DEFAULT_MIN_COVERAGE = 0.5
+_PROJECTION_TYPE = "PROJECTION"
+_INCLUSION_TYPE = "INCLUSION"
 
 
 # ---------------------------------------------------------------------------
 # Public types
 # ---------------------------------------------------------------------------
+
+@dataclass
+class WiredParadigmShift:
+    """Result of wire_paradigm_shift — concept wired to constituent morphisms.
+
+    Attributes
+    ----------
+    concept_id      : ObjectId of the concept node that was wired.
+    projection_mids : MorphIds of PROJECTION morphisms (concept → constituent).
+    inclusion_mids  : MorphIds of INCLUSION morphisms (constituent → concept).
+    """
+    concept_id:      ObjectId
+    projection_mids: list[MorphId] = field(default_factory=list)
+    inclusion_mids:  list[MorphId] = field(default_factory=list)
+
 
 @dataclass
 class ParadigmShiftResult:
@@ -223,16 +240,8 @@ def propose_paradigm_shift(
     # Wire new concept node to specified morphisms from related theories
     wired: list[MorphId] = []
     if wires_to:
-        for target_mid in wires_to:
-            wm = mg.add_morphism(
-                new_theory_id,
-                target_mid,
-                morph_type="WIRED_TO",
-                evidence=1,
-                morph_concept_id=new_theory_id,
-                payload={"wired_source": theory_id, "wired_target": target_mid},
-            )
-            wired.append(wm.morph_id)
+        wps = wire_paradigm_shift(new_theory_id, wires_to, mg)
+        wired = wps.projection_mids + wps.inclusion_mids
 
     return ParadigmShiftResult(
         old_theory_id=theory_id,
@@ -241,6 +250,69 @@ def propose_paradigm_shift(
         explanation=best_hyp,
         anomaly_coverage=cov.coverage,
         wired_morphisms=wired,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Wiring
+# ---------------------------------------------------------------------------
+
+def wire_paradigm_shift(
+    new_concept_id:     ObjectId,
+    constituent_morphs: list[MorphId],
+    mg:                 MorphismGraph,
+    bridge_mid:         Optional[MorphId] = None,
+    label_prefix:       str = "__wire__",
+) -> WiredParadigmShift:
+    """Wire a concept node to constituent morphisms via PROJECTION/INCLUSION.
+
+    For each constituent morph m:
+      - PROJECTION: source=new_concept_id, target=m.target
+      - INCLUSION:  source=m.target, target=new_concept_id
+
+    Parameters
+    ----------
+    new_concept_id      : ObjectId of the concept node to wire.
+    constituent_morphs  : list of MorphIds whose anchor objects become wired.
+    mg                  : MorphismGraph.
+    bridge_mid          : optional existing bridge morphism (unused; reserved).
+    label_prefix        : prefix for labels (reserved for future use).
+
+    Returns
+    -------
+    WiredParadigmShift with projection_mids and inclusion_mids populated.
+    """
+    projection_mids: list[MorphId] = []
+    inclusion_mids:  list[MorphId] = []
+
+    for mid in constituent_morphs:
+        m = mg.morphism_by_id(mid)
+        if m is None:
+            continue
+        constituent_target = m.target
+
+        proj = mg.add_morphism(
+            new_concept_id,
+            constituent_target,
+            morph_type=_PROJECTION_TYPE,
+            evidence=1,
+            payload={"constituent_mid": mid},
+        )
+        projection_mids.append(proj.morph_id)
+
+        incl = mg.add_morphism(
+            constituent_target,
+            new_concept_id,
+            morph_type=_INCLUSION_TYPE,
+            evidence=1,
+            payload={"constituent_mid": mid},
+        )
+        inclusion_mids.append(incl.morph_id)
+
+    return WiredParadigmShift(
+        concept_id=new_concept_id,
+        projection_mids=projection_mids,
+        inclusion_mids=inclusion_mids,
     )
 
 
