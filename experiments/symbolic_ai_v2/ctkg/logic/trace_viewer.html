@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>CTKG Activation Flow Trace</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Consolas', 'Monaco', monospace; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
+h1 { color: #0f3460; font-size: 1.4em; margin-bottom: 10px; color: #e94560; }
+h2 { font-size: 1.1em; margin: 12px 0 6px; color: #16213e; background: #0f3460; padding: 4px 8px; border-radius: 4px; }
+.nav { margin: 10px 0; display: flex; gap: 10px; align-items: center; }
+.nav button { background: #0f3460; color: #e0e0e0; border: 1px solid #e94560; padding: 6px 14px; cursor: pointer; border-radius: 4px; }
+.nav button:hover { background: #e94560; }
+.nav span { font-size: 0.95em; }
+.correct { color: #4ecca3; font-weight: bold; }
+.wrong { color: #e94560; font-weight: bold; }
+.phase { margin: 8px 0; padding: 10px; background: #16213e; border-radius: 6px; border-left: 3px solid #0f3460; }
+.phase-title { font-weight: bold; color: #4ecca3; margin-bottom: 6px; }
+table { border-collapse: collapse; width: 100%; margin: 4px 0; }
+th, td { padding: 3px 8px; text-align: left; border-bottom: 1px solid #0f3460; font-size: 0.85em; }
+th { color: #e94560; }
+.bar { display: inline-block; height: 12px; border-radius: 2px; margin-left: 4px; vertical-align: middle; }
+.bar-pos { background: #4ecca3; }
+.bar-neg { background: #e94560; }
+.bar-sigma { background: #f0a500; }
+.highlight { background: #0f3460; }
+.digit-row { font-weight: bold; }
+.summary { margin: 15px 0; padding: 10px; background: #0f3460; border-radius: 6px; }
+</style>
+</head>
+<body>
+<h1>CTKG Activation Flow Trace</h1>
+<div class="nav">
+  <button onclick="prev()">&#9664; Prev</button>
+  <button onclick="next()">Next &#9654;</button>
+  <span id="counter"></span>
+  <span id="result"></span>
+</div>
+<div id="content"></div>
+
+<script>
+let data = [];
+let idx = 0;
+
+// Load trace.json from same directory
+fetch('trace.json')
+  .then(r => r.json())
+  .then(d => { data = d; render(); })
+  .catch(e => {
+    document.getElementById('content').innerHTML =
+      '<p>Could not load trace.json. Run trace_runner.py first.</p>' +
+      '<p>Error: ' + e + '</p>';
+  });
+
+function prev() { if (idx > 0) { idx--; render(); } }
+function next() { if (idx < data.length - 1) { idx++; render(); } }
+
+function bar(val, maxVal, cls) {
+  const w = Math.min(Math.abs(val) / Math.max(maxVal, 0.001) * 150, 150);
+  return `<span class="bar ${cls}" style="width:${w}px"></span>`;
+}
+
+function render() {
+  if (!data.length) return;
+  const rec = data[idx];
+  const isCorrect = rec.selected === rec.correct;
+
+  document.getElementById('counter').textContent =
+    `Question ${idx + 1} / ${data.length} (step ${rec.step})`;
+  document.getElementById('result').innerHTML =
+    `Selected: <span class="${isCorrect ? 'correct' : 'wrong'}">${rec.selected}</span>` +
+    ` | Correct: <span class="correct">${rec.correct}</span>`;
+
+  let html = '';
+
+  // Phase 1: Observation
+  html += '<div class="phase"><div class="phase-title">Phase 1: Observation Tokens</div>';
+  html += '<table><tr><th>Token</th><th>Activation</th><th></th></tr>';
+  for (const t of rec.observation) {
+    html += `<tr><td>${t.label}</td><td>${t.activation.toFixed(3)}</td>`;
+    html += `<td>${bar(t.activation, 1.0, 'bar-pos')}</td></tr>`;
+  }
+  html += '</table></div>';
+
+  // Phase 2: Co-occurrence spread
+  html += '<div class="phase"><div class="phase-title">Phase 2: Co-occurrence Spread</div>';
+  const changed = rec.cooccur.filter(c => Math.abs(c.after - c.before) > 0.01);
+  changed.sort((a, b) => (b.after - b.before) - (a.after - a.before));
+  html += '<table><tr><th>Node</th><th>Before</th><th>After</th><th>Change</th><th></th></tr>';
+  for (const c of changed.slice(0, 20)) {
+    const delta = c.after - c.before;
+    const isDigit = /^\d$/.test(c.label);
+    const cls = isDigit ? (c.label === rec.correct ? 'highlight correct' : 'highlight') : '';
+    html += `<tr class="${cls}"><td>${c.label}</td><td>${c.before.toFixed(3)}</td>`;
+    html += `<td>${c.after.toFixed(3)}</td><td>${delta >= 0 ? '+' : ''}${delta.toFixed(3)}</td>`;
+    html += `<td>${bar(delta, 0.5, delta > 0 ? 'bar-pos' : 'bar-neg')}</td></tr>`;
+  }
+  html += '</table></div>';
+
+  // Phase 3: Sigma (Q·K values for digits)
+  html += '<div class="phase"><div class="phase-title">Phase 3: Sigma (Q&middot;K Context Support)</div>';
+  const digitQK = rec.qk.filter(q => /^\d$/.test(q.label));
+  digitQK.sort((a, b) => b.qk - a.qk);
+  const maxQK = digitQK.length ? Math.max(...digitQK.map(q => q.qk)) : 1;
+  html += '<table><tr><th>Digit</th><th>Q&middot;K</th><th></th></tr>';
+  for (const q of digitQK) {
+    const cls = q.label === rec.correct ? 'highlight correct' : '';
+    html += `<tr class="${cls}"><td>${q.label}</td><td>${q.qk.toFixed(3)}</td>`;
+    html += `<td>${bar(q.qk, maxQK, 'bar-sigma')}</td></tr>`;
+  }
+  // Top sigma edges (involving digits)
+  const digitSigma = rec.sigma_edges.filter(e =>
+    /^\d$/.test(e.src) || /^\d$/.test(e.tgt)
+  );
+  digitSigma.sort((a, b) => b.sigma - a.sigma);
+  if (digitSigma.length) {
+    html += '<br><table><tr><th>Edge</th><th>Sigma</th><th>Role</th><th></th></tr>';
+    for (const e of digitSigma.slice(0, 15)) {
+      const role = e.role === 0 ? 'cooccur' : 'trans';
+      html += `<tr><td>${e.src} &rarr; ${e.tgt}</td><td>${e.sigma.toFixed(3)}</td>`;
+      html += `<td>${role}</td><td>${bar(e.sigma, 2.0, 'bar-sigma')}</td></tr>`;
+    }
+    html += '</table>';
+  }
+  html += '</div>';
+
+  // Phase 4: Forward/Backward scores
+  html += '<div class="phase"><div class="phase-title">Phase 4: Action Selection Scores</div>';
+  const digitScores = rec.forward.filter(f => /^\d$/.test(f.label));
+  digitScores.sort((a, b) => b.total - a.total);
+  const maxTotal = digitScores.length ? Math.max(...digitScores.map(f => f.total)) : 1;
+  html += '<table><tr><th>Digit</th><th>Forward</th><th>Backward</th><th>Epistemic</th><th>Total</th><th></th></tr>';
+  for (const f of digitScores) {
+    const cls = f.label === rec.correct ? 'highlight correct' :
+                f.label === rec.selected ? 'highlight wrong' : '';
+    html += `<tr class="${cls}"><td class="digit-row">${f.label}</td>`;
+    html += `<td>${f.fwd.toFixed(3)}</td><td>${f.bwd.toFixed(3)}</td>`;
+    html += `<td>${f.epistemic.toFixed(3)}</td><td>${f.total.toFixed(3)}</td>`;
+    html += `<td>${bar(f.total, maxTotal, f.label === rec.correct ? 'bar-pos' : 'bar-neg')}</td></tr>`;
+  }
+  html += '</table></div>';
+
+  // Summary
+  html += '<div class="summary">';
+  html += `<strong>Result:</strong> Selected <span class="${isCorrect ? 'correct' : 'wrong'}">${rec.selected}</span>`;
+  html += ` | Correct: <span class="correct">${rec.correct}</span>`;
+  if (!isCorrect) {
+    // Find correct digit's rank
+    const correctIdx = digitScores.findIndex(f => f.label === rec.correct);
+    if (correctIdx >= 0) {
+      html += ` | Correct answer ranked #${correctIdx + 1} of ${digitScores.length}`;
+      const correctScore = digitScores[correctIdx];
+      const selectedScore = digitScores[0];
+      html += ` (score gap: ${(selectedScore.total - correctScore.total).toFixed(3)})`;
+    }
+  }
+  html += '</div>';
+
+  document.getElementById('content').innerHTML = html;
+}
+</script>
+</body>
+</html>

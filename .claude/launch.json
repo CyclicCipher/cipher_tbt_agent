@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "trace-viewer",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8765", "--directory", "experiments/symbolic_ai_v2/ctkg/logic"],
+      "port": 8765
+    }
+  ]
+}
