@@ -151,7 +151,6 @@ class TestBearSalmon:
         fish_catch = kg.edge(fish, catch)
         assert fish_catch is not None, "fish→CATCH_salmon edge should exist"
         weight_before = fish_catch.weight
-        conf_before = fish_catch.confidence
 
         # Now: one episode without hearing (damaged ear)
         loop.observe(

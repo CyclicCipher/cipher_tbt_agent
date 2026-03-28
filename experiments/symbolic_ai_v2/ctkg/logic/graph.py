@@ -60,162 +60,79 @@ class Node:
 # ---------------------------------------------------------------------------
 
 class Edge:
-    """A directed edge with Beta-posterior weight.
+    """A directed edge with Hebbian weight.
 
-    The edge weight is a Bayesian posterior, not a fixed number.
-    alpha counts evidence that this edge's target APPEARS when the source
-    is active. beta counts evidence that it DOESN'T.
+    Simple additive learning: strengthen() nudges toward +1,
+    weaken() nudges toward -1. Weight stays in [-1, 1] via
+    asymptotic update. No alpha/beta, no posterior, no confidence.
 
-    weight = (alpha - beta) / (alpha + beta)   ∈ [-1, 1]
-    confidence = alpha + beta                   (total evidence)
-
-    One update rule covers all four cases:
-      target appeared  → alpha += 1  (more positive / less negative)
-      target absent    → beta  += 1  (more negative / less positive)
-
-    New edges start at alpha=1, beta=1 (uniform prior, weight=0).
-    Learning rate is implicit: low confidence → large updates,
-    high confidence → small updates. No tuning parameter.
+    sigma is a transient context-dependent modulation that lives
+    for one inference pass only (reset each observation).
     """
-    __slots__ = ('source', 'target', 'alpha', 'beta', 'role', '_w', 'sigma',
+    __slots__ = ('source', 'target', 'weight', 'role', 'sigma', 'count',
                  '_dist_sum', '_dist_sq_sum', '_dist_count')
 
     def __init__(self, source: NodeId, target: NodeId,
-                 alpha: float = 1.0, beta: float = 1.0,
-                 role: int = COOCCURRENCE):
+                 weight: float = 0.0, role: int = COOCCURRENCE):
         self.source = source
         self.target = target
-        self.alpha = alpha
-        self.beta = beta
+        self.weight = weight
         self.role = role
-        self._w = (alpha - beta) / (alpha + beta) if (alpha + beta) > 0 else 0.0
-        self.sigma = 0.0  # transient context-dependent state (BDH / sheaf)
-        # PoPE-inspired positional statistics: decouple "what" from "where".
-        # Tracks the distribution of relative positions at which these two
-        # tokens co-occur. Used to compute position_match in attention.
-        self._dist_sum = 0.0     # sum of observed distances
-        self._dist_sq_sum = 0.0  # sum of squared distances
-        self._dist_count = 0     # number of distance observations
-
-    @property
-    def weight(self) -> float:
-        """Posterior mean, cached in _w. Range [-1, 1].
-
-        Cached value is updated by observe_present/observe_absent.
-        If alpha/beta are set directly (e.g., in tests), call _recalc().
-        """
-        return self._w
-
-    @weight.setter
-    def weight(self, val: float) -> None:
-        """Set weight by adjusting alpha/beta symmetrically."""
-        total = self.alpha + self.beta
-        if total == 0:
-            total = 2.0
-        self.alpha = total * (1.0 + max(-1.0, min(1.0, val))) / 2.0
-        self.beta = total - self.alpha
-        self._w = (self.alpha - self.beta) / (self.alpha + self.beta)
-
-    def _recalc(self) -> None:
-        """Recompute cached weight after direct alpha/beta modification."""
-        total = self.alpha + self.beta
-        self._w = (self.alpha - self.beta) / total if total > 0 else 0.0
+        self.sigma = 0.0
+        self.count = 0  # number of observations (for diagnostics)
+        self._dist_sum = 0.0
+        self._dist_sq_sum = 0.0
+        self._dist_count = 0
 
     @property
     def effective_weight(self) -> float:
-        """Context-dependent effective weight.
+        """Permanent weight + transient context modulation."""
+        return self.weight + self.sigma
 
-        CO-OCCURRENCE edges: permanent weight + sigma. Co-occurrence is a
-        global fact ("3 and 4 appear together") modulated by context.
+    def strengthen(self, rate: float = 0.1) -> None:
+        """Nudge weight toward +1. Asymptotic: large weights change less."""
+        self.weight += rate * (1.0 - self.weight)
+        self.count += 1
 
-        TRANSITION edges: sigma ONLY. The permanent weight gates existence
-        (the transition was observed at least once) but does NOT contribute
-        to strength. The strength of a transition in any given context is
-        entirely determined by the current co-activation pattern (sigma).
-
-        This mirrors cortical synapses: the effective postsynaptic response
-        depends on the local dendritic computation (what else is active),
-        not just the synapse's long-term potentiation weight. A synapse
-        that was strengthened in context A doesn't fire strongly in context B
-        just because it was potentiated — the dendritic context gates it.
-
-        The permanent alpha/beta on transition edges records that the
-        transition EXISTS (has been observed). Whether it FIRES depends
-        on sigma (the current assembly pattern).
-        """
-        if self.role == COOCCURRENCE:
-            return self._w + self.sigma
-        else:
-            # TRANSITION: permanent weight as prior, modulated by sigma.
-            # The permanent alpha/beta captures accumulated evidence
-            # (20 eat observations vs 3 go observations). Sigma adds
-            # context-dependent boost from current co-activation.
-            if self.alpha + self.beta <= 2.01:  # uniform prior = never observed
-                return 0.0
-            return self._w + self.sigma
-
-    @property
-    def confidence(self) -> float:
-        """Total evidence count. Higher = more stable."""
-        return self.alpha + self.beta
-
-    def observe_present(self, strength: float = 1.0) -> None:
-        """Target appeared. Bayesian update: alpha += strength."""
-        self.alpha += strength
-        total = self.alpha + self.beta
-        self._w = (self.alpha - self.beta) / total
-
-    def observe_absent(self, strength: float = 1.0) -> None:
-        """Target did not appear. Bayesian update: beta += strength."""
-        self.beta += strength
-        total = self.alpha + self.beta
-        self._w = (self.alpha - self.beta) / total
+    def weaken(self, rate: float = 0.1) -> None:
+        """Nudge weight toward -1. Asymptotic: large negative weights change less."""
+        self.weight -= rate * (1.0 + self.weight)
+        self.count += 1
 
     def observe_distance(self, dist: int) -> None:
-        """Record the relative position at which source→target co-occurred.
-
-        PoPE-inspired: tracks the distribution of distances so that
-        attention can decouple "what" (content association) from "where"
-        (positional pattern).
-        """
+        """Record the relative position at which source→target co-occurred."""
         self._dist_sum += dist
         self._dist_sq_sum += dist * dist
         self._dist_count += 1
 
     @property
     def mean_distance(self) -> float:
-        """Mean observed relative position."""
         if self._dist_count == 0:
             return 0.0
         return self._dist_sum / self._dist_count
 
     @property
     def var_distance(self) -> float:
-        """Variance of observed relative positions."""
         if self._dist_count < 2:
-            return 1.0  # high variance prior when few observations
+            return 1.0
         mu = self._dist_sum / self._dist_count
         return max(0.1, self._dist_sq_sum / self._dist_count - mu * mu)
 
     def position_match(self, query_dist: int) -> float:
         """How well does query_dist match this edge's typical distance?
 
-        Returns a value in (0, 1]: 1.0 = perfect match, decays as a
-        Gaussian away from the mean distance. Broad variance = tolerant
-        of position mismatch. Narrow variance = specific position required.
-
-        When no distance observations exist, returns 1.0 (no position bias).
+        Returns (0, 1]: 1.0 = perfect match, Gaussian decay.
+        No observations → 1.0 (no position bias).
         """
-        import math
         if self._dist_count == 0:
-            return 1.0  # no positional information — content-only
+            return 1.0
         mu = self.mean_distance
         var = self.var_distance
         return math.exp(-0.5 * (query_dist - mu) ** 2 / var)
 
     def __repr__(self) -> str:
         return (f"Edge(source={self.source}, target={self.target}, "
-                f"alpha={self.alpha}, beta={self.beta}, role={self.role})")
+                f"weight={self.weight:.3f}, role={self.role})")
 
 
 # ---------------------------------------------------------------------------
@@ -254,10 +171,6 @@ class KnowledgeGraph:
         # Cache: sum of positive outgoing co-occurrence effective weights per node.
         # Invalidated when sigma changes (reset_sigma clears it).
         self._cooccur_out_sum: dict[NodeId, float] = {}
-        # Product projections: discovered by consolidation, stored separately
-        # from edges because (src, tgt) may already have a co-occurrence edge.
-        # Maps (src_nid, tgt_nid, position_from_end) → weight.
-        self._product_projections: dict[tuple[NodeId, NodeId, int], float] = {}
 
     # -------------------------------------------------------------------
     # Node creation
@@ -320,14 +233,14 @@ class KnowledgeGraph:
     def get_or_create_edge(self, src: NodeId, tgt: NodeId, role: int = COOCCURRENCE) -> Edge:
         """Get or create a directed edge. Role is set on creation only.
 
-        New edges start with uniform Beta(1, 1) prior — weight = 0, no bias.
+        New edges start at weight=0.
         Maintains both _outgoing and _incoming adjacency indices.
         """
         key = (src, tgt)
         existing = self._edges.get(key)
         if existing is not None:
             return existing
-        edge = Edge(source=src, target=tgt, alpha=1.0, beta=1.0, role=role)
+        edge = Edge(source=src, target=tgt, weight=0.0, role=role)
         self._edges[key] = edge
         # Maintain outgoing index.
         out = self._outgoing.get(src)
@@ -354,9 +267,7 @@ class KnowledgeGraph:
         """All outgoing edges from a node. O(degree) via adjacency index."""
         return self._outgoing.get(nid, [])
 
-    def edges_to(self, nid: NodeId) -> list[Edge]:
-        """All incoming edges to a node. O(E) — no incoming index."""
-        return [e for (_, t), e in self._edges.items() if t == nid]
+    # edges_to already defined above using _incoming index — O(degree)
 
     def remove_edge(self, src: NodeId, tgt: NodeId) -> bool:
         """Remove an edge. Returns True if found and removed."""
@@ -433,14 +344,11 @@ class KnowledgeGraph:
                 denominator = 0.0
 
                 # Incoming edges: neighbors that point TO this node.
-                for (src, tgt), edge in self._edges.items():
-                    if tgt != nid:
-                        continue
+                for edge in self._incoming.get(nid, ()):
                     w = edge.effective_weight
                     if w <= 0:
-                        continue  # only excitatory edges pull
-                    # Source activation: use fixed if clamped, else current.
-                    src_act = fixed.get(src, current.get(src, 0.0))
+                        continue
+                    src_act = fixed.get(edge.source, current.get(edge.source, 0.0))
                     numerator += w * src_act
                     denominator += w
 
@@ -531,7 +439,7 @@ class KnowledgeGraph:
                 c_act = active_acts.get(c_nid, 0.0)
                 if c_act <= 0:
                     continue
-                cw = edge._w
+                cw = edge.weight
                 if cw > 0:
                     support += c_act * cw
             qk[tgt_nid] = support
@@ -700,9 +608,9 @@ class KnowledgeGraph:
            backward through the graph, settle to a prospective configuration.
            This distributes credit across the full chain, not just one hop.
 
-        2. WEIGHT UPDATE PHASE: update edge alpha/beta based on the settled
+        2. WEIGHT UPDATE PHASE: update edge weights based on the settled
            error pattern. Edges that contributed to correct predictions get
-           observe_present(); edges that contributed to errors get observe_absent().
+           strengthened; edges that contributed to errors get weakened.
 
         Returns total surprise.
         """
@@ -764,13 +672,9 @@ class KnowledgeGraph:
             for nid, err in new_errors.items():
                 errors[nid] = errors.get(nid, 0.0) + err
 
-        # --- Phase 2: Weight update (Bayesian) ---
+        # --- Phase 2: Weight update (Hebbian) ---
         # Use the settled error pattern to update edges.
-        # An edge gets credit from BOTH the direct error at its target
-        # AND the propagated error from further downstream.
 
-        # Restrict to prev_active sources. If not provided, use all active
-        # nodes as sources (backward compatibility with direct learn() calls).
         if prev_active:
             contributing_sources = set(prev_active.keys())
         else:
@@ -787,22 +691,17 @@ class KnowledgeGraph:
                     continue
 
                 tgt_observed = tgt_nid in actual_set
-
-                # Base credit from direct observation.
                 credit = edge_credit.get((src_nid, tgt_nid), 0.0)
 
                 if tgt_observed:
-                    # Correctly predicted or underpredicted: strengthen.
-                    # Strength proportional to how much credit this edge gets.
-                    strength = 1.0 + min(abs(credit), 2.0) * 0.5
-                    edge.observe_present(strength)
+                    rate = 0.1 * (1.0 + min(abs(credit), 2.0) * 0.5)
+                    edge.strengthen(rate)
                     p = max(abs(tgt_predicted), 0.01)
                     surprise += -math.log(min(p, 1.0))
                 else:
-                    # Predicted but not observed: weaken.
                     if edge.role == TRANSITION:
-                        strength = 1.0 + min(abs(credit), 2.0) * 0.5
-                        edge.observe_absent(strength)
+                        rate = 0.1 * (1.0 + min(abs(credit), 2.0) * 0.5)
+                        edge.weaken(rate)
                     if tgt_predicted > 0:
                         p = max(tgt_predicted, 0.01)
                         surprise += -math.log(min(p, 1.0))
@@ -820,9 +719,7 @@ class KnowledgeGraph:
                         best_act = src_act
             if best_src is not None and best_act >= EDGE_CREATION_THRESHOLD:
                 edge = self.get_or_create_edge(best_src, tgt_nid, role=abduct_role)
-                edge.alpha = 2.0
-                edge.beta = 1.0
-                edge._recalc()
+                edge.strengthen(0.3)
             surprise += 1.0
 
         return surprise
@@ -868,10 +765,10 @@ class KnowledgeGraph:
                 entropy -= p * math.log2(p)
         return entropy
 
-    def edge_confidence(self, src: NodeId, tgt: NodeId) -> float:
-        """Return the confidence (alpha + beta) of a specific edge."""
+    def edge_observation_count(self, src: NodeId, tgt: NodeId) -> int:
+        """Return how many times this edge has been observed."""
         e = self.edge(src, tgt)
-        return e.confidence if e is not None else 0.0
+        return e.count if e is not None else 0
 
     # -------------------------------------------------------------------
     # Homeostatic priors
@@ -892,12 +789,8 @@ class KnowledgeGraph:
         }
 
     # -------------------------------------------------------------------
-    # Action selection: attention + active inference
+    # Action selection: attention-based
     # -------------------------------------------------------------------
-
-    PRODUCT_ROLE = 3  # edge role for product projections
-
-    PRODUCT_ROLE = 3  # edge role for product projections
 
     def select_action(
         self,
@@ -905,35 +798,14 @@ class KnowledgeGraph:
         fixed_context: dict[NodeId, float] | None = None,
         context_positions: dict[NodeId, int] | None = None,
         answer_position: int | None = None,
-        position_from_end: int | None = None,
-        input_digit_count: int = 0,
-        original_position_list: list[tuple[NodeId, int]] | None = None,
     ) -> NodeId | None:
-        """Select an action via attention with product-aware position matching.
+        """Select an action via co-occurrence attention.
 
-        Two layers of attention, combined:
+        For each candidate, compute the sum of weighted co-occurrence
+        edges from context tokens. Position matching via PoPE distance
+        statistics is used when positional information is available.
 
-        1. **Product attention** (position-specific): if position_from_end is
-           provided, consult PRODUCT edges (role=3) from context tokens whose
-           INPUT position-from-end matches the OUTPUT position-from-end.
-           Only the context digit at the MATCHING input position contributes
-           product signal. This prevents the units digit's product edges from
-           influencing the tens output and vice versa.
-
-        2. **Co-occurrence attention** (content): normalised co-occurrence
-           weight from each context token to each candidate.
-
-        Parameters
-        ----------
-        candidates : list of candidate action NodeIds.
-        fixed_context : {NodeId: activation} for the current observation.
-        context_positions : {NodeId: position_index} for each context token.
-        answer_position : the position index where the answer would appear.
-        position_from_end : which digit position we're producing (0 = units,
-            1 = tens, 2 = hundreds, etc.).
-        input_digit_count : total number of digit tokens in the input. Used
-            to compute each context token's position-from-end so we only
-            consult product edges from the matching input position.
+        Returns the highest-scoring candidate, or None.
         """
         if not candidates:
             return None
@@ -946,39 +818,6 @@ class KnowledgeGraph:
 
         logits: dict[NodeId, float] = {nid: 0.0 for nid in candidates}
 
-        # --- Layer 1: Product attention (position-specific projections) ---
-        # Use original_position_list (preserves duplicates) to find which
-        # input digit is at the matching position-from-end. For 5000 with
-        # positions [(5,0), (0,1), (0,2), (0,3), (succ,4)]:
-        #   position_from_end=3 → input digit at obs_pos 0 → node 5
-        #   position_from_end=2 → input digit at obs_pos 1 → node 0
-        #   position_from_end=1 → input digit at obs_pos 2 → node 0
-        #   position_from_end=0 → input digit at obs_pos 3 → node 0
-        if position_from_end is not None and original_position_list and input_digit_count > 0:
-            # Extract input digit positions: the first input_digit_count
-            # entries in the position list that have product projections.
-            input_digit_entries: list[tuple[NodeId, int]] = []
-            for nid, pos in original_position_list:
-                if len(input_digit_entries) >= input_digit_count:
-                    break
-                # Check if this node appears as source in any product projection.
-                has_product = any(
-                    k[0] == nid for k in self._product_projections
-                )
-                if has_product:
-                    input_digit_entries.append((nid, pos))
-
-            # The matching input digit: count from the RIGHT.
-            target_idx = len(input_digit_entries) - 1 - position_from_end
-            if 0 <= target_idx < len(input_digit_entries):
-                match_nid = input_digit_entries[target_idx][0]
-                for cand_nid in candidates:
-                    key = (match_nid, cand_nid, position_from_end)
-                    weight = self._product_projections.get(key, 0.0)
-                    if weight > 0:
-                        logits[cand_nid] += weight * 2.0
-
-        # --- Layer 2: Co-occurrence attention (content) ---
         for ctx_nid, ctx_act in context.items():
             if ctx_act <= 0:
                 continue
@@ -1000,21 +839,13 @@ class KnowledgeGraph:
 
             if context_positions and answer_position is not None:
                 ctx_pos = context_positions.get(ctx_nid)
-                if ctx_pos is not None:
-                    query_dist = answer_position - ctx_pos
-                else:
-                    query_dist = None
+                query_dist = (answer_position - ctx_pos) if ctx_pos is not None else None
             else:
                 query_dist = None
 
             for cand_nid, edge in profile:
                 content_w = edge.effective_weight / total_ew
-
-                if query_dist is not None:
-                    pos_match = edge.position_match(query_dist)
-                else:
-                    pos_match = 1.0
-
+                pos_match = edge.position_match(query_dist) if query_dist is not None else 1.0
                 logits[cand_nid] += ctx_act * content_w * pos_match
 
         if not logits or all(v == 0 for v in logits.values()):

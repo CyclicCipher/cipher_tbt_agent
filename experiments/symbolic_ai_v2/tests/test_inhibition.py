@@ -49,10 +49,13 @@ class TestInhibitorySpread:
         c = kg.get_or_create("C")
         b = kg.get_or_create("B")
         # A excites B, C inhibits B
+        # Transition excitatory edges are normalised per source, so
+        # a weight=1.0 edge sends activation 1.0 * (1.0/1.0) = 1.0.
+        # Inhibitory edges are raw, so -1.0 sends -1.0. Net = 0.
         e1 = kg.get_or_create_edge(a, b, role=TRANSITION)
-        e1.weight = 2.0
+        e1.weight = 1.0
         e2 = kg.get_or_create_edge(c, b, role=TRANSITION)
-        e2.weight = -2.0
+        e2.weight = -1.0
         kg.activate(a, 1.0)
         kg.activate(c, 1.0)
         pred = kg.spread(role_filter=TRANSITION)
@@ -66,10 +69,7 @@ class TestInhibitorySpread:
         a = kg.get_or_create("A")
         b = kg.get_or_create("B")
         edge = kg.get_or_create_edge(a, b, role=COOCCURRENCE)
-        # Make edge strongly inhibitory via Beta: alpha=1, beta=20 → weight ≈ -0.9
-        edge.alpha = 1.0
-        edge.beta = 20.0
-        edge._recalc()
+        edge.weight = -0.9  # strongly inhibitory
         kg.activate(a, 1.0)
         pred = kg.spread(role_filter=COOCCURRENCE)
         assert pred[b] >= -SPREAD_CAP
@@ -131,21 +131,18 @@ class TestInhibitoryLearning:
         )
 
     def test_weight_bounded_by_beta(self):
-        """With Beta posteriors, weight is always in [-1, 1]."""
+        """With asymptotic weaken(), weight stays in [-1, 1]."""
         kg = KnowledgeGraph()
         a = kg.get_or_create("A")
         b = kg.get_or_create("B")
         edge = kg.get_or_create_edge(a, b, role=TRANSITION)
-        # Make strongly inhibitory
-        edge.alpha = 1.0
-        edge.beta = 100.0
-        edge._recalc()
+        edge.weight = -0.99  # strongly inhibitory
         kg.activate(a, 1.0)
         predicted = {b: edge.weight}
-        actual = {}  # B absent → observe_absent → beta grows
+        actual = {}  # B absent → weaken
         kg.learn(predicted, actual)
         assert edge.weight >= -1.0, (
-            f"Beta posterior weight should be >= -1.0, got {edge.weight}"
+            f"Weight should be >= -1.0, got {edge.weight}"
         )
         assert edge.weight <= 1.0
 

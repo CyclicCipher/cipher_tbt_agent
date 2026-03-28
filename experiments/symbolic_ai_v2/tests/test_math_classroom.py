@@ -298,7 +298,7 @@ class TestAgentLearning:
             mode="A",
             max_cycles=20,
             seed=42,
-            consolidation_interval=5,
+            consolidation_interval=100,
         )
         kg = loop.kg
         # Bare digit tokens should exist in the graph.

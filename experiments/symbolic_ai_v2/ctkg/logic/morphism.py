@@ -39,6 +39,7 @@ def discover_morphisms(
     hippo: Hippocampus,
     min_occurrences: int = 2,
     max_context_size: int = 6,
+    since_index: int = 0,
 ) -> dict[str, Any]:
     """Discover level-1 morphisms from observation→action pairs.
 
@@ -52,7 +53,8 @@ def discover_morphisms(
 
     Returns statistics.
     """
-    observations = hippo.all_observations()
+    all_observations = hippo.all_observations()
+    observations = all_observations[max(0, since_index):]
     if len(observations) < 3:
         return {"morphisms_created": 0, "patterns_found": 0}
 
@@ -135,19 +137,13 @@ def discover_morphisms(
         kg._nodes[morph_nid].resting = 0.4
 
         # Input edges: context_node → morphism (co-occurrence role).
-        # These are the "domain" of the morphism.
         for ctx_nid in ctx:
             edge = kg.get_or_create_edge(ctx_nid, morph_nid, role=COOCCURRENCE)
-            edge.alpha = max(edge.alpha, count + 1.0)
-            edge.beta = max(edge.beta, 1.0)
-            edge._recalc()
+            edge.strengthen(min(0.15 * count, 0.9))
 
         # Output edge: morphism → output (co-occurrence role).
-        # This is the "codomain" — the prediction.
         out_edge = kg.get_or_create_edge(morph_nid, output_nid, role=COOCCURRENCE)
-        out_edge.alpha = max(out_edge.alpha, count + 1.0)
-        out_edge.beta = max(out_edge.beta, 1.0)
-        out_edge._recalc()
+        out_edge.strengthen(min(0.15 * count, 0.9))
 
         morphisms_created += 1
 

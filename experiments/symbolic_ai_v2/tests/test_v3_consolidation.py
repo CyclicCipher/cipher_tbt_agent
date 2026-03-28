@@ -25,7 +25,7 @@ from experiments.symbolic_ai_v2.ctkg.logic.graph import (
 )
 from experiments.symbolic_ai_v2.ctkg.logic.loop import AgenticLoop
 from experiments.symbolic_ai_v2.ctkg.logic.hippocampus import Hippocampus
-from experiments.symbolic_ai_v2.ctkg.logic import consolidation
+from experiments.symbolic_ai_v2.ctkg.logic import Consolidation as consolidation
 from experiments.symbolic_ai_v2.environments.science_lab import ScienceLabEnv
 
 
@@ -121,13 +121,9 @@ class TestPrune:
         b = kg.get_or_create("B")
         c = kg.get_or_create("C")
         e_good = kg.get_or_create_edge(a, b)
-        e_good.alpha = 10.0  # strongly positive
-        e_good.beta = 1.0
-        e_good._recalc()
+        e_good.weight = 0.8  # strongly positive
         e_dead = kg.get_or_create_edge(a, c)
-        e_dead.alpha = 1.0   # strongly negative: weight = (1-20)/(1+20) ≈ -0.9
-        e_dead.beta = 20.0
-        e_dead._recalc()
+        e_dead.weight = -0.9  # strongly negative
         assert e_dead.weight < -0.5  # confirm it's negative
 
         stats = consolidation.prune(kg, edge_threshold=-0.5)
@@ -148,69 +144,9 @@ class TestPrune:
         assert kg.edge_count() <= edges_before
 
 
-# ============================================================================
-# Colimit formation
-# ============================================================================
-
-class TestColimits:
-
-    def test_colimit_from_coactivation(self):
-        """Nodes that consistently co-activate get a summary node."""
-        kg = KnowledgeGraph()
-        hippo = Hippocampus()
-
-        # Simulate 10 snapshots where A, B, C always co-activate.
-        a = kg.get_or_create("A")
-        b = kg.get_or_create("B")
-        c = kg.get_or_create("C")
-        d = kg.get_or_create("D")  # D does NOT co-activate
-
-        for _ in range(10):
-            hippo.store({a: 1.0, b: 1.0, c: 1.0})  # A,B,C together
-        # A few snapshots with D but not together with A,B,C
-        for _ in range(5):
-            hippo.store({d: 1.0})
-
-        stats = consolidation.find_colimits(kg, hippo, min_coactivation=5, min_group_size=3)
-        assert stats["colimits_created"] == 1
-
-        # The summary node should exist and have edges to A, B, C.
-        colimit_nodes = [
-            nid for nid, node in kg._nodes.items()
-            if node.resting >= 0.5 and nid not in {a, b, c, d}
-        ]
-        assert len(colimit_nodes) == 1
-        summary = colimit_nodes[0]
-
-        # Summary → each member edge exists.
-        for member in [a, b, c]:
-            e = kg.edge(summary, member)
-            assert e is not None, f"Summary should connect to {kg.label_for_node(member)}"
-            assert e.weight > 0
-
-    def test_no_colimit_for_small_groups(self):
-        """Groups smaller than min_group_size don't get summary nodes."""
-        kg = KnowledgeGraph()
-        hippo = Hippocampus()
-        a = kg.get_or_create("A")
-        b = kg.get_or_create("B")
-        for _ in range(10):
-            hippo.store({a: 1.0, b: 1.0})
-        stats = consolidation.find_colimits(kg, hippo, min_group_size=3)
-        assert stats["colimits_created"] == 0
-
-    def test_colimit_idempotent(self):
-        """Running colimit twice doesn't create duplicates."""
-        kg = KnowledgeGraph()
-        hippo = Hippocampus()
-        a = kg.get_or_create("A")
-        b = kg.get_or_create("B")
-        c = kg.get_or_create("C")
-        for _ in range(10):
-            hippo.store({a: 1.0, b: 1.0, c: 1.0})
-        consolidation.find_colimits(kg, hippo, min_coactivation=5, min_group_size=3)
-        stats2 = consolidation.find_colimits(kg, hippo, min_coactivation=5, min_group_size=3)
-        assert stats2["colimits_created"] == 0  # already exists
+# Old TestColimits removed — tested the undirected snapshot-based colimit
+# which was replaced by the directed observation-based colimit in colimit.py.
+# New colimit tests should be written for the directed version.
 
 
 # ============================================================================

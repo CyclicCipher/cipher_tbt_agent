@@ -47,6 +47,7 @@ def find_colimits(
     min_coactivation: int = 3,
     min_group_size: int = 2,
     max_group_size: int = 3,
+    since_index: int = 0,
 ) -> dict[str, Any]:
     """Discover colimits from observation-grounded diagrams.
 
@@ -60,7 +61,8 @@ def find_colimits(
 
     Returns statistics.
     """
-    observations = hippo.all_observations()
+    all_observations = hippo.all_observations()
+    observations = all_observations[since_index:]
     if len(observations) < min_coactivation:
         return {"colimits_created": 0, "factored_edges": 0, "diagrams_found": 0}
 
@@ -124,14 +126,10 @@ def find_colimits(
             colimits_created += 1
 
         # --- Cocone maps: diagram members → colimit ---
-        # Both src and tgt map into the colimit (cocone condition).
         for member_nid in (src, tgt):
             edge_up = kg.get_or_create_edge(member_nid, colimit_nid, role=COOCCURRENCE)
-            desired_alpha = max(count + 1.0, edge_up.alpha)
-            if edge_up.alpha < desired_alpha:
-                edge_up.alpha = desired_alpha
-                edge_up.beta = max(1.0, edge_up.beta)
-                edge_up._recalc()
+            # Scale rate by count — one call, not a loop.
+            edge_up.strengthen(min(0.15 * count, 0.9))
 
         # --- Universal property: factored edges ---
         # Scan the observations where this pair appeared. For each such
@@ -166,12 +164,8 @@ def find_colimits(
         # context have been verified by the colimit construction.
         for target_nid, tgt_count in target_counts.items():
             factored = kg.get_or_create_edge(colimit_nid, target_nid, role=COOCCURRENCE)
-            desired_alpha = max(tgt_count * 5.0 + 1.0, 2.0)
-            if factored.alpha < desired_alpha:
-                factored.alpha = desired_alpha
-                factored.beta = max(1.0, factored.beta)
-                factored._recalc()
-                factored_edges_created += 1
+            factored.strengthen(min(0.15 * tgt_count * 3, 0.95))
+            factored_edges_created += 1
 
     return {
         "colimits_created": colimits_created,

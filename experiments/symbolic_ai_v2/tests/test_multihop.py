@@ -36,8 +36,7 @@ def _build_number_line(kg: KnowledgeGraph, n: int = 10):
         src = kg.get_or_create(str(i))
         tgt = kg.get_or_create(str(i + 1))
         edge = kg.get_or_create_edge(src, tgt, role=COOCCURRENCE)
-        edge.alpha += 10.0  # strong evidence
-        edge._recalc()
+        edge.weight = 0.9  # strong positive weight
 
 
 def _run_classroom_warmup(max_cycles: int = 3, warmup: int = 2, seed: int = 42):
