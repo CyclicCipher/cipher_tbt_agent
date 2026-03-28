@@ -564,10 +564,31 @@ def discover_initial_algebras(
     # Count how many candidates passed the threshold.
     passing = sum(1 for r in results if r.score >= min_score)
 
+    # Populate _discovered_succ from ALL chains.
+    # When multiple chains disagree on a node's successor, keep the pair
+    # with the highest PMI (most specifically associated). This resolves
+    # conflicts like 0→next_is vs 0→1 in favor of 0→1 (higher content PMI).
+    succ_candidates: dict[NodeId, list[tuple[NodeId, float]]] = {}
+    for alg in all_algebras:
+        for src, tgt in alg.succ.items():
+            if src not in kg._nodes or tgt not in kg._nodes:
+                continue
+            pmi_score = kg._pmi.get((src, tgt), 0.0)
+            succ_candidates.setdefault(src, []).append((tgt, pmi_score))
+
+    succ_pairs_added = 0
+    kg._discovered_succ.clear()
+    for src, tgt_list in succ_candidates.items():
+        # Pick the target with the highest PMI to the source.
+        best_tgt = max(tgt_list, key=lambda x: x[1])[0]
+        kg._discovered_succ[src] = best_tgt
+        succ_pairs_added += 1
+
     return {
         "candidates_cooccur": len(cooccur_algebras),
         "candidates_transition": len(transition_algebras),
         "initial_algebras_found": passing,
         "best_score": best_score,
         "best_chain_length": best_length,
+        "succ_pairs_added": succ_pairs_added,
     }

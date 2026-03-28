@@ -170,6 +170,10 @@ class KnowledgeGraph:
         # IDF cache: inverse document frequency per node.
         # High IDF = rare token (informative). Low IDF = common (noise).
         self._idf: dict[NodeId, float] = {}
+        # Discovered successor map: populated by initial algebra discovery.
+        # Maps node → its successor on a discovered chain. Used by
+        # select_action for COMPUTATION (walk the chain) not LOOKUP.
+        self._discovered_succ: dict[NodeId, NodeId] = {}
 
     # -------------------------------------------------------------------
     # Node creation
@@ -451,7 +455,7 @@ class KnowledgeGraph:
         return predicted
 
     # -------------------------------------------------------------------
-    # Multi-hop co-occurrence spread (substrate for functor discovery)
+    # Multi-hop co-occurrence spread
     # -------------------------------------------------------------------
 
     def spread_cooccurrence(
@@ -462,21 +466,8 @@ class KnowledgeGraph:
     ) -> dict[NodeId, float]:
         """Iterative co-occurrence spread from seed nodes.
 
-        Each hop: for each currently active node, spread activation along
-        positive-weight FORWARD co-occurrence edges (causal masking respected).
-        Activation at each hop is multiplied by `decay` to prevent saturation.
-
+        Each hop: spread along positive-weight FORWARD co-occurrence edges.
         Returns {NodeId: activation} for all reachable nodes.
-
-        This is the substrate for multi-hop chain traversal. By itself it
-        doesn't know when to stop (that's the functor's job). It just makes
-        distant nodes reachable so that higher-level structure can use them.
-
-        Parameters
-        ----------
-        seeds : initial activations {NodeId: level}
-        hops : number of spread iterations
-        decay : multiplicative decay per hop (prevents saturation)
         """
         current = dict(seeds)
         accumulated = dict(seeds)
@@ -500,6 +491,88 @@ class KnowledgeGraph:
             current = next_act
             for nid, act in current.items():
                 accumulated[nid] = max(accumulated.get(nid, 0.0), act)
+
+        return accumulated
+
+    # -------------------------------------------------------------------
+    # Enriched spread: PMI × position_match (the enriched Kan extension)
+    # -------------------------------------------------------------------
+
+    def spread_enriched(
+        self,
+        seeds: dict[NodeId, float],
+        candidates: set[NodeId] | None = None,
+        hops: int = 3,
+        decay: float = 0.8,
+    ) -> dict[NodeId, float]:
+        """Multi-hop spread weighted by PMI and positional distance.
+
+        This is the enriched Kan extension: for each target, compute
+        the weighted colimit over all paths from seeds to target, where
+        the weight of each edge is PMI × position_match.
+
+        PMI measures specific association (filters hubs). Position_match
+        measures whether the positional distance along this edge matches
+        the typical distance (filters wrong-distance co-occurrences).
+
+        Each hop tracks cumulative distance from the seed. At hop k,
+        the expected distance from seed is k+1 (adjacent tokens are
+        distance 1, two hops = distance 2, etc.).
+
+        Parameters
+        ----------
+        seeds : {NodeId: activation} — starting points.
+        candidates : if provided, only accumulate scores for these nodes.
+        hops : number of spread iterations.
+        decay : per-hop decay (prevents distant paths from dominating).
+
+        Returns {NodeId: score} for all reachable nodes (or candidates only).
+        """
+        # Current frontier: {NodeId: (score, cumulative_distance)}
+        current: dict[NodeId, tuple[float, int]] = {
+            nid: (act, 0) for nid, act in seeds.items()
+        }
+        accumulated: dict[NodeId, float] = {}
+
+        for hop in range(hops):
+            next_frontier: dict[NodeId, tuple[float, int]] = {}
+            expected_dist = hop + 1  # distance from seed at this hop
+
+            for nid, (act, cum_dist) in current.items():
+                if act < 0.01:
+                    continue
+
+                for edge in self._outgoing.get(nid, ()):
+                    if edge.role != COOCCURRENCE:
+                        continue
+
+                    tgt = edge.target
+
+                    # PMI gate: only follow specifically associated edges.
+                    pmi_score = self._pmi.get((nid, tgt), 0.0)
+                    if pmi_score <= 0:
+                        continue
+
+                    # Position gate: does this edge's typical distance
+                    # match what we expect at this hop?
+                    pos_match = edge.position_match(expected_dist)
+
+                    # Combined weight: PMI × position_match × decay.
+                    contrib = act * pmi_score * pos_match * decay
+
+                    if contrib > 0.01:
+                        existing = next_frontier.get(tgt)
+                        if existing is None or contrib > existing[0]:
+                            next_frontier[tgt] = (contrib, expected_dist)
+
+            current = next_frontier
+
+            # Accumulate: for each reached node, keep the max score
+            # across all hops (earlier hops = shorter paths = typically better).
+            for nid, (score, _) in current.items():
+                if candidates is not None and nid not in candidates:
+                    continue
+                accumulated[nid] = max(accumulated.get(nid, 0.0), score)
 
         return accumulated
 
@@ -712,16 +785,20 @@ class KnowledgeGraph:
         context_positions: dict[NodeId, int] | None = None,
         answer_position: int | None = None,
     ) -> NodeId | None:
-        """Select an action via PMI-weighted attention.
+        """Select an action via discovered structure, enriched spread, or fallback.
 
-        Two layers:
-        1. **PMI attention** (if _pmi cache available): for each context
-           token and candidate, look up PMI(context, candidate). PMI
-           measures specific association — high PMI = these tokens are
-           more associated than chance. This naturally filters hub tokens
-           (space, PHASE) which have low/negative PMI with everything.
-        2. **Co-occurrence fallback**: if no PMI data, use raw edge weight
-           normalized per context token (the original mechanism).
+        Four layers, in priority order:
+        1. **Successor computation**: direct chain walk (1 hop). If exactly
+           one context token's successor is a candidate, return it.
+        2. **Enriched spread**: multi-hop PMI × position_match spread from
+           context to candidates. This is the enriched Kan extension — it
+           finds the best candidate by following paths through intermediate
+           nodes, weighted by specific association and positional match.
+           Handles cases like succ(0) where the direct successor is a
+           structural token (next_is) but the 2-hop path through next_is
+           reaches the correct digit (1).
+        3. **PMI attention**: discriminativeness-weighted direct PMI.
+        4. **Co-occurrence fallback**: raw edge weight, normalized.
 
         Returns the highest-scoring candidate, or None.
         """
@@ -731,6 +808,34 @@ class KnowledgeGraph:
         context = fixed_context if fixed_context is not None else self.active_nodes()
         candidate_set = set(candidates)
 
+        # --- Layer 0: Successor computation (1-hop chain walk) ---
+        if self._discovered_succ:
+            succ_hits: list[NodeId] = []
+            for ctx_nid in context:
+                succ_nid = self._discovered_succ.get(ctx_nid)
+                if succ_nid is not None and succ_nid in candidate_set:
+                    succ_hits.append(succ_nid)
+            unique_hits = list(dict.fromkeys(succ_hits))
+            if len(unique_hits) == 1:
+                return unique_hits[0]
+
+        # --- Layer 1: Enriched spread (multi-hop PMI × position) ---
+        # Only fire if the best candidate is clearly better than the rest.
+        # Margin threshold prevents noisy early-training PMI from dominating.
+        if len(self._pmi) > 0:
+            enriched_scores = self.spread_enriched(
+                context, candidates=candidate_set, hops=3,
+            )
+            if enriched_scores:
+                sorted_scores = sorted(enriched_scores.values(), reverse=True)
+                best_score = sorted_scores[0]
+                second_score = sorted_scores[1] if len(sorted_scores) > 1 else 0.0
+                # Require the best to be at least 2x the second.
+                if best_score > 0.05 and best_score > second_score * 2:
+                    best = max(enriched_scores, key=enriched_scores.get)
+                    return best
+
+        # --- Layer 2: PMI attention (discriminativeness-weighted) ---
         if context_positions and answer_position is None:
             answer_position = max(context_positions.values()) + 1
 
@@ -743,23 +848,12 @@ class KnowledgeGraph:
                 continue
 
             if use_pmi:
-                # PMI attention: only context tokens that are also candidates
-                # (or share the same type) contribute PMI signal. Structural
-                # tokens (PHASE, SCORE, etc.) are filtered by requiring the
-                # context token to have positive PMI to at least one candidate.
-                #
-                # Additionally, weight by how discriminative the context token
-                # is: if it has positive PMI to only 1-2 candidates, it's
-                # highly informative. If it has positive PMI to all candidates,
-                # it's non-discriminative (like PHASE_test).
                 n_positive = sum(
                     1 for cand_nid in candidates
                     if self._pmi.get((ctx_nid, cand_nid), 0.0) > 0
                 )
                 if n_positive == 0:
                     continue
-                # Discriminativeness: 1/n_positive. A token pointing to 1
-                # candidate gets weight 1.0. Pointing to all 10 gets 0.1.
                 disc_weight = 1.0 / n_positive
 
                 for cand_nid in candidates:
