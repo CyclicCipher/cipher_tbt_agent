@@ -45,7 +45,7 @@ class TraceRecord:
     cooccur_activations: list[dict] = field(default_factory=list)  # [{label, nid, before, after}]
 
     # Phase 3: sigma
-    sigma_edges: list[dict] = field(default_factory=list)  # [{src, tgt, sigma, qk, role}]
+    sigma_edges: list[dict] = field(default_factory=list)  # deprecated, kept for format compat
     qk_values: list[dict] = field(default_factory=list)    # [{label, nid, qk}]
 
     # Phase 4: forward spread in select_action
@@ -108,15 +108,7 @@ class Tracer:
                     "nid": nid,
                     "qk": round(v, 3),
                 })
-        # Record top sigma edges.
-        for edge in kg._edges.values():
-            if edge.sigma > 0.01:
-                self._current.sigma_edges.append({
-                    "src": kg.label_for_node(edge.source),
-                    "tgt": kg.label_for_node(edge.target),
-                    "sigma": round(edge.sigma, 3),
-                    "role": edge.role,
-                })
+        # Sigma edges removed (sigma was circular modulation, now deleted).
 
     def capture_forward(self, kg, fwd: dict[NodeId, float],
                         bwd: dict[NodeId, float],

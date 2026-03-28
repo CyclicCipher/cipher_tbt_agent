@@ -77,28 +77,7 @@ def run_traced(max_cycles=5, counting_warmup=2, seed=43):
             }
             tracer.capture_cooccur(kg, before_acts, after_acts)
 
-            # --- Phase 3: capture sigma state ---
-            active_set = set(
-                nid for nid, n in kg._nodes.items()
-                if n.activation >= ACTIVATION_THRESHOLD
-            )
-            # Recompute Q·K for tracing (same as compute_sigma does internally)
-            qk = {}
-            active_acts = {
-                nid: kg._nodes[nid].activation
-                for nid in active_set if nid in kg._nodes
-            }
-            for tgt_nid in active_set:
-                support = 0.0
-                for edge in kg._incoming.get(tgt_nid, ()):
-                    if edge.role != COOCCURRENCE:
-                        continue
-                    c_nid = edge.source
-                    c_act = active_acts.get(c_nid, 0.0)
-                    if c_act > 0 and edge._w > 0:
-                        support += c_act * edge._w
-                qk[tgt_nid] = support
-            tracer.capture_sigma(kg, active_set, qk)
+            # Phase 3 (sigma capture) removed — sigma was deleted.
 
         # --- Act ---
         actions = env.available_actions()

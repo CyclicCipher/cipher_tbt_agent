@@ -189,22 +189,13 @@ class AgenticLoop:
                         else:
                             edge.weaken(back_strength)
 
-        # Step 7a: iterative co-occurrence spread + sigma.
-        COOCCUR_ROUNDS = 3
-        self.kg.reset_sigma()
-        for _round in range(COOCCUR_ROUNDS):
-            cooccur_spread = self.kg.spread(role_filter=COOCCURRENCE)
-            for nid, level in cooccur_spread.items():
-                if level > 0:
-                    node = nodes.get(nid)
-                    if node is not None:
-                        node.activation = max(node.activation, min(1.0, level * 0.5))
-
-            active_nids_full = set(
-                nid for nid, n in nodes.items()
-                if n.activation >= ACTIVATION_THRESHOLD
-            )
-            self.kg.compute_sigma(active_nids_full)
+        # Step 7a: co-occurrence spread (activate associated nodes).
+        cooccur_spread = self.kg.spread(role_filter=COOCCURRENCE)
+        for nid, level in cooccur_spread.items():
+            if level > 0:
+                node = nodes.get(nid)
+                if node is not None:
+                    node.activation = max(node.activation, min(1.0, level * 0.5))
 
         # Step 7b: spread TRANSITION edges (= predict what comes NEXT).
         self._pending_prediction = self.kg.spread(role_filter=TRANSITION)

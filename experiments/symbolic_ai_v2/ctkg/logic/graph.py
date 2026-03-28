@@ -65,11 +65,8 @@ class Edge:
     Simple additive learning: strengthen() nudges toward +1,
     weaken() nudges toward -1. Weight stays in [-1, 1] via
     asymptotic update. No alpha/beta, no posterior, no confidence.
-
-    sigma is a transient context-dependent modulation that lives
-    for one inference pass only (reset each observation).
     """
-    __slots__ = ('source', 'target', 'weight', 'role', 'sigma', 'count',
+    __slots__ = ('source', 'target', 'weight', 'role', 'count',
                  '_dist_sum', '_dist_sq_sum', '_dist_count')
 
     def __init__(self, source: NodeId, target: NodeId,
@@ -78,7 +75,6 @@ class Edge:
         self.target = target
         self.weight = weight
         self.role = role
-        self.sigma = 0.0
         self.count = 0  # number of observations (for diagnostics)
         self._dist_sum = 0.0
         self._dist_sq_sum = 0.0
@@ -86,8 +82,8 @@ class Edge:
 
     @property
     def effective_weight(self) -> float:
-        """Permanent weight + transient context modulation."""
-        return self.weight + self.sigma
+        """Edge weight. Same as .weight (sigma removed)."""
+        return self.weight
 
     def strengthen(self, rate: float = 0.1) -> None:
         """Nudge weight toward +1. Asymptotic: large weights change less."""
@@ -168,9 +164,6 @@ class KnowledgeGraph:
         self._next_id: int = 0
         # Reverse index: value → NodeId (for get_or_create)
         self._value_to_node: dict[Any, NodeId] = {}
-        # Cache: sum of positive outgoing co-occurrence effective weights per node.
-        # Invalidated when sigma changes (reset_sigma clears it).
-        self._cooccur_out_sum: dict[NodeId, float] = {}
 
     # -------------------------------------------------------------------
     # Node creation
@@ -372,92 +365,6 @@ class KnowledgeGraph:
                 current[nid] = max(0.0, min(SPREAD_CAP, val))
 
         return current
-
-    # -------------------------------------------------------------------
-    # Dynamic sigma (BDH-style transient state / sheaf local section)
-    # -------------------------------------------------------------------
-
-    def reset_sigma(self) -> None:
-        """Reset all transient edge state to zero.
-
-        Called at the start of each observation. The sigma field captures
-        context-dependent modulation — it lives for one inference pass only.
-        """
-        for edge in self._edges.values():
-            edge.sigma = 0.0
-        self._cooccur_out_sum.clear()  # invalidate selectivity cache
-
-    def compute_sigma(
-        self,
-        active_nids: set[NodeId],
-        idf: dict[NodeId, float] | None = None,
-    ) -> None:
-        """QKV-style sigma with IDF weighting for discriminating context.
-
-        The transformer's QKV attention, adapted to the graph:
-        - Q (query) = the current activation pattern, IDF-weighted
-        - K (key) = each target node's co-occurrence profile
-        - sigma(A→B) = activation_A × activation_B × (Q · K_B) × SCALE
-
-        IDF weighting: context tokens that appear in every observation
-        (succ, PHASE_test) have low IDF and contribute little to Q·K.
-        Tokens that vary between observations (the question digit) have
-        high IDF and dominate Q·K. This is the TF-IDF insight: common
-        tokens are not informative.
-
-        Without IDF, the Q·K for all digits is dominated by their
-        co-occurrence with `succ` (which appears in every question),
-        making all digits score similarly. With IDF, only the question
-        digit's co-occurrence matters, correctly selecting the successor.
-
-        Parameters
-        ----------
-        active_nids : set of currently active NodeIds
-        idf : {NodeId: idf_weight} — inverse document frequency weights.
-            If None, all context tokens weighted equally (falls back to
-            plain QKV). Computed from hippocampus observation counts.
-        """
-        SIGMA_SCALE = 0.3
-
-        # Step 1: build the IDF-weighted context vector Q.
-        active_acts: dict[NodeId, float] = {}
-        for nid in active_nids:
-            node = self._nodes.get(nid)
-            if node is not None and node.activation > 0:
-                # Weight activation by IDF: rare tokens contribute more.
-                idf_w = idf.get(nid, 1.0) if idf else 1.0
-                active_acts[nid] = node.activation * idf_w
-
-        # Step 2: precompute Q · K for each active target node.
-        qk: dict[NodeId, float] = {}
-        for tgt_nid in active_nids:
-            support = 0.0
-            for edge in self._incoming.get(tgt_nid, ()):
-                if edge.role != COOCCURRENCE:
-                    continue
-                c_nid = edge.source
-                c_act = active_acts.get(c_nid, 0.0)
-                if c_act <= 0:
-                    continue
-                cw = edge.weight
-                if cw > 0:
-                    support += c_act * cw
-            qk[tgt_nid] = support
-
-        # Step 3: set sigma on each edge using precomputed Q·K.
-        for src_nid in active_nids:
-            src_act = active_acts.get(src_nid, 0.0)
-            if src_act <= 0:
-                continue
-            for edge in self._outgoing.get(src_nid, ()):
-                tgt_nid = edge.target
-                if tgt_nid not in active_nids:
-                    continue
-                tgt_act = active_acts.get(tgt_nid, 0.0)
-                if tgt_act <= 0:
-                    continue
-                support = qk.get(tgt_nid, 0.0)
-                edge.sigma += src_act * tgt_act * (1.0 + support) * SIGMA_SCALE
 
     # -------------------------------------------------------------------
     # Spread (= prediction = deduction)

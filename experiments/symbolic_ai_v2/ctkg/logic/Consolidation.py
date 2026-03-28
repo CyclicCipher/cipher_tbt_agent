@@ -289,7 +289,7 @@ def consolidate(
     replay_strength: float = 0.1,
     since_index: int = 0,
 ) -> dict[str, Any]:
-    """Consolidation: replay → prune → FCA → algebra → initial algebra → colimit → morphism.
+    """Consolidation: replay → prune → FCA → algebra → initial algebra → sheaf → colimit → morphism.
 
     since_index: only process snapshots/observations from this index onward
     (incremental consolidation — don't re-process old data).
@@ -318,6 +318,11 @@ def consolidate(
     from experiments.symbolic_ai_v2.ctkg.logic.initial_algebra import discover_initial_algebras
     ia_stats = discover_initial_algebras(kg, hippo, since_index=since_index)
     stats.update({f"ia_{k}": v for k, v in ia_stats.items()})
+
+    # Sheaf Laplacian: consistency diagnostics.
+    from experiments.symbolic_ai_v2.ctkg.logic.sheaf import discover_sheaf_structure
+    sheaf_stats = discover_sheaf_structure(kg, hippo, since_index=since_index)
+    stats.update({f"sheaf_{k}": v for k, v in sheaf_stats.items()})
 
     from experiments.symbolic_ai_v2.ctkg.logic.colimit import find_colimits
     colimit_stats = find_colimits(kg, hippo, since_index=since_index)
