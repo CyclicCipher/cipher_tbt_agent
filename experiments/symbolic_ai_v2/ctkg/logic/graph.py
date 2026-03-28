@@ -171,9 +171,12 @@ class KnowledgeGraph:
         # High IDF = rare token (informative). Low IDF = common (noise).
         self._idf: dict[NodeId, float] = {}
         # Discovered successor map: populated by initial algebra discovery.
-        # Maps node → its successor on a discovered chain. Used by
-        # select_action for COMPUTATION (walk the chain) not LOOKUP.
         self._discovered_succ: dict[NodeId, NodeId] = {}
+        # Concept embeddings: continuous membership vectors.
+        # _embeddings[nid] = list[float] of length |concepts|.
+        # _embedding_concepts = list of concept extents (dimension labels).
+        self._embeddings: dict[NodeId, list[float]] = {}
+        self._embedding_concepts: list[frozenset[NodeId]] = []
 
     # -------------------------------------------------------------------
     # Node creation
@@ -818,6 +821,11 @@ class KnowledgeGraph:
             unique_hits = list(dict.fromkeys(succ_hits))
             if len(unique_hits) == 1:
                 return unique_hits[0]
+
+        # Layer 0.5 (embedding-based successor) is implemented in
+        # embedding.py but not wired in here yet — the 189-dimensional
+        # concept vectors are too noisy for reliable displacement matching.
+        # Needs dimensionality reduction or concept selection first.
 
         # --- Layer 1: Enriched spread (multi-hop PMI × position) ---
         # Only fire if the best candidate is clearly better than the rest.
