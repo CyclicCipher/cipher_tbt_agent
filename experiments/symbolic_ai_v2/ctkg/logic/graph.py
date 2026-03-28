@@ -164,6 +164,12 @@ class KnowledgeGraph:
         self._next_id: int = 0
         # Reverse index: value → NodeId (for get_or_create)
         self._value_to_node: dict[Any, NodeId] = {}
+        # PMI cache: computed during consolidation, used by select_action.
+        # Maps (src, tgt) → PMI score. Positive = specifically associated.
+        self._pmi: dict[tuple[NodeId, NodeId], float] = {}
+        # IDF cache: inverse document frequency per node.
+        # High IDF = rare token (informative). Low IDF = common (noise).
+        self._idf: dict[NodeId, float] = {}
 
     # -------------------------------------------------------------------
     # Node creation
@@ -706,11 +712,16 @@ class KnowledgeGraph:
         context_positions: dict[NodeId, int] | None = None,
         answer_position: int | None = None,
     ) -> NodeId | None:
-        """Select an action via co-occurrence attention.
+        """Select an action via PMI-weighted attention.
 
-        For each candidate, compute the sum of weighted co-occurrence
-        edges from context tokens. Position matching via PoPE distance
-        statistics is used when positional information is available.
+        Two layers:
+        1. **PMI attention** (if _pmi cache available): for each context
+           token and candidate, look up PMI(context, candidate). PMI
+           measures specific association — high PMI = these tokens are
+           more associated than chance. This naturally filters hub tokens
+           (space, PHASE) which have low/negative PMI with everything.
+        2. **Co-occurrence fallback**: if no PMI data, use raw edge weight
+           normalized per context token (the original mechanism).
 
         Returns the highest-scoring candidate, or None.
         """
@@ -725,35 +736,63 @@ class KnowledgeGraph:
 
         logits: dict[NodeId, float] = {nid: 0.0 for nid in candidates}
 
+        use_pmi = len(self._pmi) > 0
+
         for ctx_nid, ctx_act in context.items():
             if ctx_act <= 0:
                 continue
 
-            profile: list[tuple[NodeId, Edge]] = []
-            total_ew = 0.0
-            for edge in self._outgoing.get(ctx_nid, ()):
-                if edge.role != COOCCURRENCE:
+            if use_pmi:
+                # PMI attention: only context tokens that are also candidates
+                # (or share the same type) contribute PMI signal. Structural
+                # tokens (PHASE, SCORE, etc.) are filtered by requiring the
+                # context token to have positive PMI to at least one candidate.
+                #
+                # Additionally, weight by how discriminative the context token
+                # is: if it has positive PMI to only 1-2 candidates, it's
+                # highly informative. If it has positive PMI to all candidates,
+                # it's non-discriminative (like PHASE_test).
+                n_positive = sum(
+                    1 for cand_nid in candidates
+                    if self._pmi.get((ctx_nid, cand_nid), 0.0) > 0
+                )
+                if n_positive == 0:
                     continue
-                if edge.target not in candidate_set:
-                    continue
-                ew = edge.effective_weight
-                if ew > 0:
-                    profile.append((edge.target, edge))
-                    total_ew += ew
+                # Discriminativeness: 1/n_positive. A token pointing to 1
+                # candidate gets weight 1.0. Pointing to all 10 gets 0.1.
+                disc_weight = 1.0 / n_positive
 
-            if total_ew <= 0:
-                continue
-
-            if context_positions and answer_position is not None:
-                ctx_pos = context_positions.get(ctx_nid)
-                query_dist = (answer_position - ctx_pos) if ctx_pos is not None else None
+                for cand_nid in candidates:
+                    pmi_score = self._pmi.get((ctx_nid, cand_nid), 0.0)
+                    if pmi_score > 0:
+                        logits[cand_nid] += ctx_act * pmi_score * disc_weight
             else:
-                query_dist = None
+                # Fallback: raw co-occurrence weight, normalised.
+                profile: list[tuple[NodeId, Edge]] = []
+                total_ew = 0.0
+                for edge in self._outgoing.get(ctx_nid, ()):
+                    if edge.role != COOCCURRENCE:
+                        continue
+                    if edge.target not in candidate_set:
+                        continue
+                    ew = edge.effective_weight
+                    if ew > 0:
+                        profile.append((edge.target, edge))
+                        total_ew += ew
 
-            for cand_nid, edge in profile:
-                content_w = edge.effective_weight / total_ew
-                pos_match = edge.position_match(query_dist) if query_dist is not None else 1.0
-                logits[cand_nid] += ctx_act * content_w * pos_match
+                if total_ew <= 0:
+                    continue
+
+                if context_positions and answer_position is not None:
+                    ctx_pos = context_positions.get(ctx_nid)
+                    query_dist = (answer_position - ctx_pos) if ctx_pos is not None else None
+                else:
+                    query_dist = None
+
+                for cand_nid, edge in profile:
+                    content_w = edge.effective_weight / total_ew
+                    pos_match = edge.position_match(query_dist) if query_dist is not None else 1.0
+                    logits[cand_nid] += ctx_act * content_w * pos_match
 
         if not logits or all(v == 0 for v in logits.values()):
             return candidates[0] if candidates else None

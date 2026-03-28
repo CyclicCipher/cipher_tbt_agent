@@ -304,6 +304,25 @@ def consolidate(
     prune_stats = prune(kg)
     stats.update({f"prune_{k}": v for k, v in prune_stats.items()})
 
+    # PMI + IDF cache: compute from observation records for action selection.
+    from experiments.symbolic_ai_v2.ctkg.logic.initial_algebra import _compute_pmi
+    kg._pmi = _compute_pmi(hippo, kg, since_index=since_index)
+    stats["pmi_pairs"] = len(kg._pmi)
+
+    # IDF: log(N / count(token)) for each token.
+    import math as _math
+    all_obs = hippo.all_observations()
+    obs_recent = all_obs[max(0, since_index):]
+    n_obs = max(len(obs_recent), 1)
+    _token_doc_count: dict[int, int] = {}
+    for _obs in obs_recent:
+        for _nid in set(_obs.token_nids):
+            _token_doc_count[_nid] = _token_doc_count.get(_nid, 0) + 1
+    kg._idf = {
+        nid: _math.log(n_obs / count) if count > 0 else 0.0
+        for nid, count in _token_doc_count.items()
+    }
+
     # FCA: discover type hierarchy from observation co-occurrence.
     from experiments.symbolic_ai_v2.ctkg.logic.fca import discover_fca_structure
     fca_stats = discover_fca_structure(kg, hippo, since_index=since_index)

@@ -90,44 +90,166 @@ class UniversalPropertyResult:
 # Candidate algebra extraction
 # ---------------------------------------------------------------------------
 
+def _compute_pmi(
+    hippo: Hippocampus,
+    kg: KnowledgeGraph,
+    since_index: int = 0,
+    max_observations: int = 2000,
+) -> dict[tuple[NodeId, NodeId], float]:
+    """Compute pointwise mutual information for co-occurring token pairs.
+
+    PMI(A,B) = log(P(A,B) / (P(A) * P(B)))
+
+    High PMI = specifically associated. Low/negative = co-occur by chance.
+    This naturally distinguishes successor pairs (3→4: high PMI) from
+    hub co-occurrences (3→space: low PMI because space appears everywhere).
+
+    Returns {(src, tgt): PMI} for all directed pairs (causal order).
+    """
+    import math
+
+    all_obs = hippo.all_observations()
+    obs_slice = all_obs[max(0, since_index):]
+    if len(obs_slice) > max_observations:
+        obs_slice = obs_slice[-max_observations:]
+    if not obs_slice:
+        return {}
+
+    n_obs = len(obs_slice)
+
+    # Count: how many observations each token appears in.
+    token_count: dict[NodeId, int] = {}
+    # Count: how many observations each directed pair appears in.
+    pair_count: dict[tuple[NodeId, NodeId], int] = {}
+
+    for obs in obs_slice:
+        nids = list(dict.fromkeys(obs.token_nids))  # deduplicate preserving order
+        nid_set = set(nids)
+        for nid in nid_set:
+            token_count[nid] = token_count.get(nid, 0) + 1
+        # Directed pairs (causal order: i before j).
+        for i in range(len(nids)):
+            for j in range(i + 1, len(nids)):
+                key = (nids[i], nids[j])
+                pair_count[key] = pair_count.get(key, 0) + 1
+
+    # Compute PMI.
+    pmi: dict[tuple[NodeId, NodeId], float] = {}
+    for (a, b), count_ab in pair_count.items():
+        count_a = token_count.get(a, 0)
+        count_b = token_count.get(b, 0)
+        if count_a == 0 or count_b == 0:
+            continue
+        p_ab = count_ab / n_obs
+        p_a = count_a / n_obs
+        p_b = count_b / n_obs
+        if p_ab > 0 and p_a * p_b > 0:
+            pmi[(a, b)] = math.log(p_ab / (p_a * p_b))
+
+    return pmi
+
+
 def _find_cooccurrence_chains(
     kg: KnowledgeGraph,
     min_chain_length: int = 3,
     max_chains: int = 20,
+    hippo: Hippocampus | None = None,
 ) -> list[Algebra]:
-    """Find chains in the co-occurrence graph via best-forward-neighbor.
+    """Find chains in the co-occurrence graph via best-PMI-neighbor.
 
-    For each node, follow the strongest positive forward co-occurrence
-    edge repeatedly. If this produces a chain of length >= min_chain_length
-    where each step is the unique best neighbor, it's a candidate algebra.
+    Uses pointwise mutual information (not raw edge weight) to find
+    specifically associated token pairs. PMI naturally filters hubs
+    (tokens that co-occur with everything have low PMI with each).
+
+    Falls back to raw edge weight if hippo is not provided.
     """
-    # Compute best forward neighbor for each node.
-    best_fwd: dict[NodeId, tuple[NodeId, float]] = {}
-    for nid in kg._nodes:
-        best_target = None
-        best_weight = 0.0
-        for edge in kg._outgoing.get(nid, ()):
-            if edge.role != COOCCURRENCE:
-                continue
-            if edge.weight > best_weight:
-                best_weight = edge.weight
-                best_target = edge.target
-        if best_target is not None and best_weight > 0.05:
-            best_fwd[nid] = (best_target, best_weight)
+    # Compute PMI-based best neighbors if hippo available.
+    use_pmi = hippo is not None and hippo.observation_count() > 0
 
-    # Compute best backward neighbor (who points most strongly TO this node).
-    best_bwd: dict[NodeId, tuple[NodeId, float]] = {}
-    for nid in kg._nodes:
-        best_source = None
-        best_weight = 0.0
-        for edge in kg._incoming.get(nid, ()):
-            if edge.role != COOCCURRENCE:
+    if use_pmi:
+        pmi = _compute_pmi(hippo, kg)
+
+        # Build a PMI-weighted directed graph. For chain discovery, we want
+        # the longest path where every step has positive PMI. We use a
+        # greedy longest-path search instead of mutual-best-neighbor, because
+        # mutual-best fails when structural tokens (FEEDBACK, SCORE) have
+        # higher PMI with content tokens than the successor pairs do.
+        #
+        # Algorithm: for each node, try extending a chain forward by picking
+        # the highest-PMI neighbor that also has co-occurrence edge. Track
+        # visited to avoid cycles. Keep the longest chain found.
+        pmi_fwd: dict[NodeId, list[tuple[NodeId, float]]] = {}
+        for (a, b), score in pmi.items():
+            if score <= 0:
                 continue
-            if edge.weight > best_weight:
-                best_weight = edge.weight
-                best_source = edge.source
-        if best_source is not None and best_weight > 0.05:
-            best_bwd[nid] = (best_source, best_weight)
+            # Only consider edges that also exist in the co-occurrence graph.
+            if kg.edge(a, b) is None:
+                continue
+            pmi_fwd.setdefault(a, []).append((b, score))
+        # Sort each node's neighbors by PMI descending.
+        for nid in pmi_fwd:
+            pmi_fwd[nid].sort(key=lambda x: -x[1])
+
+        # Find longest chains via greedy forward extension from each node.
+        best_chains: list[list[NodeId]] = []
+        global_visited: set[NodeId] = set()
+
+        for start in sorted(pmi_fwd.keys()):
+            if start in global_visited:
+                continue
+            chain = [start]
+            visited = {start}
+            current = start
+            while current in pmi_fwd:
+                # Pick highest-PMI unvisited neighbor.
+                found = False
+                for nxt, score in pmi_fwd[current]:
+                    if nxt not in visited:
+                        chain.append(nxt)
+                        visited.add(nxt)
+                        current = nxt
+                        found = True
+                        break
+                if not found:
+                    break
+            if len(chain) >= min_chain_length:
+                best_chains.append(chain)
+                global_visited.update(chain)
+            if len(best_chains) >= max_chains:
+                break
+
+        algebras: list[Algebra] = []
+        for chain in best_chains:
+            succ = {chain[i]: chain[i + 1] for i in range(len(chain) - 1)}
+            algebras.append(Algebra(zero=chain[0], succ=succ))
+        return algebras
+    else:
+        # Fallback: raw edge weight.
+        best_fwd = {}
+        for nid in kg._nodes:
+            best_target = None
+            best_weight = 0.0
+            for edge in kg._outgoing.get(nid, ()):
+                if edge.role != COOCCURRENCE:
+                    continue
+                if edge.weight > best_weight:
+                    best_weight = edge.weight
+                    best_target = edge.target
+            if best_target is not None and best_weight > 0.05:
+                best_fwd[nid] = (best_target, best_weight)
+
+        best_bwd = {}
+        for nid in kg._nodes:
+            best_source = None
+            best_weight = 0.0
+            for edge in kg._incoming.get(nid, ()):
+                if edge.role != COOCCURRENCE:
+                    continue
+                if edge.weight > best_weight:
+                    best_weight = edge.weight
+                    best_source = edge.source
+            if best_source is not None and best_weight > 0.05:
+                best_bwd[nid] = (best_source, best_weight)
 
     # Find chains of mutual best neighbors.
     used: set[NodeId] = set()
@@ -372,7 +494,7 @@ def discover_initial_algebras(
     """
     # Collect all candidate algebras.
     cooccur_algebras = _find_cooccurrence_chains(
-        kg, min_chain_length=min_chain_length,
+        kg, min_chain_length=min_chain_length, hippo=hippo,
     )
     transition_algebras = _find_transition_chains(
         kg, min_chain_length=min_chain_length,
