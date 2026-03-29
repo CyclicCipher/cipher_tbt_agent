@@ -227,6 +227,151 @@ def discover_displacement_nodes(
 
 
 # ---------------------------------------------------------------------------
+# Context-tagged sequence tracking
+# ---------------------------------------------------------------------------
+
+def _active_contexts_for_snapshot(
+    kg: KnowledgeGraph,
+    snap,
+    context_nids: set[NodeId],
+) -> set[NodeId]:
+    """Compute which context nodes fire given a snapshot's activations."""
+    active_ids = set(
+        nid for nid, lvl in snap.activations.items()
+        if lvl >= ACTIVATION_THRESHOLD
+        and nid in kg._nodes
+        and kg._nodes[nid].layer == IDENTITY
+    )
+    active_ctx: set[NodeId] = set()
+    for ctx_nid in context_nids:
+        val = kg.value_for_node(ctx_nid)
+        if not isinstance(val, tuple) or val[0] != "__context__":
+            continue
+        pattern = val[1]
+        if pattern.issubset(active_ids):
+            active_ctx.add(ctx_nid)
+    return active_ctx
+
+
+def _strongest_identity(
+    kg: KnowledgeGraph,
+    snap,
+    exclude: frozenset[NodeId] | None = None,
+) -> NodeId | None:
+    """Return the most strongly activated identity node in a snapshot.
+
+    Optionally exclude a set of nodes (e.g., the context's own members).
+    """
+    best_nid = None
+    best_act = 0.0
+    for nid, lvl in snap.activations.items():
+        if nid not in kg._nodes:
+            continue
+        if kg._nodes[nid].layer != IDENTITY:
+            continue
+        if exclude and nid in exclude:
+            continue
+        if lvl > best_act:
+            best_act = lvl
+            best_nid = nid
+    return best_nid
+
+
+def discover_positional_periods(
+    kg: KnowledgeGraph,
+    hippo: Hippocampus,
+    since_index: int = 0,
+    min_observations: int = 10,
+) -> dict[str, Any]:
+    """Discover token periodicity at each position across observations.
+
+    For each position p in the observation token sequences, extract the
+    token that appears at position p across all observations. If this
+    per-position sequence is periodic, record the period.
+
+    This uses the OBSERVATION records (ordered token lists), not
+    activation snapshots. The position IS the context — no context
+    node matching needed.
+
+    Materializes discovered periods as nodes linked to position info.
+
+    Returns stats including discovered periods per position.
+    """
+    observations = hippo.all_observations()
+    recent = observations[max(0, since_index):]
+    if len(recent) < min_observations:
+        return {"positions_checked": 0, "periods_found": 0, "period_details": {}}
+
+    # Find max observation length.
+    max_len = max(len(obs.token_nids) for obs in recent)
+
+    # For each position, extract the token sequence across observations.
+    periods_found = 0
+    positions_checked = 0
+    period_details: dict[int, int] = {}  # position → period
+
+    for pos in range(max_len):
+        # Collect token at this position from each observation.
+        seq: list[NodeId] = []
+        for obs in recent:
+            if pos < len(obs.token_nids):
+                seq.append(obs.token_nids[pos])
+
+        if len(seq) < min_observations:
+            continue
+        positions_checked += 1
+
+        # Check if this position has a constant token (frame).
+        unique = set(seq)
+        if len(unique) == 1:
+            continue  # invariant position, no period to discover
+
+        # Detect period.
+        for p in range(2, min(100, len(seq) // 2) + 1):
+            max_check = min(len(seq) - p, len(seq) // 2)
+            if max_check < 5:
+                continue
+            matches = sum(1 for i in range(max_check) if seq[i] == seq[i + p])
+            if matches / max_check >= 0.85:
+                period_details[pos] = p
+                periods_found += 1
+
+                # Materialize as a period node.
+                # Extract the cycle tokens.
+                cycle_tokens: list[NodeId] = []
+                for phase in range(p):
+                    phase_counts: dict[NodeId, int] = {}
+                    for i in range(phase, len(seq), p):
+                        nid = seq[i]
+                        phase_counts[nid] = phase_counts.get(nid, 0) + 1
+                    if phase_counts:
+                        best = max(phase_counts, key=phase_counts.get)
+                        cycle_tokens.append(best)
+
+                period_key = ("__period__", pos, p, tuple(cycle_tokens))
+                if period_key not in kg._value_to_node:
+                    period_nid = kg.get_or_create(period_key, layer=CONTEXT)
+                    node = kg.node(period_nid)
+                    if node is not None:
+                        node.resting = 0.5
+
+                    # Edges from period node to cycle tokens.
+                    for tok_nid in cycle_tokens:
+                        edge = kg.get_or_create_edge(
+                            period_nid, tok_nid, role=COOCCURRENCE,
+                        )
+                        edge.strengthen(0.4)
+
+                break  # smallest period
+
+    return {
+        "positions_checked": positions_checked,
+        "periods_found": periods_found,
+        "period_details": period_details,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -235,16 +380,19 @@ def discover_cortical_structure(
     hippo: Hippocampus,
     since_index: int = 0,
 ) -> dict[str, Any]:
-    """Discover context and displacement nodes.
+    """Discover context nodes, positional periods, and displacement nodes.
 
-    Called during consolidation. First discovers context nodes (layer 1)
-    from activation patterns, then displacement nodes (layer 2) from
-    context transitions.
+    Called during consolidation. Order:
+    1. Context nodes (layer 1) from activation patterns
+    2. Positional period detection from observation sequences
+    3. Displacement nodes (layer 2) from context transitions
     """
     ctx_stats = discover_context_nodes(kg, hippo, since_index=since_index)
+    period_stats = discover_positional_periods(kg, hippo, since_index=since_index)
     disp_stats = discover_displacement_nodes(kg, hippo, since_index=since_index)
 
     stats: dict[str, Any] = {}
     stats.update({f"ctx_{k}": v for k, v in ctx_stats.items()})
+    stats.update({f"period_{k}": v for k, v in period_stats.items()})
     stats.update({f"disp_{k}": v for k, v in disp_stats.items()})
     return stats

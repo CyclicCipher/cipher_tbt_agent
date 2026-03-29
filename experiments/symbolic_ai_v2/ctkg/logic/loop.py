@@ -56,7 +56,8 @@ class AgenticLoop:
         self._last_action_nid: NodeId | None = None
         self._last_action_context: dict[NodeId, float] = {}
         self._last_consolidation_step: int = 0
-        self._last_consolidation_snapshot: int = 0  # index into hippo snapshots
+        self._last_consolidation_snapshot: int = 0
+        self._suppress_observation: bool = False  # during read(), suppress per-fixation obs
 
     # -------------------------------------------------------------------
     # Homeostatic priors
@@ -203,7 +204,12 @@ class AgenticLoop:
             self._pending_prediction.pop(nid, None)
 
         # Step 8: store snapshot + observation record.
-        self.hippo.store(self.kg.active_nodes(), observed_nids=current_nids)
+        # During read(), observation storage is suppressed (read() stores
+        # one observation for the full sentence at the end).
+        if self._suppress_observation:
+            self.hippo.store(self.kg.active_nodes(), observed_nids=None)
+        else:
+            self.hippo.store(self.kg.active_nodes(), observed_nids=current_nids)
 
         self._prev_active = actual
         self._step_count += 1
@@ -287,6 +293,7 @@ class AgenticLoop:
         n = len(characters)
 
         all_nids: list[NodeId] = []
+        self._suppress_observation = True
 
         while pos < n:
             end = min(pos + fixation_size, n)
@@ -300,8 +307,7 @@ class AgenticLoop:
                     nid = self.kg.get_or_create(tok_id)
                 else:
                     nid = self.kg.get_or_create(tok)
-                if nid not in all_nids:
-                    all_nids.append(nid)
+                all_nids.append(nid)  # preserve order AND duplicates
 
             # Adapt fixation size.
             surprise = self._last_surprise
@@ -312,8 +318,8 @@ class AgenticLoop:
 
             pos = end
 
-        # Store one observation record for the full read.
-        # (Snapshots were already stored per fixation by observe().)
+        # Restore observation storage and store ONE record for the full read.
+        self._suppress_observation = False
         self.hippo.store(self.kg.active_nodes(), observed_nids=all_nids)
 
     # -------------------------------------------------------------------
