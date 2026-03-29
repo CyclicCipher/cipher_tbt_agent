@@ -173,10 +173,13 @@ class KnowledgeGraph:
         # Discovered successor map: populated by initial algebra discovery.
         self._discovered_succ: dict[NodeId, NodeId] = {}
         # Concept embeddings: continuous membership vectors.
-        # _embeddings[nid] = list[float] of length |concepts|.
-        # _embedding_concepts = list of concept extents (dimension labels).
         self._embeddings: dict[NodeId, list[float]] = {}
         self._embedding_concepts: list[frozenset[NodeId]] = []
+        # Causal navigation structure: discovered by navigate.py.
+        self._causal_structure: Any = None
+        # Force-directed embedding: positions shaped by attraction/repulsion.
+        self._force_embeddings: dict[NodeId, list[float]] = {}
+        self._force_operators: list[NodeId] = []  # dimension labels
 
     # -------------------------------------------------------------------
     # Node creation
@@ -822,10 +825,24 @@ class KnowledgeGraph:
             if len(unique_hits) == 1:
                 return unique_hits[0]
 
-        # Layer 0.5 (embedding-based successor) is implemented in
-        # embedding.py but not wired in here yet — the 189-dimensional
-        # concept vectors are too noisy for reliable displacement matching.
-        # Needs dimensionality reduction or concept selection first.
+        # --- Layer 0.5: Force-directed navigation ---
+        # If force embeddings exist, find the operator in context (a token
+        # that has a force dimension but is NOT a candidate) and the operand
+        # (a context token that IS a candidate). Navigate from operand by
+        # +1 in the operator's dimension. Find nearest candidate.
+        if self._force_embeddings and self._force_operators:
+            from experiments.symbolic_ai_v2.ctkg.logic.force_embed import force_navigate
+            op_set = set(self._force_operators)
+            ctx_operators = [n for n in context
+                            if n in op_set and n not in candidate_set]
+            ctx_operands = [n for n in context if n in candidate_set
+                            and n in self._force_embeddings]
+            if ctx_operators and ctx_operands:
+                query_nid = ctx_operands[-1]
+                op_nid = ctx_operators[0]
+                nav_result = force_navigate(self, query_nid, op_nid, candidates)
+                if nav_result is not None and nav_result in candidate_set:
+                    return nav_result
 
         # --- Layer 1: Enriched spread (multi-hop PMI × position) ---
         # Only fire if the best candidate is clearly better than the rest.
