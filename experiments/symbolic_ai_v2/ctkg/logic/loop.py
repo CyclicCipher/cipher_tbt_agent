@@ -274,27 +274,19 @@ class AgenticLoop:
         - Low surprise (familiar/predicted content) → grow fixation
         - High surprise (novel content) → shrink fixation
 
-        Each fixation updates the graph (edges, activations) but does
-        NOT store individual fixations in the hippocampus. Instead,
-        after the full sequence is processed, ONE episodic snapshot is
-        stored — the working memory state after reading. This mirrors
-        the brain: the hippocampus stores episodes, not individual
-        saccades.
+        Each fixation stores a SNAPSHOT (activation pattern for context
+        node discovery) but NOT an observation record. After the full
+        sequence, ONE observation record is stored for the complete
+        token list (for FCA and other observation-based discovery).
+
+        Snapshots per fixation = fine-grained activation patterns.
+        One observation per sentence = the full episode.
         """
         pos = 0
         fixation_size = self.MIN_FIXATION
         n = len(characters)
 
-        # Temporarily disable hippo storage during fixations.
-        # We'll store one snapshot at the end.
-        hippo_ref = self.hippo
-        from experiments.symbolic_ai_v2.ctkg.logic.hippocampus import Hippocampus
-        dummy_hippo = Hippocampus(max_episodes=0)
-
-        original_hippo = self.hippo
-        self.hippo = dummy_hippo
-
-        all_nids: list[NodeId] = []  # track all observed token nids
+        all_nids: list[NodeId] = []
 
         while pos < n:
             end = min(pos + fixation_size, n)
@@ -302,7 +294,6 @@ class AgenticLoop:
 
             self.observe(chunk)
 
-            # Track which tokens were in this read.
             for tok in chunk:
                 if self.tokenizer is not None:
                     tok_id = self.tokenizer.encode_token(tok)
@@ -321,8 +312,8 @@ class AgenticLoop:
 
             pos = end
 
-        # Restore hippo and store ONE episodic record for the full read.
-        self.hippo = original_hippo
+        # Store one observation record for the full read.
+        # (Snapshots were already stored per fixation by observe().)
         self.hippo.store(self.kg.active_nodes(), observed_nids=all_nids)
 
     # -------------------------------------------------------------------

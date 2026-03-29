@@ -32,9 +32,14 @@ from typing import Any
 
 NodeId = int
 
-# Edge roles: the only two kinds.
+# Edge roles.
 COOCCURRENCE = 0   # A and B appeared in the same observation
 TRANSITION   = 1   # A preceded B across a timestep boundary (action between)
+
+# Node layers (inspired by cortical column structure).
+IDENTITY     = 0   # Layer 0: what — fires for a specific token value
+CONTEXT      = 1   # Layer 1: where — fires for a specific pattern of active identities
+DISPLACEMENT = 2   # Layer 2: how — fires for a specific context→context transition
 
 
 # ---------------------------------------------------------------------------
@@ -42,17 +47,26 @@ TRANSITION   = 1   # A preceded B across a timestep boundary (action between)
 # ---------------------------------------------------------------------------
 
 class Node:
-    """A single node in the knowledge graph."""
-    __slots__ = ('id', 'activation', 'resting', 'preferred', 'label')
+    """A single node in the knowledge graph.
+
+    layer: which cortical layer this node belongs to.
+    - IDENTITY (0): one per unique token. Fires when the token is observed.
+    - CONTEXT (1): one per recurring activation pattern. Fires when a
+      specific set of identity nodes are co-active. Like a place cell.
+    - DISPLACEMENT (2): one per recurring context transition. Fires when
+      the context changes in a specific way. Like a grid cell.
+    """
+    __slots__ = ('id', 'activation', 'resting', 'preferred', 'label', 'layer')
 
     def __init__(self, id: NodeId, activation: float = 0.0,
                  resting: float = 0.0, preferred: float = 0.0,
-                 label: str | None = None):
+                 label: str | None = None, layer: int = IDENTITY):
         self.id = id
         self.activation = activation
         self.resting = resting
         self.preferred = preferred
         self.label = label
+        self.layer = layer
 
 
 # ---------------------------------------------------------------------------
@@ -179,16 +193,20 @@ class KnowledgeGraph:
     # Node creation
     # -------------------------------------------------------------------
 
-    def get_or_create(self, value: Any) -> NodeId:
+    def get_or_create(self, value: Any, layer: int = IDENTITY) -> NodeId:
         """Return the NodeId for a value, creating the node if needed.
 
         Two observations of the same value share ONE node — identity.
+        Layer is set on creation only.
         """
         if value in self._value_to_node:
             return self._value_to_node[value]
         nid = self._next_id
         self._next_id += 1
-        self._nodes[nid] = Node(id=nid, label=str(value) if value is not None else None)
+        self._nodes[nid] = Node(
+            id=nid, label=str(value) if value is not None else None,
+            layer=layer,
+        )
         self._value_to_node[value] = nid
         return nid
 
@@ -197,6 +215,10 @@ class KnowledgeGraph:
 
     def node_count(self) -> int:
         return len(self._nodes)
+
+    def nodes_by_layer(self, layer: int) -> list[NodeId]:
+        """Return all NodeIds in a specific layer."""
+        return [nid for nid, n in self._nodes.items() if n.layer == layer]
 
     def edge_count(self) -> int:
         return len(self._edges)

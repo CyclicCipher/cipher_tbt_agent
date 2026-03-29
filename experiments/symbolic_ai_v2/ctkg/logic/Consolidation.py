@@ -285,67 +285,106 @@ def find_natural_transformations(
 def _chunk_observations(
     kg: KnowledgeGraph,
     hippo: Hippocampus,
+    min_occurrences: int = 3,
+    min_length: int = 2,
+    max_length: int = 20,
 ) -> int:
-    """Replace subsequences in observations with their FCA concept nodes.
+    """Replace invariant contiguous subsequences with chunk nodes.
 
-    For each observation, find maximal subsequences of tokens that all
-    belong to the same FCA concept. Replace them with the concept node.
-    This creates higher-level observations for the next consolidation pass.
+    Finds contiguous token subsequences that appear IDENTICALLY in
+    multiple observations (at the same sequential position). These
+    are invariant frame fragments — "The current date is", "the date
+    will be", etc. Replaces each occurrence with a single chunk node.
 
-    The chunking is greedy: largest matching concept first.
+    This preserves position: only CONTIGUOUS identical subsequences
+    are chunked. A character that appears in both frame and content
+    positions won't be chunked in the content position (because the
+    surrounding context differs).
 
-    Returns the number of observations chunked.
+    Returns the number of subsequences chunked.
     """
-    # Collect FCA concept extents → concept NodeId.
-    concept_map: dict[frozenset[NodeId], NodeId] = {}
-    for val, nid in kg._value_to_node.items():
-        if isinstance(val, tuple) and len(val) == 2 and val[0] == "__fca_concept__":
-            concept_map[val[1]] = nid
-
-    if not concept_map:
+    observations = hippo.all_observations()
+    if len(observations) < min_occurrences:
         return 0
 
-    # Sort concepts by size (largest first) for greedy matching.
-    sorted_concepts = sorted(concept_map.items(), key=lambda x: -len(x[0]))
-
-    observations = hippo.all_observations()
-    chunked_count = 0
+    # Collect all contiguous subsequences and count how many observations
+    # they appear in at the same position.
+    from collections import Counter
+    subseq_count: Counter = Counter()
 
     for obs in observations:
-        original = list(obs.token_nids)
-        if len(original) < 2:
-            continue
+        nids = obs.token_nids
+        n = len(nids)
+        for length in range(min_length, min(max_length, n) + 1):
+            for start in range(n - length + 1):
+                subseq = tuple(nids[start:start + length])
+                subseq_count[(subseq, start)] += 1
 
-        # Greedy chunking: scan for the largest concept whose extent
-        # is a SUBSET of the tokens in this observation. Replace all
-        # those tokens with the concept node.
-        token_set = set(original)
-        new_tokens = list(original)
-        changed = False
+    # Find subsequences that appear in many observations at the same position.
+    # These are invariant frame fragments.
+    invariants: list[tuple[tuple[NodeId, ...], int, int]] = []  # (subseq, start, count)
+    for (subseq, start), count in subseq_count.items():
+        if count >= min_occurrences and len(subseq) >= min_length:
+            invariants.append((subseq, start, count))
 
-        for extent, concept_nid in sorted_concepts:
-            if not extent.issubset(token_set):
+    # Sort by length * count (prefer long, frequent fragments).
+    invariants.sort(key=lambda x: -len(x[0]) * x[2])
+
+    if not invariants:
+        return 0
+
+    # Greedily chunk: for each invariant, create a chunk node and
+    # replace the subsequence in all matching observations.
+    chunked_count = 0
+    # Track which positions in each observation have been chunked.
+    obs_chunked: dict[int, set[int]] = {}  # obs_index → set of chunked positions
+
+    for subseq, start, count in invariants:
+        length = len(subseq)
+
+        # Create or reuse chunk node.
+        chunk_key = ("__chunk__", subseq, start)
+        chunk_nid = kg.get_or_create(chunk_key)
+        node = kg.node(chunk_nid)
+        if node is not None:
+            node.resting = max(node.resting, 0.3)
+
+        # Replace in all matching observations.
+        for obs_idx, obs in enumerate(observations):
+            nids = obs.token_nids
+            # Check if this subsequence matches at this position.
+            if start + length > len(nids):
                 continue
-            # Replace all tokens in the extent with the concept node.
-            # Keep order: replace first occurrence with concept node,
-            # remove subsequent occurrences.
-            replaced = False
-            filtered: list[NodeId] = []
-            for nid in new_tokens:
-                if nid in extent:
-                    if not replaced:
-                        filtered.append(concept_nid)
-                        replaced = True
-                    # else: skip (absorbed into the concept)
-                else:
-                    filtered.append(nid)
-            if replaced and len(filtered) < len(new_tokens):
-                new_tokens = filtered
-                changed = True
+            if tuple(nids[start:start + length]) != subseq:
+                continue
+            # Check no overlap with already-chunked positions.
+            chunked_positions = obs_chunked.get(obs_idx, set())
+            overlap = any(p in chunked_positions for p in range(start, start + length))
+            if overlap:
+                continue
 
-        if changed:
-            obs.token_nids = new_tokens
+            # Replace: put chunk_nid at start, remove the rest.
+            new_nids = nids[:start] + [chunk_nid] + nids[start + length:]
+            obs.token_nids = new_nids
+
+            # Mark positions as chunked. Adjust for the shortened list.
+            if obs_idx not in obs_chunked:
+                obs_chunked[obs_idx] = set()
+            obs_chunked[obs_idx].add(start)
+            # Shift existing chunked positions after this point.
+            shift = length - 1
+            if shift > 0:
+                obs_chunked[obs_idx] = {
+                    p - shift if p > start else p
+                    for p in obs_chunked[obs_idx]
+                }
+
             chunked_count += 1
+
+        # Only chunk a limited number of invariants to avoid
+        # over-chunking in one pass.
+        if chunked_count > len(observations) * 2:
+            break
 
     return chunked_count
 
@@ -401,6 +440,11 @@ def _single_pass(
     from experiments.symbolic_ai_v2.ctkg.logic.fca import discover_fca_structure
     fca_stats = discover_fca_structure(kg, hippo, since_index=since_index)
     stats.update({f"fca_{k}": v for k, v in fca_stats.items()})
+
+    # Cortical column: context nodes (layer 1) and displacement nodes (layer 2).
+    from experiments.symbolic_ai_v2.ctkg.logic.cortical_column import discover_cortical_structure
+    cc_stats = discover_cortical_structure(kg, hippo, since_index=since_index)
+    stats.update({f"cc_{k}": v for k, v in cc_stats.items()})
 
     # Algebraic skeleton.
     from experiments.symbolic_ai_v2.ctkg.logic.algebra import discover_algebraic_structure
