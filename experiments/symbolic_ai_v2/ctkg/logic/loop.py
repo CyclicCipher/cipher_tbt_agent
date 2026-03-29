@@ -57,7 +57,10 @@ class AgenticLoop:
         self._last_action_context: dict[NodeId, float] = {}
         self._last_consolidation_step: int = 0
         self._last_consolidation_snapshot: int = 0
-        self._suppress_observation: bool = False  # during read(), suppress per-fixation obs
+        self._suppress_observation: bool = False
+        # Sliding window of recent token NodeIds for n-gram context creation.
+        self._recent_tokens: list[NodeId] = []
+        self.NGRAM_SIZE: int = 4  # context window size
 
     # -------------------------------------------------------------------
     # Homeostatic priors
@@ -144,6 +147,28 @@ class AgenticLoop:
                 edge = self.kg.get_or_create_edge(src, tgt, role=COOCCURRENCE)
                 edge.strengthen(COOCCUR_RATE)
                 edge.observe_distance(j - i)
+
+        # Step 4.5: N-gram context nodes.
+        # Create a context node from the last N tokens (sliding window).
+        # This context uniquely identifies the positional neighborhood.
+        # Transition edges from context → current token encode
+        # position-specific next-token transitions.
+        for nid in current_nids:
+            self._recent_tokens.append(nid)
+        # Keep only the last NGRAM_SIZE tokens.
+        if len(self._recent_tokens) > self.NGRAM_SIZE:
+            self._recent_tokens = self._recent_tokens[-self.NGRAM_SIZE:]
+        # If we have a full window, create/strengthen the context→current transition.
+        if len(self._recent_tokens) >= self.NGRAM_SIZE:
+            ctx_key = ("__ngram__", tuple(self._recent_tokens[:-1]))
+            ctx_nid = self.kg.get_or_create(ctx_key, layer=CONTEXT)
+            ctx_node = self.kg.node(ctx_nid)
+            if ctx_node is not None:
+                ctx_node.activation = 1.0
+            # The last token in the window is what follows this context.
+            last_nid = self._recent_tokens[-1]
+            edge = self.kg.get_or_create_edge(ctx_nid, last_nid, role=TRANSITION)
+            edge.strengthen(0.15)
 
         # Step 5: transition edges from previous timestep.
         is_action_obs = edge_types and len(edge_types) > 0 and edge_types[0] == 2
