@@ -46,7 +46,7 @@ class AgenticLoop:
     def __init__(self, kg: KnowledgeGraph, tokenizer=None) -> None:
         self.kg = kg
         self.tokenizer = tokenizer
-        self.hippo = Hippocampus()
+        self.hippo = Hippocampus(max_episodes=5000)
         self._step_count: int = 0
         self._pending_prediction: dict[NodeId, float] = {}
         self._last_actual: dict[NodeId, float] = {}
@@ -255,6 +255,75 @@ class AgenticLoop:
         self._last_action_nid = best_nid
         self._last_action_context = dict(self._last_actual) if self._last_actual else {}
         return nid_to_token.get(best_nid)
+
+    # -------------------------------------------------------------------
+    # Read (adaptive fixation — processes a character sequence)
+    # -------------------------------------------------------------------
+
+    # Fixation parameters.
+    MIN_FIXATION: int = 1
+    MAX_FIXATION: int = 15       # perceptual span ~15 chars to the right
+    SURPRISE_THRESHOLD: float = 2.0  # above this → shrink fixation
+
+    def read(self, characters: list[str]) -> None:
+        """Process a character sequence with adaptive fixation.
+
+        Mimics human reading: each fixation takes in a variable number
+        of characters. Fixation size starts at MIN_FIXATION and adapts
+        based on prediction surprise:
+        - Low surprise (familiar/predicted content) → grow fixation
+        - High surprise (novel content) → shrink fixation
+
+        Each fixation updates the graph (edges, activations) but does
+        NOT store individual fixations in the hippocampus. Instead,
+        after the full sequence is processed, ONE episodic snapshot is
+        stored — the working memory state after reading. This mirrors
+        the brain: the hippocampus stores episodes, not individual
+        saccades.
+        """
+        pos = 0
+        fixation_size = self.MIN_FIXATION
+        n = len(characters)
+
+        # Temporarily disable hippo storage during fixations.
+        # We'll store one snapshot at the end.
+        hippo_ref = self.hippo
+        from experiments.symbolic_ai_v2.ctkg.logic.hippocampus import Hippocampus
+        dummy_hippo = Hippocampus(max_episodes=0)
+
+        original_hippo = self.hippo
+        self.hippo = dummy_hippo
+
+        all_nids: list[NodeId] = []  # track all observed token nids
+
+        while pos < n:
+            end = min(pos + fixation_size, n)
+            chunk = characters[pos:end]
+
+            self.observe(chunk)
+
+            # Track which tokens were in this read.
+            for tok in chunk:
+                if self.tokenizer is not None:
+                    tok_id = self.tokenizer.encode_token(tok)
+                    nid = self.kg.get_or_create(tok_id)
+                else:
+                    nid = self.kg.get_or_create(tok)
+                if nid not in all_nids:
+                    all_nids.append(nid)
+
+            # Adapt fixation size.
+            surprise = self._last_surprise
+            if surprise > self.SURPRISE_THRESHOLD:
+                fixation_size = max(self.MIN_FIXATION, fixation_size - 1)
+            else:
+                fixation_size = min(self.MAX_FIXATION, fixation_size + 1)
+
+            pos = end
+
+        # Restore hippo and store ONE episodic record for the full read.
+        self.hippo = original_hippo
+        self.hippo.store(self.kg.active_nodes(), observed_nids=all_nids)
 
     # -------------------------------------------------------------------
     # Consolidation (the slow path, callable through the loop)
