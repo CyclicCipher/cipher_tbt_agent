@@ -110,6 +110,27 @@ class AgenticLoop:
             current_nids.append(nid)
             actual[nid] = 1.0
 
+        # Step 3.5: activate context nodes (layer 1).
+        # A context node fires when ALL its constituent identity nodes are
+        # active (above threshold). Context nodes ACTIVATE (contribute to
+        # spread) but are NOT added to current_nids or actual — they don't
+        # participate in transition edge creation. They modulate the spread
+        # by adding their co-occurrence edges to the prediction.
+        from experiments.symbolic_ai_v2.ctkg.logic.graph import CONTEXT, IDENTITY, ACTIVATION_THRESHOLD as _AT
+        active_ids = set(
+            nid for nid, node in nodes.items()
+            if node.activation >= _AT and node.layer == IDENTITY
+        )
+        for ctx_nid, ctx_node in nodes.items():
+            if ctx_node.layer != CONTEXT:
+                continue
+            val = self.kg.value_for_node(ctx_nid)
+            if not isinstance(val, tuple) or val[0] != "__context__":
+                continue
+            pattern = val[1]
+            if pattern.issubset(active_ids):
+                ctx_node.activation = 1.0
+
         # Step 4: co-occurrence edges (causal masking: forward-only).
         all_nids = list(dict.fromkeys(current_nids))
         COOCCUR_RATE = 0.15
@@ -211,7 +232,15 @@ class AgenticLoop:
         else:
             self.hippo.store(self.kg.active_nodes(), observed_nids=current_nids)
 
-        self._prev_active = actual
+        # Include active context nodes in prev_active so they form
+        # transition edges to the next timestep. This creates
+        # context → identity transitions that enable position-aware
+        # next-token prediction.
+        prev = dict(actual)
+        for ctx_nid, ctx_node in nodes.items():
+            if ctx_node.layer == CONTEXT and ctx_node.activation >= _AT:
+                prev[ctx_nid] = ctx_node.activation
+        self._prev_active = prev
         self._step_count += 1
 
         # Step 9: periodic consolidation.
