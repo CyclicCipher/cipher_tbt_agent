@@ -279,22 +279,97 @@ def find_natural_transformations(
 
 
 # ---------------------------------------------------------------------------
+# Chunking: replace token sequences with concept nodes in observations
+# ---------------------------------------------------------------------------
+
+def _chunk_observations(
+    kg: KnowledgeGraph,
+    hippo: Hippocampus,
+) -> int:
+    """Replace subsequences in observations with their FCA concept nodes.
+
+    For each observation, find maximal subsequences of tokens that all
+    belong to the same FCA concept. Replace them with the concept node.
+    This creates higher-level observations for the next consolidation pass.
+
+    The chunking is greedy: largest matching concept first.
+
+    Returns the number of observations chunked.
+    """
+    # Collect FCA concept extents → concept NodeId.
+    concept_map: dict[frozenset[NodeId], NodeId] = {}
+    for val, nid in kg._value_to_node.items():
+        if isinstance(val, tuple) and len(val) == 2 and val[0] == "__fca_concept__":
+            concept_map[val[1]] = nid
+
+    if not concept_map:
+        return 0
+
+    # Sort concepts by size (largest first) for greedy matching.
+    sorted_concepts = sorted(concept_map.items(), key=lambda x: -len(x[0]))
+
+    observations = hippo.all_observations()
+    chunked_count = 0
+
+    for obs in observations:
+        original = list(obs.token_nids)
+        if len(original) < 2:
+            continue
+
+        # Greedy chunking: scan for the largest concept whose extent
+        # is a SUBSET of the tokens in this observation. Replace all
+        # those tokens with the concept node.
+        token_set = set(original)
+        new_tokens = list(original)
+        changed = False
+
+        for extent, concept_nid in sorted_concepts:
+            if not extent.issubset(token_set):
+                continue
+            # Replace all tokens in the extent with the concept node.
+            # Keep order: replace first occurrence with concept node,
+            # remove subsequent occurrences.
+            replaced = False
+            filtered: list[NodeId] = []
+            for nid in new_tokens:
+                if nid in extent:
+                    if not replaced:
+                        filtered.append(concept_nid)
+                        replaced = True
+                    # else: skip (absorbed into the concept)
+                else:
+                    filtered.append(nid)
+            if replaced and len(filtered) < len(new_tokens):
+                new_tokens = filtered
+                changed = True
+
+        if changed:
+            obs.token_nids = new_tokens
+            chunked_count += 1
+
+    return chunked_count
+
+
+# ---------------------------------------------------------------------------
 # Main consolidation entry point
 # ---------------------------------------------------------------------------
 
-def consolidate(
+def _single_pass(
     kg: KnowledgeGraph,
     hippo: Hippocampus,
     replay_passes: int = 1,
     replay_strength: float = 0.1,
     since_index: int = 0,
 ) -> dict[str, Any]:
-    """Consolidation: replay → prune → FCA → algebra → initial algebra → sheaf → colimit → morphism.
+    """One consolidation pass: replay → prune → PMI/IDF → FCA → algebra →
+    initial algebra → sheaf → colimit → morphism.
 
-    since_index: only process snapshots/observations from this index onward
-    (incremental consolidation — don't re-process old data).
+    Returns stats dict including structure_created count (new nodes/edges
+    materialized by FCA, algebra, initial algebra, colimit, morphism).
     """
     stats: dict[str, Any] = {}
+    nodes_before = kg.node_count()
+    edges_before = kg.edge_count()
 
     replay_stats = replay(kg, hippo, n_passes=replay_passes,
                           replay_strength=replay_strength,
@@ -304,12 +379,11 @@ def consolidate(
     prune_stats = prune(kg)
     stats.update({f"prune_{k}": v for k, v in prune_stats.items()})
 
-    # PMI + IDF cache: compute from observation records for action selection.
+    # PMI + IDF cache.
     from experiments.symbolic_ai_v2.ctkg.logic.initial_algebra import _compute_pmi
     kg._pmi = _compute_pmi(hippo, kg, since_index=since_index)
     stats["pmi_pairs"] = len(kg._pmi)
 
-    # IDF: log(N / count(token)) for each token.
     import math as _math
     all_obs = hippo.all_observations()
     obs_recent = all_obs[max(0, since_index):]
@@ -323,17 +397,17 @@ def consolidate(
         for nid, count in _token_doc_count.items()
     }
 
-    # FCA: discover type hierarchy from observation co-occurrence.
+    # FCA.
     from experiments.symbolic_ai_v2.ctkg.logic.fca import discover_fca_structure
     fca_stats = discover_fca_structure(kg, hippo, since_index=since_index)
     stats.update({f"fca_{k}": v for k, v in fca_stats.items()})
 
-    # Algebraic skeleton: SCCs, chains, cycles from transition structure.
+    # Algebraic skeleton.
     from experiments.symbolic_ai_v2.ctkg.logic.algebra import discover_algebraic_structure
     alg_stats = discover_algebraic_structure(kg, hippo, since_index=since_index)
     stats.update({f"alg_{k}": v for k, v in alg_stats.items()})
 
-    # Initial algebra: universal property test on candidate chains.
+    # Initial algebra.
     from experiments.symbolic_ai_v2.ctkg.logic.initial_algebra import discover_initial_algebras
     ia_stats = discover_initial_algebras(kg, hippo, since_index=since_index)
     stats.update({f"ia_{k}": v for k, v in ia_stats.items()})
@@ -351,4 +425,84 @@ def consolidate(
     morph_stats = discover_morphisms(kg, hippo, since_index=since_index)
     stats.update({f"morphism_{k}": v for k, v in morph_stats.items()})
 
+    # Track how much new structure was created.
+    nodes_after = kg.node_count()
+    edges_after = kg.edge_count()
+    stats["structure_new_nodes"] = nodes_after - nodes_before
+    stats["structure_new_edges"] = edges_after - edges_before
+
     return stats
+
+
+def consolidate(
+    kg: KnowledgeGraph,
+    hippo: Hippocampus,
+    replay_passes: int = 1,
+    replay_strength: float = 0.1,
+    since_index: int = 0,
+    max_depth: int = 5,
+) -> dict[str, Any]:
+    """Recursive consolidation — discovers patterns in patterns.
+
+    Runs _single_pass. If new structure was created (new nodes/edges
+    materialized by FCA, algebra, colimits, etc.), runs again — because
+    the new structure is now data for the next pass to find patterns in.
+
+    Repeats until no new structure is found (fixpoint) or max_depth
+    is reached.
+
+    This is the Broca's area merge operation: each pass discovers
+    patterns at one level; the next pass discovers patterns in THOSE
+    patterns. Level 0 = raw token patterns. Level 1 = patterns in
+    FCA concepts. Level 2 = meta-patterns (context-dependent periods,
+    conditional rules). Etc.
+
+    since_index: only process observations from this index onward.
+    max_depth: maximum number of recursive passes.
+    """
+    all_stats: dict[str, Any] = {}
+    depth = 0
+
+    while depth < max_depth:
+        pass_stats = _single_pass(
+            kg, hippo,
+            replay_passes=replay_passes,
+            replay_strength=replay_strength,
+            since_index=since_index,
+        )
+
+        new_nodes = pass_stats.get("structure_new_nodes", 0)
+        new_edges = pass_stats.get("structure_new_edges", 0)
+
+        # Store prefixed stats for tracing depth.
+        for k, v in pass_stats.items():
+            all_stats[f"d{depth}_{k}"] = v
+        # Unprefixed: depth 0 sets the base, deeper passes ACCUMULATE.
+        if depth == 0:
+            for k, v in pass_stats.items():
+                all_stats[k] = v
+        else:
+            for k, v in pass_stats.items():
+                if isinstance(v, (int, float)) and k in all_stats:
+                    all_stats[k] = all_stats[k] + v
+                else:
+                    all_stats[k] = v
+
+        depth += 1
+
+        # Stop if no new structure was created (fixpoint).
+        if new_nodes == 0 and new_edges <= 0:
+            break
+
+        # Inject discovered structure into observations for the next pass.
+        # For each observation, replace sequences of tokens that match an
+        # FCA concept's extent with the concept node. This creates
+        # higher-level observations that the next pass can find patterns in.
+        _chunk_observations(kg, hippo)
+
+        # After first pass, don't re-replay or re-prune — just run
+        # the structure discovery phases on the enriched graph.
+        replay_passes = 0
+
+    all_stats["consolidation_depth"] = depth
+    return all_stats
