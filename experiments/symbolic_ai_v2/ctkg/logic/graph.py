@@ -176,8 +176,9 @@ class KnowledgeGraph:
         self._outgoing: dict[NodeId, list[Edge]] = {}
         self._incoming: dict[NodeId, list[Edge]] = {}
         self._next_id: int = 0
-        # Reverse index: value → NodeId (for get_or_create)
+        # Reverse indices: value ↔ NodeId
         self._value_to_node: dict[Any, NodeId] = {}
+        self._node_to_value: dict[NodeId, Any] = {}  # O(1) reverse lookup
         # PMI cache: computed during consolidation, used by select_action.
         # Maps (src, tgt) → PMI score. Positive = specifically associated.
         self._pmi: dict[tuple[NodeId, NodeId], float] = {}
@@ -208,6 +209,8 @@ class KnowledgeGraph:
             layer=layer,
         )
         self._value_to_node[value] = nid
+        self._node_to_value[nid] = value
+        self._invalidate_layer_cache()
         return nid
 
     def node(self, nid: NodeId) -> Node | None:
@@ -217,8 +220,22 @@ class KnowledgeGraph:
         return len(self._nodes)
 
     def nodes_by_layer(self, layer: int) -> list[NodeId]:
-        """Return all NodeIds in a specific layer."""
-        return [nid for nid, n in self._nodes.items() if n.layer == layer]
+        """Return all NodeIds in a specific layer.
+
+        Uses cached index for O(1) lookup per layer.
+        """
+        if not hasattr(self, '_layer_index'):
+            self._layer_index: dict[int, list[NodeId]] = {}
+        if layer not in self._layer_index:
+            self._layer_index[layer] = [
+                nid for nid, n in self._nodes.items() if n.layer == layer
+            ]
+        return self._layer_index[layer]
+
+    def _invalidate_layer_cache(self) -> None:
+        """Clear the layer index cache (call after adding nodes)."""
+        if hasattr(self, '_layer_index'):
+            self._layer_index.clear()
 
     def edge_count(self) -> int:
         return len(self._edges)
@@ -643,7 +660,7 @@ class KnowledgeGraph:
         # Each iteration: for each node with error, propagate a fraction
         # of that error backward to its sources (via _incoming edges).
         # This is the predictive coding error propagation.
-        PC_ITERATIONS = 3
+        PC_ITERATIONS = 1  # single iteration sufficient for character-level
         PC_ERROR_RATE = 0.3  # fraction of error propagated per iteration
 
         # Collect which edges participated in the prediction (for phase 2).
@@ -920,11 +937,8 @@ class KnowledgeGraph:
     # -------------------------------------------------------------------
 
     def value_for_node(self, nid: NodeId) -> Any:
-        """Reverse lookup: NodeId → original value."""
-        for val, n in self._value_to_node.items():
-            if n == nid:
-                return val
-        return None
+        """Reverse lookup: NodeId → original value. O(1)."""
+        return self._node_to_value.get(nid)
 
     def label_for_node(self, nid: NodeId) -> str:
         """Human-readable label."""
