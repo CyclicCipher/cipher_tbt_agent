@@ -343,16 +343,6 @@ def consolidate(
     sheaf_stats = discover_sheaf_structure(kg, hippo, since_index=since_index)
     stats.update({f"sheaf_{k}": v for k, v in sheaf_stats.items()})
 
-    # Concept embeddings: continuous membership vectors for action selection.
-    from experiments.symbolic_ai_v2.ctkg.logic.embedding import compute_concept_embeddings
-    emb_stats = compute_concept_embeddings(kg, hippo, since_index=since_index)
-    stats.update({f"emb_{k}": v for k, v in emb_stats.items()})
-
-    # Force-directed embedding: attraction/repulsion from observation triples.
-    from experiments.symbolic_ai_v2.ctkg.logic.force_embed import compute_force_embedding
-    force_stats = compute_force_embedding(kg, hippo, since_index=since_index)
-    stats.update({f"force_{k}": v for k, v in force_stats.items()})
-
     from experiments.symbolic_ai_v2.ctkg.logic.colimit import find_colimits
     colimit_stats = find_colimits(kg, hippo, since_index=since_index)
     stats.update({f"colimit_{k}": v for k, v in colimit_stats.items()})
