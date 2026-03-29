@@ -282,23 +282,24 @@ def discover_positional_periods(
     hippo: Hippocampus,
     since_index: int = 0,
     min_observations: int = 10,
+    observation_subset: list | None = None,
+    group_label: str = "",
 ) -> dict[str, Any]:
     """Discover token periodicity at each position across observations.
 
     For each position p in the observation token sequences, extract the
-    token that appears at position p across all observations. If this
-    per-position sequence is periodic, record the period.
+    token at position p across all observations. If periodic, record it.
 
-    This uses the OBSERVATION records (ordered token lists), not
-    activation snapshots. The position IS the context — no context
-    node matching needed.
-
-    Materializes discovered periods as nodes linked to position info.
+    observation_subset: if provided, use this list instead of hippo.
+    group_label: label for this group (for materializing period nodes).
 
     Returns stats including discovered periods per position.
     """
-    observations = hippo.all_observations()
-    recent = observations[max(0, since_index):]
+    if observation_subset is not None:
+        recent = observation_subset
+    else:
+        observations = hippo.all_observations()
+        recent = observations[max(0, since_index):]
     if len(recent) < min_observations:
         return {"positions_checked": 0, "periods_found": 0, "period_details": {}}
 
@@ -348,7 +349,7 @@ def discover_positional_periods(
                         best = max(phase_counts, key=phase_counts.get)
                         cycle_tokens.append(best)
 
-                period_key = ("__period__", pos, p, tuple(cycle_tokens))
+                period_key = ("__period__", group_label, pos, p, tuple(cycle_tokens))
                 if period_key not in kg._value_to_node:
                     period_nid = kg.get_or_create(period_key, layer=CONTEXT)
                     node = kg.node(period_nid)
@@ -375,6 +376,98 @@ def discover_positional_periods(
 # Main entry point
 # ---------------------------------------------------------------------------
 
+def discover_grouped_periods(
+    kg: KnowledgeGraph,
+    hippo: Hippocampus,
+    since_index: int = 0,
+    min_group_size: int = 20,
+    min_observations: int = 10,
+) -> dict[str, Any]:
+    """Partition observations by categorical positions, then detect periods.
+
+    For each position in the observations, check if the token at that
+    position is CATEGORICAL (small number of unique values that partition
+    the observations) vs NUMERICAL (many values, potentially periodic).
+
+    Categorical positions partition the observations into groups.
+    Within each group, run period detection on the numerical positions.
+
+    This discovers: "among observations where position 46 is 's' (seconds),
+    position 21 cycles with period 10."
+
+    Returns stats.
+    """
+    observations = hippo.all_observations()
+    recent = observations[max(0, since_index):]
+    if len(recent) < min_group_size:
+        return {"groups_found": 0, "total_periods": 0, "group_details": {}}
+
+    max_len = max(len(obs.token_nids) for obs in recent)
+
+    # Find categorical positions: positions where only a few unique tokens
+    # appear across all observations (< 20 unique values AND < 50% of obs count).
+    categorical_positions: list[tuple[int, dict[NodeId, list]]] = []
+
+    for pos in range(max_len):
+        token_groups: dict[NodeId, list] = {}
+        for obs in recent:
+            if pos < len(obs.token_nids):
+                tok = obs.token_nids[pos]
+                token_groups.setdefault(tok, []).append(obs)
+
+        n_unique = len(token_groups)
+        # Categorical: few unique values, each with enough observations.
+        if 2 <= n_unique <= 15:
+            big_groups = sum(1 for g in token_groups.values() if len(g) >= min_group_size)
+            if big_groups >= 2:
+                categorical_positions.append((pos, token_groups))
+
+    if not categorical_positions:
+        # No categorical partition found — run on all observations.
+        period_stats = discover_positional_periods(
+            kg, hippo, since_index=since_index,
+            min_observations=min_observations,
+            group_label="all",
+        )
+        return {
+            "groups_found": 0,
+            "total_periods": period_stats["periods_found"],
+            "group_details": {"all": period_stats["period_details"]},
+        }
+
+    # Use the categorical position with the fewest unique values
+    # (most discriminating partition).
+    best_pos, best_groups = min(categorical_positions, key=lambda x: len(x[1]))
+
+    total_periods = 0
+    group_details: dict[str, dict] = {}
+
+    for tok_nid, group_obs in best_groups.items():
+        if len(group_obs) < min_group_size:
+            continue
+        label = kg.label_for_node(tok_nid)
+        group_stats = discover_positional_periods(
+            kg, hippo,
+            min_observations=min_observations,
+            observation_subset=group_obs,
+            group_label=f"pos{best_pos}={label}",
+        )
+        total_periods += group_stats["periods_found"]
+        if group_stats["period_details"]:
+            group_details[f"pos{best_pos}={label}"] = group_stats["period_details"]
+
+    return {
+        "groups_found": len(best_groups),
+        "partition_position": best_pos,
+        "total_periods": total_periods,
+        "group_details": group_details,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
 def discover_cortical_structure(
     kg: KnowledgeGraph,
     hippo: Hippocampus,
@@ -384,11 +477,11 @@ def discover_cortical_structure(
 
     Called during consolidation. Order:
     1. Context nodes (layer 1) from activation patterns
-    2. Positional period detection from observation sequences
+    2. Grouped positional period detection
     3. Displacement nodes (layer 2) from context transitions
     """
     ctx_stats = discover_context_nodes(kg, hippo, since_index=since_index)
-    period_stats = discover_positional_periods(kg, hippo, since_index=since_index)
+    period_stats = discover_grouped_periods(kg, hippo, since_index=since_index)
     disp_stats = discover_displacement_nodes(kg, hippo, since_index=since_index)
 
     stats: dict[str, Any] = {}
