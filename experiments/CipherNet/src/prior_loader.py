@@ -82,15 +82,20 @@ def load_priors(config_path: str | None = None) -> tuple[Graph, dict[str, dict[s
 
     # Create connections between priors.
     for conn in config.get("connections", []):
+        # Skip comment-only entries.
+        if "_comment" in conn and "source_prior" not in conn:
+            continue
+
         src_prior = conn["source_prior"]
         src_node = conn["source_node"]
         tgt_prior = conn["target_prior"]
         tgt_node = conn["target_node"]
         etype = EDGE_TYPES.get(conn.get("type", "spatial"), SPATIAL)
+        weight = conn.get("weight", 1.0)
 
         src_id = prior_nodes[src_prior][src_node]
         tgt_id = prior_nodes[tgt_prior][tgt_node]
-        graph.add_edge(src_id, tgt_id, edge_type=etype)
+        graph.add_edge(src_id, tgt_id, edge_type=etype, weight=weight)
 
     return graph, prior_nodes
 

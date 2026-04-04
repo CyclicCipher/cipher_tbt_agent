@@ -47,11 +47,18 @@ class TokenIO:
         self._input_columns: dict[str, dict[str, int]] = {}
 
     def get_or_create_input_column(self, char: str) -> dict[str, int]:
-        """Get or create a column for an input character."""
+        """Get or create a column for an input character.
+
+        Input columns have a moderate self-loop on L23 (0.3) for
+        Mamba-style per-column retention. This gives enough persistence
+        for sequential tokens to overlap in activation (needed for
+        counting/successor learning) without the long persistence of
+        PFC working memory (0.95).
+        """
         if char in self._input_columns:
             return self._input_columns[char]
 
-        col = self.graph.create_column(f"char:{char}")
+        col = self.graph.create_column(f"char:{char}", self_loop_weight=0.7)
         col["token"] = char
         self._input_columns[char] = col
         return col
