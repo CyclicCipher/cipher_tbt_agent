@@ -143,6 +143,35 @@ def setup_brain() -> Brain:
             col = brain.tio._input_columns[str(d_in)]
             graph.add_edge(out_node, col['L23'], edge_type=TEMPORAL, weight=0.01)
 
+    # === WORKSPACE CONJUNCTION PATH ===
+    # Broca workspace -> output cortex (all-to-all, weak).
+    # The workspace holds COMBINATIONS of inputs. When ws0 holds one
+    # operand and ws1 holds another, the combined pattern drives
+    # the correct output via these edges.
+    for ws_slot in ['ws0', 'ws1', 'ws2', 'ws3']:
+        ws_l5 = priors['broca'][f'{ws_slot}:L5']
+        for d in range(10):
+            out_node = priors['output_cortex'][f'out:{d}']
+            graph.add_edge(ws_l5, out_node, edge_type=TEMPORAL, weight=0.02)
+
+    # Input column relays -> temporal cortex relay.
+    # This is the pathway: input column -> relay -> temporal cortex
+    # -> Broca workspace. Without this, tokens never reach Broca.
+    tc_relay = priors['thalamus']['relay_temporal']
+    for char in '0123456789+-*/=':
+        col = brain.tio._input_columns[char]
+        relay = col.get('relay')
+        if relay is not None:
+            graph.add_edge(relay, tc_relay, edge_type=TEMPORAL, weight=0.5)
+
+    # Backward: Broca workspace -> digit column L2/3 (predictions).
+    # The workspace predicts what input it expects.
+    for ws_slot in ['ws0', 'ws1', 'ws2', 'ws3']:
+        ws_l5 = priors['broca'][f'{ws_slot}:L5']
+        for d in range(10):
+            col = brain.tio._input_columns[str(d)]
+            graph.add_edge(ws_l5, col['L23'], edge_type=TEMPORAL, weight=0.01)
+
     print(f"Brain setup: {graph.summary()}")
     return brain
 
@@ -218,7 +247,8 @@ def stage_addition(brain: Brain, epochs: int = 100, verbose: bool = False):
             total_error += graph.total_error()
 
             # 4. Learn once from the settled state.
-            graph.learn(learning_rate=0.005, synaptogenesis=False)
+            graph.learn(learning_rate=0.003, synaptogenesis=False,
+                        weight_decay=0.0)
 
         # Evaluate holdout (free inference, no clamp).
         if epoch % 5 == 0:

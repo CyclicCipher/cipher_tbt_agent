@@ -22,9 +22,8 @@
     {"source_prior": "basal_ganglia", "source_node": "gpi_3", "target_prior": "thalamus", "target_node": "relay_broca", "type": "gate",
      "description": "GPi_3 gates the VA thalamic relay for Broca. Tonically active = Merge blocked. Go pathway disinhibits = Merge permitted."},
 
-    {"_comment": "=== BG GPi → Thalamus relay (GATE — temporal cortex) ==="},
-    {"source_prior": "basal_ganglia", "source_node": "gpi_4", "target_prior": "thalamus", "target_node": "relay_temporal", "type": "gate",
-     "description": "GPi_4 gates the temporal cortex relay. Controls whether new tokens enter the phonological buffer."},
+    {"_comment": "=== Temporal cortex relay: NO BG gate ==="},
+    {"_comment": "Sensory thalamus passes signals freely — unlike PFC/Broca thalamus which is BG-gated. Attentional selection happens in cortex, not at the sensory relay."},
 
     {"_comment": "=== Thalamus relays → PFC WM (gated input to working memory) ==="},
     {"source_prior": "thalamus", "source_node": "relay_0", "target_prior": "pfc", "target_node": "wm0:L23", "type": "gate"},

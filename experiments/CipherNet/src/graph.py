@@ -77,11 +77,23 @@ class Node:
 
 @dataclass
 class Edge:
-    """A connection between two nodes."""
+    """A connection between two nodes, assigned to a dendritic segment.
+
+    Dendritic computation:
+    - Edges on the SAME segment are multiplicative (AND-like).
+      All must be active for the segment to fire.
+    - Edges on DIFFERENT segments are additive (OR-like).
+      Any segment can fire the node.
+
+    Default: each edge gets a unique auto-incrementing segment ID,
+    making the computation purely additive (backwards compatible).
+    Learning merges segments when conjunction is useful.
+    """
     source: int
     target: int
     edge_type: int = SPATIAL
     weight: float = 1.0
+    segment: int = -1          # dendritic segment (-1 = auto-assign unique)
     meta: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -122,6 +134,7 @@ class Graph:
         self._outgoing: dict[int, list[Edge]] = defaultdict(list)
         self._incoming: dict[int, list[Edge]] = defaultdict(list)
         self._next_id: int = 0
+        self._next_segment: int = 0  # auto-increment for unique segments
         self._label_to_id: dict[str, int] = {}
         self._subgraphs: dict[str, set[int]] = defaultdict(set)
 
@@ -164,6 +177,7 @@ class Graph:
     def add_edge(self, source: int, target: int,
                  edge_type: int = SPATIAL,
                  weight: float = 1.0,
+                 segment: int = -1,
                  **meta) -> Edge:
         key = (source, target, edge_type)
         existing = self._edges.get(key)
@@ -173,7 +187,11 @@ class Graph:
             return existing
 
         edge = Edge(source=source, target=target, edge_type=edge_type,
-                    weight=weight, meta=meta)
+                    weight=weight, segment=segment, meta=meta)
+        # Auto-assign unique segment if not specified.
+        if edge.segment < 0:
+            edge.segment = self._next_segment
+            self._next_segment += 1
         self._edges[key] = edge
         self._outgoing[source].append(edge)
         self._incoming[target].append(edge)
@@ -183,6 +201,9 @@ class Graph:
             if rev_key not in self._edges:
                 rev = Edge(source=target, target=source, edge_type=edge_type,
                            weight=weight, meta=meta)
+                if rev.segment < 0:
+                    rev.segment = self._next_segment
+                    self._next_segment += 1
                 self._edges[rev_key] = rev
                 self._outgoing[target].append(rev)
                 self._incoming[source].append(rev)
@@ -304,26 +325,54 @@ class Graph:
                 freq = LAYER_FREQ.get(layer)
                 retain = FREQ_DECAY.get(freq, default_decay) if freq else default_decay
 
-            # 2. Split incoming temporal into sensory vs prediction.
-            sensory = 0.0
-            prediction = 0.0
+            # 2. Dendritic computation: group incoming temporal edges
+            #    by segment, compute multiplicatively within segments
+            #    (AND-like), sum across segments (OR-like).
+            #    Split into sensory vs prediction streams.
+            #    ALL edges in a segment are included (even inactive ones
+            #    contribute 0), so AND requires ALL inputs active.
+            sensory_segments: dict[int, list[float]] = defaultdict(list)
+            prediction_total = 0.0
             for edge in self._incoming.get(nid, []):
                 if edge.edge_type != TEMPORAL:
                     continue
                 if edge.source == nid:
                     continue  # self-loop handled separately
                 src = self._nodes.get(edge.source)
-                if src is None or src.activation < 0.001:
+                if src is None:
                     continue
-                signal = edge.weight * src.activation
-                # Feedback (L6) edges carry top-down predictions.
+                # Include ALL edges, even inactive (signal=0 for AND).
+                signal = edge.weight * src.activation if src.activation > 0.001 else 0.0
+                # Feedback (L6) edges carry top-down predictions
+                # (not dendritic — predictions are always summed).
                 if src.meta.get('role') == 'feedback':
-                    prediction += signal
+                    prediction_total += signal
                 else:
-                    sensory += signal
+                    sensory_segments[edge.segment].append(signal)
+
+            # Compute sensory input: dendritic AND within segments,
+            # OR across segments.
+            sensory = 0.0
+            for seg_id, signals in sensory_segments.items():
+                if len(signals) == 1:
+                    # Single-edge segment: pass through
+                    sensory += max(0.0, signals[0])
+                else:
+                    # Multi-edge segment: AND-like (geometric mean)
+                    # If ANY input is 0, the whole segment output is 0.
+                    product = 1.0
+                    all_positive = True
+                    for s in signals:
+                        if s <= 0.0:
+                            all_positive = False
+                            break
+                        product *= s
+                    if all_positive:
+                        sensory += product ** (1.0 / len(signals))
+                    # else: segment output = 0 (AND not satisfied)
 
             # 3. Prediction error.
-            error = sensory - prediction
+            error = sensory - prediction_total
 
             # 4. Recurrence: activation tracks SENSORY input.
             self_loop_weight = 0.0
@@ -408,7 +457,8 @@ class Graph:
               synaptogenesis: bool = True,
               synapse_threshold: float = 0.3,
               synapse_weight: float = 0.05,
-              prune_threshold: float = 0.001):
+              prune_threshold: float = 0.001,
+              weight_decay: float = 0.001):
         """Predictive coding weight update.
 
         delta_w = learning_rate * target.error * source.activation
@@ -441,10 +491,45 @@ class Graph:
 
             # Error-driven: delta = lr * target_error * source_activation
             delta = learning_rate * tgt_node.error * src_node.activation
+            # Weight decay: prevent runaway growth.
+            edge.weight *= (1.0 - weight_decay)
             edge.weight += delta
             edge.weight = max(-2.0, min(2.0, edge.weight))
 
-        # --- 2. Synaptogenesis: create edges to high-error nodes ---
+        # --- 2. Dendritic segment merging ---
+        # When two edges to the same target are BOTH active and the
+        # target has POSITIVE error (needs more input), merge their
+        # segments. This means: "these inputs should be conjunctive
+        # (AND) because they co-occur during useful computation."
+        # Only merge if both sources have strong activation.
+        merge_threshold = 0.2
+        targets_with_error = set()
+        for (src, tgt, etype), edge in self._edges.items():
+            if etype in edge_types:
+                tgt_node = self._nodes.get(tgt)
+                if tgt_node and tgt_node.error > merge_threshold:
+                    targets_with_error.add(tgt)
+
+        for tgt_id in targets_with_error:
+            # Find all active incoming edges to this target.
+            active_edges = []
+            for edge in self._incoming.get(tgt_id, []):
+                if edge.edge_type not in edge_types:
+                    continue
+                if edge.source == tgt_id:
+                    continue
+                src_node = self._nodes.get(edge.source)
+                if src_node and src_node.activation >= merge_threshold:
+                    active_edges.append(edge)
+
+            # Merge: assign all active edges to the same segment
+            # (the segment of the first active edge).
+            if len(active_edges) >= 2:
+                target_segment = active_edges[0].segment
+                for edge in active_edges[1:]:
+                    edge.segment = target_segment
+
+        # --- 3. Synaptogenesis: create edges to high-error nodes ---
         if synaptogenesis:
             high_error = [(nid, n) for nid, n in self._nodes.items()
                           if abs(n.error) >= synapse_threshold]
