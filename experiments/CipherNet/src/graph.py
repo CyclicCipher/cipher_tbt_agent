@@ -138,6 +138,10 @@ class Graph:
         self._next_segment: int = 0  # auto-increment for unique segments
         self._label_to_id: dict[str, int] = {}
         self._subgraphs: dict[str, set[int]] = defaultdict(set)
+        # Co-activation counter for dendritic segment merging.
+        # Key: frozenset of two edge keys (src,tgt,type).
+        # Value: count of episodes where both sources were active.
+        self._coactivation: dict[frozenset, int] = defaultdict(int)
 
     # -------------------------------------------------------------------
     # Node operations
@@ -344,6 +348,9 @@ class Graph:
                 src = self._nodes.get(edge.source)
                 if src is None:
                     continue
+                # Skip negative temporal edges (handled as inhibition in step 5).
+                if edge.weight < 0:
+                    continue
                 # Include ALL edges, even inactive (signal=0 for AND).
                 signal = edge.weight * src.activation if src.activation > 0.001 else 0.0
                 # Feedback (L6) edges carry top-down predictions
@@ -412,10 +419,15 @@ class Graph:
             # Mamba-style: decay old + add new.
             new_act = decay * old_act + sensory
 
-            # 5. Inhibition.
+            # 5. Inhibition from negative SPATIAL edges AND negative
+            #    TEMPORAL edges. Negative temporal = directed inhibition
+            #    (inhibitory interneurons). Negative spatial = lateral
+            #    inhibition (undirected competition).
             inhibition = 0.0
             for edge in self._incoming.get(nid, []):
-                if edge.edge_type == SPATIAL and edge.weight < 0:
+                if edge.weight < 0 and edge.edge_type in (SPATIAL, TEMPORAL):
+                    if edge.source == nid:
+                        continue  # skip negative self-loops
                     src = self._nodes.get(edge.source)
                     if src is not None and src.activation > 0.001:
                         inhibition += abs(edge.weight) * src.activation
@@ -576,6 +588,11 @@ class Graph:
             # Only update if source is active AND target has error.
             if abs(tgt_node.error) < 0.001 or src_node.activation < 0.001:
                 continue
+            # Protect intra-subgraph structural edges from learning.
+            # Column internal wiring (L4→L23→L5→L6) must not be modified.
+            if (src_node.subgraph is not None and
+                    src_node.subgraph == tgt_node.subgraph):
+                continue
 
             # Error-driven: delta = lr * target_error * source_activation
             delta = learning_rate * tgt_node.error * src_node.activation
@@ -584,11 +601,49 @@ class Graph:
             edge.weight += delta
             edge.weight = max(-2.0, min(2.0, edge.weight))
 
-        # --- 2. Dendritic segment merging ---
-        # TODO: implement selective merging based on co-activation
-        # statistics across multiple examples. Current naive merge
-        # (all active → same segment) is too destructive.
-        # For now, segments stay separate (additive = OR behavior).
+        # --- 2. Dendritic segment merging via co-activation tracking ---
+        # Based on Bhatt et al. (2015): synapses that repeatedly co-fire
+        # within a learning window migrate onto the same dendritic branch.
+        # We track co-activation counts for each edge pair to the same
+        # target. When the count exceeds merge_threshold, we merge their
+        # segments (making them conjunctive/AND).
+        merge_threshold = 10  # co-activations needed before merging
+        coact_threshold = 0.05  # minimum activation to count as "active"
+
+        # Group active incoming edges by target node.
+        target_active_edges: dict[int, list[tuple]] = defaultdict(list)
+        for (src, tgt, etype), edge in self._edges.items():
+            if etype not in edge_types:
+                continue
+            src_node = self._nodes.get(src)
+            tgt_node = self._nodes.get(tgt)
+            if src_node is None or tgt_node is None:
+                continue
+            if src_node.activation < coact_threshold:
+                continue
+            if abs(tgt_node.error) < 0.01:
+                continue  # only track at nodes with prediction error
+            target_active_edges[tgt].append((src, tgt, etype))
+
+        # For each target with 2+ active incoming edges, update counts.
+        for tgt_id, edge_keys in target_active_edges.items():
+            if len(edge_keys) < 2:
+                continue
+            # Update co-activation counts for all pairs.
+            for i in range(len(edge_keys)):
+                for j in range(i + 1, len(edge_keys)):
+                    pair_key = frozenset((edge_keys[i], edge_keys[j]))
+                    self._coactivation[pair_key] += 1
+                    # Check if ready to merge.
+                    if self._coactivation[pair_key] >= merge_threshold:
+                        edge_a = self._edges.get(edge_keys[i])
+                        edge_b = self._edges.get(edge_keys[j])
+                        if edge_a and edge_b and edge_a.segment != edge_b.segment:
+                            # Merge: move B onto A's segment.
+                            old_seg = edge_b.segment
+                            edge_b.segment = edge_a.segment
+                            # Reset counter (don't merge again immediately).
+                            self._coactivation[pair_key] = 0
 
         # --- 3. Synaptogenesis: create edges to high-error nodes ---
         if synaptogenesis:

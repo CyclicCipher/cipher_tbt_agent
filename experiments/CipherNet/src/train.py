@@ -68,10 +68,17 @@ def evaluate_pairs(brain, pairs, op_char, settle_steps=15):
         if len(expected) > 1:
             continue
 
+        expr = f"{a}{op_char}{b}="
         brain.graph.reset_activations()
-        for tok in f"{a}{op_char}{b}=":
+        for tok in expr:
             brain.feed(tok, n_steps=1)
-        brain.settle(n_steps=settle_steps)
+        # Clamp inputs at full strength during settle.
+        input_clamp = {}
+        for tok in set(expr):
+            col = brain.tio._input_columns.get(tok)
+            if col:
+                input_clamp[col['L4']] = 1.0
+        brain.settle(n_steps=settle_steps, clamp=input_clamp)
 
         out, act = brain.read_output()
         if out == expected:
@@ -133,6 +140,28 @@ def setup_brain() -> Brain:
         # Feedback: predictions propagate, skip L4, target L2/3
         graph.add_edge(col_a['L5'], col_b['L23'], edge_type=TEMPORAL, weight=0.01)
         graph.add_edge(col_b['L5'], col_a['L23'], edge_type=TEMPORAL, weight=0.01)
+
+    # === INPUT COLUMN LATERAL INHIBITION ===
+    # Like the output cortex inhibitor: one inhibitor node that creates
+    # winner-take-all competition between input columns. When a new
+    # token arrives, the inhibitor suppresses old tokens. Only the most
+    # recently activated columns survive.
+    # This is the biological lateral inhibition that prevents state
+    # saturation (the Mamba selective forgetting equivalent).
+    input_inhibitor = graph.add_node(
+        label="input_inhibitor", subgraph="thalamus",
+        role="inhibitor")
+    for char in '0123456789+-*/=':
+        col = brain.tio._input_columns[char]
+        # L23 drives the inhibitor (excitatory, directed).
+        graph.add_edge(col['L23'], input_inhibitor,
+                       edge_type=TEMPORAL, weight=0.15)
+        # Inhibitor suppresses L23 (inhibitory, directed).
+        # Negative TEMPORAL = directed inhibition (interneuron).
+        # Weight tuned: strong enough to suppress unfed columns,
+        # weak enough that clamped L4 input (1.0) overcomes it.
+        graph.add_edge(input_inhibitor, col['L23'],
+                       edge_type=TEMPORAL, weight=-0.3)
 
     # Backward prediction edges from output cortex to digit columns.
     # Output cortex predicts what input it expects (generative model).
@@ -241,20 +270,35 @@ def stage_addition(brain: Brain, epochs: int = 100, verbose: bool = False):
             # 2. Build clamp: fix inputs + desired output.
             clamp = build_clamp(brain, tokens, expected)
 
-            # 3. Settle: find activations minimizing prediction error.
-            brain.settle(n_steps=20, clamp=clamp)
+            # 3. Settle with INPUT clamped at full strength, OUTPUT free.
+            #    Clamp at 1.0: "this token IS in the input" (not its
+            #    current decayed value). The system must GENERATE the
+            #    answer from the clamped question.
+            input_clamp = {}
+            for tok in set(tokens):  # unique tokens
+                col = brain.tio._input_columns.get(tok)
+                if col:
+                    input_clamp[col['L4']] = 1.0
+            brain.settle(n_steps=15, clamp=input_clamp)
 
-            total_error += graph.total_error()
-
-            # 4. Backward error propagation.
+            # 4. Compute teaching error at CORRECT output only.
+            #    error = 1.0 - activation (how far from target).
+            #    Don't suppress wrong outputs via error — the inhibitor
+            #    handles competition. Teaching signal = "boost the
+            #    right answer," not "suppress everything else."
+            out_node = brain.tio._output_token_map.get(expected)
             clamp_errors = {}
-            for nid, val in clamp.items():
-                node = graph.get_node(nid)
-                if node and abs(node.error) > 0.001:
-                    clamp_errors[nid] = node.error
+            if out_node is not None:
+                node = graph.get_node(out_node)
+                clamp_errors[out_node] = 1.0 - (node.activation if node else 0.0)
+
+            # 5. Backward error propagation from teaching signal.
+            # Track teaching error BEFORE backward propagation.
+            total_error += sum(e**2 for e in clamp_errors.values())
+
             brain.propagate_errors(n_passes=3, clamp_errors=clamp_errors)
 
-            # 5. Learn.
+            # 6. Learn from the discrepancy.
             graph.learn(learning_rate=0.001, synaptogenesis=False,
                         weight_decay=0.0)
 
