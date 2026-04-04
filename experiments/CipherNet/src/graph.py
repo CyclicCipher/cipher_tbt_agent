@@ -488,68 +488,7 @@ class Graph:
                 self.learn(learning_rate=learn_rate, synaptogenesis=False)
 
     # -------------------------------------------------------------------
-    # Backward error propagation
-    # -------------------------------------------------------------------
-
-    def propagate_errors_backward(self, n_passes: int = 3,
-                                   decay: float = 0.5,
-                                   clamp_errors: dict[int, float] | None = None):
-        """Backward sweep: propagate errors from output to all nodes.
-
-        After settle() computes activations and local errors, this method
-        propagates error BACKWARD through outgoing edges so every node
-        gets credit assignment proportional to its contribution to
-        downstream errors.
-
-        For each node (excluding clamped error nodes):
-          error += decay * sum(edge.weight * target.error) for all outgoing edges
-
-        Multiple passes handle cycles and long paths. With n_passes=3
-        and a 5-hop path, error reaches every node.
-
-        This + local learn() = equivalent to backpropagation through the
-        graph (Whittington & Bogacz 2017).
-
-        Args:
-            n_passes: number of backward sweeps (handles cycles/depth)
-            decay: attenuation per hop (prevents error explosion)
-            clamp_errors: {node_id: error} nodes whose error is fixed
-                          (typically the output nodes with teaching error)
-        """
-        if clamp_errors is None:
-            clamp_errors = {}
-
-        for _ in range(n_passes):
-            new_errors: dict[int, float] = {}
-            for nid, node in self._nodes.items():
-                if nid in clamp_errors:
-                    new_errors[nid] = clamp_errors[nid]
-                    continue
-
-                # Backward: error flows OPPOSITE to edge direction.
-                # For each outgoing edge, this node contributed to the
-                # target's activation. The target's error tells us how
-                # much that contribution was wrong.
-                backward_error = 0.0
-                for edge in self._outgoing.get(nid, []):
-                    if edge.edge_type not in (TEMPORAL, BINDING):
-                        continue
-                    tgt = self._nodes.get(edge.target)
-                    if tgt is not None and abs(tgt.error) > 0.001:
-                        backward_error += edge.weight * tgt.error
-
-                # REPLACE local error with backward credit from clamp.
-                # Don't add — the backward credit IS the teaching signal.
-                # Local errors are useful for settle but not for learn.
-                clipped = max(-1.0, min(1.0, decay * backward_error))
-                new_errors[nid] = clipped
-
-            # Apply.
-            for nid, err in new_errors.items():
-                self._nodes[nid].error = err
-
-    # -------------------------------------------------------------------
-    # Learning — error-driven weight updates
+    # Learning — local predictive coding weight updates
     # -------------------------------------------------------------------
 
     def learn(self, learning_rate: float = 0.01,

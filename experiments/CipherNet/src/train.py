@@ -232,19 +232,23 @@ def stage_ans_grounding(brain: Brain, epochs: int = 50, verbose: bool = False):
 # -----------------------------------------------------------------------
 
 def stage_addition(brain: Brain, epochs: int = 100, verbose: bool = False):
-    """Teach single-digit addition via predictive coding.
+    """Teach single-digit addition via pure local predictive coding.
+
+    The output clamp IS a prediction (active inference: "I predict
+    the answer is 7"). The system settles to minimize prediction
+    error everywhere. Each node's LOCAL error drives its own learning.
+    No backward sweep. No global error signal.
 
     Training loop:
-    1. Feed "A+B=" tokens (activate input columns)
-    2. Clamp desired output (goal prediction)
-    3. Settle with both input + output clamped (prospective config)
-    4. Learn from settled prediction errors
-    5. Periodically test free inference (no output clamp)
+    1. Feed "A+B=" tokens
+    2. Settle with input AND output clamped
+       (input = sensory evidence, output = goal/prediction)
+    3. Learn from LOCAL prediction errors at every node
+    4. Test: settle with input only (no output clamp)
     """
-    print("\n=== Addition (Predictive Coding) ===")
+    print("\n=== Addition (Pure Local Predictive Coding) ===")
     graph = brain.graph
 
-    # All single-digit pairs with single-char result.
     small_pairs = [(a, b) for a in range(10) for b in range(10)
                    if a + b <= 9]
     random.seed(42)
@@ -267,39 +271,29 @@ def stage_addition(brain: Brain, epochs: int = 100, verbose: bool = False):
             for tok in tokens:
                 brain.feed(tok, n_steps=1)
 
-            # 2. Build clamp: fix inputs + desired output.
-            clamp = build_clamp(brain, tokens, expected)
-
-            # 3. Settle with INPUT clamped at full strength, OUTPUT free.
-            #    Clamp at 1.0: "this token IS in the input" (not its
-            #    current decayed value). The system must GENERATE the
-            #    answer from the clamped question.
-            input_clamp = {}
-            for tok in set(tokens):  # unique tokens
+            # 2. Settle with BOTH input AND output clamped.
+            #    Input clamp = sensory evidence ("this is 3+4=")
+            #    Output clamp = prediction/goal ("I predict the answer is 7")
+            #    This IS active inference: the system adjusts internal
+            #    state to be consistent with both the question and answer.
+            #    Every node computes its own LOCAL prediction error.
+            clamp = {}
+            for tok in set(tokens):
                 col = brain.tio._input_columns.get(tok)
                 if col:
-                    input_clamp[col['L4']] = 1.0
-            brain.settle(n_steps=15, clamp=input_clamp)
-
-            # 4. Compute teaching error at CORRECT output only.
-            #    error = 1.0 - activation (how far from target).
-            #    Don't suppress wrong outputs via error — the inhibitor
-            #    handles competition. Teaching signal = "boost the
-            #    right answer," not "suppress everything else."
+                    clamp[col['L4']] = 1.0
+            # Output = goal prediction.
             out_node = brain.tio._output_token_map.get(expected)
-            clamp_errors = {}
             if out_node is not None:
-                node = graph.get_node(out_node)
-                clamp_errors[out_node] = 1.0 - (node.activation if node else 0.0)
+                clamp[out_node] = 1.0
 
-            # 5. Backward error propagation from teaching signal.
-            # Track teaching error BEFORE backward propagation.
-            total_error += sum(e**2 for e in clamp_errors.values())
+            brain.settle(n_steps=20, clamp=clamp)
+            total_error += graph.total_error()
 
-            brain.propagate_errors(n_passes=3, clamp_errors=clamp_errors)
-
-            # 6. Learn from the discrepancy.
-            graph.learn(learning_rate=0.001, synaptogenesis=False,
+            # 3. Learn from LOCAL errors — each node's own
+            #    (sensory - prediction) drives its own weight updates.
+            #    No backward sweep. No global signal. Pure local.
+            graph.learn(learning_rate=0.01, synaptogenesis=False,
                         weight_decay=0.0)
 
         # Evaluate holdout (free inference, no clamp).
