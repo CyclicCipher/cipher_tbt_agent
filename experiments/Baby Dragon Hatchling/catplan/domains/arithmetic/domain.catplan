@@ -1,0 +1,40 @@
+-- Arithmetic domain in CatPlan
+-- Tests adjunctions (inverse operations) and initial algebras (recursion).
+-- This is a GIVEN domain (hand-authored) for testing the planner.
+
+category Arithmetic where
+
+  -- Types
+  type Num
+
+  -- Predicates
+  pred value   : Num -> Num -> Prop
+  pred sum     : Num -> Num -> Num -> Prop
+  pred diff    : Num -> Num -> Num -> Prop
+  pred product : Num -> Num -> Num -> Prop
+  pred succ_of : Num -> Num -> Prop
+
+  -- Actions
+  action add(a : Num, b : Num, c : Num)
+    require value(a, a)
+    require value(b, b)
+    effect sum(a, b, c)
+
+  action subtract(c : Num, b : Num, a : Num)
+    require value(c, c)
+    require value(b, b)
+    effect diff(c, b, a)
+
+  action multiply(a : Num, b : Num, c : Num)
+    require value(a, a)
+    require value(b, b)
+    effect product(a, b, c)
+
+  -- D.2: Adjunctions — inverse operations
+  adjunction add_sub : add -| subtract
+
+  -- D.5: Initial algebra — natural numbers
+  initial_algebra Nat
+    carrier Num
+    zero n0
+    succ succ_of

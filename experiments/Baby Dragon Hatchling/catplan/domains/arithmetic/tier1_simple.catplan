@@ -1,0 +1,54 @@
+-- Arithmetic: Tier 1 — direct computation
+
+problem add_3_4
+  domain Arithmetic
+  objects
+    n0 : Num
+    n1 : Num
+    n2 : Num
+    n3 : Num
+    n4 : Num
+    n5 : Num
+    n6 : Num
+    n7 : Num
+  init
+    value(n0, n0)
+    value(n1, n1)
+    value(n2, n2)
+    value(n3, n3)
+    value(n4, n4)
+    value(n5, n5)
+    value(n6, n6)
+    value(n7, n7)
+    succ_of(n0, n1)
+    succ_of(n1, n2)
+    succ_of(n2, n3)
+    succ_of(n3, n4)
+    succ_of(n4, n5)
+    succ_of(n5, n6)
+    succ_of(n6, n7)
+  goal
+    sum(n3, n4, n7)
+
+problem subtract_7_3
+  domain Arithmetic
+  objects
+    n0 : Num
+    n1 : Num
+    n2 : Num
+    n3 : Num
+    n4 : Num
+    n5 : Num
+    n6 : Num
+    n7 : Num
+  init
+    value(n0, n0)
+    value(n1, n1)
+    value(n2, n2)
+    value(n3, n3)
+    value(n4, n4)
+    value(n5, n5)
+    value(n6, n6)
+    value(n7, n7)
+  goal
+    diff(n7, n3, n4)

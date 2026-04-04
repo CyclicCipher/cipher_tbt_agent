@@ -179,6 +179,16 @@ class KnowledgeGraph:
         # Reverse indices: value ↔ NodeId
         self._value_to_node: dict[Any, NodeId] = {}
         self._node_to_value: dict[NodeId, Any] = {}  # O(1) reverse lookup
+        # --- Active set: only nodes with activation >= threshold ---
+        # Replaces O(N) full scans of _nodes for decay, spread, active_nodes.
+        # Maintained by activate(), decay(), and deactivate().
+        self._active_set: dict[NodeId, float] = {}  # {nid: activation}
+        # --- Working memory: nodes held active (no decay) ---
+        # Surprise-gated: high-surprise tokens are held in WM while
+        # predictable tokens decay normally. This carries input information
+        # across long template spans to the answer position.
+        self._wm_set: set[NodeId] = set()
+        self._wm_capacity: int = 25  # Miller's law + individual chars
         # PMI cache: computed during consolidation, used by select_action.
         # Maps (src, tgt) → PMI score. Positive = specifically associated.
         self._pmi: dict[tuple[NodeId, NodeId], float] = {}
@@ -249,24 +259,74 @@ class KnowledgeGraph:
         node = self._nodes.get(nid)
         if node is None:
             return
-        node.activation = min(SPREAD_CAP, level)
+        clamped = min(SPREAD_CAP, level)
+        node.activation = clamped
+        # Maintain _active_set.
+        if clamped >= ACTIVATION_THRESHOLD:
+            self._active_set[nid] = clamped
+        else:
+            self._active_set.pop(nid, None)
         # Exposure builds resting potential.
         node.resting = min(1.0, node.resting + RESTING_GROWTH)
 
+    def deactivate(self, nid: NodeId) -> None:
+        """Set a node's activation to 0 and remove from active set."""
+        node = self._nodes.get(nid)
+        if node is not None:
+            node.activation = 0.0
+        self._active_set.pop(nid, None)
+
     def decay(self) -> None:
-        """Decay all activations toward resting potential."""
-        for node in self._nodes.values():
-            node.activation *= DECAY_FACTOR
-            if node.activation < ACTIVATION_THRESHOLD:
-                node.activation = 0.0
+        """Decay activations of active nodes only. O(|active|) not O(N).
+
+        Nodes in working memory (_wm_set) are skipped — they don't decay.
+        """
+        to_remove: list[NodeId] = []
+        wm = self._wm_set
+        for nid, act in self._active_set.items():
+            if nid in wm:
+                continue  # WM nodes don't decay
+            new_act = act * DECAY_FACTOR
+            if new_act < ACTIVATION_THRESHOLD:
+                new_act = 0.0
+                to_remove.append(nid)
+            self._nodes[nid].activation = new_act
+            self._active_set[nid] = new_act
+        for nid in to_remove:
+            del self._active_set[nid]
 
     def active_nodes(self) -> dict[NodeId, float]:
-        """Return {node_id: activation} for all active nodes."""
-        return {
-            nid: n.activation
-            for nid, n in self._nodes.items()
-            if n.activation >= ACTIVATION_THRESHOLD
-        }
+        """Return {node_id: activation} for all active nodes. O(|active|)."""
+        return dict(self._active_set)
+
+    # -------------------------------------------------------------------
+    # Working memory
+    # -------------------------------------------------------------------
+
+    def wm_hold(self, nid: NodeId) -> None:
+        """Add a node to working memory (no decay until released).
+
+        If WM is full, the oldest entry is evicted (FIFO via set iteration).
+        """
+        if nid in self._wm_set:
+            return
+        if len(self._wm_set) >= self._wm_capacity:
+            # Evict oldest (first item in set iteration order — insertion order in CPython 3.7+).
+            oldest = next(iter(self._wm_set))
+            self._wm_set.discard(oldest)
+        self._wm_set.add(nid)
+
+    def wm_release(self, nid: NodeId) -> None:
+        """Remove a node from working memory (it will decay normally)."""
+        self._wm_set.discard(nid)
+
+    def wm_release_all(self) -> None:
+        """Clear all working memory entries."""
+        self._wm_set.clear()
+
+    def wm_contents(self) -> set[NodeId]:
+        """Return the current working memory set."""
+        return set(self._wm_set)
 
     # -------------------------------------------------------------------
     # Edges (with adjacency index)
@@ -321,6 +381,12 @@ class KnowledgeGraph:
         if out is not None:
             try:
                 out.remove(edge)
+            except ValueError:
+                pass
+        inc = self._incoming.get(tgt)
+        if inc is not None:
+            try:
+                inc.remove(edge)
             except ValueError:
                 pass
         return True
@@ -442,14 +508,15 @@ class KnowledgeGraph:
         """
         predicted: dict[NodeId, float] = {}
 
-        for nid, node in self._nodes.items():
-            if node.activation < SPREAD_THRESHOLD:
+        # Iterate only active nodes, not all nodes. O(|active|) not O(N).
+        for nid, act in self._active_set.items():
+            if act < SPREAD_THRESHOLD:
                 continue
             out = self._outgoing.get(nid)
             if not out:
                 continue
 
-            src_act = node.activation
+            src_act = act
 
             # Separate edges by role and sign.
             trans_pos: list[tuple[Edge, float]] = []
@@ -703,10 +770,7 @@ class KnowledgeGraph:
         if prev_active:
             contributing_sources = set(prev_active.keys())
         else:
-            contributing_sources = set(
-                nid for nid, node in self._nodes.items()
-                if node.activation >= ACTIVATION_THRESHOLD
-            )
+            contributing_sources = set(self._active_set.keys())
 
         for src_nid in contributing_sources:
             for edge in self._outgoing.get(src_nid, ()):

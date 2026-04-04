@@ -1,0 +1,59 @@
+-- Logistics domain in CatPlan
+-- Packages, trucks, cities, airports, planes.
+
+category Logistics where
+
+  -- Types
+  type Package
+  type City
+  type Airport
+  type Location = City | Airport
+  type Truck
+  type Plane
+  type Vehicle = Truck | Plane
+
+  -- Predicates
+  pred at_pkg  : Package -> Location -> Prop
+  pred at_trk  : Truck -> Location -> Prop
+  pred at_pln  : Plane -> Airport -> Prop
+  pred in_trk  : Package -> Truck -> Prop
+  pred in_pln  : Package -> Plane -> Prop
+  pred connected : Location -> Location -> Prop
+
+  -- Actions
+  action load_truck(p : Package, t : Truck, loc : Location)
+    require at_pkg(p, loc)
+    require at_trk(t, loc)
+    effect in_trk(p, t)
+    effect not(at_pkg(p, loc))
+
+  action unload_truck(p : Package, t : Truck, loc : Location)
+    require in_trk(p, t)
+    require at_trk(t, loc)
+    effect at_pkg(p, loc)
+    effect not(in_trk(p, t))
+
+  action drive(t : Truck, from : Location, to : Location)
+    require at_trk(t, from)
+    require connected(from, to)
+    require from /= to
+    effect at_trk(t, to)
+    effect not(at_trk(t, from))
+
+  action load_plane(p : Package, pl : Plane, a : Airport)
+    require at_pkg(p, a)
+    require at_pln(pl, a)
+    effect in_pln(p, pl)
+    effect not(at_pkg(p, a))
+
+  action unload_plane(p : Package, pl : Plane, a : Airport)
+    require in_pln(p, pl)
+    require at_pln(pl, a)
+    effect at_pkg(p, a)
+    effect not(in_pln(p, pl))
+
+  action fly(pl : Plane, from : Airport, to : Airport)
+    require at_pln(pl, from)
+    require from /= to
+    effect at_pln(pl, to)
+    effect not(at_pln(pl, from))

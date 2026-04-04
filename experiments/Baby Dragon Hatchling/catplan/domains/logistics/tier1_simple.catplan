@@ -1,0 +1,16 @@
+-- Logistics: Tier 1 — simple direct delivery
+
+problem direct_delivery
+  domain Logistics
+  objects
+    pkg1 : Package
+    truck1 : Truck
+    cityA : City
+    cityB : City
+  init
+    at_pkg(pkg1, cityA)
+    at_trk(truck1, cityA)
+    connected(cityA, cityB)
+    connected(cityB, cityA)
+  goal
+    at_pkg(pkg1, cityB)

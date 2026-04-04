@@ -1,0 +1,34 @@
+{
+  "name": "ans",
+  "description": "Approximate Number System — magnitude comparison via graph structure",
+
+  "nodes": [
+    {"id": "input_a", "layer": 4, "role": "input", "description": "Receives activation proportional to quantity A"},
+    {"id": "input_b", "layer": 4, "role": "input", "description": "Receives activation proportional to quantity B"},
+    {"id": "accumulator_a", "layer": 23, "role": "accumulator", "description": "Accumulates magnitude of A. Activation level = perceived magnitude."},
+    {"id": "accumulator_b", "layer": 23, "role": "accumulator", "description": "Accumulates magnitude of B. Activation level = perceived magnitude."},
+    {"id": "comparator", "layer": 23, "role": "comparator", "description": "Computes difference between accumulator activations. Inhibitory competition."},
+    {"id": "output_a_larger", "layer": 5, "role": "output", "description": "Active when A > B (by sufficient margin)"},
+    {"id": "output_b_larger", "layer": 5, "role": "output", "description": "Active when B > A (by sufficient margin)"},
+    {"id": "output_equal", "layer": 5, "role": "output", "description": "Active when A ≈ B (within Weber fraction)"}
+  ],
+
+  "edges": [
+    {"source": "input_a", "target": "accumulator_a", "type": "temporal", "weight": 1.0},
+    {"source": "input_b", "target": "accumulator_b", "type": "temporal", "weight": 1.0},
+    {"source": "accumulator_a", "target": "comparator", "type": "temporal", "weight": 1.0},
+    {"source": "accumulator_b", "target": "comparator", "type": "temporal", "weight": -1.0, "description": "Inhibitory — subtracts B from A at comparator"},
+    {"source": "comparator", "target": "output_a_larger", "type": "temporal", "weight": 1.0, "description": "Positive comparator → A larger"},
+    {"source": "comparator", "target": "output_b_larger", "type": "temporal", "weight": -1.0, "description": "Negative comparator → B larger"},
+    {"source": "comparator", "target": "output_equal", "type": "temporal", "weight": 0.0, "description": "Near-zero comparator → equal"},
+    {"source": "accumulator_a", "target": "accumulator_b", "type": "spatial", "weight": 1.0, "description": "Lateral connection for mutual inhibition / comparison"},
+    {"source": "output_a_larger", "target": "output_b_larger", "type": "spatial", "weight": -1.0, "description": "Mutual inhibition between outputs"},
+    {"source": "output_a_larger", "target": "output_equal", "type": "spatial", "weight": -1.0, "description": "Mutual inhibition"},
+    {"source": "output_b_larger", "target": "output_equal", "type": "spatial", "weight": -1.0, "description": "Mutual inhibition"}
+  ],
+
+  "properties": {
+    "weber_fraction": 0.15,
+    "description": "Weber fraction determines discrimination threshold. Adult humans ≈ 0.15. Ratio-dependent: 10 vs 5 (ratio 2) is easy, 10 vs 9 (ratio 1.11) is hard. The weber fraction is NOT implemented as code — it emerges from the inhibitory competition between accumulator nodes and the mutual inhibition between output nodes. The weight magnitudes on the comparator edges determine the effective weber fraction."
+  }
+}

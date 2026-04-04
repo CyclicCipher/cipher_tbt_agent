@@ -1,0 +1,63 @@
+{
+  "name": "basal_ganglia",
+  "description": "Basal ganglia — Go/NoGo gating circuit for PFC working memory. Implements the direct (D1, Go) and indirect (D2, NoGo) pathways. Controls which PFC stripes update vs maintain via disinhibition of the thalamus.",
+
+  "nodes": [
+    {"id": "d1_go_0", "role": "d1_msn", "stripe": 0, "description": "Direct pathway D1 MSN for stripe 0. When active: inhibits GPi → disinhibits thalamus → gate opens → WM updates."},
+    {"id": "d1_go_1", "role": "d1_msn", "stripe": 1, "description": "D1 MSN for stripe 1."},
+    {"id": "d1_go_2", "role": "d1_msn", "stripe": 2, "description": "D1 MSN for stripe 2 (goal)."},
+
+    {"id": "d2_nogo_0", "role": "d2_msn", "stripe": 0, "description": "Indirect pathway D2 MSN for stripe 0. When active: excites GPi (via GPe→STN→GPi) → inhibits thalamus → gate stays closed → WM maintains."},
+    {"id": "d2_nogo_1", "role": "d2_msn", "stripe": 1, "description": "D2 MSN for stripe 1."},
+    {"id": "d2_nogo_2", "role": "d2_msn", "stripe": 2, "description": "D2 MSN for stripe 2 (goal — usually active, keeping goal stable)."},
+
+    {"id": "gpe_0", "role": "gpe", "stripe": 0, "description": "External globus pallidus — tonically active, inhibited by D2 NoGo."},
+    {"id": "gpe_1", "role": "gpe", "stripe": 1},
+    {"id": "gpe_2", "role": "gpe", "stripe": 2},
+
+    {"id": "stn", "role": "stn", "description": "Subthalamic nucleus — excitatory. Receives from GPe (inhibitory). When GPe is suppressed by NoGo, STN fires and excites GPi, reinforcing the gate-closed state."},
+
+    {"id": "gpi_0", "role": "gpi", "stripe": 0, "description": "Internal globus pallidus for stripe 0. Tonically active (inhibits thalamus by default). Go pathway suppresses GPi → thalamus disinhibited. NoGo pathway excites GPi via STN → thalamus stays inhibited."},
+    {"id": "gpi_1", "role": "gpi", "stripe": 1},
+    {"id": "gpi_2", "role": "gpi", "stripe": 2},
+
+    {"id": "dopamine", "role": "dopamine", "description": "Dopamine signal (reward prediction error). Positive RPE strengthens D1 (Go) and weakens D2 (NoGo) for the actions that led to reward. Negative RPE does the opposite. This is how the system LEARNS when to gate."}
+  ],
+
+  "edges": [
+    {"source": "d1_go_0", "target": "gpi_0", "type": "temporal", "weight": -1.0, "description": "Direct pathway: D1 Go INHIBITS GPi (negative weight). Disinhibits thalamus."},
+    {"source": "d1_go_1", "target": "gpi_1", "type": "temporal", "weight": -1.0},
+    {"source": "d1_go_2", "target": "gpi_2", "type": "temporal", "weight": -1.0},
+
+    {"source": "d2_nogo_0", "target": "gpe_0", "type": "temporal", "weight": -1.0, "description": "Indirect pathway step 1: D2 NoGo INHIBITS GPe."},
+    {"source": "d2_nogo_1", "target": "gpe_1", "type": "temporal", "weight": -1.0},
+    {"source": "d2_nogo_2", "target": "gpe_2", "type": "temporal", "weight": -1.0},
+
+    {"source": "gpe_0", "target": "stn", "type": "temporal", "weight": -0.3, "description": "Indirect step 2: GPe INHIBITS STN. When GPe is suppressed by NoGo, STN is disinhibited."},
+    {"source": "gpe_1", "target": "stn", "type": "temporal", "weight": -0.3},
+    {"source": "gpe_2", "target": "stn", "type": "temporal", "weight": -0.3},
+
+    {"source": "stn", "target": "gpi_0", "type": "temporal", "weight": 0.5, "description": "Indirect step 3: STN EXCITES GPi (positive weight). Reinforces gate-closed."},
+    {"source": "stn", "target": "gpi_1", "type": "temporal", "weight": 0.5},
+    {"source": "stn", "target": "gpi_2", "type": "temporal", "weight": 0.5},
+
+    {"source": "d1_go_0", "target": "d2_nogo_0", "type": "spatial", "weight": -0.3, "description": "Go and NoGo compete within each stripe via lateral inhibition."},
+    {"source": "d2_nogo_0", "target": "d1_go_0", "type": "spatial", "weight": -0.3},
+    {"source": "d1_go_1", "target": "d2_nogo_1", "type": "spatial", "weight": -0.3},
+    {"source": "d2_nogo_1", "target": "d1_go_1", "type": "spatial", "weight": -0.3},
+    {"source": "d1_go_2", "target": "d2_nogo_2", "type": "spatial", "weight": -0.3},
+    {"source": "d2_nogo_2", "target": "d1_go_2", "type": "spatial", "weight": -0.3},
+
+    {"source": "dopamine", "target": "d1_go_0", "type": "temporal", "weight": 0.5, "description": "Dopamine excites D1 (Go) MSNs — positive RPE strengthens Go."},
+    {"source": "dopamine", "target": "d1_go_1", "type": "temporal", "weight": 0.5},
+    {"source": "dopamine", "target": "d1_go_2", "type": "temporal", "weight": 0.5},
+    {"source": "dopamine", "target": "d2_nogo_0", "type": "temporal", "weight": -0.5, "description": "Dopamine inhibits D2 (NoGo) MSNs — positive RPE weakens NoGo."},
+    {"source": "dopamine", "target": "d2_nogo_1", "type": "temporal", "weight": -0.5},
+    {"source": "dopamine", "target": "d2_nogo_2", "type": "temporal", "weight": -0.5}
+  ],
+
+  "properties": {
+    "default_state": "GPi tonically active → thalamus inhibited → gates closed. Go pathway must actively fire to open a gate. This means WM holds by DEFAULT — you need a signal to update, not a signal to hold.",
+    "dopamine_role": "Reward prediction error. Positive: strengthens the gating decisions that led to reward. Negative: weakens them. Over time, the system learns WHEN to open each gate."
+  }
+}

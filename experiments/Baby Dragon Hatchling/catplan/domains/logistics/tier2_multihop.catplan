@@ -1,0 +1,40 @@
+-- Logistics: Tier 2 — multi-hop delivery through 3 cities
+
+problem three_city_delivery
+  domain Logistics
+  objects
+    pkg1 : Package
+    truck1 : Truck
+    cityA : City
+    cityB : City
+    cityC : City
+  init
+    at_pkg(pkg1, cityA)
+    at_trk(truck1, cityA)
+    connected(cityA, cityB)
+    connected(cityB, cityA)
+    connected(cityB, cityC)
+    connected(cityC, cityB)
+  goal
+    at_pkg(pkg1, cityC)
+
+problem two_packages
+  domain Logistics
+  objects
+    pkg1 : Package
+    pkg2 : Package
+    truck1 : Truck
+    cityA : City
+    cityB : City
+    cityC : City
+  init
+    at_pkg(pkg1, cityA)
+    at_pkg(pkg2, cityB)
+    at_trk(truck1, cityA)
+    connected(cityA, cityB)
+    connected(cityB, cityA)
+    connected(cityB, cityC)
+    connected(cityC, cityB)
+  goal
+    at_pkg(pkg1, cityC)
+    at_pkg(pkg2, cityC)

@@ -1,0 +1,80 @@
+{
+  "name": "pfc",
+  "description": "Prefrontal Cortex — modified cortical columns with stronger recurrence. Working memory stripes, sequencer, error monitor, lateral inhibition. Gates are EXTERNAL (in basal ganglia subgraph).",
+
+  "nodes": [
+    {"id": "wm0:L4", "layer": 4, "role": "input", "stripe": 0, "description": "Working memory stripe 0 input."},
+    {"id": "wm0:L23", "layer": 23, "role": "process", "stripe": 0, "description": "WM0 processing — strong recurrent self-connection."},
+    {"id": "wm0:L5", "layer": 5, "role": "output", "stripe": 0, "description": "WM0 output."},
+    {"id": "wm0:L6", "layer": 6, "role": "feedback", "stripe": 0, "description": "WM0 feedback."},
+
+    {"id": "wm1:L4", "layer": 4, "role": "input", "stripe": 1},
+    {"id": "wm1:L23", "layer": 23, "role": "process", "stripe": 1},
+    {"id": "wm1:L5", "layer": 5, "role": "output", "stripe": 1},
+    {"id": "wm1:L6", "layer": 6, "role": "feedback", "stripe": 1},
+
+    {"id": "wm2:L4", "layer": 4, "role": "input", "stripe": 2, "description": "Task/goal stripe."},
+    {"id": "wm2:L23", "layer": 23, "role": "process", "stripe": 2},
+    {"id": "wm2:L5", "layer": 5, "role": "output", "stripe": 2},
+    {"id": "wm2:L6", "layer": 6, "role": "feedback", "stripe": 2},
+
+    {"id": "inhibitor", "layer": 23, "role": "inhibitor", "description": "Lateral inhibition between stripes."},
+
+    {"id": "monitor:L4", "layer": 4, "role": "input", "description": "Error monitor input."},
+    {"id": "monitor:L23", "layer": 23, "role": "process", "description": "Error monitor processing."},
+    {"id": "monitor:L5", "layer": 5, "role": "output", "description": "Error monitor output."},
+    {"id": "monitor:L6", "layer": 6, "role": "feedback"},
+
+    {"id": "sequencer:L4", "layer": 4, "role": "input", "description": "Sequencer input."},
+    {"id": "sequencer:L23", "layer": 23, "role": "process", "description": "Sequencer — maintains task position."},
+    {"id": "sequencer:L5", "layer": 5, "role": "output", "description": "Sequencer output."},
+    {"id": "sequencer:L6", "layer": 6, "role": "feedback"}
+  ],
+
+  "edges": [
+    {"source": "wm0:L4", "target": "wm0:L23", "type": "temporal", "weight": 1.0},
+    {"source": "wm0:L23", "target": "wm0:L23", "type": "temporal", "weight": 0.95, "description": "Recurrent self-loop — persistent activity."},
+    {"source": "wm0:L23", "target": "wm0:L5", "type": "temporal", "weight": 1.0},
+    {"source": "wm0:L5", "target": "wm0:L6", "type": "temporal", "weight": 1.0},
+    {"source": "wm0:L6", "target": "wm0:L4", "type": "temporal", "weight": 0.5},
+
+    {"source": "wm1:L4", "target": "wm1:L23", "type": "temporal", "weight": 1.0},
+    {"source": "wm1:L23", "target": "wm1:L23", "type": "temporal", "weight": 0.95},
+    {"source": "wm1:L23", "target": "wm1:L5", "type": "temporal", "weight": 1.0},
+    {"source": "wm1:L5", "target": "wm1:L6", "type": "temporal", "weight": 1.0},
+    {"source": "wm1:L6", "target": "wm1:L4", "type": "temporal", "weight": 0.5},
+
+    {"source": "wm2:L4", "target": "wm2:L23", "type": "temporal", "weight": 1.0},
+    {"source": "wm2:L23", "target": "wm2:L23", "type": "temporal", "weight": 0.98, "description": "Goal stripe — strongest persistence."},
+    {"source": "wm2:L23", "target": "wm2:L5", "type": "temporal", "weight": 1.0},
+    {"source": "wm2:L5", "target": "wm2:L6", "type": "temporal", "weight": 1.0},
+    {"source": "wm2:L6", "target": "wm2:L4", "type": "temporal", "weight": 0.5},
+
+    {"source": "wm0:L5", "target": "inhibitor", "type": "temporal", "weight": 0.3},
+    {"source": "wm1:L5", "target": "inhibitor", "type": "temporal", "weight": 0.3},
+    {"source": "wm2:L5", "target": "inhibitor", "type": "temporal", "weight": 0.3},
+    {"source": "inhibitor", "target": "wm0:L23", "type": "spatial", "weight": -0.2},
+    {"source": "inhibitor", "target": "wm1:L23", "type": "spatial", "weight": -0.2},
+    {"source": "inhibitor", "target": "wm2:L23", "type": "spatial", "weight": -0.2},
+
+    {"source": "wm0:L5", "target": "wm1:L4", "type": "temporal", "weight": 0.5, "description": "Stripe-to-stripe for chaining."},
+    {"source": "wm1:L5", "target": "wm0:L4", "type": "temporal", "weight": 0.5},
+
+    {"source": "monitor:L4", "target": "monitor:L23", "type": "temporal", "weight": 1.0},
+    {"source": "monitor:L23", "target": "monitor:L5", "type": "temporal", "weight": 1.0},
+    {"source": "monitor:L5", "target": "monitor:L6", "type": "temporal", "weight": 1.0},
+    {"source": "monitor:L6", "target": "monitor:L4", "type": "temporal", "weight": 0.5},
+
+    {"source": "wm0:L5", "target": "monitor:L4", "type": "temporal", "weight": 0.5},
+    {"source": "wm1:L5", "target": "monitor:L4", "type": "temporal", "weight": 0.5},
+
+    {"source": "sequencer:L4", "target": "sequencer:L23", "type": "temporal", "weight": 1.0},
+    {"source": "sequencer:L23", "target": "sequencer:L23", "type": "temporal", "weight": 0.9},
+    {"source": "sequencer:L23", "target": "sequencer:L5", "type": "temporal", "weight": 1.0},
+    {"source": "sequencer:L5", "target": "sequencer:L6", "type": "temporal", "weight": 1.0},
+    {"source": "sequencer:L6", "target": "sequencer:L4", "type": "temporal", "weight": 0.5},
+    {"source": "wm0:L5", "target": "sequencer:L4", "type": "temporal", "weight": 0.3},
+    {"source": "wm1:L5", "target": "sequencer:L4", "type": "temporal", "weight": 0.3},
+    {"source": "wm2:L5", "target": "sequencer:L4", "type": "temporal", "weight": 0.3}
+  ]
+}

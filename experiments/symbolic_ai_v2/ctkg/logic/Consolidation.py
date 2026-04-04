@@ -133,9 +133,10 @@ def prune(
     for nid in dead_nodes:
         del kg._nodes[nid]
         kg._outgoing.pop(nid, None)
-        to_remove_val = [v for v, n in kg._value_to_node.items() if n == nid]
-        for v in to_remove_val:
-            del kg._value_to_node[v]
+        kg._active_set.pop(nid, None)
+        val = kg._node_to_value.pop(nid, None)
+        if val is not None:
+            kg._value_to_node.pop(val, None)
 
     return {
         "edges_pruned": len(dead_edges),

@@ -1,0 +1,32 @@
+-- Blocks World: Tier 2 — Towers of Hanoi with 3 blocks
+-- Requires 7 moves. Tests multi-step planning with constraints.
+
+problem hanoi_3
+  domain BlocksWorld
+  objects
+    hand : Hand
+    a : Block    -- smallest
+    b : Block    -- medium
+    c : Block    -- largest
+    peg1 : Block -- pegs modeled as blocks (can have things on them)
+    peg2 : Block
+    peg3 : Block
+  init
+    empty(hand)
+    on(a, b)
+    on(b, c)
+    on(c, peg1)
+    on_table(peg1)
+    on_table(peg2)
+    on_table(peg3)
+    clear(a)
+    clear(peg2)
+    clear(peg3)
+  goal
+    on(a, b)
+    on(b, c)
+    on(c, peg3)
+  -- Constraint: can only place smaller on larger.
+  -- This is encoded in the invariants, not the goal.
+  -- The planner must discover this from failed attempts or
+  -- it must be provided as a domain constraint.

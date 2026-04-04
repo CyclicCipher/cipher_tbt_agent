@@ -1,0 +1,36 @@
+{
+  "name": "thalamus",
+  "description": "Thalamus — relay and gating between cortical columns. Every cortical L5→L4 connection passes through a thalamic relay. GPi controls relay state (inhibited by default, disinhibited by Go pathway). Reticular nucleus creates competition between relays.",
+
+  "nodes": [
+    {"id": "relay_0", "role": "relay", "stripe": 0, "description": "Thalamic relay for PFC stripe 0. Passes signals from operation columns to PFC WM0 when disinhibited by GPi."},
+    {"id": "relay_1", "role": "relay", "stripe": 1, "description": "Relay for stripe 1."},
+    {"id": "relay_2", "role": "relay", "stripe": 2, "description": "Relay for stripe 2 (goal)."},
+
+    {"id": "relay_add", "role": "relay", "description": "Relay for addition column output. Routes add results to PFC."},
+    {"id": "relay_mul", "role": "relay", "description": "Relay for multiplication column output."},
+    {"id": "relay_sub", "role": "relay", "description": "Relay for subtraction column output."},
+
+    {"id": "trn_0", "role": "reticular", "stripe": 0, "description": "Thalamic reticular nucleus for stripe 0. Inhibitory — creates competition between relays. When relay_0 is active, TRN_0 inhibits neighboring relays."},
+    {"id": "trn_1", "role": "reticular", "stripe": 1},
+    {"id": "trn_2", "role": "reticular", "stripe": 2}
+  ],
+
+  "edges": [
+    {"source": "relay_0", "target": "trn_0", "type": "temporal", "weight": 0.5, "description": "Active relay excites its reticular neuron."},
+    {"source": "relay_1", "target": "trn_1", "type": "temporal", "weight": 0.5},
+    {"source": "relay_2", "target": "trn_2", "type": "temporal", "weight": 0.5},
+
+    {"source": "trn_0", "target": "relay_1", "type": "spatial", "weight": -0.3, "description": "Reticular inhibition: active relay suppresses neighbors."},
+    {"source": "trn_0", "target": "relay_2", "type": "spatial", "weight": -0.3},
+    {"source": "trn_1", "target": "relay_0", "type": "spatial", "weight": -0.3},
+    {"source": "trn_1", "target": "relay_2", "type": "spatial", "weight": -0.3},
+    {"source": "trn_2", "target": "relay_0", "type": "spatial", "weight": -0.3},
+    {"source": "trn_2", "target": "relay_1", "type": "spatial", "weight": -0.3}
+  ],
+
+  "properties": {
+    "default_state": "Relays are inhibited by GPi (via connections specified in config.json). When Go pathway disinhibits a relay, signals pass through to PFC.",
+    "reticular_function": "The TRN creates winner-take-all competition. When one relay opens, it suppresses the others. This focuses attention — only the most relevant input reaches PFC at any given moment."
+  }
+}

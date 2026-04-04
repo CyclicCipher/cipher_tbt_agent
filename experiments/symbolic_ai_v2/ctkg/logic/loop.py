@@ -22,7 +22,7 @@ if _REPO_ROOT not in sys.path:
 
 from experiments.symbolic_ai_v2.ctkg.logic.graph import (
     KnowledgeGraph, NodeId, COOCCURRENCE, TRANSITION,
-    ACTIVATION_THRESHOLD,
+    ACTIVATION_THRESHOLD, IDENTITY, CONTEXT,
 )
 from experiments.symbolic_ai_v2.ctkg.logic.hippocampus import Hippocampus
 
@@ -42,6 +42,8 @@ class AgenticLoop:
 
     # Default: consolidate every 100 observe() calls. Set to 0 to disable.
     CONSOLIDATION_INTERVAL: int = 100
+    # Surprise threshold for working memory entry.
+    WM_SURPRISE_THRESHOLD: float = 0.5
 
     def __init__(self, kg: KnowledgeGraph, tokenizer=None) -> None:
         self.kg = kg
@@ -55,6 +57,7 @@ class AgenticLoop:
         self._prev_active: dict[NodeId, float] = {}
         self._last_action_nid: NodeId | None = None
         self._last_action_context: dict[NodeId, float] = {}
+        self._prev_context_nid: NodeId | None = None  # last n-gram context node
         self._last_consolidation_step: int = 0
         self._last_consolidation_snapshot: int = 0
         self._suppress_observation: bool = False
@@ -97,7 +100,6 @@ class AgenticLoop:
         self.kg.decay()
 
         # Step 2–3: resolve tokens to nodes, activate them.
-        nodes = self.kg._nodes
         current_nids: list[NodeId] = []
         actual: dict[NodeId, float] = {}
         tokenizer = self.tokenizer
@@ -107,45 +109,27 @@ class AgenticLoop:
                 nid = self.kg.get_or_create(tok_id)
             else:
                 nid = self.kg.get_or_create(tok)
-            node = nodes[nid]
-            node.activation = 1.0
-            node.resting = min(1.0, node.resting + 0.01)
+            self.kg.activate(nid, 1.0)
             current_nids.append(nid)
             actual[nid] = 1.0
 
-        # Step 3.5: activate context nodes (layer 1).
-        # A context node fires when ALL its constituent identity nodes are
-        # active. Only check __context__ pattern nodes (not chunks/ngrams).
-        # Uses _node_to_value for O(1) value lookup.
-        from experiments.symbolic_ai_v2.ctkg.logic.graph import CONTEXT, IDENTITY, ACTIVATION_THRESHOLD as _AT
-        active_ids = set(
-            nid for nid, node in nodes.items()
-            if node.activation >= _AT and node.layer == IDENTITY
-        )
-        if active_ids:
-            for ctx_nid in self.kg.nodes_by_layer(CONTEXT):
-                val = self.kg._node_to_value.get(ctx_nid)
-                if not isinstance(val, tuple) or len(val) < 2:
-                    continue
-                if val[0] != "__context__":
-                    continue
-                pattern = val[1]
-                if isinstance(pattern, frozenset) and pattern.issubset(active_ids):
-                    nodes[ctx_nid].activation = 1.0
+        # Step 3.5: context is the n-gram — no pattern scan needed.
+        # The n-gram context node (created below in step 4.5) IS the context.
+        # No O(N) scan of __context__ pattern nodes. Context = hash lookup.
 
-        # Step 4: co-occurrence edges (causal masking: forward-only).
-        all_nids = list(dict.fromkeys(current_nids))
+        # Step 4: co-occurrence edges — context node → current tokens only.
+        # NOT all-pairs. The n-gram context captures the sequential context;
+        # individual identity tokens don't need pairwise edges.
+        # (Co-occurrence edges between tokens in the same fixation are created
+        # only for consecutive pairs, not all pairs.)
+        unique_nids = list(dict.fromkeys(current_nids))
         COOCCUR_RATE = 0.15
-        unique_nids = list(dict.fromkeys(all_nids))
-        n = len(unique_nids)
-        for i in range(n):
-            for j in range(i + 1, n):
-                src, tgt = unique_nids[i], unique_nids[j]
-                if src == tgt:
-                    continue
+        for i in range(len(unique_nids) - 1):
+            src, tgt = unique_nids[i], unique_nids[i + 1]
+            if src != tgt:
                 edge = self.kg.get_or_create_edge(src, tgt, role=COOCCURRENCE)
                 edge.strengthen(COOCCUR_RATE)
-                edge.observe_distance(j - i)
+                edge.observe_distance(1)
 
         # Step 4.5: N-gram context learning.
         # If recent_tokens has enough history, create an n-gram context node
@@ -161,27 +145,35 @@ class AgenticLoop:
                 self._recent_tokens = self._recent_tokens[-self.NGRAM_SIZE:]
 
         # Create/strengthen n-gram context → current token transition.
+        # This is the ONLY source of transition edges per timestep.
+        # The context node IS the sequential context — one edge per
+        # (context, next_token) pair, not all-pairs from prev_active.
+        ctx_nid_current = None
         if len(self._recent_tokens) >= self.NGRAM_SIZE:
             ctx_key = ("__ngram__", tuple(self._recent_tokens[-(self.NGRAM_SIZE-1):]))
-            ctx_nid = self.kg.get_or_create(ctx_key, layer=CONTEXT)
-            ctx_node = self.kg.node(ctx_nid)
-            if ctx_node is not None:
-                ctx_node.activation = 1.0
+            ctx_nid_current = self.kg.get_or_create(ctx_key, layer=CONTEXT)
+            self.kg.activate(ctx_nid_current, 1.0)
             # The current token is what follows this context.
             for nid in current_nids:
-                edge = self.kg.get_or_create_edge(ctx_nid, nid, role=TRANSITION)
+                edge = self.kg.get_or_create_edge(ctx_nid_current, nid, role=TRANSITION)
                 edge.strengthen(0.15)
 
-        # Step 5: transition edges from previous timestep.
+        # Step 5: transition edge from previous context to current context.
+        # Instead of all-prev_active × all-new_nids (O(N²)), create ONE
+        # edge: prev_context → current_context (context chain).
+        # Plus: prev_context → current tokens (for cross-context prediction).
         is_action_obs = edge_types and len(edge_types) > 0 and edge_types[0] == 2
-        if self._prev_active and not is_action_obs:
-            cur_set = set(current_nids)
-            prev_set = set(self._prev_active)
-            new_nids = cur_set - prev_set
-            for prev_nid in self._prev_active:
-                for cur_nid in new_nids:
-                    edge = self.kg.get_or_create_edge(prev_nid, cur_nid, role=TRANSITION)
-                    edge.strengthen(0.1)
+        if self._prev_context_nid is not None and not is_action_obs:
+            if ctx_nid_current is not None and ctx_nid_current != self._prev_context_nid:
+                # Context-to-context transition (displacement).
+                edge = self.kg.get_or_create_edge(
+                    self._prev_context_nid, ctx_nid_current, role=TRANSITION)
+                edge.strengthen(0.1)
+            # Previous context → current identity tokens.
+            for nid in current_nids:
+                edge = self.kg.get_or_create_edge(
+                    self._prev_context_nid, nid, role=TRANSITION)
+                edge.strengthen(0.1)
 
         # Step 6: learn from the PENDING prediction.
         if self._pending_prediction:
@@ -189,6 +181,16 @@ class AgenticLoop:
                 self._pending_prediction, actual,
                 prev_active=self._prev_active if self._prev_active else None,
             )
+
+        # Step 6a: surprise-gated working memory.
+        # High-surprise tokens (unpredictable content like date digits) get
+        # held in WM so their activation survives across long template spans.
+        # Low-surprise tokens (predictable template text) decay normally.
+        if self._last_surprise > self.WM_SURPRISE_THRESHOLD:
+            for nid in current_nids:
+                node = self.kg.node(nid)
+                if node is not None and node.layer == IDENTITY:
+                    self.kg.wm_hold(nid)
 
         if is_action_obs and self._last_actual:
             merged = dict(self._last_actual)
@@ -242,9 +244,10 @@ class AgenticLoop:
         cooccur_spread = self.kg.spread(role_filter=COOCCURRENCE)
         for nid, level in cooccur_spread.items():
             if level > 0:
-                node = nodes.get(nid)
+                node = self.kg.node(nid)
                 if node is not None:
-                    node.activation = max(node.activation, min(1.0, level * 0.5))
+                    new_act = max(node.activation, min(1.0, level * 0.5))
+                    self.kg.activate(nid, new_act)
 
         # Step 7b: spread TRANSITION edges (= predict what comes NEXT).
         self._pending_prediction = self.kg.spread(role_filter=TRANSITION)
@@ -252,23 +255,16 @@ class AgenticLoop:
             self._pending_prediction.pop(nid, None)
 
         # Step 8: store snapshot + observation record.
-        # During read(), observation storage is suppressed (read() stores
-        # one observation for the full sentence at the end).
         if self._suppress_observation:
             self.hippo.store(self.kg.active_nodes(), observed_nids=None)
         else:
             self.hippo.store(self.kg.active_nodes(), observed_nids=current_nids)
 
-        # Include the most recently created n-gram context in prev_active.
-        # Only ONE context node (the current n-gram), not all active contexts.
-        # This keeps transition edge creation O(1) per context.
-        prev = dict(actual)
-        if len(self._recent_tokens) >= self.NGRAM_SIZE - 1:
-            ctx_key = ("__ngram__", tuple(self._recent_tokens[-(self.NGRAM_SIZE-1):]))
-            ctx_nid = self.kg._value_to_node.get(ctx_key)
-            if ctx_nid is not None:
-                prev[ctx_nid] = 1.0
-        self._prev_active = prev
+        # Track the current context node for next timestep's transitions.
+        self._prev_context_nid = ctx_nid_current
+        self._prev_active = dict(actual)
+        if ctx_nid_current is not None:
+            self._prev_active[ctx_nid_current] = 1.0
         self._step_count += 1
 
         # Step 9: periodic consolidation.
@@ -345,6 +341,9 @@ class AgenticLoop:
         Snapshots per fixation = fine-grained activation patterns.
         One observation per sentence = the full episode.
         """
+        # Release WM from previous sentence — each sentence is independent.
+        self.kg.wm_release_all()
+
         pos = 0
         fixation_size = self.MIN_FIXATION
         n = len(characters)
@@ -379,11 +378,8 @@ class AgenticLoop:
             if len(chunk_nids) > 1 and surprise < self.SURPRISE_THRESHOLD:
                 # Low surprise multi-char fixation = recognized chunk.
                 chunk_key = ("__ngram__", tuple(chunk_nids))
-                from experiments.symbolic_ai_v2.ctkg.logic.graph import CONTEXT as _CTX
-                chunk_nid = self.kg.get_or_create(chunk_key, layer=_CTX)
-                chunk_node = self.kg.node(chunk_nid)
-                if chunk_node is not None:
-                    chunk_node.activation = 1.0
+                chunk_nid = self.kg.get_or_create(chunk_key, layer=CONTEXT)
+                self.kg.activate(chunk_nid, 1.0)
                 self._recent_tokens.append(chunk_nid)
             else:
                 # High surprise or single char: add individual tokens.
