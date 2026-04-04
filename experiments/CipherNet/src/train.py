@@ -246,8 +246,16 @@ def stage_addition(brain: Brain, epochs: int = 100, verbose: bool = False):
 
             total_error += graph.total_error()
 
-            # 4. Learn once from the settled state.
-            graph.learn(learning_rate=0.003, synaptogenesis=False,
+            # 4. Backward error propagation.
+            clamp_errors = {}
+            for nid, val in clamp.items():
+                node = graph.get_node(nid)
+                if node and abs(node.error) > 0.001:
+                    clamp_errors[nid] = node.error
+            brain.propagate_errors(n_passes=3, clamp_errors=clamp_errors)
+
+            # 5. Learn.
+            graph.learn(learning_rate=0.001, synaptogenesis=False,
                         weight_decay=0.0)
 
         # Evaluate holdout (free inference, no clamp).

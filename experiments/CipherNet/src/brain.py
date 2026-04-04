@@ -56,6 +56,12 @@ class Brain:
                           default_decay=self.default_decay,
                           learn_rate=learn_rate)
 
+    def propagate_errors(self, n_passes: int = 3,
+                          clamp_errors: dict[int, float] | None = None):
+        """Backward error sweep for full credit assignment."""
+        self.graph.propagate_errors_backward(
+            n_passes=n_passes, clamp_errors=clamp_errors)
+
     def read_output(self) -> tuple[str | None, float]:
         """Read the winning output token."""
         return self.tio.read_output()

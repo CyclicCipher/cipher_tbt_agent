@@ -18,6 +18,7 @@ system acts to minimize prediction error between goals and reality.
 """
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
@@ -285,16 +286,18 @@ class Graph:
         return sum(n.error ** 2 for n in self._nodes.values())
 
     def step(self, default_decay: float = 0.85, threshold: float = 0.01):
-        """One timestep with prediction error computation.
+        """One timestep: Mamba-style accumulation + predictive coding.
 
         For each node:
         1. GATE: compute gate signal from incoming GATE edges.
-        2. Split incoming TEMPORAL into SENSORY vs PREDICTION:
-           - Edges from nodes with role='feedback' are PREDICTIONS
-           - All other temporal edges are SENSORY
+        2. Split incoming TEMPORAL into SENSORY vs PREDICTION
+           (dendritic segments: AND within, OR across).
         3. PREDICTION ERROR: error = sensory - prediction
-        4. UPDATE: new_act = retain * old + (1-retain) * sensory
-           (activation tracks sensory input, NOT prediction)
+        4. UPDATE (Mamba-style): new_act = decay * old + input
+           Input is ADDED to decayed state, NOT blended. This
+           preserves signal strength across multiple hops.
+           (Contrast with old rule: retain*old + (1-retain)*input
+           which kills signal exponentially.)
         5. INHIBITION: negative spatial edges.
 
         The error field is stored on each node for learn() to use.
@@ -371,23 +374,43 @@ class Graph:
                         sensory += product ** (1.0 / len(signals))
                     # else: segment output = 0 (AND not satisfied)
 
-            # 3. Prediction error.
+            # 3. Prediction error (clamped to prevent explosion).
             error = sensory - prediction_total
+            error = max(-1.0, min(1.0, error))
 
-            # 4. Recurrence: activation tracks SENSORY input.
+            # 4. Mamba-style accumulation.
+            #
+            # Mamba:  h_t = exp(Δ*A) * h_{t-1}  +  B*x
+            # Ours:   act  = decay    * old_act  +  sensory
+            #
+            # Input is ADDED to decayed state. The decay prevents
+            # unbounded growth; the addition preserves signal strength.
+            # Self-loop weight modulates the decay (higher = more persistent).
+            #
+            # Gate signal controls how much old state decays:
+            #   gate=1.0 → decay=0 (flush state, accept full input)
+            #   gate=0.0 → decay=retain (hold state)
+
             self_loop_weight = 0.0
             for edge in self._incoming.get(nid, []):
                 if edge.edge_type == TEMPORAL and edge.source == nid:
                     self_loop_weight = edge.weight
                     break
 
-            if self_loop_weight > 0 and has_gate and gate_signal < 0.5:
-                effective_retain = min(1.0, retain * self_loop_weight + (1.0 - retain) * self_loop_weight)
-                new_act = effective_retain * old_act + (1.0 - effective_retain) * sensory
-            elif self_loop_weight > 0 and not has_gate:
-                new_act = self_loop_weight * old_act + (1.0 - self_loop_weight) * sensory
+            # Compute effective decay (Mamba's exp(Δ*A)).
+            if has_gate:
+                # Gate open → low decay (flush old state).
+                decay = retain  # retain = 1 - gate_signal
+            elif self_loop_weight > 0:
+                # Self-loop → use self-loop weight as decay.
+                # Higher self-loop = stronger persistence (like PFC WM).
+                decay = self_loop_weight
             else:
-                new_act = retain * old_act + (1.0 - retain) * sensory
+                # No gate, no self-loop → use frequency-dependent decay.
+                decay = retain
+
+            # Mamba-style: decay old + add new.
+            new_act = decay * old_act + sensory
 
             # 5. Inhibition.
             inhibition = 0.0
@@ -398,7 +421,11 @@ class Graph:
                         inhibition += abs(edge.weight) * src.activation
 
             new_act = max(0.0, new_act - inhibition)
-            new_act = min(1.0, new_act)
+            # Smooth compression (tanh): preserves relative differences
+            # at high activation instead of hard-clamping to [0,1].
+            # Like a real neuron's firing rate saturation curve.
+            if new_act > 1.0:
+                new_act = math.tanh(new_act)
             if new_act < threshold:
                 new_act = 0.0
 
@@ -449,6 +476,67 @@ class Graph:
                 self.learn(learning_rate=learn_rate, synaptogenesis=False)
 
     # -------------------------------------------------------------------
+    # Backward error propagation
+    # -------------------------------------------------------------------
+
+    def propagate_errors_backward(self, n_passes: int = 3,
+                                   decay: float = 0.5,
+                                   clamp_errors: dict[int, float] | None = None):
+        """Backward sweep: propagate errors from output to all nodes.
+
+        After settle() computes activations and local errors, this method
+        propagates error BACKWARD through outgoing edges so every node
+        gets credit assignment proportional to its contribution to
+        downstream errors.
+
+        For each node (excluding clamped error nodes):
+          error += decay * sum(edge.weight * target.error) for all outgoing edges
+
+        Multiple passes handle cycles and long paths. With n_passes=3
+        and a 5-hop path, error reaches every node.
+
+        This + local learn() = equivalent to backpropagation through the
+        graph (Whittington & Bogacz 2017).
+
+        Args:
+            n_passes: number of backward sweeps (handles cycles/depth)
+            decay: attenuation per hop (prevents error explosion)
+            clamp_errors: {node_id: error} nodes whose error is fixed
+                          (typically the output nodes with teaching error)
+        """
+        if clamp_errors is None:
+            clamp_errors = {}
+
+        for _ in range(n_passes):
+            new_errors: dict[int, float] = {}
+            for nid, node in self._nodes.items():
+                if nid in clamp_errors:
+                    new_errors[nid] = clamp_errors[nid]
+                    continue
+
+                # Backward: error flows OPPOSITE to edge direction.
+                # For each outgoing edge, this node contributed to the
+                # target's activation. The target's error tells us how
+                # much that contribution was wrong.
+                backward_error = 0.0
+                for edge in self._outgoing.get(nid, []):
+                    if edge.edge_type not in (TEMPORAL, BINDING):
+                        continue
+                    tgt = self._nodes.get(edge.target)
+                    if tgt is not None and abs(tgt.error) > 0.001:
+                        backward_error += edge.weight * tgt.error
+
+                # REPLACE local error with backward credit from clamp.
+                # Don't add — the backward credit IS the teaching signal.
+                # Local errors are useful for settle but not for learn.
+                clipped = max(-1.0, min(1.0, decay * backward_error))
+                new_errors[nid] = clipped
+
+            # Apply.
+            for nid, err in new_errors.items():
+                self._nodes[nid].error = err
+
+    # -------------------------------------------------------------------
     # Learning — error-driven weight updates
     # -------------------------------------------------------------------
 
@@ -497,37 +585,10 @@ class Graph:
             edge.weight = max(-2.0, min(2.0, edge.weight))
 
         # --- 2. Dendritic segment merging ---
-        # When two edges to the same target are BOTH active and the
-        # target has POSITIVE error (needs more input), merge their
-        # segments. This means: "these inputs should be conjunctive
-        # (AND) because they co-occur during useful computation."
-        # Only merge if both sources have strong activation.
-        merge_threshold = 0.2
-        targets_with_error = set()
-        for (src, tgt, etype), edge in self._edges.items():
-            if etype in edge_types:
-                tgt_node = self._nodes.get(tgt)
-                if tgt_node and tgt_node.error > merge_threshold:
-                    targets_with_error.add(tgt)
-
-        for tgt_id in targets_with_error:
-            # Find all active incoming edges to this target.
-            active_edges = []
-            for edge in self._incoming.get(tgt_id, []):
-                if edge.edge_type not in edge_types:
-                    continue
-                if edge.source == tgt_id:
-                    continue
-                src_node = self._nodes.get(edge.source)
-                if src_node and src_node.activation >= merge_threshold:
-                    active_edges.append(edge)
-
-            # Merge: assign all active edges to the same segment
-            # (the segment of the first active edge).
-            if len(active_edges) >= 2:
-                target_segment = active_edges[0].segment
-                for edge in active_edges[1:]:
-                    edge.segment = target_segment
+        # TODO: implement selective merging based on co-activation
+        # statistics across multiple examples. Current naive merge
+        # (all active → same segment) is too destructive.
+        # For now, segments stay separate (additive = OR behavior).
 
         # --- 3. Synaptogenesis: create edges to high-error nodes ---
         if synaptogenesis:
