@@ -712,7 +712,11 @@ class Graph:
         act_threshold = 0.1   # minimum activation to count as "active"
         merge_threshold = 5   # conflicts + successes needed before merge
 
-        # Collect active edges grouped by target.
+        # Collect active FEEDFORWARD edges grouped by target.
+        # Biology: NMDA spike clustering only happens on BASAL dendrites
+        # (feedforward). Feedback inputs land on APICAL dendrites with
+        # different plasticity rules. We only track conflict/success for
+        # feedforward edges (from cortical L23 processing nodes).
         target_edges: dict[int, list[tuple]] = defaultdict(list)
         for (src, tgt, etype), edge in self._edges.items():
             if etype not in edge_types or edge.weight < 0:
@@ -725,6 +729,12 @@ class Graph:
                 continue
             if src_node.subgraph is not None and src_node.subgraph == tgt_node.subgraph:
                 continue  # skip structural edges
+            # ONLY feedforward edges participate in segment merging.
+            # Feedforward = from cortical L23 nodes (role='process').
+            # Feedback from output nodes, inhibitors, etc. is excluded
+            # (it lands on "apical dendrites" with different rules).
+            if src_node.meta.get('role') != 'process':
+                continue
             target_edges[tgt].append((src, tgt, etype))
 
         for tgt_id, edge_keys in target_edges.items():
