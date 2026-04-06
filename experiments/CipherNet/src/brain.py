@@ -56,6 +56,68 @@ class Brain:
                           default_decay=self.default_decay,
                           learn_rate=learn_rate)
 
+    def reward(self, value: float, learning_rate: float = 0.01):
+        """Deliver reward via dopamine (three-factor learning).
+
+        Biology (Yagishita et al. 2014): the silent eligibility trace.
+        1. Cortex→D1 synapses that were recently active have an
+           eligibility trace (set during gating decisions).
+        2. Dopamine arrives ~2s later (reward signal).
+        3. ONLY synapses with active traces get potentiated.
+           Synapses without traces are unaffected.
+
+        Positive RPE: dopamine burst → D1 edges with traces get LTP.
+        Negative RPE: dopamine dip → D1 edges get LTD (or D2 LTP).
+
+        The eligibility trace window (~20 gamma cycles) bridges the
+        delay between the gating action and the reward signal.
+        """
+        da_key = self.priors.get('basal_ganglia', {}).get('dopamine')
+        if da_key is None:
+            return
+
+        if value > 0:
+            # Positive RPE: dopamine burst.
+            self.graph.activate(da_key, min(1.0, value))
+        else:
+            # Negative RPE: dopamine dip.
+            self.graph.activate(da_key, 0.0)
+
+        # Propagate dopamine to D1/D2 (one step for immediate effect).
+        self.step(1)
+
+        # Three-factor learning: adjust edges that have BOTH
+        # active source AND active eligibility trace.
+        # The eligibility traces were set during earlier gating
+        # decisions. Dopamine converts them to weight changes.
+        from graph import TEMPORAL, quantize_weight, ELIGIBILITY_THRESHOLD
+        bg_nodes = self.priors.get('basal_ganglia', {})
+        for edge_key, edge in list(self.graph._edges.items()):
+            if edge.edge_type != TEMPORAL:
+                continue
+            # Only modify edges INTO D1/D2 MSNs (the gating decision edges).
+            tgt_node = self.graph.get_node(edge.target)
+            if tgt_node is None:
+                continue
+            tgt_role = tgt_node.meta.get('role')
+            if tgt_role not in ('d1_msn', 'd2_msn'):
+                continue
+            # Three factors: eligibility × dopamine_value × source_activation
+            if abs(edge.eligibility) < ELIGIBILITY_THRESHOLD:
+                continue  # no trace → no change (temporal specificity)
+            src_node = self.graph.get_node(edge.source)
+            if src_node is None or src_node.activation < 0.01:
+                continue
+            # D1: positive dopamine → strengthen (LTP)
+            # D2: positive dopamine → weaken (LTD)
+            if tgt_role == 'd1_msn':
+                delta = learning_rate * value * edge.eligibility * src_node.activation
+            else:  # d2_msn
+                delta = -learning_rate * value * edge.eligibility * src_node.activation
+            edge.weight += delta
+            edge.weight = quantize_weight(edge.weight)
+            edge.eligibility = 0.0  # trace consumed
+
     def read_output(self) -> tuple[str | None, float]:
         """Read the winning output token."""
         return self.tio.read_output()

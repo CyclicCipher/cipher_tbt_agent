@@ -628,6 +628,18 @@ class Graph:
             new_activations[nid] = new_act
             new_errors[nid] = error
 
+            # Set eligibility traces on edges into D1/D2 MSNs.
+            # Biology: when cortex activates D1/D2 (gating decision),
+            # the synapse is "tagged" for ~2s. Dopamine arriving
+            # later converts the tag to plasticity.
+            node_role = node.meta.get('role')
+            if node_role in ('d1_msn', 'd2_msn') and new_act > 0.1:
+                for edge in self._incoming.get(nid, []):
+                    if edge.edge_type == TEMPORAL and edge.weight > 0:
+                        src = self._nodes.get(edge.source)
+                        if src and src.activation > 0.1:
+                            edge.eligibility = max(edge.eligibility, 1.0)
+
         # Apply synchronously.
         for nid, act in new_activations.items():
             self._nodes[nid].activation = act

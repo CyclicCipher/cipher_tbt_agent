@@ -332,7 +332,76 @@ Not needed yet. Relevant when:
 - Modulates eligibility trace conversion (factor 3 for LTD)
 - Slower timescale than dopamine
 
+---
+
+## Dopamine and Credit Assignment
+
+Based on Yagishita et al. (2014), Gerstner et al. (2018), Fisher et al. (2025).
+
+### Reward Prediction Error (RPE)
+- Dopamine neurons in VTA/SNc encode RPE = actual - expected reward
+- Positive RPE (better than expected): phasic dopamine burst
+- Negative RPE (worse than expected): dopamine dip below baseline
+- Zero RPE (as expected): no change
+- 2025 finding: ALSO encodes action prediction error (APE) — reinforces repeated actions independent of reward (lateral SNc → tail of striatum)
+
+### The Silent Eligibility Trace in Striatum
+Discovered by Yagishita et al. (2014, Science). The mechanism:
+1. Pre + post fire together → SILENT trace set at synapse
+   (no immediate plasticity change — hence "silent")
+2. Molecular basis: transient CP-AMPA receptor insertion in spine
+   (appears within 0-4s, detectable by inward rectification)
+3. Trace window: ~2 SECONDS (strict — dopamine at -2s, 0s, or +4s has no effect)
+4. When dopamine arrives at +2s:
+   - D1 receptor activation → adenylate cyclase signaling
+   - Redirects calcium from L-type VSCCs to CP-AMPA receptors
+   - Converts t-LTD into t-LTP (unmasking)
+5. Without dopamine: pre-post pairing → t-LTD (depression)
+   With dopamine at +2s: same pairing → t-LTP (potentiation)
+
+### D1 vs D2 MSN Differences
+- D1 MSNs (Go pathway): show eligibility trace + dopamine conversion
+  - Pre-post → t-LTD (baseline)
+  - Pre-post + dopamine at +2s → t-LTP
+  - Supralinear calcium rises in dendritic spines
+- D2 MSNs (NoGo pathway): NO eligibility trace in this study
+  - Pre-post → no significant change
+  - Separate dopamine circuitry (D2 receptor, different signaling)
+  - May use different plasticity rules (punishment-driven)
+
+### Solving temporal credit assignment
+The 2-second eligibility window bridges the delay between:
+- Action (gating decision in BG) at time t
+- Reward (dopamine signal) at time t + 2s
+Without this trace, the brain couldn't associate actions with
+delayed rewards. The trace "tags" which synapses were active
+BEFORE the reward, allowing retroactive reinforcement.
+
+### Two types of dopaminergic teaching signals (2025)
+- RPE (reward prediction error): reinforces reward-driven actions
+  - VTA and medial SNc neurons
+  - Projects to ventral striatum (nucleus accumbens)
+- APE (action prediction error): reinforces repeated actions
+  - Lateral SNc neurons
+  - Projects to tail of striatum
+  - Independent of reward — drives habit formation
+
+### For CipherNet
+- Eligibility traces on cortex→D1 edges (~20 gamma cycles = ~2s)
+- Dopamine fires when training provides reward signal
+- D1 edges with active traces get potentiated (Go strengthened)
+- D1 edges without traces are NOT affected (temporal specificity)
+- D2 pathway may need separate plasticity rule
+
 ### Sources
+- Yagishita et al. 2014, Science (silent eligibility trace in striatum)
+- Gerstner et al. 2018, Frontiers (three-factor learning rules)
+- Fisher et al. 2025, Nature (RPE + APE dual teaching signals)
+- Dopamine, Updated: RPE and Beyond (Current Opinion Neurobiol 2021)
+- Silent eligibility trace in mouse striatum (PMC 2019)
+- Striatal dopamine signals errors across domains (Science Advances 2024)
+
+### Sources (neuromodulatory systems)
 - Adrenergic modulation of L5 dendritic excitability (Cell Reports 2018)
 - Cholinergic control of neocortical output neurons (Neuron 2018)
 - Neuromodulation of STDP (Neuron 2019)
