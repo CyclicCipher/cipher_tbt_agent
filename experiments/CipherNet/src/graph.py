@@ -28,10 +28,18 @@ from typing import Any
 # Edge types
 # ---------------------------------------------------------------------------
 
-SPATIAL = 0    # undirected, metric structure (A <-> B)
-TEMPORAL = 1   # directed, transitions/causality (A -> B)
-BINDING = 2    # directed, stimulus -> latent position
-GATE = 3       # directed, gate -> target (controls retention vs update)
+# One edge type: directed synapse. The sign (excitatory/inhibitory) is
+# determined by the weight, which should follow Dale's law (source neuron
+# type determines sign — excitatory cells always positive, inhibitory
+# cells always negative). All edges are directed. No undirected edges.
+#
+# Legacy constants kept for backwards compatibility during transition.
+# New code should just use edge_type=0.
+EDGE = 0
+SPATIAL = 0    # legacy alias → EDGE
+TEMPORAL = 1   # legacy alias → EDGE (treated identically)
+BINDING = 2    # legacy alias → EDGE (treated identically)
+GATE = 3       # legacy: replaced by inhibitory edges from GPi
 
 # ---------------------------------------------------------------------------
 # Synaptic weight quantization (8-bit precision)
@@ -269,17 +277,8 @@ class Graph:
         self._outgoing[source].append(edge)
         self._incoming[target].append(edge)
 
-        if edge_type == SPATIAL and source != target:
-            rev_key = (target, source, edge_type)
-            if rev_key not in self._edges:
-                rev = Edge(source=target, target=source, edge_type=edge_type,
-                           weight=weight, meta=meta)
-                if rev.segment < 0:
-                    rev.segment = self._next_segment
-                    self._next_segment += 1
-                self._edges[rev_key] = rev
-                self._outgoing[target].append(rev)
-                self._incoming[source].append(rev)
+        # All edges are directed. No auto-reverse. To create
+        # bidirectional connections, add two separate directed edges.
 
         return edge
 
@@ -428,7 +427,7 @@ class Graph:
         apical_total = 0.0
 
         for edge in self._incoming.get(nid, []):
-            if edge.edge_type not in (TEMPORAL, BINDING) or edge.source == nid or edge.weight < 0:
+            if edge.source == nid or edge.weight < 0:
                 continue
             src = self._nodes.get(edge.source)
             if src is None:
@@ -535,30 +534,32 @@ class Graph:
 
             old_act = node.activation
 
-            # 1. GATE signal.
-            gate_signal = 0.0
-            has_gate = False
+            # 1. Compute tonic inhibition (replaces old GATE mechanism).
+            # Biology: GPi sends inhibitory (negative) edges to relay.
+            # When GPi is active, the relay receives strong negative input
+            # → effectively blocked. When Go fires (GPi inhibited),
+            # negative input drops → relay opens.
+            # Tonic inhibition = sum of negative edge inputs from
+            # tonically-active sources (GPi role = 'gpi').
+            tonic_inhibition = 0.0
             for edge in self._incoming.get(nid, []):
-                if edge.edge_type == GATE:
+                if edge.weight < 0:
                     src = self._nodes.get(edge.source)
-                    if src is not None:
-                        gate_signal += edge.weight * src.activation
-                        has_gate = True
+                    if src is not None and src.activation > 0.01:
+                        # GPi-like tonic sources contribute to gating
+                        if src.meta.get('role') == 'gpi':
+                            tonic_inhibition += abs(edge.weight) * src.activation
 
-            if has_gate:
-                gate_signal = max(0.0, min(1.0, gate_signal))
-                # Biology: GPi INHIBITS thalamus. GPi active = gate CLOSED.
-                # retain = gate_signal: high GPi = high retention = closed.
-                # D1 Go inhibits GPi → gate_signal drops → retain drops → OPEN.
-                # Hard threshold: GPi > 0.7 = fully closed (no leak).
-                if gate_signal > 0.7:
-                    retain = 1.0
-                else:
-                    retain = gate_signal
+            # Determine retention from tonic inhibition.
+            if tonic_inhibition > 0.01:
+                # Node is being tonically inhibited (gated).
+                # High inhibition = high retention = gate closed.
+                retain = min(1.0, tonic_inhibition)
+                if retain > 0.7:
+                    retain = 1.0  # hard threshold: fully closed
             else:
-                # Frequency-dependent decay: layer determines band.
-                layer = node.meta.get('layer')
-                freq = LAYER_FREQ.get(layer)
+                # No tonic gating: use frequency-dependent decay.
+                freq = self._node_freq(node)
                 retain = FREQ_DECAY.get(freq, default_decay) if freq else default_decay
 
             # 2-3. Two-compartment dendritic computation.
@@ -572,7 +573,7 @@ class Graph:
                     self_loop_weight = edge.weight
                     break
 
-            if has_gate:
+            if tonic_inhibition > 0.01:
                 decay = retain
             elif self_loop_weight > 0:
                 decay = self_loop_weight
@@ -589,8 +590,7 @@ class Graph:
                 # Each step propagates credit one hop deeper.
                 downstream_error = 0.0
                 for edge in self._outgoing.get(nid, []):
-                    if edge.edge_type not in (TEMPORAL, BINDING):
-                        continue
+                    # All positive outgoing edges carry downstream error.
                     if edge.weight < 0:
                         continue
                     if edge.source == nid:
@@ -613,26 +613,27 @@ class Graph:
                 new_act = old_act + inference_rate * (error + downstream_error)
             else:
                 # FEED MODE (used during token input).
-                if has_gate:
-                    # GATED nodes: blend old and new based on gate openness.
-                    # retain high (GPi active, closed): hold old state.
-                    # retain low (GPi inhibited, open): accept new input.
+                if tonic_inhibition > 0.01:
+                    # Tonically inhibited (gated): blend old/new.
+                    # retain high (GPi active): hold old state.
+                    # retain low (GPi gone): accept new input.
                     new_act = retain * old_act + (1.0 - retain) * sensory
                 else:
                     # NON-GATED nodes: Mamba accumulation.
                     new_act = decay * old_act + sensory
 
-            # 5. Inhibition from negative SPATIAL edges AND negative
-            #    TEMPORAL edges. Negative temporal = directed inhibition
-            #    (inhibitory interneurons). Negative spatial = lateral
-            #    inhibition (undirected competition).
+            # 5. Inhibition from negative edges (Dale's law).
+            #    Skip GPi tonic sources (already handled in step 1
+            #    as tonic gating — don't double-count).
             inhibition = 0.0
             for edge in self._incoming.get(nid, []):
-                if edge.weight < 0 and edge.edge_type in (SPATIAL, TEMPORAL):
+                if edge.weight < 0:
                     if edge.source == nid:
-                        continue  # skip negative self-loops
+                        continue
                     src = self._nodes.get(edge.source)
                     if src is not None and src.activation > 0.001:
+                        if src.meta.get('role') == 'gpi':
+                            continue  # tonic gating, not regular inhibition
                         inhibition += abs(edge.weight) * src.activation
 
             new_act = max(0.0, new_act - inhibition)
