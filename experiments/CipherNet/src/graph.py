@@ -75,6 +75,17 @@ LAYER_FREQ = {
     6:  'beta',    # L6: feedback/prediction, slow
 }
 
+# Oscillatory timing: how many gamma cycles per phase
+BETA_PERIOD = 3     # L5/L6 update every 3 gamma cycles
+THETA_PERIOD = 8    # PFC/WM update every 8 gamma cycles
+ALPHA_PERIOD = 10   # thalamic relay cycle every 10 gamma cycles
+
+# Segment calcium dynamics
+CALCIUM_INCREMENT = 0.05  # calcium added per NMDA spike (segment fires)
+CALCIUM_DECAY = 0.8       # calcium multiplier per beta cycle
+CALCIUM_MAX = 0.5         # cap: threshold can't exceed half max signal
+CALCIUM_THRESHOLD_SCALE = 0.5  # how much calcium raises the segment threshold
+
 
 # ---------------------------------------------------------------------------
 # Node
@@ -157,6 +168,13 @@ class Graph:
         self._next_segment: int = 0  # auto-increment for unique segments
         self._label_to_id: dict[str, int] = {}
         self._subgraphs: dict[str, set[int]] = defaultdict(set)
+        # Oscillatory clock: increments every step (each step = 1 gamma cycle)
+        self._clock: int = 0
+
+        # Segment state: per-segment calcium for metaplasticity.
+        # segment_id -> calcium float (0.0 = resting, higher = recently active)
+        self._segment_calcium: dict[int, float] = defaultdict(float)
+
         # Parallel edges: multiple synapses from the same presynaptic
         # neuron to different dendritic branches of the same postsynaptic
         # neuron. Stored separately from _edges (which is keyed by
@@ -348,15 +366,78 @@ class Graph:
         """Sum of squared prediction errors across all nodes."""
         return sum(n.error ** 2 for n in self._nodes.values())
 
+    def _node_freq(self, node: Node) -> str | None:
+        """Get the frequency band for a node based on its layer."""
+        return LAYER_FREQ.get(node.meta.get('layer'))
+
+    def _should_update(self, node: Node) -> bool:
+        """Check if a node should update this clock cycle."""
+        freq = self._node_freq(node)
+        if freq == 'beta':
+            return self._clock % BETA_PERIOD == 0
+        if freq == 'theta':
+            return self._clock % THETA_PERIOD == 0
+        return True  # gamma and untagged: every step
+
+    def _compute_sensory(self, nid: int) -> tuple[float, float, float]:
+        """Dendritic computation for a node. Returns (sensory, prediction, error).
+
+        Segments with calcium-modulated thresholds. NMDA spikes
+        increment segment calcium.
+        """
+        sensory_segments: dict[int, list[float]] = defaultdict(list)
+        prediction_total = 0.0
+        for edge in self._incoming.get(nid, []):
+            if edge.edge_type != TEMPORAL or edge.source == nid or edge.weight < 0:
+                continue
+            src = self._nodes.get(edge.source)
+            if src is None:
+                continue
+            signal = edge.weight * src.activation if src.activation > 0.001 else 0.0
+            if src.meta.get('role') == 'feedback':
+                prediction_total += signal
+            else:
+                sensory_segments[edge.segment].append(signal)
+
+        sensory = 0.0
+        for seg_id, signals in sensory_segments.items():
+            calcium = self._segment_calcium.get(seg_id, 0.0)
+            seg_threshold = CALCIUM_THRESHOLD_SCALE * calcium
+            if len(signals) == 1:
+                val = max(0.0, signals[0])
+                if val > seg_threshold:
+                    sensory += val
+                    self._segment_calcium[seg_id] = min(CALCIUM_MAX, calcium + CALCIUM_INCREMENT)
+            else:
+                product = 1.0
+                all_positive = True
+                for s in signals:
+                    if s <= 0.0:
+                        all_positive = False
+                        break
+                    product *= s
+                if all_positive:
+                    val = product ** (1.0 / len(signals))
+                    if val > seg_threshold:
+                        sensory += val
+                        self._segment_calcium[seg_id] = min(CALCIUM_MAX, calcium + CALCIUM_INCREMENT)
+
+        error = max(-1.0, min(1.0, sensory - prediction_total))
+        return sensory, prediction_total, error
+
     def step(self, default_decay: float = 0.85, threshold: float = 0.01,
              inference: bool = False):
-        """One timestep: Mamba accumulation (feed) or PC inference (settle).
+        """One gamma cycle of the physics engine.
 
-        For each node:
+        Oscillatory: nodes only update when their band's phase arrives.
+        Gamma (every step): L4/L23. Beta (every 3): L5/L6. Theta (every 8): PFC.
+        PV gamma reset clears L23 after each cycle (prevents accumulation).
+        Segment calcium decays at beta rate.
+
+        For each updating node:
         1. GATE: compute gate signal from incoming GATE edges.
-        2. Split incoming TEMPORAL into SENSORY vs PREDICTION
-           (dendritic segments: AND within, OR across).
-        3. PREDICTION ERROR: error = sensory - prediction
+        2. Dendritic sensory + prediction error (with calcium thresholds).
+        3. UPDATE: PC inference (gradient descent) or Mamba accumulation.
         4. UPDATE (Mamba-style): new_act = decay * old + input
            Input is ADDED to decayed state, NOT blended. This
            preserves signal strength across multiple hops.
@@ -367,10 +448,15 @@ class Graph:
         The error field is stored on each node for learn() to use.
         All nodes update simultaneously.
         """
+        self._clock += 1
         new_activations: dict[int, float] = {}
         new_errors: dict[int, float] = {}
 
         for nid, node in self._nodes.items():
+            # Oscillatory gating: skip nodes not in this phase.
+            if not self._should_update(node):
+                continue
+
             old_act = node.activation
 
             # 1. GATE signal.
@@ -392,58 +478,8 @@ class Graph:
                 freq = LAYER_FREQ.get(layer)
                 retain = FREQ_DECAY.get(freq, default_decay) if freq else default_decay
 
-            # 2. Dendritic computation: group incoming temporal edges
-            #    by segment, compute multiplicatively within segments
-            #    (AND-like), sum across segments (OR-like).
-            #    Split into sensory vs prediction streams.
-            #    ALL edges in a segment are included (even inactive ones
-            #    contribute 0), so AND requires ALL inputs active.
-            sensory_segments: dict[int, list[float]] = defaultdict(list)
-            prediction_total = 0.0
-            for edge in self._incoming.get(nid, []):
-                if edge.edge_type != TEMPORAL:
-                    continue
-                if edge.source == nid:
-                    continue  # self-loop handled separately
-                src = self._nodes.get(edge.source)
-                if src is None:
-                    continue
-                # Skip negative temporal edges (handled as inhibition in step 5).
-                if edge.weight < 0:
-                    continue
-                # Include ALL edges, even inactive (signal=0 for AND).
-                signal = edge.weight * src.activation if src.activation > 0.001 else 0.0
-                # Feedback (L6) edges carry top-down predictions
-                # (not dendritic — predictions are always summed).
-                if src.meta.get('role') == 'feedback':
-                    prediction_total += signal
-                else:
-                    sensory_segments[edge.segment].append(signal)
-
-            # Compute sensory input: dendritic AND within segments,
-            # OR across segments.
-            sensory = 0.0
-            for seg_id, signals in sensory_segments.items():
-                if len(signals) == 1:
-                    # Single-edge segment: pass through
-                    sensory += max(0.0, signals[0])
-                else:
-                    # Multi-edge segment: AND-like (geometric mean)
-                    # If ANY input is 0, the whole segment output is 0.
-                    product = 1.0
-                    all_positive = True
-                    for s in signals:
-                        if s <= 0.0:
-                            all_positive = False
-                            break
-                        product *= s
-                    if all_positive:
-                        sensory += product ** (1.0 / len(signals))
-                    # else: segment output = 0 (AND not satisfied)
-
-            # 3. Prediction error (clamped to prevent explosion).
-            error = sensory - prediction_total
-            error = max(-1.0, min(1.0, error))
+            # 2-3. Dendritic sensory + prediction error (with calcium).
+            sensory, prediction, error = self._compute_sensory(nid)
 
             # 4. Update: two modes.
 
@@ -522,6 +558,29 @@ class Graph:
             self._nodes[nid].activation = act
             self._nodes[nid].error = new_errors.get(nid, 0.0)
 
+        # === Phase-specific operations ===
+
+        # PV GAMMA RESET: partial clear of L23 each gamma cycle.
+        # Prevents accumulation/saturation. Only in feed mode.
+        if not inference:
+            for nid, node in self._nodes.items():
+                if (node.meta.get('layer') == 23
+                        and node.meta.get('role') == 'process'):
+                    # Spare WM-like nodes with strong self-loops.
+                    has_strong_loop = any(
+                        e.edge_type == TEMPORAL and e.source == nid
+                        and e.weight > 0.5
+                        for e in self._incoming.get(nid, []))
+                    if not has_strong_loop:
+                        node.activation *= 0.3
+
+        # BETA PHASE: segment calcium decay.
+        if self._clock % BETA_PERIOD == 0:
+            for seg_id in list(self._segment_calcium.keys()):
+                self._segment_calcium[seg_id] *= CALCIUM_DECAY
+                if self._segment_calcium[seg_id] < 0.001:
+                    del self._segment_calcium[seg_id]
+
     # -------------------------------------------------------------------
     # Settle — prospective configuration
     # -------------------------------------------------------------------
@@ -547,7 +606,14 @@ class Graph:
             threshold: activation cutoff
             learn_rate: if > 0, adjust weights each step (online learning)
         """
-        for _ in range(n_steps):
+        # Track the MAXIMUM teaching error at each clamped node across
+        # all settle steps. The first few steps have the largest error
+        # (before the network converges to the clamped state). This
+        # error is what learning should use — not the final near-zero
+        # error after convergence.
+        max_clamp_errors: dict[int, float] = {}
+
+        for i in range(n_steps):
             self.step(default_decay=default_decay, threshold=threshold,
                       inference=True)
             # Set teaching error at clamped nodes.
@@ -555,11 +621,23 @@ class Graph:
                 for nid, val in clamp.items():
                     node = self._nodes.get(nid)
                     if node is not None:
-                        node.error = val - node.activation
+                        teaching_err = val - node.activation
+                        node.error = teaching_err
                         node.activation = val
+                        # Track max error magnitude for learning.
+                        if abs(teaching_err) > abs(max_clamp_errors.get(nid, 0)):
+                            max_clamp_errors[nid] = teaching_err
             # Online learning: adjust weights at every step.
             if learn_rate > 0:
                 self.learn(learning_rate=learn_rate, synaptogenesis=False)
+
+        # Restore the max teaching errors at clamped nodes for learn().
+        # The final settle errors are near-zero (network converged),
+        # but the INITIAL errors encode what the network couldn't produce.
+        for nid, err in max_clamp_errors.items():
+            node = self._nodes.get(nid)
+            if node is not None:
+                node.error = err
 
     # -------------------------------------------------------------------
     # Learning — local predictive coding weight updates
