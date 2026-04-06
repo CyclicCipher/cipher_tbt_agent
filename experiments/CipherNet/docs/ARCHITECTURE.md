@@ -1,4 +1,4 @@
-# CipherNet Architecture v7 — Cortical Columns with Dendritic Computation, Oscillatory Timing, and Subcortical Physics
+# CipherNet Architecture v8 — Basal/Apical Dendrites, Eligibility Traces, BAC Firing
 
 ## North Star
 
@@ -37,33 +37,64 @@ audio, keyboard, and mouse. CipherNet is the brain.
    emerges from the physics engine running every step. Different
    structures have different physics, but all run automatically.
 
-## The Cortical Column
+## The Cortical Column (Two-Compartment Pyramidal Neuron)
 
-Based on Bastos et al. (2012) predictive coding microcircuit.
+Based on Larkum et al. (1999), Phillips & Larkum (2024), Bastos
+et al. (2012). Each node has TWO dendritic compartments:
 
 ```
-  L2/3 (gamma) ──── FORWARD: prediction ERRORS up to next L4
-        ^
-        |
-  L4   (gamma) ──── ERROR = sensory - prediction from L6
-        ^
-        |
-  L5   (beta)  ──── BACKWARD: PREDICTIONS down to next L2/3
-        |
-  L6   (beta)  ──── PREDICTION for own L4
+  APICAL (feedback, context)
+     │  receives: top-down predictions, lateral votes
+     │  effect: AMPLIFIES basal signal (gain modulation)
+     │  plasticity: anti-Hebbian, context association
+     │
+  ┌──┴──┐
+  │ SOMA │─── OUTPUT: single spike (basal only) or
+  └──┬──┘    BURST (basal + apical coincide = BAC firing)
+     │
+  BASAL (feedforward, sensory)
+     receives: L4 input, lateral same-layer
+     effect: DRIVES the neuron (determines WHAT it responds to)
+     plasticity: STDP + NMDA clustering (AND-gate formation)
+     segments: conflict-driven merging (dendritic clustering)
 ```
 
-### Interneurons within the column
+### BAC Firing (Larkum 1999)
 
-- **PV (parvalbumin)**: Fast perisomatic inhibition. Fires at the
-  END of each gamma cycle, resetting L23 activations. Creates
-  discrete computation slots — prevents accumulation/saturation.
-- **SST (somatostatin)**: Dendritic branch-specific inhibition.
-  Suppresses specific segments while leaving others active.
-  Local structural attention within the column.
-- **VIP (vasoactive intestinal peptide)**: Inhibits SST
-  (disinhibition). Releases branches from SST suppression.
-  The intra-column attention spotlight.
+Backpropagation-Activated Calcium spike. The neuron only BURSTS
+when basal (bottom-up) AND apical (top-down) coincide within ~3ms:
+- Basal active + apical active → BURST (2-4 spikes, amplified)
+- Basal active + apical silent → single spike (normal)
+- Basal silent + apical active → NO output (apical can't drive alone)
+
+This is the biological AND-gate between sensory evidence and
+contextual prediction. Burst = "I see it AND it's expected."
+
+### Apical Amplification (Phillips & Larkum 2024)
+
+The apical dendrite does NOT subtract prediction from sensory.
+It AMPLIFIES the sensory signal when context matches:
+- Feedforward information is PRESERVED (not subtracted)
+- Context only changes SALIENCE (how strongly the neuron responds)
+- Asymmetric: apical depends on basal, but not vice versa
+
+Implementation: output = basal_signal * (1 + apical_gain)
+
+### Layer structure
+
+- **L4** (gamma): Error/input layer. Computes error = input - L6 prediction.
+- **L2/3** (gamma): Superficial pyramidal. Basal dendrites receive L4
+  feedforward. Apical dendrites receive feedback from higher areas.
+  Sends errors FORWARD. PV reset each gamma cycle.
+- **L5** (beta): Deep pyramidal. Sends predictions BACKWARD (skip L4).
+  BAC firing here determines conscious perception (Larkum 2020).
+- **L6** (beta): Generates prediction for own L4.
+
+### Interneurons
+
+- **PV**: Fast perisomatic inhibition. Gamma reset for L23.
+- **SST**: Dendritic branch-specific inhibition (basal segments).
+- **VIP**: Inhibits SST (disinhibition = attention spotlight).
 
 ## Dendritic Computation
 
@@ -75,17 +106,28 @@ Each edge has a `segment` ID. Edges on the same segment compute
 multiplicatively (AND). Different segments sum additively (OR).
 Default: each edge in its own segment (purely additive).
 
-### Conflict-driven segment merging
+### Conflict-driven segment merging (with eligibility traces)
 
-Tracks two signals per edge:
-- **solo_conflict**: source active AND target has negative error
-  (this edge causes false positives when firing alone)
-- **paired_success**: both sources active AND target has positive
-  error (this pair is useful together)
+Biology: synapses don't track cumulative co-activation statistics.
+Instead, they use ELIGIBILITY TRACES (Gerstner et al. 2018):
+1. Pre + post fire together → eligibility trace set (flag, NOT weight change)
+2. Trace decays over ~1-10 seconds (or ~10-100 gamma cycles)
+3. When neuromodulatory signal (dopamine) arrives within trace window
+   → flag converts to actual structural change (merge)
 
-When solo_conflict AND paired_success both exceed threshold:
-merge the pair into one segment. The AND-gate prevents the solo
-false positives while preserving the paired successes.
+Three-factor learning: pre-activity × post-activity × reward signal.
+
+Implementation: each edge has an `eligibility` float (0-1).
+- When source active AND target has error: eligibility = 1.0
+- Each step: eligibility *= decay (e.g., 0.95)
+- Segment merge: when TWO edges to same target BOTH have
+  eligibility > threshold AND target receives reward signal.
+- Solo conflict: edge has eligibility but target gets PUNISHED.
+  Edges with high eligibility during punishment seek AND-gate
+  protection with co-eligible edges.
+
+This replaces cumulative counters with decaying traces — O(1) memory
+per edge, biologically correct, and naturally time-windowed.
 
 ### Parallel edges
 
@@ -323,6 +365,23 @@ The correct dendritic segments ARE discovered ({A,B} for obj1,
 the feedback loop creates spurious segments alongside the correct
 ones. Segment merging needs to be restricted to feedforward-driven
 co-activation only (not feedback-driven). Work in progress.
+
+## Key Research References
+
+- Larkum et al. 1999: BAC firing (Nature) — coincidence detection
+- Gidon et al. 2020: Human dendrites solve XOR (Science)
+- Suzuki & Larkum 2020: Anesthesia decouples apical (Cell)
+- Phillips & Larkum 2024: Apical amplification not subtraction (PMC)
+- Bastos et al. 2012: Canonical microcircuits for PC (Neuron)
+- Sacramento et al. 2018: Dendritic microcircuits ≈ backprop (NeurIPS)
+- Gerstner et al. 2018: Three-factor learning, eligibility traces (PMC)
+- Bhatt et al. 2015: Synaptic clustering within dendrites (PMC)
+- Bhatt et al. 2009: Plasticity compartments in basal dendrites (JNS)
+- Hawkins et al. 2017: Columns enable learning structure (Frontiers)
+- Numenta 2024: Thousand Brains Project, CMP (arXiv)
+- Mikulasch et al. 2023: Dendritic hierarchical predictive coding (TINS)
+- Doron et al. 2020: Perirhinal input to L1 controls learning (Science)
+- Zolnik et al. 2024: Layer 6b controls brain state (Neuron)
 
 ## Tokenization
 

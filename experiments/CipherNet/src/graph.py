@@ -86,6 +86,15 @@ CALCIUM_DECAY = 0.8       # calcium multiplier per beta cycle
 CALCIUM_MAX = 0.5         # cap: threshold can't exceed half max signal
 CALCIUM_THRESHOLD_SCALE = 0.5  # how much calcium raises the segment threshold
 
+# Eligibility trace dynamics (three-factor learning)
+ELIGIBILITY_DECAY = 0.9   # trace decays per step (~10 step half-life)
+ELIGIBILITY_THRESHOLD = 0.3  # minimum trace for merge consideration
+
+# BAC firing threshold
+BAC_APICAL_THRESHOLD = 0.2  # minimum apical activation for burst
+BAC_BASAL_THRESHOLD = 0.2   # minimum basal activation for burst
+BAC_AMPLIFICATION = 1.5     # burst multiplier when BAC fires
+
 
 # ---------------------------------------------------------------------------
 # Node
@@ -93,10 +102,21 @@ CALCIUM_THRESHOLD_SCALE = 0.5  # how much calcium raises the segment threshold
 
 @dataclass
 class Node:
-    """A position in the latent space with prediction error."""
+    """A position in the latent space with two dendritic compartments.
+
+    Basal: receives feedforward input. Drives the neuron.
+           Dendritic segments (AND-gates) live here.
+    Apical: receives feedback/context. Amplifies the basal signal.
+            Does NOT drive the neuron alone (Larkum 1999).
+
+    Output = basal * (1 + apical_gain)  [apical amplification]
+    Burst = basal > threshold AND apical > threshold  [BAC firing]
+    """
     id: int
     activation: float = 0.0
     error: float = 0.0         # prediction error (sensory - prediction)
+    basal: float = 0.0         # feedforward compartment
+    apical: float = 0.0        # feedback/context compartment
     label: str | None = None
     subgraph: str | None = None
     meta: dict[str, Any] = field(default_factory=dict)
@@ -125,6 +145,7 @@ class Edge:
     edge_type: int = SPATIAL
     weight: float = 1.0
     segment: int = -1          # dendritic segment (-1 = auto-assign unique)
+    eligibility: float = 0.0   # eligibility trace (decaying flag for 3-factor learning)
     meta: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -182,13 +203,8 @@ class Graph:
         # the adjacency lists so step() and learn() see them.
         self._parallel_edges: list[Edge] = []
 
-        # Conflict-driven dendritic segment merging.
-        # solo_conflict: edge_key -> count of times source was active
-        #   AND target had negative error (edge causing false positive).
-        # paired_success: frozenset(edge_key, edge_key) -> count of times
-        #   both sources active AND target had positive error (pair useful).
-        self._solo_conflict: dict[tuple, int] = defaultdict(int)
-        self._paired_success: dict[frozenset, int] = defaultdict(int)
+        # Eligibility traces are stored on edges directly (Edge.eligibility).
+        # No separate counters needed — traces decay naturally.
 
     # -------------------------------------------------------------------
     # Node operations
@@ -357,6 +373,14 @@ class Graph:
         for node in self._nodes.values():
             node.activation = 0.0
             node.error = 0.0
+            node.basal = 0.0
+            node.apical = 0.0
+        # Reset eligibility traces and segment calcium between examples.
+        for edge in self._edges.values():
+            edge.eligibility = 0.0
+        for edge in self._parallel_edges:
+            edge.eligibility = 0.0
+        self._segment_calcium.clear()
 
     def active_nodes(self, threshold: float = 0.01) -> dict[int, float]:
         return {nid: n.activation for nid, n in self._nodes.items()
@@ -379,35 +403,56 @@ class Graph:
             return self._clock % THETA_PERIOD == 0
         return True  # gamma and untagged: every step
 
-    def _compute_sensory(self, nid: int) -> tuple[float, float, float]:
-        """Dendritic computation for a node. Returns (sensory, prediction, error).
+    def _compute_sensory(self, nid: int, node: Node) -> tuple[float, float, float]:
+        """Two-compartment dendritic computation.
 
-        Segments with calcium-modulated thresholds. NMDA spikes
-        increment segment calcium.
+        BASAL: feedforward input from processing nodes (role='process').
+               Dendritic segments with AND-gates + calcium thresholds.
+               This DRIVES the neuron.
+
+        APICAL: feedback/context from feedback nodes (role='feedback')
+                and from non-column sources (output nodes, etc.).
+                This AMPLIFIES the basal signal (gain modulation).
+
+        Returns (basal, apical, error).
+        Output = basal * (1 + apical) via BAC-like amplification.
         """
-        sensory_segments: dict[int, list[float]] = defaultdict(list)
-        prediction_total = 0.0
+        # BASAL compartment: feedforward, with dendritic segments.
+        basal_segments: dict[int, list[float]] = defaultdict(list)
+        # APICAL compartment: feedback/context, simple sum.
+        apical_total = 0.0
+
         for edge in self._incoming.get(nid, []):
             if edge.edge_type != TEMPORAL or edge.source == nid or edge.weight < 0:
                 continue
             src = self._nodes.get(edge.source)
             if src is None:
                 continue
+            # Include ALL edges, even inactive (signal=0 for AND-gate).
+            # Inactive sources contribute 0 — this is critical for
+            # AND-gates where one missing input must kill the segment.
             signal = edge.weight * src.activation if src.activation > 0.001 else 0.0
-            if src.meta.get('role') == 'feedback':
-                prediction_total += signal
-            else:
-                sensory_segments[edge.segment].append(signal)
 
-        sensory = 0.0
-        for seg_id, signals in sensory_segments.items():
+            # Route to compartment based on source type.
+            # Feedback (L6) and non-column sources → APICAL
+            # Processing (L23) sources → BASAL
+            src_role = src.meta.get('role')
+            if src_role == 'feedback' or src_role is None:
+                apical_total += signal
+            else:
+                basal_segments[edge.segment].append(signal)
+
+        # Compute basal: dendritic AND within segments, OR across.
+        basal = 0.0
+        for seg_id, signals in basal_segments.items():
             calcium = self._segment_calcium.get(seg_id, 0.0)
             seg_threshold = CALCIUM_THRESHOLD_SCALE * calcium
             if len(signals) == 1:
                 val = max(0.0, signals[0])
                 if val > seg_threshold:
-                    sensory += val
-                    self._segment_calcium[seg_id] = min(CALCIUM_MAX, calcium + CALCIUM_INCREMENT)
+                    basal += val
+                    self._segment_calcium[seg_id] = min(
+                        CALCIUM_MAX, calcium + CALCIUM_INCREMENT)
             else:
                 product = 1.0
                 all_positive = True
@@ -419,11 +464,28 @@ class Graph:
                 if all_positive:
                     val = product ** (1.0 / len(signals))
                     if val > seg_threshold:
-                        sensory += val
-                        self._segment_calcium[seg_id] = min(CALCIUM_MAX, calcium + CALCIUM_INCREMENT)
+                        basal += val
+                        self._segment_calcium[seg_id] = min(
+                            CALCIUM_MAX, calcium + CALCIUM_INCREMENT)
 
-        error = max(-1.0, min(1.0, sensory - prediction_total))
-        return sensory, prediction_total, error
+        # Store compartment values on the node.
+        node.basal = basal
+        node.apical = apical_total
+
+        # Apical amplification (Phillips & Larkum 2024):
+        # output = basal * (1 + gain). Apical AMPLIFIES, doesn't drive.
+        # BAC firing: if both basal AND apical exceed threshold, BURST.
+        if basal > BAC_BASAL_THRESHOLD and apical_total > BAC_APICAL_THRESHOLD:
+            # BAC burst: amplified output
+            sensory = basal * BAC_AMPLIFICATION
+        else:
+            # Normal: basal drives, apical provides mild gain
+            sensory = basal * (1.0 + 0.5 * max(0.0, apical_total))
+
+        # Prediction error: what L6 feedback predicted vs what arrived.
+        # L6 feedback is in the apical stream.
+        error = max(-1.0, min(1.0, basal - apical_total))
+        return sensory, apical_total, error
 
     def step(self, default_decay: float = 0.85, threshold: float = 0.01,
              inference: bool = False):
@@ -478,8 +540,8 @@ class Graph:
                 freq = LAYER_FREQ.get(layer)
                 retain = FREQ_DECAY.get(freq, default_decay) if freq else default_decay
 
-            # 2-3. Dendritic sensory + prediction error (with calcium).
-            sensory, prediction, error = self._compute_sensory(nid)
+            # 2-3. Two-compartment dendritic computation.
+            sensory, prediction, error = self._compute_sensory(nid, node)
 
             # 4. Update: two modes.
 
@@ -696,28 +758,24 @@ class Graph:
             # Quantize to 8-bit precision, clamped to [-1, 1].
             edge.weight = quantize_weight(edge.weight)
 
-        # --- 2. Conflict-driven dendritic segment merging ---
+        # --- 2. Eligibility-trace-based dendritic segment merging ---
         #
-        # Track two signals per edge:
-        # (a) solo_conflict: source active AND target has NEGATIVE error
-        #     (too much activation) → this edge is causing false positives.
-        # (b) paired_success: BOTH sources active AND target has POSITIVE
-        #     error (needs more activation) → this pair is useful together.
+        # Biology (Gerstner et al. 2018): three-factor learning.
+        # 1. Pre+post co-fire → set eligibility trace (flag, not weight change)
+        # 2. Trace decays over ~10 steps
+        # 3. Neuromodulatory signal (error) arrives → trace converts to change
         #
-        # When an edge has high solo conflict AND high paired success
-        # with a specific partner → merge into same segment (AND-gate).
-        # The AND protects: the edge only fires when its partner is also
-        # active, preventing the solo false positives.
+        # For segment merging: edges that are eligible (recently active
+        # during error) and co-eligible with a partner get merged.
+        # ONLY feedforward (basal) edges participate — apical excluded.
 
-        act_threshold = 0.1   # minimum activation to count as "active"
-        merge_threshold = 5   # conflicts + successes needed before merge
+        # Decay all eligibility traces.
+        for (src, tgt, etype), edge in self._edges.items():
+            edge.eligibility *= ELIGIBILITY_DECAY
+        for edge in self._parallel_edges:
+            edge.eligibility *= ELIGIBILITY_DECAY
 
-        # Collect active FEEDFORWARD edges grouped by target.
-        # Biology: NMDA spike clustering only happens on BASAL dendrites
-        # (feedforward). Feedback inputs land on APICAL dendrites with
-        # different plasticity rules. We only track conflict/success for
-        # feedforward edges (from cortical L23 processing nodes).
-        target_edges: dict[int, list[tuple]] = defaultdict(list)
+        # Set eligibility for active FEEDFORWARD edges at error targets.
         for (src, tgt, etype), edge in self._edges.items():
             if etype not in edge_types or edge.weight < 0:
                 continue
@@ -725,112 +783,82 @@ class Graph:
             tgt_node = self._nodes.get(tgt)
             if src_node is None or tgt_node is None:
                 continue
-            if src_node.activation < act_threshold:
+            if src_node.activation < 0.1:
                 continue
-            if src_node.subgraph is not None and src_node.subgraph == tgt_node.subgraph:
-                continue  # skip structural edges
-            # ONLY feedforward edges participate in segment merging.
-            # Feedforward = from cortical L23 nodes (role='process').
-            # Feedback from output nodes, inhibitors, etc. is excluded
-            # (it lands on "apical dendrites" with different rules).
+            if src_node.subgraph and src_node.subgraph == tgt_node.subgraph:
+                continue
+            # ONLY basal (feedforward from L23) edges.
             if src_node.meta.get('role') != 'process':
-                continue
-            target_edges[tgt].append((src, tgt, etype))
-
-        for tgt_id, edge_keys in target_edges.items():
-            tgt_node = self._nodes.get(tgt_id)
-            if tgt_node is None:
                 continue
 
             if tgt_node.error < -0.05:
-                # NEGATIVE error: target has too much activation.
-                # Active edges are causing false positives.
-                for ek in edge_keys:
-                    self._solo_conflict[ek] += 1
-
+                # Negative error: this edge is causing a false positive.
+                # Set negative eligibility (wants AND protection).
+                edge.eligibility = min(edge.eligibility, -1.0)
             elif tgt_node.error > 0.05:
-                # POSITIVE error: target needs more activation.
-                # Active edge pairs are useful together.
-                for i in range(len(edge_keys)):
-                    for j in range(i + 1, len(edge_keys)):
-                        pair = frozenset((edge_keys[i], edge_keys[j]))
-                        self._paired_success[pair] += 1
+                # Positive error: this edge is helping but not enough.
+                # Set positive eligibility (co-firing is useful).
+                edge.eligibility = max(edge.eligibility, 1.0)
 
-        # Check for merge candidates: edges with high solo conflict
-        # that also have high paired success with a specific partner.
-        for pair, success_count in list(self._paired_success.items()):
-            if success_count < merge_threshold:
+        # Check for merge: pairs of edges to the same target where
+        # one has negative eligibility (conflict) and both have
+        # positive eligibility in some recent step (co-success).
+        # The eligibility trace naturally time-windows this.
+        target_eligible: dict[int, list] = defaultdict(list)
+        for (src, tgt, etype), edge in self._edges.items():
+            if abs(edge.eligibility) > ELIGIBILITY_THRESHOLD:
+                src_node = self._nodes.get(src)
+                if src_node and src_node.meta.get('role') == 'process':
+                    target_eligible[tgt].append(((src, tgt, etype), edge))
+
+        for tgt_id, eligible_list in target_eligible.items():
+            if len(eligible_list) < 2:
                 continue
-            keys = list(pair)
-            conflict_a = self._solo_conflict.get(keys[0], 0)
-            conflict_b = self._solo_conflict.get(keys[1], 0)
-            # At least ONE edge must have solo conflicts.
-            # An edge already in a segment (a_seg_size > 0) doesn't need
-            # solo conflict — it already proved it needs AND protection.
-            # Only require conflict from the UNPROTECTED edge.
-            if conflict_a < merge_threshold and conflict_b < merge_threshold:
+            # Find pairs where BOTH have positive eligibility
+            # (both co-fired during a positive-error example).
+            # At least one must ALSO have had recent negative eligibility
+            # (solo conflict from a negative example).
+            # Since eligibility resets between examples, positive traces
+            # only come from the CURRENT example.
+            pos_edges = [(k, e) for k, e in eligible_list
+                         if e.eligibility > ELIGIBILITY_THRESHOLD]
+            if len(pos_edges) < 2:
                 continue
-            edge_a = self._edges.get(keys[0])
-            edge_b = self._edges.get(keys[1])
-            if not edge_a or not edge_b:
-                # Edge might be a parallel edge — find it.
-                for pe in self._parallel_edges:
-                    if not edge_a and pe.source == keys[0][0] and pe.target == keys[0][1]:
-                        edge_a = pe
-                    if not edge_b and pe.source == keys[1][0] and pe.target == keys[1][1]:
-                        edge_b = pe
-            if not edge_a or not edge_b:
-                continue
-            if edge_a.segment == edge_b.segment:
-                continue  # already merged
 
-            # Check if edge_a's segment has OTHER edges in it.
-            # If so, edge_a is already in an AND-gate with someone else.
-            # Create a PARALLEL edge for this new pairing instead of
-            # breaking the existing segment.
-            a_seg_size = sum(1 for e in self._incoming.get(keys[0][1], [])
-                            if e.segment == edge_a.segment and e is not edge_a)
-            b_seg_size = sum(1 for e in self._incoming.get(keys[1][1], [])
-                            if e.segment == edge_b.segment and e is not edge_b)
+            # All pairs of positively eligible edges are merge candidates.
+            for i in range(len(pos_edges)):
+                for j in range(i + 1, len(pos_edges)):
+                    ek_a, ea = pos_edges[i]
+                    ek_b, eb = pos_edges[j]
+                    if ea.segment == eb.segment:
+                        continue
 
-            if a_seg_size > 0 and b_seg_size == 0:
-                # A is in a group, B is alone. Create parallel A for B's segment.
-                self.add_parallel_edge(
-                    edge_a.source, edge_a.target, edge_a.edge_type,
-                    weight=edge_a.weight, segment=edge_b.segment)
-                # Reset ALL paired_success involving edge_a's key to prevent
-                # the original edge from triggering merges that collapse
-                # the parallel structure.
-                for pk in list(self._paired_success.keys()):
-                    if keys[0] in pk:
-                        self._paired_success[pk] = 0
-            elif b_seg_size > 0 and a_seg_size == 0:
-                # B is in a group, A is alone. Create parallel B for A's segment.
-                self.add_parallel_edge(
-                    edge_b.source, edge_b.target, edge_b.edge_type,
-                    weight=edge_b.weight, segment=edge_a.segment)
-                for pk in list(self._paired_success.keys()):
-                    if keys[1] in pk:
-                        self._paired_success[pk] = 0
-            elif a_seg_size > 0 and b_seg_size > 0:
-                # BOTH in groups. Don't merge — would collapse two
-                # independent segments. Create parallel of the smaller.
-                if a_seg_size <= b_seg_size:
-                    self.add_parallel_edge(
-                        edge_a.source, edge_a.target, edge_a.edge_type,
-                        weight=edge_a.weight, segment=edge_b.segment)
-                else:
-                    self.add_parallel_edge(
-                        edge_b.source, edge_b.target, edge_b.edge_type,
-                        weight=edge_b.weight, segment=edge_a.segment)
-            else:
-                # Neither in groups. Simple merge.
-                edge_b.segment = edge_a.segment
+                    a_seg_size = sum(1 for e in self._incoming.get(tgt_id, [])
+                                    if e.segment == ea.segment and e is not ea)
+                    b_seg_size = sum(1 for e in self._incoming.get(tgt_id, [])
+                                    if e.segment == eb.segment and e is not eb)
 
-            # Reset counters for this pair.
-            self._paired_success[pair] = 0
-            self._solo_conflict[keys[0]] = 0
-            self._solo_conflict[keys[1]] = 0
+                    if a_seg_size > 0 and b_seg_size == 0:
+                        self.add_parallel_edge(
+                            ea.source, ea.target, ea.edge_type,
+                            weight=ea.weight, segment=eb.segment)
+                    elif b_seg_size > 0 and a_seg_size == 0:
+                        self.add_parallel_edge(
+                            eb.source, eb.target, eb.edge_type,
+                            weight=eb.weight, segment=ea.segment)
+                    elif a_seg_size > 0 and b_seg_size > 0:
+                        if a_seg_size <= b_seg_size:
+                            self.add_parallel_edge(
+                                ea.source, ea.target, ea.edge_type,
+                                weight=ea.weight, segment=eb.segment)
+                        else:
+                            self.add_parallel_edge(
+                                eb.source, eb.target, eb.edge_type,
+                                weight=eb.weight, segment=ea.segment)
+                    else:
+                        eb.segment = ea.segment
+                    ea.eligibility = 0.0
+                    eb.eligibility = 0.0
 
         # --- 3. Synaptogenesis: create edges to high-error nodes ---
         if synaptogenesis:
