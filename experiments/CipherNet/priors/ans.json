@@ -1,34 +1,52 @@
 {
   "name": "ans",
-  "description": "Approximate Number System — magnitude comparison via graph structure",
+  "description": "Approximate Number System — population of number-tuned cortical columns in the parietal region (IPS analog). INNATE: present at birth with coarse 1:3 Weber fraction. 3 seed columns with preferred numerosities at ~1, ~3, ~9 (log-spaced). Each is a standard cortical column (L4/L23/L5/L6). Lateral inhibition creates winner-take-all for comparison. Precision refines with experience (new columns added, tuning narrowed). Logarithmic compression: more cortical space for small numbers.",
 
   "nodes": [
-    {"id": "input_a", "layer": 4, "role": "input", "description": "Receives activation proportional to quantity A"},
-    {"id": "input_b", "layer": 4, "role": "input", "description": "Receives activation proportional to quantity B"},
-    {"id": "accumulator_a", "layer": 23, "role": "accumulator", "description": "Accumulates magnitude of A. Activation level = perceived magnitude."},
-    {"id": "accumulator_b", "layer": 23, "role": "accumulator", "description": "Accumulates magnitude of B. Activation level = perceived magnitude."},
-    {"id": "comparator", "layer": 23, "role": "comparator", "description": "Computes difference between accumulator activations. Inhibitory competition."},
-    {"id": "output_a_larger", "layer": 5, "role": "output", "description": "Active when A > B (by sufficient margin)"},
-    {"id": "output_b_larger", "layer": 5, "role": "output", "description": "Active when B > A (by sufficient margin)"},
-    {"id": "output_equal", "layer": 5, "role": "output", "description": "Active when A ≈ B (within Weber fraction)"}
+    {"id": "num1:L4", "layer": 4, "role": "input", "preferred_numerosity": 1, "description": "Number column tuned to ~1. Input layer."},
+    {"id": "num1:L23", "layer": 23, "role": "process", "preferred_numerosity": 1},
+    {"id": "num1:L5", "layer": 5, "role": "output", "preferred_numerosity": 1},
+    {"id": "num1:L6", "layer": 6, "role": "feedback", "preferred_numerosity": 1},
+
+    {"id": "num3:L4", "layer": 4, "role": "input", "preferred_numerosity": 3, "description": "Number column tuned to ~3."},
+    {"id": "num3:L23", "layer": 23, "role": "process", "preferred_numerosity": 3},
+    {"id": "num3:L5", "layer": 5, "role": "output", "preferred_numerosity": 3},
+    {"id": "num3:L6", "layer": 6, "role": "feedback", "preferred_numerosity": 3},
+
+    {"id": "num9:L4", "layer": 4, "role": "input", "preferred_numerosity": 9, "description": "Number column tuned to ~9."},
+    {"id": "num9:L23", "layer": 23, "role": "process", "preferred_numerosity": 9},
+    {"id": "num9:L5", "layer": 5, "role": "output", "preferred_numerosity": 9},
+    {"id": "num9:L6", "layer": 6, "role": "feedback", "preferred_numerosity": 9}
   ],
 
   "edges": [
-    {"source": "input_a", "target": "accumulator_a", "type": "temporal", "weight": 1.0},
-    {"source": "input_b", "target": "accumulator_b", "type": "temporal", "weight": 1.0},
-    {"source": "accumulator_a", "target": "comparator", "type": "temporal", "weight": 1.0},
-    {"source": "accumulator_b", "target": "comparator", "type": "temporal", "weight": -1.0, "description": "Inhibitory — subtracts B from A at comparator"},
-    {"source": "comparator", "target": "output_a_larger", "type": "temporal", "weight": 1.0, "description": "Positive comparator → A larger"},
-    {"source": "comparator", "target": "output_b_larger", "type": "temporal", "weight": -1.0, "description": "Negative comparator → B larger"},
-    {"source": "comparator", "target": "output_equal", "type": "temporal", "weight": 0.0, "description": "Near-zero comparator → equal"},
-    {"source": "accumulator_a", "target": "accumulator_b", "type": "spatial", "weight": 1.0, "description": "Lateral connection for mutual inhibition / comparison"},
-    {"source": "output_a_larger", "target": "output_b_larger", "type": "spatial", "weight": -1.0, "description": "Mutual inhibition between outputs"},
-    {"source": "output_a_larger", "target": "output_equal", "type": "spatial", "weight": -1.0, "description": "Mutual inhibition"},
-    {"source": "output_b_larger", "target": "output_equal", "type": "spatial", "weight": -1.0, "description": "Mutual inhibition"}
+    {"source": "num1:L4", "target": "num1:L23", "type": "temporal", "weight": 1.0},
+    {"source": "num1:L23", "target": "num1:L5", "type": "temporal", "weight": 1.0},
+    {"source": "num1:L5", "target": "num1:L6", "type": "temporal", "weight": 1.0},
+    {"source": "num1:L6", "target": "num1:L4", "type": "temporal", "weight": 0.5},
+
+    {"source": "num3:L4", "target": "num3:L23", "type": "temporal", "weight": 1.0},
+    {"source": "num3:L23", "target": "num3:L5", "type": "temporal", "weight": 1.0},
+    {"source": "num3:L5", "target": "num3:L6", "type": "temporal", "weight": 1.0},
+    {"source": "num3:L6", "target": "num3:L4", "type": "temporal", "weight": 0.5},
+
+    {"source": "num9:L4", "target": "num9:L23", "type": "temporal", "weight": 1.0},
+    {"source": "num9:L23", "target": "num9:L5", "type": "temporal", "weight": 1.0},
+    {"source": "num9:L5", "target": "num9:L6", "type": "temporal", "weight": 1.0},
+    {"source": "num9:L6", "target": "num9:L4", "type": "temporal", "weight": 0.5},
+
+    {"source": "num1:L23", "target": "num3:L23", "type": "temporal", "weight": -0.3, "description": "Lateral inhibition: neighboring number columns compete (winner-take-all for comparison)."},
+    {"source": "num3:L23", "target": "num1:L23", "type": "temporal", "weight": -0.3},
+    {"source": "num3:L23", "target": "num9:L23", "type": "temporal", "weight": -0.3},
+    {"source": "num9:L23", "target": "num3:L23", "type": "temporal", "weight": -0.3},
+    {"source": "num1:L23", "target": "num9:L23", "type": "temporal", "weight": -0.15, "description": "Weaker inhibition between distant numerosities (log-spaced)."},
+    {"source": "num9:L23", "target": "num1:L23", "type": "temporal", "weight": -0.15},
+
+    {"source": "num1:L5", "target": "num3:L23", "type": "temporal", "weight": 0.1, "description": "Successor-like excitation: neighboring number columns have weak forward connection (basis for counting/succession)."},
+    {"source": "num3:L5", "target": "num9:L23", "type": "temporal", "weight": 0.1}
   ],
 
   "properties": {
-    "weber_fraction": 0.15,
-    "description": "Weber fraction determines discrimination threshold. Adult humans ≈ 0.15. Ratio-dependent: 10 vs 5 (ratio 2) is easy, 10 vs 9 (ratio 1.11) is hard. The weber fraction is NOT implemented as code — it emerges from the inhibitory competition between accumulator nodes and the mutual inhibition between output nodes. The weight magnitudes on the comparator edges determine the effective weber fraction."
+    "description": "Population code: the PATTERN of activity across the 3 columns encodes the current numerosity. The most-active column = the perceived number. Lateral inhibition creates winner-take-all for comparison. Log-spacing means discrimination is ratio-dependent (Weber's law). New columns can be added between existing ones as precision refines with experience."
   }
 }

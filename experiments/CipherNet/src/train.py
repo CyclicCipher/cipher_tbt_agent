@@ -103,11 +103,18 @@ def setup_brain() -> Brain:
     for char in '0123456789+-*/^=() ':
         brain.tio.get_or_create_input_column(char)
 
-    # Innate: digit columns -> ANS input (sensory pathway).
-    ans_input = priors['ans']['input_a']
+    # Innate: digit columns → ANS number columns (sensory pathway).
+    # Each digit connects to the ANS column closest to its numerosity.
+    # Connections are weak — the digit-to-numerosity mapping is LEARNED.
+    ans_cols = {'num1': priors['ans']['num1:L4'],
+                'num3': priors['ans']['num3:L4'],
+                'num9': priors['ans']['num9:L4']}
     for d in range(10):
         col = brain.tio._input_columns[str(d)]
-        graph.add_edge(col['L5'], ans_input, edge_type=BINDING, weight=0.05)
+        # Initial connections from L23 (gamma, fast) to ANS columns.
+        # Using TEMPORAL not BINDING for stronger signal propagation.
+        for ans_name, ans_nid in ans_cols.items():
+            graph.add_edge(col['L23'], ans_nid, edge_type=TEMPORAL, weight=0.1)
 
     # Innate: ALL digit columns -> ALL output digits (weak).
     # Feedforward: L2/3 (error signal) -> output cortex.
@@ -202,19 +209,40 @@ def setup_brain() -> Brain:
 # -----------------------------------------------------------------------
 
 def stage_ans_grounding(brain: Brain, epochs: int = 50, verbose: bool = False):
-    """Teach digit -> magnitude via ANS."""
+    """Teach digit → ANS numerosity association.
+
+    Present each digit alongside activation of the closest ANS
+    number column. The system learns which digit maps to which
+    approximate numerosity.
+    """
     print("\n=== ANS Grounding ===")
     graph = brain.graph
-    ans_input = brain.priors['ans']['input_a']
+    ans = brain.priors['ans']
+
+    # Map digits to closest ANS column (log-spaced: 1, 3, 9)
+    # Digits 0-2 → num1, digits 3-5 → num3, digits 6-9 → num9
+    digit_to_ans = {}
+    for d in range(10):
+        if d <= 2:
+            digit_to_ans[d] = ans['num1:L4']
+        elif d <= 5:
+            digit_to_ans[d] = ans['num3:L4']
+        else:
+            digit_to_ans[d] = ans['num9:L4']
 
     for epoch in range(epochs):
         for d in range(10):
             graph.reset_activations()
             brain.feed(str(d), n_steps=2)
-            graph.activate(ans_input, d / 9.0 if d > 0 else 0.05)
-            brain.step(3)
-            graph.learn(learning_rate=0.01, synaptogenesis=False,
-                        edge_types={BINDING, TEMPORAL})
+            # Settle with digit + correct ANS column clamped.
+            # Wrong ANS columns clamped to 0.
+            clamp = {brain.tio._input_columns[str(d)]['L4']: 1.0,
+                     digit_to_ans[d]: 1.0}
+            for ans_nid in digit_to_ans.values():
+                if ans_nid != digit_to_ans[d]:
+                    clamp[ans_nid] = 0.0
+            brain.settle(n_steps=10, clamp=clamp)
+            graph.learn(learning_rate=0.02, synaptogenesis=False)
 
     print(f"  Done. Edges: {graph.edge_count()}")
 

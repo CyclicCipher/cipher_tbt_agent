@@ -10,8 +10,10 @@
   ],
   "connections": [
 
-    {"_comment": "=== ANS → PFC (magnitude comparison) ==="},
-    {"source_prior": "ans", "source_node": "output_a_larger", "target_prior": "pfc", "target_node": "monitor:L4", "type": "temporal"},
+    {"_comment": "=== ANS → PFC (numerosity signal to monitor) ==="},
+    {"source_prior": "ans", "source_node": "num1:L5", "target_prior": "pfc", "target_node": "monitor:L4", "type": "temporal", "weight": 0.3},
+    {"source_prior": "ans", "source_node": "num3:L5", "target_prior": "pfc", "target_node": "monitor:L4", "type": "temporal", "weight": 0.3},
+    {"source_prior": "ans", "source_node": "num9:L5", "target_prior": "pfc", "target_node": "monitor:L4", "type": "temporal", "weight": 0.3},
 
     {"_comment": "=== BG GPi → Thalamus relays (GATE — PFC stripes 0-2) ==="},
     {"source_prior": "basal_ganglia", "source_node": "gpi_0", "target_prior": "thalamus", "target_node": "relay_0", "type": "gate"},

@@ -428,7 +428,7 @@ class Graph:
         apical_total = 0.0
 
         for edge in self._incoming.get(nid, []):
-            if edge.edge_type != TEMPORAL or edge.source == nid or edge.weight < 0:
+            if edge.edge_type not in (TEMPORAL, BINDING) or edge.source == nid or edge.weight < 0:
                 continue
             src = self._nodes.get(edge.source)
             if src is None:
