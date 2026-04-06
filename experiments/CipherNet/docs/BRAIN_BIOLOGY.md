@@ -490,6 +490,45 @@ Based on Bhatt et al. (2024), neuromorphic hardware research.
 
 ---
 
+## Why 6 Layers (The PC Signal Fidelity Hypothesis)
+
+### The hypothesis
+Cortical columns have 6 layers because this is the maximum depth
+at which predictive coding maintains useful learning signal fidelity.
+
+### Supporting evidence
+- PC error = input - f(W * prediction). Each layer adds nonlinear
+  approximation error through f(). After 6-7 layers, accumulated
+  error exceeds useful signal.
+- Backprop uses EXACT transpose weights → no accumulation →
+  can go arbitrarily deep. PC uses local dendritic approximation.
+- PC is competitive with backprop up to ~6-7 layers, then loses.
+  (Sacramento et al. 2018 showed PC ≈ backprop on shallow networks)
+- The brain scales by WIDTH (more columns), not depth (more layers).
+  Neocortex grows in surface area, not thickness.
+
+### The thalamic depth reset
+When signal goes column A → thalamus → column B:
+- Column B's L4 receives a fresh input (depth resets to 0)
+- Column B runs its own 6-layer PC cycle
+- Total processing depth = unlimited (many hops)
+- Each hop = only 6 layers (within signal fidelity range)
+- The thalamus prevents deep-network signal degradation
+
+### Implications for data efficiency
+- A single cortical column is a tiny network (~600 neurons)
+- Tiny networks don't overfit → need very little training data
+- Built-in spatial structure (reference frames) prevents memorization
+- The scaling law INVERTS: more columns = more capability
+  without proportionally more data per column
+
+### Status: hypothesis, not proven
+Good empirical grounding but needs formal verification.
+The ~6-7 layer PC fidelity limit is an empirical observation
+from computational studies, not a proven theorem.
+
+---
+
 ## Larkum Lab Key Papers
 
 1. **Larkum et al. 1999, Nature**: BAC firing discovered

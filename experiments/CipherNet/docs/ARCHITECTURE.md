@@ -366,6 +366,33 @@ the feedback loop creates spurious segments alongside the correct
 ones. Segment merging needs to be restricted to feedforward-driven
 co-activation only (not feedback-driven). Work in progress.
 
+## Why 6 Layers (The PC Signal Fidelity Hypothesis)
+
+The cortical column's 6-layer structure may be the maximum depth at
+which predictive coding maintains useful signal fidelity. Evidence:
+
+- PC error signals accumulate approximation error per layer
+  (each layer's prediction introduces nonlinear distortion)
+- At ~6-7 layers, accumulated error exceeds the useful signal
+  (PC loses to backprop at this depth — backprop uses exact
+  transpose weights, PC uses local dendritic approximations)
+- The brain's solution: don't go deeper, go WIDER (more columns)
+- The thalamus RESETS the depth counter at each hop:
+  column A L5 → thalamus → column B L4 = fresh 6-layer cycle
+- Arbitrary computational depth through many column-hops,
+  each only 6 layers deep
+- Width (more columns) is the scaling axis, not depth
+
+This explains why:
+- Cortical columns are everywhere the same depth (~6 layers)
+- The neocortex scales by surface area, not thickness
+- A single column needs very little data (tiny network, ~600 neurons)
+- The brain inverts the scaling law: more columns = more capability
+  without proportionally more data per column
+
+Design implication: NEVER make columns deeper. Add more columns
+and route through the thalamus instead.
+
 ## Key Research References
 
 - Larkum et al. 1999: BAC firing (Nature) — coincidence detection
