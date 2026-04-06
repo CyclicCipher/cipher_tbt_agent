@@ -49,8 +49,12 @@ def build_clamp(brain, input_tokens, output_token):
     return clamp
 
 
-def evaluate_pairs(brain, pairs, op_char, settle_steps=15):
-    """Evaluate accuracy on (a, b) pairs — free inference (no clamp)."""
+def evaluate_pairs(brain, pairs, op_char, n_steps=10):
+    """Evaluate accuracy — single forward pass (no settle, no clamp).
+
+    At test time, a trained PCN becomes a feedforward network.
+    Just push input through the weights and read the output.
+    """
     correct = 0
     for a, b in pairs:
         if op_char == '+':
@@ -64,21 +68,14 @@ def evaluate_pairs(brain, pairs, op_char, settle_steps=15):
         else:
             continue
 
-        # Only test single-char answers for now.
         if len(expected) > 1:
             continue
 
-        expr = f"{a}{op_char}{b}="
+        # Forward pass: feed input, step, read output. No settle.
         brain.graph.reset_activations()
-        for tok in expr:
-            brain.feed(tok, n_steps=1)
-        # Clamp inputs at full strength during settle.
-        input_clamp = {}
-        for tok in set(expr):
-            col = brain.tio._input_columns.get(tok)
-            if col:
-                input_clamp[col['L4']] = 1.0
-        brain.settle(n_steps=settle_steps, clamp=input_clamp)
+        for tok in f"{a}{op_char}{b}=":
+            brain.feed(tok, n_steps=2)
+        brain.step(n_steps)
 
         out, act = brain.read_output()
         if out == expected:

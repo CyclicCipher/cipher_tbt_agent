@@ -289,8 +289,9 @@ class Graph:
         """Sum of squared prediction errors across all nodes."""
         return sum(n.error ** 2 for n in self._nodes.values())
 
-    def step(self, default_decay: float = 0.85, threshold: float = 0.01):
-        """One timestep: Mamba-style accumulation + predictive coding.
+    def step(self, default_decay: float = 0.85, threshold: float = 0.01,
+             inference: bool = False):
+        """One timestep: Mamba accumulation (feed) or PC inference (settle).
 
         For each node:
         1. GATE: compute gate signal from incoming GATE edges.
@@ -385,18 +386,7 @@ class Graph:
             error = sensory - prediction_total
             error = max(-1.0, min(1.0, error))
 
-            # 4. Mamba-style accumulation.
-            #
-            # Mamba:  h_t = exp(Δ*A) * h_{t-1}  +  B*x
-            # Ours:   act  = decay    * old_act  +  sensory
-            #
-            # Input is ADDED to decayed state. The decay prevents
-            # unbounded growth; the addition preserves signal strength.
-            # Self-loop weight modulates the decay (higher = more persistent).
-            #
-            # Gate signal controls how much old state decays:
-            #   gate=1.0 → decay=0 (flush state, accept full input)
-            #   gate=0.0 → decay=retain (hold state)
+            # 4. Update: two modes.
 
             self_loop_weight = 0.0
             for edge in self._incoming.get(nid, []):
@@ -404,20 +394,40 @@ class Graph:
                     self_loop_weight = edge.weight
                     break
 
-            # Compute effective decay (Mamba's exp(Δ*A)).
             if has_gate:
-                # Gate open → low decay (flush old state).
-                decay = retain  # retain = 1 - gate_signal
+                decay = retain
             elif self_loop_weight > 0:
-                # Self-loop → use self-loop weight as decay.
-                # Higher self-loop = stronger persistence (like PFC WM).
                 decay = self_loop_weight
             else:
-                # No gate, no self-loop → use frequency-dependent decay.
                 decay = retain
 
-            # Mamba-style: decay old + add new.
-            new_act = decay * old_act + sensory
+            if inference:
+                # PC INFERENCE MODE (used during settle):
+                # dμ/dt = -ε_local + Σ(W · ε_downstream)
+                #
+                # Pure gradient descent on prediction error energy.
+                # No sensory accumulation — the error already captures
+                # the mismatch between sensory input and prediction.
+                # Each step propagates credit one hop deeper.
+                downstream_error = 0.0
+                for edge in self._outgoing.get(nid, []):
+                    if edge.edge_type not in (TEMPORAL, BINDING):
+                        continue
+                    if edge.weight < 0:
+                        continue
+                    if edge.source == nid:
+                        continue
+                    tgt = self._nodes.get(edge.target)
+                    if tgt is not None and abs(tgt.error) > 0.001:
+                        downstream_error += edge.weight * tgt.error
+
+                # PC value update: adjust to minimize total error.
+                inference_rate = 0.1
+                new_act = old_act + inference_rate * (-error + downstream_error)
+            else:
+                # FEED MODE (used during token input):
+                # Mamba-style accumulation. Signal ADDS to state.
+                new_act = decay * old_act + sensory
 
             # 5. Inhibition from negative SPATIAL edges AND negative
             #    TEMPORAL edges. Negative temporal = directed inhibition
@@ -475,7 +485,8 @@ class Graph:
             learn_rate: if > 0, adjust weights each step (online learning)
         """
         for _ in range(n_steps):
-            self.step(default_decay=default_decay, threshold=threshold)
+            self.step(default_decay=default_decay, threshold=threshold,
+                      inference=True)
             # Set teaching error at clamped nodes.
             if clamp:
                 for nid, val in clamp.items():
