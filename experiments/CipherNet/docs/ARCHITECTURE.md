@@ -1,4 +1,4 @@
-# CipherNet Architecture v6 — Predictive Coding + Mamba Accumulation + Dendritic Computation
+# CipherNet Architecture v7 — Cortical Columns with Dendritic Computation, Oscillatory Timing, and Subcortical Physics
 
 ## North Star
 
@@ -7,266 +7,289 @@ audio, keyboard, and mouse. CipherNet is the brain.
 
 ## Core Principles
 
-1. **The unit of creation is always a COLUMN, never a bare node.**
-   Every neocortical node belongs to a column with standard layer
-   structure. Every column connects through the thalamus.
+1. **Cortical columns are the unit of neocortical computation.**
+   Every neocortical node belongs to a column with L4/L23/L5/L6.
+   Columns connect through the thalamus.
 
-2. **Columns for THINGS. Edges for RELATIONSHIPS.**
-   New digit '3' -> new column. Successor between '2' and '3' -> edge.
+2. **Dendritic segments give non-linear conjunction.**
+   AND within a segment, OR across segments. Segments are learned
+   through conflict-driven merging. Parallel edges allow the same
+   input to participate in multiple AND-gates.
 
-3. **Intelligence is navigation in reference frames (TBT).**
-   Arithmetic = navigating the number line. Recognition = navigating
-   object surfaces. Planning = navigating task space. Same mechanism.
+3. **Predictive coding is the learning rule.**
+   Bottom-up errors (gamma, fast) + top-down predictions (beta, slow).
+   Learning minimizes local prediction error at every node.
+   PC inference mode: dmu/dt = +error + downstream_error.
 
-4. **Predictive coding is the learning rule.**
-   Bottom-up errors + top-down predictions. Learning minimizes
-   prediction error. Credit assignment is automatic via backward
-   error propagation (equivalent to backprop at equilibrium).
+4. **Oscillatory timing separates computation into phases.**
+   Gamma (every step): feedforward sweep. Beta (every 3): predictions
+   update. Theta (every 8): WM/sequence advance. Alpha (every 10):
+   thalamic relay cycle. Not cosmetic — functionally necessary.
 
-5. **Mamba-style accumulation is the update rule.**
-   new_act = decay * old + input (signal ADDS to state).
-   NOT convex blend (retain * old + (1-retain) * input) which kills signal.
+5. **Subcortical structures have their own physics.**
+   Thalamus, BG, and neuromodulatory systems follow specialized
+   update rules reflecting their unique biology. Cortical columns
+   follow the standard cortical step. The graph.step() function is
+   a physics engine dispatching to the right rule per structure type.
 
-6. **Dendritic computation gives non-linear conjunctions.**
-   AND/OR/XOR within single nodes via dendritic segments, avoiding
-   combinatorial explosion of dedicated conjunction nodes.
+6. **No Python orchestration.**
+   No code says "now use Broca" or "route to PFC." All behavior
+   emerges from the physics engine running every step. Different
+   structures have different physics, but all run automatically.
 
-7. **No Python orchestration of brain regions.**
-   All behavior emerges from graph.step(). If the graph can't do it,
-   the graph structure is wrong.
+## The Cortical Column
 
-## The Cortical Column (Predictive Coding Microcircuit)
-
-Based on Bastos et al. (2012). Each column = one level of hierarchy.
-
-```
-  Top-down predictions from higher area
-         |
-         v
-  +----- L1 -----+  (apical dendrites, backward predictions)
-  |               |
-  |  L2/3  -------->  FORWARD: prediction ERRORS up
-  |  (superficial |    Gamma (30-100 Hz, fast transients)
-  |   pyramidal)  |
-  |       ^       |
-  |       |       |
-  |  L4  -+       |  ERROR LAYER: error = input - prediction
-  |  (spiny       |  Receives feedforward from lower area
-  |   stellate)   |  Receives prediction from own L6
-  |       ^       |
-  |       |       |
-  |  L5  -------->  BACKWARD: PREDICTIONS down
-  |  (deep        |    Beta (13-30 Hz, slow/smooth)
-  |   pyramidal)  |    Skip L4! (predictions != sensory)
-  |       |       |
-  |  L6  -+       |  PREDICTION GENERATOR for own L4
-  +---------------+
-```
-
-### Message types
-
-| Direction | Carries | Origin | Target in next area |
-|-----------|---------|--------|---------------------|
-| Feedforward | Prediction ERRORS | L2/3 | L4 of higher area |
-| Feedback | PREDICTIONS | L5 | L2/3 of lower area (skip L4) |
-
-## The Update Rule (Mamba-Style Accumulation)
-
-The foundation. Every node, every timestep:
+Based on Bastos et al. (2012) predictive coding microcircuit.
 
 ```
-1. GATE: signal from GATE edges controls decay.
-   gate=1.0 -> decay=0 (flush state). gate=0 -> decay=retain.
-
-2. DENDRITIC COMPUTATION on incoming temporal edges:
-   - Group by segment (dendritic branch)
-   - Within segment: multiplicative (AND — all must be active)
-   - Across segments: additive (OR — any branch can fire)
-   - Split into SENSORY vs PREDICTION (feedback role)
-
-3. PREDICTION ERROR: error = sensory - prediction (clamped to [-1,1])
-
-4. MAMBA ACCUMULATION: new_act = decay * old_act + sensory
-   Input ADDS to decayed state (not blended). Signal persists.
-
-5. INHIBITION: subtract from negative spatial edges.
-6. TANH COMPRESSION: smooth saturation (not hard clamp).
+  L2/3 (gamma) ──── FORWARD: prediction ERRORS up to next L4
+        ^
+        |
+  L4   (gamma) ──── ERROR = sensory - prediction from L6
+        ^
+        |
+  L5   (beta)  ──── BACKWARD: PREDICTIONS down to next L2/3
+        |
+  L6   (beta)  ──── PREDICTION for own L4
 ```
 
-### Why accumulation, not blending
+### Interneurons within the column
 
-Old rule: `new = 0.7 * old + 0.3 * input` -> signal per hop: 30%
-After 5 hops with w=0.3: 0.3^5 * 0.3 = 0.00007 (dead)
-
-Mamba rule: `new = 0.7 * old + input` -> signal per hop: 100%
-After 5 hops with w=0.3: still 0.3^5 = 0.002 (13x better)
-
-The decay only affects OLD state; new input enters at full strength.
+- **PV (parvalbumin)**: Fast perisomatic inhibition. Fires at the
+  END of each gamma cycle, resetting L23 activations. Creates
+  discrete computation slots — prevents accumulation/saturation.
+- **SST (somatostatin)**: Dendritic branch-specific inhibition.
+  Suppresses specific segments while leaving others active.
+  Local structural attention within the column.
+- **VIP (vasoactive intestinal peptide)**: Inhibits SST
+  (disinhibition). Releases branches from SST suppression.
+  The intra-column attention spotlight.
 
 ## Dendritic Computation
 
-Based on Bhatt et al. (2015) "Synaptic clustering within dendrites"
-and Fu et al. (2012) motor learning clustering studies.
+Based on Bhatt et al. (2015) synaptic clustering.
 
-### Biology
+### Segments
 
-Real neurons have multiple dendrite branches:
-- **Within a branch**: inputs are multiplicative (AND). An NMDA spike
-  fires only when enough synapses on the same branch are co-active.
-- **Across branches**: branches sum at the soma (OR). Any branch
-  can fire the neuron.
+Each edge has a `segment` ID. Edges on the same segment compute
+multiplicatively (AND). Different segments sum additively (OR).
+Default: each edge in its own segment (purely additive).
 
-This gives Boolean logic without dedicated gates:
-- **AND**: edges on SAME segment, all must be active
-- **OR**: edges on DIFFERENT segments, any fires the node
-- **XOR**: two segments with crossed inhibitory edges
+### Conflict-driven segment merging
 
-### Implementation: Edge Segments
+Tracks two signals per edge:
+- **solo_conflict**: source active AND target has negative error
+  (this edge causes false positives when firing alone)
+- **paired_success**: both sources active AND target has positive
+  error (this pair is useful together)
 
-Each edge has a `segment` integer. Default: unique per edge (additive).
-Learning merges segments when co-activation is reliable.
+When solo_conflict AND paired_success both exceed threshold:
+merge the pair into one segment. The AND-gate prevents the solo
+false positives while preserving the paired successes.
 
-```python
-# Within segment: geometric mean (AND)
-# If ANY input is 0, segment output = 0
-product = 1.0
-for signal in segment_signals:
-    product *= max(0, signal)
-segment_output = product ** (1/len(segment_signals))
+### Parallel edges
 
-# Across segments: sum (OR)
-total_sensory = sum(segment_outputs)
+One presynaptic neuron can form multiple synapses on different
+dendritic branches. When an input participates in multiple
+AND-gates, parallel edges are created on different segments.
+
+### Segment state (dendritic calcium)
+
+Each segment maintains:
+- **calcium**: accumulates on NMDA spike (segment fires), decays
+  at beta rate. Tracks the branch's recent history.
+- **threshold**: base * (1 + calcium). Recently-active segments
+  require stronger input (metaplasticity/habituation).
+
+### Results
+
+| Level | Task | Result |
+|-------|------|--------|
+| 1 | (A AND B) OR (C AND D) | 100% by epoch 20 |
+| 2 | (A AND B AND C) OR (D AND E) OR (F AND G AND H) | 100% by epoch 30 |
+| 3 | (A AND B) OR (A AND C) OR (D AND E) — overlapping | 100% by epoch 30 |
+| 4 | 16 inputs, 5 overlapping segments | 85% stable |
+
+## Oscillatory Timing
+
+Each graph.step() = 1 gamma cycle (~30ms).
+
+| Band | Period | What updates | Role |
+|------|--------|-------------|------|
+| Gamma | Every step | L4, L23, PV reset, dendritic segments | Feedforward sweep, one info slot |
+| Beta | Every 3 steps | L5, L6, segment calcium, BG decision | Predictions, branch history |
+| Theta | Every 8 steps | PFC WM, temporal buffer, dopamine | Sequence position, WM gating |
+| Alpha | Every 10 steps | Thalamic relay, TRN competition | Column selection, attention |
+
+### PV gamma reset
+
+At the end of each gamma cycle, PV interneurons reset L23
+activations. This solves the accumulation/saturation problem:
+only the current cycle's input survives. No need for complex
+lateral inhibition to suppress stale tokens.
+
+### Theta-gamma coupling
+
+The temporal cortex buffer has 4 slots = 4 gamma phases within
+one theta cycle. Each theta cycle advances the buffer: slot 0
+gets the current token, slots 1-3 hold previous tokens.
+Sequential items at different gamma phases within theta.
+
+### Beta as prediction persistence
+
+L5/L6 accumulate gamma-rate errors over a beta period, then
+produce smoothed predictions. High beta = system is "locked on"
+(prediction matches input). Beta breakdown = surprise/update.
+
+## Subcortical Physics
+
+### Thalamus
+
+The thalamus is NOT a cortical column. It has specialized physics:
+
+- **Relay gating**: GPi controls whether the relay is open (tonic
+  mode, faithful transmission) or closed (no signal passes).
+- **Burst mode**: When a relay has been hyperpolarized (closed)
+  for several alpha cycles and then released, it fires a BURST
+  that amplifies weak signals. State-dependent gain control.
+- **TRN competition**: The reticular nucleus creates winner-take-all
+  between relays at alpha rate. Which columns get driven changes
+  every alpha cycle based on competition.
+- **Alpha generation**: The thalamo-cortical loop
+  (relay -> cortex L4 -> cortex L6 -> TRN -> relay) cycles at
+  alpha frequency, creating the fundamental attentional rhythm.
+
+### Basal Ganglia
+
+Specialized action selection circuit:
+
+- **Go/NoGo competition** at beta rate: D1 (Go) inhibits GPi,
+  disinhibiting the thalamic relay. D2 (NoGo) excites GPi via
+  GPe/STN, keeping the relay closed.
+- **Dopamine modulation**: Reward prediction error from VTA/SNc.
+  Positive RPE: strengthens D1, weakens D2 (facilitate actions
+  that led to reward). Negative RPE: opposite. Operates at
+  theta rate (slower than individual decisions).
+- **Selection**: Only ONE action (gate) opens at a time via
+  lateral inhibition. The BG is the argmax over candidate actions.
+
+### Neuromodulatory Systems
+
+Volume transmission (broadcast, not synaptic):
+
+- **Acetylcholine** (from basal forebrain): THE cortical attention
+  signal. Operates at theta rate. Effects:
+  - Enhances thalamocortical input (more signal through relay)
+  - Lowers dendritic NMDA thresholds (AND-gates fire more easily)
+  - Suppresses intracortical spread (less lateral noise)
+  - Net: sharpens cortical representation
+  - Driven by: PFC error monitor (novelty), task demands
+
+- **Dopamine** (from VTA/SNc): Reward prediction error. Modulates
+  BG Go/NoGo balance. Indirect effect on cortical dendrites via
+  the BG -> thalamus -> cortex loop. Also: directly modulates
+  cortical plasticity rules (what gets strengthened vs weakened).
+
+- **Norepinephrine** (from locus coeruleus): Arousal/salience.
+  Global gain knob. High NE = everything more responsive.
+
+## The Update Rule (Physics Engine)
+
+graph.step() dispatches to the right physics per structure type:
+
+```
+Every step (gamma):
+  cortical_gamma_step:  L4/L23 update, PV reset, segment computation
+
+Every 3 steps (beta):
+  cortical_beta_step:   L5/L6 update (predictions)
+  bg_step:              Go/NoGo competition
+  segment_calcium:      calcium decay, threshold update
+
+Every 8 steps (theta):
+  pfc_theta_step:       WM update (if BG gate open)
+  buffer_shift:         temporal cortex buffer advance
+  neuromod_broadcast:   ACh/NE gain applied to all cortical segments
+
+Every 10 steps (alpha):
+  thalamic_alpha_step:  relay cycle, TRN competition
 ```
 
-### Cluster Formation via Co-Activation Tracking
+### Cortical gamma step
 
-The brain forms dendritic clusters through REPEATED co-activation,
-not single events. NMDA spikes + local biochemical spread (Ras, RhoA
-GTPases, ~5-20 um) cause synapses that repeatedly fire together to
-migrate onto the same dendritic branch.
+For each L4/L23 node:
+1. Split incoming temporal into sensory vs prediction (by source role)
+2. Dendritic computation: AND within segments, OR across
+3. Prediction error = sensory - prediction (clamped [-1, 1])
+4. PC inference: new_act = old + rate * (+error + downstream_error)
+   OR feed mode: new_act = decay * old + sensory
+5. Inhibition from negative edges
+6. PV reset: clear L23 at end of cycle (prevent accumulation)
 
-**Our implementation**: Each edge pair to the same target node
-maintains a co-activation counter. When both sources are active during
-a learn() call, the counter increments. When the counter exceeds a
-threshold (e.g., 10 co-activations), the edges merge into the same
-segment.
+### Cortical beta step
 
-```
-For each target node with error:
-  For each pair of active incoming edges (A, B):
-    co_count[A, B] += 1
-    if co_count[A, B] >= merge_threshold:
-      B.segment = A.segment  (merge onto same dendrite)
-```
+For each L5/L6 node:
+1. Accumulate errors from L23 over the beta period
+2. Produce smoothed prediction
+3. Send prediction backward to lower area L23 (skip L4)
 
-**Key property**: edges that ALWAYS co-fire (like char:3 and char:+
-in every addition involving 3) cluster first. Edges that SOMETIMES
-co-fire (like char:3 and char:4, only in "3+4") cluster later or not
-at all. The co-activation count naturally discovers which inputs are
-truly conjunctive vs coincidentally concurrent.
+### Learning
 
-This is NOT hardcoded. The system discovers its own AND-gates from
-the statistics of its experience.
+Local predictive coding:
+  delta_w = lr * target.error * source.activation
 
-## Column Voting (TBT Consensus)
+Only cross-subgraph edges learn (structural edges protected).
+8-bit quantized weights: excitatory [0, 1.0], inhibitory [-1.0, 0].
+256 levels per sign (~0.004 per quantum).
 
-Based on Numenta's Cortical Messaging Protocol (2024).
+Segment merging: conflict-driven, based on solo_conflict and
+paired_success statistics accumulated over many examples.
 
-Columns share HYPOTHESES (not raw features) through lateral
-connections. The settle() process IS the voting protocol: columns
-iteratively adjust activations based on neighbors' signals until
-consensus (minimum total prediction error).
+## Three Timescales of Flexibility
 
-- TRN inhibition (negative SPATIAL edges): competition/disagreement
-- Positive backward edges (L5 -> L2/3): agreement/prediction
-- Workspace binding (Broca): hierarchical structure consensus
+| Timescale | Mechanism | What changes | Speed |
+|-----------|-----------|-------------|-------|
+| Fastest (gamma) | PV gating | Whether a column outputs this cycle | ~30ms |
+| Medium (seconds) | Segment calcium | How easily each AND-gate fires | ~100ms-1s |
+| Slow (minutes) | ACh/NE modulation | Global cortical sensitivity | minutes |
+| Structural (hours) | Segment merging, weight learning | Which inputs are conjunctive | hours |
 
-## Workspace Conjunction (Broca's Area)
+This replaces the O(n^2) per-step flexibility of transformer attention
+with O(1) per-step structural routing + dynamic gain modulation.
 
-The computation path for arithmetic:
+## Subgraphs
 
-```
-Input columns -> relay -> temporal cortex buffer -> Broca workspace
-                                                         |
-                                                         v
-                                                   Output cortex
-```
+### Innate (subcortical + architectural)
 
-Broca's workspace holds COMBINATIONS. When ws0="3" and ws1="+4",
-the combined activation pattern is a unique sparse distributed
-representation that drives the correct output. The workspace IS the
-conjunctive representation — no explosion of combination nodes.
+| Subgraph | Nodes | Role | Physics |
+|----------|-------|------|---------|
+| ANS | 8 | Magnitude comparison | Standard |
+| PFC | 21 | 3 WM stripes + monitor + sequencer | Theta-rate |
+| Basal ganglia | 22 | Go/NoGo, 5 stripes | Beta-rate, selection |
+| Thalamus | 13 | Relay + TRN + VA | Alpha-rate, mode switching |
+| Output cortex | 50 | 49 tokens + inhibitor | Gamma-rate, WTA |
+| Broca | 18 | BA44/BA45 + workspace | Gamma/beta |
+| Temporal cortex | 16 | Buffer + lexical | Theta-coupled |
 
-Broca's Merge operation: takes two workspace elements, creates a
-hierarchical binding {A, B}. The order of Merges determines operator
-precedence (learned via reward, not hardcoded).
+### Learned (neocortical)
 
-## Brain Oscillations
-
-| Band | Hz | Role | Layers | Decay |
-|------|----|------|--------|-------|
-| Gamma | 30-100 | Feedforward errors | L4, L2/3 | 0.3 (fast) |
-| Beta | 13-30 | Feedback predictions | L5, L6 | 0.7 (slow) |
-| Theta | 4-8 | WM maintenance | PFC | 0.95 (persistent) |
-
-## Context-Dependent Gating (Mamba Selection)
-
-Context changes effective connectivity. BG gate = Mamba's delta.
-Context is LEARNED: the BG discovers through reward that certain
-token patterns require different gating. Synaptogenesis creates GATE
-edges when a gating pattern reduces prediction error.
-
-## Credit Assignment
-
-### Forward: settle (20 steps)
-Activations propagate forward with clamped I/O. Each step, prediction
-errors are computed locally. Prospective configuration finds the
-internal state consistent with both input and desired output.
-
-### Backward: propagate_errors_backward (3 passes)
-After settle, sweep error from output clamp back through all outgoing
-edges. Each node receives credit proportional to its contribution to
-downstream errors. Errors clipped to [-1,1] to prevent cycle explosion.
-
-### Learn: one call
-delta_w = lr * target.error * source.activation
-
-At equilibrium (settle converged), this is equivalent to full
-backpropagation through the graph (Whittington & Bogacz 2017).
-
-## Subgraphs (Brain Regions)
-
-### Innate priors (subcortical + architectural)
-
-| Subgraph | Nodes | Role |
-|----------|-------|------|
-| ANS | 8 | Magnitude comparison (subcortical) |
-| PFC | 21 | 3 WM stripes + inhibitor + monitor + sequencer |
-| Basal ganglia | 22 | Go/NoGo gating, 5 stripes |
-| Thalamus | 13 | Relay + reticular + VA for Broca |
-| Output cortex | 50 | 49 tokens + inhibitor (winner-take-all) |
-| Broca's area | 18 | BA44/BA45 + 4 workspace slots |
-| Temporal cortex | 16 | Phonological buffer + lexical |
-
-### Learned (neocortical, from experience)
-
-Input columns, number line, inter-column associations, dendritic
-segment structure — all discovered dynamically.
+Input columns, inter-column edges, dendritic segment structure,
+parallel edges — all discovered from experience.
 
 ## Edge Types
 
 | Type | Value | Direction | Purpose |
 |------|-------|-----------|---------|
 | SPATIAL | 0 | Undirected | Metric structure, lateral inhibition |
-| TEMPORAL | 1 | Directed | Signal, predictions, transitions |
+| TEMPORAL | 1 | Directed | Signal, predictions, inhibition (negative weight) |
 | BINDING | 2 | Directed | Stimulus -> column grounding |
-| GATE | 3 | Directed | Context-dependent routing |
+| GATE | 3 | Directed | BG -> thalamic relay control |
 
-Each edge also has a `segment` field for dendritic branch assignment.
+Each edge has: weight (8-bit quantized), segment ID, metadata.
 
 ## Tokenization
 
-ALL input is character-level. "307" = '3', '0', '7'. No exceptions.
+ALL input is character-level. "307" = '3', '0', '7'.
 
 ## File Structure
 
@@ -274,27 +297,22 @@ ALL input is character-level. "307" = '3', '0', '7'. No exceptions.
 experiments/CipherNet/
   docs/
     ARCHITECTURE.md      <- this document
-    RULES.md             -- non-negotiable constraints
+    RULES.md             -- constraints
     NORTH_STAR_PLAN.md   -- Danganronpa goal
-    BROCAS_AREA_DESIGN.md -- Merge operation
-    LESSONS.md           -- lessons learned
-    TBT_RESEARCH.md      -- Thousand Brains Theory
-    PFC_RESEARCH.md      -- PFC biology
-    PFC_PLAN.md          -- PFC design
+    BROCAS_AREA_DESIGN.md
+    LESSONS.md
+    TBT_RESEARCH.md
+    PFC_RESEARCH.md
+    PFC_PLAN.md
   priors/
-    config.json          -- loading + inter-prior connections
-    ans.json             -- Approximate Number System
-    pfc.json             -- Prefrontal Cortex
-    basal_ganglia.json   -- Go/NoGo gating
-    thalamus.json        -- Relay + reticular
-    output_cortex.json   -- Token output
-    broca.json           -- Broca's area
-    temporal_cortex.json -- Phonological buffer
+    config.json, ans.json, pfc.json, basal_ganglia.json,
+    thalamus.json, output_cortex.json, broca.json,
+    temporal_cortex.json
   src/
-    graph.py             -- core: step() + settle() + learn() + backward
+    graph.py             -- physics engine: step() + learn()
     brain.py             -- Brain wrapper
-    prior_loader.py      -- JSON prior loader
-    token_io.py          -- character-level I/O
+    prior_loader.py      -- JSON loader
+    token_io.py          -- character I/O
     train.py             -- training teacher
-    visualize.py         -- 3D plotly visualization
+    visualize.py         -- 3D visualization
 ```
