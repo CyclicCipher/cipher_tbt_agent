@@ -1,66 +1,50 @@
 {
   "name": "temporal_cortex",
-  "description": "Posterior temporal cortex (Wernicke's area analog) — phonological buffer and lexical categorization. Receives token activations from input columns via thalamic relays. Sends to Broca's area via two pathways: dorsal (arcuate fasciculus, phonological — buffer slots to workspace) and ventral (uncinate/extreme capsule, semantic — lexical output to BA45). The phonological buffer holds the last 3 tokens briefly, giving Broca's area a window of recent input to Merge.",
+  "description": "Superior temporal gyrus (STG) / Wernicke's area — standard cortical columns in the auditory processing hierarchy. Receives from auditory thalamus (MGN) and input column relays. Two output streams: dorsal (arcuate fasciculus to Broca, phonological) and ventral (extreme capsule to vlPFC, semantic). Phonological persistence emerges from column self-loops and theta-gamma coupling, NOT from hardware buffer slots.",
 
   "nodes": [
-    {"id": "recv0:L4", "layer": 4, "role": "input", "slot": 0, "description": "Receiving buffer slot 0 (most recent token). Receives from input column relays."},
-    {"id": "recv0:L23", "layer": 23, "role": "process", "slot": 0, "description": "Buffer slot 0 processing. Self-loop for brief persistence (~3-4 steps)."},
-    {"id": "recv0:L5", "layer": 5, "role": "output", "slot": 0, "description": "Buffer slot 0 output. Projects to Broca ws0 via arcuate fasciculus."},
+    {"id": "stg1:L4", "layer": 4, "role": "input", "area": "stg_primary", "description": "Primary STG column — receives from auditory relay / input columns."},
+    {"id": "stg1:L23", "layer": 23, "role": "process", "area": "stg_primary"},
+    {"id": "stg1:L5", "layer": 5, "role": "output", "area": "stg_primary"},
+    {"id": "stg1:L6", "layer": 6, "role": "feedback", "area": "stg_primary"},
 
-    {"id": "recv1:L4", "layer": 4, "role": "input", "slot": 1, "description": "Buffer slot 1 (previous token)."},
-    {"id": "recv1:L23", "layer": 23, "role": "process", "slot": 1},
-    {"id": "recv1:L5", "layer": 5, "role": "output", "slot": 1, "description": "Projects to Broca ws1."},
+    {"id": "stg2:L4", "layer": 4, "role": "input", "area": "stg_secondary", "description": "Secondary STG column — higher-level phonological processing."},
+    {"id": "stg2:L23", "layer": 23, "role": "process", "area": "stg_secondary"},
+    {"id": "stg2:L5", "layer": 5, "role": "output", "area": "stg_secondary"},
+    {"id": "stg2:L6", "layer": 6, "role": "feedback", "area": "stg_secondary"},
 
-    {"id": "recv2:L4", "layer": 4, "role": "input", "slot": 2, "description": "Buffer slot 2 (two tokens ago)."},
-    {"id": "recv2:L23", "layer": 23, "role": "process", "slot": 2},
-    {"id": "recv2:L5", "layer": 5, "role": "output", "slot": 2, "description": "Projects to Broca ws2."},
-
-    {"id": "recv3:L4", "layer": 4, "role": "input", "slot": 3, "description": "Buffer slot 3 (three tokens ago). Oldest in buffer."},
-    {"id": "recv3:L23", "layer": 23, "role": "process", "slot": 3},
-    {"id": "recv3:L5", "layer": 5, "role": "output", "slot": 3, "description": "Projects to Broca ws3."},
-
-    {"id": "lexical:L4", "layer": 4, "role": "input", "description": "Lexical access input. Receives from all buffer slots. Activity pattern represents the current token category."},
-    {"id": "lexical:L23", "layer": 23, "role": "process", "description": "Lexical processing. Learns to distinguish token categories (digit vs operator vs letter) from edge weights."},
-    {"id": "lexical:L5", "layer": 5, "role": "output", "description": "Lexical output. Projects to BA45 (ventral semantic pathway) for Merge selection."},
-
-    {"id": "shift_gate", "layer": 23, "role": "gate", "description": "Controls buffer shifting. When a new token arrives (recv0 active), older tokens shift down: 0->1, 1->2, 2->3. The shift happens because recv0's new input overwrites slot 0, and the OLD content of slot 0 feeds into slot 1's input via temporal edges."}
+    {"id": "stg_assoc:L4", "layer": 4, "role": "input", "area": "stg_association", "description": "Association STG — lexical/categorical processing. Highest in the temporal hierarchy."},
+    {"id": "stg_assoc:L23", "layer": 23, "role": "process", "area": "stg_association"},
+    {"id": "stg_assoc:L5", "layer": 5, "role": "output", "area": "stg_association"},
+    {"id": "stg_assoc:L6", "layer": 6, "role": "feedback", "area": "stg_association"}
   ],
 
   "edges": [
-    {"source": "recv0:L4", "target": "recv0:L23", "type": "temporal", "weight": 1.0},
-    {"source": "recv0:L23", "target": "recv0:L23", "type": "temporal", "weight": 0.85, "description": "Self-loop — brief persistence, shorter than PFC WM."},
-    {"source": "recv0:L23", "target": "recv0:L5", "type": "temporal", "weight": 1.0},
+    {"source": "stg1:L4", "target": "stg1:L23", "type": "temporal", "weight": 1.0},
+    {"source": "stg1:L23", "target": "stg1:L5", "type": "temporal", "weight": 1.0},
+    {"source": "stg1:L5", "target": "stg1:L6", "type": "temporal", "weight": 1.0},
+    {"source": "stg1:L6", "target": "stg1:L4", "type": "temporal", "weight": 0.5},
+    {"source": "stg1:L23", "target": "stg1:L23", "type": "temporal", "weight": 0.7, "description": "Self-loop for brief phonological persistence."},
 
-    {"source": "recv1:L4", "target": "recv1:L23", "type": "temporal", "weight": 1.0},
-    {"source": "recv1:L23", "target": "recv1:L23", "type": "temporal", "weight": 0.85},
-    {"source": "recv1:L23", "target": "recv1:L5", "type": "temporal", "weight": 1.0},
+    {"source": "stg2:L4", "target": "stg2:L23", "type": "temporal", "weight": 1.0},
+    {"source": "stg2:L23", "target": "stg2:L5", "type": "temporal", "weight": 1.0},
+    {"source": "stg2:L5", "target": "stg2:L6", "type": "temporal", "weight": 1.0},
+    {"source": "stg2:L6", "target": "stg2:L4", "type": "temporal", "weight": 0.5},
+    {"source": "stg2:L23", "target": "stg2:L23", "type": "temporal", "weight": 0.7},
 
-    {"source": "recv2:L4", "target": "recv2:L23", "type": "temporal", "weight": 1.0},
-    {"source": "recv2:L23", "target": "recv2:L23", "type": "temporal", "weight": 0.85},
-    {"source": "recv2:L23", "target": "recv2:L5", "type": "temporal", "weight": 1.0},
+    {"source": "stg_assoc:L4", "target": "stg_assoc:L23", "type": "temporal", "weight": 1.0},
+    {"source": "stg_assoc:L23", "target": "stg_assoc:L5", "type": "temporal", "weight": 1.0},
+    {"source": "stg_assoc:L5", "target": "stg_assoc:L6", "type": "temporal", "weight": 1.0},
+    {"source": "stg_assoc:L6", "target": "stg_assoc:L4", "type": "temporal", "weight": 0.5},
 
-    {"source": "recv3:L4", "target": "recv3:L23", "type": "temporal", "weight": 1.0},
-    {"source": "recv3:L23", "target": "recv3:L23", "type": "temporal", "weight": 0.85},
-    {"source": "recv3:L23", "target": "recv3:L5", "type": "temporal", "weight": 1.0},
+    {"source": "stg1:L23", "target": "stg2:L4", "type": "temporal", "weight": 0.8, "description": "Feedforward: primary → secondary (hierarchical auditory processing)."},
+    {"source": "stg2:L23", "target": "stg_assoc:L4", "type": "temporal", "weight": 0.8, "description": "Feedforward: secondary → association (lexical/categorical)."},
 
-    {"source": "recv0:L5", "target": "recv1:L4", "type": "temporal", "weight": 0.7, "description": "Buffer shift: slot 0 content pushes to slot 1 when new input arrives."},
-    {"source": "recv1:L5", "target": "recv2:L4", "type": "temporal", "weight": 0.7, "description": "Shift: slot 1 to slot 2."},
-    {"source": "recv2:L5", "target": "recv3:L4", "type": "temporal", "weight": 0.7, "description": "Shift: slot 2 to slot 3."},
-
-    {"source": "recv0:L5", "target": "shift_gate", "type": "temporal", "weight": 0.5, "description": "Active slot 0 drives the shift gate."},
-    {"source": "recv1:L5", "target": "shift_gate", "type": "temporal", "weight": 0.3},
-
-    {"source": "recv0:L5", "target": "lexical:L4", "type": "temporal", "weight": 0.8, "description": "Most recent token drives lexical access strongly."},
-    {"source": "recv1:L5", "target": "lexical:L4", "type": "temporal", "weight": 0.4, "description": "Previous token contributes to lexical context."},
-    {"source": "recv2:L5", "target": "lexical:L4", "type": "temporal", "weight": 0.2},
-    {"source": "recv3:L5", "target": "lexical:L4", "type": "temporal", "weight": 0.1},
-
-    {"source": "lexical:L4", "target": "lexical:L23", "type": "temporal", "weight": 1.0},
-    {"source": "lexical:L23", "target": "lexical:L5", "type": "temporal", "weight": 1.0}
+    {"source": "stg2:L5", "target": "stg1:L23", "type": "temporal", "weight": 0.3, "description": "Feedback: secondary → primary (predictions, skip L4)."},
+    {"source": "stg_assoc:L5", "target": "stg2:L23", "type": "temporal", "weight": 0.3, "description": "Feedback: association → secondary (predictions)."}
   ],
 
   "properties": {
-    "buffer_depth": 4,
-    "description": "4-slot phonological buffer + lexical access. Buffer slots have brief self-loop persistence (0.85). When a new token arrives at slot 0, older tokens shift down the buffer via temporal edges. Lexical unit categorizes the current token pattern. Dorsal pathway (buffer -> Broca workspace) carries sequential structure. Ventral pathway (lexical -> BA45) carries semantic/categorical information. Both pathways are temporal edges with learnable weights."
+    "description": "3-level auditory processing hierarchy (primary → secondary → association). Phonological persistence from self-loops (0.7), NOT hardware buffer slots. Dorsal stream (stg1/stg2 → Broca) carries phonological information. Ventral stream (stg_assoc → vlPFC) carries semantic information. Both streams wired in config.json."
   }
 }

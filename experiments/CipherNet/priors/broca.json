@@ -1,75 +1,43 @@
 {
   "name": "broca",
-  "description": "Broca's area — hierarchical structure builder via Merge. BA44 executes Merge (combining two elements into a hierarchy). BA45 selects which elements to Merge (semantic/priority ranking). Workspace holds partially-built structures (syntactic WM).",
+  "description": "Broca's area — standard cortical columns with specific connectivity. BA44 anterior (Merge/hierarchy), BA44 posterior (motor sequencing), BA45 (semantic retrieval). Same L4/L23/L5/L6 architecture as everywhere. Specialization from connectivity: arcuate fasciculus to temporal cortex, anterior putamen to BG, VA thalamus.",
 
   "nodes": [
-    {"id": "ba44:trigger", "layer": 23, "role": "merge_trigger", "description": "BA44 Merge trigger. Fires when two Mergeable elements are available on the workspace. The act of Merge = creating a new column from two active columns."},
-    {"id": "ba44:priority", "layer": 23, "role": "merge_priority", "description": "BA44 Merge priority. Determines which pending Merge to execute first. Higher activation = merge sooner. Learns operator precedence from examples."},
-    {"id": "ba44:output", "layer": 5, "role": "merge_output", "description": "BA44 output. Signals that a Merge has been completed. The new merged column is available."},
+    {"id": "ba44a:L4", "layer": 4, "role": "input", "area": "ba44_anterior", "description": "BA44 anterior — hierarchy/Merge input."},
+    {"id": "ba44a:L23", "layer": 23, "role": "process", "area": "ba44_anterior"},
+    {"id": "ba44a:L5", "layer": 5, "role": "output", "area": "ba44_anterior"},
+    {"id": "ba44a:L6", "layer": 6, "role": "feedback", "area": "ba44_anterior"},
 
-    {"id": "ba45:input", "layer": 4, "role": "semantic_input", "description": "BA45 input. Receives from active columns and workspace to determine what elements are available for Merge."},
-    {"id": "ba45:select", "layer": 23, "role": "semantic_select", "description": "BA45 selection. Decides which elements should be Merged based on semantic/structural cues. Operator type determines Merge order."},
-    {"id": "ba45:output", "layer": 5, "role": "semantic_output", "description": "BA45 output. Sends selection signal to BA44 trigger."},
+    {"id": "ba44p:L4", "layer": 4, "role": "input", "area": "ba44_posterior", "description": "BA44 posterior — motor/premotor sequencing."},
+    {"id": "ba44p:L23", "layer": 23, "role": "process", "area": "ba44_posterior"},
+    {"id": "ba44p:L5", "layer": 5, "role": "output", "area": "ba44_posterior"},
+    {"id": "ba44p:L6", "layer": 6, "role": "feedback", "area": "ba44_posterior"},
 
-    {"id": "ws0:L4", "layer": 4, "role": "input", "slot": 0, "description": "Workspace slot 0 (stack top) input."},
-    {"id": "ws0:L23", "layer": 23, "role": "process", "slot": 0, "description": "Workspace slot 0 processing. Self-loop for persistent hold."},
-    {"id": "ws0:L5", "layer": 5, "role": "output", "slot": 0, "description": "Workspace slot 0 output."},
-
-    {"id": "ws1:L4", "layer": 4, "role": "input", "slot": 1},
-    {"id": "ws1:L23", "layer": 23, "role": "process", "slot": 1},
-    {"id": "ws1:L5", "layer": 5, "role": "output", "slot": 1},
-
-    {"id": "ws2:L4", "layer": 4, "role": "input", "slot": 2},
-    {"id": "ws2:L23", "layer": 23, "role": "process", "slot": 2},
-    {"id": "ws2:L5", "layer": 5, "role": "output", "slot": 2},
-
-    {"id": "ws3:L4", "layer": 4, "role": "input", "slot": 3},
-    {"id": "ws3:L23", "layer": 23, "role": "process", "slot": 3},
-    {"id": "ws3:L5", "layer": 5, "role": "output", "slot": 3}
+    {"id": "ba45:L4", "layer": 4, "role": "input", "area": "ba45", "description": "BA45 — semantic retrieval and selection."},
+    {"id": "ba45:L23", "layer": 23, "role": "process", "area": "ba45"},
+    {"id": "ba45:L5", "layer": 5, "role": "output", "area": "ba45"},
+    {"id": "ba45:L6", "layer": 6, "role": "feedback", "area": "ba45"}
   ],
 
   "edges": [
-    {"source": "ws0:L4", "target": "ws0:L23", "type": "temporal", "weight": 1.0},
-    {"source": "ws0:L23", "target": "ws0:L23", "type": "temporal", "weight": 0.95, "description": "Self-loop — workspace slots hold their contents."},
-    {"source": "ws0:L23", "target": "ws0:L5", "type": "temporal", "weight": 1.0},
+    {"source": "ba44a:L4", "target": "ba44a:L23", "type": "temporal", "weight": 1.0},
+    {"source": "ba44a:L23", "target": "ba44a:L5", "type": "temporal", "weight": 1.0},
+    {"source": "ba44a:L5", "target": "ba44a:L6", "type": "temporal", "weight": 1.0},
+    {"source": "ba44a:L6", "target": "ba44a:L4", "type": "temporal", "weight": 0.5},
+    {"source": "ba44a:L23", "target": "ba44a:L23", "type": "temporal", "weight": 0.85, "description": "Workspace persistence for holding partial structures during Merge."},
 
-    {"source": "ws1:L4", "target": "ws1:L23", "type": "temporal", "weight": 1.0},
-    {"source": "ws1:L23", "target": "ws1:L23", "type": "temporal", "weight": 0.95},
-    {"source": "ws1:L23", "target": "ws1:L5", "type": "temporal", "weight": 1.0},
+    {"source": "ba44p:L4", "target": "ba44p:L23", "type": "temporal", "weight": 1.0},
+    {"source": "ba44p:L23", "target": "ba44p:L5", "type": "temporal", "weight": 1.0},
+    {"source": "ba44p:L5", "target": "ba44p:L6", "type": "temporal", "weight": 1.0},
+    {"source": "ba44p:L6", "target": "ba44p:L4", "type": "temporal", "weight": 0.5},
 
-    {"source": "ws2:L4", "target": "ws2:L23", "type": "temporal", "weight": 1.0},
-    {"source": "ws2:L23", "target": "ws2:L23", "type": "temporal", "weight": 0.95},
-    {"source": "ws2:L23", "target": "ws2:L5", "type": "temporal", "weight": 1.0},
+    {"source": "ba45:L4", "target": "ba45:L23", "type": "temporal", "weight": 1.0},
+    {"source": "ba45:L23", "target": "ba45:L5", "type": "temporal", "weight": 1.0},
+    {"source": "ba45:L5", "target": "ba45:L6", "type": "temporal", "weight": 1.0},
+    {"source": "ba45:L6", "target": "ba45:L4", "type": "temporal", "weight": 0.5},
 
-    {"source": "ws3:L4", "target": "ws3:L23", "type": "temporal", "weight": 1.0},
-    {"source": "ws3:L23", "target": "ws3:L23", "type": "temporal", "weight": 0.95},
-    {"source": "ws3:L23", "target": "ws3:L5", "type": "temporal", "weight": 1.0},
-
-    {"source": "ws0:L5", "target": "ba44:trigger", "type": "temporal", "weight": 0.5, "description": "Workspace slots report to BA44 merge trigger."},
-    {"source": "ws1:L5", "target": "ba44:trigger", "type": "temporal", "weight": 0.5},
-    {"source": "ws2:L5", "target": "ba44:trigger", "type": "temporal", "weight": 0.3},
-    {"source": "ws3:L5", "target": "ba44:trigger", "type": "temporal", "weight": 0.3},
-
-    {"source": "ws0:L5", "target": "ba45:input", "type": "temporal", "weight": 0.5, "description": "Workspace contents feed into BA45 semantic selection."},
-    {"source": "ws1:L5", "target": "ba45:input", "type": "temporal", "weight": 0.5},
-    {"source": "ws2:L5", "target": "ba45:input", "type": "temporal", "weight": 0.3},
-    {"source": "ws3:L5", "target": "ba45:input", "type": "temporal", "weight": 0.3},
-
-    {"source": "ba45:input", "target": "ba45:select", "type": "temporal", "weight": 1.0},
-    {"source": "ba45:select", "target": "ba45:output", "type": "temporal", "weight": 1.0},
-    {"source": "ba45:output", "target": "ba44:trigger", "type": "temporal", "weight": 0.8, "description": "BA45 selection drives BA44 merge trigger."},
-    {"source": "ba45:output", "target": "ba44:priority", "type": "temporal", "weight": 0.8},
-
-    {"source": "ba44:trigger", "target": "ba44:output", "type": "temporal", "weight": 1.0},
-    {"source": "ba44:priority", "target": "ba44:trigger", "type": "temporal", "weight": 0.5, "description": "Priority modulates trigger — higher priority operators trigger Merge sooner."},
-
-    {"source": "ws0:L5", "target": "ws1:L4", "type": "temporal", "weight": 0.3, "description": "Stack shift: when slot 0 is consumed by Merge, slot 1 moves up."},
-    {"source": "ws1:L5", "target": "ws2:L4", "type": "temporal", "weight": 0.3},
-    {"source": "ws2:L5", "target": "ws3:L4", "type": "temporal", "weight": 0.3}
-  ],
-
-  "properties": {
-    "workspace_depth": 4,
-    "description": "4-slot workspace stack. BA44 Merge creates new columns. BA45 selects what to Merge. Priority weights (learned) determine operator precedence. Workspace slots have self-loops for persistent hold (like PFC WM)."
-  }
+    {"source": "ba44a:L5", "target": "ba44p:L4", "type": "temporal", "weight": 0.5, "description": "Anterior Merge result feeds posterior motor sequencing."},
+    {"source": "ba45:L5", "target": "ba44a:L4", "type": "temporal", "weight": 0.5, "description": "Semantic selection informs Merge."},
+    {"source": "ba44p:L5", "target": "ba45:L4", "type": "temporal", "weight": 0.3, "description": "Motor sequencing state feeds back to semantic."}
+  ]
 }

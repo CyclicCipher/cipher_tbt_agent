@@ -490,6 +490,85 @@ Based on Bhatt et al. (2024), neuromorphic hardware research.
 
 ---
 
+## Broca's Area (BA44 / BA45)
+
+NOT a special structure — standard cortical columns with specific connectivity.
+
+### BA44 (pars opercularis)
+- **Anterior BA44**: Merge operation — hierarchical structure building.
+  Major hub for syntactic Merge (Minimalist Program).
+  Standard cortical columns that learned to process hierarchy.
+- **Posterior BA44**: premotor/motor sequencing — selects actions
+  based on contextual signals from other cortical areas.
+- Evolved from an action-related region into a bipartite system:
+  posterior = action, anterior = syntax. (PLOS Biology 2023)
+
+### BA45 (pars triangularis)
+- Controlled semantic retrieval and top-down lexical selection.
+- Standard cortical columns specialized for meaning, not structure.
+
+### Connectivity (what makes Broca special)
+- **Arcuate fasciculus** (dorsal stream): Broca ↔ temporal cortex.
+  Carries phonological/articulatory information.
+- **Extreme capsule** (ventral stream): Broca ↔ temporal cortex.
+  Carries semantic/comprehension information.
+- **Anterior putamen** (BG): direct cortical-striatal projection.
+  BA44 → putamen for procedural gating of Merge.
+- **Ventral anterior thalamus** (VA): higher-order thalamic relay.
+  BA44 ↔ VA for the Broca cortico-BG-thalamocortical loop.
+- **BA45 → caudate head**: separate BG channel for semantic retrieval.
+
+### Sources
+- Language and action in Broca's area (Brain & Cognition 2021)
+- Broca's striatal and thalamic connections (Frontiers Neuroanatomy 2013)
+- Morphological evolution of language areas (PLOS Biology 2023)
+- Revisiting Broca's role (Frontiers Language Sciences 2025)
+
+---
+
+## Temporal Cortex (STG / Wernicke's Area)
+
+NOT a special structure — standard cortical columns in auditory hierarchy.
+
+### Processing hierarchy
+Primary auditory cortex → belt → parabelt → STG → association areas.
+Each level = cortical columns with increasingly complex representations.
+
+### Two output streams from STG
+- **Dorsal** (via arcuate fasciculus + superior longitudinal fascicle):
+  STG → Broca. Phonological processing, sublexical repetition,
+  sound-to-articulation mapping.
+- **Ventral** (via extreme capsule + middle longitudinal fascicle):
+  STG → ventrolateral PFC. Semantic processing, comprehension,
+  sound-to-meaning mapping.
+
+### Wernicke's area (posterior STG)
+- Speech perception, phonological representation
+- Electrical stimulation → paraphasic errors (phonological deficit)
+- Increasing left lateralization through development
+- NOT a distinct cortical type — standard columns, specific connectivity
+
+### Thalamic connections
+- **Pulvinar** → temporal lobe: four distinct tracts
+  Bridge dorsal and ventral streams (Brain 2024)
+- **Medial geniculate nucleus (MGN)** → primary auditory cortex:
+  first-order thalamic relay for auditory input
+
+### Phonological buffer
+NOT a fixed 4-slot hardware buffer. Emerges from:
+- Cortical column self-loops (recurrent persistence)
+- Theta-gamma coupling (sequential items at different phases)
+- The "buffer" IS the pattern of active columns with their
+  self-loop persistence, not dedicated buffer nodes.
+
+### Sources
+- From Sound to Meaning: Navigating Wernicke's Area (Cureus 2024)
+- Beyond ventral and dorsal streams (Brain 2024)
+- Dual stream model (PNAS 2008)
+- Encoding of speech sounds in STG (Neuron 2019)
+
+---
+
 ## Why 6 Layers (The PC Signal Fidelity Hypothesis)
 
 ### The hypothesis
