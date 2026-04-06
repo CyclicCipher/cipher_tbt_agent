@@ -422,8 +422,12 @@ class Graph:
                         downstream_error += edge.weight * tgt.error
 
                 # PC value update: adjust to minimize total error.
+                # +error: increase activation when getting unexpected
+                #   input (positive error = sensory > prediction).
+                #   This EXPLAINS the input by increasing the representation.
+                # +downstream: increase when downstream needs more signal.
                 inference_rate = 0.1
-                new_act = old_act + inference_rate * (-error + downstream_error)
+                new_act = old_act + inference_rate * (error + downstream_error)
             else:
                 # FEED MODE (used during token input):
                 # Mamba-style accumulation. Signal ADDS to state.
