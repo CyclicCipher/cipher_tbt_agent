@@ -28,17 +28,17 @@
     {"source": "relay_broca", "target": "trn_broca", "type": "temporal", "weight": 0.5},
     {"source": "relay_temporal", "target": "trn_temporal", "type": "temporal", "weight": 0.5},
 
-    {"source": "trn_0", "target": "relay_1", "type": "spatial", "weight": -0.3, "description": "Reticular inhibition: active relay suppresses neighbors."},
-    {"source": "trn_0", "target": "relay_2", "type": "spatial", "weight": -0.3},
-    {"source": "trn_1", "target": "relay_0", "type": "spatial", "weight": -0.3},
-    {"source": "trn_1", "target": "relay_2", "type": "spatial", "weight": -0.3},
-    {"source": "trn_2", "target": "relay_0", "type": "spatial", "weight": -0.3},
-    {"source": "trn_2", "target": "relay_1", "type": "spatial", "weight": -0.3},
+    {"source": "trn_0", "target": "relay_1", "type": "temporal", "weight": -0.3, "description": "Reticular inhibition: directed negative TEMPORAL (not SPATIAL which is bidirectional). Active relay suppresses neighbors."},
+    {"source": "trn_0", "target": "relay_2", "type": "temporal", "weight": -0.3},
+    {"source": "trn_1", "target": "relay_0", "type": "temporal", "weight": -0.3},
+    {"source": "trn_1", "target": "relay_2", "type": "temporal", "weight": -0.3},
+    {"source": "trn_2", "target": "relay_0", "type": "temporal", "weight": -0.3},
+    {"source": "trn_2", "target": "relay_1", "type": "temporal", "weight": -0.3},
 
-    {"source": "trn_broca", "target": "relay_0", "type": "spatial", "weight": -0.15, "description": "Broca TRN weakly inhibits PFC relays — Merge processing competes with WM updating."},
-    {"source": "trn_broca", "target": "relay_1", "type": "spatial", "weight": -0.15},
+    {"source": "trn_broca", "target": "relay_0", "type": "temporal", "weight": -0.15, "description": "Broca TRN weakly inhibits PFC relays — Merge processing competes with WM updating."},
+    {"source": "trn_broca", "target": "relay_1", "type": "temporal", "weight": -0.15},
 
-    {"source": "trn_temporal", "target": "relay_broca", "type": "spatial", "weight": -0.1, "description": "Temporal TRN weakly inhibits Broca relay — receiving new tokens slightly suppresses ongoing Merge."}
+    {"source": "trn_temporal", "target": "relay_broca", "type": "temporal", "weight": -0.1, "description": "Temporal TRN weakly inhibits Broca relay — receiving new tokens slightly suppresses ongoing Merge."}
   ],
 
   "properties": {

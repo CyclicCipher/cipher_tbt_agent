@@ -535,7 +535,11 @@ class Graph:
                 # Biology: GPi INHIBITS thalamus. GPi active = gate CLOSED.
                 # retain = gate_signal: high GPi = high retention = closed.
                 # D1 Go inhibits GPi → gate_signal drops → retain drops → OPEN.
-                retain = gate_signal
+                # Hard threshold: GPi > 0.7 = fully closed (no leak).
+                if gate_signal > 0.7:
+                    retain = 1.0
+                else:
+                    retain = gate_signal
             else:
                 # Frequency-dependent decay: layer determines band.
                 layer = node.meta.get('layer')
