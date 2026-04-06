@@ -157,6 +157,13 @@ class Graph:
         self._next_segment: int = 0  # auto-increment for unique segments
         self._label_to_id: dict[str, int] = {}
         self._subgraphs: dict[str, set[int]] = defaultdict(set)
+        # Parallel edges: multiple synapses from the same presynaptic
+        # neuron to different dendritic branches of the same postsynaptic
+        # neuron. Stored separately from _edges (which is keyed by
+        # (src, tgt, type) and allows only one). Parallel edges are in
+        # the adjacency lists so step() and learn() see them.
+        self._parallel_edges: list[Edge] = []
+
         # Conflict-driven dendritic segment merging.
         # solo_conflict: edge_key -> count of times source was active
         #   AND target had negative error (edge causing false positive).
@@ -237,6 +244,36 @@ class Graph:
 
         return edge
 
+    def add_parallel_edge(self, source: int, target: int,
+                          edge_type: int = TEMPORAL,
+                          weight: float = 0.5,
+                          segment: int = -1) -> Edge | None:
+        """Create a parallel synapse (same src/tgt, different branch).
+
+        Biology: one presynaptic neuron can make multiple synaptic
+        contacts on different dendritic branches of the same
+        postsynaptic neuron. This enables the same input to
+        participate in multiple AND-gates independently.
+
+        Returns None if a parallel edge already exists from this
+        source to this target on the requested segment.
+        """
+        # Check for duplicate: don't create if one already exists
+        # from same source to same target on the same segment.
+        for pe in self._parallel_edges:
+            if (pe.source == source and pe.target == target
+                    and pe.segment == segment):
+                return None  # already exists
+        edge = Edge(source=source, target=target, edge_type=edge_type,
+                    weight=quantize_weight(weight), segment=segment)
+        if edge.segment < 0:
+            edge.segment = self._next_segment
+            self._next_segment += 1
+        self._parallel_edges.append(edge)
+        self._outgoing[source].append(edge)
+        self._incoming[target].append(edge)
+        return edge
+
     def get_edge(self, source: int, target: int, edge_type: int = SPATIAL) -> Edge | None:
         return self._edges.get((source, target, edge_type))
 
@@ -253,7 +290,7 @@ class Graph:
         return list(edges)
 
     def edge_count(self) -> int:
-        return len(self._edges)
+        return len(self._edges) + len(self._parallel_edges)
 
     def _remove_edge(self, key: tuple[int, int, int]):
         edge = self._edges.pop(key, None)
@@ -554,7 +591,11 @@ class Graph:
             edge_types = {TEMPORAL}
 
         # --- 1. Error-driven weight adjustment ---
-        for (src, tgt, etype), edge in list(self._edges.items()):
+        # Include both primary and parallel edges.
+        all_edges = list(self._edges.items()) + [
+            ((e.source, e.target, e.edge_type), e)
+            for e in self._parallel_edges]
+        for (src, tgt, etype), edge in all_edges:
             if etype not in edge_types:
                 continue
             src_node = self._nodes.get(src)
@@ -635,18 +676,73 @@ class Graph:
             keys = list(pair)
             conflict_a = self._solo_conflict.get(keys[0], 0)
             conflict_b = self._solo_conflict.get(keys[1], 0)
-            # Both edges must have solo conflicts (both cause problems alone).
-            if conflict_a < merge_threshold or conflict_b < merge_threshold:
+            # At least ONE edge must have solo conflicts.
+            # An edge already in a segment (a_seg_size > 0) doesn't need
+            # solo conflict — it already proved it needs AND protection.
+            # Only require conflict from the UNPROTECTED edge.
+            if conflict_a < merge_threshold and conflict_b < merge_threshold:
                 continue
             edge_a = self._edges.get(keys[0])
             edge_b = self._edges.get(keys[1])
-            if edge_a and edge_b and edge_a.segment != edge_b.segment:
-                # Merge: AND-gate protects both from solo conflicts.
+            if not edge_a or not edge_b:
+                # Edge might be a parallel edge — find it.
+                for pe in self._parallel_edges:
+                    if not edge_a and pe.source == keys[0][0] and pe.target == keys[0][1]:
+                        edge_a = pe
+                    if not edge_b and pe.source == keys[1][0] and pe.target == keys[1][1]:
+                        edge_b = pe
+            if not edge_a or not edge_b:
+                continue
+            if edge_a.segment == edge_b.segment:
+                continue  # already merged
+
+            # Check if edge_a's segment has OTHER edges in it.
+            # If so, edge_a is already in an AND-gate with someone else.
+            # Create a PARALLEL edge for this new pairing instead of
+            # breaking the existing segment.
+            a_seg_size = sum(1 for e in self._incoming.get(keys[0][1], [])
+                            if e.segment == edge_a.segment and e is not edge_a)
+            b_seg_size = sum(1 for e in self._incoming.get(keys[1][1], [])
+                            if e.segment == edge_b.segment and e is not edge_b)
+
+            if a_seg_size > 0 and b_seg_size == 0:
+                # A is in a group, B is alone. Create parallel A for B's segment.
+                self.add_parallel_edge(
+                    edge_a.source, edge_a.target, edge_a.edge_type,
+                    weight=edge_a.weight, segment=edge_b.segment)
+                # Reset ALL paired_success involving edge_a's key to prevent
+                # the original edge from triggering merges that collapse
+                # the parallel structure.
+                for pk in list(self._paired_success.keys()):
+                    if keys[0] in pk:
+                        self._paired_success[pk] = 0
+            elif b_seg_size > 0 and a_seg_size == 0:
+                # B is in a group, A is alone. Create parallel B for A's segment.
+                self.add_parallel_edge(
+                    edge_b.source, edge_b.target, edge_b.edge_type,
+                    weight=edge_b.weight, segment=edge_a.segment)
+                for pk in list(self._paired_success.keys()):
+                    if keys[1] in pk:
+                        self._paired_success[pk] = 0
+            elif a_seg_size > 0 and b_seg_size > 0:
+                # BOTH in groups. Don't merge — would collapse two
+                # independent segments. Create parallel of the smaller.
+                if a_seg_size <= b_seg_size:
+                    self.add_parallel_edge(
+                        edge_a.source, edge_a.target, edge_a.edge_type,
+                        weight=edge_a.weight, segment=edge_b.segment)
+                else:
+                    self.add_parallel_edge(
+                        edge_b.source, edge_b.target, edge_b.edge_type,
+                        weight=edge_b.weight, segment=edge_a.segment)
+            else:
+                # Neither in groups. Simple merge.
                 edge_b.segment = edge_a.segment
-                # Reset counters.
-                self._paired_success[pair] = 0
-                self._solo_conflict[keys[0]] = 0
-                self._solo_conflict[keys[1]] = 0
+
+            # Reset counters for this pair.
+            self._paired_success[pair] = 0
+            self._solo_conflict[keys[0]] = 0
+            self._solo_conflict[keys[1]] = 0
 
         # --- 3. Synaptogenesis: create edges to high-error nodes ---
         if synaptogenesis:
