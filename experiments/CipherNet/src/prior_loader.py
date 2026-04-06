@@ -97,6 +97,15 @@ def load_priors(config_path: str | None = None) -> tuple[Graph, dict[str, dict[s
         tgt_id = prior_nodes[tgt_prior][tgt_node]
         graph.add_edge(src_id, tgt_id, edge_type=etype, weight=weight)
 
+    # Set tonic activations for intrinsically active neurons.
+    # GPi neurons fire tonically without input — they inhibit thalamus
+    # by default. Gates are CLOSED until Go pathway actively opens them.
+    if 'basal_ganglia' in prior_nodes:
+        for node_key, node_id in prior_nodes['basal_ganglia'].items():
+            node = graph.get_node(node_id)
+            if node and node.meta.get('role') == 'gpi':
+                node.activation = 0.8  # tonic firing
+
     return graph, prior_nodes
 
 

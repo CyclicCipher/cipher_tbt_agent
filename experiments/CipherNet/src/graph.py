@@ -434,10 +434,9 @@ class Graph:
             signal = edge.weight * src.activation if src.activation > 0.001 else 0.0
 
             # Route to compartment based on source type.
-            # Feedback (L6) and non-column sources → APICAL
-            # Processing (L23) sources → BASAL
-            src_role = src.meta.get('role')
-            if src_role == 'feedback' or src_role is None:
+            # ONLY explicit feedback (L6, role='feedback') → APICAL
+            # EVERYTHING else → BASAL (feedforward by default)
+            if src.meta.get('role') == 'feedback':
                 apical_total += signal
             else:
                 basal_segments[edge.segment].append(signal)
@@ -533,7 +532,10 @@ class Graph:
 
             if has_gate:
                 gate_signal = max(0.0, min(1.0, gate_signal))
-                retain = 1.0 - gate_signal
+                # Biology: GPi INHIBITS thalamus. GPi active = gate CLOSED.
+                # retain = gate_signal: high GPi = high retention = closed.
+                # D1 Go inhibits GPi → gate_signal drops → retain drops → OPEN.
+                retain = gate_signal
             else:
                 # Frequency-dependent decay: layer determines band.
                 layer = node.meta.get('layer')
@@ -591,9 +593,15 @@ class Graph:
                 inference_rate = 0.1
                 new_act = old_act + inference_rate * (error + downstream_error)
             else:
-                # FEED MODE (used during token input):
-                # Mamba-style accumulation. Signal ADDS to state.
-                new_act = decay * old_act + sensory
+                # FEED MODE (used during token input).
+                if has_gate:
+                    # GATED nodes: blend old and new based on gate openness.
+                    # retain high (GPi active, closed): hold old state.
+                    # retain low (GPi inhibited, open): accept new input.
+                    new_act = retain * old_act + (1.0 - retain) * sensory
+                else:
+                    # NON-GATED nodes: Mamba accumulation.
+                    new_act = decay * old_act + sensory
 
             # 5. Inhibition from negative SPATIAL edges AND negative
             #    TEMPORAL edges. Negative temporal = directed inhibition

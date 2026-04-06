@@ -57,6 +57,12 @@
     {"source": "stn", "target": "gpi_3", "type": "temporal", "weight": 0.5},
     {"source": "stn", "target": "gpi_4", "type": "temporal", "weight": 0.5},
 
+    {"source": "gpi_0", "target": "gpi_0", "type": "temporal", "weight": 0.9, "description": "Tonic self-loop: GPi stays active by default. Go pathway must actively inhibit to open gate."},
+    {"source": "gpi_1", "target": "gpi_1", "type": "temporal", "weight": 0.9},
+    {"source": "gpi_2", "target": "gpi_2", "type": "temporal", "weight": 0.9},
+    {"source": "gpi_3", "target": "gpi_3", "type": "temporal", "weight": 0.9},
+    {"source": "gpi_4", "target": "gpi_4", "type": "temporal", "weight": 0.9},
+
     {"source": "d1_go_0", "target": "d2_nogo_0", "type": "spatial", "weight": -0.3, "description": "Go and NoGo compete within each stripe via lateral inhibition."},
     {"source": "d2_nogo_0", "target": "d1_go_0", "type": "spatial", "weight": -0.3},
     {"source": "d1_go_1", "target": "d2_nogo_1", "type": "spatial", "weight": -0.3},
