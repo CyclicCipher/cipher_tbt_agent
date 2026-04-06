@@ -206,6 +206,11 @@ class Graph:
         # Eligibility traces are stored on edges directly (Edge.eligibility).
         # No separate counters needed — traces decay naturally.
 
+        # Acetylcholine level: global attentional gain control.
+        # When > 0: enhances thalamocortical input, suppresses
+        # intracortical lateral connections. Set by Brain.attend().
+        self._ach_level: float = 0.0
+
     # -------------------------------------------------------------------
     # Node operations
     # -------------------------------------------------------------------
@@ -432,6 +437,16 @@ class Graph:
             # Inactive sources contribute 0 — this is critical for
             # AND-gates where one missing input must kill the segment.
             signal = edge.weight * src.activation if src.activation > 0.001 else 0.0
+
+            # ACh sharpening: enhance thalamocortical, suppress lateral.
+            if self._ach_level > 0:
+                src_role = src.meta.get('role')
+                if src_role == 'relay':
+                    # Thalamocortical: ENHANCED by ACh (nicotinic)
+                    signal *= (1.0 + self._ach_level)
+                elif src_role == 'process' and src.subgraph != node.subgraph:
+                    # Intracortical lateral: SUPPRESSED by ACh (muscarinic)
+                    signal *= max(0.0, 1.0 - 0.7 * self._ach_level)
 
             # Route to compartment based on source type.
             # ONLY explicit feedback (L6, role='feedback') → APICAL

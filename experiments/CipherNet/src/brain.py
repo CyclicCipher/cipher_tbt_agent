@@ -118,6 +118,16 @@ class Brain:
             edge.weight = quantize_weight(edge.weight)
             edge.eligibility = 0.0  # trace consumed
 
+    def attend(self, level: float = 1.0):
+        """Set acetylcholine attentional gain.
+
+        Biology: ACh from nucleus basalis of Meynert.
+        - level > 0: enhance thalamocortical, suppress lateral
+        - level = 0: no attentional modulation (default state)
+        - Sharpens representation: boost direct input, suppress noise
+        """
+        self.graph._ach_level = max(0.0, min(1.0, level))
+
     def read_output(self) -> tuple[str | None, float]:
         """Read the winning output token."""
         return self.tio.read_output()

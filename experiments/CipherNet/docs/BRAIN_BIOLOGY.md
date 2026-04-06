@@ -247,6 +247,28 @@ Based on Bhatt et al. (2009, 2015), Gerstner et al. (2018).
 - Trace does NOT immediately change weight
 - When factor 3 arrives within trace lifetime → weight changes
 
+### Cross-example contamination prevention
+The brain prevents one episode's traces from contaminating the next:
+- **Dopamine at reward = episode boundary.** Phasic dopamine "closes"
+  the current eligibility window. Sustained action representation
+  terminates. New episode begins clean. (Rubin et al. 2021)
+- **Theta phase reset on novelty.** D1 receptors in ventral hippocampus
+  trigger persistent theta that reorganizes vHPC activity. Existing
+  vHPC-mPFC synaptic strength WEAKENED for new encoding capacity.
+  (Guise & Bhatt, Nature Communications 2021)
+- **Event boundary signal.** At event boundaries: hippocampus spikes,
+  temporal context resets, items across boundary recalled as more
+  distant. No single "new episode" neuron — convergence of dopamine
+  novelty tagging + theta reset + pattern separation + SWR replay +
+  PFC context updating. (Zheng et al., Nature Communications 2022)
+- **BG sustained activation.** Only ONE action representation sustained
+  at a time (winner-take-all). When dopamine arrives, only the
+  still-active synapses get reinforced. Mechanically prevents
+  cross-action contamination. (Rubin et al. 2021)
+- **Hippocampal pattern separation.** Dentate gyrus orthogonalizes
+  similar inputs into distinct representations. 5x more neurons
+  than input → sparse coding. Prevents catastrophic interference.
+
 ### Eligibility trace timescales
 - Striatum: ~1 second (dopamine-dependent)
 - Cortex: 5-10 seconds (norepinephrine→LTP, serotonin→LTD)
@@ -304,15 +326,71 @@ Not needed yet. Relevant when:
 
 ## Neuromodulatory Systems
 
-### Acetylcholine (from basal forebrain / nucleus basalis)
-- THE cortical attention signal
-- Effects:
-  - Enhances thalamocortical input (more signal through relay)
-  - Lowers dendritic NMDA thresholds (AND-gates fire more easily)
-  - Suppresses intracortical lateral spread (less noise)
-  - Drives VIP interneurons → disinhibits dendrites
-- Net effect: sharpens cortical representation (more signal, less noise)
-- Driven by: novelty, task demands, PFC error monitor
+### Acetylcholine (from nucleus basalis of Meynert / basal forebrain)
+THE cortical attention signal. Wired and PHASIC (not slow diffuse
+volume transmission — Sarter et al. 2009 settled this debate).
+
+**Source:** nucleus basalis of Meynert (NBM). Topographic: rostral
+NBM → broad cortical layers, caudal NBM → deep layers.
+
+**Transmission:** point-to-point synaptic + en passant release.
+Millisecond-scale phasic signals detected by modern biosensors.
+
+**Effects on cortical processing:**
+- **Thalamocortical input: ENHANCED.** Nicotinic receptors on
+  thalamic axon terminals in L4 lower threshold and increase
+  sensory-evoked responses. Direct bottom-up boost.
+- **Intracortical lateral: SUPPRESSED.** Presynaptic muscarinic M2
+  receptors reduce efficacy of lateral/recurrent connections.
+  Dampens internal recurrence and lateral spread.
+- **Dendritic NMDA thresholds: LOWERED.** ACh facilitates NMDA
+  spikes, making dendritic AND-gates fire more easily.
+- **VIP→SST disinhibitory cascade:** ACh depolarizes VIP (nicotinic)
+  → VIP inhibits SST → SST releases pyramidal dendrites →
+  pyramidal cells amplified. This IS the gain mechanism.
+- **Apical-basal coupling: ENHANCED.** ACh facilitates BAC firing
+  by lowering apical calcium spike threshold. Top-down context
+  more easily amplifies bottom-up sensory.
+- **Net effect: SHARPEN.** Boost direct sensory, suppress lateral
+  noise, disinhibit dendrites. Signal-to-noise ratio improves.
+
+**What drives ACh release:**
+- PFC → basal forebrain: top-down attention commands
+- Amygdala → basal forebrain: emotional salience
+- Hippocampus → basal forebrain: novelty/context
+- Hypothalamus/orexin → basal forebrain: arousal state
+- Striatum → basal forebrain: reward-related gating
+
+**Time course:**
+- Phasic: 200-500ms onset, lasts seconds. Cue detection.
+- Tonic: minutes. General cognitive demand, working memory.
+
+**In predictive coding (eLife 2024):**
+ACh = PRECISION WEIGHTING of prediction errors. ACh modulates
+mismatch negativity (error) without affecting repetition suppression.
+Most neurons suppressed, few encoding precise errors enhanced.
+This IS the Friston/Feldman precision framework implemented.
+
+**When blocked (scopolamine):**
+- Impaired memory encoding, verbal recall, recognition
+- Signal-to-noise degradation in sensory processing
+- Planning/WM relatively spared (those use other neuromodulators)
+
+**For CipherNet:**
+ACh during training prevents merge contamination by:
+1. Enhancing thalamocortical path (direct feature input boosted)
+2. Suppressing intracortical lateral paths (indirect activation blocked)
+3. Only directly-fed features stay strongly active
+4. Merge sees correct feature pairs, not indirect contamination
+
+### Sources (ACh)
+- Sarter et al. 2009, Nature Rev Neurosci (wired, not volume)
+- Forebrain cholinergic signalling (Nature Rev Neurosci 2023)
+- Nicotinic control of thalamocortical transmission (Nature Neurosci)
+- VIP-SST disinhibitory circuit (Neuron 2024)
+- ACh modulates precision of prediction error (eLife 2024)
+- Zolnik/Larkum 2024, Neuron (L6b NMDA spikes via L1)
+- Scopolamine meta-analysis (PMC 2025)
 
 ### Dopamine (from VTA / substantia nigra)
 - Reward prediction error
