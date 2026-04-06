@@ -157,10 +157,13 @@ class Graph:
         self._next_segment: int = 0  # auto-increment for unique segments
         self._label_to_id: dict[str, int] = {}
         self._subgraphs: dict[str, set[int]] = defaultdict(set)
-        # Co-activation counter for dendritic segment merging.
-        # Key: frozenset of two edge keys (src,tgt,type).
-        # Value: count of episodes where both sources were active.
-        self._coactivation: dict[frozenset, int] = defaultdict(int)
+        # Conflict-driven dendritic segment merging.
+        # solo_conflict: edge_key -> count of times source was active
+        #   AND target had negative error (edge causing false positive).
+        # paired_success: frozenset(edge_key, edge_key) -> count of times
+        #   both sources active AND target had positive error (pair useful).
+        self._solo_conflict: dict[tuple, int] = defaultdict(int)
+        self._paired_success: dict[frozenset, int] = defaultdict(int)
 
     # -------------------------------------------------------------------
     # Node operations
@@ -574,49 +577,76 @@ class Graph:
             # Quantize to 8-bit precision, clamped to [-1, 1].
             edge.weight = quantize_weight(edge.weight)
 
-        # --- 2. Dendritic segment merging via co-activation tracking ---
-        # Based on Bhatt et al. (2015): synapses that repeatedly co-fire
-        # within a learning window migrate onto the same dendritic branch.
-        # We track co-activation counts for each edge pair to the same
-        # target. When the count exceeds merge_threshold, we merge their
-        # segments (making them conjunctive/AND).
-        merge_threshold = 10  # co-activations needed before merging
-        coact_threshold = 0.05  # minimum activation to count as "active"
+        # --- 2. Conflict-driven dendritic segment merging ---
+        #
+        # Track two signals per edge:
+        # (a) solo_conflict: source active AND target has NEGATIVE error
+        #     (too much activation) → this edge is causing false positives.
+        # (b) paired_success: BOTH sources active AND target has POSITIVE
+        #     error (needs more activation) → this pair is useful together.
+        #
+        # When an edge has high solo conflict AND high paired success
+        # with a specific partner → merge into same segment (AND-gate).
+        # The AND protects: the edge only fires when its partner is also
+        # active, preventing the solo false positives.
 
-        # Group active incoming edges by target node.
-        target_active_edges: dict[int, list[tuple]] = defaultdict(list)
+        act_threshold = 0.1   # minimum activation to count as "active"
+        merge_threshold = 5   # conflicts + successes needed before merge
+
+        # Collect active edges grouped by target.
+        target_edges: dict[int, list[tuple]] = defaultdict(list)
         for (src, tgt, etype), edge in self._edges.items():
-            if etype not in edge_types:
+            if etype not in edge_types or edge.weight < 0:
                 continue
             src_node = self._nodes.get(src)
             tgt_node = self._nodes.get(tgt)
             if src_node is None or tgt_node is None:
                 continue
-            if src_node.activation < coact_threshold:
+            if src_node.activation < act_threshold:
                 continue
-            if abs(tgt_node.error) < 0.01:
-                continue  # only track at nodes with prediction error
-            target_active_edges[tgt].append((src, tgt, etype))
+            if src_node.subgraph is not None and src_node.subgraph == tgt_node.subgraph:
+                continue  # skip structural edges
+            target_edges[tgt].append((src, tgt, etype))
 
-        # For each target with 2+ active incoming edges, update counts.
-        for tgt_id, edge_keys in target_active_edges.items():
-            if len(edge_keys) < 2:
+        for tgt_id, edge_keys in target_edges.items():
+            tgt_node = self._nodes.get(tgt_id)
+            if tgt_node is None:
                 continue
-            # Update co-activation counts for all pairs.
-            for i in range(len(edge_keys)):
-                for j in range(i + 1, len(edge_keys)):
-                    pair_key = frozenset((edge_keys[i], edge_keys[j]))
-                    self._coactivation[pair_key] += 1
-                    # Check if ready to merge.
-                    if self._coactivation[pair_key] >= merge_threshold:
-                        edge_a = self._edges.get(edge_keys[i])
-                        edge_b = self._edges.get(edge_keys[j])
-                        if edge_a and edge_b and edge_a.segment != edge_b.segment:
-                            # Merge: move B onto A's segment.
-                            old_seg = edge_b.segment
-                            edge_b.segment = edge_a.segment
-                            # Reset counter (don't merge again immediately).
-                            self._coactivation[pair_key] = 0
+
+            if tgt_node.error < -0.05:
+                # NEGATIVE error: target has too much activation.
+                # Active edges are causing false positives.
+                for ek in edge_keys:
+                    self._solo_conflict[ek] += 1
+
+            elif tgt_node.error > 0.05:
+                # POSITIVE error: target needs more activation.
+                # Active edge pairs are useful together.
+                for i in range(len(edge_keys)):
+                    for j in range(i + 1, len(edge_keys)):
+                        pair = frozenset((edge_keys[i], edge_keys[j]))
+                        self._paired_success[pair] += 1
+
+        # Check for merge candidates: edges with high solo conflict
+        # that also have high paired success with a specific partner.
+        for pair, success_count in list(self._paired_success.items()):
+            if success_count < merge_threshold:
+                continue
+            keys = list(pair)
+            conflict_a = self._solo_conflict.get(keys[0], 0)
+            conflict_b = self._solo_conflict.get(keys[1], 0)
+            # Both edges must have solo conflicts (both cause problems alone).
+            if conflict_a < merge_threshold or conflict_b < merge_threshold:
+                continue
+            edge_a = self._edges.get(keys[0])
+            edge_b = self._edges.get(keys[1])
+            if edge_a and edge_b and edge_a.segment != edge_b.segment:
+                # Merge: AND-gate protects both from solo conflicts.
+                edge_b.segment = edge_a.segment
+                # Reset counters.
+                self._paired_success[pair] = 0
+                self._solo_conflict[keys[0]] = 0
+                self._solo_conflict[keys[1]] = 0
 
         # --- 3. Synaptogenesis: create edges to high-error nodes ---
         if synaptogenesis:
