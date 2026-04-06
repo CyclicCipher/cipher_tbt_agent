@@ -3,6 +3,92 @@
 A reference document for biological facts that inform CipherNet's
 architecture. Sourced from neuroscience research. Updated as we learn.
 
+## Approximate Number System (ANS)
+
+Based on Nieder (2016, 2024), Piazza et al. (2004), Izard et al. (2009).
+
+### What is it?
+INNATE, evolutionarily ancient cognitive system for representing
+approximate numerical magnitudes. Present at BIRTH. Shared with
+monkeys, birds, fish. NOT learned from experience — the architecture
+is genetic, though precision refines with experience.
+
+### Neural implementation
+- **Location:** bilateral intraparietal sulcus (IPS), parietal cortex.
+  Right-lateralized in infants (before language). Also PFC neurons
+  (task-dependent numerosity coding).
+- **Number neurons:** each neuron has a PREFERRED NUMEROSITY and
+  a Gaussian tuning curve on a LOGARITHMIC scale.
+  - Neuron tuned to 4: fires strongly for 4, weakly for 3 and 5
+  - Tuning WIDTH proportional to preferred numerosity (Weber's law)
+  - Neuron tuned to 4: width ~1. Tuned to 20: width ~5.
+- **Population code (labeled-line):** different neurons tuned to
+  different numerosities. The most-active neuron IS the perceived
+  number. As a population, they tile the number line.
+- **Logarithmic compression:** more cortical space for small numbers.
+  1-4: many neurons, high precision (subitizing).
+  >4: fewer neurons, lower precision (estimation).
+
+### Tuning curve equation
+```
+response(n) = A * exp(-(log(n) - log(preferred))^2 / (2 * sigma^2))
+```
+Gaussian on log scale. Width sigma proportional to preferred numerosity.
+
+### Weber fraction (precision by age)
+| Age | Weber fraction | Discriminable ratio |
+|-----|---------------|-------------------|
+| Newborn | ~0.33 | 1:3 |
+| 6 months | ~0.50 | 1:2 |
+| 9 months | ~0.67 | 2:3 |
+| Preschool | ~0.75 | 3:4 |
+| Adult | ~0.88 | 7:8 |
+
+Architecture innate, precision improves with experience.
+
+### Two systems (or one?)
+- **Subitizing (1-4):** precise, parallel, fast. More neurons per
+  numerosity → higher precision. Labeled-line code.
+- **Estimation (>4):** approximate, ratio-dependent. Fewer neurons
+  → logarithmic compression. Population code.
+- May be a single system with naturally higher resolution for
+  small numbers (more cortical space devoted to small numerosities).
+
+### What is innate vs learned
+- **INNATE:** parietal number neurons, approximate numerosity
+  discrimination, right-parietal specialization (before language),
+  abstract cross-modal number (visual + auditory matched at birth)
+- **LEARNED:** symbol-to-number mapping (digit "3" = quantity three),
+  exact arithmetic, the number line as an ordered spatial structure,
+  Weber fraction refinement
+
+### Parietal vs prefrontal number neurons
+- **IPS (parietal):** stimulus-driven, pure numerosity coding.
+  Tuning curves stable across tasks.
+- **PFC:** task-dependent. Change tuning based on what the monkey
+  is doing. Arithmetic rule neurons are HERE, not in parietal.
+  PFC number neurons are more flexible but less reliable.
+
+### For CipherNet
+Our current ANS prior (8 nodes: comparator circuit) is wrong.
+The biological ANS is:
+- A set of cortical columns, each tuned to a preferred numerosity
+- Gaussian tuning on log scale → Weber's law emerges
+- Population code across columns → number representation
+- Comparison via lateral inhibition between number columns
+- Pre-wired approximately, refined by experience
+
+### Sources
+- Nieder 2016, Nature Rev Neurosci (the neuronal code for number)
+- Nieder 2024, Physiol Rev (the calculating brain)
+- Piazza et al. 2004, Neuron (tuning curves in human IPS)
+- Izard et al. 2009, PNAS (newborns perceive abstract numbers)
+- Decarli et al. 2023, Dev Science (12-month ANS predicts 4-year math)
+- Nature Human Behaviour 2023 (distinct coding small vs large numbers)
+- Nature Comm 2023 (learning-induced number neuron reorganization)
+
+---
+
 ## The Pyramidal Neuron (Two-Compartment)
 
 Based on Larkum et al. (1999, 2020, 2024), Spruston (2008).
