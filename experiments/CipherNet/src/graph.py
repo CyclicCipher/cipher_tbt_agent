@@ -583,6 +583,11 @@ class Graph:
                 #   input (positive error = sensory > prediction).
                 #   This EXPLAINS the input by increasing the representation.
                 # +downstream: increase when downstream needs more signal.
+                # Larkum's principle: apical (downstream) cannot drive
+                # without basal (feedforward). If no basal input,
+                # downstream error is ignored — nothing to amplify.
+                if node.basal < 0.01:
+                    downstream_error = 0.0
                 inference_rate = 0.1
                 new_act = old_act + inference_rate * (error + downstream_error)
             else:
