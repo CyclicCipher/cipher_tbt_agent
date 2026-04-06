@@ -34,6 +34,25 @@ BINDING = 2    # directed, stimulus -> latent position
 GATE = 3       # directed, gate -> target (controls retention vs update)
 
 # ---------------------------------------------------------------------------
+# Synaptic weight quantization (8-bit precision)
+# ---------------------------------------------------------------------------
+# Biology: ~4.7 bits per synapse (24 distinguishable sizes via AMPA receptor
+# count). We use 8 bits for computational convenience (256 levels).
+# Excitatory: [0, 1.0] in 255 steps. Inhibitory: [-1.0, 0] in 255 steps.
+# Weight changes smaller than one quantum have no effect (like inserting
+# fewer than one receptor). This provides natural regularization.
+
+WEIGHT_QUANTA = 255  # 8-bit: 0..255 levels
+WEIGHT_STEP = 1.0 / WEIGHT_QUANTA  # ≈ 0.00392
+
+
+def quantize_weight(w: float) -> float:
+    """Quantize a weight to 8-bit precision in [-1.0, 1.0]."""
+    w = max(-1.0, min(1.0, w))
+    # Round to nearest quantum.
+    return round(w / WEIGHT_STEP) * WEIGHT_STEP
+
+# ---------------------------------------------------------------------------
 # Frequency bands (decay rates per brain oscillation band)
 # ---------------------------------------------------------------------------
 # Gamma: fast response, carries feedforward prediction errors (L2/3, L4)
@@ -192,7 +211,7 @@ class Graph:
             return existing
 
         edge = Edge(source=source, target=target, edge_type=edge_type,
-                    weight=weight, segment=segment, meta=meta)
+                    weight=quantize_weight(weight), segment=segment, meta=meta)
         # Auto-assign unique segment if not specified.
         if edge.segment < 0:
             edge.segment = self._next_segment
@@ -550,10 +569,10 @@ class Graph:
 
             # Error-driven: delta = lr * target_error * source_activation
             delta = learning_rate * tgt_node.error * src_node.activation
-            # Weight decay: prevent runaway growth.
             edge.weight *= (1.0 - weight_decay)
             edge.weight += delta
-            edge.weight = max(-2.0, min(2.0, edge.weight))
+            # Quantize to 8-bit precision, clamped to [-1, 1].
+            edge.weight = quantize_weight(edge.weight)
 
         # --- 2. Dendritic segment merging via co-activation tracking ---
         # Based on Bhatt et al. (2015): synapses that repeatedly co-fire
