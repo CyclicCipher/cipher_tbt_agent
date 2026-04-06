@@ -287,6 +287,43 @@ parallel edges — all discovered from experience.
 
 Each edge has: weight (8-bit quantized), segment ID, metadata.
 
+## Column Voting (TBT Consensus)
+
+Based on Hawkins et al. (2017) and Numenta's CMP (2024).
+
+Columns share HYPOTHESES through a feedback loop:
+```
+Column A:L23 -> output obj1 -> Column A:L4 (reinforcement)
+                     |
+Column B:L23 -> output obj1 -> Column B:L4 (reinforcement)
+```
+
+When both A and B drive obj1, obj1 feeds back to both columns'
+L4. This feedback is MODULATORY — it only boosts columns that
+already have feedforward sensory support. The PV gamma reset
+prevents inactive columns from being activated by feedback alone.
+
+The settle() process IS the voting protocol. Over multiple gamma
+cycles, the feedback loop amplifies the consensus hypothesis and
+suppresses alternatives through output competition (inhibitor).
+
+### Hawkins formal mechanism (Equation 5)
+
+A L2/3 cell fires if it has BOTH:
+- Feedforward support (sensory match from L4)
+- Lateral support >= threshold (other columns agree)
+
+The lateral support comes through basal dendritic segments — an
+AND-gate requiring BOTH sensory input AND lateral agreement.
+
+### 4-column disambiguation test
+
+The correct dendritic segments ARE discovered ({A,B} for obj1,
+{A,C} for obj2, {B,D} for obj3). But cross-contamination from
+the feedback loop creates spurious segments alongside the correct
+ones. Segment merging needs to be restricted to feedforward-driven
+co-activation only (not feedback-driven). Work in progress.
+
 ## Tokenization
 
 ALL input is character-level. "307" = '3', '0', '7'.
