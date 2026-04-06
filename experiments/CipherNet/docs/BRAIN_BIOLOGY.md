@@ -268,6 +268,40 @@ Based on Bhatt et al. (2009, 2015), Gerstner et al. (2018).
 
 ---
 
+## Hemispheric Lateralization
+
+Based on Gotts et al. (2021, Neuron).
+
+### Why two hemispheres?
+- **Parallel dual processing**: language (left) and spatial (right) simultaneously
+- **Wiring cost reduction**: specialization avoids duplicate cross-hemisphere connections
+- **Two processing styles**: left=sequential/analytical (System 2), right=holistic/contextual (System 1)
+- **Resilience**: partial redundancy — if one side damaged, other compensates
+
+### Corpus callosum (interhemispheric connection)
+- Anterior: INHIBITORY during competition (keep hemispheres independent)
+- Posterior: FACILITATORY during cooperation (share information)
+- Intentional BOTTLENECK — prevents constant cross-talk noise
+- Can integrate OR isolate depending on context
+
+### 2024 finding: different conduction velocities
+- Left hemisphere: faster conduction → precise temporal analysis (speech)
+- Right hemisphere: slower conduction → broader integration window (melody)
+
+### For CipherNet
+Not needed yet. Relevant when:
+- Vision + language run simultaneously
+- Analytical + holistic processing on same input
+- Damage resilience required
+
+### Sources
+- Gotts et al. 2021, Neuron (hemispheric specialization and cognition)
+- Two distinct forms of functional lateralization (PNAS 2013)
+- Hemispheric specialization tuned by conduction velocities (bioRxiv 2024)
+- Corpus callosum: excitation or inhibition? (Neuropsychology Review)
+
+---
+
 ## Neuromodulatory Systems
 
 ### Acetylcholine (from basal forebrain / nucleus basalis)

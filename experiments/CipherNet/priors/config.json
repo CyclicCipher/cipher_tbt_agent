@@ -85,13 +85,32 @@
     {"source_prior": "temporal_cortex", "source_node": "lexical:L5", "target_prior": "broca", "target_node": "ba45:input", "type": "temporal", "weight": 0.6,
      "description": "Ventral semantic pathway: lexical categorization from temporal cortex → BA45 semantic selection. Tells BA45 what TYPE of tokens are in the workspace."},
 
-    {"_comment": "=== Temporal cortex → PFC (direct temporal-frontal connection) ==="},
+    {"_comment": "=== TRANSTHALAMIC PATHWAYS (higher-order thalamus = MD) ==="},
+    {"_comment": "Biology: cortical L5 → higher-order thalamus → PFC. This is the transthalamic bridge (NOT the first-order sensory relay). The MD thalamus receives processed cortical output and routes it to PFC, gated by BG."},
+
+    {"_comment": "=== Temporal cortex L5 → MD relay_0 → PFC WM0 (token→WM pathway) ==="},
+    {"source_prior": "temporal_cortex", "source_node": "recv0:L5", "target_prior": "thalamus", "target_node": "relay_0", "type": "temporal", "weight": 0.8,
+     "description": "Transthalamic: temporal cortex (most recent token) → MD relay_0. BG GPi_0 gates whether this reaches PFC WM0."},
+    {"source_prior": "temporal_cortex", "source_node": "recv1:L5", "target_prior": "thalamus", "target_node": "relay_0", "type": "temporal", "weight": 0.5,
+     "description": "Previous token also feeds MD relay_0 (weaker)."},
+
+    {"_comment": "=== Broca L5 → MD relay_1 → PFC WM1 (processed structure→WM) ==="},
+    {"source_prior": "broca", "source_node": "ws0:L5", "target_prior": "thalamus", "target_node": "relay_1", "type": "temporal", "weight": 0.7,
+     "description": "Transthalamic: Broca workspace output → MD relay_1 → PFC WM1. BG GPi_1 gates."},
+    {"source_prior": "broca", "source_node": "ba44:output", "target_prior": "thalamus", "target_node": "relay_2", "type": "temporal", "weight": 0.6,
+     "description": "Transthalamic: Broca Merge result → MD relay_2 → PFC WM2 (goal)."},
+
+    {"_comment": "=== Temporal cortex → PFC (direct cortico-cortical, parallel to transthalamic) ==="},
     {"source_prior": "temporal_cortex", "source_node": "recv0:L5", "target_prior": "pfc", "target_node": "wm0:L4", "type": "temporal", "weight": 0.3,
-     "description": "Most recent token also goes to PFC WM (weaker path — main flow is through Broca)."},
+     "description": "Direct cortico-cortical route (parallel to transthalamic). Weaker — main flow is through MD thalamus."},
+
+    {"_comment": "=== PFC WM → output cortex (WM drives output) ==="},
+    {"source_prior": "pfc", "source_node": "wm0:L5", "target_prior": "output_cortex", "target_node": "inhibitor", "type": "temporal", "weight": -0.3,
+     "description": "Active WM0 releases output inhibition (disinhibits output cortex)."},
 
     {"_comment": "=== Broca workspace → output cortex (merged structure drives output) ==="},
     {"source_prior": "broca", "source_node": "ba44:output", "target_prior": "output_cortex", "target_node": "inhibitor", "type": "temporal", "weight": -0.3,
-     "description": "Merge completion RELEASES output cortex inhibition. After Merge, the result can drive output. Negative weight on inhibitor = disinhibition."},
+     "description": "Merge completion RELEASES output cortex inhibition."},
 
     {"_comment": "=== PFC sequencer → BG temporal cortex gate (controls token intake timing) ==="},
     {"source_prior": "pfc", "source_node": "sequencer:L5", "target_prior": "basal_ganglia", "target_node": "d1_go_4", "type": "temporal", "weight": 0.5,
