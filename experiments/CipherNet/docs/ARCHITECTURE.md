@@ -483,7 +483,66 @@ Output cortex backward prediction edges targeted L23 (basal compartment, role='p
 ### 4. Testing used step() (feed mode) instead of settle() (PC inference)
 Feed mode (Mamba accumulation) doesn't run the WTA inhibitor iteratively. **Fix**: use settle() with input clamp during testing, giving the inhibitor time to suppress non-winners.
 
-## Sensory Processing Hierarchy
+## Symbolic Cortical Columns (Active Architecture)
+
+The neural column architecture (L4/L23/L5/L6 with multi-cell, dendritic
+segments, 582 nodes) is replaced by **symbolic columns** — data structures
+that directly implement TBT column functions.
+
+### Why symbolic
+
+The neural columns failed to learn single-digit succession through the
+full hierarchy after 100 epochs. The architecture used gradient descent
+to implement what is essentially a lookup table. The symbolic column
+does the lookup directly: one-shot learning (dict write), O(1) prediction
+(dict lookup). No neurons, no gradient descent, no epochs.
+
+### The SymbolicColumn
+
+Each column maintains a reference frame (location), stores feature-location
+associations (memory dict), and predicts via lookup. The displacement
+algebra is category-theoretic: location = object, displacement = morphism,
+path integration = composition.
+
+- `observe(feature)` → compare prediction vs actual, learn if surprised
+- `displace(morphism)` → update location (path integration)
+- `predict()` → lookup at current location
+- `vote()` → broadcast prediction to neighbors
+
+### Column types
+
+- **SuccessionColumn**: location = current token, memory maps current → next
+- **PlaceValueColumn**: location = (digit, carry), memory = Z/10Z successor morphism
+
+### Results
+
+| Benchmark | Result | Training |
+|-----------|--------|----------|
+| Succession (0→1...8→9) | 9/9 | 1 pass, 9 examples |
+| Multi-digit carry (42 pairs) | 42/42 | 0 epochs (pre-loaded morphism) |
+| Holdout (unseen tens 5-8) | 40/40 | never trained |
+| OOD 999→1000 | correct | never seen 3+ digits |
+| OOD 99999→100000 | correct | never seen 5+ digits |
+
+### Category-theoretic displacement
+
+The reference frame for each column is a CATEGORY:
+- Succession: Z (integers, successor morphism)
+- Place value: Z/10Z (integers mod 10, +1 with carry)
+- Future vision: Z² (2D grid, saccade displacement)
+- Future language: free category over token relations
+
+Different domains use different categories. The column PROTOCOL is the
+same — only the category changes.
+
+### Structure discovery (future)
+
+Currently column types (SuccessionColumn, PlaceValueColumn) are manually
+specified. The RelationalLearner (experiments/symbolic_ai/) will discover
+the category structure (morphisms, composition rules) from raw data.
+The E0-E3 pipeline finds relational structure without hardcoded rules.
+
+## Sensory Processing Hierarchy (Legacy Neural Architecture)
 
 ALL input flows through a sensory cortex hierarchy before reaching WM:
 
