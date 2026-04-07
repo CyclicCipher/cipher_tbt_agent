@@ -119,9 +119,16 @@ class Node:
 
     Output = basal * (1 + apical_gain)  [apical amplification]
     Burst = basal > threshold AND apical > threshold  [BAC firing]
+
+    Theta phase encoding (position in sequence):
+    Content = activation (firing rate). Position = phase (timing
+    relative to theta oscillation). Based on theta-gamma phase coding
+    in hippocampus/entorhinal cortex. Domain-general: works for
+    digit position, word position, spatial location.
     """
     id: int
     activation: float = 0.0
+    phase: float = 0.0         # theta phase (0 to 2*pi) — position in sequence
     error: float = 0.0         # prediction error (sensory - prediction)
     basal: float = 0.0         # feedforward compartment
     apical: float = 0.0        # feedback/context compartment
@@ -368,10 +375,29 @@ class Graph:
     # Activation dynamics — predictive coding
     # -------------------------------------------------------------------
 
-    def activate(self, nid: int, level: float = 1.0):
+    def theta_phase(self) -> float:
+        """Current theta oscillation phase (0 to 2*pi).
+
+        Based on the global clock and THETA_PERIOD. Tokens fed at
+        different clock ticks get different phases, encoding their
+        sequential position. This is the neural equivalent of PoPE
+        (Polar Positional Embedding).
+        """
+        return (self._clock % THETA_PERIOD) / THETA_PERIOD * 2 * math.pi
+
+    def activate(self, nid: int, level: float = 1.0,
+                 phase: float | None = None):
+        """Activate a node with optional theta phase.
+
+        If phase is provided, it sets the node's positional encoding.
+        If not, the node's phase is unchanged (useful for non-sequential
+        activations like GPi tonic state).
+        """
         node = self._nodes.get(nid)
         if node is not None:
             node.activation = min(1.0, level)
+            if phase is not None:
+                node.phase = phase
 
     def reset_activations(self):
         for node in self._nodes.values():
@@ -379,6 +405,7 @@ class Graph:
             node.error = 0.0
             node.basal = 0.0
             node.apical = 0.0
+            node.phase = 0.0
         # Reset eligibility traces and segment calcium between examples.
         for edge in self._edges.values():
             edge.eligibility = 0.0
@@ -407,8 +434,8 @@ class Graph:
             return self._clock % THETA_PERIOD == 0
         return True  # gamma and untagged: every step
 
-    def _compute_sensory(self, nid: int, node: Node) -> tuple[float, float, float]:
-        """Two-compartment dendritic computation.
+    def _compute_sensory(self, nid: int, node: Node) -> tuple[float, float, float, float]:
+        """Two-compartment dendritic computation with theta phase.
 
         BASAL: feedforward input from processing nodes (role='process').
                Dendritic segments with AND-gates + calcium thresholds.
@@ -418,11 +445,19 @@ class Graph:
                 and from non-column sources (output nodes, etc.).
                 This AMPLIFIES the basal signal (gain modulation).
 
-        Returns (basal, apical, error).
+        Phase propagation: the node inherits its phase from the weighted
+        average of incoming signal phases (complex mean). This preserves
+        positional information as it flows through the graph.
+
+        Returns (basal, apical, error, phase).
         Output = basal * (1 + apical) via BAC-like amplification.
         """
         # BASAL compartment: feedforward, with dendritic segments.
-        basal_segments: dict[int, list[float]] = defaultdict(list)
+        # Each signal is a (magnitude, phase) tuple for phase-aware computation.
+        basal_segments: dict[int, list[tuple[float, float]]] = defaultdict(list)
+        # Phase tracking: weighted complex sum for phase propagation.
+        phase_real = 0.0  # sum of magnitude * cos(phase)
+        phase_imag = 0.0  # sum of magnitude * sin(phase)
         # APICAL compartment: feedback/context, simple sum.
         apical_total = 0.0
 
@@ -453,33 +488,78 @@ class Graph:
             if src.meta.get('role') == 'feedback':
                 apical_total += signal
             else:
-                basal_segments[edge.segment].append(signal)
+                basal_segments[edge.segment].append((signal, src.phase))
+
+            # Phase propagation: accumulate complex components
+            # from ALL incoming positive edges (both basal and apical).
+            if signal > 0.001:
+                phase_real += signal * math.cos(src.phase)
+                phase_imag += signal * math.sin(src.phase)
 
         # Compute basal: dendritic AND within segments, OR across.
+        # Phase-aware: inputs on the same segment at similar phases
+        # constructively interfere; inputs at different phases cancel.
+        # Biology: NMDA spike requires coincident inputs (~5-10ms window).
+        # Inputs at similar theta phases arrive within this window.
+        # Phase concordance: (1 + cos(phi_i - phi_j)) / 2
+        #   Same phase: 1.0 (constructive, full AND-gate)
+        #   Opposite phase: 0.0 (destructive, AND-gate killed)
+        #   90 deg apart: 0.5 (partial)
         basal = 0.0
-        for seg_id, signals in basal_segments.items():
+        for seg_id, signals_with_phase in basal_segments.items():
             calcium = self._segment_calcium.get(seg_id, 0.0)
             seg_threshold = CALCIUM_THRESHOLD_SCALE * calcium
-            if len(signals) == 1:
-                val = max(0.0, signals[0])
+            if len(signals_with_phase) == 1:
+                val = max(0.0, signals_with_phase[0][0])
                 if val > seg_threshold:
                     basal += val
                     self._segment_calcium[seg_id] = min(
                         CALCIUM_MAX, calcium + CALCIUM_INCREMENT)
             else:
+                # Multi-input segment: AND-gate with phase concordance.
+                magnitudes = [s[0] for s in signals_with_phase]
+                phases = [s[1] for s in signals_with_phase]
+
                 product = 1.0
                 all_positive = True
-                for s in signals:
-                    if s <= 0.0:
+                for m in magnitudes:
+                    if m <= 0.0:
                         all_positive = False
                         break
-                    product *= s
+                    product *= m
                 if all_positive:
-                    val = product ** (1.0 / len(signals))
+                    geo_mean = product ** (1.0 / len(magnitudes))
+
+                    # Phase concordance: mean pairwise (1+cos(diff))/2.
+                    # Measures how temporally coincident the inputs are.
+                    concordance = 1.0
+                    n_pairs = 0
+                    concordance_sum = 0.0
+                    for i in range(len(phases)):
+                        for j in range(i + 1, len(phases)):
+                            concordance_sum += (1.0 + math.cos(phases[i] - phases[j])) / 2.0
+                            n_pairs += 1
+                    if n_pairs > 0:
+                        concordance = concordance_sum / n_pairs
+
+                    # AND-gate output = geometric mean * phase concordance.
+                    # Same-phase inputs: full AND. Different-phase: attenuated.
+                    val = geo_mean * concordance
                     if val > seg_threshold:
                         basal += val
                         self._segment_calcium[seg_id] = min(
                             CALCIUM_MAX, calcium + CALCIUM_INCREMENT)
+
+        # Compute propagated phase from complex mean.
+        # atan2(imag, real) gives the circular mean of input phases,
+        # weighted by signal magnitude. This is the PoPE principle:
+        # content (magnitude) and position (phase) are orthogonal.
+        if phase_real != 0.0 or phase_imag != 0.0:
+            propagated_phase = math.atan2(phase_imag, phase_real)
+            if propagated_phase < 0:
+                propagated_phase += 2 * math.pi
+        else:
+            propagated_phase = node.phase  # keep existing if no input
 
         # Store compartment values on the node.
         node.basal = basal
@@ -498,7 +578,7 @@ class Graph:
         # Prediction error: what L6 feedback predicted vs what arrived.
         # L6 feedback is in the apical stream.
         error = max(-1.0, min(1.0, basal - apical_total))
-        return sensory, apical_total, error
+        return sensory, apical_total, error, propagated_phase
 
     def step(self, default_decay: float = 0.85, threshold: float = 0.01,
              inference: bool = False):
@@ -526,6 +606,7 @@ class Graph:
         self._clock += 1
         new_activations: dict[int, float] = {}
         new_errors: dict[int, float] = {}
+        new_phases: dict[int, float] = {}
 
         for nid, node in self._nodes.items():
             # Oscillatory gating: skip nodes not in this phase.
@@ -563,7 +644,7 @@ class Graph:
                 retain = FREQ_DECAY.get(freq, default_decay) if freq else default_decay
 
             # 2-3. Two-compartment dendritic computation.
-            sensory, prediction, error = self._compute_sensory(nid, node)
+            sensory, prediction, error, prop_phase = self._compute_sensory(nid, node)
 
             # 4. Update: two modes.
 
@@ -647,6 +728,36 @@ class Graph:
 
             new_activations[nid] = new_act
             new_errors[nid] = error
+            # Phase propagation: blend old phase with incoming phase.
+            # Use circular mean weighted by old vs new activation.
+            # In feed mode: new input can shift phase (new token arrives).
+            # In inference mode: phase is mostly preserved (settled state).
+            if sensory > 0.01:
+                # Weight the incoming phase by the proportion of new input.
+                if not inference:
+                    # Feed mode: phase follows dominant input.
+                    total = decay * old_act + sensory
+                    if total > 0.01:
+                        old_w = decay * old_act / total
+                        new_w = sensory / total
+                        # Circular weighted mean via complex numbers.
+                        pr = old_w * math.cos(node.phase) + new_w * math.cos(prop_phase)
+                        pi = old_w * math.sin(node.phase) + new_w * math.sin(prop_phase)
+                        blended = math.atan2(pi, pr)
+                        if blended < 0:
+                            blended += 2 * math.pi
+                        new_phases[nid] = blended
+                    else:
+                        new_phases[nid] = node.phase
+                else:
+                    # Inference mode: phase is stable (only update if
+                    # node was previously inactive and is now receiving input).
+                    if old_act < 0.01:
+                        new_phases[nid] = prop_phase
+                    else:
+                        new_phases[nid] = node.phase
+            else:
+                new_phases[nid] = node.phase
 
             # Set eligibility traces on edges into D1/D2 MSNs.
             # Biology: when cortex activates D1/D2 (gating decision),
@@ -664,6 +775,8 @@ class Graph:
         for nid, act in new_activations.items():
             self._nodes[nid].activation = act
             self._nodes[nid].error = new_errors.get(nid, 0.0)
+            if nid in new_phases:
+                self._nodes[nid].phase = new_phases[nid]
 
         # === Phase-specific operations ===
 
@@ -871,12 +984,30 @@ class Graph:
                 continue
 
             # All pairs of positively eligible edges are merge candidates.
+            # Phase concordance gate: only merge edges whose sources
+            # have SIMILAR theta phases. This prevents merging inputs
+            # from different sequential positions (e.g., tens digit and
+            # ones digit) onto the same dendritic segment.
+            # Biology: NMDA spike requires coincident inputs (~5-10ms).
+            # Inputs at different theta phases arrive at different times
+            # and should NOT be on the same dendrite branch.
             for i in range(len(pos_edges)):
                 for j in range(i + 1, len(pos_edges)):
                     ek_a, ea = pos_edges[i]
                     ek_b, eb = pos_edges[j]
                     if ea.segment == eb.segment:
                         continue
+
+                    # Phase concordance check: sources must be at
+                    # similar theta phases for segment merging.
+                    src_a = self._nodes.get(ea.source)
+                    src_b = self._nodes.get(eb.source)
+                    if src_a is not None and src_b is not None:
+                        phase_conc = (1.0 + math.cos(src_a.phase - src_b.phase)) / 2.0
+                        if phase_conc < 0.5:
+                            # Phases too different — these inputs are at
+                            # different positions. Don't merge.
+                            continue
 
                     a_seg_size = sum(1 for e in self._incoming.get(tgt_id, [])
                                     if e.segment == ea.segment and e is not ea)

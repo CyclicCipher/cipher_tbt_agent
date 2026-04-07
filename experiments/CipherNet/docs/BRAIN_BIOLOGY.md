@@ -368,6 +368,41 @@ The brain prevents one episode's traces from contaminating the next:
 - Biochemical signals: 1-2 seconds (eligibility trace)
 - Synaptic tags: 30 min - 2 hours (consolidation)
 
+### Phase-dependent dendritic computation
+
+NMDA spikes are sensitive to the TIMING of inputs within the theta oscillation cycle.
+
+**Coincidence detection timing windows:**
+- Single dendritic branch: ~5-10ms for NMDA spike generation
+- ~20 synchronized inputs within <6ms needed for basal dendrite NMDA spike
+- Distal dendrites: broader windows (~8-20ms), supralinear response to clustered inputs
+- Proximal dendrites: tight windows (~2-5ms), linear summation
+
+**Phase-dependent plasticity (Huerta & Lisman 1995, Pavlides et al. 1988):**
+- Stimulation at theta PEAK: LTP (potentiation)
+- Stimulation at theta TROUGH: LTD (depression)
+- 4-pulse burst at 100Hz at theta peak induces robust LTP
+- Same burst at theta trough induces depotentiation
+
+**Constructive/destructive interference in dendrites:**
+- Two inputs arriving on the same dendritic branch at the SAME theta phase: constructive interference (amplified response)
+- Two inputs at OPPOSITE theta phases: destructive interference (suppressed response)
+- This is voltage-based: overlapping depolarization waveforms sum constructively or destructively
+- Concordance factor: (1 + cos(phase_difference)) / 2 (ranges 0-1)
+
+**HCN channel resonance:**
+- Pyramidal neurons express HCN channels creating intrinsic theta-frequency resonance
+- Distal dendrites: higher HCN conductance = higher resonance impedance at theta
+- Creates a "phase filter": same input produces stronger response at the resonant phase for that compartment
+- Proximal inputs drive spikes at depolarizing theta peaks
+- Distal inputs drive spikes at hyperpolarizing theta troughs
+
+**Sources:**
+- Springer et al. 2008, JNP (NMDA plateau potentials)
+- Huerta & Lisman 1995, J Neurosci (theta phase determines LTP vs LTD)
+- Pavlides et al. 1988, Nature (phase-dependent plasticity)
+- Gidon et al. 2020, Science (human dendritic computation)
+
 ### Sources
 - Bhatt et al. 2009, J Neurosci (plasticity compartments)
 - Bhatt et al. 2015, PMC (synaptic clustering review)
@@ -769,6 +804,225 @@ When signal goes column A → thalamus → column B:
 Good empirical grounding but needs formal verification.
 The ~6-7 layer PC fidelity limit is an empirical observation
 from computational studies, not a proven theorem.
+
+---
+
+## Theta-Gamma Phase Coding (Position Encoding in Working Memory)
+
+The brain encodes the POSITION of items in a working memory sequence using the PHASE of neural oscillations. This is the primary mechanism for serial order.
+
+### Theta-gamma coupling
+
+- Each theta cycle (~125-250ms, 4-8 Hz) is divided into multiple gamma windows (~30-100 Hz)
+- Each gamma burst within a theta cycle carries ONE working memory item
+- The theta PHASE at which an item's gamma burst occurs encodes that item's POSITION in the sequence
+- Position 1 = gamma burst at theta phase 0deg, Position 2 = gamma burst at 90deg, etc.
+- Cross-frequency theta-gamma coupling increases during sequence learning
+- Delta and theta power increase monotonically with serial position
+
+**Sources:** Heusser et al. 2016 (PMC5039104), Leszcznski et al. 2015, Axmacher et al. 2010 (PNAS)
+
+### Phase precession
+
+- As the brain processes sequential items, neurons fire at progressively EARLIER phases of theta
+- This compresses entire sequences into single theta cycles (5-10x temporal compression)
+- Both firing RATE and spike PHASE encode position information
+- Phase coding is more precise than rate coding for fine position discrimination
+- Phase precession enables spike-timing-dependent plasticity for sequence binding
+
+**Sources:** Qasim et al. 2021 (PMC8195854), Stangl et al. 2024 (Nature Human Behaviour)
+
+### Theta sequences (compressed trajectory encoding)
+
+- During a single theta oscillation, neurons representing a trajectory fire in compressed sequential order
+- Encodes both WHAT (which items) and WHERE (in what order)
+- Theta sequences are modulated by goals and intentions (planning role)
+- Hippocampal theta sequences segment experience into discrete events
+
+**Sources:** Drieu & Bhatt 2016 (PMC5049882), Patel et al. 2015 (PMC4428659)
+
+### Content-Position separation (the PoPE principle)
+
+- CONTENT (identity of item) is encoded by firing RATE (magnitude)
+- POSITION (where in sequence) is encoded by spike TIMING relative to theta (phase)
+- These two dimensions are ORTHOGONAL: you can vary position without changing content and vice versa
+- This is exactly what PoPE (Polar Positional Embedding) implements computationally: content = magnitude, position = phase in polar coordinates
+- Domain-general: the same phase coding works for spatial position, digit position, word position
+
+---
+
+## Grid Cells and Abstract Position Encoding
+
+The entorhinal grid cell system provides a domain-general coordinate system for organizing any ordered information, not just physical space.
+
+### Grid cells for conceptual spaces
+
+- Constantinescu et al. 2016 (Science): humans navigating abstract 2D feature spaces show hexagonal grid-like signals in entorhinal cortex IDENTICAL to spatial navigation patterns
+- Grid cells provide coordinate systems for auditory tone sequences, visual feature spaces, and conceptual navigation
+- Subjects with stronger hexagonal modulation perform better at abstract tasks
+- The code is stable across sessions (hours and weeks apart)
+
+### The spatial scaffolding hypothesis
+
+- The brain repurposes spatial coding mechanisms (grid/place cells) for organizing non-spatial sequential and conceptual information
+- Place cells encode individual concepts; grid cells organize these conceptually
+- The spatial network can be activated from purely internal processes (voluntary recall, imagery, planning)
+- A unified neural representation model (PNAS 2024) produces place cells, grid cells, and concept cells using identical computational principles
+
+### Time cells
+
+- Hippocampal and entorhinal neurons fire at specific TIMES within a sequence interval (temporal "place fields")
+- Parallel to place cells but in the time domain
+- Provide position-in-sequence encoding through temporal tuning curves
+- The brain integrates both time and space for sequence position
+
+### Toroidal topology
+
+- Gardner et al. 2022 (Nature): grid cell joint activity resides on a 2D torus
+- Positions on torus correspond to positions in environment
+- Toroidal structure is maintained across environments and sleep
+- Naturally handles periodic/cyclic patterns (like modular arithmetic)
+- Population dynamics on the torus are stable and context-invariant
+
+### Number-space mapping (SNARC effect)
+
+- Small numbers associated with left space, large numbers with right
+- Anterior IPS codes magnitude (how large); posterior IPS codes spatial position (where)
+- Ordinal position in WM correlates with space: beginning=left, end=right
+- Grid cell network used for both physical navigation and mental number line
+
+**Sources:** Constantinescu et al. 2016 (Science), Gardner et al. 2022 (Nature), Doeller et al. 2010 (Nature)
+
+---
+
+## Competitive Queuing and Motor Planning Buffers
+
+The brain converts parallel planning into serial execution via competitive queuing. This is how multi-digit/multi-word output is produced in the correct left-to-right order.
+
+### Competitive queuing model
+
+- All planned output elements are simultaneously active in a PARALLEL PLANNING layer
+- Each element has a different activation level encoding its serial position
+- The MOST active element is selected first (winner-take-all)
+- After selection, the winner SELF-INHIBITS (activation drops)
+- The next most active element then wins
+- Repeat until sequence is complete
+- Fidelity of competitive queuing correlates with behavioral performance
+
+### Motor planning buffers
+
+- **Phonological output buffer (left posterior inferior frontal sulcus):** holds assembled sound units BEFORE motor articulation. Capacity ~2 seconds of speech (~4-6 items)
+- **Sequential structure buffer (bilateral preSMA):** stores the ordered structure/FRAME for the upcoming sequence. Separate from content buffer.
+- **SMA proper:** encodes linear sequences and controls motor output. Connected to primary motor cortex and spinal cord.
+- **Pre-SMA (rostral):** higher-level planning. Blood flow remains high during imagined movement even when motor cortex is inactive.
+
+### Broca's area subregions for sequence planning
+
+- **BA44 (posterior):** organizes individual motor sequence components BEFORE execution
+- **BA45 (anterior):** encodes lexical/hierarchical planning
+- Planning is complete before execution begins (hierarchical: first plan structure, then fill content)
+
+### BG chunking for serial execution
+
+- Striatal fast-spiking interneurons fire at beginning and END of learned routines, quiet during execution
+- Creates behavioral "chunks" where individual movements are bound into single units
+- Dorsolateral striatum controls learned action programs retrieved as complete units
+- Dopamine gates sequence initiation via direct/indirect pathways
+
+### Planning-to-execution transition
+
+- Distinct brain activity patterns for planning vs execution phases
+- A midbrain-thalamus-cortex circuit generates a "GO" signal that switches from planning to execution mode
+- The readiness potential (Bereitschaftspotential): slow electrical buildup 1500ms before movement, from SMA and premotor cortex
+- Early component (~1500-400ms): bilateral, reflects preplanning
+- Late component (~400-0ms): primary motor cortex, reflects immediate execution preparation
+
+### Coarticulation (lookahead planning)
+
+- Forward coarticulation: articulation of a speech segment is affected by UPCOMING segments
+- Demonstrates that the speaker plans several phonemes ahead before starting to speak
+- Motor planning involves syllable-level planning (above phoneme level)
+- The brain resolves all dependencies before serial execution begins
+
+**Sources:** Bullock 2004, Bohland et al. 2010 (Frontiers HN), Fujii & Graybiel 2003 (PMC4523429), Soldado-Magraner et al. 2024
+
+---
+
+## TBT Reference Frames and Efference Copies
+
+Based on Hawkins et al. 2018, Lewis et al. 2019, Hawkins & Ahmad 2016.
+
+### The location signal (L6 grid cells)
+
+Each cortical column maintains a LOCATION representation in Layer 6 using grid
+cell-like neurons. This encodes "where in the reference frame am I" — for
+spatial objects, this is position on the object's surface; for sequences,
+this is position-in-sequence.
+
+- L6 cells have grid cell-like properties (multi-scale, path-integrable)
+- Multiple grid cell modules at different scales provide unambiguous position
+- The location code is ALLOCENTRIC (object-centered, not viewer-centered)
+- For sequences: position within the sequence IS the location
+
+### Efference copy as displacement vector
+
+When the motor system acts (produces an output), L5 sends a DISPLACEMENT
+signal through the thalamus to L6 of sensory columns. This is NOT the
+content of the output — it's the POSITION CHANGE.
+
+- Pathway: Motor cortex L5 → higher-order thalamus → sensory cortex L6
+- The displacement operates in reference frame coordinates
+- For sequences: displacement = "advance one position" (not "I produced digit X")
+- L6 updates: new_location = old_location + displacement (path integration)
+
+### The prediction cycle
+
+1. L6 grid cells encode current position in reference frame
+2. L6 → L4: position predicts what sensory input to expect
+3. Motor action occurs (output produced)
+4. Efference copy (displacement) arrives at L6 via thalamus
+5. L6 updates position via path integration
+6. Updated L6 → L4: predicts next position's expected input
+7. New sensory input arrives at L4, compared against prediction
+8. Error = input - prediction (standard PC)
+
+### HTM cell selection (position via context)
+
+In HTM, all cells in a mini-column receive the same feedforward input.
+WHICH cells activate depends on context (previous input, sequence position):
+- Predicted cells: only they activate (sparse, contextual)
+- No predicted cells: all activate (ambiguous/learning state)
+- Different active cells = different position in the sequence
+- Basal dendrites recognize preceding patterns (sub-threshold depolarization)
+
+### Displacement cells (L5)
+
+L5 cells compute the displacement vector from:
+- Current location (from L6)
+- Motor command (from motor cortex)
+displacement = f(motor_command, current_location_context)
+
+They send this to thalamus (for other columns) and to L6 (for local update).
+
+### Multi-scale grid modules for sequences
+
+- Module 1: position within single digit (0-9 scale)
+- Module 2: position within a number (tens, hundreds)
+- Module 3: position within an expression (operand, operator, result)
+- The combination creates a unique code for any position
+
+### Extension to abstract domains
+
+Grid-like codes emerge in non-spatial domains (Constantinescu et al. 2016):
+- Perceptual spaces, conceptual/semantic spaces, social hierarchies
+- Mathematical reasoning uses the same spatial navigation circuitry
+- Reading/producing language = sensorimotor navigation through sentence space
+
+**Sources:**
+- Hawkins et al. 2018, Frontiers Neural Circuits (grid cell framework)
+- Lewis et al. 2019, Frontiers Neural Circuits (locations in neocortex)
+- Hawkins & Ahmad 2016, Frontiers Neural Circuits (thousands of synapses)
+- Nature Neuroscience 2025 (grid cells track movement despite reference frame switches)
 
 ---
 

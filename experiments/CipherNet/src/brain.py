@@ -34,9 +34,17 @@ class Brain:
         self.default_decay = default_decay
 
     def feed(self, token: str, n_steps: int = 2):
-        """Feed one token. Activates its column, runs graph steps."""
+        """Feed one token. Activates its column with theta phase.
+
+        The theta phase encodes the token's sequential position.
+        Tokens fed at different times get different phases, enabling
+        the system to distinguish position in a sequence (e.g.,
+        tens digit vs ones digit in "19").
+        """
         col = self.tio.get_or_create_input_column(token)
-        self.graph.activate(col["L4"], 1.0)
+        phase = self.graph.theta_phase()
+        # Set phase on all column layers so it propagates downstream.
+        self.graph.activate(col["L4"], 1.0, phase=phase)
         for _ in range(n_steps):
             self.graph.step(default_decay=self.default_decay)
 

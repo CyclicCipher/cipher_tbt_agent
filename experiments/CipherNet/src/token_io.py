@@ -94,6 +94,20 @@ class TokenIO:
             if node:
                 node.activation = 0.0
 
+    def clear_output_with_inhibitor(self):
+        """Clear output nodes + inhibitor between competitive queuing steps.
+
+        The inhibitor retains high activation from the previous winner.
+        Without clearing it, subsequent digits are suppressed before
+        they can emerge during re-settle.
+        """
+        self.clear_output()
+        inhibitor_id = self.output_cortex.get('inhibitor')
+        if inhibitor_id is not None:
+            node = self.graph.get_node(inhibitor_id)
+            if node:
+                node.activation = 0.0
+
     def drive_output(self, token: str, strength: float = 1.0):
         """Directly drive an output token's activation.
 

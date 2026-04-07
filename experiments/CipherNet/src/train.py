@@ -124,26 +124,20 @@ def setup_brain() -> Brain:
         col = brain.tio._input_columns[str(d_in)]
         for d_out in range(10):
             out_node = priors['output_cortex'][f'out:{d_out}']
-            w = 0.08 if d_in == d_out else 0.02
-            graph.add_edge(col['L23'], out_node, edge_type=TEMPORAL, weight=w)
+            # No diagonal bias — all start equal. The system must LEARN
+            # which digit maps to which output. Diagonal bias (0.08 vs 0.02)
+            # created echo interference where digits mapped to themselves.
+            graph.add_edge(col['L23'], out_node, edge_type=TEMPORAL, weight=0.03)
 
     # Innate: '=' -> output cortex disinhibition.
     eq_col = brain.tio._input_columns['=']
     graph.add_edge(eq_col['L5'], priors['output_cortex']['inhibitor'],
                    edge_type=TEMPORAL, weight=-0.1)
 
-    # Short-range cortical connections (predictive coding wiring):
-    # Feedforward (errors UP): L2/3 of lower -> L4 of higher
-    # Feedback (predictions DOWN): L5 of higher -> L2/3 of lower (skip L4!)
-    for i in range(9):
-        col_a = brain.tio._input_columns[str(i)]
-        col_b = brain.tio._input_columns[str(i + 1)]
-        # Feedforward: errors propagate in both directions between neighbors
-        graph.add_edge(col_a['L23'], col_b['L4'], edge_type=TEMPORAL, weight=0.01)
-        graph.add_edge(col_b['L23'], col_a['L4'], edge_type=TEMPORAL, weight=0.01)
-        # Feedback: predictions propagate, skip L4, target L2/3
-        graph.add_edge(col_a['L5'], col_b['L23'], edge_type=TEMPORAL, weight=0.01)
-        graph.add_edge(col_b['L5'], col_a['L23'], edge_type=TEMPORAL, weight=0.01)
+    # NOTE: short-range connections between digit columns REMOVED.
+    # The number line (successor edges) must EMERGE from succession
+    # training, not be pre-wired. Pre-wired edges caused successor
+    # propagation that created spurious dendritic segments.
 
     # === INPUT COLUMN LATERAL INHIBITION ===
     # Like the output cortex inhibitor: one inhibitor node that creates
@@ -169,12 +163,25 @@ def setup_brain() -> Brain:
 
     # Backward prediction edges from output cortex to digit columns.
     # Output cortex predicts what input it expects (generative model).
-    # These go to L2/3 (NOT L4) — predictions skip the error layer.
+    # Routed to L6 (feedback layer) → L6 generates prediction for L4.
+    # Same-digit feedback is stronger (0.05) to support multi-digit
+    # autoregressive context: when "2" is produced, char:2 gets a
+    # strong feedback signal that influences the next position's output.
     for d_out in range(10):
         out_node = priors['output_cortex'][f'out:{d_out}']
         for d_in in range(10):
             col = brain.tio._input_columns[str(d_in)]
-            graph.add_edge(out_node, col['L23'], edge_type=TEMPORAL, weight=0.01)
+            w = 0.05 if d_in == d_out else 0.01
+            graph.add_edge(out_node, col['L6'], edge_type=TEMPORAL, weight=w)
+
+    # === EOS CONNECTIVITY ===
+    # Weak edges from digit columns to EOS output node.
+    # Without any pathway, EOS can never fire. The system learns
+    # WHEN to produce EOS through training (after last significant digit).
+    eos_node = priors['output_cortex']['out:EOS']
+    for d in range(10):
+        col = brain.tio._input_columns[str(d)]
+        graph.add_edge(col['L23'], eos_node, edge_type=TEMPORAL, weight=0.01)
 
     # === WORKSPACE CONJUNCTION PATH ===
     # Broca columns → output cortex (all-to-all, weak).
@@ -193,12 +200,12 @@ def setup_brain() -> Brain:
         if relay is not None:
             graph.add_edge(relay, tc_relay, edge_type=TEMPORAL, weight=0.5)
 
-    # Broca → digit column L23 (backward predictions).
+    # Broca → digit column L6 (backward predictions → apical pathway).
     for broca_col in ['ba44a', 'ba45']:
         broca_l5 = priors['broca'][f'{broca_col}:L5']
         for d in range(10):
             col = brain.tio._input_columns[str(d)]
-            graph.add_edge(broca_l5, col['L23'], edge_type=TEMPORAL, weight=0.01)
+            graph.add_edge(broca_l5, col['L6'], edge_type=TEMPORAL, weight=0.01)
 
     print(f"Brain setup: {graph.summary()}")
     return brain

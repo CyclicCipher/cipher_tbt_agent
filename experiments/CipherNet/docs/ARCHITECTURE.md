@@ -135,6 +135,21 @@ One presynaptic neuron can form multiple synapses on different
 dendritic branches. When an input participates in multiple
 AND-gates, parallel edges are created on different segments.
 
+### Phase concordance in segments
+
+Multi-input segments are phase-aware: inputs at similar theta phases constructively interfere, while inputs at different phases destructively interfere.
+
+**Segment output = geometric_mean(magnitudes) * phase_concordance**
+
+Phase concordance = mean pairwise (1 + cos(phase_i - phase_j)) / 2:
+- Same phase: concordance = 1.0 (full AND-gate, constructive)
+- Opposite phase (pi apart): concordance = 0.0 (AND-gate killed, destructive)
+- 90 degrees apart: concordance = 0.5 (partial)
+
+**Biology:** NMDA spike requires ~20 coincident inputs within <6ms. Inputs at different theta phases arrive at different times and CANNOT trigger the dendritic spike together. Only same-phase inputs are temporally coincident.
+
+**Segment merging is also phase-gated:** edges only merge onto the same segment when their source nodes have similar phases (concordance > 0.5). This prevents merging inputs from different sequential positions onto the same dendrite branch.
+
 ### Segment state (dendritic calcium)
 
 Each segment maintains:
@@ -182,6 +197,42 @@ Sequential items at different gamma phases within theta.
 L5/L6 accumulate gamma-rate errors over a beta period, then
 produce smoothed predictions. High beta = system is "locked on"
 (prediction matches input). Beta breakdown = surprise/update.
+
+## Theta-Phase Position Encoding
+
+Every node carries both **magnitude** (activation) and **phase** (theta oscillation timing). Content = magnitude, Position = phase. This is the neural equivalent of PoPE (Polar Positional Embedding) and is grounded in theta-gamma phase coding.
+
+### How it works
+
+When `brain.feed(token)` is called, the token's column gets its phase set to the current theta clock phase: `phase = (clock % 8) / 8 * 2*pi`. Tokens fed at different times get different phases.
+
+For input "19": char:1 gets phase ~0, char:9 gets phase ~pi/2. The phase difference encodes their relative position (tens digit vs ones digit).
+
+### Phase propagation
+
+As signals flow through edges, phase propagates via weighted circular mean:
+- Each incoming signal carries both magnitude and phase
+- The target node's phase becomes the complex mean: `atan2(sum(mag*sin(phase)), sum(mag*cos(phase)))`
+- Strong inputs dominate the phase; weak inputs have little effect
+- Phase is orthogonal to magnitude — changing one doesn't affect the other
+
+### Biological grounding
+
+- **Theta-gamma phase coding** (Heusser et al. 2016): WM items at different serial positions produce gamma bursts at distinct theta phases
+- **Phase precession** (Qasim et al. 2021): neurons fire at progressively earlier theta phases as sequences advance
+- **Grid cells for abstract sequences** (Constantinescu et al. 2016): the same hexagonal spatial code works for conceptual/sequential positions
+- **Content-position orthogonality**: firing rate encodes identity, spike timing encodes position
+
+### What this enables
+
+1. **Position encoding**: different tokens at different phases
+2. **Left-to-right output**: competitive queuing by phase order
+3. **Carry propagation**: phase-shifting edges connect adjacent positions
+4. **Domain-general**: works for digit position, word position, spatial location
+
+### Current status
+
+Phase 1 implemented: nodes carry phase, propagation through edges, backwards-compatible with single-digit succession (9/9 still perfect). Phase 2 (phase-aware dendritic segments) pending.
 
 ## Subcortical Physics
 
@@ -409,6 +460,28 @@ and route through the thalamus instead.
 - Mikulasch et al. 2023: Dendritic hierarchical predictive coding (TINS)
 - Doron et al. 2020: Perirhinal input to L1 controls learning (Science)
 - Zolnik et al. 2024: Layer 6b controls brain state (Neuron)
+
+## Echo Interference Fix (Succession Stability)
+
+Succession training (digit N → digit N+1) peaked at 9/9 then degraded to 3/9 due to echo interference — digits mapping to themselves (1→1, 4→4, 7→7). Root causes:
+
+### 1. Diagonal bias in initial weights
+Digit→output edges initialized with diagonal bias (echo=0.08, off-diagonal=0.02). **Fix**: equal initial weights (0.03 for all). The system must learn ALL mappings from scratch.
+
+### 2. Non-target outputs not suppressed during training
+When training "3"→"4", out:3 received positive basal input from char:3, developed positive error, and its incoming edge (char:3→out:3) was STRENGTHENED. The output WTA inhibitor (-0.1) was too weak to overcome the feedforward drive.
+
+**Biology**: PV+ basket cells in motor cortex actively suppress non-selected motor programs during learning. The inhibition is strong enough that competitors never fire.
+
+**Fix**: (a) Strengthen WTA inhibitor (output→inhib: 0.3, inhib→output: -0.5). (b) Clamp non-target digit outputs to 0 during training. This creates negative error at non-targets → weakens spurious edges.
+
+### 3. Backward predictions routed to basal (feedforward)
+Output cortex backward prediction edges targeted L23 (basal compartment, role='process') instead of L6 (feedback layer, role='feedback'). This made backward predictions act as feedforward input, creating a positive feedback loop: out:4 → char:3 L23 → out:3 (echo amplification).
+
+**Fix**: Route backward predictions to L6. Signal path: output_cortex → L6 (basal) → L4 (apical, via L6's feedback role). This is the correct PC pathway — predictions arrive as top-down apical signals that AMPLIFY, not drive.
+
+### 4. Testing used step() (feed mode) instead of settle() (PC inference)
+Feed mode (Mamba accumulation) doesn't run the WTA inhibitor iteratively. **Fix**: use settle() with input clamp during testing, giving the inhibitor time to suppress non-winners.
 
 ## Tokenization
 
