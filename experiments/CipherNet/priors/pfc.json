@@ -1,6 +1,6 @@
 {
   "name": "pfc",
-  "description": "PFC with 8 cells/layer for WM",
+  "description": "PFC with 8 cells/layer, MLP L5->L6",
   "nodes": [
     {
       "id": "wm0:L4:0",
@@ -682,12 +682,6 @@
       "weight": 1.0
     },
     {
-      "source": "wm0:L5:0",
-      "target": "wm0:L6:0",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "wm0:L6:0",
       "target": "wm0:L4:0",
       "type": "temporal",
@@ -708,12 +702,6 @@
     {
       "source": "wm0:L23:1",
       "target": "wm0:L5:1",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "wm0:L5:1",
-      "target": "wm0:L6:1",
       "type": "temporal",
       "weight": 1.0
     },
@@ -742,12 +730,6 @@
       "weight": 1.0
     },
     {
-      "source": "wm0:L5:2",
-      "target": "wm0:L6:2",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "wm0:L6:2",
       "target": "wm0:L4:2",
       "type": "temporal",
@@ -768,12 +750,6 @@
     {
       "source": "wm0:L23:3",
       "target": "wm0:L5:3",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "wm0:L5:3",
-      "target": "wm0:L6:3",
       "type": "temporal",
       "weight": 1.0
     },
@@ -802,12 +778,6 @@
       "weight": 1.0
     },
     {
-      "source": "wm0:L5:4",
-      "target": "wm0:L6:4",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "wm0:L6:4",
       "target": "wm0:L4:4",
       "type": "temporal",
@@ -828,12 +798,6 @@
     {
       "source": "wm0:L23:5",
       "target": "wm0:L5:5",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "wm0:L5:5",
-      "target": "wm0:L6:5",
       "type": "temporal",
       "weight": 1.0
     },
@@ -862,12 +826,6 @@
       "weight": 1.0
     },
     {
-      "source": "wm0:L5:6",
-      "target": "wm0:L6:6",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "wm0:L6:6",
       "target": "wm0:L4:6",
       "type": "temporal",
@@ -892,12 +850,6 @@
       "weight": 1.0
     },
     {
-      "source": "wm0:L5:7",
-      "target": "wm0:L6:7",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "wm0:L6:7",
       "target": "wm0:L4:7",
       "type": "temporal",
@@ -908,6 +860,390 @@
       "target": "wm0:L23:7",
       "type": "temporal",
       "weight": 0.95
+    },
+    {
+      "source": "wm0:L5:0",
+      "target": "wm0:L6:0",
+      "type": "temporal",
+      "weight": 0.1255
+    },
+    {
+      "source": "wm0:L5:0",
+      "target": "wm0:L6:1",
+      "type": "temporal",
+      "weight": 0.1905
+    },
+    {
+      "source": "wm0:L5:0",
+      "target": "wm0:L6:2",
+      "type": "temporal",
+      "weight": 0.0831
+    },
+    {
+      "source": "wm0:L5:0",
+      "target": "wm0:L6:3",
+      "type": "temporal",
+      "weight": 0.2316
+    },
+    {
+      "source": "wm0:L5:0",
+      "target": "wm0:L6:4",
+      "type": "temporal",
+      "weight": 0.1258
+    },
+    {
+      "source": "wm0:L5:0",
+      "target": "wm0:L6:5",
+      "type": "temporal",
+      "weight": 0.1651
+    },
+    {
+      "source": "wm0:L5:0",
+      "target": "wm0:L6:6",
+      "type": "temporal",
+      "weight": 0.2266
+    },
+    {
+      "source": "wm0:L5:0",
+      "target": "wm0:L6:7",
+      "type": "temporal",
+      "weight": 0.1174
+    },
+    {
+      "source": "wm0:L5:1",
+      "target": "wm0:L6:0",
+      "type": "temporal",
+      "weight": 0.2457
+    },
+    {
+      "source": "wm0:L5:1",
+      "target": "wm0:L6:1",
+      "type": "temporal",
+      "weight": 0.0878
+    },
+    {
+      "source": "wm0:L5:1",
+      "target": "wm0:L6:2",
+      "type": "temporal",
+      "weight": 0.1807
+    },
+    {
+      "source": "wm0:L5:1",
+      "target": "wm0:L6:3",
+      "type": "temporal",
+      "weight": 0.0638
+    },
+    {
+      "source": "wm0:L5:1",
+      "target": "wm0:L6:4",
+      "type": "temporal",
+      "weight": 0.1903
+    },
+    {
+      "source": "wm0:L5:1",
+      "target": "wm0:L6:5",
+      "type": "temporal",
+      "weight": 0.162
+    },
+    {
+      "source": "wm0:L5:1",
+      "target": "wm0:L6:6",
+      "type": "temporal",
+      "weight": 0.1415
+    },
+    {
+      "source": "wm0:L5:1",
+      "target": "wm0:L6:7",
+      "type": "temporal",
+      "weight": 0.1687
+    },
+    {
+      "source": "wm0:L5:2",
+      "target": "wm0:L6:0",
+      "type": "temporal",
+      "weight": 0.0802
+    },
+    {
+      "source": "wm0:L5:2",
+      "target": "wm0:L6:1",
+      "type": "temporal",
+      "weight": 0.1199
+    },
+    {
+      "source": "wm0:L5:2",
+      "target": "wm0:L6:2",
+      "type": "temporal",
+      "weight": 0.0808
+    },
+    {
+      "source": "wm0:L5:2",
+      "target": "wm0:L6:3",
+      "type": "temporal",
+      "weight": 0.0675
+    },
+    {
+      "source": "wm0:L5:2",
+      "target": "wm0:L6:4",
+      "type": "temporal",
+      "weight": 0.1689
+    },
+    {
+      "source": "wm0:L5:2",
+      "target": "wm0:L6:5",
+      "type": "temporal",
+      "weight": 0.2161
+    },
+    {
+      "source": "wm0:L5:2",
+      "target": "wm0:L6:6",
+      "type": "temporal",
+      "weight": 0.1179
+    },
+    {
+      "source": "wm0:L5:2",
+      "target": "wm0:L6:7",
+      "type": "temporal",
+      "weight": 0.0607
+    },
+    {
+      "source": "wm0:L5:3",
+      "target": "wm0:L6:0",
+      "type": "temporal",
+      "weight": 0.0776
+    },
+    {
+      "source": "wm0:L5:3",
+      "target": "wm0:L6:1",
+      "type": "temporal",
+      "weight": 0.1364
+    },
+    {
+      "source": "wm0:L5:3",
+      "target": "wm0:L6:2",
+      "type": "temporal",
+      "weight": 0.1313
+    },
+    {
+      "source": "wm0:L5:3",
+      "target": "wm0:L6:3",
+      "type": "temporal",
+      "weight": 0.0898
+    },
+    {
+      "source": "wm0:L5:3",
+      "target": "wm0:L6:4",
+      "type": "temporal",
+      "weight": 0.1996
+    },
+    {
+      "source": "wm0:L5:3",
+      "target": "wm0:L6:5",
+      "type": "temporal",
+      "weight": 0.2052
+    },
+    {
+      "source": "wm0:L5:3",
+      "target": "wm0:L6:6",
+      "type": "temporal",
+      "weight": 0.2355
+    },
+    {
+      "source": "wm0:L5:3",
+      "target": "wm0:L6:7",
+      "type": "temporal",
+      "weight": 0.1134
+    },
+    {
+      "source": "wm0:L5:4",
+      "target": "wm0:L6:0",
+      "type": "temporal",
+      "weight": 0.1521
+    },
+    {
+      "source": "wm0:L5:4",
+      "target": "wm0:L6:1",
+      "type": "temporal",
+      "weight": 0.2262
+    },
+    {
+      "source": "wm0:L5:4",
+      "target": "wm0:L6:2",
+      "type": "temporal",
+      "weight": 0.1693
+    },
+    {
+      "source": "wm0:L5:4",
+      "target": "wm0:L6:3",
+      "type": "temporal",
+      "weight": 0.1864
+    },
+    {
+      "source": "wm0:L5:4",
+      "target": "wm0:L6:4",
+      "type": "temporal",
+      "weight": 0.1069
+    },
+    {
+      "source": "wm0:L5:4",
+      "target": "wm0:L6:5",
+      "type": "temporal",
+      "weight": 0.1001
+    },
+    {
+      "source": "wm0:L5:4",
+      "target": "wm0:L6:6",
+      "type": "temporal",
+      "weight": 0.1226
+    },
+    {
+      "source": "wm0:L5:4",
+      "target": "wm0:L6:7",
+      "type": "temporal",
+      "weight": 0.221
+    },
+    {
+      "source": "wm0:L5:5",
+      "target": "wm0:L6:0",
+      "type": "temporal",
+      "weight": 0.0674
+    },
+    {
+      "source": "wm0:L5:5",
+      "target": "wm0:L6:1",
+      "type": "temporal",
+      "weight": 0.1742
+    },
+    {
+      "source": "wm0:L5:5",
+      "target": "wm0:L6:2",
+      "type": "temporal",
+      "weight": 0.2385
+    },
+    {
+      "source": "wm0:L5:5",
+      "target": "wm0:L6:3",
+      "type": "temporal",
+      "weight": 0.1408
+    },
+    {
+      "source": "wm0:L5:5",
+      "target": "wm0:L6:4",
+      "type": "temporal",
+      "weight": 0.1652
+    },
+    {
+      "source": "wm0:L5:5",
+      "target": "wm0:L6:5",
+      "type": "temporal",
+      "weight": 0.0839
+    },
+    {
+      "source": "wm0:L5:5",
+      "target": "wm0:L6:6",
+      "type": "temporal",
+      "weight": 0.1506
+    },
+    {
+      "source": "wm0:L5:5",
+      "target": "wm0:L6:7",
+      "type": "temporal",
+      "weight": 0.2277
+    },
+    {
+      "source": "wm0:L5:6",
+      "target": "wm0:L6:0",
+      "type": "temporal",
+      "weight": 0.1211
+    },
+    {
+      "source": "wm0:L5:6",
+      "target": "wm0:L6:1",
+      "type": "temporal",
+      "weight": 0.063
+    },
+    {
+      "source": "wm0:L5:6",
+      "target": "wm0:L6:2",
+      "type": "temporal",
+      "weight": 0.0654
+    },
+    {
+      "source": "wm0:L5:6",
+      "target": "wm0:L6:3",
+      "type": "temporal",
+      "weight": 0.2012
+    },
+    {
+      "source": "wm0:L5:6",
+      "target": "wm0:L6:4",
+      "type": "temporal",
+      "weight": 0.1108
+    },
+    {
+      "source": "wm0:L5:6",
+      "target": "wm0:L6:5",
+      "type": "temporal",
+      "weight": 0.2411
+    },
+    {
+      "source": "wm0:L5:6",
+      "target": "wm0:L6:6",
+      "type": "temporal",
+      "weight": 0.1807
+    },
+    {
+      "source": "wm0:L5:6",
+      "target": "wm0:L6:7",
+      "type": "temporal",
+      "weight": 0.2341
+    },
+    {
+      "source": "wm0:L5:7",
+      "target": "wm0:L6:0",
+      "type": "temporal",
+      "weight": 0.11
+    },
+    {
+      "source": "wm0:L5:7",
+      "target": "wm0:L6:1",
+      "type": "temporal",
+      "weight": 0.1681
+    },
+    {
+      "source": "wm0:L5:7",
+      "target": "wm0:L6:2",
+      "type": "temporal",
+      "weight": 0.1795
+    },
+    {
+      "source": "wm0:L5:7",
+      "target": "wm0:L6:3",
+      "type": "temporal",
+      "weight": 0.0969
+    },
+    {
+      "source": "wm0:L5:7",
+      "target": "wm0:L6:4",
+      "type": "temporal",
+      "weight": 0.2121
+    },
+    {
+      "source": "wm0:L5:7",
+      "target": "wm0:L6:5",
+      "type": "temporal",
+      "weight": 0.2076
+    },
+    {
+      "source": "wm0:L5:7",
+      "target": "wm0:L6:6",
+      "type": "temporal",
+      "weight": 0.2066
+    },
+    {
+      "source": "wm0:L5:7",
+      "target": "wm0:L6:7",
+      "type": "temporal",
+      "weight": 0.2005
     },
     {
       "source": "wm0:L4:0",
@@ -1210,12 +1546,6 @@
       "weight": 1.0
     },
     {
-      "source": "wm1:L5:0",
-      "target": "wm1:L6:0",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "wm1:L6:0",
       "target": "wm1:L4:0",
       "type": "temporal",
@@ -1236,12 +1566,6 @@
     {
       "source": "wm1:L23:1",
       "target": "wm1:L5:1",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "wm1:L5:1",
-      "target": "wm1:L6:1",
       "type": "temporal",
       "weight": 1.0
     },
@@ -1270,12 +1594,6 @@
       "weight": 1.0
     },
     {
-      "source": "wm1:L5:2",
-      "target": "wm1:L6:2",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "wm1:L6:2",
       "target": "wm1:L4:2",
       "type": "temporal",
@@ -1296,12 +1614,6 @@
     {
       "source": "wm1:L23:3",
       "target": "wm1:L5:3",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "wm1:L5:3",
-      "target": "wm1:L6:3",
       "type": "temporal",
       "weight": 1.0
     },
@@ -1330,12 +1642,6 @@
       "weight": 1.0
     },
     {
-      "source": "wm1:L5:4",
-      "target": "wm1:L6:4",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "wm1:L6:4",
       "target": "wm1:L4:4",
       "type": "temporal",
@@ -1356,12 +1662,6 @@
     {
       "source": "wm1:L23:5",
       "target": "wm1:L5:5",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "wm1:L5:5",
-      "target": "wm1:L6:5",
       "type": "temporal",
       "weight": 1.0
     },
@@ -1390,12 +1690,6 @@
       "weight": 1.0
     },
     {
-      "source": "wm1:L5:6",
-      "target": "wm1:L6:6",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "wm1:L6:6",
       "target": "wm1:L4:6",
       "type": "temporal",
@@ -1420,12 +1714,6 @@
       "weight": 1.0
     },
     {
-      "source": "wm1:L5:7",
-      "target": "wm1:L6:7",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "wm1:L6:7",
       "target": "wm1:L4:7",
       "type": "temporal",
@@ -1436,6 +1724,390 @@
       "target": "wm1:L23:7",
       "type": "temporal",
       "weight": 0.95
+    },
+    {
+      "source": "wm1:L5:0",
+      "target": "wm1:L6:0",
+      "type": "temporal",
+      "weight": 0.0645
+    },
+    {
+      "source": "wm1:L5:0",
+      "target": "wm1:L6:1",
+      "type": "temporal",
+      "weight": 0.1449
+    },
+    {
+      "source": "wm1:L5:0",
+      "target": "wm1:L6:2",
+      "type": "temporal",
+      "weight": 0.1673
+    },
+    {
+      "source": "wm1:L5:0",
+      "target": "wm1:L6:3",
+      "type": "temporal",
+      "weight": 0.1478
+    },
+    {
+      "source": "wm1:L5:0",
+      "target": "wm1:L6:4",
+      "type": "temporal",
+      "weight": 0.1482
+    },
+    {
+      "source": "wm1:L5:0",
+      "target": "wm1:L6:5",
+      "type": "temporal",
+      "weight": 0.2328
+    },
+    {
+      "source": "wm1:L5:0",
+      "target": "wm1:L6:6",
+      "type": "temporal",
+      "weight": 0.066
+    },
+    {
+      "source": "wm1:L5:0",
+      "target": "wm1:L6:7",
+      "type": "temporal",
+      "weight": 0.0909
+    },
+    {
+      "source": "wm1:L5:1",
+      "target": "wm1:L6:0",
+      "type": "temporal",
+      "weight": 0.0563
+    },
+    {
+      "source": "wm1:L5:1",
+      "target": "wm1:L6:1",
+      "type": "temporal",
+      "weight": 0.1081
+    },
+    {
+      "source": "wm1:L5:1",
+      "target": "wm1:L6:2",
+      "type": "temporal",
+      "weight": 0.2227
+    },
+    {
+      "source": "wm1:L5:1",
+      "target": "wm1:L6:3",
+      "type": "temporal",
+      "weight": 0.1804
+    },
+    {
+      "source": "wm1:L5:1",
+      "target": "wm1:L6:4",
+      "type": "temporal",
+      "weight": 0.2286
+    },
+    {
+      "source": "wm1:L5:1",
+      "target": "wm1:L6:5",
+      "type": "temporal",
+      "weight": 0.0893
+    },
+    {
+      "source": "wm1:L5:1",
+      "target": "wm1:L6:6",
+      "type": "temporal",
+      "weight": 0.1096
+    },
+    {
+      "source": "wm1:L5:1",
+      "target": "wm1:L6:7",
+      "type": "temporal",
+      "weight": 0.2392
+    },
+    {
+      "source": "wm1:L5:2",
+      "target": "wm1:L6:0",
+      "type": "temporal",
+      "weight": 0.0871
+    },
+    {
+      "source": "wm1:L5:2",
+      "target": "wm1:L6:1",
+      "type": "temporal",
+      "weight": 0.0518
+    },
+    {
+      "source": "wm1:L5:2",
+      "target": "wm1:L6:2",
+      "type": "temporal",
+      "weight": 0.1217
+    },
+    {
+      "source": "wm1:L5:2",
+      "target": "wm1:L6:3",
+      "type": "temporal",
+      "weight": 0.0724
+    },
+    {
+      "source": "wm1:L5:2",
+      "target": "wm1:L6:4",
+      "type": "temporal",
+      "weight": 0.092
+    },
+    {
+      "source": "wm1:L5:2",
+      "target": "wm1:L6:5",
+      "type": "temporal",
+      "weight": 0.1193
+    },
+    {
+      "source": "wm1:L5:2",
+      "target": "wm1:L6:6",
+      "type": "temporal",
+      "weight": 0.1218
+    },
+    {
+      "source": "wm1:L5:2",
+      "target": "wm1:L6:7",
+      "type": "temporal",
+      "weight": 0.185
+    },
+    {
+      "source": "wm1:L5:3",
+      "target": "wm1:L6:0",
+      "type": "temporal",
+      "weight": 0.1335
+    },
+    {
+      "source": "wm1:L5:3",
+      "target": "wm1:L6:1",
+      "type": "temporal",
+      "weight": 0.1859
+    },
+    {
+      "source": "wm1:L5:3",
+      "target": "wm1:L6:2",
+      "type": "temporal",
+      "weight": 0.1059
+    },
+    {
+      "source": "wm1:L5:3",
+      "target": "wm1:L6:3",
+      "type": "temporal",
+      "weight": 0.2001
+    },
+    {
+      "source": "wm1:L5:3",
+      "target": "wm1:L6:4",
+      "type": "temporal",
+      "weight": 0.149
+    },
+    {
+      "source": "wm1:L5:3",
+      "target": "wm1:L6:5",
+      "type": "temporal",
+      "weight": 0.2432
+    },
+    {
+      "source": "wm1:L5:3",
+      "target": "wm1:L6:6",
+      "type": "temporal",
+      "weight": 0.2425
+    },
+    {
+      "source": "wm1:L5:3",
+      "target": "wm1:L6:7",
+      "type": "temporal",
+      "weight": 0.2389
+    },
+    {
+      "source": "wm1:L5:4",
+      "target": "wm1:L6:0",
+      "type": "temporal",
+      "weight": 0.2342
+    },
+    {
+      "source": "wm1:L5:4",
+      "target": "wm1:L6:1",
+      "type": "temporal",
+      "weight": 0.1044
+    },
+    {
+      "source": "wm1:L5:4",
+      "target": "wm1:L6:2",
+      "type": "temporal",
+      "weight": 0.2093
+    },
+    {
+      "source": "wm1:L5:4",
+      "target": "wm1:L6:3",
+      "type": "temporal",
+      "weight": 0.1586
+    },
+    {
+      "source": "wm1:L5:4",
+      "target": "wm1:L6:4",
+      "type": "temporal",
+      "weight": 0.164
+    },
+    {
+      "source": "wm1:L5:4",
+      "target": "wm1:L6:5",
+      "type": "temporal",
+      "weight": 0.1536
+    },
+    {
+      "source": "wm1:L5:4",
+      "target": "wm1:L6:6",
+      "type": "temporal",
+      "weight": 0.1554
+    },
+    {
+      "source": "wm1:L5:4",
+      "target": "wm1:L6:7",
+      "type": "temporal",
+      "weight": 0.1265
+    },
+    {
+      "source": "wm1:L5:5",
+      "target": "wm1:L6:0",
+      "type": "temporal",
+      "weight": 0.1975
+    },
+    {
+      "source": "wm1:L5:5",
+      "target": "wm1:L6:1",
+      "type": "temporal",
+      "weight": 0.1583
+    },
+    {
+      "source": "wm1:L5:5",
+      "target": "wm1:L6:2",
+      "type": "temporal",
+      "weight": 0.2134
+    },
+    {
+      "source": "wm1:L5:5",
+      "target": "wm1:L6:3",
+      "type": "temporal",
+      "weight": 0.2173
+    },
+    {
+      "source": "wm1:L5:5",
+      "target": "wm1:L6:4",
+      "type": "temporal",
+      "weight": 0.2202
+    },
+    {
+      "source": "wm1:L5:5",
+      "target": "wm1:L6:5",
+      "type": "temporal",
+      "weight": 0.0809
+    },
+    {
+      "source": "wm1:L5:5",
+      "target": "wm1:L6:6",
+      "type": "temporal",
+      "weight": 0.1765
+    },
+    {
+      "source": "wm1:L5:5",
+      "target": "wm1:L6:7",
+      "type": "temporal",
+      "weight": 0.1974
+    },
+    {
+      "source": "wm1:L5:6",
+      "target": "wm1:L6:0",
+      "type": "temporal",
+      "weight": 0.2201
+    },
+    {
+      "source": "wm1:L5:6",
+      "target": "wm1:L6:1",
+      "type": "temporal",
+      "weight": 0.0689
+    },
+    {
+      "source": "wm1:L5:6",
+      "target": "wm1:L6:2",
+      "type": "temporal",
+      "weight": 0.1219
+    },
+    {
+      "source": "wm1:L5:6",
+      "target": "wm1:L6:3",
+      "type": "temporal",
+      "weight": 0.2338
+    },
+    {
+      "source": "wm1:L5:6",
+      "target": "wm1:L6:4",
+      "type": "temporal",
+      "weight": 0.1025
+    },
+    {
+      "source": "wm1:L5:6",
+      "target": "wm1:L6:5",
+      "type": "temporal",
+      "weight": 0.2025
+    },
+    {
+      "source": "wm1:L5:6",
+      "target": "wm1:L6:6",
+      "type": "temporal",
+      "weight": 0.1913
+    },
+    {
+      "source": "wm1:L5:6",
+      "target": "wm1:L6:7",
+      "type": "temporal",
+      "weight": 0.0763
+    },
+    {
+      "source": "wm1:L5:7",
+      "target": "wm1:L6:0",
+      "type": "temporal",
+      "weight": 0.1531
+    },
+    {
+      "source": "wm1:L5:7",
+      "target": "wm1:L6:1",
+      "type": "temporal",
+      "weight": 0.1437
+    },
+    {
+      "source": "wm1:L5:7",
+      "target": "wm1:L6:2",
+      "type": "temporal",
+      "weight": 0.1969
+    },
+    {
+      "source": "wm1:L5:7",
+      "target": "wm1:L6:3",
+      "type": "temporal",
+      "weight": 0.1017
+    },
+    {
+      "source": "wm1:L5:7",
+      "target": "wm1:L6:4",
+      "type": "temporal",
+      "weight": 0.2373
+    },
+    {
+      "source": "wm1:L5:7",
+      "target": "wm1:L6:5",
+      "type": "temporal",
+      "weight": 0.1121
+    },
+    {
+      "source": "wm1:L5:7",
+      "target": "wm1:L6:6",
+      "type": "temporal",
+      "weight": 0.0968
+    },
+    {
+      "source": "wm1:L5:7",
+      "target": "wm1:L6:7",
+      "type": "temporal",
+      "weight": 0.1418
     },
     {
       "source": "wm1:L4:0",
@@ -1738,12 +2410,6 @@
       "weight": 1.0
     },
     {
-      "source": "wm2:L5:0",
-      "target": "wm2:L6:0",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "wm2:L6:0",
       "target": "wm2:L4:0",
       "type": "temporal",
@@ -1764,12 +2430,6 @@
     {
       "source": "wm2:L23:1",
       "target": "wm2:L5:1",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "wm2:L5:1",
-      "target": "wm2:L6:1",
       "type": "temporal",
       "weight": 1.0
     },
@@ -1798,12 +2458,6 @@
       "weight": 1.0
     },
     {
-      "source": "wm2:L5:2",
-      "target": "wm2:L6:2",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "wm2:L6:2",
       "target": "wm2:L4:2",
       "type": "temporal",
@@ -1824,12 +2478,6 @@
     {
       "source": "wm2:L23:3",
       "target": "wm2:L5:3",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "wm2:L5:3",
-      "target": "wm2:L6:3",
       "type": "temporal",
       "weight": 1.0
     },
@@ -1858,12 +2506,6 @@
       "weight": 1.0
     },
     {
-      "source": "wm2:L5:4",
-      "target": "wm2:L6:4",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "wm2:L6:4",
       "target": "wm2:L4:4",
       "type": "temporal",
@@ -1884,12 +2526,6 @@
     {
       "source": "wm2:L23:5",
       "target": "wm2:L5:5",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "wm2:L5:5",
-      "target": "wm2:L6:5",
       "type": "temporal",
       "weight": 1.0
     },
@@ -1918,12 +2554,6 @@
       "weight": 1.0
     },
     {
-      "source": "wm2:L5:6",
-      "target": "wm2:L6:6",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "wm2:L6:6",
       "target": "wm2:L4:6",
       "type": "temporal",
@@ -1948,12 +2578,6 @@
       "weight": 1.0
     },
     {
-      "source": "wm2:L5:7",
-      "target": "wm2:L6:7",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "wm2:L6:7",
       "target": "wm2:L4:7",
       "type": "temporal",
@@ -1964,6 +2588,390 @@
       "target": "wm2:L23:7",
       "type": "temporal",
       "weight": 0.98
+    },
+    {
+      "source": "wm2:L5:0",
+      "target": "wm2:L6:0",
+      "type": "temporal",
+      "weight": 0.1506
+    },
+    {
+      "source": "wm2:L5:0",
+      "target": "wm2:L6:1",
+      "type": "temporal",
+      "weight": 0.1251
+    },
+    {
+      "source": "wm2:L5:0",
+      "target": "wm2:L6:2",
+      "type": "temporal",
+      "weight": 0.0928
+    },
+    {
+      "source": "wm2:L5:0",
+      "target": "wm2:L6:3",
+      "type": "temporal",
+      "weight": 0.1336
+    },
+    {
+      "source": "wm2:L5:0",
+      "target": "wm2:L6:4",
+      "type": "temporal",
+      "weight": 0.0969
+    },
+    {
+      "source": "wm2:L5:0",
+      "target": "wm2:L6:5",
+      "type": "temporal",
+      "weight": 0.2069
+    },
+    {
+      "source": "wm2:L5:0",
+      "target": "wm2:L6:6",
+      "type": "temporal",
+      "weight": 0.1005
+    },
+    {
+      "source": "wm2:L5:0",
+      "target": "wm2:L6:7",
+      "type": "temporal",
+      "weight": 0.1001
+    },
+    {
+      "source": "wm2:L5:1",
+      "target": "wm2:L6:0",
+      "type": "temporal",
+      "weight": 0.0703
+    },
+    {
+      "source": "wm2:L5:1",
+      "target": "wm2:L6:1",
+      "type": "temporal",
+      "weight": 0.185
+    },
+    {
+      "source": "wm2:L5:1",
+      "target": "wm2:L6:2",
+      "type": "temporal",
+      "weight": 0.1844
+    },
+    {
+      "source": "wm2:L5:1",
+      "target": "wm2:L6:3",
+      "type": "temporal",
+      "weight": 0.2377
+    },
+    {
+      "source": "wm2:L5:1",
+      "target": "wm2:L6:4",
+      "type": "temporal",
+      "weight": 0.2239
+    },
+    {
+      "source": "wm2:L5:1",
+      "target": "wm2:L6:5",
+      "type": "temporal",
+      "weight": 0.0506
+    },
+    {
+      "source": "wm2:L5:1",
+      "target": "wm2:L6:6",
+      "type": "temporal",
+      "weight": 0.13
+    },
+    {
+      "source": "wm2:L5:1",
+      "target": "wm2:L6:7",
+      "type": "temporal",
+      "weight": 0.2499
+    },
+    {
+      "source": "wm2:L5:2",
+      "target": "wm2:L6:0",
+      "type": "temporal",
+      "weight": 0.0552
+    },
+    {
+      "source": "wm2:L5:2",
+      "target": "wm2:L6:1",
+      "type": "temporal",
+      "weight": 0.1724
+    },
+    {
+      "source": "wm2:L5:2",
+      "target": "wm2:L6:2",
+      "type": "temporal",
+      "weight": 0.1499
+    },
+    {
+      "source": "wm2:L5:2",
+      "target": "wm2:L6:3",
+      "type": "temporal",
+      "weight": 0.1447
+    },
+    {
+      "source": "wm2:L5:2",
+      "target": "wm2:L6:4",
+      "type": "temporal",
+      "weight": 0.2195
+    },
+    {
+      "source": "wm2:L5:2",
+      "target": "wm2:L6:5",
+      "type": "temporal",
+      "weight": 0.2284
+    },
+    {
+      "source": "wm2:L5:2",
+      "target": "wm2:L6:6",
+      "type": "temporal",
+      "weight": 0.0858
+    },
+    {
+      "source": "wm2:L5:2",
+      "target": "wm2:L6:7",
+      "type": "temporal",
+      "weight": 0.0672
+    },
+    {
+      "source": "wm2:L5:3",
+      "target": "wm2:L6:0",
+      "type": "temporal",
+      "weight": 0.1113
+    },
+    {
+      "source": "wm2:L5:3",
+      "target": "wm2:L6:1",
+      "type": "temporal",
+      "weight": 0.1067
+    },
+    {
+      "source": "wm2:L5:3",
+      "target": "wm2:L6:2",
+      "type": "temporal",
+      "weight": 0.1737
+    },
+    {
+      "source": "wm2:L5:3",
+      "target": "wm2:L6:3",
+      "type": "temporal",
+      "weight": 0.0899
+    },
+    {
+      "source": "wm2:L5:3",
+      "target": "wm2:L6:4",
+      "type": "temporal",
+      "weight": 0.1119
+    },
+    {
+      "source": "wm2:L5:3",
+      "target": "wm2:L6:5",
+      "type": "temporal",
+      "weight": 0.0523
+    },
+    {
+      "source": "wm2:L5:3",
+      "target": "wm2:L6:6",
+      "type": "temporal",
+      "weight": 0.1025
+    },
+    {
+      "source": "wm2:L5:3",
+      "target": "wm2:L6:7",
+      "type": "temporal",
+      "weight": 0.1383
+    },
+    {
+      "source": "wm2:L5:4",
+      "target": "wm2:L6:0",
+      "type": "temporal",
+      "weight": 0.0799
+    },
+    {
+      "source": "wm2:L5:4",
+      "target": "wm2:L6:1",
+      "type": "temporal",
+      "weight": 0.0667
+    },
+    {
+      "source": "wm2:L5:4",
+      "target": "wm2:L6:2",
+      "type": "temporal",
+      "weight": 0.1463
+    },
+    {
+      "source": "wm2:L5:4",
+      "target": "wm2:L6:3",
+      "type": "temporal",
+      "weight": 0.1859
+    },
+    {
+      "source": "wm2:L5:4",
+      "target": "wm2:L6:4",
+      "type": "temporal",
+      "weight": 0.1544
+    },
+    {
+      "source": "wm2:L5:4",
+      "target": "wm2:L6:5",
+      "type": "temporal",
+      "weight": 0.2228
+    },
+    {
+      "source": "wm2:L5:4",
+      "target": "wm2:L6:6",
+      "type": "temporal",
+      "weight": 0.1398
+    },
+    {
+      "source": "wm2:L5:4",
+      "target": "wm2:L6:7",
+      "type": "temporal",
+      "weight": 0.2479
+    },
+    {
+      "source": "wm2:L5:5",
+      "target": "wm2:L6:0",
+      "type": "temporal",
+      "weight": 0.0554
+    },
+    {
+      "source": "wm2:L5:5",
+      "target": "wm2:L6:1",
+      "type": "temporal",
+      "weight": 0.1181
+    },
+    {
+      "source": "wm2:L5:5",
+      "target": "wm2:L6:2",
+      "type": "temporal",
+      "weight": 0.0724
+    },
+    {
+      "source": "wm2:L5:5",
+      "target": "wm2:L6:3",
+      "type": "temporal",
+      "weight": 0.0766
+    },
+    {
+      "source": "wm2:L5:5",
+      "target": "wm2:L6:4",
+      "type": "temporal",
+      "weight": 0.2144
+    },
+    {
+      "source": "wm2:L5:5",
+      "target": "wm2:L6:5",
+      "type": "temporal",
+      "weight": 0.1065
+    },
+    {
+      "source": "wm2:L5:5",
+      "target": "wm2:L6:6",
+      "type": "temporal",
+      "weight": 0.2084
+    },
+    {
+      "source": "wm2:L5:5",
+      "target": "wm2:L6:7",
+      "type": "temporal",
+      "weight": 0.0798
+    },
+    {
+      "source": "wm2:L5:6",
+      "target": "wm2:L6:0",
+      "type": "temporal",
+      "weight": 0.1901
+    },
+    {
+      "source": "wm2:L5:6",
+      "target": "wm2:L6:1",
+      "type": "temporal",
+      "weight": 0.2408
+    },
+    {
+      "source": "wm2:L5:6",
+      "target": "wm2:L6:2",
+      "type": "temporal",
+      "weight": 0.2156
+    },
+    {
+      "source": "wm2:L5:6",
+      "target": "wm2:L6:3",
+      "type": "temporal",
+      "weight": 0.1686
+    },
+    {
+      "source": "wm2:L5:6",
+      "target": "wm2:L6:4",
+      "type": "temporal",
+      "weight": 0.0762
+    },
+    {
+      "source": "wm2:L5:6",
+      "target": "wm2:L6:5",
+      "type": "temporal",
+      "weight": 0.1839
+    },
+    {
+      "source": "wm2:L5:6",
+      "target": "wm2:L6:6",
+      "type": "temporal",
+      "weight": 0.1346
+    },
+    {
+      "source": "wm2:L5:6",
+      "target": "wm2:L6:7",
+      "type": "temporal",
+      "weight": 0.0996
+    },
+    {
+      "source": "wm2:L5:7",
+      "target": "wm2:L6:0",
+      "type": "temporal",
+      "weight": 0.0885
+    },
+    {
+      "source": "wm2:L5:7",
+      "target": "wm2:L6:1",
+      "type": "temporal",
+      "weight": 0.1041
+    },
+    {
+      "source": "wm2:L5:7",
+      "target": "wm2:L6:2",
+      "type": "temporal",
+      "weight": 0.1695
+    },
+    {
+      "source": "wm2:L5:7",
+      "target": "wm2:L6:3",
+      "type": "temporal",
+      "weight": 0.1281
+    },
+    {
+      "source": "wm2:L5:7",
+      "target": "wm2:L6:4",
+      "type": "temporal",
+      "weight": 0.0992
+    },
+    {
+      "source": "wm2:L5:7",
+      "target": "wm2:L6:5",
+      "type": "temporal",
+      "weight": 0.087
+    },
+    {
+      "source": "wm2:L5:7",
+      "target": "wm2:L6:6",
+      "type": "temporal",
+      "weight": 0.2104
+    },
+    {
+      "source": "wm2:L5:7",
+      "target": "wm2:L6:7",
+      "type": "temporal",
+      "weight": 0.1549
     },
     {
       "source": "wm2:L4:0",
@@ -2637,8 +3645,5 @@
       "type": "temporal",
       "weight": 0.5
     }
-  ],
-  "properties": {
-    "n_cells": 8
-  }
+  ]
 }

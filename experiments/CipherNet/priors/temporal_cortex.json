@@ -1,6 +1,6 @@
 {
   "name": "temporal_cortex",
-  "description": "STG with 8 cells/layer",
+  "description": "STG with 8 cells/layer, MLP L5->L6",
   "nodes": [
     {
       "id": "stg1:L4:0",
@@ -638,12 +638,6 @@
       "weight": 1.0
     },
     {
-      "source": "stg1:L5:0",
-      "target": "stg1:L6:0",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "stg1:L6:0",
       "target": "stg1:L4:0",
       "type": "temporal",
@@ -664,12 +658,6 @@
     {
       "source": "stg1:L23:1",
       "target": "stg1:L5:1",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "stg1:L5:1",
-      "target": "stg1:L6:1",
       "type": "temporal",
       "weight": 1.0
     },
@@ -698,12 +686,6 @@
       "weight": 1.0
     },
     {
-      "source": "stg1:L5:2",
-      "target": "stg1:L6:2",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "stg1:L6:2",
       "target": "stg1:L4:2",
       "type": "temporal",
@@ -724,12 +706,6 @@
     {
       "source": "stg1:L23:3",
       "target": "stg1:L5:3",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "stg1:L5:3",
-      "target": "stg1:L6:3",
       "type": "temporal",
       "weight": 1.0
     },
@@ -758,12 +734,6 @@
       "weight": 1.0
     },
     {
-      "source": "stg1:L5:4",
-      "target": "stg1:L6:4",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "stg1:L6:4",
       "target": "stg1:L4:4",
       "type": "temporal",
@@ -784,12 +754,6 @@
     {
       "source": "stg1:L23:5",
       "target": "stg1:L5:5",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "stg1:L5:5",
-      "target": "stg1:L6:5",
       "type": "temporal",
       "weight": 1.0
     },
@@ -818,12 +782,6 @@
       "weight": 1.0
     },
     {
-      "source": "stg1:L5:6",
-      "target": "stg1:L6:6",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "stg1:L6:6",
       "target": "stg1:L4:6",
       "type": "temporal",
@@ -848,12 +806,6 @@
       "weight": 1.0
     },
     {
-      "source": "stg1:L5:7",
-      "target": "stg1:L6:7",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "stg1:L6:7",
       "target": "stg1:L4:7",
       "type": "temporal",
@@ -864,6 +816,390 @@
       "target": "stg1:L23:7",
       "type": "temporal",
       "weight": 0.7
+    },
+    {
+      "source": "stg1:L5:0",
+      "target": "stg1:L6:0",
+      "type": "temporal",
+      "weight": 0.1553
+    },
+    {
+      "source": "stg1:L5:0",
+      "target": "stg1:L6:1",
+      "type": "temporal",
+      "weight": 0.2025
+    },
+    {
+      "source": "stg1:L5:0",
+      "target": "stg1:L6:2",
+      "type": "temporal",
+      "weight": 0.0568
+    },
+    {
+      "source": "stg1:L5:0",
+      "target": "stg1:L6:3",
+      "type": "temporal",
+      "weight": 0.1974
+    },
+    {
+      "source": "stg1:L5:0",
+      "target": "stg1:L6:4",
+      "type": "temporal",
+      "weight": 0.0647
+    },
+    {
+      "source": "stg1:L5:0",
+      "target": "stg1:L6:5",
+      "type": "temporal",
+      "weight": 0.1181
+    },
+    {
+      "source": "stg1:L5:0",
+      "target": "stg1:L6:6",
+      "type": "temporal",
+      "weight": 0.2338
+    },
+    {
+      "source": "stg1:L5:0",
+      "target": "stg1:L6:7",
+      "type": "temporal",
+      "weight": 0.1612
+    },
+    {
+      "source": "stg1:L5:1",
+      "target": "stg1:L6:0",
+      "type": "temporal",
+      "weight": 0.0915
+    },
+    {
+      "source": "stg1:L5:1",
+      "target": "stg1:L6:1",
+      "type": "temporal",
+      "weight": 0.2357
+    },
+    {
+      "source": "stg1:L5:1",
+      "target": "stg1:L6:2",
+      "type": "temporal",
+      "weight": 0.1497
+    },
+    {
+      "source": "stg1:L5:1",
+      "target": "stg1:L6:3",
+      "type": "temporal",
+      "weight": 0.238
+    },
+    {
+      "source": "stg1:L5:1",
+      "target": "stg1:L6:4",
+      "type": "temporal",
+      "weight": 0.1856
+    },
+    {
+      "source": "stg1:L5:1",
+      "target": "stg1:L6:5",
+      "type": "temporal",
+      "weight": 0.0894
+    },
+    {
+      "source": "stg1:L5:1",
+      "target": "stg1:L6:6",
+      "type": "temporal",
+      "weight": 0.2094
+    },
+    {
+      "source": "stg1:L5:1",
+      "target": "stg1:L6:7",
+      "type": "temporal",
+      "weight": 0.2145
+    },
+    {
+      "source": "stg1:L5:2",
+      "target": "stg1:L6:0",
+      "type": "temporal",
+      "weight": 0.2119
+    },
+    {
+      "source": "stg1:L5:2",
+      "target": "stg1:L6:1",
+      "type": "temporal",
+      "weight": 0.241
+    },
+    {
+      "source": "stg1:L5:2",
+      "target": "stg1:L6:2",
+      "type": "temporal",
+      "weight": 0.193
+    },
+    {
+      "source": "stg1:L5:2",
+      "target": "stg1:L6:3",
+      "type": "temporal",
+      "weight": 0.1407
+    },
+    {
+      "source": "stg1:L5:2",
+      "target": "stg1:L6:4",
+      "type": "temporal",
+      "weight": 0.0962
+    },
+    {
+      "source": "stg1:L5:2",
+      "target": "stg1:L6:5",
+      "type": "temporal",
+      "weight": 0.0519
+    },
+    {
+      "source": "stg1:L5:2",
+      "target": "stg1:L6:6",
+      "type": "temporal",
+      "weight": 0.105
+    },
+    {
+      "source": "stg1:L5:2",
+      "target": "stg1:L6:7",
+      "type": "temporal",
+      "weight": 0.2308
+    },
+    {
+      "source": "stg1:L5:3",
+      "target": "stg1:L6:0",
+      "type": "temporal",
+      "weight": 0.2197
+    },
+    {
+      "source": "stg1:L5:3",
+      "target": "stg1:L6:1",
+      "type": "temporal",
+      "weight": 0.1692
+    },
+    {
+      "source": "stg1:L5:3",
+      "target": "stg1:L6:2",
+      "type": "temporal",
+      "weight": 0.0863
+    },
+    {
+      "source": "stg1:L5:3",
+      "target": "stg1:L6:3",
+      "type": "temporal",
+      "weight": 0.1185
+    },
+    {
+      "source": "stg1:L5:3",
+      "target": "stg1:L6:4",
+      "type": "temporal",
+      "weight": 0.1919
+    },
+    {
+      "source": "stg1:L5:3",
+      "target": "stg1:L6:5",
+      "type": "temporal",
+      "weight": 0.1466
+    },
+    {
+      "source": "stg1:L5:3",
+      "target": "stg1:L6:6",
+      "type": "temporal",
+      "weight": 0.1731
+    },
+    {
+      "source": "stg1:L5:3",
+      "target": "stg1:L6:7",
+      "type": "temporal",
+      "weight": 0.2405
+    },
+    {
+      "source": "stg1:L5:4",
+      "target": "stg1:L6:0",
+      "type": "temporal",
+      "weight": 0.135
+    },
+    {
+      "source": "stg1:L5:4",
+      "target": "stg1:L6:1",
+      "type": "temporal",
+      "weight": 0.1345
+    },
+    {
+      "source": "stg1:L5:4",
+      "target": "stg1:L6:2",
+      "type": "temporal",
+      "weight": 0.0645
+    },
+    {
+      "source": "stg1:L5:4",
+      "target": "stg1:L6:3",
+      "type": "temporal",
+      "weight": 0.1434
+    },
+    {
+      "source": "stg1:L5:4",
+      "target": "stg1:L6:4",
+      "type": "temporal",
+      "weight": 0.1638
+    },
+    {
+      "source": "stg1:L5:4",
+      "target": "stg1:L6:5",
+      "type": "temporal",
+      "weight": 0.1865
+    },
+    {
+      "source": "stg1:L5:4",
+      "target": "stg1:L6:6",
+      "type": "temporal",
+      "weight": 0.1781
+    },
+    {
+      "source": "stg1:L5:4",
+      "target": "stg1:L6:7",
+      "type": "temporal",
+      "weight": 0.192
+    },
+    {
+      "source": "stg1:L5:5",
+      "target": "stg1:L6:0",
+      "type": "temporal",
+      "weight": 0.1018
+    },
+    {
+      "source": "stg1:L5:5",
+      "target": "stg1:L6:1",
+      "type": "temporal",
+      "weight": 0.1918
+    },
+    {
+      "source": "stg1:L5:5",
+      "target": "stg1:L6:2",
+      "type": "temporal",
+      "weight": 0.1976
+    },
+    {
+      "source": "stg1:L5:5",
+      "target": "stg1:L6:3",
+      "type": "temporal",
+      "weight": 0.1919
+    },
+    {
+      "source": "stg1:L5:5",
+      "target": "stg1:L6:4",
+      "type": "temporal",
+      "weight": 0.1075
+    },
+    {
+      "source": "stg1:L5:5",
+      "target": "stg1:L6:5",
+      "type": "temporal",
+      "weight": 0.1988
+    },
+    {
+      "source": "stg1:L5:5",
+      "target": "stg1:L6:6",
+      "type": "temporal",
+      "weight": 0.2108
+    },
+    {
+      "source": "stg1:L5:5",
+      "target": "stg1:L6:7",
+      "type": "temporal",
+      "weight": 0.2083
+    },
+    {
+      "source": "stg1:L5:6",
+      "target": "stg1:L6:0",
+      "type": "temporal",
+      "weight": 0.1473
+    },
+    {
+      "source": "stg1:L5:6",
+      "target": "stg1:L6:1",
+      "type": "temporal",
+      "weight": 0.0846
+    },
+    {
+      "source": "stg1:L5:6",
+      "target": "stg1:L6:2",
+      "type": "temporal",
+      "weight": 0.1225
+    },
+    {
+      "source": "stg1:L5:6",
+      "target": "stg1:L6:3",
+      "type": "temporal",
+      "weight": 0.123
+    },
+    {
+      "source": "stg1:L5:6",
+      "target": "stg1:L6:4",
+      "type": "temporal",
+      "weight": 0.1865
+    },
+    {
+      "source": "stg1:L5:6",
+      "target": "stg1:L6:5",
+      "type": "temporal",
+      "weight": 0.1756
+    },
+    {
+      "source": "stg1:L5:6",
+      "target": "stg1:L6:6",
+      "type": "temporal",
+      "weight": 0.2162
+    },
+    {
+      "source": "stg1:L5:6",
+      "target": "stg1:L6:7",
+      "type": "temporal",
+      "weight": 0.1973
+    },
+    {
+      "source": "stg1:L5:7",
+      "target": "stg1:L6:0",
+      "type": "temporal",
+      "weight": 0.2232
+    },
+    {
+      "source": "stg1:L5:7",
+      "target": "stg1:L6:1",
+      "type": "temporal",
+      "weight": 0.1746
+    },
+    {
+      "source": "stg1:L5:7",
+      "target": "stg1:L6:2",
+      "type": "temporal",
+      "weight": 0.2017
+    },
+    {
+      "source": "stg1:L5:7",
+      "target": "stg1:L6:3",
+      "type": "temporal",
+      "weight": 0.229
+    },
+    {
+      "source": "stg1:L5:7",
+      "target": "stg1:L6:4",
+      "type": "temporal",
+      "weight": 0.2115
+    },
+    {
+      "source": "stg1:L5:7",
+      "target": "stg1:L6:5",
+      "type": "temporal",
+      "weight": 0.1405
+    },
+    {
+      "source": "stg1:L5:7",
+      "target": "stg1:L6:6",
+      "type": "temporal",
+      "weight": 0.2131
+    },
+    {
+      "source": "stg1:L5:7",
+      "target": "stg1:L6:7",
+      "type": "temporal",
+      "weight": 0.1861
     },
     {
       "source": "stg1:L4:0",
@@ -1166,12 +1502,6 @@
       "weight": 1.0
     },
     {
-      "source": "stg2:L5:0",
-      "target": "stg2:L6:0",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "stg2:L6:0",
       "target": "stg2:L4:0",
       "type": "temporal",
@@ -1192,12 +1522,6 @@
     {
       "source": "stg2:L23:1",
       "target": "stg2:L5:1",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "stg2:L5:1",
-      "target": "stg2:L6:1",
       "type": "temporal",
       "weight": 1.0
     },
@@ -1226,12 +1550,6 @@
       "weight": 1.0
     },
     {
-      "source": "stg2:L5:2",
-      "target": "stg2:L6:2",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "stg2:L6:2",
       "target": "stg2:L4:2",
       "type": "temporal",
@@ -1252,12 +1570,6 @@
     {
       "source": "stg2:L23:3",
       "target": "stg2:L5:3",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "stg2:L5:3",
-      "target": "stg2:L6:3",
       "type": "temporal",
       "weight": 1.0
     },
@@ -1286,12 +1598,6 @@
       "weight": 1.0
     },
     {
-      "source": "stg2:L5:4",
-      "target": "stg2:L6:4",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "stg2:L6:4",
       "target": "stg2:L4:4",
       "type": "temporal",
@@ -1312,12 +1618,6 @@
     {
       "source": "stg2:L23:5",
       "target": "stg2:L5:5",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "stg2:L5:5",
-      "target": "stg2:L6:5",
       "type": "temporal",
       "weight": 1.0
     },
@@ -1346,12 +1646,6 @@
       "weight": 1.0
     },
     {
-      "source": "stg2:L5:6",
-      "target": "stg2:L6:6",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "stg2:L6:6",
       "target": "stg2:L4:6",
       "type": "temporal",
@@ -1376,12 +1670,6 @@
       "weight": 1.0
     },
     {
-      "source": "stg2:L5:7",
-      "target": "stg2:L6:7",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "stg2:L6:7",
       "target": "stg2:L4:7",
       "type": "temporal",
@@ -1392,6 +1680,390 @@
       "target": "stg2:L23:7",
       "type": "temporal",
       "weight": 0.7
+    },
+    {
+      "source": "stg2:L5:0",
+      "target": "stg2:L6:0",
+      "type": "temporal",
+      "weight": 0.2118
+    },
+    {
+      "source": "stg2:L5:0",
+      "target": "stg2:L6:1",
+      "type": "temporal",
+      "weight": 0.1205
+    },
+    {
+      "source": "stg2:L5:0",
+      "target": "stg2:L6:2",
+      "type": "temporal",
+      "weight": 0.182
+    },
+    {
+      "source": "stg2:L5:0",
+      "target": "stg2:L6:3",
+      "type": "temporal",
+      "weight": 0.2109
+    },
+    {
+      "source": "stg2:L5:0",
+      "target": "stg2:L6:4",
+      "type": "temporal",
+      "weight": 0.1234
+    },
+    {
+      "source": "stg2:L5:0",
+      "target": "stg2:L6:5",
+      "type": "temporal",
+      "weight": 0.2129
+    },
+    {
+      "source": "stg2:L5:0",
+      "target": "stg2:L6:6",
+      "type": "temporal",
+      "weight": 0.2188
+    },
+    {
+      "source": "stg2:L5:0",
+      "target": "stg2:L6:7",
+      "type": "temporal",
+      "weight": 0.0873
+    },
+    {
+      "source": "stg2:L5:1",
+      "target": "stg2:L6:0",
+      "type": "temporal",
+      "weight": 0.119
+    },
+    {
+      "source": "stg2:L5:1",
+      "target": "stg2:L6:1",
+      "type": "temporal",
+      "weight": 0.235
+    },
+    {
+      "source": "stg2:L5:1",
+      "target": "stg2:L6:2",
+      "type": "temporal",
+      "weight": 0.0504
+    },
+    {
+      "source": "stg2:L5:1",
+      "target": "stg2:L6:3",
+      "type": "temporal",
+      "weight": 0.1936
+    },
+    {
+      "source": "stg2:L5:1",
+      "target": "stg2:L6:4",
+      "type": "temporal",
+      "weight": 0.1523
+    },
+    {
+      "source": "stg2:L5:1",
+      "target": "stg2:L6:5",
+      "type": "temporal",
+      "weight": 0.0748
+    },
+    {
+      "source": "stg2:L5:1",
+      "target": "stg2:L6:6",
+      "type": "temporal",
+      "weight": 0.1106
+    },
+    {
+      "source": "stg2:L5:1",
+      "target": "stg2:L6:7",
+      "type": "temporal",
+      "weight": 0.2249
+    },
+    {
+      "source": "stg2:L5:2",
+      "target": "stg2:L6:0",
+      "type": "temporal",
+      "weight": 0.1914
+    },
+    {
+      "source": "stg2:L5:2",
+      "target": "stg2:L6:1",
+      "type": "temporal",
+      "weight": 0.1748
+    },
+    {
+      "source": "stg2:L5:2",
+      "target": "stg2:L6:2",
+      "type": "temporal",
+      "weight": 0.0765
+    },
+    {
+      "source": "stg2:L5:2",
+      "target": "stg2:L6:3",
+      "type": "temporal",
+      "weight": 0.0737
+    },
+    {
+      "source": "stg2:L5:2",
+      "target": "stg2:L6:4",
+      "type": "temporal",
+      "weight": 0.2345
+    },
+    {
+      "source": "stg2:L5:2",
+      "target": "stg2:L6:5",
+      "type": "temporal",
+      "weight": 0.1743
+    },
+    {
+      "source": "stg2:L5:2",
+      "target": "stg2:L6:6",
+      "type": "temporal",
+      "weight": 0.1352
+    },
+    {
+      "source": "stg2:L5:2",
+      "target": "stg2:L6:7",
+      "type": "temporal",
+      "weight": 0.0657
+    },
+    {
+      "source": "stg2:L5:3",
+      "target": "stg2:L6:0",
+      "type": "temporal",
+      "weight": 0.0759
+    },
+    {
+      "source": "stg2:L5:3",
+      "target": "stg2:L6:1",
+      "type": "temporal",
+      "weight": 0.0995
+    },
+    {
+      "source": "stg2:L5:3",
+      "target": "stg2:L6:2",
+      "type": "temporal",
+      "weight": 0.2019
+    },
+    {
+      "source": "stg2:L5:3",
+      "target": "stg2:L6:3",
+      "type": "temporal",
+      "weight": 0.1186
+    },
+    {
+      "source": "stg2:L5:3",
+      "target": "stg2:L6:4",
+      "type": "temporal",
+      "weight": 0.2198
+    },
+    {
+      "source": "stg2:L5:3",
+      "target": "stg2:L6:5",
+      "type": "temporal",
+      "weight": 0.0766
+    },
+    {
+      "source": "stg2:L5:3",
+      "target": "stg2:L6:6",
+      "type": "temporal",
+      "weight": 0.1224
+    },
+    {
+      "source": "stg2:L5:3",
+      "target": "stg2:L6:7",
+      "type": "temporal",
+      "weight": 0.2012
+    },
+    {
+      "source": "stg2:L5:4",
+      "target": "stg2:L6:0",
+      "type": "temporal",
+      "weight": 0.123
+    },
+    {
+      "source": "stg2:L5:4",
+      "target": "stg2:L6:1",
+      "type": "temporal",
+      "weight": 0.2341
+    },
+    {
+      "source": "stg2:L5:4",
+      "target": "stg2:L6:2",
+      "type": "temporal",
+      "weight": 0.1903
+    },
+    {
+      "source": "stg2:L5:4",
+      "target": "stg2:L6:3",
+      "type": "temporal",
+      "weight": 0.2201
+    },
+    {
+      "source": "stg2:L5:4",
+      "target": "stg2:L6:4",
+      "type": "temporal",
+      "weight": 0.1987
+    },
+    {
+      "source": "stg2:L5:4",
+      "target": "stg2:L6:5",
+      "type": "temporal",
+      "weight": 0.2312
+    },
+    {
+      "source": "stg2:L5:4",
+      "target": "stg2:L6:6",
+      "type": "temporal",
+      "weight": 0.1983
+    },
+    {
+      "source": "stg2:L5:4",
+      "target": "stg2:L6:7",
+      "type": "temporal",
+      "weight": 0.0759
+    },
+    {
+      "source": "stg2:L5:5",
+      "target": "stg2:L6:0",
+      "type": "temporal",
+      "weight": 0.2202
+    },
+    {
+      "source": "stg2:L5:5",
+      "target": "stg2:L6:1",
+      "type": "temporal",
+      "weight": 0.1701
+    },
+    {
+      "source": "stg2:L5:5",
+      "target": "stg2:L6:2",
+      "type": "temporal",
+      "weight": 0.1845
+    },
+    {
+      "source": "stg2:L5:5",
+      "target": "stg2:L6:3",
+      "type": "temporal",
+      "weight": 0.072
+    },
+    {
+      "source": "stg2:L5:5",
+      "target": "stg2:L6:4",
+      "type": "temporal",
+      "weight": 0.1658
+    },
+    {
+      "source": "stg2:L5:5",
+      "target": "stg2:L6:5",
+      "type": "temporal",
+      "weight": 0.2244
+    },
+    {
+      "source": "stg2:L5:5",
+      "target": "stg2:L6:6",
+      "type": "temporal",
+      "weight": 0.1158
+    },
+    {
+      "source": "stg2:L5:5",
+      "target": "stg2:L6:7",
+      "type": "temporal",
+      "weight": 0.2365
+    },
+    {
+      "source": "stg2:L5:6",
+      "target": "stg2:L6:0",
+      "type": "temporal",
+      "weight": 0.1073
+    },
+    {
+      "source": "stg2:L5:6",
+      "target": "stg2:L6:1",
+      "type": "temporal",
+      "weight": 0.1697
+    },
+    {
+      "source": "stg2:L5:6",
+      "target": "stg2:L6:2",
+      "type": "temporal",
+      "weight": 0.1741
+    },
+    {
+      "source": "stg2:L5:6",
+      "target": "stg2:L6:3",
+      "type": "temporal",
+      "weight": 0.2398
+    },
+    {
+      "source": "stg2:L5:6",
+      "target": "stg2:L6:4",
+      "type": "temporal",
+      "weight": 0.2229
+    },
+    {
+      "source": "stg2:L5:6",
+      "target": "stg2:L6:5",
+      "type": "temporal",
+      "weight": 0.1524
+    },
+    {
+      "source": "stg2:L5:6",
+      "target": "stg2:L6:6",
+      "type": "temporal",
+      "weight": 0.1192
+    },
+    {
+      "source": "stg2:L5:6",
+      "target": "stg2:L6:7",
+      "type": "temporal",
+      "weight": 0.1992
+    },
+    {
+      "source": "stg2:L5:7",
+      "target": "stg2:L6:0",
+      "type": "temporal",
+      "weight": 0.1754
+    },
+    {
+      "source": "stg2:L5:7",
+      "target": "stg2:L6:1",
+      "type": "temporal",
+      "weight": 0.0986
+    },
+    {
+      "source": "stg2:L5:7",
+      "target": "stg2:L6:2",
+      "type": "temporal",
+      "weight": 0.0618
+    },
+    {
+      "source": "stg2:L5:7",
+      "target": "stg2:L6:3",
+      "type": "temporal",
+      "weight": 0.1305
+    },
+    {
+      "source": "stg2:L5:7",
+      "target": "stg2:L6:4",
+      "type": "temporal",
+      "weight": 0.2438
+    },
+    {
+      "source": "stg2:L5:7",
+      "target": "stg2:L6:5",
+      "type": "temporal",
+      "weight": 0.178
+    },
+    {
+      "source": "stg2:L5:7",
+      "target": "stg2:L6:6",
+      "type": "temporal",
+      "weight": 0.1222
+    },
+    {
+      "source": "stg2:L5:7",
+      "target": "stg2:L6:7",
+      "type": "temporal",
+      "weight": 0.2357
     },
     {
       "source": "stg2:L4:0",
@@ -1694,12 +2366,6 @@
       "weight": 1.0
     },
     {
-      "source": "stg_assoc:L5:0",
-      "target": "stg_assoc:L6:0",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "stg_assoc:L6:0",
       "target": "stg_assoc:L4:0",
       "type": "temporal",
@@ -1714,12 +2380,6 @@
     {
       "source": "stg_assoc:L23:1",
       "target": "stg_assoc:L5:1",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "stg_assoc:L5:1",
-      "target": "stg_assoc:L6:1",
       "type": "temporal",
       "weight": 1.0
     },
@@ -1742,12 +2402,6 @@
       "weight": 1.0
     },
     {
-      "source": "stg_assoc:L5:2",
-      "target": "stg_assoc:L6:2",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "stg_assoc:L6:2",
       "target": "stg_assoc:L4:2",
       "type": "temporal",
@@ -1762,12 +2416,6 @@
     {
       "source": "stg_assoc:L23:3",
       "target": "stg_assoc:L5:3",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "stg_assoc:L5:3",
-      "target": "stg_assoc:L6:3",
       "type": "temporal",
       "weight": 1.0
     },
@@ -1790,12 +2438,6 @@
       "weight": 1.0
     },
     {
-      "source": "stg_assoc:L5:4",
-      "target": "stg_assoc:L6:4",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "stg_assoc:L6:4",
       "target": "stg_assoc:L4:4",
       "type": "temporal",
@@ -1810,12 +2452,6 @@
     {
       "source": "stg_assoc:L23:5",
       "target": "stg_assoc:L5:5",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
-      "source": "stg_assoc:L5:5",
-      "target": "stg_assoc:L6:5",
       "type": "temporal",
       "weight": 1.0
     },
@@ -1838,12 +2474,6 @@
       "weight": 1.0
     },
     {
-      "source": "stg_assoc:L5:6",
-      "target": "stg_assoc:L6:6",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "stg_assoc:L6:6",
       "target": "stg_assoc:L4:6",
       "type": "temporal",
@@ -1862,16 +2492,394 @@
       "weight": 1.0
     },
     {
-      "source": "stg_assoc:L5:7",
-      "target": "stg_assoc:L6:7",
-      "type": "temporal",
-      "weight": 1.0
-    },
-    {
       "source": "stg_assoc:L6:7",
       "target": "stg_assoc:L4:7",
       "type": "temporal",
       "weight": 0.5
+    },
+    {
+      "source": "stg_assoc:L5:0",
+      "target": "stg_assoc:L6:0",
+      "type": "temporal",
+      "weight": 0.0673
+    },
+    {
+      "source": "stg_assoc:L5:0",
+      "target": "stg_assoc:L6:1",
+      "type": "temporal",
+      "weight": 0.0605
+    },
+    {
+      "source": "stg_assoc:L5:0",
+      "target": "stg_assoc:L6:2",
+      "type": "temporal",
+      "weight": 0.1415
+    },
+    {
+      "source": "stg_assoc:L5:0",
+      "target": "stg_assoc:L6:3",
+      "type": "temporal",
+      "weight": 0.1161
+    },
+    {
+      "source": "stg_assoc:L5:0",
+      "target": "stg_assoc:L6:4",
+      "type": "temporal",
+      "weight": 0.1864
+    },
+    {
+      "source": "stg_assoc:L5:0",
+      "target": "stg_assoc:L6:5",
+      "type": "temporal",
+      "weight": 0.1723
+    },
+    {
+      "source": "stg_assoc:L5:0",
+      "target": "stg_assoc:L6:6",
+      "type": "temporal",
+      "weight": 0.2047
+    },
+    {
+      "source": "stg_assoc:L5:0",
+      "target": "stg_assoc:L6:7",
+      "type": "temporal",
+      "weight": 0.1154
+    },
+    {
+      "source": "stg_assoc:L5:1",
+      "target": "stg_assoc:L6:0",
+      "type": "temporal",
+      "weight": 0.1642
+    },
+    {
+      "source": "stg_assoc:L5:1",
+      "target": "stg_assoc:L6:1",
+      "type": "temporal",
+      "weight": 0.1533
+    },
+    {
+      "source": "stg_assoc:L5:1",
+      "target": "stg_assoc:L6:2",
+      "type": "temporal",
+      "weight": 0.2367
+    },
+    {
+      "source": "stg_assoc:L5:1",
+      "target": "stg_assoc:L6:3",
+      "type": "temporal",
+      "weight": 0.0563
+    },
+    {
+      "source": "stg_assoc:L5:1",
+      "target": "stg_assoc:L6:4",
+      "type": "temporal",
+      "weight": 0.2378
+    },
+    {
+      "source": "stg_assoc:L5:1",
+      "target": "stg_assoc:L6:5",
+      "type": "temporal",
+      "weight": 0.095
+    },
+    {
+      "source": "stg_assoc:L5:1",
+      "target": "stg_assoc:L6:6",
+      "type": "temporal",
+      "weight": 0.1643
+    },
+    {
+      "source": "stg_assoc:L5:1",
+      "target": "stg_assoc:L6:7",
+      "type": "temporal",
+      "weight": 0.1703
+    },
+    {
+      "source": "stg_assoc:L5:2",
+      "target": "stg_assoc:L6:0",
+      "type": "temporal",
+      "weight": 0.2329
+    },
+    {
+      "source": "stg_assoc:L5:2",
+      "target": "stg_assoc:L6:1",
+      "type": "temporal",
+      "weight": 0.1561
+    },
+    {
+      "source": "stg_assoc:L5:2",
+      "target": "stg_assoc:L6:2",
+      "type": "temporal",
+      "weight": 0.0938
+    },
+    {
+      "source": "stg_assoc:L5:2",
+      "target": "stg_assoc:L6:3",
+      "type": "temporal",
+      "weight": 0.2416
+    },
+    {
+      "source": "stg_assoc:L5:2",
+      "target": "stg_assoc:L6:4",
+      "type": "temporal",
+      "weight": 0.1078
+    },
+    {
+      "source": "stg_assoc:L5:2",
+      "target": "stg_assoc:L6:5",
+      "type": "temporal",
+      "weight": 0.0746
+    },
+    {
+      "source": "stg_assoc:L5:2",
+      "target": "stg_assoc:L6:6",
+      "type": "temporal",
+      "weight": 0.0666
+    },
+    {
+      "source": "stg_assoc:L5:2",
+      "target": "stg_assoc:L6:7",
+      "type": "temporal",
+      "weight": 0.0844
+    },
+    {
+      "source": "stg_assoc:L5:3",
+      "target": "stg_assoc:L6:0",
+      "type": "temporal",
+      "weight": 0.1512
+    },
+    {
+      "source": "stg_assoc:L5:3",
+      "target": "stg_assoc:L6:1",
+      "type": "temporal",
+      "weight": 0.2293
+    },
+    {
+      "source": "stg_assoc:L5:3",
+      "target": "stg_assoc:L6:2",
+      "type": "temporal",
+      "weight": 0.1539
+    },
+    {
+      "source": "stg_assoc:L5:3",
+      "target": "stg_assoc:L6:3",
+      "type": "temporal",
+      "weight": 0.073
+    },
+    {
+      "source": "stg_assoc:L5:3",
+      "target": "stg_assoc:L6:4",
+      "type": "temporal",
+      "weight": 0.2128
+    },
+    {
+      "source": "stg_assoc:L5:3",
+      "target": "stg_assoc:L6:5",
+      "type": "temporal",
+      "weight": 0.192
+    },
+    {
+      "source": "stg_assoc:L5:3",
+      "target": "stg_assoc:L6:6",
+      "type": "temporal",
+      "weight": 0.0692
+    },
+    {
+      "source": "stg_assoc:L5:3",
+      "target": "stg_assoc:L6:7",
+      "type": "temporal",
+      "weight": 0.1194
+    },
+    {
+      "source": "stg_assoc:L5:4",
+      "target": "stg_assoc:L6:0",
+      "type": "temporal",
+      "weight": 0.1461
+    },
+    {
+      "source": "stg_assoc:L5:4",
+      "target": "stg_assoc:L6:1",
+      "type": "temporal",
+      "weight": 0.1396
+    },
+    {
+      "source": "stg_assoc:L5:4",
+      "target": "stg_assoc:L6:2",
+      "type": "temporal",
+      "weight": 0.0875
+    },
+    {
+      "source": "stg_assoc:L5:4",
+      "target": "stg_assoc:L6:3",
+      "type": "temporal",
+      "weight": 0.0789
+    },
+    {
+      "source": "stg_assoc:L5:4",
+      "target": "stg_assoc:L6:4",
+      "type": "temporal",
+      "weight": 0.1725
+    },
+    {
+      "source": "stg_assoc:L5:4",
+      "target": "stg_assoc:L6:5",
+      "type": "temporal",
+      "weight": 0.1433
+    },
+    {
+      "source": "stg_assoc:L5:4",
+      "target": "stg_assoc:L6:6",
+      "type": "temporal",
+      "weight": 0.0873
+    },
+    {
+      "source": "stg_assoc:L5:4",
+      "target": "stg_assoc:L6:7",
+      "type": "temporal",
+      "weight": 0.2017
+    },
+    {
+      "source": "stg_assoc:L5:5",
+      "target": "stg_assoc:L6:0",
+      "type": "temporal",
+      "weight": 0.14
+    },
+    {
+      "source": "stg_assoc:L5:5",
+      "target": "stg_assoc:L6:1",
+      "type": "temporal",
+      "weight": 0.0975
+    },
+    {
+      "source": "stg_assoc:L5:5",
+      "target": "stg_assoc:L6:2",
+      "type": "temporal",
+      "weight": 0.2305
+    },
+    {
+      "source": "stg_assoc:L5:5",
+      "target": "stg_assoc:L6:3",
+      "type": "temporal",
+      "weight": 0.0765
+    },
+    {
+      "source": "stg_assoc:L5:5",
+      "target": "stg_assoc:L6:4",
+      "type": "temporal",
+      "weight": 0.1236
+    },
+    {
+      "source": "stg_assoc:L5:5",
+      "target": "stg_assoc:L6:5",
+      "type": "temporal",
+      "weight": 0.1368
+    },
+    {
+      "source": "stg_assoc:L5:5",
+      "target": "stg_assoc:L6:6",
+      "type": "temporal",
+      "weight": 0.2259
+    },
+    {
+      "source": "stg_assoc:L5:5",
+      "target": "stg_assoc:L6:7",
+      "type": "temporal",
+      "weight": 0.1483
+    },
+    {
+      "source": "stg_assoc:L5:6",
+      "target": "stg_assoc:L6:0",
+      "type": "temporal",
+      "weight": 0.0931
+    },
+    {
+      "source": "stg_assoc:L5:6",
+      "target": "stg_assoc:L6:1",
+      "type": "temporal",
+      "weight": 0.1242
+    },
+    {
+      "source": "stg_assoc:L5:6",
+      "target": "stg_assoc:L6:2",
+      "type": "temporal",
+      "weight": 0.1724
+    },
+    {
+      "source": "stg_assoc:L5:6",
+      "target": "stg_assoc:L6:3",
+      "type": "temporal",
+      "weight": 0.1559
+    },
+    {
+      "source": "stg_assoc:L5:6",
+      "target": "stg_assoc:L6:4",
+      "type": "temporal",
+      "weight": 0.0905
+    },
+    {
+      "source": "stg_assoc:L5:6",
+      "target": "stg_assoc:L6:5",
+      "type": "temporal",
+      "weight": 0.2276
+    },
+    {
+      "source": "stg_assoc:L5:6",
+      "target": "stg_assoc:L6:6",
+      "type": "temporal",
+      "weight": 0.2047
+    },
+    {
+      "source": "stg_assoc:L5:6",
+      "target": "stg_assoc:L6:7",
+      "type": "temporal",
+      "weight": 0.1677
+    },
+    {
+      "source": "stg_assoc:L5:7",
+      "target": "stg_assoc:L6:0",
+      "type": "temporal",
+      "weight": 0.1779
+    },
+    {
+      "source": "stg_assoc:L5:7",
+      "target": "stg_assoc:L6:1",
+      "type": "temporal",
+      "weight": 0.11
+    },
+    {
+      "source": "stg_assoc:L5:7",
+      "target": "stg_assoc:L6:2",
+      "type": "temporal",
+      "weight": 0.1372
+    },
+    {
+      "source": "stg_assoc:L5:7",
+      "target": "stg_assoc:L6:3",
+      "type": "temporal",
+      "weight": 0.1181
+    },
+    {
+      "source": "stg_assoc:L5:7",
+      "target": "stg_assoc:L6:4",
+      "type": "temporal",
+      "weight": 0.1935
+    },
+    {
+      "source": "stg_assoc:L5:7",
+      "target": "stg_assoc:L6:5",
+      "type": "temporal",
+      "weight": 0.0779
+    },
+    {
+      "source": "stg_assoc:L5:7",
+      "target": "stg_assoc:L6:6",
+      "type": "temporal",
+      "weight": 0.1558
+    },
+    {
+      "source": "stg_assoc:L5:7",
+      "target": "stg_assoc:L6:7",
+      "type": "temporal",
+      "weight": 0.089
     },
     {
       "source": "stg_assoc:L4:0",
@@ -2353,8 +3361,5 @@
       "type": "temporal",
       "weight": 0.3
     }
-  ],
-  "properties": {
-    "n_cells": 8
-  }
+  ]
 }

@@ -765,11 +765,22 @@ class Graph:
             sensory, prediction, error, prop_phase = self._compute_sensory(nid, node)
 
             # 2b. Spatial broadcast: receive from nearby cells.
-            # Adds excitatory context (basal) and inhibitory surround.
-            # Only L23 cells participate — matches biology (densest
-            # horizontal connections in superficial layers).
+            # Excitatory broadcast → APICAL (context/amplification).
+            # NOT basal (driving). Lateral context from neighbors is
+            # like HTM distal dendrite input: it PREDICTS and PRIMES
+            # cells (via BAC amplification) without creating false error.
+            # Inhibitory broadcast → subtracted from activation (surround).
             bcast_exc, bcast_inh = self.compute_broadcast(nid, node)
-            sensory += bcast_exc  # broadcast adds to feedforward drive
+            if bcast_exc > 0.001:
+                # Add broadcast context to apical and recompute sensory
+                # output with BAC firing check (broadcast may trigger burst).
+                node.apical += bcast_exc
+                prediction += bcast_exc
+                if node.basal > BAC_BASAL_THRESHOLD and node.apical > BAC_APICAL_THRESHOLD:
+                    sensory = node.basal * BAC_AMPLIFICATION
+                else:
+                    sensory = node.basal * (1.0 + 0.5 * max(0.0, node.apical))
+                error = max(-1.0, min(1.0, node.basal - node.apical))
 
             # 4. Update: two modes.
 
@@ -1321,10 +1332,10 @@ class Graph:
                     label=f"{name}:L6:{c}", subgraph=sg,
                     layer=6, role="feedback", cell_index=c)
 
-                # Vertical 1-to-1: L4:i → L23:i → L5:i → L6:i → L4:i
+                # Vertical 1-to-1: L4:i → L23:i → L5:i, L6:i → L4:i
                 self.add_edge(l4_c, l23_c, edge_type=TEMPORAL, weight=1.0)
                 self.add_edge(l23_c, l5_c, edge_type=TEMPORAL, weight=1.0)
-                self.add_edge(l5_c, l6_c, edge_type=TEMPORAL, weight=1.0)
+                # L5→L6 wired ALL-TO-ALL below (MLP-style, not 1-to-1)
                 self.add_edge(l6_c, l4_c, edge_type=TEMPORAL, weight=0.5)
 
                 if self_loop_weight > 0:
@@ -1335,6 +1346,19 @@ class Graph:
                 l23_cells.append(l23_c)
                 l5_cells.append(l5_c)
                 l6_cells.append(l6_c)
+
+            # MLP-style L5→L6: ALL L5 cells → ALL L6 cells with RANDOM
+            # weights. Each L6 cell computes a different projection of
+            # the L5 population — like neurons in an MLP layer. This is
+            # what breaks symmetry: different L6 cells generate different
+            # predictions, causing different L4 errors, causing different
+            # L23 activations. Without this, all cell chains are identical.
+            import random as _rng
+            _rng.seed(hash(name) & 0xFFFFFFFF)  # deterministic per column
+            for l5_c in l5_cells:
+                for l6_c in l6_cells:
+                    w = 0.05 + _rng.random() * 0.2  # range [0.05, 0.25]
+                    self.add_edge(l5_c, l6_c, edge_type=TEMPORAL, weight=w)
 
             # Per-layer lateral inhibition (within-column competition).
             # Sparse activation: only a few cells per layer win.
