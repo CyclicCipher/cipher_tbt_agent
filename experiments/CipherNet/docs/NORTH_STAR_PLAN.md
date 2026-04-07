@@ -228,6 +228,18 @@ Build semantic concept columns. Train on text.
 System learns word meanings from context.
 Can answer questions about passages.
 
+### Phase 4.5: PEMDAS validation
+
+After Broca's and Wernicke's are working, test whether the system
+can learn operator precedence from examples alone:
+- Train on: "3+4*2=11", "2*3+1=7", "5+6*0=5", etc.
+- Test: "1+2*3+4=11" (never seen, requires correct precedence)
+- The system must parse this as [add 1 [add [mul 2 3] 4]] = 11,
+  NOT as [add [add [mul [add 1 2] 3] 4]] = 13.
+
+This is the litmus test for Broca's area: if it can learn PEMDAS
+from examples without hardcoded rules, hierarchical Merge works.
+
 ### Phase 5: Verify criterion 3 (novel task learning)
 
 Test the architecture on tasks it wasn't designed for.

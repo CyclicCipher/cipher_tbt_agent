@@ -300,9 +300,48 @@ Cortex (PFC, sensory) → Striatum → GPi/SNr → Thalamus → Cortex
 - Go signal must ACTIVELY fire to open a gate (update WM)
 - This prevents random overwriting of WM contents
 
+### BG gating learning (PBWM model, O'Reilly & Frank 2006)
+
+How the BG learns WHICH gate to open WHEN — via reinforcement learning.
+
+**The algorithm (synaptic tagging + dopamine reinforcement):**
+1. When a Go neuron fires (gate opens), its active synapses get TAGGED
+   (eligibility trace). Weights don't change yet.
+2. Later, dopamine signal arrives (reward prediction error):
+   - Positive RPE: D1/Go tagged synapses STRENGTHEN, D2/NoGo WEAKEN
+   - Negative RPE: D2/NoGo tagged synapses STRENGTHEN, D1/Go WEAKEN
+3. Only tagged synapses update (solves temporal credit assignment)
+4. Update rule: delta_w = learning_rate * dopamine * eligibility_trace
+
+**Stripe specialization (emergent, not hardcoded):**
+- All stripes receive the SAME dopamine signal
+- But each stripe's synapses are tagged by DIFFERENT inputs
+- Over many trials: each stripe converges on the gating policy that
+  works for its input domain
+- Specialization emerges from input-driven tagging, not explicit assignment
+
+**Cold start (exploration → exploitation):**
+- High tonic dopamine → low selectivity → multiple gates open (exploration)
+- As learning progresses, selectivity increases (exploitation)
+- This is explore/exploit at the neural level
+
+**Three gating functions (Chatham & Badre 2015):**
+- Input gating: WHEN to update WM (rostral/associative striatum)
+- Output gating: WHICH WM content to deploy (caudate)
+- Maintenance: WHEN to clear obsolete info (ventral striatum)
+- Each learns independently through dopamine
+
+**PFC biasing (not controlling):**
+- PFC sends maintained representations → striatum
+- Provides BIAS (context), not INSTRUCTION
+- The actual Go/NoGo decision is made by the striatum
+- BG discovers optimal gating policy relative to PFC context
+
 ### Sources
-- O'Reilly & Frank, PBWM model
-- Numenta 2024, CMP/BG interactions
+- O'Reilly & Frank 2006, Neural Computation (PBWM model)
+- Hazy, Frank & O'Reilly 2007 (executive without homunculus)
+- Chatham & Badre 2015 (multiple gates on working memory)
+- Frank & Badre 2012 (corticostriatal output gating)
 
 ---
 

@@ -85,6 +85,16 @@ def train_example(brain, input_tokens: str, output_tokens: str,
     brain.settle(n_steps=settle_steps, clamp=clamp)
     graph.learn(learning_rate=lr, synaptogenesis=False, weight_decay=0.0)
 
+    # Dopamine reward for BG gating learning (PBWM).
+    # Check if the WM pathway produced the correct output, then
+    # deliver reward to train the D1/D2 gating synapses.
+    # Only tagged synapses (from the gating decision) get updated.
+    out, _ = brain.read_output()
+    if out == output_tokens[0]:
+        brain.reward(+1.0, learning_rate=0.01)
+    else:
+        brain.reward(-0.5, learning_rate=0.01)
+
 
 def test_example(brain, input_tokens: str, expected: str,
                  n_steps: int = 10) -> tuple[str, bool]:
@@ -244,6 +254,13 @@ def train_multi_digit(brain, input_str: str, output_str: str,
 
         brain.settle(n_steps=settle_steps, clamp=clamp)
         graph.learn(learning_rate=lr, synaptogenesis=False, weight_decay=0.0)
+
+        # Dopamine reward for BG gating learning (PBWM).
+        out, _ = brain.read_output()
+        if out == out_char:
+            brain.reward(+1.0, learning_rate=0.01)
+        else:
+            brain.reward(-0.5, learning_rate=0.01)
 
         # TBT efference copy: DISPLACEMENT, not content.
         # After producing output, advance L6 phases of all input columns

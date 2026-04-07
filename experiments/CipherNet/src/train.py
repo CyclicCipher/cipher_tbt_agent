@@ -146,6 +146,22 @@ def setup_brain() -> Brain:
             if node_key.startswith('out:'):
                 graph.add_edge(wm_l5, node_id, edge_type=TEMPORAL, weight=0.05)
 
+    # 3. Input columns → BG striatum (gating control)
+    # All-to-all: any input can learn to gate any WM stripe.
+    # The BG learns via dopamine which input should gate which stripe.
+    # This is domain-general — same mechanism for digits, letters, etc.
+    for char in '0123456789+-*/=':
+        col = brain.tio._input_columns[char]
+        for stripe in range(3):  # WM stripes 0-2
+            d1_key = f'd1_go_{stripe}'
+            d2_key = f'd2_nogo_{stripe}'
+            if d1_key in priors.get('basal_ganglia', {}):
+                graph.add_edge(col['L5'], priors['basal_ganglia'][d1_key],
+                               edge_type=TEMPORAL, weight=0.05)
+            if d2_key in priors.get('basal_ganglia', {}):
+                graph.add_edge(col['L5'], priors['basal_ganglia'][d2_key],
+                               edge_type=TEMPORAL, weight=0.05)
+
     # Innate: '=' -> output cortex disinhibition.
     eq_col = brain.tio._input_columns['=']
     graph.add_edge(eq_col['L5'], priors['output_cortex']['inhibitor'],
