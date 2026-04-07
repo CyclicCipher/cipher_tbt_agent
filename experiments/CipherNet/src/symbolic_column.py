@@ -1,73 +1,74 @@
 """Symbolic cortical column with receptive fields.
 
-Each column has a POSITION (from wiring — which input it receives)
-and learns FEATURES at that position (from signal content). Position
-and feature are pre-separated by the topographic mapping, just like
-the brain's retinotopic/tonotopic/somatotopic maps.
+Each column has a POSITION (from wiring) and learns FEATURES at that
+position (from signal content). Position and feature are pre-separated
+by the topographic mapping (labeled line principle).
 
-Key insight: position is NOT learned or computed. Position is a
-structural property of the wiring — WHICH column receives WHICH input.
-The column's job is to learn feature associations AT its position.
-
-Receptive fields overlap between neighbors, enabling the system to
-know that adjacent columns represent adjacent positions (not isolated
-modalities). This overlap is how the cortical map discovers local
-structure.
-
-The reference frame is the topographic map itself. Displacement =
-shifting which column is active (attention moves across the map).
+Memory accumulates votes: the same feature can map to multiple targets
+(e.g., a pixel patch appearing in different digit classes). Prediction
+returns the mode (most frequent target). This is domain-general:
+succession has 1 target per feature, classification has many.
 """
 from __future__ import annotations
 
 from typing import Any
+import numpy as np
 
 
 class SymbolicColumn:
     """A cortical column with a fixed receptive field.
 
-    Position = which input positions this column receives from (receptive field).
+    Position = which input positions this column receives from.
     Feature = what signal content arrives at those positions.
-    Memory = {feature_pattern → predicted_next_feature} (one-shot learned).
+    Memory = {feature → {target: count}} (accumulated votes).
     """
 
-    def __init__(self, name: str, receptive_field: tuple | None = None,
+    def __init__(self, name: str, receptive_field: Any = None,
                  position: tuple = (0.0, 0.0)):
         self.name = name
-        # Receptive field: which input positions this column covers.
-        # For token sequences: a range of sequence positions.
-        # For vision: a patch of pixel coordinates.
-        # None = receives from all positions (global column).
         self.receptive_field = receptive_field
-        # Position on the cortical sheet (for broadcast/neighbor discovery).
         self.position = position
-
-        # Memory: maps observed patterns to predictions.
-        # Key = what was observed. Value = what comes next (or associated feature).
-        self.memory: dict[str, str] = {}
-
-        # Current state (transient, reset between episodes).
+        # Memory: feature → {target: count}. Accumulates, never overwrites.
+        self.memory: dict[str, dict[str, int]] = {}
+        # Transient state.
         self.current_input: str | None = None
         self.prediction: str | None = None
         self.error: bool = False
         self.vote: str | None = None
 
     def observe(self, feature: str) -> bool:
-        """Observe a feature. Compare against prediction. Learn if surprised."""
+        """Observe a feature. Compare against prediction."""
         self.current_input = feature
-        self.prediction = self.memory.get(feature)
-        self.error = (self.prediction is None)  # surprised if never seen before
+        self.prediction = self.predict()
+        self.error = (self.prediction is None)
         self.vote = feature
         return self.error
 
     def teach(self, feature: str, target: str):
-        """One-shot: associate feature → target at this column's position."""
-        self.memory[feature] = target
+        """Accumulate: feature → target gets +1 vote."""
+        if feature not in self.memory:
+            self.memory[feature] = {}
+        counts = self.memory[feature]
+        counts[target] = counts.get(target, 0) + 1
 
     def predict(self) -> str | None:
-        """Predict: what is associated with the current input?"""
+        """Return the most frequent target for current input (mode)."""
         if self.current_input is None:
             return None
-        return self.memory.get(self.current_input)
+        counts = self.memory.get(self.current_input)
+        if not counts:
+            return None
+        return max(counts, key=counts.get)
+
+    def predict_dist(self) -> dict[str, float] | None:
+        """Return full distribution P(target | current_input)."""
+        if self.current_input is None:
+            return None
+        counts = self.memory.get(self.current_input)
+        if not counts:
+            return None
+        total = sum(counts.values())
+        return {k: v / total for k, v in counts.items()}
 
     def reset(self):
         """Reset transient state. Memory preserved."""
@@ -77,87 +78,75 @@ class SymbolicColumn:
         self.vote = None
 
     def __repr__(self):
-        return (f"SymbolicColumn({self.name}, rf={self.receptive_field}, "
-                f"mem={len(self.memory)})")
+        n_features = len(self.memory)
+        return f"SymbolicColumn({self.name}, rf={self.receptive_field}, {n_features} features)"
 
 
-class ColumnSheet:
-    """A sheet of symbolic columns with topographic mapping.
+class ColumnSheet2D:
+    """A 2D grid of symbolic columns (visual cortex).
 
-    The sheet is a 1D or 2D array of columns, each with a receptive field
-    that overlaps slightly with its neighbors. This is the cortical map.
+    Each column covers a rectangular patch of the input image.
+    Receptive fields can overlap with neighbors (shared pixels
+    create implicit lateral connections).
 
-    For token sequences: a 1D sheet where each column covers one sequence
-    position, with overlap to adjacent positions.
-
-    For vision: a 2D sheet where each column covers a patch of pixels,
-    with overlap to adjacent patches.
+    For MNIST (28×28): 7×7 grid, 4×4 patches, stride 4.
+    For Danganronpa (1920×1080): configurable grid, same code.
     """
 
-    def __init__(self, name: str, n_columns: int, overlap: int = 1):
+    def __init__(self, name: str, image_shape: tuple[int, int],
+                 patch_size: int = 4, stride: int = 4):
         self.name = name
-        self.columns: list[SymbolicColumn] = []
-        self.overlap = overlap
+        self.image_h, self.image_w = image_shape
+        self.patch_size = patch_size
+        self.stride = stride
+        self.grid_h = (self.image_h - patch_size) // stride + 1
+        self.grid_w = (self.image_w - patch_size) // stride + 1
 
-        for i in range(n_columns):
-            # Receptive field: positions [i-overlap, i+overlap] (clamped).
-            rf_start = max(0, i - overlap)
-            rf_end = i + overlap  # inclusive
-            col = SymbolicColumn(
-                name=f"{name}:{i}",
-                receptive_field=(rf_start, rf_end),
-                position=(float(i), 0.0),
-            )
-            self.columns.append(col)
+        # Create 2D grid of columns.
+        self.columns: list[list[SymbolicColumn]] = []
+        for gy in range(self.grid_h):
+            row = []
+            for gx in range(self.grid_w):
+                # Receptive field in pixel coordinates.
+                y0 = gy * stride
+                x0 = gx * stride
+                rf = (y0, x0, y0 + patch_size, x0 + patch_size)
+                col = SymbolicColumn(
+                    name=f"{name}:{gy},{gx}",
+                    receptive_field=rf,
+                    position=(float(gx), float(gy)),
+                )
+                row.append(col)
+            self.columns.append(row)
 
-    def feed(self, tokens: list[str]):
-        """Feed a sequence of tokens to the sheet.
+    def n_columns(self) -> int:
+        return self.grid_h * self.grid_w
 
-        Each column receives the token at its primary position.
-        Overlap columns also see adjacent tokens.
-        """
-        for col in self.columns:
-            rf_start, rf_end = col.receptive_field
-            primary_pos = self.columns.index(col)
-            if primary_pos < len(tokens):
-                col.observe(tokens[primary_pos])
+    def all_columns(self):
+        """Iterate over all columns (flat)."""
+        for row in self.columns:
+            yield from row
 
-    def teach_succession(self, tokens: list[str], targets: list[str]):
-        """Teach: for each position, token[i] → target[i]."""
-        for i, col in enumerate(self.columns):
-            if i < len(tokens) and i < len(targets):
-                col.teach(tokens[i], targets[i])
-
-    def predict_all(self) -> list[str | None]:
-        """Get predictions from all columns."""
-        return [col.predict() for col in self.columns]
-
-    def get_column_at(self, position: int) -> SymbolicColumn | None:
-        """Get the column whose primary position matches."""
-        if 0 <= position < len(self.columns):
-            return self.columns[position]
-        return None
+    def extract_patches(self, image: np.ndarray) -> list[tuple[int, int, np.ndarray]]:
+        """Extract patches from an image. Returns (gy, gx, patch) tuples."""
+        patches = []
+        ps = self.patch_size
+        for gy in range(self.grid_h):
+            for gx in range(self.grid_w):
+                y0 = gy * self.stride
+                x0 = gx * self.stride
+                patch = image[y0:y0 + ps, x0:x0 + ps]
+                patches.append((gy, gx, patch))
+        return patches
 
     def __repr__(self):
-        return f"ColumnSheet({self.name}, {len(self.columns)} columns)"
+        return (f"ColumnSheet2D({self.name}, {self.grid_h}x{self.grid_w} columns, "
+                f"patch={self.patch_size}, stride={self.stride})")
 
 
 class SuccessionEngine:
-    """Handles multi-digit succession using the Z/10Z morphism.
+    """Z/10Z successor morphism for multi-digit succession."""
 
-    This is NOT a column — it's the computational rule that columns
-    at different positions coordinate through. Each digit position
-    is handled by a column in the sheet. The carry propagation
-    is the displacement morphism (+1 mod 10 with carry).
-
-    The engine applies the successor morphism position-by-position,
-    right-to-left, propagating carry. This is the algorithm that
-    a trained system would discover from the regularity of the
-    Z/10Z group structure.
-    """
-
-    # Z/10Z successor morphism (innate counting ability).
-    # {(digit, carry_in) → (output_digit, carry_out)}
     SUCC = {}
     for _d in range(10):
         for _c in (False, True):
@@ -166,31 +155,22 @@ class SuccessionEngine:
 
     @staticmethod
     def successor(number_str: str) -> str:
-        """Compute successor of a number string using Z/10Z morphism."""
+        """Compute successor of a number string."""
         digits = [int(d) for d in number_str]
         result = []
         carry = False
-
-        # Right-to-left: ones first.
-        # Ones position always gets +1 (the succession operation).
         for i in range(len(digits) - 1, -1, -1):
             d = digits[i]
             if i == len(digits) - 1:
-                # Ones position: apply successor (+1)
                 out_d, carry = SuccessionEngine.SUCC[(d, False)]
             else:
-                # Higher positions: echo unless carry
                 if carry:
                     out_d, carry = SuccessionEngine.SUCC[(d, False)]
-                    # Note: carry_in is handled by doing +1 via SUCC
-                    # This is equivalent to (d + carry_in) mod 10
                 else:
                     out_d = d
                     carry = False
             result.append(str(out_d))
-
         if carry:
             result.append("1")
-
         result.reverse()
         return ''.join(result)
