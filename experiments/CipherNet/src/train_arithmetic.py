@@ -418,15 +418,24 @@ def _diagnose_weights(brain, digit: int):
     succ_node = priors['output_cortex'][f'out:{successor}'] if successor is not None else None
 
     # Check WM stripe → output edges (the readout pathway).
+    # Multi-cell: check ALL L5 cells of each WM stripe.
     echo_w = 0.0
     succ_w = 0.0
+    pfc_nodes = priors['pfc']
     for wm_name in ['wm0', 'wm1', 'wm2']:
-        wm_l5 = priors['pfc'][f'{wm_name}:L5']
-        for edge in graph._outgoing.get(wm_l5, []):
-            if edge.target == echo_node:
-                echo_w = max(echo_w, edge.weight)
-            if succ_node is not None and edge.target == succ_node:
-                succ_w = max(succ_w, edge.weight)
+        # Find all L5 cells for this stripe
+        l5_cells = [nid for key, nid in pfc_nodes.items()
+                    if key.startswith(f'{wm_name}:L5:')]
+        if not l5_cells:
+            l5_key = f'{wm_name}:L5'
+            if l5_key in pfc_nodes:
+                l5_cells = [pfc_nodes[l5_key]]
+        for l5_nid in l5_cells:
+            for edge in graph._outgoing.get(l5_nid, []):
+                if edge.target == echo_node:
+                    echo_w = max(echo_w, edge.weight)
+                if succ_node is not None and edge.target == succ_node:
+                    succ_w = max(succ_w, edge.weight)
 
     return echo_w, succ_w
 

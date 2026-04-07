@@ -181,8 +181,10 @@ def setup_brain() -> Brain:
         for l5_nid in l5_cells:
             for node_key, node_id in priors['output_cortex'].items():
                 if node_key.startswith('out:'):
+                    # Weight scaled by 1/n_cells to keep total drive
+                    # similar to single-cell (24 cells × 0.005 ≈ old 3 × 0.05).
                     graph.add_edge(l5_nid, node_id,
-                                   edge_type=TEMPORAL, weight=0.05)
+                                   edge_type=TEMPORAL, weight=0.005)
 
     # 3. Input columns → BG striatum (gating control)
     # All-to-all: any input can learn to gate any WM stripe.
