@@ -1,69 +1,173 @@
 {
   "name": "token_cortex",
-  "description": "Primary sensory cortex for sequential token input (A1 analog). Three columns with different temporal dynamics create diversity of timescales: fast (transient/onset), medium (transition), slow (sustained/identity). Functional specialization emerges from temporal properties, not hardcoded labels. Designed to be repurposable for audio input. Feeds the temporal cortex hierarchy (STG) after preprocessing.",
+  "description": "Primary sensory cortex for sequential token input (A1 analog). Tokentopic map: identity columns specialize for different tokens through learning (like A1's tonotopic map for frequency). Temporal columns provide onset/transition/sustained dynamics. Repurposable for audio.",
 
   "nodes": [
-    {"id": "tc_fast:L4",  "layer": 4,  "role": "input",    "temporal_scale": "fast",   "description": "Fast column input. Low self-loop = transient response (onset-like)."},
-    {"id": "tc_fast:L23", "layer": 23, "role": "process",  "temporal_scale": "fast"},
-    {"id": "tc_fast:L5",  "layer": 5,  "role": "output",   "temporal_scale": "fast"},
-    {"id": "tc_fast:L6",  "layer": 6,  "role": "feedback", "temporal_scale": "fast"},
+    {"_comment": "=== TEMPORAL COLUMNS (onset, transition, sustained) ==="},
+    {"id": "tc_fast:L4",  "layer": 4,  "role": "input",    "column_type": "temporal"},
+    {"id": "tc_fast:L23", "layer": 23, "role": "process",  "column_type": "temporal"},
+    {"id": "tc_fast:L5",  "layer": 5,  "role": "output",   "column_type": "temporal"},
+    {"id": "tc_fast:L6",  "layer": 6,  "role": "feedback", "column_type": "temporal"},
 
-    {"id": "tc_mid:L4",  "layer": 4,  "role": "input",    "temporal_scale": "medium", "description": "Medium column input. Moderate decay = transition detection."},
-    {"id": "tc_mid:L23", "layer": 23, "role": "process",  "temporal_scale": "medium"},
-    {"id": "tc_mid:L5",  "layer": 5,  "role": "output",   "temporal_scale": "medium"},
-    {"id": "tc_mid:L6",  "layer": 6,  "role": "feedback", "temporal_scale": "medium"},
+    {"id": "tc_mid:L4",  "layer": 4,  "role": "input",    "column_type": "temporal"},
+    {"id": "tc_mid:L23", "layer": 23, "role": "process",  "column_type": "temporal"},
+    {"id": "tc_mid:L5",  "layer": 5,  "role": "output",   "column_type": "temporal"},
+    {"id": "tc_mid:L6",  "layer": 6,  "role": "feedback", "column_type": "temporal"},
 
-    {"id": "tc_slow:L4",  "layer": 4,  "role": "input",    "temporal_scale": "slow",  "description": "Slow column input. High self-loop = sustained identity preservation."},
-    {"id": "tc_slow:L23", "layer": 23, "role": "process",  "temporal_scale": "slow"},
-    {"id": "tc_slow:L5",  "layer": 5,  "role": "output",   "temporal_scale": "slow"},
-    {"id": "tc_slow:L6",  "layer": 6,  "role": "feedback", "temporal_scale": "slow"},
+    {"id": "tc_slow:L4",  "layer": 4,  "role": "input",    "column_type": "temporal"},
+    {"id": "tc_slow:L23", "layer": 23, "role": "process",  "column_type": "temporal"},
+    {"id": "tc_slow:L5",  "layer": 5,  "role": "output",   "column_type": "temporal"},
+    {"id": "tc_slow:L6",  "layer": 6,  "role": "feedback", "column_type": "temporal"},
 
-    {"id": "inhibitor", "role": "inhibitor", "description": "Lateral inhibition for dynamic competition between temporal scales."}
+    {"_comment": "=== IDENTITY COLUMNS (tokentopic map — specialize through learning) ==="},
+    {"_comment": "8 generic columns. Initially identical. Specialize via competitive learning."},
+    {"_comment": "Like A1 tonotopic columns that sharpen their frequency tuning with experience."},
+
+    {"id": "id0:L4",  "layer": 4,  "role": "input",    "column_type": "identity"},
+    {"id": "id0:L23", "layer": 23, "role": "process",  "column_type": "identity"},
+    {"id": "id0:L5",  "layer": 5,  "role": "output",   "column_type": "identity"},
+    {"id": "id0:L6",  "layer": 6,  "role": "feedback", "column_type": "identity"},
+
+    {"id": "id1:L4",  "layer": 4,  "role": "input",    "column_type": "identity"},
+    {"id": "id1:L23", "layer": 23, "role": "process",  "column_type": "identity"},
+    {"id": "id1:L5",  "layer": 5,  "role": "output",   "column_type": "identity"},
+    {"id": "id1:L6",  "layer": 6,  "role": "feedback", "column_type": "identity"},
+
+    {"id": "id2:L4",  "layer": 4,  "role": "input",    "column_type": "identity"},
+    {"id": "id2:L23", "layer": 23, "role": "process",  "column_type": "identity"},
+    {"id": "id2:L5",  "layer": 5,  "role": "output",   "column_type": "identity"},
+    {"id": "id2:L6",  "layer": 6,  "role": "feedback", "column_type": "identity"},
+
+    {"id": "id3:L4",  "layer": 4,  "role": "input",    "column_type": "identity"},
+    {"id": "id3:L23", "layer": 23, "role": "process",  "column_type": "identity"},
+    {"id": "id3:L5",  "layer": 5,  "role": "output",   "column_type": "identity"},
+    {"id": "id3:L6",  "layer": 6,  "role": "feedback", "column_type": "identity"},
+
+    {"id": "id4:L4",  "layer": 4,  "role": "input",    "column_type": "identity"},
+    {"id": "id4:L23", "layer": 23, "role": "process",  "column_type": "identity"},
+    {"id": "id4:L5",  "layer": 5,  "role": "output",   "column_type": "identity"},
+    {"id": "id4:L6",  "layer": 6,  "role": "feedback", "column_type": "identity"},
+
+    {"id": "id5:L4",  "layer": 4,  "role": "input",    "column_type": "identity"},
+    {"id": "id5:L23", "layer": 23, "role": "process",  "column_type": "identity"},
+    {"id": "id5:L5",  "layer": 5,  "role": "output",   "column_type": "identity"},
+    {"id": "id5:L6",  "layer": 6,  "role": "feedback", "column_type": "identity"},
+
+    {"id": "id6:L4",  "layer": 4,  "role": "input",    "column_type": "identity"},
+    {"id": "id6:L23", "layer": 23, "role": "process",  "column_type": "identity"},
+    {"id": "id6:L5",  "layer": 5,  "role": "output",   "column_type": "identity"},
+    {"id": "id6:L6",  "layer": 6,  "role": "feedback", "column_type": "identity"},
+
+    {"id": "id7:L4",  "layer": 4,  "role": "input",    "column_type": "identity"},
+    {"id": "id7:L23", "layer": 23, "role": "process",  "column_type": "identity"},
+    {"id": "id7:L5",  "layer": 5,  "role": "output",   "column_type": "identity"},
+    {"id": "id7:L6",  "layer": 6,  "role": "feedback", "column_type": "identity"},
+
+    {"_comment": "=== INHIBITORS ==="},
+    {"id": "temporal_inhibitor", "role": "inhibitor", "description": "Competition between temporal columns."},
+    {"id": "identity_inhibitor", "role": "inhibitor", "description": "Competition between identity columns. Forces specialization — only the most responsive column wins for each token."}
   ],
 
   "edges": [
-    {"_comment": "=== tc_fast column (transient, onset-like) ==="},
+    {"_comment": "=== TEMPORAL COLUMNS (same as before) ==="},
+
+    {"_comment": "tc_fast: very low self-loop (0.1) — transient/onset"},
     {"source": "tc_fast:L4",  "target": "tc_fast:L23", "type": "temporal", "weight": 1.0},
     {"source": "tc_fast:L23", "target": "tc_fast:L5",  "type": "temporal", "weight": 1.0},
     {"source": "tc_fast:L5",  "target": "tc_fast:L6",  "type": "temporal", "weight": 1.0},
     {"source": "tc_fast:L6",  "target": "tc_fast:L4",  "type": "temporal", "weight": 0.5},
-    {"source": "tc_fast:L23", "target": "tc_fast:L23", "type": "temporal", "weight": 0.1, "description": "Very low self-loop: fast decay, transient response."},
+    {"source": "tc_fast:L23", "target": "tc_fast:L23", "type": "temporal", "weight": 0.1},
 
-    {"_comment": "=== tc_mid column (transition detection) ==="},
+    {"_comment": "tc_mid: medium self-loop (0.4) — transitions"},
     {"source": "tc_mid:L4",  "target": "tc_mid:L23", "type": "temporal", "weight": 1.0},
     {"source": "tc_mid:L23", "target": "tc_mid:L5",  "type": "temporal", "weight": 1.0},
     {"source": "tc_mid:L5",  "target": "tc_mid:L6",  "type": "temporal", "weight": 1.0},
     {"source": "tc_mid:L6",  "target": "tc_mid:L4",  "type": "temporal", "weight": 0.5},
-    {"source": "tc_mid:L23", "target": "tc_mid:L23", "type": "temporal", "weight": 0.4, "description": "Medium self-loop: captures transitions between tokens."},
+    {"source": "tc_mid:L23", "target": "tc_mid:L23", "type": "temporal", "weight": 0.4},
 
-    {"_comment": "=== tc_slow column (sustained, identity-preserving) ==="},
+    {"_comment": "tc_slow: high self-loop (0.8) — sustained"},
     {"source": "tc_slow:L4",  "target": "tc_slow:L23", "type": "temporal", "weight": 1.0},
     {"source": "tc_slow:L23", "target": "tc_slow:L5",  "type": "temporal", "weight": 1.0},
     {"source": "tc_slow:L5",  "target": "tc_slow:L6",  "type": "temporal", "weight": 1.0},
     {"source": "tc_slow:L6",  "target": "tc_slow:L4",  "type": "temporal", "weight": 0.5},
-    {"source": "tc_slow:L23", "target": "tc_slow:L23", "type": "temporal", "weight": 0.8, "description": "High self-loop: sustained response, preserves token identity."},
+    {"source": "tc_slow:L23", "target": "tc_slow:L23", "type": "temporal", "weight": 0.8},
 
-    {"_comment": "=== Hierarchy feedforward (fast → mid → slow) ==="},
-    {"source": "tc_fast:L23", "target": "tc_mid:L4",  "type": "temporal", "weight": 0.5, "description": "Onset feeds transition detector."},
-    {"source": "tc_mid:L23",  "target": "tc_slow:L4", "type": "temporal", "weight": 0.5, "description": "Transition feeds sustained column."},
-
-    {"_comment": "=== Hierarchy feedback (slow → mid → fast, skip L4) ==="},
+    {"_comment": "Temporal hierarchy feedforward + feedback"},
+    {"source": "tc_fast:L23", "target": "tc_mid:L4",  "type": "temporal", "weight": 0.5},
+    {"source": "tc_mid:L23",  "target": "tc_slow:L4", "type": "temporal", "weight": 0.5},
     {"source": "tc_slow:L5",  "target": "tc_mid:L23",  "type": "temporal", "weight": 0.3},
     {"source": "tc_mid:L5",   "target": "tc_fast:L23", "type": "temporal", "weight": 0.3},
 
-    {"_comment": "=== Forward suppression (onset suppresses sustained briefly) ==="},
-    {"source": "tc_fast:L5", "target": "tc_slow:L23", "type": "temporal", "weight": -0.08, "description": "Mild onset suppression of sustained column (forward suppression / adaptation). Weak enough that sustained input (0.3) overcomes it. Biological: A1 forward masking."},
+    {"_comment": "Mild forward suppression"},
+    {"source": "tc_fast:L5", "target": "tc_slow:L23", "type": "temporal", "weight": -0.08},
 
-    {"_comment": "=== Lateral inhibition via inhibitor ==="},
-    {"source": "tc_fast:L23", "target": "inhibitor", "type": "temporal", "weight": 0.15},
-    {"source": "tc_mid:L23",  "target": "inhibitor", "type": "temporal", "weight": 0.15},
-    {"source": "tc_slow:L23", "target": "inhibitor", "type": "temporal", "weight": 0.15},
-    {"source": "inhibitor", "target": "tc_fast:L23", "type": "spatial", "weight": -0.2},
-    {"source": "inhibitor", "target": "tc_mid:L23",  "type": "spatial", "weight": -0.2},
-    {"source": "inhibitor", "target": "tc_slow:L23", "type": "spatial", "weight": -0.2}
+    {"_comment": "Temporal column lateral inhibition"},
+    {"source": "tc_fast:L23", "target": "temporal_inhibitor", "type": "temporal", "weight": 0.15},
+    {"source": "tc_mid:L23",  "target": "temporal_inhibitor", "type": "temporal", "weight": 0.15},
+    {"source": "tc_slow:L23", "target": "temporal_inhibitor", "type": "temporal", "weight": 0.15},
+    {"source": "temporal_inhibitor", "target": "tc_fast:L23", "type": "spatial", "weight": -0.2},
+    {"source": "temporal_inhibitor", "target": "tc_mid:L23",  "type": "spatial", "weight": -0.2},
+    {"source": "temporal_inhibitor", "target": "tc_slow:L23", "type": "spatial", "weight": -0.2},
+
+    {"_comment": "=== IDENTITY COLUMNS (standard cortical column wiring) ==="},
+    {"_comment": "All 8 identity columns have the same internal structure."},
+    {"_comment": "Self-loop 0.6 — moderate persistence (between fast and slow temporal)."},
+    {"_comment": "Specialization comes from LEARNED input weights, not innate structure."},
+
+    {"source": "id0:L4", "target": "id0:L23", "type": "temporal", "weight": 1.0},
+    {"source": "id0:L23", "target": "id0:L5", "type": "temporal", "weight": 1.0},
+    {"source": "id0:L5", "target": "id0:L6", "type": "temporal", "weight": 1.0},
+    {"source": "id0:L6", "target": "id0:L4", "type": "temporal", "weight": 0.5},
+    {"source": "id0:L23", "target": "id0:L23", "type": "temporal", "weight": 0.6},
+
+    {"source": "id1:L4", "target": "id1:L23", "type": "temporal", "weight": 1.0},
+    {"source": "id1:L23", "target": "id1:L5", "type": "temporal", "weight": 1.0},
+    {"source": "id1:L5", "target": "id1:L6", "type": "temporal", "weight": 1.0},
+    {"source": "id1:L6", "target": "id1:L4", "type": "temporal", "weight": 0.5},
+    {"source": "id1:L23", "target": "id1:L23", "type": "temporal", "weight": 0.6},
+
+    {"source": "id2:L4", "target": "id2:L23", "type": "temporal", "weight": 1.0},
+    {"source": "id2:L23", "target": "id2:L5", "type": "temporal", "weight": 1.0},
+    {"source": "id2:L5", "target": "id2:L6", "type": "temporal", "weight": 1.0},
+    {"source": "id2:L6", "target": "id2:L4", "type": "temporal", "weight": 0.5},
+    {"source": "id2:L23", "target": "id2:L23", "type": "temporal", "weight": 0.6},
+
+    {"source": "id3:L4", "target": "id3:L23", "type": "temporal", "weight": 1.0},
+    {"source": "id3:L23", "target": "id3:L5", "type": "temporal", "weight": 1.0},
+    {"source": "id3:L5", "target": "id3:L6", "type": "temporal", "weight": 1.0},
+    {"source": "id3:L6", "target": "id3:L4", "type": "temporal", "weight": 0.5},
+    {"source": "id3:L23", "target": "id3:L23", "type": "temporal", "weight": 0.6},
+
+    {"source": "id4:L4", "target": "id4:L23", "type": "temporal", "weight": 1.0},
+    {"source": "id4:L23", "target": "id4:L5", "type": "temporal", "weight": 1.0},
+    {"source": "id4:L5", "target": "id4:L6", "type": "temporal", "weight": 1.0},
+    {"source": "id4:L6", "target": "id4:L4", "type": "temporal", "weight": 0.5},
+    {"source": "id4:L23", "target": "id4:L23", "type": "temporal", "weight": 0.6},
+
+    {"source": "id5:L4", "target": "id5:L23", "type": "temporal", "weight": 1.0},
+    {"source": "id5:L23", "target": "id5:L5", "type": "temporal", "weight": 1.0},
+    {"source": "id5:L5", "target": "id5:L6", "type": "temporal", "weight": 1.0},
+    {"source": "id5:L6", "target": "id5:L4", "type": "temporal", "weight": 0.5},
+    {"source": "id5:L23", "target": "id5:L23", "type": "temporal", "weight": 0.6},
+
+    {"source": "id6:L4", "target": "id6:L23", "type": "temporal", "weight": 1.0},
+    {"source": "id6:L23", "target": "id6:L5", "type": "temporal", "weight": 1.0},
+    {"source": "id6:L5", "target": "id6:L6", "type": "temporal", "weight": 1.0},
+    {"source": "id6:L6", "target": "id6:L4", "type": "temporal", "weight": 0.5},
+    {"source": "id6:L23", "target": "id6:L23", "type": "temporal", "weight": 0.6},
+
+    {"source": "id7:L4", "target": "id7:L23", "type": "temporal", "weight": 1.0},
+    {"source": "id7:L23", "target": "id7:L5", "type": "temporal", "weight": 1.0},
+    {"source": "id7:L5", "target": "id7:L6", "type": "temporal", "weight": 1.0},
+    {"source": "id7:L6", "target": "id7:L4", "type": "temporal", "weight": 0.5},
+    {"source": "id7:L23", "target": "id7:L23", "type": "temporal", "weight": 0.6},
+
+    {"_comment": "Identity columns use POPULATION CODE, not WTA."},
+    {"_comment": "Like A1 tonotopic columns: all respond proportionally."},
+    {"_comment": "Competition happens downstream. identity_inhibitor disconnected."}
   ],
 
   "properties": {
-    "description": "A1-analog for text tokens. Three temporal scales create diverse representations: fast columns detect token onsets and carry precise timing (position) information. Medium columns detect transitions between tokens. Slow columns preserve token identity for downstream processing. The same architecture works for audio (phoneme onset, vowel sustain, consonant transition)."
+    "description": "Tokentopic map with 8 identity columns + 3 temporal columns. Identity columns specialize through competitive learning (lateral inhibition forces WTA). Direct input edges from input columns (added in train.py) provide the identity signal. Temporal columns provide onset/transition/sustained dynamics via relay_token. For audio: identity columns become frequency-tuned, temporal columns stay the same."
   }
 }

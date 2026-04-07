@@ -36,6 +36,8 @@ def load_subgraph_from_json(graph: Graph, json_path: str) -> dict[str, int]:
     # Create nodes.
     id_map: dict[str, int] = {}
     for node_spec in spec.get("nodes", []):
+        if "id" not in node_spec:
+            continue  # skip _comment entries
         # Pass ALL fields from the JSON spec as metadata.
         meta = {k: v for k, v in node_spec.items() if k != "id"}
         nid = graph.add_node(

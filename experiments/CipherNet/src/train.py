@@ -116,23 +116,52 @@ def setup_brain() -> Brain:
         for ans_name, ans_nid in ans_cols.items():
             graph.add_edge(col['L23'], ans_nid, edge_type=TEMPORAL, weight=0.1)
 
-    # === DOMAIN-GENERAL SENSORY → WM PATHWAY ===
+    # === DOMAIN-GENERAL SENSORY PATHWAY ===
     #
-    # NO direct char→output or char→WM relay edges. ALL input flows
-    # through the sensory processing hierarchy:
-    #   Input columns → relay_token → Token Cortex → Temporal Cortex → Broca → WM
+    # Two parallel paths to token cortex (like cochlea → A1):
     #
-    # The token cortex preprocesses raw tokens (onset detection,
-    # adaptation, temporal structure) before they reach the hierarchy.
-    # This is domain-general — same architecture for audio later.
+    # 1. TEMPORAL PATH: input relay → relay_token → temporal columns
+    #    Carries "something arrived" signal (onset/transition/sustained).
+    #    Undifferentiated — same for all tokens.
     #
-    # Input columns → relay_token (always open, no BG gating)
+    # 2. IDENTITY PATH: input column L23 → identity columns (DIRECT)
+    #    Carries "THIS SPECIFIC token arrived" signal.
+    #    All-to-all, initially weak. Columns specialize through competitive
+    #    learning (lateral inhibition forces WTA → each column becomes
+    #    selective for specific tokens). This is the tokentopic map.
+    #
+    # Path 1: relay_token (temporal dynamics)
     token_relay = priors['thalamus']['relay_token']
     for char in '0123456789+-*/=':
         col = brain.tio._input_columns[char]
         relay = col.get('relay')
         if relay is not None:
             graph.add_edge(relay, token_relay, edge_type=TEMPORAL, weight=0.5)
+
+    # Path 2: identity edges via RELAY (tokentopic map)
+    # Input column RELAY → identity column L4. Using the relay (not L23)
+    # because relay nodes have role='relay' which gets ACh ENHANCEMENT.
+    # Direct L23→L4 cross-subgraph edges get 70% ACh SUPPRESSION
+    # (muscarinic intracortical lateral suppression) — too weak to work.
+    # Biology: A1 receives from thalamus (MGB), not lateral cortex.
+    #
+    # STOCHASTIC SYMMETRY BREAKING: randomized weights so different
+    # identity columns start with different sensitivities.
+    import random as _rng
+    _rng.seed(42)  # reproducible initialization
+    tc_priors = priors.get('token_cortex', {})
+    for char in '0123456789+-*/=':
+        col = brain.tio._input_columns[char]
+        relay = col.get('relay')
+        if relay is None:
+            continue
+        for i in range(8):
+            id_l4_key = f'id{i}:L4'
+            if id_l4_key in tc_priors:
+                # Random weight: mean 0.1, range [0.02, 0.18]
+                w = 0.02 + _rng.random() * 0.16
+                graph.add_edge(relay, tc_priors[id_l4_key],
+                               edge_type=TEMPORAL, weight=w)
 
     # 2. WM stripes → output cortex (excitatory readout)
     # All-to-all: any WM content can drive any output node. Specificity
