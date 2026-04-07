@@ -948,6 +948,53 @@ The brain converts parallel planning into serial execution via competitive queui
 
 ---
 
+## Position Selection for Serial Output
+
+Based on empirical fMRI, single-neuron, and lesion studies.
+
+### The hierarchy (NOT motor cortex)
+
+Position selection happens UPSTREAM of motor cortex in a distributed system:
+
+1. **PFC encodes serial order**: each element gets a rank (activation strength).
+   Neurons respond differently to the same item at position 1 vs 2 vs 3.
+   Relative ranking, not absolute position. The next element = highest rank.
+2. **Pre-SMA selects "what comes next"**: 71% of neurons are order-sensitive.
+   Implements the position-pointer function. Lexical/item SELECTION.
+3. **SMA-proper (posterior)**: linear sequence encoding and motor control.
+4. **PPC maintains position information**: encodes both current AND future
+   targets in parallel (not just the immediate next). Spatial position
+   as proxy for temporal order.
+5. **BG gates WHEN to release** (temporal gating, NOT element selection).
+   Direct pathway = Go (release), indirect = NoGo (hold).
+   Both fire at sequence initiation/termination, not during.
+6. **Cerebellum provides timing context**: when to expect next element.
+7. **Motor cortex is a PASSIVE output stage**: receives pre-selected,
+   rank-weighted input. Activity = linear combination of constituents,
+   strongest weight on the current element. Does NOT re-select.
+
+### Output gating vs element selection (critical distinction)
+
+- **Element selection**: "which information to prepare next" (PFC, pre-SMA)
+- **Output gating**: "when this information can influence behavior" (BG, striatum)
+- These are DIFFERENT functions, not the same
+
+### Competitive queuing implementation
+
+- Planning layer (PFC/parietal): all elements active in parallel, graded activation
+- Competitive choice layer (striatum/premotor): winner-take-all via lateral inhibition
+- Suppression: winner inhibits its own planning-layer representation
+- Output: winning node sends selected element to motor cortex
+
+### Sources
+- Baldauf et al. 2008, PMC (PPC encodes both goals in double-reach sequences)
+- Averbeck et al. 2003 (SMA/pre-SMA order-sensitive neurons)
+- Averbeck et al. 2006 (prefrontal cortex serial order encoding)
+- Chatham et al. 2014, PMC (corticostriatal output gating from WM)
+- Cisek & Kalaska 2005 (motor cortex competitive selection)
+
+---
+
 ## TBT Reference Frames and Efference Copies
 
 Based on Hawkins et al. 2018, Lewis et al. 2019, Hawkins & Ahmad 2016.

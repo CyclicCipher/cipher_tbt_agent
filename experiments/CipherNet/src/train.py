@@ -116,28 +116,40 @@ def setup_brain() -> Brain:
         for ans_name, ans_nid in ans_cols.items():
             graph.add_edge(col['L23'], ans_nid, edge_type=TEMPORAL, weight=0.1)
 
-    # Innate: ALL digit columns -> ALL output digits (weak).
-    # Feedforward: L2/3 (error signal) -> output cortex.
-    # Like cortical neurons having many potential synapses, mostly
-    # silent. Learning selects which become functional.
-    for d_in in range(10):
-        col = brain.tio._input_columns[str(d_in)]
-        for d_out in range(10):
-            out_node = priors['output_cortex'][f'out:{d_out}']
-            # No diagonal bias — all start equal. The system must LEARN
-            # which digit maps to which output. Diagonal bias (0.08 vs 0.02)
-            # created echo interference where digits mapped to themselves.
-            graph.add_edge(col['L23'], out_node, edge_type=TEMPORAL, weight=0.03)
+    # === DOMAIN-GENERAL PLANNING PATHWAY ===
+    #
+    # NO direct char→output edges. ALL output flows through the WM
+    # planning buffer. This forces the system to learn the general
+    # char → relay → WM → output pathway instead of a shortcut.
+    # The same mechanism works for digits, letters, and any other output.
+    #
+    # 1. Input columns → thalamic relays (BG-gated WM loading)
+    # Any input can reach any WM stripe. BG Go/NoGo determines which
+    # input loads which stripe when. Edges are weak and learnable.
+    for char in '0123456789+-*/=':
+        col = brain.tio._input_columns[char]
+        for relay_name in ['relay_0', 'relay_1', 'relay_2']:
+            relay_nid = priors['thalamus'][relay_name]
+            # Strong enough to drive the relay (matches existing
+            # transthalamic weights of 0.5-0.8 from other cortical areas).
+            graph.add_edge(col['L5'], relay_nid, edge_type=TEMPORAL, weight=0.2)
+
+    # 2. WM stripes → output cortex (excitatory readout)
+    # All-to-all: any WM content can drive any output node. Specificity
+    # comes from LEARNED weights. A WM stripe holding "digit 2" pattern
+    # develops strong edges to out:2. Same mechanism for letters, etc.
+    # Weight 0.05: strong enough that WM at full activation (1.0) can
+    # overcome the output WTA inhibitor (3 stripes * 0.05 = 0.15 total).
+    for wm_name in ['wm0', 'wm1', 'wm2']:
+        wm_l5 = priors['pfc'][f'{wm_name}:L5']
+        for node_key, node_id in priors['output_cortex'].items():
+            if node_key.startswith('out:'):
+                graph.add_edge(wm_l5, node_id, edge_type=TEMPORAL, weight=0.05)
 
     # Innate: '=' -> output cortex disinhibition.
     eq_col = brain.tio._input_columns['=']
     graph.add_edge(eq_col['L5'], priors['output_cortex']['inhibitor'],
                    edge_type=TEMPORAL, weight=-0.1)
-
-    # NOTE: short-range connections between digit columns REMOVED.
-    # The number line (successor edges) must EMERGE from succession
-    # training, not be pre-wired. Pre-wired edges caused successor
-    # propagation that created spurious dendritic segments.
 
     # === INPUT COLUMN LATERAL INHIBITION ===
     # Like the output cortex inhibitor: one inhibitor node that creates

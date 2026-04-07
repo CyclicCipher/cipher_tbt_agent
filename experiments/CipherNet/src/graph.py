@@ -807,17 +807,17 @@ class Graph:
 
     def settle(self, n_steps: int = 20, clamp: dict[int, float] | None = None,
                default_decay: float = 0.85, threshold: float = 0.01,
-               learn_rate: float = 0.0):
-        """Run inference steps to minimize prediction error.
+               learn_rate: float = 0.0, warmup: int = 5):
+        """Run feedforward warmup + inference steps.
 
-        Clamped nodes (input + desired output) keep their activation
-        fixed. Their prediction error is set to (desired - computed),
-        which is the TEACHING SIGNAL.
+        Biology: the brain does a fast feedforward gamma sweep BEFORE
+        recurrent PC inference begins. The feedforward sweep propagates
+        signals through the full pathway (input → relay → WM → output).
+        Then PC inference (settle) refines activations to minimize
+        prediction error.
 
-        If learn_rate > 0, weights adjust at EVERY step (simultaneous
-        inference and learning, like biological predictive coding).
-        Error propagates one hop per step, and weights adjust to reduce
-        it. Over N steps, error propagates N hops deep.
+        Without the warmup, deep pathways (5+ hops) never receive
+        signal because PC inference only propagates 0.1 per step per hop.
 
         Args:
             n_steps: number of inference iterations
@@ -825,7 +825,20 @@ class Graph:
             default_decay: retention for non-gated nodes
             threshold: activation cutoff
             learn_rate: if > 0, adjust weights each step (online learning)
+            warmup: number of feedforward (non-inference) steps before settle
         """
+        # Phase 1: Feedforward warmup (Mamba accumulation mode).
+        # Propagates signals through the full pathway at full strength.
+        for i in range(warmup):
+            self.step(default_decay=default_decay, threshold=threshold,
+                      inference=False)
+            if clamp:
+                for nid, val in clamp.items():
+                    node = self._nodes.get(nid)
+                    if node is not None:
+                        node.activation = val
+
+        # Phase 2: PC inference (gradient descent on prediction error).
         # Track the MAXIMUM teaching error at each clamped node across
         # all settle steps. The first few steps have the largest error
         # (before the network converges to the clamped state). This

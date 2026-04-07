@@ -48,7 +48,10 @@ def train_example(brain, input_tokens: str, output_tokens: str,
     # Feed input tokens one at a time.
     graph.reset_activations()
     # Reset GPi tonic
-    for key in ['gpi_0', 'gpi_1', 'gpi_2', 'gpi_3', 'gpi_4']:
+    # GPi tonic: only close Broca/temporal gates (3,4).
+    # WM gates (0,1,2) start OPEN so input can reach WM.
+    # The BG learns to close WM gates when needed.
+    for key in ['gpi_3', 'gpi_4']:
         if key in priors.get('basal_ganglia', {}):
             graph.activate(priors['basal_ganglia'][key], 0.8)
 
@@ -94,7 +97,10 @@ def test_example(brain, input_tokens: str, expected: str,
     priors = brain.priors
 
     graph.reset_activations()
-    for key in ['gpi_0', 'gpi_1', 'gpi_2', 'gpi_3', 'gpi_4']:
+    # GPi tonic: only close Broca/temporal gates (3,4).
+    # WM gates (0,1,2) start OPEN so input can reach WM.
+    # The BG learns to close WM gates when needed.
+    for key in ['gpi_3', 'gpi_4']:
         if key in priors.get('basal_ganglia', {}):
             graph.activate(priors['basal_ganglia'][key], 0.8)
 
@@ -201,7 +207,10 @@ def train_multi_digit(brain, input_str: str, output_str: str,
 
     # Reset and set GPi tonic.
     graph.reset_activations()
-    for key in ['gpi_0', 'gpi_1', 'gpi_2', 'gpi_3', 'gpi_4']:
+    # GPi tonic: only close Broca/temporal gates (3,4).
+    # WM gates (0,1,2) start OPEN so input can reach WM.
+    # The BG learns to close WM gates when needed.
+    for key in ['gpi_3', 'gpi_4']:
         if key in priors.get('basal_ganglia', {}):
             graph.activate(priors['basal_ganglia'][key], 0.8)
 
@@ -273,7 +282,10 @@ def test_multi_digit(brain, input_str: str, expected: str,
     priors = brain.priors
 
     graph.reset_activations()
-    for key in ['gpi_0', 'gpi_1', 'gpi_2', 'gpi_3', 'gpi_4']:
+    # GPi tonic: only close Broca/temporal gates (3,4).
+    # WM gates (0,1,2) start OPEN so input can reach WM.
+    # The BG learns to close WM gates when needed.
+    for key in ['gpi_3', 'gpi_4']:
         if key in priors.get('basal_ganglia', {}):
             graph.activate(priors['basal_ganglia'][key], 0.8)
 
@@ -316,7 +328,10 @@ def _trace_multi_digit(brain, input_str: str, max_digits: int = 6):
     priors = brain.priors
 
     graph.reset_activations()
-    for key in ['gpi_0', 'gpi_1', 'gpi_2', 'gpi_3', 'gpi_4']:
+    # GPi tonic: only close Broca/temporal gates (3,4).
+    # WM gates (0,1,2) start OPEN so input can reach WM.
+    # The BG learns to close WM gates when needed.
+    for key in ['gpi_3', 'gpi_4']:
         if key in priors.get('basal_ganglia', {}):
             graph.activate(priors['basal_ganglia'][key], 0.8)
 
@@ -372,23 +387,29 @@ def _trace_multi_digit(brain, input_str: str, max_digits: int = 6):
 # -----------------------------------------------------------------------
 
 def _diagnose_weights(brain, digit: int):
-    """Print successor vs echo edge weights for a digit."""
+    """Diagnose WM pathway weights for a digit.
+
+    Checks the full pathway: char L5 → relay → WM → output.
+    Reports the strongest WM→output edge for echo (same digit)
+    and successor (digit+1).
+    """
     graph = brain.graph
     priors = brain.priors
-    col = brain.tio._input_columns[str(digit)]
-    l23 = col['L23']
 
     successor = digit + 1 if digit < 9 else None
     echo_node = priors['output_cortex'][f'out:{digit}']
     succ_node = priors['output_cortex'][f'out:{successor}'] if successor is not None else None
 
+    # Check WM stripe → output edges (the readout pathway).
     echo_w = 0.0
     succ_w = 0.0
-    for edge in graph._outgoing.get(l23, []):
-        if edge.target == echo_node:
-            echo_w = edge.weight
-        if succ_node is not None and edge.target == succ_node:
-            succ_w = edge.weight
+    for wm_name in ['wm0', 'wm1', 'wm2']:
+        wm_l5 = priors['pfc'][f'{wm_name}:L5']
+        for edge in graph._outgoing.get(wm_l5, []):
+            if edge.target == echo_node:
+                echo_w = max(echo_w, edge.weight)
+            if succ_node is not None and edge.target == succ_node:
+                succ_w = max(succ_w, edge.weight)
 
     return echo_w, succ_w
 
