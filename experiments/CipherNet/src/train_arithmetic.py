@@ -35,7 +35,7 @@ from train import setup_brain, stage_ans_grounding
 # -----------------------------------------------------------------------
 
 def train_example(brain, input_tokens: str, output_tokens: str,
-                  settle_steps: int = 20, lr: float = 0.02):
+                  settle_steps: int = 30, lr: float = 0.02):
     """Train one example: feed input, clamp output, settle, learn.
 
     Input tokens are fed sequentially. Output tokens are clamped
@@ -201,7 +201,7 @@ def _init_sequencer_phase(brain, input_str: str):
 
 
 def train_multi_digit(brain, input_str: str, output_str: str,
-                      settle_steps: int = 25, lr: float = 0.02):
+                      settle_steps: int = 30, lr: float = 0.02):
     """Train one multi-digit example with left-to-right position training.
 
     The graph state persists between output positions — NO reset.

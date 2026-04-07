@@ -916,11 +916,18 @@ class Graph:
             # Only update if source is active AND target has error.
             if abs(tgt_node.error) < 0.001 or src_node.activation < 0.001:
                 continue
-            # Protect intra-subgraph structural edges from learning.
-            # Column internal wiring (L4→L23→L5→L6) must not be modified.
+            # Protect intra-subgraph STRUCTURAL edges from learning.
+            # Feedforward column wiring (L4→L23→L5→L6) must not change.
+            # BUT: L6→L4 FEEDBACK edges ARE learnable — they encode the
+            # column's predictions. The prediction must adapt to what the
+            # column expects to see. In predictive coding, identity flows
+            # DOWNWARD through these learned predictions, not upward
+            # through the feedforward error stream.
             if (src_node.subgraph is not None and
                     src_node.subgraph == tgt_node.subgraph):
-                continue
+                # Allow feedback edges (L6→L4) to learn.
+                if src_node.meta.get('role') != 'feedback':
+                    continue
 
             # Error-driven: delta = lr * target_error * source_activation
             delta = learning_rate * tgt_node.error * src_node.activation

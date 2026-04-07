@@ -122,6 +122,35 @@
     {"_comment": "Onset + identity fast-track to PFC WM."},
     {"source_prior": "token_cortex", "source_node": "tc_fast:L5", "target_prior": "thalamus", "target_node": "relay_0", "type": "temporal", "weight": 0.3},
 
+    {"_comment": "=== IDENTITY COLUMNS → L6 THROUGHOUT HIERARCHY ==="},
+    {"_comment": "Identity population code reaches L6 (feedback/prediction layer) of each"},
+    {"_comment": "hierarchy level. This provides the context L6 needs to generate identity-"},
+    {"_comment": "specific predictions. In TBT, L6 grid cells receive from multiple sources"},
+    {"_comment": "(own L5 + thalamus + lateral) to generate predictions. The identity signal"},
+    {"_comment": "tells L6 WHICH token is present so it can predict the correct downstream features."},
+
+    {"_comment": "Identity → temporal cortex L6 (prediction context for STG)"},
+    {"source_prior": "token_cortex", "source_node": "id0:L5", "target_prior": "temporal_cortex", "target_node": "stg1:L6", "type": "temporal", "weight": 0.1},
+    {"source_prior": "token_cortex", "source_node": "id1:L5", "target_prior": "temporal_cortex", "target_node": "stg1:L6", "type": "temporal", "weight": 0.1},
+    {"source_prior": "token_cortex", "source_node": "id2:L5", "target_prior": "temporal_cortex", "target_node": "stg2:L6", "type": "temporal", "weight": 0.1},
+    {"source_prior": "token_cortex", "source_node": "id3:L5", "target_prior": "temporal_cortex", "target_node": "stg2:L6", "type": "temporal", "weight": 0.1},
+    {"source_prior": "token_cortex", "source_node": "id4:L5", "target_prior": "temporal_cortex", "target_node": "stg_assoc:L6", "type": "temporal", "weight": 0.1},
+    {"source_prior": "token_cortex", "source_node": "id5:L5", "target_prior": "temporal_cortex", "target_node": "stg_assoc:L6", "type": "temporal", "weight": 0.1},
+
+    {"_comment": "Identity → Broca L6 (prediction context for structural processing)"},
+    {"source_prior": "token_cortex", "source_node": "id0:L5", "target_prior": "broca", "target_node": "ba44a:L6", "type": "temporal", "weight": 0.1},
+    {"source_prior": "token_cortex", "source_node": "id2:L5", "target_prior": "broca", "target_node": "ba44a:L6", "type": "temporal", "weight": 0.1},
+    {"source_prior": "token_cortex", "source_node": "id4:L5", "target_prior": "broca", "target_node": "ba45:L6", "type": "temporal", "weight": 0.1},
+    {"source_prior": "token_cortex", "source_node": "id6:L5", "target_prior": "broca", "target_node": "ba45:L6", "type": "temporal", "weight": 0.1},
+
+    {"_comment": "Identity → PFC WM L6 (prediction context for working memory)"},
+    {"source_prior": "token_cortex", "source_node": "id0:L5", "target_prior": "pfc", "target_node": "wm0:L6", "type": "temporal", "weight": 0.1},
+    {"source_prior": "token_cortex", "source_node": "id2:L5", "target_prior": "pfc", "target_node": "wm0:L6", "type": "temporal", "weight": 0.1},
+    {"source_prior": "token_cortex", "source_node": "id4:L5", "target_prior": "pfc", "target_node": "wm1:L6", "type": "temporal", "weight": 0.1},
+    {"source_prior": "token_cortex", "source_node": "id6:L5", "target_prior": "pfc", "target_node": "wm1:L6", "type": "temporal", "weight": 0.1},
+    {"source_prior": "token_cortex", "source_node": "id1:L5", "target_prior": "pfc", "target_node": "wm2:L6", "type": "temporal", "weight": 0.1},
+    {"source_prior": "token_cortex", "source_node": "id3:L5", "target_prior": "pfc", "target_node": "wm2:L6", "type": "temporal", "weight": 0.1},
+
     {"_comment": "=== TEMPORAL CORTEX → TOKEN CORTEX FEEDBACK (top-down predictions) ==="},
     {"source_prior": "temporal_cortex", "source_node": "stg1:L5", "target_prior": "token_cortex", "target_node": "tc_slow:L23", "type": "temporal", "weight": 0.3},
 
