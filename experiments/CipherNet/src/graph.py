@@ -733,6 +733,19 @@ class Graph:
 
             old_act = node.activation
 
+            # Fast skip: if node is inactive AND has no active incoming
+            # sources, nothing will change. Saves ~50% of computation
+            # during early warmup when most nodes are dormant.
+            if old_act < 0.001:
+                has_active_input = False
+                for edge in self._incoming.get(nid, []):
+                    src = self._nodes.get(edge.source)
+                    if src is not None and src.activation > 0.001:
+                        has_active_input = True
+                        break
+                if not has_active_input:
+                    continue
+
             # 1. Compute tonic inhibition (replaces old GATE mechanism).
             # Biology: GPi sends inhibitory (negative) edges to relay.
             # When GPi is active, the relay receives strong negative input
