@@ -50,15 +50,15 @@
     {"source": "wm2:L5", "target": "wm2:L6", "type": "temporal", "weight": 1.0},
     {"source": "wm2:L6", "target": "wm2:L4", "type": "temporal", "weight": 0.5},
 
-    {"source": "wm0:L5", "target": "inhibitor", "type": "temporal", "weight": 0.3},
-    {"source": "wm1:L5", "target": "inhibitor", "type": "temporal", "weight": 0.3},
-    {"source": "wm2:L5", "target": "inhibitor", "type": "temporal", "weight": 0.3},
-    {"source": "inhibitor", "target": "wm0:L23", "type": "spatial", "weight": -0.2},
-    {"source": "inhibitor", "target": "wm1:L23", "type": "spatial", "weight": -0.2},
-    {"source": "inhibitor", "target": "wm2:L23", "type": "spatial", "weight": -0.2},
+    {"source": "wm0:L5", "target": "inhibitor", "type": "temporal", "weight": 0.5, "description": "WM lateral inhibition: stripes compete. Strong inhibition forces different stripes to hold different content (representational repulsion)."},
+    {"source": "wm1:L5", "target": "inhibitor", "type": "temporal", "weight": 0.5},
+    {"source": "wm2:L5", "target": "inhibitor", "type": "temporal", "weight": 0.5},
+    {"source": "inhibitor", "target": "wm0:L23", "type": "spatial", "weight": -0.6},
+    {"source": "inhibitor", "target": "wm1:L23", "type": "spatial", "weight": -0.6},
+    {"source": "inhibitor", "target": "wm2:L23", "type": "spatial", "weight": -0.6},
 
-    {"source": "wm0:L5", "target": "wm1:L4", "type": "temporal", "weight": 0.5, "description": "Stripe-to-stripe for chaining."},
-    {"source": "wm1:L5", "target": "wm0:L4", "type": "temporal", "weight": 0.5},
+    {"source": "wm0:L5", "target": "wm1:L4", "type": "temporal", "weight": 0.2, "description": "Stripe-to-stripe chaining (reduced to prevent content copying)."},
+    {"source": "wm1:L5", "target": "wm0:L4", "type": "temporal", "weight": 0.2},
 
     {"source": "monitor:L4", "target": "monitor:L23", "type": "temporal", "weight": 1.0},
     {"source": "monitor:L23", "target": "monitor:L5", "type": "temporal", "weight": 1.0},

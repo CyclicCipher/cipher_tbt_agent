@@ -52,7 +52,7 @@
     {"source": "tc_mid:L5",   "target": "tc_fast:L23", "type": "temporal", "weight": 0.3},
 
     {"_comment": "=== Forward suppression (onset suppresses sustained briefly) ==="},
-    {"source": "tc_fast:L5", "target": "tc_slow:L23", "type": "temporal", "weight": -0.2, "description": "New onset suppresses sustained column (forward suppression / adaptation). Biological: A1 forward masking."},
+    {"source": "tc_fast:L5", "target": "tc_slow:L23", "type": "temporal", "weight": -0.08, "description": "Mild onset suppression of sustained column (forward suppression / adaptation). Weak enough that sustained input (0.3) overcomes it. Biological: A1 forward masking."},
 
     {"_comment": "=== Lateral inhibition via inhibitor ==="},
     {"source": "tc_fast:L23", "target": "inhibitor", "type": "temporal", "weight": 0.15},
