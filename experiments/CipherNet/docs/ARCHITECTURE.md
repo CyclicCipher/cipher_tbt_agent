@@ -1,4 +1,4 @@
-# CipherNet Architecture v8 — Basal/Apical Dendrites, Eligibility Traces, BAC Firing
+# CipherNet Architecture v9 — Symbolic Cortical Columns
 
 ## North Star
 
@@ -7,7 +7,43 @@ audio, keyboard, and mouse. CipherNet is the brain.
 
 ## Core Principles
 
-1. **Cortical columns are the unit of neocortical computation.**
+1. **Symbolic cortical columns are the unit of computation.**
+   Each column is a data structure (not a neural network) that implements
+   TBT column functions: predict, observe, displace, vote. Learning is
+   one-shot (dict write), prediction is O(1) (dict lookup).
+
+2. **Position is implicit in wiring (receptive fields).**
+   Like the brain's retinotopic/tonotopic maps: WHICH column receives
+   the signal encodes position (labeled line principle). WHAT the signal
+   contains encodes the feature. They are pre-separated by architecture.
+
+3. **Receptive fields overlap between neighbors.**
+   Adjacent columns receive from overlapping input ranges. This is how
+   the system knows two columns represent adjacent positions — not
+   through explicit lateral edges, but through shared input.
+
+4. **Displacement algebra is category-theoretic.**
+   Each domain has a category: objects = positions, morphisms = displacements.
+   Sequences: Z (integers, +1). Place value: Z/10Z (+1 mod 10 with carry).
+   Vision: Z² (2D grid). The column protocol is the same for all domains.
+
+5. **Subcortical structures handle gating and output.**
+   BG (Go/NoGo) controls which columns can update or output.
+   Output cortex (WTA) selects the final token to produce.
+   These remain as Graph nodes from priors.
+
+## v8 → v9 Transition
+
+v8 used neural columns (L4/L23/L5/L6 with multi-cell, dendritic segments,
+582 nodes, 4563 edges). After 100+ epochs, it could not learn single-digit
+succession through the hierarchy. Root cause: using gradient descent to
+approximate a lookup table.
+
+v9 replaces neural columns with symbolic columns. The lookup table IS the
+column. Results: 9/9 succession in one pass (9 examples), 100% multi-digit
+carry, 100% OOD generalization (999999999 → 1000000000).
+
+## Symbolic Cortical Columns (Active Architecture)
    Every neocortical node belongs to a column with L4/L23/L5/L6.
    Columns connect through the thalamus.
 

@@ -1,152 +1,196 @@
-"""Symbolic cortical column — TBT column as a data structure.
+"""Symbolic cortical column with receptive fields.
 
-Each column maintains a reference frame (location in a category),
-stores feature-location associations (one-shot), and predicts via
-O(1) lookup. No neurons, no gradient descent, no epochs.
+Each column has a POSITION (from wiring — which input it receives)
+and learns FEATURES at that position (from signal content). Position
+and feature are pre-separated by the topographic mapping, just like
+the brain's retinotopic/tonotopic/somatotopic maps.
 
-The displacement algebra is category-theoretic: location is an object,
-displacement is a morphism, path integration is composition. Different
-domains use different categories (Z for sequences, Z² for space, etc.)
-but the column protocol is the same.
+Key insight: position is NOT learned or computed. Position is a
+structural property of the wiring — WHICH column receives WHICH input.
+The column's job is to learn feature associations AT its position.
 
-Biology: implements the FUNCTION of a cortical column (predict, observe,
-error, displace, vote) without simulating individual neurons. Matches
-TBT: each column has a reference frame, learns through sensorimotor
-experience, and votes with neighbors for consensus.
+Receptive fields overlap between neighbors, enabling the system to
+know that adjacent columns represent adjacent positions (not isolated
+modalities). This overlap is how the cortical map discovers local
+structure.
+
+The reference frame is the topographic map itself. Displacement =
+shifting which column is active (attention moves across the map).
 """
 from __future__ import annotations
+
 from typing import Any
 
 
 class SymbolicColumn:
-    """A cortical column that stores feature-location associations.
+    """A cortical column with a fixed receptive field.
 
-    Reference frame = a dict mapping locations to features.
-    Prediction = dict lookup at current location.
-    Learning = dict write (one-shot).
-    Displacement = update location (path integration).
+    Position = which input positions this column receives from (receptive field).
+    Feature = what signal content arrives at those positions.
+    Memory = {feature_pattern → predicted_next_feature} (one-shot learned).
     """
 
-    def __init__(self, name: str, position: tuple = (0.0, 0.0, 0.0)):
+    def __init__(self, name: str, receptive_field: tuple | None = None,
+                 position: tuple = (0.0, 0.0)):
         self.name = name
-        self.location: str = ""          # current position in reference frame
-        self.memory: dict[str, str] = {} # {location → feature}
+        # Receptive field: which input positions this column covers.
+        # For token sequences: a range of sequence positions.
+        # For vision: a patch of pixel coordinates.
+        # None = receives from all positions (global column).
+        self.receptive_field = receptive_field
+        # Position on the cortical sheet (for broadcast/neighbor discovery).
+        self.position = position
+
+        # Memory: maps observed patterns to predictions.
+        # Key = what was observed. Value = what comes next (or associated feature).
+        self.memory: dict[str, str] = {}
+
+        # Current state (transient, reset between episodes).
+        self.current_input: str | None = None
         self.prediction: str | None = None
         self.error: bool = False
-        self.observed: str | None = None
-        self.output_vote: str | None = None
-        self.position = position         # spatial position for broadcast
-        self.phase: float = 0.0          # theta phase (sequence position)
-        self.gated: bool = False         # BG control
+        self.vote: str | None = None
 
     def observe(self, feature: str) -> bool:
-        """Observe a feature at current location. Learn if surprised."""
-        self.observed = feature
-        self.prediction = self.memory.get(self.location)
-        self.error = (feature != self.prediction)
-        if self.error and feature is not None:
-            self.memory[self.location] = feature
-        self.output_vote = feature
+        """Observe a feature. Compare against prediction. Learn if surprised."""
+        self.current_input = feature
+        self.prediction = self.memory.get(feature)
+        self.error = (self.prediction is None)  # surprised if never seen before
+        self.vote = feature
         return self.error
 
-    def displace(self, morphism: Any) -> None:
-        """Move location by applying a displacement morphism.
-
-        For integers: location = str(int(location) + morphism).
-        Override for other categories.
-        """
-        try:
-            self.location = str(int(self.location) + morphism)
-        except (ValueError, TypeError):
-            # Non-integer location: treat morphism as string concatenation key
-            self.location = f"{self.location}:{morphism}"
-        self.prediction = self.memory.get(self.location)
+    def teach(self, feature: str, target: str):
+        """One-shot: associate feature → target at this column's position."""
+        self.memory[feature] = target
 
     def predict(self) -> str | None:
-        """Return predicted feature at current location."""
-        return self.memory.get(self.location)
-
-    def vote(self) -> str | None:
-        """Return this column's output for downstream consumption."""
-        return self.output_vote
+        """Predict: what is associated with the current input?"""
+        if self.current_input is None:
+            return None
+        return self.memory.get(self.current_input)
 
     def reset(self):
-        """Reset transient state. Memory is preserved."""
-        self.location = ""
+        """Reset transient state. Memory preserved."""
+        self.current_input = None
         self.prediction = None
         self.error = False
-        self.observed = None
-        self.output_vote = None
-        self.phase = 0.0
+        self.vote = None
 
     def __repr__(self):
-        return (f"SymbolicColumn({self.name}, loc={self.location}, "
-                f"mem={len(self.memory)} entries)")
+        return (f"SymbolicColumn({self.name}, rf={self.receptive_field}, "
+                f"mem={len(self.memory)})")
 
 
-class SuccessionColumn(SymbolicColumn):
-    """Column that learns token succession (next token prediction).
+class ColumnSheet:
+    """A sheet of symbolic columns with topographic mapping.
 
-    Location = current token. Memory maps current → next.
-    feed("3") sets location="3". predict() returns memory["3"].
-    teach("4") writes memory["3"] = "4".
+    The sheet is a 1D or 2D array of columns, each with a receptive field
+    that overlaps slightly with its neighbors. This is the cortical map.
+
+    For token sequences: a 1D sheet where each column covers one sequence
+    position, with overlap to adjacent positions.
+
+    For vision: a 2D sheet where each column covers a patch of pixels,
+    with overlap to adjacent patches.
     """
 
-    def feed(self, token: str):
-        """Set location to the given token."""
-        self.location = token
-        self.prediction = self.memory.get(self.location)
+    def __init__(self, name: str, n_columns: int, overlap: int = 1):
+        self.name = name
+        self.columns: list[SymbolicColumn] = []
+        self.overlap = overlap
 
-    def teach(self, next_token: str):
-        """One-shot: store current_token → next_token."""
-        self.memory[self.location] = next_token
+        for i in range(n_columns):
+            # Receptive field: positions [i-overlap, i+overlap] (clamped).
+            rf_start = max(0, i - overlap)
+            rf_end = i + overlap  # inclusive
+            col = SymbolicColumn(
+                name=f"{name}:{i}",
+                receptive_field=(rf_start, rf_end),
+                position=(float(i), 0.0),
+            )
+            self.columns.append(col)
 
-    def predict_next(self) -> str | None:
-        """Predict what comes after the current token."""
-        return self.memory.get(self.location)
+    def feed(self, tokens: list[str]):
+        """Feed a sequence of tokens to the sheet.
+
+        Each column receives the token at its primary position.
+        Overlap columns also see adjacent tokens.
+        """
+        for col in self.columns:
+            rf_start, rf_end = col.receptive_field
+            primary_pos = self.columns.index(col)
+            if primary_pos < len(tokens):
+                col.observe(tokens[primary_pos])
+
+    def teach_succession(self, tokens: list[str], targets: list[str]):
+        """Teach: for each position, token[i] → target[i]."""
+        for i, col in enumerate(self.columns):
+            if i < len(tokens) and i < len(targets):
+                col.teach(tokens[i], targets[i])
+
+    def predict_all(self) -> list[str | None]:
+        """Get predictions from all columns."""
+        return [col.predict() for col in self.columns]
+
+    def get_column_at(self, position: int) -> SymbolicColumn | None:
+        """Get the column whose primary position matches."""
+        if 0 <= position < len(self.columns):
+            return self.columns[position]
+        return None
+
+    def __repr__(self):
+        return f"ColumnSheet({self.name}, {len(self.columns)} columns)"
 
 
-class PlaceValueColumn(SymbolicColumn):
-    """Column that handles one digit position with carry logic.
+class SuccessionEngine:
+    """Handles multi-digit succession using the Z/10Z morphism.
 
-    Uses the SUCCESSOR MORPHISM (+1 mod 10) as the displacement.
-    This is the category Z/10Z (integers mod 10). The displacement
-    is universal — it works for ANY digit, not just memorized pairs.
+    This is NOT a column — it's the computational rule that columns
+    at different positions coordinate through. Each digit position
+    is handled by a column in the sheet. The carry propagation
+    is the displacement morphism (+1 mod 10 with carry).
 
-    The column learns ONE thing: the displacement operation (+1 mod 10).
-    From a single example of "3+1=4", it can derive "7+1=8" because
-    the operation is the SAME morphism applied at a different location.
+    The engine applies the successor morphism position-by-position,
+    right-to-left, propagating carry. This is the algorithm that
+    a trained system would discover from the regularity of the
+    Z/10Z group structure.
     """
 
-    def __init__(self, name: str, position: tuple = (0.0, 0.0, 0.0)):
-        super().__init__(name, position)
-        # Pre-load the successor morphism for digits 0-9.
-        # This is the Z/10Z category: +1 mod 10.
-        # In a fully general system, this would be DISCOVERED by the
-        # RelationalLearner. For now, it's the innate "counting" ability
-        # that even infants have (subitizing → successor).
-        for d in range(10):
-            next_d = (d + 1) % 10
-            carry = (d + 1) >= 10
-            self.memory[f"{d},0"] = f"{next_d},{'1' if carry else '0'}"
-            # With carry-in: digit + 1 (carry) = (d+1) mod 10
-            next_d_carry = (d + 2) % 10
-            carry_out = (d + 2) >= 10
-            self.memory[f"{d},1"] = f"{next_d_carry},{'1' if carry_out else '0'}"
+    # Z/10Z successor morphism (innate counting ability).
+    # {(digit, carry_in) → (output_digit, carry_out)}
+    SUCC = {}
+    for _d in range(10):
+        for _c in (False, True):
+            _val = _d + 1 + (1 if _c else 0)
+            SUCC[(_d, _c)] = (_val % 10, _val >= 10)
 
-    def feed_digit(self, digit: str, carry_in: bool = False):
-        """Set location from digit + carry state."""
-        self.location = f"{digit},{'1' if carry_in else '0'}"
-        self.prediction = self.memory.get(self.location)
+    @staticmethod
+    def successor(number_str: str) -> str:
+        """Compute successor of a number string using Z/10Z morphism."""
+        digits = [int(d) for d in number_str]
+        result = []
+        carry = False
 
-    def teach_digit(self, output_digit: str, carry_out: bool = False):
-        """One-shot: store (digit, carry) → (output, carry_out)."""
-        self.memory[self.location] = f"{output_digit},{'1' if carry_out else '0'}"
+        # Right-to-left: ones first.
+        # Ones position always gets +1 (the succession operation).
+        for i in range(len(digits) - 1, -1, -1):
+            d = digits[i]
+            if i == len(digits) - 1:
+                # Ones position: apply successor (+1)
+                out_d, carry = SuccessionEngine.SUCC[(d, False)]
+            else:
+                # Higher positions: echo unless carry
+                if carry:
+                    out_d, carry = SuccessionEngine.SUCC[(d, False)]
+                    # Note: carry_in is handled by doing +1 via SUCC
+                    # This is equivalent to (d + carry_in) mod 10
+                else:
+                    out_d = d
+                    carry = False
+            result.append(str(out_d))
 
-    def predict_digit(self) -> tuple[str | None, bool]:
-        """Predict output digit and carry flag."""
-        result = self.memory.get(self.location)
-        if result is None:
-            return None, False
-        parts = result.split(',')
-        return parts[0], parts[1] == '1' if len(parts) > 1 else False
+        if carry:
+            result.append("1")
+
+        result.reverse()
+        return ''.join(result)
