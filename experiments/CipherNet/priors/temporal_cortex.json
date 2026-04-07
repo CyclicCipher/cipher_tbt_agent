@@ -1,50 +1,2360 @@
 {
   "name": "temporal_cortex",
-  "description": "Superior temporal gyrus (STG) / Wernicke's area — standard cortical columns in the auditory processing hierarchy. Receives from auditory thalamus (MGN) and input column relays. Two output streams: dorsal (arcuate fasciculus to Broca, phonological) and ventral (extreme capsule to vlPFC, semantic). Phonological persistence emerges from column self-loops and theta-gamma coupling, NOT from hardware buffer slots.",
-
+  "description": "STG with 8 cells/layer",
   "nodes": [
-    {"id": "stg1:L4", "layer": 4, "role": "input", "area": "stg_primary", "description": "Primary STG column — receives from auditory relay / input columns."},
-    {"id": "stg1:L23", "layer": 23, "role": "process", "area": "stg_primary"},
-    {"id": "stg1:L5", "layer": 5, "role": "output", "area": "stg_primary"},
-    {"id": "stg1:L6", "layer": 6, "role": "feedback", "area": "stg_primary"},
-
-    {"id": "stg2:L4", "layer": 4, "role": "input", "area": "stg_secondary", "description": "Secondary STG column — higher-level phonological processing."},
-    {"id": "stg2:L23", "layer": 23, "role": "process", "area": "stg_secondary"},
-    {"id": "stg2:L5", "layer": 5, "role": "output", "area": "stg_secondary"},
-    {"id": "stg2:L6", "layer": 6, "role": "feedback", "area": "stg_secondary"},
-
-    {"id": "stg_assoc:L4", "layer": 4, "role": "input", "area": "stg_association", "description": "Association STG — lexical/categorical processing. Highest in the temporal hierarchy."},
-    {"id": "stg_assoc:L23", "layer": 23, "role": "process", "area": "stg_association"},
-    {"id": "stg_assoc:L5", "layer": 5, "role": "output", "area": "stg_association"},
-    {"id": "stg_assoc:L6", "layer": 6, "role": "feedback", "area": "stg_association"}
+    {
+      "id": "stg1:L4:0",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 0
+    },
+    {
+      "id": "stg1:L23:0",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 0
+    },
+    {
+      "id": "stg1:L5:0",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 0
+    },
+    {
+      "id": "stg1:L6:0",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 0
+    },
+    {
+      "id": "stg1:L4:1",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 1
+    },
+    {
+      "id": "stg1:L23:1",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 1
+    },
+    {
+      "id": "stg1:L5:1",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 1
+    },
+    {
+      "id": "stg1:L6:1",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 1
+    },
+    {
+      "id": "stg1:L4:2",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 2
+    },
+    {
+      "id": "stg1:L23:2",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 2
+    },
+    {
+      "id": "stg1:L5:2",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 2
+    },
+    {
+      "id": "stg1:L6:2",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 2
+    },
+    {
+      "id": "stg1:L4:3",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 3
+    },
+    {
+      "id": "stg1:L23:3",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 3
+    },
+    {
+      "id": "stg1:L5:3",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 3
+    },
+    {
+      "id": "stg1:L6:3",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 3
+    },
+    {
+      "id": "stg1:L4:4",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 4
+    },
+    {
+      "id": "stg1:L23:4",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 4
+    },
+    {
+      "id": "stg1:L5:4",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 4
+    },
+    {
+      "id": "stg1:L6:4",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 4
+    },
+    {
+      "id": "stg1:L4:5",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 5
+    },
+    {
+      "id": "stg1:L23:5",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 5
+    },
+    {
+      "id": "stg1:L5:5",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 5
+    },
+    {
+      "id": "stg1:L6:5",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 5
+    },
+    {
+      "id": "stg1:L4:6",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 6
+    },
+    {
+      "id": "stg1:L23:6",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 6
+    },
+    {
+      "id": "stg1:L5:6",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 6
+    },
+    {
+      "id": "stg1:L6:6",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 6
+    },
+    {
+      "id": "stg1:L4:7",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 7
+    },
+    {
+      "id": "stg1:L23:7",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 7
+    },
+    {
+      "id": "stg1:L5:7",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 7
+    },
+    {
+      "id": "stg1:L6:7",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 7
+    },
+    {
+      "id": "stg1:L4_inhib",
+      "role": "inhibitor",
+      "layer": 4
+    },
+    {
+      "id": "stg1:L23_inhib",
+      "role": "inhibitor",
+      "layer": 23
+    },
+    {
+      "id": "stg1:L5_inhib",
+      "role": "inhibitor",
+      "layer": 5
+    },
+    {
+      "id": "stg2:L4:0",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 0
+    },
+    {
+      "id": "stg2:L23:0",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 0
+    },
+    {
+      "id": "stg2:L5:0",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 0
+    },
+    {
+      "id": "stg2:L6:0",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 0
+    },
+    {
+      "id": "stg2:L4:1",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 1
+    },
+    {
+      "id": "stg2:L23:1",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 1
+    },
+    {
+      "id": "stg2:L5:1",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 1
+    },
+    {
+      "id": "stg2:L6:1",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 1
+    },
+    {
+      "id": "stg2:L4:2",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 2
+    },
+    {
+      "id": "stg2:L23:2",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 2
+    },
+    {
+      "id": "stg2:L5:2",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 2
+    },
+    {
+      "id": "stg2:L6:2",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 2
+    },
+    {
+      "id": "stg2:L4:3",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 3
+    },
+    {
+      "id": "stg2:L23:3",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 3
+    },
+    {
+      "id": "stg2:L5:3",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 3
+    },
+    {
+      "id": "stg2:L6:3",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 3
+    },
+    {
+      "id": "stg2:L4:4",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 4
+    },
+    {
+      "id": "stg2:L23:4",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 4
+    },
+    {
+      "id": "stg2:L5:4",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 4
+    },
+    {
+      "id": "stg2:L6:4",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 4
+    },
+    {
+      "id": "stg2:L4:5",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 5
+    },
+    {
+      "id": "stg2:L23:5",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 5
+    },
+    {
+      "id": "stg2:L5:5",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 5
+    },
+    {
+      "id": "stg2:L6:5",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 5
+    },
+    {
+      "id": "stg2:L4:6",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 6
+    },
+    {
+      "id": "stg2:L23:6",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 6
+    },
+    {
+      "id": "stg2:L5:6",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 6
+    },
+    {
+      "id": "stg2:L6:6",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 6
+    },
+    {
+      "id": "stg2:L4:7",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 7
+    },
+    {
+      "id": "stg2:L23:7",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 7
+    },
+    {
+      "id": "stg2:L5:7",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 7
+    },
+    {
+      "id": "stg2:L6:7",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 7
+    },
+    {
+      "id": "stg2:L4_inhib",
+      "role": "inhibitor",
+      "layer": 4
+    },
+    {
+      "id": "stg2:L23_inhib",
+      "role": "inhibitor",
+      "layer": 23
+    },
+    {
+      "id": "stg2:L5_inhib",
+      "role": "inhibitor",
+      "layer": 5
+    },
+    {
+      "id": "stg_assoc:L4:0",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 0
+    },
+    {
+      "id": "stg_assoc:L23:0",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 0
+    },
+    {
+      "id": "stg_assoc:L5:0",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 0
+    },
+    {
+      "id": "stg_assoc:L6:0",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 0
+    },
+    {
+      "id": "stg_assoc:L4:1",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 1
+    },
+    {
+      "id": "stg_assoc:L23:1",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 1
+    },
+    {
+      "id": "stg_assoc:L5:1",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 1
+    },
+    {
+      "id": "stg_assoc:L6:1",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 1
+    },
+    {
+      "id": "stg_assoc:L4:2",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 2
+    },
+    {
+      "id": "stg_assoc:L23:2",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 2
+    },
+    {
+      "id": "stg_assoc:L5:2",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 2
+    },
+    {
+      "id": "stg_assoc:L6:2",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 2
+    },
+    {
+      "id": "stg_assoc:L4:3",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 3
+    },
+    {
+      "id": "stg_assoc:L23:3",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 3
+    },
+    {
+      "id": "stg_assoc:L5:3",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 3
+    },
+    {
+      "id": "stg_assoc:L6:3",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 3
+    },
+    {
+      "id": "stg_assoc:L4:4",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 4
+    },
+    {
+      "id": "stg_assoc:L23:4",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 4
+    },
+    {
+      "id": "stg_assoc:L5:4",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 4
+    },
+    {
+      "id": "stg_assoc:L6:4",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 4
+    },
+    {
+      "id": "stg_assoc:L4:5",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 5
+    },
+    {
+      "id": "stg_assoc:L23:5",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 5
+    },
+    {
+      "id": "stg_assoc:L5:5",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 5
+    },
+    {
+      "id": "stg_assoc:L6:5",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 5
+    },
+    {
+      "id": "stg_assoc:L4:6",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 6
+    },
+    {
+      "id": "stg_assoc:L23:6",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 6
+    },
+    {
+      "id": "stg_assoc:L5:6",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 6
+    },
+    {
+      "id": "stg_assoc:L6:6",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 6
+    },
+    {
+      "id": "stg_assoc:L4:7",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 7
+    },
+    {
+      "id": "stg_assoc:L23:7",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 7
+    },
+    {
+      "id": "stg_assoc:L5:7",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 7
+    },
+    {
+      "id": "stg_assoc:L6:7",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 7
+    },
+    {
+      "id": "stg_assoc:L4_inhib",
+      "role": "inhibitor",
+      "layer": 4
+    },
+    {
+      "id": "stg_assoc:L23_inhib",
+      "role": "inhibitor",
+      "layer": 23
+    },
+    {
+      "id": "stg_assoc:L5_inhib",
+      "role": "inhibitor",
+      "layer": 5
+    }
   ],
-
   "edges": [
-    {"source": "stg1:L4", "target": "stg1:L23", "type": "temporal", "weight": 1.0},
-    {"source": "stg1:L23", "target": "stg1:L5", "type": "temporal", "weight": 1.0},
-    {"source": "stg1:L5", "target": "stg1:L6", "type": "temporal", "weight": 1.0},
-    {"source": "stg1:L6", "target": "stg1:L4", "type": "temporal", "weight": 0.5},
-    {"source": "stg1:L23", "target": "stg1:L23", "type": "temporal", "weight": 0.7, "description": "Self-loop for brief phonological persistence."},
-
-    {"source": "stg2:L4", "target": "stg2:L23", "type": "temporal", "weight": 1.0},
-    {"source": "stg2:L23", "target": "stg2:L5", "type": "temporal", "weight": 1.0},
-    {"source": "stg2:L5", "target": "stg2:L6", "type": "temporal", "weight": 1.0},
-    {"source": "stg2:L6", "target": "stg2:L4", "type": "temporal", "weight": 0.5},
-    {"source": "stg2:L23", "target": "stg2:L23", "type": "temporal", "weight": 0.7},
-
-    {"source": "stg_assoc:L4", "target": "stg_assoc:L23", "type": "temporal", "weight": 1.0},
-    {"source": "stg_assoc:L23", "target": "stg_assoc:L5", "type": "temporal", "weight": 1.0},
-    {"source": "stg_assoc:L5", "target": "stg_assoc:L6", "type": "temporal", "weight": 1.0},
-    {"source": "stg_assoc:L6", "target": "stg_assoc:L4", "type": "temporal", "weight": 0.5},
-
-    {"source": "stg1:L23", "target": "stg2:L4", "type": "temporal", "weight": 0.8, "description": "Feedforward: primary → secondary (hierarchical auditory processing)."},
-    {"source": "stg2:L23", "target": "stg_assoc:L4", "type": "temporal", "weight": 0.8, "description": "Feedforward: secondary → association (lexical/categorical)."},
-
-    {"source": "stg2:L5", "target": "stg1:L23", "type": "temporal", "weight": 0.3, "description": "Feedback: secondary → primary (predictions, skip L4)."},
-    {"source": "stg_assoc:L5", "target": "stg2:L23", "type": "temporal", "weight": 0.3, "description": "Feedback: association → secondary (predictions)."}
+    {
+      "source": "stg1:L4:0",
+      "target": "stg1:L23:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L23:0",
+      "target": "stg1:L5:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L5:0",
+      "target": "stg1:L6:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L6:0",
+      "target": "stg1:L4:0",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg1:L23:0",
+      "target": "stg1:L23:0",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg1:L4:1",
+      "target": "stg1:L23:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L23:1",
+      "target": "stg1:L5:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L5:1",
+      "target": "stg1:L6:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L6:1",
+      "target": "stg1:L4:1",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg1:L23:1",
+      "target": "stg1:L23:1",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg1:L4:2",
+      "target": "stg1:L23:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L23:2",
+      "target": "stg1:L5:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L5:2",
+      "target": "stg1:L6:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L6:2",
+      "target": "stg1:L4:2",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg1:L23:2",
+      "target": "stg1:L23:2",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg1:L4:3",
+      "target": "stg1:L23:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L23:3",
+      "target": "stg1:L5:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L5:3",
+      "target": "stg1:L6:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L6:3",
+      "target": "stg1:L4:3",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg1:L23:3",
+      "target": "stg1:L23:3",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg1:L4:4",
+      "target": "stg1:L23:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L23:4",
+      "target": "stg1:L5:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L5:4",
+      "target": "stg1:L6:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L6:4",
+      "target": "stg1:L4:4",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg1:L23:4",
+      "target": "stg1:L23:4",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg1:L4:5",
+      "target": "stg1:L23:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L23:5",
+      "target": "stg1:L5:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L5:5",
+      "target": "stg1:L6:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L6:5",
+      "target": "stg1:L4:5",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg1:L23:5",
+      "target": "stg1:L23:5",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg1:L4:6",
+      "target": "stg1:L23:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L23:6",
+      "target": "stg1:L5:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L5:6",
+      "target": "stg1:L6:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L6:6",
+      "target": "stg1:L4:6",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg1:L23:6",
+      "target": "stg1:L23:6",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg1:L4:7",
+      "target": "stg1:L23:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L23:7",
+      "target": "stg1:L5:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L5:7",
+      "target": "stg1:L6:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg1:L6:7",
+      "target": "stg1:L4:7",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg1:L23:7",
+      "target": "stg1:L23:7",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg1:L4:0",
+      "target": "stg1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L4_inhib",
+      "target": "stg1:L4:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L4:1",
+      "target": "stg1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L4_inhib",
+      "target": "stg1:L4:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L4:2",
+      "target": "stg1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L4_inhib",
+      "target": "stg1:L4:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L4:3",
+      "target": "stg1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L4_inhib",
+      "target": "stg1:L4:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L4:4",
+      "target": "stg1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L4_inhib",
+      "target": "stg1:L4:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L4:5",
+      "target": "stg1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L4_inhib",
+      "target": "stg1:L4:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L4:6",
+      "target": "stg1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L4_inhib",
+      "target": "stg1:L4:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L4:7",
+      "target": "stg1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L4_inhib",
+      "target": "stg1:L4:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L23:0",
+      "target": "stg1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L23_inhib",
+      "target": "stg1:L23:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L23:1",
+      "target": "stg1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L23_inhib",
+      "target": "stg1:L23:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L23:2",
+      "target": "stg1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L23_inhib",
+      "target": "stg1:L23:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L23:3",
+      "target": "stg1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L23_inhib",
+      "target": "stg1:L23:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L23:4",
+      "target": "stg1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L23_inhib",
+      "target": "stg1:L23:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L23:5",
+      "target": "stg1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L23_inhib",
+      "target": "stg1:L23:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L23:6",
+      "target": "stg1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L23_inhib",
+      "target": "stg1:L23:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L23:7",
+      "target": "stg1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L23_inhib",
+      "target": "stg1:L23:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L5:0",
+      "target": "stg1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L5_inhib",
+      "target": "stg1:L5:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L5:1",
+      "target": "stg1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L5_inhib",
+      "target": "stg1:L5:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L5:2",
+      "target": "stg1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L5_inhib",
+      "target": "stg1:L5:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L5:3",
+      "target": "stg1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L5_inhib",
+      "target": "stg1:L5:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L5:4",
+      "target": "stg1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L5_inhib",
+      "target": "stg1:L5:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L5:5",
+      "target": "stg1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L5_inhib",
+      "target": "stg1:L5:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L5:6",
+      "target": "stg1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L5_inhib",
+      "target": "stg1:L5:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L5:7",
+      "target": "stg1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg1:L5_inhib",
+      "target": "stg1:L5:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L4:0",
+      "target": "stg2:L23:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L23:0",
+      "target": "stg2:L5:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L5:0",
+      "target": "stg2:L6:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L6:0",
+      "target": "stg2:L4:0",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg2:L23:0",
+      "target": "stg2:L23:0",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg2:L4:1",
+      "target": "stg2:L23:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L23:1",
+      "target": "stg2:L5:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L5:1",
+      "target": "stg2:L6:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L6:1",
+      "target": "stg2:L4:1",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg2:L23:1",
+      "target": "stg2:L23:1",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg2:L4:2",
+      "target": "stg2:L23:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L23:2",
+      "target": "stg2:L5:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L5:2",
+      "target": "stg2:L6:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L6:2",
+      "target": "stg2:L4:2",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg2:L23:2",
+      "target": "stg2:L23:2",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg2:L4:3",
+      "target": "stg2:L23:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L23:3",
+      "target": "stg2:L5:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L5:3",
+      "target": "stg2:L6:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L6:3",
+      "target": "stg2:L4:3",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg2:L23:3",
+      "target": "stg2:L23:3",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg2:L4:4",
+      "target": "stg2:L23:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L23:4",
+      "target": "stg2:L5:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L5:4",
+      "target": "stg2:L6:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L6:4",
+      "target": "stg2:L4:4",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg2:L23:4",
+      "target": "stg2:L23:4",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg2:L4:5",
+      "target": "stg2:L23:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L23:5",
+      "target": "stg2:L5:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L5:5",
+      "target": "stg2:L6:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L6:5",
+      "target": "stg2:L4:5",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg2:L23:5",
+      "target": "stg2:L23:5",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg2:L4:6",
+      "target": "stg2:L23:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L23:6",
+      "target": "stg2:L5:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L5:6",
+      "target": "stg2:L6:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L6:6",
+      "target": "stg2:L4:6",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg2:L23:6",
+      "target": "stg2:L23:6",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg2:L4:7",
+      "target": "stg2:L23:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L23:7",
+      "target": "stg2:L5:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L5:7",
+      "target": "stg2:L6:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg2:L6:7",
+      "target": "stg2:L4:7",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg2:L23:7",
+      "target": "stg2:L23:7",
+      "type": "temporal",
+      "weight": 0.7
+    },
+    {
+      "source": "stg2:L4:0",
+      "target": "stg2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L4_inhib",
+      "target": "stg2:L4:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L4:1",
+      "target": "stg2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L4_inhib",
+      "target": "stg2:L4:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L4:2",
+      "target": "stg2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L4_inhib",
+      "target": "stg2:L4:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L4:3",
+      "target": "stg2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L4_inhib",
+      "target": "stg2:L4:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L4:4",
+      "target": "stg2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L4_inhib",
+      "target": "stg2:L4:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L4:5",
+      "target": "stg2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L4_inhib",
+      "target": "stg2:L4:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L4:6",
+      "target": "stg2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L4_inhib",
+      "target": "stg2:L4:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L4:7",
+      "target": "stg2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L4_inhib",
+      "target": "stg2:L4:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L23:0",
+      "target": "stg2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L23_inhib",
+      "target": "stg2:L23:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L23:1",
+      "target": "stg2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L23_inhib",
+      "target": "stg2:L23:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L23:2",
+      "target": "stg2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L23_inhib",
+      "target": "stg2:L23:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L23:3",
+      "target": "stg2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L23_inhib",
+      "target": "stg2:L23:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L23:4",
+      "target": "stg2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L23_inhib",
+      "target": "stg2:L23:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L23:5",
+      "target": "stg2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L23_inhib",
+      "target": "stg2:L23:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L23:6",
+      "target": "stg2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L23_inhib",
+      "target": "stg2:L23:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L23:7",
+      "target": "stg2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L23_inhib",
+      "target": "stg2:L23:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L5:0",
+      "target": "stg2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L5_inhib",
+      "target": "stg2:L5:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L5:1",
+      "target": "stg2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L5_inhib",
+      "target": "stg2:L5:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L5:2",
+      "target": "stg2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L5_inhib",
+      "target": "stg2:L5:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L5:3",
+      "target": "stg2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L5_inhib",
+      "target": "stg2:L5:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L5:4",
+      "target": "stg2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L5_inhib",
+      "target": "stg2:L5:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L5:5",
+      "target": "stg2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L5_inhib",
+      "target": "stg2:L5:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L5:6",
+      "target": "stg2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L5_inhib",
+      "target": "stg2:L5:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg2:L5:7",
+      "target": "stg2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg2:L5_inhib",
+      "target": "stg2:L5:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L4:0",
+      "target": "stg_assoc:L23:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L23:0",
+      "target": "stg_assoc:L5:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L5:0",
+      "target": "stg_assoc:L6:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L6:0",
+      "target": "stg_assoc:L4:0",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg_assoc:L4:1",
+      "target": "stg_assoc:L23:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L23:1",
+      "target": "stg_assoc:L5:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L5:1",
+      "target": "stg_assoc:L6:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L6:1",
+      "target": "stg_assoc:L4:1",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg_assoc:L4:2",
+      "target": "stg_assoc:L23:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L23:2",
+      "target": "stg_assoc:L5:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L5:2",
+      "target": "stg_assoc:L6:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L6:2",
+      "target": "stg_assoc:L4:2",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg_assoc:L4:3",
+      "target": "stg_assoc:L23:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L23:3",
+      "target": "stg_assoc:L5:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L5:3",
+      "target": "stg_assoc:L6:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L6:3",
+      "target": "stg_assoc:L4:3",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg_assoc:L4:4",
+      "target": "stg_assoc:L23:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L23:4",
+      "target": "stg_assoc:L5:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L5:4",
+      "target": "stg_assoc:L6:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L6:4",
+      "target": "stg_assoc:L4:4",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg_assoc:L4:5",
+      "target": "stg_assoc:L23:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L23:5",
+      "target": "stg_assoc:L5:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L5:5",
+      "target": "stg_assoc:L6:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L6:5",
+      "target": "stg_assoc:L4:5",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg_assoc:L4:6",
+      "target": "stg_assoc:L23:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L23:6",
+      "target": "stg_assoc:L5:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L5:6",
+      "target": "stg_assoc:L6:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L6:6",
+      "target": "stg_assoc:L4:6",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg_assoc:L4:7",
+      "target": "stg_assoc:L23:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L23:7",
+      "target": "stg_assoc:L5:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L5:7",
+      "target": "stg_assoc:L6:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "stg_assoc:L6:7",
+      "target": "stg_assoc:L4:7",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "stg_assoc:L4:0",
+      "target": "stg_assoc:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L4_inhib",
+      "target": "stg_assoc:L4:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L4:1",
+      "target": "stg_assoc:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L4_inhib",
+      "target": "stg_assoc:L4:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L4:2",
+      "target": "stg_assoc:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L4_inhib",
+      "target": "stg_assoc:L4:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L4:3",
+      "target": "stg_assoc:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L4_inhib",
+      "target": "stg_assoc:L4:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L4:4",
+      "target": "stg_assoc:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L4_inhib",
+      "target": "stg_assoc:L4:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L4:5",
+      "target": "stg_assoc:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L4_inhib",
+      "target": "stg_assoc:L4:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L4:6",
+      "target": "stg_assoc:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L4_inhib",
+      "target": "stg_assoc:L4:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L4:7",
+      "target": "stg_assoc:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L4_inhib",
+      "target": "stg_assoc:L4:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L23:0",
+      "target": "stg_assoc:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L23_inhib",
+      "target": "stg_assoc:L23:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L23:1",
+      "target": "stg_assoc:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L23_inhib",
+      "target": "stg_assoc:L23:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L23:2",
+      "target": "stg_assoc:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L23_inhib",
+      "target": "stg_assoc:L23:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L23:3",
+      "target": "stg_assoc:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L23_inhib",
+      "target": "stg_assoc:L23:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L23:4",
+      "target": "stg_assoc:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L23_inhib",
+      "target": "stg_assoc:L23:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L23:5",
+      "target": "stg_assoc:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L23_inhib",
+      "target": "stg_assoc:L23:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L23:6",
+      "target": "stg_assoc:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L23_inhib",
+      "target": "stg_assoc:L23:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L23:7",
+      "target": "stg_assoc:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L23_inhib",
+      "target": "stg_assoc:L23:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L5:0",
+      "target": "stg_assoc:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L5_inhib",
+      "target": "stg_assoc:L5:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L5:1",
+      "target": "stg_assoc:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L5_inhib",
+      "target": "stg_assoc:L5:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L5:2",
+      "target": "stg_assoc:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L5_inhib",
+      "target": "stg_assoc:L5:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L5:3",
+      "target": "stg_assoc:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L5_inhib",
+      "target": "stg_assoc:L5:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L5:4",
+      "target": "stg_assoc:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L5_inhib",
+      "target": "stg_assoc:L5:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L5:5",
+      "target": "stg_assoc:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L5_inhib",
+      "target": "stg_assoc:L5:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L5:6",
+      "target": "stg_assoc:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L5_inhib",
+      "target": "stg_assoc:L5:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg_assoc:L5:7",
+      "target": "stg_assoc:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "stg_assoc:L5_inhib",
+      "target": "stg_assoc:L5:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "stg1:L23:0",
+      "target": "stg2:L4:0",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L23:0",
+      "target": "stg_assoc:L4:0",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L5:0",
+      "target": "stg1:L23:0",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "stg_assoc:L5:0",
+      "target": "stg2:L23:0",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "stg1:L23:1",
+      "target": "stg2:L4:1",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L23:1",
+      "target": "stg_assoc:L4:1",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L5:1",
+      "target": "stg1:L23:1",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "stg_assoc:L5:1",
+      "target": "stg2:L23:1",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "stg1:L23:2",
+      "target": "stg2:L4:2",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L23:2",
+      "target": "stg_assoc:L4:2",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L5:2",
+      "target": "stg1:L23:2",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "stg_assoc:L5:2",
+      "target": "stg2:L23:2",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "stg1:L23:3",
+      "target": "stg2:L4:3",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L23:3",
+      "target": "stg_assoc:L4:3",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L5:3",
+      "target": "stg1:L23:3",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "stg_assoc:L5:3",
+      "target": "stg2:L23:3",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "stg1:L23:4",
+      "target": "stg2:L4:4",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L23:4",
+      "target": "stg_assoc:L4:4",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L5:4",
+      "target": "stg1:L23:4",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "stg_assoc:L5:4",
+      "target": "stg2:L23:4",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "stg1:L23:5",
+      "target": "stg2:L4:5",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L23:5",
+      "target": "stg_assoc:L4:5",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L5:5",
+      "target": "stg1:L23:5",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "stg_assoc:L5:5",
+      "target": "stg2:L23:5",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "stg1:L23:6",
+      "target": "stg2:L4:6",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L23:6",
+      "target": "stg_assoc:L4:6",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L5:6",
+      "target": "stg1:L23:6",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "stg_assoc:L5:6",
+      "target": "stg2:L23:6",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "stg1:L23:7",
+      "target": "stg2:L4:7",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L23:7",
+      "target": "stg_assoc:L4:7",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source": "stg2:L5:7",
+      "target": "stg1:L23:7",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "stg_assoc:L5:7",
+      "target": "stg2:L23:7",
+      "type": "temporal",
+      "weight": 0.3
+    }
   ],
-
   "properties": {
-    "description": "3-level auditory processing hierarchy (primary → secondary → association). Phonological persistence from self-loops (0.7), NOT hardware buffer slots. Dorsal stream (stg1/stg2 → Broca) carries phonological information. Ventral stream (stg_assoc → vlPFC) carries semantic information. Both streams wired in config.json."
+    "n_cells": 8
   }
 }

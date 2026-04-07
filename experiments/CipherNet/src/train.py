@@ -164,16 +164,25 @@ def setup_brain() -> Brain:
                                edge_type=TEMPORAL, weight=w)
 
     # 2. WM stripes → output cortex (excitatory readout)
-    # All-to-all: any WM content can drive any output node. Specificity
-    # comes from LEARNED weights. A WM stripe holding "digit 2" pattern
-    # develops strong edges to out:2. Same mechanism for letters, etc.
-    # Weight 0.05: strong enough that WM at full activation (1.0) can
-    # overcome the output WTA inhibitor (3 stripes * 0.05 = 0.15 total).
+    # ALL L5 cells of each WM stripe → ALL output nodes. The population
+    # pattern across L5 cells encodes identity. Each L5 cell contributes
+    # to the output drive. Learned weights specialize which patterns
+    # drive which outputs.
     for wm_name in ['wm0', 'wm1', 'wm2']:
-        wm_l5 = priors['pfc'][f'{wm_name}:L5']
-        for node_key, node_id in priors['output_cortex'].items():
-            if node_key.startswith('out:'):
-                graph.add_edge(wm_l5, node_id, edge_type=TEMPORAL, weight=0.05)
+        pfc_nodes = priors['pfc']
+        # Find all L5 cells for this WM stripe
+        l5_cells = [nid for key, nid in pfc_nodes.items()
+                    if key.startswith(f'{wm_name}:L5:')]
+        if not l5_cells:
+            # Fallback: single-cell column (backward compat)
+            l5_key = f'{wm_name}:L5'
+            if l5_key in pfc_nodes:
+                l5_cells = [pfc_nodes[l5_key]]
+        for l5_nid in l5_cells:
+            for node_key, node_id in priors['output_cortex'].items():
+                if node_key.startswith('out:'):
+                    graph.add_edge(l5_nid, node_id,
+                                   edge_type=TEMPORAL, weight=0.05)
 
     # 3. Input columns → BG striatum (gating control)
     # All-to-all: any input can learn to gate any WM stripe.
@@ -240,26 +249,33 @@ def setup_brain() -> Brain:
         col = brain.tio._input_columns[str(d)]
         graph.add_edge(col['L23'], eos_node, edge_type=TEMPORAL, weight=0.01)
 
+    # Helper: find all cells for a multi-cell layer.
+    # E.g., _find_cells(priors['broca'], 'ba44a:L5') returns all L5 cell nids.
+    def _find_cells(prior_dict, prefix):
+        """Find all cell node IDs matching a prefix (e.g., 'ba44a:L5')."""
+        cells = [nid for key, nid in prior_dict.items()
+                 if key.startswith(f'{prefix}:') and key[len(prefix)+1:].isdigit()]
+        if not cells and prefix in prior_dict:
+            cells = [prior_dict[prefix]]  # single-cell fallback
+        return cells
+
     # === WORKSPACE CONJUNCTION PATH ===
-    # Broca columns → output cortex (all-to-all, weak).
-    # BA44 anterior (hierarchy) drives output selection.
+    # Broca columns → output cortex (all L5 cells → all output nodes).
     for broca_col in ['ba44a', 'ba44p', 'ba45']:
-        broca_l5 = priors['broca'][f'{broca_col}:L5']
-        for d in range(10):
-            out_node = priors['output_cortex'][f'out:{d}']
-            graph.add_edge(broca_l5, out_node, edge_type=TEMPORAL, weight=0.02)
+        l5_cells = _find_cells(priors['broca'], f'{broca_col}:L5')
+        for l5_nid in l5_cells:
+            for d in range(10):
+                out_node = priors['output_cortex'][f'out:{d}']
+                graph.add_edge(l5_nid, out_node, edge_type=TEMPORAL, weight=0.02)
 
-    # NOTE: Input columns no longer connect directly to relay_temporal.
-    # The path is: input → relay_token → token cortex → temporal cortex.
-    # This is wired in config.json, not here. The token cortex preprocesses
-    # raw tokens before they reach the temporal cortex hierarchy.
-
-    # Broca → digit column L6 (backward predictions → apical pathway).
+    # Broca → digit column L6 (backward predictions, first L5 cell only).
     for broca_col in ['ba44a', 'ba45']:
-        broca_l5 = priors['broca'][f'{broca_col}:L5']
-        for d in range(10):
-            col = brain.tio._input_columns[str(d)]
-            graph.add_edge(broca_l5, col['L6'], edge_type=TEMPORAL, weight=0.01)
+        l5_cells = _find_cells(priors['broca'], f'{broca_col}:L5')
+        if l5_cells:
+            for d in range(10):
+                col = brain.tio._input_columns[str(d)]
+                graph.add_edge(l5_cells[0], col['L6'],
+                               edge_type=TEMPORAL, weight=0.01)
 
     print(f"Brain setup: {graph.summary()}")
     return brain

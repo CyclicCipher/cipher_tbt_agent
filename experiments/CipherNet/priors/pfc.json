@@ -1,80 +1,2644 @@
 {
   "name": "pfc",
-  "description": "Prefrontal Cortex — modified cortical columns with stronger recurrence. Working memory stripes, sequencer, error monitor, lateral inhibition. Gates are EXTERNAL (in basal ganglia subgraph).",
-
+  "description": "PFC with 8 cells/layer for WM",
   "nodes": [
-    {"id": "wm0:L4", "layer": 4, "role": "input", "stripe": 0, "description": "Working memory stripe 0 input."},
-    {"id": "wm0:L23", "layer": 23, "role": "process", "stripe": 0, "description": "WM0 processing — strong recurrent self-connection."},
-    {"id": "wm0:L5", "layer": 5, "role": "output", "stripe": 0, "description": "WM0 output."},
-    {"id": "wm0:L6", "layer": 6, "role": "feedback", "stripe": 0, "description": "WM0 feedback."},
-
-    {"id": "wm1:L4", "layer": 4, "role": "input", "stripe": 1},
-    {"id": "wm1:L23", "layer": 23, "role": "process", "stripe": 1},
-    {"id": "wm1:L5", "layer": 5, "role": "output", "stripe": 1},
-    {"id": "wm1:L6", "layer": 6, "role": "feedback", "stripe": 1},
-
-    {"id": "wm2:L4", "layer": 4, "role": "input", "stripe": 2, "description": "Task/goal stripe."},
-    {"id": "wm2:L23", "layer": 23, "role": "process", "stripe": 2},
-    {"id": "wm2:L5", "layer": 5, "role": "output", "stripe": 2},
-    {"id": "wm2:L6", "layer": 6, "role": "feedback", "stripe": 2},
-
-    {"id": "inhibitor", "layer": 23, "role": "inhibitor", "description": "Lateral inhibition between stripes."},
-
-    {"id": "monitor:L4", "layer": 4, "role": "input", "description": "Error monitor input."},
-    {"id": "monitor:L23", "layer": 23, "role": "process", "description": "Error monitor processing."},
-    {"id": "monitor:L5", "layer": 5, "role": "output", "description": "Error monitor output."},
-    {"id": "monitor:L6", "layer": 6, "role": "feedback"},
-
-    {"id": "sequencer:L4", "layer": 4, "role": "input", "description": "Sequencer input."},
-    {"id": "sequencer:L23", "layer": 23, "role": "process", "description": "Sequencer — maintains task position."},
-    {"id": "sequencer:L5", "layer": 5, "role": "output", "description": "Sequencer output."},
-    {"id": "sequencer:L6", "layer": 6, "role": "feedback"}
+    {
+      "id": "wm0:L4:0",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 0
+    },
+    {
+      "id": "wm0:L23:0",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 0
+    },
+    {
+      "id": "wm0:L5:0",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 0
+    },
+    {
+      "id": "wm0:L6:0",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 0
+    },
+    {
+      "id": "wm0:L4:1",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 1
+    },
+    {
+      "id": "wm0:L23:1",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 1
+    },
+    {
+      "id": "wm0:L5:1",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 1
+    },
+    {
+      "id": "wm0:L6:1",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 1
+    },
+    {
+      "id": "wm0:L4:2",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 2
+    },
+    {
+      "id": "wm0:L23:2",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 2
+    },
+    {
+      "id": "wm0:L5:2",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 2
+    },
+    {
+      "id": "wm0:L6:2",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 2
+    },
+    {
+      "id": "wm0:L4:3",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 3
+    },
+    {
+      "id": "wm0:L23:3",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 3
+    },
+    {
+      "id": "wm0:L5:3",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 3
+    },
+    {
+      "id": "wm0:L6:3",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 3
+    },
+    {
+      "id": "wm0:L4:4",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 4
+    },
+    {
+      "id": "wm0:L23:4",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 4
+    },
+    {
+      "id": "wm0:L5:4",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 4
+    },
+    {
+      "id": "wm0:L6:4",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 4
+    },
+    {
+      "id": "wm0:L4:5",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 5
+    },
+    {
+      "id": "wm0:L23:5",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 5
+    },
+    {
+      "id": "wm0:L5:5",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 5
+    },
+    {
+      "id": "wm0:L6:5",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 5
+    },
+    {
+      "id": "wm0:L4:6",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 6
+    },
+    {
+      "id": "wm0:L23:6",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 6
+    },
+    {
+      "id": "wm0:L5:6",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 6
+    },
+    {
+      "id": "wm0:L6:6",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 6
+    },
+    {
+      "id": "wm0:L4:7",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 7
+    },
+    {
+      "id": "wm0:L23:7",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 7
+    },
+    {
+      "id": "wm0:L5:7",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 7
+    },
+    {
+      "id": "wm0:L6:7",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 7
+    },
+    {
+      "id": "wm0:L4_inhib",
+      "role": "inhibitor",
+      "layer": 4
+    },
+    {
+      "id": "wm0:L23_inhib",
+      "role": "inhibitor",
+      "layer": 23
+    },
+    {
+      "id": "wm0:L5_inhib",
+      "role": "inhibitor",
+      "layer": 5
+    },
+    {
+      "id": "wm1:L4:0",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 0
+    },
+    {
+      "id": "wm1:L23:0",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 0
+    },
+    {
+      "id": "wm1:L5:0",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 0
+    },
+    {
+      "id": "wm1:L6:0",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 0
+    },
+    {
+      "id": "wm1:L4:1",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 1
+    },
+    {
+      "id": "wm1:L23:1",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 1
+    },
+    {
+      "id": "wm1:L5:1",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 1
+    },
+    {
+      "id": "wm1:L6:1",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 1
+    },
+    {
+      "id": "wm1:L4:2",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 2
+    },
+    {
+      "id": "wm1:L23:2",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 2
+    },
+    {
+      "id": "wm1:L5:2",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 2
+    },
+    {
+      "id": "wm1:L6:2",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 2
+    },
+    {
+      "id": "wm1:L4:3",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 3
+    },
+    {
+      "id": "wm1:L23:3",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 3
+    },
+    {
+      "id": "wm1:L5:3",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 3
+    },
+    {
+      "id": "wm1:L6:3",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 3
+    },
+    {
+      "id": "wm1:L4:4",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 4
+    },
+    {
+      "id": "wm1:L23:4",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 4
+    },
+    {
+      "id": "wm1:L5:4",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 4
+    },
+    {
+      "id": "wm1:L6:4",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 4
+    },
+    {
+      "id": "wm1:L4:5",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 5
+    },
+    {
+      "id": "wm1:L23:5",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 5
+    },
+    {
+      "id": "wm1:L5:5",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 5
+    },
+    {
+      "id": "wm1:L6:5",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 5
+    },
+    {
+      "id": "wm1:L4:6",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 6
+    },
+    {
+      "id": "wm1:L23:6",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 6
+    },
+    {
+      "id": "wm1:L5:6",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 6
+    },
+    {
+      "id": "wm1:L6:6",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 6
+    },
+    {
+      "id": "wm1:L4:7",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 7
+    },
+    {
+      "id": "wm1:L23:7",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 7
+    },
+    {
+      "id": "wm1:L5:7",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 7
+    },
+    {
+      "id": "wm1:L6:7",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 7
+    },
+    {
+      "id": "wm1:L4_inhib",
+      "role": "inhibitor",
+      "layer": 4
+    },
+    {
+      "id": "wm1:L23_inhib",
+      "role": "inhibitor",
+      "layer": 23
+    },
+    {
+      "id": "wm1:L5_inhib",
+      "role": "inhibitor",
+      "layer": 5
+    },
+    {
+      "id": "wm2:L4:0",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 0
+    },
+    {
+      "id": "wm2:L23:0",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 0
+    },
+    {
+      "id": "wm2:L5:0",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 0
+    },
+    {
+      "id": "wm2:L6:0",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 0
+    },
+    {
+      "id": "wm2:L4:1",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 1
+    },
+    {
+      "id": "wm2:L23:1",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 1
+    },
+    {
+      "id": "wm2:L5:1",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 1
+    },
+    {
+      "id": "wm2:L6:1",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 1
+    },
+    {
+      "id": "wm2:L4:2",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 2
+    },
+    {
+      "id": "wm2:L23:2",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 2
+    },
+    {
+      "id": "wm2:L5:2",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 2
+    },
+    {
+      "id": "wm2:L6:2",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 2
+    },
+    {
+      "id": "wm2:L4:3",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 3
+    },
+    {
+      "id": "wm2:L23:3",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 3
+    },
+    {
+      "id": "wm2:L5:3",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 3
+    },
+    {
+      "id": "wm2:L6:3",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 3
+    },
+    {
+      "id": "wm2:L4:4",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 4
+    },
+    {
+      "id": "wm2:L23:4",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 4
+    },
+    {
+      "id": "wm2:L5:4",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 4
+    },
+    {
+      "id": "wm2:L6:4",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 4
+    },
+    {
+      "id": "wm2:L4:5",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 5
+    },
+    {
+      "id": "wm2:L23:5",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 5
+    },
+    {
+      "id": "wm2:L5:5",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 5
+    },
+    {
+      "id": "wm2:L6:5",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 5
+    },
+    {
+      "id": "wm2:L4:6",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 6
+    },
+    {
+      "id": "wm2:L23:6",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 6
+    },
+    {
+      "id": "wm2:L5:6",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 6
+    },
+    {
+      "id": "wm2:L6:6",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 6
+    },
+    {
+      "id": "wm2:L4:7",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 7
+    },
+    {
+      "id": "wm2:L23:7",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 7
+    },
+    {
+      "id": "wm2:L5:7",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 7
+    },
+    {
+      "id": "wm2:L6:7",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 7
+    },
+    {
+      "id": "wm2:L4_inhib",
+      "role": "inhibitor",
+      "layer": 4
+    },
+    {
+      "id": "wm2:L23_inhib",
+      "role": "inhibitor",
+      "layer": 23
+    },
+    {
+      "id": "wm2:L5_inhib",
+      "role": "inhibitor",
+      "layer": 5
+    },
+    {
+      "id": "sequencer:L4",
+      "layer": 4,
+      "role": "input"
+    },
+    {
+      "id": "sequencer:L23",
+      "layer": 23,
+      "role": "process"
+    },
+    {
+      "id": "sequencer:L5",
+      "layer": 5,
+      "role": "output"
+    },
+    {
+      "id": "sequencer:L6",
+      "layer": 6,
+      "role": "feedback"
+    },
+    {
+      "id": "monitor:L4",
+      "layer": 4,
+      "role": "input"
+    },
+    {
+      "id": "monitor:L23",
+      "layer": 23,
+      "role": "process"
+    },
+    {
+      "id": "monitor:L5",
+      "layer": 5,
+      "role": "output"
+    },
+    {
+      "id": "monitor:L6",
+      "layer": 6,
+      "role": "feedback"
+    },
+    {
+      "id": "inhibitor",
+      "role": "inhibitor"
+    }
   ],
-
   "edges": [
-    {"source": "wm0:L4", "target": "wm0:L23", "type": "temporal", "weight": 1.0},
-    {"source": "wm0:L23", "target": "wm0:L23", "type": "temporal", "weight": 0.95, "description": "Recurrent self-loop — persistent activity."},
-    {"source": "wm0:L23", "target": "wm0:L5", "type": "temporal", "weight": 1.0},
-    {"source": "wm0:L5", "target": "wm0:L6", "type": "temporal", "weight": 1.0},
-    {"source": "wm0:L6", "target": "wm0:L4", "type": "temporal", "weight": 0.5},
-
-    {"source": "wm1:L4", "target": "wm1:L23", "type": "temporal", "weight": 1.0},
-    {"source": "wm1:L23", "target": "wm1:L23", "type": "temporal", "weight": 0.95},
-    {"source": "wm1:L23", "target": "wm1:L5", "type": "temporal", "weight": 1.0},
-    {"source": "wm1:L5", "target": "wm1:L6", "type": "temporal", "weight": 1.0},
-    {"source": "wm1:L6", "target": "wm1:L4", "type": "temporal", "weight": 0.5},
-
-    {"source": "wm2:L4", "target": "wm2:L23", "type": "temporal", "weight": 1.0},
-    {"source": "wm2:L23", "target": "wm2:L23", "type": "temporal", "weight": 0.98, "description": "Goal stripe — strongest persistence."},
-    {"source": "wm2:L23", "target": "wm2:L5", "type": "temporal", "weight": 1.0},
-    {"source": "wm2:L5", "target": "wm2:L6", "type": "temporal", "weight": 1.0},
-    {"source": "wm2:L6", "target": "wm2:L4", "type": "temporal", "weight": 0.5},
-
-    {"source": "wm0:L5", "target": "inhibitor", "type": "temporal", "weight": 0.5, "description": "WM lateral inhibition: stripes compete. Strong inhibition forces different stripes to hold different content (representational repulsion)."},
-    {"source": "wm1:L5", "target": "inhibitor", "type": "temporal", "weight": 0.5},
-    {"source": "wm2:L5", "target": "inhibitor", "type": "temporal", "weight": 0.5},
-    {"source": "inhibitor", "target": "wm0:L23", "type": "spatial", "weight": -0.6},
-    {"source": "inhibitor", "target": "wm1:L23", "type": "spatial", "weight": -0.6},
-    {"source": "inhibitor", "target": "wm2:L23", "type": "spatial", "weight": -0.6},
-
-    {"source": "wm0:L5", "target": "wm1:L4", "type": "temporal", "weight": 0.2, "description": "Stripe-to-stripe chaining (reduced to prevent content copying)."},
-    {"source": "wm1:L5", "target": "wm0:L4", "type": "temporal", "weight": 0.2},
-
-    {"source": "monitor:L4", "target": "monitor:L23", "type": "temporal", "weight": 1.0},
-    {"source": "monitor:L23", "target": "monitor:L5", "type": "temporal", "weight": 1.0},
-    {"source": "monitor:L5", "target": "monitor:L6", "type": "temporal", "weight": 1.0},
-    {"source": "monitor:L6", "target": "monitor:L4", "type": "temporal", "weight": 0.5},
-
-    {"source": "wm0:L5", "target": "monitor:L4", "type": "temporal", "weight": 0.5},
-    {"source": "wm1:L5", "target": "monitor:L4", "type": "temporal", "weight": 0.5},
-
-    {"source": "sequencer:L4", "target": "sequencer:L23", "type": "temporal", "weight": 1.0},
-    {"source": "sequencer:L23", "target": "sequencer:L23", "type": "temporal", "weight": 0.9},
-    {"source": "sequencer:L23", "target": "sequencer:L5", "type": "temporal", "weight": 1.0},
-    {"source": "sequencer:L5", "target": "sequencer:L6", "type": "temporal", "weight": 1.0},
-    {"source": "sequencer:L6", "target": "sequencer:L4", "type": "temporal", "weight": 0.5},
-    {"source": "wm0:L5", "target": "sequencer:L4", "type": "temporal", "weight": 0.3},
-    {"source": "wm1:L5", "target": "sequencer:L4", "type": "temporal", "weight": 0.3},
-    {"source": "wm2:L5", "target": "sequencer:L4", "type": "temporal", "weight": 0.3}
-  ]
+    {
+      "source": "wm0:L4:0",
+      "target": "wm0:L23:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L23:0",
+      "target": "wm0:L5:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L5:0",
+      "target": "wm0:L6:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L6:0",
+      "target": "wm0:L4:0",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm0:L23:0",
+      "target": "wm0:L23:0",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm0:L4:1",
+      "target": "wm0:L23:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L23:1",
+      "target": "wm0:L5:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L5:1",
+      "target": "wm0:L6:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L6:1",
+      "target": "wm0:L4:1",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm0:L23:1",
+      "target": "wm0:L23:1",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm0:L4:2",
+      "target": "wm0:L23:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L23:2",
+      "target": "wm0:L5:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L5:2",
+      "target": "wm0:L6:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L6:2",
+      "target": "wm0:L4:2",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm0:L23:2",
+      "target": "wm0:L23:2",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm0:L4:3",
+      "target": "wm0:L23:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L23:3",
+      "target": "wm0:L5:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L5:3",
+      "target": "wm0:L6:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L6:3",
+      "target": "wm0:L4:3",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm0:L23:3",
+      "target": "wm0:L23:3",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm0:L4:4",
+      "target": "wm0:L23:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L23:4",
+      "target": "wm0:L5:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L5:4",
+      "target": "wm0:L6:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L6:4",
+      "target": "wm0:L4:4",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm0:L23:4",
+      "target": "wm0:L23:4",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm0:L4:5",
+      "target": "wm0:L23:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L23:5",
+      "target": "wm0:L5:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L5:5",
+      "target": "wm0:L6:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L6:5",
+      "target": "wm0:L4:5",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm0:L23:5",
+      "target": "wm0:L23:5",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm0:L4:6",
+      "target": "wm0:L23:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L23:6",
+      "target": "wm0:L5:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L5:6",
+      "target": "wm0:L6:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L6:6",
+      "target": "wm0:L4:6",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm0:L23:6",
+      "target": "wm0:L23:6",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm0:L4:7",
+      "target": "wm0:L23:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L23:7",
+      "target": "wm0:L5:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L5:7",
+      "target": "wm0:L6:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm0:L6:7",
+      "target": "wm0:L4:7",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm0:L23:7",
+      "target": "wm0:L23:7",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm0:L4:0",
+      "target": "wm0:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L4_inhib",
+      "target": "wm0:L4:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L4:1",
+      "target": "wm0:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L4_inhib",
+      "target": "wm0:L4:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L4:2",
+      "target": "wm0:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L4_inhib",
+      "target": "wm0:L4:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L4:3",
+      "target": "wm0:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L4_inhib",
+      "target": "wm0:L4:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L4:4",
+      "target": "wm0:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L4_inhib",
+      "target": "wm0:L4:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L4:5",
+      "target": "wm0:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L4_inhib",
+      "target": "wm0:L4:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L4:6",
+      "target": "wm0:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L4_inhib",
+      "target": "wm0:L4:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L4:7",
+      "target": "wm0:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L4_inhib",
+      "target": "wm0:L4:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L23:0",
+      "target": "wm0:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L23_inhib",
+      "target": "wm0:L23:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L23:1",
+      "target": "wm0:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L23_inhib",
+      "target": "wm0:L23:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L23:2",
+      "target": "wm0:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L23_inhib",
+      "target": "wm0:L23:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L23:3",
+      "target": "wm0:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L23_inhib",
+      "target": "wm0:L23:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L23:4",
+      "target": "wm0:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L23_inhib",
+      "target": "wm0:L23:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L23:5",
+      "target": "wm0:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L23_inhib",
+      "target": "wm0:L23:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L23:6",
+      "target": "wm0:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L23_inhib",
+      "target": "wm0:L23:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L23:7",
+      "target": "wm0:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L23_inhib",
+      "target": "wm0:L23:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L5:0",
+      "target": "wm0:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L5_inhib",
+      "target": "wm0:L5:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L5:1",
+      "target": "wm0:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L5_inhib",
+      "target": "wm0:L5:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L5:2",
+      "target": "wm0:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L5_inhib",
+      "target": "wm0:L5:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L5:3",
+      "target": "wm0:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L5_inhib",
+      "target": "wm0:L5:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L5:4",
+      "target": "wm0:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L5_inhib",
+      "target": "wm0:L5:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L5:5",
+      "target": "wm0:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L5_inhib",
+      "target": "wm0:L5:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L5:6",
+      "target": "wm0:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L5_inhib",
+      "target": "wm0:L5:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm0:L5:7",
+      "target": "wm0:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm0:L5_inhib",
+      "target": "wm0:L5:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L4:0",
+      "target": "wm1:L23:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L23:0",
+      "target": "wm1:L5:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L5:0",
+      "target": "wm1:L6:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L6:0",
+      "target": "wm1:L4:0",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm1:L23:0",
+      "target": "wm1:L23:0",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm1:L4:1",
+      "target": "wm1:L23:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L23:1",
+      "target": "wm1:L5:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L5:1",
+      "target": "wm1:L6:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L6:1",
+      "target": "wm1:L4:1",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm1:L23:1",
+      "target": "wm1:L23:1",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm1:L4:2",
+      "target": "wm1:L23:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L23:2",
+      "target": "wm1:L5:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L5:2",
+      "target": "wm1:L6:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L6:2",
+      "target": "wm1:L4:2",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm1:L23:2",
+      "target": "wm1:L23:2",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm1:L4:3",
+      "target": "wm1:L23:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L23:3",
+      "target": "wm1:L5:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L5:3",
+      "target": "wm1:L6:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L6:3",
+      "target": "wm1:L4:3",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm1:L23:3",
+      "target": "wm1:L23:3",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm1:L4:4",
+      "target": "wm1:L23:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L23:4",
+      "target": "wm1:L5:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L5:4",
+      "target": "wm1:L6:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L6:4",
+      "target": "wm1:L4:4",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm1:L23:4",
+      "target": "wm1:L23:4",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm1:L4:5",
+      "target": "wm1:L23:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L23:5",
+      "target": "wm1:L5:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L5:5",
+      "target": "wm1:L6:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L6:5",
+      "target": "wm1:L4:5",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm1:L23:5",
+      "target": "wm1:L23:5",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm1:L4:6",
+      "target": "wm1:L23:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L23:6",
+      "target": "wm1:L5:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L5:6",
+      "target": "wm1:L6:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L6:6",
+      "target": "wm1:L4:6",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm1:L23:6",
+      "target": "wm1:L23:6",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm1:L4:7",
+      "target": "wm1:L23:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L23:7",
+      "target": "wm1:L5:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L5:7",
+      "target": "wm1:L6:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm1:L6:7",
+      "target": "wm1:L4:7",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm1:L23:7",
+      "target": "wm1:L23:7",
+      "type": "temporal",
+      "weight": 0.95
+    },
+    {
+      "source": "wm1:L4:0",
+      "target": "wm1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L4_inhib",
+      "target": "wm1:L4:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L4:1",
+      "target": "wm1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L4_inhib",
+      "target": "wm1:L4:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L4:2",
+      "target": "wm1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L4_inhib",
+      "target": "wm1:L4:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L4:3",
+      "target": "wm1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L4_inhib",
+      "target": "wm1:L4:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L4:4",
+      "target": "wm1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L4_inhib",
+      "target": "wm1:L4:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L4:5",
+      "target": "wm1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L4_inhib",
+      "target": "wm1:L4:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L4:6",
+      "target": "wm1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L4_inhib",
+      "target": "wm1:L4:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L4:7",
+      "target": "wm1:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L4_inhib",
+      "target": "wm1:L4:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L23:0",
+      "target": "wm1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L23_inhib",
+      "target": "wm1:L23:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L23:1",
+      "target": "wm1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L23_inhib",
+      "target": "wm1:L23:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L23:2",
+      "target": "wm1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L23_inhib",
+      "target": "wm1:L23:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L23:3",
+      "target": "wm1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L23_inhib",
+      "target": "wm1:L23:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L23:4",
+      "target": "wm1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L23_inhib",
+      "target": "wm1:L23:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L23:5",
+      "target": "wm1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L23_inhib",
+      "target": "wm1:L23:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L23:6",
+      "target": "wm1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L23_inhib",
+      "target": "wm1:L23:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L23:7",
+      "target": "wm1:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L23_inhib",
+      "target": "wm1:L23:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L5:0",
+      "target": "wm1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L5_inhib",
+      "target": "wm1:L5:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L5:1",
+      "target": "wm1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L5_inhib",
+      "target": "wm1:L5:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L5:2",
+      "target": "wm1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L5_inhib",
+      "target": "wm1:L5:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L5:3",
+      "target": "wm1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L5_inhib",
+      "target": "wm1:L5:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L5:4",
+      "target": "wm1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L5_inhib",
+      "target": "wm1:L5:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L5:5",
+      "target": "wm1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L5_inhib",
+      "target": "wm1:L5:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L5:6",
+      "target": "wm1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L5_inhib",
+      "target": "wm1:L5:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm1:L5:7",
+      "target": "wm1:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm1:L5_inhib",
+      "target": "wm1:L5:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L4:0",
+      "target": "wm2:L23:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L23:0",
+      "target": "wm2:L5:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L5:0",
+      "target": "wm2:L6:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L6:0",
+      "target": "wm2:L4:0",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm2:L23:0",
+      "target": "wm2:L23:0",
+      "type": "temporal",
+      "weight": 0.98
+    },
+    {
+      "source": "wm2:L4:1",
+      "target": "wm2:L23:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L23:1",
+      "target": "wm2:L5:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L5:1",
+      "target": "wm2:L6:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L6:1",
+      "target": "wm2:L4:1",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm2:L23:1",
+      "target": "wm2:L23:1",
+      "type": "temporal",
+      "weight": 0.98
+    },
+    {
+      "source": "wm2:L4:2",
+      "target": "wm2:L23:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L23:2",
+      "target": "wm2:L5:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L5:2",
+      "target": "wm2:L6:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L6:2",
+      "target": "wm2:L4:2",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm2:L23:2",
+      "target": "wm2:L23:2",
+      "type": "temporal",
+      "weight": 0.98
+    },
+    {
+      "source": "wm2:L4:3",
+      "target": "wm2:L23:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L23:3",
+      "target": "wm2:L5:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L5:3",
+      "target": "wm2:L6:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L6:3",
+      "target": "wm2:L4:3",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm2:L23:3",
+      "target": "wm2:L23:3",
+      "type": "temporal",
+      "weight": 0.98
+    },
+    {
+      "source": "wm2:L4:4",
+      "target": "wm2:L23:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L23:4",
+      "target": "wm2:L5:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L5:4",
+      "target": "wm2:L6:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L6:4",
+      "target": "wm2:L4:4",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm2:L23:4",
+      "target": "wm2:L23:4",
+      "type": "temporal",
+      "weight": 0.98
+    },
+    {
+      "source": "wm2:L4:5",
+      "target": "wm2:L23:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L23:5",
+      "target": "wm2:L5:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L5:5",
+      "target": "wm2:L6:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L6:5",
+      "target": "wm2:L4:5",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm2:L23:5",
+      "target": "wm2:L23:5",
+      "type": "temporal",
+      "weight": 0.98
+    },
+    {
+      "source": "wm2:L4:6",
+      "target": "wm2:L23:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L23:6",
+      "target": "wm2:L5:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L5:6",
+      "target": "wm2:L6:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L6:6",
+      "target": "wm2:L4:6",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm2:L23:6",
+      "target": "wm2:L23:6",
+      "type": "temporal",
+      "weight": 0.98
+    },
+    {
+      "source": "wm2:L4:7",
+      "target": "wm2:L23:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L23:7",
+      "target": "wm2:L5:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L5:7",
+      "target": "wm2:L6:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "wm2:L6:7",
+      "target": "wm2:L4:7",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm2:L23:7",
+      "target": "wm2:L23:7",
+      "type": "temporal",
+      "weight": 0.98
+    },
+    {
+      "source": "wm2:L4:0",
+      "target": "wm2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L4_inhib",
+      "target": "wm2:L4:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L4:1",
+      "target": "wm2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L4_inhib",
+      "target": "wm2:L4:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L4:2",
+      "target": "wm2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L4_inhib",
+      "target": "wm2:L4:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L4:3",
+      "target": "wm2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L4_inhib",
+      "target": "wm2:L4:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L4:4",
+      "target": "wm2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L4_inhib",
+      "target": "wm2:L4:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L4:5",
+      "target": "wm2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L4_inhib",
+      "target": "wm2:L4:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L4:6",
+      "target": "wm2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L4_inhib",
+      "target": "wm2:L4:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L4:7",
+      "target": "wm2:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L4_inhib",
+      "target": "wm2:L4:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L23:0",
+      "target": "wm2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L23_inhib",
+      "target": "wm2:L23:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L23:1",
+      "target": "wm2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L23_inhib",
+      "target": "wm2:L23:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L23:2",
+      "target": "wm2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L23_inhib",
+      "target": "wm2:L23:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L23:3",
+      "target": "wm2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L23_inhib",
+      "target": "wm2:L23:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L23:4",
+      "target": "wm2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L23_inhib",
+      "target": "wm2:L23:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L23:5",
+      "target": "wm2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L23_inhib",
+      "target": "wm2:L23:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L23:6",
+      "target": "wm2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L23_inhib",
+      "target": "wm2:L23:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L23:7",
+      "target": "wm2:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L23_inhib",
+      "target": "wm2:L23:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L5:0",
+      "target": "wm2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L5_inhib",
+      "target": "wm2:L5:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L5:1",
+      "target": "wm2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L5_inhib",
+      "target": "wm2:L5:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L5:2",
+      "target": "wm2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L5_inhib",
+      "target": "wm2:L5:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L5:3",
+      "target": "wm2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L5_inhib",
+      "target": "wm2:L5:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L5:4",
+      "target": "wm2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L5_inhib",
+      "target": "wm2:L5:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L5:5",
+      "target": "wm2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L5_inhib",
+      "target": "wm2:L5:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L5:6",
+      "target": "wm2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L5_inhib",
+      "target": "wm2:L5:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "wm2:L5:7",
+      "target": "wm2:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "wm2:L5_inhib",
+      "target": "wm2:L5:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "sequencer:L4",
+      "target": "sequencer:L23",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "sequencer:L23",
+      "target": "sequencer:L5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "sequencer:L5",
+      "target": "sequencer:L6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "sequencer:L6",
+      "target": "sequencer:L4",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "sequencer:L23",
+      "target": "sequencer:L23",
+      "type": "temporal",
+      "weight": 0.9
+    },
+    {
+      "source": "monitor:L4",
+      "target": "monitor:L23",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "monitor:L23",
+      "target": "monitor:L5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "monitor:L5",
+      "target": "monitor:L6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "monitor:L6",
+      "target": "monitor:L4",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm0:L5:0",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm0:L23:0",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm0:L5:1",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm0:L23:1",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm0:L5:2",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm0:L23:2",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm0:L5:3",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm0:L23:3",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm0:L5:4",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm0:L23:4",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm0:L5:5",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm0:L23:5",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm0:L5:6",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm0:L23:6",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm0:L5:7",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm0:L23:7",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm1:L5:0",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm1:L23:0",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm1:L5:1",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm1:L23:1",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm1:L5:2",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm1:L23:2",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm1:L5:3",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm1:L23:3",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm1:L5:4",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm1:L23:4",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm1:L5:5",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm1:L23:5",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm1:L5:6",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm1:L23:6",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm1:L5:7",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm1:L23:7",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm2:L5:0",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm2:L23:0",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm2:L5:1",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm2:L23:1",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm2:L5:2",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm2:L23:2",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm2:L5:3",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm2:L23:3",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm2:L5:4",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm2:L23:4",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm2:L5:5",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm2:L23:5",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm2:L5:6",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm2:L23:6",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm2:L5:7",
+      "target": "inhibitor",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "inhibitor",
+      "target": "wm2:L23:7",
+      "type": "spatial",
+      "weight": -0.6
+    },
+    {
+      "source": "wm0:L5:0",
+      "target": "wm1:L4:0",
+      "type": "temporal",
+      "weight": 0.2
+    },
+    {
+      "source": "wm1:L5:0",
+      "target": "wm0:L4:0",
+      "type": "temporal",
+      "weight": 0.2
+    },
+    {
+      "source": "wm0:L5:0",
+      "target": "sequencer:L4",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "wm1:L5:0",
+      "target": "sequencer:L4",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "wm2:L5:0",
+      "target": "sequencer:L4",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source": "wm0:L5:0",
+      "target": "monitor:L4",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "wm1:L5:0",
+      "target": "monitor:L4",
+      "type": "temporal",
+      "weight": 0.5
+    }
+  ],
+  "properties": {
+    "n_cells": 8
+  }
 }

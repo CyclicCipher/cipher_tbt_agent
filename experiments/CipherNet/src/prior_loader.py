@@ -97,9 +97,26 @@ def load_priors(config_path: str | None = None) -> tuple[Graph, dict[str, dict[s
         etype = EDGE_TYPES.get(conn.get("type", "spatial"), SPATIAL)
         weight = conn.get("weight", 1.0)
 
-        src_id = prior_nodes[src_prior][src_node]
-        tgt_id = prior_nodes[tgt_prior][tgt_node]
-        graph.add_edge(src_id, tgt_id, edge_type=etype, weight=weight)
+        # Wildcard expansion: "stg1:L4:*" → all cells in that layer.
+        # Used for feedforward broadcast to multi-cell columns.
+        def _expand_wildcard(prior_name, node_pattern):
+            if ':*' not in node_pattern:
+                return [prior_nodes[prior_name][node_pattern]]
+            prefix = node_pattern.replace(':*', ':')
+            matches = [nid for key, nid in prior_nodes[prior_name].items()
+                       if key.startswith(prefix)]
+            if not matches:
+                # Fallback: try without the wildcard (single-cell column)
+                base = node_pattern.replace(':*', '')
+                if base in prior_nodes[prior_name]:
+                    return [prior_nodes[prior_name][base]]
+            return matches
+
+        src_ids = _expand_wildcard(src_prior, src_node)
+        tgt_ids = _expand_wildcard(tgt_prior, tgt_node)
+        for sid in src_ids:
+            for tid in tgt_ids:
+                graph.add_edge(sid, tid, edge_type=etype, weight=weight)
 
     # Set tonic activations for intrinsically active neurons.
     # GPi neurons fire tonically without input — they inhibit thalamus

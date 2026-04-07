@@ -1126,7 +1126,8 @@ class Graph:
 
     def create_column(self, name: str,
                       self_loop_weight: float = 0.0,
-                      create_relay: bool = True) -> dict[str, int]:
+                      create_relay: bool = True,
+                      n_cells: int = 1) -> dict[str, int]:
         """Create a predictive coding cortical column.
 
         Microcircuit (Bastos et al. 2012):
@@ -1136,56 +1137,115 @@ class Graph:
           Sends errors FORWARD (up) to L4 of next higher area.
         - L5 (beta): DEEP PYRAMIDAL. Encodes conditional expectations.
           Sends predictions BACKWARD (down) to L2/3 of next lower area.
-          NOTE: predictions skip L4 (the error layer).
         - L6 (beta): FEEDBACK. Generates intra-column prediction for L4.
 
-        Feedforward relay: L2/3 -> relay -> next area's L4 (errors go UP)
-        Feedback relay: receives from higher area's L5 -> this L2/3
-        (predictions come DOWN, skip L4)
+        Multi-cell columns (n_cells > 1):
+        Each layer gets N cells. Vertical wiring is 1-to-1 across layers
+        (L4:i → L23:i → L5:i → L6:i → L4:i). External input broadcasts
+        to ALL L4 cells. All cells share the same feedforward input but
+        WHICH cells activate depends on context (lateral connections).
+        The PATTERN of active cells encodes identity + context.
+
+        Biology: a minicolumn has ~80-120 neurons. HTM uses 32 cells.
+        CipherNet uses 8 cells for hierarchy columns, 1 for input columns.
         """
         sg = f"column:{name}"
         self.create_subgraph(sg)
 
-        l4 = self.add_node(label=f"{name}:L4", subgraph=sg, layer=4, role="input")
-        l23 = self.add_node(label=f"{name}:L23", subgraph=sg, layer=23, role="process")
-        l5 = self.add_node(label=f"{name}:L5", subgraph=sg, layer=5, role="output")
-        l6 = self.add_node(label=f"{name}:L6", subgraph=sg, layer=6, role="feedback")
+        if n_cells == 1:
+            # --- Single-cell column (backward compatible) ---
+            l4 = self.add_node(label=f"{name}:L4", subgraph=sg,
+                               layer=4, role="input")
+            l23 = self.add_node(label=f"{name}:L23", subgraph=sg,
+                                layer=23, role="process")
+            l5 = self.add_node(label=f"{name}:L5", subgraph=sg,
+                               layer=5, role="output")
+            l6 = self.add_node(label=f"{name}:L6", subgraph=sg,
+                               layer=6, role="feedback")
 
-        # Internal wiring:
-        # L4 (error) -> L2/3 (error encoding)
-        self.add_edge(l4, l23, edge_type=TEMPORAL, weight=1.0)
-        # L2/3 (error) -> L5 (deep pyramidal takes error, forms prediction)
-        self.add_edge(l23, l5, edge_type=TEMPORAL, weight=1.0)
-        # L5 (prediction) -> L6 (feedback generator)
-        self.add_edge(l5, l6, edge_type=TEMPORAL, weight=1.0)
-        # L6 (prediction) -> L4 (top-down prediction for error computation)
-        # This is the PREDICTION edge: role='feedback' on source means
-        # step() treats this as prediction, not sensory input.
-        self.add_edge(l6, l4, edge_type=TEMPORAL, weight=0.5)
+            self.add_edge(l4, l23, edge_type=TEMPORAL, weight=1.0)
+            self.add_edge(l23, l5, edge_type=TEMPORAL, weight=1.0)
+            self.add_edge(l5, l6, edge_type=TEMPORAL, weight=1.0)
+            self.add_edge(l6, l4, edge_type=TEMPORAL, weight=0.5)
+            if self_loop_weight > 0:
+                self.add_edge(l23, l23, edge_type=TEMPORAL,
+                              weight=self_loop_weight)
 
-        # Self-loop on L2/3 for persistence within the gamma band.
-        if self_loop_weight > 0:
-            self.add_edge(l23, l23, edge_type=TEMPORAL, weight=self_loop_weight)
+            result = {"L4": l4, "L23": l23, "L5": l5, "L6": l6,
+                      "L4_cells": [l4], "L23_cells": [l23],
+                      "L5_cells": [l5], "L6_cells": [l6],
+                      "name": name, "n_cells": 1}
+        else:
+            # --- Multi-cell column (HTM-style) ---
+            l4_cells = []
+            l23_cells = []
+            l5_cells = []
+            l6_cells = []
 
-        result = {"L4": l4, "L23": l23, "L5": l5, "L6": l6, "name": name}
+            for c in range(n_cells):
+                l4_c = self.add_node(
+                    label=f"{name}:L4:{c}", subgraph=sg,
+                    layer=4, role="input", cell_index=c)
+                l23_c = self.add_node(
+                    label=f"{name}:L23:{c}", subgraph=sg,
+                    layer=23, role="process", cell_index=c)
+                l5_c = self.add_node(
+                    label=f"{name}:L5:{c}", subgraph=sg,
+                    layer=5, role="output", cell_index=c)
+                l6_c = self.add_node(
+                    label=f"{name}:L6:{c}", subgraph=sg,
+                    layer=6, role="feedback", cell_index=c)
+
+                # Vertical 1-to-1: L4:i → L23:i → L5:i → L6:i → L4:i
+                self.add_edge(l4_c, l23_c, edge_type=TEMPORAL, weight=1.0)
+                self.add_edge(l23_c, l5_c, edge_type=TEMPORAL, weight=1.0)
+                self.add_edge(l5_c, l6_c, edge_type=TEMPORAL, weight=1.0)
+                self.add_edge(l6_c, l4_c, edge_type=TEMPORAL, weight=0.5)
+
+                if self_loop_weight > 0:
+                    self.add_edge(l23_c, l23_c, edge_type=TEMPORAL,
+                                  weight=self_loop_weight)
+
+                l4_cells.append(l4_c)
+                l23_cells.append(l23_c)
+                l5_cells.append(l5_c)
+                l6_cells.append(l6_c)
+
+            # Per-layer lateral inhibition (within-column competition).
+            # Sparse activation: only a few cells per layer win.
+            for layer_tag, cells in [("L4", l4_cells), ("L23", l23_cells),
+                                     ("L5", l5_cells)]:
+                inhib = self.add_node(
+                    label=f"{name}:{layer_tag}_inhib", subgraph=sg,
+                    role="inhibitor", layer=int(layer_tag.replace("L", "")))
+                for cell in cells:
+                    self.add_edge(cell, inhib, edge_type=TEMPORAL,
+                                  weight=0.15)
+                    self.add_edge(inhib, cell, edge_type=SPATIAL,
+                                  weight=-0.1)
+
+            # Backward compat: "L4" = first cell, "L4_cells" = all cells
+            result = {
+                "L4": l4_cells[0], "L23": l23_cells[0],
+                "L5": l5_cells[0], "L6": l6_cells[0],
+                "L4_cells": l4_cells, "L23_cells": l23_cells,
+                "L5_cells": l5_cells, "L6_cells": l6_cells,
+                "name": name, "n_cells": n_cells,
+            }
 
         if create_relay:
             self.create_subgraph("thalamus")
-            # Feedforward relay: carries ERRORS up.
-            # L2/3 -> relay -> next area's L4
             relay = self.add_node(
                 label=f"thalamus:relay:{name}",
-                subgraph="thalamus",
-                role="relay",
-                column=name,
-            )
-            # L2/3 sends errors to relay (not L5 — L5 sends predictions DOWN)
-            self.add_edge(l23, relay, edge_type=TEMPORAL, weight=1.0)
-            # Relay feeds next area's L4 (feedforward target)
-            self.add_edge(relay, l4, edge_type=TEMPORAL, weight=1.0)
-            # L5 still connects to relay for backward prediction routing
-            # through thalamus to lower areas' L2/3
-            self.add_edge(l5, relay, edge_type=TEMPORAL, weight=0.5)
+                subgraph="thalamus", role="relay", column=name)
+            # First L23 cell sends to relay (backward compat).
+            # For multi-cell: all L23 cells could send, but relay
+            # is a single node that sums them (population readout).
+            first_l23 = result["L23_cells"][0] if n_cells > 1 else result["L23"]
+            first_l5 = result["L5_cells"][0] if n_cells > 1 else result["L5"]
+            self.add_edge(first_l23, relay, edge_type=TEMPORAL, weight=1.0)
+            self.add_edge(relay, result["L4"], edge_type=TEMPORAL, weight=1.0)
+            self.add_edge(first_l5, relay, edge_type=TEMPORAL, weight=0.5)
             result["relay"] = relay
 
         return result

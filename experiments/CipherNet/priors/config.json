@@ -1,163 +1,736 @@
 {
   "priors": [
-    {"name": "ans", "file": "priors/ans.json"},
-    {"name": "pfc", "file": "priors/pfc.json"},
-    {"name": "basal_ganglia", "file": "priors/basal_ganglia.json"},
-    {"name": "thalamus", "file": "priors/thalamus.json"},
-    {"name": "output_cortex", "file": "priors/output_cortex.json"},
-    {"name": "broca", "file": "priors/broca.json"},
-    {"name": "temporal_cortex", "file": "priors/temporal_cortex.json"},
-    {"name": "token_cortex", "file": "priors/token_cortex.json"},
-    {"name": "visual_cortex_stub", "file": "priors/visual_cortex_stub.json"}
+    {
+      "name": "ans",
+      "file": "priors/ans.json"
+    },
+    {
+      "name": "pfc",
+      "file": "priors/pfc.json"
+    },
+    {
+      "name": "basal_ganglia",
+      "file": "priors/basal_ganglia.json"
+    },
+    {
+      "name": "thalamus",
+      "file": "priors/thalamus.json"
+    },
+    {
+      "name": "output_cortex",
+      "file": "priors/output_cortex.json"
+    },
+    {
+      "name": "broca",
+      "file": "priors/broca.json"
+    },
+    {
+      "name": "temporal_cortex",
+      "file": "priors/temporal_cortex.json"
+    },
+    {
+      "name": "token_cortex",
+      "file": "priors/token_cortex.json"
+    },
+    {
+      "name": "visual_cortex_stub",
+      "file": "priors/visual_cortex_stub.json"
+    }
   ],
   "connections": [
-
-    {"_comment": "=== ANS → PFC (numerosity signal to monitor) ==="},
-    {"source_prior": "ans", "source_node": "num1:L5", "target_prior": "pfc", "target_node": "monitor:L4", "type": "temporal", "weight": 0.3},
-    {"source_prior": "ans", "source_node": "num3:L5", "target_prior": "pfc", "target_node": "monitor:L4", "type": "temporal", "weight": 0.3},
-    {"source_prior": "ans", "source_node": "num9:L5", "target_prior": "pfc", "target_node": "monitor:L4", "type": "temporal", "weight": 0.3},
-
-    {"_comment": "=== BG GPi → Thalamus relays (inhibitory, Dale's law) ==="},
-    {"_comment": "GPi is inhibitory (GABAergic). Active GPi suppresses relay. Go pathway inhibits GPi → relay disinhibited."},
-    {"source_prior": "basal_ganglia", "source_node": "gpi_0", "target_prior": "thalamus", "target_node": "relay_0", "type": "temporal", "weight": -1.0},
-    {"source_prior": "basal_ganglia", "source_node": "gpi_1", "target_prior": "thalamus", "target_node": "relay_1", "type": "temporal", "weight": -1.0},
-    {"source_prior": "basal_ganglia", "source_node": "gpi_2", "target_prior": "thalamus", "target_node": "relay_2", "type": "temporal", "weight": -1.0},
-
-    {"_comment": "=== BG GPi → Thalamus VA relay (inhibitory) ==="},
-    {"source_prior": "basal_ganglia", "source_node": "gpi_3", "target_prior": "thalamus", "target_node": "relay_broca", "type": "temporal", "weight": -1.0},
-
-    {"_comment": "=== Thalamus relays → PFC WM (excitatory) ==="},
-    {"source_prior": "thalamus", "source_node": "relay_0", "target_prior": "pfc", "target_node": "wm0:L23", "type": "temporal", "weight": 0.8},
-    {"source_prior": "thalamus", "source_node": "relay_1", "target_prior": "pfc", "target_node": "wm1:L23", "type": "temporal", "weight": 0.8},
-    {"source_prior": "thalamus", "source_node": "relay_2", "target_prior": "pfc", "target_node": "wm2:L23", "type": "temporal", "weight": 0.8},
-
-    {"_comment": "=== Thalamus VA → Broca BA44 anterior (excitatory) ==="},
-    {"source_prior": "thalamus", "source_node": "relay_broca", "target_prior": "broca", "target_node": "ba44a:L4", "type": "temporal", "weight": 0.8},
-
-    {"_comment": "=== Thalamus → temporal cortex (sensory relay, ungated) ==="},
-    {"source_prior": "thalamus", "source_node": "relay_temporal", "target_prior": "temporal_cortex", "target_node": "stg1:L4", "type": "temporal", "weight": 1.0},
-
-    {"_comment": "=== PFC → BG (cortical inputs to striatum) ==="},
-    {"source_prior": "pfc", "source_node": "sequencer:L5", "target_prior": "basal_ganglia", "target_node": "d1_go_0", "type": "temporal"},
-    {"source_prior": "pfc", "source_node": "sequencer:L5", "target_prior": "basal_ganglia", "target_node": "d1_go_1", "type": "temporal"},
-    {"source_prior": "pfc", "source_node": "monitor:L5", "target_prior": "basal_ganglia", "target_node": "d1_go_0", "type": "temporal"},
-    {"source_prior": "pfc", "source_node": "monitor:L5", "target_prior": "basal_ganglia", "target_node": "d1_go_1", "type": "temporal"},
-
-    {"_comment": "=== Broca BA44 → PFC (hierarchy output) ==="},
-    {"source_prior": "broca", "source_node": "ba44a:L5", "target_prior": "pfc", "target_node": "sequencer:L4", "type": "temporal"},
-    {"source_prior": "broca", "source_node": "ba44a:L5", "target_prior": "pfc", "target_node": "wm2:L4", "type": "temporal"},
-
-    {"_comment": "=== PFC → Broca BA45 (WM informs semantic selection) ==="},
-    {"source_prior": "pfc", "source_node": "wm0:L5", "target_prior": "broca", "target_node": "ba45:L4", "type": "temporal"},
-    {"source_prior": "pfc", "source_node": "wm1:L5", "target_prior": "broca", "target_node": "ba45:L4", "type": "temporal"},
-
-    {"_comment": "=== Broca → BG (procedural gating — anterior putamen) ==="},
-    {"source_prior": "broca", "source_node": "ba44a:L5", "target_prior": "basal_ganglia", "target_node": "d1_go_3", "type": "temporal", "weight": 0.6},
-    {"source_prior": "broca", "source_node": "ba44a:L23", "target_prior": "basal_ganglia", "target_node": "d1_go_3", "type": "temporal", "weight": 0.4},
-
-    {"_comment": "=== Broca BA45 → BG (caudate head) ==="},
-    {"source_prior": "broca", "source_node": "ba45:L5", "target_prior": "basal_ganglia", "target_node": "d1_go_3", "type": "temporal", "weight": 0.5},
-    {"source_prior": "broca", "source_node": "ba45:L23", "target_prior": "basal_ganglia", "target_node": "d2_nogo_3", "type": "temporal", "weight": 0.3},
-
-    {"_comment": "=== Temporal cortex → Broca (DORSAL stream — arcuate fasciculus) ==="},
-    {"source_prior": "temporal_cortex", "source_node": "stg1:L23", "target_prior": "broca", "target_node": "ba44a:L4", "type": "temporal", "weight": 0.7,
-     "description": "Arcuate fasciculus: primary STG → BA44 anterior (phonological → Merge)."},
-    {"source_prior": "temporal_cortex", "source_node": "stg2:L23", "target_prior": "broca", "target_node": "ba44a:L4", "type": "temporal", "weight": 0.5,
-     "description": "Secondary STG → BA44 (more processed phonological)."},
-
-    {"_comment": "=== Temporal cortex → Broca (VENTRAL stream — extreme capsule) ==="},
-    {"source_prior": "temporal_cortex", "source_node": "stg_assoc:L23", "target_prior": "broca", "target_node": "ba45:L4", "type": "temporal", "weight": 0.6,
-     "description": "Extreme capsule: association STG → BA45 (semantic → selection)."},
-
-    {"_comment": "=== Broca → Temporal cortex (feedback predictions, skip L4) ==="},
-    {"source_prior": "broca", "source_node": "ba44a:L5", "target_prior": "temporal_cortex", "target_node": "stg1:L23", "type": "temporal", "weight": 0.3},
-    {"source_prior": "broca", "source_node": "ba45:L5", "target_prior": "temporal_cortex", "target_node": "stg_assoc:L23", "type": "temporal", "weight": 0.3},
-
-    {"_comment": "=== TRANSTHALAMIC PATHWAYS (MD thalamus) ==="},
-    {"source_prior": "temporal_cortex", "source_node": "stg1:L5", "target_prior": "thalamus", "target_node": "relay_0", "type": "temporal", "weight": 0.8,
-     "description": "Transthalamic: STG primary → MD relay_0 → PFC WM0."},
-    {"source_prior": "temporal_cortex", "source_node": "stg2:L5", "target_prior": "thalamus", "target_node": "relay_0", "type": "temporal", "weight": 0.5},
-
-    {"source_prior": "broca", "source_node": "ba44a:L5", "target_prior": "thalamus", "target_node": "relay_1", "type": "temporal", "weight": 0.7,
-     "description": "Transthalamic: BA44 anterior → MD relay_1 → PFC WM1."},
-    {"source_prior": "broca", "source_node": "ba44a:L5", "target_prior": "thalamus", "target_node": "relay_2", "type": "temporal", "weight": 0.6,
-     "description": "Transthalamic: BA44 hierarchy result → MD relay_2 → PFC WM2."},
-
-    {"_comment": "=== Direct cortico-cortical (parallel to transthalamic) ==="},
-    {"source_prior": "temporal_cortex", "source_node": "stg1:L5", "target_prior": "pfc", "target_node": "wm0:L4", "type": "temporal", "weight": 0.3},
-
-    {"_comment": "=== PFC WM → output cortex ==="},
-    {"source_prior": "pfc", "source_node": "wm0:L5", "target_prior": "output_cortex", "target_node": "inhibitor", "type": "temporal", "weight": -0.3},
-
-    {"_comment": "=== Broca → output cortex ==="},
-    {"source_prior": "broca", "source_node": "ba44a:L5", "target_prior": "output_cortex", "target_node": "inhibitor", "type": "temporal", "weight": -0.3},
-
-    {"_comment": "=== PFC sequencer → BG temporal cortex gate ==="},
-    {"source_prior": "pfc", "source_node": "sequencer:L5", "target_prior": "basal_ganglia", "target_node": "d1_go_4", "type": "temporal", "weight": 0.5},
-
-    {"_comment": "=== TOKEN CORTEX INPUT (relay_token → token cortex) ==="},
-    {"_comment": "Strong drive to fast column (onset), weaker to slow (sustained). New input hits the onset detector hardest."},
-    {"source_prior": "thalamus", "source_node": "relay_token", "target_prior": "token_cortex", "target_node": "tc_fast:L4", "type": "temporal", "weight": 1.0},
-    {"source_prior": "thalamus", "source_node": "relay_token", "target_prior": "token_cortex", "target_node": "tc_mid:L4", "type": "temporal", "weight": 0.5},
-    {"source_prior": "thalamus", "source_node": "relay_token", "target_prior": "token_cortex", "target_node": "tc_slow:L4", "type": "temporal", "weight": 0.3},
-
-    {"_comment": "=== TOKEN CORTEX → TEMPORAL CORTEX ==="},
-    {"_comment": "Temporal columns feed STG1 (temporal structure)."},
-    {"source_prior": "token_cortex", "source_node": "tc_slow:L23", "target_prior": "temporal_cortex", "target_node": "stg1:L4", "type": "temporal", "weight": 0.8},
-    {"source_prior": "token_cortex", "source_node": "tc_mid:L23", "target_prior": "temporal_cortex", "target_node": "stg1:L4", "type": "temporal", "weight": 0.4},
-
-    {"_comment": "Identity columns DISTRIBUTED across temporal cortex columns."},
-    {"_comment": "Different identity columns feed different STG levels, preserving"},
-    {"_comment": "the tokentopic map through the hierarchy (not all to STG1)."},
-    {"source_prior": "token_cortex", "source_node": "id0:L23", "target_prior": "temporal_cortex", "target_node": "stg1:L4", "type": "temporal", "weight": 0.3},
-    {"source_prior": "token_cortex", "source_node": "id1:L23", "target_prior": "temporal_cortex", "target_node": "stg1:L4", "type": "temporal", "weight": 0.3},
-    {"source_prior": "token_cortex", "source_node": "id2:L23", "target_prior": "temporal_cortex", "target_node": "stg1:L4", "type": "temporal", "weight": 0.3},
-    {"source_prior": "token_cortex", "source_node": "id3:L23", "target_prior": "temporal_cortex", "target_node": "stg2:L4", "type": "temporal", "weight": 0.3},
-    {"source_prior": "token_cortex", "source_node": "id4:L23", "target_prior": "temporal_cortex", "target_node": "stg2:L4", "type": "temporal", "weight": 0.3},
-    {"source_prior": "token_cortex", "source_node": "id5:L23", "target_prior": "temporal_cortex", "target_node": "stg_assoc:L4", "type": "temporal", "weight": 0.3},
-    {"source_prior": "token_cortex", "source_node": "id6:L23", "target_prior": "temporal_cortex", "target_node": "stg_assoc:L4", "type": "temporal", "weight": 0.3},
-    {"source_prior": "token_cortex", "source_node": "id7:L23", "target_prior": "temporal_cortex", "target_node": "stg_assoc:L4", "type": "temporal", "weight": 0.3},
-
-    {"_comment": "=== TOKEN CORTEX → TRANSTHALAMIC (fast-track to PFC) ==="},
-    {"_comment": "Onset + identity fast-track to PFC WM."},
-    {"source_prior": "token_cortex", "source_node": "tc_fast:L5", "target_prior": "thalamus", "target_node": "relay_0", "type": "temporal", "weight": 0.3},
-
-    {"_comment": "=== IDENTITY COLUMNS → L6 THROUGHOUT HIERARCHY ==="},
-    {"_comment": "Identity population code reaches L6 (feedback/prediction layer) of each"},
-    {"_comment": "hierarchy level. This provides the context L6 needs to generate identity-"},
-    {"_comment": "specific predictions. In TBT, L6 grid cells receive from multiple sources"},
-    {"_comment": "(own L5 + thalamus + lateral) to generate predictions. The identity signal"},
-    {"_comment": "tells L6 WHICH token is present so it can predict the correct downstream features."},
-
-    {"_comment": "Identity → temporal cortex L6 (prediction context for STG)"},
-    {"source_prior": "token_cortex", "source_node": "id0:L5", "target_prior": "temporal_cortex", "target_node": "stg1:L6", "type": "temporal", "weight": 0.1},
-    {"source_prior": "token_cortex", "source_node": "id1:L5", "target_prior": "temporal_cortex", "target_node": "stg1:L6", "type": "temporal", "weight": 0.1},
-    {"source_prior": "token_cortex", "source_node": "id2:L5", "target_prior": "temporal_cortex", "target_node": "stg2:L6", "type": "temporal", "weight": 0.1},
-    {"source_prior": "token_cortex", "source_node": "id3:L5", "target_prior": "temporal_cortex", "target_node": "stg2:L6", "type": "temporal", "weight": 0.1},
-    {"source_prior": "token_cortex", "source_node": "id4:L5", "target_prior": "temporal_cortex", "target_node": "stg_assoc:L6", "type": "temporal", "weight": 0.1},
-    {"source_prior": "token_cortex", "source_node": "id5:L5", "target_prior": "temporal_cortex", "target_node": "stg_assoc:L6", "type": "temporal", "weight": 0.1},
-
-    {"_comment": "Identity → Broca L6 (prediction context for structural processing)"},
-    {"source_prior": "token_cortex", "source_node": "id0:L5", "target_prior": "broca", "target_node": "ba44a:L6", "type": "temporal", "weight": 0.1},
-    {"source_prior": "token_cortex", "source_node": "id2:L5", "target_prior": "broca", "target_node": "ba44a:L6", "type": "temporal", "weight": 0.1},
-    {"source_prior": "token_cortex", "source_node": "id4:L5", "target_prior": "broca", "target_node": "ba45:L6", "type": "temporal", "weight": 0.1},
-    {"source_prior": "token_cortex", "source_node": "id6:L5", "target_prior": "broca", "target_node": "ba45:L6", "type": "temporal", "weight": 0.1},
-
-    {"_comment": "Identity → PFC WM L6 (prediction context for working memory)"},
-    {"source_prior": "token_cortex", "source_node": "id0:L5", "target_prior": "pfc", "target_node": "wm0:L6", "type": "temporal", "weight": 0.1},
-    {"source_prior": "token_cortex", "source_node": "id2:L5", "target_prior": "pfc", "target_node": "wm0:L6", "type": "temporal", "weight": 0.1},
-    {"source_prior": "token_cortex", "source_node": "id4:L5", "target_prior": "pfc", "target_node": "wm1:L6", "type": "temporal", "weight": 0.1},
-    {"source_prior": "token_cortex", "source_node": "id6:L5", "target_prior": "pfc", "target_node": "wm1:L6", "type": "temporal", "weight": 0.1},
-    {"source_prior": "token_cortex", "source_node": "id1:L5", "target_prior": "pfc", "target_node": "wm2:L6", "type": "temporal", "weight": 0.1},
-    {"source_prior": "token_cortex", "source_node": "id3:L5", "target_prior": "pfc", "target_node": "wm2:L6", "type": "temporal", "weight": 0.1},
-
-    {"_comment": "=== TEMPORAL CORTEX → TOKEN CORTEX FEEDBACK (top-down predictions) ==="},
-    {"source_prior": "temporal_cortex", "source_node": "stg1:L5", "target_prior": "token_cortex", "target_node": "tc_slow:L23", "type": "temporal", "weight": 0.3},
-
-    {"_comment": "=== VISUAL CORTEX STUB INPUT (relay_visual → visual cortex) ==="},
-    {"source_prior": "thalamus", "source_node": "relay_visual", "target_prior": "visual_cortex_stub", "target_node": "v00:L4", "type": "temporal", "weight": 1.0},
-    {"source_prior": "thalamus", "source_node": "relay_visual", "target_prior": "visual_cortex_stub", "target_node": "v01:L4", "type": "temporal", "weight": 1.0},
-    {"source_prior": "thalamus", "source_node": "relay_visual", "target_prior": "visual_cortex_stub", "target_node": "v10:L4", "type": "temporal", "weight": 1.0},
-    {"source_prior": "thalamus", "source_node": "relay_visual", "target_prior": "visual_cortex_stub", "target_node": "v11:L4", "type": "temporal", "weight": 1.0}
+    {
+      "_comment": "=== ANS \u00e2\u2020\u2019 PFC (numerosity signal to monitor) ==="
+    },
+    {
+      "source_prior": "ans",
+      "source_node": "num1:L5",
+      "target_prior": "pfc",
+      "target_node": "monitor:L4",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source_prior": "ans",
+      "source_node": "num3:L5",
+      "target_prior": "pfc",
+      "target_node": "monitor:L4",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source_prior": "ans",
+      "source_node": "num9:L5",
+      "target_prior": "pfc",
+      "target_node": "monitor:L4",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "_comment": "=== BG GPi \u00e2\u2020\u2019 Thalamus relays (inhibitory, Dale's law) ==="
+    },
+    {
+      "_comment": "GPi is inhibitory (GABAergic). Active GPi suppresses relay. Go pathway inhibits GPi \u00e2\u2020\u2019 relay disinhibited."
+    },
+    {
+      "source_prior": "basal_ganglia",
+      "source_node": "gpi_0",
+      "target_prior": "thalamus",
+      "target_node": "relay_0",
+      "type": "temporal",
+      "weight": -1.0
+    },
+    {
+      "source_prior": "basal_ganglia",
+      "source_node": "gpi_1",
+      "target_prior": "thalamus",
+      "target_node": "relay_1",
+      "type": "temporal",
+      "weight": -1.0
+    },
+    {
+      "source_prior": "basal_ganglia",
+      "source_node": "gpi_2",
+      "target_prior": "thalamus",
+      "target_node": "relay_2",
+      "type": "temporal",
+      "weight": -1.0
+    },
+    {
+      "_comment": "=== BG GPi \u00e2\u2020\u2019 Thalamus VA relay (inhibitory) ==="
+    },
+    {
+      "source_prior": "basal_ganglia",
+      "source_node": "gpi_3",
+      "target_prior": "thalamus",
+      "target_node": "relay_broca",
+      "type": "temporal",
+      "weight": -1.0
+    },
+    {
+      "_comment": "=== Thalamus relays \u00e2\u2020\u2019 PFC WM (excitatory) ==="
+    },
+    {
+      "source_prior": "thalamus",
+      "source_node": "relay_0",
+      "target_prior": "pfc",
+      "target_node": "wm0:L23:*",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source_prior": "thalamus",
+      "source_node": "relay_1",
+      "target_prior": "pfc",
+      "target_node": "wm1:L23:*",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source_prior": "thalamus",
+      "source_node": "relay_2",
+      "target_prior": "pfc",
+      "target_node": "wm2:L23:*",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "_comment": "=== Thalamus VA \u00e2\u2020\u2019 Broca BA44 anterior (excitatory) ==="
+    },
+    {
+      "source_prior": "thalamus",
+      "source_node": "relay_broca",
+      "target_prior": "broca",
+      "target_node": "ba44a:L4:*",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "_comment": "=== Thalamus \u00e2\u2020\u2019 temporal cortex (sensory relay, ungated) ==="
+    },
+    {
+      "source_prior": "thalamus",
+      "source_node": "relay_temporal",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg1:L4:*",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "_comment": "=== PFC \u00e2\u2020\u2019 BG (cortical inputs to striatum) ==="
+    },
+    {
+      "source_prior": "pfc",
+      "source_node": "sequencer:L5",
+      "target_prior": "basal_ganglia",
+      "target_node": "d1_go_0",
+      "type": "temporal"
+    },
+    {
+      "source_prior": "pfc",
+      "source_node": "sequencer:L5",
+      "target_prior": "basal_ganglia",
+      "target_node": "d1_go_1",
+      "type": "temporal"
+    },
+    {
+      "source_prior": "pfc",
+      "source_node": "monitor:L5",
+      "target_prior": "basal_ganglia",
+      "target_node": "d1_go_0",
+      "type": "temporal"
+    },
+    {
+      "source_prior": "pfc",
+      "source_node": "monitor:L5",
+      "target_prior": "basal_ganglia",
+      "target_node": "d1_go_1",
+      "type": "temporal"
+    },
+    {
+      "_comment": "=== Broca BA44 \u00e2\u2020\u2019 PFC (hierarchy output) ==="
+    },
+    {
+      "source_prior": "broca",
+      "source_node": "ba44a:L5:*",
+      "target_prior": "pfc",
+      "target_node": "sequencer:L4",
+      "type": "temporal"
+    },
+    {
+      "source_prior": "broca",
+      "source_node": "ba44a:L5:*",
+      "target_prior": "pfc",
+      "target_node": "wm2:L4:*",
+      "type": "temporal"
+    },
+    {
+      "_comment": "=== PFC \u00e2\u2020\u2019 Broca BA45 (WM informs semantic selection) ==="
+    },
+    {
+      "source_prior": "pfc",
+      "source_node": "wm0:L5:*",
+      "target_prior": "broca",
+      "target_node": "ba45:L4:*",
+      "type": "temporal"
+    },
+    {
+      "source_prior": "pfc",
+      "source_node": "wm1:L5:*",
+      "target_prior": "broca",
+      "target_node": "ba45:L4:*",
+      "type": "temporal"
+    },
+    {
+      "_comment": "=== Broca \u00e2\u2020\u2019 BG (procedural gating \u00e2\u20ac\u201d anterior putamen) ==="
+    },
+    {
+      "source_prior": "broca",
+      "source_node": "ba44a:L5:*",
+      "target_prior": "basal_ganglia",
+      "target_node": "d1_go_3",
+      "type": "temporal",
+      "weight": 0.6
+    },
+    {
+      "source_prior": "broca",
+      "source_node": "ba44a:L23:*",
+      "target_prior": "basal_ganglia",
+      "target_node": "d1_go_3",
+      "type": "temporal",
+      "weight": 0.4
+    },
+    {
+      "_comment": "=== Broca BA45 \u00e2\u2020\u2019 BG (caudate head) ==="
+    },
+    {
+      "source_prior": "broca",
+      "source_node": "ba45:L5:*",
+      "target_prior": "basal_ganglia",
+      "target_node": "d1_go_3",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source_prior": "broca",
+      "source_node": "ba45:L23:*",
+      "target_prior": "basal_ganglia",
+      "target_node": "d2_nogo_3",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "_comment": "=== Temporal cortex \u00e2\u2020\u2019 Broca (DORSAL stream \u00e2\u20ac\u201d arcuate fasciculus) ==="
+    },
+    {
+      "source_prior": "temporal_cortex",
+      "source_node": "stg1:L23:*",
+      "target_prior": "broca",
+      "target_node": "ba44a:L4:*",
+      "type": "temporal",
+      "weight": 0.7,
+      "description": "Arcuate fasciculus: primary STG \u00e2\u2020\u2019 BA44 anterior (phonological \u00e2\u2020\u2019 Merge)."
+    },
+    {
+      "source_prior": "temporal_cortex",
+      "source_node": "stg2:L23:*",
+      "target_prior": "broca",
+      "target_node": "ba44a:L4:*",
+      "type": "temporal",
+      "weight": 0.5,
+      "description": "Secondary STG \u00e2\u2020\u2019 BA44 (more processed phonological)."
+    },
+    {
+      "_comment": "=== Temporal cortex \u00e2\u2020\u2019 Broca (VENTRAL stream \u00e2\u20ac\u201d extreme capsule) ==="
+    },
+    {
+      "source_prior": "temporal_cortex",
+      "source_node": "stg_assoc:L23:*",
+      "target_prior": "broca",
+      "target_node": "ba45:L4:*",
+      "type": "temporal",
+      "weight": 0.6,
+      "description": "Extreme capsule: association STG \u00e2\u2020\u2019 BA45 (semantic \u00e2\u2020\u2019 selection)."
+    },
+    {
+      "_comment": "=== Broca \u00e2\u2020\u2019 Temporal cortex (feedback predictions, skip L4) ==="
+    },
+    {
+      "source_prior": "broca",
+      "source_node": "ba44a:L5:*",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg1:L23:*",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source_prior": "broca",
+      "source_node": "ba45:L5:*",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg_assoc:L23:*",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "_comment": "=== TRANSTHALAMIC PATHWAYS (MD thalamus) ==="
+    },
+    {
+      "source_prior": "temporal_cortex",
+      "source_node": "stg1:L5:*",
+      "target_prior": "thalamus",
+      "target_node": "relay_0",
+      "type": "temporal",
+      "weight": 0.8,
+      "description": "Transthalamic: STG primary \u00e2\u2020\u2019 MD relay_0 \u00e2\u2020\u2019 PFC WM0."
+    },
+    {
+      "source_prior": "temporal_cortex",
+      "source_node": "stg2:L5:*",
+      "target_prior": "thalamus",
+      "target_node": "relay_0",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source_prior": "broca",
+      "source_node": "ba44a:L5:*",
+      "target_prior": "thalamus",
+      "target_node": "relay_1",
+      "type": "temporal",
+      "weight": 0.7,
+      "description": "Transthalamic: BA44 anterior \u00e2\u2020\u2019 MD relay_1 \u00e2\u2020\u2019 PFC WM1."
+    },
+    {
+      "source_prior": "broca",
+      "source_node": "ba44a:L5:*",
+      "target_prior": "thalamus",
+      "target_node": "relay_2",
+      "type": "temporal",
+      "weight": 0.6,
+      "description": "Transthalamic: BA44 hierarchy result \u00e2\u2020\u2019 MD relay_2 \u00e2\u2020\u2019 PFC WM2."
+    },
+    {
+      "_comment": "=== Direct cortico-cortical (parallel to transthalamic) ==="
+    },
+    {
+      "source_prior": "temporal_cortex",
+      "source_node": "stg1:L5:*",
+      "target_prior": "pfc",
+      "target_node": "wm0:L4:*",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "_comment": "=== PFC WM \u00e2\u2020\u2019 output cortex ==="
+    },
+    {
+      "source_prior": "pfc",
+      "source_node": "wm0:L5:*",
+      "target_prior": "output_cortex",
+      "target_node": "inhibitor",
+      "type": "temporal",
+      "weight": -0.3
+    },
+    {
+      "_comment": "=== Broca \u00e2\u2020\u2019 output cortex ==="
+    },
+    {
+      "source_prior": "broca",
+      "source_node": "ba44a:L5:*",
+      "target_prior": "output_cortex",
+      "target_node": "inhibitor",
+      "type": "temporal",
+      "weight": -0.3
+    },
+    {
+      "_comment": "=== PFC sequencer \u00e2\u2020\u2019 BG temporal cortex gate ==="
+    },
+    {
+      "source_prior": "pfc",
+      "source_node": "sequencer:L5",
+      "target_prior": "basal_ganglia",
+      "target_node": "d1_go_4",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "_comment": "=== TOKEN CORTEX INPUT (relay_token \u00e2\u2020\u2019 token cortex) ==="
+    },
+    {
+      "_comment": "Strong drive to fast column (onset), weaker to slow (sustained). New input hits the onset detector hardest."
+    },
+    {
+      "source_prior": "thalamus",
+      "source_node": "relay_token",
+      "target_prior": "token_cortex",
+      "target_node": "tc_fast:L4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source_prior": "thalamus",
+      "source_node": "relay_token",
+      "target_prior": "token_cortex",
+      "target_node": "tc_mid:L4",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source_prior": "thalamus",
+      "source_node": "relay_token",
+      "target_prior": "token_cortex",
+      "target_node": "tc_slow:L4",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "_comment": "=== TOKEN CORTEX \u00e2\u2020\u2019 TEMPORAL CORTEX ==="
+    },
+    {
+      "_comment": "Temporal columns feed STG1 (temporal structure)."
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "tc_slow:L23",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg1:L4:*",
+      "type": "temporal",
+      "weight": 0.8
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "tc_mid:L23",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg1:L4:*",
+      "type": "temporal",
+      "weight": 0.4
+    },
+    {
+      "_comment": "Identity columns DISTRIBUTED across temporal cortex columns."
+    },
+    {
+      "_comment": "Different identity columns feed different STG levels, preserving"
+    },
+    {
+      "_comment": "the tokentopic map through the hierarchy (not all to STG1)."
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id0:L23",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg1:L4:*",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id1:L23",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg1:L4:*",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id2:L23",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg1:L4:*",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id3:L23",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg2:L4:*",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id4:L23",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg2:L4:*",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id5:L23",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg_assoc:L4:*",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id6:L23",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg_assoc:L4:*",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id7:L23",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg_assoc:L4:*",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "_comment": "=== TOKEN CORTEX \u00e2\u2020\u2019 TRANSTHALAMIC (fast-track to PFC) ==="
+    },
+    {
+      "_comment": "Onset + identity fast-track to PFC WM."
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "tc_fast:L5",
+      "target_prior": "thalamus",
+      "target_node": "relay_0",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "_comment": "=== IDENTITY COLUMNS \u00e2\u2020\u2019 L6 THROUGHOUT HIERARCHY ==="
+    },
+    {
+      "_comment": "Identity population code reaches L6 (feedback/prediction layer) of each"
+    },
+    {
+      "_comment": "hierarchy level. This provides the context L6 needs to generate identity-"
+    },
+    {
+      "_comment": "specific predictions. In TBT, L6 grid cells receive from multiple sources"
+    },
+    {
+      "_comment": "(own L5 + thalamus + lateral) to generate predictions. The identity signal"
+    },
+    {
+      "_comment": "tells L6 WHICH token is present so it can predict the correct downstream features."
+    },
+    {
+      "_comment": "Identity \u00e2\u2020\u2019 temporal cortex L6 (prediction context for STG)"
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id0:L5",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg1:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id1:L5",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg1:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id2:L5",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg2:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id3:L5",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg2:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id4:L5",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg_assoc:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id5:L5",
+      "target_prior": "temporal_cortex",
+      "target_node": "stg_assoc:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "_comment": "Identity \u00e2\u2020\u2019 Broca L6 (prediction context for structural processing)"
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id0:L5",
+      "target_prior": "broca",
+      "target_node": "ba44a:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id2:L5",
+      "target_prior": "broca",
+      "target_node": "ba44a:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id4:L5",
+      "target_prior": "broca",
+      "target_node": "ba45:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id6:L5",
+      "target_prior": "broca",
+      "target_node": "ba45:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "_comment": "Identity \u00e2\u2020\u2019 PFC WM L6 (prediction context for working memory)"
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id0:L5",
+      "target_prior": "pfc",
+      "target_node": "wm0:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id2:L5",
+      "target_prior": "pfc",
+      "target_node": "wm0:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id4:L5",
+      "target_prior": "pfc",
+      "target_node": "wm1:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id6:L5",
+      "target_prior": "pfc",
+      "target_node": "wm1:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id1:L5",
+      "target_prior": "pfc",
+      "target_node": "wm2:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "source_prior": "token_cortex",
+      "source_node": "id3:L5",
+      "target_prior": "pfc",
+      "target_node": "wm2:L6:*",
+      "type": "temporal",
+      "weight": 0.1
+    },
+    {
+      "_comment": "=== TEMPORAL CORTEX \u00e2\u2020\u2019 TOKEN CORTEX FEEDBACK (top-down predictions) ==="
+    },
+    {
+      "source_prior": "temporal_cortex",
+      "source_node": "stg1:L5:*",
+      "target_prior": "token_cortex",
+      "target_node": "tc_slow:L23",
+      "type": "temporal",
+      "weight": 0.3
+    },
+    {
+      "_comment": "=== VISUAL CORTEX STUB INPUT (relay_visual \u00e2\u2020\u2019 visual cortex) ==="
+    },
+    {
+      "source_prior": "thalamus",
+      "source_node": "relay_visual",
+      "target_prior": "visual_cortex_stub",
+      "target_node": "v00:L4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source_prior": "thalamus",
+      "source_node": "relay_visual",
+      "target_prior": "visual_cortex_stub",
+      "target_node": "v01:L4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source_prior": "thalamus",
+      "source_node": "relay_visual",
+      "target_prior": "visual_cortex_stub",
+      "target_node": "v10:L4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source_prior": "thalamus",
+      "source_node": "relay_visual",
+      "target_prior": "visual_cortex_stub",
+      "target_node": "v11:L4",
+      "type": "temporal",
+      "weight": 1.0
+    }
   ]
 }

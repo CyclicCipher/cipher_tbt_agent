@@ -1,43 +1,2120 @@
 {
   "name": "broca",
-  "description": "Broca's area — standard cortical columns with specific connectivity. BA44 anterior (Merge/hierarchy), BA44 posterior (motor sequencing), BA45 (semantic retrieval). Same L4/L23/L5/L6 architecture as everywhere. Specialization from connectivity: arcuate fasciculus to temporal cortex, anterior putamen to BG, VA thalamus.",
-
+  "description": "Broca with 8 cells/layer",
   "nodes": [
-    {"id": "ba44a:L4", "layer": 4, "role": "input", "area": "ba44_anterior", "description": "BA44 anterior — hierarchy/Merge input."},
-    {"id": "ba44a:L23", "layer": 23, "role": "process", "area": "ba44_anterior"},
-    {"id": "ba44a:L5", "layer": 5, "role": "output", "area": "ba44_anterior"},
-    {"id": "ba44a:L6", "layer": 6, "role": "feedback", "area": "ba44_anterior"},
-
-    {"id": "ba44p:L4", "layer": 4, "role": "input", "area": "ba44_posterior", "description": "BA44 posterior — motor/premotor sequencing."},
-    {"id": "ba44p:L23", "layer": 23, "role": "process", "area": "ba44_posterior"},
-    {"id": "ba44p:L5", "layer": 5, "role": "output", "area": "ba44_posterior"},
-    {"id": "ba44p:L6", "layer": 6, "role": "feedback", "area": "ba44_posterior"},
-
-    {"id": "ba45:L4", "layer": 4, "role": "input", "area": "ba45", "description": "BA45 — semantic retrieval and selection."},
-    {"id": "ba45:L23", "layer": 23, "role": "process", "area": "ba45"},
-    {"id": "ba45:L5", "layer": 5, "role": "output", "area": "ba45"},
-    {"id": "ba45:L6", "layer": 6, "role": "feedback", "area": "ba45"}
+    {
+      "id": "ba44a:L4:0",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 0
+    },
+    {
+      "id": "ba44a:L23:0",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 0
+    },
+    {
+      "id": "ba44a:L5:0",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 0
+    },
+    {
+      "id": "ba44a:L6:0",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 0
+    },
+    {
+      "id": "ba44a:L4:1",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 1
+    },
+    {
+      "id": "ba44a:L23:1",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 1
+    },
+    {
+      "id": "ba44a:L5:1",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 1
+    },
+    {
+      "id": "ba44a:L6:1",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 1
+    },
+    {
+      "id": "ba44a:L4:2",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 2
+    },
+    {
+      "id": "ba44a:L23:2",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 2
+    },
+    {
+      "id": "ba44a:L5:2",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 2
+    },
+    {
+      "id": "ba44a:L6:2",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 2
+    },
+    {
+      "id": "ba44a:L4:3",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 3
+    },
+    {
+      "id": "ba44a:L23:3",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 3
+    },
+    {
+      "id": "ba44a:L5:3",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 3
+    },
+    {
+      "id": "ba44a:L6:3",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 3
+    },
+    {
+      "id": "ba44a:L4:4",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 4
+    },
+    {
+      "id": "ba44a:L23:4",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 4
+    },
+    {
+      "id": "ba44a:L5:4",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 4
+    },
+    {
+      "id": "ba44a:L6:4",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 4
+    },
+    {
+      "id": "ba44a:L4:5",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 5
+    },
+    {
+      "id": "ba44a:L23:5",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 5
+    },
+    {
+      "id": "ba44a:L5:5",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 5
+    },
+    {
+      "id": "ba44a:L6:5",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 5
+    },
+    {
+      "id": "ba44a:L4:6",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 6
+    },
+    {
+      "id": "ba44a:L23:6",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 6
+    },
+    {
+      "id": "ba44a:L5:6",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 6
+    },
+    {
+      "id": "ba44a:L6:6",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 6
+    },
+    {
+      "id": "ba44a:L4:7",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 7
+    },
+    {
+      "id": "ba44a:L23:7",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 7
+    },
+    {
+      "id": "ba44a:L5:7",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 7
+    },
+    {
+      "id": "ba44a:L6:7",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 7
+    },
+    {
+      "id": "ba44a:L4_inhib",
+      "role": "inhibitor",
+      "layer": 4
+    },
+    {
+      "id": "ba44a:L23_inhib",
+      "role": "inhibitor",
+      "layer": 23
+    },
+    {
+      "id": "ba44a:L5_inhib",
+      "role": "inhibitor",
+      "layer": 5
+    },
+    {
+      "id": "ba44p:L4:0",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 0
+    },
+    {
+      "id": "ba44p:L23:0",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 0
+    },
+    {
+      "id": "ba44p:L5:0",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 0
+    },
+    {
+      "id": "ba44p:L6:0",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 0
+    },
+    {
+      "id": "ba44p:L4:1",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 1
+    },
+    {
+      "id": "ba44p:L23:1",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 1
+    },
+    {
+      "id": "ba44p:L5:1",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 1
+    },
+    {
+      "id": "ba44p:L6:1",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 1
+    },
+    {
+      "id": "ba44p:L4:2",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 2
+    },
+    {
+      "id": "ba44p:L23:2",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 2
+    },
+    {
+      "id": "ba44p:L5:2",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 2
+    },
+    {
+      "id": "ba44p:L6:2",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 2
+    },
+    {
+      "id": "ba44p:L4:3",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 3
+    },
+    {
+      "id": "ba44p:L23:3",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 3
+    },
+    {
+      "id": "ba44p:L5:3",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 3
+    },
+    {
+      "id": "ba44p:L6:3",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 3
+    },
+    {
+      "id": "ba44p:L4:4",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 4
+    },
+    {
+      "id": "ba44p:L23:4",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 4
+    },
+    {
+      "id": "ba44p:L5:4",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 4
+    },
+    {
+      "id": "ba44p:L6:4",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 4
+    },
+    {
+      "id": "ba44p:L4:5",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 5
+    },
+    {
+      "id": "ba44p:L23:5",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 5
+    },
+    {
+      "id": "ba44p:L5:5",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 5
+    },
+    {
+      "id": "ba44p:L6:5",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 5
+    },
+    {
+      "id": "ba44p:L4:6",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 6
+    },
+    {
+      "id": "ba44p:L23:6",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 6
+    },
+    {
+      "id": "ba44p:L5:6",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 6
+    },
+    {
+      "id": "ba44p:L6:6",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 6
+    },
+    {
+      "id": "ba44p:L4:7",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 7
+    },
+    {
+      "id": "ba44p:L23:7",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 7
+    },
+    {
+      "id": "ba44p:L5:7",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 7
+    },
+    {
+      "id": "ba44p:L6:7",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 7
+    },
+    {
+      "id": "ba44p:L4_inhib",
+      "role": "inhibitor",
+      "layer": 4
+    },
+    {
+      "id": "ba44p:L23_inhib",
+      "role": "inhibitor",
+      "layer": 23
+    },
+    {
+      "id": "ba44p:L5_inhib",
+      "role": "inhibitor",
+      "layer": 5
+    },
+    {
+      "id": "ba45:L4:0",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 0
+    },
+    {
+      "id": "ba45:L23:0",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 0
+    },
+    {
+      "id": "ba45:L5:0",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 0
+    },
+    {
+      "id": "ba45:L6:0",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 0
+    },
+    {
+      "id": "ba45:L4:1",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 1
+    },
+    {
+      "id": "ba45:L23:1",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 1
+    },
+    {
+      "id": "ba45:L5:1",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 1
+    },
+    {
+      "id": "ba45:L6:1",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 1
+    },
+    {
+      "id": "ba45:L4:2",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 2
+    },
+    {
+      "id": "ba45:L23:2",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 2
+    },
+    {
+      "id": "ba45:L5:2",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 2
+    },
+    {
+      "id": "ba45:L6:2",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 2
+    },
+    {
+      "id": "ba45:L4:3",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 3
+    },
+    {
+      "id": "ba45:L23:3",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 3
+    },
+    {
+      "id": "ba45:L5:3",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 3
+    },
+    {
+      "id": "ba45:L6:3",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 3
+    },
+    {
+      "id": "ba45:L4:4",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 4
+    },
+    {
+      "id": "ba45:L23:4",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 4
+    },
+    {
+      "id": "ba45:L5:4",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 4
+    },
+    {
+      "id": "ba45:L6:4",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 4
+    },
+    {
+      "id": "ba45:L4:5",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 5
+    },
+    {
+      "id": "ba45:L23:5",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 5
+    },
+    {
+      "id": "ba45:L5:5",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 5
+    },
+    {
+      "id": "ba45:L6:5",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 5
+    },
+    {
+      "id": "ba45:L4:6",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 6
+    },
+    {
+      "id": "ba45:L23:6",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 6
+    },
+    {
+      "id": "ba45:L5:6",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 6
+    },
+    {
+      "id": "ba45:L6:6",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 6
+    },
+    {
+      "id": "ba45:L4:7",
+      "layer": 4,
+      "role": "input",
+      "cell_index": 7
+    },
+    {
+      "id": "ba45:L23:7",
+      "layer": 23,
+      "role": "process",
+      "cell_index": 7
+    },
+    {
+      "id": "ba45:L5:7",
+      "layer": 5,
+      "role": "output",
+      "cell_index": 7
+    },
+    {
+      "id": "ba45:L6:7",
+      "layer": 6,
+      "role": "feedback",
+      "cell_index": 7
+    },
+    {
+      "id": "ba45:L4_inhib",
+      "role": "inhibitor",
+      "layer": 4
+    },
+    {
+      "id": "ba45:L23_inhib",
+      "role": "inhibitor",
+      "layer": 23
+    },
+    {
+      "id": "ba45:L5_inhib",
+      "role": "inhibitor",
+      "layer": 5
+    }
   ],
-
   "edges": [
-    {"source": "ba44a:L4", "target": "ba44a:L23", "type": "temporal", "weight": 1.0},
-    {"source": "ba44a:L23", "target": "ba44a:L5", "type": "temporal", "weight": 1.0},
-    {"source": "ba44a:L5", "target": "ba44a:L6", "type": "temporal", "weight": 1.0},
-    {"source": "ba44a:L6", "target": "ba44a:L4", "type": "temporal", "weight": 0.5},
-    {"source": "ba44a:L23", "target": "ba44a:L23", "type": "temporal", "weight": 0.85, "description": "Workspace persistence for holding partial structures during Merge."},
-
-    {"source": "ba44p:L4", "target": "ba44p:L23", "type": "temporal", "weight": 1.0},
-    {"source": "ba44p:L23", "target": "ba44p:L5", "type": "temporal", "weight": 1.0},
-    {"source": "ba44p:L5", "target": "ba44p:L6", "type": "temporal", "weight": 1.0},
-    {"source": "ba44p:L6", "target": "ba44p:L4", "type": "temporal", "weight": 0.5},
-
-    {"source": "ba45:L4", "target": "ba45:L23", "type": "temporal", "weight": 1.0},
-    {"source": "ba45:L23", "target": "ba45:L5", "type": "temporal", "weight": 1.0},
-    {"source": "ba45:L5", "target": "ba45:L6", "type": "temporal", "weight": 1.0},
-    {"source": "ba45:L6", "target": "ba45:L4", "type": "temporal", "weight": 0.5},
-
-    {"source": "ba44a:L5", "target": "ba44p:L4", "type": "temporal", "weight": 0.5, "description": "Anterior Merge result feeds posterior motor sequencing."},
-    {"source": "ba45:L5", "target": "ba44a:L4", "type": "temporal", "weight": 0.5, "description": "Semantic selection informs Merge."},
-    {"source": "ba44p:L5", "target": "ba45:L4", "type": "temporal", "weight": 0.3, "description": "Motor sequencing state feeds back to semantic."}
-  ]
+    {
+      "source": "ba44a:L4:0",
+      "target": "ba44a:L23:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L23:0",
+      "target": "ba44a:L5:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L5:0",
+      "target": "ba44a:L6:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L6:0",
+      "target": "ba44a:L4:0",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44a:L23:0",
+      "target": "ba44a:L23:0",
+      "type": "temporal",
+      "weight": 0.85
+    },
+    {
+      "source": "ba44a:L4:1",
+      "target": "ba44a:L23:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L23:1",
+      "target": "ba44a:L5:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L5:1",
+      "target": "ba44a:L6:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L6:1",
+      "target": "ba44a:L4:1",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44a:L23:1",
+      "target": "ba44a:L23:1",
+      "type": "temporal",
+      "weight": 0.85
+    },
+    {
+      "source": "ba44a:L4:2",
+      "target": "ba44a:L23:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L23:2",
+      "target": "ba44a:L5:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L5:2",
+      "target": "ba44a:L6:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L6:2",
+      "target": "ba44a:L4:2",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44a:L23:2",
+      "target": "ba44a:L23:2",
+      "type": "temporal",
+      "weight": 0.85
+    },
+    {
+      "source": "ba44a:L4:3",
+      "target": "ba44a:L23:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L23:3",
+      "target": "ba44a:L5:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L5:3",
+      "target": "ba44a:L6:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L6:3",
+      "target": "ba44a:L4:3",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44a:L23:3",
+      "target": "ba44a:L23:3",
+      "type": "temporal",
+      "weight": 0.85
+    },
+    {
+      "source": "ba44a:L4:4",
+      "target": "ba44a:L23:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L23:4",
+      "target": "ba44a:L5:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L5:4",
+      "target": "ba44a:L6:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L6:4",
+      "target": "ba44a:L4:4",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44a:L23:4",
+      "target": "ba44a:L23:4",
+      "type": "temporal",
+      "weight": 0.85
+    },
+    {
+      "source": "ba44a:L4:5",
+      "target": "ba44a:L23:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L23:5",
+      "target": "ba44a:L5:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L5:5",
+      "target": "ba44a:L6:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L6:5",
+      "target": "ba44a:L4:5",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44a:L23:5",
+      "target": "ba44a:L23:5",
+      "type": "temporal",
+      "weight": 0.85
+    },
+    {
+      "source": "ba44a:L4:6",
+      "target": "ba44a:L23:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L23:6",
+      "target": "ba44a:L5:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L5:6",
+      "target": "ba44a:L6:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L6:6",
+      "target": "ba44a:L4:6",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44a:L23:6",
+      "target": "ba44a:L23:6",
+      "type": "temporal",
+      "weight": 0.85
+    },
+    {
+      "source": "ba44a:L4:7",
+      "target": "ba44a:L23:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L23:7",
+      "target": "ba44a:L5:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L5:7",
+      "target": "ba44a:L6:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44a:L6:7",
+      "target": "ba44a:L4:7",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44a:L23:7",
+      "target": "ba44a:L23:7",
+      "type": "temporal",
+      "weight": 0.85
+    },
+    {
+      "source": "ba44a:L4:0",
+      "target": "ba44a:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L4_inhib",
+      "target": "ba44a:L4:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L4:1",
+      "target": "ba44a:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L4_inhib",
+      "target": "ba44a:L4:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L4:2",
+      "target": "ba44a:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L4_inhib",
+      "target": "ba44a:L4:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L4:3",
+      "target": "ba44a:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L4_inhib",
+      "target": "ba44a:L4:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L4:4",
+      "target": "ba44a:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L4_inhib",
+      "target": "ba44a:L4:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L4:5",
+      "target": "ba44a:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L4_inhib",
+      "target": "ba44a:L4:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L4:6",
+      "target": "ba44a:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L4_inhib",
+      "target": "ba44a:L4:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L4:7",
+      "target": "ba44a:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L4_inhib",
+      "target": "ba44a:L4:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L23:0",
+      "target": "ba44a:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L23_inhib",
+      "target": "ba44a:L23:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L23:1",
+      "target": "ba44a:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L23_inhib",
+      "target": "ba44a:L23:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L23:2",
+      "target": "ba44a:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L23_inhib",
+      "target": "ba44a:L23:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L23:3",
+      "target": "ba44a:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L23_inhib",
+      "target": "ba44a:L23:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L23:4",
+      "target": "ba44a:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L23_inhib",
+      "target": "ba44a:L23:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L23:5",
+      "target": "ba44a:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L23_inhib",
+      "target": "ba44a:L23:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L23:6",
+      "target": "ba44a:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L23_inhib",
+      "target": "ba44a:L23:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L23:7",
+      "target": "ba44a:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L23_inhib",
+      "target": "ba44a:L23:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L5:0",
+      "target": "ba44a:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L5_inhib",
+      "target": "ba44a:L5:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L5:1",
+      "target": "ba44a:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L5_inhib",
+      "target": "ba44a:L5:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L5:2",
+      "target": "ba44a:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L5_inhib",
+      "target": "ba44a:L5:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L5:3",
+      "target": "ba44a:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L5_inhib",
+      "target": "ba44a:L5:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L5:4",
+      "target": "ba44a:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L5_inhib",
+      "target": "ba44a:L5:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L5:5",
+      "target": "ba44a:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L5_inhib",
+      "target": "ba44a:L5:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L5:6",
+      "target": "ba44a:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L5_inhib",
+      "target": "ba44a:L5:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44a:L5:7",
+      "target": "ba44a:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44a:L5_inhib",
+      "target": "ba44a:L5:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L4:0",
+      "target": "ba44p:L23:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L23:0",
+      "target": "ba44p:L5:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L5:0",
+      "target": "ba44p:L6:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L6:0",
+      "target": "ba44p:L4:0",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44p:L4:1",
+      "target": "ba44p:L23:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L23:1",
+      "target": "ba44p:L5:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L5:1",
+      "target": "ba44p:L6:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L6:1",
+      "target": "ba44p:L4:1",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44p:L4:2",
+      "target": "ba44p:L23:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L23:2",
+      "target": "ba44p:L5:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L5:2",
+      "target": "ba44p:L6:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L6:2",
+      "target": "ba44p:L4:2",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44p:L4:3",
+      "target": "ba44p:L23:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L23:3",
+      "target": "ba44p:L5:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L5:3",
+      "target": "ba44p:L6:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L6:3",
+      "target": "ba44p:L4:3",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44p:L4:4",
+      "target": "ba44p:L23:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L23:4",
+      "target": "ba44p:L5:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L5:4",
+      "target": "ba44p:L6:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L6:4",
+      "target": "ba44p:L4:4",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44p:L4:5",
+      "target": "ba44p:L23:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L23:5",
+      "target": "ba44p:L5:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L5:5",
+      "target": "ba44p:L6:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L6:5",
+      "target": "ba44p:L4:5",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44p:L4:6",
+      "target": "ba44p:L23:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L23:6",
+      "target": "ba44p:L5:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L5:6",
+      "target": "ba44p:L6:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L6:6",
+      "target": "ba44p:L4:6",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44p:L4:7",
+      "target": "ba44p:L23:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L23:7",
+      "target": "ba44p:L5:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L5:7",
+      "target": "ba44p:L6:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba44p:L6:7",
+      "target": "ba44p:L4:7",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba44p:L4:0",
+      "target": "ba44p:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L4_inhib",
+      "target": "ba44p:L4:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L4:1",
+      "target": "ba44p:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L4_inhib",
+      "target": "ba44p:L4:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L4:2",
+      "target": "ba44p:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L4_inhib",
+      "target": "ba44p:L4:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L4:3",
+      "target": "ba44p:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L4_inhib",
+      "target": "ba44p:L4:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L4:4",
+      "target": "ba44p:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L4_inhib",
+      "target": "ba44p:L4:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L4:5",
+      "target": "ba44p:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L4_inhib",
+      "target": "ba44p:L4:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L4:6",
+      "target": "ba44p:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L4_inhib",
+      "target": "ba44p:L4:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L4:7",
+      "target": "ba44p:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L4_inhib",
+      "target": "ba44p:L4:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L23:0",
+      "target": "ba44p:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L23_inhib",
+      "target": "ba44p:L23:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L23:1",
+      "target": "ba44p:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L23_inhib",
+      "target": "ba44p:L23:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L23:2",
+      "target": "ba44p:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L23_inhib",
+      "target": "ba44p:L23:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L23:3",
+      "target": "ba44p:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L23_inhib",
+      "target": "ba44p:L23:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L23:4",
+      "target": "ba44p:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L23_inhib",
+      "target": "ba44p:L23:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L23:5",
+      "target": "ba44p:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L23_inhib",
+      "target": "ba44p:L23:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L23:6",
+      "target": "ba44p:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L23_inhib",
+      "target": "ba44p:L23:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L23:7",
+      "target": "ba44p:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L23_inhib",
+      "target": "ba44p:L23:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L5:0",
+      "target": "ba44p:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L5_inhib",
+      "target": "ba44p:L5:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L5:1",
+      "target": "ba44p:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L5_inhib",
+      "target": "ba44p:L5:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L5:2",
+      "target": "ba44p:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L5_inhib",
+      "target": "ba44p:L5:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L5:3",
+      "target": "ba44p:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L5_inhib",
+      "target": "ba44p:L5:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L5:4",
+      "target": "ba44p:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L5_inhib",
+      "target": "ba44p:L5:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L5:5",
+      "target": "ba44p:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L5_inhib",
+      "target": "ba44p:L5:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L5:6",
+      "target": "ba44p:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L5_inhib",
+      "target": "ba44p:L5:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba44p:L5:7",
+      "target": "ba44p:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba44p:L5_inhib",
+      "target": "ba44p:L5:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L4:0",
+      "target": "ba45:L23:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L23:0",
+      "target": "ba45:L5:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L5:0",
+      "target": "ba45:L6:0",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L6:0",
+      "target": "ba45:L4:0",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba45:L4:1",
+      "target": "ba45:L23:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L23:1",
+      "target": "ba45:L5:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L5:1",
+      "target": "ba45:L6:1",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L6:1",
+      "target": "ba45:L4:1",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba45:L4:2",
+      "target": "ba45:L23:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L23:2",
+      "target": "ba45:L5:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L5:2",
+      "target": "ba45:L6:2",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L6:2",
+      "target": "ba45:L4:2",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba45:L4:3",
+      "target": "ba45:L23:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L23:3",
+      "target": "ba45:L5:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L5:3",
+      "target": "ba45:L6:3",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L6:3",
+      "target": "ba45:L4:3",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba45:L4:4",
+      "target": "ba45:L23:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L23:4",
+      "target": "ba45:L5:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L5:4",
+      "target": "ba45:L6:4",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L6:4",
+      "target": "ba45:L4:4",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba45:L4:5",
+      "target": "ba45:L23:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L23:5",
+      "target": "ba45:L5:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L5:5",
+      "target": "ba45:L6:5",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L6:5",
+      "target": "ba45:L4:5",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba45:L4:6",
+      "target": "ba45:L23:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L23:6",
+      "target": "ba45:L5:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L5:6",
+      "target": "ba45:L6:6",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L6:6",
+      "target": "ba45:L4:6",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba45:L4:7",
+      "target": "ba45:L23:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L23:7",
+      "target": "ba45:L5:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L5:7",
+      "target": "ba45:L6:7",
+      "type": "temporal",
+      "weight": 1.0
+    },
+    {
+      "source": "ba45:L6:7",
+      "target": "ba45:L4:7",
+      "type": "temporal",
+      "weight": 0.5
+    },
+    {
+      "source": "ba45:L4:0",
+      "target": "ba45:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L4_inhib",
+      "target": "ba45:L4:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L4:1",
+      "target": "ba45:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L4_inhib",
+      "target": "ba45:L4:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L4:2",
+      "target": "ba45:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L4_inhib",
+      "target": "ba45:L4:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L4:3",
+      "target": "ba45:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L4_inhib",
+      "target": "ba45:L4:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L4:4",
+      "target": "ba45:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L4_inhib",
+      "target": "ba45:L4:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L4:5",
+      "target": "ba45:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L4_inhib",
+      "target": "ba45:L4:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L4:6",
+      "target": "ba45:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L4_inhib",
+      "target": "ba45:L4:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L4:7",
+      "target": "ba45:L4_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L4_inhib",
+      "target": "ba45:L4:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L23:0",
+      "target": "ba45:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L23_inhib",
+      "target": "ba45:L23:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L23:1",
+      "target": "ba45:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L23_inhib",
+      "target": "ba45:L23:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L23:2",
+      "target": "ba45:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L23_inhib",
+      "target": "ba45:L23:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L23:3",
+      "target": "ba45:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L23_inhib",
+      "target": "ba45:L23:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L23:4",
+      "target": "ba45:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L23_inhib",
+      "target": "ba45:L23:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L23:5",
+      "target": "ba45:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L23_inhib",
+      "target": "ba45:L23:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L23:6",
+      "target": "ba45:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L23_inhib",
+      "target": "ba45:L23:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L23:7",
+      "target": "ba45:L23_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L23_inhib",
+      "target": "ba45:L23:7",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L5:0",
+      "target": "ba45:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L5_inhib",
+      "target": "ba45:L5:0",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L5:1",
+      "target": "ba45:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L5_inhib",
+      "target": "ba45:L5:1",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L5:2",
+      "target": "ba45:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L5_inhib",
+      "target": "ba45:L5:2",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L5:3",
+      "target": "ba45:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L5_inhib",
+      "target": "ba45:L5:3",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L5:4",
+      "target": "ba45:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L5_inhib",
+      "target": "ba45:L5:4",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L5:5",
+      "target": "ba45:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L5_inhib",
+      "target": "ba45:L5:5",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L5:6",
+      "target": "ba45:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L5_inhib",
+      "target": "ba45:L5:6",
+      "type": "spatial",
+      "weight": -0.1
+    },
+    {
+      "source": "ba45:L5:7",
+      "target": "ba45:L5_inhib",
+      "type": "temporal",
+      "weight": 0.15
+    },
+    {
+      "source": "ba45:L5_inhib",
+      "target": "ba45:L5:7",
+      "type": "spatial",
+      "weight": -0.1
+    }
+  ],
+  "properties": {
+    "n_cells": 8
+  }
 }
