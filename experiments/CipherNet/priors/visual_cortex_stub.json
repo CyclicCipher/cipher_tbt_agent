@@ -1,0 +1,72 @@
+{
+  "name": "visual_cortex_stub",
+  "description": "Minimal visual cortex stub for testing multi-dimensional position encoding. 2x2 grid of columns, each tuned to a preferred (x,y) position. Tests whether the theta-phase mechanism can handle 2D spatial position. NOT a full visual cortex — just enough to debug multi-dimensional position before building the real thing.",
+
+  "nodes": [
+    {"id": "v00:L4",  "layer": 4,  "role": "input",    "preferred_x": 0, "preferred_y": 0, "description": "Top-left position"},
+    {"id": "v00:L23", "layer": 23, "role": "process",  "preferred_x": 0, "preferred_y": 0},
+    {"id": "v00:L5",  "layer": 5,  "role": "output",   "preferred_x": 0, "preferred_y": 0},
+    {"id": "v00:L6",  "layer": 6,  "role": "feedback", "preferred_x": 0, "preferred_y": 0},
+
+    {"id": "v01:L4",  "layer": 4,  "role": "input",    "preferred_x": 0, "preferred_y": 1, "description": "Top-right position"},
+    {"id": "v01:L23", "layer": 23, "role": "process",  "preferred_x": 0, "preferred_y": 1},
+    {"id": "v01:L5",  "layer": 5,  "role": "output",   "preferred_x": 0, "preferred_y": 1},
+    {"id": "v01:L6",  "layer": 6,  "role": "feedback", "preferred_x": 0, "preferred_y": 1},
+
+    {"id": "v10:L4",  "layer": 4,  "role": "input",    "preferred_x": 1, "preferred_y": 0, "description": "Bottom-left position"},
+    {"id": "v10:L23", "layer": 23, "role": "process",  "preferred_x": 1, "preferred_y": 0},
+    {"id": "v10:L5",  "layer": 5,  "role": "output",   "preferred_x": 1, "preferred_y": 0},
+    {"id": "v10:L6",  "layer": 6,  "role": "feedback", "preferred_x": 1, "preferred_y": 0},
+
+    {"id": "v11:L4",  "layer": 4,  "role": "input",    "preferred_x": 1, "preferred_y": 1, "description": "Bottom-right position"},
+    {"id": "v11:L23", "layer": 23, "role": "process",  "preferred_x": 1, "preferred_y": 1},
+    {"id": "v11:L5",  "layer": 5,  "role": "output",   "preferred_x": 1, "preferred_y": 1},
+    {"id": "v11:L6",  "layer": 6,  "role": "feedback", "preferred_x": 1, "preferred_y": 1},
+
+    {"id": "inhibitor", "role": "inhibitor", "description": "Surround suppression (V1 center-surround)."}
+  ],
+
+  "edges": [
+    {"_comment": "=== v00 column (top-left) ==="},
+    {"source": "v00:L4",  "target": "v00:L23", "type": "temporal", "weight": 1.0},
+    {"source": "v00:L23", "target": "v00:L5",  "type": "temporal", "weight": 1.0},
+    {"source": "v00:L5",  "target": "v00:L6",  "type": "temporal", "weight": 1.0},
+    {"source": "v00:L6",  "target": "v00:L4",  "type": "temporal", "weight": 0.5},
+    {"source": "v00:L23", "target": "v00:L23", "type": "temporal", "weight": 0.5},
+
+    {"_comment": "=== v01 column (top-right) ==="},
+    {"source": "v01:L4",  "target": "v01:L23", "type": "temporal", "weight": 1.0},
+    {"source": "v01:L23", "target": "v01:L5",  "type": "temporal", "weight": 1.0},
+    {"source": "v01:L5",  "target": "v01:L6",  "type": "temporal", "weight": 1.0},
+    {"source": "v01:L6",  "target": "v01:L4",  "type": "temporal", "weight": 0.5},
+    {"source": "v01:L23", "target": "v01:L23", "type": "temporal", "weight": 0.5},
+
+    {"_comment": "=== v10 column (bottom-left) ==="},
+    {"source": "v10:L4",  "target": "v10:L23", "type": "temporal", "weight": 1.0},
+    {"source": "v10:L23", "target": "v10:L5",  "type": "temporal", "weight": 1.0},
+    {"source": "v10:L5",  "target": "v10:L6",  "type": "temporal", "weight": 1.0},
+    {"source": "v10:L6",  "target": "v10:L4",  "type": "temporal", "weight": 0.5},
+    {"source": "v10:L23", "target": "v10:L23", "type": "temporal", "weight": 0.5},
+
+    {"_comment": "=== v11 column (bottom-right) ==="},
+    {"source": "v11:L4",  "target": "v11:L23", "type": "temporal", "weight": 1.0},
+    {"source": "v11:L23", "target": "v11:L5",  "type": "temporal", "weight": 1.0},
+    {"source": "v11:L5",  "target": "v11:L6",  "type": "temporal", "weight": 1.0},
+    {"source": "v11:L6",  "target": "v11:L4",  "type": "temporal", "weight": 0.5},
+    {"source": "v11:L23", "target": "v11:L23", "type": "temporal", "weight": 0.5},
+
+    {"_comment": "=== Surround suppression (adjacent positions inhibit each other) ==="},
+    {"source": "v00:L23", "target": "inhibitor", "type": "temporal", "weight": 0.15},
+    {"source": "v01:L23", "target": "inhibitor", "type": "temporal", "weight": 0.15},
+    {"source": "v10:L23", "target": "inhibitor", "type": "temporal", "weight": 0.15},
+    {"source": "v11:L23", "target": "inhibitor", "type": "temporal", "weight": 0.15},
+    {"source": "inhibitor", "target": "v00:L23", "type": "spatial", "weight": -0.15},
+    {"source": "inhibitor", "target": "v01:L23", "type": "spatial", "weight": -0.15},
+    {"source": "inhibitor", "target": "v10:L23", "type": "spatial", "weight": -0.15},
+    {"source": "inhibitor", "target": "v11:L23", "type": "spatial", "weight": -0.15}
+  ],
+
+  "properties": {
+    "description": "Test article for 2D position encoding. Each column has preferred_x and preferred_y metadata. For full visual cortex, this would be expanded with orientation tuning, spatial frequency, and retinotopic mapping. Currently no downstream connections — purely for position encoding debugging."
+  }
+}

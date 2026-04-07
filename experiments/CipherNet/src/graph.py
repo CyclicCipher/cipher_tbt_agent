@@ -807,7 +807,7 @@ class Graph:
 
     def settle(self, n_steps: int = 20, clamp: dict[int, float] | None = None,
                default_decay: float = 0.85, threshold: float = 0.01,
-               learn_rate: float = 0.0, warmup: int = 5):
+               learn_rate: float = 0.0, warmup: int = 10):
         """Run feedforward warmup + inference steps.
 
         Biology: the brain does a fast feedforward gamma sweep BEFORE

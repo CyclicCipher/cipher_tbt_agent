@@ -483,6 +483,46 @@ Output cortex backward prediction edges targeted L23 (basal compartment, role='p
 ### 4. Testing used step() (feed mode) instead of settle() (PC inference)
 Feed mode (Mamba accumulation) doesn't run the WTA inhibitor iteratively. **Fix**: use settle() with input clamp during testing, giving the inhibitor time to suppress non-winners.
 
+## Sensory Processing Hierarchy
+
+ALL input flows through a sensory cortex hierarchy before reaching WM:
+
+```
+Input columns → relay_token → Token Cortex (fast/mid/slow)
+                                    ↓
+                              Temporal Cortex (STG1 → STG2 → STG_assoc)
+                                    ↓                    ↓
+                              (dorsal stream)      (ventral stream)
+                              Broca BA44           Broca BA45
+                                    ↓                    ↓
+                              relay_1/relay_2 → PFC WM stripes
+                                    ↓
+                              Output cortex
+```
+
+### Token Cortex (A1 analog, `priors/token_cortex.json`)
+
+Primary sensory cortex for sequential tokens. Three columns with different temporal dynamics:
+- **tc_fast** (self-loop 0.1): transient/onset. Fires for new tokens, decays fast. Carries position timing.
+- **tc_mid** (self-loop 0.4): transition detection. Captures changes between tokens.
+- **tc_slow** (self-loop 0.8): sustained identity. Holds current token for downstream.
+
+Forward suppression: tc_fast → tc_slow (-0.2) suppresses sustained briefly on new input (adaptation). Hierarchy: fast → mid → slow feedforward, slow → mid → fast feedback.
+
+Designed to be repurposable for audio (phoneme onset, vowel sustain, consonant transition use the same temporal diversity).
+
+### Visual Cortex Stub (`priors/visual_cortex_stub.json`)
+
+Minimal 2x2 grid for testing multi-dimensional position encoding. Each column has preferred (x, y) coordinates. Tests whether the theta-phase mechanism extends to 2D spatial position.
+
+### Inner Speech
+
+The Broca → temporal cortex → Broca feedback loop IS inner speech when motor output is inhibited (BG NoGo on output gate). The system "thinks" by running the planning loop without releasing to output cortex. The efference copy (planned output prediction) circulates as the internal monologue.
+
+### Domain Generality
+
+NO direct char→output edges. ALL output flows through WM. The same input→token_cortex→temporal→Broca→WM→output pathway works for digits, letters, keyboard actions, or any sequential content. Specificity comes from LEARNED weights, not architecture.
+
 ## Tokenization
 
 ALL input is character-level. "307" = '3', '0', '7'.

@@ -47,6 +47,8 @@ def load_subgraph_from_json(graph: Graph, json_path: str) -> dict[str, int]:
 
     # Create edges.
     for edge_spec in spec.get("edges", []):
+        if "source" not in edge_spec:
+            continue  # skip _comment entries
         src = id_map[edge_spec["source"]]
         tgt = id_map[edge_spec["target"]]
         etype = EDGE_TYPES.get(edge_spec.get("type", "spatial"), SPATIAL)

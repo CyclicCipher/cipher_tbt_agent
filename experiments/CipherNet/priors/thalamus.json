@@ -12,7 +12,9 @@
     {"id": "relay_sub", "role": "relay", "description": "Relay for subtraction column output."},
 
     {"id": "relay_broca", "role": "relay", "description": "Ventral anterior (VA) thalamic relay for Broca's area. Disinhibited by BG stripe 3, signals BA44 that Merge is permitted. This is the return path of the Broca cortico-BG-thalamocortical loop."},
-    {"id": "relay_temporal", "role": "relay", "description": "Thalamic relay for temporal cortex. Routes input column signals to Wernicke's phonological buffer."},
+    {"id": "relay_temporal", "role": "relay", "description": "Thalamic relay for temporal cortex. Routes token cortex output to STG1."},
+    {"id": "relay_token", "role": "relay", "description": "Token cortex input relay (medial geniculate body analog for audio). Routes input column signals to token cortex for preprocessing. Always open (no BG gating)."},
+    {"id": "relay_visual", "role": "relay", "description": "Visual cortex input relay (lateral geniculate nucleus analog). Routes visual input to visual cortex. Always open (no BG gating)."},
 
     {"id": "trn_0", "role": "reticular", "stripe": 0, "description": "Thalamic reticular nucleus for stripe 0. Inhibitory — creates competition between relays. When relay_0 is active, TRN_0 inhibits neighboring relays."},
     {"id": "trn_1", "role": "reticular", "stripe": 1},

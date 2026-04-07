@@ -116,23 +116,23 @@ def setup_brain() -> Brain:
         for ans_name, ans_nid in ans_cols.items():
             graph.add_edge(col['L23'], ans_nid, edge_type=TEMPORAL, weight=0.1)
 
-    # === DOMAIN-GENERAL PLANNING PATHWAY ===
+    # === DOMAIN-GENERAL SENSORY → WM PATHWAY ===
     #
-    # NO direct char→output edges. ALL output flows through the WM
-    # planning buffer. This forces the system to learn the general
-    # char → relay → WM → output pathway instead of a shortcut.
-    # The same mechanism works for digits, letters, and any other output.
+    # NO direct char→output or char→WM relay edges. ALL input flows
+    # through the sensory processing hierarchy:
+    #   Input columns → relay_token → Token Cortex → Temporal Cortex → Broca → WM
     #
-    # 1. Input columns → thalamic relays (BG-gated WM loading)
-    # Any input can reach any WM stripe. BG Go/NoGo determines which
-    # input loads which stripe when. Edges are weak and learnable.
+    # The token cortex preprocesses raw tokens (onset detection,
+    # adaptation, temporal structure) before they reach the hierarchy.
+    # This is domain-general — same architecture for audio later.
+    #
+    # Input columns → relay_token (always open, no BG gating)
+    token_relay = priors['thalamus']['relay_token']
     for char in '0123456789+-*/=':
         col = brain.tio._input_columns[char]
-        for relay_name in ['relay_0', 'relay_1', 'relay_2']:
-            relay_nid = priors['thalamus'][relay_name]
-            # Strong enough to drive the relay (matches existing
-            # transthalamic weights of 0.5-0.8 from other cortical areas).
-            graph.add_edge(col['L5'], relay_nid, edge_type=TEMPORAL, weight=0.2)
+        relay = col.get('relay')
+        if relay is not None:
+            graph.add_edge(relay, token_relay, edge_type=TEMPORAL, weight=0.5)
 
     # 2. WM stripes → output cortex (excitatory readout)
     # All-to-all: any WM content can drive any output node. Specificity
@@ -220,13 +220,10 @@ def setup_brain() -> Brain:
             out_node = priors['output_cortex'][f'out:{d}']
             graph.add_edge(broca_l5, out_node, edge_type=TEMPORAL, weight=0.02)
 
-    # Input column relays → temporal cortex relay (sensory pathway).
-    tc_relay = priors['thalamus']['relay_temporal']
-    for char in '0123456789+-*/=':
-        col = brain.tio._input_columns[char]
-        relay = col.get('relay')
-        if relay is not None:
-            graph.add_edge(relay, tc_relay, edge_type=TEMPORAL, weight=0.5)
+    # NOTE: Input columns no longer connect directly to relay_temporal.
+    # The path is: input → relay_token → token cortex → temporal cortex.
+    # This is wired in config.json, not here. The token cortex preprocesses
+    # raw tokens before they reach the temporal cortex hierarchy.
 
     # Broca → digit column L6 (backward predictions → apical pathway).
     for broca_col in ['ba44a', 'ba45']:
