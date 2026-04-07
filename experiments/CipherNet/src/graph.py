@@ -553,30 +553,24 @@ class Graph:
         return True  # gamma and untagged: every step
 
     def _compute_sensory(self, nid: int, node: Node) -> tuple[float, float, float, float]:
-        """Two-compartment dendritic computation with theta phase.
+        """Two-compartment dendritic computation.
 
-        BASAL: feedforward input from processing nodes (role='process').
-               Dendritic segments with AND-gates + calcium thresholds.
-               This DRIVES the neuron.
+        BASAL: feedforward from non-feedback nodes. Organized into
+               dendritic segments. Per-segment: weighted sum → NMDA
+               threshold gate. Per-soma: sum across segments (OR).
+               This is matmul-compatible: W @ x → threshold → sum.
 
-        APICAL: feedback/context from feedback nodes (role='feedback')
-                and from non-column sources (output nodes, etc.).
-                This AMPLIFIES the basal signal (gain modulation).
+        APICAL: feedback from role='feedback' nodes. Simple sum.
+                Amplifies basal via BAC firing (Phillips & Larkum 2024).
 
-        Phase propagation: the node inherits its phase from the weighted
-        average of incoming signal phases (complex mean). This preserves
-        positional information as it flows through the graph.
+        Phase propagation: weighted circular mean of input phases.
 
-        Returns (basal, apical, error, phase).
-        Output = basal * (1 + apical) via BAC-like amplification.
+        Returns (sensory_output, apical, error, propagated_phase).
         """
-        # BASAL compartment: feedforward, with dendritic segments.
-        # Each signal is a (magnitude, phase) tuple for phase-aware computation.
-        basal_segments: dict[int, list[tuple[float, float]]] = defaultdict(list)
-        # Phase tracking: weighted complex sum for phase propagation.
-        phase_real = 0.0  # sum of magnitude * cos(phase)
-        phase_imag = 0.0  # sum of magnitude * sin(phase)
-        # APICAL compartment: feedback/context, simple sum.
+        # Per-segment weighted sums (matmul rows).
+        segment_sums: dict[int, float] = defaultdict(float)
+        phase_real = 0.0
+        phase_imag = 0.0
         apical_total = 0.0
 
         for edge in self._incoming.get(nid, []):
@@ -585,116 +579,60 @@ class Graph:
             src = self._nodes.get(edge.source)
             if src is None:
                 continue
-            # Include ALL edges, even inactive (signal=0 for AND-gate).
-            # Inactive sources contribute 0 — this is critical for
-            # AND-gates where one missing input must kill the segment.
             signal = edge.weight * src.activation if src.activation > 0.001 else 0.0
 
-            # ACh sharpening: enhance thalamocortical, suppress lateral.
+            # ACh sharpening.
             if self._ach_level > 0:
                 src_role = src.meta.get('role')
                 if src_role == 'relay':
-                    # Thalamocortical: ENHANCED by ACh (nicotinic)
                     signal *= (1.0 + self._ach_level)
                 elif src_role == 'process' and src.subgraph != node.subgraph:
-                    # Intracortical lateral: SUPPRESSED by ACh (muscarinic)
                     signal *= max(0.0, 1.0 - 0.7 * self._ach_level)
 
-            # Route to compartment based on source type.
-            # ONLY explicit feedback (L6, role='feedback') → APICAL
-            # EVERYTHING else → BASAL (feedforward by default)
             if src.meta.get('role') == 'feedback':
                 apical_total += signal
             else:
-                basal_segments[edge.segment].append((signal, src.phase))
+                # Weighted sum per segment (matmul-compatible).
+                segment_sums[edge.segment] += signal
 
-            # Phase propagation: accumulate complex components
-            # from ALL incoming positive edges (both basal and apical).
+            # Phase propagation.
             if signal > 0.001:
                 phase_real += signal * math.cos(src.phase)
                 phase_imag += signal * math.sin(src.phase)
 
-        # Compute basal: dendritic AND within segments, OR across.
-        # Phase-aware: inputs on the same segment at similar phases
-        # constructively interfere; inputs at different phases cancel.
-        # Biology: NMDA spike requires coincident inputs (~5-10ms window).
-        # Inputs at similar theta phases arrive within this window.
-        # Phase concordance: (1 + cos(phi_i - phi_j)) / 2
-        #   Same phase: 1.0 (constructive, full AND-gate)
-        #   Opposite phase: 0.0 (destructive, AND-gate killed)
-        #   90 deg apart: 0.5 (partial)
+        # Soma integration: threshold-gated segment sums.
+        # Per-segment: weighted sum → threshold gate (NMDA spike).
+        # Per-soma: sum across segments (OR).
+        # This is: matmul → relu(x - threshold) → sum.
         basal = 0.0
-        for seg_id, signals_with_phase in basal_segments.items():
+        for seg_id, seg_sum in segment_sums.items():
+            if seg_sum <= 0.0:
+                continue
             calcium = self._segment_calcium.get(seg_id, 0.0)
             seg_threshold = CALCIUM_THRESHOLD_SCALE * calcium
-            if len(signals_with_phase) == 1:
-                val = max(0.0, signals_with_phase[0][0])
-                if val > seg_threshold:
-                    basal += val
-                    self._segment_calcium[seg_id] = min(
-                        CALCIUM_MAX, calcium + CALCIUM_INCREMENT)
-            else:
-                # Multi-input segment: AND-gate with phase concordance.
-                magnitudes = [s[0] for s in signals_with_phase]
-                phases = [s[1] for s in signals_with_phase]
+            if seg_sum > seg_threshold:
+                basal += seg_sum
+                self._segment_calcium[seg_id] = min(
+                    CALCIUM_MAX, calcium + CALCIUM_INCREMENT)
 
-                product = 1.0
-                all_positive = True
-                for m in magnitudes:
-                    if m <= 0.0:
-                        all_positive = False
-                        break
-                    product *= m
-                if all_positive:
-                    geo_mean = product ** (1.0 / len(magnitudes))
-
-                    # Phase concordance: mean pairwise (1+cos(diff))/2.
-                    # Measures how temporally coincident the inputs are.
-                    concordance = 1.0
-                    n_pairs = 0
-                    concordance_sum = 0.0
-                    for i in range(len(phases)):
-                        for j in range(i + 1, len(phases)):
-                            concordance_sum += (1.0 + math.cos(phases[i] - phases[j])) / 2.0
-                            n_pairs += 1
-                    if n_pairs > 0:
-                        concordance = concordance_sum / n_pairs
-
-                    # AND-gate output = geometric mean * phase concordance.
-                    # Same-phase inputs: full AND. Different-phase: attenuated.
-                    val = geo_mean * concordance
-                    if val > seg_threshold:
-                        basal += val
-                        self._segment_calcium[seg_id] = min(
-                            CALCIUM_MAX, calcium + CALCIUM_INCREMENT)
-
-        # Compute propagated phase from complex mean.
-        # atan2(imag, real) gives the circular mean of input phases,
-        # weighted by signal magnitude. This is the PoPE principle:
-        # content (magnitude) and position (phase) are orthogonal.
+        # Propagated phase.
         if phase_real != 0.0 or phase_imag != 0.0:
             propagated_phase = math.atan2(phase_imag, phase_real)
             if propagated_phase < 0:
                 propagated_phase += 2 * math.pi
         else:
-            propagated_phase = node.phase  # keep existing if no input
+            propagated_phase = node.phase
 
-        # Store compartment values on the node.
+        # Store compartment values.
         node.basal = basal
         node.apical = apical_total
 
-        # Apical amplification (Phillips & Larkum 2024):
-        # output = basal * (1 + gain). Apical AMPLIFIES, doesn't drive.
-        # BAC firing: if both basal AND apical exceed threshold, BURST.
+        # BAC firing: basal + apical coincidence → burst.
         if basal > BAC_BASAL_THRESHOLD and apical_total > BAC_APICAL_THRESHOLD:
-            # BAC burst: amplified output
             sensory = basal * BAC_AMPLIFICATION
         else:
-            # Normal: basal drives, apical provides mild gain
             sensory = basal * (1.0 + 0.5 * max(0.0, apical_total))
 
-        # Prediction error: what L6 feedback predicted vs what arrived.
-        # L6 feedback is in the apical stream.
         error = max(-1.0, min(1.0, basal - apical_total))
         return sensory, apical_total, error, propagated_phase
 
@@ -1167,15 +1105,16 @@ class Graph:
                     if ea.segment == eb.segment:
                         continue
 
-                    # Phase concordance check: sources must be at
-                    # similar theta phases for segment merging.
+                    # Phase gate: sources must be within pi/2 phase
+                    # window for segment merging (same NMDA timing
+                    # constraint as the dendritic computation).
                     src_a = self._nodes.get(ea.source)
                     src_b = self._nodes.get(eb.source)
                     if src_a is not None and src_b is not None:
-                        phase_conc = (1.0 + math.cos(src_a.phase - src_b.phase)) / 2.0
-                        if phase_conc < 0.5:
-                            # Phases too different — these inputs are at
-                            # different positions. Don't merge.
+                        pd = abs(src_a.phase - src_b.phase)
+                        if pd > math.pi:
+                            pd = 2 * math.pi - pd
+                        if pd > math.pi / 2:
                             continue
 
                     a_seg_size = sum(1 for e in self._incoming.get(tgt_id, [])
