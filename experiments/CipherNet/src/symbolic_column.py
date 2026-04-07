@@ -1,48 +1,61 @@
-"""Symbolic cortical column with receptive fields.
+"""Symbolic cortical column with receptive fields and hierarchical stacking.
 
 Each column has a POSITION (from wiring) and learns FEATURES at that
-position (from signal content). Position and feature are pre-separated
-by the topographic mapping (labeled line principle).
+position. Memory accumulates votes. Prediction returns the mode.
 
-Memory accumulates votes: the same feature can map to multiple targets
-(e.g., a pixel patch appearing in different digit classes). Prediction
-returns the mode (most frequent target). This is domain-general:
-succession has 1 target per feature, classification has many.
+HIERARCHY: each level uses the same SymbolicColumn protocol. A higher
+level's input features ARE the lower level's output votes + positions.
+This is TBT's mechanism: V1 outputs "edge_H at (3,2)" → V2 treats
+that as a feature and learns "edge_H@(3,2) + edge_V@(4,2) = corner".
+
+The Cortical Messaging Protocol (CMP): columns exchange
+(object_id, position, confidence). Same format at every level.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 import numpy as np
 
 
-class SymbolicColumn:
-    """A cortical column with a fixed receptive field.
+# -----------------------------------------------------------------------
+# Cortical Messaging Protocol
+# -----------------------------------------------------------------------
 
-    Position = which input positions this column receives from.
-    Feature = what signal content arrives at those positions.
-    Memory = {feature → {target: count}} (accumulated votes).
+@dataclass
+class CorticalMessage:
+    """Message exchanged between columns (TBT's CMP).
+
+    object_id: what the column thinks it's seeing (its vote)
+    position: where on the cortical sheet this column sits
+    confidence: how sure the column is (vote_count / total_votes)
     """
+    object_id: str | None
+    position: tuple
+    confidence: float = 0.0
+
+
+# -----------------------------------------------------------------------
+# Symbolic Column
+# -----------------------------------------------------------------------
+
+class SymbolicColumn:
+    """A cortical column with receptive field and accumulating memory."""
 
     def __init__(self, name: str, receptive_field: Any = None,
                  position: tuple = (0.0, 0.0)):
         self.name = name
         self.receptive_field = receptive_field
         self.position = position
-        # Memory: feature → {target: count}. Accumulates, never overwrites.
         self.memory: dict[str, dict[str, int]] = {}
-        # Transient state.
         self.current_input: str | None = None
         self.prediction: str | None = None
-        self.error: bool = False
-        self.vote: str | None = None
+        self.confidence: float = 0.0
 
-    def observe(self, feature: str) -> bool:
-        """Observe a feature. Compare against prediction."""
+    def observe(self, feature: str):
+        """Set current input and compute prediction."""
         self.current_input = feature
         self.prediction = self.predict()
-        self.error = (self.prediction is None)
-        self.vote = feature
-        return self.error
 
     def teach(self, feature: str, target: str):
         """Accumulate: feature → target gets +1 vote."""
@@ -52,67 +65,68 @@ class SymbolicColumn:
         counts[target] = counts.get(target, 0) + 1
 
     def predict(self) -> str | None:
-        """Return the most frequent target for current input (mode)."""
-        if self.current_input is None:
-            return None
-        counts = self.memory.get(self.current_input)
-        if not counts:
-            return None
-        return max(counts, key=counts.get)
-
-    def predict_dist(self) -> dict[str, float] | None:
-        """Return full distribution P(target | current_input)."""
+        """Return mode (most frequent target) for current input."""
         if self.current_input is None:
             return None
         counts = self.memory.get(self.current_input)
         if not counts:
             return None
         total = sum(counts.values())
-        return {k: v / total for k, v in counts.items()}
+        winner = max(counts, key=counts.get)
+        self.confidence = counts[winner] / total
+        return winner
+
+    def message(self) -> CorticalMessage:
+        """Produce a CMP message (vote + position + confidence)."""
+        return CorticalMessage(
+            object_id=self.prediction,
+            position=self.position,
+            confidence=self.confidence,
+        )
 
     def reset(self):
-        """Reset transient state. Memory preserved."""
         self.current_input = None
         self.prediction = None
-        self.error = False
-        self.vote = None
+        self.confidence = 0.0
 
     def __repr__(self):
-        n_features = len(self.memory)
-        return f"SymbolicColumn({self.name}, rf={self.receptive_field}, {n_features} features)"
+        return f"SymbolicColumn({self.name}, {len(self.memory)} features)"
 
 
-class ColumnSheet2D:
-    """A 2D grid of symbolic columns (visual cortex).
+# -----------------------------------------------------------------------
+# Column Sheet (2D grid of columns = one cortical area)
+# -----------------------------------------------------------------------
 
-    Each column covers a rectangular patch of the input image.
-    Receptive fields can overlap with neighbors (shared pixels
-    create implicit lateral connections).
+class ColumnSheet:
+    """A 2D grid of symbolic columns (one cortical area).
 
-    For MNIST (28×28): 7×7 grid, 4×4 patches, stride 4.
-    For Danganronpa (1920×1080): configurable grid, same code.
+    Each column covers a rectangular receptive field of the input.
+    For images: pixel patches. For higher levels: patches of lower-level
+    columns' outputs.
+
+    The same class is used at every hierarchy level. Only the input
+    type changes (pixels → edge codes → shape codes → object codes).
     """
 
-    def __init__(self, name: str, image_shape: tuple[int, int],
-                 patch_size: int = 4, stride: int = 4):
+    def __init__(self, name: str, grid_h: int, grid_w: int,
+                 rf_size: tuple[int, int] | None = None,
+                 stride: tuple[int, int] | None = None):
         self.name = name
-        self.image_h, self.image_w = image_shape
-        self.patch_size = patch_size
-        self.stride = stride
-        self.grid_h = (self.image_h - patch_size) // stride + 1
-        self.grid_w = (self.image_w - patch_size) // stride + 1
+        self.grid_h = grid_h
+        self.grid_w = grid_w
+        self.rf_size = rf_size  # (patch_h, patch_w) in input coordinates
+        self.stride = stride    # (stride_h, stride_w)
 
-        # Create 2D grid of columns.
         self.columns: list[list[SymbolicColumn]] = []
-        for gy in range(self.grid_h):
+        for gy in range(grid_h):
             row = []
-            for gx in range(self.grid_w):
-                # Receptive field in pixel coordinates.
-                y0 = gy * stride
-                x0 = gx * stride
-                rf = (y0, x0, y0 + patch_size, x0 + patch_size)
+            for gx in range(grid_w):
+                rf = None
+                if rf_size and stride:
+                    y0, x0 = gy * stride[0], gx * stride[1]
+                    rf = (y0, x0, y0 + rf_size[0], x0 + rf_size[1])
                 col = SymbolicColumn(
-                    name=f"{name}:{gy},{gx}",
+                    name=f"{name}:L{gy},{gx}",
                     receptive_field=rf,
                     position=(float(gx), float(gy)),
                 )
@@ -123,26 +137,152 @@ class ColumnSheet2D:
         return self.grid_h * self.grid_w
 
     def all_columns(self):
-        """Iterate over all columns (flat)."""
         for row in self.columns:
             yield from row
 
-    def extract_patches(self, image: np.ndarray) -> list[tuple[int, int, np.ndarray]]:
-        """Extract patches from an image. Returns (gy, gx, patch) tuples."""
-        patches = []
-        ps = self.patch_size
-        for gy in range(self.grid_h):
-            for gx in range(self.grid_w):
-                y0 = gy * self.stride
-                x0 = gx * self.stride
-                patch = image[y0:y0 + ps, x0:x0 + ps]
-                patches.append((gy, gx, patch))
-        return patches
+    def get_messages(self) -> list[list[CorticalMessage]]:
+        """Collect CMP messages from all columns (2D grid of messages)."""
+        return [[col.message() for col in row] for row in self.columns]
 
     def __repr__(self):
-        return (f"ColumnSheet2D({self.name}, {self.grid_h}x{self.grid_w} columns, "
-                f"patch={self.patch_size}, stride={self.stride})")
+        return f"ColumnSheet({self.name}, {self.grid_h}x{self.grid_w})"
 
+
+# -----------------------------------------------------------------------
+# Hierarchical Column Stack (N levels, same protocol)
+# -----------------------------------------------------------------------
+
+class ColumnHierarchy:
+    """A stack of ColumnSheets forming a cortical hierarchy.
+
+    Level 0: receives raw features (pixel codes from codebook).
+    Level N>0: receives MESSAGES from level N-1 as features.
+
+    Each level uses the same SymbolicColumn with the same teach/predict.
+    The only difference is what constitutes a "feature" at each level:
+    - Level 0: "v42" (VQ codebook entry for a pixel patch)
+    - Level 1: "v42@(0,0)+v17@(1,0)+v3@(0,1)+v55@(1,1)" (combination
+      of lower-level codes at relative positions)
+    - Level 2: combination of Level 1 outputs... etc.
+
+    This is TBT: lower column's object_id becomes higher column's feature.
+    """
+
+    def __init__(self):
+        self.levels: list[ColumnSheet] = []
+        self._level_pool: list[tuple[int, int]] = []  # pooling factor per level
+
+    def add_level(self, sheet: ColumnSheet, pool_h: int = 2, pool_w: int = 2):
+        """Add a cortical area to the hierarchy.
+
+        pool_h, pool_w: how many lower-level columns each higher-level
+        column's receptive field covers. E.g., pool 2×2 means each
+        higher column sees a 2×2 patch of lower columns' outputs.
+        """
+        self.levels.append(sheet)
+        self._level_pool.append((pool_h, pool_w))
+
+    def n_levels(self) -> int:
+        return len(self.levels)
+
+    @staticmethod
+    def compose_feature(messages: list[CorticalMessage]) -> str:
+        """Compose a higher-level feature from lower-level messages.
+
+        Concatenates (object_id @ relative_position) for each message.
+        This IS the feature-at-location binding from TBT.
+
+        E.g., messages from a 2×2 patch of lower columns:
+          [("edge_H", (0,0)), ("edge_V", (1,0)), (None, (0,1)), ("edge_H", (1,1))]
+        → "edge_H@0,0|edge_V@1,0|_@0,1|edge_H@1,1"
+        """
+        parts = []
+        if not messages:
+            return "_empty"
+        # Use relative positions (offset from first message's position).
+        base_x, base_y = messages[0].position
+        for msg in messages:
+            obj = msg.object_id or "_"
+            rx = msg.position[0] - base_x
+            ry = msg.position[1] - base_y
+            parts.append(f"{obj}@{int(rx)},{int(ry)}")
+        return "|".join(sorted(parts))  # sorted for position-invariant key
+
+    def propagate(self):
+        """Propagate messages from level 0 upward through the hierarchy.
+
+        At each level above 0:
+        1. Collect messages from the level below
+        2. For each higher-level column, gather the lower-level messages
+           within its receptive field (pooling region)
+        3. Compose them into a single feature string
+        4. Feed that feature to the higher-level column
+        """
+        for lev in range(1, len(self.levels)):
+            lower = self.levels[lev - 1]
+            upper = self.levels[lev]
+            pool_h, pool_w = self._level_pool[lev]
+
+            lower_msgs = lower.get_messages()
+
+            for gy in range(upper.grid_h):
+                for gx in range(upper.grid_w):
+                    # Gather messages from the lower-level patch.
+                    patch_msgs = []
+                    for dy in range(pool_h):
+                        for dx in range(pool_w):
+                            ly = gy * pool_h + dy
+                            lx = gx * pool_w + dx
+                            if ly < lower.grid_h and lx < lower.grid_w:
+                                patch_msgs.append(lower_msgs[ly][lx])
+
+                    # Compose into a higher-level feature.
+                    feature = self.compose_feature(patch_msgs)
+                    upper.columns[gy][gx].observe(feature)
+
+    def teach_all(self, target: str):
+        """Teach the TARGET label to all columns at all levels.
+
+        Every column at every level learns: my_current_feature → target.
+        This is weak supervision: each column independently associates
+        its local (possibly abstract) feature with the global label.
+        """
+        for sheet in self.levels:
+            for col in sheet.all_columns():
+                if col.current_input is not None:
+                    col.teach(col.current_input, target)
+
+    def vote(self) -> tuple[str | None, dict[str, float]]:
+        """Collect votes from ALL levels. Return (winner, vote_scores).
+
+        Higher levels get more weight (they see larger context).
+        Level weight = 2^level (level 0 = 1, level 1 = 2, level 2 = 4).
+        """
+        scores: dict[str, float] = {}
+        for lev, sheet in enumerate(self.levels):
+            weight = 2.0 ** lev  # higher levels count more
+            for col in sheet.all_columns():
+                pred = col.prediction
+                if pred is not None:
+                    scores[pred] = scores.get(pred, 0.0) + weight * col.confidence
+        if not scores:
+            return None, scores
+        winner = max(scores, key=scores.get)
+        return winner, scores
+
+    def reset(self):
+        for sheet in self.levels:
+            for col in sheet.all_columns():
+                col.reset()
+
+    def __repr__(self):
+        parts = [f"L{i}: {s}" for i, s in enumerate(self.levels)]
+        return f"ColumnHierarchy({', '.join(parts)})"
+
+
+# -----------------------------------------------------------------------
+# Succession Engine (unchanged)
+# -----------------------------------------------------------------------
 
 class SuccessionEngine:
     """Z/10Z successor morphism for multi-digit succession."""
@@ -155,7 +295,6 @@ class SuccessionEngine:
 
     @staticmethod
     def successor(number_str: str) -> str:
-        """Compute successor of a number string."""
         digits = [int(d) for d in number_str]
         result = []
         carry = False
@@ -167,8 +306,7 @@ class SuccessionEngine:
                 if carry:
                     out_d, carry = SuccessionEngine.SUCC[(d, False)]
                 else:
-                    out_d = d
-                    carry = False
+                    out_d, carry = d, False
             result.append(str(out_d))
         if carry:
             result.append("1")

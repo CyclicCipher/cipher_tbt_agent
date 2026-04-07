@@ -68,19 +68,20 @@ def stage_mnist(brain: SymbolicBrain):
     from mnist_loader import load_mnist
     (train_img, train_lbl), (test_img, test_lbl) = load_mnist()
 
-    # Initialize visual cortex.
-    brain.init_visual_cortex(
+    # Initialize visual hierarchy (2 levels).
+    brain.init_visual(
         image_shape=(28, 28),
         patch_size=4, stride=4,
-        n_codes=2048,
+        n_codes=512,
+        n_levels=2, pool=2,
     )
 
-    # Pre-train codebook on training patches.
+    # Pre-train codebook.
     t0 = time.time()
     brain.train_codebook(train_img, verbose=True)
     print(f"  Codebook time: {time.time()-t0:.1f}s")
 
-    # Train: one pass through training set.
+    # Train: one pass.
     t0 = time.time()
     for i in range(len(train_img)):
         brain.train_image(train_img[i], int(train_lbl[i]))
@@ -89,14 +90,16 @@ def stage_mnist(brain: SymbolicBrain):
     print(f"  Training time: {time.time()-t0:.1f}s")
 
     # Memory stats.
-    total_mem = sum(len(col.memory) for col in brain.visual_cortex.all_columns())
-    print(f"  Total column memory entries: {total_mem}")
+    for lev, sheet in enumerate(brain.visual.levels):
+        total = sum(len(c.memory) for c in sheet.all_columns())
+        print(f"  Level {lev} ({sheet.name}): {sheet.n_columns()} columns, "
+              f"{total} memory entries")
 
     # Test.
     t0 = time.time()
     correct = 0
     for i in range(len(test_img)):
-        pred, votes = brain.classify_image(test_img[i])
+        pred, _ = brain.classify_image(test_img[i])
         if pred is not None and int(pred) == test_lbl[i]:
             correct += 1
 
@@ -127,10 +130,12 @@ def main():
 
     print(f"\n{'=' * 50}")
     print(f"Succession memory: {len(brain.succession.memory)} entries")
-    if brain.visual_cortex:
-        total = sum(len(c.memory) for c in brain.visual_cortex.all_columns())
-        print(f"Visual cortex: {brain.visual_cortex.n_columns()} columns, "
-              f"{total} memory entries")
+    if brain.visual:
+        print(f"Visual hierarchy: {brain.visual.n_levels()} levels")
+        for i, lev in enumerate(brain.visual.levels):
+            total = sum(len(c.memory) for c in lev.all_columns())
+            print(f"  Level {i} ({lev.name}): {lev.n_columns()} columns, "
+                  f"{total} features")
     print(f"{'=' * 50}")
 
 
