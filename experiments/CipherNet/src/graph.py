@@ -125,6 +125,11 @@ class Node:
     relative to theta oscillation). Based on theta-gamma phase coding
     in hippocampus/entorhinal cortex. Domain-general: works for
     digit position, word position, spatial location.
+
+    Spatial position (broadcast communication):
+    Each node has a position on the virtual cortical sheet. Nearby
+    nodes communicate via broadcast (signal attenuates with distance).
+    No explicit lateral edges needed — proximity IS connectivity.
     """
     id: int
     activation: float = 0.0
@@ -132,6 +137,7 @@ class Node:
     error: float = 0.0         # prediction error (sensory - prediction)
     basal: float = 0.0         # feedforward compartment
     apical: float = 0.0        # feedback/context compartment
+    position: tuple = (0.0, 0.0, 0.0)  # (x, y, z) on cortical sheet
     label: str | None = None
     subgraph: str | None = None
     meta: dict[str, Any] = field(default_factory=dict)
@@ -226,6 +232,13 @@ class Graph:
         # intracortical lateral connections. Set by Brain.attend().
         self._ach_level: float = 0.0
 
+        # Spatial broadcast: grid-hash index for O(1) neighbor lookup.
+        # Nodes with positions communicate via distance-attenuated broadcast.
+        # Rebuilt on demand via _rebuild_spatial_index().
+        self._spatial_grid: dict[tuple[int, int], list[int]] = defaultdict(list)
+        self._spatial_cell_size: float = 3.0  # grid cell = max broadcast radius
+        self._spatial_dirty: bool = True  # rebuild flag
+
     # -------------------------------------------------------------------
     # Node operations
     # -------------------------------------------------------------------
@@ -235,8 +248,12 @@ class Graph:
                  **meta) -> int:
         nid = self._next_id
         self._next_id += 1
-        node = Node(id=nid, label=label, subgraph=subgraph, meta=meta)
+        # Extract position from meta if provided, otherwise default.
+        pos = meta.pop('position', (0.0, 0.0, 0.0))
+        node = Node(id=nid, label=label, subgraph=subgraph, meta=meta,
+                    position=pos)
         self._nodes[nid] = node
+        self._spatial_dirty = True
         if label is not None:
             self._label_to_id[label] = nid
         if subgraph is not None:
@@ -420,6 +437,107 @@ class Graph:
     def total_error(self) -> float:
         """Sum of squared prediction errors across all nodes."""
         return sum(n.error ** 2 for n in self._nodes.values())
+
+    # -------------------------------------------------------------------
+    # Spatial broadcast system
+    # -------------------------------------------------------------------
+
+    def _rebuild_spatial_index(self):
+        """Rebuild the grid-hash spatial index from node positions."""
+        self._spatial_grid.clear()
+        cs = self._spatial_cell_size
+        for nid, node in self._nodes.items():
+            gx = int(node.position[0] / cs)
+            gy = int(node.position[1] / cs)
+            self._spatial_grid[(gx, gy)].append(nid)
+        self._spatial_dirty = False
+
+    def _spatial_neighbors(self, nid: int, radius: float):
+        """Yield (neighbor_nid, distance) for nodes within radius.
+
+        Uses grid-hash for O(1) cell lookup. Checks 3x3 grid cells
+        around the query node's cell.
+        """
+        if self._spatial_dirty:
+            self._rebuild_spatial_index()
+        node = self._nodes.get(nid)
+        if node is None:
+            return
+        px, py, pz = node.position
+        cs = self._spatial_cell_size
+        gx, gy = int(px / cs), int(py / cs)
+        r2 = radius * radius
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                for other_nid in self._spatial_grid.get((gx + dx, gy + dy), []):
+                    if other_nid == nid:
+                        continue
+                    other = self._nodes.get(other_nid)
+                    if other is None or other.activation < 0.001:
+                        continue
+                    ox, oy, oz = other.position
+                    d2 = (px - ox) ** 2 + (py - oy) ** 2
+                    if d2 <= r2:
+                        yield other_nid, math.sqrt(d2)
+
+    def compute_broadcast(self, nid: int, node: Node) -> tuple[float, float]:
+        """Compute broadcast input from spatial neighbors.
+
+        Three broadcast channels (matching biology):
+
+        1. EXCITATORY LOCAL (L23→L23): nearby columns share identity.
+           Radius ~3.0 units. Attenuates exponentially (λ=1.5).
+           Biology: L2/3 horizontal axon arbors (350-1200μm).
+           Arrives at BASAL (feedforward context).
+
+        2. INHIBITORY SURROUND (PV+ broadcast): nearby columns compete.
+           Radius ~2.0 units. Attenuates exponentially (λ=1.0).
+           Biology: PV+ basket cell axons (~500μm-1mm).
+           Subtracted from activation (direct inhibition).
+
+        3. Phase-coherent reception: cells only receive broadcasts from
+           cells at similar theta phase. This prevents cross-position
+           interference and enables position-gated communication.
+
+        Returns (excitatory_broadcast, inhibitory_broadcast).
+        """
+        exc_radius = 3.0
+        exc_lambda = 1.5
+        inh_radius = 2.0
+        inh_lambda = 1.0
+
+        excitatory = 0.0
+        inhibitory = 0.0
+
+        node_layer = node.meta.get('layer')
+        node_role = node.meta.get('role')
+
+        # Only L23 (process) cells participate in lateral broadcast.
+        # L4 (input) and L5 (output) use explicit edges for their pathways.
+        # This matches biology: L2/3 has the densest horizontal connections.
+        if node_layer != 23 or node_role == 'inhibitor':
+            return 0.0, 0.0
+
+        for other_nid, dist in self._spatial_neighbors(nid, exc_radius):
+            other = self._nodes[other_nid]
+            other_layer = other.meta.get('layer')
+            other_role = other.meta.get('role')
+            if other_role == 'inhibitor':
+                continue
+
+            # Phase-coherent reception: attenuate by phase mismatch.
+            phase_match = (1.0 + math.cos(node.phase - other.phase)) / 2.0
+
+            if other_layer == 23 and other_role == 'process':
+                # Excitatory L23→L23 broadcast
+                signal = other.activation * math.exp(-dist / exc_lambda)
+                excitatory += signal * phase_match
+            elif other_role == 'inhibitor' and dist <= inh_radius:
+                # Inhibitory surround from nearby inhibitors
+                signal = other.activation * math.exp(-dist / inh_lambda)
+                inhibitory += signal
+
+        return excitatory, inhibitory
 
     def _node_freq(self, node: Node) -> str | None:
         """Get the frequency band for a node based on its layer."""
@@ -646,6 +764,13 @@ class Graph:
             # 2-3. Two-compartment dendritic computation.
             sensory, prediction, error, prop_phase = self._compute_sensory(nid, node)
 
+            # 2b. Spatial broadcast: receive from nearby cells.
+            # Adds excitatory context (basal) and inhibitory surround.
+            # Only L23 cells participate — matches biology (densest
+            # horizontal connections in superficial layers).
+            bcast_exc, bcast_inh = self.compute_broadcast(nid, node)
+            sensory += bcast_exc  # broadcast adds to feedforward drive
+
             # 4. Update: two modes.
 
             self_loop_weight = 0.0
@@ -717,7 +842,7 @@ class Graph:
                             continue  # tonic gating, not regular inhibition
                         inhibition += abs(edge.weight) * src.activation
 
-            new_act = max(0.0, new_act - inhibition)
+            new_act = max(0.0, new_act - inhibition - bcast_inh)
             # Smooth compression (tanh): preserves relative differences
             # at high activation instead of hard-clamping to [0,1].
             # Like a real neuron's firing rate saturation curve.

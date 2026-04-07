@@ -279,6 +279,54 @@ def setup_brain() -> Brain:
                 graph.add_edge(l5_cells[0], col['L6'],
                                edge_type=TEMPORAL, weight=0.01)
 
+    # === SPATIAL POSITION ASSIGNMENT ===
+    # Assign (x, y, z) positions to all nodes on the virtual cortical sheet.
+    # y = cortical area (sensory→motor hierarchy)
+    # x = column index within an area
+    # z = cell index within a column (distinguishes cells, same x/y)
+    # Nearby nodes communicate via broadcast — no explicit lateral edges.
+
+    area_y = {
+        'ans': 0.0,
+        'token_cortex': 2.0,
+        'temporal_cortex': 4.0,
+        'broca': 6.0,
+        'pfc': 8.0,
+        'output_cortex': 10.0,
+        'basal_ganglia': 12.0,
+        'thalamus': 14.0,
+        'visual_cortex_stub': 1.0,
+    }
+
+    for sg_name, nids in graph._subgraphs.items():
+        # Determine y from area
+        y = 0.0
+        for area_prefix, area_y_val in area_y.items():
+            if sg_name == area_prefix or sg_name.startswith(area_prefix):
+                y = area_y_val
+                break
+        # Input columns: place along x-axis at y=-1
+        if sg_name.startswith('column:char:'):
+            y = -1.0
+            char = sg_name.split(':')[-1]
+            # Deterministic x from character
+            chars = '0123456789+-*/^=() '
+            x = chars.index(char) if char in chars else hash(char) % 20
+        else:
+            x = 0.0
+
+        for i, nid in enumerate(sorted(nids)):
+            node = graph.get_node(nid)
+            if node is None:
+                continue
+            cell_idx = node.meta.get('cell_index', 0)
+            # x: spread nodes within an area by their index
+            # For multi-cell priors, use the column prefix for x grouping
+            node_x = x + i * 0.3 if sg_name.startswith('column:') else i * 0.3
+            node.position = (node_x, y, float(cell_idx))
+
+    graph._spatial_dirty = True
+
     print(f"Brain setup: {graph.summary()}")
     return brain
 
