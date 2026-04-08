@@ -48,65 +48,61 @@ def stage_mnist(brain: SymbolicBrain):
 
     from mnist_loader import load_mnist
     from eye import Eye
-    from visual_cortex import RetinotopicV1, FovealExplorer
+    from visual_cortex import HierarchicalV1, FovealExplorer
     from codebook import PatchCodebook
 
     (train_img, train_lbl), (test_img, test_lbl) = load_mnist()
 
-    # Setup.
+    # Setup: eye + hierarchical cortex (2 levels).
     eye = Eye(retina_size=19)
     codebook = PatchCodebook(n_codes=256)
-    v1 = RetinotopicV1(eye, codebook, patch_size=5, stride=3)
-    explorer = FovealExplorer(eye, v1, n_fixations=3)
-    print(f"  Eye: {eye}, V1: {v1.n_cols} columns")
+    cortex = HierarchicalV1(eye, codebook, patch_size=5, stride=3,
+                            n_levels=2, pool=2, n_categories=32)
+    explorer = FovealExplorer(eye, cortex, n_fixations=9)
+    print(f"  Eye: {eye}")
+    for i, lev in enumerate(cortex.levels):
+        print(f"  Level {i} ({lev.name}): {lev.grid_h}x{lev.grid_w} = {lev.n_cols} columns")
 
     # Codebook.
     t0 = time.time()
-    ps = v1.patch_size
+    ps = cortex.patch_size
     patches = []
-    for idx in range(300):
+    for idx in range(200):
         eye.fixate(14.0, 14.0)
         r = eye.sample(train_img[idx])
-        for gy in range(v1.grid_h):
-            for gx in range(v1.grid_w):
-                patches.append(r[gy*v1.stride:gy*v1.stride+ps, gx*v1.stride:gx*v1.stride+ps])
-    codebook.fit(np.array(patches[:8000]), verbose=True)
+        gh, gw = cortex.levels[0].grid_h, cortex.levels[0].grid_w
+        st = cortex.stride
+        for gy in range(gh):
+            for gx in range(gw):
+                patches.append(r[gy*st:gy*st+ps, gx*st:gx*st+ps])
+    codebook.fit(np.array(patches[:5000]), verbose=True)
     print(f"  Codebook: {time.time()-t0:.1f}s")
 
-    # Phase 1: Explore unlabeled images → accumulate triples.
+    # Phase 1: Explore unlabeled → accumulate triples.
     t0 = time.time()
-    n_explore = 2000
+    n_explore = 1000
     for i in range(n_explore):
         explorer.explore_unlabeled(train_img[i])
-    print(f"  Phase 1 (explore {n_explore}): {time.time()-t0:.1f}s, "
-          f"{v1.total_triples()} triples")
+    total_triples = sum(lev.total_triples() for lev in cortex.levels)
+    print(f"  Phase 1 (explore {n_explore}): {time.time()-t0:.1f}s, {total_triples} triples")
 
-    # Phase 2: Discover categories.
+    # Phase 2: Discover categories at all levels.
     t0 = time.time()
-    v1.discover(verbose=True)
+    cortex.discover_all(verbose=True)
     print(f"  Phase 2 (discover): {time.time()-t0:.1f}s")
-    if v1.category:
-        print(f"  {v1.category.describe()}")
 
-    # Phase 3: Learn with categorical features.
+    # Phase 3: Learn.
     t0 = time.time()
-    n_train = 5000
+    n_train = 3000
     for i in range(n_train):
-        label = str(int(train_lbl[i]))
-        explorer.learn(train_img[i], label)
+        explorer.learn(train_img[i], str(int(train_lbl[i])))
         if (i + 1) % 1000 == 0:
             print(f"  Trained {i+1}/{n_train}")
     print(f"  Phase 3 (learn {n_train}): {time.time()-t0:.1f}s")
 
-    # Model stats.
-    total_entries = sum(sum(len(m) for m in col_models.values())
-                        for col_models in v1._models)
-    n_models = sum(len(col_models) for col_models in v1._models)
-    print(f"  Models: {n_models}, Total entries: {total_entries}")
-
     # Test.
     t0 = time.time()
-    n_test = 2000
+    n_test = 1000
     correct = 0
     for i in range(n_test):
         pred, conf = explorer.recognize(test_img[i])
