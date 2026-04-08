@@ -72,7 +72,7 @@ def stage_mnist(brain: SymbolicBrain):
 
     (train_img, train_lbl), (test_img, test_lbl) = load_mnist()
 
-    # Create eye (19×19 retinal image) + V1 with patch RFs + codebook.
+    # Eye + V1 + codebook.
     eye = Eye(retina_size=19)
     codebook = PatchCodebook(n_codes=256)
     v1 = RetinotopicV1(eye, codebook, patch_size=5, stride=3)
@@ -80,52 +80,51 @@ def stage_mnist(brain: SymbolicBrain):
     print(f"  Eye: {eye}")
     print(f"  V1: {v1.n_columns} columns ({v1.grid_h}x{v1.grid_w})")
 
-    # Pre-train codebook: extract patches from center-fixated images.
+    # Pre-train codebook.
     t0 = time.time()
-    rng = np.random.RandomState(42)
     ps = v1.patch_size
-    sample_patches = []
-    for idx in rng.choice(len(train_img), size=500, replace=False):
-        eye.fixate(14.0, 14.0)  # center of 28×28
-        retina = eye.sample(train_img[idx])
+    patches = []
+    for idx in range(500):
+        eye.fixate(14.0, 14.0)
+        r = eye.sample(train_img[idx])
         for gy in range(v1.grid_h):
             for gx in range(v1.grid_w):
                 y0, x0 = gy * v1.stride, gx * v1.stride
-                sample_patches.append(retina[y0:y0+ps, x0:x0+ps])
-    codebook.fit(np.array(sample_patches[:10000]), verbose=True)
+                patches.append(r[y0:y0+ps, x0:x0+ps])
+    codebook.fit(np.array(patches[:10000]), verbose=True)
     print(f"  Codebook time: {time.time()-t0:.1f}s")
 
-    # Train: explore images with saccades.
-    n_train = min(20000, len(train_img))
+    # Train: foveal exploration. Each digit class is an "object."
+    n_train = min(10000, len(train_img))
     t0 = time.time()
     for i in range(n_train):
-        label = str(int(train_lbl[i]))
-        explorer.explore(train_img[i], label=label, learn=True)
-        if (i + 1) % 5000 == 0:
+        object_id = str(int(train_lbl[i]))
+        explorer.explore(train_img[i], object_id=object_id, learn=True)
+        if (i + 1) % 2000 == 0:
             elapsed = time.time() - t0
             print(f"  Trained {i+1}/{n_train} ({elapsed:.1f}s)")
     print(f"  Training time: {time.time()-t0:.1f}s")
 
     # Memory stats.
-    total_mem = sum(len(c.memory) for c in v1.columns)
-    ident = sum(1 for c in v1.columns for k in c.memory if ':d' not in k)
-    disp = sum(1 for c in v1.columns for k in c.memory if ':d' in k)
-    print(f"  Memory: {total_mem} total ({ident} identity, {disp} displacement)")
+    total_bindings = sum(c.total_bindings() for c in v1.columns)
+    n_models = sum(len(c.models) for c in v1.columns)
+    print(f"  Models: {n_models}, Total bindings: {total_bindings}")
 
     # Test.
     t0 = time.time()
     correct = 0
-    for i in range(len(test_img)):
-        pred, _ = explorer.explore(test_img[i], learn=False)
+    n_test = min(5000, len(test_img))
+    for i in range(n_test):
+        pred, conf = explorer.explore(test_img[i], learn=False)
         if pred is not None and pred == str(int(test_lbl[i])):
             correct += 1
-        if (i + 1) % 2000 == 0:
-            print(f"  Tested {i+1}/{len(test_img)}: "
+        if (i + 1) % 1000 == 0:
+            print(f"  Tested {i+1}/{n_test}: "
                   f"{correct}/{i+1} = {correct/(i+1)*100:.1f}%")
 
-    acc = correct / len(test_img) * 100
+    acc = correct / n_test * 100
     print(f"  Test time: {time.time()-t0:.1f}s")
-    print(f"  MNIST accuracy: {correct}/{len(test_img)} = {acc:.2f}%")
+    print(f"  MNIST accuracy: {correct}/{n_test} = {acc:.2f}%")
     return acc
 
 
