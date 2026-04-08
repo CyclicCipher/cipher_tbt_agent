@@ -63,49 +63,55 @@ def stage_ood(brain: SymbolicBrain):
 # -----------------------------------------------------------------------
 
 def stage_mnist(brain: SymbolicBrain):
-    print("\n=== Stage 3: MNIST Classification ===")
+    print("\n=== Stage 3: MNIST (Foveal Exploration) ===")
 
     from mnist_loader import load_mnist
+    from eye import Eye
+    from visual_cortex import RetinotopicV1, FovealExplorer
+
     (train_img, train_lbl), (test_img, test_lbl) = load_mnist()
 
-    # Initialize visual hierarchy (4 levels).
-    # L0 (V1): 7×7 columns, 4×4 pixel patches, 512 VQ codes
-    # L1 (V2): 3×3, pools 2×2 from L0 (sees combinations of edges)
-    # L2 (V4): 1×1, pools 3×3 from L1 (sees whole digit shape)
-    # L3 (IT): 1×1, pools 1×1 from L2 (final classification)
-    brain.init_visual(
-        image_shape=(28, 28),
-        patch_size=4, stride=4,
-        n_codes=512,
-        n_levels=4, pool=2,
-    )
+    # Create eye + retinotopic V1.
+    eye = Eye(fovea_radius=3, n_rings=2, samples_per_ring=6)
+    v1 = RetinotopicV1(eye)
+    explorer = FovealExplorer(eye, v1, n_fixations=3)
+    print(f"  Eye: {eye}")
+    print(f"  V1: {v1.n_columns} columns")
 
-    # Pre-train codebook.
+    # Train: explore images with saccades.
+    # 10K images is enough — with 256-entry cap, more just evicts.
+    n_train = min(10000, len(train_img))
     t0 = time.time()
-    brain.train_codebook(train_img, verbose=True)
-    print(f"  Codebook time: {time.time()-t0:.1f}s")
-
-    # Train: one pass.
-    t0 = time.time()
-    for i in range(len(train_img)):
-        brain.train_image(train_img[i], int(train_lbl[i]))
-        if (i + 1) % 10000 == 0:
-            print(f"  Trained {i+1}/{len(train_img)}")
+    for i in range(n_train):
+        label = str(int(train_lbl[i]))
+        explorer.explore(train_img[i], label=label, learn=True)
+        if (i + 1) % 5000 == 0:
+            elapsed = time.time() - t0
+            print(f"  Trained {i+1}/{n_train} ({elapsed:.1f}s)")
     print(f"  Training time: {time.time()-t0:.1f}s")
 
     # Memory stats.
-    for lev, sheet in enumerate(brain.visual.levels):
-        total = sum(len(c.memory) for c in sheet.all_columns())
-        print(f"  Level {lev} ({sheet.name}): {sheet.n_columns()} columns, "
-              f"{total} memory entries")
+    total_identity = 0
+    total_displacement = 0
+    for col in v1.columns:
+        for k in col.memory:
+            if ':d' in k:
+                total_displacement += 1
+            else:
+                total_identity += 1
+    print(f"  Identity entries: {total_identity}")
+    print(f"  Displacement entries: {total_displacement}")
 
     # Test.
     t0 = time.time()
     correct = 0
     for i in range(len(test_img)):
-        pred, _ = brain.classify_image(test_img[i])
-        if pred is not None and int(pred) == test_lbl[i]:
+        pred, _ = explorer.explore(test_img[i], learn=False)
+        if pred is not None and pred == str(int(test_lbl[i])):
             correct += 1
+        if (i + 1) % 2000 == 0:
+            print(f"  Tested {i+1}/{len(test_img)}: "
+                  f"{correct}/{i+1} = {correct/(i+1)*100:.1f}%")
 
     acc = correct / len(test_img) * 100
     print(f"  Test time: {time.time()-t0:.1f}s")
@@ -134,12 +140,6 @@ def main():
 
     print(f"\n{'=' * 50}")
     print(f"Succession memory: {len(brain.succession.memory)} entries")
-    if brain.visual:
-        print(f"Visual hierarchy: {brain.visual.n_levels()} levels")
-        for i, lev in enumerate(brain.visual.levels):
-            total = sum(len(c.memory) for c in lev.all_columns())
-            print(f"  Level {i} ({lev.name}): {lev.n_columns()} columns, "
-                  f"{total} features")
     print(f"{'=' * 50}")
 
 
