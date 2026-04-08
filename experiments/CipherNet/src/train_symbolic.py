@@ -68,12 +68,16 @@ def stage_mnist(brain: SymbolicBrain):
     from mnist_loader import load_mnist
     (train_img, train_lbl), (test_img, test_lbl) = load_mnist()
 
-    # Initialize visual hierarchy (2 levels).
+    # Initialize visual hierarchy (4 levels).
+    # L0 (V1): 7×7 columns, 4×4 pixel patches, 512 VQ codes
+    # L1 (V2): 3×3, pools 2×2 from L0 (sees combinations of edges)
+    # L2 (V4): 1×1, pools 3×3 from L1 (sees whole digit shape)
+    # L3 (IT): 1×1, pools 1×1 from L2 (final classification)
     brain.init_visual(
         image_shape=(28, 28),
         patch_size=4, stride=4,
         n_codes=512,
-        n_levels=2, pool=2,
+        n_levels=4, pool=2,
     )
 
     # Pre-train codebook.

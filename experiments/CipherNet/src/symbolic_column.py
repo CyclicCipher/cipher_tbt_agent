@@ -39,14 +39,25 @@ class CorticalMessage:
 # Symbolic Column
 # -----------------------------------------------------------------------
 
+MAX_MEMORY = 256  # biological minicolumn capacity (~100-500 patterns)
+
+
 class SymbolicColumn:
-    """A cortical column with receptive field and accumulating memory."""
+    """A cortical column with capped memory (256 entries max).
+
+    When memory is full, the least confident entry is evicted.
+    This forces selectivity: columns keep only the most useful
+    associations, like biological columns developing orientation
+    or object selectivity through competitive learning.
+    """
 
     def __init__(self, name: str, receptive_field: Any = None,
-                 position: tuple = (0.0, 0.0)):
+                 position: tuple = (0.0, 0.0),
+                 max_memory: int = MAX_MEMORY):
         self.name = name
         self.receptive_field = receptive_field
         self.position = position
+        self.max_memory = max_memory
         self.memory: dict[str, dict[str, int]] = {}
         self.current_input: str | None = None
         self.prediction: str | None = None
@@ -58,11 +69,37 @@ class SymbolicColumn:
         self.prediction = self.predict()
 
     def teach(self, feature: str, target: str):
-        """Accumulate: feature → target gets +1 vote."""
+        """Accumulate: feature → target gets +1 vote. Evict if full."""
         if feature not in self.memory:
+            if len(self.memory) >= self.max_memory:
+                self._evict()
             self.memory[feature] = {}
         counts = self.memory[feature]
         counts[target] = counts.get(target, 0) + 1
+
+    def _evict(self):
+        """Remove the least confident memory entry.
+
+        Confidence = max_votes / total_votes for that feature.
+        Low confidence = ambiguous feature (maps to many targets
+        with similar frequency). Evicting it loses the least.
+        """
+        worst_key = None
+        worst_conf = float('inf')
+        for feat, counts in self.memory.items():
+            total = sum(counts.values())
+            if total == 0:
+                worst_key = feat
+                break
+            best = max(counts.values())
+            conf = best / total
+            # Tiebreak: prefer evicting features with fewer total votes.
+            score = conf + 0.001 * total  # slight bias toward keeping frequent
+            if score < worst_conf:
+                worst_conf = score
+                worst_key = feat
+        if worst_key is not None:
+            del self.memory[worst_key]
 
     def predict(self) -> str | None:
         """Return mode (most frequent target) for current input."""
