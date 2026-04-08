@@ -49,34 +49,25 @@ def stage_mnist(brain: SymbolicBrain):
     from mnist_loader import load_mnist
     from eye import Eye
     from visual_cortex import HierarchicalV1, FovealExplorer
-    from codebook import PatchCodebook
+    from codebook import GaborFilterBank
 
     (train_img, train_lbl), (test_img, test_lbl) = load_mnist()
 
-    # Setup: eye + hierarchical cortex (2 levels).
+    # Setup: eye + Gabor filter bank + hierarchical cortex.
     eye = Eye(retina_size=19)
-    codebook = PatchCodebook(n_codes=256)
-    cortex = HierarchicalV1(eye, codebook, patch_size=5, stride=3,
+    gabor = GaborFilterBank(patch_size=5, n_orientations=8,
+                            n_frequencies=3, top_k=4)
+    cortex = HierarchicalV1(eye, gabor, patch_size=5, stride=3,
                             n_levels=2, pool=2, n_categories=32)
     explorer = FovealExplorer(eye, cortex, n_fixations=9)
     print(f"  Eye: {eye}")
+    print(f"  Gabor: {gabor}")
     for i, lev in enumerate(cortex.levels):
         print(f"  Level {i} ({lev.name}): {lev.grid_h}x{lev.grid_w} = {lev.n_cols} columns")
 
-    # Codebook.
+    # Gabor filters are fixed (no training needed).
+    gabor.fit(verbose=True)
     t0 = time.time()
-    ps = cortex.patch_size
-    patches = []
-    for idx in range(200):
-        eye.fixate(14.0, 14.0)
-        r = eye.sample(train_img[idx])
-        gh, gw = cortex.levels[0].grid_h, cortex.levels[0].grid_w
-        st = cortex.stride
-        for gy in range(gh):
-            for gx in range(gw):
-                patches.append(r[gy*st:gy*st+ps, gx*st:gx*st+ps])
-    codebook.fit(np.array(patches[:5000]), verbose=True)
-    print(f"  Codebook: {time.time()-t0:.1f}s")
 
     # Phase 1: Explore unlabeled → accumulate triples.
     t0 = time.time()

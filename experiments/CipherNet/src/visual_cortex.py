@@ -188,8 +188,12 @@ class HierarchicalV1:
                                 parts.append(lower._current_features[li])
                             else:
                                 parts.append("_")
-                    # Compose: sorted tuple of lower features.
-                    composed = "|".join(sorted(parts))
+                    # Compose: ORDERED spatial tuple (position-specific).
+                    # NOT sorted — spatial arrangement IS the feature.
+                    # Different spatial arrangements of the same V1 features
+                    # produce DIFFERENT V2 features (like V2 corner detectors
+                    # have spatially distinct subunits wired to specific V1 positions).
+                    composed = "|".join(parts)
                     features.append(composed)
 
             upper.observe(features)
