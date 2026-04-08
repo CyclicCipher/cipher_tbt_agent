@@ -68,28 +68,27 @@ class DiscoveredCategory:
 
 
 def discover_category(triples: list[tuple[str, Any, str]],
+                      n_object_classes: int = 32,
                       verbose: bool = False) -> DiscoveredCategory:
     """Discover categorical structure from (feature, displacement, feature) triples.
 
-    The main entry point. Runs all four stages:
-    1. Object discovery (partition refinement)
-    2. Morphism discovery (displacement equivalence)
-    3. Composition table (Cayley table from chained transitions)
-    4. Algebraic classification
+    Stages:
+    1. Object discovery: JSD-based distributional clustering of features
+       by their transition profiles (soft equivalence, not exact match).
+    2. Morphism discovery: displacement equivalence classes.
+    3. Composition table (Cayley table from chained transitions).
+    4. Algebraic classification.
 
     Args:
         triples: list of (feature_a, displacement, feature_b)
+        n_object_classes: target number of feature equivalence classes.
         verbose: print progress
-
-    Returns:
-        DiscoveredCategory with objects, morphisms, composition.
     """
     if not triples:
         return DiscoveredCategory()
 
     cat = DiscoveredCategory()
 
-    # Collect unique features and displacements.
     features = set()
     displacements = set()
     for a, d, b in triples:
@@ -101,83 +100,94 @@ def discover_category(triples: list[tuple[str, Any, str]],
         print(f"  Raw: {len(features)} features, {len(displacements)} displacements, "
               f"{len(triples)} triples")
 
-    # --- Stage 1: Object discovery (partition refinement) ---
-    # Two features are equivalent if they have the same transition
-    # signature: for every displacement, they map to the same target class.
-    # This is the Hopcroft/Myhill-Nerode equivalence.
+    # --- Stage 1: Object discovery (JSD distributional clustering) ---
+    # Build distributional signature per feature: for each displacement,
+    # what is the probability distribution over target features?
+    # Then cluster features by JSD similarity of these distributions.
+    # Features with SIMILAR (not identical) transition patterns merge.
 
-    # Build transition map: (feature, displacement) → set of target features.
-    trans_map: dict[tuple[str, Any], set[str]] = defaultdict(set)
-    for a, d, b in triples:
-        trans_map[(a, d)].add(b)
-
-    # Initial partition: all features in one class.
-    # Refine by splitting classes where members have different transition targets.
     feature_list = sorted(features)
     disp_list = sorted(displacements, key=str)
+    target_list = sorted(features)  # targets are also features
+    target_idx = {t: i for i, t in enumerate(target_list)}
+    n_targets = len(target_list)
+    n_disps = len(disp_list)
 
-    # Compute signature for each feature: tuple of (displacement → frozenset of targets).
-    def signature(feat: str) -> tuple:
-        sig = []
-        for d in disp_list:
-            targets = trans_map.get((feat, d), set())
-            sig.append(frozenset(targets))
-        return tuple(sig)
+    # Build count matrix: trans_counts[(feat, disp_idx)] → Counter over targets.
+    trans_counts: dict[str, dict[int, dict[int, int]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(int)))
+    for a, d, b in triples:
+        di = disp_list.index(d) if n_disps < 50 else 0  # fast path for few displacements
+        bi = target_idx.get(b, 0)
+        trans_counts[a][di][bi] += 1
 
-    # Group features by signature → equivalence classes.
-    sig_to_class: dict[tuple, int] = {}
-    class_id = 0
-    for feat in feature_list:
-        sig = signature(feat)
-        if sig not in sig_to_class:
-            sig_to_class[sig] = class_id
-            cat.objects[class_id] = set()
-            class_id += 1
-        cid = sig_to_class[sig]
+    # Handle case where disp_list is long (index() is O(n)).
+    if n_disps >= 50:
+        disp_idx_map = {d: i for i, d in enumerate(disp_list)}
+        trans_counts = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+        for a, d, b in triples:
+            di = disp_idx_map[d]
+            bi = target_idx.get(b, 0)
+            trans_counts[a][di][bi] += 1
+
+    # Build distributional signature vectors for clustering.
+    # Each feature gets a vector of length (n_disps * n_targets) —
+    # flattened transition probability distribution.
+    # For large target spaces, use a compressed signature.
+    if n_targets * n_disps > 5000:
+        # Compressed: use top-K targets per displacement.
+        K = min(20, n_targets)
+        sig_dim = n_disps * K
+    else:
+        K = n_targets
+        sig_dim = n_disps * K
+
+    import numpy as np
+
+    sig_matrix = np.zeros((len(feature_list), sig_dim), dtype=np.float32)
+    for fi, feat in enumerate(feature_list):
+        for di in range(n_disps):
+            counts = trans_counts[feat][di]
+            if not counts:
+                continue
+            total = sum(counts.values())
+            if K < n_targets:
+                # Top-K targets.
+                top_targets = sorted(counts.items(), key=lambda x: -x[1])[:K]
+                for ki, (ti, c) in enumerate(top_targets):
+                    sig_matrix[fi, di * K + ki] = c / total
+            else:
+                for ti, c in counts.items():
+                    if ti < K:
+                        sig_matrix[fi, di * K + ti] = c / total
+
+    # Cluster using sklearn MiniBatchKMeans (fast, JSD-approximated via L2 on sqrt).
+    # sqrt transform approximates Hellinger distance ≈ JSD for distributions.
+    sig_sqrt = np.sqrt(sig_matrix + 1e-10)
+
+    from sklearn.cluster import MiniBatchKMeans
+
+    n_clusters = min(n_object_classes, len(feature_list))
+    if n_clusters < 2:
+        n_clusters = 2
+
+    km = MiniBatchKMeans(n_clusters=n_clusters, random_state=42,
+                         batch_size=256, n_init=3)
+    labels = km.fit_predict(sig_sqrt)
+
+    for fi, feat in enumerate(feature_list):
+        cid = int(labels[fi])
+        if cid not in cat.objects:
+            cat.objects[cid] = set()
         cat.objects[cid].add(feat)
         cat.feature_to_object[feat] = cid
 
-    # Iterative refinement: re-partition using class-level targets.
-    # (One pass is usually sufficient for small alphabets.)
-    changed = True
-    max_iter = 10
-    for iteration in range(max_iter):
-        if not changed:
-            break
-        changed = False
-
-        def class_signature(feat: str) -> tuple:
-            sig = []
-            for d in disp_list:
-                targets = trans_map.get((feat, d), set())
-                target_classes = frozenset(cat.feature_to_object.get(t, -1) for t in targets)
-                sig.append(target_classes)
-            return tuple(sig)
-
-        new_objects: dict[int, set[str]] = {}
-        new_f2o: dict[str, int] = {}
-        csig_to_class: dict[tuple, int] = {}
-        new_cid = 0
-        for feat in feature_list:
-            csig = class_signature(feat)
-            if csig not in csig_to_class:
-                csig_to_class[csig] = new_cid
-                new_objects[new_cid] = set()
-                new_cid += 1
-            cid = csig_to_class[csig]
-            new_objects[cid].add(feat)
-            new_f2o[feat] = cid
-
-        if len(new_objects) != len(cat.objects):
-            changed = True
-            cat.objects = new_objects
-            cat.feature_to_object = new_f2o
-
     if verbose:
-        print(f"  Stage 1: {cat.n_objects()} object classes")
-        for cid, members in sorted(cat.objects.items()):
-            sample = sorted(members)[:5]
-            print(f"    Class {cid}: {sample}{'...' if len(members) > 5 else ''} "
+        print(f"  Stage 1: {cat.n_objects()} object classes (JSD clustering)")
+        for cid in sorted(cat.objects):
+            members = cat.objects[cid]
+            sample = sorted(members)[:3]
+            print(f"    Class {cid}: {sample}{'...' if len(members) > 3 else ''} "
                   f"({len(members)} members)")
 
     # --- Stage 2: Morphism discovery ---
