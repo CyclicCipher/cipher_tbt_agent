@@ -1,11 +1,16 @@
-"""Foveal eye — samples images with resolution falloff from fixation.
+"""Foveal eye with constrained saccade vocabulary.
 
 The eye produces a RETINAL IMAGE: a 2D crop around the fixation point.
-The fovea (center) is full resolution. The periphery is downsampled.
 V1 columns tile this retinal image with patch receptive fields.
 
-Saccades move the fixation → the retinal image shifts → V1 columns
-see new features. The displacement (efference copy) is the saccade vector.
+Saccades use a FIXED VOCABULARY of ~8 vectors (4 cardinal + 4 diagonal)
+at quantized amplitudes. This matches biology: the superior colliculus
+has a topographic map creating a discrete grid of saccade vectors,
+saccades are 60% horizontal / 30% vertical / 10% oblique, and
+85% of saccades are short (<15°).
+
+The constrained vocabulary creates the regularity needed for category
+discovery to find the Z² spatial structure.
 """
 from __future__ import annotations
 
@@ -78,6 +83,69 @@ class Eye:
             retina[dst_y0:dst_y1, dst_x0:dst_x1] = image[src_y0:src_y1, src_x0:src_x1]
 
         return retina
+
+    # --- Constrained saccade vocabulary ---
+    # 8 vectors: 4 cardinal + 4 diagonal at a fixed step size.
+    # Matches biology: SC topographic map, cardinal bias, quantized amplitudes.
+
+    SACCADE_VOCAB = [
+        (1, 0), (-1, 0), (0, 1), (0, -1),    # cardinal
+        (1, 1), (1, -1), (-1, 1), (-1, -1),   # diagonal
+    ]
+
+    def grid_scan(self, image: np.ndarray, step: int = 5,
+                  center: tuple[float, float] | None = None
+                  ) -> list[tuple[float, float]]:
+        """Generate a systematic grid scan pattern over the image.
+
+        Returns list of fixation points (x, y) in a regular grid
+        centered on the image (or specified center). Uses cardinal
+        saccade directions at fixed step size.
+
+        This produces the regular displacement patterns needed for
+        category discovery to find Z² structure.
+        """
+        h, w = image.shape[:2]
+        if center is None:
+            cx, cy = w / 2.0, h / 2.0
+        else:
+            cx, cy = center
+
+        fixations = [(cx, cy)]  # start at center
+
+        # Spiral outward from center using cardinal steps.
+        for radius in range(1, max(h, w) // step + 1):
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    if abs(dx) != radius and abs(dy) != radius:
+                        continue  # only perimeter of current ring
+                    fx = cx + dx * step
+                    fy = cy + dy * step
+                    if 0 <= fx < w and 0 <= fy < h:
+                        fixations.append((fx, fy))
+
+        return fixations
+
+    def cardinal_scan(self, image: np.ndarray, step: int = 5,
+                      n_fixations: int = 9) -> list[tuple[float, float]]:
+        """Generate fixations using cardinal/diagonal saccade vocabulary.
+
+        Starts at image center, saccades using the 8-vector vocabulary
+        at the given step size. Returns up to n_fixations points.
+        """
+        h, w = image.shape[:2]
+        cx, cy = w / 2.0, h / 2.0
+        fixations = [(cx, cy)]
+
+        for dx, dy in self.SACCADE_VOCAB:
+            if len(fixations) >= n_fixations:
+                break
+            fx = cx + dx * step
+            fy = cy + dy * step
+            if 0 <= fx < w and 0 <= fy < h:
+                fixations.append((fx, fy))
+
+        return fixations
 
     def __repr__(self):
         return f"Eye(retina={self.retina_size}x{self.retina_size})"

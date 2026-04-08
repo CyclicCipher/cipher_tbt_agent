@@ -185,15 +185,9 @@ class FovealExplorer:
         self.v1 = v1
         self.n_fixations = n_fixations
 
-    def _get_fixations(self, image: np.ndarray) -> list[tuple[int, int]]:
-        h, w = image.shape[:2]
-        fixations = SalienceMap.suggest_fixations(
-            image, n=self.n_fixations,
-            min_distance=max(3, self.eye.retina_size // 4),
-        )
-        if not fixations:
-            fixations = [(w // 2, h // 2)]
-        return fixations
+    def _get_fixations(self, image: np.ndarray) -> list[tuple]:
+        """Cardinal scan: regular saccade vocabulary for structured exploration."""
+        return self.eye.cardinal_scan(image, step=5, n_fixations=self.n_fixations)
 
     def explore_unlabeled(self, image: np.ndarray):
         """Phase 1: Explore an image, accumulate triples. No labels."""
