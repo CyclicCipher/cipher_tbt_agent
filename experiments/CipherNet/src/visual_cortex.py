@@ -1,24 +1,25 @@
-"""Hierarchical retinotopic visual cortex with category discovery.
+"""Ventral visual stream: V1 → V2 → V4 → IT → linear decision.
 
-V1: pixel patches → VQ codes → category discovery → object classes
-V2+: receives lower level's categorical outputs as features,
-     accumulates triples, discovers higher-level categories.
+The hierarchy progressively untangles object representations.
+V1 detects edges. V2 detects corners. V4 detects shapes.
+IT produces position-invariant representations where different
+object categories are linearly separable.
 
-Each level uses the SAME protocol:
-  explore → accumulate triples → discover categories → learn → recognize
+Classification is a SIMPLE LINEAR READOUT of the IT representation.
+Not feature-location matching. Not nearest-neighbor. Just a dot product.
 
-Higher levels see COMPOSITIONS of lower-level features. V2's feature
-is the pattern of V1 categories across its receptive field.
+Each level uses category discovery to compress its feature space.
+Higher levels compose lower levels' categorical outputs into
+progressively more abstract, invariant representations.
 """
 from __future__ import annotations
 
 import numpy as np
 from collections import defaultdict
 
-from symbolic_column import SymbolicColumn, MAX_MEMORY
 from eye import Eye, SalienceMap
-from codebook import PatchCodebook
-from category_discovery import discover_category, DiscoveredCategory
+from codebook import GaborFilterBank
+from category_discovery import discover_category
 
 
 def parietal_transform(retinal_pos, eye_fixation, object_origin):
@@ -26,327 +27,299 @@ def parietal_transform(retinal_pos, eye_fixation, object_origin):
             round(retinal_pos[1] + eye_fixation[1] - object_origin[1]))
 
 
-class CorticalLevel:
-    """One level of the visual hierarchy.
+class VentralStream:
+    """Complete ventral visual stream with linear decision.
 
-    Has a grid of columns, each with a receptive field over the level
-    below (or over the retina for V1). Accumulates triples, discovers
-    categories, learns and recognizes with categorical features.
+    V1 (5×5) → V2 (2×2) → V4 (1×1) → IT (1×1, invariant)
+    Each level: encode → categorize → compose → propagate up.
+    IT output → linear classifier → digit label.
     """
 
-    def __init__(self, name: str, grid_h: int, grid_w: int):
-        self.name = name
-        self.grid_h = grid_h
-        self.grid_w = grid_w
-        self.n_cols = grid_h * grid_w
-
-        # Triples accumulated during exploration.
-        self._triples: list[tuple[str, tuple, str]] = []
-
-        # Discovered category.
-        self.category: DiscoveredCategory | None = None
-
-        # Object models: {col_idx: {object_id: {(cat_loc, cat_feat): count}}}
-        self._models: list[dict[str, dict]] = [{} for _ in range(self.n_cols)]
-
-        # Current features (set during observe).
-        self._current_features: list[str] = [""] * self.n_cols
-
-    def categorize(self, raw_feature: str) -> str:
-        """Map raw feature to discovered category class."""
-        if self.category is None:
-            return raw_feature
-        cls = self.category.feature_to_object.get(raw_feature)
-        return f"{self.name}_c{cls}" if cls is not None else raw_feature
-
-    def observe(self, features: list[str]):
-        """Set current features for all columns."""
-        self._current_features = [self.categorize(f) for f in features]
-
-    def accumulate_triple(self, prev_features: list[str], displacement: tuple):
-        """Record (prev_feature, displacement, curr_feature) for each column."""
-        for i in range(self.n_cols):
-            self._triples.append((prev_features[i], displacement, self._current_features[i]))
-
-    def discover(self, n_classes: int = 32, verbose: bool = False):
-        """Run category discovery on accumulated triples."""
-        if not self._triples:
-            return
-        if verbose:
-            print(f"  {self.name}: discovering from {len(self._triples)} triples...")
-        self.category = discover_category(self._triples, n_object_classes=n_classes,
-                                          verbose=verbose)
-
-    def learn(self, object_id: str, locations: list[tuple]):
-        """Learn: bind (categorical_feature, location) → object for each column."""
-        for i in range(self.n_cols):
-            feat = self._current_features[i]
-            loc = f"L{locations[i][0]},{locations[i][1]}"
-            if object_id not in self._models[i]:
-                self._models[i][object_id] = {}
-            model = self._models[i][object_id]
-            key = (loc, feat)
-            model[key] = model.get(key, 0) + 1
-
-    def vote(self, locations: list[tuple]) -> dict[str, float]:
-        """Recognition: score each object by matching current observations."""
-        votes: dict[str, float] = {}
-        for i in range(self.n_cols):
-            feat = self._current_features[i]
-            loc = f"L{locations[i][0]},{locations[i][1]}"
-            key = (loc, feat)
-            for obj_id, model in self._models[i].items():
-                if key in model:
-                    votes[obj_id] = votes.get(obj_id, 0.0) + model[key]
-        return votes
-
-    def total_triples(self) -> int:
-        return len(self._triples)
-
-
-class HierarchicalV1:
-    """Multi-level visual cortex with category discovery at each level."""
-
-    def __init__(self, eye: Eye, codebook: PatchCodebook,
+    def __init__(self, eye: Eye, gabor: GaborFilterBank,
                  patch_size: int = 5, stride: int = 3,
-                 n_levels: int = 2, pool: int = 2,
                  n_categories: int = 32):
         self.eye = eye
-        self.codebook = codebook
+        self.gabor = gabor
         self.patch_size = patch_size
         self.stride = stride
         self.n_categories = n_categories
 
         rs = eye.retina_size
-        grid_h = (rs - patch_size) // stride + 1
-        grid_w = (rs - patch_size) // stride + 1
+        self.v1_h = (rs - patch_size) // stride + 1
+        self.v1_w = (rs - patch_size) // stride + 1
 
-        # Build levels.
-        self.levels: list[CorticalLevel] = []
-        self._pool = pool
-
-        # Level 0 (V1): one column per retinal patch.
-        self.levels.append(CorticalLevel("V1", grid_h, grid_w))
-
-        # Higher levels: pool from level below.
-        cur_h, cur_w = grid_h, grid_w
-        for lev in range(1, n_levels):
-            next_h = max(1, cur_h // pool)
-            next_w = max(1, cur_w // pool)
-            self.levels.append(CorticalLevel(f"V{lev+1}", next_h, next_w))
-            cur_h, cur_w = next_h, next_w
-
-        # Retinal positions for parietal transform (V1 only).
+        # Retinal positions for V1.
         half = rs / 2.0
         self._retinal_pos = []
-        for gy in range(grid_h):
-            for gx in range(grid_w):
+        for gy in range(self.v1_h):
+            for gx in range(self.v1_w):
                 ry = gy * stride + patch_size / 2.0 - half
                 rx = gx * stride + patch_size / 2.0 - half
                 self._retinal_pos.append((rx, ry))
 
         self._object_origin = (0.0, 0.0)
 
+        # Category discovery state per level.
+        self._triples = {'V1': [], 'V2': [], 'V4': []}
+        self._categories = {}  # level_name → DiscoveredCategory
+        self._prev_features = {}  # level_name → previous feature list
+
+        # IT representation accumulator.
+        # For each image: collect all (level, category_id) across fixations.
+        self._it_vector_size = 0  # set after discovery
+        self._it_index = {}  # (level, category_id) → index in IT vector
+
+        # Linear classifier (vlPFC): weight matrix + bias.
+        # Maps IT vector → class scores. Learned from labeled examples.
+        self._weights = None  # (n_classes, it_vector_size)
+        self._bias = None     # (n_classes,)
+
     def set_object_origin(self, origin):
         self._object_origin = origin
 
+    # --- V1 encoding ---
+
     def _v1_encode(self, image: np.ndarray) -> list[str]:
-        """Encode V1 patches from retinal image via VQ codebook."""
+        """Gabor encode retinal patches."""
         retina = self.eye.sample(image)
         ps, st = self.patch_size, self.stride
-        level0 = self.levels[0]
-        patches = np.empty((level0.n_cols, ps, ps), dtype=np.float32)
+        n = self.v1_h * self.v1_w
+        patches = np.empty((n, ps, ps), dtype=np.float32)
         idx = 0
-        for gy in range(level0.grid_h):
+        for gy in range(self.v1_h):
             y0 = gy * st
-            for gx in range(level0.grid_w):
+            for gx in range(self.v1_w):
                 x0 = gx * st
                 patches[idx] = retina[y0:y0+ps, x0:x0+ps]
                 idx += 1
-        codes = self.codebook.encode_batch(patches)
-        return [f"v{c}" for c in codes]
+        return self.gabor.encode_batch(patches)
 
-    def _propagate_up(self):
-        """Propagate features from V1 upward. Higher levels compose lower."""
-        for lev_idx in range(1, len(self.levels)):
-            lower = self.levels[lev_idx - 1]
-            upper = self.levels[lev_idx]
-            pool = self._pool
+    # --- Hierarchical composition ---
 
-            # Each upper column covers a pool×pool patch of lower columns.
-            features = []
-            for gy in range(upper.grid_h):
-                for gx in range(upper.grid_w):
-                    # Gather lower-level features in this patch.
-                    parts = []
-                    for dy in range(pool):
-                        for dx in range(pool):
-                            ly = gy * pool + dy
-                            lx = gx * pool + dx
-                            li = ly * lower.grid_w + lx
-                            if li < lower.n_cols:
-                                parts.append(lower._current_features[li])
-                            else:
-                                parts.append("_")
-                    # Compose: ORDERED spatial tuple (position-specific).
-                    # NOT sorted — spatial arrangement IS the feature.
-                    # Different spatial arrangements of the same V1 features
-                    # produce DIFFERENT V2 features (like V2 corner detectors
-                    # have spatially distinct subunits wired to specific V1 positions).
-                    composed = "|".join(parts)
-                    features.append(composed)
-
-            upper.observe(features)
-
-    def _get_locations(self) -> list[tuple]:
-        """Object-centered locations for V1 columns."""
-        eye_fix = self.eye.fixation
-        return [parietal_transform(rp, eye_fix, self._object_origin)
-                for rp in self._retinal_pos]
-
-    def _get_level_locations(self, lev_idx: int) -> list[tuple]:
-        """Locations for a specific level (pooled from V1 locations)."""
-        if lev_idx == 0:
-            return self._get_locations()
-        # Higher levels: average of V1 locations in receptive field.
-        lower_locs = self._get_level_locations(lev_idx - 1)
-        lower = self.levels[lev_idx - 1]
-        upper = self.levels[lev_idx]
-        pool = self._pool
-        locs = []
-        for gy in range(upper.grid_h):
-            for gx in range(upper.grid_w):
-                sum_x, sum_y, count = 0.0, 0.0, 0
+    def _compose(self, features: list[str], grid_h: int, grid_w: int,
+                 pool: int = 2) -> list[str]:
+        """Compose features from a grid into higher-level features.
+        Pool×pool lower features → 1 higher feature (ordered spatial tuple).
+        """
+        out_h = max(1, grid_h // pool)
+        out_w = max(1, grid_w // pool)
+        composed = []
+        for gy in range(out_h):
+            for gx in range(out_w):
+                parts = []
                 for dy in range(pool):
                     for dx in range(pool):
-                        ly = gy * pool + dy
-                        lx = gx * pool + dx
-                        li = ly * lower.grid_w + lx
-                        if li < len(lower_locs):
-                            sum_x += lower_locs[li][0]
-                            sum_y += lower_locs[li][1]
-                            count += 1
-                if count > 0:
-                    locs.append((round(sum_x / count), round(sum_y / count)))
-                else:
-                    locs.append((0, 0))
-        return locs
+                        ly = min(gy * pool + dy, grid_h - 1)
+                        lx = min(gx * pool + dx, grid_w - 1)
+                        li = ly * grid_w + lx
+                        parts.append(features[li] if li < len(features) else "_")
+                composed.append("|".join(parts))
+        return composed
 
-    # --- Phase 1: Explore unlabeled ---
+    def _categorize(self, features: list[str], level: str) -> list[str]:
+        """Map raw features to discovered category IDs."""
+        cat = self._categories.get(level)
+        if cat is None:
+            return features
+        result = []
+        for f in features:
+            cls = cat.feature_to_object.get(f)
+            result.append(f"{level}_c{cls}" if cls is not None else f)
+        return result
 
-    def explore_unlabeled(self, image: np.ndarray, displacement: tuple | None,
-                          prev_v1_features: list[str] | None) -> list[str]:
-        """One fixation: encode, observe at all levels, accumulate triples."""
-        v1_features = self._v1_encode(image)
-        self.levels[0].observe(v1_features)
-        self._propagate_up()
+    # --- Full forward pass ---
 
-        if prev_v1_features is not None and displacement is not None:
-            # Accumulate triples at V1.
-            qd = (round(displacement[0]), round(displacement[1]))
-            prev_cat = [self.levels[0].categorize(f) for f in prev_v1_features]
-            self.levels[0].accumulate_triple(prev_cat, qd)
+    def _forward(self, image: np.ndarray) -> dict[str, list[str]]:
+        """Forward pass: V1 → V2 → V4 → IT categorized features per level."""
+        v1_raw = self._v1_encode(image)
+        v1_cat = self._categorize(v1_raw, 'V1')
 
-            # Higher levels: same displacement, composed features.
-            for lev_idx in range(1, len(self.levels)):
-                level = self.levels[lev_idx]
-                # prev features at this level were set during previous fixation.
-                # We need to store them — use a simple buffer.
-                if hasattr(level, '_prev_features') and level._prev_features:
-                    level.accumulate_triple(level._prev_features, qd)
+        v2_raw = self._compose(v1_cat, self.v1_h, self.v1_w, pool=2)
+        v2_h = max(1, self.v1_h // 2)
+        v2_w = max(1, self.v1_w // 2)
+        v2_cat = self._categorize(v2_raw, 'V2')
 
-        # Buffer current features for next triple.
-        for level in self.levels:
-            level._prev_features = list(level._current_features)
+        v4_raw = self._compose(v2_cat, v2_h, v2_w, pool=max(v2_h, v2_w))
+        v4_cat = self._categorize(v4_raw, 'V4')
 
-        return v1_features
+        # IT = V4 output (position-invariant at this point: single column
+        # covering the entire visual field through progressive pooling).
+        return {'V1': v1_cat, 'V2': v2_cat, 'V4': v4_cat, 'IT': v4_cat}
+
+    # --- Phase 1: Explore and accumulate triples ---
+
+    def explore_fixation(self, image: np.ndarray, displacement: tuple | None):
+        """One fixation during exploration. Accumulate triples at each level."""
+        features = self._forward(image)
+
+        for level in ['V1', 'V2', 'V4']:
+            prev = self._prev_features.get(level)
+            if prev is not None and displacement is not None:
+                qd = (round(displacement[0]), round(displacement[1]))
+                for i in range(len(features[level])):
+                    if i < len(prev):
+                        self._triples[level].append((prev[i], qd, features[level][i]))
+
+        for level in ['V1', 'V2', 'V4']:
+            self._prev_features[level] = list(features[level])
+
+    def total_triples(self) -> int:
+        return sum(len(t) for t in self._triples.values())
 
     # --- Phase 2: Discover categories ---
 
-    def discover_all(self, verbose: bool = False):
-        """Run category discovery at each level."""
-        for level in self.levels:
-            level.discover(n_classes=self.n_categories, verbose=verbose)
+    def discover(self, verbose: bool = False):
+        """Run category discovery at V1, V2, V4."""
+        for level in ['V1', 'V2', 'V4']:
+            triples = self._triples[level]
+            if not triples:
+                continue
+            if verbose:
+                print(f"  {level}: {len(triples)} triples...")
+            self._categories[level] = discover_category(
+                triples, n_object_classes=self.n_categories, verbose=verbose)
 
-    # --- Phase 3: Learn ---
+        # Build IT vector index: one dimension per (level, category_id).
+        self._it_index = {}
+        idx = 0
+        for level in ['V1', 'V2', 'V4']:
+            cat = self._categories.get(level)
+            if cat is None:
+                continue
+            for cid in sorted(cat.objects.keys()):
+                self._it_index[(level, cid)] = idx
+                idx += 1
+        self._it_vector_size = idx
+        if verbose:
+            print(f"  IT vector size: {self._it_vector_size} dimensions")
 
-    def learn(self, image: np.ndarray, object_id: str):
-        """Learn at one fixation: all levels bind (feature, location) → object."""
-        v1_features = self._v1_encode(image)
-        self.levels[0].observe(v1_features)
-        self._propagate_up()
+    # --- IT representation ---
 
-        for lev_idx, level in enumerate(self.levels):
-            locs = self._get_level_locations(lev_idx)
-            level.learn(object_id, locs)
+    def _it_vector(self, image: np.ndarray) -> np.ndarray:
+        """Compute the IT representation vector for one fixation.
 
-    # --- Phase 3: Recognize ---
+        Counts how many columns at each level activate each category.
+        This is the population code: a histogram over categories.
+        """
+        features = self._forward(image)
+        vec = np.zeros(self._it_vector_size, dtype=np.float32)
+        for level in ['V1', 'V2', 'V4']:
+            cat = self._categories.get(level)
+            if cat is None:
+                continue
+            for f in features[level]:
+                # Extract category ID from categorized feature string.
+                if f.startswith(f"{level}_c"):
+                    try:
+                        cid = int(f[len(level) + 2:])
+                        key = (level, cid)
+                        if key in self._it_index:
+                            vec[self._it_index[key]] += 1.0
+                    except ValueError:
+                        pass
+        return vec
 
-    def recognize(self, image: np.ndarray) -> tuple[str | None, float]:
-        """Recognize at one fixation: all levels vote."""
-        v1_features = self._v1_encode(image)
-        self.levels[0].observe(v1_features)
-        self._propagate_up()
+    def compute_it(self, image: np.ndarray,
+                    fixations: list[tuple]) -> np.ndarray:
+        """Compute IT vector accumulated across multiple fixations.
 
-        # Weighted votes from all levels (higher = more weight).
-        all_votes: dict[str, float] = {}
-        for lev_idx, level in enumerate(self.levels):
-            weight = 2.0 ** lev_idx
-            locs = self._get_level_locations(lev_idx)
-            level_votes = level.vote(locs)
-            for obj, score in level_votes.items():
-                all_votes[obj] = all_votes.get(obj, 0.0) + score * weight
+        This is the position-invariant representation: summing
+        category activations across all fixation points gives a
+        representation that doesn't depend on saccade order.
+        """
+        vec = np.zeros(self._it_vector_size, dtype=np.float32)
+        for fx, fy in fixations:
+            self.eye.fixate(float(fx), float(fy))
+            vec += self._it_vector(image)
+        # Normalize.
+        total = vec.sum()
+        if total > 0:
+            vec /= total
+        return vec
 
-        if not all_votes:
-            return None, 0.0
-        winner = max(all_votes, key=all_votes.get)
-        total = sum(all_votes.values())
-        return winner, all_votes[winner] / total
+    # --- Phase 3: Train linear classifier (vlPFC) ---
+
+    def train_classifier(self, images: np.ndarray, labels: np.ndarray,
+                         fixation_fn, n_classes: int = 10,
+                         verbose: bool = True):
+        """Train linear classifier on IT representations.
+
+        This is the vlPFC: maps IT vector → class scores.
+        Uses simple least-squares (no gradient descent, no epochs).
+        One-shot: solve X @ W = Y directly.
+        """
+        n = len(images)
+        if self._it_vector_size == 0:
+            print("  WARNING: IT vector size is 0. Run discover() first.")
+            return
+
+        if verbose:
+            print(f"  Computing IT vectors for {n} images...")
+
+        # Build IT matrix.
+        X = np.zeros((n, self._it_vector_size), dtype=np.float32)
+        for i in range(n):
+            h, w = images[i].shape[:2]
+            self.set_object_origin((w / 2.0, h / 2.0))
+            fixations = fixation_fn(images[i])
+            X[i] = self.compute_it(images[i], fixations)
+            if verbose and (i + 1) % 1000 == 0:
+                print(f"    {i+1}/{n}")
+
+        # One-hot labels.
+        Y = np.zeros((n, n_classes), dtype=np.float32)
+        for i in range(n):
+            Y[i, int(labels[i])] = 1.0
+
+        # Least-squares: W = (X^T X + λI)^{-1} X^T Y (ridge regression).
+        # This is the "one-shot learning" — no epochs, no gradient descent.
+        lam = 0.01  # small regularization
+        XtX = X.T @ X + lam * np.eye(self._it_vector_size)
+        XtY = X.T @ Y
+        self._weights = np.linalg.solve(XtX, XtY).T  # (n_classes, it_dim)
+        self._bias = np.zeros(n_classes, dtype=np.float32)
+
+        # Training accuracy.
+        scores = X @ self._weights.T + self._bias
+        preds = scores.argmax(axis=1)
+        acc = (preds == labels).mean() * 100
+        if verbose:
+            print(f"  Classifier trained: {acc:.1f}% training accuracy")
+
+    # --- Phase 3: Classify ---
+
+    def classify(self, image: np.ndarray,
+                 fixations: list[tuple]) -> tuple[int, np.ndarray]:
+        """Classify an image: IT vector → linear readout → predicted class."""
+        h, w = image.shape[:2]
+        self.set_object_origin((w / 2.0, h / 2.0))
+        vec = self.compute_it(image, fixations)
+        scores = self._weights @ vec + self._bias
+        return int(scores.argmax()), scores
 
 
 class FovealExplorer:
-    """Three-phase foveal exploration with hierarchy."""
+    """Drives the ventral stream through saccadic exploration."""
 
-    def __init__(self, eye: Eye, cortex: HierarchicalV1, n_fixations: int = 9):
+    def __init__(self, eye: Eye, stream: VentralStream, n_fixations: int = 9):
         self.eye = eye
-        self.cortex = cortex
+        self.stream = stream
         self.n_fixations = n_fixations
 
-    def _get_fixations(self, image: np.ndarray) -> list[tuple]:
+    def get_fixations(self, image: np.ndarray) -> list[tuple]:
         return self.eye.cardinal_scan(image, step=5, n_fixations=self.n_fixations)
 
     def explore_unlabeled(self, image: np.ndarray):
+        """Phase 1: explore image, accumulate triples."""
         h, w = image.shape[:2]
-        self.cortex.set_object_origin((w / 2.0, h / 2.0))
-        fixations = self._get_fixations(image)
+        self.stream.set_object_origin((w / 2.0, h / 2.0))
+        fixations = self.get_fixations(image)
 
         fx, fy = fixations[0]
         self.eye.fixate(float(fx), float(fy))
-        prev_v1 = self.cortex.explore_unlabeled(image, None, None)
+        self.stream.explore_fixation(image, None)
 
         for fx, fy in fixations[1:]:
             self.eye.saccade_to(float(fx), float(fy))
             disp = self.eye.last_displacement
-            prev_v1 = self.cortex.explore_unlabeled(image, disp, prev_v1)
-
-    def learn(self, image: np.ndarray, object_id: str):
-        h, w = image.shape[:2]
-        self.cortex.set_object_origin((w / 2.0, h / 2.0))
-        for fx, fy in self._get_fixations(image):
-            self.eye.fixate(float(fx), float(fy))
-            self.cortex.learn(image, object_id)
-
-    def recognize(self, image: np.ndarray) -> tuple[str | None, float]:
-        h, w = image.shape[:2]
-        self.cortex.set_object_origin((w / 2.0, h / 2.0))
-        all_votes: dict[str, float] = {}
-        for fx, fy in self._get_fixations(image):
-            self.eye.fixate(float(fx), float(fy))
-            pred, conf = self.cortex.recognize(image)
-            if pred:
-                all_votes[pred] = all_votes.get(pred, 0.0) + conf
-        if not all_votes:
-            return None, 0.0
-        winner = max(all_votes, key=all_votes.get)
-        total = sum(all_votes.values())
-        return winner, all_votes[winner] / total
+            self.stream.explore_fixation(image, disp)

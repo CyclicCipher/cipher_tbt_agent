@@ -48,56 +48,51 @@ def stage_mnist(brain: SymbolicBrain):
 
     from mnist_loader import load_mnist
     from eye import Eye
-    from visual_cortex import HierarchicalV1, FovealExplorer
+    from visual_cortex import VentralStream, FovealExplorer
     from codebook import GaborFilterBank
 
     (train_img, train_lbl), (test_img, test_lbl) = load_mnist()
 
-    # Setup: eye + Gabor filter bank + hierarchical cortex.
+    # Setup.
     eye = Eye(retina_size=19)
     gabor = GaborFilterBank(patch_size=5, n_orientations=8,
                             n_frequencies=3, top_k=4)
-    cortex = HierarchicalV1(eye, gabor, patch_size=5, stride=3,
-                            n_levels=2, pool=2, n_categories=32)
-    explorer = FovealExplorer(eye, cortex, n_fixations=9)
-    print(f"  Eye: {eye}")
-    print(f"  Gabor: {gabor}")
-    for i, lev in enumerate(cortex.levels):
-        print(f"  Level {i} ({lev.name}): {lev.grid_h}x{lev.grid_w} = {lev.n_cols} columns")
-
-    # Gabor filters are fixed (no training needed).
+    stream = VentralStream(eye, gabor, patch_size=5, stride=3, n_categories=32)
+    explorer = FovealExplorer(eye, stream, n_fixations=9)
     gabor.fit(verbose=True)
-    t0 = time.time()
+    print(f"  Eye: {eye}, V1: {stream.v1_h}x{stream.v1_w}")
 
-    # Phase 1: Explore unlabeled → accumulate triples.
+    # Phase 1: Explore unlabeled images → accumulate triples.
     t0 = time.time()
     n_explore = 1000
     for i in range(n_explore):
         explorer.explore_unlabeled(train_img[i])
-    total_triples = sum(lev.total_triples() for lev in cortex.levels)
-    print(f"  Phase 1 (explore {n_explore}): {time.time()-t0:.1f}s, {total_triples} triples")
+    print(f"  Phase 1 (explore {n_explore}): {time.time()-t0:.1f}s, "
+          f"{stream.total_triples()} triples")
 
     # Phase 2: Discover categories at all levels.
     t0 = time.time()
-    cortex.discover_all(verbose=True)
+    stream.discover(verbose=True)
     print(f"  Phase 2 (discover): {time.time()-t0:.1f}s")
 
-    # Phase 3: Learn.
+    # Phase 3: Train linear classifier on IT representation.
     t0 = time.time()
     n_train = 3000
-    for i in range(n_train):
-        explorer.learn(train_img[i], str(int(train_lbl[i])))
-        if (i + 1) % 1000 == 0:
-            print(f"  Trained {i+1}/{n_train}")
-    print(f"  Phase 3 (learn {n_train}): {time.time()-t0:.1f}s")
+    stream.train_classifier(
+        train_img[:n_train], train_lbl[:n_train],
+        fixation_fn=lambda img: explorer.get_fixations(img),
+        verbose=True,
+    )
+    print(f"  Phase 3 (train classifier): {time.time()-t0:.1f}s")
 
     # Test.
     t0 = time.time()
-    n_test = 1000
+    n_test = 2000
     correct = 0
     for i in range(n_test):
-        pred, conf = explorer.recognize(test_img[i])
-        if pred == str(int(test_lbl[i])):
+        fixations = explorer.get_fixations(test_img[i])
+        pred, scores = stream.classify(test_img[i], fixations)
+        if pred == int(test_lbl[i]):
             correct += 1
         if (i + 1) % 500 == 0:
             print(f"  Tested {i+1}/{n_test}: {correct}/{i+1} = {correct/(i+1)*100:.1f}%")
