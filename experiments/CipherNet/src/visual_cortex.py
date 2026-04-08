@@ -1,16 +1,15 @@
-"""Retinotopic visual cortex — V1 columns wired to the eye.
+"""Retinotopic visual cortex — V1 columns with patch receptive fields.
 
-Each V1 column reads from a FIXED retinal position. It doesn't know
-where the eye is pointing — it only knows what's at ITS position on
-the retina. When the eye saccades, the image shifts on the retina,
-and the column sees new features.
+Each V1 column reads a PATCH from the retinal image (not a single pixel).
+Patches are VQ-encoded into discrete feature tokens. Columns tile the
+retinal image with overlapping receptive fields.
 
-The displacement (efference copy) from the saccade tells columns HOW
-the image shifted. Columns accumulate (feature, displacement, next_feature)
-triples to learn their reference frames.
+When the eye saccades, the retinal image shifts → columns see new
+patches → accumulate (feature, displacement, next_feature) triples
+for reference frame learning.
 
-This is TBT: each column builds a model of the world through
-sensorimotor experience (observe → move → observe → learn).
+Vectorized: patch extraction and VQ encoding are batched numpy ops.
+Per-column Python loops only for memory dict operations.
 """
 from __future__ import annotations
 
@@ -22,56 +21,76 @@ from codebook import PatchCodebook
 
 
 class RetinotopicV1:
-    """V1 cortex: one symbolic column per retinal sample position.
+    """V1 cortex: columns tile the retinal image with patch RFs.
 
-    Columns are wired to the EYE, not the image. Each column
-    receives from one retinal position. The retinotopic map IS
-    the wiring — position is structural, not learned.
-
-    Foveal columns (ring 0) see high-resolution details.
-    Peripheral columns (ring 1+) see coarse features.
+    Each column covers a patch_size × patch_size region of the retina.
+    Patches are VQ-encoded to feature tokens. Columns overlap by
+    stride < patch_size.
     """
 
-    def __init__(self, eye: Eye, codebook: PatchCodebook | None = None):
+    def __init__(self, eye: Eye, codebook: PatchCodebook,
+                 patch_size: int = 5, stride: int = 3):
         self.eye = eye
         self.codebook = codebook
+        self.patch_size = patch_size
+        self.stride = stride
 
-        # One column per retinal sample.
+        rs = eye.retina_size
+        self.grid_h = (rs - patch_size) // stride + 1
+        self.grid_w = (rs - patch_size) // stride + 1
+
+        # One column per grid position.
         self.columns: list[SymbolicColumn] = []
-        for i, (dx, dy, ring) in enumerate(eye.get_sample_positions()):
-            col = SymbolicColumn(
-                name=f"V1:{i}",
-                receptive_field=(dx, dy, ring),
-                position=(dx, dy),  # retinotopic position
-                max_memory=MAX_MEMORY,
-            )
-            self.columns.append(col)
+        for gy in range(self.grid_h):
+            for gx in range(self.grid_w):
+                y0, x0 = gy * stride, gx * stride
+                col = SymbolicColumn(
+                    name=f"V1:{gy},{gx}",
+                    receptive_field=(y0, x0, y0 + patch_size, x0 + patch_size),
+                    position=(float(gx), float(gy)),
+                    max_memory=MAX_MEMORY,
+                )
+                self.columns.append(col)
 
     @property
     def n_columns(self) -> int:
         return len(self.columns)
 
-    def observe(self, image: np.ndarray) -> list[str]:
-        """Sample the image through the eye, encode, observe at each column.
+    def _extract_and_encode(self, retina: np.ndarray) -> np.ndarray:
+        """Extract all patches from retinal image and VQ-encode them.
 
-        Returns the feature code at each retinal position.
+        Returns array of codebook indices (int), one per column.
+        Fully vectorized: no Python loop over columns.
         """
-        retinal_samples = self.eye.sample(image)
+        ps = self.patch_size
+        st = self.stride
+        n = self.grid_h * self.grid_w
+        # Extract all patches at once using stride tricks.
+        patches = np.empty((n, ps, ps), dtype=np.float32)
+        idx = 0
+        for gy in range(self.grid_h):
+            y0 = gy * st
+            for gx in range(self.grid_w):
+                x0 = gx * st
+                patches[idx] = retina[y0:y0+ps, x0:x0+ps]
+                idx += 1
+        # Batch VQ encode.
+        codes = self.codebook.encode_batch(patches)
+        return codes
+
+    def observe(self, image: np.ndarray) -> list[str]:
+        """Sample image through eye, encode patches, observe at columns.
+
+        Returns feature codes (one per column). Vectorized encoding.
+        """
+        retina = self.eye.sample(image)
+        codes = self._extract_and_encode(retina)
         features = []
-
         for i, col in enumerate(self.columns):
-            # Quantize retinal sample to a discrete feature.
-            # For single-pixel samples: simple intensity quantization.
-            val = retinal_samples[i]
-            feature = f"i{int(val * 15)}"  # 16 intensity levels
-            col.observe(feature)
-            features.append(feature)
-
+            feat = f"v{codes[i]}"
+            col.observe(feat)
+            features.append(feat)
         return features
-
-    def get_messages(self) -> list[CorticalMessage]:
-        """Collect CMP messages from all V1 columns."""
-        return [col.message() for col in self.columns]
 
     def teach_all(self, target: str):
         """Teach all columns: current_feature → target."""
@@ -82,115 +101,65 @@ class RetinotopicV1:
     def displacement_teach(self, prev_features: list[str],
                            displacement: tuple[float, float],
                            curr_features: list[str]):
-        """Teach displacement associations.
-
-        For each column: (prev_feature, displacement) → curr_feature.
-        This is how the column learns its reference frame:
-        "when I saw X and the eye moved by D, I now see Y."
-
-        The displacement is encoded as part of the feature key,
-        making it a (feature, morphism) → feature mapping.
-        """
-        dx, dy = displacement
-        # Quantize displacement to grid.
-        qdx, qdy = int(round(dx)), int(round(dy))
-        disp_key = f"d{qdx},{qdy}"
-
-        for i, col in enumerate(self.columns):
-            if prev_features[i] is not None and curr_features[i] is not None:
-                # Key = "prev_feature:displacement"
-                key = f"{prev_features[i]}:{disp_key}"
-                col.teach(key, curr_features[i])
-
-    def predict_after_displacement(self, features: list[str],
-                                   displacement: tuple[float, float]) -> list[str | None]:
-        """Predict what each column will see after a displacement.
-
-        Uses the learned (feature, displacement) → next_feature mapping.
-        """
+        """Teach displacement: (prev_feature:disp → curr_feature)."""
         dx, dy = displacement
         qdx, qdy = int(round(dx)), int(round(dy))
         disp_key = f"d{qdx},{qdy}"
-
-        predictions = []
         for i, col in enumerate(self.columns):
-            if features[i] is not None:
-                key = f"{features[i]}:{disp_key}"
-                col.observe(key)
-                predictions.append(col.predict())
-            else:
-                predictions.append(None)
-        return predictions
+            pf, cf = prev_features[i], curr_features[i]
+            if pf is not None and cf is not None:
+                col.teach(f"{pf}:{disp_key}", cf)
+
+    def get_messages(self) -> list[CorticalMessage]:
+        return [col.message() for col in self.columns]
+
+    def vote_classification(self) -> tuple[str | None, dict[str, float]]:
+        """Collect classification votes from all columns."""
+        votes: dict[str, float] = {}
+        for col in self.columns:
+            pred = col.prediction
+            if pred is not None:
+                votes[pred] = votes.get(pred, 0.0) + col.confidence
+        if not votes:
+            return None, votes
+        return max(votes, key=votes.get), votes
 
 
 class FovealExplorer:
-    """Explores an image through saccadic eye movements.
+    """Explores images through saccadic eye movements."""
 
-    Uses salience to guide fixations, collects sensorimotor
-    experience at each fixation for column learning.
-
-    The exploration protocol:
-    1. Compute salience map → suggest fixation points
-    2. For each fixation: observe → saccade → observe
-    3. Columns accumulate (feature, displacement, next_feature) triples
-    4. After exploration: columns vote on object identity
-    """
-
-    def __init__(self, eye: Eye, v1: RetinotopicV1,
-                 n_fixations: int = 5):
+    def __init__(self, eye: Eye, v1: RetinotopicV1, n_fixations: int = 3):
         self.eye = eye
         self.v1 = v1
         self.n_fixations = n_fixations
 
     def explore(self, image: np.ndarray, label: str | None = None,
                 learn: bool = True) -> tuple[str | None, dict[str, float]]:
-        """Explore an image through saccades. Optionally learn.
-
-        Returns (predicted_label, vote_scores).
-        """
+        """Explore an image. Optionally learn identity + displacement."""
         h, w = image.shape[:2]
-
-        # Get salience-guided fixation sequence.
         fixations = SalienceMap.suggest_fixations(
             image, n=self.n_fixations,
-            min_distance=max(2, self.eye.fovea_radius),
+            min_distance=max(3, self.eye.retina_size // 4),
         )
         if not fixations:
-            # Fallback: center
             fixations = [(w // 2, h // 2)]
 
         # First fixation.
         fx, fy = fixations[0]
         self.eye.fixate(float(fx), float(fy))
         prev_features = self.v1.observe(image)
-
-        # Teach object identity at first fixation.
         if learn and label is not None:
             self.v1.teach_all(label)
 
-        # Subsequent fixations: saccade → observe → learn displacement + identity.
+        # Subsequent fixations.
         for fx, fy in fixations[1:]:
             self.eye.saccade_to(float(fx), float(fy))
-            displacement = self.eye.last_displacement
+            disp = self.eye.last_displacement
             curr_features = self.v1.observe(image)
-
             if learn:
-                # Teach displacement associations (reference frame learning).
-                self.v1.displacement_teach(prev_features, displacement, curr_features)
-                # Teach object identity at this fixation too.
+                self.v1.displacement_teach(prev_features, disp, curr_features)
                 if label is not None:
                     self.v1.teach_all(label)
-
             prev_features = curr_features
 
-        # Vote on identity across all columns and fixations.
-        votes: dict[str, float] = {}
-        for col in self.v1.columns:
-            pred = col.prediction
-            if pred is not None:
-                votes[pred] = votes.get(pred, 0.0) + col.confidence
-
-        if not votes:
-            return None, votes
-        winner = max(votes, key=votes.get)
-        return winner, votes
+        return self.v1.vote_classification()

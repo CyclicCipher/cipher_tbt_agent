@@ -68,19 +68,35 @@ def stage_mnist(brain: SymbolicBrain):
     from mnist_loader import load_mnist
     from eye import Eye
     from visual_cortex import RetinotopicV1, FovealExplorer
+    from codebook import PatchCodebook
 
     (train_img, train_lbl), (test_img, test_lbl) = load_mnist()
 
-    # Create eye + retinotopic V1.
-    eye = Eye(fovea_radius=3, n_rings=2, samples_per_ring=6)
-    v1 = RetinotopicV1(eye)
+    # Create eye (19×19 retinal image) + V1 with patch RFs + codebook.
+    eye = Eye(retina_size=19)
+    codebook = PatchCodebook(n_codes=256)
+    v1 = RetinotopicV1(eye, codebook, patch_size=5, stride=3)
     explorer = FovealExplorer(eye, v1, n_fixations=3)
     print(f"  Eye: {eye}")
-    print(f"  V1: {v1.n_columns} columns")
+    print(f"  V1: {v1.n_columns} columns ({v1.grid_h}x{v1.grid_w})")
+
+    # Pre-train codebook: extract patches from center-fixated images.
+    t0 = time.time()
+    rng = np.random.RandomState(42)
+    ps = v1.patch_size
+    sample_patches = []
+    for idx in rng.choice(len(train_img), size=500, replace=False):
+        eye.fixate(14.0, 14.0)  # center of 28×28
+        retina = eye.sample(train_img[idx])
+        for gy in range(v1.grid_h):
+            for gx in range(v1.grid_w):
+                y0, x0 = gy * v1.stride, gx * v1.stride
+                sample_patches.append(retina[y0:y0+ps, x0:x0+ps])
+    codebook.fit(np.array(sample_patches[:10000]), verbose=True)
+    print(f"  Codebook time: {time.time()-t0:.1f}s")
 
     # Train: explore images with saccades.
-    # 10K images is enough — with 256-entry cap, more just evicts.
-    n_train = min(10000, len(train_img))
+    n_train = min(20000, len(train_img))
     t0 = time.time()
     for i in range(n_train):
         label = str(int(train_lbl[i]))
@@ -91,16 +107,10 @@ def stage_mnist(brain: SymbolicBrain):
     print(f"  Training time: {time.time()-t0:.1f}s")
 
     # Memory stats.
-    total_identity = 0
-    total_displacement = 0
-    for col in v1.columns:
-        for k in col.memory:
-            if ':d' in k:
-                total_displacement += 1
-            else:
-                total_identity += 1
-    print(f"  Identity entries: {total_identity}")
-    print(f"  Displacement entries: {total_displacement}")
+    total_mem = sum(len(c.memory) for c in v1.columns)
+    ident = sum(1 for c in v1.columns for k in c.memory if ':d' not in k)
+    disp = sum(1 for c in v1.columns for k in c.memory if ':d' in k)
+    print(f"  Memory: {total_mem} total ({ident} identity, {disp} displacement)")
 
     # Test.
     t0 = time.time()
