@@ -1,0 +1,46 @@
+# Static eye configuration — V1 → IT (no V2).
+#
+# The eye does not move.  A single fixation at image center.
+# One fixation → no temporal sequence → V2 would be redundant.
+# V1 feeds directly into supervised IT.
+#
+# Grid: 6×6 = 36 columns, stride=4, patch_size=5.
+
+name: static_visual
+eye_type: static
+
+layers:
+
+  # V1 — Primary visual cortex (static retina).
+  - id: V1
+    grid: [6, 6]
+    n_mini: 10
+    supervised: false
+    reference_frame:
+      type: retinotopic
+      params:
+        retina_size: 29
+        patch_size: 5
+        stride: 4
+        image_w: 28
+        image_h: 28
+    input:
+      source: sensor
+      encoder: hog
+      encoder_params:
+        patch_size: 5
+        n_bins: 8
+        top_k: 3
+
+  # IT — Inferotemporal cortex.
+  # Input: all 36 V1 winners (RF covers entire V1 grid).
+  # Supervised: minicolumn index == digit class.
+  - id: IT
+    grid: [1, 1]
+    n_mini: 10
+    supervised: true
+    reference_frame:
+      type: allocentric
+      params: {}
+    input:
+      source: V1

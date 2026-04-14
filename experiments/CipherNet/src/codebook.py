@@ -83,38 +83,50 @@ class GaborFilterBank:
 
         return np.array(filters, dtype=np.float32)
 
-    def encode(self, patch: np.ndarray) -> str:
-        """Encode a single patch → sparse code string.
+    @staticmethod
+    def _normalize(flat_patch: np.ndarray) -> np.ndarray:
+        """Zero-mean, unit-variance normalisation.
 
-        Computes response to all Gabor filters, takes top-K active
-        filter IDs as the sparse code.
+        Makes Gabor responses depend only on the spatial pattern of
+        contrast within the patch, not on absolute brightness or
+        overall contrast level.  After DoG preprocessing, interior
+        (uniform) patches are already near-zero; normalization makes
+        them consistently zero so they produce a stable, repeatable
+        sparse code rather than amplifying numerical noise.
+
+        Truly flat patches (std < 1e-6) are left as all-zeros — their
+        code will be consistent across images (all zero input → same
+        top-K by index), so they contribute correctly to overlap.
         """
-        flat_patch = patch.flatten().astype(np.float32)
-        flat_filters = self.filters.reshape(self.n_filters, -1)
-        responses = np.abs(flat_filters @ flat_patch)  # rectified response
+        mean = flat_patch.mean()
+        std  = flat_patch.std()
+        if std > 1e-6:
+            return (flat_patch - mean) / std
+        return flat_patch - mean   # flat → zeros
 
-        # Top-K sparse code.
-        top_idx = np.argsort(responses)[-self.top_k:]
-        top_idx = np.sort(top_idx)  # canonical ordering
+    def encode(self, patch: np.ndarray) -> str:
+        """Encode a single patch → sparse code string."""
+        flat_patch = self._normalize(patch.flatten().astype(np.float32))
+        flat_filters = self.filters.reshape(self.n_filters, -1)
+        responses = np.abs(flat_filters @ flat_patch)
+        top_idx = np.sort(np.argsort(responses)[-self.top_k:])
         return "g" + "_".join(str(i) for i in top_idx)
 
     def encode_batch(self, patches: np.ndarray) -> list[str]:
-        """Encode batch of patches → list of sparse code strings.
-
-        Vectorized: all patches × all filters in one matmul.
-        """
+        """Encode batch of patches → list of sparse code strings."""
         n = patches.shape[0]
-        flat_patches = patches.reshape(n, -1).astype(np.float32)
-        flat_filters = self.filters.reshape(self.n_filters, -1)
+        flat = patches.reshape(n, -1).astype(np.float32)
+        # Normalise each patch independently (zero-mean, unit-variance).
+        # np.maximum avoids div-by-zero without triggering numpy warnings.
+        means = flat.mean(axis=1, keepdims=True)
+        flat  = flat - means
+        stds  = np.sqrt((flat ** 2).mean(axis=1, keepdims=True))
+        flat  = flat / np.maximum(stds, 1e-6)
 
-        # (n_patches, n_filters) response matrix.
-        responses = np.abs(flat_patches @ flat_filters.T)
-
-        # Top-K per patch.
+        responses = np.abs(flat @ self.filters.reshape(self.n_filters, -1).T)
         codes = []
         for i in range(n):
-            top_idx = np.argsort(responses[i])[-self.top_k:]
-            top_idx = np.sort(top_idx)
+            top_idx = np.sort(np.argsort(responses[i])[-self.top_k:])
             codes.append("g" + "_".join(str(j) for j in top_idx))
         return codes
 
@@ -128,6 +140,103 @@ class GaborFilterBank:
     def __repr__(self):
         return (f"GaborFilterBank(patch={self.patch_size}, "
                 f"filters={self.n_filters}, top_k={self.top_k})")
+
+
+class HOGEncoder:
+    """Histogram of Oriented Gradients patch encoder.
+
+    Designed for DoG-preprocessed (contrast-coded) input, exactly as V1
+    simple cells receive from the retina.
+
+    For each patch:
+      1. Compute central-difference gradients (gx, gy).
+      2. Compute unsigned orientation = arctan2(gy, gx) % π  →  [0, π).
+         Unsigned because we want "horizontal edge" to code the same
+         regardless of polarity (light-on-dark vs dark-on-light).
+      3. Build an orientation histogram weighted by gradient magnitude.
+      4. L2-normalise the histogram.
+      5. Return the top-K dominant bin indices as a code string.
+
+    Vocabulary size = C(n_bins, top_k).
+      n_bins=8, top_k=3  →  56 codes.
+      Gabor top-K gave C(24, 4) = 10,626 codes.
+    The smaller vocabulary means far more code reuse across images of the
+    same class, so the minicolumn WTA converges with far less training data.
+
+    Flat patches (DoG ≈ 0, magnitude ≈ 0) produce a consistent all-zero
+    gradient → stable code "h5_h6_h7" (argsort of all-zero vector) on
+    every image.  They contribute reliably to overlap without adding noise.
+    """
+
+    def __init__(self, patch_size: int = 5,
+                 n_bins: int = 8,
+                 top_k: int = 3):
+        self.patch_size = patch_size
+        self.n_bins     = n_bins
+        self.top_k      = top_k
+
+    # ------------------------------------------------------------------
+
+    def _hog(self, patch: np.ndarray) -> str:
+        p = patch.astype(np.float32)
+
+        # Central differences (forward/backward at borders).
+        gx = np.empty_like(p)
+        gy = np.empty_like(p)
+        if p.shape[1] >= 2:
+            gx[:, 1:-1] = p[:, 2:] - p[:, :-2]
+            gx[:, 0]    = p[:, 1]  - p[:, 0]
+            gx[:, -1]   = p[:, -1] - p[:, -2]
+        else:
+            gx[:] = 0.0
+        if p.shape[0] >= 2:
+            gy[1:-1, :] = p[2:, :] - p[:-2, :]
+            gy[0, :]    = p[1, :]  - p[0, :]
+            gy[-1, :]   = p[-1, :] - p[-2, :]
+        else:
+            gy[:] = 0.0
+
+        magnitude = np.sqrt(gx ** 2 + gy ** 2)
+
+        # Unsigned orientation in [0, π).
+        angle = np.arctan2(gy, gx) % np.pi
+
+        # Hard-bin: which of n_bins equally-spaced orientation bins?
+        bin_idx = np.clip(
+            (angle / np.pi * self.n_bins).astype(np.int32),
+            0, self.n_bins - 1,
+        )
+
+        # Weighted histogram.
+        hist = np.zeros(self.n_bins, dtype=np.float32)
+        np.add.at(hist, bin_idx.ravel(), magnitude.ravel())
+
+        # L2 normalise (+ ε to keep flat patches at zero, not inf).
+        norm = np.sqrt((hist ** 2).sum()) + 1e-6
+        hist /= norm
+
+        # Top-K dominant bins → code string.
+        top_idx = np.sort(np.argsort(hist)[-self.top_k:])
+        return "h" + "_".join(str(i) for i in top_idx)
+
+    def encode(self, patch: np.ndarray) -> str:
+        return self._hog(patch)
+
+    def encode_batch(self, patches: np.ndarray) -> list[str]:
+        return [self._hog(p) for p in patches]
+
+    def fit(self, patches: np.ndarray = None, verbose: bool = True):
+        """No-op: HOG is parameter-free."""
+        if verbose:
+            from math import comb
+            print(f"  HOG: {self.n_bins} orientation bins, "
+                  f"top-{self.top_k}  "
+                  f"(vocab = C({self.n_bins},{self.top_k}) = "
+                  f"{comb(self.n_bins, self.top_k)} codes)")
+
+    def __repr__(self) -> str:
+        return (f"HOGEncoder(patch={self.patch_size}, "
+                f"bins={self.n_bins}, top_k={self.top_k})")
 
 
 # Keep PatchCodebook for backward compatibility.

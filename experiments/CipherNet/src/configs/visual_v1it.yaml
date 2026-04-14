@@ -1,0 +1,44 @@
+# Foveal V1 → IT (no V2).
+#
+# Tests cross-fixation evidence accumulation WITHOUT the V2 bottleneck.
+# V1 (5×5 foveal grid) feeds directly into supervised IT.
+# Equivalent to old per-label model but with TBT WTA at V1.
+
+name: visual_v1it
+eye_type: foveal
+
+layers:
+
+  # V1 — Primary visual cortex (foveal retina).
+  - id: V1
+    grid: [5, 5]
+    n_mini: 10
+    supervised: false
+    reference_frame:
+      type: retinotopic
+      params:
+        retina_size: 19
+        patch_size: 5
+        stride: 3
+        image_w: 28
+        image_h: 28
+    input:
+      source: sensor
+      encoder: hog
+      encoder_params:
+        patch_size: 5
+        n_bins: 8
+        top_k: 3
+
+  # IT — Inferotemporal cortex.
+  # Input: all 25 V1 winners (RF covers entire V1 grid).
+  # Supervised: minicolumn index == digit class.
+  - id: IT
+    grid: [1, 1]
+    n_mini: 10
+    supervised: true
+    reference_frame:
+      type: allocentric
+      params: {}
+    input:
+      source: V1
