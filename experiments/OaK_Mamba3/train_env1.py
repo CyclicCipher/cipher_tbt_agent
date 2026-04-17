@@ -179,6 +179,65 @@ def apply_masking(
 
 
 # ---------------------------------------------------------------------------
+# Oracle option index computation
+# ---------------------------------------------------------------------------
+
+def compute_oracle_omega(
+    grid_segments: List[Tuple[int, int, int, int]],
+    T: int,
+) -> List[int]:
+    """Compute phase-based oracle option indices from grid segment metadata.
+
+    Assigns a deterministic option index to every token position based on
+    which phase of the ARC inference process that position belongs to:
+
+      omega=0 : example input grids + structural tokens (SEP, QUERY, PAD, MASK)
+                → "reading input: forming initial impression"
+      omega=1 : example output grids
+                → "reading output: verifying / revising hypothesis"
+      omega=2 : test input grid
+                → "reading test input: preparing to apply confirmed rule"
+      omega=3 : test output grid (masked positions)
+                → "generating output: executing the rule"
+
+    The test input is identified as the LAST segment with seg_id=0 — guaranteed
+    by encode_episode's construction order. All other positions default to omega=0.
+    """
+    omega = [0] * T
+
+    input_segs   = [(s, h, w) for s, h, w, sid in grid_segments if sid == 0]
+    output_segs  = [(s, h, w) for s, h, w, sid in grid_segments if sid == 1]
+    test_out_segs = [(s, h, w) for s, h, w, sid in grid_segments if sid == 2]
+
+    # Example input grids: all seg_id=0 segments except the last
+    for start, h, w in input_segs[:-1]:
+        for i in range(h * w):
+            if start + i < T:
+                omega[start + i] = 0   # default, but explicit for clarity
+
+    # Test input: last seg_id=0 segment
+    if input_segs:
+        start, h, w = input_segs[-1]
+        for i in range(h * w):
+            if start + i < T:
+                omega[start + i] = 2
+
+    # Example output grids
+    for start, h, w in output_segs:
+        for i in range(h * w):
+            if start + i < T:
+                omega[start + i] = 1
+
+    # Test output (masked positions)
+    for start, h, w in test_out_segs:
+        for i in range(h * w):
+            if start + i < T:
+                omega[start + i] = 3
+
+    return omega
+
+
+# ---------------------------------------------------------------------------
 # Batch construction
 # ---------------------------------------------------------------------------
 
@@ -191,6 +250,7 @@ def make_batch(
     chunk_size: int,
     rng: np.random.Generator,
     device: torch.device,
+    oracle_options: bool = False,
 ) -> Dict:
     """Sample a batch of episodes, apply MDLM masking, and collate into tensors.
 
@@ -248,6 +308,16 @@ def make_batch(
     mask_t        = torch.tensor(np.stack(padded_masks), dtype=torch.bool, device=device)
     labels_t      = torch.tensor(all_labels, dtype=torch.long, device=device)
 
+    # Oracle omega: compute from first episode's grid_segments (same for all in batch)
+    # since H, W, K are fixed across the batch
+    if oracle_options and grid_segments_shared is not None:
+        omega_list = compute_oracle_omega(grid_segments_shared, T)
+        omega_t = torch.tensor(
+            [omega_list] * batch_size, dtype=torch.long, device=device
+        )
+    else:
+        omega_t = None
+
     return {
         'tokens':        tokens_t,           # (B, T)
         'tokens_orig':   tokens_orig_t,      # (B, T)
@@ -256,6 +326,7 @@ def make_batch(
         'label_starts':  label_starts,
         'labels':        labels_t,           # (B, HW)
         'H': H, 'W': W, 'K': K,
+        'omega':         omega_t,            # (B, T) long or None
     }
 
 
@@ -462,7 +533,8 @@ def exact_match_accuracy(
     cell_total   = 0
 
     for _ in range(n_episodes):
-        batch = make_batch(H, W, K, difficulty, 1, chunk_size, rng, device)
+        batch = make_batch(H, W, K, difficulty, 1, chunk_size, rng, device,
+                           oracle_options=False)
         label_start  = batch['label_starts'][0]
         tokens_orig  = batch['tokens_orig']   # (1, T)
 
@@ -508,19 +580,24 @@ def exact_match_accuracy(
 def _sample_hwk(difficulty: int, rng: np.random.Generator) -> Tuple[int, int, int]:
     """Sample H, W, K from difficulty-level ranges.
 
-    difficulty 1: H=W ~ Uniform(3,6),  K ~ Uniform(2,3)
-    difficulty 2: H=W ~ Uniform(4,10), K ~ Uniform(2,5)
-    difficulty 3: H=W ~ Uniform(5,13), K ~ Uniform(3,8)
+    Ranges are sized so that worst-case seqlen stays under ~700 tokens,
+    keeping peak VRAM acceptable on 4 GB cards even without AMP.
+    With AMP enabled (default on CUDA) all difficulties are comfortable.
+
+    Seqlen formula: (K+1) * (2 + 2*H*W)
+      difficulty 1: max K=3, H=W=5  → max seqlen = 4*52  = 208  → pad 256
+      difficulty 2: max K=4, H=W=8  → max seqlen = 5*130 = 650  → pad 704
+      difficulty 3: max K=6, H=W=10 → max seqlen = 7*202 = 1414 → pad 1472
     """
     if difficulty == 1:
-        hw = int(rng.integers(3, 7))       # [3, 6]
+        hw = int(rng.integers(3, 6))       # [3, 5]
         k  = int(rng.integers(2, 4))       # [2, 3]
     elif difficulty == 2:
-        hw = int(rng.integers(4, 11))      # [4, 10]
-        k  = int(rng.integers(2, 6))       # [2, 5]
+        hw = int(rng.integers(4, 9))       # [4, 8]
+        k  = int(rng.integers(2, 5))       # [2, 4]
     else:
-        hw = int(rng.integers(5, 14))      # [5, 13]
-        k  = int(rng.integers(3, 9))       # [3, 8]
+        hw = int(rng.integers(5, 11))      # [5, 10]
+        k  = int(rng.integers(3, 7))       # [3, 6]
     return hw, hw, k
 
 
@@ -529,7 +606,13 @@ def _sample_hwk(difficulty: int, rng: np.random.Generator) -> Tuple[int, int, in
 # ---------------------------------------------------------------------------
 
 def train(args):
+    if args.oracle_options and args.num_options < 4:
+        print('WARNING: --oracle_options requires --num_options >= 4. '
+              'Setting num_options=4 automatically.')
+        args.num_options = 4
+
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    use_amp = (device.type == 'cuda') and not args.no_amp
     print(f'Device: {device}')
 
     # --- Model ---
@@ -542,14 +625,26 @@ def train(args):
         n_layer     = args.n_layer,
         mlp_expand  = 4,
         stable_ssm  = True,
-        num_options = 1,    # Phase 1: single option
+        num_options = args.num_options,
         d_option    = 32,
         n_gvfs      = 5,
     )
     model = OaKModel(config).to(device)
+    if args.grad_checkpoint:
+        model.use_grad_checkpoint = True
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f'Parameters: {n_params:,}')
+
+    if device.type == 'cuda':
+        props = torch.cuda.get_device_properties(device)
+        total_gb = props.total_memory / 1024 ** 3
+        print(f'GPU: {props.name} | VRAM: {total_gb:.1f} GB')
+    print(f'AMP: {"on (fp16)" if use_amp else "off (fp32)"}')
+    print(f'Grad checkpoint: {"on" if args.grad_checkpoint else "off"}')
+
+    # --- AMP scaler ---
+    scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
 
     # --- Optimiser ---
     optimizer = torch.optim.AdamW(
@@ -580,19 +675,31 @@ def train(args):
             H, W, K, args.difficulty,
             args.batch_size, config.chunk_size,
             rng, device,
+            oracle_options=args.oracle_options,
         )
 
-        outputs = model(batch['tokens'], batch['grid_segments'])
-
-        total_loss, task_loss, gvf_loss = compute_losses(
-            outputs, batch, lambda_gvf=args.lambda_gvf
-        )
+        with torch.amp.autocast(device_type=device.type, enabled=use_amp):
+            outputs = model(
+                batch['tokens'],
+                batch['grid_segments'],
+                omega=batch.get('omega'),
+            )
+            total_loss, task_loss, gvf_loss = compute_losses(
+                outputs, batch, lambda_gvf=args.lambda_gvf
+            )
 
         optimizer.zero_grad()
-        total_loss.backward()
+        scaler.scale(total_loss).backward()
+        scaler.unscale_(optimizer)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        optimizer.step()
-        scheduler.step()
+        # scaler.step() calls optimizer.step() internally (or skips if inf/nan).
+        # scheduler.step() must come after optimizer.step().
+        prev_scale = scaler.get_scale()
+        scaler.step(optimizer)
+        scaler.update()
+        # Only advance scheduler when optimizer actually stepped (scale unchanged).
+        if scaler.get_scale() == prev_scale:
+            scheduler.step()
 
         loss_window.append(task_loss.item())
         if len(loss_window) > 50:
@@ -602,11 +709,31 @@ def train(args):
             elapsed  = time.time() - t0
             avg_loss = sum(loss_window) / len(loss_window)
             lr_now   = scheduler.get_last_lr()[0]
+            mem_str  = ''
+            if device.type == 'cuda':
+                mem_gb = torch.cuda.memory_reserved() / 1024 ** 3
+                mem_str = f' | VRAM {mem_gb:.2f}GB'
             print(
                 f'step {step:6d} | loss {avg_loss:.4f} | '
                 f'gvf {gvf_loss.item():.4f} | '
-                f'lr {lr_now:.2e} | H={H} W={W} K={K} | {elapsed:.0f}s'
+                f'lr {lr_now:.2e} | H={H} W={W} K={K}{mem_str} | {elapsed:.0f}s'
             )
+
+    # Save model checkpoint if requested
+    if args.save_checkpoint:
+        ckpt_path = args.save_checkpoint
+        torch.save({
+            'model_state_dict': model.state_dict(),
+            'config_dict': {
+                'd_model': config.d_model, 'd_state': config.d_state,
+                'expand': config.expand, 'headdim': config.headdim,
+                'chunk_size': config.chunk_size, 'n_layer': config.n_layer,
+                'mlp_expand': config.mlp_expand, 'stable_ssm': config.stable_ssm,
+                'num_options': config.num_options, 'd_option': 32,
+                'n_gvfs': config.n_gvfs, 'n_segments': config.n_segments,
+            },
+        }, ckpt_path)
+        print(f'Checkpoint saved to {ckpt_path}')
 
     # ---------------------------------------------------------------------------
     # Evaluation
@@ -663,6 +790,23 @@ if __name__ == '__main__':
     parser.add_argument('--seed',         type=int,   default=42)
     parser.add_argument('--lambda_gvf',   type=float, default=0.1,
                         help='Weight on GVF-0 auxiliary loss')
+    parser.add_argument('--num_options',  type=int,   default=1,
+                        help='Number of option embeddings (1 = no options, '
+                             '4 = phase options: input/output/test-in/test-out)')
+    parser.add_argument('--oracle_options', action='store_true',
+                        help='Use ground-truth phase-based oracle option indices '
+                             '(omega=0..3 by grid segment type). Requires --num_options 4.')
+    parser.add_argument('--save_checkpoint', type=str, default=None,
+                        metavar='PATH',
+                        help='Save model checkpoint to PATH after training.')
+    parser.add_argument('--no_amp',        action='store_true',
+                        help='Disable automatic mixed precision (fp16). '
+                             'AMP is on by default for CUDA; use this to '
+                             'debug numerical issues.')
+    parser.add_argument('--grad_checkpoint', action='store_true',
+                        help='Enable gradient checkpointing inside OaKBlocks. '
+                             'Trades ~30%% extra compute for ~50%% less activation '
+                             'memory. Use when VRAM is tight even with AMP.')
     args = parser.parse_args()
 
     train(args)

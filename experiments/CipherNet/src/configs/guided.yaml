@@ -1,15 +1,21 @@
-# Guided visual cortex — all three Monty features.
+# Guided visual cortex — V1 → IT with feedback and global lateral voting.
 #
-# V1 (5×5 foveal) → IT (3×1 supervised, 3 voting columns)
+# V1 (5×5 foveal) → IT (3×1 unsupervised, 3 voting columns)
 #
-# What's active here vs visual_v1it.yaml:
+# Active features:
 #   1. Hypothesis-directed fixation  — classify() picks remaining fixation
 #      positions that best discriminate the current IT leader from runner-up.
 #   2. Negative evidence (miss_penalty=0.1) — IT minicolumns whose stored
-#      model predicts a feature at a location but the actual feature differs
-#      receive a small negative evidence contribution.
+#      model predicts a different feature at a location receive a small
+#      negative evidence contribution.
 #   3. Three IT columns (grid [3,1]) — top, middle, bottom of V1 each have
-#      an independent IT column; they vote by summing evidence before pred.
+#      an independent IT column; they vote via OutputCortex.
+#   4. Global lateral voting (_global_lateral_pass) — full-layer plurality
+#      winner gets a small evidence bonus in every column of that layer.
+#   5. IT→V1 feedback (_feedback_pass) — after each fixation, IT's winner
+#      minicolumn's predictions prime the corresponding V1 columns.
+#   6. OutputCortex readout — IT is fully unsupervised; label association
+#      lives in OutputCortex (Hebbian minicolumn→label mapping).
 #
 # RF layout (auto-computed from grids):
 #   IT [3,1] over V1 [5,5]:
@@ -48,16 +54,19 @@ layers:
         n_bins: 8
         top_k: 3
 
-  # IT — Three independent voting columns.
-  # miss_penalty: penalty applied when stored model predicts something
-  # different from the observed V1 winner (negative evidence).
-  # lateral_bonus: Phase 5 — evidence bonus from adjacent IT columns.
+  # IT — Three independent voting columns, fully unsupervised.
+  # Label association lives in OutputCortex, not inside the minicolumns.
+  # n_mini=20: more prototypes than classes; lets IT discover multiple
+  # structural variants per digit without being told which is which.
+  # miss_penalty: penalty when stored model predicts differently from
+  # the observed V1 winner (negative evidence — rewards specificity).
+  # lateral_bonus: evidence bonus from adjacent IT columns.
   - id: IT
     grid: [3, 1]
-    n_mini: 10
-    supervised: true
+    n_mini: 20
+    supervised: false
     miss_penalty: 0.1
-    lateral_bonus: 0.1    # Phase 5: lateral inhibition between IT columns
+    lateral_bonus: 0.1
     reference_frame:
       type: allocentric
       params: {}

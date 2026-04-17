@@ -7,9 +7,8 @@ higher region).
 What it contains:
   location   — where the column currently IS in its reference frame
                (a hashable tuple from ReferenceFrame.position_key())
-  feature    — what the column currently SEES at that location
-               (a hashable key: Gabor code string at L1,
-                or a higher-level code string at L2+)
+  feature    — what the column currently SEES at that location. 
+               Must be an SDR, if it is not an SDR then the code is wrong.
   confidence — how well the column's prediction matched reality [0, 1]
                (1.0 = perfect prediction, 0.0 = never seen before)
 

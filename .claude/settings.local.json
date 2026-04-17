@@ -392,7 +392,15 @@
       "Bash(ls -lh /c/Users/julia/GitHub/predictive-coding-agent/docs/research/*.pdf)",
       "WebFetch(domain:jerryxio.ng)",
       "Bash(venv/Scripts/python.exe experiments/OaK_Mamba3/train_env1.py --steps 2000 --d_model 128 --grid_size 4 --K 2 --batch_size 16 --log_interval 200 --eval_episodes 200)",
-      "WebFetch(domain:proceedings.iclr.cc)"
+      "WebFetch(domain:proceedings.iclr.cc)",
+      "Bash(venv\\\\Scripts\\\\python.exe experiments/OaK_Mamba3/probe.py --no_checkpoint --n_episodes 30 --difficulty 1 --test 3)",
+      "Bash(venv/Scripts/python.exe experiments/OaK_Mamba3/probe.py --no_checkpoint --n_episodes 30 --difficulty 1 --test 3)",
+      "Bash(venv/Scripts/python.exe experiments/OaK_Mamba3/probe.py --no_checkpoint --n_episodes 100 --difficulty 1 --test 4 --k_means 6)",
+      "Bash(venv/Scripts/python.exe experiments/OaK_Mamba3/probe.py --no_checkpoint --n_episodes 20 --difficulty 1 --test 0)",
+      "Bash(venv/Scripts/python.exe experiments/OaK_Mamba3/test_oak.py)",
+      "WebFetch(domain:api-monty.thousandbrains.org)",
+      "Bash(gh api:*)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/thousandbrainsproject/tbp.monty/main/src/tbp/monty/frameworks/models/evidence_matching/learning_module.py\")"
     ]
   }
 }

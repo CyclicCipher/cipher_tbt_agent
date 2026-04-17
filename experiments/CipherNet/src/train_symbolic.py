@@ -25,13 +25,15 @@ from cortex import Cortex
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config',       default='configs/visual.yaml')
+    parser.add_argument('--config',       default='configs/guided.yaml')
     parser.add_argument('--n_train',      type=int,   default=100)
     parser.add_argument('--n_test',       type=int,   default=1000)
     parser.add_argument('--n_fixations',  type=int,   default=9)
     parser.add_argument('--confidence',   type=float, default=0.6)
     parser.add_argument('--diagnose',     action='store_true',
                         help='Print full layer/column/minicolumn representation report after training')
+    parser.add_argument('--diag_sample', type=int, default=200,
+                        help='Images per diagnostic probe (default 200)')
     args = parser.parse_args()
 
     config_path = os.path.join(os.path.dirname(__file__), args.config)
@@ -72,16 +74,32 @@ def main():
         print(f"  [{s['id']}] used_mini={s['used_mini']}  "
               f"total_locations={s['total_locations']}")
 
+    purity = cortex._output_cortex.purity_stats()
+    print(f"  OutputCortex: {cortex._output_cortex.n_associations()} associations  "
+          f"mean_purity={purity['mean_purity']:.2f}  "
+          f"pure80={purity['frac_pure80']:.0%}  "
+          f"pure60={purity['frac_pure60']:.0%}")
+
+    # ------------------------------------------------------------------
+    # Diagnostics (probes run before the full test loop)
+    # ------------------------------------------------------------------
     if args.diagnose:
-        print(cortex.diagnose())
+        from diagnostics import run_diagnostics
+        run_diagnostics(
+            cortex, explorer,
+            train_img[:args.n_train], train_lbl[:args.n_train],
+            test_img[:args.n_test],   test_lbl[:args.n_test],
+            n_sample=args.diag_sample,
+            confidence=args.confidence,
+        )
 
     # ------------------------------------------------------------------
     # Test
     # ------------------------------------------------------------------
     print(f"\nTesting on {args.n_test} images "
           f"(confidence threshold={args.confidence}) ...")
-    correct = 0
-    no_vote = 0
+    correct   = 0
+    no_assoc  = 0   # OutputCortex returned -1 (active IT mini has no training associations)
     t0 = time.time()
 
     for i in range(args.n_test):
@@ -91,18 +109,22 @@ def main():
             confidence_threshold=args.confidence)
 
         if pred == -1:
-            no_vote += 1
+            no_assoc += 1
         elif pred == int(test_lbl[i]):
             correct += 1
 
         if (i + 1) % max(1, args.n_test // 4) == 0:
-            print(f"  {i+1}/{args.n_test}: {correct/(i+1)*100:.1f}%")
+            elapsed = time.time() - t0
+            done    = i + 1
+            print(f"  {done}/{args.n_test}: {correct/done*100:.1f}%  "
+                  f"({elapsed:.1f}s)")
 
     print(f"\nTest time: {time.time()-t0:.1f}s")
     if args.n_test > 0:
+        denominator = args.n_test - no_assoc
         acc = correct / args.n_test * 100
         print(f"MNIST accuracy: {correct}/{args.n_test} = {acc:.2f}%  "
-              f"(no-vote: {no_vote})")
+              f"(no-assoc: {no_assoc})")
 
 
 if __name__ == '__main__':

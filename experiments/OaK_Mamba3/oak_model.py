@@ -33,6 +33,7 @@ from typing import List, Optional, Tuple
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+from torch.utils.checkpoint import checkpoint as grad_checkpoint
 
 # Import SSM utilities from sibling Mamba3 directory
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'Mamba3'))
@@ -249,6 +250,9 @@ class OaKMixer(nn.Module):
         # Fast weight head
         self.fast_weight = FastWeightHead(config.d_model, config.d_state)
 
+        # Probe: last dt tensor captured after forward() — (B, T, nheads), detached
+        self._last_dt: Optional[Tensor] = None
+
         self._init_params()
 
     def _init_params(self):
@@ -287,6 +291,9 @@ class OaKMixer(nn.Module):
 
         dt  = F.softplus(dt + self.dt_bias)   # (B, T, nheads)
         lam = torch.sigmoid(lam_logit)         # (B, T, 1)
+
+        # Capture dt for probing (always stored, detached — zero overhead on backward)
+        self._last_dt = dt.detach()
 
         # --- StableSSM decay ---
         A_dt = stable_log_decay(self.A_raw * dt)  # (B, T, nheads)
@@ -578,6 +585,11 @@ class OaKModel(nn.Module):
         self.layers = nn.ModuleList([OaKBlock(config) for _ in range(config.n_layer)])
         self.norm   = RMSNorm(config.d_model)
 
+        # Gradient checkpointing: set to True to trade compute for memory.
+        # When enabled, activations inside each OaKBlock are NOT stored during
+        # the forward pass and are recomputed on demand during backward.
+        self.use_grad_checkpoint: bool = False
+
         # Output heads
         self.task_head = nn.Linear(config.d_model, NUM_COLORS)
 
@@ -643,8 +655,14 @@ class OaKModel(nn.Module):
 
         # 4. SSM layers — pass grid_positions (start, H, W only) for 2D-PoPE
         grid_positions = [(s, H, W) for s, H, W, _ in grid_segments]
+        use_ckpt = self.use_grad_checkpoint and self.training
         for layer in self.layers:
-            x = layer(x, grid_positions)
+            if use_ckpt:
+                # Recompute activations during backward instead of storing them.
+                # use_reentrant=False avoids issues with non-leaf tensor graphs.
+                x = grad_checkpoint(layer, x, grid_positions, use_reentrant=False)
+            else:
+                x = layer(x, grid_positions)
 
         # 5. Final norm
         h = self.norm(x)   # (B, T, d_model)

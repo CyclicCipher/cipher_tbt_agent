@@ -65,6 +65,7 @@ import numpy as np
 from reference_frames import make_frame, RetinotopicFrame, ReferenceFrame
 from column import MacroColumn
 from cortical_message import CorticalMessage
+from output_cortex import OutputCortex
 
 
 CONFIDENCE_THRESHOLD = 0.6
@@ -87,12 +88,14 @@ def _build_encoder(encoder_type: str, params: dict):
     if encoder_type == 'gabor':
         from codebook import GaborFilterBank
         enc = GaborFilterBank(
-            patch_size=params.get('patch_size', 5),
-            n_orientations=params.get('n_orientations', 8),
-            n_frequencies=params.get('n_frequencies', 3),
-            top_k=params.get('top_k', 4),
+            patch_size    =params.get('patch_size',     5),
+            n_orientations=params.get('n_orientations', 16),
+            n_frequencies =params.get('n_frequencies',  8),
+            n_phases      =params.get('n_phases',        2),
+            n_positions   =params.get('n_positions',     8),
+            top_k         =params.get('top_k',          40),
         )
-        enc.fit(verbose=False)
+        enc.fit(verbose=True)
         return enc
     raise ValueError(f"Unknown encoder type '{encoder_type}'")
 
@@ -120,6 +123,9 @@ class Layer:
     receptive_fields: list[list[int]]               = field(default_factory=list)
     # rf_local_pos[i][j]   = (vy, vx) local position of RF slot j for column i
     rf_local_pos:     list[list[tuple[int, int]]]   = field(default_factory=list)
+    # last_features[i] = HOG SDR (np.ndarray int8) or None (blank patch).
+    # Only populated for sensor layers; used by higher layers in direct-HOG mode.
+    last_features:    list                          = field(default_factory=list)
 
     @property
     def n_columns(self) -> int:
@@ -152,10 +158,11 @@ class Cortex:
                  layers: dict[str, Layer],
                  ordered_ids: list[str],
                  eye=None):
-        self.name    = name
-        self.layers  = layers
-        self._order  = ordered_ids
-        self._eye    = eye
+        self.name           = name
+        self.layers         = layers
+        self._order         = ordered_ids
+        self._eye           = eye
+        self._output_cortex = OutputCortex()
 
     # ------------------------------------------------------------------
     # Construction from config
@@ -326,15 +333,89 @@ class Cortex:
                     layer.columns[idx].apply_lateral_input(
                         neighbor_winners, layer.lateral_bonus)
 
+    @staticmethod
+    def _global_lateral_pass(layer: Layer,
+                              bonus: float = 0.05) -> None:
+        """Apply full-layer plurality vote as a weak global prior.
+
+        After the local ±1 lateral pass, every column in the layer receives
+        a small bonus for whichever minicolumn index is the most common
+        tentative winner across ALL columns in the layer.  This implements
+        the long-range horizontal white-matter connections that the ±1
+        neighbourhood cannot reach.
+
+        The bonus is intentionally smaller than lateral_bonus so the global
+        signal guides without overriding local evidence.
+        """
+        if not layer.columns:
+            return
+        winners = [col.tentative_winner() for col in layer.columns]
+        if not winners:
+            return
+        plurality = max(set(winners), key=winners.count)
+        for col in layer.columns:
+            col.apply_lateral_input([plurality], bonus)
+
     # ------------------------------------------------------------------
     # Sensor encoding (V1)
     # ------------------------------------------------------------------
 
+    def _feedback_pass(self, layer_tentatives: dict[str, list[int]],
+                       feedback_bonus: float = 0.3) -> None:
+        """Top-down prediction sweep after each fixation's forward pass.
+
+        Iterates layer pairs upper → lower (IT→V1).  The upper winner
+        minicolumn's stored SDR union at each RF slot is the predicted
+        feature for the corresponding lower column.  For multi-mini lower
+        layers, the lower minicolumn whose model best matches that predicted
+        SDR receives an evidence boost — biasing WTA toward the upper
+        layer's expectation before the next fixation.
+
+        With the current V1 n_mini=1, this is a no-op (no competition to
+        bias).  Retained for future architectures with learned V1 WTA.
+        """
+        # Feedback path: upper winner's predicted SDR at each RF slot primes
+        # the corresponding lower column.  With direct-HOG mode (V1 n_mini=1),
+        # lower columns have only one possible mini — feedback is a no-op.
+        # This loop is retained for future multi-mini lower layers.
+        for upper_idx in range(len(self._order) - 1, 0, -1):
+            upper_id    = self._order[upper_idx]
+            lower_id    = self._order[upper_idx - 1]
+            upper_layer = self.layers[upper_id]
+            lower_layer = self.layers[lower_id]
+            upper_winners = layer_tentatives[upper_id]
+
+            for ui, u_col in enumerate(upper_layer.columns):
+                winner_mc = u_col.minicolumns[upper_winners[ui]]
+                rf        = upper_layer.receptive_fields[ui]
+                lpos      = upper_layer.rf_local_pos[ui]
+                for j, lower_col_idx in enumerate(rf):
+                    loc           = lpos[j]
+                    predicted_sdr = winner_mc._model.get(loc)
+                    if predicted_sdr is None:
+                        continue
+                    # For multi-mini lower layers: find the mini whose model
+                    # best matches the predicted SDR and boost it.
+                    lower_col = lower_layer.columns[lower_col_idx]
+                    if lower_col.N_MINI == 1:
+                        continue   # no competition to bias
+                    scores = [mc.overlap_score(predicted_sdr, loc)
+                              for mc in lower_col.minicolumns]
+                    best_mini = int(np.argmax(scores))
+                    lower_col.receive_feedback_by_index(best_mini, feedback_bonus)
+
     def _encode_sensor_fixation(self, layer: Layer,
                                  dog: np.ndarray,
                                  fixation: tuple,
-                                 ) -> tuple[list[str], list[tuple]]:
-        """HOG encode one fixation for a sensor layer."""
+                                 ) -> tuple[list[np.ndarray | None], list[tuple]]:
+        """HOG encode one fixation for a sensor layer.
+
+        Returns features as list[np.ndarray | None].
+        None = blank/silent patch — suppressed structurally by the encoder
+        (HOGEncoder returns None when mean gradient magnitude is below its
+        ACTIVITY_THRESHOLD).  None features are skipped by higher-layer
+        observation building so blank background never reaches IT.
+        """
         self._eye.fixate(float(fixation[0]), float(fixation[1]))
         retina = self._eye.sample(dog)
         ps, st = layer.patch_size, layer.stride
@@ -347,7 +428,10 @@ class Cortex:
                 x0 = gx * st
                 patches[k] = retina[y0:y0 + ps, x0:x0 + ps]
                 k += 1
-        features = layer.encoder.encode_batch(patches)
+
+        # Encoder returns list[np.ndarray | None] — None for blank patches.
+        features: list[np.ndarray | None] = layer.encoder.encode_batch(patches)
+        layer.last_features = features
 
         locations: list[tuple] = []
         for col in layer.columns:
@@ -362,19 +446,33 @@ class Cortex:
 
     @staticmethod
     def _build_rf_observations(
-            lower_winners:  list[int],
+            lower_winners:    list[int],
             receptive_fields: list[list[int]],
             rf_local_pos:     list[list[tuple[int, int]]],
             col_idx:          int,
-    ) -> list[tuple[str, tuple]]:
-        """Build independent (feat, loc) observations for one upper column.
+            lower_features:   list | None = None,
+    ) -> list[tuple[np.ndarray, tuple]]:
+        """Build independent (sdr, loc) observations for one upper column.
 
-        Feature = str(lower_winner_index).
-        Location = local (vy, vx) position within RF.
+        If lower_features is provided (lower layer is a sensor), each feature
+        is an SDR np.ndarray — the biologically correct input.  None entries
+        (blank/silent patches) are filtered out here so observe_multi() never
+        sees a zero-energy feature.
+
+        Otherwise (lower layer is a non-sensor with learned WTA winners),
+        fall back to winner-index SDRs — a one-hot int8 vector of length
+        N_MINI encoding which minicolumn won in the lower layer.
         """
         rf   = receptive_fields[col_idx]
         lpos = rf_local_pos[col_idx]
-        return [(str(lower_winners[j]), lp) for j, lp in zip(rf, lpos)]
+        if lower_features is not None:
+            return [(lower_features[j], lp)
+                    for j, lp in zip(rf, lpos)
+                    if lower_features[j] is not None]
+        # Winner-index fallback: encode as one-hot SDR so MiniColumn.overlap_score
+        # still receives an np.ndarray.  This path is used when the lower layer
+        # is a non-sensor (learned WTA) — not active in the current V1→IT config.
+        return [(np.array([1], dtype=np.int8), lp) for j, lp in zip(rf, lpos)]
 
     # ------------------------------------------------------------------
     # Learning
@@ -382,16 +480,20 @@ class Cortex:
 
     def learn(self, image: np.ndarray, label: int,
               fixations: list[tuple]) -> None:
-        """TBT evidence accumulation + supervised IT commit.
+        """TBT evidence accumulation — fully unsupervised columns.
 
         Per fixation, bottom-up:
-          V1: observe(HOG_feat, retinal_loc)       — single observation
-          V2: observe_multi(v1_winner per RF slot)  — 9 obs per column
-          IT: observe_multi(v2_winner per RF slot)  — 4 obs per column
+          V1: observe(HOG_feat, retinal_loc)      — single observation
+          IT: observe_multi(v1_winner per RF slot) — n_rf obs per column
+
+        After each fixation:
+          _feedback_pass   — IT→V1 top-down priming for the next fixation
+          _lateral_pass    — ±1 neighbour lateral consistency
+          _global_lateral_pass — full-layer plurality bonus
 
         End of image:
-          V1, V2: commit(write=True)           — unsupervised WTA
-          IT:     commit_supervised(label)     — minicolumn idx = class
+          All layers: commit(write=True)  — unsupervised WTA
+          OutputCortex.learn(IT winners, label) — Hebbian label readout
         """
         dog = self._eye.preprocess(image)
 
@@ -409,33 +511,54 @@ class Cortex:
                     feats, locs = self._encode_sensor_fixation(
                         layer, dog, fix)
                     for i, col in enumerate(layer.columns):
-                        col.observe(feats[i], locs[i])
+                        if feats[i] is not None:   # skip silent/blank patches
+                            col.observe(feats[i], locs[i])
                 else:
-                    lower_winners = layer_tentative[layer.input_source]
+                    lower_id      = layer.input_source
+                    lower_layer   = self.layers[lower_id]
+                    lower_winners = layer_tentative[lower_id]
+                    # Use HOG codes directly when the lower layer is a sensor
+                    # (V1 = fixed feature extractor; IT = learning layer).
+                    direct_feats = (lower_layer.last_features
+                                    if lower_layer.encoder is not None else None)
                     for i, col in enumerate(layer.columns):
                         obs = self._build_rf_observations(
                             lower_winners,
                             layer.receptive_fields,
-                            layer.rf_local_pos, i)
-                        col.observe_multi(obs)
+                            layer.rf_local_pos, i,
+                            lower_features=direct_feats)
+                        if obs:   # skip if all RF slots were blank
+                            col.observe_multi(obs)
 
                 self._lateral_pass(layer)
+                self._global_lateral_pass(layer)
 
                 layer_tentative[lid] = [
                     col.tentative_winner() for col in layer.columns
                 ]
 
+            # After the full forward sweep, send top-down predictions back
+            # (IT→V1): each upper layer's winner primes lower layers for
+            # the next fixation.
+            self._feedback_pass(layer_tentative)
+
         for lid in self._order:
             layer = self.layers[lid]
-            if layer.supervised:
-                for col in layer.columns:
-                    col.commit_supervised(label, write=True)
-            elif layer.chl:
+            if layer.chl:
                 for col in layer.columns:
                     col.commit_chl(label, write=True)
+            elif layer.supervised:
+                for col in layer.columns:
+                    col.commit_supervised(label, write=True)
             else:
                 for col in layer.columns:
                     col.commit(write=True)
+
+        # Associate the final layer's unsupervised winners with the label
+        # via OutputCortex (Hebbian readout, no labels inside columns).
+        final_layer = self.layers[self._order[-1]]
+        for ci, col in enumerate(final_layer.columns):
+            self._output_cortex.learn(ci, col.sdr(), label)
 
     # ------------------------------------------------------------------
     # Inference
@@ -484,9 +607,13 @@ class Cortex:
             # (approximation — ignores accumulated evidence; fast and unbiased)
             v1_est: list[int] = []
             for ci, col in enumerate(v1_layer.columns):
-                scores = [mc.overlap_score(feats[ci], locs[ci]) + mc._boost
-                          for mc in col.minicolumns]
-                v1_est.append(int(np.argmax(scores)))
+                if feats[ci] is None:
+                    # Blank patch: no signal — default to mini 0 (only one for V1).
+                    v1_est.append(0)
+                else:
+                    scores = [mc.overlap_score(feats[ci], locs[ci]) + mc._boost
+                              for mc in col.minicolumns]
+                    v1_est.append(int(np.argmax(scores)))
 
             # Expected discriminability across all IT columns
             disc = 0.0
@@ -534,7 +661,6 @@ class Cortex:
         it_layer   = self.layers[self._order[-1]]
         v1_lid     = self._order[0]
         v1_layer   = self.layers[v1_lid]
-        n_mini_it  = it_layer.columns[0].N_MINI
 
         # Pre-cache V1 encodings for ALL candidate fixations so guided
         # fixation can score them without re-encoding.
@@ -564,33 +690,53 @@ class Cortex:
                     feats, locs = v1_cache.get(fix) or \
                         self._encode_sensor_fixation(layer, dog, fix)
                     for i, col in enumerate(layer.columns):
-                        col.observe(feats[i], locs[i])
+                        if feats[i] is not None:   # skip silent/blank patches
+                            col.observe(feats[i], locs[i])
                 else:
-                    lower_winners = layer_tentative[layer.input_source]
+                    lower_id      = layer.input_source
+                    lower_layer   = self.layers[lower_id]
+                    lower_winners = layer_tentative[lower_id]
+                    direct_feats  = (lower_layer.last_features
+                                     if lower_layer.encoder is not None else None)
                     for i, col in enumerate(layer.columns):
                         obs = self._build_rf_observations(
                             lower_winners,
                             layer.receptive_fields,
-                            layer.rf_local_pos, i)
-                        col.observe_multi(obs)
+                            layer.rf_local_pos, i,
+                            lower_features=direct_feats)
+                        if obs:   # skip if all RF slots were blank
+                            col.observe_multi(obs)
 
                 self._lateral_pass(layer)
+                self._global_lateral_pass(layer)
 
                 layer_tentative[lid] = [
                     col.tentative_winner() for col in layer.columns
                 ]
 
-            # Early stopping: check aggregated IT evidence ratio
+            # Top-down feedback: IT→V1 priming for the next fixation.
+            self._feedback_pass(layer_tentative)
+
+            # Early stopping: dominant IT minicolumn (evidence ratio).
+            # Uses OutputCortex to map the unsupervised winner to a label.
             if k >= 1:
                 agg   = self._aggregate_it_evidence(it_layer)
                 total = sum(agg)
                 if total > 0 and max(agg) / total >= confidence_threshold:
-                    pred = int(np.argmax(agg))
-                    return pred, Counter({pred: max(agg)})
+                    active = [
+                        (ci, frozenset([col.tentative_winner()]))
+                        for ci, col in enumerate(it_layer.columns)
+                    ]
+                    pred, votes = self._output_cortex.classify(active)
+                    if pred != -1:
+                        return pred, votes
 
-        agg  = self._aggregate_it_evidence(it_layer)
-        pred = int(np.argmax(agg)) if agg else 0
-        return pred, Counter({i: v for i, v in enumerate(agg)})
+        active = [
+            (ci, frozenset([col.tentative_winner()]))
+            for ci, col in enumerate(it_layer.columns)
+        ]
+        pred, votes = self._output_cortex.classify(active)
+        return pred, votes  # pred == -1 means no OutputCortex associations yet
 
     # ------------------------------------------------------------------
     # Stats
