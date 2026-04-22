@@ -289,7 +289,7 @@ class MacroColumn:
 
         For higher layers (IT): called once per fixation with one entry per
         lower-layer column in this column's receptive field (None entries
-        already filtered out by cortex._build_rf_observations).
+        already filtered out before calling observe_multi()).
 
         Evidence is normalised by RF size so each fixation contributes the
         same total regardless of how many active slots remain after blank

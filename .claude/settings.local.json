@@ -400,7 +400,26 @@
       "Bash(venv/Scripts/python.exe experiments/OaK_Mamba3/test_oak.py)",
       "WebFetch(domain:api-monty.thousandbrains.org)",
       "Bash(gh api:*)",
-      "Bash(curl -s \"https://raw.githubusercontent.com/thousandbrainsproject/tbp.monty/main/src/tbp/monty/frameworks/models/evidence_matching/learning_module.py\")"
+      "Bash(curl -s \"https://raw.githubusercontent.com/thousandbrainsproject/tbp.monty/main/src/tbp/monty/frameworks/models/evidence_matching/learning_module.py\")",
+      "WebFetch(domain:blog.acolyer.org)",
+      "WebFetch(domain:www.cortical.io)",
+      "Bash(\"C:/Users/julia/GitHub/predictive-coding-agent/venv/Scripts/python.exe\" slot_workspace.py)",
+      "Bash(python -c ' *)",
+      "Bash(../../../venv/Scripts/python.exe -m pytest tests/test_maze_env.py tests/test_sensor.py tests/test_place_map.py -v)",
+      "Bash(./../../../../../../venv/Scripts/python.exe -m pytest tests/test_maze_env.py tests/test_sensor.py tests/test_place_map.py -v)",
+      "Bash(C:/Users/julia/GitHub/predictive-coding-agent/venv/Scripts/python.exe -m pytest tests/test_maze_env.py tests/test_sensor.py tests/test_place_map.py -v)",
+      "Bash(C:/Users/julia/GitHub/predictive-coding-agent/venv/Scripts/python.exe -m pytest tests/test_brain.py -v)",
+      "Bash(C:/Users/julia/GitHub/predictive-coding-agent/venv/Scripts/python.exe -m pytest tests/ -v)",
+      "Bash(C:/Users/julia/GitHub/predictive-coding-agent/venv/Scripts/python.exe experiments/exp1_single_column.py)",
+      "Bash(C:/Users/julia/GitHub/predictive-coding-agent/venv/Scripts/python.exe -m pytest tests/ -q)",
+      "Bash(C:/Users/julia/GitHub/predictive-coding-agent/venv/Scripts/python.exe -c ' *)",
+      "Bash(C:/Users/julia/GitHub/predictive-coding-agent/venv/Scripts/python.exe experiments/exp1_scaling.py)",
+      "Bash(C:/Users/julia/GitHub/predictive-coding-agent/venv/Scripts/python.exe -m pytest tests/test_brain.py::test_belief_update_sharpens_on_consistent_sdr -v)",
+      "Bash(venv\\\\Scripts\\\\python.exe experiments\\\\CipherNet\\\\tbt_llm\\\\experiments\\\\exp1_single_column.py)",
+      "Bash(venv\\\\Scripts\\\\python.exe experiments\\\\CipherNet\\\\tbt_llm\\\\experiments\\\\profile_perf.py)",
+      "Bash(\"venv/Scripts/python.exe\" experiments/CipherNet/tbt_llm/experiments/profile_perf.py)",
+      "Bash(\"venv/Scripts/python.exe\" -u experiments/CipherNet/tbt_llm/experiments/profile_perf.py)",
+      "Bash(python -c \"import sys; print\\(sys.stdout.encoding\\)\")"
     ]
   }
 }
