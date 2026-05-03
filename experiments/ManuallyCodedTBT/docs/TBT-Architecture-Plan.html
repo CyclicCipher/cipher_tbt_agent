@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Architecture Plan — ManuallyCodedTBT</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,600;1,300&display=swap');
+
+  :root {
+    --bg: #0d0f12;
+    --surface: #13161b;
+    --border: #1e2229;
+    --accent: #4af0a0;
+    --accent2: #f0a04a;
+    --accent3: #4a9ef0;
+    --warn: #f04a4a;
+    --text: #c8cdd6;
+    --text-dim: #5a6070;
+    --text-bright: #edf0f5;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.7;
+    padding: 48px 24px;
+  }
+
+  .container { max-width: 860px; margin: 0 auto; }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 32px;
+    margin-bottom: 48px;
+  }
+
+  .doc-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  h1 {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--text-bright);
+    letter-spacing: -0.02em;
+  }
+
+  .subtitle {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+    font-style: italic;
+  }
+
+  /* Boxes */
+  .principle-box {
+    background: #0e1a14;
+    border: 1px solid var(--accent);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 20px 24px;
+    margin-bottom: 32px;
+  }
+
+  .warning-box {
+    background: #1a0e0e;
+    border: 1px solid var(--warn);
+    border-left: 3px solid var(--warn);
+    border-radius: 4px;
+    padding: 20px 24px;
+    margin-bottom: 32px;
+  }
+
+  .info-box {
+    background: #10141a;
+    border: 1px solid var(--accent3);
+    border-left: 3px solid var(--accent3);
+    border-radius: 4px;
+    padding: 20px 24px;
+    margin-bottom: 32px;
+  }
+
+  .box-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .principle-box .box-label { color: var(--accent); }
+  .warning-box .box-label { color: var(--warn); }
+  .info-box .box-label { color: var(--accent3); }
+
+  /* Sections */
+  section { margin-bottom: 48px; }
+
+  .section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-num {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+  }
+
+  h2 {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-bright);
+    letter-spacing: 0.03em;
+  }
+
+  .section-tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 2px;
+    margin-left: auto;
+  }
+
+  .tag-design { background: #0e1a14; color: var(--accent); border: 1px solid #1a3025; }
+  .tag-scripts { background: #1a1508; color: var(--accent2); border: 1px solid #332a10; }
+  .tag-open { background: #1a0e0e; color: var(--warn); border: 1px solid #331818; }
+  .tag-plan { background: #1a1230; color: var(--accent3); border: 1px solid #2a1f50; }
+
+  ul { list-style: none; }
+
+  ul li {
+    position: relative;
+    padding-left: 20px;
+    margin-bottom: 10px;
+    font-size: 13.5px;
+    color: var(--text);
+  }
+
+  ul li::before {
+    content: '—';
+    position: absolute;
+    left: 0;
+    color: var(--text-dim);
+    font-family: var(--mono);
+  }
+
+  ul li strong { color: var(--text-bright); font-weight: 600; }
+  ul li em { color: var(--accent2); font-style: normal; }
+
+  .open-questions li::before { color: var(--warn); content: '?'; font-family: var(--mono); font-weight: 600; }
+
+  .subsection {
+    margin-top: 20px;
+    margin-bottom: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--accent3);
+    text-transform: uppercase;
+  }
+
+  .callout {
+    background: #10141a;
+    border-left: 2px solid var(--accent3);
+    padding: 12px 16px;
+    margin: 16px 0;
+    font-size: 13px;
+    color: var(--text);
+    font-style: italic;
+  }
+
+  .file-entry {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 8px 16px;
+    margin-bottom: 8px;
+    align-items: start;
+  }
+
+  .file-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent2);
+    padding-top: 1px;
+  }
+
+  .file-desc {
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  footer {
+    margin-top: 64px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    text-align: center;
+  }
+
+  .divider {
+    border: none;
+    border-top: 1px dashed var(--border);
+    margin: 24px 0;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="doc-label">Architecture Plan // ManuallyCodedTBT</div>
+    <h1>TBT Architecture Plan</h1>
+    <p class="subtitle">HTM foundations + TBT cortical column layer model — built from scratch, no Monty</p>
+  </header>
+
+  <!-- DESIGN PRINCIPLES -->
+  <div class="principle-box">
+    <div class="box-label">Design Principles</div>
+    <ul>
+      <li><strong>Data Oriented Design.</strong> Arrays of data, not trees of objects. Cortical columns own flat arrays. No Cell class, no Minicolumn class, no Segment class. Index arithmetic and slicing replace object hierarchies.</li>
+      <li><strong>SDRs are the universal data type.</strong> Every signal between every component — sensory input, motor commands, inter-layer communication, inter-column voting — is an SDR. No floats, no embedding vectors, no 3D coordinates as primitives.</li>
+      <li><strong>Reference frames are learned, not hardcoded.</strong> Grid cell modules learn the dimensionality and metric of their space from data. The system must be capable of operating in spaces that are not 3D Euclidean — semantic space, number lines, abstract relational spaces.</li>
+      <li><strong>Prediction error is the only training signal.</strong> The system predicts what it will observe next. It only learns when the prediction is wrong. No backpropagation, no gradient descent, no loss functions.</li>
+      <li><strong>One algorithm, every domain.</strong> The cortical column is a single repeating circuit. The same code handles vision, touch, language, and arithmetic. Domain differences come from the sensor and its encoder, not from the column.</li>
+      <li><strong>Bitter lesson compliance.</strong> Emergent capability over hand-coded knowledge. The column learns representations; we do not design them. Configuration-driven architecture, not anatomy-in-code.</li>
+    </ul>
+  </div>
+
+  <div class="warning-box">
+    <div class="box-label">What Monty Got Wrong — Do Not Repeat</div>
+    <ul>
+      <li>Hardcoded 3D Euclidean as the universal reference frame. All learning modules communicate in xyz coordinates. This makes non-spatial domains (language, reasoning, math) impossible.</li>
+      <li>Abandoned SDRs entirely. Object models are torch_geometric graphs with float features. No noise resistance, no HDC operations, no biological grounding.</li>
+      <li>Abandoned temporal memory. No sequence learning, no prediction-error-driven learning, no bursting.</li>
+      <li>No benchmarks on standard ML tasks. Only tested in a custom 3D simulation. No MNIST, CIFAR, ARC, or any compositionality benchmark.</li>
+      <li>The "cortical messaging protocol" forces every learning module into the same coordinate system, destroying the ability of different columns to maintain independent reference frames — which is the entire point of TBT.</li>
+    </ul>
+  </div>
+
+  <!-- 1. SYSTEM ARCHITECTURE -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <h2>System Architecture — Top Level</h2>
+      <span class="section-tag tag-design">Design</span>
+    </div>
+    <ul>
+      <li>The brain is a flat 2D sheet of <strong>regions</strong>. Each region contains cortical columns laid out according to a <strong>sensor map</strong> (retinotopic for vision, somatotopic for touch, etc.). Neighboring columns correspond to neighboring receptive fields.</li>
+      <li>Every sensor has a <strong>sensor map</strong> defining its receptive fields and their spatial relationships. The region that receives from that sensor mirrors this map.</li>
+      <li>The <strong>Old Brain</strong> (reptilian brain) sets objective functions, controls muscles, executes autonomic behavior. It receives all raw sensory data from all senses, and controls all muscles. It sends a <em>copy</em> of sensory data and motor commands to the neocortex — these two streams are the neocortex's only inputs.</li>
+      <li>The <strong>Thalamus</strong> routes sensory data to the appropriate cortical region. It is also involved in coordinate transformations between egocentric (sensor-relative) and allocentric (object-relative) reference frames. Its exact computational role is an open question.</li>
+      <li>All sensory data is converted into SDRs by <strong>encoders</strong> before reaching the brain. There are two encoder types: <em>Encoder</em> (single quantity) and <em>MultiEncoder</em> (semantically related quantities combined into one SDR).</li>
+      <li>The system runs in discrete <strong>5ms timesteps</strong>: collect sensory data → process in brain → emit motor output → repeat.</li>
+    </ul>
+  </section>
+
+  <!-- 2. CORTICAL COLUMN LAYER MODEL -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <h2>Cortical Column — Layer-by-Layer Computational Model</h2>
+      <span class="section-tag tag-design">Design</span>
+    </div>
+
+    <div class="callout">Each cortical column is a single object owning flat arrays for each layer's state. Layers are not separate objects — they are groups of arrays within the column, connected by index-based wiring. Note: L2/3 and L5 each split into two functionally distinct sublayers.</div>
+
+    <p class="subsection">Layer 4 — Sensory Input and Feature-Location Binding</p>
+    <ul>
+      <li><strong>Role:</strong> Receives thalamic/encoder sensory input. Also receives the location prediction from L6a. L4 is where "what" (feature) and "where" (location) are first combined — binding happens here, not in L2/3.</li>
+      <li><strong>Mechanism:</strong> Spatial pooling converts input SDR to stable sparse minicolumn representation. L6a's location signal modulates this processing. L4 also projects down to L6a, providing sensory grounding to the grid cell system.</li>
+      <li><strong>Output:</strong> Bound feature-location SDR fed up to L3 as proximal input. Also projects to L6a.</li>
+    </ul>
+
+    <p class="subsection">Layer 3 (Lower L2/3) — Sequence Learning and Local Voting</p>
+    <ul>
+      <li><strong>Role:</strong> Receives feedforward input from L4. Learns sequences of feature-location pairs via temporal memory. Projects laterally to neighboring columns' L3 for inter-column voting. Projects to L5a (driving motor output). Projects feedback to L4.</li>
+      <li><strong>Mechanism:</strong> Location-conditioned temporal memory — cells become predictive based on both prior sequence context and current L6a location.</li>
+      <li><strong>Output:</strong> Object representation SDR fed to L5a, laterally to neighboring columns' L3, and feedback to L4.</li>
+    </ul>
+
+    <p class="subsection">Layer 2 (Upper L2/3) — Sensorimotor Integration and Long-Range Output</p>
+    <ul>
+      <li><strong>Role:</strong> Receives from L3 below AND from L5a. This makes L2 a sensorimotor integration layer — it combines the sensory sequence representation with the motor context. Projects strongly to other cortical areas (long-range corticocortical output).</li>
+      <li><strong>Output:</strong> Integrated sensorimotor representation sent to other cortical areas.</li>
+    </ul>
+
+    <p class="subsection">Layer 5a — Intratelencephalic (IT) Motor Output</p>
+    <ul>
+      <li><strong>Role:</strong> IT neurons. Receives from L3. Projects to other cortical columns, other cortical areas, and the striatum — the corticocortical motor signal. Also provides input back up to L2. Receives from L6b.</li>
+      <li><strong>Output:</strong> Motor context SDR to other cortical columns, striatum, and upward to L2.</li>
+    </ul>
+
+    <p class="subsection">Layer 5b — Displacement Cell Modules (ET Neurons)</p>
+    <ul>
+      <li><strong>Confirmed:</strong> ET neurons ("thick-tufted") are displacement cells (Hawkins 2019). L5b is NOT the same as L5a — L5a is corticocortical, L5b is displacement/motor.</li>
+      <li><strong>Modular structure:</strong> L5b has one displacement cell module for each L6a grid cell module, with the same period structure. A single displacement module is ambiguous (cannot uniquely represent a displacement); multiple modules together uniquely encode a displacement via the same residue number system as L6a. Displacement SDR = concatenation of all modules' outputs.</li>
+      <li><strong>Bilateral connection with L6a:</strong> Firing displacement d shifts each L6a module's phase by (d mod λᵢ) — path integration. This is the update mechanism for the reference frame.</li>
+      <li><strong>Axon split:</strong> Branch 1 → subcortical motor targets (muscles). Branch 2 → thalamic relay cells → next hierarchical cortical area's L4.</li>
+      <li><strong>Two roles:</strong> (1) Movement — updating L6a when the sensor moves. (2) Composition — encoding the spatial relationship between two separate object reference frames.</li>
+      <li><strong>Addition test strategy:</strong> The displacement does not have to come from this column. Injecting displacement externally to L6a is architecturally valid — equivalent to a "+" operator column sending its L5b signal to our column's L6a. Phase 9 uses external injection.</li>
+    </ul>
+
+    <p class="subsection">Layer 6a — Grid Cells / Reference Frame</p>
+    <ul>
+      <li><strong>Role:</strong> Grid cell modules tracking sensor location in the object's allocentric reference frame. Projects a location prediction to L4. Projects modulatory feedback to the thalamic nucleus providing sensory input — modifies thalamic relay without driving it directly.</li>
+      <li><strong>Mechanism:</strong> Residue number system via multiple grid cell modules with different periods. Path integration via modular phase addition.</li>
+      <li><strong>Output:</strong> Location SDR to L4 (prediction) and to L3 as basal context. Modulatory signal to thalamus.</li>
+    </ul>
+
+    <p class="subsection">Layer 6b — Role Unclear</p>
+    <ul>
+      <li><strong>Role:</strong> Receives from L5a (per diagram). Projects to same thalamic nucleus as L6a, and also to the next higher-order thalamic nucleus. May modulate hierarchical routing. Function in adult cortex is not well understood.</li>
+      <li><strong>Status:</strong> Deferred. Not implemented in initial build.</li>
+    </ul>
+
+    <p class="subsection">Layer 1 — Top-Down Wiring Substrate</p>
+    <ul>
+      <li><strong>Role:</strong> Contains apical dendrite tufts and long-range axons. Wiring substrate for top-down feedback. Function implicit in connections defined elsewhere. Not modeled separately.</li>
+    </ul>
+  </section>
+
+  <!-- 3. SCRIPTS AND FILES -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">03</span>
+      <h2>Scripts &amp; Files</h2>
+      <span class="section-tag tag-scripts">Scripts</span>
+    </div>
+
+    <p class="subsection">src/ — Core Library (all implemented and tested)</p>
+    <div class="file-entry">
+      <span class="file-name">sdr.py</span>
+      <span class="file-desc">✓ DONE — SDR data type: creation, overlap (AND), union (OR), subsampling, concatenation, scalar/periodic/RDSE encoding, false positive estimation. All operations as functions on numpy arrays. 65 tests pass.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">encoder.py</span>
+      <span class="file-desc">✓ DONE — ScalarEncoder, PeriodicEncoder, RDSEncoder, CategoryEncoder, SymbolEncoder, MultiEncoder. All produce fixed-length boolean SDR outputs. Encoders are external to the column — one encoder per receptive field/sensor type.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">spatial_pooler.py</span>
+      <span class="file-desc">✓ DONE — Layer 4 mechanism. Permanence matrices, dual boosting (boost factor + permanence rescue), global inhibition, Hebbian learning. BAMI v0.56 compliant. 27 tests pass.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">temporal_memory.py</span>
+      <span class="file-desc">✓ DONE — Layer 3 (lower L2/3) mechanism. Cell-level sequence learning with L6a location conditioning via separate location synapse arrays. Three learning rules: reinforce predictions, grow segments on burst, punish incorrect predictions. Optimized to skip empty segments. 26 tests pass.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">grid_cells.py</span>
+      <span class="file-desc">✓ DONE — Layer 6a mechanism. Multiple grid cell modules forming a residue number system. Periodic phase encoding, path integration via modular addition, CRT reconstruction, configurable periods. 40 tests pass.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">displacement_layer.py</span>
+      <span class="file-desc">✓ DONE — Layer 5b mechanism. Displacement cell modules mirroring L6a grid cell modules 1:1 with same periods. Encodes displacements in the same RNS as positions. Applies displacement to GridCellLayer via modular addition. make_displacement_layer_from_grid() convenience constructor guarantees period compatibility. 28 tests pass.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">cortical_column.py</span>
+      <span class="file-desc">✓ DONE — Full column assembly (Phase 8). Wiring harness accepting pre-built encoder, SpatialPooler, TemporalMemory, GridCellLayer, DisplacementLayer — with sensible defaults if not provided. Per-timestep computation: encode → L4 SP → L6a location → L3 TM → L5b displacement. Returns full state dict. Higher-order memory validated to order 6. 27 tests pass.</span>
+    </div>
+
+    <p class="subsection">src/ — System-Level (deferred)</p>
+    <div class="file-entry">
+      <span class="file-name">old_brain.py</span>
+      <span class="file-desc">DEFERRED — The reptilian brain: receives all sensory data and motor state, sets goals/reward signals, controls muscles, sends copies of sensory and motor data to the neocortex.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">thalamus.py</span>
+      <span class="file-desc">DEFERRED — Information router with modulatory feedback from L6a. Not needed for single-column experiments.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">region.py</span>
+      <span class="file-desc">DEFERRED — A cortical region: collection of cortical columns on a sensor map with inter-column voting. Not needed for single-column work.</span>
+    </div>
+
+    <p class="subsection">tests/</p>
+    <div class="file-entry">
+      <span class="file-name">test_sdr.py</span>
+      <span class="file-desc">✓ 65 tests — SDR operations: overlap, union, encoding, noise resistance, false positive rates.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">test_spatial_pooler.py</span>
+      <span class="file-desc">✓ 27 tests — Sparsity, stability, semantic overlap preservation, boosting, reconstruction.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">test_temporal_memory.py</span>
+      <span class="file-desc">✓ 26 tests — Sequence learning, prediction, bursting, higher-order memory, location conditioning, incorrect prediction punishment.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">test_grid_cells.py</span>
+      <span class="file-desc">✓ 40 tests — Phase encoding, path integration, addition, subtraction, commutativity, unique representations, CRT reconstruction.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">test_displacement_layer.py</span>
+      <span class="file-desc">✓ 28 tests — Displacement encoding, apply_to, addition, subtraction, commutativity, round-trips, error detection.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">test_cortical_column.py</span>
+      <span class="file-desc">✓ 27 tests — Full column integration: instantiation, encoding, anomaly score, sequence learning, location conditioning, path integration, reset behavior, higher-order memory orders 2–6 (all 0.000 anomaly).</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">test_addition_9a.py</span>
+      <span class="file-desc">✓ DONE (9a) — Reference frame test with external displacement injection. Stride-1 walk trained in isolation achieves 0.000 anomaly at every step. Correct target has 0.000 anomaly, wrong feature 1.000. Subtraction (negative stride) works identically. KEY FINDING: The column must train each stride in isolation — multiple strides competing for shared burst-winner cell slots converge only with O(1000+) epochs per stride. This is a TM training dynamics constraint, not an architectural flaw. The fix is addressed in Phase 10.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">test_addition_9b.py</span>
+      <span class="file-desc">✓ DONE (9b, expected failures) — Learned addition test without displacement injection. RESULT: The column partially learns addition via rote memorization — unique-result pairs (3+5=8, 2+7=9) are memorized correctly with 0.000 anomaly. Ambiguous-result pairs (1+9=10 and 5+5=10 share the same result) fail with ~1.000 anomaly, as expected. This is the correct failure mode — without the reference frame being updated by a learned L5b displacement, the column cannot distinguish paths that share an output. Defines the Phase 10 milestone.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">displacement_layer_v2.py</span>
+      <span class="file-desc">NEXT — Phase 10 component: L5b learned displacement cells. See Phase 10 design section.</span>
+    </div>
+    <div class="file-entry">
+      <span class="file-name">test_addition_10.py</span>
+      <span class="file-desc">NEXT — Phase 10 test: learned addition with L5b displacement output. See Phase 10 design section.</span>
+    </div>
+  </section>
+
+  <!-- 4. PHASE 10 DESIGN ──────────────────────────────────────────────── -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">04</span>
+      <h2>Phase 10 — Learned L5b and Reference Frame Fix</h2>
+      <span class="section-tag tag-plan">Next</span>
+    </div>
+
+    <p>Phase 10 has two coupled components that must be implemented together because they share a root cause: the location signal is currently too weak to independently activate segments.</p>
+
+    <p class="subsection">Component A — Fix: Location-Driven Predictions (No More Reset Burst)</p>
+
+    <div class="callout">Root problem: After reset, <code>prev_active</code> is all zeros, so cell synapses contribute nothing to segment activity. Location synapses are additive and rarely reach threshold alone. The column always bursts at step 0 of any new context, even for positions it has been to thousands of times.</div>
+
+    <p>This is architecturally wrong. In a biological column, the location signal arrives on basal/distal dendrites and <strong>independently</strong> puts cells in a depolarized "ready to fire" state. When sensory input then arrives on proximal dendrites, the pre-primed cells fire selectively without any sequential context being required. The reference frame must be <em>position-addressable</em>, not walk-dependent.</p>
+
+    <p>The correct behavior: when the grid layer is at position p, the cells associated with feature(p) at that position should become predictive from the location signal alone, and when feature(p) arrives they fire without bursting — even after a reset.</p>
+
+    <p>This also resolves the multi-stride training problem from Phase 9a. If location alone can make the correct cells predictive, there is no burst-winner competition between strides at shared positions. Training one stride no longer destabilizes another.</p>
+
+    <p><strong>Implementation:</strong> Add a <code>location_activation_threshold</code> parameter to TemporalMemory (separate from <code>segment_activation_threshold</code>). A segment becomes predictive if either:</p>
+    <ul>
+      <li>Combined (cell + location) synapses &ge; <code>segment_activation_threshold</code> (existing behavior), OR</li>
+      <li>Location synapses alone &ge; <code>location_activation_threshold</code> (new — location-only activation)</li>
+    </ul>
+    <p>This is backward-compatible — setting <code>location_activation_threshold</code> above <code>max_loc_synapses_per_seg</code> restores the old additive-only behavior. Growing enough location synapses per segment (12–16) and setting threshold = 8–10 should let mature segments fire from location alone.</p>
+
+    <p><strong>Biological grounding:</strong> This maps directly onto the known distinction between proximal (driving) and basal/distal (modulatory) dendritic input. Distal dendritic input can independently depolarize a pyramidal cell's apical tuft, lowering the threshold for proximal input to cause firing. In HTM terms, the location SDR on basal dendrites acts as a dendritic spike threshold, not just an additive vote.</p>
+
+    <p class="subsection">Component B — Learned L5b Displacement Cells</p>
+
+    <div class="callout">The problem 9b demonstrates: without a learned L5 displacement output, the column cannot learn that "+" means "treat the next number as a displacement." It can only rote-memorize specific (a, b) → result pairs, and fails on any pair where multiple inputs share an output.</div>
+
+    <p><strong>Architecture (from Hawkins 2019 + pre-compaction design):</strong></p>
+    <ul>
+      <li><strong>L3 → L5a (conjunctive readout):</strong> L5a (IT neurons) receives from L3 (confirmed) and from L4. L5a acts as the conjunctive integrator of operator context (from L3: "we are after +") and current feature magnitude (from L4: "the number is 5"). L5a is where the learned displacement computation lives, not L5b.</li>
+      <li><strong>L5a → L5b (local drive):</strong> L5a drives L5b (ET displacement cells) locally. L5b produces the actual displacement output to L6a and subcortical motor targets. L3 does NOT directly drive L5b — this is confirmed by Hawkins 2019.</li>
+      <li><strong>L5b → L6a (path integration):</strong> L5b fires displacement d, shifting each L6a module's phase by d mod λᵢ — the same <code>grid_layer.integrate(d)</code> call already implemented.</li>
+    </ul>
+
+    <p><strong>The learned mapping:</strong> L5a learns a weight matrix W of shape (total_L3_cells + num_minicolumns, 1) mapping (L3 active cells ∥ L4 active minicolumns) → displacement scalar. This is a conjunctive readout: the same L4 input (number 5) produces zero displacement in neutral context and displacement +5 in "after +" context, because L3 context changes which cells contribute to the dot product.</p>
+
+    <p><strong>Learning rule (Hebbian, prediction-error-driven):</strong></p>
+    <ol>
+      <li>At each timestep, L5a outputs displacement d̂ = W · (L3_cells ∥ L4_cols).</li>
+      <li>d̂ is applied to L6a. The column then observes the next sensory input.</li>
+      <li>If the prediction was correct (anomaly = 0 at the next step), reinforce: strengthen synapses from currently-active L3 cells and L4 minicolumns toward d̂.</li>
+      <li>If prediction was wrong (anomaly > 0), weaken those synapses.</li>
+      <li>The anomaly score at the RESULT step (after "=") is the primary teaching signal.</li>
+    </ol>
+
+    <p>This is Option B from the Phase 9b test output. It avoids backpropagation. It is biologically plausible — the anomaly signal corresponds to prediction error, which is already computed by the TM and propagated as bursting. No external supervision is needed.</p>
+
+    <p><strong>Implementation plan:</strong></p>
+    <ul>
+      <li>New file: <code>l5a_readout.py</code> — L5aReadout class with weight matrix W, <code>compute(l3_cells, l4_cols)</code> → displacement scalar, <code>learn(displacement, anomaly_score)</code> for Hebbian update.</li>
+      <li>L5b is already implemented as DisplacementLayer. L5a feeds into it via <code>displ.apply_displacement_to(d, grid_layer)</code>.</li>
+      <li>CorticalColumn updated: <code>compute()</code> accepts an optional L5aReadout; if provided, it runs the readout after L3 TM and before applying displacement to L6a.</li>
+      <li>Training sequences: <code>[a, +, b, =, a+b]</code> — no external displacement injection. L5a must learn to output b when L3 context = "after +" and L4 = feature(b).</li>
+    </ul>
+
+    <p class="subsection">Test Plan (test_addition_10.py)</p>
+    <ul>
+      <li><strong>Test A — Reset no longer bursts at known positions:</strong> Train the column on stride-1 walk. Reset and jump directly to position 5 (set_position). Observe feature(5). Anomaly should be near 0.0. This validates Component A.</li>
+      <li><strong>Test B — Multi-stride no longer requires isolated training:</strong> Train stride-1 and stride-2 simultaneously. Both should converge in &le;500 epochs. This validates that Component A resolves the training dynamics problem from Phase 9a.</li>
+      <li><strong>Test C — Unique-result addition with learned L5a:</strong> Train on [a, +, b, =, a+b] sequences without displacement injection. Measure anomaly at result step for unique-result pairs. Expected to pass (previously passed even without L5b via rote memorization, so this is a sanity check).</li>
+      <li><strong>Test D — Ambiguous-result addition with learned L5a:</strong> Test pairs where multiple (a,b) share the same result (1+9=10 and 5+5=10). This is the critical test. With L5a providing the correct displacement, the reference frame should be at position a+b at the result step, so feature(a+b) is predicted correctly via the reference frame rather than via rote sequence memory. Expected to PASS for the first time.</li>
+      <li><strong>Test E — Generalization:</strong> Test pairs not seen during training. With reference frame generalization, unseen (a,b) pairs should work as long as positions a and a+b were visited.</li>
+    </ul>
+
+    <p class="subsection">Open Questions for Phase 10</p>
+    <ul class="open-questions">
+      <li>What learning rate and decay schedule works best for the L5a weight matrix given the sparse SDR inputs?</li>
+      <li>Should L5a output a continuous scalar displacement or a quantized/modular one? Continuous is simpler but the displacement layer operates on scalar values anyway, so this may not matter.</li>
+      <li>How does L5a know to output 0 (no displacement) when the context is neutral — i.e. when L3 is NOT in "after +" state? The weight matrix should learn near-zero weights from neutral-context L3 cells, but this needs to be verified.</li>
+      <li>The teaching signal (anomaly at the result step) is delayed by one step from when L5a fires. How does the system associate the error with the L5a weights from the prior step? This requires storing the prior (L3, L4) state for credit assignment.</li>
+    </ul>
+  </section>
+
+  <!-- 5. TOKEN SEMANTICS -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">05</span>
+      <h2>Token Semantics — Language Modeling Notes</h2>
+      <span class="section-tag tag-plan">Future</span>
+    </div>
+    <ul>
+      <li>For language modeling: a fixed token vocabulary, but instead of a tokenizer, a <strong>token encoder</strong> converts tokens into SDRs.</li>
+      <li>In transformers, embedding vectors cluster semantically similar tokens together in high-dimensional space, with similarity measured by cosine distance. SDRs can do the same — semantically similar tokens should have high bit overlap.</li>
+      <li>To achieve this, the SDR encoding for tokens must have a <strong>topology corresponding to semantic space</strong>. Semantically similar tokens should produce SDRs with high overlap.</li>
+      <li>We cannot know where every token belongs in semantic space a priori. This has to be <strong>learned</strong> — likely through the spatial pooler and/or a dedicated semantic learning mechanism.</li>
+      <li>The dimensionality of semantic space is NOT fixed at 3. It is potentially very high-dimensional. Grid cell modules must support this — they project onto an abstract space, not necessarily physical space.</li>
+    </ul>
+  </section>
+
+  <!-- 5. OPEN QUESTIONS -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">06</span>
+      <h2>Open Questions</h2>
+      <span class="section-tag tag-open">Unresolved</span>
+    </div>
+
+    <p class="subsection">Grid Cells &amp; Reference Frames</p>
+    <ul class="open-questions">
+      <li>How do grid cells decide how to project themselves onto a space? How do they select a metric and dimensionality? Is this configured per-region, or learned?</li>
+      <li>How does L6a's location prediction to L4 work mechanistically? Is it a gating signal, an additive modulatory input, or something else entirely?</li>
+    </ul>
+
+    <p class="subsection">Displacement Cells and Layer 5b</p>
+    <ul class="open-questions">
+      <li>L5b displacement cells are confirmed (Hawkins 2019) and their modular structure is now understood. The remaining question: what learning rule governs L5b's displacement output? Given operator context "after +" and current L4 input (the number 5), how does L5b learn to output displacement +5?</li>
+      <li>Does the Old Brain's goal/reward signal directly modulate L5b, biasing which displacements get reinforced?</li>
+    </ul>
+
+    <p class="subsection">Layer 6b</p>
+    <ul class="open-questions">
+      <li>What does L6b actually compute? It receives from L5a and projects to the same thalamic nucleus as L6a plus the next higher-order thalamic nucleus. Is it routing decisions for the hierarchical chain? Its function in adult cortex is genuinely unresolved in the neuroscience literature.</li>
+    </ul>
+
+    <p class="subsection">Layer 2 vs Layer 3</p>
+    <ul class="open-questions">
+      <li>L3 does the sequence learning and local voting. L2 integrates L3 output with L5a motor context and projects long-range. But what specifically is L2 computing — is it a consensus object representation with motor context baked in, or something else?</li>
+      <li>When L5a projects back up to L2, what does that motor context signal represent at the L2 level?</li>
+    </ul>
+
+    <p class="subsection">Inter-Column Communication</p>
+    <ul class="open-questions">
+      <li>L3 → neighboring columns' L3 for local voting. Which layers do L5a project to in receiving columns — L3, L5, both?</li>
+      <li>How does inter-column voting work computationally? Is it SDR union of object hypotheses with overlap determining consensus?</li>
+      <li>How does long-range L2 → other areas work? Which layers does it target in the receiving area?</li>
+    </ul>
+
+    <p class="subsection">Thalamus</p>
+    <ul class="open-questions">
+      <li>L6a → thalamus is modulatory (modifies how relay cells respond without driving them). L6b also projects to the next higher-order thalamus. How does this thalamic routing interact with the cortical hierarchy — is L6b the mechanism for "level skipping" that Hawkins describes?</li>
+      <li>The thalamus receives a copy of L5b's motor output and relays it to the next cortical area's L4. What transformation, if any, does the thalamus perform on this signal?</li>
+    </ul>
+
+    <p class="subsection">Biological Open Questions</p>
+    <ul class="open-questions">
+      <li>Some research indicates minicolumns build group-theoretic representations. What does this mean computationally? Could it inform how L6a grid cells tile their spaces?</li>
+    </ul>
+  </section>
+
+  <!-- 6. ADDITION/SUBTRACTION TEST PLAN -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">07</span>
+      <h2>Milestone Test — Addition &amp; Subtraction on the Number Line</h2>
+      <span class="section-tag tag-plan">Plan</span>
+    </div>
+
+    <div class="info-box">
+      <div class="box-label">Core Insight</div>
+      <p>Addition and subtraction are <strong>navigation on a 1D number line</strong>. "3 + 5 = 8" means: start at position 3, apply displacement +5, arrive at position 8. A cortical column with a 1D reference frame should be able to learn this as a sensorimotor pattern — no different from learning that moving your finger 2cm along a cup brings you from the handle to the rim.</p>
+    </div>
+
+    <ul>
+      <li><strong>Sensor:</strong> A number encoder. Encodes integers into SDRs using scalar encoding on a number line. The "sensory input" is the current number being observed.</li>
+      <li><strong>Reference frame:</strong> A 1D grid cell layer. Position on the number line. Displacement = the addend or subtrahend.</li>
+      <li><strong>Object model:</strong> The number line itself. Feature at location N = the SDR encoding of N. The column learns that every position on the number line has a feature (the number at that position), and that displacements move between positions.</li>
+      <li><strong>The task:</strong> Given input "3 + 5", the column receives the SDR for 3, applies displacement +5 to its reference frame, and predicts the feature at the new location. If it has learned the number line, it predicts the SDR for 8.</li>
+      <li><strong>Generalization test:</strong> Train on a subset of additions (e.g., all pairs where both operands are 0–10). Test on held-out pairs (e.g., operands 11–20). If the column has truly learned the number line as a reference frame — not memorized input-output pairs — it should generalize perfectly.</li>
+    </ul>
+  </section>
+
+  <footer>ManuallyCodedTBT // Architecture Plan v1 // 2026-04-24</footer>
+
+</div>
+</body>
+</html>

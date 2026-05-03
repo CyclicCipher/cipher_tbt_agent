@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TBT-HTM Notes</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,600;1,300&display=swap');
+
+  :root {
+    --bg: #0d0f12;
+    --surface: #13161b;
+    --border: #1e2229;
+    --accent: #4af0a0;
+    --accent2: #f0a04a;
+    --accent3: #4a9ef0;
+    --warn: #f04a4a;
+    --text: #c8cdd6;
+    --text-dim: #5a6070;
+    --text-bright: #edf0f5;
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.7;
+    padding: 48px 24px;
+  }
+
+  .container { max-width: 860px; margin: 0 auto; }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 32px;
+    margin-bottom: 48px;
+  }
+
+  .doc-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  h1 {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--text-bright);
+    letter-spacing: -0.02em;
+  }
+
+  .subtitle {
+    margin-top: 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+    font-style: italic;
+  }
+
+  /* Terminology box */
+  .terminology-box {
+    background: #0e1a14;
+    border: 1px solid var(--accent);
+    border-left: 3px solid var(--accent);
+    border-radius: 4px;
+    padding: 20px 24px;
+    margin-bottom: 48px;
+  }
+
+  .terminology-box .box-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .term-row {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 8px 16px;
+    margin-bottom: 8px;
+    align-items: start;
+  }
+
+  .term-name {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--accent2);
+    padding-top: 1px;
+  }
+
+  .term-def {
+    font-size: 13px;
+    color: var(--text);
+  }
+
+  /* Sections */
+  section {
+    margin-bottom: 48px;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section-num {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+  }
+
+  h2 {
+    font-family: var(--mono);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-bright);
+    letter-spacing: 0.03em;
+  }
+
+  .section-tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 2px;
+    margin-left: auto;
+  }
+
+  .tag-htm { background: #1a1230; color: var(--accent3); border: 1px solid #2a1f50; }
+  .tag-tbt { background: #0e1a14; color: var(--accent); border: 1px solid #1a3025; }
+  .tag-shared { background: #1a1508; color: var(--accent2); border: 1px solid #332a10; }
+  .tag-open { background: #1a0e0e; color: var(--warn); border: 1px solid #331818; }
+
+  ul { list-style: none; }
+
+  ul li {
+    position: relative;
+    padding-left: 20px;
+    margin-bottom: 10px;
+    font-size: 13.5px;
+    color: var(--text);
+  }
+
+  ul li::before {
+    content: '—';
+    position: absolute;
+    left: 0;
+    color: var(--text-dim);
+    font-family: var(--mono);
+  }
+
+  ul li strong {
+    color: var(--text-bright);
+    font-weight: 600;
+  }
+
+  ul li em {
+    color: var(--accent2);
+    font-style: normal;
+  }
+
+  /* Open questions */
+  .open-questions li::before { color: var(--warn); content: '?'; font-family: var(--mono); font-weight: 600; }
+
+  /* Subsection */
+  .subsection {
+    margin-top: 20px;
+    margin-bottom: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    color: var(--accent3);
+    text-transform: uppercase;
+  }
+
+  /* Callout */
+  .callout {
+    background: #10141a;
+    border-left: 2px solid var(--accent3);
+    padding: 12px 16px;
+    margin: 16px 0;
+    font-size: 13px;
+    color: var(--text);
+    font-style: italic;
+  }
+
+  footer {
+    margin-top: 64px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="doc-label">Research Notes // ManuallyCodedTBT</div>
+    <h1>TBT-HTM Notes</h1>
+    <p class="subtitle">Thousand Brains Theory &amp; Hierarchical Temporal Memory — sorted by topic</p>
+  </header>
+
+  <!-- TERMINOLOGY DISAMBIGUATION -->
+  <div class="terminology-box">
+    <div class="box-label">⚠ Terminology Disambiguation — Read First</div>
+    <div class="term-row">
+      <span class="term-name">Cortical column</span>
+      <span class="term-def">The large-scale biological unit: ~1mm diameter, 2.5mm deep, ~100,000 neurons, 6 layers, hundreds of minicolumns inside it. This is the unit that has a receptive field, votes with neighbors, and builds object models.</span>
+    </div>
+    <div class="term-row">
+      <span class="term-name">Minicolumn</span>
+      <span class="term-def">The canonical microcircuit inside a cortical column. There are hundreds of minicolumns per cortical column. In HTM spatial pooling, the output unit is a minicolumn — one bit in the spatial pooler's output SDR. A minicolumn has multiple cells; temporal memory operates at the cell level within minicolumns.</span>
+    </div>
+    <div class="term-row">
+      <span class="term-name">Cell</span>
+      <span class="term-def">The individual neuron inside a minicolumn. Temporal memory distinguishes cells within the same minicolumn to encode sequence context. Multiple cells per minicolumn = higher-order memory.</span>
+    </div>
+    <div class="term-row">
+      <span class="term-name">Layer</span>
+      <span class="term-def">One of the 6 horizontal strata inside a cortical column (L1–L6). Each layer contains thousands of pyramidal neurons. Layers are the computational stages of TBT.</span>
+    </div>
+  </div>
+
+  <!-- 1. NEOCORTEX OVERVIEW -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <h2>Neocortex — Structure &amp; General Properties</h2>
+      <span class="section-tag tag-shared">HTM + TBT</span>
+    </div>
+    <ul>
+      <li>The neocortex evolved in mammals over the past 100–200 million years. It is the wrinkly outer layer of the brain — wrinkled to maximize surface area. Reptiles and birds lack a neocortex.</li>
+      <li>The neocortex is a <strong>homogeneous sheet</strong>: every part shares the same repeating circuit and solves every problem — regardless of modality or domain — in the same way.</li>
+      <li>There are approximately <strong>150,000 cortical columns</strong> (~1mm diameter, ~2.5mm deep). Each cortical column contains ~100,000 neurons, ~500 million synapses (5,000 per neuron), dozens of cell types, and hundreds of minicolumns.</li>
+      <li>Total neocortex: ~15 billion neurons, ~75 trillion synapses.</li>
+      <li>The neocortex runs processing steps of approximately <strong>5ms each</strong>.</li>
+      <li>Only <strong>2% of neurons are active</strong> at any given time — sparse distributed activation.</li>
+      <li>The neocortex is divided into several dozen regions connected via nerve fibers through the white matter.</li>
+      <li>The <strong>reptilian brain</strong> handles metabolic function, emotions, drives, and reward. It sets goals; the neocortex plans and executes toward them.</li>
+      <li>The neocortex's primary function is to <strong>learn a model of the world</strong>, use it to plan goal-directed behavior, and execute those plans. Prediction is the primary training signal — you only learn when a prediction is wrong.</li>
+      <li>Two fundamental inputs to the neocortex: (1) a copy of outgoing motor commands, (2) a copy of incoming sensory data. Both are necessary so the neocortex can distinguish self-caused sensory change from externally-caused change.</li>
+    </ul>
+  </section>
+
+  <!-- 2. CORTICAL COLUMN STRUCTURE -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <h2>Cortical Column — 6-Layer Architecture</h2>
+      <span class="section-tag tag-tbt">TBT</span>
+    </div>
+    <ul>
+      <li>Every cortical column shares the same 6-layer laminar structure, regardless of where it is in the neocortex or what modality it processes.</li>
+      <li>Every cortical column has a <strong>motor output</strong>, not just sensory columns.</li>
+      <li>Each cortical column is assigned to exactly one <strong>receptive field</strong> — a specific patch of sensory data it and only it attends to.</li>
+    </ul>
+    <p class="subsection">Layer Roles</p>
+    <ul>
+      <li><strong>Layer 1:</strong> Auxiliary biological role. Contains apical dendrite tufts from deep-layer neurons and long-range axons. Serves as a wiring substrate for top-down feedback signals. May not require separate computational modeling.</li>
+      <li><strong>Layer 2 (upper L2/3):</strong> Receives input from L3 below it, and also receives input from L5a. This makes L2 an integration layer for both the processed sensory sequence (from L3) and the motor context (from L5a). Projects strongly to other cortical areas — L2 is the long-range corticocortical output layer.</li>
+      <li><strong>Layer 3 (lower L2/3):</strong> Receives feedforward input primarily from L4. Projects to all layers of the home column (including feedback to L4), to L5a, and to neighboring columns' L3. The lateral projections for inter-column voting originate here. Also the site of sequence learning via temporal memory — stores sequences of feature-location pairs that have been bound upstream in L4.</li>
+      <li><strong>Layer 4:</strong> <em>Sensory input and feature-location binding layer.</em> Thalamic relay cells deliver sensory data here. L4 also receives the location prediction from L6a — making L4 the site where "what" (sensory feature) and "where" (object-relative location) are first combined. L4 projects up to L3, carrying the bound feature-location representation. L4 also projects down to L6a (the connection between sensory input and the grid cell system).</li>
+      <li><strong>Layer 5a:</strong> <em>Intratelencephalic (IT) motor output.</em> IT neurons have small cell bodies in upper L5. Receive from L3 and L6b. Project to other cortical columns, other cortical areas, and the striatum — this is the corticocortical signal that broadcasts the column's current sequence state to the rest of the neocortex. Also provides input back up to L2 (upper L2/3). L5a is NOT the displacement layer.</li>
+      <li><strong>Layer 5b:</strong> <em>Extratelencephalic (ET) motor output — Displacement Cell Modules.</em> ET neurons have large "thick-tufted" cell bodies in lower L5. These are the displacement cells (Hawkins 2019). L5b has a <strong>modular structure that mirrors L6a</strong>: there is one displacement cell module for each grid cell module in L6a, with the same period structure. A single displacement cell module is ambiguous (it cannot uniquely represent a displacement, just as a single grid cell module cannot uniquely represent a position). Multiple displacement cell modules together uniquely represent a displacement — the same residue number system logic as L6a. Their axon splits: one branch goes to subcortical motor structures (the muscle command), the second branch goes to thalamic relay cells which become feedforward input to the next hierarchical cortical area. L5b makes bilateral connections with L6a grid cells — firing a displacement shifts each L6a module's phase by d mod λᵢ (path integration). Displacement cells serve two roles: (1) movement — updating the reference frame when the sensor moves, and (2) composition — representing the spatial relationship between two objects placed in each other's reference frames.</li>
+      <li><strong>Layer 6a:</strong> <em>Grid cells / reference frame.</em> Tracks where the sensor is in the object's allocentric reference frame. Projects a location prediction to L4 (how the column anticipates what sensory input to expect given current position). Also projects feedback to the thalamic nucleus that provides sensory input to the column — modulatory only, does not drive thalamic firing, modifies how relay cells respond to subcortical input.</li>
+      <li><strong>Layer 6b:</strong> Role not well understood. Projects to the same thalamic nucleus as L6a, and also forward to the next higher-order thalamic nucleus (routing to the next hierarchical level). Receives from L5a in the diagram. May have been a subplate remnant in evolutionary terms. Function in adult cortex actively under investigation.</li>
+    </ul>
+    <p class="subsection">The Binding Problem — Where Feature Meets Location</p>
+    <div class="callout">Layer 2/3 does not perform the initial feature-location binding. That binding happens at Layer 4, which receives both sensory input (from the thalamus/encoder) and the location prediction from L6a. L4's output to L3 already carries the combined feature-location representation. L3 then learns sequences of these bound pairs via temporal memory.</div>
+    <p class="subsection">Dendritic Input Types (Per Pyramidal Neuron)</p>
+    <ul>
+      <li><strong>Proximal dendrites:</strong> Feedforward input from the layer below or from sensory input. Causes action potentials directly.</li>
+      <li><strong>Basal/distal dendrites:</strong> Lateral context from the same layer. Modulatory — affects how the neuron responds to proximal input. Provides temporal context (which cells were active previously) and location context (from L6a).</li>
+      <li><strong>Apical dendrites:</strong> Feedback from higher layers. Also modulatory. Carries top-down predictions.</li>
+    </ul>
+    <div class="callout">A pyramidal neuron integrates three signal streams: feedforward (proximal), same-layer context (basal), and top-down feedback (apical). This is what allows a cell to be in a "predictive state" before it fires.</div>
+    <p class="subsection">Inter-Column Connections</p>
+    <ul>
+      <li><strong>L3 → neighboring columns' L3:</strong> Lateral voting projections within the same cortical area. Columns whose receptive fields are spatially adjacent share their object representations here.</li>
+      <li><strong>L2 → other cortical areas:</strong> Long-range corticocortical projections. L2 carries the integrated sensorimotor output of the column to distant regions.</li>
+      <li><strong>L5a → other cortical columns and striatum:</strong> Motor context signal shared across columns and into the basal ganglia.</li>
+      <li><strong>L5b → thalamus → next cortical area:</strong> The L5b motor output copy reaches the next hierarchical cortical area via a thalamic relay, forming the hierarchical processing chain.</li>
+    </ul>
+    <p class="subsection">Open Questions</p>
+    <ul class="open-questions">
+      <li>What exactly is L6b doing? Its role in adult cortex is genuinely unclear. Does it receive from L5a as the diagram suggests, and if so what does it compute?</li>
+      <li>How does L6a's location prediction to L4 work mechanistically? Is it a gating signal, an additive modulatory input, or something else?</li>
+      <li>L5b is confirmed as the displacement cell layer (Hawkins 2019). The remaining question: how does L5b decide which displacement to output? Answer: via L5a, which is the conjunctive readout of (L3 context, L4 feature) → displacement. L5a drives L5b locally. See Phase 10 in Architecture Plan.</li>
+      <li>Some research indicates human minicolumns build group-theoretic representations. What does this mean computationally, and how should it inform the architecture?</li>
+    </ul>
+
+    <p class="subsection">Key Finding — Reset Burst Problem</p>
+    <div class="callout">A software reset (<code>col.reset()</code>) zeros all TM cell state, causing the column to burst at position 0 of every new context — even for well-trained positions. This has no biological analog. In the real neocortex, neurons don't spontaneously lose their dendritic synapse patterns between trials. The correct behavior is for the location signal alone (from L6a) to make the right cells predictive at any position, without sequential context being required.</div>
+    <ul>
+      <li><strong>Root cause:</strong> Location synapses in our TM are <em>additive</em> to cell synapses. After reset, <code>prev_active</code> is all zeros, so cell synapses contribute nothing and location synapses rarely reach threshold alone. Every first step bursts.</li>
+      <li><strong>Correct biological behavior:</strong> The location signal arrives on basal/distal dendrites and independently depolarizes cells into a "ready to fire" state (dendritic spike). When proximal sensory input then arrives, pre-primed cells fire selectively without needing sequential context. The reference frame must be <em>position-addressable</em>, not walk-dependent.</li>
+      <li><strong>Fix (Phase 10):</strong> Add a <code>location_activation_threshold</code> parameter to TemporalMemory. A segment becomes predictive if location synapses alone &ge; this threshold, regardless of cell synapse activity. This also resolves the multi-stride training competition problem from Phase 9a — if location alone primes cells, strides don't compete for burst-winner slots.</li>
+    </ul>
+
+    <p class="subsection">Key Finding — Phase 9b Results</p>
+    <ul>
+      <li>Without a learned L5 displacement output, the column can only rote-memorize specific (a,b)→result pairs. Unique-result pairs (3+5=8, 2+7=9) memorize correctly (0.000 anomaly). Ambiguous-result pairs (1+9=10 and 5+5=10 share a result) fail completely.</li>
+      <li>The failure mode is architecturally revealing: without the reference frame being moved by L5b, both "1+9=10" and "5+5=10" sequences end at the same grid position (position 0, never moved), so the column has no basis to distinguish them. The reference frame IS what enables compositional addition.</li>
+    </ul>
+  </section>
+
+  <!-- 3. SDRs -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">03</span>
+      <h2>Sparse Distributed Representations (SDRs)</h2>
+      <span class="section-tag tag-shared">HTM + TBT</span>
+    </div>
+    <ul>
+      <li>The state of any region of the neocortex can be represented as a bit array — 1 if a neuron is active, 0 if not. Only ~2% are active: this is a <strong>Sparse Distributed Representation</strong>.</li>
+      <li>SDRs have two key parameters: <em>length n</em> (total bits) and <em>population w</em> (number of active bits). Capacity = n! / (w!(n−w)!). Example: n=256, w=4 → ~8.8 billion unique states.</li>
+      <li>SDRs are extremely <strong>noise-resistant</strong>: overlap score (AND) can match two SDRs even with multiple flipped bits. Threshold θ is a hyperparameter for minimum overlap to declare a match.</li>
+      <li>False positive rates at typical SDR sizes and noise tolerances are negligibly small — effectively zero.</li>
+      <li>Smallest HTM SDRs: length 2048, population 40. Largest used: 65536.</li>
+      <li><strong>Union (OR):</strong> Combines a set of SDRs into one. Used for fast approximate membership testing. Saturates as more SDRs are added — use unions instead of O(n²) pairwise comparison.</li>
+      <li><strong>Overlap (AND):</strong> Counts shared active bits between two SDRs. This is the semantic similarity metric.</li>
+      <li>SDRs can be <strong>concatenated</strong> — sub-encoders produce independent SDRs which are joined to form a combined representation (e.g. a datetime encoder concatenating day-of-week, time-of-day, and season sub-encoders).</li>
+      <li>Axon bundles can merge and split without data loss because of SDR noise resistance and semantic properties.</li>
+    </ul>
+    <p class="subsection">Encoding Rules</p>
+    <ul>
+      <li>Semantically similar inputs must have high bit overlap. The same input must always produce the same output. Output length and sparsity must be consistent.</li>
+      <li><strong>Scalar encoding:</strong> Encodes a continuous value as a consecutive bucket of on-bits within a range [min, max]. Adjacent scalar values share overlapping bits.</li>
+      <li><strong>Periodic encoding:</strong> Like scalar, but wraps — max and min are semantically similar. Good for cyclic data (time of day, compass heading).</li>
+      <li><strong>Random Distributed Scalar Encoding (RDSE):</strong> Scatters the active bits randomly but maintains overlap between adjacent values. Requires state, which is inconvenient for data-oriented design.</li>
+      <li>Multi-quantity encoders: Correlated quantities (e.g. systolic and diastolic blood pressure) should be encoded together or with explicit sub-encoders for their relationships, not independently.</li>
+    </ul>
+  </section>
+
+  <!-- 4. SPATIAL POOLING -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">04</span>
+      <h2>Spatial Pooling</h2>
+      <span class="section-tag tag-htm">HTM</span>
+    </div>
+
+    <p class="subsection">Column vs. Minicolumn Clarification</p>
+    <ul>
+      <li>The spatial pooler operates at the <strong>minicolumn level</strong>. Its output is a boolean vector over minicolumns — which minicolumns won inhibition. It is entirely blind to individual cells within minicolumns.</li>
+      <li>Temporal memory then takes over and determines <em>which cell within each active minicolumn</em> fires based on sequence context. TM's output is a boolean vector over cells — a much longer vector of shape <code>num_minicolumns × cells_per_minicolumn</code>.</li>
+      <li>BAMI uses "column" and "minicolumn" interchangeably, which is a known source of confusion. The peer-reviewed paper (Cui et al. 2017) consistently uses "mini-column" for the SP output unit. Our code uses <code>num_minicolumns</code> throughout, which is correct.</li>
+    </ul>
+
+    <p class="subsection">Algorithm</p>
+    <ul>
+      <li>Takes an input SDR of arbitrary size and translates it into a fixed-size output SDR of active <strong>minicolumns</strong>, maintaining fixed sparsity and preserving semantic overlap from the input.</li>
+      <li>Each minicolumn has a <em>potential pool</em> of input bits it might connect to, and a <em>permanence value</em> per potential connection. If permanence ≥ threshold, the synapse is considered connected.</li>
+      <li>Minicolumn activation: compute raw overlap score (connected synapses hitting active input bits), multiply by boost factor, then top-k inhibition. Only minicolumns whose <strong>raw</strong> overlap exceeds <em>stimulus_threshold</em> are eligible — this prevents noise columns from winning via boost alone.</li>
+      <li><strong>Phase order:</strong> Boosting (multiply overlaps by boost factors) → Inhibition (top-k selection) → Hebbian learning (active columns only) → Duty cycle update → Boost factor update → Permanence boost (if needed).</li>
+      <li><strong>Hebbian learning:</strong> For active minicolumns only — increase permanence for connections to active input bits, decrease for inactive. Non-winning columns are not modified at all.</li>
+    </ul>
+
+    <p class="subsection">Two Boosting Mechanisms</p>
+    <ul>
+      <li><strong>Boost factor (mechanism 1):</strong> Multiplies each minicolumn's overlap score before inhibition. Computed as <code>exp(β × (mean_neighbor_duty_cycle − own_duty_cycle))</code>. The reference is the <em>mean active duty cycle of neighboring columns</em> (global mean under global inhibition) — not a fixed target rate. This is an adaptive target that evolves with learning. Columns below the mean are boosted above 1; columns above are suppressed below 1.</li>
+      <li><strong>Permanence boost (mechanism 2):</strong> If a minicolumn's <em>overlap duty cycle</em> (how often its raw overlap exceeds stimulus_threshold) falls below <code>min_pct_overlap_duty_cycle × max(neighbors' overlap duty cycles)</code>, all its potential permanences are increased by <code>0.1 × permanence_threshold</code>. This rescues columns that have lost all useful connections and can no longer even reach stimulus_threshold — they would never recover via Hebbian learning alone because they never win.</li>
+      <li>Without both mechanisms, ~30% of minicolumns end up never used. With both, nearly every minicolumn participates at its target activation rate. The peer-reviewed paper empirically confirms that learning without boosting performs no better than a random untrained SP.</li>
+    </ul>
+
+    <p class="subsection">Topology</p>
+    <ul>
+      <li><strong>Global inhibition:</strong> Every minicolumn competes with every other. Fastest and most common in practice.</li>
+      <li><strong>Local inhibition with topology:</strong> Each minicolumn has a receptive field — a spatial window into the input space. Minicolumns only connect within their receptive field. Receptive fields overlap. Analogous to convolutions in CNNs. Important for vision and other sensory data; the learned representation can physically resemble the input space structure. Effects become more useful as input size increases.</li>
+    </ul>
+
+    <p class="subsection">Parameter Guidance — Source Variation</p>
+    <ul>
+      <li>Parameter recommendations differ between Numenta sources. Both are authoritative; BAMI (v0.56, corrected Jan 2024) is more recent than the peer-reviewed paper (Cui et al. 2017). Neither set should be treated as fixed — empirical tuning is required for each domain.</li>
+      <li><strong>num_minicolumns:</strong> BAMI minimum 2048. Target ~2% sparsity: active_per_step ≈ 0.02 × num_minicolumns.</li>
+      <li><strong>permanence_threshold:</strong> BAMI recommends 0.2; paper uses 0.5. System is not sensitive to this parameter per BAMI.</li>
+      <li><strong>permanence_inc / permanence_dec:</strong> BAMI: 0.03 / 0.015. Paper: 0.1 / 0.02. The ratio of dec to inc affects how aggressively the SP prunes connections — a higher dec/inc ratio produces sparser, more selective receptive fields.</li>
+      <li><strong>boost_strength (β):</strong> BAMI does not specify a number; paper uses β=100. Our implementation defaults to 3.0, which is likely too mild — columns are barely differentiated. A value in the range 10–100 is more likely to produce meaningful homeostatic pressure. Treat as a tuning parameter.</li>
+      <li><strong>Permanence initialization:</strong> Our implementation uses a normal distribution centered on the threshold (requires scipy). The paper uses uniform U(0,1). Both produce ~50% initial connectivity at threshold=0.5. The uniform approach is simpler and eliminates the scipy dependency.</li>
+    </ul>
+  </section>
+
+  <!-- 5. TEMPORAL MEMORY -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">05</span>
+      <h2>Temporal Memory</h2>
+      <span class="section-tag tag-htm">HTM</span>
+    </div>
+    <ul>
+      <li>Operates on the output of spatial pooling (the active minicolumns). Learns sequences of active minicolumn patterns and predicts the next pattern using temporal context.</li>
+      <li>Temporal memory distinguishes individual <strong>cells within minicolumns</strong>. Multiple cells per minicolumn = higher-order memory, allowing the same minicolumn to mean different things in different sequential contexts.</li>
+      <li>A single cell per minicolumn would produce first-order memory only — a chain that breaks on unexpected input with no ability to branch.</li>
+    </ul>
+    <p class="subsection">Two-Phase Algorithm Per Timestep</p>
+    <ul>
+      <li><strong>Phase 1 — Activate:</strong> For each active minicolumn, determine which cells fire. If any cell in the minicolumn was in a predictive state, only those cells fire. If none were predictive, the entire minicolumn <strong>bursts</strong> (all cells activate).</li>
+      <li><strong>Phase 2 — Predict:</strong> After activation, select which cells across all minicolumns enter a predictive state for the next timestep. A cell becomes predictive if any of its basal dendritic segments has enough active presynaptic connections (above activation threshold) to the currently active cells.</li>
+    </ul>
+    <p class="subsection">Bursting and Winner Cell Selection</p>
+    <ul>
+      <li>Bursting means the model has not seen this input in this context before — no cell predicted it.</li>
+      <li>A <strong>winner cell</strong> is selected from the bursting column to represent this new sequence step in the future.</li>
+      <li>Selection: prefer a cell with a dendritic segment that <em>almost</em> predicted the last input (permanence values below threshold but matching pattern). If no such cell exists, pick the cell with the fewest segments.</li>
+      <li>After winner cell selection: grow or strengthen distal synapses from the winner cell to the previously active cells (the prior context).</li>
+      <li>Winner cells of non-bursting columns = their active cells (already predicted correctly).</li>
+      <li>Include a synapse <strong>decay hyperparameter</strong> for forgetting over time.</li>
+    </ul>
+  </section>
+
+  <!-- 6. REFERENCE FRAMES AND GRID CELLS -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">06</span>
+      <h2>Reference Frames, Grid Cells &amp; Place Cells</h2>
+      <span class="section-tag tag-tbt">TBT</span>
+    </div>
+    <ul>
+      <li><strong>Place cells</strong> (hippocampus): Represent where the animal is in an environment based on sensory input. They remap when sensory details of the environment change.</li>
+      <li><strong>Grid cells</strong> (entorhinal cortex + neocortex): Represent location in a reference frame using a hexagonal tiling pattern. They do NOT remap. Fire when the sensor or organism is at specific locations in the tiled space.</li>
+      <li>The hexagonal tiling arises because circles packed as densely as possible produce hexagonal center patterns.</li>
+      <li>A single grid cell module tiles its space — the location is ambiguous across tiles. To get a unique position, multiple grid cell modules with <strong>different scales and orientations</strong> are combined. Where their firing fields simultaneously agree = the disambiguated location. More modules = more unique representable locations.</li>
+      <li>A unique location SDR is formed by <strong>concatenating the SDRs of each grid cell module</strong>.</li>
+      <li>Grid cells in the <strong>entorhinal cortex</strong>: map locations in the organism's physical environment (room-scale reference frames). Features of a room are objects within that reference frame.</li>
+      <li>Grid cells in the <strong>neocortex</strong>: map locations in an object's reference frame. Each cortical column's Layer 6 tracks where its sensor patch is located relative to the object it's currently touching/sensing.</li>
+      <li>Experimental evidence has confirmed grid cells exist in the neocortex.</li>
+      <li>Grid cells can represent abstract spaces — not just physical space. Human metaphors often map non-spatial concepts into spatial terms, consistent with this.</li>
+    </ul>
+    <p class="subsection">Object Reference Frames</p>
+    <ul>
+      <li>When learning a new object, an origin point is chosen within the grid cell layer's reference frame. Movement through the object space updates the grid cell activations, allowing features to be associated with locations.</li>
+      <li>Because the location space is so vast, randomly selected origins for different objects are effectively non-overlapping — one reference frame can store many object models without collision.</li>
+      <li>Object representations are <strong>allocentric</strong> — defined relative to the object itself, not the sensor.</li>
+    </ul>
+    <p class="subsection">Displacement Cells</p>
+    <ul>
+      <li><strong>Location: Layer 5b</strong> (thick-tufted ET neurons). Confirmed by Hawkins 2019. Previously listed as unknown.</li>
+      <li><strong>L5b has a modular structure mirroring L6a.</strong> Each L6a grid cell module is paired with one L5b displacement cell module using the same period. A single displacement cell module is ambiguous — it cannot uniquely represent a displacement, just as a single grid cell module cannot uniquely represent a position. Multiple displacement cell modules together uniquely encode a displacement via the same residue number system logic. The displacement SDR is the concatenation of all modules' outputs.</li>
+      <li>When L5b fires encoding displacement d, it shifts each L6a module's phase by (d mod λᵢ) via modular addition — path integration. This is the same <code>integrate(d)</code> call in our <code>grid_cells.py</code>.</li>
+      <li>Displacement cells serve <strong>two alternating roles</strong>: (1) <strong>movement</strong> — updating the reference frame when the sensor physically moves, and (2) <strong>composition</strong> — representing the spatial relationship between two separate object reference frames (e.g., where a logo is positioned on a cup). The same L5b population alternates between these functions.</li>
+      <li>Displacements allow learning new objects (traversing features during exploration) and recognizing learned objects (predicting the next feature at the next location).</li>
+      <li>Displacements between <strong>objects</strong> are larger than displacements between features of a single object. Large displacements move between object reference frames, enabling object composition.</li>
+      <li>A sequence of displacements + temporal memory = representation of an object's <strong>behavior over time</strong>.</li>
+      <li><strong>Source of displacement for addition:</strong> The displacement does not have to originate in the same column. A column representing the "+" operator could fire its own L5b displacement cells and send that signal to another column's L6a. This means injecting displacement externally to L6a for the addition test is architecturally valid — it is equivalent to the displacement being provided by a separate "operator" column.</li>
+    </ul>
+  </section>
+
+  <!-- 7. OBJECT LEARNING AND RECOGNITION -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">07</span>
+      <h2>Object Learning &amp; Recognition</h2>
+      <span class="section-tag tag-tbt">TBT</span>
+    </div>
+    <ul>
+      <li>A cortical column learns a complete model of an object by integrating <strong>features + locations</strong> over time as the sensor moves across the object.</li>
+      <li>Each cortical column builds its own independent model of every object it has experienced. Multiple columns build separate but consistent models of the same object.</li>
+      <li>A column for a sensor tracks the location (in its reference frame) of its associated sensory patch and processes the feedforward sensory input from that patch simultaneously.</li>
+      <li>Layer 4 receives the raw sensory feature (what). Layer 6 tracks the current location in the reference frame (where). Layer 2/3 stores the bound feature-location pair and is the site of inter-column voting.</li>
+    </ul>
+    <p class="subsection">Inter-Column Voting (Consensus)</p>
+    <ul>
+      <li>Voting occurs at <strong>Layer 2/3</strong>. Columns whose receptive fields are spatially near each other (neighboring skin patches, neighboring retinal spots) are also physically close in the neocortex and vote with each other as neighbors.</li>
+      <li>If multiple columns are touching the same object (e.g. three fingers on a cup), each has a different position on the object and a different sensory experience, but all converge on a consensus object identity in one sensorimotor step.</li>
+      <li>A column's Layer 2/3 representation can be split and projected laterally to neighboring columns, and receives their projections, as contextual basal/distal input.</li>
+      <li>We are only consciously aware of the consensus output.</li>
+    </ul>
+  </section>
+
+  <!-- 8. HIERARCHY AND HETERARCHY -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">08</span>
+      <h2>Hierarchy vs. Heterarchy</h2>
+      <span class="section-tag tag-tbt">TBT</span>
+    </div>
+    <ul>
+      <li>The classical AI view: strict feedforward hierarchy extracts features at increasing scales (edges → shapes → objects). Deep Learning depends on this model.</li>
+      <li>The neocortex does NOT use a strict hierarchy. More than 40% of all possible inter-region connections exist. It is better described as a <strong>heterarchy</strong> — messily entangled, wide, with bidirectional and lateral connections at all levels.</li>
+      <li>Where hierarchy exists in the neocortex, <strong>higher levels handle more abstract and more stable predictions</strong> (not larger feature scales). Lower levels: edges. Higher levels: object identity, meaning, behavior.</li>
+      <li>Hierarchy in the neocortex extracts <strong>models at different scales</strong>, not features at different scales.</li>
+      <li>Any level of the hierarchy can inform any other level. A local clue from a low-level column can propagate laterally or up/down freely.</li>
+      <li>Primary sensory regions have <strong>multimodal responses</strong> — influenced by other sensory modalities, confirming non-strict hierarchy.</li>
+      <li>Example: A high-level column sees the ground but not the horse. A mid-level column sees the horse but not details. A low-level column sees hair but not the animal. Combined, the system identifies the horse, its hair, and its position on the ground simultaneously.</li>
+    </ul>
+  </section>
+
+  <!-- 9. SENSORIMOTOR INTEGRATION -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">09</span>
+      <h2>Sensorimotor Integration</h2>
+      <span class="section-tag tag-tbt">TBT</span>
+    </div>
+    <ul>
+      <li>Every cortical column is engaged in its own independent sensorimotor loop. The difference between columns is only what their sensor is.</li>
+      <li>A column receiving retinal input also processes how the eye should move. A column receiving auditory input also directs head movement to orient the ears. Motor output is universal across all columns.</li>
+      <li>The reason the neocortex receives a copy of motor commands: every eye saccade produces an entirely new retinal image. Without knowing what motor command caused the change, the neocortex cannot distinguish self-caused sensory change from external change.</li>
+      <li>Each cortical column learns a <strong>predictive model of its receptive field</strong>: given current sensory input and the reference frame location of the sensor, predict what the sensor will observe next.</li>
+      <li>A visual sensory patch is not a section of the retina — it is projected across 3D space from the sensor origin. Depth perception is required for this in 3D environments.</li>
+    </ul>
+  </section>
+
+  <!-- 10. OPEN QUESTIONS -->
+  <section>
+    <div class="section-header">
+      <span class="section-num">10</span>
+      <h2>Open Questions &amp; Future Research</h2>
+      <span class="section-tag tag-open">Unresolved</span>
+    </div>
+    <ul class="open-questions">
+      <li>What is the <strong>role of Layer 1</strong>? Is it truly computationally irrelevant, or does it play an indispensable role?</li>
+      <li>What is the <strong>exact role of displacement cells</strong> — they are in L5b, but how does L5b decide which displacement to output given the current context? What learning rule governs this?</li>
+      <li>Some research indicates human minicolumns build <strong>group-theoretic representations</strong>. What does that mean computationally, and how should it inform the architecture?</li>
+      <li>What are the precise <strong>hyperparameters needed for spatial pooling</strong>? (boost factor calculation algorithm, connection threshold, active duty cycle formula, inhibition radius.)</li>
+      <li>Is there a faster learning method for spatial pooling than iterative Hebbian carving? Could image rescaling techniques offer an analog?</li>
+      <li>Where exactly does the neocortical grid cell reference frame originate? Is it truly that each cortical column's Layer 6 grid cells fire when their specific sensory patch is at the corresponding location on the object?</li>
+    </ul>
+  </section>
+
+  <footer>ManuallyCodedTBT // predictive-coding-agent // last updated 2026-04-22</footer>
+
+</div>
+</body>
+</html>
