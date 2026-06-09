@@ -66,9 +66,10 @@ class TConfig:
     gate_warmup: int = 100
     faithful_subsample: int = 32  # sub-batch size for the faithful variance estimate (0 = full)
     # muon / aurora (matrix optimizer). adam group (embeddings/head/norms) uses `lr`.
-    muon_lr: float = 0.02
-    muon_wd: float = 0.0
-    ns_steps: int = 5
+    # defaults match the official repo (tilde-research/aurora-release).
+    muon_lr: float = 0.05
+    muon_wd: float = 0.025
+    ns_steps: int = 12
     aurora_K: int = 2
     aurora_beta: float = 0.5
     eval_every: int = 200
@@ -118,8 +119,8 @@ def build_optimizer(arm: str, model, cfg: TConfig):
     if arm in ("muon", "aurora"):
         matrix, other = split_matrix_params(model)
         groups = [
-            dict(params=matrix, use_muon=True, variant=arm, lr=cfg.muon_lr, momentum=0.9,
-                 weight_decay=cfg.muon_wd, ns_steps=cfg.ns_steps,
+            dict(params=matrix, use_muon=True, variant=arm, lr=cfg.muon_lr, momentum=0.95,
+                 nesterov=True, weight_decay=cfg.muon_wd, ns_steps=cfg.ns_steps,
                  aurora_K=cfg.aurora_K, aurora_beta=cfg.aurora_beta),
             dict(params=other, use_muon=False, lr=cfg.lr, betas=(0.9, 0.999),
                  eps=1e-8, weight_decay=cfg.weight_decay),
@@ -203,8 +204,8 @@ def main() -> None:
     p.add_argument("--gate_warmup", type=int, default=100)
     p.add_argument("--faithful_subsample", type=int, default=32,
                    help="sub-batch for the faithful variance estimate (0 = full batch)")
-    p.add_argument("--muon_lr", type=float, default=0.02, help="lr for the muon/aurora matrix group")
-    p.add_argument("--muon_wd", type=float, default=0.0)
+    p.add_argument("--muon_lr", type=float, default=0.05, help="lr for the muon/aurora matrix group")
+    p.add_argument("--muon_wd", type=float, default=0.025)
     p.add_argument("--aurora_K", type=int, default=2)
     p.add_argument("--aurora_beta", type=float, default=0.5)
     p.add_argument("--arms", nargs="+", default=["adamw", "muon", "aurora"], choices=ALL_ARMS)

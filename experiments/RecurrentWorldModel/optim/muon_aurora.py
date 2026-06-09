@@ -13,11 +13,13 @@ with a damped-EMA of row scales) with the polar factor, forcing uniform row norm
 *and* (approximate) semi-orthogonality. Claim 1: a tall matrix cannot be exactly
 column-orthogonal AND uniform-unit-row-norm, so the target is sqrt(n/m), not 1.
 
-SOURCE CAVEAT: the only reference is the Tilde blog (no full paper/appendix). The
-core transforms here are verified empirically (singular values -> 1; Aurora's row
-norms more uniform than Muon's -- see tests). But the exact LR-scaling constant and
-wide-matrix handling are best-effort; treat the learning rate as something to sweep,
-and compare against Muon (the point of the ladder Adam -> Muon -> Aurora).
+Matched to the official repo (github.com/tilde-research/aurora-release, src/aurora.py,
+src/polar.py): EMA+Nesterov momentum (mu=0.95), the "simple quintic" polar
+(a=2,b=-1.5,c=0.5, 12 iters, Frobenius-normalized), the D-refinement row-balancing
+loop (target row energy n/m, damping pp_beta=0.5, pp_iterations=2), Muon-style
+spectral scaling max(1,m/n)^0.5, and decoupled weight decay (default 0.025).
+Verified empirically (tests): Aurora revives starved rows + uniformizes row norms
+vs plain polar (Muon). The polar is float32 here for CPU/stability (repo uses bf16).
 """
 
 from __future__ import annotations
@@ -26,15 +28,16 @@ import torch
 
 
 # ---------------------------------------------------------------- orthogonalization
-def newton_schulz(G: torch.Tensor, steps: int = 5, eps: float = 1e-7) -> torch.Tensor:
-    """Approximate the orthogonal polar factor of a 2D matrix (Muon's quintic NS).
+def newton_schulz(G: torch.Tensor, steps: int = 12, eps: float = 1e-7) -> torch.Tensor:
+    """Approximate the orthogonal polar factor (repo's "simple quintic", 12 iters).
 
-    Iterates X <- a X + (b A + c A^2) X with A = X X^T, which drives the singular
-    values of X toward 1. Input is Frobenius-normalized first so the spectral norm
-    is <= 1 (NS convergence condition). Computed in float32.
+    Iterates X <- a X + (b A + c A^2) X with A = X X^T and FIXED coefficients
+    a=2, b=-1.5, c=0.5 -- the gentle monotone quintic p(s)=2s-1.5s^3+0.5s^5 with
+    p(1)=1, p'(1)=0, driving singular values toward 1. Frobenius-normalized first
+    (spectral norm <= 1 => convergence). float32.
     """
     assert G.ndim == 2, "newton_schulz expects a 2D matrix"
-    a, b, c = 3.4445, -4.7750, 2.0315
+    a, b, c = 2.0, -1.5, 0.5
     X = G.float()
     X = X / (X.norm() + eps)
     transposed = X.shape[0] > X.shape[1]
@@ -50,24 +53,30 @@ def newton_schulz(G: torch.Tensor, steps: int = 5, eps: float = 1e-7) -> torch.T
 
 
 def aurora_transform(M: torch.Tensor, K: int = 2, beta: float = 0.5,
-                     ns_steps: int = 5, eps: float = 1e-7) -> torch.Tensor:
-    """Aurora's alternating projection: K rounds of (damped row-normalize) + polar."""
-    Mf = M.float()
-    transposed = Mf.shape[0] < Mf.shape[1]   # work tall (m >= n) for the row-norm logic
+                     ns_steps: int = 12, eps: float = 1e-7) -> torch.Tensor:
+    """Aurora row-balancing (repo src/aurora.py). Find a row-scaling D so that
+    polar(D * M) has uniform row energy (target n/m), by fixed-point refinement:
+
+        D_0 = 1 / rownorm(M)
+        for k in 0..K-1:  U = polar(D * M);  if k<K-1: D *= (n/m / rowsq(U))^beta
+
+    The constraint (Claim 1): a tall matrix can't be column-orthogonal AND have
+    uniform unit rows, so the target row energy is n/m, not 1.
+    """
+    transposed = M.shape[0] < M.shape[1]     # canonicalize tall (m >= n)
+    G = (M.T if transposed else M).float()
+    m, n = G.shape
+    target = n / m
+    D = 1.0 / G.norm(dim=1).clamp_min(eps)   # (m,) initial row scaling
+    U = None
+    for k in range(K):
+        U = newton_schulz(D.unsqueeze(1) * G, steps=ns_steps, eps=eps)
+        if k < K - 1:
+            row_sq = (U * U).sum(dim=1).clamp_min(eps)
+            D = D * (target / row_sq).pow(beta)
     if transposed:
-        Mf = Mf.T
-    m, n = Mf.shape
-    X = Mf / (Mf.norm() + eps)
-    D = torch.ones(m, device=Mf.device, dtype=Mf.dtype)   # diagonal row-scale EMA (as vector)
-    target = (n / m) ** 0.5
-    for _ in range(K):
-        r = X.norm(dim=1).clamp_min(eps)                  # row norms
-        D = D.pow(beta) * r.pow(1.0 - beta)               # damped EMA of row scales
-        X = target * (X / D.unsqueeze(1))                 # row-normalize to sqrt(n/m)
-        X = newton_schulz(X, steps=ns_steps, eps=eps)     # re-orthogonalize
-    if transposed:
-        X = X.T
-    return X.to(M.dtype)
+        U = U.T
+    return U.to(M.dtype)
 
 
 # ---------------------------------------------------------------- the optimizer
@@ -94,10 +103,11 @@ class MuonAuroraAdamW(torch.optim.Optimizer):
 
     def _muon_group(self, group) -> None:
         lr = group["lr"]
-        mom = group.get("momentum", 0.9)
-        wd = group.get("weight_decay", 0.0)
+        mu = group.get("momentum", 0.95)
+        wd = group.get("weight_decay", 0.025)
+        nesterov = group.get("nesterov", True)
         variant = group.get("variant", "aurora")
-        ns_steps = group.get("ns_steps", 5)
+        ns_steps = group.get("ns_steps", 12)
         K = group.get("aurora_K", 2)
         beta = group.get("aurora_beta", 0.5)
         for p in group["params"]:
@@ -110,16 +120,15 @@ class MuonAuroraAdamW(torch.optim.Optimizer):
             if "buf" not in st:
                 st["buf"] = torch.zeros_like(p)
             buf = st["buf"]
-            buf.mul_(mom).add_(g, alpha=1 - mom)          # EMA momentum (Aurora blog)
+            buf.mul_(mu).add_(g, alpha=1 - mu)            # EMA momentum
+            upd = g.add(buf, alpha=mu) if nesterov else buf   # Nesterov: G + mu*momentum
             if variant == "aurora":
-                u = aurora_transform(buf, K=K, beta=beta, ns_steps=ns_steps)
-                # Aurora LR scaling: n / ||U||_F  (n = output/col count of the update)
-                scale = p.shape[1] / (u.norm() + 1e-7)
-            else:  # muon
-                u = newton_schulz(buf, steps=ns_steps)
-                scale = max(1.0, p.shape[0] / p.shape[1]) ** 0.5
+                u = aurora_transform(upd, K=K, beta=beta, ns_steps=ns_steps)
+            else:  # muon: plain polar (same NS as Aurora; isolates the row-balancing)
+                u = newton_schulz(upd, steps=ns_steps)
+            scale = (max(p.shape) / min(p.shape)) ** 0.5  # Muon spectral scale max(1,m/n)^0.5
             if wd != 0.0:
-                p.mul_(1 - lr * wd)                        # decoupled weight decay
+                p.mul_(1 - lr * wd)                       # decoupled weight decay
             p.add_(u, alpha=-lr * scale)
 
     def _adamw_group(self, group) -> None:

@@ -23,10 +23,10 @@ from train_transformer import TConfig, run_transformer  # noqa: E402
 def test_newton_schulz_orthogonalizes():
     torch.manual_seed(0)
     M = torch.randn(64, 24)
-    U = newton_schulz(M, steps=5)
+    U = newton_schulz(M, steps=12)
     sv = torch.linalg.svdvals(U)
-    # NS5 is a coarse polar approx -> singular values clustered near 1
-    assert sv.mean() > 0.7 and sv.std() < 0.25
+    # the repo's 12-iter simple quintic drives singular values precisely to 1
+    assert abs(sv.mean() - 1.0) < 0.02 and sv.std() < 0.02
 
 
 def test_aurora_revives_dead_rows_and_uniformizes():
