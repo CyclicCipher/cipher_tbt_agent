@@ -190,6 +190,31 @@ def test_pope_decouples_content_from_position():
     assert abs(score(2, 5) - score(4, 7)) < 1e-4   # both have s - t = 3
 
 
+def test_warm_start_modes_run_and_converge_faster():
+    task = ModularChain(seed=0)
+    rng = random.Random(0)
+    b = task.sample(8, 1, 4, rng)
+    iters = {}
+    for mode in ("zeros", "input", "proposal"):
+        m = SettlingLM(SettlingLMConfig(vocab_size=task.vocab_size, dim=32, n_heads=4,
+                                        max_seq=task.seq_len, pos_mode="pope", warm_start=mode))
+        final, seg, infos = m(b.input_ids)
+        assert final.shape == (8, task.seq_len, task.vocab_size)
+        with torch.no_grad():
+            _, info = m.deq(m._inject(b.input_ids), h0=m._warm_h0(m._inject(b.input_ids)))
+        iters[mode] = info.iters
+    # a proposal warm-start should never need MORE iterations than a cold start
+    assert iters["proposal"] <= iters["zeros"]
+
+
+def test_pope_with_qknorm_still_runs():
+    # PoPE now applies QK-Norm to raw features before softplus -- make sure the path runs
+    from core.block import SettlingBlock, SettlingBlockConfig
+    block = SettlingBlock(SettlingBlockConfig(dim=32, n_heads=4, pos_enc="pope", qk_norm=True))
+    out = block(torch.randn(2, 6, 32), torch.zeros(2, 6, 32))
+    assert out.shape == (2, 6, 32) and torch.isfinite(out).all()
+
+
 def test_pope_model_has_no_absolute_pos_params():
     task = ModularChain(seed=0)
     pope = SettlingLM(SettlingLMConfig(vocab_size=task.vocab_size, dim=32, n_heads=4,

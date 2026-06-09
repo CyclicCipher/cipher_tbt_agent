@@ -207,7 +207,11 @@ class DEQFixedPoint(nn.Module):
         # BPTT: fixed iteration count, gradient through every step. Decouples
         # learning from convergence (the Ouro / looped-transformer regime) -- the
         # plan's documented fallback when the fixed-point solve doesn't converge.
-        if self.cfg.grad_mode == "bptt" and torch.is_grad_enabled():
+        # Run the SAME fixed unroll in eval (no_grad) as in training -- otherwise
+        # eval would fall through to the Picard solver and read the state at a
+        # different, non-converged point than training optimized (the train/eval
+        # mismatch behind the BPTT oscillation). Consistency, not convergence.
+        if self.cfg.grad_mode == "bptt":
             h = h0
             trace: list[float] = []
             for _ in range(self.cfg.bptt_iters):

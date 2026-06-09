@@ -58,6 +58,7 @@ class Stage0Config:
     bptt_iters: int = 12          # iterations for grad_mode=bptt
     state_norm: bool = False      # RMS-normalize state each iteration (contraction aid)
     pos_mode: str = "pope"        # pope | rope | learned (positional scheme, both arms)
+    warm_start: str = "zeros"     # zeros | input | proposal (settle init; Solve-the-Loop)
     # training
     steps: int = 2000
     batch_size: int = 128
@@ -150,6 +151,7 @@ def build_model(cfg: Stage0Config, vocab: int, max_seq: int) -> SettlingLM:
     lm_cfg = SettlingLMConfig(
         vocab_size=vocab, dim=cfg.dim, n_heads=cfg.n_heads, max_seq=max_seq,
         n_supervision_segments=cfg.segments, pos_mode=cfg.pos_mode,
+        warm_start=cfg.warm_start,
         deq=DEQConfig(
             max_iter=cfg.deq_max_iter, tol=cfg.deq_tol, grad_mode=cfg.grad_mode,
             bptt_iters=cfg.bptt_iters, state_norm=cfg.state_norm,
@@ -223,7 +225,8 @@ def run_stage0(cfg: Stage0Config) -> dict:
     model = build_model(cfg, task.vocab_size, task.seq_len).to(cfg.device)
     n_params = count_parameters(model)
     print(f"[stage0] settling model: {n_params:,} params | device={cfg.device} "
-          f"| grad_mode={cfg.grad_mode} state_norm={cfg.state_norm} pos={cfg.pos_mode}")
+          f"| grad_mode={cfg.grad_mode} state_norm={cfg.state_norm} pos={cfg.pos_mode} "
+          f"warm={cfg.warm_start}")
     hist_s = _fit(model, lambda m, ids: m(ids)[1], task, cfg,
                   random.Random(cfg.seed), "settling", full_eval=True)
     result = {"settling": {"n_params": n_params, "history": hist_s,
@@ -257,7 +260,8 @@ def run_stage0(cfg: Stage0Config) -> dict:
         out = os.path.join(os.path.dirname(os.path.abspath(__file__)), cfg.out_dir)
         os.makedirs(out, exist_ok=True)
         tag = (f"{cfg.grad_mode}{'_sn' if cfg.state_norm else ''}"
-               f"_{cfg.pos_mode}_seed{cfg.seed}")
+               f"_{cfg.pos_mode}{'' if cfg.warm_start == 'zeros' else '_warm-' + cfg.warm_start}"
+               f"_seed{cfg.seed}")
         path = os.path.join(out, f"stage0_{tag}.json")
         with open(path, "w") as f:
             json.dump(result, f, indent=2)
@@ -279,6 +283,8 @@ def main() -> None:
     p.add_argument("--bptt_iters", type=int, default=12)
     p.add_argument("--state_norm", action="store_true", help="RMS-normalize state each iteration")
     p.add_argument("--pos", choices=["pope", "rope", "learned"], default="pope", help="positional scheme")
+    p.add_argument("--warm_start", choices=["zeros", "input", "proposal"], default="zeros",
+                   help="settle init (Solve-the-Loop warm-start)")
     p.add_argument("--baseline", action="store_true", help="also build a param-matched baseline")
     p.add_argument("--baseline_layers", type=int, default=6)
     p.add_argument("--seed", type=int, default=0)
@@ -288,7 +294,7 @@ def main() -> None:
         steps=a.steps, dim=a.dim, n_heads=a.heads, segments=a.segments,
         batch_size=a.batch_size, lr=a.lr, deq_max_iter=a.deq_max_iter,
         grad_mode=a.grad_mode, bptt_iters=a.bptt_iters, state_norm=a.state_norm,
-        pos_mode=a.pos,
+        pos_mode=a.pos, warm_start=a.warm_start,
         baseline=a.baseline, baseline_layers=a.baseline_layers, seed=a.seed, smoke=a.smoke,
     )
     run_stage0(cfg)

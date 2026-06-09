@@ -41,12 +41,16 @@ class SettlingLMConfig:
     tie_head: bool = True
     emb_scale: float = 1.0
     pos_mode: str = "pope"  # "pope" | "rope" | "learned" (absolute)
+    warm_start: str = "zeros"  # "zeros" | "input" | "proposal" (settle init; Solve-the-Loop)
+    n_warm: int = 2            # block steps for warm_start="proposal"
     block: SettlingBlockConfig = field(default=None)  # filled in __post_init__
     deq: DEQConfig = field(default_factory=DEQConfig)
 
     def __post_init__(self) -> None:
         if self.pos_mode not in ("pope", "rope", "learned"):
             raise ValueError(f"pos_mode must be pope|rope|learned, got {self.pos_mode!r}")
+        if self.warm_start not in ("zeros", "input", "proposal"):
+            raise ValueError(f"warm_start must be zeros|input|proposal, got {self.warm_start!r}")
         if self.block is None:
             self.block = SettlingBlockConfig(
                 dim=self.dim, n_heads=self.n_heads, causal=True, max_seq=self.max_seq,
@@ -95,12 +99,27 @@ class SettlingLM(nn.Module):
             return F.linear(h, self.embed.weight)
         return self.head_proj(h)
 
+    def _warm_h0(self, x: torch.Tensor) -> torch.Tensor:
+        """Settle-init (Solve-the-Loop warm-start). 'zeros' = cold start; 'input' =
+        start from the embedded input; 'proposal' = a cheap no-grad few-step forward
+        as a coherent starting point, which converges faster and more stably."""
+        mode = self.cfg.warm_start
+        if mode == "input":
+            return x
+        if mode == "proposal":
+            with torch.no_grad():
+                h = torch.zeros_like(x)
+                for _ in range(self.cfg.n_warm):
+                    h = self.deq._step(h, x)
+            return h
+        return torch.zeros_like(x)
+
     def forward(
         self, tokens: torch.Tensor
     ) -> tuple[torch.Tensor, list[torch.Tensor], list[FixedPointInfo]]:
         """Return (final logits, per-segment logits, per-segment fixed-point info)."""
         x = self._inject(tokens)
-        h = torch.zeros_like(x)
+        h = self._warm_h0(x)
         seg_logits: list[torch.Tensor] = []
         infos: list[FixedPointInfo] = []
         for _ in range(max(1, self.cfg.n_supervision_segments)):

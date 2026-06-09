@@ -153,8 +153,9 @@ class Attention(nn.Module):
 
     Positional scheme (cfg.pos_enc):
       * "rope" -- rotary, applied after QK-Norm (rotation preserves norm).
-      * "pope" -- polar; magnitude (content) comes from softplus, so QK-Norm is
-        bypassed (it would erase the content-in-magnitude). Q,K score runs in 2*hd.
+      * "pope" -- polar; magnitude (content) = softplus(features). QK-Norm, if on,
+        is applied to the RAW features *before* softplus (bounds magnitudes for a
+        more contractive settle; preserves decoupling). Q,K score runs in 2*hd.
       * "none" -- no positional info in attention (use a model-level abs-pos table).
     """
 
@@ -181,8 +182,15 @@ class Attention(nn.Module):
         v = v.view(b, t, self.n_heads, self.head_dim).transpose(1, 2)
 
         if self.pope is not None:
-            # PoPE supplies content via softplus magnitude -- bypass QK-Norm, which
-            # would erase it. Q,K become 2*head_dim polar vectors; v stays head_dim.
+            # QK-Norm on the RAW features (before softplus), not on the magnitude:
+            # bounds the magnitudes -> tighter, more contractive settling -- while
+            # preserving PoPE's decoupling (magnitude stays position-independent).
+            # The PoPE paper omits QK-Norm (it is feed-forward); this is the natural
+            # extrapolation for the recurrent/settling setting. See Docs/LESSONS.md §3.
+            if self.cfg.qk_norm:
+                q = F.normalize(q, dim=-1) * F.softplus(self.q_scale).view(1, -1, 1, 1)
+                k = F.normalize(k, dim=-1) * F.softplus(self.k_scale).view(1, -1, 1, 1)
+            # Q,K become 2*head_dim polar vectors; v stays head_dim.
             q = self.pope.encode(q, is_key=False)
             k = self.pope.encode(k, is_key=True)
             scale = self.head_dim ** -0.5
