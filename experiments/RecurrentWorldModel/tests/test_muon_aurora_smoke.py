@@ -45,6 +45,13 @@ def test_aurora_revives_dead_rows_and_uniformizes():
     assert aur_dead > 5 * muon_dead
 
 
+def test_aurora_equals_muon_on_square():
+    # Aurora's row-balancing is trivial on square matrices -> reduces to plain polar (Muon).
+    torch.manual_seed(0)
+    M = torch.randn(48, 48)
+    assert torch.allclose(aurora_transform(M, K=2), newton_schulz(M, steps=12), atol=1e-5)
+
+
 def test_param_routing():
     task = ModularChain(seed=0)
     m = FixedDepthTransformer(FixedDepthConfig(vocab_size=task.vocab_size, dim=32, n_layers=2,

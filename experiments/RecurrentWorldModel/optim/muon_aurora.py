@@ -62,10 +62,18 @@ def aurora_transform(M: torch.Tensor, K: int = 2, beta: float = 0.5,
 
     The constraint (Claim 1): a tall matrix can't be column-orthogonal AND have
     uniform unit rows, so the target row energy is n/m, not 1.
+
+    On SQUARE matrices the row-balancing is trivial (target n/m = 1, and a square
+    orthogonal matrix already has unit rows), so Aurora reduces to plain polar
+    (Muon). The speedrun (PR #284) routes square q/k/v/o projections to Muon for
+    exactly this reason; we short-circuit here to the same effect.
     """
     transposed = M.shape[0] < M.shape[1]     # canonicalize tall (m >= n)
     G = (M.T if transposed else M).float()
     m, n = G.shape
+    if m == n:                               # square -> Aurora == Muon
+        U = newton_schulz(G, steps=ns_steps, eps=eps)
+        return (U.T if transposed else U).to(M.dtype)
     target = n / m
     D = 1.0 / G.norm(dim=1).clamp_min(eps)   # (m,) initial row scaling
     U = None
