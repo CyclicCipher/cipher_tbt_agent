@@ -74,3 +74,16 @@ def test_run_transformer_smoke_all_arms():
         assert arm in out["arms"]
         f = out["arms"][arm]["final"]
         assert "acc_in" in f and "acc_ood" in f and "risk" in f
+
+
+def test_wsd_schedule_and_momentum_warmup():
+    from train_transformer import lr_mult, muon_momentum
+    total, warm, cd = 1000, 100, 0.4
+    assert lr_mult(0, total, warm, cd, 0.0) < lr_mult(50, total, warm, cd, 0.0)   # warmup rising
+    assert abs(lr_mult(warm, total, warm, cd, 0.0) - 1.0) < 1e-6                    # peak = 1
+    assert abs(lr_mult(500, total, warm, cd, 0.0) - 1.0) < 1e-6                     # stable phase
+    assert lr_mult(total - 1, total, warm, cd, 0.0) < 0.05                          # cooled near 0
+    # momentum warms 0.85 -> 0.95
+    assert abs(muon_momentum(0, 300) - 0.85) < 1e-6
+    assert abs(muon_momentum(300, 300) - 0.95) < 1e-6
+    assert 0.85 < muon_momentum(150, 300) < 0.95

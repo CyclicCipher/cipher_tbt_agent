@@ -66,18 +66,43 @@ class TConfig:
     gate_warmup: int = 100
     faithful_subsample: int = 32  # sub-batch size for the faithful variance estimate (0 = full)
     # muon / aurora (matrix optimizer). adam group (embeddings/head/norms) uses `lr`.
-    # defaults match the official repo (tilde-research/aurora-release).
-    muon_lr: float = 0.05
+    muon_lr: float = 0.02      # ~modded-nanogpt's 0.023 (our 0.05 overshot)
     muon_wd: float = 0.025
     ns_steps: int = 12
     aurora_K: int = 2
     aurora_beta: float = 0.5
+    # LR schedule (WSD) + Muon momentum warmup -- the modded-nanogpt robustness recipe.
+    schedule: bool = True
+    warmup_steps: int = 200
+    cooldown_frac: float = 0.4     # last 40% of steps: linear decay to lr_floor
+    lr_floor: float = 0.0
+    muon_mom_warmup: int = 300     # momentum 0.85 -> 0.95 over the first N steps
     eval_every: int = 200
     eval_batch: int = 256
     seed: int = 0
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     arms: tuple[str, ...] = ("adamw", "snr_ema", "snr_faithful")
     smoke: bool = False
+
+
+def lr_mult(step: int, total: int, warmup: int, cooldown_frac: float, floor: float) -> float:
+    """WSD: linear warmup -> constant 1.0 -> linear cooldown to `floor` over the last
+    `cooldown_frac` of training. The cooldown is what robustifies Muon (anneals the
+    step size near the optimum, since Muon has no per-parameter self-annealing)."""
+    if warmup > 0 and step < warmup:
+        return (step + 1) / warmup
+    cd_start = total * (1.0 - cooldown_frac)
+    if cooldown_frac > 0 and step >= cd_start:
+        t = min(1.0, (step - cd_start) / max(1.0, total - cd_start))
+        return (1.0 - t) + floor * t
+    return 1.0
+
+
+def muon_momentum(step: int, warmup: int, lo: float = 0.85, hi: float = 0.95) -> float:
+    """Momentum warmup 0.85 -> 0.95 over the first `warmup` steps (modded-nanogpt)."""
+    if warmup <= 0 or step >= warmup:
+        return hi
+    return lo + (hi - lo) * step / warmup
 
 
 def ce_loss(logits, targets, mask):
@@ -135,9 +160,18 @@ def train_arm(arm: str, cfg: TConfig, task) -> list[dict]:
     opt = build_optimizer(arm, model, cfg)
     rng = random.Random(cfg.seed)                     # identical data stream across arms
     eval_rng = random.Random(cfg.seed + 999)
+    for g in opt.param_groups:                         # stash base LRs for the schedule
+        g["_base_lr"] = g["lr"]
     history: list[dict] = []
     model.train()
     for step in range(1, cfg.steps + 1):
+        if cfg.schedule:                               # WSD LR + Muon momentum warmup
+            mult = lr_mult(step - 1, cfg.steps, cfg.warmup_steps, cfg.cooldown_frac, cfg.lr_floor)
+            mom = muon_momentum(step - 1, cfg.muon_mom_warmup)
+            for g in opt.param_groups:
+                g["lr"] = g["_base_lr"] * mult
+                if g.get("use_muon"):
+                    g["momentum"] = mom
         b = task.sample(cfg.batch_size, cfg.train_len_min, cfg.train_len_max, rng).to(cfg.device)
         logits = model(b.input_ids)
         loss = ce_loss(logits, b.targets, b.loss_mask)
@@ -166,6 +200,7 @@ def run_transformer(cfg: TConfig) -> dict:
         cfg.dim, cfg.n_layers = 32, 2
         cfg.steps, cfg.batch_size, cfg.eval_batch = 2, 16, 16
         cfg.eval_every, cfg.gate_warmup, cfg.device = 2, 1, "cpu"
+        cfg.warmup_steps, cfg.muon_mom_warmup = 1, 1
 
     task = ModularChain(cfg.modulus, cfg.n_ops, cfg.max_len, seed=cfg.seed)
     torch.manual_seed(cfg.seed)
@@ -204,8 +239,11 @@ def main() -> None:
     p.add_argument("--gate_warmup", type=int, default=100)
     p.add_argument("--faithful_subsample", type=int, default=32,
                    help="sub-batch for the faithful variance estimate (0 = full batch)")
-    p.add_argument("--muon_lr", type=float, default=0.05, help="lr for the muon/aurora matrix group")
+    p.add_argument("--muon_lr", type=float, default=0.02, help="lr for the muon/aurora matrix group")
     p.add_argument("--muon_wd", type=float, default=0.025)
+    p.add_argument("--no_schedule", action="store_true", help="disable WSD LR + momentum warmup")
+    p.add_argument("--warmup_steps", type=int, default=200)
+    p.add_argument("--cooldown_frac", type=float, default=0.4)
     p.add_argument("--aurora_K", type=int, default=2)
     p.add_argument("--aurora_beta", type=float, default=0.5)
     p.add_argument("--arms", nargs="+", default=["adamw", "muon", "aurora"], choices=ALL_ARMS)
@@ -215,6 +253,7 @@ def main() -> None:
     cfg = TConfig(steps=a.steps, dim=a.dim, n_layers=a.layers, batch_size=a.batch_size,
                   lr=a.lr, gate_warmup=a.gate_warmup, faithful_subsample=a.faithful_subsample,
                   muon_lr=a.muon_lr, muon_wd=a.muon_wd, aurora_K=a.aurora_K, aurora_beta=a.aurora_beta,
+                  schedule=not a.no_schedule, warmup_steps=a.warmup_steps, cooldown_frac=a.cooldown_frac,
                   arms=tuple(a.arms), seed=a.seed, smoke=a.smoke)
     run_transformer(cfg)
 
