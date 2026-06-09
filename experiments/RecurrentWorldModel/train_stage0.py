@@ -54,9 +54,10 @@ class Stage0Config:
     segments: int = 2          # deep-supervision segments
     deq_max_iter: int = 40
     deq_tol: float = 1e-3
-    grad_mode: str = "one_step"   # one_step | unrolled | bptt
+    grad_mode: str = "one_step"   # one_step | unrolled | bptt | ift
     bptt_iters: int = 12          # iterations for grad_mode=bptt
     state_norm: bool = False      # RMS-normalize state each iteration (contraction aid)
+    use_rope: bool = True         # rotary (relative) position; False = learned absolute
     # training
     steps: int = 2000
     batch_size: int = 128
@@ -148,7 +149,7 @@ def evaluate(model, task, cfg: Stage0Config, rng) -> dict:
 def build_model(cfg: Stage0Config, vocab: int, max_seq: int) -> SettlingLM:
     lm_cfg = SettlingLMConfig(
         vocab_size=vocab, dim=cfg.dim, n_heads=cfg.n_heads, max_seq=max_seq,
-        n_supervision_segments=cfg.segments,
+        n_supervision_segments=cfg.segments, use_rope=cfg.use_rope,
         deq=DEQConfig(
             max_iter=cfg.deq_max_iter, tol=cfg.deq_tol, grad_mode=cfg.grad_mode,
             bptt_iters=cfg.bptt_iters, state_norm=cfg.state_norm,
@@ -222,7 +223,8 @@ def run_stage0(cfg: Stage0Config) -> dict:
     model = build_model(cfg, task.vocab_size, task.seq_len).to(cfg.device)
     n_params = count_parameters(model)
     print(f"[stage0] settling model: {n_params:,} params | device={cfg.device} "
-          f"| grad_mode={cfg.grad_mode} state_norm={cfg.state_norm}")
+          f"| grad_mode={cfg.grad_mode} state_norm={cfg.state_norm} "
+          f"pos={'rope' if cfg.use_rope else 'learned'}")
     hist_s = _fit(model, lambda m, ids: m(ids)[1], task, cfg,
                   random.Random(cfg.seed), "settling", full_eval=True)
     result = {"settling": {"n_params": n_params, "history": hist_s,
@@ -232,7 +234,7 @@ def run_stage0(cfg: Stage0Config) -> dict:
     if cfg.baseline:
         bl, bl_cfg, bl_params = matched_baseline(
             n_params, vocab_size=task.vocab_size, n_heads=cfg.n_heads,
-            n_layers=cfg.baseline_layers, max_seq=task.seq_len,
+            n_layers=cfg.baseline_layers, max_seq=task.seq_len, use_rope=cfg.use_rope,
         )
         bl = bl.to(cfg.device)
         print(f"[stage0] matched baseline: {bl_params:,} params "
@@ -255,7 +257,8 @@ def run_stage0(cfg: Stage0Config) -> dict:
     if not cfg.smoke:
         out = os.path.join(os.path.dirname(os.path.abspath(__file__)), cfg.out_dir)
         os.makedirs(out, exist_ok=True)
-        tag = f"{cfg.grad_mode}{'_sn' if cfg.state_norm else ''}_seed{cfg.seed}"
+        tag = (f"{cfg.grad_mode}{'_sn' if cfg.state_norm else ''}"
+               f"{'_rope' if cfg.use_rope else '_abs'}_seed{cfg.seed}")
         path = os.path.join(out, f"stage0_{tag}.json")
         with open(path, "w") as f:
             json.dump(result, f, indent=2)
@@ -273,9 +276,10 @@ def main() -> None:
     p.add_argument("--batch_size", type=int, default=128)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--deq_max_iter", type=int, default=40)
-    p.add_argument("--grad_mode", choices=["one_step", "unrolled", "bptt"], default="one_step")
+    p.add_argument("--grad_mode", choices=["one_step", "unrolled", "bptt", "ift"], default="one_step")
     p.add_argument("--bptt_iters", type=int, default=12)
     p.add_argument("--state_norm", action="store_true", help="RMS-normalize state each iteration")
+    p.add_argument("--pos", choices=["rope", "learned"], default="rope", help="positional scheme")
     p.add_argument("--baseline", action="store_true", help="also build a param-matched baseline")
     p.add_argument("--baseline_layers", type=int, default=6)
     p.add_argument("--seed", type=int, default=0)
@@ -285,6 +289,7 @@ def main() -> None:
         steps=a.steps, dim=a.dim, n_heads=a.heads, segments=a.segments,
         batch_size=a.batch_size, lr=a.lr, deq_max_iter=a.deq_max_iter,
         grad_mode=a.grad_mode, bptt_iters=a.bptt_iters, state_norm=a.state_norm,
+        use_rope=(a.pos == "rope"),
         baseline=a.baseline, baseline_layers=a.baseline_layers, seed=a.seed, smoke=a.smoke,
     )
     run_stage0(cfg)

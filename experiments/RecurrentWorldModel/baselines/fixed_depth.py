@@ -32,15 +32,19 @@ class FixedDepthConfig:
     max_seq: int = 64
     tie_head: bool = True
     emb_scale: float = 1.0
+    use_rope: bool = True   # match the settling model's positional scheme
 
 
 class FixedDepthTransformer(nn.Module):
     def __init__(self, cfg: FixedDepthConfig) -> None:
         super().__init__()
         self.cfg = cfg
-        block_cfg = SettlingBlockConfig(dim=cfg.dim, n_heads=cfg.n_heads, causal=True)
+        block_cfg = SettlingBlockConfig(
+            dim=cfg.dim, n_heads=cfg.n_heads, causal=True,
+            rope=cfg.use_rope, max_seq=cfg.max_seq,
+        )
         self.embed = nn.Embedding(cfg.vocab_size, cfg.dim)
-        self.pos = nn.Parameter(torch.randn(1, cfg.max_seq, cfg.dim) * 0.02)
+        self.pos = None if cfg.use_rope else nn.Parameter(torch.randn(1, cfg.max_seq, cfg.dim) * 0.02)
         self.layers = nn.ModuleList([SettlingBlock(block_cfg) for _ in range(cfg.n_layers)])
         self.norm_out = RMSNorm(cfg.dim, block_cfg.rmsnorm_eps)
         self.head_proj = None if cfg.tie_head else nn.Linear(cfg.dim, cfg.vocab_size, bias=False)
@@ -57,7 +61,9 @@ class FixedDepthTransformer(nn.Module):
 
     def forward(self, tokens: torch.Tensor) -> torch.Tensor:
         t = tokens.shape[1]
-        h = self.embed(tokens) * self.cfg.emb_scale + self.pos[:, :t]
+        h = self.embed(tokens) * self.cfg.emb_scale
+        if self.pos is not None:
+            h = h + self.pos[:, :t]
         zero = torch.zeros_like(h)
         for layer in self.layers:
             h = layer(h, zero)
@@ -75,6 +81,7 @@ def matched_baseline(
     n_layers: int = 6,
     max_seq: int = 64,
     tie_head: bool = True,
+    use_rope: bool = True,
     max_dim_mult: int = 8,
 ) -> tuple[FixedDepthTransformer, FixedDepthConfig, int]:
     """Build an ``n_layers``-layer transformer whose param count is closest to
@@ -89,9 +96,11 @@ def matched_baseline(
     base = max(n_heads, 8)
     ceiling = base * max_dim_mult * 8
     for dim in range(base, ceiling + 1, n_heads):
+        if use_rope and (dim // n_heads) % 2 != 0:
+            continue  # RoPE needs an even head_dim
         cfg = FixedDepthConfig(
             vocab_size=vocab_size, dim=dim, n_heads=n_heads,
-            n_layers=n_layers, max_seq=max_seq, tie_head=tie_head,
+            n_layers=n_layers, max_seq=max_seq, tie_head=tie_head, use_rope=use_rope,
         )
         model = FixedDepthTransformer(cfg)
         n = count_parameters(model)

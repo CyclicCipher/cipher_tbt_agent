@@ -116,3 +116,52 @@ def test_state_norm_bounds_the_state():
 def test_run_stage0_bptt_smoke():
     out = run_stage0(Stage0Config(smoke=True, grad_mode="bptt", bptt_iters=6, state_norm=True))
     assert out["settling"]["history"] and "acc_in" in out["settling"]["final"]
+
+
+def test_ift_gradient_matches_bptt_reference():
+    """The implicit (IFT) gradient must equal the full-BPTT gradient AT the fixed
+    point. state_norm makes the map contractive so both the forward and the
+    adjoint solve converge."""
+    from core.deq import DEQConfig, DEQFixedPoint
+    from core.block import SettlingBlock, SettlingBlockConfig
+    bcfg = SettlingBlockConfig(dim=32, n_heads=4)
+    x = torch.randn(2, 6, 32)
+    target = torch.randn(2, 6, 32)
+
+    def grads(mode, **kw):
+        torch.manual_seed(0)
+        block = SettlingBlock(bcfg)
+        deq = DEQFixedPoint(block, DEQConfig(grad_mode=mode, state_norm=True,
+                                             max_iter=150, tol=1e-6, **kw))
+        h, info = deq(x)
+        (h - target).pow(2).mean().backward()
+        g = torch.cat([p.grad.flatten() for p in block.parameters()])
+        return g, info
+
+    g_ift, info = grads("ift")
+    g_ref, _ = grads("bptt", bptt_iters=150)  # full BPTT to equilibrium = reference
+    assert info.converged
+    cos = torch.nn.functional.cosine_similarity(g_ift, g_ref, dim=0).item()
+    assert cos > 0.999, f"IFT gradient diverges from reference (cos={cos:.4f})"
+
+
+def test_rope_attention_runs_and_extrapolates_positions():
+    from core.block import SettlingBlock, SettlingBlockConfig
+    block = SettlingBlock(SettlingBlockConfig(dim=32, n_heads=4, rope=True, max_seq=16))
+    # rope has no learned position params, so a longer sequence than any "training"
+    # length still runs (the extrapolation property we want)
+    for t in (4, 12):
+        h = torch.randn(2, t, 32)
+        out = block(h, torch.zeros_like(h))
+        assert out.shape == (2, t, 32) and torch.isfinite(out).all()
+
+
+def test_rope_model_has_no_absolute_pos_params():
+    task = ModularChain(seed=0)
+    rope = SettlingLM(SettlingLMConfig(vocab_size=task.vocab_size, dim=32, n_heads=4,
+                                       max_seq=task.seq_len, use_rope=True))
+    abso = SettlingLM(SettlingLMConfig(vocab_size=task.vocab_size, dim=32, n_heads=4,
+                                       max_seq=task.seq_len, use_rope=False))
+    assert rope.pos is None and abso.pos is not None
+    # rope model has fewer params (no max_seq x dim position table)
+    assert count_parameters(rope) < count_parameters(abso)

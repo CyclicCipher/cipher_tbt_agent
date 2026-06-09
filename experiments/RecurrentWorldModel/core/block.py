@@ -37,10 +37,15 @@ class SettlingBlockConfig:
     rmsnorm_eps: float = 1e-5
     inject_scale: float = 1.0    # weight on the constant input injection each step
     polar_split: bool = False    # hyle/morphe magnitude/phase split (Stage 1+; OFF by default)
+    rope: bool = False           # rotary (relative) position in attention -- extrapolates
+    max_seq: int = 64            # for the RoPE cos/sin tables
+    rope_base: float = 10000.0
 
     def __post_init__(self) -> None:
         if self.dim % self.n_heads != 0:
             raise ValueError(f"dim {self.dim} not divisible by n_heads {self.n_heads}")
+        if self.rope and (self.dim // self.n_heads) % 2 != 0:
+            raise ValueError(f"RoPE needs an even head_dim; got {self.dim // self.n_heads}")
 
 
 class RMSNorm(nn.Module):
@@ -69,12 +74,43 @@ class SwiGLU(nn.Module):
         return self.w_down(F.silu(self.w_gate(x)) * self.w_up(x))
 
 
+def _rotate_half(x: torch.Tensor) -> torch.Tensor:
+    x1, x2 = x.chunk(2, dim=-1)
+    return torch.cat((-x2, x1), dim=-1)
+
+
+class RotaryEmbedding(nn.Module):
+    """RoPE (item 3 / the rotary core of PoPE): rotate Q,K by position so the
+    attention score depends on *relative* position. Unlike learned absolute
+    position embeddings, this extrapolates to sequence lengths/positions never
+    seen in training -- the fix for the Stage-0 OOD positional confound.
+
+    Full PoPE (the magnitude=content / phase=position decoupling, repr §3b) is a
+    further step flagged open (Q11); this is the rotary part that PoPE generalizes.
+    """
+
+    def __init__(self, head_dim: int, max_seq: int, base: float = 10000.0) -> None:
+        super().__init__()
+        theta = base ** (-torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim)
+        pos = torch.arange(max_seq, dtype=torch.float32)
+        freqs = torch.outer(pos, theta)              # (max_seq, head_dim/2)
+        emb = torch.cat((freqs, freqs), dim=-1)      # (max_seq, head_dim)
+        self.register_buffer("cos", emb.cos()[None, None], persistent=False)  # (1,1,S,hd)
+        self.register_buffer("sin", emb.sin()[None, None], persistent=False)
+
+    def forward(self, q: torch.Tensor, k: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        t = q.shape[-2]
+        cos, sin = self.cos[..., :t, :], self.sin[..., :t, :]
+        return q * cos + _rotate_half(q) * sin, k * cos + _rotate_half(k) * sin
+
+
 class Attention(nn.Module):
-    """Multi-head self-attention with optional QK-Norm.
+    """Multi-head self-attention with optional QK-Norm and RoPE.
 
     QK-Norm (item 56): L2-normalize per-head queries and keys, then scale by a
     learned temperature. Stabilizes attention logits across many settling
     iterations (the §1c stability hazard) and bounds the magnitude channel.
+    RoPE applies *after* QK-Norm (rotation preserves norm, so the two compose).
     """
 
     def __init__(self, cfg: SettlingBlockConfig) -> None:
@@ -88,6 +124,7 @@ class Attention(nn.Module):
             # learned per-head temperature; init so effective scale ~= 1/sqrt(head_dim)
             self.q_scale = nn.Parameter(torch.zeros(cfg.n_heads))
             self.k_scale = nn.Parameter(torch.zeros(cfg.n_heads))
+        self.rope = RotaryEmbedding(self.head_dim, cfg.max_seq, cfg.rope_base) if cfg.rope else None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         b, t, _ = x.shape
@@ -103,6 +140,9 @@ class Attention(nn.Module):
             scale = 1.0  # normalization already sets the scale
         else:
             scale = self.head_dim ** -0.5
+
+        if self.rope is not None:
+            q, k = self.rope(q, k)
 
         attn = F.scaled_dot_product_attention(
             q, k, v, is_causal=self.cfg.causal, scale=scale

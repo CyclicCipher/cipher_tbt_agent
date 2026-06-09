@@ -236,12 +236,39 @@ class DEQFixedPoint(nn.Module):
                 h = self._step(h, x)
             h_star = h
         elif self.cfg.grad_mode == "ift":
-            raise NotImplementedError(
-                "Full implicit (IFT) gradient is a Stage-0+ TODO. Implement the "
-                "backward fixed-point solve (Bai et al. 2019) here, or use "
-                "grad_mode='one_step' (default) / 'unrolled' for now."
-            )
+            h_star = self._ift_reattach(h_star.detach(), x)
         else:  # pragma: no cover
             raise ValueError(f"unknown grad_mode {self.cfg.grad_mode!r}")
 
         return h_star, info
+
+    def _ift_reattach(self, h_fixed: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        """Implicit-function-theorem gradient at the fixed point (Bai et al. 2019).
+
+        For a loss L on the equilibrium h* = f(h*, x), the exact gradient is
+            dL/dtheta = (dL/dh*) (I - J_f)^{-1} (df/dtheta),   J_f = df/dh* .
+        We avoid forming (I - J_f)^{-1}: a backward hook solves the adjoint system
+            g = (dL/dh*) + J_f^T g
+        by fixed-point iteration (each step a vector-Jacobian product via autograd),
+        then the normal autograd through one re-engaged step f(h*, x) multiplies g by
+        df/dtheta. O(1) memory in the number of forward iterations. The adjoint solve
+        converges when J_f is contractive -- which is exactly what `state_norm` buys.
+        """
+        h_eng = self._step(h_fixed, x)               # graph: depends on theta (h_fixed const)
+        z0 = h_fixed.clone().requires_grad_(True)    # separate graph for VJPs
+        f0 = self._step(z0, x)
+        max_it, tol = self.cfg.max_iter, self.cfg.tol
+
+        def backward_hook(grad: torch.Tensor) -> torch.Tensor:
+            g = grad
+            for _ in range(max_it):
+                vjp = torch.autograd.grad(f0, z0, g, retain_graph=True)[0]
+                g_new = grad + vjp
+                if _rel_residual(g_new, g).item() < tol:
+                    g = g_new
+                    break
+                g = g_new
+            return g
+
+        h_eng.register_hook(backward_hook)
+        return h_eng

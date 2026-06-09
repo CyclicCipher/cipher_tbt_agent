@@ -40,13 +40,15 @@ class SettlingLMConfig:
     n_supervision_segments: int = 1
     tie_head: bool = True
     emb_scale: float = 1.0
+    use_rope: bool = True   # rotary (relative) position; if False, learned absolute pos
     block: SettlingBlockConfig = field(default=None)  # filled in __post_init__
     deq: DEQConfig = field(default_factory=DEQConfig)
 
     def __post_init__(self) -> None:
         if self.block is None:
             self.block = SettlingBlockConfig(
-                dim=self.dim, n_heads=self.n_heads, causal=True
+                dim=self.dim, n_heads=self.n_heads, causal=True,
+                rope=self.use_rope, max_seq=self.max_seq,
             )
 
 
@@ -55,7 +57,8 @@ class SettlingLM(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.embed = nn.Embedding(cfg.vocab_size, cfg.dim)
-        self.pos = nn.Parameter(torch.randn(1, cfg.max_seq, cfg.dim) * 0.02)
+        # absolute position only when not using RoPE (rotary carries position in attn)
+        self.pos = None if cfg.use_rope else nn.Parameter(torch.randn(1, cfg.max_seq, cfg.dim) * 0.02)
         self.block = SettlingBlock(cfg.block)
         self.deq = DEQFixedPoint(self.block, cfg.deq)
         self.norm_out = RMSNorm(cfg.dim, cfg.block.rmsnorm_eps)
@@ -78,7 +81,10 @@ class SettlingLM(nn.Module):
         t = tokens.shape[1]
         if t > self.cfg.max_seq:
             raise ValueError(f"sequence length {t} exceeds max_seq {self.cfg.max_seq}")
-        return self.embed(tokens) * self.cfg.emb_scale + self.pos[:, :t]
+        x = self.embed(tokens) * self.cfg.emb_scale
+        if self.pos is not None:
+            x = x + self.pos[:, :t]
+        return x
 
     def _logits(self, h: torch.Tensor) -> torch.Tensor:
         h = self.norm_out(h)
