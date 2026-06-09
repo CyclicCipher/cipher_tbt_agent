@@ -11,12 +11,12 @@ import sys
 
 import torch
 
-# allow `import core` / `import diagnostics` when run from the repo root
+# allow `import core` / `import probes` when run from the repo root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import DEQConfig, DEQFixedPoint, SettlingBlock, SettlingBlockConfig  # noqa: E402
 from core.halting import ChainHalt, converged  # noqa: E402
-from diagnostics import ConvergenceMonitor, basin_consistency  # noqa: E402
+from probes import ConvergenceMonitor, basin_consistency  # noqa: E402
 
 
 def _make(dim=64, heads=4, **deq_kw):

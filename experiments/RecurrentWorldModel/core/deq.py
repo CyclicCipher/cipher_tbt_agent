@@ -17,7 +17,7 @@ Gradient modes (Docs/architecture.md §4b, implementation_plan §2.1):
 
 The whole point of Stage 0 is to find out whether the loop converges at all
 (Risk 1). Every solve returns a ``FixedPointInfo`` so the convergence monitor
-(diagnostics/convergence.py) can aggregate behavior across a run.
+(probes/convergence.py) can aggregate behavior across a run.
 """
 
 from __future__ import annotations

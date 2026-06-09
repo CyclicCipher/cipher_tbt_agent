@@ -20,6 +20,7 @@ A tiny CPU smoke path exists for tests only: run_stage0(Stage0Config(smoke=True)
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import random
 import sys
@@ -33,7 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from baselines import matched_baseline  # noqa: E402
 from core.deq import DEQConfig  # noqa: E402
 from core.model import SettlingLM, SettlingLMConfig, count_parameters  # noqa: E402
-from diagnostics import ConvergenceMonitor, basin_consistency  # noqa: E402
+from probes import ConvergenceMonitor, basin_consistency  # noqa: E402
 from tasks import ModularChain  # noqa: E402
 
 
@@ -66,6 +67,9 @@ class Stage0Config:
     # baseline
     baseline: bool = False
     baseline_layers: int = 6
+    # outputs: metrics JSON is written here. "diagnostics" is git-ignored
+    # (experiments/*/diagnostics/) so run artifacts never get committed.
+    out_dir: str = "diagnostics"
     # smoke (tests only): tiny + 2 steps, no real training
     smoke: bool = False
 
@@ -196,7 +200,18 @@ def run_stage0(cfg: Stage0Config) -> dict:
                   f"adaptive_r {r:+.2f} "
                   f"basin_dist {metrics['basin']['mean_pairwise_rel_dist']:.3f}")
 
-    return {"n_params": n_params, "history": history, "final": history[-1] if history else {}}
+    result = {"n_params": n_params, "history": history, "final": history[-1] if history else {}}
+
+    # write the run artifact to the (git-ignored) outputs dir -- not during smoke
+    if not cfg.smoke:
+        out = os.path.join(os.path.dirname(os.path.abspath(__file__)), cfg.out_dir)
+        os.makedirs(out, exist_ok=True)
+        path = os.path.join(out, f"stage0_seed{cfg.seed}.json")
+        with open(path, "w") as f:
+            json.dump(result, f, indent=2)
+        print(f"[stage0] wrote metrics to {path}")
+
+    return result
 
 
 def main() -> None:

@@ -186,12 +186,16 @@ experiments/RecurrentWorldModel/
 │   ├── value.py                 # learned value (Stage 3)
 │   └── learn_pc.py              # prospective config + item-52 filter (Stage 4)
 ├── env/                         # see training_environment.md
-├── diagnostics/                 # convergence, collapse, consistency, credit, interference probes
+├── probes/                      # diagnostic SOURCE: convergence, collapse, consistency, credit, interference probes (tracked)
+├── diagnostics/                 # diagnostic OUTPUT: metrics JSON / logs / plots (git-ignored, experiments/*/diagnostics/)
+├── tasks/                       # Stage 0 synthetic reasoning tasks (ModularChain)
 ├── train_stage0.py … train_stage4.py
 └── baselines/                   # matched fixed-depth transformer, etc.
 ```
 
-One file = one concept (a standing repo rule). Tests via `./venv/Scripts/python.exe -m pytest`.
+One file = one concept (a standing repo rule). **Probe scripts live in `probes/`
+(tracked); their outputs go to `diagnostics/` (ignored)** — keep code and artifacts
+apart. Tests via `./venv/Scripts/python.exe -m pytest`.
 
 ---
 
