@@ -157,34 +157,29 @@ def build_model(cfg: Stage0Config, vocab: int, max_seq: int) -> SettlingLM:
     return SettlingLM(lm_cfg)
 
 
-def run_stage0(cfg: Stage0Config) -> dict:
-    if cfg.smoke:
-        cfg.dim, cfg.n_heads, cfg.segments = 32, 4, 2
-        cfg.steps, cfg.batch_size, cfg.eval_batch = 2, 16, 16
-        cfg.deq_max_iter, cfg.eval_every, cfg.device = 8, 2, "cpu"
+def _eval_accuracy(model, forward, task, cfg: Stage0Config, rng) -> tuple[float, float]:
+    """In-dist + OOD accuracy for any model exposing ``forward(model, ids) -> [logits]``."""
+    model.eval()
+    dev = cfg.device
+    with torch.no_grad():
+        b_in = task.sample(cfg.eval_batch, cfg.train_len_min, cfg.train_len_max, rng).to(dev)
+        b_ood = task.sample(cfg.eval_batch, cfg.ood_len_min, cfg.ood_len_max, rng).to(dev)
+        ai = accuracy(forward(model, b_in.input_ids)[-1], b_in.targets, b_in.loss_mask)
+        ao = accuracy(forward(model, b_ood.input_ids)[-1], b_ood.targets, b_ood.loss_mask)
+    model.train()
+    return ai, ao
 
-    torch.manual_seed(cfg.seed)
-    rng = random.Random(cfg.seed)
-    task = ModularChain(cfg.modulus, cfg.n_ops, cfg.max_len, seed=cfg.seed)
 
-    model = build_model(cfg, task.vocab_size, task.seq_len).to(cfg.device)
-    n_params = count_parameters(model)
+def _fit(model, forward, task, cfg: Stage0Config, rng, label: str, full_eval: bool) -> list[dict]:
+    """Train one model. ``forward(model, ids)`` returns a list of segment logits
+    (settling: deep-supervision segments; baseline: a single-element list).
+    ``full_eval`` toggles the settling-only convergence diagnostics."""
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
-
-    print(f"[stage0] settling model: {n_params:,} params | device={cfg.device}")
-    if cfg.baseline:
-        bl, bl_cfg, bl_params = matched_baseline(
-            n_params, vocab_size=task.vocab_size, n_heads=cfg.n_heads,
-            n_layers=cfg.baseline_layers, max_seq=task.seq_len,
-        )
-        print(f"[stage0] matched baseline: {bl_params:,} params "
-              f"({cfg.baseline_layers} layers, dim={bl_cfg.dim})")
-
     history: list[dict] = []
     model.train()
     for step in range(1, cfg.steps + 1):
         batch = task.sample(cfg.batch_size, cfg.train_len_min, cfg.train_len_max, rng).to(cfg.device)
-        _, seg_logits, _ = model(batch.input_ids)
+        seg_logits = forward(model, batch.input_ids)
         loss = lm_loss(seg_logits, batch.targets, batch.loss_mask)
         opt.zero_grad(set_to_none=True)
         loss.backward()
@@ -192,20 +187,69 @@ def run_stage0(cfg: Stage0Config) -> dict:
         opt.step()
 
         if step % cfg.eval_every == 0 or step == cfg.steps:
-            metrics = evaluate(model, task, cfg, rng)
-            metrics["step"] = step
-            metrics["loss"] = loss.item()
-            history.append(metrics)
-            c = metrics["convergence"]
-            r = metrics["adaptive"]["iters_vs_difficulty_r"]
-            print(f"[stage0] step {step:>5} loss {loss.item():.3f} "
-                  f"acc_in {metrics['acc_in']:.3f} acc_ood {metrics['acc_ood']:.3f} "
-                  f"| conv {c['convergence_rate']:.2f} iters~{c['iters_mean']:.1f} "
-                  f"osc {c['oscillation_rate']:.2f} "
-                  f"adaptive_r {r:+.2f} "
-                  f"basin_dist {metrics['basin']['mean_pairwise_rel_dist']:.3f}")
+            if full_eval:
+                m = evaluate(model, task, cfg, rng)
+            else:
+                ai, ao = _eval_accuracy(model, forward, task, cfg, rng)
+                m = {"acc_in": ai, "acc_ood": ao}
+            m["step"] = step
+            m["loss"] = loss.item()
+            history.append(m)
+            if full_eval:
+                c = m["convergence"]
+                r = m["adaptive"]["iters_vs_difficulty_r"]
+                print(f"[{label}] step {step:>5} loss {m['loss']:.3f} "
+                      f"acc_in {m['acc_in']:.3f} acc_ood {m['acc_ood']:.3f} "
+                      f"| conv {c['convergence_rate']:.2f} iters~{c['iters_mean']:.1f} "
+                      f"osc {c['oscillation_rate']:.2f} adaptive_r {r:+.2f} "
+                      f"basin_dist {m['basin']['mean_pairwise_rel_dist']:.3f}")
+            else:
+                print(f"[{label}] step {step:>5} loss {m['loss']:.3f} "
+                      f"acc_in {m['acc_in']:.3f} acc_ood {m['acc_ood']:.3f}")
+    return history
 
-    result = {"n_params": n_params, "history": history, "final": history[-1] if history else {}}
+
+def run_stage0(cfg: Stage0Config) -> dict:
+    if cfg.smoke:
+        cfg.dim, cfg.n_heads, cfg.segments = 32, 4, 2
+        cfg.steps, cfg.batch_size, cfg.eval_batch = 2, 16, 16
+        cfg.deq_max_iter, cfg.eval_every, cfg.device = 8, 2, "cpu"
+
+    torch.manual_seed(cfg.seed)
+    task = ModularChain(cfg.modulus, cfg.n_ops, cfg.max_len, seed=cfg.seed)
+
+    # --- settling core (full convergence diagnostics) ---
+    model = build_model(cfg, task.vocab_size, task.seq_len).to(cfg.device)
+    n_params = count_parameters(model)
+    print(f"[stage0] settling model: {n_params:,} params | device={cfg.device} "
+          f"| grad_mode={cfg.grad_mode} state_norm={cfg.state_norm}")
+    hist_s = _fit(model, lambda m, ids: m(ids)[1], task, cfg,
+                  random.Random(cfg.seed), "settling", full_eval=True)
+    result = {"settling": {"n_params": n_params, "history": hist_s,
+                           "final": hist_s[-1] if hist_s else {}}}
+
+    # --- matched fixed-depth baseline: actually train it, then compare (the gate) ---
+    if cfg.baseline:
+        bl, bl_cfg, bl_params = matched_baseline(
+            n_params, vocab_size=task.vocab_size, n_heads=cfg.n_heads,
+            n_layers=cfg.baseline_layers, max_seq=task.seq_len,
+        )
+        bl = bl.to(cfg.device)
+        print(f"[stage0] matched baseline: {bl_params:,} params "
+              f"({cfg.baseline_layers} layers, dim={bl_cfg.dim})")
+        # same seed => identical training batches => an equal-data comparison
+        hist_b = _fit(bl, lambda m, ids: [m(ids)], task, cfg,
+                      random.Random(cfg.seed), "baseline", full_eval=False)
+        result["baseline"] = {"n_params": bl_params, "history": hist_b,
+                              "final": hist_b[-1] if hist_b else {}}
+        s, b = result["settling"]["final"], result["baseline"]["final"]
+        if s and b:
+            delta = s["acc_ood"] - b["acc_ood"]
+            verdict = ("settling wins" if delta > 0.02
+                       else "baseline wins" if delta < -0.02
+                       else "TIE -- recurrent depth buys nothing")
+            print(f"[gate] OOD acc  settling {s['acc_ood']:.3f}  vs  baseline {b['acc_ood']:.3f}"
+                  f"  => delta {delta:+.3f}  [{verdict}]")
 
     # write the run artifact to the (git-ignored) outputs dir -- not during smoke
     if not cfg.smoke:

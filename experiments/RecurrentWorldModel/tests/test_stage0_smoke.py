@@ -76,12 +76,15 @@ def test_fixed_depth_forward():
 
 def test_run_stage0_smoke():
     out = run_stage0(Stage0Config(smoke=True, baseline=True))
-    assert out["n_params"] > 0
-    assert out["history"], "no eval recorded"
-    final = out["final"]
-    assert "acc_in" in final and "acc_ood" in final
-    assert 0.0 <= final["acc_in"] <= 1.0
-    assert "convergence_rate" in final["convergence"]
+    s = out["settling"]
+    assert s["n_params"] > 0 and s["history"], "no settling eval recorded"
+    assert "acc_in" in s["final"] and "acc_ood" in s["final"]
+    assert 0.0 <= s["final"]["acc_in"] <= 1.0
+    assert "convergence_rate" in s["final"]["convergence"]
+    # the baseline arm is actually trained + evaluated now (the gate)
+    b = out["baseline"]
+    assert b["n_params"] > 0 and b["history"]
+    assert "acc_ood" in b["final"]
 
 
 def test_bptt_grad_flows_through_all_steps():
@@ -112,4 +115,4 @@ def test_state_norm_bounds_the_state():
 
 def test_run_stage0_bptt_smoke():
     out = run_stage0(Stage0Config(smoke=True, grad_mode="bptt", bptt_iters=6, state_norm=True))
-    assert out["history"] and "acc_in" in out["final"]
+    assert out["settling"]["history"] and "acc_in" in out["settling"]["final"]
