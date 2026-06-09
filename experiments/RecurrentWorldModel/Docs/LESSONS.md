@@ -10,8 +10,10 @@ For the Stage-0 settling core on a small model + small data:
 - **Positional encoding: PoPE** (`pos_mode="pope"`). Clean what/where split; big OOD/length-extrapolation win.
 - **Convergence: `state_norm`** (RMS-normalize the state each iteration) — without it the residual block drifts and never settles.
 - **Gradient: BPTT** (`grad_mode="bptt"`), not IFT, at this scale — matches "Solve the Loop" practice for tiny models.
-- **Stability levers (being tried):** warm-start the settle from a proposal (not zeros); QK-norm on raw features before PoPE's softplus.
-- Open: the BPTT result generalizes OOD *better than the matched fixed-depth baseline* (0.57 vs 0.47) but oscillates — stability work in progress.
+- **Cold start (`warm_start="zeros"`).** The cheap single-block warm-start (`proposal`) *breaks* learning — see §4; it needs a trained backbone we don't have.
+- **QK-norm on raw features before PoPE's softplus** — kept (slightly helps training, doesn't fix convergence).
+- **BPTT eval consistency** — eval runs the same fixed N-step unroll as training (fixes the oscillation, which was a train/eval mismatch, not dynamics).
+- Best result so far (run #4): BPTT settling generalizes OOD *better than the matched fixed-depth baseline* (0.57 vs 0.47) — the first "recurrent depth earns its place" signal, with cold start + eval-consistency the way to keep it stable.
 
 ---
 
@@ -45,7 +47,7 @@ For the Stage-0 settling core on a small model + small data:
 
 ## 4 · Stable training of equilibrium / attractor models (DEQ + Solve the Loop)
 
-**Warm-start from a coherent proposal, not zeros.** "Solve the Loop"'s central stability trick: a backbone proposes `ỹ₀`, the attractor refines *from it* with `ỹ₀` persistently injected. Initializing from a coherent proposal "makes training stable compared to DEQ," which "blows up in the number of iterations" from zeros.
+**Warm-start needs a *trained* proposal — a detached self-pass HURTS.** "Solve the Loop" warm-starts the attractor from a backbone's coherent `ỹ₀` (gradient flows through the trained backbone). We tried the cheap single-operator version: a `no_grad` few-step pass of the *same untrained block* as the settle init. **Measured: it breaks BPTT learning outright** — loss stuck at chance (1.96) vs 1.66 from a cold (zeros) start, in a clean 4-way isolation (warm=proposal fails for both qk_norm on and off; warm=zeros learns for both). A detached self-pass of a random/marginally-contractive block is *not* a coherent proposal — it's a slightly-settled noise state, and starting the BPTT unroll from it starves the gradient. **Takeaway:** the warm-start benefit comes from the *trained backbone* (the two-module split), not from warm-starting per se — concrete evidence that single-operator purity costs training stability. `warm_start="zeros"` is the working default; `"proposal"` is parked until/unless we add a trained proposal generator (which is the backbone+attractor relaxation).
 
 **Operator-norm control.** DEQ: "the weights' operator norm is directly related to the stability of root-finding; weight normalization typically finds more stable parameters" — plus small init and LayerNorm/gating to constrain output ranges. Our levers: QK-norm-on-raw (§3) and weight/spectral norm.
 
