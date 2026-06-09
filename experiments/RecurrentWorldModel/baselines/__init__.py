@@ -1,0 +1,14 @@
+"""Baselines for the Stage 0 gate.
+
+The decisive Stage 0 test (implementation_plan.md §2.3): does the settling core
+beat a *fixed-depth* transformer of **equal active parameters** at an equal data
+budget? If a matched fixed-depth model ties it, recurrent depth buys nothing.
+"""
+
+from .fixed_depth import (
+    FixedDepthConfig,
+    FixedDepthTransformer,
+    matched_baseline,
+)
+
+__all__ = ["FixedDepthConfig", "FixedDepthTransformer", "matched_baseline"]

@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reservoir Computing Integration — Fork</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0E1016;
+  --bg2:       #14161D;
+  --bg3:       #1C1F28;
+  --bg4:       #242730;
+  --text:      #DDD9D0;
+  --text2:     #908C84;
+  --text3:     #5A5752;
+  --border:    rgba(255,255,255,0.07);
+  --border2:   rgba(255,255,255,0.12);
+
+  --amber:     #D4924A;
+  --amber-bg:  rgba(212,146,74,0.1);
+  --teal:      #4A9B93;
+  --teal-bg:   rgba(74,155,147,0.1);
+  --coral:     #C05B5B;
+  --coral-bg:  rgba(192,91,91,0.1);
+  --purple:    #8B7DC0;
+  --purple-bg: rgba(139,125,192,0.1);
+  --green:     #5E9B68;
+  --green-bg:  rgba(94,155,104,0.1);
+  --blue:      #5B87C0;
+  --blue-bg:   rgba(91,135,192,0.1);
+
+  --font-body: 'Crimson Pro', Georgia, serif;
+  --font-mono: 'Space Mono', 'Courier New', monospace;
+  --r: 5px;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+/* ── Layout ── */
+.shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* ── Sidebar ── */
+nav {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2.5rem 1rem 2rem 1.5rem;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  scrollbar-width: thin;
+}
+nav h2 {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 1rem;
+}
+nav ul { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+nav li a {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text2);
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 3px;
+  transition: all 0.12s;
+  line-height: 1.4;
+}
+nav li a:hover { background: var(--bg3); color: var(--text); }
+nav li a.sub { padding-left: 18px; font-size: 10px; opacity: 0.75; }
+nav .divider { height: 1px; background: var(--border); margin: 10px 8px; }
+.legend { margin-top: 1.5rem; padding: 0 8px; }
+.legend h3 { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text3); margin-bottom: 8px; }
+.legend-row { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+.legend-row span { font-family: var(--font-mono); font-size: 9px; color: var(--text2); }
+
+/* ── Main ── */
+main { padding: 3rem 3.5rem 6rem; max-width: 820px; }
+
+/* ── Doc header ── */
+.doc-header { margin-bottom: 3.5rem; padding-bottom: 2rem; border-bottom: 1px solid var(--border); }
+.doc-eyebrow { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text3); margin-bottom: 0.75rem; }
+.doc-header h1 { font-size: 2.2rem; font-weight: 300; letter-spacing: -0.02em; line-height: 1.2; color: var(--text); margin-bottom: 0.6rem; }
+.doc-header h1 em { font-style: italic; color: var(--text2); }
+.doc-meta { display: flex; gap: 1.5rem; margin-top: 1rem; flex-wrap: wrap; }
+.doc-meta span { font-family: var(--font-mono); font-size: 10px; color: var(--text3); }
+.doc-meta b { color: var(--text2); }
+.doc-intro { margin-top: 1.4rem; font-size: 1.05rem; color: var(--text2); line-height: 1.7; max-width: 62ch; }
+
+/* ── Sections ── */
+.section { margin-bottom: 3.5rem; }
+.section-header { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 1.5rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--border); }
+.section-num { font-family: var(--font-mono); font-size: 10px; color: var(--text3); }
+.section-header h2 { font-size: 1.2rem; font-weight: 600; letter-spacing: -0.01em; }
+
+.subsection { margin-bottom: 2.2rem; }
+.subsection h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.9rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+
+p { margin-bottom: 0.9rem; color: var(--text); }
+p:last-child { margin-bottom: 0; }
+
+/* ── Accent bars ── */
+.accent-amber  .section-header { border-bottom-color: var(--amber);  }
+.accent-teal   .section-header { border-bottom-color: var(--teal);   }
+.accent-coral  .section-header { border-bottom-color: var(--coral);  }
+.accent-purple .section-header { border-bottom-color: var(--purple); }
+.accent-green  .section-header { border-bottom-color: var(--green);  }
+.accent-blue   .section-header { border-bottom-color: var(--blue);   }
+
+/* ── Badges ── */
+.badge {
+  display: inline-flex; align-items: center;
+  font-family: var(--font-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 3px; white-space: nowrap;
+}
+.badge-amber  { background: var(--amber-bg);  color: var(--amber);  border: 0.5px solid rgba(212,146,74,0.3); }
+.badge-teal   { background: var(--teal-bg);   color: var(--teal);   border: 0.5px solid rgba(74,155,147,0.3); }
+.badge-coral  { background: var(--coral-bg);  color: var(--coral);  border: 0.5px solid rgba(192,91,91,0.3);  }
+.badge-purple { background: var(--purple-bg); color: var(--purple); border: 0.5px solid rgba(139,125,192,0.3);}
+.badge-green  { background: var(--green-bg);  color: var(--green);  border: 0.5px solid rgba(94,155,104,0.3); }
+.badge-blue   { background: var(--blue-bg);   color: var(--blue);   border: 0.5px solid rgba(91,135,192,0.3); }
+
+/* ── Callout boxes ── */
+.callout {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--r);
+  padding: 1rem 1.2rem;
+  margin: 1.2rem 0;
+  position: relative;
+}
+.callout::before {
+  content: attr(data-label);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  position: absolute;
+  top: -1px; left: 12px;
+  transform: translateY(-50%);
+  background: var(--bg2);
+  padding: 0 6px;
+}
+.callout.key    { border-left: 3px solid var(--amber);  background: var(--amber-bg); }
+.callout.key::before  { color: var(--amber); }
+.callout.caution { border-left: 3px solid var(--coral); background: var(--coral-bg); }
+.callout.caution::before { color: var(--coral); }
+.callout.plan   { border-left: 3px solid var(--green);  background: var(--green-bg); }
+.callout.plan::before  { color: var(--green); }
+.callout.theory { border-left: 3px solid var(--purple); background: var(--purple-bg); }
+.callout.theory::before { color: var(--purple); }
+.callout p { font-size: 16px; }
+
+/* ── Method cards ── */
+.method-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 1.2rem 1.4rem;
+  margin-bottom: 1.2rem;
+}
+.method-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.8rem; gap: 1rem; flex-wrap: wrap; }
+.method-card-title { font-size: 1rem; font-weight: 600; }
+.method-card-badges { display: flex; gap: 5px; flex-wrap: wrap; flex-shrink: 0; }
+.method-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.5rem; margin: 0.8rem 0; }
+.method-stat { font-size: 14px; }
+.method-stat-label { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text3); margin-bottom: 1px; }
+.method-stat-value { color: var(--text2); line-height: 1.4; }
+.method-verdict { margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid var(--border); font-size: 15px; color: var(--text2); }
+.method-verdict b { color: var(--text); }
+
+/* ── Agenda tags ── */
+.agenda-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 0.5rem; }
+.atag {
+  font-family: var(--font-mono); font-size: 9px;
+  background: var(--bg3); color: var(--text3);
+  border: 0.5px solid var(--border2);
+  padding: 2px 6px; border-radius: 3px;
+}
+
+/* ── Open questions ── */
+.question-list { display: flex; flex-direction: column; gap: 1rem; }
+.question-item { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 1rem 1.2rem; }
+.question-top { display: flex; align-items: baseline; gap: 0.7rem; margin-bottom: 0.5rem; }
+.question-num { font-family: var(--font-mono); font-size: 10px; color: var(--text3); flex-shrink: 0; }
+.question-text { font-size: 1rem; font-weight: 600; line-height: 1.4; }
+.question-body { font-size: 15px; color: var(--text2); line-height: 1.6; }
+
+/* ── Two-column ── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+.col-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 1rem 1.1rem; }
+.col-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 0.5rem; }
+.col-card ul { font-size: 14px; color: var(--text2); padding-left: 1.2rem; line-height: 1.7; }
+
+/* ── KG step list ── */
+.step-list { counter-reset: steps; display: flex; flex-direction: column; gap: 0.6rem; margin: 1rem 0; }
+.step { display: flex; gap: 0.9rem; align-items: flex-start; }
+.step-num {
+  counter-increment: steps;
+  content: counter(steps);
+  font-family: var(--font-mono); font-size: 10px;
+  background: var(--bg3); color: var(--text3);
+  border: 1px solid var(--border2);
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; margin-top: 2px;
+}
+.step-body { font-size: 15px; color: var(--text2); line-height: 1.6; }
+.step-body b { color: var(--text); }
+
+/* ── Fork diagram ── */
+.fork { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: 1rem 0; background: var(--border); border-radius: var(--r); overflow: hidden; }
+.fork-side { background: var(--bg2); padding: 1rem 1.1rem; }
+.fork-side h4 { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.6rem; }
+.fork-side.empiricist h4 { color: var(--teal); }
+.fork-side.rationalist h4 { color: var(--purple); }
+.fork-side p { font-size: 14px; color: var(--text2); line-height: 1.6; }
+
+/* ── Numbers / stats highlight ── */
+.stat-row { display: flex; gap: 1.5rem; margin: 0.8rem 0; flex-wrap: wrap; }
+.stat-box { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 0.6rem 0.9rem; }
+.stat-box .num { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; line-height: 1; }
+.stat-box .lbl { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text3); margin-top: 3px; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 5px; }
+
+/* ── Responsive ── */
+@media (max-width: 780px) {
+  .shell { grid-template-columns: 1fr; }
+  nav { display: none; }
+  main { padding: 2rem 1.5rem 4rem; }
+  .two-col, .fork, .method-stat-grid { grid-template-columns: 1fr; }
+}
+</style>
+<body>
+<div class="shell">
+
+<!-- ── Sidebar ── -->
+<nav>
+  <h2>Contents</h2>
+  <ul>
+    <li><a href="#fork">0 — The Fork</a></li>
+    <li><a href="#hard">1 — Two Hard Problems</a></li>
+    <div class="divider"></div>
+    <li><a href="#proposals">2 — Integration Proposals</a></li>
+    <li><a href="#p1" class="sub">2a P1 · Frozen front-end</a></li>
+    <li><a href="#p2" class="sub">2b P2 · Parallel axis</a></li>
+    <li><a href="#p3" class="sub">2c P3 · Hybrid mixer ★</a></li>
+    <li><a href="#p4" class="sub">2d P4 · Reservoir-init</a></li>
+    <div class="divider"></div>
+    <li><a href="#experiments">3 — Experimental Program</a></li>
+    <li><a href="#brain">4 — Deeper Questions (Deferred)</a></li>
+    <li><a href="#questions">5 — Open Questions</a></li>
+  </ul>
+
+  <div class="legend">
+    <h3>Status legend</h3>
+    <div class="legend-row"><span class="badge badge-amber">established</span><span>empirically confirmed</span></div>
+    <div class="legend-row"><span class="badge badge-teal">directional</span><span>promising, unproven</span></div>
+    <div class="legend-row"><span class="badge badge-coral">open</span><span>active research question</span></div>
+    <div class="legend-row"><span class="badge badge-purple">theoretical</span><span>unconfirmed theory</span></div>
+    <div class="legend-row"><span class="badge badge-green">plan</span><span>next step</span></div>
+  </div>
+</nav>
+
+<!-- ── Main content ── -->
+<main>
+
+  <header class="doc-header">
+    <div class="doc-eyebrow">Research Agenda · Fork · Off the v1 Critical Path · Companion to Architecture</div>
+    <h1>Reservoir Computing Integration<br><em>Proposals &amp; Experiments — A Research Fork</em></h1>
+    <div class="doc-meta">
+      <span><b>Problem:</b> the time-series / streaming-temporal gap (item 98)</span>
+      <span><b>Status:</b> fork — not on the v1 critical path</span>
+      <span><b>Preferred:</b> P3 (hybrid mixer), pending neuroscience</span>
+    </div>
+    <p class="doc-intro">The architecture has thinking-time recurrence (depth, chain) but no native streaming-temporal substrate, and attention is the wrong tool for it. Reservoir computing is the candidate fix, but how a fixed dynamical reservoir slots into a gradient-trained reasoning model is genuinely unresolved — it might be a front-end, a parallel axis, an interleaved mixer, or a structural prior. This document lays out the integration problem honestly, gives four proposals with proposed experiments, and parks the deeper question — what the brain does — as the path to a better answer, to be taken up another day.</p>
+  </header>
+
+
+  <!-- ══ 0 · THE FORK ══ -->
+  <section class="section accent-coral" id="fork">
+    <div class="section-header">
+      <span class="section-num">00</span>
+      <h2>The Fork</h2>
+    </div>
+
+    <p>This is a research branch, deliberately off the v1 critical path. The v1 blueprint (architecture §6) stays reasoning- and text-first; reservoir computing is spun up when time-series and streaming dynamics come into scope. The reason it is a fork and not a feature is that it is hard in a way the rest of the architecture is not: a reservoir is a different <em>kind</em> of object from a gradient-trained transformer, and the right way to join them is unknown.</p>
+
+    <div class="callout key" data-label="What is established vs. what is open">
+      <p>The <strong>direction</strong> — reservoir computing for the temporal substrate — is the established part: echo-state networks and liquid-state machines are decades-proven on temporal and chaotic-signal tasks, training only a readout, BPTT-free. <strong>HypercubeESN</strong> (item 98) is a memory-frugal, reproducible, edge-friendly <em>candidate implementation</em> of that direction (XOR-addressed hypercube wiring, a per-neuron delay line, the whole reservoir specified by a handful of scalars), not a settled dependency. What is <strong>open</strong> is the integration: how a frozen reservoir couples to a gradient-trained, convergent reasoning core. That is this document's subject.</p>
+    </div>
+
+    <div class="agenda-tags"><span class="atag">item 98 (reservoir/HypercubeESN)</span><span class="atag">item 1 (DEQ)</span><span class="atag">item 41 (attractors)</span><span class="atag">architecture §6 (v1)</span></div>
+  </section>
+
+
+  <!-- ══ 1 · TWO HARD PROBLEMS ══ -->
+  <section class="section accent-purple" id="hard">
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <h2>Two Hard Problems Every Proposal Must Answer</h2>
+    </div>
+
+    <div class="subsection">
+      <h3>1a &nbsp; The spectral-regime incompatibility <span class="badge badge-purple">theoretical</span></h3>
+      <p>A reservoir and the DEQ/attractor core sit at <strong>opposite ends of the spectral-radius axis</strong>, and this is the deepest fact in the whole problem. The echo-state property requires spectral radius ≈ 1 — edge-of-chaos dynamics that do <em>not</em> die, so temporal history stays alive in the state. The DEQ core (architecture §6a) requires contraction, spectral radius &lt; 1, so it <em>converges</em> to a fixed point that is the answer. One dynamical system cannot occupy both regimes. The consequence is not an engineering inconvenience but a structural verdict: <strong>the reservoir must be a distinct component with its own dynamics, feeding or running beside the convergent core — never a re-tuning of it.</strong> This rules out replacing the core's dynamics with reservoir dynamics, and it is why the viable proposals all keep two separate dynamical regimes.</p>
+    </div>
+
+    <div class="subsection">
+      <h3>1b &nbsp; The frozen-to-trained seam <span class="badge badge-coral">open</span></h3>
+      <p>A reservoir is frozen; it trains only a readout — that is the entire source of its efficiency (cheap, BPTT-free, reproducible). The rest of the model is gradient-trained end to end. So every integration is really a decision about <em>where the frozen-to-trained seam goes</em> and how gradients route around the frozen reservoir. Put the seam at the input (P1), at a side-memory interface (P2), inside the residual stream (P3), or dissolve it by making the reservoir trainable (P4) — each choice trades integration cleanliness against how much of the reservoir's cheapness survives. There is no free option; the proposals differ in which cost they pay.</p>
+    </div>
+
+    <div class="agenda-tags"><span class="atag">item 41 (spectral radius)</span><span class="atag">item 1 (contraction/DEQ)</span><span class="atag">echo-state property</span></div>
+  </section>
+
+
+  <!-- ══ 2 · PROPOSALS ══ -->
+  <section class="section accent-amber" id="proposals">
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <h2>Integration Proposals</h2>
+    </div>
+
+    <p>Four proposals, ordered by invasiveness. Each names where the seam goes, what it costs, and a concrete experiment. The full-replacement option — a reservoir <em>instead of</em> attention everywhere — is excluded by §1a and by capability: reservoirs have recency-biased fading memory and no content-based addressing, so they cannot do the relational binding attention provides, and the project will not give up composition.</p>
+
+    <div class="subsection" id="p1">
+      <h3>2a &nbsp; P1 — Frozen Temporal Front-End <span class="badge badge-teal">directional</span></h3>
+      <p><b>Setup.</b> The streaming signal drives a frozen reservoir; a thin <em>trainable</em> readout projects the reservoir state into the shared latent space as tokens; the attention/DEQ core processes them as usual. This is architecture §6b with the time-series modality's adapter being a reservoir instead of a linear projection — the classic ESN forecasting setup. <b>Seam:</b> at the readout; gradients stop there, reservoir frozen. Cleanest. <b>Cost:</b> temporal processing is pre-core and static — the model reasons over a fixed temporal summary it cannot dynamically interrogate, and the fading-memory profile is fixed, not learned.</p>
+      <div class="callout plan" data-label="Proposed experiment — the decisive first probe">
+        <p>Frozen HypercubeESN reservoir → trainable linear readout → tokens → existing core. Compare three conditions on a forecasting / nonlinear-temporal task (NARMA-N, Jaeger memory-capacity, a real forecasting benchmark): core-with-reservoir-features, core-alone, and reservoir-alone (ESN linear readout). The decisive question is narrow and cheap: <em>do frozen reservoir features give the core a temporal capability it lacks?</em> If even as a front-end they do not help, the whole direction is suspect; if they do, escalate.</p>
+      </div>
+    </div>
+
+    <div class="subsection" id="p2">
+      <h3>2b &nbsp; P2 — Parallel Queryable Axis (the genuine 3rd axis) <span class="badge badge-teal">directional</span></h3>
+      <p><b>Setup.</b> A frozen reservoir runs alongside the chain, updated on the <em>world/token clock</em> (not the depth-iteration clock — depth is thinking-time, the reservoir is world-time), maintaining persistent temporal state the core reads via cross-attention. The model then has depth recurrence (settle), chain recurrence (step), and a reservoir state (temporal memory) it can attend into throughout reasoning. <b>Seam:</b> the trainable cross-attention/readout into the core; reservoir frozen. <b>Cost:</b> more machinery (cross-attention to a non-token state, clock management), and the frozen features may be misaligned to what the core wants.</p>
+      <div class="callout plan" data-label="Proposed experiment">
+        <p>Add the world-clock reservoir + cross-attention to a core that passed P1. Test on a task needing <em>both</em> relational reasoning and temporal recall — a streaming environment from the training-environment doc, or a synthetic task interleaving relational inference with temporal-order recall. Measure whether queryable temporal memory extends horizon (architecture §1g) and beats P1 on long-range temporal dependencies, and watch the clock separation carefully.</p>
+      </div>
+      <div class="callout caution" data-label="Overlap to resolve before building">
+        <p>P2's "queryable temporal memory the core attends into" overlaps with item 79's hippocampus/CLS memory, which is also a queryable store the core reads. These may be one component wearing two hats (temporal-reservoir and episodic-hippocampal memory) or two distinct systems. Decide before building, to avoid two parallel memory systems that should have been one.</p>
+      </div>
+    </div>
+
+    <div class="subsection" id="p3">
+      <h3>2c &nbsp; P3 — Interleaved Hybrid Mixer <span class="badge badge-coral">open — preferred</span></h3>
+      <p><b>Setup.</b> Make temporal mixing and relational mixing first-class peers in the <em>same</em> stack: attention/relational layers do content/relational mixing (composition — what reasoning needs), reservoir layers do temporal mixing (sequential dynamics), interleaved. This is the most principled option — temporal context is available at every layer, shaping relational computation directly, rather than being relegated to a front-end (P1) or a side-memory (P2). <b>Seam:</b> inside the residual stream — a frozen, non-differentiable layer wedged into a gradient-trained stack, which is where the friction is sharpest. <b>Cost:</b> the interface (how reservoir output enters the residual stream, how gradients route around it) and the risk that the reservoir's fixed dynamics do not match the representation at that depth.</p>
+      <div class="callout key" data-label="Why P3 is worth the difficulty">
+        <p>Two reasons it is the preferred direction despite the seam problem. First, it is the <strong>known-good pattern with one component swapped</strong>: hybrid recurrent-attention stacks (interleaving SSM/Mamba-style recurrent mixers with attention) already work well. A reservoir is the fixed, nonlinear <em>extreme</em> of that recurrent mixer — so P3 is "hybrid recurrent-attention" with the recurrent mixer being a reservoir, not an exotic new structure. Second, it is the most <strong>biologically resonant</strong>: cortical microcircuits combine recurrent (reservoir-like) and feedforward processing in the same tissue. If the brain interleaves, P3 is the faithful model — which is exactly why the better answer needs the neuroscience (§4).</p>
+      </div>
+      <div class="callout plan" data-label="Proposed experiment — the SSM bridge">
+        <p>Exploit the known-good pattern as a smooth path. Start from a working hybrid stack with a <em>trained</em> recurrent mixer (SSM/Mamba-style) interleaved with relational attention; confirm it works. Then progressively <em>freeze it toward a reservoir</em>: reduce trained parameters, fix the spectral radius near 1, adopt the hypercube structure — measuring at each step where temporal capability holds and where it breaks. The decisive question: <em>can a frozen reservoir mixer match a trained recurrent mixer's temporal contribution while keeping the reservoir's cheapness?</em> If performance collapses as you freeze, P3-pure is not viable and the fallback is P4 (this experiment also dissolves continuously into P4).</p>
+      </div>
+    </div>
+
+    <div class="subsection" id="p4">
+      <h3>2d &nbsp; P4 — Reservoir-as-Initialization (the bridge) <span class="badge badge-teal">directional</span></h3>
+      <p><b>Setup.</b> Use HypercubeESN's <em>structure</em> — hypercube wiring, XOR addressing, spectral-radius-scaled init, delay-line memory — as the initialization and architectural prior of a <em>normal differentiable</em> recurrent layer, then train it. <b>Seam:</b> dissolved — it is just a layer with a good temporal prior, fully differentiable, integrates trivially. <b>Cost:</b> you forfeit the reservoir's defining advantage — train-only-the-readout, BPTT-free, ultra-cheap, reproducible — and inherit backprop-through-time's vanishing-gradient problems the reservoir avoided. A different trade: differentiability and integration for cheapness and reproducibility. The memory-frugal hypercube structure can still be kept as the prior.</p>
+      <div class="callout plan" data-label="Proposed experiment">
+        <p>Initialize a trainable recurrent layer with HypercubeESN structure + spectral scaling; train end-to-end. Compare against a random-init recurrent layer and against the frozen reservoir (P1/P3). Measure whether the reservoir prior beats random init, and how much temporal capability survives training (does the spectral radius drift away from the good regime once gradients touch it?).</p>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ══ 3 · EXPERIMENTAL PROGRAM ══ -->
+  <section class="section accent-green" id="experiments">
+    <div class="section-header">
+      <span class="section-num">03</span>
+      <h2>Experimental Program</h2>
+    </div>
+
+    <p>The proposals form a natural escalation, cheapest and most decisive first. The program is gated: each stage only runs if the prior one showed value.</p>
+
+    <div class="step-list">
+      <div class="step"><div class="step-num">1</div><div class="step-body"><b>P1 — does the core gain a temporal capability at all?</b> The highest-information, lowest-cost probe. If frozen reservoir features do not help the core even as a front-end, stop — the direction is wrong. If they do, the rest is worth pursuing.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-body"><b>P2 — does it need to be live during reasoning?</b> Only if P1 showed value but the core wants temporal memory it can interrogate mid-reasoning, not just a static summary. Resolve the item-79 overlap first.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-body"><b>P3 via the SSM bridge — can a frozen mixer match a trained one?</b> The preferred direction, approached by freezing a working trained-recurrent hybrid toward a reservoir. Continuously dissolves into P4 as freezing fails, so the two share one experimental track.</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-body"><b>P4 — the fallback.</b> If the frozen seam cannot be made to work in-stack, trade cheapness for a trainable reservoir-initialized layer.</div></div>
+    </div>
+
+    <div class="callout key" data-label="Shared diagnostics across all proposals">
+      <p>Three standard reservoir benchmarks isolate the temporal contribution cleanly, and HypercubeESN ships them: <strong>Jaeger memory capacity</strong> (how many past steps the state retains), <strong>NARMA-N</strong> (nonlinear temporal modeling), and streaming forecasting / anomaly detection. The one knob to monitor throughout is the <strong>spectral radius</strong> — it is the single parameter that decides whether the component is in the memory-preserving regime (≈ 1) or has slipped toward forgetting (&lt; 1) or chaos (&gt; 1). Every proposal lives or dies by keeping the reservoir component in the right regime while the core stays contractive.</p>
+    </div>
+
+    <div class="agenda-tags"><span class="atag">item 98 (HypercubeESN benchmarks)</span><span class="atag">architecture §1g (horizon)</span><span class="atag">item 79 (memory overlap)</span></div>
+  </section>
+
+
+  <!-- ══ 4 · DEEPER QUESTIONS / DEFERRED ══ -->
+  <section class="section accent-blue" id="brain">
+    <div class="section-header">
+      <span class="section-num">04</span>
+      <h2>The Deeper Questions — Deferred to Neuroscience</h2>
+    </div>
+
+    <div class="callout key" data-label="Deferred — to revisit">
+      <p>The proposals above are how to <em>try things</em>; they do not tell us which is <em>right</em>. The better answer requires understanding how the brain integrates reservoir-like temporal dynamics with structured computation — because biology has already solved this, and the single most important architectural choice (P3 interleave vs P2 separate subsystem) is exactly the choice the brain's organization would settle. This section is deliberately parked, to be taken up on a later day with proper neuroscience research.</p>
+    </div>
+
+    <p>The discriminating question, stated plainly: <strong>does the brain interleave temporal and relational processing in one circuit (→ P3), or separate them into distinct subsystems (→ P2)?</strong> The known anatomy points both ways, which is precisely why it needs real study rather than a guess:</p>
+
+    <div class="two-col">
+      <div class="col-card">
+        <h4>Evidence pointing toward P2 (separate subsystem)</h4>
+        <ul>
+          <li><b>The cerebellum as a liquid-state machine.</b> A random granule-cell expansion feeding a trained Purkinje readout is a biological reservoir-with-trained-readout, coupled to but separate from cortex — a concrete template for the frozen-reservoir + readout + reasoner coupling.</li>
+          <li><b>Cerebellum as forward model.</b> If the cerebellum is the brain's temporal/predictive subsystem feeding the cortical reasoner, that argues a separate reservoir subsystem, not interleaving.</li>
+        </ul>
+      </div>
+      <div class="col-card">
+        <h4>Evidence pointing toward P3 (interleaved in one circuit)</h4>
+        <ul>
+          <li><b>Cortical microcircuits as reservoirs (Maass LSM).</b> If cortex itself is partly reservoir-like, temporal and relational mixing already coexist in one tissue — the faithful model is then interleaving.</li>
+          <li><b>Recurrent + feedforward in the same column.</b> Cortical tissue combines recurrent dynamics and feedforward selectivity locally, which is exactly the P3 hybrid-mixer picture.</li>
+        </ul>
+      </div>
+    </div>
+
+    <p style="margin-top:0.9rem">Supporting questions worth the same deferred study:</p>
+    <div class="step-list">
+      <div class="step"><div class="step-num">i</div><div class="step-body"><b>Thalamo-cortical loops.</b> How does the thalamus gate and route temporal/contextual signals into cortical computation? A model for the reservoir→core interface — whether it is cross-attention (P2) or in-stream injection (P3).</div></div>
+      <div class="step"><div class="step-num">ii</div><div class="step-body"><b>Time cells, sequence replay, theta phase coding.</b> How is temporal order represented and made queryable in hippocampus and entorhinal cortex? Informs P2's queryable memory and the item-79 overlap — and connects to grid-cells-as-Yoneda from the representation document.</div></div>
+      <div class="step"><div class="step-num">iii</div><div class="step-body"><b>Timescale separation and neuromodulation.</b> How does the brain run fast reservoir-like dynamics and slow consolidation at once? Directly the world-time-vs-thinking-time clock problem (P2).</div></div>
+    </div>
+
+    <div class="agenda-tags"><span class="atag">item 79 (hippocampus/CLS)</span><span class="atag">item 41 (attractors)</span><span class="atag">cerebellum / LSM</span><span class="atag">DEFERRED</span></div>
+  </section>
+
+
+  <!-- ══ 5 · OPEN QUESTIONS ══ -->
+  <section class="section accent-coral" id="questions">
+    <div class="section-header">
+      <span class="section-num">05</span>
+      <h2>Open Questions</h2>
+    </div>
+
+    <div class="question-list">
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">R1</span>
+          <span class="question-text">Do frozen reservoir features give the core a temporal capability it lacks?</span>
+          <span class="badge badge-coral">open — decisive</span>
+        </div>
+        <p class="question-body">The gate on the entire fork (P1 experiment). If a frozen reservoir front-end does not measurably extend what the core can do on temporal tasks, no more elaborate integration will rescue it. Cheap to answer, and it should be answered first.</p>
+        <div class="agenda-tags"><span class="atag">P1</span><span class="atag">item 98</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">R2</span>
+          <span class="question-text">Can a frozen reservoir mixer match a trained recurrent mixer in-stack (is P3 viable)?</span>
+          <span class="badge badge-coral">open — preferred direction</span>
+        </div>
+        <p class="question-body">Approached via the SSM bridge: freeze a working trained-recurrent hybrid toward a reservoir and watch where it breaks. If temporal capability survives freezing, P3 is viable and cheap; if it collapses, the answer is P4. The neuroscience (§4) is what would tell us whether to expect interleaving to work at all.</p>
+        <div class="agenda-tags"><span class="atag">P3</span><span class="atag">P4</span><span class="atag">§4</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">R3</span>
+          <span class="question-text">Is the reservoir's temporal memory the same component as the hippocampal/CLS memory?</span>
+          <span class="badge badge-coral">open</span>
+        </div>
+        <p class="question-body">P2's queryable temporal store and item 79's episodic memory may be one system or two. Resolving this prevents building two parallel memory systems that should have been unified, and the time-cell / sequence-replay neuroscience (§4-ii) bears directly on it.</p>
+        <div class="agenda-tags"><span class="atag">P2</span><span class="atag">item 79</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">R4</span>
+          <span class="question-text">Does the brain interleave (P3) or separate (P2) temporal and relational processing?</span>
+          <span class="badge badge-purple">deferred — the deciding question</span>
+        </div>
+        <p class="question-body">The architectural choice that the proposals cannot settle on their own. Cerebellum-as-reservoir argues separate subsystem; cortical-microcircuit-as-reservoir argues interleaving. Deferred to proper neuroscience study (§4), and the reason a better answer than "run the experiments and see" is possible at all.</p>
+        <div class="agenda-tags"><span class="atag">§4</span><span class="atag">DEFERRED</span></div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+</div>
+</body>
+</html>

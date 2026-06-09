@@ -1,0 +1,225 @@
+"""Stage 0 experiment harness -- the settling core vs a matched fixed-depth baseline.
+
+What this runs (implementation_plan.md §2, training_environment.md §2.1):
+  * Trains ``SettlingLM`` on ModularChain (compositional reasoning, difficulty = chain length).
+  * Logs the Risk-1 convergence diagnostics: convergence rate, iterations distribution,
+    oscillation rate, difficulty->iterations correlation (adaptive compute), basin
+    consistency (spurious attractors).
+  * Evaluates in-distribution and OOD-by-difficulty accuracy.
+  * Optionally trains a parameter-matched fixed-depth transformer for the gate:
+    does recurrent depth beat fixed depth at equal params and equal data?
+
+THIS DOES NOT RUN ON IMPORT. Run it on the GPU (never train on the dev machine --
+Mistake #36):
+
+    ./venv/Scripts/python.exe experiments/RecurrentWorldModel/train_stage0.py --steps 4000 --baseline
+
+A tiny CPU smoke path exists for tests only: run_stage0(Stage0Config(smoke=True)).
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import random
+import sys
+from dataclasses import dataclass
+
+import torch
+import torch.nn.functional as F
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from baselines import matched_baseline  # noqa: E402
+from core.deq import DEQConfig  # noqa: E402
+from core.model import SettlingLM, SettlingLMConfig, count_parameters  # noqa: E402
+from diagnostics import ConvergenceMonitor, basin_consistency  # noqa: E402
+from tasks import ModularChain  # noqa: E402
+
+
+@dataclass
+class Stage0Config:
+    # task
+    modulus: int = 7
+    n_ops: int = 8
+    max_len: int = 8
+    train_len_min: int = 1
+    train_len_max: int = 4
+    ood_len_min: int = 5
+    ood_len_max: int = 6
+    # model
+    dim: int = 128
+    n_heads: int = 4
+    segments: int = 2          # deep-supervision segments
+    deq_max_iter: int = 40
+    deq_tol: float = 1e-3
+    grad_mode: str = "one_step"
+    # training
+    steps: int = 2000
+    batch_size: int = 128
+    lr: float = 3e-4
+    weight_decay: float = 0.01
+    eval_every: int = 200
+    eval_batch: int = 256
+    seed: int = 0
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    # baseline
+    baseline: bool = False
+    baseline_layers: int = 6
+    # smoke (tests only): tiny + 2 steps, no real training
+    smoke: bool = False
+
+
+def lm_loss(seg_logits: list[torch.Tensor], targets, mask) -> torch.Tensor:
+    """Mean over deep-supervision segments of masked next-token cross-entropy."""
+    v = seg_logits[0].shape[-1]
+    denom = mask.sum().clamp_min(1.0)
+    total = seg_logits[0].new_zeros(())
+    for logits in seg_logits:
+        ce = F.cross_entropy(logits.reshape(-1, v), targets.reshape(-1), reduction="none")
+        total = total + (ce.reshape(mask.shape) * mask).sum() / denom
+    return total / len(seg_logits)
+
+
+@torch.no_grad()
+def accuracy(logits, targets, mask) -> float:
+    pred = logits.argmax(dim=-1)
+    correct = ((pred == targets).float() * mask).sum()
+    return (correct / mask.sum().clamp_min(1.0)).item()
+
+
+@torch.no_grad()
+def adaptive_compute_probe(model, task, cfg: Stage0Config, rng) -> dict:
+    """Risk-1 adaptive-compute test: do iterations-to-converge rise with difficulty?
+
+    Solve a pure-difficulty-n batch for each n and correlate n with the solver's
+    iteration count. Positive correlation = the core spends more compute on harder
+    inputs (the central justification for recurrent depth).
+    """
+    mon = ConvergenceMonitor()
+    diffs: list[float] = []
+    series: list[tuple[int, int]] = []
+    for n in range(1, task.max_len + 1):
+        batch = task.sample(64, n, n, rng).to(cfg.device)
+        _, info = model.deq(model._inject(batch.input_ids))
+        mon.record(info)
+        diffs.append(float(n))
+        series.append((n, info.iters))
+    return {"series": series, "iters_vs_difficulty_r": mon.difficulty_correlation(diffs)}
+
+
+@torch.no_grad()
+def evaluate(model, task, cfg: Stage0Config, rng) -> dict:
+    model.eval()
+    dev = cfg.device
+    # in-distribution
+    b_in = task.sample(cfg.eval_batch, cfg.train_len_min, cfg.train_len_max, rng).to(dev)
+    logits_in, _, infos_in = model(b_in.input_ids)
+    # out-of-distribution by difficulty
+    b_ood = task.sample(cfg.eval_batch, cfg.ood_len_min, cfg.ood_len_max, rng).to(dev)
+    logits_ood, _, _ = model(b_ood.input_ids)
+
+    # Risk-1 convergence diagnostics over the in-dist eval batch
+    mon = ConvergenceMonitor()
+    for info in infos_in:
+        mon.record(info)
+    # iterations-vs-difficulty correlation needs per-example iters; recompute
+    # one solve per example would be costly, so report the summary + a basin probe
+    basin = basin_consistency(model.deq, model._inject(b_in.input_ids[:8]), n_restarts=4)
+
+    adaptive = adaptive_compute_probe(model, task, cfg, rng)
+
+    model.train()
+    return {
+        "acc_in": accuracy(logits_in, b_in.targets, b_in.loss_mask),
+        "acc_ood": accuracy(logits_ood, b_ood.targets, b_ood.loss_mask),
+        "convergence": mon.summary(),
+        "basin": basin,
+        "adaptive": adaptive,
+    }
+
+
+def build_model(cfg: Stage0Config, vocab: int, max_seq: int) -> SettlingLM:
+    lm_cfg = SettlingLMConfig(
+        vocab_size=vocab, dim=cfg.dim, n_heads=cfg.n_heads, max_seq=max_seq,
+        n_supervision_segments=cfg.segments,
+        deq=DEQConfig(max_iter=cfg.deq_max_iter, tol=cfg.deq_tol, grad_mode=cfg.grad_mode),
+    )
+    return SettlingLM(lm_cfg)
+
+
+def run_stage0(cfg: Stage0Config) -> dict:
+    if cfg.smoke:
+        cfg.dim, cfg.n_heads, cfg.segments = 32, 4, 2
+        cfg.steps, cfg.batch_size, cfg.eval_batch = 2, 16, 16
+        cfg.deq_max_iter, cfg.eval_every, cfg.device = 8, 2, "cpu"
+
+    torch.manual_seed(cfg.seed)
+    rng = random.Random(cfg.seed)
+    task = ModularChain(cfg.modulus, cfg.n_ops, cfg.max_len, seed=cfg.seed)
+
+    model = build_model(cfg, task.vocab_size, task.seq_len).to(cfg.device)
+    n_params = count_parameters(model)
+    opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+
+    print(f"[stage0] settling model: {n_params:,} params | device={cfg.device}")
+    if cfg.baseline:
+        bl, bl_cfg, bl_params = matched_baseline(
+            n_params, vocab_size=task.vocab_size, n_heads=cfg.n_heads,
+            n_layers=cfg.baseline_layers, max_seq=task.seq_len,
+        )
+        print(f"[stage0] matched baseline: {bl_params:,} params "
+              f"({cfg.baseline_layers} layers, dim={bl_cfg.dim})")
+
+    history: list[dict] = []
+    model.train()
+    for step in range(1, cfg.steps + 1):
+        batch = task.sample(cfg.batch_size, cfg.train_len_min, cfg.train_len_max, rng).to(cfg.device)
+        _, seg_logits, _ = model(batch.input_ids)
+        loss = lm_loss(seg_logits, batch.targets, batch.loss_mask)
+        opt.zero_grad(set_to_none=True)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        opt.step()
+
+        if step % cfg.eval_every == 0 or step == cfg.steps:
+            metrics = evaluate(model, task, cfg, rng)
+            metrics["step"] = step
+            metrics["loss"] = loss.item()
+            history.append(metrics)
+            c = metrics["convergence"]
+            r = metrics["adaptive"]["iters_vs_difficulty_r"]
+            print(f"[stage0] step {step:>5} loss {loss.item():.3f} "
+                  f"acc_in {metrics['acc_in']:.3f} acc_ood {metrics['acc_ood']:.3f} "
+                  f"| conv {c['convergence_rate']:.2f} iters~{c['iters_mean']:.1f} "
+                  f"osc {c['oscillation_rate']:.2f} "
+                  f"adaptive_r {r:+.2f} "
+                  f"basin_dist {metrics['basin']['mean_pairwise_rel_dist']:.3f}")
+
+    return {"n_params": n_params, "history": history, "final": history[-1] if history else {}}
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description="Stage 0: settling core vs fixed-depth baseline")
+    p.add_argument("--steps", type=int, default=2000)
+    p.add_argument("--dim", type=int, default=128)
+    p.add_argument("--heads", type=int, default=4)
+    p.add_argument("--segments", type=int, default=2)
+    p.add_argument("--batch_size", type=int, default=128)
+    p.add_argument("--lr", type=float, default=3e-4)
+    p.add_argument("--deq_max_iter", type=int, default=40)
+    p.add_argument("--baseline", action="store_true", help="also build a param-matched baseline")
+    p.add_argument("--baseline_layers", type=int, default=6)
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--smoke", action="store_true", help="tiny CPU smoke run (no real training)")
+    a = p.parse_args()
+    cfg = Stage0Config(
+        steps=a.steps, dim=a.dim, n_heads=a.heads, segments=a.segments,
+        batch_size=a.batch_size, lr=a.lr, deq_max_iter=a.deq_max_iter,
+        baseline=a.baseline, baseline_layers=a.baseline_layers, seed=a.seed, smoke=a.smoke,
+    )
+    run_stage0(cfg)
+
+
+if __name__ == "__main__":
+    main()

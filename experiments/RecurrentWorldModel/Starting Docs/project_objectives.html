@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Project Objectives — Scope &amp; Strategy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0E1016;
+  --bg2:       #14161D;
+  --bg3:       #1C1F28;
+  --bg4:       #242730;
+  --text:      #DDD9D0;
+  --text2:     #908C84;
+  --text3:     #5A5752;
+  --border:    rgba(255,255,255,0.07);
+  --border2:   rgba(255,255,255,0.12);
+
+  --amber:     #D4924A;
+  --amber-bg:  rgba(212,146,74,0.1);
+  --teal:      #4A9B93;
+  --teal-bg:   rgba(74,155,147,0.1);
+  --coral:     #C05B5B;
+  --coral-bg:  rgba(192,91,91,0.1);
+  --purple:    #8B7DC0;
+  --purple-bg: rgba(139,125,192,0.1);
+  --green:     #5E9B68;
+  --green-bg:  rgba(94,155,104,0.1);
+  --blue:      #5B87C0;
+  --blue-bg:   rgba(91,135,192,0.1);
+
+  --font-body: 'Crimson Pro', Georgia, serif;
+  --font-mono: 'Space Mono', 'Courier New', monospace;
+  --r: 5px;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+/* ── Layout ── */
+.shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* ── Sidebar ── */
+nav {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2.5rem 1rem 2rem 1.5rem;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  scrollbar-width: thin;
+}
+nav h2 {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 1rem;
+}
+nav ul { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+nav li a {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text2);
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 3px;
+  transition: all 0.12s;
+  line-height: 1.4;
+}
+nav li a:hover { background: var(--bg3); color: var(--text); }
+nav li a.sub { padding-left: 18px; font-size: 10px; opacity: 0.75; }
+nav .divider { height: 1px; background: var(--border); margin: 10px 8px; }
+.legend { margin-top: 1.5rem; padding: 0 8px; }
+.legend h3 { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text3); margin-bottom: 8px; }
+.legend-row { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+.legend-row span { font-family: var(--font-mono); font-size: 9px; color: var(--text2); }
+
+/* ── Main ── */
+main { padding: 3rem 3.5rem 6rem; max-width: 820px; }
+
+/* ── Doc header ── */
+.doc-header { margin-bottom: 3.5rem; padding-bottom: 2rem; border-bottom: 1px solid var(--border); }
+.doc-eyebrow { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text3); margin-bottom: 0.75rem; }
+.doc-header h1 { font-size: 2.2rem; font-weight: 300; letter-spacing: -0.02em; line-height: 1.2; color: var(--text); margin-bottom: 0.6rem; }
+.doc-header h1 em { font-style: italic; color: var(--text2); }
+.doc-meta { display: flex; gap: 1.5rem; margin-top: 1rem; flex-wrap: wrap; }
+.doc-meta span { font-family: var(--font-mono); font-size: 10px; color: var(--text3); }
+.doc-meta b { color: var(--text2); }
+.doc-intro { margin-top: 1.4rem; font-size: 1.05rem; color: var(--text2); line-height: 1.7; max-width: 60ch; }
+
+/* ── Sections ── */
+.section { margin-bottom: 3.5rem; }
+.section-header { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 1.5rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--border); }
+.section-num { font-family: var(--font-mono); font-size: 10px; color: var(--text3); }
+.section-header h2 { font-size: 1.2rem; font-weight: 600; letter-spacing: -0.01em; }
+
+.subsection { margin-bottom: 2.2rem; }
+.subsection h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.9rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+
+p { margin-bottom: 0.9rem; color: var(--text); }
+p:last-child { margin-bottom: 0; }
+
+/* ── Accent bars ── */
+.accent-amber  .section-header { border-bottom-color: var(--amber);  }
+.accent-teal   .section-header { border-bottom-color: var(--teal);   }
+.accent-coral  .section-header { border-bottom-color: var(--coral);  }
+.accent-purple .section-header { border-bottom-color: var(--purple); }
+.accent-green  .section-header { border-bottom-color: var(--green);  }
+.accent-blue   .section-header { border-bottom-color: var(--blue);   }
+
+/* ── Badges ── */
+.badge {
+  display: inline-flex; align-items: center;
+  font-family: var(--font-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 3px; white-space: nowrap;
+}
+.badge-amber  { background: var(--amber-bg);  color: var(--amber);  border: 0.5px solid rgba(212,146,74,0.3); }
+.badge-teal   { background: var(--teal-bg);   color: var(--teal);   border: 0.5px solid rgba(74,155,147,0.3); }
+.badge-coral  { background: var(--coral-bg);  color: var(--coral);  border: 0.5px solid rgba(192,91,91,0.3);  }
+.badge-purple { background: var(--purple-bg); color: var(--purple); border: 0.5px solid rgba(139,125,192,0.3);}
+.badge-green  { background: var(--green-bg);  color: var(--green);  border: 0.5px solid rgba(94,155,104,0.3); }
+.badge-blue   { background: var(--blue-bg);   color: var(--blue);   border: 0.5px solid rgba(91,135,192,0.3); }
+
+/* ── Callout boxes ── */
+.callout {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--r);
+  padding: 1rem 1.2rem;
+  margin: 1.2rem 0;
+  position: relative;
+}
+.callout::before {
+  content: attr(data-label);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  position: absolute;
+  top: -1px; left: 12px;
+  transform: translateY(-50%);
+  background: var(--bg2);
+  padding: 0 6px;
+}
+.callout.key    { border-left: 3px solid var(--amber);  background: var(--amber-bg); }
+.callout.key::before  { color: var(--amber); }
+.callout.caution { border-left: 3px solid var(--coral); background: var(--coral-bg); }
+.callout.caution::before { color: var(--coral); }
+.callout.plan   { border-left: 3px solid var(--green);  background: var(--green-bg); }
+.callout.plan::before  { color: var(--green); }
+.callout.theory { border-left: 3px solid var(--purple); background: var(--purple-bg); }
+.callout.theory::before { color: var(--purple); }
+.callout p { font-size: 16px; }
+
+/* ── Method cards ── */
+.method-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 1.2rem 1.4rem;
+  margin-bottom: 1.2rem;
+}
+.method-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.8rem; gap: 1rem; flex-wrap: wrap; }
+.method-card-title { font-size: 1rem; font-weight: 600; }
+.method-card-badges { display: flex; gap: 5px; flex-wrap: wrap; flex-shrink: 0; }
+.method-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.5rem; margin: 0.8rem 0; }
+.method-stat { font-size: 14px; }
+.method-stat-label { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text3); margin-bottom: 1px; }
+.method-stat-value { color: var(--text2); line-height: 1.4; }
+.method-verdict { margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid var(--border); font-size: 15px; color: var(--text2); }
+.method-verdict b { color: var(--text); }
+
+/* ── Agenda tags ── */
+.agenda-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 0.5rem; }
+.atag {
+  font-family: var(--font-mono); font-size: 9px;
+  background: var(--bg3); color: var(--text3);
+  border: 0.5px solid var(--border2);
+  padding: 2px 6px; border-radius: 3px;
+}
+
+/* ── Open questions ── */
+.question-list { display: flex; flex-direction: column; gap: 1rem; }
+.question-item { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 1rem 1.2rem; }
+.question-top { display: flex; align-items: baseline; gap: 0.7rem; margin-bottom: 0.5rem; }
+.question-num { font-family: var(--font-mono); font-size: 10px; color: var(--text3); flex-shrink: 0; }
+.question-text { font-size: 1rem; font-weight: 600; line-height: 1.4; }
+.question-body { font-size: 15px; color: var(--text2); line-height: 1.6; }
+
+/* ── Two-column ── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+.col-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 1rem 1.1rem; }
+.col-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 0.5rem; }
+.col-card ul { font-size: 14px; color: var(--text2); padding-left: 1.2rem; line-height: 1.7; }
+
+/* ── KG step list ── */
+.step-list { counter-reset: steps; display: flex; flex-direction: column; gap: 0.6rem; margin: 1rem 0; }
+.step { display: flex; gap: 0.9rem; align-items: flex-start; }
+.step-num {
+  counter-increment: steps;
+  content: counter(steps);
+  font-family: var(--font-mono); font-size: 10px;
+  background: var(--bg3); color: var(--text3);
+  border: 1px solid var(--border2);
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; margin-top: 2px;
+}
+.step-body { font-size: 15px; color: var(--text2); line-height: 1.6; }
+.step-body b { color: var(--text); }
+
+/* ── Fork diagram ── */
+.fork { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: 1rem 0; background: var(--border); border-radius: var(--r); overflow: hidden; }
+.fork-side { background: var(--bg2); padding: 1rem 1.1rem; }
+.fork-side h4 { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.6rem; }
+.fork-side.empiricist h4 { color: var(--teal); }
+.fork-side.rationalist h4 { color: var(--purple); }
+.fork-side p { font-size: 14px; color: var(--text2); line-height: 1.6; }
+
+/* ── Numbers / stats highlight ── */
+.stat-row { display: flex; gap: 1.5rem; margin: 0.8rem 0; flex-wrap: wrap; }
+.stat-box { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 0.6rem 0.9rem; }
+.stat-box .num { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; line-height: 1; }
+.stat-box .lbl { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text3); margin-top: 3px; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 5px; }
+
+/* ── Responsive ── */
+@media (max-width: 780px) {
+  .shell { grid-template-columns: 1fr; }
+  nav { display: none; }
+  main { padding: 2rem 1.5rem 4rem; }
+  .two-col, .fork, .method-stat-grid { grid-template-columns: 1fr; }
+}
+</style>
+<body>
+<div class="shell">
+
+<!-- ── Sidebar ── -->
+<nav>
+  <h2>Contents</h2>
+  <ul>
+    <li><a href="#scope">0 — Scope &amp; Non-Goals</a></li>
+    <li><a href="#success">1 — Success &amp; Validation</a></li>
+    <li><a href="#staged">2 — Single-Timescale First</a></li>
+    <li><a href="#objective">3 — What Is the Objective For?</a></li>
+    <li><a href="#active">4 — Active Inference Frame</a></li>
+    <li><a href="#continual">5 — Continual Learning</a></li>
+  </ul>
+
+  <div class="legend">
+    <h3>Status legend</h3>
+    <div class="legend-row"><span class="badge badge-amber">established</span><span>empirically confirmed</span></div>
+    <div class="legend-row"><span class="badge badge-teal">directional</span><span>promising, unproven</span></div>
+    <div class="legend-row"><span class="badge badge-coral">open</span><span>active research question</span></div>
+    <div class="legend-row"><span class="badge badge-purple">theoretical</span><span>unconfirmed theory</span></div>
+    <div class="legend-row"><span class="badge badge-green">commitment</span><span>project decision</span></div>
+  </div>
+</nav>
+
+<!-- ── Main content ── -->
+<main>
+
+  <header class="doc-header">
+    <div class="doc-eyebrow">Research Agenda · Working Document · Project Charter</div>
+    <h1>Project Objectives<br><em>Scope &amp; Strategy</em></h1>
+    <div class="doc-meta">
+      <span><b>Hard constraint:</b> 4GB VRAM (RTX 3050 Ti)</span>
+      <span><b>Companions:</b> Representation Learning · Architecture</span>
+    </div>
+    <p class="doc-intro">This document states what the project is for and how its success will be judged, so that the architecture and representation work have a target to serve. The central decision: this is not an attempt to build a frontier model, and it should not be measured as if it were.</p>
+  </header>
+
+
+  <!-- ══ 0 · SCOPE & NON-GOALS ══ -->
+  <section class="section accent-coral" id="scope">
+    <div class="section-header">
+      <span class="section-num">00</span>
+      <h2>Scope &amp; Non-Goals</h2>
+    </div>
+
+    <p>We are not attempting to make the next frontier model. We cannot on this budget, and it is not the right objective regardless. A project succeeds by achieving the objectives it set at the outset, not by how much it changes everything. Holding this project to a frontier standard would be measuring it against a goal it never had — and would obscure the things it can actually demonstrate.</p>
+
+    <div class="callout key" data-label="What success is, and is not">
+      <p><strong>Not the goal:</strong> state-of-the-art benchmarks, frontier scale, beating large labs, general-purpose capability. <strong>The goal:</strong> architectural validation — showing the recurrent-depth + relational design learns coherent world models and composes relations — plus a few sharp domain-specific experiments that demonstrate practical usefulness on a small, well-chosen knowledge base.</p>
+    </div>
+
+    <p>The justification for this being a worthwhile target, not a consolation prize: practically useful AI can be achieved at very small parameter counts, as long as the model only needs to reason very well over a small amount of knowledge. The frontier bet is "know everything"; ours is "reason well over a little." Those are different problems, and the second is tractable on consumer hardware.</p>
+
+    <div class="callout plan" data-label="Reference stretch goal: Sapient's HRM-Text">
+      <p>Sapient Inc.'s approach — a tiny ~1B-parameter HRM model (HRM-Text) with open-sourced code — is a good enough stretch goal for our purposes. It is proof that a small, architecturally novel model with released code is a complete and respectable contribution. Matching that shape — small model, validated architecture, open code, honest writeup — is success. Exceeding it is upside, not the bar.</p>
+    </div>
+
+    <div class="agenda-tags"><span class="atag">HRM-Text (Sapient)</span><span class="atag">item 44/61/62 (HRM)</span></div>
+  </section>
+
+
+  <!-- ══ 1 · SUCCESS & VALIDATION ══ -->
+  <section class="section accent-green" id="success">
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <h2>Success Criteria &amp; Validation Methodology</h2>
+    </div>
+
+    <p>Two things have to be shown, and both are small-budget-feasible:</p>
+
+    <div class="two-col">
+      <div class="col-card">
+        <h4>1 · Architectural validation</h4>
+        <ul>
+          <li>The recurrent-depth core learns and halts adaptively (compute scales with difficulty).</li>
+          <li>Latent thoughts behave as composable operators (the composition-fidelity test, companion Q1/A4).</li>
+          <li>A JEPA objective produces a coherent latent world model without collapse.</li>
+          <li>Relational attention composes relations on top of JEPA-grounded objects.</li>
+        </ul>
+      </div>
+      <div class="col-card">
+        <h4>2 · Domain-specific experiments</h4>
+        <ul>
+          <li>A few sharp tasks on a small, curated knowledge base where reasoning quality — not breadth — is the point.</li>
+          <li>Each should be a clean demonstration, not a benchmark chase.</li>
+          <li>Practical usefulness on the chosen domain is the headline result.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout plan" data-label="Validation template: LeWorldModel">
+      <p>LeWorldModel gives the methodology, scaled down. Train on a handful of <strong>small controlled environments</strong> with clear physical/causal structure; train with <strong>JEPA latent prediction</strong>; evaluate with <strong>violation-of-expectation</strong> — the Socratic test from the representation document. Success is a measurable latent prediction-error spike when the model is shown a physically impossible event, indicating it learned the world's structure rather than surface statistics. This needs no scale, only careful environment design, and it directly tests the architectural claims above.</p>
+    </div>
+
+    <div class="callout caution" data-label="An important caveat that lowers the bar correctly">
+      <p>Joint-embedding architectures already learn coherent object representations and causal physics on their own — they reliably distinguish a cat, a hand, or a tree from co-occurring background pixels. So a large part of the perceptual half of validation is <em>expected</em> to work; the novel burden of proof is on the <em>compositional</em> half (relational attention, operator-like latent thoughts), not on basic object coherence. Do not spend the budget re-proving what JEPA already gives for free.</p>
+    </div>
+
+    <div class="agenda-tags"><span class="atag">item 49 (Sub-JEPA / LeWM)</span><span class="atag">item 78 (RISE)</span><span class="atag">companion A4</span></div>
+  </section>
+
+
+  <!-- ══ 2 · SINGLE-TIMESCALE FIRST ══ -->
+  <section class="section accent-amber" id="staged">
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <h2>Staged Build: Single-Timescale Prototype First</h2>
+    </div>
+
+    <p><strong>Commitment: build a single-timescale prototype first; treat the hierarchy as optional and contingent on a test.</strong> The HRM-style slow/fast hierarchy was once the assumed destination, but the ablation evidence (architecture §1e) shows iteration — not hierarchy — is the engine. So the hierarchy is now a module added last and kept only if it beats the single-timescale baseline (architecture A7). Building single-timescale first isolates the core bet, makes failures legible, and avoids paying for a hierarchy that may buy nothing.</p>
+
+    <div class="step-list">
+      <div class="step"><div class="step-num">1</div><div class="step-body"><b>Single-timescale prototype.</b> One recurrence axis (depth recurrence, the more established), relational attention, a JEPA objective, adaptive halting at one timescale. Goal: confirm the core learns, halts, and composes before adding hierarchy. This is where architectural validation (§1) is first attempted.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-body"><b>Add the second recurrence axis.</b> Introduce thought recurrence (COCONUT) around the depth loop only after the single-timescale core works — testing the combination question (architecture A1) in isolation from the rest.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-body"><b>Hierarchy test (optional, gated).</b> Only after both recurrence axes work, add the H/L slow/fast split and test whether it beats the single-timescale baseline at matched parameters and compute (architecture A7). Keep it only if it earns its place. Note the AutoTTS control policy is <em>not</em> part of this test — it rides on the halting layer from stage 1 and does not require the hierarchy.</div></div>
+    </div>
+
+    <div class="callout key" data-label="Why this ordering">
+      <p>Each stage adds exactly one source of failure on top of a validated base, so when something breaks, the cause is the thing just added. The alternative — building the full hierarchical nested model and debugging it as a whole — is exactly the kind of all-at-once integration that burns a small compute budget on uninterpretable failures.</p>
+    </div>
+
+    <div class="agenda-tags"><span class="atag">architecture §1</span><span class="atag">item 1 (depth recurrence)</span><span class="atag">item 2 (COCONUT)</span><span class="atag">item 8 (AutoTTS)</span></div>
+  </section>
+
+
+  <!-- ══ 3 · WHAT IS THE OBJECTIVE FOR ══ -->
+  <section class="section accent-purple" id="objective">
+    <div class="section-header">
+      <span class="section-num">03</span>
+      <h2>What Is the Training Objective For?</h2>
+    </div>
+
+    <p>Most ML work leaves the deepest question about a model implicit: what is its training objective actually <em>for</em>? The objective is not a neutral technicality — it defines what the model is trying to become. HRM made this explicit by using PrefixLM attention to build an objective of <em>completing tasks successfully</em> rather than predicting the next token. JEPA and active inference do the same in their own ways. The philosophy in the representation document gives part of the answer (telos — Aristotle's final cause, Heidegger's Zuhandenheit), but the rest is purpose-dependent: the right objective depends on what the model is for.</p>
+
+    <div class="callout theory" data-label="The objective is the value function, and it must match the task">
+      <p>The models that became superhuman did so by choosing the <em>correct target</em>, not the conventional one. AlphaZero and MuZero learned a predictive model of which chains of actions, in which contexts, lead to reward — a value over trajectories, not over next moves. AlphaFold and MAMMAL are vastly superhuman because predicting the next protein structure <em>is</em> the correct target — the structure is the goal, so structure-prediction and the task coincide. Next-token prediction works for protein folding's analogue because next-state prediction is genuinely what is wanted there.</p>
+    </div>
+
+    <p><strong>The load-bearing conclusion: next-token prediction is the wrong value function for long-horizon reasoning.</strong> It optimizes local plausibility, not goal achievement — it rewards the most likely next token, not the trajectory that reaches the answer. For reasoning, the correct target is reaching a goal state: task completion (HRM), or predicting the latent consequences of reasoning steps and selecting those that reach the goal (JEPA + planning). This is why the architecture places telos in the objective (JEPA / active-inference prediction toward preferred states), not in a head, and why the latent thoughts are shaped to be predictive of goal-achievement rather than of the next token.</p>
+
+    <div class="callout caution" data-label="Calibration">
+      <p>"Purpose-dependent" is not a dodge — it is the claim that there is no single universally correct objective, and that choosing the objective <em>is</em> the central design act. For this project's reasoning goal, the objective is goal-state prediction under a JEPA/active-inference frame. For a different goal (e.g. a structure-prediction domain), next-state prediction might be exactly right. The discipline is to match the value function to the task rather than defaulting to next-token prediction out of habit.</p>
+    </div>
+
+    <div class="agenda-tags"><span class="atag">item 77 (MuZero→HRM)</span><span class="atag">item 20 (active inference)</span><span class="atag">item 49 (JEPA)</span><span class="atag">representation §2d/§2e (telos)</span></div>
+  </section>
+
+
+  <!-- ══ 4 · ACTIVE INFERENCE FRAME ══ -->
+  <section class="section accent-teal" id="active">
+    <div class="section-header">
+      <span class="section-num">04</span>
+      <h2>Active Inference: The Unifying Frame</h2>
+    </div>
+
+    <p>The architecture, the value function, and the training rule are not separate choices that happen to fit together — they are facets of a single principle. Active inference (the free energy principle) is the frame that unifies them: an agent maintains a generative model of the world and minimizes free energy (prediction error plus complexity), either by updating beliefs to explain observations (perception) or by acting to make its predictions come true (action). Each part of the plan is a piece of this loop.</p>
+
+    <div class="method-stat-grid">
+      <div class="method-stat">
+        <div class="method-stat-label">Generative model</div>
+        <div class="method-stat-value">The JEPA objective. Predicting future latent states from current ones <em>is</em> the world model active inference requires.</div>
+      </div>
+      <div class="method-stat">
+        <div class="method-stat-label">Perception = inference</div>
+        <div class="method-stat-value">The recurrent-depth settling. Iterating the block to a fixed point is relaxation to the latent that best explains the input — the inference step of energy-based active inference.</div>
+      </div>
+      <div class="method-stat">
+        <div class="method-stat-label">Action = planning</div>
+        <div class="method-stat-value">Thought recurrence / latent rollout. Rolling the world model forward to select reasoning steps that reach the goal is minimizing expected free energy — MuZero-style latent planning.</div>
+      </div>
+      <div class="method-stat">
+        <div class="method-stat-label">Preferences = telos</div>
+        <div class="method-stat-value">The training objective. Active inference's prior preferences over outcomes are exactly the telos — what states the model prefers to reach. The objective encodes purpose.</div>
+      </div>
+      <div class="method-stat">
+        <div class="method-stat-label">Halting = free energy minimized</div>
+        <div class="method-stat-value">Stopping when prediction stabilizes (no EOS token) is stopping when free energy is minimized — the goal-state reached, nothing left to predict.</div>
+      </div>
+      <div class="method-stat">
+        <div class="method-stat-label">Learning rule</div>
+        <div class="method-stat-value">Prospective configuration (item 92). Energy-based, predictive-coding learning that infers target activity then consolidates it — the active-inference-consistent alternative to backprop.</div>
+      </div>
+    </div>
+
+    <p>This is why the pieces cohere: they are one system viewed from different angles. It also means the framework makes a falsifiable commitment — if free energy minimization is the right frame, the settling, planning, and learning steps should all be expressible as descent on a single energy, and the prospective-configuration learning rule should fit the recurrent settling machinery without a separate mechanism (item 91).</p>
+
+    <div class="agenda-tags"><span class="atag">item 20 (active inference)</span><span class="atag">item 92 (prospective config)</span><span class="atag">item 77 (MuZero)</span><span class="atag">item 41 (energy/attractors)</span></div>
+  </section>
+
+
+  <!-- ══ 5 · CONTINUAL LEARNING ══ -->
+  <section class="section accent-blue" id="continual">
+    <div class="section-header">
+      <span class="section-num">05</span>
+      <h2>Continual Learning as a Practical Necessity</h2>
+    </div>
+
+    <p>Continual learning is on the critical path for a practical reason, not an aesthetic one: without it, training is a pain. This is especially true if the model must learn a world model through trial and error and experience — that kind of learning is inherently online and incremental, in changing environments, where a single large offline pass is not available. Catastrophic forgetting turns every new experience into a threat to old competence, which makes experiential training of a world model nearly intractable on a small budget.</p>
+
+    <div class="callout plan" data-label="The most promising direction">
+      <p>Prospective configuration (item 92) is the lead candidate precisely because its advantages are exactly the regimes we face: deep structures, online learning, limited data, changing environments, and continual learning with multiple tasks — where it resists catastrophic forgetting. Critically, its settling step is an energy relaxation to convergence, the same fixed-point computation as the depth recurrence — so it may reuse the architecture's own machinery rather than requiring a separate system (items 90, 91). Whether DiffusionBlocks + JEPA can be fused into a viable prospective-configuration training algorithm is the open question (item 90).</p>
+    </div>
+
+    <p>The connection to the hippocampus / complementary-learning-systems direction (item 79) is the other half: fast episodic encoding feeding slow consolidation is how biological systems learn continually without forgetting, and it is the natural partner to a prospective-configuration learning rule.</p>
+
+    <div class="agenda-tags"><span class="atag">item 92 (prospective config)</span><span class="atag">item 90 (DiffusionBlocks + JEPA)</span><span class="atag">item 91 (efficient settling)</span><span class="atag">item 79 (hippocampus/CLS)</span></div>
+  </section>
+
+</main>
+</div>
+</body>
+</html>

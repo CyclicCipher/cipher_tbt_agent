@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Training Environment — Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0E1016;
+  --bg2:       #14161D;
+  --bg3:       #1C1F28;
+  --bg4:       #242730;
+  --text:      #DDD9D0;
+  --text2:     #908C84;
+  --text3:     #5A5752;
+  --border:    rgba(255,255,255,0.07);
+  --border2:   rgba(255,255,255,0.12);
+
+  --amber:     #D4924A;
+  --amber-bg:  rgba(212,146,74,0.1);
+  --teal:      #4A9B93;
+  --teal-bg:   rgba(74,155,147,0.1);
+  --coral:     #C05B5B;
+  --coral-bg:  rgba(192,91,91,0.1);
+  --purple:    #8B7DC0;
+  --purple-bg: rgba(139,125,192,0.1);
+  --green:     #5E9B68;
+  --green-bg:  rgba(94,155,104,0.1);
+  --blue:      #5B87C0;
+  --blue-bg:   rgba(91,135,192,0.1);
+
+  --font-body: 'Crimson Pro', Georgia, serif;
+  --font-mono: 'Space Mono', 'Courier New', monospace;
+  --r: 5px;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+/* ── Layout ── */
+.shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* ── Sidebar ── */
+nav {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2.5rem 1rem 2rem 1.5rem;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  scrollbar-width: thin;
+}
+nav h2 {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 1rem;
+}
+nav ul { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+nav li a {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text2);
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 3px;
+  transition: all 0.12s;
+  line-height: 1.4;
+}
+nav li a:hover { background: var(--bg3); color: var(--text); }
+nav li a.sub { padding-left: 18px; font-size: 10px; opacity: 0.75; }
+nav .divider { height: 1px; background: var(--border); margin: 10px 8px; }
+.legend { margin-top: 1.5rem; padding: 0 8px; }
+.legend h3 { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text3); margin-bottom: 8px; }
+.legend-row { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+.legend-row span { font-family: var(--font-mono); font-size: 9px; color: var(--text2); }
+
+/* ── Main ── */
+main { padding: 3rem 3.5rem 6rem; max-width: 820px; }
+
+/* ── Doc header ── */
+.doc-header { margin-bottom: 3.5rem; padding-bottom: 2rem; border-bottom: 1px solid var(--border); }
+.doc-eyebrow { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text3); margin-bottom: 0.75rem; }
+.doc-header h1 { font-size: 2.2rem; font-weight: 300; letter-spacing: -0.02em; line-height: 1.2; color: var(--text); margin-bottom: 0.6rem; }
+.doc-header h1 em { font-style: italic; color: var(--text2); }
+.doc-meta { display: flex; gap: 1.5rem; margin-top: 1rem; flex-wrap: wrap; }
+.doc-meta span { font-family: var(--font-mono); font-size: 10px; color: var(--text3); }
+.doc-meta b { color: var(--text2); }
+.doc-intro { margin-top: 1.4rem; font-size: 1.05rem; color: var(--text2); line-height: 1.7; max-width: 62ch; }
+
+/* ── Sections ── */
+.section { margin-bottom: 3.5rem; }
+.section-header { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 1.5rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--border); }
+.section-num { font-family: var(--font-mono); font-size: 10px; color: var(--text3); }
+.section-header h2 { font-size: 1.2rem; font-weight: 600; letter-spacing: -0.01em; }
+
+.subsection { margin-bottom: 2.2rem; }
+.subsection h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.9rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+
+p { margin-bottom: 0.9rem; color: var(--text); }
+p:last-child { margin-bottom: 0; }
+
+/* ── Accent bars ── */
+.accent-amber  .section-header { border-bottom-color: var(--amber);  }
+.accent-teal   .section-header { border-bottom-color: var(--teal);   }
+.accent-coral  .section-header { border-bottom-color: var(--coral);  }
+.accent-purple .section-header { border-bottom-color: var(--purple); }
+.accent-green  .section-header { border-bottom-color: var(--green);  }
+.accent-blue   .section-header { border-bottom-color: var(--blue);   }
+
+/* ── Badges ── */
+.badge {
+  display: inline-flex; align-items: center;
+  font-family: var(--font-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 3px; white-space: nowrap;
+}
+.badge-amber  { background: var(--amber-bg);  color: var(--amber);  border: 0.5px solid rgba(212,146,74,0.3); }
+.badge-teal   { background: var(--teal-bg);   color: var(--teal);   border: 0.5px solid rgba(74,155,147,0.3); }
+.badge-coral  { background: var(--coral-bg);  color: var(--coral);  border: 0.5px solid rgba(192,91,91,0.3);  }
+.badge-purple { background: var(--purple-bg); color: var(--purple); border: 0.5px solid rgba(139,125,192,0.3);}
+.badge-green  { background: var(--green-bg);  color: var(--green);  border: 0.5px solid rgba(94,155,104,0.3); }
+.badge-blue   { background: var(--blue-bg);   color: var(--blue);   border: 0.5px solid rgba(91,135,192,0.3); }
+
+/* ── Callout boxes ── */
+.callout {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--r);
+  padding: 1rem 1.2rem;
+  margin: 1.2rem 0;
+  position: relative;
+}
+.callout::before {
+  content: attr(data-label);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  position: absolute;
+  top: -1px; left: 12px;
+  transform: translateY(-50%);
+  background: var(--bg2);
+  padding: 0 6px;
+}
+.callout.key    { border-left: 3px solid var(--amber);  background: var(--amber-bg); }
+.callout.key::before  { color: var(--amber); }
+.callout.caution { border-left: 3px solid var(--coral); background: var(--coral-bg); }
+.callout.caution::before { color: var(--coral); }
+.callout.plan   { border-left: 3px solid var(--green);  background: var(--green-bg); }
+.callout.plan::before  { color: var(--green); }
+.callout.theory { border-left: 3px solid var(--purple); background: var(--purple-bg); }
+.callout.theory::before { color: var(--purple); }
+.callout p { font-size: 16px; }
+
+/* ── Method cards ── */
+.method-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 1.2rem 1.4rem;
+  margin-bottom: 1.2rem;
+}
+.method-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.8rem; gap: 1rem; flex-wrap: wrap; }
+.method-card-title { font-size: 1rem; font-weight: 600; }
+.method-card-badges { display: flex; gap: 5px; flex-wrap: wrap; flex-shrink: 0; }
+.method-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.5rem; margin: 0.8rem 0; }
+.method-stat { font-size: 14px; }
+.method-stat-label { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text3); margin-bottom: 1px; }
+.method-stat-value { color: var(--text2); line-height: 1.4; }
+.method-verdict { margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid var(--border); font-size: 15px; color: var(--text2); }
+.method-verdict b { color: var(--text); }
+
+/* ── Agenda tags ── */
+.agenda-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 0.5rem; }
+.atag {
+  font-family: var(--font-mono); font-size: 9px;
+  background: var(--bg3); color: var(--text3);
+  border: 0.5px solid var(--border2);
+  padding: 2px 6px; border-radius: 3px;
+}
+
+/* ── Open questions ── */
+.question-list { display: flex; flex-direction: column; gap: 1rem; }
+.question-item { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 1rem 1.2rem; }
+.question-top { display: flex; align-items: baseline; gap: 0.7rem; margin-bottom: 0.5rem; }
+.question-num { font-family: var(--font-mono); font-size: 10px; color: var(--text3); flex-shrink: 0; }
+.question-text { font-size: 1rem; font-weight: 600; line-height: 1.4; }
+.question-body { font-size: 15px; color: var(--text2); line-height: 1.6; }
+
+/* ── Two-column ── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+.col-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 1rem 1.1rem; }
+.col-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 0.5rem; }
+.col-card ul { font-size: 14px; color: var(--text2); padding-left: 1.2rem; line-height: 1.7; }
+
+/* ── KG step list ── */
+.step-list { counter-reset: steps; display: flex; flex-direction: column; gap: 0.6rem; margin: 1rem 0; }
+.step { display: flex; gap: 0.9rem; align-items: flex-start; }
+.step-num {
+  counter-increment: steps;
+  content: counter(steps);
+  font-family: var(--font-mono); font-size: 10px;
+  background: var(--bg3); color: var(--text3);
+  border: 1px solid var(--border2);
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; margin-top: 2px;
+}
+.step-body { font-size: 15px; color: var(--text2); line-height: 1.6; }
+.step-body b { color: var(--text); }
+
+/* ── Fork diagram ── */
+.fork { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: 1rem 0; background: var(--border); border-radius: var(--r); overflow: hidden; }
+.fork-side { background: var(--bg2); padding: 1rem 1.1rem; }
+.fork-side h4 { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.6rem; }
+.fork-side.empiricist h4 { color: var(--teal); }
+.fork-side.rationalist h4 { color: var(--purple); }
+.fork-side p { font-size: 14px; color: var(--text2); line-height: 1.6; }
+
+/* ── Numbers / stats highlight ── */
+.stat-row { display: flex; gap: 1.5rem; margin: 0.8rem 0; flex-wrap: wrap; }
+.stat-box { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 0.6rem 0.9rem; }
+.stat-box .num { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; line-height: 1; }
+.stat-box .lbl { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text3); margin-top: 3px; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 5px; }
+
+/* ── Responsive ── */
+@media (max-width: 780px) {
+  .shell { grid-template-columns: 1fr; }
+  nav { display: none; }
+  main { padding: 2rem 1.5rem 4rem; }
+  .two-col, .fork, .method-stat-grid { grid-template-columns: 1fr; }
+}
+</style>
+<body>
+<div class="shell">
+
+<!-- ── Sidebar ── -->
+<nav>
+  <h2>Contents</h2>
+  <ul>
+    <li><a href="#purpose">0 — Purpose &amp; Philosophy</a></li>
+    <li><a href="#template">1 — ARC-AGI-3 as Template</a></li>
+    <li><a href="#contamination">2 — Train the Process, Test the Benchmark</a></li>
+    <div class="divider"></div>
+    <li><a href="#generator">3 — The Environment Generator</a></li>
+    <li><a href="#obs" class="sub">3a Observation &amp; action</a></li>
+    <li><a href="#mechanics" class="sub">3b Mechanics &amp; goals</a></li>
+    <li><a href="#reward" class="sub">3c Reward &amp; efficiency</a></li>
+    <div class="divider"></div>
+    <li><a href="#additions">4 — What We Add</a></li>
+    <li><a href="#leworld">5 — The Diagnostic Layer</a></li>
+    <li><a href="#integration">6 — Integration &amp; Build Plan</a></li>
+    <li><a href="#questions">7 — Open Questions</a></li>
+  </ul>
+
+  <div class="legend">
+    <h3>Status legend</h3>
+    <div class="legend-row"><span class="badge badge-amber">established</span><span>empirically confirmed</span></div>
+    <div class="legend-row"><span class="badge badge-teal">directional</span><span>promising, unproven</span></div>
+    <div class="legend-row"><span class="badge badge-coral">open</span><span>active research question</span></div>
+    <div class="legend-row"><span class="badge badge-green">plan</span><span>next step</span></div>
+  </div>
+</nav>
+
+<!-- ── Main content ── -->
+<main>
+
+  <header class="doc-header">
+    <div class="doc-eyebrow">Research Agenda · Working Document · Companion to Architecture, Objectives &amp; Learning</div>
+    <h1>The Training Environment<br><em>An Interactive World for an Active-Inference Learner</em></h1>
+    <div class="doc-meta">
+      <span><b>Template:</b> ARC-AGI-3 (interactive reasoning)</span>
+      <span><b>Method:</b> generate the process, evaluate on the benchmark</span>
+      <span><b>Tests:</b> world-model building, goal acquisition, fluid intelligence</span>
+    </div>
+    <p class="doc-intro">A model whose thesis is active inference and recurrent-depth reasoning cannot be trained or judged on static next-token prediction alone — its core claims (build a world model, acquire goals, plan under sparse feedback, adapt to novelty) only become testable inside an interactive environment. ARC-AGI-3 is the benchmark built for exactly those capabilities, so it is the right template. The plan: replicate its generative principles to get an unlimited stream of novel training environments, instrument them as a glass box for our philosophy, and hold the real ARC-AGI-3 public set as uncontaminated evaluation.</p>
+  </header>
+
+
+  <!-- ══ 0 · PURPOSE ══ -->
+  <section class="section accent-coral" id="purpose">
+    <div class="section-header">
+      <span class="section-num">00</span>
+      <h2>Purpose &amp; Philosophy</h2>
+    </div>
+
+    <p>Static datasets test crystallized knowledge — what a model already encodes. Our architecture is a bet on the opposite quantity: <em>fluid intelligence</em>, the efficiency with which a model learns something genuinely new. That quantity is invisible to a static benchmark and only appears when an agent is dropped into an unfamiliar environment and has to perceive, infer the goal, model the dynamics, and act — which is precisely the active-inference loop the objectives document commits to.</p>
+
+    <div class="callout key" data-label="Why the environment is not optional">
+      <p>Three of the project's central claims are <em>only</em> testable interactively. The JEPA world model is a claim about predicting environment dynamics — untestable without an environment to predict. The value-function thesis (objectives §3) is a claim about acting toward goals — untestable without goals to act toward. Active inference (objectives §4) is a claim about minimizing surprise through action — untestable without actions that change what is observed. The COCONUT chain axis (architecture §1b, Stage 2) rolls the world model forward — and a rollout needs a world to roll through. The training environment is the test apparatus for the half of the architecture that static text cannot exercise.</p>
+    </div>
+
+    <div class="agenda-tags"><span class="atag">item 20 (active inference)</span><span class="atag">item 49 (Sub-JEPA / world model)</span><span class="atag">objectives §3, §4</span></div>
+  </section>
+
+
+  <!-- ══ 1 · TEMPLATE ══ -->
+  <section class="section accent-teal" id="template">
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <h2>ARC-AGI-3 as the Template</h2>
+    </div>
+
+    <p>ARC-AGI-3 (ARC Prize Foundation, launched March 2026) is the first fully interactive benchmark in the ARC-AGI family: hundreds of handcrafted, turn-based, game-like environments with <strong>no instructions, no stated rules, and no stated goals</strong>. An agent must explore, infer how the environment works, discover what winning means, and carry skills forward across increasingly difficult levels. Humans score ~100%; frontier models score under 1% (the leading system around 0.37%). The gap it exposes is the gap this project targets — between following instructions and genuinely learning in novel situations.</p>
+
+    <p>Its design goals read like a specification of our architecture's philosophy:</p>
+
+    <div class="method-stat-grid">
+      <div class="method-stat"><div class="method-stat-label">Build adaptable world models</div><div class="method-stat-value">= the JEPA latent world model (architecture §1d).</div></div>
+      <div class="method-stat"><div class="method-stat-label">Acquire goals on the fly</div><div class="method-stat-value">= active inference: the agent infers its own preferences/goals (objectives §4).</div></div>
+      <div class="method-stat"><div class="method-stat-label">Learn continuously</div><div class="method-stat-value">= continual learning without forgetting (prospective configuration, learning doc).</div></div>
+      <div class="method-stat"><div class="method-stat-label">Skill-acquisition efficiency</div><div class="method-stat-value">= data efficiency, the project's primary goal — and the benchmark scores it directly.</div></div>
+      <div class="method-stat"><div class="method-stat-label">Long-horizon, sparse feedback</div><div class="method-stat-value">= the recurrent-depth + value-function thesis (no dense per-step label).</div></div>
+      <div class="method-stat"><div class="method-stat-label">Real-time adaptation to novel rules</div><div class="method-stat-value">= fluid intelligence, no memorization — the anti-shortcut-learning core.</div></div>
+    </div>
+
+    <p style="margin-top:0.8rem">A useful caution from its own preview: early environments that could be solved by random or informed search over the action space were retired, because brute force is exactly the non-reasoning pathology the benchmark exists to defeat. Any environment we build must resist the same shortcut.</p>
+
+    <div class="agenda-tags"><span class="atag">item 20</span><span class="atag">item 49</span><span class="atag">item 77 (latent planning)</span><span class="atag">objectives §3 (value function)</span></div>
+  </section>
+
+
+  <!-- ══ 2 · CONTAMINATION ══ -->
+  <section class="section accent-purple" id="contamination">
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <h2>Train the Process, Evaluate on the Benchmark</h2>
+    </div>
+
+    <p>The decisive design choice. ARC-AGI-3 ships ~135 environments with only ~25 public and ~110 private, an inversion of the earlier ARC ratio specifically to prevent training on the test. You cannot train on the private set, and overtraining on 25 public environments would just produce the memorization the benchmark is built to catch. So ARC-AGI-3 is our <strong>held-out evaluation</strong>, never our training data.</p>
+
+    <div class="callout key" data-label="Replicate the generator, not the games">
+      <p>What we build is a <strong>procedural generator of ARC-AGI-3-style environments</strong> — replicating the design <em>principles</em> (novelty, no instructions, hidden goal, sparse discoverable reward, action-efficiency scoring, graduated difficulty) rather than the specific games. This gives an unlimited stream of novel environments to train skill-acquisition on, and resolves the apparent either/or in the plan: a faithful ARC-AGI-3-style generator <em>is</em> "LeWorldModel-style controlled environments, but more diverse and difficult." The generator is the diversity engine; the real public set is the honesty check.</p>
+    </div>
+
+    <div class="callout caution" data-label="The hard part of this choice">
+      <p>Generating environments that are genuinely novel — not secretly solvable by learning the generator's quirks — is itself difficult; the ARC Prize team used a human game studio precisely because procedural novelty tends to leak exploitable regularities. The mitigation is built into the method: hold the 25 real public environments as validation to <em>detect generator-overfitting</em> (if the model aces our generator but fails the real public set, it learned our quirks, not skill-acquisition), and use the controlled diagnostic layer (§5) to confirm it is learning dynamics rather than surface structure. This is the project's main environment risk (Q1).</p>
+    </div>
+
+    <div class="agenda-tags"><span class="atag">benchmark contamination</span><span class="atag">item 49</span></div>
+  </section>
+
+
+  <!-- ══ 3 · GENERATOR ══ -->
+  <section class="section accent-amber" id="generator">
+    <div class="section-header">
+      <span class="section-num">03</span>
+      <h2>The Environment Generator</h2>
+    </div>
+
+    <p>A turn-based environment generator with a Gym-like API (reset / step / observe), where each sampled environment is a small, self-contained world with novel mechanics the agent must discover. Three parts.</p>
+
+    <div class="subsection" id="obs">
+      <h3>3a &nbsp; Observation &amp; Action Space <span class="badge badge-green">plan</span></h3>
+      <p>Observations are <strong>abstract grids</strong> (the ARC lineage) — a small 2D field of colored cells — chosen deliberately: they are perceptually simple (cheap on 4GB), modality-clean (no pretrained vision encoder needed), and they enter the shared core as clamped sensory units (architecture §6b), so the same model that reasons over text reasons over the grid with only a thin adapter. Actions are a small discrete set (move / select / act on a cell), turn-based. Keeping both spaces small keeps episodes short enough to roll the world model forward within the depth/chain budget.</p>
+      <div class="agenda-tags"><span class="atag">architecture §6b (clamped I/O)</span><span class="atag">item 49</span></div>
+    </div>
+
+    <div class="subsection" id="mechanics">
+      <h3>3b &nbsp; Mechanics &amp; Hidden Goals <span class="badge badge-green">plan</span></h3>
+      <p>Each environment samples a <strong>rule set</strong> from a library of composable mechanics (gravity, keys/doors, pushable objects, transformations, conservation laws) and a <strong>hidden goal</strong> (reach a state, transform a pattern, satisfy a relation). Neither is told to the agent. Difficulty scales by composing more mechanics, lengthening the solution, and increasing the inference required to find the goal. The library is the lever that produces both <em>novelty</em> (unseen combinations) and <em>transfer</em> (shared underlying mechanics across surface-different environments) — and the generator records which mechanics are shared, which the agent never sees but we use for the transfer probe (§4).</p>
+      <div class="agenda-tags"><span class="atag">fluid intelligence</span><span class="atag">item 34 (composable structure)</span></div>
+    </div>
+
+    <div class="subsection" id="reward">
+      <h3>3c &nbsp; Reward &amp; the Efficiency Metric <span class="badge badge-green">plan</span></h3>
+      <p>Reward is <strong>sparse and discoverable</strong> — signal on reaching the (hidden) goal, not dense per-step shaping, matching the long-horizon sparse-feedback regime. Crucially, scoring follows ARC-AGI-3's principle that <strong>efficiency is penalized super-linearly</strong>: their metric squares the inefficiency ratio, so an agent taking ~10× the human action count scores ~1%. We adopt the same shape, because it operationalizes the actual target — not "can it eventually win" (brute force can) but "can it win <em>efficiently</em>," i.e. with few interactions, which is skill-acquisition efficiency = data efficiency made behavioral. This metric is the thing that makes the environment resist the search-the-action-space shortcut.</p>
+      <div class="agenda-tags"><span class="atag">data efficiency</span><span class="atag">objectives §3 (value function)</span></div>
+    </div>
+  </section>
+
+
+  <!-- ══ 4 · WHAT WE ADD ══ -->
+  <section class="section accent-green" id="additions">
+    <div class="section-header">
+      <span class="section-num">04</span>
+      <h2>What We Add Beyond a Replica</h2>
+    </div>
+
+    <p>The public benchmark is a black box: it reports a score and nothing else. Because we <em>generate</em> our environments, we hold their ground truth, which lets us instrument the things our philosophy makes claims about. These additions are what turn a faithful replica into a training-and-diagnostic apparatus aligned to the architecture. All glass-box instrumentation is disabled at evaluation on the real benchmark.</p>
+
+    <div class="step-list">
+      <div class="step"><div class="step-num">1</div><div class="step-body"><b>Ground-truth dynamics access (training only).</b> We know each environment's true next-state, so we can generate JEPA targets directly, measure world-model prediction accuracy, and confirm the latent rollout tracks reality — none of which the black-box benchmark exposes.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-body"><b>Violation-of-expectation probes.</b> Mid-episode, change a rule or inject an impossible transition and measure the model's prediction-error / surprise spike. This is the direct test of the JEPA world model and the active-inference surprise signal — the LeWorldModel idea, used as a scalpel.</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-body"><b>Goal-acquisition instrumentation.</b> Since active inference has the agent infer its own goal, and the goal is hidden, we probe <em>when</em> and <em>whether</em> a correct internal goal representation forms — measuring goal-discovery time, not only final success. Tests objectives §4's claim that the model sets its own intermediate goals.</div></div>
+      <div class="step"><div class="step-num">4</div><div class="step-body"><b>Continual-learning curriculum.</b> Environments arrive as a stream; we measure catastrophic forgetting across the sequence. The benchmark tests within-environment learning; we add the cross-environment continual setting that prospective configuration (learning doc) is meant to handle.</div></div>
+      <div class="step"><div class="step-num">5</div><div class="step-body"><b>Mechanic-transfer probes.</b> Using the generator's record of shared mechanics, measure whether the model transfers a learned mechanic to a surface-different environment (fluid intelligence) versus relearning from scratch. A controlled transfer test the handcrafted benchmark cannot give.</div></div>
+      <div class="step"><div class="step-num">6</div><div class="step-body"><b>Latent-rollout / horizon diagnostics.</b> The COCONUT chain rolls the world model forward; here we measure rollout length before divergence (drift) inside real episodes — the concrete test bed for architecture §1g and the targeted-TBAF question (A3).</div></div>
+      <div class="step"><div class="step-num">7</div><div class="step-body"><b>Difficulty curriculum &amp; skill-acquisition slope.</b> Graduated levels from trivial to hard, so we can train in stages and measure the <em>slope</em> of improvement — how fast the model acquires skill — which is the fluid-intelligence quantity itself, not a proxy.</div></div>
+    </div>
+
+    <div class="agenda-tags"><span class="atag">item 20 (active inference)</span><span class="atag">item 49 (VoE)</span><span class="atag">item 92 (continual)</span><span class="atag">§1g / A3 (drift)</span><span class="atag">objectives §4</span></div>
+  </section>
+
+
+  <!-- ══ 5 · DIAGNOSTIC LAYER ══ -->
+  <section class="section accent-blue" id="leworld">
+    <div class="section-header">
+      <span class="section-num">05</span>
+      <h2>The LeWorldModel Diagnostic Layer</h2>
+    </div>
+
+    <p>Alongside the novelty-generating environments, a small set of <strong>fully controlled environments</strong> with completely known, simple dynamics — the LeWorldModel role, made more diverse and harder. Their job is not novelty but <em>clean diagnosis</em>: when the world model is wrong, a controlled environment tells you exactly where, because you know the true dynamics in closed form.</p>
+
+    <div class="two-col">
+      <div class="col-card">
+        <h4>Generator (§3–4): novelty &amp; scale</h4>
+        <ul>
+          <li>Unlimited novel environments → trains skill-acquisition and fluid intelligence.</li>
+          <li>Benchmark-aligned → results transfer to the real ARC-AGI-3 eval.</li>
+          <li>Noisy/complex → realistic, but hard to attribute failures.</li>
+        </ul>
+      </div>
+      <div class="col-card">
+        <h4>Controlled layer (§5): clean diagnosis</h4>
+        <ul>
+          <li>Known closed-form dynamics → exact world-model error attribution.</li>
+          <li>Minimal → isolates one mechanism (drift, collapse, forgetting) at a time.</li>
+          <li>Not novel → cannot test fluid intelligence; diagnostic only.</li>
+        </ul>
+      </div>
+    </div>
+
+    <p style="margin-top:0.8rem">They are complementary, not competing: the generator answers "does it learn to learn?", the controlled layer answers "and when it fails, why?". Both are needed, and both feed the same shared-core model.</p>
+
+    <div class="agenda-tags"><span class="atag">item 49 (LeWorldModel)</span><span class="atag">item 78 (RISE world model)</span></div>
+  </section>
+
+
+  <!-- ══ 6 · INTEGRATION ══ -->
+  <section class="section accent-teal" id="integration">
+    <div class="section-header">
+      <span class="section-num">06</span>
+      <h2>Integration &amp; Build Plan</h2>
+    </div>
+
+    <p>The environment is built in lockstep with the architecture stages (architecture §6d), each environment capability arriving exactly when the stage that needs it does.</p>
+
+    <div class="step-list">
+      <div class="step"><div class="step-num">0–1</div><div class="step-body"><b>Text core first — no environment yet.</b> Stages 0–1 (depth core as DEQ; JEPA through the depth loop) are validated on text. In parallel, build the controlled diagnostic layer (§5) and one hand-built generator environment — enough to begin testing the world model, not yet the full generator.</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-body"><b>COCONUT stage — the environment becomes load-bearing.</b> Adding the chain axis means rolling the world model forward, which needs interactive episodes. This is where the generator (§3–4) comes online in earnest: train the chain as a JEPA rollout in generated environments, measure rollout drift (probe 6), and test joint depth+chain training (architecture A1). The chain stage and the environment are the same milestone.</div></div>
+      <div class="step"><div class="step-num">3+</div><div class="step-body"><b>Active inference, continual learning, evaluation.</b> Goal-acquisition (probe 3), the continual-learning curriculum (probe 4) with prospective configuration, and transfer (probe 5) come online as those architecture/learning capabilities are added. Throughout, evaluate on the held-out real ARC-AGI-3 public set to detect generator-overfitting (§2).</div></div>
+    </div>
+
+    <div class="callout plan" data-label="The one-line coupling">
+      <p>Stages 0–1 are testable on text; <strong>Stage 2 (COCONUT) is gated on the environment generator</strong>, because a chain that rolls a world model forward has nothing to roll without one. Build the generator on the Stage-1 → Stage-2 boundary.</p>
+    </div>
+
+    <div class="agenda-tags"><span class="atag">architecture §6d (stages)</span><span class="atag">architecture A1, A3</span><span class="atag">learning doc (prospective config)</span></div>
+  </section>
+
+
+  <!-- ══ 7 · OPEN QUESTIONS ══ -->
+  <section class="section accent-coral" id="questions">
+    <div class="section-header">
+      <span class="section-num">07</span>
+      <h2>Open Questions</h2>
+    </div>
+
+    <div class="question-list">
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q1</span>
+          <span class="question-text">Can a generator produce environments novel enough to test skill-acquisition, not generator quirks?</span>
+          <span class="badge badge-coral">open — central</span>
+        </div>
+        <p class="question-body">The whole approach depends on procedurally generating genuinely novel environments. Procedural generation tends to leak exploitable regularities the model can learn instead of general skill-acquisition. The detector is built in: hold the 25 real public ARC-AGI-3 environments as validation — if the model aces our generator but fails the real set, it learned our quirks. If the gap is large, the generator needs more mechanic diversity or a handcrafted-environment supplement.</p>
+        <div class="agenda-tags"><span class="atag">§2</span><span class="atag">generator design</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q2</span>
+          <span class="question-text">Does the squared efficiency metric reward the right behavior during training?</span>
+          <span class="badge badge-coral">open</span>
+        </div>
+        <p class="question-body">A super-linear inefficiency penalty is right for <em>evaluation</em>, but as a training signal a near-zero sparse reward squared by inefficiency may be too sparse to learn from early. Likely needs a curriculum: dense-ish shaping or easy environments first to bootstrap, annealed toward the true sparse efficiency metric. Where exactly to anneal is open and interacts with the value-function objective (objectives §3).</p>
+        <div class="agenda-tags"><span class="atag">§3c</span><span class="atag">objectives §3</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q3</span>
+          <span class="question-text">Does training on our generator transfer to the real ARC-AGI-3 benchmark (sim-to-real)?</span>
+          <span class="badge badge-coral">open</span>
+        </div>
+        <p class="question-body">Even a good generator differs from a human-designed game studio's environments. Whether skill-acquisition learned on our process transfers to handcrafted environments is the analogue of sim-to-real transfer, and it is the bottom-line question for the whole strategy. Measured directly by the held-out public set; if transfer is poor, the generator's distribution must be widened toward the benchmark's characteristics.</p>
+        <div class="agenda-tags"><span class="atag">§2</span><span class="atag">evaluation</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q4</span>
+          <span class="question-text">Is grid-world the right observation space, or does it limit what world model can be learned?</span>
+          <span class="badge badge-teal">directional</span>
+        </div>
+        <p class="question-body">Abstract grids are cheap and modality-clean, matching the clamped-I/O design (§6b) and the 4GB budget. But they may be too narrow to develop a world model that later generalizes to richer modalities. Whether to stay grid-only through validation and broaden later (the staged-multimodality plan, architecture A9), or build in more varied observations from the start, is a real design fork.</p>
+        <div class="agenda-tags"><span class="atag">§3a</span><span class="atag">architecture §6b, A9</span></div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Model Architecture — Status &amp; Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0E1016;
+  --bg2:       #14161D;
+  --bg3:       #1C1F28;
+  --bg4:       #242730;
+  --text:      #DDD9D0;
+  --text2:     #908C84;
+  --text3:     #5A5752;
+  --border:    rgba(255,255,255,0.07);
+  --border2:   rgba(255,255,255,0.12);
+
+  --amber:     #D4924A;
+  --amber-bg:  rgba(212,146,74,0.1);
+  --teal:      #4A9B93;
+  --teal-bg:   rgba(74,155,147,0.1);
+  --coral:     #C05B5B;
+  --coral-bg:  rgba(192,91,91,0.1);
+  --purple:    #8B7DC0;
+  --purple-bg: rgba(139,125,192,0.1);
+  --green:     #5E9B68;
+  --green-bg:  rgba(94,155,104,0.1);
+  --blue:      #5B87C0;
+  --blue-bg:   rgba(91,135,192,0.1);
+
+  --font-body: 'Crimson Pro', Georgia, serif;
+  --font-mono: 'Space Mono', 'Courier New', monospace;
+  --r: 5px;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+/* ── Layout ── */
+.shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* ── Sidebar ── */
+nav {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2.5rem 1rem 2rem 1.5rem;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  scrollbar-width: thin;
+}
+nav h2 {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 1rem;
+}
+nav ul { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+nav li a {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text2);
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 3px;
+  transition: all 0.12s;
+  line-height: 1.4;
+}
+nav li a:hover { background: var(--bg3); color: var(--text); }
+nav li a.sub { padding-left: 18px; font-size: 10px; opacity: 0.75; }
+nav .divider { height: 1px; background: var(--border); margin: 10px 8px; }
+.legend { margin-top: 1.5rem; padding: 0 8px; }
+.legend h3 { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text3); margin-bottom: 8px; }
+.legend-row { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+.legend-row span { font-family: var(--font-mono); font-size: 9px; color: var(--text2); }
+
+/* ── Main ── */
+main { padding: 3rem 3.5rem 6rem; max-width: 820px; }
+
+/* ── Doc header ── */
+.doc-header { margin-bottom: 3.5rem; padding-bottom: 2rem; border-bottom: 1px solid var(--border); }
+.doc-eyebrow { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text3); margin-bottom: 0.75rem; }
+.doc-header h1 { font-size: 2.2rem; font-weight: 300; letter-spacing: -0.02em; line-height: 1.2; color: var(--text); margin-bottom: 0.6rem; }
+.doc-header h1 em { font-style: italic; color: var(--text2); }
+.doc-meta { display: flex; gap: 1.5rem; margin-top: 1rem; flex-wrap: wrap; }
+.doc-meta span { font-family: var(--font-mono); font-size: 10px; color: var(--text3); }
+.doc-meta b { color: var(--text2); }
+.doc-intro { margin-top: 1.4rem; font-size: 1.05rem; color: var(--text2); line-height: 1.7; max-width: 60ch; }
+
+/* ── Sections ── */
+.section { margin-bottom: 3.5rem; }
+.section-header { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 1.5rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--border); }
+.section-num { font-family: var(--font-mono); font-size: 10px; color: var(--text3); }
+.section-header h2 { font-size: 1.2rem; font-weight: 600; letter-spacing: -0.01em; }
+
+.subsection { margin-bottom: 2.2rem; }
+.subsection h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.9rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+
+p { margin-bottom: 0.9rem; color: var(--text); }
+p:last-child { margin-bottom: 0; }
+
+/* ── Accent bars ── */
+.accent-amber  .section-header { border-bottom-color: var(--amber);  }
+.accent-teal   .section-header { border-bottom-color: var(--teal);   }
+.accent-coral  .section-header { border-bottom-color: var(--coral);  }
+.accent-purple .section-header { border-bottom-color: var(--purple); }
+.accent-green  .section-header { border-bottom-color: var(--green);  }
+.accent-blue   .section-header { border-bottom-color: var(--blue);   }
+
+/* ── Badges ── */
+.badge {
+  display: inline-flex; align-items: center;
+  font-family: var(--font-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 3px; white-space: nowrap;
+}
+.badge-amber  { background: var(--amber-bg);  color: var(--amber);  border: 0.5px solid rgba(212,146,74,0.3); }
+.badge-teal   { background: var(--teal-bg);   color: var(--teal);   border: 0.5px solid rgba(74,155,147,0.3); }
+.badge-coral  { background: var(--coral-bg);  color: var(--coral);  border: 0.5px solid rgba(192,91,91,0.3);  }
+.badge-purple { background: var(--purple-bg); color: var(--purple); border: 0.5px solid rgba(139,125,192,0.3);}
+.badge-green  { background: var(--green-bg);  color: var(--green);  border: 0.5px solid rgba(94,155,104,0.3); }
+.badge-blue   { background: var(--blue-bg);   color: var(--blue);   border: 0.5px solid rgba(91,135,192,0.3); }
+
+/* ── Callout boxes ── */
+.callout {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--r);
+  padding: 1rem 1.2rem;
+  margin: 1.2rem 0;
+  position: relative;
+}
+.callout::before {
+  content: attr(data-label);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  position: absolute;
+  top: -1px; left: 12px;
+  transform: translateY(-50%);
+  background: var(--bg2);
+  padding: 0 6px;
+}
+.callout.key    { border-left: 3px solid var(--amber);  background: var(--amber-bg); }
+.callout.key::before  { color: var(--amber); }
+.callout.caution { border-left: 3px solid var(--coral); background: var(--coral-bg); }
+.callout.caution::before { color: var(--coral); }
+.callout.plan   { border-left: 3px solid var(--green);  background: var(--green-bg); }
+.callout.plan::before  { color: var(--green); }
+.callout.theory { border-left: 3px solid var(--purple); background: var(--purple-bg); }
+.callout.theory::before { color: var(--purple); }
+.callout p { font-size: 16px; }
+
+/* ── Method cards ── */
+.method-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 1.2rem 1.4rem;
+  margin-bottom: 1.2rem;
+}
+.method-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.8rem; gap: 1rem; flex-wrap: wrap; }
+.method-card-title { font-size: 1rem; font-weight: 600; }
+.method-card-badges { display: flex; gap: 5px; flex-wrap: wrap; flex-shrink: 0; }
+.method-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.5rem; margin: 0.8rem 0; }
+.method-stat { font-size: 14px; }
+.method-stat-label { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text3); margin-bottom: 1px; }
+.method-stat-value { color: var(--text2); line-height: 1.4; }
+.method-verdict { margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid var(--border); font-size: 15px; color: var(--text2); }
+.method-verdict b { color: var(--text); }
+
+/* ── Agenda tags ── */
+.agenda-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 0.5rem; }
+.atag {
+  font-family: var(--font-mono); font-size: 9px;
+  background: var(--bg3); color: var(--text3);
+  border: 0.5px solid var(--border2);
+  padding: 2px 6px; border-radius: 3px;
+}
+
+/* ── Open questions ── */
+.question-list { display: flex; flex-direction: column; gap: 1rem; }
+.question-item { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 1rem 1.2rem; }
+.question-top { display: flex; align-items: baseline; gap: 0.7rem; margin-bottom: 0.5rem; }
+.question-num { font-family: var(--font-mono); font-size: 10px; color: var(--text3); flex-shrink: 0; }
+.question-text { font-size: 1rem; font-weight: 600; line-height: 1.4; }
+.question-body { font-size: 15px; color: var(--text2); line-height: 1.6; }
+
+/* ── Two-column ── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+.col-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 1rem 1.1rem; }
+.col-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 0.5rem; }
+.col-card ul { font-size: 14px; color: var(--text2); padding-left: 1.2rem; line-height: 1.7; }
+
+/* ── KG step list ── */
+.step-list { counter-reset: steps; display: flex; flex-direction: column; gap: 0.6rem; margin: 1rem 0; }
+.step { display: flex; gap: 0.9rem; align-items: flex-start; }
+.step-num {
+  counter-increment: steps;
+  content: counter(steps);
+  font-family: var(--font-mono); font-size: 10px;
+  background: var(--bg3); color: var(--text3);
+  border: 1px solid var(--border2);
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; margin-top: 2px;
+}
+.step-body { font-size: 15px; color: var(--text2); line-height: 1.6; }
+.step-body b { color: var(--text); }
+
+/* ── Fork diagram ── */
+.fork { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: 1rem 0; background: var(--border); border-radius: var(--r); overflow: hidden; }
+.fork-side { background: var(--bg2); padding: 1rem 1.1rem; }
+.fork-side h4 { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.6rem; }
+.fork-side.empiricist h4 { color: var(--teal); }
+.fork-side.rationalist h4 { color: var(--purple); }
+.fork-side p { font-size: 14px; color: var(--text2); line-height: 1.6; }
+
+/* ── Numbers / stats highlight ── */
+.stat-row { display: flex; gap: 1.5rem; margin: 0.8rem 0; flex-wrap: wrap; }
+.stat-box { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 0.6rem 0.9rem; }
+.stat-box .num { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; line-height: 1; }
+.stat-box .lbl { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text3); margin-top: 3px; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 5px; }
+
+/* ── Responsive ── */
+@media (max-width: 780px) {
+  .shell { grid-template-columns: 1fr; }
+  nav { display: none; }
+  main { padding: 2rem 1.5rem 4rem; }
+  .two-col, .fork, .method-stat-grid { grid-template-columns: 1fr; }
+}
+</style>
+<body>
+<div class="shell">
+
+<!-- ── Sidebar ── -->
+<nav>
+  <h2>Contents</h2>
+  <ul>
+    <li><a href="#core">0 — Core Commitment</a></li>
+    <div class="divider"></div>
+    <li><a href="#stack">1 — The Recurrence Stack</a></li>
+    <li><a href="#ouro" class="sub">1a Depth recurrence (Ouro)</a></li>
+    <li><a href="#coconut" class="sub">1b Thought recurrence (COCONUT)</a></li>
+    <li><a href="#combine" class="sub">1c Can they combine?</a></li>
+    <li><a href="#jepa" class="sub">1d JEPA as objective</a></li>
+    <li><a href="#hrm" class="sub">1e HRM control</a></li>
+    <li><a href="#autotts" class="sub">1f AutoTTS &amp; halting</a></li>
+    <li><a href="#horizon" class="sub">1g Horizon &amp; TTS</a></li>
+    <div class="divider"></div>
+    <li><a href="#operators">2 — Thoughts as Operators</a></li>
+    <div class="divider"></div>
+    <li><a href="#block">3 — The Block</a></li>
+    <li><a href="#attn" class="sub">3a Relational attention</a></li>
+    <li><a href="#tbaf" class="sub">3b TBAF, used once</a></li>
+    <li><a href="#norm" class="sub">3c Activation &amp; norm</a></li>
+    <div class="divider"></div>
+    <li><a href="#memory">4 — Memory &amp; Training</a></li>
+    <li><a href="#diffblocks" class="sub">4a DiffusionBlocks</a></li>
+    <li><a href="#deq" class="sub">4b Implicit gradients</a></li>
+    <li><a href="#quant" class="sub">4c Quantization &amp; MoE</a></li>
+    <div class="divider"></div>
+    <li><a href="#systems">5 — Systems</a></li>
+    <div class="divider"></div>
+    <li><a href="#blueprint">6 — Build &amp; Test Blueprint</a></li>
+    <li><a href="#bp-core" class="sub">6a Attractor/DEQ core</a></li>
+    <li><a href="#bp-io" class="sub">6b I/O &amp; multimodality</a></li>
+    <li><a href="#bp-train" class="sub">6c Data efficiency</a></li>
+    <li><a href="#bp-stages" class="sub">6d Build &amp; test order</a></li>
+    <div class="divider"></div>
+    <li><a href="#questions">7 — Open Questions</a></li>
+  </ul>
+
+  <div class="legend">
+    <h3>Status legend</h3>
+    <div class="legend-row"><span class="badge badge-amber">established</span><span>empirically confirmed</span></div>
+    <div class="legend-row"><span class="badge badge-teal">directional</span><span>promising, unproven</span></div>
+    <div class="legend-row"><span class="badge badge-coral">open</span><span>active research question</span></div>
+    <div class="legend-row"><span class="badge badge-purple">theoretical</span><span>unconfirmed theory</span></div>
+    <div class="legend-row"><span class="badge badge-green">plan</span><span>next step</span></div>
+  </div>
+</nav>
+
+<!-- ── Main content ── -->
+<main>
+
+  <!-- Doc header -->
+  <header class="doc-header">
+    <div class="doc-eyebrow">Research Agenda · Working Document · Companion to "Representation Learning"</div>
+    <h1>Model Architecture<br><em>Status &amp; Plan</em></h1>
+    <div class="doc-meta">
+      <span><b>Architecture cluster:</b> Items 1, 2, 11, 13, 36, 44, 49, 56, 61, 62, 65, 69, 85</span>
+      <span><b>Hard constraint:</b> 4GB VRAM (RTX 3050 Ti)</span>
+    </div>
+    <p class="doc-intro">This document covers <em>how the model is built</em>. Its companion covers <em>what the representations should be</em>; where the attention layer is concerned, this document points there rather than repeating it. The spine here is a single non-negotiable commitment — recurrent depth — and the open question of exactly which recurrences combine.</p>
+  </header>
+
+
+  <!-- ══ 0 · CORE COMMITMENT ══ -->
+  <section class="section accent-coral" id="core">
+    <div class="section-header">
+      <span class="section-num">00</span>
+      <h2>The Core Commitment: Recurrent Depth</h2>
+    </div>
+
+    <p>There is no variant of this model that is not a recurrent-depth model of some kind. This is the one fixed point of the design. Everything else — the attention mechanism, the activation, the training objective — is negotiable; recurrent depth is not.</p>
+
+    <p>The justification is threefold. First, the bitter lesson: a fixed-depth network has a fixed compute budget per token regardless of problem difficulty, which forces it to pattern-match rather than compute. Recurrence lets the model spend more computation on harder inputs — emergent search rather than hand-coded depth. Second, the companion document's central claim is that reasoning is the <em>composition</em> of relation-transformations (morphisms); composition is inherently iterative, so the architecture that realizes it must iterate. Third, the memory constraint: weight-shared recurrence buys effective depth without parameter growth, which on 4GB VRAM is not a luxury but the only way to reach the depth the problem needs.</p>
+
+    <div class="callout key" data-label="Two orthogonal axes of recurrence">
+      <p>The critical distinction the field tends to blur: there are <strong>two different things "recurrence" can mean</strong>, and they are orthogonal. <strong>Depth recurrence</strong> (Ouro/LoopedLM) loops the same block to deepen the computation of a single step — "think harder about this." <strong>Thought recurrence</strong> (COCONUT) feeds a latent output back as the next input to extend a reasoning chain — "take another step." They are not redundant and they are not the same axis. The plan uses at least one; ideally both, nested.</p>
+    </div>
+
+    <div class="fork">
+      <div class="fork-side empiricist">
+        <h4>Depth axis — "think harder"</h4>
+        <p>Same weights applied L times to refine a representation in place. Fixed input, deepening transformation. A fixed-point / equilibrium computation. Ouro, LoopedLM, Universal Transformer (item 1).</p>
+      </div>
+      <div class="fork-side rationalist">
+        <h4>Thought axis — "take a step"</h4>
+        <p>Latent output fed back as next input, extending a trajectory of continuous thoughts that attend to each other. Chain length = reasoning length. COCONUT (item 2).</p>
+      </div>
+    </div>
+
+    <div class="agenda-tags"><span class="atag">item 1 (Ouro/LoopedLM)</span><span class="atag">item 2 (COCONUT)</span><span class="atag">item 49 (Sub-JEPA)</span><span class="atag">item 44/61/62 (HRM)</span></div>
+  </section>
+
+
+  <!-- ══ 1 · THE RECURRENCE STACK ══ -->
+  <section class="section accent-teal" id="stack">
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <h2>The Recurrence Stack</h2>
+    </div>
+
+    <!-- 1a Ouro -->
+    <div class="subsection" id="ouro">
+      <h3>1a &nbsp; Depth Recurrence — Ouro / LoopedLM <span class="badge badge-amber">established</span></h3>
+      <p>A block <em>B</em> with shared weights applied repeatedly: <em>h<sub>l+1</sub> = B(h<sub>l</sub>)</em> for <em>l = 0…L−1</em> on a fixed input. Effective depth <em>L</em> at the parameter cost of one block — Ouro reports roughly 4× parameter efficiency versus an unrolled network of equivalent depth. The natural mathematical reading is a <em>fixed-point</em> computation: the loop iterates toward an equilibrium <em>h* = B(h*)</em>, which is the Deep Equilibrium (DEQ) view and matters enormously for memory (§4b).</p>
+      <p>This is also the substrate for the attractor-state picture in the companion document: KG-style objects are attractors of the depth loop, and a relation is the transformation moving the state from one attractor toward another (item 41).</p>
+      <div class="agenda-tags"><span class="atag">item 1</span><span class="atag">item 41 (attractor models)</span></div>
+    </div>
+
+    <!-- 1b COCONUT -->
+    <div class="subsection" id="coconut">
+      <h3>1b &nbsp; Thought Recurrence — COCONUT <span class="badge badge-teal">directional</span></h3>
+      <p>Instead of decoding a hidden state to a token and re-embedding it, COCONUT feeds the last hidden state back directly as the next input embedding — reasoning in continuous latent space. The sequence grows as <em>[context, c<sub>1</sub>, c<sub>2</sub>, …, c<sub>t</sub>]</em>; only after the latent chain completes does the model decode an answer. The payoff is that a continuous thought is not forced through the bottleneck of a discrete token vocabulary, so a single thought can carry more than one token's worth of information and need not commit prematurely to one branch.</p>
+      <p>The companion document sharpens what these thoughts <em>should be</em> (§2 below): not compressed content, but relation-transformations — operators.</p>
+      <div class="agenda-tags"><span class="atag">item 2</span><span class="atag">item 55 (abstract CoT)</span></div>
+    </div>
+
+    <!-- 1c Combine -->
+    <div class="subsection" id="combine">
+      <h3>1c &nbsp; Can They Combine? <span class="badge badge-coral">open — central</span></h3>
+      <p>The question is whether depth recurrence and thought recurrence co-exist in one model. The argument that they can: they are orthogonal axes, so the natural combination is <strong>nested</strong> — each COCONUT thought step <em>c<sub>t</sub></em> is itself computed by an Ouro-style depth loop. Total computation scales as <em>T</em> (thoughts) × <em>L</em> (depth loops per thought). Because depth refines a step and thought extends the chain, the two are complementary, not duplicative; a capable reasoner needs both deep per-step computation and multi-step chains.</p>
+      <p>The honest hard parts, in order of severity:</p>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><b>Gradient flow and memory.</b> Backprop through a <em>T × L</em> unroll is the central obstacle on 4GB. Two escapes, both real: DEQ-style implicit gradients give O(1) memory in the depth loop (§4b), and DiffusionBlocks decouples memory from unroll depth (§4a). Without at least one, the nested model does not fit.</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><b>Stability.</b> Nested recurrence can blow up or collapse over many iterations. Requires bounded/normalized signal propagation — RMSNorm, QK-Norm, and possibly a bounded periodic activation (§3b, §3c) — plus the anti-collapse term from the JEPA objective.</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><b>Halting.</b> When does the depth loop stop (per thought), and when does the thought loop stop (per problem)? This is what HRM's ACT halting is for, applied at both recurrence axes (§1e) — adaptive computation time per step and per problem.</div></div>
+      </div>
+      <div class="callout caution" data-label="Calibration">
+        <p>It is genuinely unknown whether the two co-train cleanly. The orthogonality argument says they <em>should</em> be combinable in principle; it does not guarantee gradient descent finds a joint solution. The fallback is graceful: if nesting fails, ship depth recurrence alone (the more established of the two) and treat thought recurrence as a later addition. At least one axis is present; both is the stretch goal.</p>
+      </div>
+      <div class="agenda-tags"><span class="atag">item 1</span><span class="atag">item 2</span><span class="atag">item 85 (DiffusionBlocks)</span></div>
+    </div>
+
+    <!-- 1d JEPA -->
+    <div class="subsection" id="jepa">
+      <h3>1d &nbsp; JEPA as the Objective — A World Model in Latent Depth <span class="badge badge-teal">directional / ideal</span></h3>
+      <p>JEPA is not a module to bolt on; it is the training <em>objective</em> that shapes the latent thoughts. Predict the representation of a future state from the current one, in latent space, rather than reconstructing tokens or pixels. In a recurrent-depth reasoner this means: given the current latent state, predict the latent state that a reasoning step would produce. The model learns to run its own world-model forward in its head — imagine consequences without committing to tokens. This is precisely the "telos" placement from the companion document: purpose lives in the objective, not in a head.</p>
+      <p>This connects three agenda items into one objective: active inference (item 20, represent things by their role in achieving goals), MuZero-style latent planning (item 77, "an HRM with a JEPA objective gets ~80% of the way there"), and Sub-JEPA's anti-collapse machinery (item 49). The anti-collapse term is mandatory: a model predicting its own future latents has a trivial collapse solution (constant latent), defeated by SIGReg/VICReg-style isotropy regularization.</p>
+      <div class="callout caution" data-label="The real uncertainty">
+        <p>Whether a JEPA predictive objective can drive a COCONUT latent chain — and do so <em>through</em> a depth-recurrent core — without either collapsing or destabilizing is the least-tested part of the whole plan. COCONUT was originally trained with a token-replacement curriculum, not a predictive latent objective. Making JEPA the driver is the ideal; it is not known to work. Flagged honestly as the highest-risk, highest-reward element.</p>
+      </div>
+      <div class="agenda-tags"><span class="atag">item 49 (Sub-JEPA)</span><span class="atag">item 20 (active inference)</span><span class="atag">item 77 (MuZero→HRM)</span><span class="atag">item 78 (RISE world model)</span></div>
+    </div>
+
+    <!-- 1e HRM -->
+    <div class="subsection" id="hrm">
+      <h3>1e &nbsp; HRM — Take the Outer Loop, Make the Hierarchy Optional <span class="badge badge-teal">directional</span></h3>
+      <p>The earlier framing leaned on HRM's slow/fast hierarchy as the controller. The ablation evidence has redrawn what is worth taking. The ARC Prize analysis and two mechanistic follow-ups found the H/L hierarchy had minimal impact versus a similarly-sized plain transformer, while the under-documented <strong>outer refinement loop</strong> — repeated forward segments with deep supervision and ACT halting — drove the gains: iteration is the engine, hierarchy is secondary. HRM-Text (1.15B, ~40B tokens, runs at 0.6 GiB int4) carries the same recurrent depth to language but, tellingly, has not had the flat-vs-hierarchical control run on it either.</p>
+      <p>So we take from HRM the parts the evidence supports — and which, notably, could enhance any architecture: the <strong>outer refinement loop</strong>, <strong>deep supervision</strong> over segments, <strong>ACT halting</strong>, and the one-step / equilibrium gradient (already §1a, §4b). These are the recurrent-depth machinery, not the module split. The <strong>H/L hierarchy itself becomes an optional module — built last and tested against single-timescale recurrent depth (A7)</strong>. The default build is single-timescale, consistent with the objectives staging.</p>
+      <p>What survives independent of the hierarchy is the <em>control</em> role: a halting / policy layer deciding how hard to think per step and how many steps to take. That is where metacognition lives (item 80) and is the Kantian apperceptive binding from the companion document — the "I" that owns and binds the latent trajectory. It requires a control policy over the recurrence (§1f), not specifically the slow/fast split.</p>
+      <div class="agenda-tags"><span class="atag">item 44/61/62 (HRM)</span><span class="atag">item 80 (metacognition)</span><span class="atag">item 8 (AutoTTS)</span><span class="atag">A7 (hierarchy test)</span></div>
+    </div>
+
+    <!-- 1f AutoTTS / halting / EOS -->
+    <div class="subsection" id="autotts">
+      <h3>1f &nbsp; AutoTTS as the Control Policy — and Halting Without an EOS Token <span class="badge badge-teal">directional</span></h3>
+      <p>AutoTTS (item 8) is "the bitter lesson applied to chain-of-thought — when to terminate or branch, and how to use branches." That is not a separate module to add; it is precisely the <em>policy</em> the halting/control layer (§1e) should learn over the two recurrence axes — a control policy that does not depend on the H/L hierarchy. Getting its effect means making three decisions learned and adaptive rather than fixed: depth-loop count per step, thought-chain length, and when to spawn and prune divergent branches. The branch-evaluation half pairs naturally with item 82 (ADHD parallel/divergent thinking), whose value is spotting reasoning traps — i.e. deciding which divergent branches to kill.</p>
+      <p><strong>Halting without an EOS token.</strong> A model that thinks (and ideally speaks) in latent space has no natural discrete token to mark "stop." Replace the EOS token with a continuous halting signal. Two mechanisms: an ACT-style accumulated halting probability the controller emits per step, or — more natural for a JEPA model — <strong>latent fixed-point convergence</strong>: stop when the predicted next latent ≈ the current one (nothing left to predict) or when the depth loop reaches equilibrium. Under the active-inference frame this is principled: stopping = free energy minimized = the goal state reached. The EOS token is a crude proxy for "goal achieved"; convergence-based halting makes "done" mean "predicted future = preferred future," and reuses the same halting machinery as the recurrence.</p>
+      <div class="agenda-tags"><span class="atag">item 8 (AutoTTS)</span><span class="atag">item 82 (ADHD branching)</span><span class="atag">item 89 (learn to skip blocks)</span><span class="atag">objectives §3 (telos as halting)</span></div>
+    </div>
+
+    <!-- 1g Horizon -->
+    <div class="subsection" id="horizon">
+      <h3>1g &nbsp; Horizon — Hierarchical JEPA + Test-Time Scaling <span class="badge badge-coral">open hunch</span></h3>
+      <p>LeCun argues hierarchical JEPA is required for long-timescale prediction, and his experiments support it — but they <em>increase</em> the achievable planning length without <em>extending it indefinitely</em>, because the number of hierarchy levels is fixed at training, so horizon is architecturally bounded. The hunch worth testing: test-time-scaling techniques (COCONUT, AutoTTS, and modifications) could extend not just reasoning depth but the length of the predictions and actions the model can make.</p>
+      <p>The hunch is true in direction, with one honest limit. Test-time recurrence is <em>dynamic</em> where hierarchy is static: a recurrent JEPA can roll its world model forward at inference (predict next latent → feed back → predict again), extending horizon without retraining. So TTS does push past fixed hierarchical JEPA. But the binding limit then becomes <strong>error accumulation</strong> in the latent rollout, not architecture — the same compounding that limits autoregressive generation. The two combine better than either alone: hierarchy reduces the number of error-accumulating steps per unit horizon (coarser levels = fewer steps), and TTS spends variable compute to roll further when needed. Not indefinite, but further and adaptive.</p>
+      <div class="callout caution" data-label="Two candidate levers against rollout drift">
+        <p>Two complementary mechanisms could bound the compounding error. <b>(1) Operator structure:</b> composing clean relation-transformations (§2) should accumulate less error than predicting noisy content vectors — if so, the relational design is itself a horizon-extension mechanism, not only a reasoning one. <b>(2) Targeted TBAF:</b> the triangle activation's stated purpose is precisely to correct autoregressive drift, so a single strategic placement on the rollout feedback path (§3b) could cap per-step error growth at the exact point where drift enters. Whether either transfers to this latent space is the most interesting untested claim in the recurrence stack.</p>
+      </div>
+      <div class="agenda-tags"><span class="atag">item 49 (hierarchical JEPA)</span><span class="atag">item 2 (COCONUT)</span><span class="atag">item 8 (AutoTTS)</span><span class="atag">item 77 (MuZero rollout)</span></div>
+    </div>
+  </section>
+
+
+  <!-- ══ 2 · THOUGHTS AS OPERATORS ══ -->
+  <section class="section accent-purple" id="operators">
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <h2>Latent Thoughts as Operators</h2>
+    </div>
+
+    <p>What <em>are</em> the continuous thoughts in the latent loop? The default assumption — that a thought is a compressed content vector, a squeezed token embedding — is probably wrong, and two agenda items point the other way.</p>
+
+    <p>Abstract Chain-of-Thought (item 55) reports ~12× token savings by reasoning over abstract tokens that are explicitly <em>not</em> equivalent to language tokens. Because the method is non-interpretable we cannot read off what those tokens are — but the efficiency ratio is a clue too large to ignore. A 12× compression over natural language is exactly what you would expect if each abstract token were an <em>operator</em> rather than a piece of content: the natural-language description of "compose relation R then relation S" is many tokens, but the operation itself is one step. Content compresses linearly; operations compress combinatorially.</p>
+
+    <div class="callout theory" data-label="The synthesis (points 55 + 34)">
+      <p>If reasoning is composition of relation-transformations (companion §3), then a latent thought should be parameterized as a <strong>morphism</strong> — a relation-transformation applied to the current state, <em>c<sub>t</sub> = M<sub>r<sub>t</sub></sub> · state</em> — not as compressed content. This unifies COCONUT with the relational attention: the thought <em>is</em> the morphism. It explains item 55's two observations at once — why the abstract tokens are not language tokens (they are operators, not objects) and why they are ~12× more efficient (an operation is more compact than its description). The KG algebra of item 34 is the space these operators live in.</p>
+    </div>
+
+    <p>This also answers Chollet (item 86) on his own terms. His claim that connectionist models cannot do symbolic descent is too strong: transformers have been trained to simulate C execution at arbitrary depth, so a recurrent-depth model whose latent steps are operator-applications is literally executing a program in latent space. Symbolic descent is not foreclosed to connectionist models; it is what a relation-composing recurrent loop <em>does</em>. The data-efficiency gap Chollet identifies is real, but its cause is the lack of compositional operator structure, not connectionism per se — and that structure is exactly what this design supplies.</p>
+
+    <div class="callout caution" data-label="Calibration">
+      <p>Item 55 is non-interpretable, so "the abstract tokens are operators" is an inference, not an established fact — by construction we cannot confirm it directly. The design commitment (parameterize thoughts as morphisms) is defensible on independent grounds from the companion document; the item-55 connection is supporting evidence, not proof. A probing experiment that tests whether learned latent thoughts behave like composable operators is Q4.</p>
+    </div>
+
+    <div class="agenda-tags"><span class="atag">item 55 (abstract CoT)</span><span class="atag">item 34 (KG algebra)</span><span class="atag">item 86 (symbolic descent)</span><span class="atag">item 24 (program synthesis)</span></div>
+  </section>
+
+
+  <!-- ══ 3 · THE BLOCK ══ -->
+  <section class="section accent-amber" id="block">
+    <div class="section-header">
+      <span class="section-num">03</span>
+      <h2>The Block: Attention, Activation, Norm</h2>
+    </div>
+
+    <!-- 3a attention -->
+    <div class="subsection" id="attn">
+      <h3>3a &nbsp; The Attention Layer <span class="badge badge-green">see companion §3</span></h3>
+      <p>The attention mechanism is the relational attention developed in the companion document, not repeated here: relations as a monoid acting on embeddings, the polar (magnitude = content, phase = structure) hyle/morphe split, softmax as the discrimination/classifier, expressivity from a small generating set, and SSA (item 5) handling content-conditioned routing so the structural channel stays linear. In the recurrent block it is the per-loop operator: each depth iteration applies relational attention, and over a thought step the composed attention is the composed morphism. The polar phase channel is also where the activation question below becomes concrete.</p>
+      <div class="agenda-tags"><span class="atag">companion §3</span><span class="atag">item 5 (SSA)</span><span class="atag">item 3 (polar PE)</span><span class="atag">item 11 (MLA)</span></div>
+    </div>
+
+    <!-- 3b TBAF -->
+    <div class="subsection" id="tbaf">
+      <h3>3b &nbsp; TBAF — Used Once, For Drift Correction <span class="badge badge-coral">open</span></h3>
+      <p>The agenda's earlier note on the Triangle-Based Activation Function was misleading and has been corrected (item 69). Two facts reframe it. First, in the repo experiment the activation was used <em>only once</em> in the entire model — an image model — and still achieved its goal; it was never required in every block. Second, and more important, its <em>purpose</em> was to solve <strong>autoregressive drift</strong> — the compounding error that accumulates when a model is fed its own output repeatedly. That is exactly the limit that bounds horizon in §1g. So the real question is not "replace SwiGLU everywhere" but "can one targeted placement correct the latent-rollout drift that caps how far the world model can be rolled forward?"</p>
+      <p><strong>Why a triangle activation would correct drift.</strong> It is bounded, periodic, and (with unit slope) approximately 1-Lipschitz. Boundedness caps signal-magnitude growth; the ~1-Lipschitz property caps per-step error amplification — and drift <em>is</em> error amplification, so bounding the amplification factor bounds the compounding; and unlike tanh/sigmoid it does not saturate, so it controls magnitude without killing gradients. On the phase channel the argument is stronger still: phase is periodic, so accumulated phase drift <em>wraps back</em> into range rather than escaping — the triangle activation matches the geometry instead of fighting it.</p>
+      <p>Candidate placements, most-interesting first:</p>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><b>The phase channel of relational attention.</b> A triangle wave is the principled nonlinearity for a periodic variable, and it doubles as drift correction — accumulated phase drift folds back onto the torus. Content (magnitude) is left untouched, which is essential: folding magnitude would corrupt content. The polar split is exactly what makes this <em>targeted</em> application possible. Strongest fit — it links item 69, the polar split, and the §1g horizon lever in a single placement.</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><b>The rollout feedback path.</b> One activation where the predicted latent is fed back as the next input — the precise site where autoregressive drift enters. The placement most directly aligned with TBAF's original drift-correction purpose.</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><b>The single shared recurrent block.</b> In a weight-shared loop, "used once" in parameter terms means "applied every iteration" in compute terms; a bounded periodic activation aids stable signal propagation across loops (the SIREN rationale), addressing the §1c stability hazard as well.</div></div>
+      </div>
+      <div class="callout caution" data-label="The real uncertainty: does it transfer?">
+        <p>The result is from a single <em>image</em> model; whether the drift-correction property transfers to an abstract reasoning latent space is unproven, and it is the crux of the user's own question. The precondition is specific: TBAF helps only if the meaningful drift lives in the bounded/periodic part of the representation — phase drift (it wraps) or magnitude growth (it caps). If drift is instead <em>semantic</em> — meaning drifting while magnitude and phase stay bounded — a periodic activation will not fix it, and the correction must come from elsewhere (JEPA prediction-error re-grounding, or the metacognitive check). So the first experiment is not "add TBAF" but "characterize where drift lives in the latent rollout," then place TBAF only if it lives in the periodic/bounded part. The "used once" and "for drift" claims are both worth re-verifying against the repo first.</p>
+      </div>
+      <div class="agenda-tags"><span class="atag">item 69 (TBAF)</span><span class="atag">item 3 (polar phase)</span><span class="atag">§1g (horizon limit)</span></div>
+    </div>
+
+    <!-- 3c norm -->
+    <div class="subsection" id="norm">
+      <h3>3c &nbsp; Activation &amp; Normalization Baseline <span class="badge badge-amber">established</span></h3>
+      <p>Absent a confirmed reason to deviate, the block uses the robust modern defaults: <strong>SwiGLU</strong> FFN (item 13), <strong>RMSNorm</strong> (item 36), and <strong>QK-Norm</strong> (item 56). QK-Norm is doubly relevant here: it stabilizes attention logits in deep recurrence (the §1c stability concern) and it is the natural place to control the <em>magnitude</em> channel of the polar split — keeping content magnitude bounded while phase carries structure. TBAF, if it survives testing, is a single-site addition on top of this baseline, not a replacement for SwiGLU throughout.</p>
+      <div class="agenda-tags"><span class="atag">item 13 (SwiGLU)</span><span class="atag">item 36 (RMSNorm)</span><span class="atag">item 56 (QK-Norm)</span></div>
+    </div>
+  </section>
+
+
+  <!-- ══ 4 · MEMORY & TRAINING ══ -->
+  <section class="section accent-green" id="memory">
+    <div class="section-header">
+      <span class="section-num">04</span>
+      <h2>Memory &amp; Training Under 4GB</h2>
+    </div>
+
+    <p>The binding constraint is 4GB of VRAM on an RTX 3050 Ti. Every architectural choice above is shadowed by it, and a nested <em>T × L</em> recurrence is exactly the structure that naively blows the budget. Three levers make it tractable.</p>
+
+    <!-- 4a DiffusionBlocks -->
+    <div class="subsection" id="diffblocks">
+      <h3>4a &nbsp; DiffusionBlocks — Block-wise Training <span class="badge badge-teal">directional — high value</span></h3>
+      <p>DiffusionBlocks (item 85, Sakana) splits the network into blocks trained <em>independently</em> by treating the forward pass as a diffusion-style denoising process, so the memory cost is decoupled from the full unroll depth — you never need all activations of the full network resident at once. For a recurrent-depth model this is an unusually good fit: the loop is already a sequence of near-identical block applications, which is precisely the structure block-wise training wants. This is the single most promising memory lever for fitting the nested recurrence on 4GB, and it is why item 85 entered the agenda.</p>
+      <div class="callout caution" data-label="Open">
+        <p>Whether independently-trained blocks preserve the <em>semantics</em> of a weight-shared recurrent loop — where the same block must compose with itself across iterations — is not obvious and is Q5. Block-wise training assumes a degree of block independence that recurrence partly violates.</p>
+      </div>
+      <div class="agenda-tags"><span class="atag">item 85 (DiffusionBlocks)</span><span class="atag">item 88 (PID — diffusion decoding)</span></div>
+    </div>
+
+    <!-- 4b DEQ -->
+    <div class="subsection" id="deq">
+      <h3>4b &nbsp; Implicit Gradients for the Depth Loop <span class="badge badge-purple">theoretical</span></h3>
+      <p>If the depth recurrence converges to a fixed point <em>h* = B(h*)</em>, the Deep Equilibrium trick computes the gradient at the fixed point via the implicit function theorem, in <strong>O(1) memory</strong> regardless of the number of loop iterations — you do not store the per-iteration activations at all. This is the clean theoretical answer to the depth half of the memory problem, and it pairs with DiffusionBlocks (which handles the across-block half). The cost is the assumption of convergence and the overhead of the implicit solve; whether the relational recurrent block converges reliably enough to use DEQ gradients is open.</p>
+      <div class="agenda-tags"><span class="atag">item 1 (looped/equilibrium)</span><span class="atag">item 41 (attractors = fixed points)</span></div>
+    </div>
+
+    <!-- 4c quant -->
+    <div class="subsection" id="quant">
+      <h3>4c &nbsp; Quantization, MoE, Checkpointing <span class="badge badge-amber">established</span></h3>
+      <p>The standard levers, all compatible with the above: <strong>4-bit</strong> weight quantization (items 60, 67) for the resident model; <strong>MoE + MLA</strong> (item 11) to grow capacity without growing active parameters or KV-cache; and gradient checkpointing as the always-available fallback. None of these is novel; they are the cushion that makes the novel parts fit.</p>
+      <div class="callout caution" data-label="Residual Coupling is not a free MoE upgrade">
+        <p>Residual Coupling (item 65) is the cross-expert mechanism that doubles as the companion document's sheaf-gluing of perspectives — but it carries a real trade-off and is <strong>not a drop-in MoE replacement</strong>. Because it couples the experts' residual streams, it requires the experts to be <em>active</em>, which forfeits exactly the sparsity that makes MoE efficient. So it loses on raw efficiency versus a traditional sparse MoE. It is worth paying for only where cross-expert coupling — cross-domain reasoning, perspective-gluing — matters more than the compute savings of sparsity. Use it deliberately, not by default.</p>
+      </div>
+      <div class="agenda-tags"><span class="atag">item 60/67 (4-bit)</span><span class="atag">item 11 (MoE+MLA)</span><span class="atag">item 65 (Residual Coupling — trade-off)</span></div>
+    </div>
+  </section>
+
+
+  <!-- ══ 5 · SYSTEMS ══ -->
+  <section class="section accent-blue" id="systems">
+    <div class="section-header">
+      <span class="section-num">05</span>
+      <h2>Systems &amp; Implementation</h2>
+    </div>
+
+    <p>xAI's vertically integrated training stack, written in C, reportedly trains over an order of magnitude faster than JAX through heavy cross-GPU parallelism (item 83). The lesson is real — a tightly controlled low-level stack is a genuine multiplier — but the timing matters. Rust (items 83, 84) for bare-metal speed and bloat removal is a <strong>commercialization-phase</strong> concern, not a testing-phase one. During research, a faster stack mostly buys faster iteration; it does not change which architecture is correct, and premature low-level optimization would trade the thing that is scarce (research iterations on a 4GB card, where the constraint is memory, not language overhead) for the thing that is not yet needed (throughput at scale).</p>
+
+    <div class="callout plan" data-label="Sequencing">
+      <p>Hold Rust/C systems work until the architecture is validated. The 4GB constraint is addressed by the memory levers in §4, which are algorithmic, not implementation-language choices — a faster language does not create VRAM. Revisit items 83/84 when moving from "does this architecture work" to "can this be deployed and scaled."</p>
+    </div>
+
+    <div class="agenda-tags"><span class="atag">item 83 (xAI C stack)</span><span class="atag">item 84 (Rust)</span><span class="atag">item 70 (Rust SNN)</span><span class="atag">item 71 (GPU efficiency)</span></div>
+  </section>
+
+
+  <!-- ══ 6 · BUILD & TEST BLUEPRINT ══ -->
+  <section class="section accent-amber" id="blueprint">
+    <div class="section-header">
+      <span class="section-num">06</span>
+      <h2>Build &amp; Test Blueprint — Non-Hierarchical v1</h2>
+    </div>
+
+    <p>This is the consolidation of §0–§5 into one buildable, testable model, stripped to what serves the two goals — <strong>data efficiency</strong> and <strong>reasoning depth</strong> — with the hierarchy left out (§1e, A7). The linchpin is a single idea that ties the rest together: a recurrent-depth core trained as a Deep Equilibrium model, whose equilibrium <em>is</em> an attractor (item 41).</p>
+
+    <!-- 6a core -->
+    <div class="subsection" id="bp-core">
+      <h3>6a &nbsp; The Core — One Block, Settled to an Attractor (DEQ) <span class="badge badge-teal">directional</span></h3>
+      <p>A single weight-shared block <em>f<sub>θ</sub></em> — relational attention (§3a) plus RMSNorm/QK-Norm (§3c) — is iterated on a fixed input until it reaches equilibrium <em>h* = f<sub>θ</sub>(h*, x)</em>. That equilibrium is the <strong>attractor</strong>: the settled reasoning state. This single move serves both goals at once:</p>
+      <div class="two-col">
+        <div class="col-card">
+          <h4>Reasoning depth</h4>
+          <ul>
+            <li>Iterations-to-converge = effective depth, unbounded and <em>adaptive</em> — harder inputs settle more slowly, so the model spends more computation where it is needed.</li>
+            <li>Depth is decoupled from both layer count and parameter count (the f<sub>θ</sub> operator view, §1a / §2).</li>
+          </ul>
+        </div>
+        <div class="col-card">
+          <h4>Data efficiency</h4>
+          <ul>
+            <li>DEQ implicit gradients train the loop in <strong>O(1) memory</strong> regardless of iteration count (§4b) — depth becomes affordable on 4GB.</li>
+            <li>Basins of attraction <em>are</em> denoising: nearby noisy inputs fall into the same attractor = the same conclusion, which is generalization from few examples.</li>
+          </ul>
+        </div>
+      </div>
+      <p style="margin-top:0.8rem">Halting falls out for free: stop when the loop reaches its fixed point (‖h<sub>t+1</sub> − h<sub>t</sub>‖ &lt; ε), the convergence-based halting of §1f — no EOS token for the latent loop. And the same settling engine is reused by the learning algorithm: prospective configuration's relaxation is this same DEQ solve with the target clamped (learning-algorithm §5), so inference and learning share one mechanism.</p>
+      <div class="callout caution" data-label="The assumption this rests on">
+        <p>DEQ gradients want a <em>stable, unique</em> fixed point, but reasoning may want multiplicity (breadth, alternatives) and HRM's analysis found <em>spurious</em> fixed points that trap the dynamics. For v1 — single-timescale, depth-only — single-attractor convergence is the right simple target, and the chain axis (§1b) is where breadth lives later. Whether the relational block reaches useful, non-spurious attractors reliably enough for DEQ is the load-bearing assumption of the whole core (A8); a contraction constraint (spectral norm, the ~1-Lipschitz placement of §3b) is the first lever if it does not.</p>
+      </div>
+      <div class="agenda-tags"><span class="atag">item 1 (Ouro/equilibrium)</span><span class="atag">item 41 (attractors)</span><span class="atag">§4b (DEQ)</span><span class="atag">A8</span></div>
+    </div>
+
+    <!-- 6b I/O -->
+    <div class="subsection" id="bp-io">
+      <h3>6b &nbsp; I/O — Encoders Yes, Reconstructive Decoders No <span class="badge badge-teal">directional</span></h3>
+      <p>Because the objective is JEPA — predict in representation space, never reconstruct the input — the model needs something to map raw input into the latent space (an encoder) and something to emit (a head), but <strong>no generative/reconstructive decoder</strong>. The capacity that an autoencoder or diffusion model spends learning to repaint its input is simply not spent here. That is the data-efficiency win at the I/O layer.</p>
+      <p>The better framing than "one encoder-decoder per modality" is to treat I/O as <strong>clamping on the shared core</strong>, the way a predictive-coding network does:</p>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><b>Encode = clamp + settle.</b> A thin per-modality adapter places the input on a set of sensory units; clamp them and let the core settle. The attractor it reaches <em>is</em> the encoding — no deep encoder stack.</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><b>Cross-modal prediction = clamp some, free the rest.</b> Clamp one modality's units, leave another's free, settle — that is JEPA prediction in the shared space, and it is how multimodality is integrated without a separate fusion module.</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><b>Output = read off.</b> A thin head reads the relevant units after settling. For text this head is <em>autoregressive</em> (a PrefixLM-style token head, as in HRM-Text) — the one place "settle and read off" does not suffice, since token generation is discrete and sequential.</div></div>
+      </div>
+      <p style="margin-top:0.8rem">Under this view multimodality is <em>which units are clamped</em>, not <em>which network you route to</em>; adding a modality is adding a thin adapter, not rebuilding. One shared core, thin adapters in, thin heads out.</p>
+      <div class="callout caution" data-label="Honest limits of the unified-I/O idea">
+        <p>Three caveats. Text still needs a real autoregressive token head, so "no decoder" means no <em>reconstructive</em> decoder, not no output head. JEPA still needs a <strong>target encoder</strong> (EMA/stop-gradient copy) and an anti-collapse term (SIGReg/VICReg, §1d) — that machinery does not disappear. And multimodal-JEPA-in-a-shared-core is research-grade (JEPA is proven mainly in vision), so build the single-modality text core first and add modalities as clamped channels later (A9). If clamped settling underperforms dedicated encoders, the fallback is thin per-modality encoders into the shared core — still no reconstructive decoders.</p>
+      </div>
+      <div class="agenda-tags"><span class="atag">item 49 (JEPA/anti-collapse)</span><span class="atag">item 20 (active inference / clamping)</span><span class="atag">A9</span></div>
+    </div>
+
+    <!-- 6c training for data efficiency -->
+    <div class="subsection" id="bp-train">
+      <h3>6c &nbsp; Training for Data Efficiency <span class="badge badge-teal">directional</span></h3>
+      <p>Five compounding sources of data/compute efficiency, none of which require the hierarchy:</p>
+      <div class="method-stat-grid">
+        <div class="method-stat"><div class="method-stat-label">Weight-sharing</div><div class="method-stat-value">One block reused for all depth — effective depth at the parameter cost of a single block (§1a).</div></div>
+        <div class="method-stat"><div class="method-stat-label">DEQ O(1) memory</div><div class="method-stat-value">Implicit-function-theorem gradients at the fixed point; no per-iteration activations stored (§4b).</div></div>
+        <div class="method-stat"><div class="method-stat-label">Attractor denoising</div><div class="method-stat-value">Basins generalize many inputs to one conclusion — robustness from few examples.</div></div>
+        <div class="method-stat"><div class="method-stat-label">Deep-supervision outer loop</div><div class="method-stat-value">HRM's data-efficiency device: repeated supervised segments squeeze signal from little data — the part of HRM that matters in the small-data regime Ouro's 7.7T-token recipe does not need.</div></div>
+        <div class="method-stat"><div class="method-stat-label">JEPA latent objective</div><div class="method-stat-value">No capacity spent reconstructing inputs; the prediction target lives in representation space (§1d).</div></div>
+      </div>
+      <p style="margin-top:0.8rem">The learning rule for v1 is the DEQ implicit-gradient backprop above — standard and known to work. The research upgrade is to replace it with prospective configuration reusing the same settling engine, filtered by item 52's signal/noise decomposition (the entire learning-algorithm companion document); that is staged after the architecture is validated, not built in from the start.</p>
+      <div class="agenda-tags"><span class="atag">item 1</span><span class="atag">item 44/61/62 (deep supervision)</span><span class="atag">item 49 (JEPA)</span><span class="atag">item 52 / 92 (learning doc)</span></div>
+    </div>
+
+    <!-- 6d staged build & test -->
+    <div class="subsection" id="bp-stages">
+      <h3>6d &nbsp; What to Build and Test, in Order <span class="badge badge-green">plan</span></h3>
+      <p>Each stage adds exactly one source of failure on a validated base, so a break localizes to the thing just added (objectives §2).</p>
+      <div class="step-list">
+        <div class="step"><div class="step-num">0</div><div class="step-body"><b>Single-modality depth core.</b> Text only; one block iterated as a DEQ; convergence halting; deep-supervision outer loop; plain LM/PrefixLM objective. <em>Tests:</em> (a) does it reach equilibrium reliably, without spurious attractors or oscillation (A8)? (b) does iterations-to-converge scale with problem difficulty? (c) <strong>the decisive one</strong> — does it beat a fixed-depth transformer of equal active parameters at an equal data budget on reasoning tasks? If a matched fixed-depth model ties it, recurrent depth is buying nothing here and the premise is wrong.</div></div>
+        <div class="step"><div class="step-num">1</div><div class="step-body"><b>Add the JEPA objective through the depth loop.</b> With anti-collapse (A2). <em>Test:</em> latent prediction trains without collapse, and improves sample efficiency over the Stage-0 LM objective.</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><b>Add the chain axis (COCONUT).</b> Thought recurrence around the depth loop (A1). <em>Test:</em> joint training is stable and the combination beats depth-only.</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><b>Hierarchy test — gated, optional.</b> Only now add the H/L split and test whether it beats the single-timescale baseline at matched params/compute (A7). Keep it only if it earns its place.</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body"><b>Research upgrades.</b> Prospective configuration + item 52 as the learning rule (learning-algorithm doc); multimodality as clamped channels into the shared core (A9). Both ride on a validated core.</div></div>
+      </div>
+      <div class="callout key" data-label="Minimal v1, in one line">
+        <p>[thin token adapter] → [shared block: relational attention + RMSNorm/QK-Norm, iterated to a DEQ fixed point = attractor, convergence-halted] → [autoregressive token head], trained with deep supervision + JEPA, DEQ implicit gradients for O(1) memory. Non-hierarchical, single-timescale. Everything else is a staged, gated add-on.</p>
+      </div>
+      <div class="agenda-tags"><span class="atag">objectives §2 (staging)</span><span class="atag">A1</span><span class="atag">A2</span><span class="atag">A7</span><span class="atag">A8</span><span class="atag">A9</span></div>
+    </div>
+  </section>
+
+
+  <!-- ══ 7 · OPEN QUESTIONS ══ -->
+  <section class="section accent-coral" id="questions">
+    <div class="section-header">
+      <span class="section-num">07</span>
+      <h2>Open Architectural Questions</h2>
+    </div>
+
+    <div class="question-list">
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">A1</span>
+          <span class="question-text">Do depth recurrence and thought recurrence co-train in one model?</span>
+          <span class="badge badge-coral">open — central</span>
+        </div>
+        <p class="question-body">The orthogonality argument says nesting COCONUT (thought) around Ouro (depth) should be possible; it does not prove gradient descent finds a joint solution through a T × L unroll. The first experiment: train depth-recurrence alone to a working baseline, then add the thought loop and test whether joint training is stable and whether the combination outperforms either axis alone. Fallback is graceful — ship depth-only if nesting fails.</p>
+        <div class="agenda-tags"><span class="atag">item 1</span><span class="atag">item 2</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">A2</span>
+          <span class="question-text">Can a JEPA objective drive the latent chain without collapse, through a depth-recurrent core?</span>
+          <span class="badge badge-coral">open — highest risk/reward</span>
+        </div>
+        <p class="question-body">Making JEPA the driver of COCONUT thoughts (rather than the original token-replacement curriculum), and doing so through the depth loop, is the least-tested element. Needs the anti-collapse term (SIGReg/VICReg, item 49) and a check that the predictive objective does not destabilize the recurrence. If it works, the model models the world in its head; if not, fall back to a token-supervised latent chain and treat JEPA as a later objective.</p>
+        <div class="agenda-tags"><span class="atag">item 49</span><span class="atag">item 20</span><span class="atag">item 77</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">A3</span>
+          <span class="question-text">Can a targeted TBAF placement correct latent-rollout drift and thereby extend horizon?</span>
+          <span class="badge badge-coral">open</span>
+        </div>
+        <p class="question-body">TBAF's purpose was autoregressive-drift correction, which is exactly the limit that bounds horizon (§1g) — so this is not merely an activation-choice question but a horizon-extension one. First characterize where drift lives in the latent rollout (phase drift, magnitude growth, or semantic drift); then, only if it lives in the bounded/periodic part, test the placements from §3b — phase channel (strongest fit), rollout feedback path, shared block — against a SwiGLU baseline, measuring achievable rollout length before divergence, not just task accuracy. The open risk is transfer: the result is from an image model, and semantic drift would be immune to a periodic activation. Re-verify the "used once" and "for drift" claims against the repo first.</p>
+        <div class="agenda-tags"><span class="atag">item 69</span><span class="atag">item 3</span><span class="atag">§1g (horizon)</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">A4</span>
+          <span class="question-text">Are the learned latent thoughts actually composable operators?</span>
+          <span class="badge badge-purple">theoretical</span>
+        </div>
+        <p class="question-body">The §2 commitment parameterizes thoughts as morphisms. Test it: probe whether learned latent thoughts behave like composable relation-transformations — e.g. whether applying thought-A-then-thought-B yields the same state as a learned composite, the same composition-fidelity test as companion Q1. This is the architecture-side mirror of the representation-side question; passing both is the through-line of the whole project.</p>
+        <div class="agenda-tags"><span class="atag">item 55</span><span class="atag">item 34</span><span class="atag">companion Q1</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">A5</span>
+          <span class="question-text">Does DiffusionBlocks' independent-block training preserve recurrence semantics?</span>
+          <span class="badge badge-teal">directional</span>
+        </div>
+        <p class="question-body">Block-wise independent training assumes a degree of block independence that weight-shared recurrence partly violates — the same block must compose with itself across iterations. Whether DiffusionBlocks' memory savings survive the recurrent setting, or need modification, is the key feasibility question for fitting the nested model on 4GB.</p>
+        <div class="agenda-tags"><span class="atag">item 85</span><span class="atag">item 1</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">A6</span>
+          <span class="question-text">How should a recurrent-depth model handle long context — and is the context window the wrong primitive?</span>
+          <span class="badge badge-coral">open</span>
+        </div>
+        <p class="question-body">Context rot in long windows (item 87) may be a symptom of treating context as a flat buffer. A relational, recurrent model suggests an alternative: context as relational structure the model composes into, with RAG-style retrieval informing what is loaded rather than a monotonically growing window. Whether the context window should be redesigned from the onset — and what RAG teaches about that — is open and interacts with the hippocampus/CLS memory direction (item 79).</p>
+        <div class="agenda-tags"><span class="atag">item 87 (context rot)</span><span class="atag">item 79 (hippocampus/CLS)</span><span class="atag">item 73 (Engram-RAG)</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">A7</span>
+          <span class="question-text">Does the H/L hierarchy add anything over single-timescale recurrent depth?</span>
+          <span class="badge badge-coral">open — deferred</span>
+        </div>
+        <p class="question-body">HRM's ablations found the hierarchy near-cosmetic for puzzles, and the equivalent control has never been run on HRM-Text at ~1B. Build single-timescale first (the default), get it working, then add the slow/fast split and test whether it beats the single-timescale baseline at matched parameters and compute — measuring whether the hierarchy buys anything the outer loop and depth recurrence do not already provide. If it does not, the hierarchy stays out. This is deliberately deferred: it is the cheapest decision to postpone, since the single-timescale model is the prerequisite either way.</p>
+        <div class="agenda-tags"><span class="atag">item 44/61/62 (HRM)</span><span class="atag">§1e</span><span class="atag">objectives §2 (staging)</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">A8</span>
+          <span class="question-text">Does the relational recurrent block reach useful, non-spurious attractors reliably enough for DEQ?</span>
+          <span class="badge badge-coral">open — linchpin</span>
+        </div>
+        <p class="question-body">The whole §6 core assumes the loop converges to a stable, meaningful fixed point. DEQ gradients require it; HRM's analysis found spurious fixed points that trap the dynamics; and reasoning may eventually want multiplicity the single-attractor view forbids. Measure convergence behavior on the relational block: does it settle, how often to a spurious attractor, and do basins align with correct answers? If convergence is unreliable, impose a contraction constraint (spectral norm / the ~1-Lipschitz placement of §3b) or fall back to a fixed iteration count with truncated backprop. This is the single assumption the buildable core most depends on.</p>
+        <div class="agenda-tags"><span class="atag">item 41</span><span class="atag">item 1</span><span class="atag">§6a</span><span class="atag">§4b</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">A9</span>
+          <span class="question-text">Can shared-core clamped settling replace per-modality encoder–decoders?</span>
+          <span class="badge badge-coral">open — deferred</span>
+        </div>
+        <p class="question-body">The §6b proposal treats I/O as clamping on one shared core — encode by clamping and settling, predict cross-modally by clamping some modalities and freeing others (JEPA), read off through thin heads, with no reconstructive decoder. Test on a two-modality toy (text + simple images): clamp one modality, predict the other's latent, read off; compare against thin per-modality encoders plus a fusion module. If clamped settling underperforms, fall back to thin per-modality encoders into the shared core — still no reconstructive decoders. Deferred until the single-modality text core (Stage 0) works; text also retains an autoregressive head regardless.</p>
+        <div class="agenda-tags"><span class="atag">item 49 (JEPA)</span><span class="atag">item 20 (active inference)</span><span class="atag">§6b</span></div>
+      </div>
+
+    </div>
+  </section>
+
+</main>
+</div>
+</body>
+</html>

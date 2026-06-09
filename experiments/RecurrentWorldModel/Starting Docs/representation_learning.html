@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Representation Learning — Status &amp; Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Space+Mono:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0E1016;
+  --bg2:       #14161D;
+  --bg3:       #1C1F28;
+  --bg4:       #242730;
+  --text:      #DDD9D0;
+  --text2:     #908C84;
+  --text3:     #5A5752;
+  --border:    rgba(255,255,255,0.07);
+  --border2:   rgba(255,255,255,0.12);
+
+  --amber:     #D4924A;
+  --amber-bg:  rgba(212,146,74,0.1);
+  --teal:      #4A9B93;
+  --teal-bg:   rgba(74,155,147,0.1);
+  --coral:     #C05B5B;
+  --coral-bg:  rgba(192,91,91,0.1);
+  --purple:    #8B7DC0;
+  --purple-bg: rgba(139,125,192,0.1);
+  --green:     #5E9B68;
+  --green-bg:  rgba(94,155,104,0.1);
+  --blue:      #5B87C0;
+  --blue-bg:   rgba(91,135,192,0.1);
+
+  --font-body: 'Crimson Pro', Georgia, serif;
+  --font-mono: 'Space Mono', 'Courier New', monospace;
+  --r: 5px;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 17px;
+  line-height: 1.7;
+}
+
+/* ── Layout ── */
+.shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* ── Sidebar ── */
+nav {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 2.5rem 1rem 2rem 1.5rem;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  scrollbar-width: thin;
+}
+nav h2 {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 1rem;
+}
+nav ul { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+nav li a {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text2);
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 3px;
+  transition: all 0.12s;
+  line-height: 1.4;
+}
+nav li a:hover { background: var(--bg3); color: var(--text); }
+nav li a.sub { padding-left: 18px; font-size: 10px; opacity: 0.75; }
+nav .divider { height: 1px; background: var(--border); margin: 10px 8px; }
+.legend { margin-top: 1.5rem; padding: 0 8px; }
+.legend h3 { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text3); margin-bottom: 8px; }
+.legend-row { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
+.legend-row span { font-family: var(--font-mono); font-size: 9px; color: var(--text2); }
+
+/* ── Main ── */
+main { padding: 3rem 3.5rem 6rem; max-width: 820px; }
+
+/* ── Doc header ── */
+.doc-header { margin-bottom: 3.5rem; padding-bottom: 2rem; border-bottom: 1px solid var(--border); }
+.doc-eyebrow { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase; color: var(--text3); margin-bottom: 0.75rem; }
+.doc-header h1 { font-size: 2.2rem; font-weight: 300; letter-spacing: -0.02em; line-height: 1.2; color: var(--text); margin-bottom: 0.6rem; }
+.doc-header h1 em { font-style: italic; color: var(--text2); }
+.doc-meta { display: flex; gap: 1.5rem; margin-top: 1rem; flex-wrap: wrap; }
+.doc-meta span { font-family: var(--font-mono); font-size: 10px; color: var(--text3); }
+.doc-meta b { color: var(--text2); }
+
+/* ── Sections ── */
+.section { margin-bottom: 3.5rem; }
+.section-header { display: flex; align-items: baseline; gap: 1rem; margin-bottom: 1.5rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--border); }
+.section-num { font-family: var(--font-mono); font-size: 10px; color: var(--text3); }
+.section-header h2 { font-size: 1.2rem; font-weight: 600; letter-spacing: -0.01em; }
+
+.subsection { margin-bottom: 2.2rem; }
+.subsection h3 { font-size: 1rem; font-weight: 600; margin-bottom: 0.9rem; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+
+p { margin-bottom: 0.9rem; color: var(--text); }
+p:last-child { margin-bottom: 0; }
+
+/* ── Accent bars ── */
+.accent-amber  .section-header { border-bottom-color: var(--amber);  }
+.accent-teal   .section-header { border-bottom-color: var(--teal);   }
+.accent-coral  .section-header { border-bottom-color: var(--coral);  }
+.accent-purple .section-header { border-bottom-color: var(--purple); }
+.accent-green  .section-header { border-bottom-color: var(--green);  }
+.accent-blue   .section-header { border-bottom-color: var(--blue);   }
+
+/* ── Badges ── */
+.badge {
+  display: inline-flex; align-items: center;
+  font-family: var(--font-mono); font-size: 9px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 3px; white-space: nowrap;
+}
+.badge-amber  { background: var(--amber-bg);  color: var(--amber);  border: 0.5px solid rgba(212,146,74,0.3); }
+.badge-teal   { background: var(--teal-bg);   color: var(--teal);   border: 0.5px solid rgba(74,155,147,0.3); }
+.badge-coral  { background: var(--coral-bg);  color: var(--coral);  border: 0.5px solid rgba(192,91,91,0.3);  }
+.badge-purple { background: var(--purple-bg); color: var(--purple); border: 0.5px solid rgba(139,125,192,0.3);}
+.badge-green  { background: var(--green-bg);  color: var(--green);  border: 0.5px solid rgba(94,155,104,0.3); }
+.badge-blue   { background: var(--blue-bg);   color: var(--blue);   border: 0.5px solid rgba(91,135,192,0.3); }
+
+/* ── Callout boxes ── */
+.callout {
+  background: var(--bg2);
+  border: 1px solid var(--border2);
+  border-radius: var(--r);
+  padding: 1rem 1.2rem;
+  margin: 1.2rem 0;
+  position: relative;
+}
+.callout::before {
+  content: attr(data-label);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  position: absolute;
+  top: -1px; left: 12px;
+  transform: translateY(-50%);
+  background: var(--bg2);
+  padding: 0 6px;
+}
+.callout.key    { border-left: 3px solid var(--amber);  background: var(--amber-bg); }
+.callout.key::before  { color: var(--amber); }
+.callout.caution { border-left: 3px solid var(--coral); background: var(--coral-bg); }
+.callout.caution::before { color: var(--coral); }
+.callout.plan   { border-left: 3px solid var(--green);  background: var(--green-bg); }
+.callout.plan::before  { color: var(--green); }
+.callout.theory { border-left: 3px solid var(--purple); background: var(--purple-bg); }
+.callout.theory::before { color: var(--purple); }
+.callout p { font-size: 16px; }
+
+/* ── Method cards ── */
+.method-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 1.2rem 1.4rem;
+  margin-bottom: 1.2rem;
+}
+.method-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.8rem; gap: 1rem; flex-wrap: wrap; }
+.method-card-title { font-size: 1rem; font-weight: 600; }
+.method-card-badges { display: flex; gap: 5px; flex-wrap: wrap; flex-shrink: 0; }
+.method-stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.5rem; margin: 0.8rem 0; }
+.method-stat { font-size: 14px; }
+.method-stat-label { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text3); margin-bottom: 1px; }
+.method-stat-value { color: var(--text2); line-height: 1.4; }
+.method-verdict { margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid var(--border); font-size: 15px; color: var(--text2); }
+.method-verdict b { color: var(--text); }
+
+/* ── Agenda tags ── */
+.agenda-tags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 0.5rem; }
+.atag {
+  font-family: var(--font-mono); font-size: 9px;
+  background: var(--bg3); color: var(--text3);
+  border: 0.5px solid var(--border2);
+  padding: 2px 6px; border-radius: 3px;
+}
+
+/* ── Open questions ── */
+.question-list { display: flex; flex-direction: column; gap: 1rem; }
+.question-item { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 1rem 1.2rem; }
+.question-top { display: flex; align-items: baseline; gap: 0.7rem; margin-bottom: 0.5rem; }
+.question-num { font-family: var(--font-mono); font-size: 10px; color: var(--text3); flex-shrink: 0; }
+.question-text { font-size: 1rem; font-weight: 600; line-height: 1.4; }
+.question-body { font-size: 15px; color: var(--text2); line-height: 1.6; }
+
+/* ── Two-column ── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+.col-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 1rem 1.1rem; }
+.col-card h4 { font-size: 14px; font-weight: 600; margin-bottom: 0.5rem; }
+.col-card ul { font-size: 14px; color: var(--text2); padding-left: 1.2rem; line-height: 1.7; }
+
+/* ── KG step list ── */
+.step-list { counter-reset: steps; display: flex; flex-direction: column; gap: 0.6rem; margin: 1rem 0; }
+.step { display: flex; gap: 0.9rem; align-items: flex-start; }
+.step-num {
+  counter-increment: steps;
+  content: counter(steps);
+  font-family: var(--font-mono); font-size: 10px;
+  background: var(--bg3); color: var(--text3);
+  border: 1px solid var(--border2);
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; margin-top: 2px;
+}
+.step-body { font-size: 15px; color: var(--text2); line-height: 1.6; }
+.step-body b { color: var(--text); }
+
+/* ── Fork diagram ── */
+.fork { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin: 1rem 0; background: var(--border); border-radius: var(--r); overflow: hidden; }
+.fork-side { background: var(--bg2); padding: 1rem 1.1rem; }
+.fork-side h4 { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.6rem; }
+.fork-side.empiricist h4 { color: var(--teal); }
+.fork-side.rationalist h4 { color: var(--purple); }
+.fork-side p { font-size: 14px; color: var(--text2); line-height: 1.6; }
+
+/* ── Numbers / stats highlight ── */
+.stat-row { display: flex; gap: 1.5rem; margin: 0.8rem 0; flex-wrap: wrap; }
+.stat-box { background: var(--bg3); border: 1px solid var(--border); border-radius: var(--r); padding: 0.6rem 0.9rem; }
+.stat-box .num { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; line-height: 1; }
+.stat-box .lbl { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text3); margin-top: 3px; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 5px; }
+
+/* ── Responsive ── */
+@media (max-width: 780px) {
+  .shell { grid-template-columns: 1fr; }
+  nav { display: none; }
+  main { padding: 2rem 1.5rem 4rem; }
+  .two-col, .fork, .method-stat-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<!-- ── Sidebar ── -->
+<nav>
+  <h2>Contents</h2>
+  <ul>
+    <li><a href="#problem">0 — Core Problem</a></li>
+    <li><a href="#methods">1 — Methods Surveyed</a></li>
+    <li><a href="#pmh" class="sub">1a PMH</a></li>
+    <li><a href="#lewm" class="sub">1b LeWorldModel</a></li>
+    <li><a href="#kg" class="sub">1c KG Approach</a></li>
+    <div class="divider"></div>
+    <li><a href="#theory">2 — Theoretical Grounding</a></li>
+    <li><a href="#prh" class="sub">2a Platonic Rep. Hyp.</a></li>
+    <li><a href="#plato" class="sub">2b Plato + Socrates</a></li>
+    <li><a href="#fork" class="sub">2c The Two Paths</a></li>
+    <li><a href="#aristotle" class="sub">2d Aristotle</a></li>
+    <li><a href="#german" class="sub">2e German philosophy</a></li>
+    <li><a href="#meta" class="sub">2f Item 50 synthesis</a></li>
+    <li><a href="#eastern" class="sub">2g Eastern critiques</a></li>
+    <li><a href="#bridge" class="sub">2h Category-theory bridge</a></li>
+    <div class="divider"></div>
+    <li><a href="#factory">3 — Relational Attention</a></li>
+    <li><a href="#relational-core" class="sub">3a Relations as algebra</a></li>
+    <li><a href="#polar-split" class="sub">3b Polar hyle/morphe</a></li>
+    <li><a href="#closure" class="sub">3c Exclusion &amp; closure</a></li>
+    <li><a href="#complexity" class="sub">3d Complexity &amp; linear</a></li>
+    <li><a href="#curriculum" class="sub">3e Curriculum &amp; KG signal</a></li>
+    <div class="divider"></div>
+    <li><a href="#questions">4 — Open Questions</a></li>
+    <li><a href="#gaps">5 — Agenda Gaps</a></li>
+    <div class="divider"></div>
+    <li><a href="#unified">6 — Against Fragmentation</a></li>
+    <li><a href="#reinterp" class="sub">6a Reinterpreting item 14</a></li>
+    <li><a href="#orchestrator-fail" class="sub">6b The orchestrator failure</a></li>
+    <li><a href="#unified-kg" class="sub">6c Unified multi-domain KG</a></li>
+    <li><a href="#rcmoe" class="sub">6d RC-MoE architecture</a></li>
+    <li><a href="#tbt-parallel" class="sub">6e Thousand Brains parallel</a></li>
+  </ul>
+
+  <div class="legend">
+    <h3>Status legend</h3>
+    <div class="legend-row"><span class="badge badge-amber">established</span><span>empirically confirmed</span></div>
+    <div class="legend-row"><span class="badge badge-teal">directional</span><span>promising, unproven</span></div>
+    <div class="legend-row"><span class="badge badge-coral">open</span><span>active research question</span></div>
+    <div class="legend-row"><span class="badge badge-purple">theoretical</span><span>unconfirmed theory</span></div>
+    <div class="legend-row"><span class="badge badge-green">plan</span><span>next step</span></div>
+  </div>
+</nav>
+
+<!-- ── Main content ── -->
+<main>
+
+  <!-- Doc header -->
+  <header class="doc-header">
+    <div class="doc-eyebrow">Research Agenda · Working Document</div>
+    <h1>Representation Learning<br><em>Status &amp; Plan</em></h1>
+    <div class="doc-meta">
+      <span><b>Problem cluster:</b> Items 14, 32, 34, 65, 72</span>
+      <span><b>Related:</b> Items 2, 7, 11, 20, 24, 41, 43, 49</span>
+      <span><b>Status:</b> Active planning</span>
+    </div>
+  </header>
+
+
+  <!-- ══ 0 · CORE PROBLEM ══ -->
+  <section class="section accent-coral" id="problem">
+    <div class="section-header">
+      <span class="section-num">00</span>
+      <h2>The Core Problem</h2>
+      <span class="badge badge-coral">open</span>
+    </div>
+
+    <p>A model trained on ten million cat images does not learn what a cat <em>is</em>. It learns a high-dimensional statistical summary of what cat images looked like — which encodes the cat, the background, the typical lighting, the framing conventions of animal photography, and the JPEG compression artifacts in the dataset. Gradient descent has no mechanism that distinguishes a causal feature from a spurious co-occurrence. Both reduce loss equally, so both get encoded.</p>
+
+    <div class="callout key" data-label="Core claim">
+      <p>The pixel-correlation problem is not a domain-shift problem. A model can fail to learn "cat as cat" even when evaluated in exactly the training distribution — it has simply encoded the wrong features with high confidence. PMH-style deployment robustness and standard augmentation do not address this.</p>
+    </div>
+
+    <p>This is <strong>shortcut learning</strong> in its most fundamental form. The model finds any feature that minimizes training loss — if beige background predicts "cat" in the training set, the model will use it. The literature frames this variously as spurious correlations, texture bias, Clever Hans phenomena, and OOD generalization failure. All names for the same problem: the gradient signal rewards prediction accuracy, not conceptual correctness.</p>
+
+    <p>The root cause is that <strong>natural text and images lack the structural grounding that makes intermediate reasoning states checkable</strong>. In mathematics and code, every step can be verified: a proof step is either valid or invalid, code runs or doesn't. In medicine, law, biology, and most of the world, intermediate reasoning steps are narrative and ambiguous. There is no ground truth to check intermediate steps against — until you construct one, which is what a knowledge graph provides.</p>
+
+    <div class="callout caution" data-label="Distinction">
+      <p><strong>Shortcut learning</strong> (the core problem here) is distinct from <strong>domain shift</strong> (what PMH addresses). Shortcut learning means the model encoded the wrong feature reliably. Domain shift means the right feature was encoded but the distribution changed. Both cause failure but have different solutions.</p>
+    </div>
+  </section>
+
+
+  <!-- ══ 1 · METHODS SURVEYED ══ -->
+  <section class="section accent-teal" id="methods">
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <h2>Methods Surveyed</h2>
+    </div>
+
+    <!-- 1a PMH -->
+    <div class="subsection" id="pmh">
+      <h3>1a &nbsp; Perturbation Matching Hypothesis <span class="badge badge-amber">deployment tool</span></h3>
+
+      <div class="method-card">
+        <div class="method-card-header">
+          <span class="method-card-title">PMH — Perturbation Matching Hypothesis</span>
+          <div class="method-card-badges">
+            <span class="badge badge-amber">12/13 blocks pass</span>
+            <span class="badge badge-teal">unified theory</span>
+          </div>
+        </div>
+
+        <p>A geometric theory that unifies CORAL, DANN, augmentation penalties, and metric learning as different estimators of the same object: <strong>Σ_task</strong>, the covariance of label-preserving deployment nuisance. The core claim: estimate Σ_task, penalize the encoder's Jacobian in that direction, and representation drift under deployment shift is suppressed. Seven estimator types (D1–D7) cover sensor noise, domain shift, temporal drift, style, adversarial perturbations, and compositional coordinate change.</p>
+
+        <div class="method-stat-grid">
+          <div class="method-stat">
+            <div class="method-stat-label">Architecture</div>
+            <div class="method-stat-value">80M GraphMERT encoder-only (library is framework-agnostic: PyTorch, sklearn, HuggingFace)</div>
+          </div>
+          <div class="method-stat">
+            <div class="method-stat-label">Key result</div>
+            <div class="method-stat-value">12/13 paper blocks pass pre-registered criteria; Office-31 fails with documented eigengap reason</div>
+          </div>
+          <div class="method-stat">
+            <div class="method-stat-label">Scope</div>
+            <div class="method-stat-value">Label-preserving deployment change (new camera, new site, new domain, temporal drift)</div>
+          </div>
+          <div class="method-stat">
+            <div class="method-stat-label">Explicit exclusion</div>
+            <div class="method-stat-value">Spurious correlations (Colored MNIST, Waterbirds) — label-correlated nuisance is out of scope</div>
+          </div>
+        </div>
+
+        <div class="method-verdict"><b>Verdict for core problem:</b> Does not address shortcut learning. PMH assumes the model encoded something approximately correct and protects it at deployment. It is downstream of good representations, not a source of them. Most useful as a fine-tuning / post-training robustness tool.</div>
+        <div class="agenda-tags"><span class="atag">item 72</span></div>
+      </div>
+    </div>
+
+    <!-- 1b LeWorldModel -->
+    <div class="subsection" id="lewm">
+      <h3>1b &nbsp; LeWorldModel / JEPA <span class="badge badge-teal">directional</span></h3>
+
+      <div class="method-card">
+        <div class="method-card-header">
+          <span class="method-card-title">LeWorldModel (LeWM) — Maes, Le Lidec, LeCun, Balestriero et al. 2026</span>
+          <div class="method-card-badges">
+            <span class="badge badge-amber">48× faster planning</span>
+            <span class="badge badge-teal">physical structure</span>
+          </div>
+        </div>
+
+        <p>The first JEPA trained stably end-to-end from raw pixels with two loss terms: an MSE temporal prediction loss and SIGReg, a regularizer that forces latent embeddings to be isotropic Gaussian by projecting them onto random directions and minimizing the Epps-Pulley normality test statistic along each projection. By the Cramér-Wold theorem, matching all 1D marginals forces the full joint distribution to be Gaussian. No stop-gradient, no EMA, no frozen pretrained encoder.</p>
+
+        <div class="stat-row">
+          <div class="stat-box"><div class="num" style="color:var(--teal)">15M</div><div class="lbl">parameters</div></div>
+          <div class="stat-box"><div class="num" style="color:var(--teal)">48×</div><div class="lbl">faster than DINO-WM</div></div>
+          <div class="stat-box"><div class="num" style="color:var(--teal)">1</div><div class="lbl">effective hyperparameter</div></div>
+          <div class="stat-box"><div class="num" style="color:var(--teal)">2</div><div class="lbl">loss terms</div></div>
+        </div>
+
+        <div class="method-stat-grid">
+          <div class="method-stat">
+            <div class="method-stat-label">Solves</div>
+            <div class="method-stat-value">Collapse prevention (SIGReg, provable); physical structure encoding; efficient planning; stable end-to-end training</div>
+          </div>
+          <div class="method-stat">
+            <div class="method-stat-label">Evidence of quality</div>
+            <div class="method-stat-value">t-SNE shows spatial coherence; linear probing recovers position, velocity, angle; violation-of-expectation detection works</div>
+          </div>
+        </div>
+
+        <div class="callout caution" data-label="Key limitation" style="margin:0.8rem 0">
+          <p><strong>SIGReg is a geometric constraint, not a semantic one.</strong> It says the representation should be spread out isotropically in all directions. It says nothing about <em>what</em> those directions represent. A model satisfying SIGReg perfectly can still encode "fur texture" and "indoor lighting" as its primary axes. The temporal prediction signal pushes back against this in action-conditioned settings, but only to the degree causally irrelevant features actually vary unpredictably across frames.</p>
+        </div>
+
+        <div class="method-verdict"><b>Verdict for core problem:</b> Directionally correct. Temporal prediction over diverse actions is an anti-shortcut bias; features irrelevant to next-state prediction will generate confusing gradients. But "predictable" ≠ "conceptually correct," and there's no guarantee about which features dominate. SIGReg is worth adopting as the anti-collapse mechanism.</div>
+        <div class="agenda-tags"><span class="atag">item 49</span><span class="atag">item 2 (COCONUT)</span><span class="atag">item 41 (attractors)</span></div>
+      </div>
+    </div>
+
+    <!-- 1c KG -->
+    <div class="subsection" id="kg">
+      <h3>1c &nbsp; Knowledge Graph Approach (Princeton group) <span class="badge badge-amber">strongest signal</span></h3>
+
+      <div class="method-card">
+        <div class="method-card-header">
+          <span class="method-card-title">KGs as Implicit Reward Models — Kansal &amp; Jha, Princeton 2025</span>
+          <div class="method-card-badges">
+            <span class="badge badge-amber">beats GPT-5.2</span>
+            <span class="badge badge-amber">process supervision</span>
+          </div>
+        </div>
+
+        <p>A <strong>bottom-up</strong> learning paradigm: ground models in axiomatic domain facts (KG triples), then use the graph's multi-hop paths as a process supervision reward during RL fine-tuning. The KG provides both the training curriculum (SFT examples derived from 1–3 hop paths) and the verifiable reward signal (path alignment: does the model's chain-of-thought mention the correct intermediate entities?). SFT instills atomic facts; GRPO with path-alignment reward teaches <em>composition</em>.</p>
+
+        <div class="stat-row">
+          <div class="stat-box"><div class="num" style="color:var(--amber)">14B</div><div class="lbl">model size</div></div>
+          <div class="stat-box"><div class="num" style="color:var(--amber)">+11.1%</div><div class="lbl">on unseen 5-hop queries</div></div>
+          <div class="stat-box"><div class="num" style="color:var(--amber)">+7.5%</div><div class="lbl">on unseen 4-hop queries</div></div>
+        </div>
+
+        <p style="font-size:15px;color:var(--text2);margin-top:0.5rem">Trained only on 1–3 hop paths from UMLS; evaluated zero-shot on 4–5 hop ICD-10 diagnostic tasks. Outperforms GPT-5.2 and Gemini 3 Pro on the hardest queries. Insight: <em>"SFT memorizes, RL generalizes"</em> — SFT builds the knowledge base; RL discovers the composition logic.</p>
+
+        <div class="method-stat-grid">
+          <div class="method-stat">
+            <div class="method-stat-label">Why text training fails here</div>
+            <div class="method-stat-value">Ordinary pretraining text is essentially flat 1-hop knowledge: narrative sentences associate entities but don't expose compositional depth</div>
+          </div>
+          <div class="method-stat">
+            <div class="method-stat-label">Why KGs work</div>
+            <div class="method-stat-value">Multi-hop paths are explicit N-hop compositional chains. Path length = reasoning depth. Makes hidden structure visible to gradient descent</div>
+          </div>
+          <div class="method-stat">
+            <div class="method-stat-label">Current bottleneck</div>
+            <div class="method-stat-value">Requires a manually constructed or semi-automated KG. UMLS took decades. No other domain has equivalent coverage</div>
+          </div>
+          <div class="method-stat">
+            <div class="method-stat-label">Paper series</div>
+            <div class="method-stat-value">Item 14 (reward model) + Item 34 (manifesto) + GraphMERT (auto-KG factory) — a single research program</div>
+          </div>
+        </div>
+
+        <div class="method-verdict"><b>Verdict for core problem:</b> The most direct attack on the problem. KG paths give the model explicit compositional structure that text cannot provide. The reward signal distinguishes correct intermediate reasoning from lucky shortcuts. Main limitation: the KG must exist or be constructable.<br><br><b>Fragmentation critique:</b> The DSS conclusion (separate domain models) does not follow from the evidence. Item 14 proves KG rewards work; it does not prove specialization is necessary. A general model trained on multi-domain KG rewards acquires domain structure without losing cross-domain generalization. Fragmenting into separate domain models severs the cross-domain KG paths that enable analogical reasoning. See Section 6.</div>
+        <div class="agenda-tags"><span class="atag">item 14</span><span class="atag">item 34</span><span class="atag">item 22</span><span class="atag">item 65</span></div>
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ══ 2 · THEORETICAL GROUNDING ══ -->
+  <section class="section accent-purple" id="theory">
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <h2>Theoretical Grounding</h2>
+    </div>
+
+    <!-- 2a PRH -->
+    <div class="subsection" id="prh">
+      <h3>2a &nbsp; Platonic Representation Hypothesis <span class="badge badge-teal">directional</span></h3>
+
+      <p>Huh, Cheung, Wang &amp; Isola (2024) argue that neural network representations are <strong>converging toward a universal statistical model of reality</strong> as models scale on diverse data. Vision and language models, trained on entirely different modalities with different objectives, show increasing representational alignment as they grow larger. The hypothesis is that this convergence is directional — it is approaching the true causal/generative structure of the world, the joint likelihood function across all modalities and tasks.</p>
+
+      <div class="callout theory" data-label="The Platonic claim">
+        <p>The ideal representation exists independently of any particular model, modality, or training run. All models are asymptotically approaching it. This is the Form — what all models are converging toward as they scale and diversify. The representation is uniquely determined by the structure of reality, not by any particular dataset or objective.</p>
+      </div>
+
+      <p><strong>Implication for this agenda:</strong> scale + diversity on temporally-structured data (LeWM objective) is one valid path toward correct representations. The convergence pressure from diverse environments averages out spurious correlations, leaving only causal features as the invariant signal.</p>
+
+      <p><strong>Honest limitation:</strong> Convergence may be directional without being fast. Models are better shadow-watchers than they were five years ago while potentially still encoding shadows as primary representations. The theory says nothing about how many steps remain to the limit.</p>
+    </div>
+
+    <!-- 2b Plato -->
+    <div class="subsection" id="plato">
+      <h3>2b &nbsp; Plato, Socrates, and the Cave <span class="badge badge-purple">theoretical</span></h3>
+
+      <p><strong>Plato's diagnosis:</strong> Training data are shadows on a cave wall. The model watches shadows carefully, learns patterns in how they move, and mistakes this for knowledge of the world. Individual cats in any image are imperfect instantiations of the <em>Form of Cat</em> — the essential, invariant structure. You cannot derive the Form by accumulating more shadows. No amount of additional training data closes the gap.</p>
+
+      <p><strong>Plato's prescription:</strong> True knowledge of the Form requires a different epistemic move. In architectural terms: a structural prior — a priori knowledge of the Form baked into the learning system. This is item 34's argument. Algebraic structure embedded as geometric transformations is, in Platonic terms, injecting the Forms directly into the representation space.</p>
+
+      <p><strong>Socrates' test:</strong> The model knows millions of cat examples but cannot define one. Socrates' method — <em>elenchus</em> — generates counterexamples that destroy false definitions. In ML terms: adversarial probing, OOD evaluation, interventional testing. The question is never "does the model get the right answer" but "does it get the right answer for the right reasons."</p>
+
+      <div class="callout key" data-label="The key diagnostic">
+        <p>Socratic test for representations: give the model a cat on a black background; a cat-shaped sculpture that isn't a cat; a domestic cat vs a wild cat with different color statistics. If confidence in "cat" covaries with background texture rather than object structure, you don't have a definition — you have a catalogue of typical examples.</p>
+      </div>
+    </div>
+
+    <!-- 2c Fork -->
+    <div class="subsection" id="fork">
+      <h3>2c &nbsp; The Two Paths</h3>
+
+      <div class="fork">
+        <div class="fork-side empiricist">
+          <h4>Empiricist path (Platonic Rep. Hyp.)</h4>
+          <p>Diverse data + temporal prediction → spurious correlations average out → causal features survive as invariant signal → Platonic convergence. Scale and diversity are sufficient; the right representations emerge.</p>
+          <p style="margin-top:0.6rem"><strong>Mechanisms:</strong> LeWM temporal prediction; active inference (item 20); multi-environment IRM-style training.</p>
+          <p style="margin-top:0.6rem"><strong>Weakness:</strong> Plato would say you cannot reach the Forms through induction alone. Convergence may be slow or plateau at a level still far from the correct concept.</p>
+        </div>
+        <div class="fork-side rationalist">
+          <h4>Rationalist path (KG algebra / item 34)</h4>
+          <p>Inject explicit algebraic structure of the domain as a prior. Embed logical rules as geometric transformations. Make the Form visible to gradient descent by constructing it externally and supplying it as training signal.</p>
+          <p style="margin-top:0.6rem"><strong>Mechanisms:</strong> KG reward model (item 14); GraphMERT extraction; group-theoretic training (item 7).</p>
+          <p style="margin-top:0.6rem"><strong>Weakness:</strong> Requires domain structure to be formalized. Auto-KG factory partially solves this but cannot yet bootstrap from zero.</p>
+        </div>
+      </div>
+
+      <div class="callout plan" data-label="Working hypothesis">
+        <p><strong>Both are probably necessary.</strong> The empiricist signal (temporal prediction, diverse environments) provides the training pressure that aligns representations with reality. The rationalist scaffold (KG-derived reward, algebraic structure) makes the target visible to gradient descent before convergence has occurred naturally. Neither alone is sufficient at tractable scale.</p>
+      </div>
+    </div>
+
+
+    <!-- 2d Aristotle -->
+    <div class="subsection" id="aristotle">
+      <h3>2d &nbsp; Aristotle: Immanent Forms, Four Causes, Predicables <span class="badge badge-purple">theoretical</span> <span class="badge badge-amber">most concrete</span></h3>
+
+      <p>Aristotle's foundational disagreement with Plato is the one most consequential for architecture. Plato places the Forms in a separate transcendent realm — physical things merely participate in them. Aristotle says the Form of a cat is not elsewhere: it is the actual organizational structure of the cat, present in it, readable from it by a correctly performed abstraction. This is neither pure empiricism (scale will surface it) nor pure rationalism (inject it from outside). The Forms are immanent — they are in the data. The problem is extracting them correctly.</p>
+
+      <p><strong>Hylomorphism and the telos insight.</strong> Every substance compounds matter (<em>hyle</em>, substrate) and form (<em>morphe</em>, organizational principle). For a chair: matter is wood, metal, or plastic; form is whatever structure makes it a chair. The key insight: the form of all chairs is constituted primarily by their final cause — their telos, which is <em>for sitting</em>. All variety of material and structural form is compatible with being a chair; what is invariant across every instance is the function. Hylomorphism and telos are mutually grounding: form is the structure that realizes telos in matter.</p>
+
+      <div class="callout key" data-label="Dual-Head Attention as a partial hyle/morphe split">
+        <p><strong>Item 68 independently discovered a rudimentary version of this.</strong> The cosine head attends to material features — content, surface statistics. The sine head (Gram-Schmidt orthogonalized queries) attends to structural pattern — positional relations, independent of content identity. It works on multiplication because arithmetic structure is morphe and digit identity is hyle. But the split is not robustly enforced: the fusion weight α is a single learned scalar per layer with no invariant maintaining the separation; both streams share one loss; the sine head has no external guidance on what "structure" means beyond what arises from the arithmetic task. In an arbitrary domain the split would dissolve. <strong>The robust resolution is not a stronger penalty but a better coordinate system: the polar decomposition (§3b), where content is magnitude and structure is phase. These are independent coordinates, so a structural relation that rotates phase leaves content exactly invariant — robustness by construction rather than by regularization.</strong></p>
+      </div>
+
+      <p><strong>The Four Causes.</strong> A complete representation answers four causal questions. Current models are trained almost exclusively on the first:</p>
+
+      <div class="method-stat-grid">
+        <div class="method-stat">
+          <div class="method-stat-label">Material cause — over-encoded</div>
+          <div class="method-stat-value">What it is made of. Pixels, surface statistics, substrate. Highly instance-specific and domain-local. The dominant feature in current models — the root cause of shortcut learning.</div>
+        </div>
+        <div class="method-stat">
+          <div class="method-stat-label">Formal cause — partially addressed</div>
+          <div class="method-stat-value">What kind of thing it is. Organizational structure, type, categorical identity. The KG's genus/species/differentia structure addresses this. Should be the primary encoding target.</div>
+        </div>
+        <div class="method-stat">
+          <div class="method-stat-label">Efficient cause — under-encoded</div>
+          <div class="method-stat-value">What mechanism or agent produced it. Generative process, causal history. More generalizable than surface form. Largely absent from current training signals.</div>
+        </div>
+        <div class="method-stat">
+          <div class="method-stat-label">Final cause (telos) — most neglected, most important</div>
+          <div class="method-stat-value">What it is for. Function, purpose, role. The most invariant property across all instances — all chairs share the same telos regardless of material or exact structure. Neglected everywhere in current ML.</div>
+        </div>
+      </div>
+
+      <p><strong>Predicables as KG edge types.</strong> Aristotle's five predicables classify how predicates relate to subjects — a direct taxonomy for weighting the path-alignment reward. The fundamental insight: training the reward signal on accident edges as if they were differentia edges is the spurious correlation problem stated with precision.</p>
+
+      <div style="display:flex;flex-direction:column;gap:7px;margin:0.9rem 0">
+        <div style="display:flex;align-items:flex-start;gap:0.7rem">
+          <span class="badge badge-amber" style="flex-shrink:0;margin-top:3px">DIFFERENTIA</span>
+          <span style="font-size:15px;color:var(--text2)"><b style="color:var(--text)">Highest reward.</b> What distinguishes this species within its genus — whose presence/absence determines which kind of thing something is. Encodes the formal cause. Training on differentia edges builds essential-feature representations.</span>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:0.7rem">
+          <span class="badge badge-amber" style="flex-shrink:0;margin-top:3px;opacity:0.75">GENUS</span>
+          <span style="font-size:15px;color:var(--text2)"><b style="color:var(--text)">High reward.</b> Broader category membership. Enables hierarchical compositional reasoning and analogy within a category.</span>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:0.7rem">
+          <span class="badge badge-teal" style="flex-shrink:0;margin-top:3px">PROPERTY</span>
+          <span style="font-size:15px;color:var(--text2)"><b style="color:var(--text)">Moderate reward.</b> Necessarily true of all instances but not definitional. "Cats purr" — reliable inference signal, but not what makes something a cat.</span>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:0.7rem">
+          <span class="badge badge-coral" style="flex-shrink:0;margin-top:3px">ACCIDENT</span>
+          <span style="font-size:15px;color:var(--text2)"><b style="color:var(--text)">Suppress or zero.</b> Contingently true of some instances. "This cat is orange." These edges must not appear in path-alignment reward paths — they encode exactly what we are trying to prevent the model from learning.</span>
+        </div>
+      </div>
+
+      <div class="callout plan" data-label="Architectural proposal: Four-cause structured embeddings">
+        <p>Each concept node in the unified KG carries four dedicated embedding slots: material, formal, efficient, and telos. KG edges are typed by the cause they encode in addition to their predicable classification. Path-alignment reward weight is a joint function of both: formal/telos edges with differentia predicable type carry maximum weight; material/accident edges carry zero. This transforms the KG from a taxonomy into a full causal model and gives each representation its complete Aristotelian profile.</p>
+      </div>
+
+      <div class="agenda-tags"><span class="atag">item 68 (DHA = partial split)</span><span class="atag">item 14 (KG reward)</span><span class="atag">item 20 (active inference = telos)</span><span class="atag">item 34 (KG algebra)</span></div>
+    </div>
+
+
+    <!-- 2e German Philosophy -->
+    <div class="subsection" id="german">
+      <h3>2e &nbsp; Kant, Hegel, Heidegger <span class="badge badge-purple">theoretical</span></h3>
+
+      <p>The Greek philosophers identify what correct representations should be and how to extract and validate them. The German tradition asks what must be architecturally given for correct representation to be possible at all, and what dynamics govern its development. This maps onto item 50's tripartite structure — Epistemology, Ontology, Methodology — each completed by one German philosopher in a way the Greeks did not reach.</p>
+
+      <p><strong style="color:var(--text)">Kant — Epistemology: Conditions for Possible Knowledge.</strong> Experience is structured by a priori forms of intuition (space, time) and twelve pure categories of understanding that are not learned from experience but are what makes experience possible at all. The architecturally critical ones: substance/accident, causality, community (mutual interaction), and the modal triad of possibility, actuality, and necessity.</p>
+
+      <p>The strongest claim in this analysis: <strong>the substance/accident distinction (morphe/hyle), causal structure, and modal status cannot be learned by gradient descent — they are conditions for gradient descent to learn anything correctly at all.</strong> They should be architectural priors. A model without a substance/accident prior can learn correlations but cannot distinguish essential from accidental features, because making that distinction requires a framework that precedes any particular training signal.</p>
+
+      <p>Kantian modality extends KG edge typing with a dimension orthogonal to Aristotle's predicables, giving a <strong>5×3 edge classification matrix</strong> — five predicable types crossed with three modal statuses, each cell with a principled reward weight:</p>
+
+      <div class="two-col">
+        <div class="col-card">
+          <h4>Modal KG edge types</h4>
+          <ul>
+            <li><b>Necessary:</b> holds in all possible instances (triangles have three angles). Highest reward. Encodes what cannot be otherwise.</li>
+            <li><b>Actual / Contingent:</b> holds in fact but could be otherwise (mammals typically have four limbs). Moderate weight.</li>
+            <li><b>Possible:</b> could hold; doesn't necessarily. Low weight; reserved for counterfactual reasoning tasks.</li>
+          </ul>
+        </div>
+        <div class="col-card">
+          <h4>Combined 5×3 matrix</h4>
+          <ul>
+            <li>Differentia + Necessary → maximum reward weight</li>
+            <li>Property + Actual → reliable inference signal</li>
+            <li>Accident + Possible → suppress entirely</li>
+            <li>15 distinct edge classes with graduated reward weights, derived from first principles</li>
+          </ul>
+        </div>
+      </div>
+
+      <p style="margin-top:0.8rem">The <strong>transcendental unity of apperception</strong> — the binding condition that makes all representations belong to a unified experiencing subject — maps onto metacognition (item 80). For a COCONUT latent model, the HRM slow controller is the "I think" that accompanies and binds the latent reasoning chain. Without this, the model has disconnected feature activations but not integrated knowledge.</p>
+
+      <p style="margin-top:1rem"><strong style="color:var(--text)">Hegel — Methodology: Dialectical Development.</strong> Every determinate concept contains its own negation; their confrontation produces an <em>Aufhebung</em> (sublation) — a synthesis that preserves what was true in both while ascending to a higher level. The EM loop is Hegelian in structure: current KG (thesis) → model's OOD failures (antithesis) → M-step revision (synthesis). Each cycle produces a richer KG than either the original formalization or the raw model learning could generate alone.</p>
+
+      <p>Hegel also gives the correct model for <strong>curriculum design</strong>. Each stage should generate the specific contradictions that specify the next stage — not arbitrary progression but necessary development:</p>
+
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><b>Sense-certainty:</b> single-hop within-domain paths. Masters immediate concept association. Internal limitation: cannot compose.</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><b>Perception:</b> 2–3 hop within-domain paths. Learns compositional patterns. Internal limitation: cannot transfer structure across domains.</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><b>Understanding:</b> cross-domain paths via bridge edges. Structural isomorphisms become visible. Internal limitation: can traverse bridges but cannot reason about why bridges exist or generalize the bridging principle.</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body"><b>Reason:</b> meta-structural analogies — reasoning about the form of reasoning itself. Generalization over graph structure, not just within it.</div></div>
+      </div>
+
+      <p style="margin-top:1rem"><strong style="color:var(--text)">Heidegger — Ontology: Being-in-the-World.</strong> The distinction between <em>Zuhandenheit</em> (ready-to-hand) and <em>Vorhandenheit</em> (present-at-hand) sharpens the telos argument. A hammer in use is transparent — you hammer without attending to the hammer. It becomes present-at-hand only when it breaks. Ready-to-hand is the primary ontological mode; present-at-hand (descriptive, theoretical) is derived and secondary. Current models operate almost entirely in Vorhandenheit: they describe and classify. JEPA and active inference objectives produce Zuhandenheit representations — organized around what things do and what can be done with them, not what they look like.</p>
+
+      <p><strong>Training objectives are ontologically constitutive, not measurement tools.</strong> A model trained with next-token prediction inhabits a world of sequential text. A model trained with JEPA inhabits a world of state transitions and physical consequences. These produce qualitatively different representations because they structure the world differently. The unified KG is the world the model is thrown into — its ontological home, pre-shaping all representations before any training example is encountered.</p>
+
+      <div class="agenda-tags"><span class="atag">item 50</span><span class="atag">item 20 (active inference = Zuhandenheit training)</span><span class="atag">item 80 (metacognition = apperception)</span><span class="atag">item 7 (group theory = Kantian categories)</span><span class="atag">item 49 (Sub-JEPA)</span></div>
+    </div>
+
+
+    <!-- 2f Synthesis -->
+    <div class="subsection" id="meta">
+      <h3>2f &nbsp; Item 50: The Complete Framework <span class="badge badge-green">synthesis</span></h3>
+
+      <p>Epistemology, Ontology, and Methodology are the exact tripartite structure needed to organize the six-philosopher synthesis. Each dimension is addressed incompletely by one Greek philosopher and completed by one German philosopher:</p>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1px;background:var(--border);border-radius:var(--r);overflow:hidden;margin:1rem 0">
+        <div style="background:var(--bg2);padding:1rem 1.1rem">
+          <div style="font-family:var(--font-mono);font-size:9px;text-transform:uppercase;letter-spacing:0.12em;color:var(--teal);margin-bottom:0.7rem">Ontology — what there is</div>
+          <p style="font-size:14px;margin-bottom:0.5rem"><b>Plato:</b> transcendent Forms as targets; KG as formal scaffold</p>
+          <p style="font-size:14px;margin-bottom:0.7rem"><b>Heidegger:</b> Forms are organized by practical concerns; Zuhandenheit; training objectives constitute the world</p>
+          <p style="font-size:13px;color:var(--text2);font-style:italic">→ Unified KG organized around telos and function, not only taxonomy</p>
+        </div>
+        <div style="background:var(--bg2);padding:1rem 1.1rem">
+          <div style="font-family:var(--font-mono);font-size:9px;text-transform:uppercase;letter-spacing:0.12em;color:var(--purple);margin-bottom:0.7rem">Epistemology — how we know</div>
+          <p style="font-size:14px;margin-bottom:0.5rem"><b>Socrates:</b> dialectical testing; elenctic validation of genuine knowledge</p>
+          <p style="font-size:14px;margin-bottom:0.7rem"><b>Kant:</b> a priori categories as architectural priors; 5×3 modal-predicable edge matrix; apperceptive binding</p>
+          <p style="font-size:13px;color:var(--text2);font-style:italic">→ Polar hyle/morphe split (magnitude/phase, §3b) + softmax-as-classifier for exclusion + adversarial OOD validation; the 5×3 matrix collapses to a small lattice (§3c)</p>
+        </div>
+        <div style="background:var(--bg2);padding:1rem 1.1rem">
+          <div style="font-family:var(--font-mono);font-size:9px;text-transform:uppercase;letter-spacing:0.12em;color:var(--amber);margin-bottom:0.7rem">Methodology — how we arrive</div>
+          <p style="font-size:14px;margin-bottom:0.5rem"><b>Aristotle:</b> immanent Forms; hylomorphic extraction; predicable-typed edges; four-cause embeddings</p>
+          <p style="font-size:14px;margin-bottom:0.7rem"><b>Hegel:</b> dialectical Aufhebung; EM loop as thesis→antithesis→synthesis; four-stage phenomenological curriculum</p>
+          <p style="font-size:13px;color:var(--text2);font-style:italic">→ Predicable+modal typed EM loop with Hegelian curriculum stages</p>
+        </div>
+      </div>
+
+      <div class="callout key" data-label="Why each Western philosopher requires the other five">
+        <p>Plato supplies the formal target but not the extraction method. Aristotle supplies extraction but not the conditions. Kant supplies the conditions but not the target or dynamics. Hegel supplies the dynamics but not the target or conditions. Heidegger grounds the ontology but not the validation. Socrates validates but does not construct. Each is necessary for the others to function. But the whole synthesis rests on one shared assumption — representationalism, that intelligence is building a correct internal model of a world of fixed Forms — which the Eastern traditions contest at the root (§2g), and which category theory then reconciles (§2h).</p>
+      </div>
+
+      <div class="agenda-tags"><span class="atag">item 50</span><span class="atag">item 68</span><span class="atag">item 7</span><span class="atag">item 14</span><span class="atag">item 20</span><span class="atag">item 34</span><span class="atag">item 80</span></div>
+    </div>
+
+
+    <!-- 2g Eastern philosophy -->
+    <div class="subsection" id="eastern">
+      <h3>2g &nbsp; Eastern Critiques: Emptiness, Exclusion, Perspective <span class="badge badge-purple">theoretical</span> <span class="badge badge-coral">critique + extension</span></h3>
+
+      <p>Before the individual thinkers, one structural point. The entire Western synthesis (§2a–2f) is <em>representationalist</em>: it assumes intelligence consists in building a correct internal representation of an external world. Even Heidegger, who attacks the subject–object split hardest, still aims at being-in-the-world correctly. Most major Eastern traditions challenge this at the root — some deny there is a fixed external structure to represent, some deny the knower/known distinction, some hold that the highest intelligence is non-representational skill. That is the deepest challenge they pose, and it runs beneath every specific contribution below.</p>
+
+      <p><strong style="color:var(--text)">Nāgārjuna (Madhyamaka) — emptiness against fixed Forms.</strong> <em>Śūnyatā</em>: all phenomena are empty of inherent self-nature (<em>svabhāva</em>). <em>Pratītyasamutpāda</em> (dependent origination): everything arises in dependence on other things. "Cat" has no intrinsic catness; it is an empty designator for a cluster of interdependent relations — remove the contrast class, the perceptual conditions, the linguistic community, and it shifts. This is a direct refutation of the Platonic Forms and of the Platonic Representation Hypothesis's convergence claim: if there are no fixed natures, there is no fixed target to converge toward. Crucially it is <em>not</em> nihilism — what exists is a network of relations without fixed nodes; the relations are primary, the nodes are merely where relations cluster. Architectural consequence: KG nodes should carry no hardcoded content separate from their edges. Node identity is relational profile; nodes can be bootstrapped from edges, and split, merged, or dissolved by the learning process. (§2h shows this is exactly the Yoneda Lemma.)</p>
+
+      <p><strong style="color:var(--text)">Dignāga (Yogācāra) — apoha, concepts as exclusion.</strong> The <em>apoha</em> theory: concepts have no positive universal content; "cat" means "not non-cat." A concept is a boundary, not a content — you learn it by accumulating successful exclusions, not by abstracting a shared positive essence. This is a genuine alternative to Aristotle's predicables and connects directly to contrastive learning and the Socratic <em>elenchus</em> (both proceed by elimination). The caution flagged earlier stands: the strong claim that there is <em>no</em> positive content is probably too strong, and over-literal application risks an explosion of negative edges. The resolution is mathematical, not a compromise — see the subobject classifier in §2h. The defensible upshot for training: reward discrimination/exclusion at least as much as positive identification.</p>
+
+      <p><strong style="color:var(--text)">Jain (anekāntavāda) — irreducible perspectivalism.</strong> Reality is many-sided; no single standpoint grasps the whole. <em>Syādvāda</em> qualifies every judgment with "perhaps, from standpoint X"; the <em>nayas</em> are those standpoints. This extends Kantian modality: whether a relation is necessary or contingent is itself standpoint-relative ("triangles have three angles" is necessary Euclidean, contingent otherwise). The 5×3 predicable×modal matrix becomes 5×3×<em>perspective</em> — which sounds like an explosion until §2h shows it is handled by functors and sheaf-gluing. This is also the cleanest resolution of the unified-vs-specialized model debate (§6): the generalist and the specialist are each partially valid from their standpoints, so the right move is to maintain multiple standpoints simultaneously — which is precisely what the Residual-Coupled MoE does.</p>
+
+      <p><strong style="color:var(--text)">Daoism (Zhuangzi, Laozi) — natural joints and wu wei.</strong> "The Dao that can be named is not the eternal Dao." Zhuangzi's cook carves the ox by following its natural joints rather than imposing cuts; he meets no resistance because he attends rather than forces. The critique of the KG project: any ontology imposes a vocabulary — how do you know your cuts follow reality's joints rather than your domain experts' habits of speech? <em>Wu wei</em> (effortless, non-forcing action) as a training principle favors objectives that let structure emerge (JEPA, active inference) over supervised classification against fixed labels. And over-specified systems are brittle: the more precisely the KG is pinned down, the more out-of-distribution failures its categories will generate. The KG should be a light scaffold that dissolves as the model's own joints develop.</p>
+
+      <p><strong style="color:var(--text)">Advaita Vedānta (Shankara) — superimposition is shortcut learning.</strong> <em>Adhyāsa</em> (superimposition): the false attribution of one thing's properties to another — seeing a rope and perceiving a snake. This is the shortcut-learning problem in a different vocabulary: the properties of a typical background superimposed onto the concept. The solution is <em>viveka</em> (discrimination), treated as a dedicated faculty for separating the real from the superimposed — distinct from perception and inference. Architecturally this suggests a metacognitive module whose specific job is to detect when a prediction is driven by accidental co-occurrence rather than essential structure: not uncertainty quantification (confidence in the answer) nor OOD detection (distribution shift), but a check on <em>which features</em> are doing the work.</p>
+
+      <div class="callout caution" data-label="Four tensions the Western synthesis must answer">
+        <p><strong>1 · Anti-svabhāva (Nāgārjuna):</strong> there may be no unique correct target — challenges PRH convergence. <strong>2 · Apoha (Dignāga):</strong> exclusion may matter as much as positive content — redirect part of the reward toward discrimination. <strong>3 · Wu wei (Zhuangzi):</strong> imposed structure is brittle — keep the ontology fluid and revisable. <strong>4 · Perspectivalism (Jain):</strong> no single representation is correct from all standpoints — maintain multiple standpoints rather than forcing one. The common demand: treat the ontology as a hypothesis about reality's joints, not a description of its eternal Forms.</p>
+      </div>
+
+      <div class="agenda-tags"><span class="atag">item 32 (quantum/context KG)</span><span class="atag">item 65 (Residual Coupling = nayas)</span><span class="atag">item 80 (metacognition = viveka)</span><span class="atag">item 14</span></div>
+    </div>
+
+
+    <!-- 2h Category-theoretic bridge -->
+    <div class="subsection" id="bridge">
+      <h3>2h &nbsp; The Category-Theoretic Bridge: Nāgārjuna Meets Yoneda <span class="badge badge-purple">theoretical</span> <span class="badge badge-amber">grounds §3</span></h3>
+
+      <p>The deepest Eastern critique — Nāgārjuna's denial of fixed natures — looks like it should reject the whole representational enterprise. Category theory shows the opposite: it formalizes the critique and thereby <em>strengthens</em> the framework. The Eastern objections are not obstacles to route around; they are the informal statement of theorems that license the architecture in Section 3.</p>
+
+      <p><strong style="color:var(--text)">Yoneda Lemma = dependent origination.</strong> The Yoneda Lemma states that an object A is completely determined, up to isomorphism, by Hom(−, A) — the totality of morphisms into it from every other object. Identity <em>is</em> relational profile. This is Nāgārjuna stated mathematically: no <em>svabhāva</em> (no intrinsic content), yet objects still exist — as their web of relations. It dissolves the apparent Plato/Nāgārjuna conflict: the Forms are real (objects exist) but carry no intrinsic content (their identity is exhausted by relations). It also sharpens the Platonic Representation Hypothesis into something falsifiable: models are converging toward the <em>Yoneda embedding</em> of the concept-category, not toward a vague "statistical model of reality." This is exactly the foundation the CTKG already builds — Yoneda grounding, with KL divergence as the graph growth/stability signal.</p>
+
+      <p><strong style="color:var(--text)">Subobject classifier = apoha, with positive content preserved.</strong> This resolves the Dignāga tension precisely. In a topos there is a subobject classifier Ω: subobjects (membership) correspond to morphisms into Ω. Exclusion is then the <em>complement</em> of the positive morphism structure — recovered from positive content via Ω, never stored as O(n²) explicit negative edges. So both intuitions are right at once: the morphisms <em>are</em> the positive content (Dignāga's "no content" is too strong), and exclusion (<em>apoha</em>) is derived from them as a complement. Discrimination comes for free from positive structure plus a classifier — which in the architecture is what softmax normalization does (§3c).</p>
+
+      <p><strong style="color:var(--text)">Partial orders + sheaves = the dimensional resolution.</strong> The fear of exploding dimensionality (5×3 matrices, perspectival blow-up) dissolves once the structure is named. Predicables (differentia &gt; property &gt; accident) and modality (necessary ≥ actual ≥ possible) are <em>partial orders</em> — small lattices; their product is compact, and reward weighting is a monotone map on it, not fifteen independent cells. Perspectives (Jain <em>nayas</em>) are functors between sub-categories, and the <em>sheaf condition</em> glues locally-consistent perspectives into global structure — the "whole truth" no single naya captures is the global section of the sheaf. Low-dimensional locally, expressive globally. This is the CTKG's sheaf-theoretic type unification, and it is why the Section 3 architecture can be both expressive and compact.</p>
+
+      <p><strong style="color:var(--text)">Biological realization.</strong> The structure is not merely mathematically available; it is how the brain appears to work. Entorhinal grid cells implement a metric Yoneda-style embedding — objects defined by relational position in a learned reference frame. Cortical columns (Thousand Brains) hold multiple partial models of one object and reconcile them laterally: a biological sheaf of nayas. The hippocampus, under complementary learning systems, is a category constructor — fast episodic encoding feeding slow neocortical extraction of the morphism structure. Sparse distributed representations are sparse approximate Yoneda profiles. The prefrontal cortex applies relational structure to fresh content — a functor applicator. The framework is recovering, artificially, a structure evolution already found.</p>
+
+      <div class="callout key" data-label="What this licenses">
+        <p>This bridge is the warrant for Section 3. The architecture there — relations as a monoid acting on embeddings (Yoneda profile generated by an algebra), the polar hyle/morphe split, softmax as subobject classifier, expressivity from a small generating set, sheaf-gluing for perspectives — is the computational realization of these formalizations. The path is: <em>Eastern critique → category-theoretic formalization → architecture</em>. The critiques are not rejected; they are built in.</p>
+      </div>
+
+      <div class="agenda-tags"><span class="atag">CTKG (prior work)</span><span class="atag">item 2 (COCONUT = path composition)</span><span class="atag">item 41 (attractors = objects)</span><span class="atag">item 29 (TBT/grid cells)</span><span class="atag">item 7 (group/monoid structure)</span></div>
+    </div>
+
+  </section>
+
+
+  <!-- ══ 3 · RELATIONAL ATTENTION PLAN ══ -->
+  <section class="section accent-amber" id="factory">
+    <div class="section-header">
+      <span class="section-num">03</span>
+      <h2>The Architectural Plan: Relational Attention</h2>
+    </div>
+
+    <p>The requirements are strict: no external symbolics at inference, ≤ O(n²) with a credible linear path, and genuine mathematical grounding rather than categorical decoration. An earlier sketch named four attention heads after the four causes — but naming a head "efficient cause" does not make it one, and its proposed structural mechanism (Gram-Schmidt orthogonality) is the same fragile, dissolvable constraint we criticized in DHA. The grounded version starts from what the Yoneda Lemma actually says and builds the mechanism from there. It also lands squarely on prior work: PoPE, the CTKG, and item 7.</p>
+
+    <!-- 3a Relational core -->
+    <div class="subsection" id="relational-core">
+      <h3>3a &nbsp; Relations as an Algebra Acting on Embeddings <span class="badge badge-amber">core</span></h3>
+
+      <p>Standard attention collapses every relation between two tokens into a single bilinear score qᵀk. But Hom(A,B) in a category is generally a <em>set</em> of distinct, typed, composable morphisms — not a scalar. The honest generalization: a relation type <em>r</em> is a transformation <em>M_r</em> acting on the embedding space, where "A stands in relation r to B" means <em>b ≈ M_r·a</em>. This is the structure behind relational and knowledge-graph embeddings (TransE = translation group, RotatE = rotation group) and, crucially, behind RoPE — which is exactly a rotation <em>M_θ</em> encoding the <em>positional</em> relation. PoPE generalizes the encoding; this generalizes the <em>relation</em>.</p>
+
+      <p>The payoff is composition. If <em>r ↦ M_r</em> is a monoid homomorphism, then composing relations is composing transformations: <em>M_{r₂}M_{r₁} = M_{r₂∘r₁}</em>. Multi-step reasoning becomes transformation composition — a genuine algebraic operation, not a metaphor. An object's identity is then its <em>orbit</em> under the relation monoid: the full profile of how every relation connects it to every other object. Two objects with the same orbit-structure are isomorphic. This is the computational analogue of the Yoneda Lemma made precise — identity is relational profile, and the profile is <em>generated by an algebra</em>, not stored as a table.</p>
+
+      <div class="callout caution" data-label="Honest constraint">
+        <p>Real relations are not all invertible ("is-a" has no inverse), so the structure is a <strong>monoid</strong> (or a small category), not a group. And <em>r ↦ M_r</em> is only a <em>faithful</em> representation if training makes it one — composition fidelity must be encouraged and measured, not assumed. Whether the learned transformations actually compose correctly is the central empirical question (Q1).</p>
+      </div>
+
+      <div class="callout key" data-label="Scope: relational attention is for composition, not perception">
+        <p>An important caveat that keeps this project honestly bounded. Joint-embedding architectures (JEPA) <em>already</em> learn coherent object representations and causal physics on their own — they reliably distinguish a cat, a hand, or a tree from co-occurring background pixels, without conflating object and backdrop. So the perceptual half of the shortcut-learning problem (§0) is largely solved by JEPA already. Relational attention is therefore <strong>not</strong> aimed at perception; it targets the <em>compositional</em> layer that sits on top of JEPA-grounded objects — the algebra of relations <em>among</em> already-coherent objects. The division of labor: JEPA supplies the objects (the "what"); relational attention supplies the reasoning over them (the "how they relate"). Do not oversell the mechanism as solving object coherence — that is borrowed from JEPA, and the novel burden of proof is on composition.</p>
+      </div>
+
+      <div class="agenda-tags"><span class="atag">item 3 (polar PE)</span><span class="atag">item 7 (group-theoretic training)</span><span class="atag">item 49 (JEPA = object coherence)</span><span class="atag">PoPE (prior work)</span><span class="atag">CTKG (prior work)</span></div>
+    </div>
+
+    <!-- 3b Polar split -->
+    <div class="subsection" id="polar-split">
+      <h3>3b &nbsp; The Polar Hyle/Morphe Split <span class="badge badge-amber">robust by construction</span></h3>
+
+      <p>The robustness problem DHA could not solve has a clean resolution in the coordinate system itself. Write an embedding component in polar form <em>z = ρ·e^{iφ}</em>. Magnitude <em>ρ</em> and phase <em>φ</em> are <em>genuinely independent coordinates</em> — a relation that acts by rotating phase (<em>φ → φ + θ_r</em>) leaves magnitude exactly invariant, by the structure of the polar decomposition, not by a learned penalty that can dissolve. Assign content (hyle) to magnitude and relational structure (morphe) to phase. Relations are phase rotations; content is what survives them.</p>
+
+      <p>This is item 3 (polar coordinate PE, "separates what from where") generalized from position to semantic relation, and it is the rigorous version of the hyle/morphe split that DHA only approximated. The "where" (phase) carries structure; the "what" (magnitude) carries content. Item 29 (TBT-inspired evolution on PoPE) is the same instinct. The robustness DHA lacked comes from using a real coordinate system instead of a soft orthogonality penalty.</p>
+
+      <div class="callout caution" data-label="Where the idealization needs care">
+        <p>In RoPE the inner product mixes magnitude and phase (it picks up cos(φᵢ−φⱼ) terms), so "content = magnitude, structure = phase" is the <em>principle</em>, not an automatic property of any rotary scheme. Realizing a clean split requires a parameterization that keeps the channels separable — distinct magnitude and phase pathways, or restricting relations to the phase torus. This is a concrete design problem, not a solved one (Q11).</p>
+      </div>
+
+      <div class="agenda-tags"><span class="atag">item 3</span><span class="atag">item 29</span><span class="atag">item 68 (DHA = the fragile precursor)</span><span class="atag">item 56 (QK-Norm)</span></div>
+    </div>
+
+    <!-- 3c Exclusion & closure -->
+    <div class="subsection" id="closure">
+      <h3>3c &nbsp; Discrimination and Expressivity Without Explosion <span class="badge badge-teal">resolves apoha + dimensionality</span></h3>
+
+      <p><strong>Exclusion (Dignāga's apoha) for free.</strong> We do not need negative edges. Softmax normalization is inherently contrastive — it computes "this against all others." It plays the role of the subobject classifier Ω: membership and exclusion are read off from where probability mass concentrates, derived entirely from the positive relational scores. Discrimination comes from positive structure plus normalization, with no O(n²) blow-up in explicit negative relations. Boundaries are learned; they are not stored.</p>
+
+      <p><strong>Expressivity from a small generating set.</strong> The dimensionality fear — 5×3 predicable×modal matrices, perspectival blow-up — dissolves once relations form an algebra. A monoid generated by <em>k</em> generators reaches a combinatorially large set of composite relations by composition; you learn <em>k</em> generator-transformations, not the full relation space. Predicables and modality are <em>partial orders</em> (small lattices); their product is small, and the reward weighting is a monotone map on that product, not 15 independent cells. Perspectives (Jain nayas) are functors between sub-categories, glued by the sheaf condition — local and low-dimensional, exactly the CTKG sheaf-theoretic type unification already developed. Expressivity lives in the closure of a few generators, not in a giant explicit tensor.</p>
+
+      <div class="agenda-tags"><span class="atag">item 32 (context KG → phase superposition)</span><span class="atag">CTKG sheaves (prior work)</span><span class="atag">item 34 (KG algebra)</span></div>
+    </div>
+
+    <!-- 3d Complexity & linear path -->
+    <div class="subsection" id="complexity">
+      <h3>3d &nbsp; Complexity and the Linear Path <span class="badge badge-amber">O(n²) → O(n), one named obstruction</span></h3>
+
+      <p>As attention, the mechanism is O(n²d) — unchanged in order. The linear path is more honest than "use random features and hope":</p>
+
+      <div class="step-list">
+        <div class="step"><div class="step-num">✓</div><div class="step-body"><b>Phase/positional relations linearize cleanly.</b> A rotation's relative action factorizes: <em>M_{θᵢ−θⱼ} = M_{θᵢ}M_{θⱼ}^⊤</em>. This is exactly why RetNet (decay + rotation) achieves an O(n) recurrent form. Structural relations that depend only on relative position inherit this — genuinely linear, not approximate.</div></div>
+        <div class="step"><div class="step-num">!</div><div class="step-body"><b>Content-conditioned relation selection is the hard part.</b> What makes the mechanism semantic rather than merely positional is that <em>which</em> relation applies depends on the content of i and j. Data-dependent routing does not factorize, so it is the one component that resists naive linearization. This is precisely the job SSA (item 5) exists to do: sparse, content-dependent routing keeps the data-dependent part sub-quadratic while the positional/structural part stays exactly linear.</div></div>
+      </div>
+
+      <div class="callout plan" data-label="The clean division of labor">
+        <p>Split attention into a structural channel (phase rotations, exactly linear via RetNet-style recurrence) and a content-routing channel (sparse, via SSA). The linear-variant question reduces to a known, scoped problem — sparse content routing — rather than the open-ended "approximate an unspecified kernel." That is the credible path to the linear variant the requirements demand (Q12).</p>
+      </div>
+
+      <div class="agenda-tags"><span class="atag">item 5 (SSA = content routing)</span><span class="atag">item 11 (MLA = KV compression)</span><span class="atag">item 15 (compressed attention)</span></div>
+    </div>
+
+    <!-- 3e Curriculum & KG demotion -->
+    <div class="subsection" id="curriculum">
+      <h3>3e &nbsp; Training: Hegelian Curriculum, KG Demoted to Signal <span class="badge badge-green">plan</span></h3>
+
+      <p>The four causes are not four heads. Three are mechanism, one is objective: <b>material</b> = magnitude channel, <b>formal</b> = phase/relation algebra, <b>efficient</b> = the directional (non-invertible) sector of the monoid, and <b>final/telos</b> = the training <em>objective</em> itself. Telos is Heideggerian — it lives in what the training is <em>for</em> (JEPA / active-inference prediction), not in a static feature. This placement is cleaner than a "telos head": purpose belongs to the objective, not the architecture.</p>
+
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><b>Sense-certainty</b> — task completion / next-state prediction. Magnitude (content) and the causal sector populate first.</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><b>Perception</b> — JEPA objective shapes the phase relations toward predictive (telos-bearing) structure; consistency across paraphrase trains relation faithfulness.</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><b>Understanding</b> — cross-domain structural transfer; phase relations must generalize across domains. KG path-alignment optionally supervises here.</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body"><b>Reason</b> — meta-structural analogy; COCONUT latent reasoning becomes composition of relation-transformations.</div></div>
+      </div>
+
+      <p><strong>The KG is demoted from infrastructure to optional training signal.</strong> Item 14's result (KG-structured supervision beats scale) now informs <em>curriculum</em> design at Stage 3, not the inference architecture. The relation algebra lives in the weights; nothing external is queried at deployment. GraphMERT and the EM loop survive only as Stage-3 curriculum-construction tools for structurally thin domains.</p>
+
+      <div class="two-col">
+        <div class="col-card">
+          <h4>Previous plan (KG as infrastructure)</h4>
+          <ul>
+            <li>Model queries KG at inference</li>
+            <li>Deployment requires KG access</li>
+            <li>Model quality bounded by KG quality</li>
+          </ul>
+        </div>
+        <div class="col-card">
+          <h4>This plan (relation algebra in weights)</h4>
+          <ul>
+            <li>Relations are transformations in the weights</li>
+            <li>Nothing external at inference; in-context learning is composition of learned relations</li>
+            <li>Bounded by architecture + training diversity</li>
+          </ul>
+        </div>
+      </div>
+
+      <p style="margin-top:0.8rem"><strong>COCONUT as path composition.</strong> Latent reasoning (item 2) becomes traversal of the relation algebra: each latent step applies a relation-transformation, attractor states (item 41) are objects, and a chain of thought is a composite morphism. Because relations compose algebraically, the reasoning trace is verifiable as a well-formed path — the categorical structure the KG used to provide externally is now intrinsic to the latent dynamics (Q13).</p>
+
+      <div class="agenda-tags"><span class="atag">item 2 (COCONUT)</span><span class="atag">item 41 (attractors)</span><span class="atag">item 49 (Sub-JEPA = Stage 2)</span><span class="atag">item 14 (KG → Stage-3 signal)</span><span class="atag">item 20 (active inference = telos)</span></div>
+    </div>
+
+  </section>
+
+
+  <!-- ══ 4 · OPEN QUESTIONS ══ -->
+  <section class="section accent-coral" id="questions">
+    <div class="section-header">
+      <span class="section-num">04</span>
+      <h2>Open Questions</h2>
+    </div>
+
+    <div class="question-list">
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q1</span>
+          <span class="question-text">Does the learned relation map r ↦ M_r stay a faithful, composition-preserving representation?</span>
+          <span class="badge badge-coral">open — central</span>
+        </div>
+        <p class="question-body">The entire relational-attention plan rests on relations behaving as a monoid: composing two relation-transformations must yield the transformation for the composite relation (<em>M_{r₂}M_{r₁} = M_{r₂∘r₁}</em>). Nothing guarantees gradient descent produces this — without pressure, the learned <em>M_r</em> can become an arbitrary set of matrices that happen to fit local data but do not compose. The question is what training signal enforces composition fidelity, and how to measure it (e.g. holding out composite relations and testing whether the composed transformation predicts them). If this fails, the Yoneda/algebra grounding collapses to ordinary attention with extra steps. This is the first experiment to run and the one most likely to falsify the approach.</p>
+        <div class="agenda-tags"><span class="atag">item 7 (group-theoretic training)</span><span class="atag">item 34 (KG algebra)</span><span class="atag">PoPE / CTKG (prior work)</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q2</span>
+          <span class="question-text">Does the EM loop converge reliably, or to degenerate solutions?</span>
+          <span class="badge badge-teal">directional</span>
+        </div>
+        <p class="question-body">Theory suggests path-alignment reward prevents the worst degenerations (model must use correct intermediate entities, not just reach right answer). Algebraic consistency checking in the M-step prevents contradictions. But empirical verification on a real domain loop has not been done. This is a core experiment to run early.</p>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q3</span>
+          <span class="question-text">Is DSS (specialized small models) necessary, or can one general model acquire domain structure?</span>
+          <span class="badge badge-green">position: general model</span>
+        </div>
+        <p class="question-body">The Princeton group concludes: separate domain experts. This project's position: that conclusion does not follow from the evidence. Item 14 proves KG-structured process supervision produces compositional reasoning. It does not prove specialization is the mechanism. A general model trained on multi-domain KG rewards should acquire equivalent domain depth while retaining cross-domain reasoning capacity that fragmented models categorically cannot have. The residual empirical question is whether a single training run can learn domain-specific KG structures without interference — which the Residual-Coupled MoE architecture (Section 6) addresses by giving each domain preferential expert modules within a unified model rather than isolated separate models. The open question is no longer whether to generalize but <em>how</em> to implement multi-domain KG training without domain interference.</p>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q4</span>
+          <span class="question-text">What is the right granularity for KG nodes?</span>
+          <span class="badge badge-teal">directional</span>
+        </div>
+        <p class="question-body">Too coarse (e.g., "animal") = no useful compositional signal. Too fine (e.g., "specific patient case") = a lookup table, not a generalizable graph. The right granularity is probably at the level of domain concepts: natural kind terms, functional categories, theoretical constructs. GraphMERT's ValidityScore measures ontological alignment but not granularity quality directly. This connects to the entity extraction problem in the auto-factory and to the representation learning problem itself — the right KG nodes are the Platonic Forms of the domain.</p>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q5</span>
+          <span class="question-text">Can algebraic structure of the KG be automatically verified?</span>
+          <span class="badge badge-teal">directional</span>
+        </div>
+        <p class="question-body">If KG relations correspond to algebraic operations in embedding space (the item 34 claim), consistency checking becomes a geometric problem: verify that the composition of relation embeddings is consistent with the declared transitivity, associativity, and invertibility structure. This is related to item 7 (group-theoretic training) and would, if implemented, make the M-step's consistency check principled rather than heuristic.</p>
+        <div class="agenda-tags"><span class="atag">item 7</span><span class="atag">item 34</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q6</span>
+          <span class="question-text">Does the internalized-KG model (attractor-state latent space) train stably?</span>
+          <span class="badge badge-purple">theoretical</span>
+        </div>
+        <p class="question-body">The vision of KG nodes as attractors and edges as geometric transformations is theoretically well-motivated but has no working implementation. The attractor models paper (item 41) and Sub-JEPA (item 49) are the closest existing work. Whether gradient descent can be induced to build attractor structure corresponding to a target KG through path-alignment rewards alone, without explicit attractor constraints, is unknown.</p>
+        <div class="agenda-tags"><span class="atag">item 41</span><span class="atag">item 49</span><span class="atag">item 2</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q7</span>
+          <span class="question-text">Can cross-domain KG paths be automatically discovered and used for training?</span>
+          <span class="badge badge-coral">open</span>
+        </div>
+        <p class="question-body">Within-domain paths are generated by traversing a domain KG. Cross-domain paths require edges that bridge domain KGs — and these are harder to construct. Auto-discovery approaches: (a) find shared mathematical structures (if two domain concepts are both governed by the same equation, add a bridge edge); (b) mine multi-domain literature for concept co-occurrence across domains; (c) use the model itself, after initial training, to propose bridges based on structural similarity of KG neighborhoods. The key challenge is distinguishing genuine structural analogy from superficial co-occurrence. Cross-domain path alignment training only works if the paths encode real analogical structure, not noise.</p>
+        <div class="agenda-tags"><span class="atag">item 34</span><span class="atag">item 32</span><span class="atag">item 65</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q8</span>
+          <span class="question-text">Does Residual Coupling provide the right coupling strength between domain experts?</span>
+          <span class="badge badge-coral">open</span>
+        </div>
+        <p class="question-body">Too strong coupling → experts fail to specialize (collapse into homogeneous representations; domain structure is lost). Too weak → experts are effectively isolated (standard MoE; cross-domain reasoning is impossible). The right coupling should be <em>KG-topology-adaptive</em>: strong when the unified KG has edges crossing domain boundaries for the current concept, weak otherwise. Whether Residual Coupling as implemented can be conditioned on KG topology, or whether this requires a new coupling mechanism, is an open design question. Related: item 11's MLA scaling question — MLA's context compression might be relevant for managing the additional cross-expert residual channels.</p>
+        <div class="agenda-tags"><span class="atag">item 65</span><span class="atag">item 11</span><span class="atag">item 7</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q9</span>
+          <span class="question-text">Should Kantian a priori categories be hard-wired architectural priors rather than learned features?</span>
+          <span class="badge badge-coral">open</span>
+        </div>
+        <p class="question-body">Kant's argument is that the substance/accident distinction, causal structure, and modal status are conditions for the possibility of learning correct representations at all — not features that emerge from training. If true, these should be enforced architecturally rather than left emergent. The concrete question: can you build a transformer where the hyle/morphe split is maintained by architecture (not just initialization as in DHA), the causal stream is separately optimized, and modal distinctions occupy dedicated embedding slots? The risk: over-constraining the architecture may hurt flexibility on tasks where these distinctions are weak. The reward: a model that cannot mistake accidental for essential features by construction — shortcut learning becomes architecturally impossible rather than just statistically unlikely.</p>
+        <div class="agenda-tags"><span class="atag">item 68 (DHA as partial prior)</span><span class="atag">item 7 (group theory as categorical prior)</span><span class="atag">item 9 (manifold hyperconnections)</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q10</span>
+          <span class="question-text">Can the Hegelian curriculum be designed so each stage generates the contradictions that specify the next?</span>
+          <span class="badge badge-teal">directional</span>
+        </div>
+        <p class="question-body">In Hegel's phenomenology, stage transitions are not arbitrary — each stage is undermined by a specific internal contradiction that determines the character of the next stage. The Hegelian curriculum proposal (sense-certainty → perception → understanding → reason) claims the same structure. The empirical question: can we operationalize this so that OOD failures at stage N determinately point to the training signal needed for stage N+1, rather than requiring manual curriculum design? If so, curriculum design becomes partly automated by the EM loop's M-step — the model's failures generate the specification for the next training stage. This connects to AutoTTS (item 8): the Hegelian principle is exactly the bitter lesson applied not to test-time compute but to the training curriculum itself.</p>
+        <div class="agenda-tags"><span class="atag">item 8 (AutoTTS)</span><span class="atag">item 35 (self-play)</span><span class="atag">item 14 (EM loop)</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q11</span>
+          <span class="question-text">Can the polar content/structure split be realized cleanly inside the attention computation?</span>
+          <span class="badge badge-coral">open</span>
+        </div>
+        <p class="question-body">The polar decomposition gives content (magnitude) and structure (phase) as independent coordinates in principle. But the standard rotary inner product mixes them — it picks up cos(φᵢ−φⱼ) terms, so magnitude and phase are not cleanly separable in the score. The question is whether a parameterization (separate magnitude/phase pathways, a phase-torus-restricted relation channel, or a QK-Norm-style magnitude control per item 56) preserves the split through the actual computation, or whether the mixing is unavoidable and the robustness guarantee weakens to a soft one. If it weakens, the advantage over DHA shrinks.</p>
+        <div class="agenda-tags"><span class="atag">item 3 (polar PE)</span><span class="atag">item 56 (QK-Norm)</span><span class="atag">item 29 (TBT-PoPE)</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q12</span>
+          <span class="question-text">Does the structural/content channel split actually deliver a linear variant?</span>
+          <span class="badge badge-teal">directional</span>
+        </div>
+        <p class="question-body">The claim is that phase/positional relations linearize exactly (RetNet-style relative factorization) while content-conditioned relation routing is handled sparsely by SSA. This is more credible than approximating an unspecified kernel, but it assumes (a) the useful relations really do split into a position-factorable part and a sparse content-routed part, and (b) SSA's sparse routing does not silently drop the cross-domain relations that matter most. Both need empirical confirmation. If most semantically important relations turn out to be dense and content-conditioned, the linear path narrows.</p>
+        <div class="agenda-tags"><span class="atag">item 5 (SSA)</span><span class="atag">item 11 (MLA)</span><span class="atag">item 15 (compressed attention)</span></div>
+      </div>
+
+      <div class="question-item">
+        <div class="question-top">
+          <span class="question-num">Q13</span>
+          <span class="question-text">Does composing relation-transformations across layers yield valid reasoning chains?</span>
+          <span class="badge badge-purple">theoretical</span>
+        </div>
+        <p class="question-body">For COCONUT latent reasoning to be "categorical path composition," composing relations across depth must correspond to composing morphisms — but residual connections <em>add</em> rather than compose, so multi-layer composition is not automatically multiplicative. RoPE composes correctly within the relative-position structure (angles add), which is suggestive, but whether multi-step <em>semantic</em> relation composition produces well-formed paths rather than drifting representations is unknown. This is the bridge between Q1 (single-step composition fidelity) and useful long-horizon reasoning, and the hardest of the three to verify.</p>
+        <div class="agenda-tags"><span class="atag">item 2 (COCONUT)</span><span class="atag">item 41 (attractors)</span><span class="atag">item 1 (looped transformers)</span></div>
+      </div>
+
+    </div>
+  </section>
+
+
+  <!-- ══ 5 · GAPS IN AGENDA ══ -->
+  <section class="section accent-blue" id="gaps">
+    <div class="section-header">
+      <span class="section-num">05</span>
+      <h2>Gaps in Current Agenda</h2>
+    </div>
+
+    <p>The following approaches directly target the core representation problem but are not currently represented in the research agenda:</p>
+
+    <div class="method-card">
+      <div class="method-card-header">
+        <span class="method-card-title">Object-Centric / Slot-Based Representations</span>
+        <span class="badge badge-coral">missing from agenda</span>
+      </div>
+      <p>Architectures that force the encoder to factorize observations into discrete object-like slots (SAVi, SLATE, DINOSAUR). Creates a structural prior that the world is composed of objects, which are the causally relevant units. Most direct architectural approach to preventing the "encode the background" failure mode. If the architecture can only represent N discrete entities and their relations, it can't accidentally encode irrelevant texture as a primary dimension. Should be considered alongside item 9 (manifold-constrained hyperconnections) and item 57 (single-model multimodality) as a structural prior on the encoder.</p>
+    </div>
+
+    <div class="method-card">
+      <div class="method-card-header">
+        <span class="method-card-title">Invariant Risk Minimization (IRM) and descendants</span>
+        <span class="badge badge-coral">missing from agenda</span>
+      </div>
+      <p>Train on multiple environments where spurious correlations vary but causal features don't. Penalize features that require different predictors across environments. This is the empiricist complement to the rationalist KG approach: instead of injecting the correct structure, you force the model to discover invariant features by making the spurious ones inconsistent across environments. The PMH is a partial cousin but scoped to deployment shift; IRM targets spurious correlations directly. The catch is constructing environments where <em>only</em> spurious correlations vary, which can be as hard as the original labeling problem.</p>
+    </div>
+
+    <div class="callout plan" data-label="Recommendation">
+      <p>Add <strong>object-centric representations</strong> and <strong>multi-environment invariance training</strong> as new items to the research agenda. The former is an architectural constraint; the latter is a data-collection and training-objective strategy. Both are more directly targeted at the core problem than anything currently on the list except items 14, 34, and 7. Additionally, the six-philosopher synthesis (Section 2d–2f) introduces two concrete new tools not yet in the agenda: <strong>Aristotelian predicable-typed + Kantian modal KG edge classification</strong> (the 5×3 matrix) as a principled reward-weighting scheme, and <strong>four-cause structured embeddings</strong> as an architectural proposal. These should be tracked as research items.</p>
+    </div>
+
+    <h3 style="font-size:1rem;font-weight:600;margin:1.8rem 0 1rem">Relevant agenda connections</h3>
+    <div style="display:flex;flex-wrap:wrap;gap:0.5rem">
+      <span class="badge badge-teal">item 7 — group-theoretic training (algebraic structure)</span>
+      <span class="badge badge-teal">item 14 — KGs as implicit reward models</span>
+      <span class="badge badge-teal">item 20 — active inference (causal probing)</span>
+      <span class="badge badge-teal">item 24 — program synthesis (schema discovery)</span>
+      <span class="badge badge-teal">item 32 — quantum KG (context-dependent edges)</span>
+      <span class="badge badge-teal">item 34 — KG algebra for structural grounding</span>
+      <span class="badge badge-teal">item 41 — attractor models (latent internalization)</span>
+      <span class="badge badge-teal">item 43 — ISFT (separates agent outputs from world facts)</span>
+      <span class="badge badge-teal">item 49 — Sub-JEPA (JEPA world model objective)</span>
+      <span class="badge badge-teal">item 72 — PMH (deployment robustness, downstream use)</span>
+    </div>
+  </section>
+
+  <!-- ══ 6 · AGAINST FRAGMENTATION ══ -->
+  <section class="section accent-green" id="unified">
+    <div class="section-header">
+      <span class="section-num">06</span>
+      <h2>Against Fragmentation: The Case for Unified Architecture</h2>
+      <span class="badge badge-green">project position</span>
+    </div>
+
+    <p>The Princeton group's evidence establishes that KG-grounded process supervision produces compositional reasoning that neither pretraining nor answer-level RL can achieve. Their conclusion — build separate domain-specific models — does not follow. This section argues the opposite: that their results indicate precisely how to build domain-general intelligence, and that the DSS society architecture they propose is a strategic error that severs the cross-domain connections that characterize genuine intelligence.</p>
+
+
+    <!-- 6a Reinterpreting item 14 -->
+    <div class="subsection" id="reinterp">
+      <h3>6a &nbsp; Reinterpreting Item 14 <span class="badge badge-green">resolved</span></h3>
+
+      <p>What item 14 demonstrates is this: when a model is given explicit compositional structure via KG path rewards, it generalizes from short-hop to long-hop reasoning in a domain it was never trained on at that depth. The variable that produced the result was the <strong>KG reward signal</strong>, not the model's domain specificity.</p>
+
+      <div class="callout key" data-label="The reinterpretation">
+        <p>A general model trained on multi-domain KG rewards should acquire equivalent compositional depth across all domains simultaneously — and additionally be capable of traversing paths that cross domain boundaries, which a domain-specific model cannot do because the path does not exist within its single-domain KG.</p>
+      </div>
+
+      <p>The medical model's superiority over GPT-5.2 is not evidence that medical specialization is required. It is evidence that GPT-5.2 was not trained with KG-structured process supervision. A general model with KG rewards across all domains would likely exceed the medical specialist on medical tasks (because it can draw on physics, chemistry, and mathematics when those are the mechanistic ground of the medical phenomenon) while also being capable on tasks the specialist cannot handle at all.</p>
+    </div>
+
+
+    <!-- 6b Orchestrator failure -->
+    <div class="subsection" id="orchestrator-fail">
+      <h3>6b &nbsp; Why the DSS Orchestrator Fails at Intelligence <span class="badge badge-coral">structural limitation</span></h3>
+
+      <p>The DSS society architecture routes queries to domain experts via an orchestrator. The orchestrator decides which domain expert to invoke based on the apparent domain of the query. This architecture has a categorical failure mode that is not a tuning problem but a structural one.</p>
+
+      <div class="callout caution" data-label="The orchestrator failure">
+        <p><strong>Cross-domain insight requires recognizing, without prior knowledge, that a problem in Domain A has a solution structure from Domain B.</strong> The orchestrator can only route to Domain B if it already knows Domain B is relevant. But the insight — the recognition that Domain B applies — is precisely what cannot be computed without a unified representation space in which both domains are present and comparable.</p>
+      </div>
+
+      <p>Historical examples of this failure mode, rephrased as routing problems: Maxwell would not have unified electricity and magnetism if he was routing optics queries to an optics expert and electromagnetism queries to an EM expert. Watson and Crick would not have found DNA's structure if biology queries never reached the X-ray crystallography expert. The discovery of CRISPR required someone connecting bacteriophage defense (microbiology expert) to genetic engineering (molecular biology expert) — a connection the orchestrator would not make because neither query looks like it belongs in the other's domain.</p>
+
+      <p><strong>Distant connections between fields are a key sign of genius precisely because they are not obvious to a routing system.</strong> They require a representation in which the structural similarity of superficially unrelated things is geometrically visible. That requires a unified representation space with cross-domain KG paths — not a collection of isolated spaces with a router in front.</p>
+    </div>
+
+
+    <!-- 6c Unified KG -->
+    <div class="subsection" id="unified-kg">
+      <h3>6c &nbsp; The Unified Multi-Domain KG <span class="badge badge-green">plan</span></h3>
+
+      <p>Instead of separate domain KGs fed into separate models, construct a single connected graph where domain KGs are components and cross-domain edges are explicit bridge relations.</p>
+
+      <div class="two-col">
+        <div class="col-card">
+          <h4>Within-domain edges (dense)</h4>
+          <ul>
+            <li>Extracted by GraphMERT per domain</li>
+            <li>Well-typed, ontology-consistent</li>
+            <li>Verified factual with provenance</li>
+            <li>Multi-hop paths → training curriculum</li>
+          </ul>
+        </div>
+        <div class="col-card">
+          <h4>Cross-domain bridge edges (sparser)</h4>
+          <ul>
+            <li>Shared mathematical structures (same governing equation)</li>
+            <li>Causal chains that cross domain boundaries</li>
+            <li>Structural analogies (isomorphic KG neighborhoods)</li>
+            <li>Concepts appearing in multi-domain literature</li>
+          </ul>
+        </div>
+      </div>
+
+      <p style="margin-top:0.9rem">Cross-domain bridge edge discovery can be partially automated: find domain-concept pairs whose KG neighborhoods have high structural similarity (graph isomorphism tests on subgraphs); find concept co-occurrences across domain corpora; use the model itself (after initial training) to propose bridges by navigating toward structurally similar regions in its representation space. The quantum KG formalism (item 32) handles ambiguity: a cross-domain bridge edge can be a low-confidence superposition until confirmed by downstream training performance.</p>
+
+      <p>The unified KG then generates <strong>cross-domain path alignment training examples</strong>: problems whose solution requires traversal from a concept in one domain, through a bridge edge, into another domain, and back. These explicitly train analogical reasoning as a first-class skill.</p>
+
+      <div class="agenda-tags"><span class="atag">item 14</span><span class="atag">item 32</span><span class="atag">item 34</span><span class="atag">item 7 (algebra of the bridge edges)</span></div>
+    </div>
+
+
+    <!-- 6d RC-MoE -->
+    <div class="subsection" id="rcmoe">
+      <h3>6d &nbsp; Residual-Coupled MoE Architecture <span class="badge badge-teal">directional</span></h3>
+
+      <p>If domain-specific expert modules are still desirable (for specialization within a single model), the key constraint is that they must be able to communicate <em>during</em> processing — not just at input routing or output aggregation. Standard MoE experts are parallel and isolated. <strong>Residual Coupling</strong> (item 65) adds lateral residual connections between expert modules, solving this.</p>
+
+      <div class="callout theory" data-label="Architecture sketch">
+        <p>Each domain expert module receives: (1) the shared token representation from the encoder, (2) residual signals from other expert modules weighted by their KG proximity to the current concept. When the active concept in the unified KG has edges crossing into another domain, the coupling weight to that domain's expert is automatically upweighted. The experts are not isolated — they influence each other mid-computation in proportion to how KG-adjacent their domains are at this reasoning step.</p>
+      </div>
+
+      <p>This produces a model with the specialization benefits of MoE (each domain expert develops deep domain-specific representations) and the cross-domain benefits of a unified model (experts communicate when the KG topology says they should). The routing is no longer binary (invoke this expert, not that one) but continuous and KG-guided (all experts contribute with weights proportional to their KG proximity to the current concept).</p>
+
+      <p><strong>Training signals for this architecture:</strong></p>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><b>Standard pretraining objective</b> — task completion or next-token prediction across diverse domains.</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><b>Within-domain path alignment reward</b> — GRPO on KG paths within each domain (SFT + RL as in item 14). Expert modules specialize via this signal.</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><b>Cross-domain path alignment reward</b> — GRPO on paths that traverse bridge edges in the unified KG. This is the signal that develops analogical reasoning and trains the Residual Coupling channels to transmit useful cross-domain information.</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body"><b>Coupling channel regularization</b> — penalize channels that transmit noise (random high-entropy signals); encourage channels that carry KG-predictable information when adjacent domains are active. Prevents coupling from becoming spurious cross-talk.</div></div>
+      </div>
+
+      <div class="method-stat-grid" style="margin-top:1rem">
+        <div class="method-stat">
+          <div class="method-stat-label">Open design question</div>
+          <div class="method-stat-value">Coupling strength must be KG-topology-adaptive. Too strong → experts homogenize and lose domain structure. Too weak → effective isolation, same as standard MoE. See Q8.</div>
+        </div>
+        <div class="method-stat">
+          <div class="method-stat-label">Connection to item 65</div>
+          <div class="method-stat-value">Residual Coupling's documented ability to "scale an LLM horizontally" maps directly to adding domain expert modules. Verify whether the implementation supports dynamic coupling weights conditioned on KG proximity.</div>
+        </div>
+      </div>
+
+      <div class="agenda-tags"><span class="atag">item 65 (Residual Coupling)</span><span class="atag">item 11 (MoE, MLA)</span><span class="atag">item 2 (COCONUT latent traversal)</span><span class="atag">item 41 (attractor cross-domain bridges)</span></div>
+    </div>
+
+
+    <!-- 6e TBT parallel -->
+    <div class="subsection" id="tbt-parallel">
+      <h3>6e &nbsp; The Thousand Brains Parallel <span class="badge badge-purple">theoretical</span></h3>
+
+      <p>Residual-Coupled domain experts within a unified model are structurally analogous to Thousand Brains Theory's cortical columns. In TBT: each column maintains its own model of the world using reference frames; columns vote and communicate laterally to reach a unified percept; no single column is authoritative. In the proposed architecture: each domain expert maintains its own structured representation of its domain using the KG geometry as a reference frame; experts communicate via residual coupling weighted by KG proximity; no single expert is the authoritative "answer generator."</p>
+
+      <p>The key TBT insight that applies here is <strong>the vote</strong>: the final output is a consensus across expert modules, not the output of whichever expert was selected by the router. This means cross-domain reasoning is not "asking the wrong expert" — it is all experts contributing a vote weighted by their KG proximity to the current concept, and the consensus naturally reflects whatever cross-domain structure exists.</p>
+
+      <p>In the latent-internalized version (Section 3c), the domain attractor regions are the column reference frames, and Residual Coupling channels are the lateral connections between columns. COCONUT latent reasoning traverses the attractor landscape guided by the unified KG topology — crossing from one domain's attractor region to another when the bridge edges point there.</p>
+
+      <div class="callout plan" data-label="Research priority">
+        <p>Before implementing full Residual-Coupled MoE, first verify item 65's mechanism on a small experiment: two domain KGs, two expert modules, Residual Coupling between them, cross-domain path alignment reward. Test whether the coupling channels learn to carry KG-predictable information when cross-domain paths are active. This is a tractable small-scale test of the core architectural claim.</p>
+      </div>
+
+      <div class="agenda-tags"><span class="atag">item 29 (TBT-inspired PoPE)</span><span class="atag">item 65 (Residual Coupling)</span></div>
+    </div>
+
+  </section>
+
+
+</main>
+</div>
+</body>
+</html>

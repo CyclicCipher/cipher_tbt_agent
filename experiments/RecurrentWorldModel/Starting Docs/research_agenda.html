@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Research Agenda</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #ffffff; --bg2: #f5f4f0; --bg3: #eceae4;
+    --text: #1a1a18; --text2: #5a5955; --text3: #9a9894;
+    --border: rgba(0,0,0,0.1); --border2: rgba(0,0,0,0.2);
+    --radius: 8px; --radius-lg: 12px; --radius-pill: 20px;
+    --link: #185FA5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1a; --bg2: #252523; --bg3: #2e2e2b;
+      --text: #f0ede6; --text2: #9a9890; --text3: #666460;
+      --border: rgba(255,255,255,0.09); --border2: rgba(255,255,255,0.18);
+      --link: #85B7EB;
+    }
+  }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
+  .page { max-width: 860px; margin: 0 auto; padding: 2rem 1.25rem 5rem; }
+  header { margin-bottom: 1.75rem; border-bottom: 0.5px solid var(--border2); padding-bottom: 1.25rem; }
+  header h1 { font-size: 18px; font-weight: 500; letter-spacing: -0.01em; margin-bottom: 4px; }
+  header p { font-size: 12px; color: var(--text3); }
+  #toolbar { display: flex; flex-direction: column; gap: 10px; margin-bottom: 1rem; }
+  #search { width: 100%; padding: 9px 13px; font-size: 14px; border: 0.5px solid var(--border2); border-radius: var(--radius); background: var(--bg); color: var(--text); outline: none; transition: border-color 0.15s; }
+  #search:focus { border-color: var(--text3); }
+  #search::placeholder { color: var(--text3); }
+  #chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip { font-size: 11px; padding: 4px 10px; border-radius: var(--radius-pill); border: 0.5px solid var(--border2); cursor: pointer; background: var(--bg2); color: var(--text2); user-select: none; transition: all 0.12s; white-space: nowrap; }
+  .chip:hover { border-color: var(--text3); color: var(--text); }
+  #count { font-size: 12px; color: var(--text3); margin-bottom: 0.5rem; }
+  #items { display: flex; flex-direction: column; }
+  .item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 6px; border-bottom: 0.5px solid var(--border); border-radius: 4px; }
+  .item:hover { background: var(--bg2); }
+  .item-num { font-size: 11px; font-weight: 500; color: var(--text3); min-width: 28px; padding-top: 3px; flex-shrink: 0; text-align: right; }
+  .item-body { flex: 1; min-width: 0; }
+  .item-title { font-size: 13px; font-weight: 500; color: var(--text); line-height: 1.4; margin-bottom: 5px; }
+  .item-paper { font-size: 11px; color: var(--text3); margin-bottom: 4px; font-style: italic; }
+  .item-cats { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 6px; }
+  .item-desc { font-size: 12px; color: var(--text2); line-height: 1.55; margin-bottom: 5px; }
+  .item-link { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--link); text-decoration: none; border: 0.5px solid var(--border2); border-radius: var(--radius-pill); padding: 2px 8px; margin-top: 2px; transition: background 0.1s; }
+  .item-link:hover { background: var(--bg2); }
+  .badge { font-size: 10px; padding: 2px 7px; border-radius: var(--radius-pill); }
+  .badge.pri { font-weight: 600; }
+  .cg-purple { background: #EEEDFE; color: #3C3489; }
+  .cg-teal   { background: #E1F5EE; color: #085041; }
+  .cg-amber  { background: #FAEEDA; color: #633806; }
+  .cg-coral  { background: #FAECE7; color: #993C1D; }
+  .cg-green  { background: #EAF3DE; color: #3B6D11; }
+  .cg-blue   { background: #E6F1FB; color: #185FA5; }
+  .chip.cg-purple.active { background: #534AB7; color: #fff; border-color: #534AB7; }
+  .chip.cg-teal.active   { background: #0F6E56; color: #fff; border-color: #0F6E56; }
+  .chip.cg-amber.active  { background: #854F0B; color: #fff; border-color: #854F0B; }
+  .chip.cg-coral.active  { background: #993C1D; color: #fff; border-color: #993C1D; }
+  .chip.cg-green.active  { background: #3B6D11; color: #fff; border-color: #3B6D11; }
+  .chip.cg-blue.active   { background: #185FA5; color: #fff; border-color: #185FA5; }
+  .chip.all.active       { background: var(--text); color: var(--bg); border-color: var(--text); }
+  @media (prefers-color-scheme: dark) {
+    .cg-purple { background: #26215C; color: #CECBF6; }
+    .cg-teal   { background: #04342C; color: #9FE1CB; }
+    .cg-amber  { background: #412402; color: #FAC775; }
+    .cg-coral  { background: #4A1B0C; color: #F0997B; }
+    .cg-green  { background: #173404; color: #C0DD97; }
+    .cg-blue   { background: #042C53; color: #B5D4F4; }
+    .chip.cg-purple.active { background: #AFA9EC; color: #26215C; border-color: #AFA9EC; }
+    .chip.cg-teal.active   { background: #5DCAA5; color: #04342C; border-color: #5DCAA5; }
+    .chip.cg-amber.active  { background: #EF9F27; color: #412402; border-color: #EF9F27; }
+    .chip.cg-coral.active  { background: #F0997B; color: #4A1B0C; border-color: #F0997B; }
+    .chip.cg-green.active  { background: #97C459; color: #173404; border-color: #97C459; }
+    .chip.cg-blue.active   { background: #85B7EB; color: #042C53; border-color: #85B7EB; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>AI Research Agenda</h1>
+    <p>98 items · filter by category · search by number, title, description, or paper name</p>
+  </header>
+  <div id="toolbar">
+    <input id="search" type="search" placeholder="Search…" />
+    <div id="chips"></div>
+  </div>
+  <div id="count"></div>
+  <div id="items"></div>
+</div>
+
+<script id="data" type="application/json">
+[
+  {"n":1,"t":"Ouro-style looped transformers","pri":"tts","sec":["arch"],"paper":"",
+   "desc":"Require something like 4× fewer parameters because they can manipulate knowledge better.",
+   "url":""},
+  {"n":2,"t":"COCONUT: reasoning in latent space","pri":"latent","sec":["reasoning"],"paper":"COCONUT",
+   "desc":"Reasons in latent space instead of in language tokens which have a huge overhead. Cheaper and better reasoning no longer confined to what can be expressed in language.",
+   "url":""},
+  {"n":3,"t":"Polar coordinate positional encoding","pri":"posenc","sec":["attention"],"paper":"",
+   "desc":"Separates what from where.",
+   "url":""},
+  {"n":4,"t":"Token superposition pretraining","pri":"pretrain","sec":["repr"],"paper":"",
+   "desc":"",
+   "url":""},
+  {"n":5,"t":"Subquadratic sparse attention (SSA)","pri":"attention","sec":["compress"],"paper":"",
+   "desc":"How did they solve the indexing problem?",
+   "url":""},
+  {"n":6,"t":"Aurora optimizer","pri":"optim","sec":[],"paper":"",
+   "desc":"Achieves 100× data efficiency on some benchmarks, produces a better result overall for less compute.",
+   "url":""},
+  {"n":7,"t":"Group-theoretic approaches to training","pri":"training","sec":["pretrain"],"paper":"",
+   "desc":"Could this bridge the gap to human intelligence? Genuinely novel and difficult research no one has done before.",
+   "url":""},
+  {"n":8,"t":"AutoTTS: automatic test-time scaling","pri":"tts","sec":["reasoning"],"paper":"",
+   "desc":"The bitter lesson but applied to Chain of Thought — when to terminate or branch and how to use branches.",
+   "url":""},
+  {"n":9,"t":"Manifold-constrained hyperconnections","pri":"arch","sec":["repr"],"paper":"",
+   "desc":"",
+   "url":""},
+  {"n":10,"t":"Block attention residuals","pri":"attention","sec":["arch"],"paper":"",
+   "desc":"Applies attention to layer residuals to attend to which layer is the most important for the current task.",
+   "url":""},
+  {"n":11,"t":"DeepSeek MoE + Multi-head Latent Attention","pri":"arch","sec":["attention","compress"],"paper":"",
+   "desc":"Mixture of Experts and Multi-head Latent Attention. How many tokens can MLA scale to, given that SSA allows unlimited scaling of the context window?",
+   "url":""},
+  {"n":12,"t":"DeepSeek Engrams","pri":"memory","sec":[],"paper":"",
+   "desc":"Probably less necessary.",
+   "url":""},
+  {"n":13,"t":"SwiGLU FFN blocks","pri":"activ","sec":[],"paper":"",
+   "desc":"Work very well in Mamba3.",
+   "url":""},
+  {"n":14,"t":"KGs as implicit reward models","pri":"neuro","sec":["rl","safety"],"paper":"Knowledge Graphs are Implicit Reward Models",
+   "desc":"An evolution on the paper 'Knowledge Graphs are Implicit Reward Models': Is it possible for the model to discover a knowledge graph reward model for a new task during training or inference, so we don't have to know or construct it for a problem?",
+   "url":""},
+  {"n":15,"t":"Token-level compressor / compressed attention","pri":"kvcache","sec":["attention"],"paper":"",
+   "desc":"DeepSeek v4's performance improvements: token-level compressor and compressed attention. This might be incompatible with other techniques.",
+   "url":""},
+  {"n":16,"t":"Exclusive self-attention","pri":"attention","sec":[],"paper":"",
+   "desc":"",
+   "url":""},
+  {"n":17,"t":"Hallucination and uncertainty solutions","pri":"safety","sec":[],"paper":"",
+   "desc":"How to get an AI to know and report its uncertainty and when it doesn't know something?",
+   "url":""},
+  {"n":18,"t":"Introspection heads","pri":"safety","sec":[],"paper":"",
+   "desc":"How worthwhile are the benefits of introspection heads and model self-awareness? (Note: verify this paper is real — may be spurious.)",
+   "url":""},
+  {"n":19,"t":"Diffusion LLMs","pri":"arch","sec":["pretrain"],"paper":"",
+   "desc":"Are the latest papers on diffusion LLMs worth recreating, and do they beat autoregression?",
+   "url":""},
+  {"n":20,"t":"Active inference: predict→compare→update→act","pri":"world","sec":["training","rl"],"paper":"",
+   "desc":"How would the predict → compare → update → act loop be implemented in an LLM and is it worth doing? How does it change data efficiency, generalization, behavior, and training dynamics? How would it work with COCONUT? How does it change Reinforcement Learning?",
+   "url":""},
+  {"n":21,"t":"MAMMAL multimodal technique","pri":"multi","sec":[],"paper":"",
+   "desc":"Is MAMMAL's multi-modal technique an efficient way to make a multi-modal world model in other domains?",
+   "url":""},
+  {"n":22,"t":"KG reward model: alignment implications","pri":"safety","sec":["rl","neuro"],"paper":"",
+   "desc":"What are item 14's implications for alignment, if it can be used to make a new policy optimization algorithm for RL? Related to item 20.",
+   "url":""},
+  {"n":23,"t":"Free-energy / neurotransmitter embedding dims","pri":"repr","sec":["safety"],"paper":"",
+   "desc":"Should there be a dimension on the embedding vector for each type of free energy? Or for how the model is supposed to feel about something? Related to items 22, 21, and 20.",
+   "url":""},
+  {"n":24,"t":"Program synthesis for ARC-AGI-3 in-head","pri":"neuro","sec":["reasoning"],"paper":"",
+   "desc":"Some of the most effective approaches to solving ARC-AGI-3 have been neurosymbolic approaches using program synthesis. Can this AI model be trained to run arbitrary programs in its head without an external tool or harness? How would this be done with latent reasoning, as in COCONUT? How would this interact with item 20?",
+   "url":""},
+  {"n":25,"t":"Code vs natural language as world interface","pri":"dataset","sec":["reasoning"],"paper":"",
+   "desc":"Is code, or something similar to it, a better interface for the world than natural language?",
+   "url":""},
+  {"n":26,"t":"GPT-4o charisma and cognitive empathy","pri":"finetune","sec":["dataset","safety"],"paper":"",
+   "desc":"How did GPT-4o get so charismatic and have such high cognitive empathy?",
+   "url":""},
+  {"n":27,"t":"RAG, SkillRAG, and optimal RAG systems","pri":"memory","sec":[],"paper":"",
+   "desc":"What is the best possible RAG system? Could an AI model be trained (pre-training plus reinforcement learning) to optimally use the built-in RAG system? Could RAG + training apply to skills? (Related: SkillRAE.)",
+   "url":""},
+  {"n":28,"t":"Google TurboQuant","pri":"compress","sec":["hardware"],"paper":"",
+   "desc":"How useful is Google's TurboQuant when combined with every other technique here?",
+   "url":""},
+  {"n":29,"t":"TBT-inspired evolution on PoPE","pri":"posenc","sec":["repr"],"paper":"",
+   "desc":"Can Thousand Brains Theory inspire an evolution on PoPE which is superior?",
+   "url":""},
+  {"n":30,"t":"Token forgetting / context window management","pri":"kvcache","sec":["continual"],"paper":"",
+   "desc":"When should tokens in the context window be removed/forgotten and how?",
+   "url":""},
+  {"n":31,"t":"Thinking Machines Interaction Models","pri":"arch","sec":["reasoning"],"paper":"",
+   "desc":"Can Thinking Machines' Interaction Models be recreated using the techniques they documented and what is the utility?",
+   "url":""},
+  {"n":32,"t":"Quantum Knowledge Graph","pri":"neuro","sec":["memory"],"paper":"Quantum Knowledge Graph: Modeling Context-Dependent",
+   "desc":"The paper 'Quantum Knowledge Graph: Modeling Context-Dependent': Does it have implications for item 14? The purpose of this paper was to make a knowledge graph more context-dependent.",
+   "url":""},
+  {"n":33,"t":"Warm-up training (Korean baseline technique)","pri":"pretrain","sec":["safety"],"paper":"",
+   "desc":"A South Korean pre-training technique which shows the model random noise before data, to teach the model a baseline state of 'I don't know' and give it the ability to know when it doesn't know.",
+   "url":""},
+  {"n":34,"t":"KG algebra for structural grounding","pri":"neuro","sec":["repr"],"paper":"An Alternative Trajectory for Generative AI",
+   "desc":"The paper 'An Alternative Trajectory for Generative AI' argues that current AI only does well in math and coding because the training data contains good, rigorous abstractions providing structural grounding, which other domains' data doesn't have. Are there clues on how to resolve this? The theory presented is that these abstractions could be supplied in the form of knowledge graphs, the nodes and edges of which can form an algebra. If we embed algebraic structure into a high-dimensional space, we can treat logical rules as geometric transformations, making the solution visible to gradient descent and making unverifiable domains automatically verifiable.",
+   "url":""},
+  {"n":35,"t":"Scaling self-play with self-guidance","pri":"rl","sec":["training"],"paper":"Scaling Self-Play with Self-Guidance",
+   "desc":"The paper 'Scaling Self-Play with Self-Guidance': how would this interact with everything else here?",
+   "url":""},
+  {"n":36,"t":"RMSNorm","pri":"activ","sec":[],"paper":"",
+   "desc":"Use this.",
+   "url":""},
+  {"n":37,"t":"SFT pipeline + SHARE technique","pri":"finetune","sec":[],"paper":"",
+   "desc":"Supervised Fine-Tuning: how would someone go about building the best possible SFT pipeline given current research? Is the SHARE technique worth using for a training run?",
+   "url":""},
+  {"n":38,"t":"LogAct agentic reliability harness","pri":"safety","sec":["reasoning"],"paper":"LogAct: Establishing Agentic Reliability via Shared Logs",
+   "desc":"'LogAct: Establishing Agentic Reliability via Shared Logs' creates a harness to make agentic AI more reliable. Does this apply for an architecture which uses COCONUT + Looped Transformers type improvements, and how far can it be taken? What are the implications for AI safety?",
+   "url":""},
+  {"n":39,"t":"Foveal high-resolution computer vision","pri":"multi","sec":["attention"],"paper":"",
+   "desc":"Current multi-modal LLMs have very low resolutions, and can only see an image very coarsely. Is there a way, in conjunction with SSA, to make it computationally feasible to see an entire computer screen in full resolution, or at least part of it (through a technique like foveal vision)?",
+   "url":""},
+  {"n":40,"t":"Continual learning (backprop / Hope / LoRA)","pri":"continual","sec":[],"paper":"",
+   "desc":"Given the limitations of current hardware and algorithms, switching to prospective configuration to solve backprop's catastrophic forgetting is not plausible. Two approaches: 1) Can we improve the backprop algorithm to act like prospective configuration, but without settling? 2) How far can Google's Hope architecture be taken, and how far can LoRA and SHARE techniques be taken?",
+   "url":""},
+  {"n":41,"t":"Attractor models for language and reasoning","pri":"latent","sec":["tts","reasoning"],"paper":"Solve the Loop: Attractor Models for Language and Reasoning",
+   "desc":"The paper 'Solve the Loop: Attractor Models for Language and Reasoning': how do you apply this to COCONUT and Looped LLMs?",
+   "url":""},
+  {"n":42,"t":"Block-Tensor-Train weight matrices","pri":"compress","sec":["arch"],"paper":"",
+   "desc":"Can Block-Tensor-Train be improved on to make it viable as a replacement for dense weight matrices?",
+   "url":""},
+  {"n":43,"t":"Interventional SFT (ISFT)","pri":"finetune","sec":["safety"],"paper":"",
+   "desc":"ISFT reduces AI delusions compared to SFT by treating the agent's outputs separately from information about the world. The agent's outputs are interventions and world info is observations — current SFT conflates the two, treating an AI's own output as evidence when it isn't. You mask the agent's past outputs from its history so it stops mistaking hallucination for memory. Apparently it only takes a change to one line of code. This is the same self/other boundary as item 94, at the SFT stage rather than pretraining, and it is active inference's action-vs-observation distinction (item 20): one's own outputs are interventions, not evidence. All rest on a self-model; see item 80 (metacognition).",
+   "url":"https://love4all.ai/files/why-it-is-important-to-understand-causality-and-agency.pdf"},
+  {"n":44,"t":"HRM-Text viability as foundation","pri":"arch","sec":[],"paper":"",
+   "desc":"Would a Hierarchical Reasoning Model achieve the project goals better than the other plan?",
+   "url":"https://github.com/sapientinc/HRM-Text"},
+  {"n":45,"t":"Skip-layer / early-exit computation","pri":"compress","sec":["arch"],"paper":"",
+   "desc":"Is there any way to skip processing through layers which have nothing to contribute to a certain operation, to save compute and time?",
+   "url":""},
+  {"n":46,"t":"Antislop: eliminating repetitive patterns","pri":"finetune","sec":["dataset"],"paper":"Antislop: A Comprehensive Framework for Identifying and Eliminating Repetitive Patterns in Language Models",
+   "desc":"'Antislop: A Comprehensive Framework for Identifying and Eliminating Repetitive Patterns in Language Models.' Use that.",
+   "url":""},
+  {"n":47,"t":"Multi-dimensional training signal vs scalar loss","pri":"training","sec":["safety"],"paper":"",
+   "desc":"Is it possible to make a multi-dimensional training signal vector instead of a scalar loss, like humans have with neurotransmitters?",
+   "url":""},
+  {"n":48,"t":"PINNs multi-variable global loss failure","pri":"training","sec":[],"paper":"",
+   "desc":"How would you solve the problem PINNs have where a single global loss function fails to capture the signal of multiple unpredictably interacting variables?",
+   "url":""},
+  {"n":49,"t":"Sub-JEPA stable end-to-end world models","pri":"world","sec":["repr"],"paper":"Sub-JEPA: Subspace Gaussian Regularization for Stable End-to-End World Models",
+   "desc":"How much do JEPA techniques map on to the model being built here and would they be useful? Maybe for COCONUT?",
+   "url":"https://arxiv.org/pdf/2605.09241"},
+  {"n":50,"t":"Epistemology / ontology / methodology for AI","pri":"safety","sec":["training"],"paper":"",
+   "desc":"Epistemology, Ontology, Methodology: how can these concepts be used to improve AI training and reliability?",
+   "url":"https://medium.com/@socal21st.oc/reexamining-philosophical-concepts-to-improve-ai-safety-and-alignment-598bff6e0416"},
+  {"n":51,"t":"Generalization requires forgetting?","pri":"continual","sec":["repr"],"paper":"",
+   "desc":"How much does generalization require forgetting, in order to learn the mechanics required to predict something instead of just recall how it was?",
+   "url":""},
+  {"n":52,"t":"A Theory of Generalization in Deep Learning","pri":"training","sec":["optim","repr"],"paper":"A Theory of Generalization in Deep Learning",
+   "desc":"Litman et al., arXiv:2605.01172 (May 2026). Indispensable for future training algorithms; does a substantial reformulation of backprop and is the source of the 5x faster grokking claim. A non-asymptotic theory in the full feature-learning regime: the empirical NTK partitions the output into a SIGNAL channel (error dissipates fast) and a NOISE reservoir (near-zero eigenvalues trap memorization test-invisibly); coherent signal accumulates while idiosyncratic memorization is suppressed to a slow random walk. This signal/noise partition is the training-dynamics analogue of our essential-vs-accidental (differentia/accident) distinction — it suppresses shortcut learning at the optimizer level. In practice it reduces to an SNR preconditioner on top of Adam (one extra state vector, near-zero cost) that accelerates grokking 5x, suppresses memorization in PINNs / implicit neural representations, and yields an exact validation-free population-risk objective from a single run (very budget-friendly). Can this be applied to the other training techniques here, and does it have implications for continual learning?",
+   "url":"https://arxiv.org/pdf/2605.01172"},
+  {"n":53,"t":"Seed IQ: physics-based / conservation-law AI","pri":"arch","sec":["reasoning","training"],"paper":"",
+   "desc":"How did Seed IQ achieve 100% on ARC-AGI-3? What do they mean when they say 'physics-based' or 'physics-driven inference'? What do they mean when they say they applied conservation laws to AI? Is it possible to make a deep learning model do what Seed IQ's models do? How do they even work?",
+   "url":"https://www.youtube.com/watch?v=ON_b39E3MtY"},
+  {"n":54,"t":"Inductive / deductive / abductive reasoning","pri":"reasoning","sec":[],"paper":"",
+   "desc":"How do you teach a model inductive, deductive, and abductive reasoning and teach it to solve absurdly difficult problems in all of these fields combined? What techniques above are good foundations for this?",
+   "url":""},
+  {"n":55,"t":"Efficient abstract chain-of-thought","pri":"latent","sec":["reasoning"],"paper":"Thinking Without Words: Efficient Latent Reasoning with Abstract Chain-of-Thought",
+   "desc":"'Thinking Without Words: Efficient Latent Reasoning with Abstract Chain-of-Thought.' The plan is already to use COCONUT latent space thinking without intermediate tokens. Does this paper still have anything to offer?",
+   "url":""},
+  {"n":56,"t":"QK-Norm","pri":"activ","sec":["attention"],"paper":"",
+   "desc":"What is QK-Norm and how is it useful?",
+   "url":""},
+  {"n":57,"t":"Multimodality without adapters or encoders","pri":"multi","sec":["arch"],"paper":"",
+   "desc":"How would you get multimodality without adapters or encoders, but in a single model?",
+   "url":""},
+  {"n":58,"t":"Regularization strategy","pri":"training","sec":[],"paper":"",
+   "desc":"How much regularization should be used when training a model?",
+   "url":""},
+  {"n":59,"t":"Hyperbolic transformers","pri":"repr","sec":["arch"],"paper":"Hyperbolic Transformers",
+   "desc":"'Hyperbolic transformers' replace Euclidean embeddings with hyperbolic (hierarchical/continuous tree-shaped) ones. How can this be applied and is it worth using?",
+   "url":"https://mostlykiguess.github.io/Functional-Project/hyperbolic.pdf"},
+  {"n":60,"t":"4-bit weight training (stable)","pri":"hardware","sec":["compress"],"paper":"",
+   "desc":"With biological weights being between 4–5 bits, there should be no reason to use more than 4 bits for an AI model's weights. But how do you efficiently and stably train a model at such extreme quantization?",
+   "url":""},
+  {"n":61,"t":"HRM task-completion pretraining","pri":"pretrain","sec":["arch"],"paper":"",
+   "desc":"How can HRM-Text's training system be applied to other models? (Task completion, not next-word prediction.)",
+   "url":"https://www.youtube.com/watch?v=jP2HgeLyS30"},
+  {"n":62,"t":"PrefixLM attention + slow/fast HRM controller","pri":"arch","sec":["attention"],"paper":"",
+   "desc":"HRM uses PrefixLM Attention to attend to a whole sentence or question at once, and stable training at depth required a higher-level slow controller and a lower-level fast processor. What are these and how do they work?",
+   "url":""},
+  {"n":63,"t":"Odysseus: VLM RL for long-horizon decisions","pri":"rl","sec":["multi"],"paper":"Odysseus: Scaling VLMs to 100+ Turn Decision-Making in Games via Reinforcement Learning",
+   "desc":"How does this inform RL algorithms? How could the effect be achieved without a separate critic CNN?",
+   "url":"https://arxiv.org/pdf/2605.00347"},
+  {"n":64,"t":"Masked diffusion language world models","pri":"world","sec":["arch"],"paper":"Masked Diffusion Language Models are Strong and Steerable Text-Based World Models for Agentic RL",
+   "desc":"What combination of diffusion approaches would work with COCONUT, LoopedLM, and HRM approaches? What are the implications of combining diffusion with MAMMAL's multimodal system, and whatever is used for achieving all modalities in a single model?",
+   "url":"https://zenodo.org/records/20219105"},
+  {"n":65,"t":"Residual coupling","pri":"arch","sec":["compress"],"paper":"",
+   "desc":"What is the usefulness of Residual Coupling? Could it be used to make a better version of Mixture of Experts, or recreate the Thousand Brains Theory using transformer models? How much can this technique scale an LLM horizontally?",
+   "url":"https://github.com/pfekin/residual-coupling/"},
+  {"n":66,"t":"Spherical manifold / geometry-aware optimizer","pri":"optim","sec":["repr"],"paper":"",
+   "desc":"In what domain is this approach valid? It seems to be only valid when the data is spherical. What would be a way to engineer an optimizer that knows the geometry/space of the data and automatically adjusts? Would anything about the learning dynamics expected in the human neocortex by Thousand Brains Theory provide a clue on how to modify the optimizer? Is there an answer in Geometric Deep Learning or Riemannian optimization?",
+   "url":"https://eesuck1.github.io/machine-learning-on-spherical-manifold/"},
+  {"n":67,"t":"Efficient 4-bit training","pri":"hardware","sec":["compress"],"paper":"",
+   "desc":"Is this the solution for efficient 4-bit training?",
+   "url":"https://arxiv.org/abs/2509.25149"},
+  {"n":68,"t":"Dual-head attention for length generalization","pri":"attention","sec":["reasoning"],"paper":"",
+   "desc":"This 'dual head attention' technique claims to generalize outside of the training set in multiplication by using a sine head that attends to structural patterns somehow. Could it be legit? If this made some progress in structure discovery but isn't the peak, what would a more capable system do instead? Can it improve analogical and abductive reasoning?",
+   "url":"https://github.com/yzb3001313-star/Dual-Head-Attention-Enables-Length-Generalization"},
+  {"n":69,"t":"Triangle-based activation function (TBAF)","pri":"activ","sec":["latent"],"paper":"Triangle-Based Activation Function",
+   "desc":"Correction to the earlier note: in the repo experiment the custom activation was used only ONCE in the entire model (an image model) and still achieved its goal — it is NOT required in every block. If a single placement suffices, where should that one placement go in a looped / depth-recurrent JEPA core? Candidates: the phase channel of relational attention (phase is periodic; a triangle wave respects periodicity), or the single shared recurrent block (applied every loop via weight-sharing). Does it beat SwiGLU there, and why?",
+   "url":"https://github.com/Skull18500/TBAF"},
+  {"n":70,"t":"NeuronGuard: spiking neural network (Rust/CPU)","pri":"arch","sec":[],"paper":"",
+   "desc":"A low-level optimized Spiking Neural Network in Rust which runs on the CPU with multi-core parallelism and is surprisingly performant and capable. Is it worth using this instead of a traditional ANN in a transformer model?",
+   "url":"https://github.com/etoxin/NeuronGuard"},
+  {"n":71,"t":"GPU efficiency guide","pri":"hardware","sec":[],"paper":"",
+   "desc":"A guide on how to do machine learning experiments better by keeping GPUs running efficiently.",
+   "url":"https://horace.io/brrr_intro.html"},
+  {"n":72,"t":"Perturbation Matching Hypothesis","pri":"repr","sec":["safety"],"paper":"Perturbation Matching Hypothesis",
+   "desc":"Is this true and does the code attached actually work? How useful is it for alignment and representation learning?",
+   "url":"https://github.com/vishalstark512/matching-pmh"},
+  {"n":73,"t":"Engram-RAG (original idea)","pri":"memory","sec":[],"paper":"",
+   "desc":"Is there a way to make a RAG system that automatically injects knowledge into a model the way Engram does somehow?",
+   "url":""},
+  {"n":74,"t":"Sparser/faster transformer (Sakana TWeLL)","pri":"compress","sec":["arch"],"paper":"Sparser, Faster, Lighter Transformer Language Models",
+   "desc":"How good of a candidate is this for improving model performance compared to other techniques here?",
+   "url":"https://sakana.ai/twell/"},
+  {"n":75,"t":"SkillOpt: evolving agent strategies","pri":"reasoning","sec":["finetune","rl"],"paper":"SkillOpt: Executive Strategy for Self-Evolving Agent Skills",
+   "desc":"Not interested in creating skill.md files for agents — but could a similar approach be used to improve a model's reasoning or chain of thought?",
+   "url":"https://arxiv.org/pdf/2605.23904"},
+  {"n":76,"t":"Parallel saver training infra","pri":"hardware","sec":[],"paper":"",
+   "desc":"Would this help performance?",
+   "url":"https://github.com/NoteDance/parallel-saver"},
+  {"n":77,"t":"MuZero strategy transfer to LLM / HRM","pri":"rl","sec":["world"],"paper":"",
+   "desc":"What elements of MuZero can be transferred to an LLM or an HRM to autonomously learn new strategies? Making an HRM with a JEPA objective would likely get 80% of the way there.",
+   "url":""},
+  {"n":78,"t":"RISE world model for VLA","pri":"world","sec":["rl","multi"],"paper":"",
+   "desc":"Useful in robotics but probably everywhere else too. This uses a world model for a VLA to imagine the future in order to execute a task successfully and learn better via RL. It works much better than other RL techniques for VLAs. Does it validate the world model approach? Can it be applied to KVM domains?",
+   "url":"https://opendrivelab.com/RISE/"},
+  {"n":79,"t":"Hippocampus / complementary learning systems","pri":"continual","sec":["memory"],"paper":"",
+   "desc":"There's no complex animal without a hippocampus. No animal with a neocortex lacks a hippocampus. If the hippocampus were unnecessary for long-term continual learning, we wouldn't waste resources on it. It is probably impossible to solve continual learning without an equivalent of the hippocampus and complementary learning systems. Is there a better way to do long-term memory than this paper? Could the answer be to replace the traditional ML replay buffer entirely with a hippocampus that doesn't just interleave old and new experiences but acts like model-based simulation?",
+   "url":"https://arxiv.org/pdf/2605.26099"},
+  {"n":80,"t":"Metacognition in latent recurrent model","pri":"latent","sec":["safety"],"paper":"",
+   "desc":"'Introspection heads' appears to be a hallucinated (not real) idea. If you were making a recurrent model that thinks in latent space, perhaps with a JEPA objective and the resulting representations, what does metacognition look like and what could it do? Could it learn to control or alter its latent states? The self/other boundary of items 43 and 94 is the function a self-model serves; metacognition is that self-model made reflexive — the 'I' that owns the latent trajectory and can introspect or control it.",
+   "url":""},
+  {"n":81,"t":"Epiplexity (recent paper — pending review)","pri":"safety","sec":["repr"],"paper":"",
+   "desc":"There was a paper on 'Epiplexity' recently. This is relevant.",
+   "url":""},
+  {"n":82,"t":"ADHD: parallel/divergent thinking for trap-spotting","pri":"tts","sec":["reasoning"],"paper":"",
+   "desc":"A technique for parallel/divergent thinking in Claude Code, very effective at spotting traps in reasoning. How can this be merged with AutoTTS (item 8)? Divergent branches that surface reasoning traps could become a test-time-scaling primitive.",
+   "url":"https://github.com/UditAkhourii/adhd"},
+  {"n":83,"t":"xAI C-based vertically integrated training stack","pri":"hardware","sec":[],"paper":"",
+   "desc":"xAI built a vertically integrated training stack written entirely in C that trains over an order of magnitude faster than JAX, with heavy GPU parallelism across the pipeline. Would use Rust, not C — but should this be done at all? Likely for commercialization, perhaps not for testing.",
+   "url":"https://www.youtube.com/watch?v=Bro-jD8tzeo"},
+  {"n":84,"t":"Rust for bare-metal speed across the project","pri":"hardware","sec":[],"paper":"",
+   "desc":"Where can Rust be used in the project to get speed as close to bare metal as possible and remove bloat? Likely for commercialization, perhaps not for testing.",
+   "url":""},
+  {"n":85,"t":"DiffusionBlocks: block-wise training via diffusion interpretation","pri":"training","sec":["compress","arch"],"paper":"DiffusionBlocks: Block-wise Neural Network Training via Diffusion Interpretation",
+   "desc":"Sakana AI. Reduces training memory by splitting the model into blocks trained independently, treating the forward pass like a diffusion model denoising a signal. Because we are memory-constrained (4GB VRAM), this is a worthwhile avenue — and it is a natural fit for recurrent-depth transformers, exactly the target architecture.",
+   "url":"https://arxiv.org/pdf/2506.14202"},
+  {"n":86,"t":"Chollet's symbolic descent / program synthesis in connectionist models","pri":"neuro","sec":["reasoning"],"paper":"",
+   "desc":"Chollet is not wholly wrong about LLMs vs symbolic models on data efficiency, but he is wrong that connectionist models can't do symbolic descent. Transformers have been trained to accurately simulate C code at any depth and complexity, so why couldn't they emulate a symbolic model? Is there a way to make a deep neural network do this — e.g. via the recurrent-depth latent loop executing a 'program'?",
+   "url":"https://www.youtube.com/watch?v=k2ZLQC8P7dc"},
+  {"n":87,"t":"Preventing context rot; redesigning context windows","pri":"kvcache","sec":["memory"],"paper":"",
+   "desc":"How do you prevent context rot in long context windows? Are we doing context windows wrong from the onset? Is there anything in RAG that might inform how context windows should be redesigned?",
+   "url":""},
+  {"n":88,"t":"NVIDIA PID: high-resolution latent decoding with pixel diffusion","pri":"multi","sec":["latent","reasoning"],"paper":"Fast and High-Resolution Latent Decoding with Pixel Diffusion",
+   "desc":"For image generation, but could it be useful for reasoning models? Fast, high-resolution decoding of latents via pixel diffusion — possibly relevant to decoding latent thoughts, or as a diffusion-style decoding head (cf. item 85).",
+   "url":"https://research.nvidia.com/labs/sil/projects/pid/"},
+  {"n":89,"t":"Learning to skip blocks (ultrametric routing for sparse attention)","pri":"compress","sec":["hardware","arch"],"paper":"Learning to Skip Blocks: Self-Discovered Ultrametric Routing for Hardware-Accelerated Sparse Attention",
+   "desc":"The developer found a way to make LLMs learn to skip unnecessary blocks — learning where NOT to think — by not loading the irrelevant blocks onto the GPU, making the model many times faster and slashing most of the memory requirement. The approach is complex and has points of failure. Directly relevant to the 4GB constraint and to AutoTTS-style learned compute allocation (deciding where not to spend depth).",
+   "url":"https://github.com/sneed-and-feed/adelic-spectral-zeta/blob/main/papers/learning_to_skip_blocks.md"},
+  {"n":90,"t":"Fuse DiffusionBlocks + JEPA into a prospective-configuration training algorithm?","pri":"training","sec":["continual","world"],"paper":"",
+   "desc":"Could DiffusionBlocks (item 85) and JEPA world modeling be fused into a viable prospective-configuration training algorithm? Prospective configuration (item 92) is a backprop alternative that infers the target neural activity before modifying weights, and notably resists catastrophic forgetting — a key need if the model must learn a world model through experience.",
+   "url":""},
+  {"n":91,"t":"More efficient settling for prospective configuration","pri":"optim","sec":["continual","training"],"paper":"",
+   "desc":"Prospective configuration requires a relaxation/settling step (inference to convergence) before each weight update, which is its main cost. Is there a more efficient way to perform this settling — possibly reusing the model's own recurrent-depth / equilibrium (DEQ) machinery, or another technique in this list?",
+   "url":""},
+  {"n":92,"t":"Prospective configuration (learning beyond backpropagation)","pri":"continual","sec":["optim","neuro"],"paper":"Inferring Neural Activity Before Plasticity as a Foundation for Learning Beyond Backpropagation",
+   "desc":"Song, Millidge, Salvatori, Lukasiewicz, Xu, Bogacz (Nature Neuroscience, 2024). A backprop alternative grounded in energy-based / predictive-coding networks: the network first infers the neural activity that should result from learning (a relaxation/settling step), then modifies weights to consolidate it — the reverse of backprop's order. More efficient in deep structures, online learning, limited data, changing environments, and continual learning with multiple tasks, where it resists catastrophic forgetting. The settling step is an energy relaxation to convergence — the same fixed-point computation as depth recurrence / DEQ, so it could reuse that machinery (item 91).",
+   "url":"https://www.nature.com/articles/s41593-023-01514-1"},
+  {"n":93,"t":"Gemma 4 encoder-free multimodality","pri":"multi","sec":["arch"],"paper":"Gemma 4 12B (Google DeepMind)",
+   "desc":"Google DeepMind's Gemma 4 12B (June 2026, Apache 2.0) is encoder-free: no separate vision/audio encoders. Raw image patches and audio waveforms are projected directly into the LLM embedding space via lightweight linear layers (a matrix multiply + positional embedding + norm for vision; raw projection for audio), and one decoder-only transformer handles all modalities; runs on 16GB. Can we copy it? Largely YES — it validates the thin-adapter-into-shared-core input design (architecture §6b) at production scale and substantially settles the encoder half of A9: you do not need separate encoders, thin linear projection suffices. It differs from us in being a standard autoregressive decoder, not JEPA / clamped-settling — so it answers the input/encoder side, not the decoder or clamped-settling questions.",
+   "url":"https://blog.google/innovation-and-ai/technology/developers-tools/introducing-gemma-4-12b/"},
+  {"n":94,"t":"Identity-aware pretraining (self vs other; not learning bad habits)","pri":"pretrain","sec":["safety","continual"],"paper":"",
+   "desc":"How does a model, during pretraining, distinguish text written by others from text it produced itself, and avoid absorbing others' habits/behaviors as its own — e.g. mimicking emotions like frustration or anger that lower performance and can be unsafe, despite having no built-in emotions? And how to make memory identity-aware (mine vs observed)? Candidate directions: provenance/authorship as a conditioning channel (a 'speaker' axis separating self from corpus) so behavior is conditioned rather than absorbed; a distinct identity representation the model never imitates; separating an observed-behavior representation from an enacted-behavior policy; and at the memory layer, tagging stored content with provenance so retrieval is identity-aware. Open and important; ties to the clamped-I/O channels (§6b) and continual-learning memory (item 79). Likely the same capability as item 43 (intervention vs observation, at the SFT stage) and item 80 (metacognition): all three rest on a self-model separating self from world, with active inference (item 20) the natural home, since an agent already distinguishes its actions from observations. Absorbing others' frustration is a self/other-boundary failure — treating observed behavior as behavior to enact.",
+   "url":""},
+  {"n":95,"t":"q0: Hyper-Epoch Pretraining (lesson for single-model generalization)","pri":"training","sec":["optim","pretrain"],"paper":"q0: Primitives for Hyper-Epoch Pretraining",
+   "desc":"Mandal et al. (Q Labs / Princeton, arXiv:2606.03938, June 2026). Beats single-model gradient-descent saturation under fixed data by training a POPULATION (cyclic explore-then-settle snapshots + chain distillation + a learned generalization prior), Solomonoff-motivated; ~4.6x fewer epochs, ~12.9x data efficiency. We will NOT train an ensemble. The lesson for a SINGLE model: GD saturates because it commits to one hypothesis, while generalization wants a posterior over hypotheses. Single-model analogues of the three primitives: (1) self-distillation against an EMA/snapshot of yourself — chain distillation's dark-knowledge enrichment without N models; (2) a cyclic explore-then-settle schedule + weight-space averaging (SWA / model soups) to land one model in a flat, wide optimum; (3) item 52's SNR preconditioner as the per-update generalization filter. Converges with item 52 and epiplexity (item 96) on one target: extract compressible structure, suppress memorization, measured from the training stream itself.",
+   "url":"https://arxiv.org/pdf/2606.03938"},
+  {"n":96,"t":"Epiplexity as a loss function for fast generalization","pri":"training","sec":["optim","repr","dataset"],"paper":"Epiplexity (CMU dissertation)",
+   "desc":"Epiplexity (epistemic complexity) measures the structural information a COMPUTE-BOUNDED model can extract from data — operationally the area under the (online minus converged) loss curve: rapid loss drop = high structure absorbed, flat = noise. Its data-selection implication: the best pretraining data MAXIMIZES learnable structure, not minimizes final loss. Taken further into a LOSS: minimize cumulative ONLINE (prequential, predict-before-update) loss rather than final-batch loss — a model that compresses the stream best has generalized most, and online loss is a held-out-free generalization signal by construction (it predicts the next unseen point). To make it trainable, use a teacher/EMA as the 'offline' baseline (= self-distillation again, tying to q0). Most on-target tool for the project's primary goal: structure-per-token IS data efficiency. Caveat: it is a measure, not yet a proven local loss — turning the global integral into a stable per-step objective is the open work.",
+   "url":"https://ml.cmu.edu/research/phd-dissertation-pdfs/yidingji_phd_mld_2025.pdf"},
+  {"n":97,"t":"Bitter-lesson curriculum via epiplexity","pri":"dataset","sec":["training","pretrain"],"paper":"",
+   "desc":"Hand-curating dataset content and presentation order for curriculum learning is brittle and does not scale — the anti-bitter-lesson. The bitter-lesson alternative: let a measured signal drive data selection and ordering. Epiplexity (item 96) is that signal: at each step prioritize the data slices yielding the most structure-gain (online minus offline), deprioritize zero-epiplexity slices (noise, or already-absorbed structure). Adaptive by construction — as structure is absorbed its epiplexity falls, so the curriculum auto-advances along the frontier of learnable structure (a principled learning-progress curriculum). This is active inference applied to data: seek the data that maximizes expected information gain. Replaces hand-engineering with an online optimization.",
+   "url":""},
+  {"n":98,"t":"Reservoir computing (HypercubeESN) for the time-series gap","pri":"arch","sec":["memory","world","hardware"],"paper":"HypercubeESN",
+   "desc":"Critical gap: the architecture has thinking-time recurrence (depth, chain) but NO native streaming-temporal substrate, and attention — even the relational variant — is poorly suited to time-series forecasting, an inductive-bias mismatch a better attention will not fix. Worse, the DEQ/attractor core CONVERGES (kills dynamics to reach an answer), the OPPOSITE of what time-series needs: sustained non-converging dynamics that hold temporal history. Reservoir computing supplies the missing piece — a FIXED random recurrent reservoir with fading memory lifts a streaming signal into a high-dimensional temporal embedding; only a readout trains (cheap, data-efficient, BPTT-free). HypercubeESN realizes this memory-frugally: tanh neurons on a Boolean hypercube, XOR-addressed Hamming-1 connectivity (zero adjacency storage), a per-neuron delay line gathering across space AND time, the whole reservoir reproducible from a few scalars (DIM, seed, spectral radius, leak, history depth), edge-friendly (fits 4GB). This is a THIRD recurrence type (temporal/reservoir) distinct from depth and chain, integrated as a frozen temporal front-end feeding the reasoning core — i.e. time-series becomes 'just another clamped modality' (§6b) whose adapter is a reservoir. Calibration: 'transformers cannot do time-series so cannot be AGI' overstates it (TS transformers exist but are routinely beaten by simpler models); the sound conclusion — add a native temporal substrate — stands. HypercubeESN is a small early project; the reservoir-computing DIRECTION is the established, proven part.",
+   "url":"https://github.com/dliptak001/HypercubeESN"}
+]
+</script>
+
+<script>
+const CATS = [
+  {id:'arch',     label:'Architecture',        cg:'purple'},
+  {id:'tts',      label:'Test-time scaling',   cg:'purple'},
+  {id:'latent',   label:'Latent reasoning',    cg:'purple'},
+  {id:'posenc',   label:'Positional encoding', cg:'purple'},
+  {id:'memory',   label:'Memory / KG',         cg:'teal'},
+  {id:'continual',label:'Continual learning',  cg:'teal'},
+  {id:'world',    label:'World modeling',      cg:'teal'},
+  {id:'multi',    label:'Multimodality',       cg:'teal'},
+  {id:'training', label:'Training algorithms', cg:'amber'},
+  {id:'pretrain', label:'Pretraining',         cg:'amber'},
+  {id:'finetune', label:'Fine-tuning',         cg:'amber'},
+  {id:'optim',    label:'Optimizer design',    cg:'amber'},
+  {id:'dataset',  label:'Dataset',             cg:'amber'},
+  {id:'activ',    label:'Activations / norm',  cg:'amber'},
+  {id:'safety',   label:'Alignment / safety',  cg:'coral'},
+  {id:'neuro',    label:'Neurosymbolic',       cg:'green'},
+  {id:'rl',       label:'RL methods',          cg:'green'},
+  {id:'reasoning',label:'Reasoning strategies',cg:'green'},
+  {id:'attention',label:'Attention',           cg:'blue'},
+  {id:'compress', label:'Compression',         cg:'blue'},
+  {id:'kvcache',  label:'KV cache',            cg:'blue'},
+  {id:'repr',     label:'Representation',      cg:'blue'},
+  {id:'hardware', label:'Hardware / systems',  cg:'blue'},
+];
+
+const ITEMS = JSON.parse(document.getElementById('data').textContent);
+const catMap = Object.fromEntries(CATS.map(c => [c.id, c]));
+let activeFilters = new Set();
+let searchQuery = '';
+
+function getCat(id) { return catMap[id] || {id, label: id, cg: 'amber'}; }
+
+function badge(id, isPri) {
+  const c = getCat(id);
+  return `<span class="badge cg-${c.cg}${isPri ? ' pri' : ''}">${c.label}</span>`;
+}
+
+function urlLabel(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.replace(/^www\./, '');
+    const path = u.pathname.length > 1 ? u.pathname.slice(1, 30) + (u.pathname.length > 30 ? '…' : '') : '';
+    return path ? `${host}/${path}` : host;
+  } catch { return url.slice(0, 40); }
+}
+
+function matches(item) {
+  const q = searchQuery.toLowerCase();
+  if (q) {
+    const searchable = [item.t, item.desc, item.paper, String(item.n)].join(' ').toLowerCase();
+    if (!searchable.includes(q)) return false;
+  }
+  if (activeFilters.size === 0) return true;
+  return [item.pri, ...(item.sec || [])].some(c => activeFilters.has(c));
+}
+
+function render() {
+  const matched = ITEMS.filter(matches);
+  document.getElementById('count').textContent = `Showing ${matched.length} of ${ITEMS.length} items`;
+  document.getElementById('items').innerHTML = matched.map(item => {
+    const sec = (item.sec || []).map(s => badge(s, false)).join('');
+    const paper = item.paper ? `<div class="item-paper">${item.paper}</div>` : '';
+    const desc = item.desc ? `<div class="item-desc">${item.desc}</div>` : '';
+    const link = item.url ? `<a class="item-link" href="${item.url}" target="_blank" rel="noopener">${urlLabel(item.url)} ↗</a>` : '';
+    return `<div class="item">
+      <div class="item-num">#${item.n}</div>
+      <div class="item-body">
+        <div class="item-title">${item.t}</div>
+        ${paper}
+        <div class="item-cats">${badge(item.pri, true)}${sec}</div>
+        ${desc}
+        ${link}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderChips() {
+  const allActive = activeFilters.size === 0 ? ' active' : '';
+  let html = `<span class="chip all${allActive}" onclick="clearFilters()">all ${ITEMS.length}</span>`;
+  CATS.forEach(c => {
+    const cnt = ITEMS.filter(i => i.pri === c.id || (i.sec || []).includes(c.id)).length;
+    const act = activeFilters.has(c.id) ? ' active' : '';
+    html += `<span class="chip cg-${c.cg}${act}" onclick="toggleFilter('${c.id}')">${c.label} <span style="opacity:0.65">${cnt}</span></span>`;
+  });
+  document.getElementById('chips').innerHTML = html;
+}
+
+function toggleFilter(id) {
+  activeFilters.has(id) ? activeFilters.delete(id) : activeFilters.add(id);
+  renderChips(); render();
+}
+function clearFilters() { activeFilters.clear(); renderChips(); render(); }
+
+document.getElementById('search').addEventListener('input', e => {
+  searchQuery = e.target.value; render();
+});
+
+renderChips();
+render();
+</script>
+</body>
+</html>
