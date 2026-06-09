@@ -28,7 +28,7 @@ from typing import Literal
 import torch
 import torch.nn as nn
 
-GradMode = Literal["one_step", "unrolled", "ift"]
+GradMode = Literal["one_step", "unrolled", "ift", "bptt"]
 
 
 @dataclass
@@ -37,6 +37,8 @@ class DEQConfig:
     tol: float = 1e-3            # relative residual threshold for convergence
     grad_mode: GradMode = "one_step"
     backward_steps: int = 1      # used by "unrolled"
+    bptt_iters: int = 12         # used by "bptt": fixed iteration count, full BPTT
+    state_norm: bool = False     # RMS-normalize state each iteration (contraction aid)
     anderson: bool = False       # Anderson acceleration of the forward solve
     anderson_m: int = 5          # history size
     anderson_beta: float = 1.0   # mixing
@@ -77,6 +79,20 @@ def _looks_oscillating(trace: list[float], window: int = 6, tol: float = 1e-2) -
     return (min(recent) > tol) and (spread / max(recent) < 0.2)
 
 
+def _rms_normalize(h: torch.Tensor, eps: float = 1e-5) -> torch.Tensor:
+    """Project the state onto the unit-RMS sphere (parameter-free).
+
+    Why: a pre-norm *residual* block iterated is an integrator (h <- h + g(h)),
+    which drifts rather than contracting to a fixed point -- the Stage-0 failure.
+    Renormalizing the state each iteration bounds it so the map can settle (or at
+    worst oscillate on a bounded manifold) instead of drifting to infinity. This
+    is the cheapest realization of the contraction lever (architecture A8 / §3b).
+    """
+    # unit RMS per element (L2 norm ~ sqrt(dim)) -- the scale attention/RMSNorm
+    # already expect, so the bounded state stays in-distribution for the block.
+    return h * h.pow(2).mean(dim=-1, keepdim=True).add(eps).rsqrt()
+
+
 class DEQFixedPoint(nn.Module):
     """Run a ``SettlingBlock`` to equilibrium with diagnostics."""
 
@@ -84,6 +100,13 @@ class DEQFixedPoint(nn.Module):
         super().__init__()
         self.block = block
         self.cfg = cfg or DEQConfig()
+
+    def _step(self, h: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        """One iteration of the fixed-point map, with optional state bounding."""
+        h = self.block(h, x)
+        if self.cfg.state_norm:
+            h = _rms_normalize(h)
+        return h
 
     # ------------------------------------------------------------------ solve
     @torch.no_grad()
@@ -94,7 +117,7 @@ class DEQFixedPoint(nn.Module):
         converged = False
         i = 0
         for i in range(1, cfg.max_iter + 1):
-            h_new = self.block(h, x)
+            h_new = self._step(h, x)
             r = _rel_residual(h_new, h).item()
             trace.append(r)
             h = h_new
@@ -181,6 +204,22 @@ class DEQFixedPoint(nn.Module):
         if h0 is None:
             h0 = torch.zeros_like(x)
 
+        # BPTT: fixed iteration count, gradient through every step. Decouples
+        # learning from convergence (the Ouro / looped-transformer regime) -- the
+        # plan's documented fallback when the fixed-point solve doesn't converge.
+        if self.cfg.grad_mode == "bptt" and torch.is_grad_enabled():
+            h = h0
+            trace: list[float] = []
+            for _ in range(self.cfg.bptt_iters):
+                h_new = self._step(h, x)
+                trace.append(_rel_residual(h_new, h).item())
+                h = h_new
+            info = FixedPointInfo(
+                iters=self.cfg.bptt_iters, converged=trace[-1] < self.cfg.tol,
+                final_rel_residual=trace[-1], residual_trace=trace, oscillating=False,
+            )
+            return h, info
+
         solver = self._anderson_solve if self.cfg.anderson else self._picard_solve
         h_star, info = solver(x, h0)
 
@@ -188,12 +227,13 @@ class DEQFixedPoint(nn.Module):
             return h_star, info
 
         # reattach a differentiable path to the (no_grad-solved) fixed point
-        if self.cfg.grad_mode == "one_step":
-            h_star = self.block(h_star.detach(), x)
+        if self.cfg.grad_mode in ("one_step", "bptt"):
+            # "bptt" under no_grad (shouldn't happen in training) degrades to one_step
+            h_star = self._step(h_star.detach(), x)
         elif self.cfg.grad_mode == "unrolled":
             h = h_star.detach()
             for _ in range(max(1, self.cfg.backward_steps)):
-                h = self.block(h, x)
+                h = self._step(h, x)
             h_star = h
         elif self.cfg.grad_mode == "ift":
             raise NotImplementedError(

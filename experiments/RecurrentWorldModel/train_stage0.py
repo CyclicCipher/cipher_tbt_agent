@@ -54,7 +54,9 @@ class Stage0Config:
     segments: int = 2          # deep-supervision segments
     deq_max_iter: int = 40
     deq_tol: float = 1e-3
-    grad_mode: str = "one_step"
+    grad_mode: str = "one_step"   # one_step | unrolled | bptt
+    bptt_iters: int = 12          # iterations for grad_mode=bptt
+    state_norm: bool = False      # RMS-normalize state each iteration (contraction aid)
     # training
     steps: int = 2000
     batch_size: int = 128
@@ -147,7 +149,10 @@ def build_model(cfg: Stage0Config, vocab: int, max_seq: int) -> SettlingLM:
     lm_cfg = SettlingLMConfig(
         vocab_size=vocab, dim=cfg.dim, n_heads=cfg.n_heads, max_seq=max_seq,
         n_supervision_segments=cfg.segments,
-        deq=DEQConfig(max_iter=cfg.deq_max_iter, tol=cfg.deq_tol, grad_mode=cfg.grad_mode),
+        deq=DEQConfig(
+            max_iter=cfg.deq_max_iter, tol=cfg.deq_tol, grad_mode=cfg.grad_mode,
+            bptt_iters=cfg.bptt_iters, state_norm=cfg.state_norm,
+        ),
     )
     return SettlingLM(lm_cfg)
 
@@ -206,7 +211,8 @@ def run_stage0(cfg: Stage0Config) -> dict:
     if not cfg.smoke:
         out = os.path.join(os.path.dirname(os.path.abspath(__file__)), cfg.out_dir)
         os.makedirs(out, exist_ok=True)
-        path = os.path.join(out, f"stage0_seed{cfg.seed}.json")
+        tag = f"{cfg.grad_mode}{'_sn' if cfg.state_norm else ''}_seed{cfg.seed}"
+        path = os.path.join(out, f"stage0_{tag}.json")
         with open(path, "w") as f:
             json.dump(result, f, indent=2)
         print(f"[stage0] wrote metrics to {path}")
@@ -223,6 +229,9 @@ def main() -> None:
     p.add_argument("--batch_size", type=int, default=128)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--deq_max_iter", type=int, default=40)
+    p.add_argument("--grad_mode", choices=["one_step", "unrolled", "bptt"], default="one_step")
+    p.add_argument("--bptt_iters", type=int, default=12)
+    p.add_argument("--state_norm", action="store_true", help="RMS-normalize state each iteration")
     p.add_argument("--baseline", action="store_true", help="also build a param-matched baseline")
     p.add_argument("--baseline_layers", type=int, default=6)
     p.add_argument("--seed", type=int, default=0)
@@ -231,6 +240,7 @@ def main() -> None:
     cfg = Stage0Config(
         steps=a.steps, dim=a.dim, n_heads=a.heads, segments=a.segments,
         batch_size=a.batch_size, lr=a.lr, deq_max_iter=a.deq_max_iter,
+        grad_mode=a.grad_mode, bptt_iters=a.bptt_iters, state_norm=a.state_norm,
         baseline=a.baseline, baseline_layers=a.baseline_layers, seed=a.seed, smoke=a.smoke,
     )
     run_stage0(cfg)

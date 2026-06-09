@@ -82,3 +82,34 @@ def test_run_stage0_smoke():
     assert "acc_in" in final and "acc_ood" in final
     assert 0.0 <= final["acc_in"] <= 1.0
     assert "convergence_rate" in final["convergence"]
+
+
+def test_bptt_grad_flows_through_all_steps():
+    from core.deq import DEQConfig, DEQFixedPoint
+    from core.block import SettlingBlock, SettlingBlockConfig
+    block = SettlingBlock(SettlingBlockConfig(dim=32, n_heads=4))
+    deq = DEQFixedPoint(block, DEQConfig(grad_mode="bptt", bptt_iters=6))
+    x = torch.randn(2, 8, 32, requires_grad=True)
+    h, info = deq(x)
+    assert info.iters == 6
+    h.pow(2).mean().backward()
+    grads = [p.grad for p in block.parameters() if p.grad is not None]
+    assert grads and all(torch.isfinite(g).all() for g in grads)
+
+
+def test_state_norm_bounds_the_state():
+    from core.deq import DEQConfig, DEQFixedPoint
+    from core.block import SettlingBlock, SettlingBlockConfig
+    block = SettlingBlock(SettlingBlockConfig(dim=64, n_heads=4))
+    x = torch.randn(2, 8, 64)
+    deq = DEQFixedPoint(block, DEQConfig(state_norm=True, max_iter=50))
+    with torch.no_grad():
+        h, _ = deq(x)
+    # unit RMS per element => mean(h^2) ~ 1 along the feature dim
+    rms = h.pow(2).mean(dim=-1).sqrt()
+    assert torch.allclose(rms, torch.ones_like(rms), atol=1e-3)
+
+
+def test_run_stage0_bptt_smoke():
+    out = run_stage0(Stage0Config(smoke=True, grad_mode="bptt", bptt_iters=6, state_norm=True))
+    assert out["history"] and "acc_in" in out["final"]
