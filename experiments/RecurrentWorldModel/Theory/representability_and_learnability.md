@@ -23,6 +23,19 @@ Given the program *is* representable, will SGD-from-init actually converge to it
 - For us: the grokking phenomenon, memorization→generalization transitions, implicit bias of SGD/Adam, and the item-52 signal/noise story all live *here*. item-52 is entirely a learnability intervention; it assumes representability is solved.
 - Our OOD plateau is a failure of **(i)**, which is why a **(ii)** tool (the SNR gate) couldn't fix it. Diagnosing *which* layer a failure lives in is the first job of this theory.
 
+## The goal — a computable decision procedure (north star)
+
+Not just understanding: the aim is a **theoretically-grounded, analytical answer a
+simple program can compute.** Given (a) an architecture A + hyperparameters and
+(b) a *sufficiently-determined* domain / general function D, return:
+
+- `Representable(A, D) -> bool / bound` — can A express D's general algorithm? (capacity; **this doc**)
+- `Learnable(A, D, optimizer) -> bool / bound` — can the training algorithm *reach* it? (optimization; **separate problem**, §ii)
+
+These are two distinct decision procedures and must not be conflated. *"Sufficiently
+determined"* = D's generative program / function class is specified enough to
+analyze (e.g. "compose n affine maps mod P"). Success = a calculator, not a vibe.
+
 ## The compression framing (the through-line)
 
 Restated in MDL/Solomonoff terms: generalization = compressing the **source** (the generative program), memorization = compressing the **sample** (the training set). Train and test "look like different distributions" only at the *surface* level; at the *program* level they are the same distribution.
@@ -30,6 +43,41 @@ Restated in MDL/Solomonoff terms: generalization = compressing the **source** (t
 - **Representability** ⇔ the source program is in the architecture's hypothesis class (has *finite* description length under A's "code").
 - **Learnability** ⇔ the source program is the *MDL-shortest* solution the optimizer's implicit bias is drawn toward, and the path there is navigable.
 - The dream "learn anything fast" is bounded by No-Free-Lunch: achievable only on the subset of domains whose shared structure A's prior matches (the bet: that shared structure is compositional/relational).
+
+## Starting clues & first probes (agenda set 2026-06-09)
+
+Two complementary lenses toward `Representable(A, D)`:
+
+**Circuit completeness** — bounds what's expressible (the necessary condition).
+Fixed-depth log-precision transformers ⊆ uniform **TC⁰** (Merrill & Sabharwal); a
+fixed-depth net can't express depth that grows with input length. *But* our task is
+benign: composing affine maps is **associative** → computable by a **parallel prefix
+scan in O(log n) depth** → in TC⁰ → a fixed-depth transformer *can* represent it in
+principle. So representability likely isn't the blocker for the algorithm; the
+question is whether the *learned* solution is the scan (length-generalizes) or a
+depth-n unrolled shortcut (capped at trained length). Tools: **RASP-L** (Zhou et al.,
+"What Algorithms Can Transformers Learn") — conjecture: length-generalizes iff a short
+RASP-L program exists; **CoT/scratchpad buys depth past TC⁰** (Merrill & Sabharwal;
+Feng et al.) — which is the recurrent-depth thesis, provable here.
+
+**Categorical deep learning** — whether A's structure matches D's, making the right
+solution natural (the inductive-bias side; Gavranović & Veličković, "An Algebraic
+Theory of Architectures"). Representable ⇔ a **composition-preserving functor**
+(monoid homomorphism) from the affine-map monoid into A's representable functions.
+Measurable as **composition fidelity** `M(a∘b) = M(a)·M(b)`; if it holds, length
+generalization is free. Head start: the project already has the CTKG categorical
+apparatus (Yoneda / functors) to point at this; parametric lenses (item 21) are the
+optimization-side companion.
+
+**First experiments (all on the existing PoPE transformer + ModularChain, no new arch):**
+1. **Composition-fidelity probe** — does the learned representation compose as a monoid homomorphism? (categorical representability test)
+2. **Scratchpad length-generalization** — emit per-step intermediate values; does OOD lift? (circuit/CoT depth test)
+3. **Write the affine prefix-scan in RASP-L** — does the short-program prediction hold?
+
+Decision tree → the **X1 diagnosis**: scratchpad fixes OOD ⇒ representability ceiling,
+CoT lifts it (recurrent depth justified); composition fidelity holds but OOD fails ⇒
+a positional/scaffolding *learnability* issue; neither ⇒ wrong bias, need a different
+relational/positional scheme.
 
 ## Open sub-questions (to develop)
 
