@@ -111,14 +111,26 @@ class SNRAdamW(torch.optim.Optimizer):
         return loss
 
 
-def per_example_snr_gate(model, input_ids, targets, loss_mask, batch_size):
-    """True within-batch per-example SNR gate for mode='faithful'.
+def per_example_snr_gate(model, input_ids, targets, loss_mask, batch_size, subsample=None):
+    """Within-batch per-example SNR gate for mode='faithful'.
 
-    Computes per-example gradients via torch.func, then per parameter:
-        gate_k = 1 if mu_k^2 > var_k/(b-1) else 0
-    Returns (gate_dict keyed by the model's parameter tensors, risk float).
-    Cost: one vectorized per-example backward (b-fold) -- the "faithful but costly" path.
+    The batching rule that makes this cheap: the MEAN mu_k is free -- it is exactly
+    the full-batch gradient ``p.grad`` (a mean-reduced loss has grad = mean of
+    per-example grads). So per-example backprop is only needed for the VARIANCE,
+    and the variance can be estimated from a SUB-BATCH of ``subsample`` examples:
+
+        mu_k    = p.grad                  (full batch, exact, free)
+        var_k   = Var over a sub-batch of per-example grads
+        gate_k  = 1 if mu_k^2 > var_k/(b-1) else 0     (b = full batch_size)
+
+    Cost drops from b per-example backwards to ``subsample``. ``subsample=None``
+    uses the whole batch (exact, costly). Returns (gate_dict, risk).
     """
+    n = input_ids.shape[0]
+    m = n if (subsample is None or subsample >= n) else subsample
+    if m < n:  # first-m is fine for i.i.d. batches
+        input_ids, targets, loss_mask = input_ids[:m], targets[:m], loss_mask[:m]
+
     params = {k: v.detach() for k, v in model.named_parameters()}
     buffers = {k: v.detach() for k, v in model.named_buffers()}
 
@@ -133,13 +145,13 @@ def per_example_snr_gate(model, input_ids, targets, loss_mask, batch_size):
 
     gate: dict[torch.Tensor, torch.Tensor] = {}
     risk = 0.0
-    denom = batch_size - 1
+    denom = batch_size - 1                 # threshold uses the FULL batch size
     name_to_param = dict(model.named_parameters())
-    for name, ge in per_ex.items():       # ge: (b, *param_shape)
-        mu = ge.mean(0)
-        var = ge.var(0, unbiased=False)
-        excess = mu * mu - var / denom
+    for name, ge in per_ex.items():        # ge: (m, *param_shape)
         p = name_to_param[name]
+        mu = p.grad if p.grad is not None else ge.mean(0)   # exact full-batch mean
+        var = ge.var(0, unbiased=False)                     # sub-batch variance
+        excess = mu * mu - var / denom
         gate[p] = (excess > 0).to(p.dtype)
         risk += excess.clamp_min(0).sum().item()
     return gate, risk

@@ -63,6 +63,7 @@ class TConfig:
     weight_decay: float = 0.01
     var_beta: float = 0.99
     gate_warmup: int = 100
+    faithful_subsample: int = 32  # sub-batch size for the faithful variance estimate (0 = full)
     eval_every: int = 200
     eval_batch: int = 256
     seed: int = 0
@@ -119,7 +120,9 @@ def train_arm(arm: str, cfg: TConfig, task) -> list[dict]:
         opt.zero_grad(set_to_none=True)
         loss.backward()
         if ARM_MODE[arm] == "faithful":
-            gate, risk = per_example_snr_gate(model, b.input_ids, b.targets, b.loss_mask, cfg.batch_size)
+            sub = cfg.faithful_subsample or None
+            gate, risk = per_example_snr_gate(model, b.input_ids, b.targets, b.loss_mask,
+                                              cfg.batch_size, subsample=sub)
             opt.set_external_gate(gate, risk)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
@@ -174,13 +177,16 @@ def main() -> None:
     p.add_argument("--batch_size", type=int, default=128)
     p.add_argument("--lr", type=float, default=3e-4)
     p.add_argument("--gate_warmup", type=int, default=100)
+    p.add_argument("--faithful_subsample", type=int, default=32,
+                   help="sub-batch for the faithful variance estimate (0 = full batch)")
     p.add_argument("--arms", nargs="+", default=["adamw", "snr_ema", "snr_faithful"],
                    choices=["adamw", "snr_ema", "snr_faithful"])
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--smoke", action="store_true")
     a = p.parse_args()
     cfg = TConfig(steps=a.steps, dim=a.dim, n_layers=a.layers, batch_size=a.batch_size,
-                  lr=a.lr, gate_warmup=a.gate_warmup, arms=tuple(a.arms), seed=a.seed, smoke=a.smoke)
+                  lr=a.lr, gate_warmup=a.gate_warmup, faithful_subsample=a.faithful_subsample,
+                  arms=tuple(a.arms), seed=a.seed, smoke=a.smoke)
     run_transformer(cfg)
 
 
