@@ -207,6 +207,26 @@ def test_warm_start_modes_run_and_converge_faster():
     assert iters["proposal"] <= iters["zeros"]
 
 
+def test_residual_gate_makes_forward_converge_fast():
+    # the gate's purpose: a small init makes the settling map strongly contractive
+    from core.deq import DEQConfig
+    task = ModularChain(seed=0)
+    rng = random.Random(0)
+    x_ids = task.sample(8, 1, 4, rng).input_ids
+    iters = {}
+    for gate in (False, True):
+        torch.manual_seed(0)
+        m = SettlingLM(SettlingLMConfig(vocab_size=task.vocab_size, dim=64, n_heads=4,
+                                        max_seq=task.seq_len, pos_mode="pope",
+                                        residual_gate=gate, gate_init=0.1,
+                                        deq=DEQConfig(max_iter=100, tol=1e-3, state_norm=True)))
+        with torch.no_grad():
+            _, info = m.deq(m._inject(x_ids))
+        iters[gate] = info.iters
+    # gated converges in far fewer iterations than ungated (which usually hits the cap)
+    assert iters[True] < iters[False]
+
+
 def test_pope_with_qknorm_still_runs():
     # PoPE now applies QK-Norm to raw features before softplus -- make sure the path runs
     from core.block import SettlingBlock, SettlingBlockConfig

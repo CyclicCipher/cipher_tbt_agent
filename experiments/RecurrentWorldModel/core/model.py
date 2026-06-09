@@ -43,6 +43,8 @@ class SettlingLMConfig:
     pos_mode: str = "pope"  # "pope" | "rope" | "learned" (absolute)
     warm_start: str = "zeros"  # "zeros" | "input" | "proposal" (settle init; Solve-the-Loop)
     n_warm: int = 2            # block steps for warm_start="proposal"
+    residual_gate: bool = False  # LayerScale contraction gate (see SettlingBlockConfig)
+    gate_init: float = 0.1
     block: SettlingBlockConfig = field(default=None)  # filled in __post_init__
     deq: DEQConfig = field(default_factory=DEQConfig)
 
@@ -55,6 +57,7 @@ class SettlingLMConfig:
             self.block = SettlingBlockConfig(
                 dim=self.dim, n_heads=self.n_heads, causal=True, max_seq=self.max_seq,
                 pos_enc=self.pos_mode if self.pos_mode in ("rope", "pope") else "none",
+                residual_gate=self.residual_gate, gate_init=self.gate_init,
             )
 
 

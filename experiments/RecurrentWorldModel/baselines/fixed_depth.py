@@ -33,6 +33,8 @@ class FixedDepthConfig:
     tie_head: bool = True
     emb_scale: float = 1.0
     pos_mode: str = "pope"   # match the settling model's positional scheme
+    residual_gate: bool = False
+    gate_init: float = 0.1
 
 
 class FixedDepthTransformer(nn.Module):
@@ -42,6 +44,7 @@ class FixedDepthTransformer(nn.Module):
         block_cfg = SettlingBlockConfig(
             dim=cfg.dim, n_heads=cfg.n_heads, causal=True, max_seq=cfg.max_seq,
             pos_enc=cfg.pos_mode if cfg.pos_mode in ("rope", "pope") else "none",
+            residual_gate=cfg.residual_gate, gate_init=cfg.gate_init,
         )
         self.embed = nn.Embedding(cfg.vocab_size, cfg.dim)
         self.pos = (nn.Parameter(torch.randn(1, cfg.max_seq, cfg.dim) * 0.02)
@@ -83,6 +86,8 @@ def matched_baseline(
     max_seq: int = 64,
     tie_head: bool = True,
     pos_mode: str = "pope",
+    residual_gate: bool = False,
+    gate_init: float = 0.1,
     max_dim_mult: int = 8,
 ) -> tuple[FixedDepthTransformer, FixedDepthConfig, int]:
     """Build an ``n_layers``-layer transformer whose param count is closest to
@@ -102,6 +107,7 @@ def matched_baseline(
         cfg = FixedDepthConfig(
             vocab_size=vocab_size, dim=dim, n_heads=n_heads,
             n_layers=n_layers, max_seq=max_seq, tie_head=tie_head, pos_mode=pos_mode,
+            residual_gate=residual_gate, gate_init=gate_init,
         )
         model = FixedDepthTransformer(cfg)
         n = count_parameters(model)

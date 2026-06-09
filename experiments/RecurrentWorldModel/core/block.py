@@ -40,6 +40,8 @@ class SettlingBlockConfig:
     pos_enc: str = "none"        # "none" | "rope" | "pope" (positional scheme in attention)
     max_seq: int = 64            # for the position cos/sin tables
     pos_base: float = 10000.0
+    residual_gate: bool = False  # LayerScale/ReZero gate on attn+ffn residuals (contraction lever)
+    gate_init: float = 0.1       # small init -> map ~ norm(h + input), strongly contractive
 
     def __post_init__(self) -> None:
         if self.dim % self.n_heads != 0:
@@ -225,6 +227,16 @@ class SettlingBlock(nn.Module):
         self.attn = Attention(cfg)
         self.norm_ffn = RMSNorm(cfg.dim, cfg.rmsnorm_eps)
         self.ffn = SwiGLU(cfg.dim, cfg.ffn_mult)
+        if cfg.residual_gate:
+            # LayerScale/ReZero gates: small init makes the iterated map start near
+            # norm(h + input), which is strongly contractive (Jacobian ~ 1/sqrt(dim)),
+            # so the forward solve converges fast -- what IFT needs. Training can grow
+            # the gates as expressivity demands.
+            self.attn_gate = nn.Parameter(torch.full((cfg.dim,), cfg.gate_init))
+            self.ffn_gate = nn.Parameter(torch.full((cfg.dim,), cfg.gate_init))
+        else:
+            self.attn_gate = None
+            self.ffn_gate = None
         if cfg.polar_split:
             # placeholder for the magnitude/phase relational channel (Stage 1+).
             # Intentionally not implemented yet; flag exists so the wiring is in
@@ -236,8 +248,10 @@ class SettlingBlock(nn.Module):
     def forward(self, h: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
         # constant input injection (clamped sensory drive)
         h = h + self.cfg.inject_scale * x
-        h = h + self.attn(self.norm_attn(h))
-        h = h + self.ffn(self.norm_ffn(h))
+        ag = self.attn_gate if self.attn_gate is not None else 1.0
+        fg = self.ffn_gate if self.ffn_gate is not None else 1.0
+        h = h + ag * self.attn(self.norm_attn(h))
+        h = h + fg * self.ffn(self.norm_ffn(h))
         return h
 
     @torch.no_grad()
