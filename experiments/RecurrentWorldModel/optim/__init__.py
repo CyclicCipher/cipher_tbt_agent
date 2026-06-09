@@ -9,6 +9,10 @@ directions. Two ways to estimate the SNR:
   * mode="none"      -- plain AdamW control
 """
 
+from .muon_aurora import MuonAuroraAdamW, aurora_transform, newton_schulz, split_matrix_params
 from .snr import SNRAdamW, per_example_snr_gate
 
-__all__ = ["SNRAdamW", "per_example_snr_gate"]
+__all__ = [
+    "SNRAdamW", "per_example_snr_gate",
+    "MuonAuroraAdamW", "aurora_transform", "newton_schulz", "split_matrix_params",
+]

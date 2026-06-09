@@ -35,10 +35,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from baselines import FixedDepthConfig, FixedDepthTransformer  # noqa: E402
 from core.model import count_parameters  # noqa: E402
-from optim import SNRAdamW, per_example_snr_gate  # noqa: E402
+from optim import MuonAuroraAdamW, SNRAdamW, per_example_snr_gate, split_matrix_params  # noqa: E402
 from tasks import ModularChain  # noqa: E402
 
-ARM_MODE = {"adamw": "none", "snr_ema": "ema", "snr_faithful": "faithful"}
+SNR_MODE = {"adamw": "none", "snr_ema": "ema", "snr_faithful": "faithful"}
+ALL_ARMS = ["adamw", "snr_ema", "snr_faithful", "muon", "aurora"]
 
 
 @dataclass
@@ -64,6 +65,12 @@ class TConfig:
     var_beta: float = 0.99
     gate_warmup: int = 100
     faithful_subsample: int = 32  # sub-batch size for the faithful variance estimate (0 = full)
+    # muon / aurora (matrix optimizer). adam group (embeddings/head/norms) uses `lr`.
+    muon_lr: float = 0.02
+    muon_wd: float = 0.0
+    ns_steps: int = 5
+    aurora_K: int = 2
+    aurora_beta: float = 0.5
     eval_every: int = 200
     eval_batch: int = 256
     seed: int = 0
@@ -103,12 +110,28 @@ def evaluate(model, task, cfg, rng):
     return ai, ao
 
 
+def build_optimizer(arm: str, model, cfg: TConfig):
+    if arm in SNR_MODE:
+        return SNRAdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay,
+                        batch_size=cfg.batch_size, var_beta=cfg.var_beta,
+                        mode=SNR_MODE[arm], gate_warmup=cfg.gate_warmup)
+    if arm in ("muon", "aurora"):
+        matrix, other = split_matrix_params(model)
+        groups = [
+            dict(params=matrix, use_muon=True, variant=arm, lr=cfg.muon_lr, momentum=0.9,
+                 weight_decay=cfg.muon_wd, ns_steps=cfg.ns_steps,
+                 aurora_K=cfg.aurora_K, aurora_beta=cfg.aurora_beta),
+            dict(params=other, use_muon=False, lr=cfg.lr, betas=(0.9, 0.999),
+                 eps=1e-8, weight_decay=cfg.weight_decay),
+        ]
+        return MuonAuroraAdamW(groups)
+    raise ValueError(f"unknown arm {arm!r}")
+
+
 def train_arm(arm: str, cfg: TConfig, task) -> list[dict]:
     torch.manual_seed(cfg.seed)                       # identical init across arms
     model = build(cfg, task.vocab_size, task.seq_len).to(cfg.device)
-    opt = SNRAdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay,
-                   batch_size=cfg.batch_size, var_beta=cfg.var_beta,
-                   mode=ARM_MODE[arm], gate_warmup=cfg.gate_warmup)
+    opt = build_optimizer(arm, model, cfg)
     rng = random.Random(cfg.seed)                     # identical data stream across arms
     eval_rng = random.Random(cfg.seed + 999)
     history: list[dict] = []
@@ -119,7 +142,7 @@ def train_arm(arm: str, cfg: TConfig, task) -> list[dict]:
         loss = ce_loss(logits, b.targets, b.loss_mask)
         opt.zero_grad(set_to_none=True)
         loss.backward()
-        if ARM_MODE[arm] == "faithful":
+        if arm == "snr_faithful":
             sub = cfg.faithful_subsample or None
             gate, risk = per_example_snr_gate(model, b.input_ids, b.targets, b.loss_mask,
                                               cfg.batch_size, subsample=sub)
@@ -128,11 +151,12 @@ def train_arm(arm: str, cfg: TConfig, task) -> list[dict]:
         opt.step()
         if step % cfg.eval_every == 0 or step == cfg.steps:
             ai, ao = evaluate(model, task, cfg, eval_rng)
+            gate_frac = getattr(opt, "last_gate_frac", 1.0)
+            risk = getattr(opt, "last_risk", 0.0)
             history.append({"step": step, "loss": loss.item(), "acc_in": ai, "acc_ood": ao,
-                            "risk": opt.last_risk, "gate_frac": opt.last_gate_frac})
+                            "risk": risk, "gate_frac": gate_frac})
             print(f"[{arm:12}] step {step:>5} loss {loss.item():.3f} "
-                  f"acc_in {ai:.3f} acc_ood {ao:.3f} "
-                  f"gate {opt.last_gate_frac:.2f} risk {opt.last_risk:.3g}")
+                  f"acc_in {ai:.3f} acc_ood {ao:.3f} gate {gate_frac:.2f} risk {risk:.3g}")
     return history
 
 
@@ -179,13 +203,17 @@ def main() -> None:
     p.add_argument("--gate_warmup", type=int, default=100)
     p.add_argument("--faithful_subsample", type=int, default=32,
                    help="sub-batch for the faithful variance estimate (0 = full batch)")
-    p.add_argument("--arms", nargs="+", default=["adamw", "snr_ema", "snr_faithful"],
-                   choices=["adamw", "snr_ema", "snr_faithful"])
+    p.add_argument("--muon_lr", type=float, default=0.02, help="lr for the muon/aurora matrix group")
+    p.add_argument("--muon_wd", type=float, default=0.0)
+    p.add_argument("--aurora_K", type=int, default=2)
+    p.add_argument("--aurora_beta", type=float, default=0.5)
+    p.add_argument("--arms", nargs="+", default=["adamw", "muon", "aurora"], choices=ALL_ARMS)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--smoke", action="store_true")
     a = p.parse_args()
     cfg = TConfig(steps=a.steps, dim=a.dim, n_layers=a.layers, batch_size=a.batch_size,
                   lr=a.lr, gate_warmup=a.gate_warmup, faithful_subsample=a.faithful_subsample,
+                  muon_lr=a.muon_lr, muon_wd=a.muon_wd, aurora_K=a.aurora_K, aurora_beta=a.aurora_beta,
                   arms=tuple(a.arms), seed=a.seed, smoke=a.smoke)
     run_transformer(cfg)
 
