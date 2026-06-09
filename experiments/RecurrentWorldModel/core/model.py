@@ -40,15 +40,17 @@ class SettlingLMConfig:
     n_supervision_segments: int = 1
     tie_head: bool = True
     emb_scale: float = 1.0
-    use_rope: bool = True   # rotary (relative) position; if False, learned absolute pos
+    pos_mode: str = "pope"  # "pope" | "rope" | "learned" (absolute)
     block: SettlingBlockConfig = field(default=None)  # filled in __post_init__
     deq: DEQConfig = field(default_factory=DEQConfig)
 
     def __post_init__(self) -> None:
+        if self.pos_mode not in ("pope", "rope", "learned"):
+            raise ValueError(f"pos_mode must be pope|rope|learned, got {self.pos_mode!r}")
         if self.block is None:
             self.block = SettlingBlockConfig(
-                dim=self.dim, n_heads=self.n_heads, causal=True,
-                rope=self.use_rope, max_seq=self.max_seq,
+                dim=self.dim, n_heads=self.n_heads, causal=True, max_seq=self.max_seq,
+                pos_enc=self.pos_mode if self.pos_mode in ("rope", "pope") else "none",
             )
 
 
@@ -57,8 +59,9 @@ class SettlingLM(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.embed = nn.Embedding(cfg.vocab_size, cfg.dim)
-        # absolute position only when not using RoPE (rotary carries position in attn)
-        self.pos = None if cfg.use_rope else nn.Parameter(torch.randn(1, cfg.max_seq, cfg.dim) * 0.02)
+        # absolute position table only in "learned" mode; rope/pope carry position in attn
+        self.pos = (nn.Parameter(torch.randn(1, cfg.max_seq, cfg.dim) * 0.02)
+                    if cfg.pos_mode == "learned" else None)
         self.block = SettlingBlock(cfg.block)
         self.deq = DEQFixedPoint(self.block, cfg.deq)
         self.norm_out = RMSNorm(cfg.dim, cfg.block.rmsnorm_eps)

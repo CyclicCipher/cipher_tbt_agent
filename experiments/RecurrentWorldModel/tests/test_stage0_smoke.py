@@ -145,23 +145,57 @@ def test_ift_gradient_matches_bptt_reference():
     assert cos > 0.999, f"IFT gradient diverges from reference (cos={cos:.4f})"
 
 
-def test_rope_attention_runs_and_extrapolates_positions():
+def test_pope_and_rope_attention_run_and_extrapolate():
     from core.block import SettlingBlock, SettlingBlockConfig
-    block = SettlingBlock(SettlingBlockConfig(dim=32, n_heads=4, rope=True, max_seq=16))
-    # rope has no learned position params, so a longer sequence than any "training"
-    # length still runs (the extrapolation property we want)
-    for t in (4, 12):
-        h = torch.randn(2, t, 32)
-        out = block(h, torch.zeros_like(h))
-        assert out.shape == (2, t, 32) and torch.isfinite(out).all()
+    for pos in ("pope", "rope"):
+        block = SettlingBlock(SettlingBlockConfig(dim=32, n_heads=4, pos_enc=pos, max_seq=16))
+        # no learned position params, so a longer sequence than any "training" length
+        # still runs (the extrapolation property we want)
+        for t in (4, 12):
+            h = torch.randn(2, t, 32)
+            out = block(h, torch.zeros_like(h))
+            assert out.shape == (2, t, 32) and torch.isfinite(out).all()
 
 
-def test_rope_model_has_no_absolute_pos_params():
+def test_pope_decouples_content_from_position():
+    """PoPE's claim: content lives in magnitude (position-independent), and the
+    attention score depends only on RELATIVE position. Verify both directly."""
+    from core.block import PolarPositionalEmbedding
+    import torch.nn.functional as F
+    torch.manual_seed(0)
+    pe = PolarPositionalEmbedding(head_dim=8, max_seq=64)
+    x = torch.randn(1, 1, 5, 8)  # (b, h, t, head_dim) content features
+
+    # (a) content = magnitude is the SAME regardless of position: encode(x) at any
+    #     position has per-feature magnitude sqrt(cos^2+sin^2)*softplus(x) = softplus(x).
+    enc = pe.encode(x, is_key=False)              # (1,1,5,16)
+    mag = (enc[..., :8] ** 2 + enc[..., 8:] ** 2).sqrt()
+    assert torch.allclose(mag, F.softplus(x), atol=1e-5)
+
+    # (b) score is translation-invariant: same content, shift both q,k positions by
+    #     the same delta -> identical score (depends only on s - t).
+    pe.delta.data.zero_()  # isolate position from the learnable phase bias
+    q = torch.randn(1, 1, 1, 8)
+    k = torch.randn(1, 1, 1, 8)
+
+    def score(qpos, kpos):
+        # place q at qpos, k at kpos by slicing the precomputed tables
+        cq, sq = pe.cos[..., qpos:qpos + 1, :], pe.sin[..., qpos:qpos + 1, :]
+        ck, sk = pe.cos[..., kpos:kpos + 1, :], pe.sin[..., kpos:kpos + 1, :]
+        mq, mk = F.softplus(q), F.softplus(k)
+        qe = torch.cat((mq * cq, mq * sq), dim=-1)
+        ke = torch.cat((mk * ck, mk * sk), dim=-1)
+        return (qe * ke).sum().item()
+
+    assert abs(score(2, 5) - score(4, 7)) < 1e-4   # both have s - t = 3
+
+
+def test_pope_model_has_no_absolute_pos_params():
     task = ModularChain(seed=0)
-    rope = SettlingLM(SettlingLMConfig(vocab_size=task.vocab_size, dim=32, n_heads=4,
-                                       max_seq=task.seq_len, use_rope=True))
-    abso = SettlingLM(SettlingLMConfig(vocab_size=task.vocab_size, dim=32, n_heads=4,
-                                       max_seq=task.seq_len, use_rope=False))
-    assert rope.pos is None and abso.pos is not None
-    # rope model has fewer params (no max_seq x dim position table)
-    assert count_parameters(rope) < count_parameters(abso)
+    pope = SettlingLM(SettlingLMConfig(vocab_size=task.vocab_size, dim=32, n_heads=4,
+                                       max_seq=task.seq_len, pos_mode="pope"))
+    learned = SettlingLM(SettlingLMConfig(vocab_size=task.vocab_size, dim=32, n_heads=4,
+                                          max_seq=task.seq_len, pos_mode="learned"))
+    assert pope.pos is None and learned.pos is not None
+    # pope carries position in attention -> no max_seq x dim absolute table
+    assert count_parameters(pope) < count_parameters(learned)

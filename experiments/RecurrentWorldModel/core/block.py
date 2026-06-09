@@ -37,14 +37,18 @@ class SettlingBlockConfig:
     rmsnorm_eps: float = 1e-5
     inject_scale: float = 1.0    # weight on the constant input injection each step
     polar_split: bool = False    # hyle/morphe magnitude/phase split (Stage 1+; OFF by default)
-    rope: bool = False           # rotary (relative) position in attention -- extrapolates
-    max_seq: int = 64            # for the RoPE cos/sin tables
-    rope_base: float = 10000.0
+    pos_enc: str = "none"        # "none" | "rope" | "pope" (positional scheme in attention)
+    max_seq: int = 64            # for the position cos/sin tables
+    pos_base: float = 10000.0
 
     def __post_init__(self) -> None:
         if self.dim % self.n_heads != 0:
             raise ValueError(f"dim {self.dim} not divisible by n_heads {self.n_heads}")
-        if self.rope and (self.dim // self.n_heads) % 2 != 0:
+        if self.pos_enc not in ("none", "rope", "pope"):
+            raise ValueError(f"pos_enc must be none|rope|pope, got {self.pos_enc!r}")
+        # RoPE rotates feature PAIRS, so it needs an even head_dim; PoPE is per-feature
+        # (each scalar -> its own (cos,sin) plane) and has no parity requirement.
+        if self.pos_enc == "rope" and (self.dim // self.n_heads) % 2 != 0:
             raise ValueError(f"RoPE needs an even head_dim; got {self.dim // self.n_heads}")
 
 
@@ -80,13 +84,10 @@ def _rotate_half(x: torch.Tensor) -> torch.Tensor:
 
 
 class RotaryEmbedding(nn.Module):
-    """RoPE (item 3 / the rotary core of PoPE): rotate Q,K by position so the
-    attention score depends on *relative* position. Unlike learned absolute
-    position embeddings, this extrapolates to sequence lengths/positions never
-    seen in training -- the fix for the Stage-0 OOD positional confound.
-
-    Full PoPE (the magnitude=content / phase=position decoupling, repr §3b) is a
-    further step flagged open (Q11); this is the rotary part that PoPE generalizes.
+    """RoPE: rotate Q,K *pairs* by position so the score depends on relative
+    position. Extrapolates better than learned absolute positions, but the rotary
+    inner product entangles content and position (the cos(phi_k - phi_q) cross-term
+    in the score). PoPE below removes that. Kept as an available control.
     """
 
     def __init__(self, head_dim: int, max_seq: int, base: float = 10000.0) -> None:
@@ -104,13 +105,57 @@ class RotaryEmbedding(nn.Module):
         return q * cos + _rotate_half(q) * sin, k * cos + _rotate_half(k) * sin
 
 
+class PolarPositionalEmbedding(nn.Module):
+    """PoPE -- Polar Coordinate Positional Embeddings (Gopalakrishnan et al. 2025,
+    arXiv:2509.10534). The clean realization of the §3b hyle/morphe split:
+    **content lives entirely in magnitude, position entirely in phase**, so the
+    score factorizes as (what-match) x (where-match) with NO cross-term.
+
+        magnitude (content):  mu = softplus(x)          -- position-independent
+        phase    (position):  phi_c = pos * theta_c     -- content-independent
+        polar form:           [mu*cos(phi), mu*sin(phi)]  (head_dim -> 2*head_dim)
+        score:  q~ . k~ = sum_c mu_q,c mu_k,c cos((s - t) theta_c + delta_c)
+
+    Each scalar feature gets its own (cos,sin) plane (no pairing, no parity needed),
+    so the rotation leaves magnitude exactly invariant -- by construction, not a
+    learned penalty. delta_c is the paper's optional per-frequency phase bias
+    (in [-2pi, 0]); applied to keys, it is the only residual what-where coupling.
+    Cost: the QK score is computed in 2*head_dim (the paper's "d frequencies").
+    The what/where decoupling is a RESOLVED question -- see Docs/architecture.md §2.2.
+    """
+
+    def __init__(self, head_dim: int, max_seq: int, base: float = 10000.0) -> None:
+        super().__init__()
+        inv_freq = base ** (-torch.arange(0, head_dim, dtype=torch.float32) / head_dim)  # (hd,)
+        pos = torch.arange(max_seq, dtype=torch.float32)
+        phase = torch.outer(pos, inv_freq)                              # (max_seq, hd)
+        self.register_buffer("cos", phase.cos()[None, None], persistent=False)  # (1,1,S,hd)
+        self.register_buffer("sin", phase.sin()[None, None], persistent=False)
+        self.delta = nn.Parameter(torch.zeros(head_dim))  # learnable phase bias (keys)
+
+    def encode(self, x: torch.Tensor, is_key: bool) -> torch.Tensor:
+        """(b, h, t, head_dim) raw features -> (b, h, t, 2*head_dim) polar form."""
+        mu = F.softplus(x)                       # magnitude = content
+        t = x.shape[-2]
+        cos, sin = self.cos[..., :t, :], self.sin[..., :t, :]
+        if is_key:                               # rotate key phase by delta -> cos(phi+delta)
+            cd, sd = torch.cos(self.delta), torch.sin(self.delta)
+            cos, sin = cos * cd - sin * sd, sin * cd + cos * sd
+        return torch.cat((mu * cos, mu * sin), dim=-1)
+
+
 class Attention(nn.Module):
-    """Multi-head self-attention with optional QK-Norm and RoPE.
+    """Multi-head self-attention with QK-Norm and an optional positional scheme.
 
     QK-Norm (item 56): L2-normalize per-head queries and keys, then scale by a
     learned temperature. Stabilizes attention logits across many settling
     iterations (the §1c stability hazard) and bounds the magnitude channel.
-    RoPE applies *after* QK-Norm (rotation preserves norm, so the two compose).
+
+    Positional scheme (cfg.pos_enc):
+      * "rope" -- rotary, applied after QK-Norm (rotation preserves norm).
+      * "pope" -- polar; magnitude (content) comes from softplus, so QK-Norm is
+        bypassed (it would erase the content-in-magnitude). Q,K score runs in 2*hd.
+      * "none" -- no positional info in attention (use a model-level abs-pos table).
     """
 
     def __init__(self, cfg: SettlingBlockConfig) -> None:
@@ -124,7 +169,8 @@ class Attention(nn.Module):
             # learned per-head temperature; init so effective scale ~= 1/sqrt(head_dim)
             self.q_scale = nn.Parameter(torch.zeros(cfg.n_heads))
             self.k_scale = nn.Parameter(torch.zeros(cfg.n_heads))
-        self.rope = RotaryEmbedding(self.head_dim, cfg.max_seq, cfg.rope_base) if cfg.rope else None
+        self.rope = RotaryEmbedding(self.head_dim, cfg.max_seq, cfg.pos_base) if cfg.pos_enc == "rope" else None
+        self.pope = PolarPositionalEmbedding(self.head_dim, cfg.max_seq, cfg.pos_base) if cfg.pos_enc == "pope" else None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         b, t, _ = x.shape
@@ -134,15 +180,21 @@ class Attention(nn.Module):
         k = k.view(b, t, self.n_heads, self.head_dim).transpose(1, 2)
         v = v.view(b, t, self.n_heads, self.head_dim).transpose(1, 2)
 
-        if self.cfg.qk_norm:
-            q = F.normalize(q, dim=-1) * F.softplus(self.q_scale).view(1, -1, 1, 1)
-            k = F.normalize(k, dim=-1) * F.softplus(self.k_scale).view(1, -1, 1, 1)
-            scale = 1.0  # normalization already sets the scale
-        else:
+        if self.pope is not None:
+            # PoPE supplies content via softplus magnitude -- bypass QK-Norm, which
+            # would erase it. Q,K become 2*head_dim polar vectors; v stays head_dim.
+            q = self.pope.encode(q, is_key=False)
+            k = self.pope.encode(k, is_key=True)
             scale = self.head_dim ** -0.5
-
-        if self.rope is not None:
-            q, k = self.rope(q, k)
+        else:
+            if self.cfg.qk_norm:
+                q = F.normalize(q, dim=-1) * F.softplus(self.q_scale).view(1, -1, 1, 1)
+                k = F.normalize(k, dim=-1) * F.softplus(self.k_scale).view(1, -1, 1, 1)
+                scale = 1.0  # normalization already sets the scale
+            else:
+                scale = self.head_dim ** -0.5
+            if self.rope is not None:
+                q, k = self.rope(q, k)
 
         attn = F.scaled_dot_product_attention(
             q, k, v, is_causal=self.cfg.causal, scale=scale

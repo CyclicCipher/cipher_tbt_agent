@@ -36,9 +36,10 @@ Stages 0–1 are text/static-data testable. Stage 2 onward is gated on the envir
 `plan` · **the linchpin stage**
 
 ### 2.1 What to build
-- One weight-shared block `f_θ`: relational attention (polar magnitude/phase split, SSA for content routing) + SwiGLU FFN + RMSNorm + QK-Norm. Start **without** the polar split if it complicates convergence debugging — add it once the loop is stable.
+- One weight-shared block `f_θ`: attention + SwiGLU FFN + RMSNorm + QK-Norm. The full relational-attention machinery (the monoid/SSA content routing) is layered later; Stage 0 uses standard attention.
+- **Positional scheme: PoPE** (`pos_enc="pope"`, the default), the clean magnitude=content / phase=position split — the §3b polar split realized in attention. Resolves Q11 (see architecture.md §2.2); also the right *control* for any "just ship a transformer" comparison. RoPE and learned-absolute are available (`--pos rope|learned`) for ablation.
 - **Block depth `k` is a knob, not a constraint** (see architecture.md §2.2). The minimal `k = 1` map is the pure DEQ form and is unlike Ouro (which loops a multi-layer stack) — expect strange behavior and least per-step expressivity. If Risk 1 convergence or the matched-baseline gate misbehaves, sweep `k` upward (`f` becomes a small weight-tied stack, still one fixed-point map). `core/block.py` ships `k = 1`; add a `n_layers` field to extend.
-- DEQ wrapper: iterate `f_θ` on a fixed input to equilibrium; implicit-function-theorem gradients for O(1) memory. Fallback: fixed iteration count + truncated backprop if the implicit solve is unstable.
+- DEQ wrapper: iterate `f_θ` on a fixed input to equilibrium. Gradient modes: **`ift`** (proper implicit-function-theorem adjoint solve, O(1) memory — verified exact vs a full-BPTT reference), `one_step`/`unrolled` (cheaper approximations), `bptt` (fixed-iteration full backprop, the convergence-free fallback). The adjoint solve needs the map contractive — provided by **`state_norm`** (RMS-normalize the state each iteration), without which the residual block drifts and never settles.
 - Thin token adapter in; autoregressive token head out (text only at this stage).
 - Convergence-based halting: stop at `‖Δh‖ < ε`.
 - Deep-supervision outer loop (the HRM data-efficiency device that survives the hierarchy demotion).
