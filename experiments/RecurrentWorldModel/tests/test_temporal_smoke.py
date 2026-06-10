@@ -33,7 +33,8 @@ def test_eventstream_target_is_correct_decay():
             tok = b.input_ids[i, j].item()
             if 2 <= tok < 2 + task.V:          # a VAL(k) event
                 last_k, last_tau = tok - 2, b.timestamps[i, j].item()
-        cur = 0 if last_k is None else max(0, last_k - round(b.timestamps[i, q].item() - last_tau))
+        elapsed = b.timestamps[i, q].item() - last_tau if last_k is not None else 0
+        cur = 0 if last_k is None else max(0, last_k - int(elapsed // task.decay_per))
         assert b.targets[i, q].item() == 2 + cur
 
 

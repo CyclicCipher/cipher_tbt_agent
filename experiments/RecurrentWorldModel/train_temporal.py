@@ -71,6 +71,15 @@ def accuracy(logits, targets, mask):
     return ((pred == targets).float() * mask).sum().item() / mask.sum().clamp_min(1.0).item()
 
 
+@torch.no_grad()
+def nonzero_accuracy(logits, targets, mask, zero_token):
+    """Accuracy restricted to non-zero answers -- the discriminative signal the
+    0-dominated base rate hides (the decayed-to-0 cases are the trivial majority)."""
+    pred = logits.argmax(dim=-1)
+    m = mask * (targets != zero_token).float()
+    return ((pred == targets).float() * m).sum().item() / m.sum().clamp_min(1.0).item()
+
+
 def _forward(arm, model, batch):
     if arm == "integer":
         return model(batch.input_ids)
@@ -90,12 +99,18 @@ def build(arm, cfg, vocab, max_seq):
 def evaluate(arm, model, task, cfg, rng):
     model.eval()
     dev = cfg.device
+    zt = 2  # VAL(0) token
     b_in = task.sample(cfg.eval_batch, gap_max=cfg.train_max_gap, rng=rng).to(dev)
     b_ood = task.sample(cfg.eval_batch, gap_max=cfg.ood_max_gap, rng=rng).to(dev)
-    ai = accuracy(_forward(arm, model, b_in), b_in.targets, b_in.loss_mask)
-    ao = accuracy(_forward(arm, model, b_ood), b_ood.targets, b_ood.loss_mask)
+    li, lo = _forward(arm, model, b_in), _forward(arm, model, b_ood)
+    m = {
+        "acc_in": accuracy(li, b_in.targets, b_in.loss_mask),
+        "acc_ood": accuracy(lo, b_ood.targets, b_ood.loss_mask),
+        "nz_in": nonzero_accuracy(li, b_in.targets, b_in.loss_mask, zt),
+        "nz_ood": nonzero_accuracy(lo, b_ood.targets, b_ood.loss_mask, zt),
+    }
     model.train()
-    return ai, ao
+    return m
 
 
 def train_arm(arm, cfg, task):
@@ -114,9 +129,13 @@ def train_arm(arm, cfg, task):
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
         if step % cfg.eval_every == 0 or step == cfg.steps:
-            ai, ao = evaluate(arm, model, task, cfg, eval_rng)
-            history.append({"step": step, "loss": loss.item(), "acc_in": ai, "acc_ood": ao})
-            print(f"[{arm:11}] step {step:>5} loss {loss.item():.3f} acc_in {ai:.3f} acc_ood {ao:.3f}")
+            m = evaluate(arm, model, task, cfg, eval_rng)
+            m["step"] = step
+            m["loss"] = loss.item()
+            history.append(m)
+            print(f"[{arm:11}] step {step:>5} loss {loss.item():.3f} "
+                  f"acc_in {m['acc_in']:.3f} acc_ood {m['acc_ood']:.3f} "
+                  f"| nz_in {m['nz_in']:.3f} nz_ood {m['nz_ood']:.3f}")
     return history
 
 
@@ -136,11 +155,11 @@ def run_temporal(cfg: TempConfig) -> dict:
         h = train_arm(arm, cfg, task)
         result["arms"][arm] = {"history": h, "final": h[-1] if h else {}}
 
-    print("\n[compare] final  acc_in / acc_ood:")
+    print("\n[compare] final  acc (in/ood)  |  non-zero acc (in/ood) <- the discriminative signal:")
     for arm in cfg.arms:
         f = result["arms"][arm]["final"]
         if f:
-            print(f"  {arm:11}  in {f['acc_in']:.3f}  ood {f['acc_ood']:.3f}")
+            print(f"  {arm:11}  {f['acc_in']:.3f}/{f['acc_ood']:.3f}  |  {f['nz_in']:.3f}/{f['nz_ood']:.3f}")
 
     if not cfg.smoke:
         out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "diagnostics")

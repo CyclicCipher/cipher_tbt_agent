@@ -41,12 +41,14 @@ class TemporalBatch:
 
 
 class EventStream:
-    def __init__(self, n_levels: int = 6, n_events: int = 10, max_gap: int = 3,
-                 noise_frac: float = 0.3, seed: int = 0) -> None:
+    def __init__(self, n_levels: int = 6, n_events: int = 10, max_gap: int = 8,
+                 noise_frac: float = 0.3, decay_per: int = 4, seed: int = 0) -> None:
         self.V = n_levels
         self.n_events = n_events
-        self.max_gap = max_gap
+        self.max_gap = max_gap          # large + uniform => high gap variance => count !~ time
         self.noise_frac = noise_frac
+        self.decay_per = decay_per      # lose 1 value unit per `decay_per` time units (slower
+                                        # decay => answers not dominated by 0)
         self.NOISE = 2 + self.V
         self.vocab_size = 3 + self.V          # PAD, QUERY, V values, NOISE
         self.seq_len = n_events + 1           # events + the query
@@ -80,7 +82,7 @@ class EventStream:
             q = self.n_events
             ids[i, q] = QUERY
             ts[i, q] = tau
-            cur = 0 if last_k is None else max(0, last_k - int(round(tau - last_tau)))
+            cur = 0 if last_k is None else max(0, last_k - int((tau - last_tau) // self.decay_per))
             tgt[i, q] = self._val(cur)
             mask[i, q] = 1.0
         return TemporalBatch(input_ids=ids, targets=tgt, loss_mask=mask, timestamps=ts)
