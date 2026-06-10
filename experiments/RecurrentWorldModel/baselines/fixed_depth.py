@@ -35,6 +35,9 @@ class FixedDepthConfig:
     pos_mode: str = "pope"   # match the settling model's positional scheme
     residual_gate: bool = False
     gate_init: float = 0.1
+    n_axes: int = 1          # PoPE coordinate axes (continuous-time / multi-axis)
+    time_input: bool = False  # add a learned projection of log(1+time) to the embedding
+                              # (the "time as content" control vs "time as position")
 
 
 class FixedDepthTransformer(nn.Module):
@@ -44,7 +47,7 @@ class FixedDepthTransformer(nn.Module):
         block_cfg = SettlingBlockConfig(
             dim=cfg.dim, n_heads=cfg.n_heads, causal=True, max_seq=cfg.max_seq,
             pos_enc=cfg.pos_mode if cfg.pos_mode in ("rope", "pope") else "none",
-            residual_gate=cfg.residual_gate, gate_init=cfg.gate_init,
+            residual_gate=cfg.residual_gate, gate_init=cfg.gate_init, n_axes=cfg.n_axes,
         )
         self.embed = nn.Embedding(cfg.vocab_size, cfg.dim)
         self.pos = (nn.Parameter(torch.randn(1, cfg.max_seq, cfg.dim) * 0.02)
@@ -52,6 +55,7 @@ class FixedDepthTransformer(nn.Module):
         self.layers = nn.ModuleList([SettlingBlock(block_cfg) for _ in range(cfg.n_layers)])
         self.norm_out = RMSNorm(cfg.dim, block_cfg.rmsnorm_eps)
         self.head_proj = None if cfg.tie_head else nn.Linear(cfg.dim, cfg.vocab_size, bias=False)
+        self.time_proj = nn.Linear(1, cfg.dim) if cfg.time_input else None
         self.apply(self._init)
 
     @staticmethod
@@ -63,14 +67,20 @@ class FixedDepthTransformer(nn.Module):
         elif isinstance(m, nn.Embedding):
             nn.init.normal_(m.weight, std=0.02)
 
-    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+    def forward(self, tokens: torch.Tensor, coord: torch.Tensor | None = None,
+                time_feat: torch.Tensor | None = None) -> torch.Tensor:
+        """``coord`` (b, t[, n_axes]) feeds continuous-time / multi-axis PoPE (None ->
+        integer positions). ``time_feat`` (b, t) optionally adds log(1+time) to the
+        embedding -- the 'time as content' control vs PoPE's 'time as position'."""
         t = tokens.shape[1]
         h = self.embed(tokens) * self.cfg.emb_scale
         if self.pos is not None:
             h = h + self.pos[:, :t]
+        if self.time_proj is not None and time_feat is not None:
+            h = h + self.time_proj(torch.log1p(time_feat.clamp_min(0)).unsqueeze(-1))
         zero = torch.zeros_like(h)
         for layer in self.layers:
-            h = layer(h, zero)
+            h = layer(h, zero, coord=coord)
         h = self.norm_out(h)
         if self.head_proj is None:
             return F.linear(h, self.embed.weight)

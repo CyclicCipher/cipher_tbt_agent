@@ -40,6 +40,7 @@ class SettlingBlockConfig:
     pos_enc: str = "none"        # "none" | "rope" | "pope" (positional scheme in attention)
     max_seq: int = 64            # for the position cos/sin tables
     pos_base: float = 10000.0
+    n_axes: int = 1              # PoPE coordinate axes (1=time/position; >1 for 2D/3D+time)
     residual_gate: bool = False  # LayerScale/ReZero gate on attn+ffn residuals (contraction lever)
     gate_init: float = 0.1       # small init -> map ~ norm(h + input), strongly contractive
 
@@ -124,25 +125,47 @@ class PolarPositionalEmbedding(nn.Module):
     (in [-2pi, 0]); applied to keys, it is the only residual what-where coupling.
     Cost: the QK score is computed in 2*head_dim (the paper's "d frequencies").
     The what/where decoupling is a RESOLVED question -- see Docs/architecture.md §2.2.
+
+    Coordinate-driven & multi-axis: the phase is computed from a per-position REAL
+    coordinate passed at forward time (not a fixed integer table), so the "where" can
+    be continuous time (irregular event streams) -- the score then depends on relative
+    *elapsed time* (t_i - t_j), unbounded-safe since only differences matter and the
+    phase wraps. With ``n_axes > 1`` the head_dim is split into per-axis bands, each
+    driven by its own coordinate (e.g. row/col for vision, or space + time). Default
+    coordinate = integer positions, recovering standard PoPE.
     """
 
-    def __init__(self, head_dim: int, max_seq: int, base: float = 10000.0) -> None:
+    def __init__(self, head_dim: int, max_seq: int, base: float = 10000.0, n_axes: int = 1) -> None:
         super().__init__()
-        inv_freq = base ** (-torch.arange(0, head_dim, dtype=torch.float32) / head_dim)  # (hd,)
-        pos = torch.arange(max_seq, dtype=torch.float32)
-        phase = torch.outer(pos, inv_freq)                              # (max_seq, hd)
-        self.register_buffer("cos", phase.cos()[None, None], persistent=False)  # (1,1,S,hd)
-        self.register_buffer("sin", phase.sin()[None, None], persistent=False)
+        if head_dim % n_axes != 0:
+            raise ValueError(f"head_dim {head_dim} not divisible by n_axes {n_axes}")
+        self.n_axes = n_axes
+        self.max_seq = max_seq
+        per = head_dim // n_axes                                        # freqs per axis
+        inv_freq = base ** (-torch.arange(0, per, dtype=torch.float32) / per)  # (per,)
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
         self.delta = nn.Parameter(torch.zeros(head_dim))  # learnable phase bias (keys)
 
-    def encode(self, x: torch.Tensor, is_key: bool) -> torch.Tensor:
-        """(b, h, t, head_dim) raw features -> (b, h, t, 2*head_dim) polar form."""
-        mu = F.softplus(x)                       # magnitude = content
-        t = x.shape[-2]
-        cos, sin = self.cos[..., :t, :], self.sin[..., :t, :]
-        if is_key:                               # rotate key phase by delta -> cos(phi+delta)
+    def _phase(self, coord: torch.Tensor) -> torch.Tensor:
+        """coord (b, t, n_axes) real -> phase (b, t, head_dim)."""
+        ph = coord.unsqueeze(-1) * self.inv_freq      # (b, t, n_axes, per)
+        return ph.flatten(-2)                         # (b, t, head_dim)
+
+    def encode(self, x: torch.Tensor, is_key: bool, coord: torch.Tensor | None = None) -> torch.Tensor:
+        """(b, h, t, head_dim) raw features -> (b, h, t, 2*head_dim) polar form.
+        ``coord`` is (b, t) or (b, t, n_axes) real positions; None -> integer positions."""
+        b, h, t, _ = x.shape
+        if coord is None:
+            idx = torch.arange(t, device=x.device, dtype=torch.float32)
+            coord = idx[None, :, None].expand(b, t, self.n_axes)
+        elif coord.dim() == 2:
+            coord = coord.unsqueeze(-1)               # (b, t) -> (b, t, 1)
+        phase = self._phase(coord.to(torch.float32))  # (b, t, head_dim)
+        cos, sin = phase.cos().unsqueeze(1), phase.sin().unsqueeze(1)   # (b, 1, t, head_dim)
+        if is_key:                                    # rotate key phase by delta -> cos(phi+delta)
             cd, sd = torch.cos(self.delta), torch.sin(self.delta)
             cos, sin = cos * cd - sin * sd, sin * cd + cos * sd
+        mu = F.softplus(x)                            # magnitude = content
         return torch.cat((mu * cos, mu * sin), dim=-1)
 
 
@@ -173,9 +196,10 @@ class Attention(nn.Module):
             self.q_scale = nn.Parameter(torch.zeros(cfg.n_heads))
             self.k_scale = nn.Parameter(torch.zeros(cfg.n_heads))
         self.rope = RotaryEmbedding(self.head_dim, cfg.max_seq, cfg.pos_base) if cfg.pos_enc == "rope" else None
-        self.pope = PolarPositionalEmbedding(self.head_dim, cfg.max_seq, cfg.pos_base) if cfg.pos_enc == "pope" else None
+        self.pope = (PolarPositionalEmbedding(self.head_dim, cfg.max_seq, cfg.pos_base, cfg.n_axes)
+                     if cfg.pos_enc == "pope" else None)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, coord: torch.Tensor | None = None) -> torch.Tensor:
         b, t, _ = x.shape
         q, k, v = self.qkv(x).split(self.cfg.dim, dim=-1)
         # (b, h, t, d)
@@ -193,8 +217,8 @@ class Attention(nn.Module):
                 q = F.normalize(q, dim=-1) * F.softplus(self.q_scale).view(1, -1, 1, 1)
                 k = F.normalize(k, dim=-1) * F.softplus(self.k_scale).view(1, -1, 1, 1)
             # Q,K become 2*head_dim polar vectors; v stays head_dim.
-            q = self.pope.encode(q, is_key=False)
-            k = self.pope.encode(k, is_key=True)
+            q = self.pope.encode(q, is_key=False, coord=coord)
+            k = self.pope.encode(k, is_key=True, coord=coord)
             scale = self.head_dim ** -0.5
         else:
             if self.cfg.qk_norm:
@@ -245,12 +269,12 @@ class SettlingBlock(nn.Module):
                 "polar_split is Stage 1+; keep it OFF until the settling loop is stable."
             )
 
-    def forward(self, h: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, h: torch.Tensor, x: torch.Tensor, coord: torch.Tensor | None = None) -> torch.Tensor:
         # constant input injection (clamped sensory drive)
         h = h + self.cfg.inject_scale * x
         ag = self.attn_gate if self.attn_gate is not None else 1.0
         fg = self.ffn_gate if self.ffn_gate is not None else 1.0
-        h = h + ag * self.attn(self.norm_attn(h))
+        h = h + ag * self.attn(self.norm_attn(h), coord=coord)
         h = h + fg * self.ffn(self.norm_ffn(h))
         return h
 

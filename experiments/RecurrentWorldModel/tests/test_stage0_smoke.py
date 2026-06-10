@@ -172,22 +172,31 @@ def test_pope_decouples_content_from_position():
     mag = (enc[..., :8] ** 2 + enc[..., 8:] ** 2).sqrt()
     assert torch.allclose(mag, F.softplus(x), atol=1e-5)
 
-    # (b) score is translation-invariant: same content, shift both q,k positions by
+    # (b) score is translation-invariant: same content, shift both q,k coords by
     #     the same delta -> identical score (depends only on s - t).
     pe.delta.data.zero_()  # isolate position from the learnable phase bias
     q = torch.randn(1, 1, 1, 8)
     k = torch.randn(1, 1, 1, 8)
 
     def score(qpos, kpos):
-        # place q at qpos, k at kpos by slicing the precomputed tables
-        cq, sq = pe.cos[..., qpos:qpos + 1, :], pe.sin[..., qpos:qpos + 1, :]
-        ck, sk = pe.cos[..., kpos:kpos + 1, :], pe.sin[..., kpos:kpos + 1, :]
-        mq, mk = F.softplus(q), F.softplus(k)
-        qe = torch.cat((mq * cq, mq * sq), dim=-1)
-        ke = torch.cat((mk * ck, mk * sk), dim=-1)
+        qe = pe.encode(q, is_key=False, coord=torch.tensor([[float(qpos)]]))
+        ke = pe.encode(k, is_key=True, coord=torch.tensor([[float(kpos)]]))
         return (qe * ke).sum().item()
 
     assert abs(score(2, 5) - score(4, 7)) < 1e-4   # both have s - t = 3
+    # continuous coordinates: the score tracks the REAL gap, not token count
+    assert abs(score(0.0, 3.0) - score(10.0, 13.0)) < 1e-4   # both gap = 3.0
+    assert abs(score(0, 1) - score(0, 3)) > 1e-3             # different gaps differ
+
+
+def test_pope_coord_none_equals_integer_positions():
+    from core.block import PolarPositionalEmbedding
+    pe = PolarPositionalEmbedding(head_dim=8, max_seq=16)
+    x = torch.randn(2, 1, 5, 8)
+    default = pe.encode(x, is_key=False)                       # coord=None -> integers
+    explicit = pe.encode(x, is_key=False,
+                         coord=torch.arange(5).float()[None].expand(2, 5))
+    assert torch.allclose(default, explicit, atol=1e-6)
 
 
 def test_warm_start_modes_run_and_converge_faster():

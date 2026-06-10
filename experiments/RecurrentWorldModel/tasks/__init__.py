@@ -8,5 +8,6 @@ is Stage 2+; this is the cheap algorithmic stand-in.
 """
 
 from .algorithmic import ModularChain, Batch
+from .eventstream import EventStream, TemporalBatch
 
-__all__ = ["ModularChain", "Batch"]
+__all__ = ["ModularChain", "Batch", "EventStream", "TemporalBatch"]
