@@ -37,13 +37,20 @@ from tasks import EventStream  # noqa: E402
 ARMS = ("integer", "time_input", "continuous")
 
 
+# dense early evals so we catch the fast initial learning (most happens by ~step 400)
+EARLY_EVALS = (10, 25, 50, 100, 150)
+
+
 @dataclass
 class TempConfig:
-    n_levels: int = 6
+    n_levels: int = 10            # value range (bigger => answers not 0-dominated)
     n_events: int = 10
-    train_max_gap: int = 3
-    ood_max_gap: int = 6           # test on longer elapsed times than trained
+    train_max_gap: int = 8
+    ood_max_gap: int = 16          # longer elapsed times than trained => extrapolation test
     noise_frac: float = 0.3
+    decay_per: int = 3
+    fixed_dist: int = 1            # CLEAN isolation: value event at constant token distance
+                                   # => token count carries 0 info, only real timing solves it
     dim: int = 128
     n_heads: int = 4
     n_layers: int = 6
@@ -51,7 +58,7 @@ class TempConfig:
     batch_size: int = 128
     lr: float = 3e-4
     weight_decay: float = 0.01
-    eval_every: int = 200
+    eval_every: int = 100
     eval_batch: int = 256
     seed: int = 0
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -128,7 +135,7 @@ def train_arm(arm, cfg, task):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
-        if step % cfg.eval_every == 0 or step == cfg.steps:
+        if step in EARLY_EVALS or step % cfg.eval_every == 0 or step == cfg.steps:
             m = evaluate(arm, model, task, cfg, eval_rng)
             m["step"] = step
             m["loss"] = loss.item()
@@ -145,11 +152,13 @@ def run_temporal(cfg: TempConfig) -> dict:
         cfg.steps, cfg.batch_size, cfg.eval_batch, cfg.eval_every = 2, 16, 16, 2
         cfg.device = "cpu"
 
-    task = EventStream(cfg.n_levels, cfg.n_events, cfg.train_max_gap, cfg.noise_frac, seed=cfg.seed)
+    task = EventStream(n_levels=cfg.n_levels, n_events=cfg.n_events, max_gap=cfg.train_max_gap,
+                       noise_frac=cfg.noise_frac, decay_per=cfg.decay_per,
+                       fixed_dist=cfg.fixed_dist, seed=cfg.seed)
     torch.manual_seed(cfg.seed)
-    # chance = 1 / V (always predicting one value); report it for context
-    print(f"[temporal] EventStream V={cfg.n_levels} | chance ~{1/cfg.n_levels:.3f} | "
-          f"vocab {task.vocab_size} seq_len {task.seq_len} | device={cfg.device} | arms={cfg.arms}")
+    print(f"[temporal] EventStream V={cfg.n_levels} fixed_dist={cfg.fixed_dist} | "
+          f"chance ~{1/cfg.n_levels:.3f} | vocab {task.vocab_size} seq_len {task.seq_len} | "
+          f"device={cfg.device} | arms={cfg.arms}")
     result = {"chance": 1 / cfg.n_levels, "arms": {}}
     for arm in cfg.arms:
         h = train_arm(arm, cfg, task)

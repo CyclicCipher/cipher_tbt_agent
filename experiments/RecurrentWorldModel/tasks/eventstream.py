@@ -42,13 +42,20 @@ class TemporalBatch:
 
 class EventStream:
     def __init__(self, n_levels: int = 6, n_events: int = 10, max_gap: int = 8,
-                 noise_frac: float = 0.3, decay_per: int = 4, seed: int = 0) -> None:
+                 noise_frac: float = 0.3, decay_per: int = 4, fixed_dist: int = 0,
+                 seed: int = 0) -> None:
         self.V = n_levels
         self.n_events = n_events
         self.max_gap = max_gap          # large + uniform => high gap variance => count !~ time
         self.noise_frac = noise_frac
         self.decay_per = decay_per      # lose 1 value unit per `decay_per` time units (slower
                                         # decay => answers not dominated by 0)
+        # fixed_dist > 0: the single value-setting event sits a CONSTANT token distance
+        # from the query (rest NOISE). Token count then carries ZERO info about elapsed
+        # time -- only real timing can solve it. This is the clean timing-isolation mode.
+        self.fixed_dist = fixed_dist
+        if fixed_dist and not (0 < fixed_dist <= n_events):
+            raise ValueError(f"fixed_dist must be in 1..n_events, got {fixed_dist}")
         self.NOISE = 2 + self.V
         self.vocab_size = 3 + self.V          # PAD, QUERY, V values, NOISE
         self.seq_len = n_events + 1           # events + the query
@@ -65,6 +72,7 @@ class EventStream:
         ts = torch.zeros(batch_size, T, dtype=torch.float32)
         tgt = torch.full((batch_size, T), PAD, dtype=torch.long)
         mask = torch.zeros(batch_size, T, dtype=torch.float32)
+        val_pos = self.n_events - self.fixed_dist if self.fixed_dist else None
         for i in range(batch_size):
             tau = 0.0
             last_k: int | None = None
@@ -72,7 +80,14 @@ class EventStream:
             for j in range(self.n_events):
                 tau += rng.randint(gap_min, gap_max)
                 ts[i, j] = tau
-                if rng.random() < self.noise_frac:
+                if val_pos is not None:                        # fixed-distance mode
+                    if j == val_pos:
+                        k = rng.randint(0, self.V - 1)
+                        ids[i, j] = self._val(k)
+                        last_k, last_tau = k, tau
+                    else:
+                        ids[i, j] = self.NOISE
+                elif rng.random() < self.noise_frac:
                     ids[i, j] = self.NOISE
                 else:
                     k = rng.randint(0, self.V - 1)

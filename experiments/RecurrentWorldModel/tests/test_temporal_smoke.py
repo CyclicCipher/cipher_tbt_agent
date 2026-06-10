@@ -38,6 +38,21 @@ def test_eventstream_target_is_correct_decay():
         assert b.targets[i, q].item() == 2 + cur
 
 
+def test_fixed_dist_decorrelates_count_from_time():
+    # the clean isolation mode: the single VAL event sits at a CONSTANT token distance,
+    # so token count carries zero info about elapsed time (only real timing can solve it).
+    task = EventStream(n_levels=10, n_events=10, max_gap=8, decay_per=3, fixed_dist=1, seed=0)
+    b = task.sample(200, rng=random.Random(0))
+    val_pos = task.n_events - task.fixed_dist
+    for i in range(200):
+        vals = [(j, b.input_ids[i, j].item()) for j in range(task.n_events)
+                if 2 <= b.input_ids[i, j].item() < 2 + task.V]
+        assert len(vals) == 1 and vals[0][0] == val_pos     # exactly one VAL, at the fixed slot
+    # elapsed time to the query varies (random gap) even though the distance is constant
+    elapsed = b.timestamps[:, task.n_events] - b.timestamps[:, val_pos]
+    assert elapsed.std() > 1.0
+
+
 def test_continuous_pope_uses_timestamps():
     # feeding timestamps as the PoPE coordinate changes the output (vs integer positions)
     task = EventStream(seed=0)
