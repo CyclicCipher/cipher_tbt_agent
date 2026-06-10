@@ -38,6 +38,8 @@ class FixedDepthConfig:
     n_axes: int = 1          # PoPE coordinate axes (continuous-time / multi-axis)
     time_input: bool = False  # add a learned projection of log(1+time) to the embedding
                               # (the "time as content" control vs "time as position")
+    continuous_input: bool = False  # input is REAL values (B,T) projected via Linear(1,dim),
+                                    # not tokens -- for Δ-encoding / numeric-sequence tasks
 
 
 class FixedDepthTransformer(nn.Module):
@@ -49,12 +51,16 @@ class FixedDepthTransformer(nn.Module):
             pos_enc=cfg.pos_mode if cfg.pos_mode in ("rope", "pope") else "none",
             residual_gate=cfg.residual_gate, gate_init=cfg.gate_init, n_axes=cfg.n_axes,
         )
-        self.embed = nn.Embedding(cfg.vocab_size, cfg.dim)
+        # input: real values (continuous) or a token table
+        self.input_proj = nn.Linear(1, cfg.dim) if cfg.continuous_input else None
+        self.embed = None if cfg.continuous_input else nn.Embedding(cfg.vocab_size, cfg.dim)
         self.pos = (nn.Parameter(torch.randn(1, cfg.max_seq, cfg.dim) * 0.02)
                     if cfg.pos_mode == "learned" else None)
         self.layers = nn.ModuleList([SettlingBlock(block_cfg) for _ in range(cfg.n_layers)])
         self.norm_out = RMSNorm(cfg.dim, block_cfg.rmsnorm_eps)
-        self.head_proj = None if cfg.tie_head else nn.Linear(cfg.dim, cfg.vocab_size, bias=False)
+        # continuous input can't tie the head to a (nonexistent) embedding
+        self.head_proj = (nn.Linear(cfg.dim, cfg.vocab_size, bias=False)
+                          if (not cfg.tie_head or cfg.continuous_input) else None)
         self.time_proj = nn.Linear(1, cfg.dim) if cfg.time_input else None
         self.apply(self._init)
 
@@ -73,7 +79,10 @@ class FixedDepthTransformer(nn.Module):
         integer positions). ``time_feat`` (b, t) optionally adds log(1+time) to the
         embedding -- the 'time as content' control vs PoPE's 'time as position'."""
         t = tokens.shape[1]
-        h = self.embed(tokens) * self.cfg.emb_scale
+        if self.input_proj is not None:                       # continuous real-valued input
+            h = self.input_proj(tokens.float().unsqueeze(-1))
+        else:
+            h = self.embed(tokens) * self.cfg.emb_scale
         if self.pos is not None:
             h = h + self.pos[:, :t]
         if self.time_proj is not None and time_feat is not None:
