@@ -79,6 +79,63 @@ CoT lifts it (recurrent depth justified); composition fidelity holds but OOD fai
 a positional/scaffolding *learnability* issue; neither ⇒ wrong bias, need a different
 relational/positional scheme.
 
+## Worked data point #1 — the temporal-PoPE 3-way (a learnability microscope)
+
+Our first *controlled* learnability experiment (2026-06-10, `train_temporal.py`, clean
+`fixed_dist=1` EventStream where token-count carries 0 info about elapsed time, r=0).
+Three models, **identical in every way except how time is represented**, same AdamW,
+same data, same task ("read the elapsed gap, compute a decay"). This is the ideal shape
+for theory: hold everything fixed, vary one knob (the representation / inductive bias),
+watch how *learnability* moves. The three outcomes separate the two axes cleanly:
+
+| arm | time is… | curve shape | reaches 90%? | final (nz in/ood) | verdict |
+|---|---|---|---|---|---|
+| **integer** | absent | flat at the floor forever | never | 0.35 / 0.34 | **not representable** (axis i) — solution not in the function class |
+| **time_input** | a content feature (log t) | long plateau ~0.33 until ~step 1000, then a **grokking jump** | ~step 1200 | 0.85 / 0.90 (caps <1, oscillates) | **representable but HARD to learn** (axis ii) |
+| **continuous** | the PoPE coordinate (relative phase) | monotone, fast, convex climb | ~step 200 | **1.00 / 1.00** (perfect, incl. 2× OOD extrapolation) | **representable AND easy to learn** |
+
+(Floor 0.35 > chance 0.10 because the value k is given as content; the model can predict
+the best answer given k while ignoring the unknown gap. integer is pinned there: it
+literally cannot read the gap.)
+
+**What it isolates.** `integer` vs the other two = the **representability** axis (i): is the
+solution in the function class at all? `time_input` vs `continuous` = the **learnability**
+axis (ii): *the same representable solution*, but the inductive bias of the representation
+changes how reachable it is by gradient descent — by a factor of ~6× in time-to-90%, and
+the difference between perfect and capped-with-grokking. **This is the clean proof that
+learnability ≠ representability: two architectures that can both express the solution can be
+worlds apart in how easily GD finds it.**
+
+**Candidate measurable learnability signatures** (toward `Learnable(A, D, opt) -> bound`):
+- **Time-to-threshold** (steps to X% acc) — continuous ~200, time_input ~1200, integer ∞.
+- **Curve shape** — monotone-convex (continuous, easy) vs plateau-then-phase-transition
+  (time_input, grokking) vs flat (integer, unlearnable). The *presence of a plateau* is a
+  learnability red flag: no gradient signal until a circuit is mostly assembled.
+- **Final ceiling** — does GD reach the *perfect* solution (continuous 1.00) or stall below
+  it (time_input ~0.9)?
+- **Grokking present?** — grokking is the signature of a *representable-but-long* solution:
+  the generalizing circuit exists but the optimizer wanders/memorizes first.
+
+**Unifying hypothesis (theory-shaped, falsifiable).** *Learnability tracks the description
+length of the solution under the architecture's inductive bias.* continuous-PoPE makes
+"relative elapsed time" a **single built-in primitive** (phase difference) → the solution is
+SHORT in the architecture's code → gradient points at it immediately → fast, monotone,
+perfect. time_input makes the model **compose a differencing circuit** from absolute
+log-times → the solution is LONG → no loss signal until the circuit assembles → plateau →
+grokking. integer has no primitive for it at all → infinite length → unlearnable. So the
+same **Occam/MDL principle that governs generalization also governs learnability**: GD finds
+*short-under-the-prior* solutions fast. Grokking = a long-but-finite description.
+
+**To turn this into the algorithm** (what to measure next, on this same 3-way as ground
+truth): (a) **eNTK alignment at init** — project the target onto the architecture's empirical
+tangent kernel; predict continuous has high alignment (target in the fast/signal subspace),
+time_input low (target in a slow direction) — item 52's signal/noise machinery applied to
+*learnability* rather than generalization. (b) **Solution description length** in the
+architecture's primitives (a RASP-L-style program length, §clues). (c) **Plateau detection**
+from the early loss curve (does cumulative-online loss stall?). If any of these *predicts*
+the observed time-to-threshold ordering across the 3 arms, it's a candidate computable
+`Learnable()` estimator — validated on a datum we already have.
+
 ## Open sub-questions (to develop)
 
 - **R1.** Can we *certify* (or refute) that a given architecture can represent a given algorithmic family — ideally constructively (exhibit the weights) or via a complexity-class argument?
