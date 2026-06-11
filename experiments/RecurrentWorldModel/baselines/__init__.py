@@ -10,5 +10,10 @@ from .fixed_depth import (
     FixedDepthTransformer,
     matched_baseline,
 )
+from .field_model import UnifiedFieldModel, SeparateHeadsModel, FunctionalFieldModel
+from .lewm import LeWorldModel
+from .sigreg import SIGReg, MultiSubspaceSIGReg
 
-__all__ = ["FixedDepthConfig", "FixedDepthTransformer", "matched_baseline"]
+__all__ = ["FixedDepthConfig", "FixedDepthTransformer", "matched_baseline",
+           "UnifiedFieldModel", "SeparateHeadsModel", "FunctionalFieldModel",
+           "LeWorldModel", "SIGReg", "MultiSubspaceSIGReg"]

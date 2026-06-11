@@ -10,5 +10,7 @@ is Stage 2+; this is the cheap algorithmic stand-in.
 from .algorithmic import ModularChain, Batch
 from .eventstream import EventStream, TemporalBatch
 from .shiftseq import ShiftSeq, ShiftBatch
+from .driftfield import DriftField, DriftBatch
 
-__all__ = ["ModularChain", "Batch", "EventStream", "TemporalBatch", "ShiftSeq", "ShiftBatch"]
+__all__ = ["ModularChain", "Batch", "EventStream", "TemporalBatch", "ShiftSeq", "ShiftBatch",
+           "DriftField", "DriftBatch"]

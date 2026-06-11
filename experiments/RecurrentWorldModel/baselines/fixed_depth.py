@@ -73,11 +73,10 @@ class FixedDepthTransformer(nn.Module):
         elif isinstance(m, nn.Embedding):
             nn.init.normal_(m.weight, std=0.02)
 
-    def forward(self, tokens: torch.Tensor, coord: torch.Tensor | None = None,
-                time_feat: torch.Tensor | None = None) -> torch.Tensor:
-        """``coord`` (b, t[, n_axes]) feeds continuous-time / multi-axis PoPE (None ->
-        integer positions). ``time_feat`` (b, t) optionally adds log(1+time) to the
-        embedding -- the 'time as content' control vs PoPE's 'time as position'."""
+    def encode(self, tokens: torch.Tensor, coord: torch.Tensor | None = None,
+               time_feat: torch.Tensor | None = None) -> torch.Tensor:
+        """Trunk only: returns the normed hidden state (b, t, dim), pre-head. Custom
+        readouts (e.g. the Stage-3 field heads) build on this instead of the logits."""
         t = tokens.shape[1]
         if self.input_proj is not None:                       # continuous real-valued input
             h = self.input_proj(tokens.float().unsqueeze(-1))
@@ -90,7 +89,14 @@ class FixedDepthTransformer(nn.Module):
         zero = torch.zeros_like(h)
         for layer in self.layers:
             h = layer(h, zero, coord=coord)
-        h = self.norm_out(h)
+        return self.norm_out(h)
+
+    def forward(self, tokens: torch.Tensor, coord: torch.Tensor | None = None,
+                time_feat: torch.Tensor | None = None) -> torch.Tensor:
+        """``coord`` (b, t[, n_axes]) feeds continuous-time / multi-axis PoPE (None ->
+        integer positions). ``time_feat`` (b, t) optionally adds log(1+time) to the
+        embedding -- the 'time as content' control vs PoPE's 'time as position'."""
+        h = self.encode(tokens, coord, time_feat)
         if self.head_proj is None:
             return F.linear(h, self.embed.weight)
         return self.head_proj(h)
