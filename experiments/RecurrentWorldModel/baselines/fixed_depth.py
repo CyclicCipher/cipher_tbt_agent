@@ -21,6 +21,7 @@ import torch.nn.functional as F
 
 from core.block import RMSNorm, SettlingBlock, SettlingBlockConfig
 from core.model import count_parameters
+from baselines.bottleneck import ActivationFFN
 
 
 @dataclass
@@ -40,6 +41,9 @@ class FixedDepthConfig:
                               # (the "time as content" control vs "time as position")
     continuous_input: bool = False  # input is REAL values (B,T) projected via Linear(1,dim),
                                     # not tokens -- for Δ-encoding / numeric-sequence tasks
+    inject_act: str = "none"  # insert ONE ActivationFFN sublayer (TBAF drift test); one of
+                              # none|gelu|tbaf|tbaf_verbatim|commonmode
+    inject_layer: int = -1    # after which layer to inject (-1 -> n_layers//2)
 
 
 class FixedDepthTransformer(nn.Module):
@@ -57,6 +61,9 @@ class FixedDepthTransformer(nn.Module):
         self.pos = (nn.Parameter(torch.randn(1, cfg.max_seq, cfg.dim) * 0.02)
                     if cfg.pos_mode == "learned" else None)
         self.layers = nn.ModuleList([SettlingBlock(block_cfg) for _ in range(cfg.n_layers)])
+        # optional one-shot activation sublayer (the TBAF drift test); default off
+        self.inject = (ActivationFFN(cfg.dim, cfg.inject_act) if cfg.inject_act != "none" else None)
+        self.inject_layer = cfg.inject_layer if cfg.inject_layer >= 0 else cfg.n_layers // 2
         self.norm_out = RMSNorm(cfg.dim, block_cfg.rmsnorm_eps)
         # continuous input can't tie the head to a (nonexistent) embedding
         self.head_proj = (nn.Linear(cfg.dim, cfg.vocab_size, bias=False)
@@ -87,8 +94,10 @@ class FixedDepthTransformer(nn.Module):
         if self.time_proj is not None and time_feat is not None:
             h = h + self.time_proj(torch.log1p(time_feat.clamp_min(0)).unsqueeze(-1))
         zero = torch.zeros_like(h)
-        for layer in self.layers:
+        for i, layer in enumerate(self.layers):
             h = layer(h, zero, coord=coord)
+            if self.inject is not None and i == self.inject_layer:
+                h = h + self.inject(h)                         # one-shot activation sublayer
         return self.norm_out(h)
 
     def forward(self, tokens: torch.Tensor, coord: torch.Tensor | None = None,

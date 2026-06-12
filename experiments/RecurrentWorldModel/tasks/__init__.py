@@ -11,6 +11,9 @@ from .algorithmic import ModularChain, Batch
 from .eventstream import EventStream, TemporalBatch
 from .shiftseq import ShiftSeq, ShiftBatch
 from .driftfield import DriftField, DriftBatch
+from .motifecho import MotifEcho, MotifBatch
+from .periodicfield import PeriodicField, PeriodicBatch
 
 __all__ = ["ModularChain", "Batch", "EventStream", "TemporalBatch", "ShiftSeq", "ShiftBatch",
-           "DriftField", "DriftBatch"]
+           "DriftField", "DriftBatch", "MotifEcho", "MotifBatch",
+           "PeriodicField", "PeriodicBatch"]

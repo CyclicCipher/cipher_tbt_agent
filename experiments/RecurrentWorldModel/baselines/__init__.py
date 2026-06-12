@@ -13,7 +13,9 @@ from .fixed_depth import (
 from .field_model import UnifiedFieldModel, SeparateHeadsModel, FunctionalFieldModel
 from .lewm import LeWorldModel
 from .sigreg import SIGReg, MultiSubspaceSIGReg
+from .bottleneck import ActivationFFN, TBAFPerToken, TBAFVerbatim, CommonMode, make_activation
 
 __all__ = ["FixedDepthConfig", "FixedDepthTransformer", "matched_baseline",
            "UnifiedFieldModel", "SeparateHeadsModel", "FunctionalFieldModel",
-           "LeWorldModel", "SIGReg", "MultiSubspaceSIGReg"]
+           "LeWorldModel", "SIGReg", "MultiSubspaceSIGReg",
+           "ActivationFFN", "TBAFPerToken", "TBAFVerbatim", "CommonMode", "make_activation"]

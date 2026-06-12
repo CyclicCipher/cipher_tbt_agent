@@ -25,6 +25,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from baselines.bottleneck import ActivationFFN
 from baselines.field_model import _survival_when_logp
 from baselines.sigreg import MultiSubspaceSIGReg, SIGReg
 
@@ -78,28 +79,35 @@ class ARPredictor(nn.Module):
     """z_hat_{i+1} = pred(z_i, a_i): predicts the NEXT latent at each position; the action
     a_i (the time-gap to the predicted step) conditions every block via AdaLN-zero."""
 
-    def __init__(self, dim: int, heads: int, depth: int) -> None:
+    def __init__(self, dim: int, heads: int, depth: int, inject_act: str = "none") -> None:
         super().__init__()
         self.act_embed = nn.Sequential(nn.Linear(1, dim), nn.SiLU(), nn.Linear(dim, dim))
         self.blocks = nn.ModuleList([ConditionalBlock(dim, heads) for _ in range(depth)])
+        # the TBAF drift test: one common-mode-rejecting activation sublayer in the iterated
+        # latent path (default off). This is where rollout drift actually accumulates.
+        self.inject = ActivationFFN(dim, inject_act) if inject_act != "none" else None
+        self.inject_layer = depth // 2
         self.head = nn.Linear(dim, dim)
 
     def forward(self, z: torch.Tensor, t: torch.Tensor, a: torch.Tensor) -> torch.Tensor:
         c = self.act_embed(a.unsqueeze(-1))                 # (B, K, dim)
         x = z
-        for blk in self.blocks:
+        for i, blk in enumerate(self.blocks):
             x = blk(x, t, c)
+            if self.inject is not None and i == self.inject_layer:
+                x = x + self.inject(x)
         return self.head(x)                                 # (B, K, dim) predicted next latents
 
 
 class LeWorldModel(nn.Module):
     def __init__(self, dim: int = 128, heads: int = 4, depth: int = 4, v_bins: int = 32,
                  v_min: float = 0.0, v_max: float = 64.0, num_proj: int = 256,
-                 lam: float = 1.0, reg: str = "subjepa", num_subspaces: int = 32) -> None:
+                 lam: float = 1.0, reg: str = "subjepa", num_subspaces: int = 32,
+                 inject_act: str = "none") -> None:
         super().__init__()
         self.v_bins, self.v_min, self.v_max, self.lam = v_bins, v_min, v_max, lam
         self.enc = nn.Sequential(nn.Linear(1, dim), nn.SiLU(), nn.Linear(dim, dim))
-        self.predictor = ARPredictor(dim, heads, depth)
+        self.predictor = ARPredictor(dim, heads, depth, inject_act=inject_act)
         self.dec = nn.Sequential(nn.Linear(dim, dim), nn.GELU(), nn.Linear(dim, v_bins))
         # default: Sub-JEPA subspace regularizer; "sigreg" = the ambient SIGReg it improves on
         self.reg_kind = reg
