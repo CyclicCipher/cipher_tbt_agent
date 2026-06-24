@@ -14,8 +14,10 @@ from .field_model import UnifiedFieldModel, SeparateHeadsModel, FunctionalFieldM
 from .lewm import LeWorldModel
 from .sigreg import SIGReg, MultiSubspaceSIGReg
 from .bottleneck import ActivationFFN, TBAFPerToken, TBAFVerbatim, CommonMode, make_activation
+from .partitioned import PartitionedModel
 
 __all__ = ["FixedDepthConfig", "FixedDepthTransformer", "matched_baseline",
            "UnifiedFieldModel", "SeparateHeadsModel", "FunctionalFieldModel",
            "LeWorldModel", "SIGReg", "MultiSubspaceSIGReg",
-           "ActivationFFN", "TBAFPerToken", "TBAFVerbatim", "CommonMode", "make_activation"]
+           "ActivationFFN", "TBAFPerToken", "TBAFVerbatim", "CommonMode", "make_activation",
+           "PartitionedModel"]

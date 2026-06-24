@@ -1,248 +1,315 @@
 """
-l5a_readout.py — Layer 5a Conjunctive Displacement Readout.
+l5a_readout.py — Layer 5a Conjunctive Displacement Readout (SDR-native).
 
-Implements the L5a (intratelencephalic IT neuron) conjunctive readout that
-maps (L3 active cells, L4 active minicolumns) → scalar displacement.
+Implements L5a as a bank of Spatial Poolers, one per L6a/L5b displacement
+cell module. Every signal is an SDR — no scalar floats cross layer
+boundaries.
 
-Architecture (Hawkins 2019 + pre-compaction design):
-  L3 provides operator context: "we are in an after-+ state."
-  L4 provides current feature magnitude: "the number is 5."
-  Neither input alone is sufficient. L5a integrates both and outputs a
-  scalar displacement d̂, which is passed to L5b (DisplacementLayer) to
-  update the L6a grid cell reference frame.
+Architecture (Hawkins 2019 + revised design):
 
-  L3 → L5a (confirmed: IT neurons receive from lower L2/3)
-  L4 → L5a (barrel cortex literature: L5 receives from multiple laminar sources)
-  L5a → L5b (local: IT neurons drive ET neurons within the column)
-  L5b → L6a (bilateral: displacement shifts each module's phase by d mod λᵢ)
+  Input:  L3 active cells (bool, total_l3_cells)
+            — encodes the FULL prior sequence context via TM higher-order
+              memory. Sufficient for arbitrary operator semantics:
+                addition:            context at 'b' encodes [a, +, b]
+                multiplication:      context at 'b' encodes [a, ×, b]
+                chained multiply:    context at 'c' encodes [a, ×, b, ×, c]
+              The L3 cell state is the variable-length accumulator.
+          L4 is NOT needed: L3's higher-order memory already distinguishes
+            feature 'b' in different operator contexts.
 
-  L3 does NOT directly drive L5b. This is confirmed by Hawkins 2019.
+  Output: displacement SDR (bool, n_modules × sdr_length_per_module)
+            — concatenation of each module's phase SDR.
+            — same format as DisplacementLayer.get_displacement_sdr().
+            — applied to L6a via DisplacementLayer.apply_from_sdr().
 
-Weight matrix W:
-  Shape: (total_L3_cells + num_minicolumns,)
-  Represents one weight per presynaptic unit. The displacement output is
-  the dot product of W with the concatenated (L3 active ∥ L4 active) vector,
-  scaled by a gain factor.
+  Structure: one SpatialPooler per displacement cell module.
+    SP i: input_size=total_l3_cells,
+           num_minicolumns=sdr_length_per_module,
+           active_per_step=sdr_width_per_module.
+    Output of SP i = displacement module i's phase SDR.
 
-  Because SDR inputs are binary and sparse, the dot product is equivalent to
-  summing the weights of active units. Only active cells/columns contribute.
+  The SP substrate is identical to L4 — the whole system now shares one
+  computational substrate. No dense weight matrices, no gradient descent.
 
-Learning rule (Hebbian, prediction-error-driven):
-  At step b (the operand step — when L4 shows the number b):
-    1. L5a computes d̂ = W · (L3 cells ∥ L4 cols) * gain
-    2. d̂ is applied to L6a via DisplacementLayer
-    3. The (L3, L4) state is stored for credit assignment
+Variable-length context:
+  L3 active cells at the operand step encode the entire prior context:
+    'b' in [3, ×, 4, ×, 5]  ≠  'b' in [3, +, 5]  ≠  'b' in [3, ×, 5]
+  L5a SPs learn different associations for each. No architectural change
+  is needed to support longer sequences — the TM handles it.
 
-  At the result step (after "="):
-    4. Anomaly score at this step is the teaching signal.
-       anomaly = 0 → prediction correct → reinforce: W += lr * (target - d̂) * active
-       anomaly > 0 → prediction wrong   → weaken:    W -= lr * anomaly * active * decay
+Learning:
 
-  'target' at reinforcement time is the true displacement (a+b - a = b),
-  which is available from the training data. For the biologically-plausible
-  version, target is not needed: we use the sign and magnitude of anomaly
-  as a surrogate error (positive anomaly → displacement was wrong → weaken).
+  Supervised (use_supervised=True, default):
+    For each step, call learn_supervised(l3_active, true_displacement):
+      Encodes true_displacement % λᵢ as the target SDR for module i,
+      then calls SP.learn_with_target(l3_active, target_sdr).
+      The SP Hebbian permanence update grows synapses from active L3 cells
+      to the correct output bits.
 
-Two modes:
-  SUPERVISED (use_supervised=True):
-    At each training step, the true displacement is provided. W is updated
-    by a simple delta rule: ΔW = lr * (target - d̂) * active_input.
-    Fast convergence. Used to validate the architecture before tackling the
-    Hebbian version.
+    Call with true_displacement=0.0 for non-operator steps (observing 'a',
+    '+', '=', result). This trains the SPs to output a zero-phase (identity)
+    displacement for those contexts, preventing spurious grid movement.
 
-  HEBBIAN (use_supervised=False):
-    The anomaly at the result step is the teaching signal. No true displacement
-    label is provided at training time. ΔW = lr * (1 - anomaly) * d̂ * active_input
-    (reinforce when anomaly is low, weaken when high). Biologically plausible.
+  Anomaly-driven Hebbian (use_supervised=False):
+    compute() stores the L3 pattern. At the result step, if anomaly is low,
+    reinforce by calling learn_from_anomaly(anomaly_score).
 
 Usage:
-    from l5a_readout import L5aReadout
+    l5a = L5aReadout.from_displacement_layer(
+              displ, total_l3_cells=col.tm.total_cells, seed=42)
+    col.l5a = l5a
 
-    l5a = L5aReadout(
-        num_l3_cells=tm.total_cells,
-        num_minicolumns=sp.num_minicolumns,
-        learning_rate=0.01,
-        use_supervised=True,
-    )
+    # Training — for each step in sequence [a, +, b, =, result]:
+    col.compute(encode_number(a), displacement=None, learn=True)
+    l5a.learn_supervised(col.tm.cell_active, 0.0)          # not operator step
 
-    # At operand step: compute displacement and store state
-    d_hat = l5a.compute(tm.cell_active, sp_active_cols)
+    col.compute(encode_symbol('+'), displacement=None, learn=True)
+    l5a.learn_supervised(col.tm.cell_active, 0.0)          # not operator step
 
-    # At result step: learn from anomaly (Hebbian) or true target (supervised)
-    l5a.learn(anomaly_score=col.anomaly_score)           # Hebbian
-    l5a.learn(true_displacement=b, anomaly_score=anom)   # Supervised
+    col.compute(encode_number(b), displacement=float(result), learn=True)
+    l5a.learn_supervised(col.tm.cell_active, float(result)) # operator step
+
+    col.compute(encode_symbol('='), displacement=None, learn=True)
+    l5a.learn_supervised(col.tm.cell_active, 0.0)
+
+    col.compute(encode_number(result), displacement=None, learn=True)
+    l5a.learn_supervised(col.tm.cell_active, 0.0)
+
+    # Inference — L5a runs inside col.compute() automatically.
+    # No external displacement needed; L5a's SDR output is applied via
+    # DisplacementLayer.apply_from_sdr().
 """
 
 import numpy as np
-from typing import Optional
+from typing import List, Optional
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))
+
+from sdr import encode_periodic, concatenate
+from spatial_pooler import SpatialPooler
 
 
 class L5aReadout:
-    """Layer 5a conjunctive readout: (L3, L4) → displacement scalar.
+    """L5a as a bank of Spatial Poolers mapping L3 cells → displacement SDR.
 
     Args:
-        num_l3_cells: Total cells in the L3 temporal memory (total_cells).
-        num_minicolumns: Number of L4 spatial pooler minicolumns.
-        learning_rate: Hebbian/supervised weight update step size.
-        weight_decay: L2 regularization coefficient (keeps weights near 0
-            for neutral context inputs).
-        gain: Scalar applied to the dot-product output. Useful for
-            scaling the weight magnitudes to the expected displacement range.
-        use_supervised: If True, learn() requires true_displacement and uses
-            a delta rule. If False, uses Hebbian learning from anomaly signal.
-        seed: Random seed for weight initialisation.
+        total_l3_cells:        TM total_cells — input size for each SP.
+        n_modules:             Number of displacement / grid cell modules.
+        sdr_length_per_module: Phase SDR length per module.
+        sdr_width_per_module:  Phase SDR active bits per module.
+        periods:               Grid/displacement module periods (λᵢ).
+        sp_permanence_threshold: Synapse connection threshold.
+        sp_permanence_inc:     Permanence increment for active synapses.
+        sp_permanence_dec:     Permanence decrement for inactive synapses.
+        sp_initial_synapses:   Initial potential synapses per output column.
+            L3 inputs are sparser (~1%) than sensory inputs (~2%), so more
+            initial connections are needed for reliable overlap scores.
+        use_supervised:        True = forced-winner Hebbian (learn_supervised).
+                               False = anomaly-gated Hebbian (learn_from_anomaly).
+        seed:                  Random seed.
     """
 
     def __init__(
         self,
-        num_l3_cells: int,
-        num_minicolumns: int,
-        learning_rate: float = 0.005,
-        weight_decay: float = 0.0001,
-        gain: float = 1.0,
+        total_l3_cells: int,
+        n_modules: int,
+        sdr_length_per_module: int,
+        sdr_width_per_module: int,
+        periods: List[float],
+        sp_permanence_threshold: float = 0.3,
+        sp_permanence_inc: float = 0.08,
+        sp_permanence_dec: float = 0.01,
         use_supervised: bool = True,
         seed: Optional[int] = None,
     ):
-        self.num_l3_cells = num_l3_cells
-        self.num_minicolumns = num_minicolumns
-        self.input_size = num_l3_cells + num_minicolumns
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
-        self.gain = gain
+        assert len(periods) == n_modules, (
+            f"len(periods)={len(periods)} != n_modules={n_modules}"
+        )
+        self.total_l3_cells = total_l3_cells
+        self.n_modules = n_modules
+        self.sdr_length_per_module = sdr_length_per_module
+        self.sdr_width_per_module = sdr_width_per_module
+        self.periods = list(periods)
         self.use_supervised = use_supervised
+        self.total_sdr_length = n_modules * sdr_length_per_module
 
         rng = np.random.default_rng(seed)
-        # Small random init — near zero so neutral context outputs near zero
-        self.W = rng.normal(0.0, 0.01, size=self.input_size).astype(np.float32)
 
-        # Stored state for credit assignment (prev step's active input + output)
-        self._prev_active: Optional[np.ndarray] = None
-        self._prev_d_hat: float = 0.0
-        self._has_pending: bool = False   # True if a displacement was applied last step
+        # potential_pct=1.0: each output minicolumn can form synapses to ANY
+        # L3 cell. Full connectivity is correct here because L3 inputs are
+        # very sparse (~1%), so the SP needs access to all inputs to reliably
+        # grow connections to the small set of active cells.
+        # boost_strength=0: boosting distorts duty cycles when forced-winner
+        # training sees each context at different frequencies.
+        self.sps: List[SpatialPooler] = [
+            SpatialPooler(
+                input_size=total_l3_cells,
+                num_minicolumns=sdr_length_per_module,
+                active_per_step=sdr_width_per_module,
+                potential_pct=1.0,
+                permanence_threshold=sp_permanence_threshold,
+                permanence_inc=sp_permanence_inc,
+                permanence_dec=sp_permanence_dec,
+                boost_strength=0.0,
+                seed=int(rng.integers(0, 2**31)),
+            )
+            for _ in range(n_modules)
+        ]
 
-    # ── Forward ──────────────────────────────────────────────────────────────
+        # Stored L3 state for anomaly-driven Hebbian mode
+        self._stored_l3: Optional[np.ndarray] = None
+        self._has_pending: bool = False
+
+    # ── Factory ───────────────────────────────────────────────────────────────
+
+    @classmethod
+    def from_displacement_layer(
+        cls,
+        displacement_layer,
+        total_l3_cells: int,
+        use_supervised: bool = True,
+        seed: Optional[int] = None,
+        **kwargs,
+    ) -> "L5aReadout":
+        """Create L5aReadout paired to an existing DisplacementLayer."""
+        periods = [m.period for m in displacement_layer.modules]
+        return cls(
+            total_l3_cells=total_l3_cells,
+            n_modules=displacement_layer.num_modules,
+            sdr_length_per_module=displacement_layer.sdr_length_per_module,
+            sdr_width_per_module=displacement_layer.sdr_width_per_module,
+            periods=periods,
+            use_supervised=use_supervised,
+            seed=seed,
+            **kwargs,
+        )
+
+    # ── Forward ───────────────────────────────────────────────────────────────
 
     def compute(
         self,
         l3_active_cells: np.ndarray,
-        l4_active_minicolumns: np.ndarray,
-    ) -> float:
-        """Compute displacement estimate from current L3 and L4 state.
+        learn: bool = False,
+    ) -> np.ndarray:
+        """Map L3 active cells → displacement SDR.
 
-        Stores the active input and output for the next learn() call.
+        Each SP maps l3_active_cells → one module's phase SDR. Results
+        are concatenated into a single displacement SDR in DisplacementLayer
+        format, ready for DisplacementLayer.apply_from_sdr().
 
         Args:
-            l3_active_cells: Bool (num_l3_cells,) — TM cell_active.
-            l4_active_minicolumns: Bool (num_minicolumns,) — SP output.
+            l3_active_cells: Bool (total_l3_cells,) — TM cell_active.
+            learn:           Whether SPs run their normal Hebbian update
+                             (usually False; use learn_supervised instead).
 
         Returns:
-            Scalar displacement estimate d̂. Pass this to
-            DisplacementLayer.apply_displacement_to(d_hat, grid_layer).
+            Bool (total_sdr_length,) — full displacement SDR.
         """
-        active = self._concat(l3_active_cells, l4_active_minicolumns)
-        d_hat = float(np.dot(self.W, active) * self.gain)
+        module_sdrs = [
+            sp.compute(l3_active_cells, learn=learn)
+            for sp in self.sps
+        ]
 
-        # Store for credit assignment
-        self._prev_active = active
-        self._prev_d_hat = d_hat
-        self._has_pending = True
+        if not self.use_supervised:
+            self._stored_l3 = l3_active_cells.copy()
+            self._has_pending = True
 
-        return d_hat
+        return concatenate(module_sdrs)
 
-    # ── Learning ─────────────────────────────────────────────────────────────
+    # ── Learning ──────────────────────────────────────────────────────────────
 
-    def learn(
+    def learn_supervised(
         self,
-        anomaly_score: float,
-        true_displacement: Optional[float] = None,
+        l3_active_cells: np.ndarray,
+        true_displacement: float,
     ) -> None:
-        """Update weights based on the prediction outcome.
+        """Forced-winner Hebbian update toward the correct displacement SDR.
 
-        Call this at the result step, after observing the outcome of the
-        displacement that was applied at the previous compute() call.
+        For each module i, encodes true_displacement % λᵢ as the target
+        phase SDR, then calls SP.learn_with_target(l3_active, target_sdr).
+        The SP permanently associates the L3 pattern with the correct bits.
+
+        Call at EVERY timestep:
+          - Operator steps (e.g. 'b' in [a, +, b]):  true_displacement = a+b
+          - All other steps:                          true_displacement = 0.0
+            (zero phase = identity displacement — no grid movement)
 
         Args:
-            anomaly_score: Anomaly at the result step (0=correct, 1=burst).
-                Used as the primary error signal in both modes.
-            true_displacement: Optional. If use_supervised=True and this is
-                provided, use the delta rule directly. If None in supervised
-                mode, falls back to Hebbian.
+            l3_active_cells:  Bool (total_l3_cells,).
+            true_displacement: Correct displacement for this step.
         """
-        if not self._has_pending or self._prev_active is None:
+        for sp, period in zip(self.sps, self.periods):
+            phase = true_displacement % period
+            target_sdr = encode_periodic(
+                phase,
+                self.sdr_length_per_module,
+                self.sdr_width_per_module,
+                0.0,
+                period,
+            )
+            sp.learn_with_target(l3_active_cells, target_sdr)
+
+    def learn_from_anomaly(
+        self,
+        anomaly_score: float,
+        reinforce_threshold: float = 0.3,
+    ) -> None:
+        """Anomaly-gated Hebbian reinforcement (unsupervised mode).
+
+        Uses the L3 state stored during the most recent compute() call.
+        Reinforces only when anomaly < threshold (displacement was correct).
+
+        Args:
+            anomaly_score:       TM anomaly at the result step.
+            reinforce_threshold: Anomaly below which the output is reinforced.
+        """
+        if not self._has_pending or self._stored_l3 is None:
             return
-
-        active = self._prev_active
-        d_hat  = self._prev_d_hat
-
-        if self.use_supervised and true_displacement is not None:
-            # Delta rule: ΔW = lr * (target - d̂) * active_input
-            error = true_displacement - d_hat / self.gain
-            delta = self.learning_rate * error * active
-        else:
-            # Hebbian: reinforce when anomaly low, weaken when high
-            # ΔW = lr * (1 - anomaly) * d̂/gain * active  (positive = reinforce)
-            # ΔW = -lr * anomaly * d̂/gain * active        (combined)
-            # Simplified: ΔW = lr * (1 - 2*anomaly) * d̂/gain * active
-            signal = (1.0 - 2.0 * anomaly_score) * (d_hat / self.gain if self.gain != 0 else d_hat)
-            delta = self.learning_rate * signal * active
-
-        # Weight decay (L2 regularisation — pulls unused weights toward 0)
-        self.W += delta
-        self.W *= (1.0 - self.weight_decay)
-
+        if anomaly_score < reinforce_threshold:
+            for sp in self.sps:
+                sp.compute(self._stored_l3, learn=True)
         self._has_pending = False
+        self._stored_l3 = None
 
-    def skip(self) -> None:
-        """Call when a step does NOT produce a displacement to learn from.
-
-        Clears pending state without updating weights. Use when the current
-        timestep is a non-operator step (observing a number or symbol that
-        should not trigger a displacement).
-        """
+    def reset(self) -> None:
+        """Clear pending Hebbian state between sequences."""
         self._has_pending = False
-        self._prev_active = None
-        self._prev_d_hat = 0.0
+        self._stored_l3 = None
 
     # ── Diagnostics ───────────────────────────────────────────────────────────
 
-    def predict(
-        self,
-        l3_active_cells: np.ndarray,
-        l4_active_minicolumns: np.ndarray,
-    ) -> float:
-        """Compute displacement estimate without updating stored state.
+    def decode_displacement(self, displacement_sdr: np.ndarray) -> List[float]:
+        """Decode a displacement SDR to per-module phase values.
 
-        Use for evaluation/inspection only — does not affect learning.
+        Returns the decoded phase for each module (not a single scalar,
+        since the CRT reconstruction is only valid over the full module set).
+
+        Args:
+            displacement_sdr: Bool (total_sdr_length,).
+
+        Returns:
+            List of floats, one per module: [phase_mod_0, phase_mod_1, ...]
         """
-        active = self._concat(l3_active_cells, l4_active_minicolumns)
-        return float(np.dot(self.W, active) * self.gain)
+        from sdr import decode_periodic as _dp
+        L = self.sdr_length_per_module
+        return [
+            _dp(displacement_sdr[i * L: (i + 1) * L], 0.0, period)
+            for i, period in enumerate(self.periods)
+        ]
 
     def get_stats(self) -> dict:
-        """Summary statistics for monitoring."""
         return {
-            "w_mean": float(self.W.mean()),
-            "w_std": float(self.W.std()),
-            "w_max": float(self.W.max()),
-            "w_min": float(self.W.min()),
-            "w_nonzero": int((np.abs(self.W) > 1e-6).sum()),
-            "pending": self._has_pending,
+            f"module_{i}_entropy": float(sp.get_entropy())
+            for i, sp in enumerate(self.sps)
         }
 
-    def reset(self) -> None:
-        """Clear pending credit-assignment state between sequences."""
-        self._has_pending = False
-        self._prev_active = None
-        self._prev_d_hat = 0.0
-
-    # ── Internal ─────────────────────────────────────────────────────────────
-
-    def _concat(
-        self,
-        l3_active_cells: np.ndarray,
-        l4_active_minicolumns: np.ndarray,
-    ) -> np.ndarray:
-        """Concatenate L3 and L4 active patterns into a single float32 vector."""
-        return np.concatenate([
-            l3_active_cells.astype(np.float32),
-            l4_active_minicolumns.astype(np.float32),
-        ])
+    def __repr__(self) -> str:
+        return (
+            f"L5aReadout("
+            f"l3_cells={self.total_l3_cells}, "
+            f"n_modules={self.n_modules}, "
+            f"sdr={self.sdr_length_per_module}×{self.sdr_width_per_module}, "
+            f"supervised={self.use_supervised})"
+        )

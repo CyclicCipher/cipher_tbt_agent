@@ -1,7 +1,7 @@
 # Hypothesis: Multi-Rule Collapse Prevents Generalization
 
 **Date:** 2026-02-13
-**Status:** Weakened — single-rule tasks also fail (2026-02-16 Naja ablations)
+**Status:** Weakened — single-rule tasks also fail (2026-02-16 ablations, Mistake #42)
 **Authors:** Project team
 
 ## The Hypothesis
@@ -115,14 +115,14 @@ Observed multi-stage grokking in deep networks: test accuracy improves through m
 
 Measured network complexity through training and found a characteristic rise-and-fall: complexity increases during memorization and drops sharply during generalization. The generalizing solution is simpler. In our framing: "5 simple rules" has lower complexity than "1 complex rule that fits all training data," so the transition to generalization is literally a simplification.
 
-## Naja Ablation Evidence (2026-02-16) — Hypothesis Weakened
+## Ablation Evidence (2026-02-16) — Hypothesis Weakened
 
 ### New data: single-rule tasks also fail to generalize
 
-The Naja Phase 5d ablation suite tested four architectures (mamba3_base,
-mamba3_rope, delta_only, naja_full) on four tasks. Critically, **every
-ablation task is a single-rule task** — there is exactly one algorithm to
-learn, with no multi-rule mixture.
+The Phase 5d ablation suite (Mistake #42) tested several sequence
+architectures on four tasks. Critically, **every ablation task is a
+single-rule task** — there is exactly one algorithm to learn, with no
+multi-rule mixture.
 
 | Task | Algorithm | # Rules | Train Acc | Test Acc | Random |
 |------|-----------|---------|-----------|----------|--------|
@@ -168,7 +168,7 @@ are involved.
 The ~25% test accuracy in Stage 2 might not mean "learned 1 of 5 rules."
 It might mean "partially learned the shared copy/lookup mechanism that
 underlies all rules, getting some test examples right by structural
-similarity to training examples." The Naja associative_recall results
+similarity to training examples." The associative_recall results
 support this: a single-rule lookup task with vocab=32 also gets well
 above random chance (8-22% vs 3% chance) despite clear memorization —
 because some test key-value patterns happen to resemble training ones.

@@ -55,7 +55,7 @@ from typing import List, Optional
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
-from sdr import encode_periodic, concatenate
+from sdr import encode_periodic, concatenate, decode_periodic
 from grid_cells import GridCellLayer
 
 
@@ -198,18 +198,54 @@ class DisplacementLayer:
                 )
             g_mod.phase = (g_mod.phase + d_mod.phase) % g_mod.period
 
+    def apply_from_sdr(
+        self, displacement_sdr: np.ndarray, grid_layer: "GridCellLayer"
+    ) -> None:
+        """Apply a displacement encoded as an SDR to a paired GridCellLayer.
+
+        Decodes each module's chunk of the displacement SDR back to a phase
+        value using decode_periodic, then adds that phase to the paired grid
+        module. This is the fully SDR-native displacement path — no scalar
+        displacement value is required.
+
+        Replaces apply_displacement_to() in the all-SDR architecture: L5a
+        produces a displacement SDR, and this method applies it to L6a
+        without any float intermediate.
+
+        Args:
+            displacement_sdr: Bool (total_sdr_length,) — concatenated
+                displacement module SDRs, as produced by
+                DisplacementLayer.get_displacement_sdr() or by L5aReadout.
+            grid_layer: The L6a GridCellLayer to update.
+        """
+        if len(grid_layer.modules) != self.num_modules:
+            raise ValueError(
+                f"Module count mismatch: DisplacementLayer has "
+                f"{self.num_modules} modules, GridCellLayer has "
+                f"{len(grid_layer.modules)} modules."
+            )
+
+        L = self.sdr_length_per_module
+        for i, (d_mod, g_mod) in enumerate(
+            zip(self.modules, grid_layer.modules)
+        ):
+            if abs(d_mod.period - g_mod.period) > 1e-9:
+                raise ValueError(
+                    f"Period mismatch at module {i}: "
+                    f"displacement={d_mod.period}, grid={g_mod.period}"
+                )
+            chunk = displacement_sdr[i * L : (i + 1) * L]
+            phase_shift = decode_periodic(chunk, 0.0, d_mod.period)
+            g_mod.phase = (g_mod.phase + phase_shift) % g_mod.period
+
     def apply_displacement_to(
         self, displacement: float, grid_layer: GridCellLayer
     ) -> None:
-        """Convenience method: set displacement and apply to grid layer.
+        """Convenience method: set displacement scalar and apply to grid layer.
 
-        Equivalent to:
-            self.set_displacement(displacement)
-            self.apply_to(grid_layer)
-
-        Args:
-            displacement: Scalar displacement to apply.
-            grid_layer: The L6a GridCellLayer to update.
+        The scalar path is retained for external displacement injection
+        (supervised training, Phase 9a reference frame tests). The SDR-native
+        path for inference is apply_from_sdr().
         """
         self.set_displacement(displacement)
         self.apply_to(grid_layer)

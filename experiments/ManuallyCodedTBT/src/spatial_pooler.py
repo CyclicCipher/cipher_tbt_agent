@@ -214,20 +214,25 @@ class SpatialPooler:
     def _learn(self, input_sdr: np.ndarray, active: np.ndarray) -> None:
         """Hebbian permanence update for winning columns only.
 
-        Active synapses in potential pool: increment.
-        Inactive synapses in potential pool: decrement.
-        Non-winning columns: no change.
+        Vectorised: operates on all active columns at once using masked
+        matrix arithmetic rather than a Python loop per column.
         """
-        active_indices = np.where(active)[0]
+        active_idx = np.where(active)[0]
+        if len(active_idx) == 0:
+            return
 
-        for i in active_indices:
-            pot = self.potential_pool[i]
-            inc_mask = pot & input_sdr
-            dec_mask = pot & ~input_sdr
-            self.permanence[i, inc_mask] += self.permanence_inc
-            self.permanence[i, dec_mask] -= self.permanence_dec
+        # Subset permanences and potential pool for active columns only
+        perm = self.permanence[active_idx]         # (n_active, input_size)
+        pot  = self.potential_pool[active_idx]     # (n_active, input_size)
 
-        np.clip(self.permanence, 0.0, 1.0, out=self.permanence)
+        inc_mask = pot &  input_sdr   # broadcast over rows
+        dec_mask = pot & ~input_sdr
+
+        perm[inc_mask] += self.permanence_inc
+        perm[dec_mask] -= self.permanence_dec
+
+        np.clip(perm, 0.0, 1.0, out=perm)
+        self.permanence[active_idx] = perm
 
     def _update_duty_cycles(self, active: np.ndarray,
                             raw_overlaps: np.ndarray) -> None:
@@ -295,6 +300,33 @@ class SpatialPooler:
                 self.permanence[underperforming],
             )
             np.clip(self.permanence, 0.0, 1.0, out=self.permanence)
+
+    def learn_with_target(
+        self, input_sdr: np.ndarray, target_output: np.ndarray
+    ) -> None:
+        """Hebbian update with an externally specified winner set.
+
+        Treats target_output as the winning minicolumns and runs the
+        normal permanence update. Used by L5a during supervised training:
+        the correct displacement SDR bits are the forced winners, and the
+        SP grows synapses from the L3 context pattern to those bits.
+
+        Over many training steps, the SP learns to produce the correct
+        output bits when presented with the corresponding L3 pattern,
+        without needing any gradient or external error signal at the
+        synapse level — the target is specified as the winner set.
+
+        Args:
+            input_sdr:     Bool (input_size,)  — the presynaptic pattern.
+            target_output: Bool (num_minicolumns,) — forced winner columns.
+        """
+        active = target_output.astype(bool)
+        self._learn(input_sdr, active)
+        # Update duty cycles so boosting reflects actual usage.
+        # Pass raw_overlaps=None → duty cycle uses zeros (no ODC update).
+        # Active duty cycle is updated normally.
+        self._update_duty_cycles(active, raw_overlaps=np.zeros(
+            self.num_minicolumns, dtype=np.float32))
 
     def compute(self, input_sdr: np.ndarray, learn: bool = True) -> np.ndarray:
         """Run one timestep of the spatial pooler.

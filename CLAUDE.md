@@ -8,7 +8,7 @@
 
 The architecture is built around the **CTKG** (Category Theory Knowledge Graph), which is the formal cognitive architecture of the symbolic AGI — not a training aid or curriculum generator, but the knowledge representation and reasoning system itself. Categorical composition (morphism composition = Merge = Broca's area operation) is the unifying operation. The RelationalLearner discovers structure from data and populates the CTKG. The interpreter executes CTKG process primitives. The synthesis layer discovers compositional rules from examples.
 
-**Neural network approaches (Mamba3, Naja, JEPA) are paused** due to resource constraints: 4GB VRAM is insufficient for meaningful training on the target tasks. These codebases are preserved but are not the active priority. Do not suggest training runs or neural network modifications as solutions to current problems. The Compositional Arithmetic Curriculum and JEPA work are on hold indefinitely.
+**Neural network approaches (Mamba3, JEPA) are paused** due to resource constraints: 4GB VRAM is insufficient for meaningful training on the target tasks. These codebases are preserved but are not the active priority. Do not suggest training runs or neural network modifications as solutions to current problems. The Compositional Arithmetic Curriculum and JEPA work are on hold indefinitely.
 
 **ePC (energy-based predictive coding) has been archived.** After fixing all known bugs, ePC was 15x slower than backprop with zero accuracy benefit. See Mistake #38.
 
@@ -43,27 +43,6 @@ Key files:
 - `jepa_model.py` — JEPA model with encoder, predictor, decoder
 - `train_jepa.py` — Training loop, data generation, diagnostics
 - `data_gen.py` — Synthetic sequence generation (stages 1a/1b/2)
-
-### Naja (experiments/Naja/) — WY COMPLETE, ABLATIONS PAUSED
-
-Hybrid Mamba3 + Gated DeltaNet architecture with backprop training:
-
-- **Delta rule**: Householder erase before write (targeted memory management)
-- **PoPE orthogonal pair**: Two Householder reflections compose into rotation (B₁, B₂)
-- **Per-channel decay**: KDA-style diagonal α_t replaces scalar exp(Δ·A)
-- **MIMO**: Rank-r B, C, X projections for hardware efficiency
-- **Surprise gating**: β modulated by cross-entropy surprise (Phase 4)
-
-Key files:
-- `naja.py` — Full model (NajaLM, NajaMixer, delta_recurrence, delta_recurrence_wy, KLSurpriseTracker)
-- `train_naja.py` — Training loop with preset ablation configs
-- `tasks.py` — Ablation task generators (associative recall, parity, etc.)
-- `diagnose.py` — Diagnostic suite (timing, correctness, memory)
-- `test_wy_minimal.py` — Standalone WY correctness test (11 test cases, all passing ~1e-6)
-- `run_ablations.py` — Phase 5d ablation runner (preset × task grid)
-- `DESIGN.md` — Complete architecture specification
-
-**WY chunkwise status:** `delta_recurrence_wy()` is numerically verified (Phase 5a+5b+5c complete). Per-channel decay and PoPE pair (B₂ via virtual token expansion) fully supported. Remaining simplification: SISO (r=1).
 
 ### Scratchpad Framework (experiments/scratchpad/) — NEW
 
@@ -235,13 +214,8 @@ predictive-coding-agent/
 │   │   ├── train_arithmetic.py   # Curriculum training (uses scratchpad)
 │   │   ├── train_language.py     # Syntax parsing curriculum on WikiText-2 (NEW)
 │   │   └── archived_epc/        # ePC-Mamba3 (archived 2026-02-14)
-│   ├── BTT_Mamba3/        # BTT-compressed Mamba3 (DESIGN PHASE)
-│   │   └── DESIGN.md      # Layer inventory, BTT candidates, implementation plan
-│   └── Naja/              # Hybrid Mamba3 + Gated DeltaNet (WY complete, ablations paused)
-│       ├── naja.py        # Full model
-│       ├── train_naja.py  # Training loop
-│       ├── tasks.py       # Ablation task generators
-│       └── DESIGN.md      # Architecture specification
+│   └── BTT_Mamba3/        # BTT-compressed Mamba3 (DESIGN PHASE)
+│       └── DESIGN.md      # Layer inventory, BTT candidates, implementation plan
 ├── src/
 │   ├── network/           # Baseline PC (95.14% MNIST)
 │   ├── wrapper/           # Sensorimotor wrapper for Danganronpa
@@ -285,7 +259,7 @@ python experiments/energy_reasoning/train_jepa.py --stage 1b --profile
 
 ## Next Direction: Compositional Curriculum Learning
 
-The core generalization problem persists across all architectures (JEPA, Naja, Mamba3): models memorize composite tasks instead of learning algorithmic structure. Ablation benchmarks (Mistake #42) confirmed this — 100% train / chance test on every non-trivial task.
+The core generalization problem persists across all architectures (JEPA, Mamba3): models memorize composite tasks instead of learning algorithmic structure. Ablation benchmarks (Mistake #42) confirmed this — 100% train / chance test on every non-trivial task.
 
 The original 12-stage curriculum failed — provided no advantage over direct training. The 4-stage revision also failed — skipped sub-skill scaffolding, removed process supervision, autoregressive output asymmetry caused memorization. See `CONTINUATION.md` for full post-mortem.
 
@@ -319,13 +293,13 @@ Previous goals (catastrophic forgetting, modular circuits, energy-based reasonin
 4. **Dao & Gu 2024** — Mamba2/Mamba3. State Space Duality (SSD) for efficient sequence modeling. ACTIVE.
 5. **Bardes et al. 2022** — VICReg. Variance-Invariance-Covariance regularization (used in JEPA training). ACTIVE.
 
-## Research Papers Referenced (Naja Architecture)
+## Research Papers Referenced (Linear Attention / Delta Rule / SSM)
 
-6. **Yang et al. 2024** — "Parallelizing Linear Transformers with the Delta Rule" (DeltaNet). WY chunkwise algorithm for Householder recurrence. arXiv:2406.06484. CRITICAL for Phase 5 implementation.
-7. **Yang et al. 2025** — "Gated Delta Networks" (Gated DeltaNet, ICLR 2025). Adds data-dependent decay to delta rule. arXiv:2412.06464. Direct ancestor of Naja's gated delta recurrence.
-8. **Siems et al. 2025** — "DeltaProduct" (NeurIPS 2025). Multiple Householder reflections per token via virtual token expansion. arXiv:2502.10297. Relevant: Naja's PoPE pair = DeltaProduct with n_h=2.
+6. **Yang et al. 2024** — "Parallelizing Linear Transformers with the Delta Rule" (DeltaNet). WY chunkwise algorithm for Householder recurrence. arXiv:2406.06484.
+7. **Yang et al. 2025** — "Gated Delta Networks" (Gated DeltaNet, ICLR 2025). Adds data-dependent decay to the delta rule. arXiv:2412.06464.
+8. **Siems et al. 2025** — "DeltaProduct" (NeurIPS 2025). Multiple Householder reflections per token via virtual token expansion. arXiv:2502.10297.
 9. **Gopalakrishnan et al. 2024** — PoPE (Polar Positional Embeddings). Decouples content from position.
-10. **Kimi Team (Moonshot AI) 2025** — "Kimi Linear: An Expressive, Efficient Attention Architecture" (KDA). arXiv:2510.26692. Per-channel diagonal decay with `a=b=k` DPLR constraint eliminates secondary chunking. FLA-style state update and decay-weighted pseudo-keys are the ground truth for WY correctness. Our Phase 5a bugs were found by comparing against KDA/FLA conventions.
+10. **Kimi Team (Moonshot AI) 2025** — "Kimi Linear: An Expressive, Efficient Attention Architecture" (KDA). arXiv:2510.26692. Per-channel diagonal decay with `a=b=k` DPLR constraint eliminates secondary chunking; FLA-style state update and decay-weighted pseudo-keys.
 11. **Wang & Li 2024** — "StableSSM: Alleviating the Curse of Memory in State-space Models through Stable Reparameterization" (ICML 2024). arXiv:2311.14495. Best reparameterization `f(w) = 1 - 1/(w² + 0.5)` minimizes gradient-to-weight ratio, enabling larger learning rates and better long-range dependency learning. Implemented as `--stable_ssm` option in Mamba3.
 
 ## Research Papers Referenced (Architecture Improvements)

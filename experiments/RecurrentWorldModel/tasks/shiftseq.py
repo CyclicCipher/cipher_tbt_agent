@@ -43,15 +43,17 @@ class ShiftBatch:
 
 
 class ShiftSeq:
-    def __init__(self, length: int = 8, n_deltas: int = 4, seed: int = 0) -> None:
+    def __init__(self, length: int = 8, n_deltas: int = 4, seed: int = 0, max_step: int = 1) -> None:
         self.L = length
         self.D = n_deltas
-        self.target_classes = (n_deltas - 1) * length + 1   # 0 .. (D-1)*L
+        # max_step sizes the output head for the largest delta_step used (continual scale-shift);
+        # default 1 keeps the Stage-2 behaviour unchanged.
+        self.target_classes = (n_deltas - 1) * length * max_step + 1   # 0 .. (D-1)*L*max_step
         self.vocab_size = self.target_classes               # output classes
         self.seq_len = length + 1                            # v0 + L increments
 
     def sample(self, batch_size: int, v0_lo: float, v0_hi: float,
-               rng: random.Random | None = None) -> ShiftBatch:
+               rng: random.Random | None = None, delta_step: int = 1) -> ShiftBatch:
         rng = rng or random.Random()
         T = self.seq_len
         absin = torch.zeros(batch_size, T, dtype=torch.float32)
@@ -60,7 +62,10 @@ class ShiftSeq:
         mask = torch.zeros(batch_size, T, dtype=torch.float32)
         for i in range(batch_size):
             v0 = rng.uniform(v0_lo, v0_hi)
-            deltas = [rng.randint(0, self.D - 1) for _ in range(self.L)]
+            # delta_step>1 scales the increments -> a covariate shift in the DELTA input that
+            # delta-encoding canNOT annihilate (unlike the v0 offset). The continual-learning
+            # control: delta resists forgetting under the offset shift but not this one.
+            deltas = [rng.randint(0, self.D - 1) * delta_step for _ in range(self.L)]
             v = v0
             absin[i, 0] = v0
             for t, d in enumerate(deltas):

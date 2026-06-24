@@ -147,8 +147,7 @@ All four ablation tasks show 100% train accuracy with near-random test accuracy 
 
 1. **5000 samples vs 1.26M parameters:** 250× more params than samples. The model memorizes the dataset without learning any algorithmic structure.
 2. **50 epochs is far too few for grokking.** Algorithmic generalization on small datasets typically requires 100-1000× more training beyond the memorization point (Power et al. 2022).
-3. **naja_full trains slower on multi_scale** (only 39% train in 50 epochs) while simpler models hit 100% train, suggesting the extra machinery (delta rule + PoPE + per-channel decay) adds optimization difficulty for some tasks.
-4. **Only trivial tasks succeed:** parity (binary output) and permutation_3 (3 possible answers) have such small output spaces that partial learning suffices.
+3. **Only trivial tasks succeed:** parity (binary output) and permutation_3 (3 possible answers) have such small output spaces that partial learning suffices.
 
 **Implications for ablation design:**
 

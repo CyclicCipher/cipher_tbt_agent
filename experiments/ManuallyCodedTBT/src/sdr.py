@@ -455,6 +455,48 @@ def encode_periodic(value: float, n: int, w: int,
     return sdr
 
 
+def decode_periodic(sdr: np.ndarray, min_val: float, max_val: float) -> float:
+    """Decode a periodic SDR back to a scalar value.
+
+    Inverse of encode_periodic. Uses the circular mean of active bit
+    positions to locate the window centre, then subtracts the half-width
+    to recover the start position used during encoding.
+
+    The decoded value may differ from the original by at most one bucket
+    width due to integer rounding in encode_periodic.
+
+    Args:
+        sdr: Boolean array produced by encode_periodic.
+        min_val: Same min_val used in encoding.
+        max_val: Same max_val used in encoding.
+
+    Returns:
+        Scalar value in [min_val, max_val).
+    """
+    n = len(sdr)
+    active = np.where(sdr)[0].astype(float)
+    if len(active) == 0:
+        return float(min_val)
+
+    w = len(active)
+
+    # Circular mean of active bit positions → centre of the window
+    angles = 2.0 * np.pi * active / n
+    mean_sin = float(np.sin(angles).mean())
+    mean_cos = float(np.cos(angles).mean())
+    mean_angle = np.arctan2(mean_sin, mean_cos)
+    if mean_angle < 0.0:
+        mean_angle += 2.0 * np.pi
+
+    # Centre bit → start bit (subtract half-width, wrap)
+    centre_bit = mean_angle / (2.0 * np.pi) * n
+    start_bit  = (centre_bit - (w - 1) / 2.0) % n
+
+    # Map start bit back to value
+    fraction = start_bit / n
+    return float(min_val + fraction * (max_val - min_val))
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Encoding — Random Distributed Scalar Encoding (RDSE)
 # ══════════════════════════════════════════════════════════════════════════════

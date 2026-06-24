@@ -185,7 +185,7 @@ def parse_args():
 
 
 # ---------------------------------------------------------------------------
-# LR schedule (cosine with warmup, same as train_naja.py)
+# LR schedule (cosine with warmup)
 # ---------------------------------------------------------------------------
 
 def make_lr_lambda(warmup: int, total: int):

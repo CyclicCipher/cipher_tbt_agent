@@ -225,21 +225,29 @@ class CorticalColumn:
             learn=learn,
         )
 
-        # Step 5a: L5a — Conjunctive readout (if present)
-        l5a_displacement = None
+        # Step 5a: L5a readout (if present) — SDR-native path
+        l5a_displacement_sdr = None
         if self.l5a is not None:
-            l5a_displacement = self.l5a.compute(
-                self.tm.cell_active, active_minicolumns
+            l5a_displacement_sdr = self.l5a.compute(
+                self.tm.cell_active, learn=False
             )
 
-        # Step 5b: L5b → L6a — Path integration
-        # External displacement takes priority over L5a (allows training with
-        # ground-truth displacement labels alongside learned L5a)
-        effective_displacement = displacement if displacement is not None else l5a_displacement
-        if effective_displacement is not None:
+        # Step 5b: apply displacement to L6a
+        # External scalar displacement (supervised training / Phase 9a) takes
+        # priority. If no external displacement, use L5a SDR output.
+        if displacement is not None:
             self.displacement_layer.apply_displacement_to(
-                effective_displacement, self.grid_layer
+                displacement, self.grid_layer
             )
+        elif l5a_displacement_sdr is not None:
+            self.displacement_layer.apply_from_sdr(
+                l5a_displacement_sdr, self.grid_layer
+            )
+
+        # Effective displacement for reporting
+        effective_displacement = displacement if displacement is not None else (
+            'from_l5a_sdr' if l5a_displacement_sdr is not None else None
+        )
 
         self.iteration += 1
 
@@ -251,7 +259,7 @@ class CorticalColumn:
             'predictive_cells': self.tm.cell_predictive.copy(),
             'anomaly_score': self.tm.get_anomaly_score(),
             'displacement_applied': effective_displacement,
-            'l5a_displacement': l5a_displacement,
+            'l5a_displacement_sdr': l5a_displacement_sdr,
         }
         self._last_result = result
         return result

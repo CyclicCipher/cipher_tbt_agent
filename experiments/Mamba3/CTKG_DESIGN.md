@@ -6,8 +6,8 @@ Design document for the Category Theory Knowledge Graph — the external long-te
 
 | Memory Tier | Implemented By | Brain Analog |
 |---|---|---|
-| Sensory buffer | Naja fast-decay channels | Early sensory cortex |
-| Working memory | Naja surprise-gated state | Prefrontal + parietal cortex |
+| Sensory buffer | SSM fast-decay channels | Early sensory cortex |
+| Working memory | SSM surprise-gated state | Prefrontal + parietal cortex |
 | Long-term knowledge | **CTKG** | Hippocampal-entorhinal cognitive map + anterior temporal semantic hub |
 | Constraints | **CTKG** | Prefrontal constraint system (vmPFC, dlPFC, OFC, ACC) |
 | Innate priors | **CTKG** (pre-populated before training) | Genome / developmental program |

@@ -8,7 +8,7 @@ https://brantondemoss.com/research/grokking/
 
 ## Papers NOT yet in docs/research/ (need manual download)
 
-# Architecture papers (Naja lineage)
+# Architecture papers (linear attention / delta rule / SSM)
 StableSSM — Wang & Li, ICML 2024 (stable long-range memory via reparameterization):
 https://arxiv.org/abs/2311.14495
 
