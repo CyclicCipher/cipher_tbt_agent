@@ -47,8 +47,18 @@ def _sr_frame(W):
     return evecs[:, :-1]                                                  # drop the trivial constant mode
 
 
+def _sparsify_topk(M, k):
+    """Keep the signed top-k entries per row, zero the rest, renormalize — sparse high-capacity codes. A random
+    projection followed by this winner-take-all is locality-sensitive hashing (Dasgupta-Stevens-Navlakha 2017,
+    the fly mushroom body): similarity-preserving AND near-orthogonal in C(d, k) >> d numbers."""
+    idx = M.abs().topk(min(k, M.shape[1]), dim=1).indices
+    out = torch.zeros_like(M)
+    out.scatter_(1, idx, M.gather(1, idx))
+    return torch.nn.functional.normalize(out, dim=1)
+
+
 class CorticalColumn(nn.Module):
-    def __init__(self, n_entities, feat_dim=96, d_mem=512, torus_size=12, scales=(11, 13, 17),
+    def __init__(self, n_entities, feat_dim=256, d_mem=512, torus_size=12, scales=(11, 13, 17),
                  place_k=1, seed=0):
         super().__init__()
         self.gen = torch.Generator().manual_seed(seed)
@@ -62,6 +72,8 @@ class CorticalColumn(nn.Module):
         # online structure learning (discover a structure from raw transitions; driven by agent.py) -------
         self.graph, self.loc, self.rel = {}, {}, {}           # observed edges; symbol→frame index; relation operators
         self.place = None                                     # (n, d_mem) per-node SR-frame codes (set by consolidate)
+        self._sparse_place = False                            # True once n > d_mem → sparse place codes + cleanup
+        self._place_k_loc = 16                                # active units per sparse place code (~3% of d_mem)
 
     # ----- learn a model of a domain (structure GIVEN) via the SR frame ----------------------------
     def learn_domain(self, name, entity_labels, relations, remap=True):
@@ -134,8 +146,15 @@ class CorticalColumn(nn.Module):
                 W[idx[s2], idx[s]] += 1.0                            # symmetric (undirected) adjacency
                 relations.setdefault(a, []).append((idx[s], idx[s2]))
         Z = _sr_frame(W)
-        U = _orthonormal(self.d_mem, Z.shape[1], self.gen)         # this column's slot
-        self.place = torch.nn.functional.normalize(Z @ U.t(), dim=1)   # (n, d_mem) place code per node
+        nz = Z.shape[1]
+        if nz <= self.d_mem:                                       # exact near-orthonormal (dense) place codes, up to d_mem
+            P = _orthonormal(self.d_mem, nz, self.gen)
+            self.place = torch.nn.functional.normalize(Z @ P.t(), dim=1)
+            self._sparse_place = False
+        else:                                                      # past d_mem: SPARSE place codes (LSH) — capacity C(d_mem,k) >> d_mem
+            Wp = torch.randn(self.d_mem, nz, generator=self.gen) / (nz ** 0.5)
+            self.place = _sparsify_topk(Z @ Wp.t(), self._place_k_loc)
+            self._sparse_place = True
         self.loc = idx
         for s, i in idx.items():
             self.L23.pool(self.L4.bind(s, self.place[i]))
@@ -143,9 +162,16 @@ class CorticalColumn(nn.Module):
             self.L5.learn(("rel", a), self.place, edges)
             self.rel[a] = ("rel", a)
 
+    def _cleanup(self, v):
+        """Snap a noisy location vector to the nearest place code (attractor cleanup) — keeps sparse-code
+        operator composition from accumulating error. Used only on the sparse path (n > d_mem)."""
+        return self.place[(self.place @ v).argmax()]
+
     def predict(self, symbol, action):
         """Apply the learned action operator at a symbol's place, read out the landing symbol."""
         v = self.L5.apply(self.rel[action], self.place[self.loc[symbol]])
+        if self._sparse_place:
+            v = self._cleanup(v)
         return self.L4.readout(self.L23.S, v).argmax().item()
 
     def add(self, start, count, succ_action=0):
@@ -153,6 +179,8 @@ class CorticalColumn(nn.Module):
         v = self.place[self.loc[start]]
         for _ in range(count):
             v = self.L5.apply(self.rel[succ_action], v)
+            if self._sparse_place:
+                v = self._cleanup(v)
         return self.L4.readout(self.L23.S, v).argmax().item()
 
     # ----- codes exposed for cross-column composition (the thalamus binds content ⊗ location) --------

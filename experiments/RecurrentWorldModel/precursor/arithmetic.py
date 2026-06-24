@@ -36,10 +36,10 @@ def run(n: int, torus: int = 22, steps=None, seed: int = 0, max_b: int = 9):
 if __name__ == "__main__":
     print("stage 2 — addition on ONE column, scaling the number line (a + b by navigation):\n")
     print(f"  {'line':>6}  {'addition':>14}  {'placed':>9}")
-    for n in (12, 50, 96):
+    for n in (12, 96, 256):
         c, t, placed = run(n=n, torus=22, steps=5 * n * n, max_b=20)
         print(f"  {n:>6}  {f'{c}/{t}':>14}  {placed:>5}/{n}")
-    print("\n  the wall: feat_dim = 96 = the most distinct symbols one column's codebook holds.")
-    print("  beyond it a single number line simply can't represent the numbers (codebook full).")
-    print("  → bigger numbers need a COMPOSITIONAL representation — 10 digit-symbols reused across")
-    print("    positions (place value) = the second structure, now forced by data, not assumed.")
+    print("\n  no feat_dim wall any more: SPARSE content codes (L4) give capacity >> feat_dim — a single line")
+    print("  reaches ~d_mem = 512 (the LOCATION capacity, the place codes), then degrades gracefully. But raw")
+    print("  capacity was never the real reason to factor: place value reuses 10 digit-symbols across positions")
+    print("  = a LOGARITHMIC representation for ANY magnitude (factored.py), which no single line matches.")

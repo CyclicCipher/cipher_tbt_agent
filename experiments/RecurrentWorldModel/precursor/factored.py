@@ -7,7 +7,7 @@ number line (by navigation), and propagates a base-b carry.
 
 The column learns ONLY the single-digit number line (0 .. 2b-1). It NEVER sees a multi-digit number, so
 EVERY test addition is held-out — correctness = the factored representation GENERALISED (it composed 10
-digit-symbols), it did not memorise. Contrast: the holistic line (stage 2) caps at feat_dim≈96 and cannot
+digit-symbols), it did not memorise. Contrast: the holistic line (stage 2) caps at one column's place capacity (~d_mem) and cannot
 even represent a 3-digit number. The place-value rule (decompose digits / carry) is the symbolic layer that
 the column's ANS digit arithmetic runs underneath — provided here, as it is culturally taught in humans.
 
@@ -89,4 +89,4 @@ if __name__ == "__main__":
         c, t = test_addition(fc, nd)
         print(f"  {nd:>7}  {'0..' + str(10 ** nd - 1):>14}  {c:>12}/{t}")
     print("\n  every test number is unseen (no multi-digit was ever trained) — correctness = generalization")
-    print("  from 10 digit-symbols + the place rule, not memorization (holistic caps at feat_dim≈96).")
+    print("  from 10 digit-symbols + the place rule, not memorization (holistic caps at one column's place capacity).")

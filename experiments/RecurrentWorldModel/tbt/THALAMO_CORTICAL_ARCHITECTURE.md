@@ -204,6 +204,9 @@ experiments/RecurrentWorldModel/tbt/
   eigenoptions.py       # Reward-free subgoal discovery (SR/Laplacian)                    [planned]
   thalamus.py           # Inter-column routing / cross-column conjunction (bind/read)     [done — conjunction; goal-state control loop ahead]
   basal_ganglia.py      # Gate selector / emergent allocator (Go/NoGo + load-balance + dopamine-RPE; pure stdlib) [done]
+  factorize.py          # Disentanglement: discover factors from action-orbits (Higgins 2018; pure stdlib)  [done — direct-product case]
+  residual.py           # Recursive residual modelling — the ONE general structured-deviation learner (pure stdlib) [done]
+  dynamics.py           # Dynamics column: learn the world's conditional effects (precondition→effect) from exafference [done]
   __init__.py           # lazy exports (torch loads only when a torch component is touched)
   RESEARCH.md           # research log
   THALAMO_CORTICAL_ARCHITECTURE.md   # this document
@@ -212,6 +215,11 @@ experiments/RecurrentWorldModel/precursor/
   numberline.py         # stage-1 environment + runner (doc §14)
   factored.py / carry.py / grid2d.py / tree.py   # stages 3–5 (place value, learned carry, 2-D, non-metric tree)
   multicolumn.py        # stage-6 emergent allocation: pool of columns + BG gate + thalamus
+  disentangle.py        # stage-7 Higgins disentanglement: discover an entangled torus factors, from action
+  passive.py            # stage-8 passive learning: a world model learned by watching (no actions) + anticipation
+  coupled.py            # stage-9 coupled-carry: the transverse test FLAGS place value's semidirect coupling
+  residual.py           # stage-10 recursive residual: ONE loop learns carry/context/exceptions, refuses noise
+  dynamics.py           # ARC step-1: a dynamics column learns conditional effects (key/switch/pad → door) from experience
 ```
 
 An experiment = `import tbt`; assemble `columns + thalamus + basal_ganglia + reward + agent` with chosen
@@ -261,9 +269,13 @@ hyperparameters; plug in the experiment's `Environment`. The reward model now li
    identical columns + the BG gate allocate digit vs position by random-init symmetry break + load-balancing
    (a→no collapse, b→broken) + dopamine-RPE; which column takes which role varies by seed and the gate
    routes a known structure back to its specialist; the thalamus composes the gate-chosen columns → 200/200.
-   STILL OPEN: (c) **disentanglement** — discovering THAT the task factors (digit × position); the two
-   streams are still presented pre-separated. That, plus content-keyed gating (recognize a structure from
-   its transitions, not a given stream id), is the next allocation problem.
+   (c) **disentanglement** — discovering THAT the space factors — is now demonstrated for the clean
+   DIRECT-PRODUCT case (`precursor/disentangle.py`, stage 7): from an entangled torus (shuffled symbols,
+   unlabelled actions) the factorization is read off action-orbit partitions (Higgins 2018; Locatello 2019:
+   you need action, not statistics), the two independent factors recovered + modelled compositionally, and an
+   N²=100 joint space that overflows one column's codebook is handled by two columns of 10. STILL OPEN: the
+   COUPLED case (carry = a semidirect product, not a clean direct product) + content-keyed gating (recognize
+   a structure from its transitions, not a given stream id).
 4. **Stability** of the BG-gated switching loop (avoid thrashing between subgoals).
 
 ---
@@ -296,12 +308,14 @@ noise from ARC), staged so each stage lights up one more component and tests a s
    5 seeds, all 12 symbols placed.** Settles the R1 correction empirically: cold-start structure learning is
    1-shot, no meta-prior. *Built:* the `Environment` contract + the reusable wrapper.
 2. **Arithmetic on ONE column.** ✅ DONE (`precursor/arithmetic.py`). Addition = navigation: a + b = apply
-   the learned successor operator b times. **Perfect (78/78, 840/840, 1806/1806) up to the content capacity
-   feat_dim = 96**, then the codebook is full. KEY EMPIRICAL FINDING (settles "why >1 column?"): this task
-   needs only ONE column within capacity — a single number line is **linear** in capacity (≈1 symbol per
-   number). The second structure is **not** assumed; it is forced only by **efficiency at scale**: place
-   value (10 digit-symbols reused across positions) is the **logarithmic** representation that handles any
-   magnitude. So multi-column is motivated by an observed capacity wall, not theory. *Built:* the `add`
+   the learned successor operator b times. **Perfect to ~512** (the line reaches d_mem, then degrades
+   gracefully). NB the original feat_dim=96 wall is GONE — L4 now uses SPARSE content codes (capacity >>
+   feat_dim, the cortical trick), so the limit moved down to the LOCATION capacity (d_mem place codes; see
+   the L4 / capacity work). KEY EMPIRICAL FINDING (settles "why >1 column?"): a single number line is still
+   **linear** in capacity (≈1 symbol per number) — the second structure is **not** assumed; it is forced by
+   **efficiency at scale**: place value (10 digit-symbols reused across positions) is the **logarithmic**
+   representation that handles any magnitude. So multi-column is motivated by the linear-vs-log scaling, not
+   theory. *Built:* the `add`
    composition path.
 3. **Factored (place-value) representation.** ✅ BUILT (`precursor/factored.py`). A number is stored in the
    column as `digit ⊗ place` bindings — its native **What(L4) × Where(L6)** binding, = the brain's place
@@ -347,7 +361,52 @@ noise from ARC), staged so each stage lights up one more component and tests a s
    goal-state in the spatial column, §5/§6) — its necessity shows on LockPath, where the subgoal sequence is
    data-dependent, not a fixed position loop.
 
-Stage 1 settled cold-start empirically; stage 2 settled "needs >1 column" empirically (no, until the
-capacity wall); stage 5 made one frame handle every topology; stage 6 showed the factorization's ALLOCATION
-emerges from the gate (disentanglement still given). Only then move to the ARC replica (perception +
-genuinely novel structure on top).
+7. **Disentanglement — discovering THAT the space factors (Higgins-style).** ✅ DONE for the clean case
+   (`tbt/factorize.py`, `precursor/disentangle.py`). Stage 6 was handed pre-separated streams; here the input
+   is ENTANGLED — an N×N torus seen as ONE shuffled symbol per cell, 4 actions unlabelled as to axis. The
+   factorization is read off **how states transform under action** (Higgins 2018; Locatello 2019: static
+   statistics provably cannot): each action's orbit-partition is computed, actions with the same orbits are
+   one factor (an action and its inverse coincide), two factors are a direct product iff their partitions are
+   transverse. Result: from the entangled torus the 2 independent factors are recovered (actions split
+   [0,1]|[2,3]), modelled one-column-each, joint dynamics predicted compositionally (144/144 at N=6, exact at
+   N=45). Capacity (post the sparse-coding work, R4): a single column is now high-capacity, so both models fit
+   at N=45 — but the factored cost is LINEAR (2 columns of N) vs the holistic's QUADRATIC (an N²-state column
+   → N²×N² consolidation), so the holistic blows up in compute and degrades by ~N=90 while factored stays
+   cheap+exact. STILL OPEN: the COUPLED case (place-value carry = a semidirect product).
+
+**Capacity (infrastructure, not a stage).** L4 content codes AND the place codes are now SPARSE high-D codes
+(dentate-gyrus / cerebellum / fly-mushroom-body expansion) instead of dense orthonormal, so capacity is
+EXPONENTIAL not linear: the number line runs to 2000+ (was a hard wall at 96, then 513). Sparse place codes
+need an attractor CLEANUP (snap to the nearest place code) in composition, gated on the sparse path so the
+dense ≤d_mem case is byte-identical. See RESEARCH.md R4. The cortical lesson: generous sparse capacity, then
+FACTORIZE on overflow (which is the whole multi-column line).
+
+8. **Passive learning.** ✅ DONE (`precursor/passive.py`). A column learns a WORLD model by WATCHING (no
+   actions) and ANTICIPATES (rolls the world operator forward): autonomous ring, 1-step 20/20, 5-step roll-out
+   20/20. NO new machinery — a 'world' operator is learned exactly like an action operator; the efference copy
+   (reafference vs exafference) is the only thing distinguishing what the agent CONTROLS (active, orbit-
+   disentanglable) from what it merely WATCHES (passive). Both coexist in one column (16/16 each). Active alone
+   could never learn the autonomous process.
+
+9. **Coupled-carry disentanglement — detection.** ✅ DONE (`precursor/coupled.py`). Place value (units × tens
+   with carry) is a SEMIDIRECT product — Z_{b²}, NOT Z_b × Z_b. The transverse test FLAGS it: discover_factors
+   returns a TRIVIAL second factor (n=1) and is_product=FALSE (vs the torus's TRUE), localizing the coupling to
+   the carry action (+1, whose orbit is the whole cycle); the carry is sparse (b of b²). STILL OPEN: EXTRACTING
+   the carry from data = the HOLONOMY of +1 around the units-cycle (the extension's cocycle) — the next build.
+
+10. **Recursive residual modelling — the ONE general mechanism (RESEARCH.md R7).** ✅ DONE (`tbt/residual.py`,
+   `precursor/residual.py`). Instead of a bespoke detector per structure type (the holonomy would have been
+   one), ONE loop: model the coordinate-deltas, take the residual, re-model it with the same machinery,
+   recurse, stop at the MDL boundary. ONE loop, FIVE structurally different problems: 2-digit carry 100/100
+   (DISCOVERED place-value carry as rules — `c0==9 → tens+1` — no holonomy, no place value given), 3-digit
+   carry 1000/1000 (nested), context-dependence 29/29, feature exceptions 43/43, and incompressible random
+   noise REFUSED (41/49, base only = the MDL stop, not memorisation). So scope items A–D (couplings, hierarchy,
+   encoding, granularity = all "residual structure") are ONE mechanism. Open: range/disjunction predicates;
+   wiring disentangle → residual end-to-end (raw transitions, not given coordinates).
+
+Stage 1 settled cold-start empirically; stage 2 "needs >1 column" (no, until the capacity wall — now lifted by
+sparse coding); stage 5 one frame for every topology; stage 6 the factorization's ALLOCATION emerges from the
+gate; stage 7 its DISCOVERY (clean direct-product); stage 8 passive watch-and-anticipate learning; stage 9
+flagged the coupled (carry) case; stage 10 replaced the bespoke per-structure detectors with ONE recursive-
+residual mechanism (carry DISCOVERED, not hand-coded). The frontier before ARC is now genuinely just E
+perception / F value / G credit (plus wiring disentangle → residual end-to-end).
