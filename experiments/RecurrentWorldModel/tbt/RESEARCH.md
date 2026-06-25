@@ -308,3 +308,62 @@ from RAW shuffled symbols + unlabelled {+1, +b} actions with NO coordinates give
 from the +b orbit count and the +1 cycle order gives the coordinates, then the residual loop predicts carry
 **100/100 (2-digit), 1000/1000 (3-digit)** — place value + the encoding + the carry rule, all from data, one
 shot. Frontier now genuinely E (perception) / F (value) / G (credit) → the ARC replica.
+
+---
+
+## R8 — Sequence memory: L6 as a path-integrated state (and the projection-vs-table lesson)
+
+**Question.** The column — and the language probe built on it — predicts the next token from the CURRENT token
+only (Markov-1). It has no memory of the past sequence, so "B after A" and "B after X" are indistinguishable.
+What does the architecture say about sequence memory, and does adding it help?
+
+**Answer (TBT/HTM): a compressed STRUCTURED recurrent state, not lossless attention.** TBT = path integration:
+the column's LOCATION is the integrated history (grid cells path-integrate movement). HTM Temporal Memory
+(Hawkins & Ahmad 2016) = context-specific cells via lateral prediction (WHICH cell fires encodes the past).
+Both are a compressed recurrent state updated incrementally — and the engineering form is a SELECTIVE linear
+state-space recurrence, i.e. **Mamba**, which the repo already has. Attention (lossless, O(n²)) is the
+alternative and it bridges to L23 associative memory (modern Hopfield = attention = the episodic/hippocampal
+side) — but the cortical answer is the compressed state. So: make **L6 a DYNAMIC path-integrated state** (it
+was modelled on grid cells, which path-integrate; we had been using it as a STATIC lookup), updated by a
+selective per-channel gate, learned online with a **1-step-truncated** local rule (no BPTT):
+  α(x)=σ(G[x])∈(0,1)^d ;  h_t = α⊙h_{t-1} + (1−α)⊙E[x_t] ;  p_t = Op·h_t (navigate, L5) ;  P(next) ∝ softmax E·p_t.
+The convex form keeps h in the convex hull of the codes → bounded even when CARRIED across ~1500 steps.
+
+**Built + validated (`precursor/language*.py`, pooled Latin + Middle/Old High German ~480K tokens, next-token PPL).**
+- `language.py` (PASSIVE): the SR-frame IS a word embedding (Levy-Goldberg: SGNS factorizes PMI; Stachenfeld:
+  grid = SR eigenbasis — same object). Coherent geometry, generalizes next-token on RARE contexts (the
+  E3-on-unseen-pairs win). Static factorization, PPL 166.
+- `language_active.py` (ACTIVE, Markov-1): predict = a MOTOR ACT (apply the displacement operator). PPL 181 —
+  WORSE than passive. Honest finding: on a FIXED corpus the agent can't choose data, so "active" collapses to
+  online error-correction, which closed-form SVD does more efficiently; active's real edge is CONTROL over the
+  data distribution (embodied: ARC/Minecraft), not corpus reading.
+- `language_recurrent.py` (RECURRENT, selective SSM memory): PPL 181 → **152 (best)**, rare-context 155 →
+  **136** (beats passive 141). The controlled ±memory comparison (same model family) is unambiguous:
+  **sequence memory is the win.**
+
+**THE PROJECTION-vs-TABLE LESSON (record this).** The per-channel gate must be a DIRECTLY-LEARNED per-token
+TABLE `G (V×d)`, `α=σ(G[x])`. The Mamba-canonical SHARED PROJECTION `α=σ(Wₐ·E[x])` **under-trains at this
+scale**: `Wₐ` init tiny → `Wₐ·E[x]≈0` → α stuck at its init (~0.61) for every token → collapses to a FIXED
+(non-selective) decay → REGRESSES (163.6, vs the table's 152.4, vs even a scalar per-token table's 158). Why:
+the projection's gradient is diffuse across one shared d×d matrix and needs many passes to develop per-token
+differentiation; the per-token table gives each token's gate a strong, directly-accumulated signal (the scalar
+table learned α∈[0.01,1.0] cleanly). At a few hundred K tokens the **direct table wins**; the projection is the
+right form only at scale (more data + passes). **Logged in case we scale up and the projection begins to pay —
+do not assume the Mamba projection is strictly better; here it wasn't.**
+
+**Interpretability bonus.** The learned gate is linguistically meaningful, BILINGUALLY: high-α
+"carry/transparent" = particles/copula (et, est, enim); low-α "reset/overwrite" = PREPOSITIONS (ad, ab, ex,
+inter, de) + German function words (der, von). It rediscovered "a preposition introduces a fresh phrase" from
+raw next-token prediction.
+
+**Honest residuals / scope.** (1) 1-step-truncated learning: the forward state carries history but credit is
+1-step local — works here, may limit very-long-range credit. (2) The convex gate biases toward recent tokens.
+(3) This is NOT a full LM — exactly the R7 boundary: deeply recursive / unbounded-arity language structure may
+need a **Merge PRIMITIVE beyond the column.** What IS settled: recurrence/sequence memory is a real, working
+COLUMN capability — the temporal dimension the multi-column neocortex needs (the §5/§6 control loop is itself a
+recurrence over subgoals). NEXT at scale: revisit the per-dim PROJECTION gate; carry state across whole books;
+B/C-selectivity (input + readout gates); the Merge-primitive boundary for real language.
+
+Sources: Mamba/SSD (Dao & Gu 2024) · HTM Temporal Memory (Hawkins & Ahmad 2016) · TBT path integration
+(Hawkins 2019) · Stachenfeld 2017 (grid = SR) · Levy & Goldberg 2014 (SGNS = PMI) · Ramsauer 2020 (modern
+Hopfield = attention). Memory: `project_grid_in_mamba_hybrid`.

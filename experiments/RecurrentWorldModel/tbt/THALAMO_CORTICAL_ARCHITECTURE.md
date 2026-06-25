@@ -22,7 +22,7 @@ A column learns **one structured map** and predicts from it. It is a Tolman-Eich
 
 | Layer | Role | TEM |
 |---|---|---|
-| **L6** grid/structure code `g` | the SR-eigenvector frame of the transition graph (Stachenfeld: grid cells ARE the SR eigenvectors) — grid-like on metric graphs, correct on trees; hard-coded hex kept as an innate metric PRIOR | `g` (MEC) |
+| **L6** grid/structure code `g` | the SR-eigenvector frame of the transition graph (Stachenfeld: grid cells ARE the SR eigenvectors) — grid-like on metric graphs, correct on trees; hard-coded hex kept as an innate metric PRIOR; **can also be driven as a DYNAMIC path-integrated state for sequence memory** (selective recurrence — §14 stage 11 / R8) | `g` (MEC) |
 | **L5** displacement operators | per-action/relation operators that path-integrate L6 — the **efference copy** drives them | action operators |
 | **L4** content `x` | feature codebook; binds feature ⊗ location | `x` (LEC) |
 | **L23** conjunction `p` / object memory `S` | bound feature-at-location memory; pooled, delta-rule revised, votes laterally | `p` (hippocampus) |
@@ -220,6 +220,9 @@ experiments/RecurrentWorldModel/precursor/
   coupled.py            # stage-9 coupled-carry: the transverse test FLAGS place value's semidirect coupling
   residual.py           # stage-10 recursive residual: ONE loop learns carry/context/exceptions, refuses noise
   dynamics.py           # ARC step-1: a dynamics column learns conditional effects (key/switch/pad → door) from experience
+  language.py           # stage-11: the column's SR-frame IS a word embedding (passive geometry probe)
+  language_active.py    # stage-11: active sensorimotor language — predict = a motor act (Markov-1)
+  language_recurrent.py # stage-11: sequence memory — L6 as a selective-SSM path-integrated state (the win); RESEARCH.md R8
 ```
 
 An experiment = `import tbt`; assemble `columns + thalamus + basal_ganglia + reward + agent` with chosen
@@ -404,9 +407,28 @@ FACTORIZE on overflow (which is the whole multi-column line).
    encoding, granularity = all "residual structure") are ONE mechanism. Open: range/disjunction predicates;
    wiring disentangle → residual end-to-end (raw transitions, not given coordinates).
 
+11. **Sequence memory (recurrence) + language.** ✅ DONE (`precursor/language.py`, `language_active.py`,
+   `language_recurrent.py`; RESEARCH.md R8). The Markov-1 ceiling (predict next from the CURRENT token only) is
+   broken by making **L6 a DYNAMIC path-integrated state** (TBT path integration / HTM context cells) via a
+   **selective linear recurrence** (Mamba — the compressed structured state, NOT lossless attention), learned
+   online with a 1-step-truncated local rule, the state carried across the whole ~1500-token chunk. On pooled
+   Latin + Middle/Old High German (next-token perplexity): memory takes Markov-1 **181 → 152 (best of all
+   approaches)**, rare-context **155 → 136** (beats the passive SR-frame factorization, 166/141). The controlled
+   ±memory comparison (same model family) is unambiguous — sequence memory is the win. **Key build lesson (R8):**
+   the per-channel selective gate must be a DIRECTLY-LEARNED per-token TABLE `G (V×d)`; the Mamba-canonical
+   SHARED PROJECTION `σ(Wₐ·E[x])` UNDER-trains at this scale (init-tiny `Wₐ` → α frozen at init → fixed,
+   non-selective decay → regresses 163.6) — the projection is the right form only at scale, the direct table
+   wins at a few hundred K tokens. The gate is interpretable: prepositions (ad/ab/ex/de, der/von) learn to RESET
+   context, particles/copula (et/est/enim) to CARRY it — "a preposition introduces a fresh phrase", discovered
+   from raw prediction. NOT a full LM (the R7 Merge-primitive boundary), but recurrence is now a working COLUMN
+   capability — the temporal dimension the multi-column neocortex needs (the §5/§6 control loop is itself a
+   recurrence over subgoals).
+
 Stage 1 settled cold-start empirically; stage 2 "needs >1 column" (no, until the capacity wall — now lifted by
 sparse coding); stage 5 one frame for every topology; stage 6 the factorization's ALLOCATION emerges from the
 gate; stage 7 its DISCOVERY (clean direct-product); stage 8 passive watch-and-anticipate learning; stage 9
 flagged the coupled (carry) case; stage 10 replaced the bespoke per-structure detectors with ONE recursive-
-residual mechanism (carry DISCOVERED, not hand-coded). The frontier before ARC is now genuinely just E
-perception / F value / G credit (plus wiring disentangle → residual end-to-end).
+residual mechanism (carry DISCOVERED, not hand-coded); stage 11 gave the column SEQUENCE MEMORY (L6 as a
+selective-SSM recurrent state — memory beats no-memory and the static factorization). The frontier before ARC
+is now genuinely just E perception / F value / G credit (plus wiring disentangle → residual end-to-end), with
+the recurrence carrying into the multi-column control loop.
