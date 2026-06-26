@@ -27,9 +27,10 @@ class DynamicsModel:
         selects exactly the states where it occurred — the residual predicate search. An effect with no
         compressing precondition is dropped (refused, not memorised) — the MDL stop."""
         self.rules = []
-        for eff in sorted({e for _, e in self.obs if e is not None}, key=repr):
-            need = [f for f, e in self.obs if e == eff]
-            correct = [f for f, e in self.obs if e != eff]   # states where this effect did NOT occur
+        obs = list(set(self.obs))                            # the predicate search only needs the DISTINCT
+        for eff in sorted({e for _, e in obs if e is not None}, key=repr):   # (features -> effect) rows, not every
+            need = [f for f, e in obs if e == eff]           # near-identical step (e.g. 1300 steps -> ~12 rows)
+            correct = [f for f, e in obs if e != eff]        # states where this effect did NOT occur
             pred, desc = _find_predicate(need, correct)
             if pred is not None:
                 self.rules.append((pred, desc, eff))

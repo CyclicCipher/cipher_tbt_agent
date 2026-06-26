@@ -1,5 +1,13 @@
 # CLAUDE.md — Cipher's TBT Agent
 
+## ⚠ ACTIVE WORK (read first) — merge to `src/` + reorient to the reusable architecture
+The agent had drifted into a 575-line ARC-specific solver (the anti-pattern). We are **killing the silo**: merge
+`experiments/ProgramSynthesis` + `experiments/RecurrentWorldModel` into one top-level `src/` package, then
+reorient the agent to a **thin shell over the column** (the `tbt/agent.py` 40-line template), with task-format
+code quarantined in `perception/`/`tasks/` and planning moved into the column. **The plan + live checklist is
+[REORG_PLAN.md](REORG_PLAN.md) — follow it; update its checkboxes as steps land.** Do Part A (pure-move merge)
+then Part B (reorient per `tbt/EMERGENT_PLAN.md`). Remove this note when REORG_PLAN.md is fully checked.
+
 ## What this project is
 
 A from-scratch AI agent built on the **Thousand Brains Theory** (cortical columns). One reusable column learns

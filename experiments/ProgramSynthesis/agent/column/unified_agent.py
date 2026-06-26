@@ -106,7 +106,7 @@ class UnifiedAgent:
         self.body = objp.body_color
         self.pushable = set(objp.pushable)
         self._blocking0 = set(objp.blocking)
-        self.death, self.effects = set(), {}                   # trigger colour -> set(removed colours)
+        self.death, self.effects, self.adds = set(), {}, {}    # gone (trigger->removed) + appeared (trigger->added)
         for _pred, desc, eff in dm.rules:
             m = re.search(r"c0==(\d+)", desc)
             if not m:
@@ -116,6 +116,16 @@ class UnifiedAgent:
                 self.death.add(v)
             elif eff.startswith("color_") and eff.endswith("_gone"):
                 self.effects.setdefault(v, set()).add(int(eff.split("_")[1]))
+            elif eff.startswith("color_") and eff.endswith("_appeared"):
+                self.adds.setdefault(v, set()).add(int(eff.split("_")[1]))
+        # a trigger that ADDS a blocker (a door colour the dynamics also knows as removable) is HARMFUL — stepping
+        # on it MAKES an obstacle (the switch that closes the door), so the agent avoids it during navigation.
+        door_colors = set()
+        for s in self.effects.values():
+            door_colors |= s
+        for s in self.adds.values():
+            door_colors |= s
+        self.harmful = {t for t, added in self.adds.items() if added & door_colors}
         self.goal_colors = set(goal.goal_colors)
         self.required_absent = set(goal.required_absent())
         self.thal = Thalamus()
@@ -234,6 +244,7 @@ class UnifiedAgent:
         doors = set().union(*self.effects.values()) if self.effects else set()   # a colour a trigger removes is
         blocked = {p for c, cells in by_color.items()                             # an obstacle until it's removed
                    if ((c in self.blocking or c in doors) and c not in removed) or c in self.death for p in cells}
+        blocked |= {p for t in self.harmful for p in by_color.get(t, ())}         # ...and avoid a blocker-ADDING trigger
         walk = self._cache["walk"]
         seen, q = {body}, deque([body])
         while q:
@@ -303,8 +314,9 @@ class UnifiedAgent:
     # ---- factored navigation of one subgoal -------------------------------------------------------
     def _blocked(self, by_color, removed):
         doors = set().union(*self.effects.values()) if self.effects else set()   # closed doors block navigation
-        return {p for c, cells in by_color.items()                               # too, until their trigger fires
-                if ((c in self.blocking or c in doors) and c not in removed) or c in self.death for p in cells}
+        blocked = {p for c, cells in by_color.items()                            # too, until their trigger fires
+                   if ((c in self.blocking or c in doors) and c not in removed) or c in self.death for p in cells}
+        return blocked | {p for t in self.harmful for p in by_color.get(t, ())}  # + avoid a blocker-adding trigger
 
     def _pushables_now(self, by_color):
         return {p for c in self.pushable for p in by_color.get(c, ())}

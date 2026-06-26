@@ -32,6 +32,7 @@ from .object_perceiver import ObjectPerceiver               # noqa: E402  (E: bo
 from .perceive import active_cells, detect_motion, modal_background   # noqa: E402
 
 _FEAT = {0: "stepped_on"}
+_PALETTE = 16                                                 # ARC's colour count: presence-context = present(0..15)
 
 
 class DynamicsPerceiver:
@@ -66,8 +67,9 @@ class DynamicsPerceiver:
         """Return (features, effect, present) for this transition, or (None, None, None) until calibrated.
         `present` = the non-background, non-body colours in the pre-state — the context F differences."""
         prev, cur = prev_frame.grid, frame.grid
-        prev_cells = active_cells(prev, modal_background(prev))
-        cur_cells = active_cells(cur, modal_background(cur))
+        prev_bg, cur_bg = modal_background(prev), modal_background(cur)
+        prev_cells = active_cells(prev, prev_bg)
+        cur_cells = active_cells(cur, cur_bg)
 
         # efference copy: the body is the colour that translated by the action's delta
         if action.is_movement and frame.state == GameState.NOT_FINISHED:
@@ -86,22 +88,29 @@ class DynamicsPerceiver:
         dx, dy = action.delta
         dest = (body[0] + dx, body[1] + dy)
         stepped_on = prev[dest[1]][dest[0]] if 0 <= dest[1] < len(prev) and 0 <= dest[0] < len(prev[0]) else -1
-        features = (stepped_on,)
         present = {c for c in prev_cells.values()} - {self.body_color}
+        features = (stepped_on,) + tuple(1 if c in present else 0 for c in range(_PALETTE))   # + presence-context:
+        #   the per-colour presence makes a CONDITIONAL effect expressible (a switch flips a door only if present)
 
-        # effect (priority: terminal / score before a generic world-diff that a level change would corrupt)
+        # effect (terminal / score first, then a generic world-diff a level change would corrupt). The diff is now
+        # SYMMETRIC: a colour can vanish (door opens) OR appear (door closes); both are occlusion-safe (a mover or
+        # the body never counts), so the toggle's switch<->door is two conditional rules, not effects={}.
         if frame.state == GameState.GAME_OVER:
             effect = "death"
         elif frame.score > prev_frame.score:
             effect = "score_up"
         else:
             movers = self._mover_cells(prev_cells, cur_cells)
-            bg = modal_background(cur)
             gone = {}
             for (x, y), c in prev_cells.items():
-                if (x, y) not in movers and cur[y][x] == bg and c != bg:
-                    gone[c] = gone.get(c, 0) + 1             # a colour vanished spontaneously (door opened)
-            effect = f"color_{max(gone, key=gone.get)}_gone" if gone else None
+                if (x, y) not in movers and cur[y][x] == cur_bg and c != cur_bg:
+                    gone[c] = gone.get(c, 0) + 1             # a colour vanished where it was (door opened)
+            appeared = {}
+            for (x, y), c in cur_cells.items():
+                if (x, y) not in movers and prev[y][x] == prev_bg and c != self.body_color:
+                    appeared[c] = appeared.get(c, 0) + 1     # a colour materialised on bare background (door closed)
+            effect = (f"color_{max(gone, key=gone.get)}_gone" if gone else
+                      f"color_{max(appeared, key=appeared.get)}_appeared" if appeared else None)
         return features, effect, present
 
 
