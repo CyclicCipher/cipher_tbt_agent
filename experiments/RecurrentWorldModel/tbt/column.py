@@ -72,8 +72,10 @@ class CorticalColumn(nn.Module):
         # online structure learning (discover a structure from raw transitions; driven by agent.py) -------
         self.graph, self.loc, self.rel = {}, {}, {}           # observed edges; symbol→frame index; relation operators
         self.place = None                                     # (n, d_mem) per-node SR-frame codes (set by consolidate)
+        self._inv_loc = {}                                    # frame index → symbol (set by consolidate)
         self._sparse_place = False                            # True once n > d_mem → sparse place codes + cleanup
         self._place_k_loc = 16                                # active units per sparse place code (~3% of d_mem)
+        self._h = None                                        # L6 as a DYNAMIC path-integrated belief (the recurrence)
 
     # ----- learn a model of a domain (structure GIVEN) via the SR frame ----------------------------
     def learn_domain(self, name, entity_labels, relations, remap=True):
@@ -156,6 +158,7 @@ class CorticalColumn(nn.Module):
             self.place = _sparsify_topk(Z @ Wp.t(), self._place_k_loc)
             self._sparse_place = True
         self.loc = idx
+        self._inv_loc = {i: s for s, i in idx.items()}
         for s, i in idx.items():
             self.L23.pool(self.L4.bind(s, self.place[i]))
         for a, edges in relations.items():
@@ -191,3 +194,31 @@ class CorticalColumn(nn.Module):
     def place_code(self, node):
         """This column's location (Where / SR-frame) code for a node — discovered by observe/consolidate."""
         return self.place[self.loc[node]]
+
+    # ----- L6 driven as a DYNAMIC, path-integrated belief — the recurrence (architecture doc §14 stage 11) -----
+    # The static place_code above is a lookup; here L6 becomes a persistent state h, the same selective gated
+    # recurrence as the language SSM (precursor/language_recurrent.py) but on the LOCATION code: PREDICT by the
+    # L5 displacement operator (grid-cell path integration — needs no observation, so it works when position is
+    # NOT visible), CORRECT by the SSM decay gate toward a sensed node. This is what lets a column track where it
+    # is and integrate an observation sequence under PARTIAL observability, where the static lookup cannot.
+    def loc_reset(self, node):
+        """Begin the recurrent belief at a known node (the origin of dead reckoning)."""
+        self._h = self.place_code(node).clone()
+        return node
+
+    def loc_move(self, action):
+        """PREDICT: path-integrate the belief by the action's displacement operator (the efference copy). No
+        observation needed — this is the update that survives partial observability. Snapped to the nearest
+        place code (position is discrete) to keep the belief crisp over a long trajectory."""
+        self._h = self._cleanup(self.L5.apply(self.rel[action], self._h))
+        return self.loc_where()
+
+    def loc_sense(self, node, keep=0.0):
+        """CORRECT: selectively blend the belief toward an observed node. `keep` ∈ [0,1] is the SSM decay gate —
+        keep=0 snaps to a reliable sighting, keep→1 trusts the path integration (no / uncertain sighting)."""
+        self._h = keep * self._h + (1.0 - keep) * self.place_code(node)
+        return self.loc_where()
+
+    def loc_where(self):
+        """READ OUT the most likely current node — attractor match of the belief against the place codebook."""
+        return self._inv_loc[int((self.place @ self._h).argmax())]
