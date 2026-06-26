@@ -35,6 +35,12 @@ absolute (`from tbt.column import …`, `from tasks import LockPath`, `from perc
 now; A is pure relocation so every demo/regression number is unchanged.
 
 ### A checklist
+_PROGRESS (2026-06-26): A1–A4 DONE — moves via `git mv`, all imports fixed (silo `sys.path` bridges dropped,
+`arc_agi_3`→`tasks`, `..wm`/`agent.wm`→`wm`, corpora path, agent's perception imports), `experiments/` deleted,
+`src/perception/__init__.py` added. `PYTHONPATH=src python -c "from agent import …"` = IMPORTS OK. A5 VALIDATED — numberline 11/11, LockPath 100%, Toggle 100%, arithmetic (cross-demo import) runs. A6 = this merge
+commit. Run convention is now `PYTHONPATH=src python -m <pkg>.<mod>`. **Remaining (cosmetic, do before Part B):
+CLAUDE.md architecture-section paths + README run-commands still say `experiments/…` — needs a careful rewrite
+(the precursor→demos / arc_agi_3→tasks renames make a blind sed wrong).**_
 - [ ] **A1** `git mv` RWM: tbt→src/tbt, precursor→src/demos, unified_demo.py & scaling_probe.py→src/demos, Docs→src/docs
 - [ ] **A2** `git mv` PS: arc_agi_3→src/tasks, agent/layouts.py→src/tasks, agent/wm→src/wm, agent/column/{perceive,objects,object_perceiver,goal_discover,dynamics_perceive}.py→src/perception, agent/column/unified_agent.py→src/agent.py, tests→src/tests, docs→src/docs
 - [ ] **A3** fix imports: drop every `sys.path.insert`; `arc_agi_3`→`tasks`; `..wm.score`→`wm.score`; `.dynamics_perceive`/`.objects`/… in the agent→`perception.X`; `tbt.*` stays. Add `src/perception/__init__.py`, `src/tasks/__init__.py` as needed.
