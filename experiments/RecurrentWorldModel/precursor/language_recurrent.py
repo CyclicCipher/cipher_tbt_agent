@@ -39,6 +39,7 @@ from precursor.language import (                                      # shared h
     split_docs, sr_lm_nll, strict_bigram, unigram_nll,
 )
 from precursor.language_active import ActiveColumn, GER, LAT, _sigmoid, load_pooled   # noqa: E402
+from tbt.recurrence import SelectiveRecurrence                # the ONE canonical selective-gated recurrence  # noqa: E402
 
 
 def _pad(batch):
@@ -50,13 +51,13 @@ def _pad(batch):
 
 
 class SSMColumn:
-    """Codes E + displacement operator Op + a per-channel selective gate (Wa, ba) — the recurrence above."""
+    """Codes E + displacement operator Op + the canonical selective recurrence (per-token, per-channel gate)."""
 
     def __init__(self, V, d, seed=0):
         rng = np.random.default_rng(seed)
         self.E = rng.standard_normal((V, d)) * 0.1
         self.Op = np.eye(d) + rng.standard_normal((d, d)) * 0.01
-        self.G = np.full((V, d), 0.5)                                 # per-token, per-channel decay logits (α≈0.62)
+        self.rec = SelectiveRecurrence(d, n_keys=V)                   # the shared recurrence: A=identity, drive=E[x]
         self.rng = rng
 
     def train(self, chunks, uni, epochs=5, lr=0.05, lr_g=0.5, neg=5, batch=96, surprise=True):
@@ -75,9 +76,9 @@ class SSMColumn:
                     valid = ((t + 1) < lens).astype(float)            # mask: predict t→t+1 only where both exist
                     x, y = S[:, t], S[:, t + 1]
                     ex = self.E[x]
-                    a = _sigmoid(self.G[x])                           # selective per-channel decay (B,d)
+                    a = self.rec.gate(x)                              # canonical per-channel gate, computed ONCE
                     h_prev = h
-                    h = a * h_prev + (1 - a) * ex                     # path integration across the WHOLE chunk
+                    h = self.rec.step(h_prev, ex, a)                  # h = a⊙h_prev + (1−a)⊙ex (A = identity)
                     p = h @ self.Op.T
                     k = self.rng.choice(V, size=(B, neg), p=negp)
                     spos = _sigmoid(np.sum(p * self.E[y], 1))
@@ -89,19 +90,19 @@ class SSMColumn:
                     gP *= np.minimum(1.0, 5.0 / (np.linalg.norm(gP, axis=1, keepdims=True) + 1e-9))
                     gH = gP @ self.Op
                     self.Op -= eta * (gP.T @ h) / B; self.Op -= 1e-5 * (self.Op - eye)
-                    dz = (gH * (h_prev - ex)) * a * (1 - a)           # gate gradient, per channel
-                    np.add.at(self.G, x, -lr_g * dz)                  # directly-learned per-token selectivity
-                    np.add.at(self.E, x, -eta * (1 - a) * gH)         # input drive path
-                    np.add.at(self.E, y, -eta * ep_pos * p)           # contrastive
-                    np.add.at(self.E, k.ravel(), -eta * (ep_neg.reshape(-1, 1) * np.repeat(p, neg, 0)))
+                    self.rec.learn_gate(x, a, gH, h_prev, ex, lr_g)   # canonical gate learning (reuses gate a)
+                    idx = np.concatenate([x, y, k.ravel()])           # ONE scatter for drive + pos + neg (np.add.at
+                    vals = np.concatenate([-eta * (1 - a) * gH, -eta * ep_pos * p,   # is the hot path: 3 calls → 1)
+                                           -eta * (ep_neg.reshape(-1, 1) * np.repeat(p, neg, 0))])
+                    np.add.at(self.E, idx, vals)
             n = np.linalg.norm(self.E, axis=1, keepdims=True)
             self.E *= np.minimum(1.0, 4.0 / (n + 1e-9))
-            np.clip(self.G, -6, 6, out=self.G)
+            self.rec.clip()
 
     @torch.no_grad()
     def eval_nll(self, chunks, uni_logp, beta, rare_rank=None, rare_thresh=500, batch=96):
         E = torch.tensor(self.E, dtype=torch.float32); Op = torch.tensor(self.Op, dtype=torch.float32)
-        G = torch.tensor(self.G, dtype=torch.float32); up = torch.tensor(uni_logp, dtype=torch.float32)
+        G = torch.tensor(self.rec.G, dtype=torch.float32); up = torch.tensor(uni_logp, dtype=torch.float32)
         chunks = [c for c in chunks if len(c) > 2]
         tot, n, rtot, rn = 0.0, 0, 0.0, 0
         for s in range(0, len(chunks), batch):
@@ -140,7 +141,7 @@ def run(V=5000, d=200, epochs=5, seed=0):
     # references (predict from token t only)
     w_p, c_p = directed_embed(ppmi(forward_cooc(enc_tr, V, 5)), d)
     bP = min([0.5, 1.0, 2.0], key=lambda b: sr_lm_nll(w_p, c_p, uni_logp, dev, b))
-    mk = ActiveColumn(V, d, seed); mk.train(tr_pairs, uni, uni_logp, epochs=max(epochs, 6))
+    mk = ActiveColumn(V, d, seed); mk.train(tr_pairs, uni, uni_logp, epochs=max(epochs, 6), track=False)
     w_m, c_m = mk.current_next()
     bM = min([0.5, 1.0, 2.0], key=lambda b: sr_lm_nll(w_m, c_m, uni_logp, dev, b))
     lam = min([0.0, 0.3, 0.6, 0.9], key=lambda l: interp_bigram_nll(Cbg, rs, uni_p, dev, l))
@@ -160,7 +161,7 @@ def run(V=5000, d=200, epochs=5, seed=0):
                 "passive": ppl(sr_lm_nll(w_p, c_p, uni_logp, rare, bP)),
                 "Markov active": ppl(sr_lm_nll(w_m, c_m, uni_logp, rare, bM)),
                 "RECURRENT active": ssm_rare}
-    alpha = _sigmoid(ssm.G).mean(1)                                  # mean per-channel decay per token
+    alpha = _sigmoid(ssm.rec.G).mean(1)                             # mean per-channel decay per token
     common = [i for i in np.argsort(-uni)[:800] if itos[i] != "<unk>"]
     hi = sorted(common, key=lambda i: -alpha[i])[:8]; lo = sorted(common, key=lambda i: alpha[i])[:8]
     probes = [p for p in LAT + GER if p in stoi]

@@ -30,6 +30,7 @@ from .l4_feature_location import L4_FeatureLocation
 from .l5_displacement import L5_Displacement
 from .l6_grid import L6_GridLocation
 from .l23_object import L23_Object
+from .recurrence import SelectiveRecurrence            # the ONE canonical selective-gated recurrence
 
 
 def _orthonormal(rows, cols, gen):
@@ -76,6 +77,7 @@ class CorticalColumn(nn.Module):
         self._sparse_place = False                            # True once n > d_mem → sparse place codes + cleanup
         self._place_k_loc = 16                                # active units per sparse place code (~3% of d_mem)
         self._h = None                                        # L6 as a DYNAMIC path-integrated belief (the recurrence)
+        self._rec = SelectiveRecurrence(d_mem, n_keys=1)      # the canonical gate for L6 correction (loc_sense)
 
     # ----- learn a model of a domain (structure GIVEN) via the SR frame ----------------------------
     def learn_domain(self, name, entity_labels, relations, remap=True):
@@ -213,10 +215,14 @@ class CorticalColumn(nn.Module):
         self._h = self._cleanup(self.L5.apply(self.rel[action], self._h))
         return self.loc_where()
 
-    def loc_sense(self, node, keep=0.0):
-        """CORRECT: selectively blend the belief toward an observed node. `keep` ∈ [0,1] is the SSM decay gate —
-        keep=0 snaps to a reliable sighting, keep→1 trusts the path integration (no / uncertain sighting)."""
-        self._h = keep * self._h + (1.0 - keep) * self.place_code(node)
+    def loc_sense(self, node, keep=None):
+        """CORRECT: selectively blend the belief toward an observed node via the canonical per-channel gate
+        (`tbt.recurrence.SelectiveRecurrence` — the SAME gate the language SSM uses). `keep` ∈ [0,1] overrides
+        it with a scalar (keep=0 snaps to a reliable sighting); the default uses the learned per-channel gate."""
+        a = self._rec.gate(0) if keep is None else keep
+        new = self._rec.step(self._h.detach().cpu().numpy(),
+                             self.place_code(node).detach().cpu().numpy(), a)
+        self._h = torch.as_tensor(new, dtype=self._h.dtype, device=self._h.device)
         return self.loc_where()
 
     def loc_where(self):

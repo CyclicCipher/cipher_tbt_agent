@@ -64,18 +64,31 @@ def egocentric(grid, radius, agent_color=_C_AGENT):
     return out, bg
 
 
-class RecurrentAgent:
-    def __init__(self, roles, radius=2, memory=True, seed=0):
-        self.roles, self.radius, self.memory, self.seed = roles, radius, memory, seed
-        # the self-frame map column (built once) — path integration lives here (the unified recurrence)
-        self.col = CorticalColumn(n_entities=_SELF * _SELF, seed=seed)
+_FRAME_COL = None                                                 # the self-frame column is identical for every
+
+
+def _frame_column():
+    """The self-frame map column — built ONCE and shared. Its structure (place codes + L5 operators) is
+    identical for every agent; only the per-agent belief `_h` differs, and it is reset each episode, so
+    sequential agents can share one consolidated column (the consolidate eigh is the dominant build cost)."""
+    global _FRAME_COL
+    if _FRAME_COL is None:
+        col = CorticalColumn(n_entities=_SELF * _SELF, seed=0)
         for x in range(_SELF):
             for y in range(_SELF):
                 for j, (dx, dy) in enumerate(_GRID_MOVES):
                     nx, ny = x + dx, y + dy
                     if 0 <= nx < _SELF and 0 <= ny < _SELF:
-                        self.col.observe(_cell(x, y), j, _cell(nx, ny))
-        self.col.consolidate()
+                        col.observe(_cell(x, y), j, _cell(nx, ny))
+        col.consolidate()
+        _FRAME_COL = col
+    return _FRAME_COL
+
+
+class RecurrentAgent:
+    def __init__(self, roles, radius=2, memory=True, seed=0):
+        self.roles, self.radius, self.memory, self.seed = roles, radius, memory, seed
+        self.col = _frame_column()                            # built once, shared (path integration lives here)
         self.reset()
 
     def reset(self):

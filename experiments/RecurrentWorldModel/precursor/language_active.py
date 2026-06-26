@@ -63,7 +63,8 @@ class ActiveColumn:
         self.Op = np.eye(d) + rng.standard_normal((d, d)) * 0.01     # start near "stay put", learn to navigate
         self.rng = rng
 
-    def train(self, pairs, uni, uni_logp, epochs=8, lr=0.025, neg=5, batch=256, surprise=True, monitor=3000, thr=1e-3):
+    def train(self, pairs, uni, uni_logp, epochs=8, lr=0.025, neg=5, batch=256, surprise=True, monitor=3000,
+              thr=1e-3, track=True):
         V, d = self.E.shape
         I = np.array([i for i, _ in pairs]); J = np.array([j for _, j in pairs])
         f = uni / uni.sum()
@@ -91,12 +92,14 @@ class ActiveColumn:
                 self.Op -= eta * (gP.T @ H) / len(b)                  # correct the navigation operator (L5)
                 self.Op -= 1e-5 * (self.Op - eye)                     # whisper of decay — bounded, but free to navigate
                 gH = gP @ self.Op                                     # error back to the current code
-                np.add.at(self.E, i, -eta * gH)
-                np.add.at(self.E, j, -eta * ep_pos * P)
-                np.add.at(self.E, k.ravel(), -eta * (ep_neg.reshape(-1, 1) * np.repeat(P, neg, axis=0)))
+                ai = np.concatenate([i, j, k.ravel()])                # ONE scatter for current + pos + neg
+                av = np.concatenate([-eta * gH, -eta * ep_pos * P,    # (np.add.at is the hot path: 3 calls → 1)
+                                     -eta * (ep_neg.reshape(-1, 1) * np.repeat(P, neg, axis=0))])
+                np.add.at(self.E, ai, av)
             n = np.linalg.norm(self.E, axis=1, keepdims=True)         # cap code norms each epoch (no blow-up/collapse)
             self.E *= np.minimum(1.0, 4.0 / (n + 1e-9))
-            curve.append(self._monitor_ppl(I[mon], J[mon], uni_logp))
+            if track:                                                 # the monitor curve is unused by callers
+                curve.append(self._monitor_ppl(I[mon], J[mon], uni_logp))   # that only need the trained codes
         return curve
 
     def _monitor_ppl(self, i, j, uni_logp):
