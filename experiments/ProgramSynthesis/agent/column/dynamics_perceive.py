@@ -118,16 +118,20 @@ def collect(episodes=150, max_steps=200, seed=0, game_cls=LockPath):
         env = Environment(game_cls())
         frame = env.reset()
         perc.reset()
+        plan, level = [], frame.level                        # cached oracle plan; replan only on a cache miss
         for _ in range(max_steps):
             if frame.state != GameState.NOT_FINISHED:
                 break
+            if frame.level != level:                         # the layout changed -> the cached plan is stale
+                plan, level = [], frame.level
             moves = [a for a in frame.available_actions if a.is_movement]
-            sol = None
-            if rng.random() < 0.8:                           # oracle HINT from the CURRENT state (saved/restored)
-                saved = _capture(env.game)
-                sol = solve_level(env.game)
-                _restore(env.game, saved)
-            action = sol[0] if (sol and sol[0] in moves) else rng.choice(moves)
+            hint = rng.random() < 0.8
+            if hint and not plan:                            # (re)solve ONLY on a cache miss, not every step:
+                saved = _capture(env.game)                   # following the cached optimal plan is the same
+                plan = solve_level(env.game) or []           # hint without re-running the BFS each step (which
+                _restore(env.game, saved)                    # explodes with the number of movable pieces)
+            action = plan[0] if (hint and plan and plan[0] in moves) else rng.choice(moves)
+            plan = plan[1:] if (plan and action == plan[0]) else []   # advance along / drop the cached plan
             prev = frame
             frame = env.step(action)
             f, e, present = perc.observe(prev, action, frame)
@@ -142,6 +146,7 @@ def collect(episodes=150, max_steps=200, seed=0, game_cls=LockPath):
                     goal.observe_reach_no_win(present)
             if frame.level != prev.level:                    # a level was completed — reset the per-level memory
                 perc.new_level()
+                objp.new_level()
     dm.learn()
     return dm, objp, goal
 

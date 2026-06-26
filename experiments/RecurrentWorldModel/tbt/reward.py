@@ -76,13 +76,17 @@ class RewardModel:
     """Unified value (extrinsic reward + intrinsic novelty) maintained by prioritized sweeping
     (priority = gain x need). Set prioritized=False for the exhaustive value-iteration baseline."""
 
-    def __init__(self, N, gamma=0.9, beta=0.3, budget=40, theta=1e-5, prioritized=True):
+    def __init__(self, N, gamma=0.9, beta=0.3, budget=40, theta=1e-5, prioritized=True, optimistic=True):
         self.gamma, self.beta, self.budget, self.theta = gamma, beta, budget, theta
         self.prioritized, self.sweeps = prioritized, 3 * N
         self.Vmax = 1.0 / (1.0 - gamma)                         # optimism under uncertainty (R-MAX): an
-        self.V = defaultdict(lambda: self.Vmax)                 # unvisited state is maximally valued, so the
-                                                                # frontier (incl. across the switch) attracts
-                                                                # — forward "novelty drive" as a value prior
+        self.V = defaultdict((lambda: self.Vmax) if optimistic else float)   # unvisited state maximally valued,
+                                                                # so the frontier attracts — forward novelty drive.
+                                                                # But for PLANNING over a fully-enumerated subgoal
+                                                                # -MDP set optimistic=False (0-init), or undecayed
+                                                                # optimism on a not-yet-winning self-loop (reach
+                                                                # goal before clearing its condition) outvalues
+                                                                # real progress and the agent lunges early.
         self.R_ext = {}                                         # extrinsic reward (from the sparse score)
         self.visits = defaultdict(int)                          # visit counts (drive the novelty bonus)
         self.queue = {}                                         # pending backups: state -> priority

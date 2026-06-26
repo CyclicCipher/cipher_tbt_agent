@@ -56,3 +56,9 @@ class BasalGanglia:
         o = options[i]
         a[o] = a.get(o, 0.0) + lr * (values[i] - a.get(o, 0.0))
         return i
+
+    def gate_reset(self):
+        """Clear the subgoal-gate affinity. It is within-episode learning: a level's pad/key/goal cells (and even
+        subgoal types) recur across other levels by coincidence, and letting their affinity transfer re-inflates a
+        not-yet-winning goal / over-fits to a recurring cell. Reset it when the layout changes."""
+        self._opt_aff = {}

@@ -46,6 +46,14 @@ from .objects import modal_background                          # noqa: E402
 
 _MOVES = [GameAction.ACTION1, GameAction.ACTION2, GameAction.ACTION3, GameAction.ACTION4]
 
+# Per-ACTION discount for subgoal selection. The critic (reward.py) discounts gamma ONCE per subgoal, so it
+# minimises the NUMBER of subgoals to WIN, not the number of actions — among subgoals that advance equally (two
+# pads, many items) it has no spatial preference and picks an arbitrary order. Discounting each subgoal's value by
+# _TOUR_GAMMA^(its action cost) restores per-action discounting, so the cost-optimal TOUR emerges from the same
+# critic (no hand-coded TSP). Gentle (~0.9^(1/10), matching reward.py's per-subgoal gamma over ~10-action
+# subgoals) so abstract value still dominates: a far but necessary subgoal beats a near useless one.
+_TOUR_GAMMA = 0.99
+
 
 def _manh(a, b):
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
@@ -128,6 +136,7 @@ class UnifiedAgent:
         self.req_cells = set()
         self.plan = []
         self._intent = None
+        self.bg.gate_reset()                                   # subgoal-gate affinity is within-level only
 
     # ---- perception (E) ----------------------------------------------------------------------------
     def _perceive(self, grid):
@@ -222,8 +231,9 @@ class UnifiedAgent:
     def _component(self, body, by_color, removed):
         """The body's door-gated navigation-reachable region given `removed` (un-removed obstacles + hazards
         block). High-level reachability — firing a trigger that removes a blocking colour merges regions."""
-        blocked = {p for c, cells in by_color.items()
-                   if (c in self.blocking and c not in removed) or c in self.death for p in cells}
+        doors = set().union(*self.effects.values()) if self.effects else set()   # a colour a trigger removes is
+        blocked = {p for c, cells in by_color.items()                             # an obstacle until it's removed
+                   if ((c in self.blocking or c in doors) and c not in removed) or c in self.death for p in cells}
         walk = self._cache["walk"]
         seen, q = {body}, deque([body])
         while q:
@@ -270,9 +280,9 @@ class UnifiedAgent:
             T[s] = nexts
             if len(seen) > 256:
                 break
-        rm = RewardModel(max(2, len(T)), beta=0.0, prioritized=False)
-        rm.R_ext["WIN"] = 1.0
-        rm.plan(T, preds, s0)
+        rm = RewardModel(max(2, len(T)), beta=0.0, prioritized=False, optimistic=False)   # PLANNING, not
+        rm.R_ext["WIN"] = 1.0                                  # exploring: converge to the true return so a
+        rm.plan(T, preds, s0)                                  # not-yet-winning goal can't outvalue real progress
         return [(key, cell, rm.V[ns]) for key, cell, ns in self._subgoals(s0, body, by_color, comp_memo)]
 
     # ---- thalamus routing of the active subgoal's goal-state into the spatial column ----------------
@@ -292,8 +302,9 @@ class UnifiedAgent:
 
     # ---- factored navigation of one subgoal -------------------------------------------------------
     def _blocked(self, by_color, removed):
-        return {p for c, cells in by_color.items()
-                if (c in self.blocking and c not in removed) or c in self.death for p in cells}
+        doors = set().union(*self.effects.values()) if self.effects else set()   # closed doors block navigation
+        return {p for c, cells in by_color.items()                               # too, until their trigger fires
+                if ((c in self.blocking or c in doors) and c not in removed) or c in self.death for p in cells}
 
     def _pushables_now(self, by_color):
         return {p for c in self.pushable for p in by_color.get(c, ())}
@@ -315,20 +326,19 @@ class UnifiedAgent:
         if not valued:
             return []
         removed = self._abstract_state(by_color)[0]
-        keys = [k for k, _c, _v in valued]
-        vals = [v for _k, _c, v in valued]
-        i = self.bg.gate(keys, vals)                           # the basal ganglia selects the active subgoal
-        target = self._route(valued, i)                        # the thalamus routes its goal-state
-        plan = self._navigate(valued[i][0], target, body, by_color, removed)
-        if plan:
-            return plan
-        for j in sorted(range(len(valued)), key=lambda j: -vals[j]):   # fallback: next-best that navigates
-            if j == i:
-                continue
-            plan = self._navigate(valued[j][0], valued[j][1], body, by_color, removed)
-            if plan:
-                return plan
-        return []
+        # cost-aware sequencing: navigate each available subgoal, discount its value by the actions it costs, so
+        # the cheapest useful subgoal wins (=> the cost-optimal tour emerges) instead of an arbitrary equal-value
+        # one. Only navigable subgoals are candidates (this also subsumes the old explicit fallback).
+        plans = [self._navigate(k, c, body, by_color, removed) for k, c, _v in valued]
+        cand = [(i, valued[i][2] * (_TOUR_GAMMA ** len(plans[i]))) for i in range(len(valued)) if plans[i]]
+        if not cand:
+            return []
+        i = cand[self.bg.gate([valued[j][0] for j, _s in cand],
+                              [s for _j, s in cand])][0]        # the basal ganglia gates the cost-aware values
+                                                               # (its affinity is reset per level — see _new_level)
+        target = self._route(valued, i)                        # the thalamus PROPOSES a route for the chosen subgoal
+        routed = self._navigate(valued[i][0], target, body, by_color, removed)
+        return min((p for p in (routed, plans[i]) if p), key=len, default=[])   # ...but never worse than direct
 
     # ---- the agent contract: the factored control loop ---------------------------------------------
     def choose_action(self, frame):

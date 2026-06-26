@@ -14,9 +14,9 @@ from __future__ import annotations
 from collections import defaultdict
 
 try:                                                   # runnable as a module (-m) or directly
-    from .objects import object_motion, segment
+    from .objects import modal_background, object_motion, segment
 except ImportError:
-    from objects import object_motion, segment
+    from objects import modal_background, object_motion, segment
 
 
 class ObjectPerceiver:
@@ -25,7 +25,13 @@ class ObjectPerceiver:
         self.push_evidence = defaultdict(int)
         self.entered = set()                           # colours the body has walked ONTO (walkable)
         self.failed = set()                            # colours the body could NOT enter
+        self.consume_evidence = defaultdict(int)       # colour vanished after the body stepped on it (consumed)
+        self.occlude_evidence = defaultdict(int)       # colour reappeared after the body left (merely occluded)
         self.body_color = None
+        self._pending = None                           # (cell, colour) the body just stepped onto, awaiting check
+
+    def new_level(self):
+        self._pending = None                           # the body teleports between levels; drop the pending check
 
     def observe(self, prev_grid, delta, cur_grid):
         """One transition: segment both frames, read the motion, accumulate body + pushable evidence.
@@ -55,6 +61,22 @@ class ObjectPerceiver:
                         self.entered.add(tcolor)       # walked onto it
                     else:
                         self.failed.add(tcolor)        # could not enter it
+
+        # consume vs occlude (a 2-step check): when the body LEAVES a cell it stepped onto, did the underlying
+        # colour reappear (occluded, like a pad/goal) or vanish (consumed on contact, like a collect-all item)?
+        if self.body_color is not None:
+            bcur = next((o for o in cur_objs if o.color == self.body_color), None)
+            here = next(iter(bcur.cells)) if bcur else None
+            if self._pending is not None and here is not None and here != self._pending[0]:
+                (cx, cy), under = self._pending
+                back = cur_grid[cy][cx] if (0 <= cy < len(cur_grid) and 0 <= cx < len(cur_grid[0])) else under
+                (self.occlude_evidence if back == under else self.consume_evidence)[under] += 1
+                self._pending = None
+            bprev = next((o for o in prev_objs if o.color == self.body_color), None)
+            if here is not None and bprev is not None and here != next(iter(bprev.cells)):
+                under = prev_grid[here[1]][here[0]]    # the colour at the destination before the body arrived
+                if under != modal_background(prev_grid) and under != self.body_color:
+                    self._pending = (here, under)
         return prev_objs, cur_objs, moved
 
     @property
@@ -68,6 +90,15 @@ class ObjectPerceiver:
     @property
     def blocking(self):
         return self.failed - self.entered - self.pushable
+
+    @property
+    def consumable(self):
+        """Colours the body removes by stepping on them (they vanish and don't reappear) — collect-all items.
+        A pad/goal is merely occluded by the body and comes back; a PUSHED block's cell also goes empty (the block
+        moved on), so exclude pushables. Remaining over-broad colours (a used-up key) are filtered downstream,
+        where only a GOAL colour with multiple cells counts as collect-all."""
+        return {c for c, n in self.consume_evidence.items()
+                if n > self.occlude_evidence.get(c, 0)} - self.pushable
 
 
 if __name__ == "__main__":
