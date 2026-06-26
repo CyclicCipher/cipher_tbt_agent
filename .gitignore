@@ -6,34 +6,24 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
 
-# Visual Studio
+# Editors / IDE
+.vscode/
 .vs/
 *.suo
-*.user
-*.userosscache
-*.sln.docstates
-*.pyproj
-*.sln
-Debug/
-Release/
-x64/
-x86/
 
-# VS Code (in case you ever use it)
-.vscode/
-
-# Logs and checkpoints
+# Logs, checkpoints, trained weights
 logs/
 checkpoints/
 *.pt
 *.pth
 *.ckpt
+*.pkl
 
-# Data directories (downloaded corpora, benchmark data, generated caches)
+# Downloaded / generated data (the language corpora in corpora/ ARE tracked)
 data/
 experiments/*/data/
+experiments/*/results/
 
 # OS files
 .DS_Store
@@ -41,29 +31,3 @@ Thumbs.db
 
 # Environment variables
 .env
-
-# Temporary files
-*.tmp
-*.temp
-
-# Experiment results/plots (generated artifacts)
-experiments/*/results/
-experiments/*/diagnostics/
-diagnostics_epc_mnist_final.png
-diagnostics_epc_mnist_epoch_3.png
-diagnostics_epc_mnist_epoch_2.png
-diagnostics_epc_mnist_epoch_1.png
-diagnostics_cifar10_epoch_10.png
-experiments/ePC_Mamba/diagnostics_copy_epc_epoch_10.png
-experiments/ePC_Mamba/diagnostics_copy_epc_epoch_20.png
-experiments/ePC_Mamba/diagnostics_copy_epc_epoch_30.png
-experiments/ePC_Mamba/diagnostics_copy_epc_epoch_40.png
-experiments/ePC_Mamba/diagnostics_copy_epc_epoch_50.png
-experiments/ePC_Mamba/diagnostics_copy_epc_final.png
-
-# Trained GlyphReader pickles
-experiments/symbolic_ai/glyph_reader*.pkl
-
-# PCH training run logs and checkpoints (generated artifacts)
-experiments/symbolic_ai/*.log
-experiments/symbolic_ai/pch_*.pkl

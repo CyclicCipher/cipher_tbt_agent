@@ -1,1 +1,0 @@
-# Einstein test stream scenarios

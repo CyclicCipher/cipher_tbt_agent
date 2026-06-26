@@ -1,287 +1,132 @@
-# Predictive Coding Agent
+# Cipher's TBT Agent
 
-A biologically-inspired AI system based on predictive coding principles for learning to play Danganronpa: Trigger Happy Havoc.
+A from-scratch AI agent built on the **Thousand Brains Theory** of the neocortex.
 
-## Project Overview
+It is **not** a neural network in the usual sense, and it is **not** trained by gradient descent on a large
+dataset. Instead, one small, reusable *cortical column* learns the **structure** of whatever it is given — a
+space, a number line, a game's rules, a language's words — as a geometry it can navigate. The same column,
+composed into a small "neocortex," plays games, does exact arithmetic, and models language, with no
+task-specific code.
 
-This project investigates data efficiency and optimal training curricula for machine learning by comparing three experimental conditions:
+> **Honest framing.** This is a **novel if limited** research prototype — not artificial general intelligence.
+> It is early-stage and small-scale. It is interesting because of *how* it works and *what it suggests*: it
+> learns the rules of an unfamiliar game by playing it, generalizes arithmetic to numbers it has never seen,
+> and finds its way through a world it can only partly observe — all without hand-coded rules. Those are
+> genuine signs of *fluid* intelligence, on a small scale.
 
-- **Model A:** No pretraining - learns purely from game interaction
-- **Model B:** Multimodal text pretraining → game exposure
-- **Model C:** Game exposure → text pretraining → game exposure
+## The core idea: one mechanism, many domains
 
-The goal is to understand how the order of training experiences affects learning efficiency and capability development.
+A **cortical column** does one thing: *learn a map of some structure, then predict by navigating that map.*
+Everything else is the same mechanism applied to different inputs. A column has four parts (loosely mirroring
+cortical layers):
 
-## Architecture
+- **Where (L6) — a location code.** It places what it sees into a coordinate frame computed from how things
+  connect. Mathematically this is the *successor-representation eigenbasis* — the same code grid cells use in
+  the brain. It comes out grid-like for open space, ring-like for a cycle, and correct even for a branching
+  tree, all from one rule.
+- **How (L5) — displacement operators.** Movement is a first-class object: applying an operator moves you
+  through the frame. "Add 5" is just stepping the successor operator five times.
+- **What (L4) — a content codebook.** What sits at each location (a digit, a word, a tile).
+- **Memory (L23) — an object store.** Bound "what-is-where" facts, recalled later.
 
-### Core Components
+Because structure is learned as geometry, the *same* column learns a number line (and does arithmetic by
+walking it), a 2-D grid (and navigates it), a word-transition graph (and gets a word-embedding-like geometry),
+or a game's state space.
 
-1. **Layered Backbone Network** (10-12 layers, ~1500-2000 neurons/layer)
-   - Two-compartment neurons (apical/basal) with temporal convolution
-   - Block tridiagonal structure for efficient prospective learning
-   - Sparse overlay connections (2-5%) for long-range integration
+## Memory: a state that knows where it is
 
-2. **Foveal Vision System**
-   - High-resolution fovea (320×320) at gaze position
-   - Low-resolution periphery (96×96) for context
-   - Active gaze control via prediction errors
+The location code can be driven as a **recurrent state** — a selective, gated integrator (the same idea as a
+modern state-space model like Mamba). This lets the agent **path-integrate**: it knows where it is from its
+own movements, without seeing its absolute position, and it remembers what it has seen. Under partial
+observation — when it sees only a small window around itself — this is what lets it build a map and navigate;
+a memoryless agent simply cannot.
 
-3. **Hippocampal Sub-Network**
-   - Salience-triggered episodic memory
-   - Cue-based retrieval with pattern completion
-   - Consolidation via simulated sleep/replay
+## Composition: a small neocortex
 
-4. **Active Inference Motor Control**
-   - Gaze, cursor, and keyboard control
-   - Motor outputs emerge from proprioceptive prediction errors
-   - Emergency stop system for safety
+Hard tasks need more than one column. A **task** column (the sub-goals) and a **space** column (the map) are
+composed *additively* through a **thalamus** (which routes a goal from one column into the other) and a
+**basal-ganglia gate** (which decides which column handles which structure — the roles *emerge*, they are not
+assigned). Keeping the columns separate and additive avoids the combinatorial blow-up of cramming everything
+into one model.
 
-5. **Sensorimotor Wrapper**
-   - Screen capture (20+ FPS, <50ms latency)
-   - Audio capture (future implementation)
-   - Gameplay logging for analysis
+## What it can do (so far)
 
-## Hardware Requirements
+None of these use hand-coded, task-specific rules — the agent learns the rules from experience.
 
-- **GPU:** NVIDIA GeForce RTX 3050 Ti Laptop (4GB VRAM) or better
-- **RAM:** 8GB+ system RAM
-- **OS:** Linux (tested) or Windows
-- **Python:** 3.8+
+- **Plays a game it has never seen.** On a replica of an [ARC-AGI-3](https://arcprize.org/arc-agi/3)-style game
+  ("LockPath"), it learns the dynamics from playing — that a key opens doors, that blocks must be pushed onto
+  pads, that the goal only counts once the pads are covered — and then **solves all four levels on every seed,
+  near-optimally** (96.5% on an action-efficiency proxy). It decomposes the task into sub-goals and navigates
+  each, never searching the whole joint state.
+- **Models language.** From only a small classical-Latin and Middle/Old-High-German corpus, the *same column
+  mechanism* produces a coherent word geometry (related words land near each other) and a working next-token
+  model that **beats n-gram baselines exactly where data is sparse** — the generalization regime. With a
+  recurrent state it discovers, from raw prediction alone, that prepositions reset context while particles
+  carry it.
+- **Does exact arithmetic.** It learns a number line from scratch and adds by navigation — including place
+  value and carry — and **generalizes to numbers it never saw** (trained on single digits, correct on 8-digit
+  sums).
+- **Navigates the partly-unseen.** Seeing only a small window around itself, it path-integrates its position
+  and remembers the map, solving levels a memoryless agent fails — and far more efficiently.
 
-## Installation
+## Honest limitations
+
+- **Small scale.** Tiny corpora, small grids, a single 4 GB GPU. Results are demonstrations, not benchmarked at
+  scale.
+- **Perception is hand-fed.** The agent currently receives clean symbolic input (objects with known roles).
+  Turning raw pixels into objects — real perception — is the main unbuilt piece and the next step toward
+  generality.
+- **Single results.** Most numbers come from one configuration, not extensive sweeps.
+- **No general-intelligence claim.** A promising, limited research direction.
+
+## Repository layout
+
+```
+corpora/                               the language data (Latin, Middle/Old High German)
+experiments/RecurrentWorldModel/
+  tbt/                                 the cortical column — the core mechanism
+    column.py                          the column (L6 / L5 / L4 / L23)
+    recurrence.py                      the selective recurrence (the memory)
+    thalamus.py, basal_ganglia.py      multi-column routing + emergent allocation
+    RESEARCH.md, THALAMO_CORTICAL_ARCHITECTURE.md   how and why it works
+  precursor/                           runnable demos (number line, arithmetic, language, control loop, ...)
+experiments/ProgramSynthesis/
+  agent/column/                        the TBT agent playing the ARC replica
+  agent/wm/                            the predecessor symbolic agent, kept as a reference (see below)
+  arc_agi_3/                           the LockPath game replica
+```
+
+The directory names `RecurrentWorldModel` and `ProgramSynthesis` are **historical** — the experiment folders
+this work grew up in. They are kept to avoid breaking the code's import paths.
+
+## Getting started
 
 ```bash
-# Clone repository
-git clone https://github.com/CyclicCipher/predictive-coding-agent.git
-cd predictive-coding-agent
-
-# Install dependencies
+python -m venv venv && . venv/Scripts/activate      # or: source venv/bin/activate   (Linux/macOS)
 pip install -r requirements.txt
 
-# Verify installation
-python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA: {torch.cuda.is_available()}')"
+# Watch the agent learn an ARC-style game from scratch and solve all 4 levels:
+cd experiments/ProgramSynthesis && python -m agent.column.multicolumn_agent
+
+# The same column does exact arithmetic by navigating a learned number line:
+cd ../RecurrentWorldModel && python -m precursor.arithmetic
+
+# ...and models language (Latin + German):
+python -m precursor.language_recurrent
+
+# Memory under partial observation (path integration + remembered map):
+cd ../ProgramSynthesis && python -m agent.column.recurrent_agent
 ```
 
-## Configuration
+## The predecessor: a symbolic world-model agent
 
-Edit `configs/default.yaml` to customize:
+`experiments/ProgramSynthesis/agent/wm/` holds the agent's direct ancestor: a hand-written **symbolic**
+world-model agent that already solved the same ARC replica (perceive → induce the rules → infer the goal →
+plan), winning all four levels from frame + score alone. It is kept as a reference for how these ideas
+developed — the TBT column grew out of it — and it still provides the scoring used to evaluate the column
+agent.
 
-- Network architecture (layers, neurons, temporal windows)
-- Vision parameters (fovea size, periphery size)
-- Learning rates (awake vs. consolidation)
-- Hippocampus parameters (buffer size, salience threshold)
-- Motor control gains
+## Credits & license
 
-Key settings:
-```yaml
-device: "cuda"
-dtype: "float16"  # FP16 for 4GB VRAM efficiency
-
-network:
-  num_layers: 10
-  neurons_per_layer: 1500
-
-vision:
-  fovea_size: 320
-  periphery_size: 96
-
-hippocampus:
-  buffer_size: 2000
-  latent_dim: 512
-```
-
-## Current Status
-
-### Phase 1: Sensorimotor Wrapper — DONE
-- Screen capture (foveal + peripheral), motor control, gameplay logging
-- **Performance: 29 FPS @ 34ms latency** (exceeds targets)
-
-### Phase 2: Baseline Predictive Coding — DONE
-- Standard PC network: 7 layers, 95.14% MNIST test accuracy
-- See `src/network/` and `train_mnist_pc.py`
-
-### Phase 3: Bayesian Predictive Coding (BPC) — DONE
-- Matrix Normal Wishart weight posteriors with Hebbian closed-form updates
-- 4 layers, 93.5% MNIST test accuracy (1 epoch)
-- See `experiments/BayesianPC/`
-
-### Phase 4: Error-based Bayesian Predictive Coding (eBPC) — DONE
-- Combines ePC error reparameterization with BPC Bayesian weight updates
-- 4 layers, **95.74% MNIST test accuracy** (3 epochs) — exceeds both baselines
-- See `experiments/eBPC/`
-
-### Phase 5: eBPC-ResNet with Optimizations — IN PROGRESS
-- Diagonal V/Psi approximation (6x parameter reduction) — debugging NaN
-- ResNet-18 with ePC skip connections — pending
-- bfloat16 mixed precision, adaptive T — pending
-- CIFAR-10 target: ePC's 92.17%
-- See `experiments/eBPC_ResNet/`
-
-### Future Phases
-- JEPA integration
-- Network-wrapper integration for game interaction
-- Experimental comparison Models A, B, C
-
-## Testing
-
-The project includes a comprehensive test suite:
-
-```bash
-# Test screen capture performance
-python tests/test_screen_capture.py
-
-# Test motor control (will ask before moving mouse)
-python tests/test_motor_control.py
-
-# Test complete integration
-python tests/test_integration.py
-```
-
-See `tests/README.md` for detailed test documentation.
-
-## Usage Examples
-
-### Basic Screen Capture
-
-```python
-from src.wrapper import GazeController, ScreenCapture
-
-# Initialize
-gaze = GazeController(screen_width=1920, screen_height=1080, fovea_size=320)
-screen = ScreenCapture(gaze_controller=gaze)
-
-# Capture frame
-foveal, peripheral, timestamp = screen.capture()
-print(f"Foveal: {foveal.shape}, Peripheral: {peripheral.shape}")
-```
-
-### Window-Specific Capture (Safety Feature)
-
-```python
-# Capture only a specific window (for non-fullscreen apps)
-screen = ScreenCapture(
-    gaze_controller=gaze,
-    window_title="My Application"  # Partial match supported
-)
-# Falls back to full screen if window not found
-```
-
-### Sensorimotor Loop with Network
-
-```python
-import yaml
-from src.wrapper import SensorimotorWrapper
-
-# Load config
-with open('configs/default.yaml') as f:
-    config = yaml.safe_load(f)
-
-# Initialize wrapper
-wrapper = SensorimotorWrapper(config, enable_logging=True)
-
-# Define network step function
-def network_step(sensory_dict):
-    # Process sensory inputs
-    foveal = sensory_dict['foveal']
-    peripheral = sensory_dict['peripheral']
-    gaze = sensory_dict['gaze']
-    cursor = sensory_dict['cursor']
-
-    # Return motor commands (prediction errors)
-    return {
-        'gaze_error': np.array([0.0, 0.0]),
-        'cursor_error': np.array([0.0, 0.0]),
-        'click_signal': 0.0,
-        'key_signals': {}
-    }
-
-# Connect network and run
-wrapper.set_network(network_step)
-wrapper.start(duration=10.0)  # Run for 10 seconds
-```
-
-### Replay Logged Session
-
-```python
-from src.wrapper import GameplayPlayer
-
-with GameplayPlayer('logs/gameplay/session_20260123_120000.h5') as player:
-    print(f"Session: {player.metadata['session_name']}")
-    print(f"Duration: {player.metadata['duration_seconds']:.1f}s")
-    print(f"Frames: {player.num_frames}")
-
-    # Iterate through frames
-    for frame_data in player.iter_frames():
-        foveal = frame_data['foveal']
-        gaze = frame_data['gaze']
-        # Process frame...
-```
-
-## Safety Features
-
-- **Emergency Stop:** Press `Ctrl+Shift+Esc` to immediately disable all motor control
-- **Rate Limiting:** Prevents runaway motor commands
-- **Coordinate Constraints:** Mouse movement bounded to screen/window
-- **Logging:** All actions recorded for debugging
-- **Disable by Default:** Motor control can be disabled during testing
-
-## Documentation
-
-- `MISTAKES.md` - Catalogued mistakes and lessons learned (critical reference)
-- `experiments/eBPC_ResNet/TODO.md` - Current roadmap (Phase 1 core + Phase 2 research)
-- `src/wrapper/ARCHITECTURE.md` - Sensorimotor wrapper architecture
-
-## Project Structure
-
-```
-predictive-coding-agent/
-├── experiments/
-│   ├── BayesianPC/       # BPC implementation (93.5% MNIST)
-│   ├── eBPC/             # eBPC implementation (95.74% MNIST)
-│   └── eBPC_ResNet/      # Diagonal eBPC + ResNet (in progress)
-├── src/
-│   ├── network/          # Baseline PC network (95.14% MNIST)
-│   ├── active_inference/ # Active inference module
-│   ├── control/          # Hotkey control
-│   └── wrapper/          # Sensorimotor wrapper (29 FPS)
-├── tests/
-├── MISTAKES.md           # Lessons learned (17 documented mistakes)
-└── README.md
-```
-
-## Development Phases
-
-1. **Sensorimotor Wrapper** — DONE
-2. **Baseline PC** — DONE (95.14% MNIST)
-3. **Bayesian PC (BPC)** — DONE (93.5% MNIST)
-4. **Error-based BPC (eBPC)** — DONE (95.74% MNIST)
-5. **eBPC-ResNet + Optimizations** — IN PROGRESS
-6. **JEPA Integration** — Planned
-7. **Network-Wrapper Integration** — Planned
-8. **Experimental Comparison (Models A, B, C)** — Planned
-
-## Contributing
-
-This is a research project. Contributions are welcome, especially for:
-
-- Performance optimization
-- Additional test coverage
-- Documentation improvements
-- Bug fixes
-
-## License
-
-[To be determined]
-
-## Acknowledgments
-
-Built with:
-- PyTorch (deep learning framework)
-- mss (screen capture)
-- pynput (input control)
-- h5py (data logging)
-- OpenCV (image processing)
-
-## Contact
-
-For questions or issues, please use the GitHub issue tracker.
+By **Cipher** (CyclicCipher). Built on the Thousand Brains Theory (Hawkins / Numenta) and the
+successor-representation view of grid cells (Stachenfeld et al.). License: TBD.

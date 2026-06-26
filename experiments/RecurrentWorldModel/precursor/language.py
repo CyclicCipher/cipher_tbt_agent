@@ -40,7 +40,7 @@ import torch                                                          # noqa: E4
 
 from tbt.column import _sr_frame                                      # the column's LITERAL frame  # noqa: E402
 
-CORPUS = os.path.join(os.path.dirname(__file__), "..", "..", "symbolic_ai_v2", "corpus")
+CORPUS = os.path.join(os.path.dirname(__file__), "..", "..", "..", "corpora")
 TOKEN_RE = re.compile(r"[a-zà-ÿæœþð]+")
 UNK = "<unk>"
 
