@@ -49,15 +49,35 @@ CLAUDE.md architecture-section paths + README run-commands still say `experiment
 - [ ] **A6** update CLAUDE.md + README run commands to `src/`; commit "Merge to one src/ package; kill the experiment silo"
 
 ## Part B — the reorientation (the REAL fix; conceptual, incremental, regression-gated)
-- [ ] **B1** unify the `Environment` contract: `tasks/` games implement `tbt.env.Environment`; extend the contract
-        for a parameterized **click(x,y)** action; the agent drives the contract, never ARC specifics.
-- [ ] **B2** dissolve the fat agent → thin shell on the `tbt/agent.py` template: all task-format → `perception/`;
-        the agent knows only the contract (no colour literals, no `_subgoals`/`harmful`/fire/cover/goal enumeration).
+_PROGRESS (2026-06-26): **B1 + B2 + INVARIANT DONE & validated** (commit pending). The fat 575-line agent is
+dissolved into three pieces: `agent.py` = a ~30-line pure driver that **imports nothing** (perception + planner
+injected); `perception/scene.py` = the ONLY task-format code (WorldModel/Scene + the grid/colour/action-vocab,
+`build_world` decodes the dynamics' string effects once); `tbt/planner.py` = the spatial planner (SR-frame map +
+recurrence + subgoal value, **imports only `tbt/`**, speaks move-indices not GameAction). The ARC wiring +
+factories + eval moved to `demos/agent_arc.py`. B1: `tasks/contract.py` `ContractEnv` presents the harness through
+`tbt.env.Environment` (non-breaking — native harness + FrameData consumers untouched); `tbt/env.py` `step` gained
+the optional click `coords`; the eval drives the agent over the contract. **Regression IDENTICAL** to the old
+agent (proven seed-by-seed): LockPath 100, MultiKey 100, Sokoban (2 seeds), Toggle 100, partial-obs 8/8 mem vs
+degraded ablation; numberline 11/11. **Still TODO: B3 (the emergent planning — the planner still has the
+fire/cover/goal labels + the `harmful` hack, now in `tbt/planner.py` + `WorldModel.harmful`) and B4.**_
+- [x] **B1** unify the `Environment` contract: `ContractEnv` adapts the harness to `tbt.env.Environment`; the
+        contract `step` carries the click `coords` (declared; replica is movement-only); the agent drives the
+        contract, never ARC specifics. (NOT a force-merge of the harness's return type — that breaks every
+        FrameData consumer for ceremony; the click action is real-SDK work.)
+- [x] **B2** dissolve the fat agent → thin shell: all task-format in `perception/scene.py`; the agent imports
+        NOTHING task-specific (planner+perception injected). Subgoal enumeration relocated to `tbt/planner.py`
+        (to be dissolved in B3, not yet emergent).
 - [ ] **B3** planning → the column (per `src/tbt/EMERGENT_PLAN.md`): subgoals = eigenoptions (SR-frame) +
-        affordances (learned dynamics); value from `reward.py`. Delete `_navigate`/`_abstract_state`/`harmful`.
-        (The C "harmful-trigger" heuristic from the toggle work is a hack to dissolve here.)
+        affordances (learned dynamics); value from `reward.py`. Delete the fire/cover/goal labels +
+        `WorldModel.harmful` (it must EMERGE from value over the augmented state — the toggle's switch).
 - [ ] **B4** carry toggle 100% + the regression through; collect-all via the consume affordance.
-- [ ] **INVARIANT** `src/agent.py` imports nothing task-specific. Quick check: it imports only `tbt.*` + the
-        `Environment` contract; `grep -i 'colour\|color\|grid\|arc' src/agent.py` returns nothing structural.
+- [x] **INVARIANT** `src/agent.py` imports nothing task-specific (verified: only `from __future__`); `tbt/planner.py`
+        imports only `tbt/` + stdlib; all grid/colour/GameAction knowledge is in `perception/` + `tasks/`.
 
-Detail + research backing for Part B: `src/tbt/EMERGENT_PLAN.md` (after A) / `experiments/RecurrentWorldModel/tbt/EMERGENT_PLAN.md` (before A).
+Detail + research backing for Part B: `src/tbt/EMERGENT_PLAN.md`.
+
+## After Part B — study EfficientZero-V2
+Read **EfficientZero-V2** (arXiv 2403.00564) — a sample-efficient, domain-general MuZero successor with big gains
+in SEARCH over continuous spaces (Cipher flagged it as a key clue, 2026-06-26). Our `reward.py` is a MuZero-style
+critic, so it informs the planning B moves into the column. Open question: **realize EZ-V2's improvements with the
+neocortex (columns + thalamus + BG), not a monolithic net.** See memory `reference_efficientzero_v2`. (Read AFTER B.)
