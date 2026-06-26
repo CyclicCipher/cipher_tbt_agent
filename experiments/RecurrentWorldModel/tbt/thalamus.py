@@ -34,8 +34,18 @@ class Thalamus:
         return R
 
     def read(self, R, content_col, loc_col, loc_node, threshold=0.5, default=None):
-        """Top-down goal-state read: given a location in loc_col, retrieve the content bound there from
-        content_col. Returns `default` when nothing is bound at that location (score below threshold)."""
+        """Bottom-up read: given a location in loc_col, retrieve the content bound there from content_col.
+        Returns `default` when nothing is bound at that location (score below threshold)."""
         scores = content_col.L4.E @ (R @ loc_col.place_code(loc_node))
+        best = int(scores.argmax())
+        return best if scores[best] > threshold else default
+
+    def read_location(self, R, content_col, loc_col, content_label, threshold=0.1, default=None):
+        """TOP-DOWN goal-state SET (the §5 control-loop direction): given a CONTENT (a task subgoal),
+        retrieve the LOCATION bound to it in loc_col — the task column setting a goal-state in the spatial
+        column. The transpose of `read`. Returns loc_col's NODE INDEX (into its place codebook), or
+        `default` if nothing is bound there."""
+        v = R.t() @ content_col.content_code(content_label)         # the place bound to this content
+        scores = loc_col.place @ v
         best = int(scores.argmax())
         return best if scores[best] > threshold else default
