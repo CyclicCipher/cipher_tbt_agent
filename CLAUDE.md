@@ -34,38 +34,51 @@ vs 2^K + emergent allocation), `recurrent_location` (path integration). `scaling
 2^K wall; `unified_demo.py` = multi-domain non-interference.
 
 **The ARC agent — `experiments/ProgramSynthesis/`.**
-- `agent/column/` — the TBT agent on the LockPath replica: `control_agent` (flat joint-BFS baseline),
-  `dynamics_perceive` (learn the rules from play), `multicolumn_agent` (task ⊕ space — 4/4, 96.5%),
-  `recurrent_agent` (partial-observability path integration), `perceive`, `column_score`.
+- `agent/column/` — the ONE unified TBT agent (`unified_agent.py`: `UnifiedAgent` full-obs, `PartialObsAgent`
+  egocentric) + its learned pieces: `dynamics_perceive` (`collect` — one play loop driving the three learners),
+  `objects`/`object_perceiver` (E: segment → multi-cell objects, body/pushable/blocking from motion),
+  `goal_discover` (F: goal + required-absent from the score), `perceive` (frame reading). The agent reads the
+  learned mechanics, values RL/MuZero sub-goals (`reward.py`) gated by the basal ganglia, routes them via the
+  thalamus, navigates the spatial column, and path-integrates the body via the recurrence. No per-mechanic code.
 - `agent/wm/` — the **predecessor symbolic world-model agent** (perceive→induce→infer-goal→plan, the direct
-  ancestor) + the scorer (`score.py`) the column agent uses. Kept as a reference.
-- `arc_agi_3/` — the LockPath game replica (mirrors the real ARC-AGI-3 agent API). `agent/layouts.py` —
-  procedural LockPath generator (harder boards).
+  ancestor) + the scorer (`score.py`) the agent is evaluated with. Kept as a reference.
+- `arc_agi_3/` — the LockPath + MultiKey game replicas (mirror the real ARC-AGI-3 API; a GENERIC BFS oracle via
+  each game's `snapshot`/`restore`). `agent/layouts.py` — procedural LockPath generator.
 
 The corpora live in `corpora/` (Latin, Middle/Old High German); `precursor/language.py` `CORPUS` points there.
 
 ## Key results (all learned, no hand-coded rules)
-- ARC LockPath replica: **4/4 levels, 12/12 seeds, 96.5% RHAE-proxy** (`multicolumn_agent`).
+- ONE unified agent, no per-mechanic code: ARC LockPath **4/4 levels** (RHAE-proxy 59.5%) AND a structurally
+  different mechanic it was never tuned for, **MultiKey 2/2 (100%)** — the sub-goal order LEARNED by RL from the
+  sparse score (`reward.py` critic + BG gate), not hand-coded. (The old hand-coded `multicolumn_agent` scored a
+  higher 96.5% only because it was fed the mechanics — disqualified; removed.)
+- Partial observability: the SAME agent (`PartialObsAgent`), egocentric window, solves L0/L1 **8/8** by
+  path-integrating the body (the recurrence) + remembering the map, where a memoryless ablation fails (4–6/8,
+  5–15× the actions).
 - Language (pooled Latin + MHG + OHG): the column's SR-frame IS a word embedding; recurrent next-token
-  **PPL 152** (Markov 181, passive 166, bigram 164); coherent geometry; the learned gate finds that
-  prepositions reset context.
+  **PPL 152** (Markov 181, passive 166, bigram 164); the learned gate finds that prepositions reset context.
 - Arithmetic: exact, by navigation; generalizes to unseen multi-digit numbers (place value + carry, learned).
-- Partial observability: the recurrent agent solves L0/L1 efficiently where a memoryless ablation fails
-  (10–15× the actions).
 
-## Active priority: real ARC-AGI-3
-The replica feeds clean symbolic input. Real ARC-AGI-3 gives raw frames + a sparse score, no goal. Two frontier
-pieces sit in front of the (done) control loop + learned dynamics + recurrence:
-- **E (perception):** raw frame → objects/roles (currently hand-fed in `perceive.py`). The gate to generality.
-- **F (value):** learn the reward/win-condition from the sparse score (the MuZero parallel).
-Testing on real ARC-AGI-3: `pip install arc-agi`, wrap the agent as `choose_action(frames, latest_frame)`, run
-against the games (Community leaderboard / Kaggle competition).
+## Active priority: harder/diverse replica, then real ARC-AGI-3
+E (perception) and F (value) are DONE and folded into the one agent (objects from connected components; the
+roles + win-condition learned from the score; sub-goals by RL/MuZero). The agent is general (no per-mechanic
+code) but tested on a small replica. Next:
+- **Harder + more DIVERSE replica** ("homework harder than the exam"): a procedural multi-mechanic generator +
+  a held-out split, slightly above real ARC on each axis (perception load, reward sparsity, mechanic depth, the
+  click action). Breadth (unseen mechanics) is the axis a single game can't fake — the real test of generality
+  before the SDK.
+- **Efficiency** (parked): the general agent is ~59.5% on LockPath vs the hand-coded 96.5% — the cost of the
+  online door-bump + the factored cover-navigation; improve later.
+- **Real ARC-AGI-3**: 64×64×16-colour frames, multi-cell objects, a click action, level-completion-only signal,
+  135 multi-mechanic games. The interactive SDK is the **ARC-AGI-3-Agents** repo + an API key (the pip
+  `arc-agi` is only the static ARC-1/2 dataset lib). Wrap the agent's `choose_action`.
 
 ## Workflow & conventions
 - Work directly on `main`. **Always activate the venv** (`venv/Scripts/activate` on Windows) before running.
 - Run demos as modules from their experiment folder, e.g.
-  `cd experiments/ProgramSynthesis && python -m agent.column.multicolumn_agent`;
-  `cd experiments/RecurrentWorldModel && python -m precursor.language_recurrent`.
+  `cd experiments/ProgramSynthesis && python -m agent.column.unified_agent`;
+  `cd experiments/RecurrentWorldModel && python -m precursor.language_recurrent`. (cp1252 consoles: prefix
+  `PYTHONIOENCODING=utf-8`.)
 - **Never run heavy training on this machine** — the CPU demos are fine; large training is a GPU job for the user.
 - One file = one concept. **No hand-coded rules / domain priors** (the bitter lesson). **Never reimplement core
   machinery per experiment** — extract one canonical component and USE it (e.g. `tbt/recurrence.py`).

@@ -1,57 +1,37 @@
-"""A BFS oracle for LockPath-style games.
+"""A generic BFS oracle for ARC-AGI-3-style games.
 
-This is a *teacher*, not an agent: it plans an optimal solution by searching over
-the game's true internal state (it knows the win condition and simulates the
-dynamics). Its job is to (a) verify procedurally-generated layouts are solvable
-and (b) produce ground-truth action labels for behavior cloning. The learning
-agent never uses it — the agent sees only frames.
+This is a *teacher*, not an agent: it plans an optimal solution by searching over a game's true internal state
+(it knows the win condition and simulates the dynamics). Its job is to (a) verify procedurally-generated layouts
+are solvable and (b) generate winning experience for the agent's learning phase to observe. The learning agent
+never uses it — the agent sees only frames.
+
+Generic across games: each `Game` supplies `snapshot()`/`restore()` (its hashable mutable state) and
+`available_actions()`; the oracle searches over the non-coordinate actions. (Coordinate/click actions would
+make the branching factor the whole grid — out of scope for the teacher; movement/interact games only.)
 """
 
 from __future__ import annotations
 
 from collections import deque
-from typing import FrozenSet, List, Optional, Tuple
+from typing import List, Optional
 
 from .core import GameAction
 
-# The four directional actions LockPath responds to.
-_DIRECTIONS = [
-    GameAction.ACTION1,
-    GameAction.ACTION2,
-    GameAction.ACTION3,
-    GameAction.ACTION4,
-]
 
-# The mutable part of a LockPath state, as a hashable key for BFS.
-_Dyn = Tuple[Tuple[int, int], FrozenSet, FrozenSet, bool, bool]
+def _capture(game):
+    return game.snapshot()
 
 
-def _capture(game) -> _Dyn:
-    return (
-        game.agent,
-        frozenset(game.blocks),
-        frozenset(game.keys),
-        game.has_key,
-        game._dead,
-    )
-
-
-def _restore(game, dyn: _Dyn) -> None:
-    game.agent = dyn[0]
-    game.blocks = set(dyn[1])
-    game.keys = set(dyn[2])
-    game.has_key = dyn[3]
-    game._dead = dyn[4]
+def _restore(game, snap) -> None:
+    game.restore(snap)
 
 
 def solve_level(game) -> Optional[List[GameAction]]:
-    """BFS for a shortest action sequence completing the game's current level.
-
-    Mutates `game` while searching, then restores it to the level start so the
-    caller can replay the returned path through a real Environment. Returns None
-    if the level is unsolvable.
-    """
+    """BFS for a shortest action sequence completing the game's current level. Mutates `game` while searching,
+    then restores it to the level start so the caller can replay the path through a real Environment. Returns
+    None if unsolvable."""
     level = game._level
+    actions = [a for a in game.available_actions() if not getattr(a, "requires_coordinates", False)]
     start = _capture(game)
     seen = {start}
     queue: deque = deque([(start, [])])
@@ -62,10 +42,10 @@ def solve_level(game) -> Optional[List[GameAction]]:
         if game.level_complete():
             solution = path
             break
-        for action in _DIRECTIONS:
+        for action in actions:
             _restore(game, state)
             game.apply(action, None)
-            if game._dead:
+            if game.is_dead():
                 continue
             nxt = _capture(game)
             if nxt in seen:

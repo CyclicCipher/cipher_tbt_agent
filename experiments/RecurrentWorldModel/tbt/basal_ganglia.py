@@ -28,6 +28,7 @@ class BasalGanglia:
         self.aff: dict = {}                                  # structure-key -> [affinity per column]
         self.assigned = [set() for _ in range(n_columns)]    # distinct structures recruited per column
         self.load = [0.0] * n_columns
+        self._opt_aff: dict = {}                             # subgoal-option -> learned affinity (the gate, below)
 
     def _aff(self, key):
         if key not in self.aff:                              # tiny random init breaks the symmetry of identical columns
@@ -44,3 +45,14 @@ class BasalGanglia:
         self._aff(key)[column] += self.lr * value
         self.assigned[column].add(key)
         self.load[column] = len(self.assigned[column])       # load = number of DISTINCT structures on the column
+
+    def gate(self, options, values, lr=0.3):
+        """The SUBGOAL gate (doc §4): Go disinhibits the highest combined CRITIC value (reward.py) + learned
+        affinity; dopamine-RPE nudges the chosen option's affinity toward its critic value (so the gate learns
+        which subgoal is worth selecting, trained by the critic). `options` are hashable subgoal identities;
+        `values` are reward.py's values of their outcomes. Returns the chosen index."""
+        a = self._opt_aff
+        i = max(range(len(options)), key=lambda j: values[j] + a.get(options[j], 0.0))
+        o = options[i]
+        a[o] = a.get(o, 0.0) + lr * (values[i] - a.get(o, 0.0))
+        return i

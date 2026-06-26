@@ -111,7 +111,9 @@ class RewardModel:
 
     def _backup(self, s, T):
         self.backups += 1
-        new_v = max(self.reward_total(s) + self.gamma * self.V[T[s][a]] for a in range(4))
+        nxts = T[s]                                             # variable action count: 4 on the grid, subgoals elsewhere
+        new_v = (self.reward_total(s) if not nxts else
+                 max(self.reward_total(s) + self.gamma * self.V[nxt] for nxt in nxts))
         delta = new_v - self.V[s]
         self.V[s] = new_v
         return abs(delta)
@@ -134,9 +136,10 @@ class RewardModel:
 
     def act(self, current, T, preds, rng):
         self.plan(T, preds, current)
-        vals = [self.V[T[current][a]] for a in range(4)]
+        nxts = T[current]
+        vals = [self.V[nxt] for nxt in nxts]
         m = max(vals)
-        return rng.choice([a for a in range(4) if vals[a] == m])
+        return rng.choice([a for a in range(len(vals)) if vals[a] == m])
 
 
 def run(env, agent="prioritized", steps=400, seed=0, **rmkw):

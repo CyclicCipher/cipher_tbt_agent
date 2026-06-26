@@ -205,6 +205,14 @@ class LockPath(Game):
     def is_dead(self) -> bool:
         return self._dead
 
+    def snapshot(self):
+        """Hashable snapshot of the mutable state — lets the generic BFS oracle search this game."""
+        return (self.agent, frozenset(self.blocks), frozenset(self.keys), self.has_key, self._dead)
+
+    def restore(self, snap) -> None:
+        self.agent, blocks, keys, self.has_key, self._dead = snap
+        self.blocks, self.keys = set(blocks), set(keys)
+
     # -- helpers ------------------------------------------------------------
 
     def _in_bounds(self, pos: Pos) -> bool:

@@ -53,11 +53,13 @@ into one model.
 
 None of these use hand-coded, task-specific rules — the agent learns the rules from experience.
 
-- **Plays a game it has never seen.** On a replica of an [ARC-AGI-3](https://arcprize.org/arc-agi/3)-style game
-  ("LockPath"), it learns the dynamics from playing — that a key opens doors, that blocks must be pushed onto
-  pads, that the goal only counts once the pads are covered — and then **solves all four levels on every seed,
-  near-optimally** (96.5% on an action-efficiency proxy). It decomposes the task into sub-goals and navigates
-  each, never searching the whole joint state.
+- **Plays a game it was never tuned for — same model, no new code.** It learns each game's rules by playing
+  (which colour opens the way, what must be cleared, what counts as a win), then plans by **valuing sub-goals
+  from the sparse score** (a MuZero-style critic, gated by a basal-ganglia model) and navigating each — never
+  searching the whole joint state. The *same agent, unchanged*, solves the replica
+  [ARC-AGI-3](https://arcprize.org/arc-agi/3)-style game it was built on ("LockPath", all four levels, every
+  seed) **and** a structurally different one it had never seen ("MultiKey") — the sub-goal order *learned* from
+  the score, not hand-coded.
 - **Models language.** From only a small classical-Latin and Middle/Old-High-German corpus, the *same column
   mechanism* produces a coherent word geometry (related words land near each other) and a working next-token
   model that **beats n-gram baselines exactly where data is sparse** — the generalization regime. With a
@@ -66,16 +68,18 @@ None of these use hand-coded, task-specific rules — the agent learns the rules
 - **Does exact arithmetic.** It learns a number line from scratch and adds by navigation — including place
   value and carry — and **generalizes to numbers it never saw** (trained on single digits, correct on 8-digit
   sums).
-- **Navigates the partly-unseen.** Seeing only a small window around itself, it path-integrates its position
-  and remembers the map, solving levels a memoryless agent fails — and far more efficiently.
+- **Navigates the partly-unseen — the same agent.** Given only a small egocentric window, it **path-integrates
+  its position** (the recurrence) and **remembers the map**, solving levels a memoryless version cannot — which
+  is exactly why the recurrence is part of the one model.
 
 ## Honest limitations
 
 - **Small scale.** Tiny corpora, small grids, a single 4 GB GPU. Results are demonstrations, not benchmarked at
   scale.
-- **Perception is hand-fed.** The agent currently receives clean symbolic input (objects with known roles).
-  Turning raw pixels into objects — real perception — is the main unbuilt piece and the next step toward
-  generality.
+- **Tested on a replica, not the real games.** Perception is *learned* (objects from connected components,
+  their roles inferred from play — no hand-fed roles), but validated on a small replica, not yet the real
+  64×64 ARC-AGI-3 games. The general agent is also less *efficient* than an earlier hand-coded version —
+  generality was the goal, not speed.
 - **Single results.** Most numbers come from one configuration, not extensive sweeps.
 - **No general-intelligence claim.** A promising, limited research direction.
 
@@ -91,9 +95,9 @@ experiments/RecurrentWorldModel/
     RESEARCH.md, THALAMO_CORTICAL_ARCHITECTURE.md   how and why it works
   precursor/                           runnable demos (number line, arithmetic, language, control loop, ...)
 experiments/ProgramSynthesis/
-  agent/column/                        the TBT agent playing the ARC replica
+  agent/column/                        the unified TBT agent (unified_agent.py) + its learned perception/dynamics
   agent/wm/                            the predecessor symbolic agent, kept as a reference (see below)
-  arc_agi_3/                           the LockPath game replica
+  arc_agi_3/                           the LockPath + MultiKey game replicas
 ```
 
 The directory names `RecurrentWorldModel` and `ProgramSynthesis` are **historical** — the experiment folders
@@ -105,17 +109,15 @@ this work grew up in. They are kept to avoid breaking the code's import paths.
 python -m venv venv && . venv/Scripts/activate      # or: source venv/bin/activate   (Linux/macOS)
 pip install -r requirements.txt
 
-# Watch the agent learn an ARC-style game from scratch and solve all 4 levels:
-cd experiments/ProgramSynthesis && python -m agent.column.multicolumn_agent
+# Watch the one agent learn ARC-style games and solve them — full observability (LockPath + MultiKey) and an
+# egocentric partial-observability demo where the recurrence is essential:
+cd experiments/ProgramSynthesis && python -m agent.column.unified_agent
 
 # The same column does exact arithmetic by navigating a learned number line:
 cd ../RecurrentWorldModel && python -m precursor.arithmetic
 
 # ...and models language (Latin + German):
 python -m precursor.language_recurrent
-
-# Memory under partial observation (path integration + remembered map):
-cd ../ProgramSynthesis && python -m agent.column.recurrent_agent
 ```
 
 ## The predecessor: a symbolic world-model agent
