@@ -131,3 +131,29 @@ drive it with this loop — which simultaneously answers our planning wall (samp
 (flattened-prior search, online), and our value/credit question (SVE + mixed target). Open question to decide
 next: do we keep the offline-learn / online-solve split, or merge to one online search loop like EZ-V2 (its
 exploration story only works online).
+
+## Re-read 2026-06-26 — what they SEARCH OVER, and the full-observability assumption (the key clarification)
+`H` takes a **single observation** → latent `s₀`; it is **purely feed-forward + stateless** (no RNN, no belief, no
+memory). The tree search runs **entirely in latent space** (`s₀ = H(o)`, then roll `G` forward; real observations
+are never re-encoded mid-search). `G` is a **deterministic** point-estimate latent transition. The latent is shaped
+**end-to-end by gradient** — the consistency + value + policy + reward losses jointly push `H` to encode whatever
+predicts well. **There is ZERO discussion of partial observability, aliasing, memory, belief, or POMDPs — EZ-V2
+assumes FULL observability** (frame-stacking, if any, is preprocessing *before* `H`).
+
+**What this resolves for us (the `cell × open-doors` question).** EZ-V2 never builds NOR hand-codes an augmented
+state — it doesn't need to, because the relevant state is **observable**: a closed door is *in the frame*. So the
+latent just encodes the current frame, and the **learned value `V`** carries the multi-step logic — `V(at the key,
+door-closed)` is high *because firing the key reaches the goal*. The "fire the key first" plan lives in the
+**learned V over the latent** — a function that GENERALISES (no 2^K enumeration) — not in any hand-built state. So
+a hand-coded `cell × open-doors` is wrong twice: hand-coded AND unnecessary. For full-obs games the clean design is
+exactly theirs: latent = the column's encoding of the *visible* frame (the SR-frame map already IS this), `G` = the
+learned effects, a **TD-learned `V` over that latent**, shallow search.
+
+**The twist that is OURS, beyond EZ-V2.** Full observability means EZ-V2 has **no answer for the toggle** — a door
+*invisible when open* is a hidden, aliased state that a stateless feed-forward latent cannot represent. That is
+exactly where the column's **recurrence (a belief: "I pressed the switch") + CSCG cloning (split the aliased door
+cell)** go beyond EZ-V2. We are *ahead* of them on that axis — and it is the genuinely novel, harder research.
+
+**The line, now clean:** full-obs games → copy EZ-V2 (TD-learned V over the latent + search; NO cloning, NO
+hand-coded state); hidden-state / partial-obs games (the toggle) → recurrence + cloning, which EZ-V2 structurally
+cannot do.

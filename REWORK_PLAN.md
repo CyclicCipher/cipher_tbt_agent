@@ -4,6 +4,11 @@
 explicit subgoals entirely, so that work folds into this. REORG Part A (the `src/` merge) and B1/B2 (the thin
 agent + the `Environment` contract) STAND and feed directly into this. Detailed paper notes: `src/tbt/EZV2_NOTES.md`.
 
+**ACCEPTANCE TEST (the completion bar, set by Cipher 2026-06-26):** the rework is DONE only when `tbt/` — the MODEL
+ARCHITECTURE — contains **ZERO domain/environment-specific code** (no grids/colours/moves/doors/pads/keys/subgoal
+types; the move geometry, dynamics, and goal are all LEARNED, or live in `perception/`+`tasks/`). The bitter lesson
+made into a pass/fail check. See **Success criteria**.
+
 ## The thesis
 EfficientZero-V2 is a **model-based, search-driven, online** learner: four nets (representation `H`, dynamics
 `G`, policy `P`, value `V`), act by a tiny tree search, learn from the search's own targets. **Our column already
@@ -91,9 +96,11 @@ each env step:
 - **Mixed target**: trust real returns while `G`/`V` are young or data is very fresh; SVE for the stale middle.
 - **Exploration** = the flattened-prior share of the sample (∪ the existing `reward.py` novelty bonus). NO oracle,
   NO separate curiosity module. This is the fix for the depth gap (LockPath-L2) the oracle was masking.
-- **Conditional mechanics** (cover/toggle): `G` predicts the *augmented* next latent (position ⊕ effect-state), so
-  V can value "cover the pad → goal reachable". This is the EMERGENT_PLAN "A = L5 ⊕ residual effects", now the
-  only place effects live.
+- **Effects, two kinds (the EZ-V2 re-read line).** A VISIBLE effect — a key opening a *rendered* door, a pad being
+  covered — is just a frame-change `G` learns to predict; the latent encodes the visible frame, NO augmented
+  structure (full-obs, S3). A HIDDEN effect — the toggle's door, invisible when open (aliased) — needs the
+  recurrence to carry a belief + cloning to split the aliased cell (S5); that is the ONLY place a non-observable
+  latent dimension is ever minted.
 
 ## Staged execution (incremental, each gated by the steps metric — solves online, in ≤ budget)
 - **S1 — merge to one online loop + the free deletions.** Fold `collect` into `agent` (learn while playing); delete
@@ -121,9 +128,27 @@ each env step:
   and the learner-DELETION (→ column G/V) which waits on S3/S5._
 - **S3 — the sampled search replaces subgoals.** Gumbel + Sequential-Halving move-search, V-bootstrapped; delete
   `planner`, fold `reward`→agent. *Gate:* no subgoal enumeration anywhere; steps ≤ today on the solvable games.
+  _DESIGN (re-cut 2026-06-26, after re-reading EZ-V2 §representation): the augmented state is NOT hand-coded —
+  that is a bitter-lesson violation AND unnecessary. EZ-V2 assumes FULL observability and never builds an augmented
+  state: the relevant fact (door open/closed, pad covered) is OBSERVABLE (in the frame), so the latent just encodes
+  the visible frame and a **TD-learned `V(latent)`** carries the multi-step value — `V(at the key, door-closed)` is
+  high because firing the key reaches the goal; the function GENERALISES (no 2^K). So S3 = **a TD-learned `V` over
+  the column's latent** (the SR-frame, which already encodes the visible scene/map) + a **shallow search** picking
+  moves by `Q = r̂ + γ·V(G(s,a))` (Gumbel/Seq-Halving only earn their keep on the real-ARC click). This DELETES the
+  whole subgoal layer (`_subgoals`/`_value_subgoals`/`_plan`/`_navigate`, the fire/cover/goal enumeration). Hard
+  part: TD-learning V from sparse reward (credit assignment) — helped by the SR being the value basis + EZ-V2's
+  SVE/mixed targets. HIDDEN-state games (the toggle) are NOT this; they need the recurrence + cloning (S5). First
+  step: a TD-learned V over the place codes driving move-selection, A/B vs `_subgoals`, then cut over + delete it._
 - **S4 — exploration + value targets.** Flattened-prior + novelty; SVE + mixed target; V over the SR-frame. *Gate:*
   reaches a DEEP goal online (LockPath L2/L3) that random never reached — the thing the rework is *for*.
-- **S5 — augmented `G`.** effects in the recurrence → cover/toggle solved online. *Gate:* Sokoban/Toggle online.
+- **S5 — the HIDDEN-STATE frontier (recurrence + cloning) — beyond EZ-V2.** For state the frame does NOT reveal —
+  the toggle's door, invisible when OPEN (an ALIASED observation: same cell, passable vs blocked) — a stateless
+  latent cannot represent it, and EZ-V2 (full-obs, feed-forward) cannot either. The column's **recurrence carries a
+  belief** (`A = L5 ⊕ effects`: "I pressed the switch") and **CSCG one-shot cloning** splits the aliased cell into
+  context states on prediction error (exafference). The genuinely novel part + the honest open problem (one-shot
+  *online* cloning; CSCG normally needs EM). *Gate:* the toggle solved online with NO hand-coded door-state.
+  _(NB: the FULL-OBS effects — a key opening a *visible* door — are NOT here; G learns those visible frame-changes
+  in S3. S5 is only for state the frame hides.)_
 - **S6 — fold the layers + final reduction.** L4/L5/L6/L23→column; move `factorize/residual`→`research/` (BG +
   thalamus STAY — the neocortex); consolidate demos. *Gate:* file/line count down ~½; all prior gates still green.
 
@@ -143,7 +168,19 @@ each env step:
 - **The frontier: credit assignment over sparse, multi-step reward.** EZ-V2 leans on V + SVE + replay; we lean on
   the SR being the value basis. S4 proves this or finds it wanting — the one place this could genuinely not work.
 
-## Success criteria
-Online, oracle-free, no per-mechanic code: solves the suite (incl. a DEEP-mechanic game random couldn't reach)
-measured in **steps**; **core agent ≈ 6 files**, perception **6→1**, tbt **15→~6**, total core scripts **~½**, lines
-well down; and the end state has **no parallel world-model beside the column** and **no enumerated subgoal types**.
+## Success criteria — THE ACCEPTANCE TEST (the bitter lesson, made testable)
+**The plan is NOT complete until there is ZERO domain/environment-specific code in the MODEL ARCHITECTURE
+(`tbt/`).** The column + recurrence + search + value must be GENERAL — they work on any structure (line / ring /
+2-D / tree / language) and know nothing of grids, colours, moves, doors, pads, or keys. Every environment-specific
+fact is either **LEARNED** (the column's L5 operators = the action geometry; its latent + `G` = the dynamics/
+effects; `V` = the goal/value) or **quarantined in `perception/` + `tasks/`**. Concretely, by the end `tbt/` has
+no hand-coded action deltas (move geometry is *learned* operators), no effect/role literals, no fire/cover/goal
+subgoal-type enumeration, no hand-built augmented state. Heuristic check:
+`grep -inE 'grid|colour|color|delta|door|pad|key|fire|cover|pushable|blocking|GameAction|subgoal' src/tbt/*.py`
+returns nothing structural. (Today it does NOT pass — `tbt/planner.py` IS the domain-specific model code that S3
+dissolves; that's the point.)
+
+Plus: online, oracle-free, no per-mechanic code; solves the suite (incl. a DEEP-mechanic game random couldn't
+reach) measured in **steps**; perception **6→2 (done)**, the subgoal planner dissolved into the general search +
+value; **no parallel world-model beside the column**, **no enumerated subgoal types**, **no hand-coded augmented
+state**.
