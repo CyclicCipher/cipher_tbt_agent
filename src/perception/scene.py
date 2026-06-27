@@ -231,6 +231,33 @@ class StateEncoder(_ActionVocab):
             d = min((abs(b[0] - cell[0]) + abs(b[1] - cell[1]) for b in self.block_abs(coords)), default=99)
         return 1.0 / (1.0 + d)
 
+    def route_proximity(self, coords, factor, occupied=frozenset()):
+        """The agent's closeness to the OBJECT it must reach to satisfy `factor` — a non-reward EXPLORATION signal
+        (so no local optimum, unlike `proximity` as a reward): for 'cover', the nearest mover NOT already on a done
+        cell (the block to push); for 'reach', the goal. Heading exploration up this gradient brings the agent to
+        the right object; the value-search then covers from there (the L0 case). 1/(1+agent→object)."""
+        cell, kind = factor
+        ax, ay = coords[0], coords[1]
+        if kind == "reach":
+            d = abs(ax - cell[0]) + abs(ay - cell[1])
+        else:                                                  # cost = navigate to a free mover + push it to the
+            free = [b for b in self.block_abs(coords) if b not in occupied]   # cell (both terms, so the bias does
+            d = min(((abs(ax - b[0]) + abs(ay - b[1])) +                       # not just park the agent at a block)
+                     (abs(b[0] - cell[0]) + abs(b[1] - cell[1])) for b in free), default=99)
+        return 1.0 / (1.0 + d)
+
+    def focus_mover(self, coords, factor, occupied=frozenset()):
+        """The mover SLOT the value-search should FOCUS on for `factor` — the nearest free mover to push to a
+        'cover' cell; None for 'reach' (no object). Lets the value FACTOR (agent × ONE object) instead of binding
+        the JOINT of all movers, which doesn't converge (the 2^K problem)."""
+        cell, kind = factor
+        if kind == "reach":
+            return None
+        ax, ay = coords[0], coords[1]
+        cand = [(abs(b[0] - cell[0]) + abs(b[1] - cell[1]) + abs(ax - b[0]) + abs(ay - b[1]), i)
+                for i, b in enumerate(self.block_abs(coords)) if b not in occupied]
+        return min(cand)[1] if cand else None
+
 
 # ── the per-frame scene ──────────────────────────────────────────────────────────────────────────────────
 @dataclass

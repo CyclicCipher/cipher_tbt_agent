@@ -41,7 +41,9 @@ class ValuePlanner:
         self.gamma, self.alpha, self.depth, self.kappa, self.l = gamma, alpha, depth, kappa, l
         self.val = None
         self.rhat, self.term = {}, {}                          # (coords, action) -> reward, terminal (the G head)
-        self._sv, self._zc, self._slotc = {}, {}, {}           # bit-combo->tag; coords->latent; coords->slot cells
+        self._sv, self._zc, self._slotc = {}, {}, {}           # bit-combo->tag; (coords,focus)->latent; coords->cells
+        self._focus = tuple(range(n_movers))                   # which movers the VALUE binds (default: all)
+        self._stage_fn = lambda c: ()                          # coords -> the discrete STAGE tag (factors done)
         self._gen = torch.Generator().manual_seed(1234 + seed)
         self.rng = random.Random(seed)
         self._sel, self._traj = None, []
@@ -72,17 +74,28 @@ class ValuePlanner:
             v = torch.randn(self._col.d_mem, generator=self._gen); v = v / v.norm(); self._sv[bits] = v
         return v
 
+    def set_focus(self, focus, stage_fn):
+        """The task column narrows the VALUE: bind agent × the ONE object being manipulated (`focus`) — so V
+        FACTORS instead of binding the JOINT of all movers (the 2^K problem `control_loop` solved by factoring) —
+        while keeping the small discrete STAGE (which factors are done, `stage_fn(coords)`) in the tag, so the
+        value still knows where it is in the sequence. G still sees all movers; only the value narrows."""
+        self._focus, self._stage_fn = tuple(focus), stage_fn
+
     def _latent(self, coords):
-        z = self._zc.get(coords)
+        zk = (coords, self._focus)
+        z = self._zc.get(zk)
         if z is not None:
             return z
-        col, cid, zz = self._col, self._cid, None
-        for cell in self._slots(coords):
-            pc = col.place_code(cid[cell]) if cell in cid else torch.ones(col.d_mem)
-            zz = pc if zz is None else zz * pc
-        zz = zz * self._svec(coords[2 + 2 * self.n_movers:])
+        col, cid = self._col, self._cid
+        ax, ay = coords[0], coords[1]
+        zz = col.place_code(cid[(ax, ay)]) if (ax, ay) in cid else torch.ones(col.d_mem)
+        for i in self._focus:                                  # only the FOCUSED mover enters the value latent
+            cell = (ax + coords[2 + 2 * i], ay + coords[2 + 2 * i + 1])
+            if cell in cid:
+                zz = zz * col.place_code(cid[cell])
+        zz = zz * self._svec((coords[2 + 2 * self.n_movers:], self._stage_fn(coords)))   # tag: door bits + stage
         zz = zz / (zz.norm() + 1e-8)
-        self._zc[coords] = zz
+        self._zc[zk] = zz
         return zz
 
     # ---- the learned model G, gated by traversability (the map + a closed gate) ---------------------------
@@ -122,19 +135,19 @@ class ValuePlanner:
         memo[mk] = best
         return best
 
-    def act(self, coords, gates, pragmatic, explore=0.0):
+    def act(self, coords, gates, pragmatic, explore=0.0, explore_fn=None):
         if coords is None or self._col is None:
             self._sel = None
             return self.rng.randrange(self.n_actions)
-        memo, qs = {}, []
-        for a in range(self.n_actions):
-            s2 = self._forward(coords, a, gates)
-            d = self.term.get((coords, a), False)
-            qs.append(self._reward(coords, s2, a, pragmatic)
-                      + (0.0 if d else self.gamma * self._rollout(s2, self.depth - 1, gates, pragmatic, memo)))
-        if explore and self.rng.random() < explore:
-            move = self.rng.randrange(self.n_actions)
+        if explore and self.rng.random() < explore:                  # biased exploration (skips the rollout)
+            move = explore_fn(coords) if explore_fn else self.rng.randrange(self.n_actions)
         else:
+            memo, qs = {}, []
+            for a in range(self.n_actions):
+                s2 = self._forward(coords, a, gates)
+                d = self.term.get((coords, a), False)
+                qs.append(self._reward(coords, s2, a, pragmatic)
+                          + (0.0 if d else self.gamma * self._rollout(s2, self.depth - 1, gates, pragmatic, memo)))
             mx = max(qs)
             move = self.rng.choice([m for m, q in enumerate(qs) if q == mx])
         self._sel = (coords, move)
@@ -184,10 +197,12 @@ class FactoredPlanner:
     Domain-general: `factors` and `satisfied(coords, factor)->bool` are OPAQUE (from perception). For any game the
     loop sequences whatever sub-conditions F learned — pads to cover, or contradictions to resolve."""
 
-    def __init__(self, vp: "ValuePlanner", satisfied, proximity):
-        self.vp, self.satisfied, self.proximity = vp, satisfied, proximity
+    def __init__(self, vp: "ValuePlanner", satisfied, route_proximity, focus_mover):
+        self.vp, self.satisfied = vp, satisfied
+        self.route_proximity, self.focus_mover = route_proximity, focus_mover
         self._k = 1
         self._prag = lambda c: 0.0
+        self._explore_fn = None
 
     def reset(self):
         self.vp.reset()
@@ -201,12 +216,24 @@ class FactoredPlanner:
             while self._k < len(factors) and all(self.satisfied(coords, f) for f in factors[:self._k]):
                 self._k += 1                                   # the revealed set is met → reveal the next factor
             active = tuple(factors[:self._k])
-            n = len(factors)                                   # FIXED denominator (all factors): revealing the next
-            self._prag = lambda c, a=active, n=n: sum(self.satisfied(c, f) for f in a) / n  # factor must not drop Φ
-            # NOTE: this discrete pragmatic covers ONE factor then stalls — the value-search isn't drawn to the
-            # NEXT factor's object (the control_loop routing for a COVER sub-goal is the open nub; proximity-as-
-            # reward backfired into a local optimum). `self.proximity` is available for a non-reward routing.
-        return self.vp.act(coords, gates, self._prag, explore)
+            n = len(factors)                                   # the VALUE is the sparse discrete satisfaction over
+            self._prag = lambda c, a=active, n=n: sum(self.satisfied(c, f) for f in a) / n  # all factors (fixed
+            #                                                  # denominator so revealing the next never drops Φ)
+            target = factors[self._k - 1]                      # the current (revealed, unsatisfied) factor
+            occ = frozenset(f[0] for f in factors[:self._k - 1] if f[1] == "cover")   # movers parked on done cells
+            fm = self.focus_mover(coords, target, occ)         # FACTOR the value: agent × the ONE current object,
+            stage = lambda c, fac=tuple(factors): frozenset(   # + the discrete STAGE (which factors are done) so
+                j for j, f in enumerate(fac) if self.satisfied(c, f))   # the value still knows the sequence point
+            self.vp.set_focus((fm,) if fm is not None else (), stage)
+            def explore_fn(c, t=target, occ=occ, g=gates):     # EXPLORATION (not the value) heads toward the
+                best, bp = self.vp.rng.randrange(self.vp.n_actions), -1.0             # current factor's object, so
+                for a in range(self.vp.n_actions):                                   # the agent reaches the next
+                    p = self.route_proximity(self.vp._forward(c, a, g), t, occ)      # block/goal; the value-search
+                    if p > bp:                                                       # covers it from there (L0)
+                        bp, best = p, a
+                return best
+            self._explore_fn = explore_fn
+        return self.vp.act(coords, gates, self._prag, explore, self._explore_fn)
 
     def learn(self, reward, done):
         self.vp.learn(reward, done, self._prag)
