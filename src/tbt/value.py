@@ -68,13 +68,14 @@ class ValuePlanner:
         return nxt                                             # the static obstacles (unmoved) are not re-checked
 
     # ---- the per-sub-goal navigator: BFS over (agent, focused-mover) in the LEARNED model -----------------
-    def navigate(self, coords, focus, target, gates):
-        """Shortest action path to satisfy one sub-goal, by BFS over the (agent, focused-mover) joint in the
+    def navigate(self, coords, focus, target, gates, max_expand=3000):
+        """Shortest action PATH to satisfy one sub-goal, by BFS over the (agent, focused-mover) joint in the
         LEARNED forward model G — the general form of `planner._bfs_push`, but the push (and any mechanic) comes
         from G, not a hand-coded `nb = b + delta` rule. The OTHER movers are immovable obstacles (`self._occ`, so
         the agent can't disturb a placed one), so the search is over N² (agent × the one mover), never the 2^K
         joint. `focus = (slot,)` pushes that mover onto `target`; `focus = ()` walks the agent there (a reach).
-        Returns the first action of the shortest path, or None if already satisfied / unreachable."""
+        Returns the whole action path (the caller follows it, re-planning only on deviation — a full BFS per step
+        is what made the deep levels crawl); `[]` if already satisfied, unreachable, or the search bound is hit."""
         cells = self._slots(coords)                            # [agent, mover0, mover1, …]
         fset = set(focus)
         self._occ = frozenset(cells[1 + j] for j in range(self.n_movers) if j not in fset)   # non-focus = walls
@@ -93,21 +94,24 @@ class ValuePlanner:
             return (c[0], c[1]) == target
 
         if done(coords):
-            return None
-        q, seen = deque([(coords, None)]), {key(coords)}
-        while q:
-            c, first = q.popleft()
+            return []
+        q, parent, expand = deque([coords]), {key(coords): None}, 0
+        while q and expand < max_expand:
+            c = q.popleft(); expand += 1
             for a in range(self.n_actions):
                 c2 = self._forward(c, a, gates)
                 k = key(c2)
-                if k in seen:
+                if k in parent:
                     continue
-                fa = a if first is None else first             # remember the path's FIRST action
-                if done(c2):
-                    return fa
-                seen.add(k)
-                q.append((c2, fa))
-        return None
+                if done(c2):                                   # reconstruct the path (first → last) via parents
+                    path, pk = [a], key(c)
+                    while parent[pk] is not None:
+                        ppk, pa = parent[pk]; path.append(pa); pk = ppk
+                    path.reverse()
+                    return path
+                parent[k] = (key(c), a)
+                q.append(c2)
+        return []
 
 
 class FactoredPlanner:
@@ -127,11 +131,14 @@ class FactoredPlanner:
         self.vp, self.satisfied, self.focus_mover = vp, satisfied, focus_mover
         self._k = 1
         self._focus = None                                     # the mover COMMITTED to the current factor
+        self._plan = []                                        # the cached action path for the current factor
+        self._last = None                                      # previous coords (a no-op ⇒ the plan deviated from G)
+        self._cool = 0                                         # random-walk cooldown when a factor is unreachable
+        self._tries = 0                                        # re-plans on the current factor without progress
 
     def reset(self):
         self.vp.reset()
-        self._k = 1
-        self._focus = None
+        self._k, self._focus, self._plan, self._last, self._cool, self._tries = 1, None, [], None, 0, 0
 
     def set_map(self, col, cid):
         self.vp.set_map(col, cid)
@@ -142,13 +149,32 @@ class FactoredPlanner:
         prev_k = self._k
         while self._k < len(factors) and all(self.satisfied(coords, f) for f in factors[:self._k]):
             self._k += 1                                       # the revealed prefix is met → reveal the next factor
-        target, kind = factors[self._k - 1]                    # the current (revealed, unsatisfied) factor
+        if self._k != prev_k:                                  # a factor was satisfied → fresh focus + plan + counters
+            self._focus, self._plan, self._cool, self._tries = None, [], 0, 0
+        if self._cool > 0:                                     # unreachable for now → random-walk before re-searching
+            self._cool -= 1; self._last = coords               # (a full BFS per step on a stuck factor is the slow path)
+            return self.vp.rng.randrange(self.vp.n_actions)
+        if self._plan and coords != self._last:                # a plan in flight + the last move took effect → FOLLOW
+            self._last = coords
+            return self._plan.pop(0)
+        if self._last is not None and coords == self._last:    # the last action was a no-op (G mispredicted) → ESCAPE
+            self._plan, self._last = [], coords                # with a random move (re-planning would repeat the no-op)
+            return self.vp.rng.randrange(self.vp.n_actions)
+        target, kind = factors[self._k - 1]                    # else (fresh state): plan the current factor
         movers = set(self.vp._slots(coords)[1:])               # a satisfied factor leaves an obstacle iff a MOVER
         occ = frozenset(f[0] for f in factors[:self._k - 1] if f[0] in movers)   # (not the agent) parks on its cell
-        if self._k != prev_k or self._focus is None:           # COMMIT one mover per factor (re-picking each step
-            self._focus = self.focus_mover(coords, (target, kind), occ)   # flips between movers → incoherent push)
-        m = self.vp.navigate(coords, (self._focus,) if self._focus is not None else (), target, gates)
-        return m if m is not None else self.vp.rng.randrange(self.vp.n_actions)
+        if self._focus is None:                                # COMMIT one mover per factor (re-picking flips movers)
+            self._focus = self.focus_mover(coords, (target, kind), occ)
+        self._tries += 1
+        if self._tries > 6:                                    # this factor keeps re-planning without satisfying (G
+            self._cool, self._tries = 30, 0                    # can't reach it) → back off, don't keep paying search
+            return self.vp.rng.randrange(self.vp.n_actions)
+        self._plan = self.vp.navigate(coords, (self._focus,) if self._focus is not None else (), target, gates)
+        self._last = coords
+        if not self._plan:                                     # unreachable within the search bound → random-walk +
+            self._cool = 15                                    # a cooldown, instead of re-searching every step
+            return self.vp.rng.randrange(self.vp.n_actions)
+        return self._plan.pop(0)
 
     def learn(self, reward, done):                              # the navigator is exact (no value to learn)
         pass
