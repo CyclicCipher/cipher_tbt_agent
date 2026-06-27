@@ -1,39 +1,37 @@
-"""The agentic wrapper — a thin ENV DRIVER over a column.
+"""The TBT agent — THE one agent, a thin env-driver over a cortical-column planner.
 
-The column owns the model: it learns a structure from transitions (`column.observe` / `column.consolidate`),
-and predicts from it (`column.predict` / `column.add`). This wrapper only does the part the column should
-NOT know about — driving an `Environment` (choosing actions, stepping it) and feeding the observed
-transitions to the column. Everything else (the SR-eigenvector frame discovery, L5 operators, L4/L23
-content) lives in the column, beside `learn_domain`, so there is one place that owns "learn a model".
+Deliberately tiny and task-agnostic. The agent does ONLY the part the column should not know about: drive an
+environment — read each observation through a `perception` (the senses), hand the resulting scene to a
+`planner` (the brain: the SR-frame map + recurrence + the Neocortex control loop, all in `tbt/`), and emit the
+action. Perception owns every grid/colour/action detail; the planner owns the model + planning. Both are
+INJECTED, so the SAME agent runs full-observation ARC games, the egocentric partial-observation variant, or any
+future task whose perception + planner implement the contract:
 
-Attribute access delegates to the column, so `agent.loc`, `agent.place`, `agent.predict`, `agent.add`,
-`agent.graph`, `agent.rel` all reach the column's learned structure.
+  perception.read(obs) -> Percept(scene, new_level, terminal);  perception.to_action(move);  .reset_action
+  planner.act(scene, explore) -> move index;  planner.reset() / new_level() / on_death()
+
+If this agent would crash on a non-grid environment, it is wrong by construction (feedback_thin_shell_agent).
+The reorient is folding the act-and-learn `play(env)` loop in here too, so this file — not a harness — is where
+the agent lives.
 """
 
 from __future__ import annotations
 
-import random
-
-from .column import CorticalColumn
-
 
 class Agent:
-    def __init__(self, n_symbols: int, torus: int = 16, scales=(11, 13, 17), seed: int = 0):
-        self.col = CorticalColumn(n_entities=n_symbols, torus_size=torus, scales=scales, place_k=1, seed=seed)
+    def __init__(self, perception, planner):
+        self.perception = perception
+        self.planner = planner
 
-    def explore_and_learn(self, env, steps: int = 600, seed: int = 0):
-        """Drive the Environment; feed every transition to the column; consolidate the discovered structure."""
-        rng = random.Random(seed)
-        s = env.reset()
-        for _ in range(steps):
-            a = rng.choice(env.actions)
-            s2 = env.step(a).observation
-            self.col.observe(s, a, s2)                          # the column learns the structure
-            s = s2
-        self.col.consolidate()
-        return self
+    def reset(self):
+        self.planner.reset()
+        self.perception.reset()
 
-    def __getattr__(self, name):
-        if name == "col":                                      # avoid recursion before col is set
-            raise AttributeError(name)
-        return getattr(self.col, name)                         # delegate learned-structure access to the column
+    def choose_action(self, observation, explore=0.0):
+        p = self.perception.read(observation)
+        if p.terminal:                                         # GAME_OVER -> the env reloads the level
+            self.planner.on_death()
+            return self.perception.reset_action, None
+        if p.new_level:
+            self.planner.new_level()
+        return self.perception.to_action(self.planner.act(p.scene, explore=explore)), None

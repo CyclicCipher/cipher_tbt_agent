@@ -13,7 +13,7 @@ import os
 import sys
 
 
-from tbt.agent import Agent                                       # noqa: E402
+from tbt.column_learner import ColumnLearner as Agent                                       # noqa: E402
 
 from demos.numberline import NumberLine                       # noqa: E402
 

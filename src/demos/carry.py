@@ -25,7 +25,7 @@ import sys
 
 import torch                                                      # noqa: E402
 
-from tbt.agent import Agent                                       # noqa: E402
+from tbt.column_learner import ColumnLearner as Agent                                       # noqa: E402
 from tbt.env import Environment, Step                             # noqa: E402
 
 
