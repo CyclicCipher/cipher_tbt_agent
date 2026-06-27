@@ -43,7 +43,9 @@ class ValuePlanner:
         self.rhat, self.term = {}, {}                          # (coords, action) -> reward, terminal (the G head)
         self._sv, self._zc, self._slotc = {}, {}, {}           # bit-combo->tag; (coords,focus)->latent; coords->cells
         self._focus = tuple(range(n_movers))                   # which movers the VALUE binds (default: all)
-        self._stage_fn = lambda c: ()                          # coords -> the discrete STAGE tag (factors done)
+        self._target = None                                    # the current sub-goal CELL the value is parameterised by
+        self._occ = frozenset()                                # cells held by parked movers — obstacles to route AROUND
+        self._sr, self._sridx, self._srcache = None, None, {}  # the discounted-SR proximity (the NEED), per (map, occ)
         self._gen = torch.Generator().manual_seed(1234 + seed)
         self.rng = random.Random(seed)
         self._sel, self._traj = None, []
@@ -52,7 +54,7 @@ class ValuePlanner:
     def set_map(self, col, cid):
         """Bind the SR-frame column for the current state space (built by perception from its walkable set)."""
         if cid is not self._cid:
-            self._col, self._cid, self._zc = col, cid, {}
+            self._col, self._cid, self._zc, self._srcache = col, cid, {}, {}
         if self.val is None:
             self.val = Value(col.d_mem, self.gamma, self.alpha)
 
@@ -74,15 +76,16 @@ class ValuePlanner:
             v = torch.randn(self._col.d_mem, generator=self._gen); v = v / v.norm(); self._sv[bits] = v
         return v
 
-    def set_focus(self, focus, stage_fn):
-        """The task column narrows the VALUE: bind agent × the ONE object being manipulated (`focus`) — so V
-        FACTORS instead of binding the JOINT of all movers (the 2^K problem `control_loop` solved by factoring) —
-        while keeping the small discrete STAGE (which factors are done, `stage_fn(coords)`) in the tag, so the
-        value still knows where it is in the sequence. G still sees all movers; only the value narrows."""
-        self._focus, self._stage_fn = tuple(focus), stage_fn
+    def set_focus(self, focus, target, occ=frozenset()):
+        """The task column PARAMETERISES the value by the current sub-goal: navigate the focused mover (`focus`) /
+        the agent toward the `target` cell, routing AROUND the parked movers (`occ`, the already-covered cells —
+        obstacles the static map doesn't know about). One single-target navigation at a time, the targets
+        sequenced by the task column — never the JOINT of all movers (the 2^K `control_loop` solved by factoring)
+        nor a long-horizon value (which diverges over the orthonormal codes)."""
+        self._focus, self._target, self._occ = tuple(focus), target, frozenset(occ)
 
     def _latent(self, coords):
-        zk = (coords, self._focus)
+        zk = (coords, self._focus, self._target)
         z = self._zc.get(zk)
         if z is not None:
             return z
@@ -93,10 +96,55 @@ class ValuePlanner:
             cell = (ax + coords[2 + 2 * i], ay + coords[2 + 2 * i + 1])
             if cell in cid:
                 zz = zz * col.place_code(cid[cell])
-        zz = zz * self._svec((coords[2 + 2 * self.n_movers:], self._stage_fn(coords)))   # tag: door bits + stage
+        if self._target is not None and self._target in cid:   # parameterise by the current sub-goal cell
+            zz = zz * col.place_code(cid[self._target])
+        zz = zz * self._svec(coords[2 + 2 * self.n_movers:])   # tag: the door bits
         zz = zz / (zz.norm() + 1e-8)
         self._zc[zk] = zz
         return zz
+
+    def _ensure_sr(self):
+        """The discounted SR over the walkable graph MINUS the parked-mover cells, (I − γA)⁻¹ — the NEED
+        (Mattar–Daw): SR[a,b] = expected discounted visits to b from a = a PROPAGATED proximity (monotone in
+        graph distance), unlike the column's orthonormalised place codes (a delta — no gradient). Excluding the
+        parked cells routes the agent AROUND covered movers instead of through them. Cached per (map, occ)."""
+        cached = self._srcache.get(self._occ)
+        if cached is not None:
+            self._sridx, self._sr = cached
+            return
+        cells = [c for c in self._cid if c not in self._occ]
+        idx = {c: i for i, c in enumerate(cells)}
+        n = len(cells)
+        A = torch.zeros(n, n)
+        for c, i in idx.items():
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nb = (c[0] + dx, c[1] + dy)
+                if nb in idx:
+                    A[i, idx[nb]] = 1.0
+        A = A / A.sum(1, keepdim=True).clamp_min(1e-6)
+        sr = torch.linalg.inv(torch.eye(n) - 0.95 * A)
+        self._srcache[self._occ] = (idx, sr)
+        self._sridx, self._sr = idx, sr
+
+    def _prox(self, a, b):
+        i, j = self._sridx.get(a), self._sridx.get(b)
+        return float(self._sr[i, j]) if i is not None and j is not None else 0.0
+
+    def _proximity(self, coords):
+        """The navigation NEED to the current target via the discounted SR (a PROPAGATED, valid potential the
+        bound latent can't express): the FOCUSED mover → target for a `cover` sub-goal, else the agent → target
+        for a `reach`. Only the moved thing's proximity — an `agent→block` term spuriously peaks near walls (SR-
+        adjacency is higher where there are fewer neighbours), parking the agent; reaching the block is instead
+        left to the depth-D G-rollout, which sees the push (and so the block→target rise) within the horizon."""
+        if self._target is None:
+            return 0.0
+        self._ensure_sr()
+        ax, ay = coords[0], coords[1]
+        if self._focus:                                        # cover: push the focused mover onto the target
+            i = self._focus[0]
+            cell = (ax + coords[2 + 2 * i], ay + coords[2 + 2 * i + 1])
+            return self._prox(cell, self._target)
+        return self._prox((ax, ay), self._target)             # reach: agent → target
 
     # ---- the learned model G, gated by traversability (the map + a closed gate) ---------------------------
     def _traversable(self, cell, coords, gates):
@@ -120,7 +168,7 @@ class ValuePlanner:
     # ---- the depth-D model-rollout search (memoised over the reachable set) -------------------------------
     def _rollout(self, coords, depth, gates, pragmatic, memo):
         if depth <= 0:
-            return self.val.value(self._latent(coords))
+            return self._proximity(coords)
         mk = (coords, depth)
         if mk in memo:
             return memo[mk]
@@ -221,10 +269,8 @@ class FactoredPlanner:
             #                                                  # denominator so revealing the next never drops Φ)
             target = factors[self._k - 1]                      # the current (revealed, unsatisfied) factor
             occ = frozenset(f[0] for f in factors[:self._k - 1] if f[1] == "cover")   # movers parked on done cells
-            fm = self.focus_mover(coords, target, occ)         # FACTOR the value: agent × the ONE current object,
-            stage = lambda c, fac=tuple(factors): frozenset(   # + the discrete STAGE (which factors are done) so
-                j for j, f in enumerate(fac) if self.satisfied(c, f))   # the value still knows the sequence point
-            self.vp.set_focus((fm,) if fm is not None else (), stage)
+            fm = self.focus_mover(coords, target, occ)         # PARAMETERISE the value: navigate the ONE current
+            self.vp.set_focus((fm,) if fm is not None else (), target[0], occ)   # object/agent → target, around occ
             def explore_fn(c, t=target, occ=occ, g=gates):     # EXPLORATION (not the value) heads toward the
                 best, bp = self.vp.rng.randrange(self.vp.n_actions), -1.0             # current factor's object, so
                 for a in range(self.vp.n_actions):                                   # the agent reaches the next
