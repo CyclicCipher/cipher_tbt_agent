@@ -154,6 +154,32 @@ each env step:
   move) — fine per level, conflate across levels); the CUTOVER (drive the agent with `ValuePlanner`, delete
   `_subgoals`/`_value_subgoals`/`_plan`/`_navigate`); then the Phase-2 acceptance-test cleanup (move `_state`/
   `_predict` colour logic into perception so `tbt/` is vector-only)._
+  _G BUILD DESIGN (resolved 2026-06-26, after the objectperceiver/disentanglement discussion — the bitter lesson
+  at the dynamics + perception layers):_
+  - _A push-SPECIFIC forward model = 0% closer to the goal. The general G already exists: **`recursive_residual`
+    over factored coordinates** (the same MDL search that found carry; ANY conditional mechanic = a conditional
+    coordinate-delta). The fix = delete `_predict`, factor the frame into coordinates, roll `recursive_residual`
+    forward as G. Push/door/pad/toggle all emerge as learned rules — no per-mechanic code._
+  - _**THE CRUX = the coordinate frame** (lab `scratchpad/test_general_dynamics.py`): absolute coords learn every
+    NON-relational effect (move 100%) and miss every relational one (**push 0%**); **EGOCENTRIC** coords (object
+    pos relative to the body) make push a plain literal (**100%**), because the relation becomes local. So G =
+    `recursive_residual` over egocentric object coordinates._
+  - _**The coordinates are common-fate movers, not connected-components.** The object DOF the dynamics needs =
+    cells that translate together under action (the disentanglement/action-orbit principle at the grouping level).
+    Connected-component `segment()` stays ONLY as the perceptual bootstrap (a fair Core-Knowledge objectness prior;
+    needed to perceive a still object before it moves). Evidence (`test_common_fate.py`): on a multi-colour rigid
+    object + two touching independently-moving same-colour blocks, same-colour CC mis-groups 6 cells, multicolour
+    CC 3, **common-fate 0** — uniquely right on touching-independent + multi-colour objects._
+  - _**Column-specialization (Cipher's idea, folded in):** an **egocentric column** (G + the common-fate
+    coordinates + interaction dynamics; seeded by the partial-obs `_frame_column`) **thalamus-bound** to the
+    **absolute SR-frame map column** (navigation / goal location), **BG-gated**. Mirrors hippocampal-allocentric +
+    parietal-egocentric + the retrosplenial transform. Navigation reads absolute; dynamics reads egocentric; the
+    value binds across both — also the answer to "could a column take that role"._
+  - _Build increments: **(1)** G = egocentric common-fate coords → `recursive_residual`, ONE model predicts push
+    AND door (lab); **(2)** the egocentric/absolute column pair + thalamus binding; **(3)** the object-aware value
+    latent (V binds object coords, not just the agent place); **(4)** cutover + delete the enumeration; validate
+    L1/L2/Sokoban from one learned G. Sparse reward is answered by G itself: find the reward ONCE, then PLAN
+    through G to re-reach it (EZ-V2 sample-efficiency), no dense signal needed._
 - **S4 — exploration + value targets.** Flattened-prior + novelty; SVE + mixed target; V over the SR-frame. *Gate:*
   reaches a DEEP goal online (LockPath L2/L3) that random never reached — the thing the rework is *for*.
 - **S5 — the HIDDEN-STATE frontier (recurrence + cloning) — beyond EZ-V2.** For state the frame does NOT reveal —

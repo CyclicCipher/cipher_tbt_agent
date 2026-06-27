@@ -96,6 +96,33 @@ def build_world(dm, objp, goal) -> WorldModel:
     )
 
 
+def egocentric_coords(scene, world: WorldModel):
+    """Factored EGOCENTRIC coordinates for the forward model `G` (tbt/forward.py) — the perception side of the
+    coordinate frame, the one place colours/roles touch the dynamics:
+      - the body's ABSOLUTE position, so POSITIONAL effects (a key opening a door at a fixed cell) are literals
+        on it;
+      - each pushable object RELATIVE to the body, so RELATIONAL effects (a push) are literals (absolute coords
+        can't express "the block is the cell I'm stepping into" — the validated crux);
+      - a presence bit per learned door colour (the observable open/closed state).
+    One object per pushable colour for now; multiple same-colour movers (Sokoban) need common-fate object-level
+    tracking (the connected-component bootstrap + motion correspondence) — the next perception step. Returns a
+    hashable tuple, or None if the body is not visible."""
+    body = scene.body_pos
+    if body is None:
+        return None
+    co = [body[0], body[1]]
+    for c in sorted(world.pushable):
+        cells = scene.by_color.get(c)
+        if cells:
+            ox, oy = min(cells)
+            co += [ox - body[0], oy - body[1]]
+        else:
+            co += [-99, -99]                                   # absent (placeholder; same dim across the level)
+    for c in sorted(world.doors):
+        co.append(1 if scene.by_color.get(c) else 0)
+    return tuple(co)
+
+
 # ── the per-frame scene ──────────────────────────────────────────────────────────────────────────────────
 @dataclass
 class Scene:
