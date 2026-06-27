@@ -41,7 +41,7 @@ class ValuePlanner:
         self.gamma, self.alpha, self.depth, self.kappa, self.l = gamma, alpha, depth, kappa, l
         self.val = None
         self.rhat, self.term = {}, {}                          # (coords, action) -> reward, terminal (the G head)
-        self._sv, self._zc = {}, {}                            # bit-combo -> tag;  coords -> cached latent
+        self._sv, self._zc, self._slotc = {}, {}, {}           # bit-combo->tag; coords->latent; coords->slot cells
         self._gen = torch.Generator().manual_seed(1234 + seed)
         self.rng = random.Random(seed)
         self._sel, self._traj = None, []
@@ -59,8 +59,12 @@ class ValuePlanner:
 
     # ---- the bound, normalised latent (place codes ⊗ a bit tag) -------------------------------------------
     def _slots(self, coords):
-        ax, ay = coords[0], coords[1]
-        return [(ax, ay)] + [(ax + coords[2 + 2 * i], ay + coords[2 + 2 * i + 1]) for i in range(self.n_movers)]
+        s = self._slotc.get(coords)
+        if s is None:
+            ax, ay = coords[0], coords[1]
+            s = [(ax, ay)] + [(ax + coords[2 + 2 * i], ay + coords[2 + 2 * i + 1]) for i in range(self.n_movers)]
+            self._slotc[coords] = s
+        return s
 
     def _svec(self, bits):
         v = self._sv.get(bits)
@@ -165,3 +169,47 @@ class ValuePlanner:
                 R += disc * self.val.value(traj[t + n][0])
             self.val.w += self.alpha * (R - self.val.value(traj[t][0])) * traj[t][0]
         self._traj = []
+
+
+class FactoredPlanner:
+    """The task column over the value-search — `control_loop`'s additive loop, made to drive the ValuePlanner.
+
+    A conjunctive goal (`cover₁ ∧ cover₂ ∧ … ∧ reach`) is too deep for one pragmatic gradient: the search covers
+    one factor and stalls (no gradient to sequence the rest). So sequence them — REVEAL the factors one at a time
+    (perception orders them, terminal `reach` last); the value-search satisfies the newly-revealed one while every
+    already-revealed factor stays in the pragmatic set, so the done ones are PRESERVED (un-satisfying one drops
+    the progress). When the revealed set is all satisfied, reveal the next. K independent satisfactions sequenced,
+    never the joint 2^K.
+
+    Domain-general: `factors` and `satisfied(coords, factor)->bool` are OPAQUE (from perception). For any game the
+    loop sequences whatever sub-conditions F learned — pads to cover, or contradictions to resolve."""
+
+    def __init__(self, vp: "ValuePlanner", satisfied, proximity):
+        self.vp, self.satisfied, self.proximity = vp, satisfied, proximity
+        self._k = 1
+        self._prag = lambda c: 0.0
+
+    def reset(self):
+        self.vp.reset()
+        self._k = 1
+
+    def set_map(self, col, cid):
+        self.vp.set_map(col, cid)
+
+    def act(self, coords, gates, factors, explore=0.0):
+        if coords is not None and factors:
+            while self._k < len(factors) and all(self.satisfied(coords, f) for f in factors[:self._k]):
+                self._k += 1                                   # the revealed set is met → reveal the next factor
+            active = tuple(factors[:self._k])
+            n = len(factors)                                   # FIXED denominator (all factors): revealing the next
+            self._prag = lambda c, a=active, n=n: sum(self.satisfied(c, f) for f in a) / n  # factor must not drop Φ
+            # NOTE: this discrete pragmatic covers ONE factor then stalls — the value-search isn't drawn to the
+            # NEXT factor's object (the control_loop routing for a COVER sub-goal is the open nub; proximity-as-
+            # reward backfired into a local optimum). `self.proximity` is available for a non-reward routing.
+        return self.vp.act(coords, gates, self._prag, explore)
+
+    def learn(self, reward, done):
+        self.vp.learn(reward, done, self._prag)
+
+    def flush(self):
+        self.vp.flush()

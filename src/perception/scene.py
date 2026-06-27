@@ -199,7 +199,7 @@ class StateEncoder(_ActionVocab):
             non_bg.add(scene.body_pos)
         if not non_bg:
             return set()
-        walls = {c for c in self.world.blocking if c not in self.world.doors}
+        walls = {c for c in (self.world.blocking | self.world.death) if c not in self.world.doors}
         obstacles = {p for c in walls for p in by.get(c, set())}
         xs = [x for x, _ in non_bg]; ys = [y for _, y in non_bg]
         return {(x, y) for x in range(min(xs), max(xs) + 1) for y in range(min(ys), max(ys) + 1)
@@ -219,6 +219,17 @@ class StateEncoder(_ActionVocab):
         if kind == "reach":
             return (coords[0], coords[1]) == cell
         return cell in set(self.block_abs(coords))
+
+    def proximity(self, coords, factor):
+        """A CONTINUOUS [0,1] progress toward satisfying `factor` (1 = satisfied) — the navigation gradient the
+        task column routes toward: for 'reach', the agent nearing the cell; for 'cover', a mover nearing it.
+        `1/(1+distance)`. Perception owns the metric, so the planner gets a smooth, opaque pull signal."""
+        cell, kind = factor
+        if kind == "reach":
+            d = abs(coords[0] - cell[0]) + abs(coords[1] - cell[1])
+        else:
+            d = min((abs(b[0] - cell[0]) + abs(b[1] - cell[1]) for b in self.block_abs(coords)), default=99)
+        return 1.0 / (1.0 + d)
 
 
 # ── the per-frame scene ──────────────────────────────────────────────────────────────────────────────────
