@@ -367,3 +367,51 @@ B/C-selectivity (input + readout gates); the Merge-primitive boundary for real l
 Sources: Mamba/SSD (Dao & Gu 2024) · HTM Temporal Memory (Hawkins & Ahmad 2016) · TBT path integration
 (Hawkins 2019) · Stachenfeld 2017 (grid = SR) · Levy & Goldberg 2014 (SGNS = PMI) · Ramsauer 2020 (modern
 Hopfield = attention). Memory: `project_grid_in_mamba_hybrid`.
+
+---
+
+## R9 — How columns COMMUNICATE: the Cortical Messaging Protocol + voting (the gap Cipher flagged)
+
+**Question.** We built the thalamus (bind/read), basal ganglia, emergent allocation, egocentric vs absolute
+columns — but never specified HOW columns actually talk to each other. What does the literature (NOT our docs)
+say the inter-column protocol is? (Cipher, 2026-06-27: "the one thing I don't think we ever addressed is how
+columns communicate; do external research; don't forget LATERAL.")
+
+**Answer: ONE message format (the Cortical Messaging Protocol) + three routing directions; lateral = VOTING.**
+From the Thousand Brains Project / Monty (Numenta 2024, arXiv 2412.18354) and Hawkins-Ahmad-Cui 2017:
+- **The CMP — one currency for every message** (lateral, feedforward, feedback): `(content, pose, confidence)`
+  + sender-id + validity. *Content* = what object/feature; *pose* = its location + 3×3 orientation in a
+  reference frame; *confidence* ∈ [0,1]. TWO load-bearing facts: (a) columns exchange **beliefs (object+pose
+  hypotheses), NEVER raw input features** — a compressed structured message, not sensory data; (b) the message
+  carries the **spatial relationship**, so consensus is by **triangulation, not a bag-of-features** ("it's a
+  mug, AND given my pose you should be sensing it over there").
+- **Feedforward (bottom-up):** a lower column's recognized object ID becomes a **FEATURE in the higher
+  column's model** → compositionality. (= our space→task channel; how key→door enters the task column.)
+- **Feedback (top-down):** the higher column **biases** the lower (sets the goal-state). (= our task→space.)
+- **Lateral (VOTING):** peers exchange the **UNION of all their (object, pose) hypotheses** + confidence;
+  consensus by **evidence accumulation + spatial consistency**, terminal when one hypothesis survives. Resolves
+  ambiguity fast (multi-view, multimodal, aliasing). (= the piece we downplayed; the egocentric×absolute bind.)
+
+**Implication for the build (the reconnect spine).** Our thalamus binds `content ⊗ place` but the messages are
+BARE — no pose/confidence, no hypothesis-union, no voting. Upgrade: every inter-column message is **CMP-shaped
+`(content, pose, confidence)`**, carried through the thalamus; add **lateral voting** (exchange hypothesis sets,
+consensus by spatial consistency) as a first-class channel beside top-down/bottom-up; the BG gates which routes
+open; `reward.py` values; the recurrence carries context. This is the missing PROTOCOL on top of the thalamus
+SUBSTRATE.
+
+**The reconnect plan (Option A, the multi-column control loop; chosen by Cipher 2026-06-27).** The current flat
+`value.py` BFS is the architecture's explicitly-rejected exhaustive VI (§6 "not blind one-step replanning";
+reward.py "prioritized sweeping"). Stages, each gated on the levels that pass now (SK0-2, LP0-1):
+1. **The communication spine + the control loop** — CMP messages over the thalamus (top-down goal-state +
+   bottom-up achieved/exafference + lateral voting), task ⊕ space columns, navigate via the SR (reward.py
+   prioritized replay), retire the flat planner. **← STARTED HERE.**
+2. **Sub-goals EMERGE** — eigenoptions (off `_sr_frame`) + affordances (reach a discovered effect's
+   precondition, from `residual.py`); doors become sub-goals, so LP3's bits FACTOR (no 2^bits). Validate LP2/LP3.
+3. **Relational push via the egocentric column** — bind the egocentric G (`forward.py`) to the absolute map
+   column by lateral voting; the push is the egocentric dynamics rolled forward + valued, not BFS-over-joint.
+4. **Emergent allocation + incremental SR** — BG allocates columns (`multicolumn.py`); TD-SR for scale.
+
+Sources: [Thousand Brains Project / Monty (Numenta 2024)](https://arxiv.org/html/2412.18354v1) ·
+Hawkins, Ahmad & Cui 2017 (voting) · [TBT voting overview (Numenta)](https://www.numenta.com/blog/2019/01/16/the-thousand-brains-theory-of-intelligence/) ·
+cortico-cortical laminar connectivity (feedforward L2/3→L4, feedback L5/6→L1, lateral uniform). Memory: see
+`reference_hierarchy_substrate`, `reference_exploration_replay`; architecture doc §3/§5/§6.
