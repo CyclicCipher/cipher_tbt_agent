@@ -15,16 +15,13 @@ small frames and real 64×64 ones.
 
 from __future__ import annotations
 
-from collections import Counter, defaultdict, deque
+from collections import defaultdict, deque
 from dataclasses import dataclass
+
+from .perceive import modal_background                        # the cached canonical impl (one concept, shared)
 
 _4 = [(0, -1), (0, 1), (-1, 0), (1, 0)]
 _8 = _4 + [(-1, -1), (-1, 1), (1, -1), (1, 1)]
-
-
-def modal_background(grid):
-    """The most common cell value — the statistical (not semantic) background."""
-    return Counter(v for row in grid for v in row).most_common(1)[0][0]
 
 
 @dataclass(frozen=True)
@@ -60,22 +57,20 @@ def segment(grid, bg=None, conn=4, multicolor=False):
     if bg is None:
         bg = modal_background(grid)
     nbrs = _8 if conn == 8 else _4
+    nonbg = {(x, y): grid[y][x] for y in range(H) for x in range(W) if grid[y][x] != bg}   # one scan
     seen, objs = set(), []
-    for y0 in range(H):
-        for x0 in range(W):
-            if (x0, y0) in seen or grid[y0][x0] == bg:
-                continue
-            col = grid[y0][x0]
-            comp, q = set(), deque([(x0, y0)])
-            seen.add((x0, y0))
-            while q:
-                x, y = q.popleft(); comp.add((x, y))
-                for dx, dy in nbrs:
-                    nx, ny = x + dx, y + dy
-                    if (0 <= nx < W and 0 <= ny < H and (nx, ny) not in seen
-                            and grid[ny][nx] != bg and (multicolor or grid[ny][nx] == col)):
-                        seen.add((nx, ny)); q.append((nx, ny))
-            objs.append(Obj(col, frozenset(comp)))
+    for start, col in nonbg.items():                          # walk the (few) content cells, not the whole frame
+        if start in seen:
+            continue
+        comp, q = set(), deque([start])
+        seen.add(start)
+        while q:
+            x, y = q.popleft(); comp.add((x, y))
+            for dx, dy in nbrs:
+                p = (x + dx, y + dy)
+                if p in nonbg and p not in seen and (multicolor or nonbg[p] == col):
+                    seen.add(p); q.append(p)
+        objs.append(Obj(col, frozenset(comp)))
     return objs
 
 

@@ -24,7 +24,6 @@ from tbt.dynamics import DynamicsModel                       # noqa: E402
 
 from tasks import Environment, GameAction, GameState     # noqa: E402
 from tasks.games import LockPath                         # noqa: E402
-from tasks.oracle import _capture, _restore, solve_level  # noqa: E402
 
 from .goal_discover import GoalModel                         # noqa: E402  (F: goal + pad from the score)
 from .object_perceiver import ObjectPerceiver               # noqa: E402  (E: body + pushable from motion)
@@ -113,12 +112,14 @@ class DynamicsPerceiver:
         return features, effect, present
 
 
-def collect(episodes=150, max_steps=200, seed=0, game_cls=LockPath):
+def collect(episodes=150, max_steps=120, seed=0, game_cls=LockPath):
     """One shared play loop → three learners: the DynamicsModel (cause→effect), the ObjectPerceiver (E: body +
-    pushable), the GoalModel (F: goal + pad). Oracle-hinted so levels get won (key→doors, pad→win) with random
-    moves for the negatives (reaching the goal BEFORE covering a pad — what forces the conjunctive win) and for
-    hitting the hazard. Generic over `game_cls` (any Game with a snapshot/restore for the oracle). Returns
-    (dynamics_model, object_perceiver, goal_model)."""
+    pushable), the GoalModel (F: goal + context). Exploration is SELF-DIRECTED random play — NO oracle teacher
+    (it was both the speed bottleneck — a per-divergence BFS that explodes with movable pieces — and a crutch
+    that demonstrated wins instead of letting the architecture discover them). The agent generates its own
+    experience; the only signals are the env's frames + sparse score. Effects are triggered by exploration; F's
+    wins/negatives come from STUMBLING on the goal — so a mechanic whose win needs a precise act (cover a pad,
+    tour every item) is a genuine exploration challenge, not a solved one. Returns (dm, object_perceiver, goal)."""
     rng = random.Random(seed)
     perc, dm = DynamicsPerceiver(), DynamicsModel()
     objp, goal = ObjectPerceiver(), GoalModel()
@@ -126,20 +127,11 @@ def collect(episodes=150, max_steps=200, seed=0, game_cls=LockPath):
         env = Environment(game_cls())
         frame = env.reset()
         perc.reset()
-        plan, level = [], frame.level                        # cached oracle plan; replan only on a cache miss
         for _ in range(max_steps):
             if frame.state != GameState.NOT_FINISHED:
                 break
-            if frame.level != level:                         # the layout changed -> the cached plan is stale
-                plan, level = [], frame.level
             moves = [a for a in frame.available_actions if a.is_movement]
-            hint = rng.random() < 0.8
-            if hint and not plan:                            # (re)solve ONLY on a cache miss, not every step:
-                saved = _capture(env.game)                   # following the cached optimal plan is the same
-                plan = solve_level(env.game) or []           # hint without re-running the BFS each step (which
-                _restore(env.game, saved)                    # explodes with the number of movable pieces)
-            action = plan[0] if (hint and plan and plan[0] in moves) else rng.choice(moves)
-            plan = plan[1:] if (plan and action == plan[0]) else []   # advance along / drop the cached plan
+            action = rng.choice(moves)                       # self-directed random exploration (no teacher)
             prev = frame
             frame = env.step(action)
             f, e, present = perc.observe(prev, action, frame)
@@ -147,7 +139,7 @@ def collect(episodes=150, max_steps=200, seed=0, game_cls=LockPath):
                 dm.observe(f, e)                             # the cause→effect rules (key→doors, hazard→death)
                 if action.is_movement and prev.state == GameState.NOT_FINISHED and frame.level == prev.level:
                     objp.observe(prev.grid, action.delta, frame.grid)        # E: body + pushable, from motion
-                stepped_on = f[0]                                            # F: goal + pad, from the score
+                stepped_on = f[0]                                            # F: goal + context, from the score
                 if e == "score_up":
                     goal.observe_win(present, stepped_on)
                 elif stepped_on in goal.goal_colors:

@@ -12,10 +12,22 @@ from collections import Counter
 
 _UNITS = [(0, -1), (0, 1), (-1, 0), (1, 0)]
 
+_BG_CACHE: dict = {}                                          # id(grid) -> (grid, bg), identity-checked + capped
+
 
 def modal_background(grid):
-    """The most common cell value — the (statistical, not semantic) background."""
-    return Counter(v for row in grid for v in row).most_common(1)[0][0]
+    """The most common cell value — the (statistical, not semantic) background. Cached per grid OBJECT: a frame's
+    grid is read several times per step (both perception passes + segmentation) and reused as the previous frame
+    next step, so the Counter over the full 64x64 frame would otherwise run ~4x per frame redundantly."""
+    key = id(grid)
+    hit = _BG_CACHE.get(key)
+    if hit is not None and hit[0] is grid:                    # identity check: a recycled id is not a false hit
+        return hit[1]
+    bg = Counter(v for row in grid for v in row).most_common(1)[0][0]
+    if len(_BG_CACHE) > 16:                                   # keep only a small working set (the live frames)
+        _BG_CACHE.clear()
+    _BG_CACHE[key] = (grid, bg)                               # storing grid keeps it alive -> its id can't be reused
+    return bg
 
 
 def active_cells(grid, bg):

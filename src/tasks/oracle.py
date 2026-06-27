@@ -26,6 +26,17 @@ from .core import GameAction
 _DEFAULT_MAX_STATES = 2_000_000
 _budget_warned = False
 
+# solve_level is a pure function of (game type, level, start state) — deterministic BFS. The same level-start
+# state recurs every episode of `collect` and across `oracle_optimal`, so memoizing it turns thousands of
+# repeated (and, for combinatorial games, expensive) BFS solves into one. Capped so a long probe can't grow it
+# without bound. Cleared via `clear_solve_cache()` if a game's levels are ever mutated in place.
+_SOLVE_CACHE: dict = {}
+_SOLVE_CACHE_CAP = 200_000
+
+
+def clear_solve_cache() -> None:
+    _SOLVE_CACHE.clear()
+
 
 def _capture(game):
     return game.snapshot()
@@ -39,9 +50,13 @@ def solve_level(game, max_states: int = _DEFAULT_MAX_STATES) -> Optional[List[Ga
     """BFS for a shortest action sequence completing the game's current level. Mutates `game` while searching,
     then restores it to the level start so the caller can replay the path through a real Environment. Returns
     None if unsolvable OR if the search exceeds `max_states` (the safety budget — it degrades gracefully instead
-    of hanging on a combinatorial joint state)."""
+    of hanging on a combinatorial joint state). Memoized on (game type, level, start state)."""
     global _budget_warned
     level = game._level
+    key = (type(game).__name__, level, game.snapshot())
+    if key in _SOLVE_CACHE:
+        game.load_level(level)                           # match the BFS's final side-effect (game at level start)
+        return _SOLVE_CACHE[key]
     actions = [a for a in game.available_actions() if not getattr(a, "requires_coordinates", False)]
     start = _capture(game)
     seen = {start}
@@ -70,6 +85,8 @@ def solve_level(game, max_states: int = _DEFAULT_MAX_STATES) -> Optional[List[Ga
             seen.add(nxt)
             queue.append((nxt, path + [action]))
     game.load_level(level)
+    if len(_SOLVE_CACHE) < _SOLVE_CACHE_CAP:              # memoize (skip storing if a layout overflowed the budget)
+        _SOLVE_CACHE[key] = solution
     return solution
 
 
