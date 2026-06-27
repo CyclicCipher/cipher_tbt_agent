@@ -180,6 +180,21 @@ each env step:
     latent (V binds object coords, not just the agent place); **(4)** cutover + delete the enumeration; validate
     L1/L2/Sokoban from one learned G. Sparse reward is answered by G itself: find the reward ONCE, then PLAN
     through G to re-reach it (EZ-V2 sample-efficiency), no dense signal needed._
+  _CONSOLIDATION + STEP-3 STATUS (2026-06-27): the rework pieces were moved into ONE agent (no per-game scratchpad
+  silos). **DONE + committed** (4ce4057, fcc66a0): the unified `perception/scene.py:StateEncoder` (any game — 0/1/N
+  movers via a common-fate tracker + door bits + gates + walkable + F's factors) and the one domain-general
+  `tbt/value.py:ValuePlanner` (value-search over G + object-aware latent + n-step TD + pragmatic shaping + door-
+  gated traversability; grep-clean) — validated via the GENERAL loop on LockPath L1 (door) + Sokoban L0 (push),
+  single-factor. Speed fixed (G.predict + slot caches: 9 min → ~1 min/game). **OPEN = the remaining S3:** the
+  FACTORED task-column over the value-search (`FactoredPlanner`) reveals F's factors one at a time (the
+  `control_loop` reconnect) but the value-search covers ONE factor then STALLS — it must LEARN the factored
+  cover-navigation the OLD `_bfs_push` hand-coded (push the NEXT block to the NEXT pad). The cover-routing is the
+  nub: proximity-AS-REWARD backfired into a local optimum (block parked near the pad); the fix is proximity-as-
+  EXPLORATION-bias or an explicit agent×object route. Also open: F's cold-start (random collect never wins
+  Sokoban's conjunction → empty factors; the factored planner must produce the FIRST win to bootstrap F). **UNTIL
+  this works, the OLD enumeration (`planner.py` _subgoals/_value_subgoals/_navigate/_bfs_push) STAYS — it is the
+  working multi-factor agent (replica 4/4); do NOT do step 5 (delete it) or a full step 4 (loop swap) first, that
+  regresses Sokoban/L3.** Deadline posture: ship the enumeration agent; the value-search is the in-progress core._
 - **S4 — exploration + value targets.** Flattened-prior + novelty; SVE + mixed target; V over the SR-frame. *Gate:*
   reaches a DEEP goal online (LockPath L2/L3) that random never reached — the thing the rework is *for*.
 - **S5 — the HIDDEN-STATE frontier (recurrence + cloning) — beyond EZ-V2.** For state the frame does NOT reveal —
