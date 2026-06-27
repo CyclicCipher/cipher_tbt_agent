@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 
 from tasks import GameAction, GameState
+from tbt.column import CorticalColumn
 
 from .perceive import modal_background
 
@@ -96,31 +97,128 @@ def build_world(dm, objp, goal) -> WorldModel:
     )
 
 
-def egocentric_coords(scene, world: WorldModel):
-    """Factored EGOCENTRIC coordinates for the forward model `G` (tbt/forward.py) — the perception side of the
-    coordinate frame, the one place colours/roles touch the dynamics:
-      - the body's ABSOLUTE position, so POSITIONAL effects (a key opening a door at a fixed cell) are literals
-        on it;
-      - each pushable object RELATIVE to the body, so RELATIONAL effects (a push) are literals (absolute coords
-        can't express "the block is the cell I'm stepping into" — the validated crux);
+class StateEncoder(_ActionVocab):
+    """The ONE perception→planner bridge, for ANY game: a frame → the factored EGOCENTRIC state the planner plans
+    over, + the traversability gates + F's emergent subgoal factors + the pragmatic goal-progress. The single
+    place colours/roles touch planning; everything handed to the planner is OPAQUE (a coord tuple, a scalar in
+    [0,1], (cell,bit) gates, factor cells) so the planner is domain-general — swap perception and it is unchanged.
+
+    State (per frame):
+      - the body's ABSOLUTE position, so POSITIONAL effects (a key opening a door at a fixed cell) are literals;
+      - each movable object RELATIVE to the body, so RELATIONAL effects (a push) are literals;
       - a presence bit per learned door colour (the observable open/closed state).
-    One object per pushable colour for now; multiple same-colour movers (Sokoban) need common-fate object-level
-    tracking (the connected-component bootstrap + motion correspondence) — the next perception step. Returns a
-    hashable tuple, or None if the body is not visible."""
-    body = scene.body_pos
-    if body is None:
-        return None
-    co = [body[0], body[1]]
-    for c in sorted(world.pushable):
-        cells = scene.by_color.get(c)
-        if cells:
-            ox, oy = min(cells)
-            co += [ox - body[0], oy - body[1]]
-        else:
-            co += [-99, -99]                                   # absent (placeholder; same dim across the level)
-    for c in sorted(world.doors):
-        co.append(1 if scene.by_color.get(c) else 0)
-    return tuple(co)
+    Multiple same-colour movers (Sokoban) are kept distinct by a STATEFUL common-fate tracker — each slot follows
+    the nearest current mover cell across frames (one object moves per step), so G sees consistent per-object
+    coordinates whether the game has 0, 1, or N of them. (1-cell movers for the replica; multi-cell objects ⇒
+    segment + track the component — a later refinement.)"""
+
+    def __init__(self, world: WorldModel):
+        self.world = world
+        self.doors = sorted(world.doors)
+        self.reset()
+
+    def reset(self):                                            # new episode/level
+        self._slots = None                                     # tracked mover cells, stable order; set on 1st encode
+        self._mapkey = None                                    # the spatial column is rebuilt when the walkable changes
+
+    def column(self, scene):
+        """The SR-frame column over the current walkable cells (the map). Built once per distinct walkable set
+        from the cell adjacency under the action geometry; the planner reads place codes from it. Perception owns
+        the spatial structure, so `tbt/value.py` never sees a cell or a delta — it gets the column."""
+        walk = self.walkable(scene)
+        key = frozenset(walk)
+        if self._mapkey != key:
+            cells = sorted(walk)
+            cid = {c: i for i, c in enumerate(cells)}
+            col = CorticalColumn(n_entities=max(1, len(cells)))
+            for c in cells:
+                for j, (dx, dy) in enumerate(self.deltas):
+                    nb = (c[0] + dx, c[1] + dy)
+                    if nb in cid:
+                        col.observe(cid[c], j, cid[nb])
+            col.consolidate()
+            self._col, self._cid, self._mapkey = col, cid, key
+        return self._col, self._cid
+
+    @property
+    def n_movers(self):
+        return len(self._slots) if self._slots is not None else 0
+
+    @property
+    def n_doors(self):
+        return len(self.doors)
+
+    def _movers(self, scene):
+        return sorted(c for col in sorted(self.world.pushable) for c in scene.by_color.get(col, set()))
+
+    def encode(self, scene):
+        """The factored state tuple (or None if the body is not visible)."""
+        body = scene.body_pos
+        if body is None:
+            return None
+        cur = self._movers(scene)
+        if self._slots is None or len(cur) != len(self._slots):
+            self._slots = list(cur)                            # (re)seed the slots
+        else:                                                  # common-fate: GLOBAL closest-first assignment
+            pairs = sorted((abs(self._slots[i][0] - c[0]) + abs(self._slots[i][1] - c[1]), i, c)
+                           for i in range(len(self._slots)) for c in cur)
+            new, slots_used, cells_used = list(self._slots), set(), set()
+            for _, i, c in pairs:                              # claim the smallest displacements first (a stayed
+                if i not in slots_used and c not in cells_used:  # block, dist 0, is matched before a moved one)
+                    new[i] = c; slots_used.add(i); cells_used.add(c)
+            self._slots = new
+        co = [body[0], body[1]]
+        for m in self._slots:
+            co += [m[0] - body[0], m[1] - body[1]]
+        for d in self.doors:
+            co.append(1 if scene.by_color.get(d) else 0)
+        return tuple(co)
+
+    def gates(self, scene):
+        """Traversability: {cell: bit-index} for each currently-shut door cell — the planner blocks a cell while
+        the coord-bit at that index reads closed (1). General (cell, bit); the planner never knows it's a door."""
+        gates, base = {}, 2 + 2 * self.n_movers
+        for j, d in enumerate(self.doors):
+            for cell in scene.by_color.get(d, set()):
+                gates[cell] = base + j
+        return gates
+
+    def block_abs(self, coords):
+        """The movers' ABSOLUTE cells recovered from a (possibly imagined) coord tuple — for pragmatic/factor
+        checks and the value latent. Domain-general arithmetic on the opaque tuple."""
+        ax, ay = coords[0], coords[1]
+        return [(ax + coords[2 + 2 * i], ay + coords[2 + 2 * i + 1]) for i in range(self.n_movers)]
+
+    def walkable(self, scene):
+        """The map's walkable cells — the bounding box of content minus PERMANENT walls (blockers no learned
+        effect removes; a removable door is walkable, gated separately). The planner builds its SR-frame column
+        over these; perception owns 'which cells are walls'."""
+        by = scene.by_color
+        non_bg = {p for cells in by.values() for p in cells}
+        if scene.body_pos is not None:
+            non_bg.add(scene.body_pos)
+        if not non_bg:
+            return set()
+        walls = {c for c in self.world.blocking if c not in self.world.doors}
+        obstacles = {p for c in walls for p in by.get(c, set())}
+        xs = [x for x, _ in non_bg]; ys = [y for _, y in non_bg]
+        return {(x, y) for x in range(min(xs), max(xs) + 1) for y in range(min(ys), max(ys) + 1)
+                if (x, y) not in obstacles}
+
+    def factors(self, scene):
+        """F's EMERGENT subgoal factors as (target_cell, kind): each required-absent cell must be COVERED, each
+        goal cell REACHED. These are the win-condition's conjunctive terms read off F — not enumerated subgoal
+        types — so the planner sequences them generically."""
+        return ([(c, "cover") for c in sorted(scene.req_cells)]
+                + [(c, "reach") for c in sorted(scene.goal_cells)])
+
+    def satisfied(self, coords, factor):
+        """Is `factor` met in this (possibly imagined) coordinate state? Opaque to the planner (it just gets a
+        bool); here a 'cover' cell holds a mover, a 'reach' cell holds the agent."""
+        cell, kind = factor
+        if kind == "reach":
+            return (coords[0], coords[1]) == cell
+        return cell in set(self.block_abs(coords))
 
 
 # ── the per-frame scene ──────────────────────────────────────────────────────────────────────────────────

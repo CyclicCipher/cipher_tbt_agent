@@ -1,36 +1,29 @@
-"""A TD-learned value over a column's place codes + a model-rollout search — the EZ-V2 `V` + planning, general.
+"""The one value-search planner — domain-general core of the agent (the EZ-V2 `V` + planning, consolidated).
 
-The successor-representation IS the value basis (V = M·R) and the column's place codes ARE the SR eigenframe, so
-a LINEAR readout `V(z) = w · z` can represent the value, with `w` learned by TD from scalar rewards. The latent
-`z` the value reads is a BIND of the column's place code (the "where") with an observable STATE code (the "what":
-which learned effects have fired — a door opened, a pad covered). Binding is what de-aliases a cell whose value
-depends on world state that the place code alone can't see (a door is in the frame, but the door cell stays
-walkable, so the place code is identical open or shut). `z` is unit-normalised: the Hadamard bind has norm ~1/√d,
-which would otherwise shrink `V(z)` to ~0 and stall TD.
+It plans over a learned forward model `G` and an SR-frame column, by a depth-D model-rollout search whose leaf
+value is a TD-learned `V` over a bound latent, shaped online by an opaque PRAGMATIC signal (progress toward `F`'s
+learned goal). One model, every mechanic: navigation, a door (a state bit gates traversability), a push (a mover
+coordinate), a multi-object goal — they differ only in the coords/gates/pragmatic that PERCEPTION hands in.
 
-Acting is a depth-D model rollout (EZ-V2's search, exhaustive over the replica's 4 moves): from the current
-latent, roll the learned model forward — the column's walkable map advances the "where", the learned effects
-advance the "what" — accumulating the learned reward/termination head `r̂` and bootstrapping `V` at the leaves;
-take the best root move. This is what a 1-step greedy cannot do: 'fire the key first' EMERGES because the search
-sees the door open and the goal beyond it — no subgoal types, no 2^K enumeration, no hand-coded composite. (For
-the real ARC click(x,y), `4^depth` is infeasible; that is where the Gumbel-Top-k sampling + Sequential Halving in
-the notes replace the exhaustive expansion — parked until the click action.)
-
-The colour-dependent pieces (`_state`, `_predict`) are flagged for a later acceptance-test cleanup: they belong
-in perception (which legitimately knows colours), passing the planner an opaque state token + transition, so
-`tbt/` ends up vector-only. The mechanism here — bind, normalise, TD `V`, model rollout — is already domain-free.
+Everything domain-specific is opaque here:
+  - `coords` — a factored state tuple (agent + each mover, egocentric, + state bits); the planner only indexes it;
+  - the `column` + `cid` — the SR map; the planner only reads place codes;
+  - `gates` — `{cell: bit-index}`; a move onto a gated cell is blocked while that coord-bit reads 1;
+  - `pragmatic(coords) -> [0,1]` — `F`-progress, a callable.
+There is no grid / colour / delta / door / push in this file — swap perception (even to a non-spatial game) and
+this planner is unchanged. The latent binds a place code per position-slot ⊗ a tag for the bit-slots and is unit-
+normalised; the value is updated by EZ-V2 multi-step (n-step) TD with potential-based pragmatic shaping.
 """
 
 from __future__ import annotations
 
-import torch
+import random
 
-from .planner import Planner
+import torch
 
 
 class Value:
-    """The TD(0) readout over a latent: V(z) = w·z, w learned from scalar rewards. Domain-free — it sees only
-    latent VECTORS and scalar rewards, never a grid / colour / action / effect."""
+    """TD readout over a latent: V(z) = w · z; w is updated by the planner's n-step `flush`."""
 
     def __init__(self, d_mem: int, gamma: float = 0.9, alpha: float = 0.3):
         self.w = torch.zeros(d_mem)
@@ -40,126 +33,135 @@ class Value:
     def value(self, z: torch.Tensor) -> float:
         return float(self.w @ z)
 
-    def update(self, z: torch.Tensor, reward: float, z_next: torch.Tensor, done: bool) -> float:
-        """One TD(0) step: w += α·(r + γ·V(s') − V(s))·z. Returns the TD error (a surprise signal). On a terminal
-        the bootstrap is zeroed — the never-visited leaf's garbage value must not repel the agent from the goal."""
-        target = reward + (0.0 if done else self.gamma * float(self.w @ z_next))
-        td = target - float(self.w @ z)
-        self.w += self.alpha * td * z
-        return td
 
-
-class ValuePlanner(Planner):
-    """S3 — the same column-map + recurrence as `Planner`, but it PLANS by a model-rollout search over a
-    TD-learned `V` (bound latent) instead of the fire/cover/goal subgoal enumeration. Subgoal TYPES do not exist
-    here; composite order emerges from the value + search."""
-
-    def __init__(self, world, deltas, seed=0, gamma=0.9, alpha=0.3, depth=5):
-        self.gamma, self.alpha, self.depth = gamma, alpha, depth
-        self.val = None                                   # lazily sized to the column's d_mem on first act
-        self.rhat, self.term = {}, {}                     # (state, cell, move) -> reward, terminal — the G head
-        self._sv, self._zc = {}, {}                       # state -> state code;  (cell, state) -> cached latent
+class ValuePlanner:
+    def __init__(self, G, n_movers, n_bit, n_actions, gamma=0.9, alpha=0.3, depth=5, kappa=1.0, l=5, seed=0):
+        self.G = G
+        self.n_movers, self.n_bit, self.n_actions = n_movers, n_bit, n_actions
+        self.gamma, self.alpha, self.depth, self.kappa, self.l = gamma, alpha, depth, kappa, l
+        self.val = None
+        self.rhat, self.term = {}, {}                          # (coords, action) -> reward, terminal (the G head)
+        self._sv, self._zc = {}, {}                            # bit-combo -> tag;  coords -> cached latent
         self._gen = torch.Generator().manual_seed(1234 + seed)
-        self._sel = None                                  # the move just selected, awaiting its `learn`
-        super().__init__(world, deltas, seed)             # calls reset -> new_level (uses the attrs above)
+        self.rng = random.Random(seed)
+        self._sel, self._traj = None, []
+        self._col = self._cid = None
 
-    def new_level(self):
-        super().new_level()
-        self._zc = {}                                     # the map (and so the place codes) changed
-        self._sel = None
-
-    # ---- the bound, normalised latent z = place ⊗ state -----------------------------------------------------
-    def _svec(self, d, state):
-        v = self._sv.get(state)
-        if v is None:
-            v = torch.randn(d, generator=self._gen)
-            v = v / v.norm()
-            self._sv[state] = v                           # a fixed random tag per observed abstract state
-        return v
-
-    def _z(self, col, cid, cell, state):
-        z = self._zc.get((cell, state))
-        if z is None:
-            z = col.place_code(cid[cell]) * self._svec(col.d_mem, state)     # VSA bind (Hadamard)
-            z = z / (z.norm() + 1e-8)                                        # unit norm -> V(z) at O(1) scale
-            self._zc[(cell, state)] = z
-        return z
-
-    # ---- the learned forward model G (colour-dependent -> perception's job in the cleanup) -----------------
-    def _state(self, by_color):
-        """The observable abstract state: which learned-effect ('door') colours are currently removed."""
-        return frozenset(c for c in self.world.doors if c not in by_color)
-
-    def _predict(self, cid, cell2color, cell, state, move):
-        """G: (cell, state, move) -> (next_cell, next_state), from the learned map + effects. Static cell colours
-        + the dynamic `state` (which effects fired) — so an imagined rollout opens doors / fires keys correctly."""
-        dx, dy = self.deltas[move]
-        tgt = (cell[0] + dx, cell[1] + dy)
-        if tgt not in cid:
-            return cell, state                            # a wall / off-map -> stay
-        tcolor = cell2color.get(tgt)
-        if tcolor in self.world.doors and tcolor not in state:
-            return cell, state                            # a still-shut door blocks
-        ns = frozenset(state | self.world.effects[tcolor]) if tcolor in self.world.effects else state
-        return tgt, ns                                    # step (maybe firing an effect)
-
-    def _rollout(self, col, cid, c2c, cell, state, depth):
-        """Best discounted return over `depth` model steps, bootstrapping V at the leaf (EZ-V2 SVE, exhaustive
-        over the 4 moves). r̂ / term come from the learned head; the leaf value from the SR readout."""
-        if depth <= 0:
-            return self.val.value(self._z(col, cid, cell, state))
-        best = -1e30
-        for m in range(len(self.deltas)):
-            ncell, nstate = self._predict(cid, c2c, cell, state, m)
-            r = self.rhat.get((state, cell, m), 0.0)
-            d = self.term.get((state, cell, m), False)
-            q = r + (0.0 if d else self.gamma * self._rollout(col, cid, c2c, ncell, nstate, depth - 1))
-            if q > best:
-                best = q
-        return best
-
-    # ---- act / learn --------------------------------------------------------------------------------------
-    def act(self, scene, explore=0.0):
-        by_color = scene.by_color
-        self._spatial(by_color)
-        body = self._track(scene.body_pos, by_color)
-        col, cid = self._cache["col"], self._cache["cid"]
+    def set_map(self, col, cid):
+        """Bind the SR-frame column for the current state space (built by perception from its walkable set)."""
+        if cid is not self._cid:
+            self._col, self._cid, self._zc = col, cid, {}
         if self.val is None:
             self.val = Value(col.d_mem, self.gamma, self.alpha)
-        if body is None or body not in cid:
+
+    def reset(self):                                            # new episode
+        self._sel, self._traj = None, []
+
+    # ---- the bound, normalised latent (place codes ⊗ a bit tag) -------------------------------------------
+    def _slots(self, coords):
+        ax, ay = coords[0], coords[1]
+        return [(ax, ay)] + [(ax + coords[2 + 2 * i], ay + coords[2 + 2 * i + 1]) for i in range(self.n_movers)]
+
+    def _svec(self, bits):
+        v = self._sv.get(bits)
+        if v is None:
+            v = torch.randn(self._col.d_mem, generator=self._gen); v = v / v.norm(); self._sv[bits] = v
+        return v
+
+    def _latent(self, coords):
+        z = self._zc.get(coords)
+        if z is not None:
+            return z
+        col, cid, zz = self._col, self._cid, None
+        for cell in self._slots(coords):
+            pc = col.place_code(cid[cell]) if cell in cid else torch.ones(col.d_mem)
+            zz = pc if zz is None else zz * pc
+        zz = zz * self._svec(coords[2 + 2 * self.n_movers:])
+        zz = zz / (zz.norm() + 1e-8)
+        self._zc[coords] = zz
+        return zz
+
+    # ---- the learned model G, gated by traversability (the map + a closed gate) ---------------------------
+    def _traversable(self, cell, coords, gates):
+        if cell not in self._cid:
+            return False
+        b = gates.get(cell)
+        return not (b is not None and coords[b] == 1)
+
+    def _forward(self, coords, action, gates):
+        nxt = self.G.predict(coords, action)
+        for cell in self._slots(nxt):
+            if not self._traversable(cell, coords, gates):     # agent or a pushed mover lands non-walkable
+                return coords
+        return nxt
+
+    def _reward(self, coords, s2, action, pragmatic):
+        """Learned env reward + potential-based pragmatic shaping (γ·Φ(s') − Φ(s)) toward F's goal."""
+        return (self.rhat.get((coords, action), 0.0)
+                + self.kappa * (self.gamma * pragmatic(s2) - pragmatic(coords)))
+
+    # ---- the depth-D model-rollout search (memoised over the reachable set) -------------------------------
+    def _rollout(self, coords, depth, gates, pragmatic, memo):
+        if depth <= 0:
+            return self.val.value(self._latent(coords))
+        mk = (coords, depth)
+        if mk in memo:
+            return memo[mk]
+        best = -1e30
+        for a in range(self.n_actions):
+            s2 = self._forward(coords, a, gates)
+            d = self.term.get((coords, a), False)
+            q = (self._reward(coords, s2, a, pragmatic)
+                 + (0.0 if d else self.gamma * self._rollout(s2, depth - 1, gates, pragmatic, memo)))
+            if q > best:
+                best = q
+        memo[mk] = best
+        return best
+
+    def act(self, coords, gates, pragmatic, explore=0.0):
+        if coords is None or self._col is None:
             self._sel = None
-            return self.rng.randrange(len(self.deltas))
-        c2c = {cell: c for c, cells in by_color.items() for cell in cells}   # cell -> colour, O(1) in the rollout
-        state = self._state(by_color)
-        qs = []
-        for m in range(len(self.deltas)):
-            ncell, nstate = self._predict(cid, c2c, body, state, m)
-            r = self.rhat.get((state, body, m), 0.0)
-            d = self.term.get((state, body, m), False)
-            qs.append(r + (0.0 if d else self.gamma * self._rollout(col, cid, c2c, ncell, nstate, self.depth - 1)))
+            return self.rng.randrange(self.n_actions)
+        memo, qs = {}, []
+        for a in range(self.n_actions):
+            s2 = self._forward(coords, a, gates)
+            d = self.term.get((coords, a), False)
+            qs.append(self._reward(coords, s2, a, pragmatic)
+                      + (0.0 if d else self.gamma * self._rollout(s2, self.depth - 1, gates, pragmatic, memo)))
         if explore and self.rng.random() < explore:
-            move = self.rng.randrange(len(self.deltas))
+            move = self.rng.randrange(self.n_actions)
         else:
             mx = max(qs)
-            move = self.rng.choice([m for m, q in enumerate(qs) if q == mx])  # randomised ties
-        self._sel = (col, cid, body, state, move)
+            move = self.rng.choice([m for m, q in enumerate(qs) if q == mx])
+        self._sel = (coords, move)
         return move
 
-    def learn(self, next_scene, reward, done):
-        """TD-update V for the move just taken + fill the reward/termination head. The next latent is read from
-        the next state's own map (which may have rebuilt) and its own abstract state; `done` zeroes it."""
+    # ---- learning: EZ-V2 multi-step TD with potential-based pragmatic shaping -----------------------------
+    def learn(self, reward, done, pragmatic):
         if self._sel is None:
             return
-        col, cid, body, state, move = self._sel
-        z = self._z(col, cid, body, state)
-        z_next = z
-        if not done:
-            nb = next_scene.body_pos
-            nstate = self._state(next_scene.by_color)
-            nc = self._spatial(next_scene.by_color)
-            if nb is not None and nb in nc["cid"]:
-                z_next = self._z(nc["col"], nc["cid"], nb, nstate)
-        self.val.update(z, reward, z_next, done)
-        self.rhat[(state, body, move)] = reward
-        self.term[(state, body, move)] = done
+        coords, move = self._sel
+        self._traj.append((self._latent(coords), reward, pragmatic(coords), done))   # z, env_r, Φ, done
+        self.rhat[(coords, move)] = reward
+        self.term[(coords, move)] = done
         self._sel = None
+
+    def flush(self):
+        traj, T = self._traj, len(self._traj)
+        shaped = []
+        for t in range(T):
+            phi = traj[t][2]
+            phi_next = traj[t + 1][2] if (t + 1 < T and not traj[t][3]) else 0.0     # Φ(terminal) = 0
+            shaped.append(traj[t][1] + self.kappa * (self.gamma * phi_next - phi))
+        for t in range(T):
+            R, disc, n, terminal = 0.0, 1.0, 0, False
+            for k in range(self.l):
+                if t + k >= T:
+                    break
+                R += disc * shaped[t + k]; disc *= self.gamma; n = k + 1
+                if traj[t + k][3]:
+                    terminal = True; break
+            if not terminal and t + n < T:
+                R += disc * self.val.value(traj[t + n][0])
+            self.val.w += self.alpha * (R - self.val.value(traj[t][0])) * traj[t][0]
+        self._traj = []
