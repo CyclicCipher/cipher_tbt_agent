@@ -26,11 +26,11 @@ class Agent:
         self.planner.reset()
         self.perception.reset()
 
-    def choose_action(self, observation):
+    def choose_action(self, observation, explore=0.0):
         p = self.perception.read(observation)
         if p.terminal:                                         # GAME_OVER -> the env reloads the level
             self.planner.on_death()
             return self.perception.reset_action, None
         if p.new_level:
             self.planner.new_level()
-        return self.perception.to_action(self.planner.act(p.scene)), None
+        return self.perception.to_action(self.planner.act(p.scene, explore=explore)), None

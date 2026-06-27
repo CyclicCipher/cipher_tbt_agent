@@ -305,9 +305,10 @@ class Planner:
         return min((p for p in (routed, plans[i]) if p), key=len, default=[])
 
     # ---- the planning step --------------------------------------------------------------------------------
-    def act(self, scene):
-        """One scene -> one move index. Builds/caches the map, tracks the body, plans, and records the intent
-        the next recurrence step needs."""
+    def act(self, scene, explore=0.0):
+        """One scene -> one move index. Builds/caches the map, tracks the body, plans, records the intent the
+        next recurrence step needs. `explore` ∈ [0,1] = chance of a random move even when a plan exists — keeps
+        discovery alive (cover/tour) instead of only beelining to a known goal; still path-integrates correctly."""
         self.goal_cells = scene.goal_cells
         self.req_cells = scene.req_cells
         by_color = scene.by_color
@@ -316,9 +317,12 @@ class Planner:
         body = self._track(seen, by_color)
         if body is None:
             return self.rng.randrange(len(self.deltas))
-        if not self.plan:
-            self.plan = self._plan(body, by_color)
-        move = self.plan.pop(0) if self.plan else self.rng.randrange(len(self.deltas))
+        if explore and self.rng.random() < explore:
+            move = self.rng.randrange(len(self.deltas)); self.plan = []
+        else:
+            if not self.plan:
+                self.plan = self._plan(body, by_color)
+            move = self.plan.pop(0) if self.plan else self.rng.randrange(len(self.deltas))
         dx, dy = self.deltas[move]
         t = (body[0] + dx, body[1] + dy)
         tcolor = next((c for c, cells in by_color.items() if t in cells), None)
@@ -407,7 +411,7 @@ class EgoPlanner(Planner):
                     return move
         return self.rng.randrange(len(self.deltas))
 
-    def act(self, ego):
+    def act(self, ego, explore=0.0):                          # explore accepted for the shared Agent contract
         window, bg = ego.window, ego.bg
         if window is None:
             return self.rng.randrange(len(self.deltas))

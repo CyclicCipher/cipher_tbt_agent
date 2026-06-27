@@ -101,12 +101,24 @@ each env step:
   the easy games still solve online (MultiKey, Sokoban) at comparable steps. _(Oracle removal: already done.)_
   _PROGRESS 2026-06-26: the merged loop `play_online` is built (act+learn in one pass, no collect/oracle).
   MultiKey **2/2 online**, LockPath **2/4** (L0/L1). Sokoban **0/3 online** — one continuous run explores far less
-  than 150 reset-rich episodes, so it never finds the cover: the S4 exploration gap, surfaced early. NEXT: make
-  the loop **multi-episode** (reset on done, keep the model) to restore reset-rich exploration; then the free
-  deletions; then S2._
+  than 150 reset-rich episodes, so it never finds the cover: the S4 exploration gap, surfaced early.
+  Multi-episode + ε-explore (anneal): DONE — **MultiKey converges to OPTIMAL online** [9,13], 20/20 of the last
+  20 episodes (vs [190,31] single-episode). **Sokoban still 0/3**, and DIAGNOSED: its cover-all win is **~1/150
+  episodes by random** (offline landed exactly 1 lucky win → bootstrapped goal/req → 3/3; the online loop learns
+  body+pushable fine but landed 0 — ~50% likely at that rate). So it's the EXPLORATION FRONTIER (S4: deliberate
+  novelty over the augmented pad-covered state — cover on PURPOSE), not a merge defect. NEXT: free deletions +
+  S2; S4 cracks Sokoban._
 - **S2 — collapse the parallel learners into the column.** Body→efference copy in `perceive`; dynamics→column `G`;
   goal/reward→`V`. Delete `goal_discover`, `object_perceiver`, `dynamics`; collapse `perception/`→`perceive.py`.
   *Gate:* world-model quality (the learned effects/roles) ≥ today, online; steps hold.
+  _PROGRESS 2026-06-26: WRINKLE — DELETING the learners (dynamics→G, goal→V) can't precede S3/S5, which are what
+  give the column its G/V. So S2 splits: **(a) the file/code consolidation NOW** (perception 6→1, no capability
+  change), **(b) the learner-deletion AFTER S3/S5**. **(a) DONE: perception 6→2** — `perceive.py` = primitives +
+  segmentation + ObjectPerceiver(E) + GoalModel(F) + DynamicsPerceiver (all the "obs→learned-symbols"); `scene.py`
+  = the format adapter; `collect` moved to the eval harness. objects/object_perceiver/goal_discover/dynamics_perceive
+  deleted; online MultiKey unchanged (2/2 optimal) + offline collect still learns, both validated. REMAINING for
+  S2: remove the offline-path duplication (`evaluate`/`full_obs`/`collect` — entangled with the partial-obs eval),
+  and the learner-DELETION (→ column G/V) which waits on S3/S5._
 - **S3 — the sampled search replaces subgoals.** Gumbel + Sequential-Halving move-search, V-bootstrapped; delete
   `planner`, fold `reward`→agent. *Gate:* no subgoal enumeration anywhere; steps ≤ today on the solvable games.
 - **S4 — exploration + value targets.** Flattened-prior + novelty; SVE + mixed target; V over the SR-frame. *Gate:*

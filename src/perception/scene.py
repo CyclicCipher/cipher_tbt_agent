@@ -18,7 +18,7 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from tasks import GameAction, GameState
 
-from .objects import modal_background
+from .perceive import modal_background
 
 Cell = Tuple[int, int]
 
