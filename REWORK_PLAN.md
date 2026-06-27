@@ -139,6 +139,21 @@ each env step:
   part: TD-learning V from sparse reward (credit assignment) — helped by the SR being the value basis + EZ-V2's
   SVE/mixed targets. HIDDEN-state games (the toggle) are NOT this; they need the recurrence + cloning (S5). First
   step: a TD-learned V over the place codes driving move-selection, A/B vs `_subgoals`, then cut over + delete it._
+  _PROGRESS 2026-06-26 — mechanism BUILT + validated end-to-end (`tbt/value.py`: `Value` + `ValuePlanner`). Three
+  findings, each load-bearing: **(1)** a plain TD-V over the place code is OPTIMAL on navigation (L0: 8 steps) but
+  ALIASED on composition (L1 key+door: worse than random) — the door is observable in the frame's content but the
+  door cell stays walkable, so the place code is identical open/shut. Fix = **bind** `z = place ⊗ state` (state =
+  which learned effects fired), which de-aliases. **(2)** the Hadamard bind has norm ~1/√d → `V(z)≈0` stalls TD;
+  **unit-normalise** `z`. **(3)** a 1-step value-greedy COLLAPSES on L1 (commits to bumping the shut door);
+  depth sweep in the fast lab: depth 1/2/3 collapse, **depth-5 model-rollout search solves 40/40 at ~optimal** —
+  EZ-V2's thesis confirmed (the value is necessary, the SEARCH does the credit assignment). Real stack, LEARNED
+  forward model (column walkable = "where", learned effects = "what"): **L0 30/30 @ 8 steps, L1 30/30 @ ~13
+  steps**, NO subgoal enumeration. Iteration-speed fix: a perception-free value-lab (the map as a graph) + a
+  latent cache + a pickled world model — minutes → ~1s. REMAINING S3: the PUSH forward model (L2 block+pad — the
+  state must include pads-covered + G must predict a block sliding); multi-level keying (r̂/term are (state,cell,
+  move) — fine per level, conflate across levels); the CUTOVER (drive the agent with `ValuePlanner`, delete
+  `_subgoals`/`_value_subgoals`/`_plan`/`_navigate`); then the Phase-2 acceptance-test cleanup (move `_state`/
+  `_predict` colour logic into perception so `tbt/` is vector-only)._
 - **S4 — exploration + value targets.** Flattened-prior + novelty; SVE + mixed target; V over the SR-frame. *Gate:*
   reaches a DEEP goal online (LockPath L2/L3) that random never reached — the thing the rework is *for*.
 - **S5 — the HIDDEN-STATE frontier (recurrence + cloning) — beyond EZ-V2.** For state the frame does NOT reveal —
