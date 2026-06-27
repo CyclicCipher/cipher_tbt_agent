@@ -194,7 +194,23 @@ each env step:
   Sokoban's conjunction → empty factors; the factored planner must produce the FIRST win to bootstrap F). **UNTIL
   this works, the OLD enumeration (`planner.py` _subgoals/_value_subgoals/_navigate/_bfs_push) STAYS — it is the
   working multi-factor agent (replica 4/4); do NOT do step 5 (delete it) or a full step 4 (loop swap) first, that
-  regresses Sokoban/L3.** Deadline posture: ship the enumeration agent; the value-search is the in-progress core._
+  regresses Sokoban/L3.** BUT the enumeration is hand-coded subgoal TYPES — it CANNOT work on real ARC-AGI-3, so it
+  is only a replica fallback; **cracking the factored value-search (step 3) is the PRIORITY rework task, not
+  deferrable.** ACTIVE approach: the cover-routing via proximity-as-EXPLORATION-BIAS — bias the value-search's
+  exploration toward the current factor's OBJECT (the free mover to push / the goal), while the VALUE stays the
+  sparse satisfaction (so no local optimum, unlike proximity-as-reward). The agent is drawn to the next object;
+  the value-search covers from there (the L0 case); the value then learns the full path._
+  _**STEP 3 SOLVED 2026-06-27 (commit 64220e4) — the value-search was a dead end; Cipher redirected to the S4/S5
+  machinery.** The structural flaw: an agent-only leaf value (place-dot, then the discounted-SR NEED) CANNOT express
+  push geometry — getting a mover onto a cell depends on where the AGENT stands relative to it, so the search must be
+  over the **(agent, mover) JOINT**, not the mover alone. The per-factor navigator is now a **BFS in the learned G
+  over the (agent, the ONE focus-mover, state-bits) joint** (`tbt/value.py` `ValuePlanner.navigate`) — the general
+  `_bfs_push` (push from G, not a hand-coded `nb=b+delta`); `FactoredPlanner` sequences F's factors (S5). Fixes:
+  commit one mover per factor; `_forward` checks only MOVED slots; reject OVERLAP predictions (G mispredicts
+  push-into-wall). RESULT, one learned G, zero per-mechanic code: Sokoban L0/L1/L2 = 9/22/18 steps, LockPath L0/L1
+  = 8/12, all solved (push AND door/key, same BFS). Dead value-search (SR proximity, rollout, TD-V, latent) deleted;
+  value.py grep-clean. NEXT = rework step 4 (wire `FactoredPlanner` into the agent loop) + F's cold-start; THEN
+  step 5 (delete the enumeration). The OLD `planner.py` enumeration STAYS until step 4 lands._
 - **S4 — exploration + value targets.** Flattened-prior + novelty; SVE + mixed target; V over the SR-frame. *Gate:*
   reaches a DEEP goal online (LockPath L2/L3) that random never reached — the thing the rework is *for*.
 - **S5 — the HIDDEN-STATE frontier (recurrence + cloning) — beyond EZ-V2.** For state the frame does NOT reveal —
