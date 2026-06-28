@@ -46,6 +46,23 @@ class ForwardModel:
         """Record one transition: `action` carried the object from `pose` to `next_pose`."""
         self._disp[action][_round(pose, next_pose)] += 1
 
+    # ---- curiosity (competence-based intrinsic motivation -- explore until the operator is learned, not forever) ----
+    def curiosity(self, action) -> float:
+        """How much there is still to LEARN about this action's effect (the intrinsic-motivation drive that replaces
+        count-based novelty): 1.0 for a never-tried action (R-MAX optimism), 0.0 once the operator is confidently
+        learned, and 0.0 once we have tried enough without it resolving -- an unlearnable / noisy / conditional
+        effect, so we do NOT keep chasing it (the noisy-TV problem that raw novelty/error falls for)."""
+        c = self._disp.get(action)
+        if not c:
+            return 1.0                                        # never tried -> maximal curiosity
+        n = sum(c.values())
+        confidence = c.most_common(1)[0][1] / n
+        if confidence >= 0.9:
+            return 0.0                                        # a confident operator -> learned, nothing left
+        if n >= 5:
+            return 0.0                                        # tried enough, not resolving -> noise/conditional, give up
+        return 1.0                                            # still confirming -> keep practising
+
     def learn_track(self, track) -> None:
         """Learn from one `ObjectTracker` track ([(step, pose, action), ...]). Each consecutive pair is a transition
         whose displacement was produced by the LATER entry's action (the action that yielded the arrival pose)."""

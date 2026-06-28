@@ -31,22 +31,26 @@ class Planner:
     is handed the current objects, the per-object forward models, the available actions, and the set of actions tried
     so far (for babbling). `cap` bounds the rollout (compute, cheap); `novelty` is the epistemic frontier reward."""
 
-    def __init__(self, goal, cap: int = 600, gamma: float = 0.95, novelty: float = 0.05, seed: int = 0):
+    def __init__(self, goal, cap: int = 600, gamma: float = 0.95, novelty: float = 0.05,
+                 contact: float = 0.5, seed: int = 0):
         self.goal = goal
         self.cap = cap
         self.novelty = novelty
+        self.contact = contact                                 # salience: reward reaching an un-contacted object
         self._optimism = 1.0 / (1.0 - gamma)                   # R-MAX optimistic value for a never-tried action
         self.neo = Neocortex(gamma=gamma, seed=seed)
 
     def reset(self):
         self.neo.reset()
 
-    def act(self, objects, forwards, actions, tried):
+    def act(self, objects, forwards, actions, curiosity):
         """The action to take. `objects = {id: (pose, size)}`, `forwards = {id: ForwardModel}`, `actions` = available
-        action keys, `tried` = actions taken so far. Returns the action key, or None if no actions are available."""
+        action keys, `curiosity = {action: 0..1}` = how much there is still to LEARN about each action (1 = never
+        tried; ~0 once learned or unlearnable). Returns the action key, or None if nothing pragmatic/salient is
+        reachable -- the caller then falls back to (random / heavy-tailed) search."""
         if not actions:
             return None
-        goal, optimism, novelty = self.goal, self._optimism, self.novelty
+        goal, optimism, contact = self.goal, self._optimism, self.contact
         sizes = {oid: size for oid, (_pose, size) in objects.items()}
         # keep REAL poses in the rollout (predict adds integer deltas, so they stay exact) -- rounding here would make
         # the rollout's config_state disagree with perception's, and the goal would never be recognised mid-rollout.
@@ -59,23 +63,29 @@ class Planner:
         def to_objects(state):
             return {oid: (pose, sizes.get(oid, 0)) for oid, pose in state}
 
-        def pragmatic(state, a):                               # reach the goal / try an untried action
+        def pragmatic(state, a):                               # learn an action's effect / reach the goal
             key = actions[a]
-            if key not in tried:                               # an action never taken -> TRY it (motor babbling)
-                return ("?", a), optimism, True
-            nxt = advance(state, key)
+            c = curiosity.get(key, 1.0)
+            if c > 0.1:                                        # still something to LEARN -> practice it (curiosity,
+                return ("?", a), optimism * c, True            # learning-progress weighted; ~0 once learned/noise)
+            nxt = advance(state, key)                          # learned -> use it to reach the goal
             if goal.is_goal(to_objects(nxt)):                  # the learned goal configuration -> exploit
                 return nxt, 1.0, True
             return nxt, 0.0, False                             # unexplored OR visited: traversable toward the goal
 
         a = self.neo.achieve(pragmatic, start, len(actions), max_states=self.cap)
-        if self.neo.root_value > 1e-6:                         # a goal or an untried action is reachable -> pursue it
+        if self.neo.root_value > 1e-6:                         # a goal, or an action worth learning -> pursue it
             return actions[a]
 
-        def epistemic(state, a):                               # nothing to exploit -> seek the nearest new configuration
+        def salient(state, a):                                 # SALIENT: reach an un-contacted object (goals live there)
             nxt = advance(state, actions[a])
-            if goal.visits(to_objects(nxt)) == 0:              # an unvisited configuration is a frontier TARGET
-                return nxt, novelty, True
-            return nxt, 0.0, False
+            if goal.new_contact(to_objects(nxt)):
+                return nxt, contact, True
+            return nxt, 0.0, False                             # else traversable -- so a DISTANT contact stays reachable
 
-        return actions[self.neo.achieve(epistemic, start, len(actions), max_states=self.cap)]
+        a = self.neo.achieve(salient, start, len(actions), max_states=self.cap)
+        if self.neo.root_value > 1e-6:                         # an un-contacted object is reachable -> head to it
+            return actions[a]
+
+        return None                                            # nothing to learn / exploit / contact -> the caller
+        #                                                        does (random now; heavy-tailed Lévy) search -- step 2

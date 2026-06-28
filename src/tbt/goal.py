@@ -40,6 +40,22 @@ def config_state(objects):
     return tuple(sorted((size, (_r(pose[0] - ax), _r(pose[1] - ay))) for pose, size in items))
 
 
+def _contact_pairs(objects):
+    """The object pairs currently in CONTACT -- centroids within the sum of their radii (size as the proxy) plus a
+    small gap -- each keyed by the two sizes, a self-free 'which kinds of object are touching' signature. Salience:
+    goals live at object interactions (Core Knowledge), so a never-seen contact is the thing worth exploring toward."""
+    items = list(objects.values())                            # [(pose, size), ...]
+    pairs = set()
+    for i in range(len(items)):
+        (p1, s1) = items[i]
+        for j in range(i + 1, len(items)):
+            (p2, s2) = items[j]
+            d = ((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2) ** 0.5
+            if d <= 0.5 * (math.sqrt(s1) + math.sqrt(s2)) + 2:
+                pairs.add((min(s1, s2), max(s1, s2)))
+    return pairs
+
+
 class GoalModel:
     """Learn the rewarding object-configuration from the sparse score, over canonical (self-free) states, and value a
     configuration the planner is considering. Wraps `reward.py`'s `RewardModel` and adds only the scene->state
@@ -48,17 +64,24 @@ class GoalModel:
     def __init__(self, **rmkw):
         self.rm = RewardModel(1, optimistic=False, **rmkw)
         self.goals: set = set()                              # the canonical configurations a score increment rewarded
+        self.contacts: set = set()                           # object-kind pairs that have been in contact (salience)
 
     def state(self, objects):
         return config_state(objects)
 
     def observe(self, objects, score_delta) -> tuple:
-        """Record the current configuration; if the score rose, mark it the goal."""
+        """Record the current configuration (its visit + any contacts); if the score rose, mark it the goal."""
         s = self.state(objects)
         self.rm.observe(s, score_delta)
         if score_delta > 0:
             self.goals.add(s)
+        self.contacts |= _contact_pairs(objects)
         return s
+
+    def new_contact(self, objects) -> bool:
+        """Does this configuration put two objects in a contact never seen before? -- the salient exploration target
+        (drive the controllable object to an un-contacted object, where goals live)."""
+        return bool(_contact_pairs(objects) - self.contacts)
 
     def is_goal(self, objects) -> bool:
         """Is this configuration one the score has rewarded? (Recognised by its relative arrangement.)"""

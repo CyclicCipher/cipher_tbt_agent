@@ -39,7 +39,6 @@ class Player:
         self.events = EventSegmenter()
         self.planner = Planner(self.goal, cap=self.cap, gamma=self.gamma, novelty=self.novelty, seed=self.seed)
         self.forwards: dict = {}                              # object_id -> ForwardModel (per-object operators)
-        self.tried: set = set()                              # actions taken (for motor babbling)
         self._prev_objects = self._last = self._prev_frame = None
         self._prev_score = 0
 
@@ -49,7 +48,6 @@ class Player:
         self.events = EventSegmenter()
         self.field.reset()
         self.forwards = {}
-        self.tried = set()
         self._prev_objects = self._last = self._prev_frame = None
 
     def act(self, grid, actions, score):
@@ -65,10 +63,11 @@ class Player:
                         self.forwards.setdefault(oid, ForwardModel()).observe(
                             self._prev_objects[oid][0], self._last, pose)
             self.goal.observe(objects, score - self._prev_score)
-        action = self.planner.act(objects, self.forwards, actions, self.tried)
-        if action is None:                                   # nothing plan[n]able yet -> a random available action
+        # how much there is still to LEARN about each action (learning progress; 1.0 if untried) -- the curiosity drive
+        curiosity = {a: max((fm.curiosity(a) for fm in self.forwards.values()), default=1.0) for a in actions}
+        action = self.planner.act(objects, self.forwards, actions, curiosity)
+        if action is None:                                   # nothing to learn/exploit/contact -> random search (Lévy: step 2)
             action = self.rng.choice(list(actions))
-        self.tried.add(action)
         self._prev_objects, self._last, self._prev_score, self._prev_frame = objects, action, score, grid
         return action
 

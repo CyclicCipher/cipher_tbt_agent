@@ -80,3 +80,23 @@ def test_end_to_end_recovers_operators_from_raw_frames():
     fm.learn_track(track)
     assert fm.delta(1) == (1, 0)                             # learned, not assumed: action 1 = +x
     assert fm.delta(2) == (-1, 0)                            # action 2 = -x
+
+
+def test_curiosity_is_maximal_untried_and_falls_to_zero_when_learned():
+    fm = ForwardModel()
+    assert fm.curiosity("up") == 1.0                         # never tried -> maximal (R-MAX optimism)
+    for _ in range(8):
+        fm.observe((0, 0), "up", (0, -1))                    # a consistent, learnable operator
+    assert fm.curiosity("up") < 0.2                          # learned -> little learning progress left
+    assert fm.curiosity("down") == 1.0                       # a still-untried action stays maximal
+
+
+def test_curiosity_does_not_chase_unlearnable_noise():
+    """Learning progress, NOT raw error: a noisy action whose error never falls must not stay maximally curious -- the
+    'noisy-TV' problem that count-based novelty falls for. After sampling, its curiosity is well below an untried 1.0."""
+    import random
+    rng = random.Random(1)
+    fm = ForwardModel()
+    for _ in range(12):
+        fm.observe((0, 0), "noise", (rng.randint(-3, 3), rng.randint(-3, 3)))   # no consistent operator
+    assert fm.curiosity("noise") < 0.5                       # sampled, no learning progress -> not worth chasing

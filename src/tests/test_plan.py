@@ -35,7 +35,7 @@ def test_moves_the_controllable_object_to_a_goal_with_no_self():
     objects = {0: ((3, 8), 1), 1: ((10, 8), 4)}
     steps = 0
     while not g.is_goal(objects) and steps < 25:
-        a = p.act(objects, forwards, [0, 1, 2, 3], {0, 1, 2, 3})
+        a = p.act(objects, forwards, [0, 1, 2, 3], {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0})
         objects = {0: (forwards[0].predict(objects[0][0], a), 1), 1: ((10, 8), 4)}   # object 1 stays put (static)
         steps += 1
     assert g.is_goal(objects) and objects[0][0] == (9, 8) and steps <= 10
@@ -43,8 +43,9 @@ def test_moves_the_controllable_object_to_a_goal_with_no_self():
 
 def test_babbles_an_untried_action():
     p = Planner(GoalModel())
-    a = p.act({0: ((5, 5), 1), 1: ((10, 10), 4)}, {0: ForwardModel()}, [0, 1, 2, 3], set())
-    assert a in (0, 1, 2, 3)                                  # nothing tried/learned -> returns an action to try
+    curiosity = {0: 1.0, 1: 1.0, 2: 1.0, 3: 1.0}             # all untried -> maximal curiosity
+    a = p.act({0: ((5, 5), 1), 1: ((10, 10), 4)}, {0: ForwardModel()}, [0, 1, 2, 3], curiosity)
+    assert a in (0, 1, 2, 3)                                  # nothing learned yet -> returns an action to practice
 
 
 def test_exploits_a_reachable_goal_over_exploring():
@@ -52,5 +53,5 @@ def test_exploits_a_reachable_goal_over_exploring():
     g = GoalModel()
     g.observe({0: ((9, 0), 1), 1: ((10, 0), 4)}, 1)
     p = Planner(g)
-    a = p.act({0: ((3, 0), 1), 1: ((10, 0), 4)}, forwards, [0, 1, 2, 3], {0, 1, 2, 3})
+    a = p.act({0: ((3, 0), 1), 1: ((10, 0), 4)}, forwards, [0, 1, 2, 3], {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0})
     assert a == 3                                             # moves the controllable object right toward the goal
