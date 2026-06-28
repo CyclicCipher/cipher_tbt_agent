@@ -35,12 +35,19 @@ policy), validated on live `ls20` (real frames = 64×64 single grid; `ls20` acti
 over the full framework (which drags the langchain/LLM stack); lean IS the Kaggle-notebook submission shape.
 **RE-ORIENTATION (THE ACTIVE PLAN) — memory `project_continuous_online_loop`:** the private test scores by RHAE
 `(human/agent_actions)²`, terminating at 5× the human median actions/level, with NO free practice on the held-out
-private games. So `explore_and_learn` (hundreds of random episodes) scores ~0 — WRONG loop. NEXT SESSION: build a
-sample-efficient **CONTINUOUS online learn-and-plan loop** (fast body-id via efference copy; prediction-error-directed
-exploration not random ε; goal-from-first-score; plan-on-model immediately; cross-level transfer), reusing
-perception + `WorldLearner`/`GoalModel` + `NeocortexPlanner` + `reward.py` novelty; validate + measure
-action-efficiency on public `ls20`. Then: the click action (`ACTION6`, learned from a click game), colour-as-feature
-+ occlusion + rotation-permanence (where `vote`/cross-frame id-tracking earn their keep).
+private games. So `explore_and_learn` (hundreds of random episodes) scores ~0 — WRONG loop.
+**CONTINUOUS LOOP BUILT (2026-06-28):** `Agent.learn_online` (one continuous interaction: act → `learner.observe`
+→ `refresh`, model persists across levels) + `NeocortexPlanner._explore` (novelty-directed: plan to the nearest
+least-visited reachable cell, replacing random ε). Reused everything else (WorldLearner/GoalModel/perception/the
+achiever/reward.py). Replica results: cold-start LockPath L0 solved in ~20 actions (3 seeds; oracle 9), and
+CROSS-LEVEL TRANSFER makes a 2nd same-goal level cost ~8 (≈oracle) by exploiting the learned goal. Suite 82/82.
+Scoring visibility (verified in `arc_agi/scorecard.py`): the dev API WITHHOLDS the human baseline → we get
+actions/levels only; true human-relative RHAE comes from the Kaggle PUBLIC leaderboard (submit to calibrate) and
+the PRIVATE leaderboard at close. Across-GAME transfer is deliberately OFF (fresh learner per game avoids negative
+transfer; the general machinery + Core-Knowledge priors are what carry over). NEXT: a `RemoteEnv` adapter to drive
+`learn_online` on LIVE `ls20`, confronting the SR-frame column's eigendecomposition cost on 64×64 frames (cached
+per level; may need to restrict the frame or skip the column during pure `_explore`). Then: the click action
+(`ACTION6`, learned from a click game), colour-as-feature + occlusion + rotation-permanence (where `vote` earns it).
 Also open: the value/L2 multi-piece-clear now runs on a FAITHFUL model (EZ-V2 robustness reserved for real-ARC's
 imperfect ONLINE models). The replica role-schema strand (CollectAll/Toggle) — see `project_reorient_and_reconnect.md`
 + R11. NB: the architecture/run-command sections BELOW may cite stale `experiments/…` paths.

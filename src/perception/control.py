@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import math
 import random
+from collections import deque
 from dataclasses import dataclass
 from typing import Dict, FrozenSet, Optional, Tuple
 
@@ -99,12 +100,14 @@ class NeocortexPlanner:
         self._mapkey = None
         self._bound = None
         self._focus: Optional[str] = None                      # the recognised id of the focus object (BG-gated)
+        self._visits: Dict[Cell, int] = {}                     # body-cell visit counts → novelty-directed exploration
 
     def new_level(self):                                       # the layout changed → rebuild map, rebind, drop focus
         self.neo.reset()
         self._mapkey = None
         self._bound = None
         self._focus = None
+        self._visits = {}                                      # exploration is per-layout; the LEARNED model persists (in `world`)
 
     def on_death(self):                                        # GAME_OVER: the env reloads THIS level → fresh focus
         self._bound = None
@@ -234,7 +237,8 @@ class NeocortexPlanner:
         agent = scene.body_pos
         if agent is None:                                      # body not visible → can't plan; wander
             return self.rng.randrange(len(self.deltas))
-        if explore and self.rng.random() < explore:           # keep discovery alive (the cold-start's epsilon)
+        self._visits[agent] = self._visits.get(agent, 0) + 1   # coverage, for novelty-directed exploration
+        if explore and self.rng.random() < explore:           # optional epsilon (off in the continuous online loop)
             return self.rng.randrange(len(self.deltas))
         lay = self._layout(scene)
         col = self._column(lay.frame)
@@ -260,8 +264,40 @@ class NeocortexPlanner:
             return self.neo.achieve(step, (agent, None, lay.removed0), n)
         goals = sorted(scene.goal_cells)
         if not goals:
-            return self.rng.randrange(n)
+            return self._explore(lay, agent, n)                # no goal learned yet → directed (novelty) exploration
         target = self._route(col, goals[0])
+        step = self._forward_model(lay, target, None)
+        return self.neo.achieve(step, (agent, None, lay.removed0), n)
+
+    # ---- directed exploration: plan to the least-visited reachable cell (visit-novelty) ------------------
+    def _reachable(self, lay: _Layout, start: Cell) -> set:
+        """The cells reachable from `start` over the currently-free frame (walls/movers/shut-doors block), by BFS.
+        It is what the agent can actually get to NOW, so exploration targets are always plannable."""
+        others = frozenset(p for _mid, cells in lay.movers for p in cells)
+
+        def free(t):
+            return (t in lay.frame and t not in others
+                    and not (t in lay.door_at and lay.door_at[t] not in lay.removed0))
+
+        seen, q = {start}, deque([start])
+        while q:
+            x, y = q.popleft()
+            for dx, dy in self.deltas:
+                nb = (x + dx, y + dy)
+                if nb not in seen and free(nb):
+                    seen.add(nb)
+                    q.append(nb)
+        return seen
+
+    def _explore(self, lay: _Layout, agent: Cell, n: int) -> int:
+        """Novelty-directed exploration: roll the SAME forward model toward the nearest LEAST-VISITED reachable
+        cell, so the agent covers the level to discover the body's effects and the goal (the sparse score) with far
+        fewer actions than random ε. This is the epistemic half of active inference at the cold start; once the goal
+        is learned the planner switches to exploiting it (above). Visit-novelty here; prediction-error next."""
+        reachable = self._reachable(lay, agent) - {agent}
+        if not reachable:
+            return self.rng.randrange(n)
+        target = min(reachable, key=lambda c: (self._visits.get(c, 0), _manh(agent, c)))
         step = self._forward_model(lay, target, None)
         return self.neo.achieve(step, (agent, None, lay.removed0), n)
 

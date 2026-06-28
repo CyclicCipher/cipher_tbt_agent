@@ -86,3 +86,31 @@ class Agent:
                     break
             history.append(len(solved))
         return history
+
+    def learn_online(self, env, learner, max_steps=2000, refresh_every=1):
+        """THE continuous online learn-and-plan loop — the sample-efficient replacement for `explore_and_learn`'s
+        many random episodes (which the ARC-AGI-3 RHAE action budget rules out). ONE continuous interaction: ACT
+        (the planner EXPLOITS a learned goal, else does NOVELTY-DIRECTED exploration — no random epsilon), LEARN
+        each transition (`learner.observe`), and re-decode the roles live (`learner.refresh`) so a freshly-learned
+        body / goal / dynamic is planned with immediately. The learned model PERSISTS across levels (cross-level
+        transfer: only per-level positional + exploration state resets), which is what makes later levels cheap.
+
+        Generic: only `frame.action_counter / .level / .score / .is_win()` + the duck-typed learner, so the SAME
+        loop runs the replica and (through an env adapter) the live games. Returns the `Outcome`; action_counter is
+        the RHAE-relevant cost to minimise."""
+        self.reset()
+        learner.reset()
+        learner.refresh()
+        frame = env.reset()
+        step = 0
+        while frame.action_counter < max_steps and not frame.is_win():
+            if step % refresh_every == 0:
+                learner.refresh()                              # the planner sees any newly-learned role this step
+            action, coords = self.choose_action(frame)         # exploit-or-explore is decided inside the planner
+            nxt = env.step(action, coords)
+            learner.observe(frame, action, nxt)                # LEARN from THIS transition (incl. the winning one)
+            if nxt.level != frame.level:                       # level cleared → reset per-level perceiver state only
+                learner.new_level()                            #   (learned roles persist — cross-level transfer)
+            frame = nxt
+            step += 1
+        return Outcome(won=frame.is_win(), levels=frame.score, actions=frame.action_counter)

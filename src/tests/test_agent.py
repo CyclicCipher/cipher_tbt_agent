@@ -130,6 +130,37 @@ def test_cold_start_learns_goal_from_score_and_plans():
     assert out.won, out                                   # and now PLANS to the learned goal (not random wandering)
 
 
+# ── the CONTINUOUS online learn-and-plan loop (the RHAE-efficient replacement for explore_and_learn) ───────
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_learn_online_cold_starts_and_solves(seed):
+    """In ONE continuous interaction (not many episodes), cold from an empty world, the agent learns its body
+    (efference copy) and the goal (from the sparse score) WHILE playing, explores by novelty (no random epsilon),
+    and solves LockPath L0. The tight action budget is the point: directed exploration solves cold in ~20 actions
+    where random ε would need far more — the efficiency the private test's RHAE budget demands."""
+    learner = WorldLearner()
+    agent = Agent(Perception(learner.world), NeocortexPlanner(learner.world, learner.dm, seed=seed))
+    out = agent.learn_online(Environment(LockPath(levels=[LP_LEVELS[0]])), learner, max_steps=400)
+    assert out.won, f"learn_online did not solve L0 (seed {seed}): {out}"
+    assert out.actions <= 100, f"cold solve took too many actions (seed {seed}): {out.actions}"
+    assert learner.world.body == C_AGENT                  # body learned by the efference copy
+    assert C_GOAL in learner.goal.goal_colors             # goal learned from the sparse score (decoded each level)
+
+
+def test_learn_online_transfers_across_levels():
+    """Cross-level transfer: the model learned on level 0 PERSISTS, so a second level with the same goal is solved
+    by EXPLOITING the known goal (near oracle) instead of re-exploring — the amortisation RHAE rewards."""
+    def run(levels):
+        learner = WorldLearner()
+        agent = Agent(Perception(learner.world), NeocortexPlanner(learner.world, learner.dm, seed=0))
+        return agent.learn_online(Environment(LockPath(levels=levels)), learner, max_steps=600)
+
+    cold = run([LP_LEVELS[0]])                            # one level, learned cold
+    two = run([LP_LEVELS[0], LP_LEVELS[0]])               # the 2nd level should be cheap (goal already known)
+    assert two.won and two.levels == 2, two
+    assert two.actions - cold.actions <= 13, \
+        f"level 1 did not transfer: cost {two.actions - cold.actions} vs cold {cold.actions}"
+
+
 # ── Phase-2 Step B: a structurally different mechanic the TYPED planner could NOT do ───────────────────────
 def _collectall_world() -> WorldModel:
     """CollectAll's roles (INJECTED — the cold-start discovers them): the item is a CONSUMABLE required-absent and
