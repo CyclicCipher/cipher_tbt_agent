@@ -138,14 +138,22 @@ class Recognizer:
 
     def identify(self, cloud):
         """Recognise a complete shape in one shot (sense all its points) — the name, or None if unrecognised."""
+        m = self.identify_model(cloud)
+        return m.name if m is not None else None
+
+    def identify_model(self, cloud):
+        """Recognise a complete shape in one shot — the winning ObjectModel, or None. Confidence = evidence reaching
+        ~one match per point (a strong, full-object recognition)."""
         if not self.models:
             return None
         locs = [np.asarray(c, float) for c in cloud]
         self.reset()
         for i in range(len(locs)):
             self.observe(locs[i], local_disps(locs, i, self.radius))
-        res = self.best()
-        return res[0] if res is not None and res[3] >= max(2.0, len(locs) - 1.0) else None
+        if not self.hyps:
+            return None
+        h = max(self.hyps, key=lambda h: h.ev)
+        return h.obj if h.ev >= max(2.0, len(locs) - 1.0) else None
 
     # ---- the evidence loop ------------------------------------------------------------------------------
     def reset(self):
@@ -183,6 +191,25 @@ class Recognizer:
             return None
         h = max(self.hyps, key=lambda h: h.ev)
         return h.obj.name, h.theta, h.t, h.ev
+
+
+def vote(recognizers):
+    """Pose-aware lateral VOTING across columns (Monty's consensus, the CMP channel): pool every column's
+    (object, pose) hypotheses by their WORLD pose and sum the evidence. The key insight is that an object's world
+    pose (theta, t) is SHARED — columns sensing different parts of the same object independently solve the SAME
+    (object, theta, t), so agreement on the world pose IS the consensus signal. The true pose accumulates support
+    across columns and wins even when each column alone is ambiguous (a single glance). Returns (name, theta, t, ev)
+    or None. (Faithful to Monty's 'vote not just the object but where, by relative displacement' — here the relative
+    displacement is already absorbed into each column's t, computed from its own sensed location.)"""
+    pooled: dict = {}
+    for rec in recognizers:
+        for h in rec.hyps:
+            key = (h.obj.name, round(h.theta, 3), round(float(h.t[0]), 2), round(float(h.t[1]), 2))
+            pooled[key] = pooled.get(key, 0.0) + h.ev
+    if not pooled:
+        return None
+    (name, th, tx, ty), ev = max(pooled.items(), key=lambda kv: kv[1])
+    return name, th, (tx, ty), ev
 
 
 def _canonical(cloud):

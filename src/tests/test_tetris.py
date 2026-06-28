@@ -16,12 +16,13 @@ if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
 from perception.control import TetrisPlanner  # noqa: E402
-from perception.scene import TetrisLearner, TetrisPerception  # noqa: E402
+from perception.scene import TetrisPerception  # noqa: E402
 from tasks import Environment, GameAction, GameState  # noqa: E402
 from tasks.games import Tetris  # noqa: E402
 from tasks.games.tetris import C_PIECE, C_STACK, C_WALL, _LEVELS  # noqa: E402
 from tbt.agent import Agent  # noqa: E402
 from tbt.neocortex import Neocortex  # noqa: E402
+from tbt.recognize import Recognizer  # noqa: E402
 
 _ACTIONS = [GameAction.ACTION2, GameAction.ACTION3, GameAction.ACTION4, GameAction.ACTION5]
 
@@ -132,29 +133,38 @@ def test_achiever_plans_tetris_with_a_bounded_rollout():
     assert frame.state == GameState.WIN, f"achiever did not clear a line: {frame.state}"
 
 
-# ── Step 4.1: the ONE agent plays Tetris via a LEARNED OBJECT-MODEL (perception + learned operators, no internals) ──
-def _learn_rotations(learner, seeds=range(8), steps=40):
-    """Learn the rotation operator by OBSERVATION — rotate freely in a tall well and watch the shape cycle."""
-    for s in seeds:
-        env = Environment(Tetris(levels=[dict(W=8, H=18, target=999, seed=s, pieces=20)]))
-        prev = env.reset()
+# ── Step C: the ONE agent plays Tetris via POSE-INVARIANT RECOGNITION + the rotation OPERATOR (no table, no internals) ──
+def _learn_objects(recognizer, max_seeds=20, steps=80):
+    """Learn the object LIBRARY by watching — segment the controllable piece each frame and add it IF NOVEL (a
+    rotation of a known piece is recognised, not re-added). No labels, no injected shapes. Stops once all 7 one-sided
+    tetrominoes are known."""
+    perc = TetrisPerception(C_PIECE, C_STACK, C_WALL)
+    for s in range(max_seeds):
+        if len(recognizer.models) >= 7:
+            break
+        env = Environment(Tetris(levels=[dict(W=8, H=18, target=999, seed=s, pieces=30)]))
+        frame = env.reset()
         for _ in range(steps):
-            nxt = env.step(GameAction.ACTION5)
-            learner.observe(prev, GameAction.ACTION5, nxt)
-            prev = nxt
+            if frame.state == GameState.GAME_OVER:
+                break
+            p = perc.read(frame)
+            if p.scene is not None and p.scene.piece:
+                recognizer.add_if_novel(p.scene.piece)
+            frame = env.step(GameAction.ACTION5)            # rotate (also falls 1/step) → see orientations + cycle pieces
 
 
-def test_one_agent_plays_tetris_via_learned_object_model():
-    """The SAME tbt.agent.Agent (perception + the shared achiever) plays Tetris L0/L1 through an object-model built
-    from perception + LEARNED operators (translate / the learned rotation cycle / gravity / collision vote), with NO
-    game internals — Step 2 (multi-cell controllable object) + the step-3 collision vote, end to end in src/."""
-    learner = TetrisLearner(C_PIECE, C_STACK)
-    _learn_rotations(learner)
-    assert len(learner.table) >= 4, f"rotation operator not learned: {len(learner.table)} entries"
-    agent = Agent(TetrisPerception(C_PIECE, C_STACK, C_WALL), TetrisPlanner(learner, seed=0))
+def test_one_agent_plays_tetris_via_pose_invariant_recognition():
+    """The SAME tbt.agent.Agent plays Tetris L0/L1 through POSE-INVARIANT object recognition + the rotation OPERATOR
+    (tbt/recognize.py). The object library is learned by watching (no labels), the piece is identified at any pose,
+    and rotation is the operator's orbit — no lookup table, so the spawn-pollution bug class cannot exist. Step C 2-4,
+    end to end in src/."""
+    rec = Recognizer()
+    _learn_objects(rec)
+    assert len(rec.models) == 7, f"object library not learned: {len(rec.models)} objects (expected 7 tetrominoes)"
+    agent = Agent(TetrisPerception(C_PIECE, C_STACK, C_WALL), TetrisPlanner(rec, seed=0))
     for lvl in (0, 1):
         out = agent.play(Environment(Tetris(levels=[_LEVELS[lvl]])), max_steps=200)
-        assert out.won, f"Tetris L{lvl} not solved via the object-model: {out}"
+        assert out.won, f"Tetris L{lvl} not solved via recognition: {out}"
 
 
 # ── the EZ-V2 horizon value (reward.py) + its encoding (the components; the learning curve is demos/value_tetris) ──
@@ -170,7 +180,7 @@ def test_value_learner_td_converges():
 
 
 def test_tetris_planner_gaps_encoding():
-    planner = TetrisPlanner(TetrisLearner(C_PIECE, C_STACK), seed=0)
+    planner = TetrisPlanner(Recognizer(), seed=0)
     stack = frozenset((x, 9) for x in range(1, 7) if x not in (3, 4))   # a 6-well bottom row, cols 3,4 empty
     assert planner.feats(stack, (0, 7, 10)) == frozenset({(3, 9), (4, 9)})   # the gaps in the occupied row
     assert planner.feats(frozenset(), (0, 7, 10)) == frozenset()        # no stack ⇒ no gaps

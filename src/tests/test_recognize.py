@@ -13,7 +13,7 @@ _PKG_PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
-from tbt.recognize import Recognizer, local_disps, rot  # noqa: E402
+from tbt.recognize import Recognizer, local_disps, rot, vote  # noqa: E402
 
 TETROMINOES = {
     "I": [(0, 0), (1, 0), (2, 0), (3, 0)],
@@ -109,6 +109,29 @@ def test_learns_object_set_online_label_free():
             readded += rec.add_if_novel(cloud)[1]
     assert readded == 0, f"{readded} rotations wrongly treated as new objects"
     assert len(rec.models) == 7
+
+
+def test_voting_resolves_single_glance_ambiguity():
+    """Two columns each take ONE glance at DIFFERENT cells, then VOTE (Monty lateral voting). Pooling their pose
+    hypotheses resolves ambiguity that a single one-glance column cannot — voting accuracy beats solo, and is high."""
+    rng = np.random.default_rng(5)
+    n = solo = voted = 0
+    for name, base in TETROMINOES.items():
+        for _ in range(30):
+            th, t = rng.uniform(0, 2 * np.pi), rng.uniform(-5, 5, 2)
+            cloud = [rot(th) @ np.asarray(c, float) + t for c in base]
+            order = rng.permutation(len(cloud))
+            colA, colB = _lib(), _lib()                     # two columns sharing one object library
+            colA.reset(); colB.reset()
+            colA.observe(cloud[order[0]], local_disps(cloud, order[0], colA.radius))
+            colB.observe(cloud[order[1]], local_disps(cloud, order[1], colB.radius))
+            n += 1
+            ra = colA.best()
+            solo += (ra is not None and ra[0] == name)      # one column, one glance
+            rv = vote([colA, colB])                          # two columns, one glance each, voted
+            voted += (rv is not None and rv[0] == name)
+    assert voted > solo, f"voting did not help: solo {solo}/{n}, voted {voted}/{n}"
+    assert voted / n >= 0.9, f"voting accuracy too low: {voted}/{n}"
 
 
 def test_rotation_operator_is_exact():

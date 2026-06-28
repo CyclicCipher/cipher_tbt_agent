@@ -144,16 +144,6 @@ class Perception(_ActionVocab):
 _TETRIS_MOVES = [GameAction.ACTION3, GameAction.ACTION4, GameAction.ACTION5, GameAction.ACTION2]  # left right rotate down
 
 
-def shape_of(cells) -> frozenset:
-    """A cell-set's translation-invariant shape (cells relative to the bbox corner) — the object's pose-shape, the
-    key on which the learned rotation operator is indexed (so a piece is recognised regardless of where it is)."""
-    cells = frozenset(cells)
-    if not cells:
-        return frozenset()
-    mnx, mny = min(x for x, _ in cells), min(y for _, y in cells)
-    return frozenset((x - mnx, y - mny) for x, y in cells)
-
-
 @dataclass
 class TetrisScene:
     """One Tetris frame as objects: the controllable PIECE (multi-cell), the settled STACK, the WELL bounds."""
@@ -198,40 +188,3 @@ class TetrisPerception:
         floor = max(y for _, y in walls)
         return Percept(TetrisScene(self._cells(grid, self.pc), self._cells(grid, self.sc), (left, right, floor)),
                        new_level=new_level, terminal=False)
-
-
-class TetrisLearner:
-    """Learn the ROTATION operator from observation — the controllable object's orientation cycle (shape → next
-    shape), i.e. the learned 'rotate' (Step 4 / increment 2b). Driven by watching rotate transitions; the planner
-    reads `table` live (shared reference). Translation-invariant (`shape_of`), so it matches the game's rotation
-    placed at the bbox-min anchor. (gravity (0,1) and the controllable colour are injected for 4.1.)"""
-
-    def __init__(self, piece_color: int, stack_color: int):
-        self.pc = piece_color
-        self.sc = stack_color                # the settled-stack colour — to tell a rotation from a lock+respawn
-        self.table: Dict[frozenset, frozenset] = {}
-
-    def _shape(self, grid) -> frozenset:
-        return shape_of((x, y) for y, row in enumerate(grid) for x, v in enumerate(row) if v == self.pc)
-
-    def _settled(self, grid) -> frozenset:
-        return frozenset((x, y) for y, row in enumerate(grid) for x, v in enumerate(row) if v == self.sc)
-
-    def observe(self, prev_frame, action, frame):
-        # A rotation SETTLES nothing: if the stack is unchanged across the transition, the same piece rotated.
-        # If the stack CHANGED, a piece locked and a new one spawned, so prev→next is a spawn boundary
-        # (old-shape → fresh-shape), NOT a rotation — skip it. Without this filter the operator learns spurious
-        # entries like I→T from a lock/respawn (the 5/18-wrong-entries bug that broke the object-model).
-        if action == GameAction.ACTION5 and self._settled(prev_frame.grid) == self._settled(frame.grid):
-            a, b = self._shape(prev_frame.grid), self._shape(frame.grid)
-            if a and b and a != b:
-                self.table[a] = b            # this shape rotates to that shape (the learned operator)
-
-    def refresh(self):
-        pass
-
-    def new_level(self):
-        pass
-
-    def reset(self):
-        pass                                 # keep the learned table across episodes
