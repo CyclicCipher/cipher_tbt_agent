@@ -48,12 +48,17 @@ class Neocortex:
         self.bg.gate_reset()                                    # focus-gate affinity is within-level only
 
     # ---- the general rollout achiever: roll the forward model, value it (signed), act --------------------
-    def achieve(self, step, start, n_actions):
+    def achieve(self, step, start, n_actions, max_states=None):
         """Roll the forward-model callable `step` from `start` — a breadth-first sweep over the reachable factored
         states — then value that graph by prioritized replay over SIGNED reward (terminals seed it; an aversive
         terminal carries −1, a success +1) and return the greedy action. The achiever is domain-blind: reach,
         cover, collect, the affordance and hazard-avoidance are not cases here — they are what rolling a model and
-        following signed value DOES. `start` has no successors ⇒ a random move (nothing to plan)."""
+        following signed value DOES. `start` has no successors ⇒ a random move (nothing to plan).
+
+        `max_states` BOUNDS the rollout for large / time-evolving worlds (Tetris: you can stack pieces almost
+        forever without ever hitting a terminal, so enumerate-to-terminal explodes). Capping the frontier keeps it
+        tractable; per-step re-planning then keeps the goal within the cap as progress is made. None (the default)
+        = unbounded — byte-identical to before for the small factored worlds whose graph never reaches the cap."""
         T, preds, R, term = {}, defaultdict(list), {}, set()
         seen, q = {start}, deque([start])
         while q:
@@ -66,11 +71,12 @@ class Neocortex:
                     R[ns] = r                                  # signed: success > 0, aversive < 0
                 if done:
                     term.add(ns)
-                if ns not in seen:
+                    T[ns] = []                                 # a terminal is a leaf — always recorded, never expanded
+                elif ns not in seen and (max_states is None or len(seen) < max_states):
                     seen.add(ns)
                     q.append(ns)
                 preds[ns].append(s)
-            T[s] = [] if s in term else row                    # a terminal absorbs (no outgoing edges)
+            T[s] = row                                         # s was popped ⇒ non-terminal (terminals aren't enqueued)
         rm = self.rm
         rm.R_ext = R
         rm.V.clear()
@@ -79,7 +85,7 @@ class Neocortex:
             rm._push(ts, 1.0)                                  # back up FROM every terminal (reverse replay)
         rm.budget = 6 * len(T)
         rm.plan(T, preds, start)
-        if not T[start]:
+        if not T.get(start):
             return self.rng.randrange(n_actions)
         vals = [rm.V[ns] for ns in T[start]]
         m = max(vals)

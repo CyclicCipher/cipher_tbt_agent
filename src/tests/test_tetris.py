@@ -18,6 +18,7 @@ if _PKG_PARENT not in sys.path:
 from tasks import Environment, GameAction, GameState  # noqa: E402
 from tasks.games import Tetris  # noqa: E402
 from tasks.games.tetris import _LEVELS  # noqa: E402
+from tbt.neocortex import Neocortex  # noqa: E402
 
 _ACTIONS = [GameAction.ACTION2, GameAction.ACTION3, GameAction.ACTION4, GameAction.ACTION5]
 
@@ -96,3 +97,33 @@ def test_lifecycle_exposes_only_tetris_actions():
     assert frame.state == GameState.NOT_FINISHED
     assert GameAction.ACTION1 not in frame.available_actions      # up is not a Tetris action
     assert GameAction.ACTION5 in frame.available_actions          # rotate is
+
+
+def test_achiever_plans_tetris_with_a_bounded_rollout():
+    """The general rollout achiever (signed value), with its rollout BOUNDED, plans falling/rotating/multi-cell
+    Tetris over the game's own dynamics as a perfect forward model — validating planning over a time-evolving
+    world (the enumerate-to-terminal rollout would otherwise explode, so the bound is essential). Steps 2-4 will
+    replace the perfect model with the column's LEARNED object-model; this gates the PLANNING foundation."""
+    acts = [GameAction.ACTION2, GameAction.ACTION3, GameAction.ACTION4, GameAction.ACTION5]
+    pg = Tetris(levels=[_LEVELS[1]])
+    pg.load_level(0)
+
+    def step(snap, ai):
+        pg.restore(snap)
+        pg.apply(acts[ai], None)
+        ns = pg.snapshot()
+        if pg.is_dead():
+            return ns, -1.0, True
+        if pg.level_complete():
+            return ns, 1.0, True
+        return ns, 0.0, False
+
+    neo = Neocortex(seed=0)
+    env = Environment(Tetris(levels=[_LEVELS[1]]))
+    frame = env.reset()
+    for _ in range(40):
+        if frame.is_win():
+            break
+        ai = neo.achieve(step, env.game.snapshot(), 4, max_states=4000)
+        frame = env.step(acts[ai])
+    assert frame.state == GameState.WIN, f"achiever did not clear a line: {frame.state}"
