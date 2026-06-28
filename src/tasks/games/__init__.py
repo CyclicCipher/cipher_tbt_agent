@@ -5,5 +5,6 @@ from .multikey import MultiKey
 from .sokoban import Sokoban
 from .collectall import CollectAll
 from .toggle import Toggle
+from .tetris import Tetris
 
-__all__ = ["LockPath", "MultiKey", "Sokoban", "CollectAll", "Toggle"]
+__all__ = ["LockPath", "MultiKey", "Sokoban", "CollectAll", "Toggle", "Tetris"]
