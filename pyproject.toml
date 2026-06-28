@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cipher-tbt-agent"
+version = "0.1.0"
+description = "A from-scratch Thousand Brains Theory agent aimed at the ARC-AGI-3 benchmark."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT-0" }
+authors = [{ name = "CyclicCipher", email = "cycliccipher1@gmail.com" }]
+dependencies = [
+    "numpy>=1.24",
+    "torch>=2.0",
+]
+
+[project.optional-dependencies]
+demos = ["scipy>=1.10"]              # only demos/language.py needs scipy
+
+[project.urls]
+Homepage = "https://github.com/CyclicCipher/cipher_tbt_agent"
+
+# src layout: packages (tbt, perception, tasks, wm, demos) and the top-level arc_sdk module live under src/.
+# Tests and docs are not part of the installable package.
+[tool.setuptools]
+package-dir = { "" = "src" }
+py-modules = ["arc_sdk"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+exclude = ["tests*", "docs*", "docs_wm*"]

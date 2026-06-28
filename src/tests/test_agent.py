@@ -29,6 +29,7 @@ from tasks.games.collectall import _LEVELS as CA_LEVELS  # noqa: E402
 from tasks.games.lockpath import C_DOOR, C_HAZARD, C_KEY  # noqa: E402
 from tasks.games.lockpath import _LEVELS as LP_LEVELS  # noqa: E402
 from tasks.games.sokoban import C_AGENT, C_BLOCK, C_GOAL, C_PAD, C_WALL, _LEVELS  # noqa: E402
+from tasks.games.sokoban import MULTICELL_LEVELS  # noqa: E402
 from tasks.games.toggle import C_AGENT as TG_AGENT, C_DOOR as TG_DOOR, C_GOAL as TG_GOAL  # noqa: E402
 from tasks.games.toggle import C_SWITCH, C_WALL as TG_WALL  # noqa: E402
 from tasks.games.toggle import _LEVELS as TG_LEVELS  # noqa: E402
@@ -167,6 +168,34 @@ def _toggle_world() -> WorldModel:
     deliberately reopens + passes (no flailing). This is the mechanic that breaks a one-way `color_gone` model."""
     return WorldModel(body=TG_AGENT, pushable=set(), blocking={TG_WALL},
                       goal_colors={TG_GOAL}, required_absent=set())
+
+
+# ── Phase-2 Step C (real-ARC): the planner consumes RECOGNISED multi-cell OBJECTS ──────────────────────────
+@pytest.mark.parametrize("level", [0, 1])
+def test_neocortex_agent_solves_multicell_sokoban(level):
+    """The pushable obstacles are MULTI-CELL rigid objects (a domino; an L-tromino) — beyond the single-cell-body
+    replica. The SAME agent must segment + RECOGNISE each object and the planner must push it by the WHOLE
+    footprint (not cell-by-cell). M1 has two SAME-COLOUR objects of different shape, so the scene is disambiguated
+    by recognised object, not colour. Each level in isolation, through the one play loop."""
+    env = Environment(Sokoban(levels=[MULTICELL_LEVELS[level]]))
+    out = _agent().play(env, max_steps=800)
+    assert out.won, f"multi-cell Sokoban M{level} not solved: {out}"
+
+
+def test_neocortex_agent_solves_full_multicell_sokoban():
+    """Both multi-cell levels in sequence through the one play loop — win == cleared every level."""
+    out = _agent().play(Environment(Sokoban(levels=MULTICELL_LEVELS)), max_steps=2000)
+    assert out.won and out.levels == len(MULTICELL_LEVELS), out
+
+
+def test_recognition_distinguishes_same_colour_objects():
+    """M1's two pushable objects share a colour but differ in shape; perception must return them as two movers with
+    DISTINCT recognised ids — the disambiguation a colour-keyed scene cannot do (the single-cell replica's gap)."""
+    env = Environment(Sokoban(levels=[MULTICELL_LEVELS[1]]))
+    scene = Perception(_sokoban_world()).read(env.reset()).scene
+    multicell = [(mid, cells) for mid, cells in scene.movers if len(cells) >= 2]
+    assert len(multicell) == 2, f"expected two multi-cell movers, got {scene.movers}"
+    assert len({mid for mid, _ in multicell}) == 2, "two different shapes must get two distinct recognised ids"
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2])

@@ -4,6 +4,11 @@ LockPath's block+pad mechanic scaled up: several blocks must each be pushed onto
 It exists to test the agent's cover-pad loop AT SCALE — the factored navigation should push one block at a time
 (agent × that block), never the joint state of all blocks. No keys/doors/hazards.
 
+A block is a RIGID connected component of `B` cells (4-connectivity), pushed as ONE unit — a single `B` is the
+degenerate size-1 case (so the original single-cell levels are unchanged). The multi-cell levels
+(`MULTICELL_LEVELS`) are the real-ARC bench: the controllable obstacles are multi-cell OBJECTS the agent's
+perception must segment + recognise, and the planner must push by their whole footprint (not cell-by-cell).
+
 ASCII tiles:  #=wall  .=floor  A=agent  G=goal  B=block  P=pad
 """
 
@@ -23,6 +28,31 @@ C_GOAL = 3
 C_BLOCK = 6
 C_PAD = 7
 
+_NBR4 = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+
+
+def _components(cells: Set[Pos]) -> List[Set[Pos]]:
+    """Partition `cells` into 4-connected components — each a rigid block. (A single cell is its own component,
+    so single-`B` levels stay byte-identical to the original Sokoban.)"""
+    cells = set(cells)
+    seen: Set[Pos] = set()
+    comps: List[Set[Pos]] = []
+    for s in cells:
+        if s in seen:
+            continue
+        comp, stack = set(), [s]
+        seen.add(s)
+        while stack:
+            x, y = stack.pop()
+            comp.add((x, y))
+            for dx, dy in _NBR4:
+                n = (x + dx, y + dy)
+                if n in cells and n not in seen:
+                    seen.add(n)
+                    stack.append(n)
+        comps.append(comp)
+    return comps
+
 
 class Sokoban(Game):
     game_id = "sk01"
@@ -34,7 +64,7 @@ class Sokoban(Game):
         self.agent: Pos = (0, 0)
         self.goal: Pos = (0, 0)
         self.walls: Set[Pos] = set()
-        self.blocks: Set[Pos] = set()
+        self.pieces: List[Set[Pos]] = []                 # each piece = a rigid connected component of B cells
         self.pads: Set[Pos] = set()
 
     @property
@@ -46,7 +76,8 @@ class Sokoban(Game):
 
     def load_level(self, level: int) -> None:
         self._level = level
-        self.walls, self.blocks, self.pads = set(), set(), set()
+        self.walls, self.pads = set(), set()
+        block_cells: Set[Pos] = set()
         rows = self._levels[level]
         self.height = len(rows)
         self.width = max(len(r) for r in rows)
@@ -60,9 +91,19 @@ class Sokoban(Game):
                 elif ch == "G":
                     self.goal = pos
                 elif ch == "B":
-                    self.blocks.add(pos)
+                    block_cells.add(pos)
                 elif ch == "P":
                     self.pads.add(pos)
+        self.pieces = _components(block_cells)            # adjacent B's = one rigid piece (size 1 = a single block)
+
+    def block_cells(self) -> Set[Pos]:
+        return set().union(*self.pieces) if self.pieces else set()
+
+    def _piece_at(self, pos: Pos) -> int:
+        for i, p in enumerate(self.pieces):
+            if pos in p:
+                return i
+        return -1
 
     def apply(self, action: GameAction, coordinates: Optional[Coordinates]) -> None:
         if not action.is_movement:
@@ -72,12 +113,15 @@ class Sokoban(Game):
         target = (ax + dx, ay + dy)
         if not self._in_bounds(target) or target in self.walls:
             return
-        if target in self.blocks:
-            beyond = (target[0] + dx, target[1] + dy)
-            if not self._in_bounds(beyond) or beyond in self.walls or beyond in self.blocks:
-                return
-            self.blocks.discard(target)
-            self.blocks.add(beyond)
+        i = self._piece_at(target)
+        if i >= 0:                                        # push the WHOLE rigid piece by the move delta
+            piece = self.pieces[i]
+            shifted = {(x + dx, y + dy) for x, y in piece}
+            newcells = shifted - piece                    # the cells the piece advances INTO
+            others = set().union(*(p for j, p in enumerate(self.pieces) if j != i)) if len(self.pieces) > 1 else set()
+            if any(not self._in_bounds(c) or c in self.walls or c in others for c in newcells):
+                return                                    # blocked by a wall / bound / another piece
+            self.pieces[i] = shifted
         self.agent = target
 
     def render(self) -> Frame:
@@ -93,20 +137,20 @@ class Sokoban(Game):
         for pos in self.pads:
             put(pos, C_PAD)
         put(self.goal, C_GOAL)
-        for pos in self.blocks:
+        for pos in self.block_cells():
             put(pos, C_BLOCK)
         put(self.agent, C_AGENT)
         return [grid]
 
     def level_complete(self) -> bool:
-        return self.agent == self.goal and self.pads.issubset(self.blocks)
+        return self.agent == self.goal and self.pads.issubset(self.block_cells())
 
     def snapshot(self):
-        return (self.agent, frozenset(self.blocks))
+        return (self.agent, tuple(frozenset(p) for p in self.pieces))
 
     def restore(self, snap) -> None:
-        self.agent, blocks = snap
-        self.blocks = set(blocks)
+        self.agent, pieces = snap
+        self.pieces = [set(p) for p in pieces]
 
     def _in_bounds(self, pos: Pos) -> bool:
         x, y = pos
@@ -123,7 +167,7 @@ _LEVELS: List[List[str]] = [
         "#.......G#",
         "##########",
     ],
-    # L1 — two blocks, two pads.
+    # L1 — the two B's are 4-adjacent, so they are ONE rigid 2-cell block pushed onto the (adjacent) pad pair.
     [
         "###########",
         "#A........#",
@@ -142,5 +186,34 @@ _LEVELS: List[List[str]] = [
         "#...B...#",
         "#...P..G#",
         "#########",
+    ],
+]
+
+
+# The real-ARC bench: the controllable obstacles are MULTI-CELL rigid objects (adjacent B's), so perception must
+# segment + recognise them and the planner must push by the whole footprint. M1 has two SAME-COLOUR pieces of
+# DIFFERENT shapes — colour alone cannot tell them apart, so the scene is disambiguated by RECOGNISED object, the
+# capability the single-cell colour-keyed replica never exercised.
+MULTICELL_LEVELS: List[List[str]] = [
+    # M0 — one horizontal DOMINO (2 cells) pushed right onto a pad, then the goal.
+    [
+        "##########",
+        "#A.......#",
+        "#.BB..P..#",
+        "#........#",
+        "#.......G#",
+        "##########",
+    ],
+    # M1 — a DOMINO and an L-tromino (same colour, different shape), each onto its pad, then the goal.
+    [
+        "############",
+        "#A.........#",
+        "#.BB....P..#",
+        "#..........#",
+        "#.B........#",
+        "#.BB...P...#",
+        "#..........#",
+        "#.........G#",
+        "############",
     ],
 ]

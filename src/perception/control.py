@@ -44,6 +44,16 @@ def _manh(a: Cell, b: Cell) -> int:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
+def _anchor(cells: FrozenSet[Cell]) -> Cell:
+    """The object's pose-anchor (bbox-min corner) — the translation part of its pose."""
+    return (min(x for x, _ in cells), min(y for _, y in cells))
+
+
+def _near(cells: FrozenSet[Cell], c: Cell) -> int:
+    """Distance from an object (its nearest cell) to a target cell."""
+    return min(_manh(p, c) for p in cells)
+
+
 @dataclass(frozen=True)
 class _Layout:
     """The scene decoded into the rollout's geometry. The DYNAMICS (which contact changes which colour, and death)
@@ -51,7 +61,7 @@ class _Layout:
     rollout needs to evaluate it — the navigable frame, the movers, the removable-blocker cells + their start state,
     and a static cell→colour map + colour-presence to reconstruct the sensed feature the dynamics keys on."""
     frame: FrozenSet[Cell]                 # the spatial map column's reference frame (its navigable nodes)
-    movers: FrozenSet[Cell]               # the relational objects (one is the focus; the rest are obstacles)
+    movers: Tuple[Tuple[str, FrozenSet[Cell]], ...]   # recognised pushable OBJECTS (id, cells); one is the focus
     door_at: Dict[Cell, int]               # a removable-blocker cell → its colour (shut until that colour is removed)
     removed0: FrozenSet[int]               # colours already removed at the start (a blocker seen open)
     door_colours: FrozenSet[int]           # colours the learned dynamics can change (read off predict_effect's rules)
@@ -88,7 +98,7 @@ class NeocortexPlanner:
         self._col = None
         self._mapkey = None
         self._bound = None
-        self._focus: Optional[Cell] = None
+        self._focus: Optional[str] = None                      # the recognised id of the focus object (BG-gated)
 
     def new_level(self):                                       # the layout changed → rebuild map, rebind, drop focus
         self.neo.reset()
@@ -130,7 +140,7 @@ class NeocortexPlanner:
         walls = {p for c in w.blocking if c not in door_colours for p in by.get(c, ())}
         return _Layout(
             frame=frozenset(bbox - walls),                     # removable blockers + aversive cells stay IN the frame
-            movers=frozenset(p for c in w.pushable for p in by.get(c, ())),
+            movers=tuple((mid, frozenset(cells)) for mid, cells in scene.movers),   # recognised pushable objects
             door_at={p: c for c in door_colours for p in by.get(c, ())},
             removed0=frozenset(c for c in door_colours if not by.get(c)),
             door_colours=frozenset(door_colours),
@@ -140,14 +150,23 @@ class NeocortexPlanner:
         )
 
     # ---- compose the active columns into one forward-model callable --------------------------------------
-    def _forward_model(self, lay: _Layout, target: Cell, focus: Optional[Cell]):
-        """`step(state, action) -> (next_state, signed_reward, done)` over `(agent, focus-object, removed-blockers)`.
-        The spatial map column predicts the agent move + votes free; the focus object-column advances on a push iff
-        the map votes the landing free (the egocentric ⊗ absolute lateral vote); the DYNAMICS — which colour
+    def _forward_model(self, lay: _Layout, target: Cell, focus: Optional[FrozenSet[Cell]]):
+        """`step(state, action) -> (next_state, signed_reward, done)` over `(agent, focus-anchor, removed-blockers)`.
+        The spatial map column predicts the agent move + votes free; the focus object-column is a RIGID multi-cell
+        body — a push advances its whole FOOTPRINT (`shape` translated to the anchor) iff every cell it advances
+        into is voted free by the absolute map (the egocentric ⊗ absolute lateral vote); a single-cell object is
+        the degenerate `shape={(0,0)}` case (byte-identical to the old cell-push). The DYNAMICS — which colour
         vanishes/appears, and death — come from the column's learned `predict_effect`, keyed on the sensed
         (stepped-on colour, colour-presence) of the ROLLED state, so the toggle EMERGES from the context-conditioned
         rule (no hand-coded flip). Signed value: a predicted-death state is a terminal −1, the goal-state a +1."""
-        others = lay.movers - ({focus} if focus is not None else set())
+        others = frozenset(p for _mid, cells in lay.movers if cells != focus for p in cells)
+        shape = None
+        if focus is not None:
+            ax, ay = _anchor(focus)
+            shape = frozenset((x - ax, y - ay) for x, y in focus)   # the object's cells relative to its anchor
+
+        def footprint(anchor: Cell) -> FrozenSet[Cell]:
+            return frozenset((anchor[0] + dx, anchor[1] + dy) for dx, dy in shape)
 
         def free(t: Cell, removed: FrozenSet[int]) -> bool:
             return (t in lay.frame and t not in others
@@ -169,17 +188,18 @@ class NeocortexPlanner:
             return memo[key]
 
         def step(state, a):
-            ag, mv, removed = state
+            ag, anchor, removed = state
             dx, dy = self.deltas[a]
             t = (ag[0] + dx, ag[1] + dy)
-            if not free(t, removed):                           # spatial map column: the agent-move vote
-                return state, 0.0, False
-            nmv = mv
-            if mv is not None and t == mv:                     # focus object-column: the egocentric push…
-                b = (t[0] + dx, t[1] + dy)
-                if not free(b, removed):                        # …voted against the absolute map (lateral)
+            if anchor is not None and t in footprint(anchor):  # focus object-column: the egocentric RIGID push…
+                shifted = (anchor[0] + dx, anchor[1] + dy)
+                if not all(free(c, removed) for c in footprint(shifted) - footprint(anchor)):
+                    return state, 0.0, False                    # …every advanced-into cell voted against the absolute map
+                n_anchor = shifted
+            else:                                              # spatial map column: the agent-move vote
+                if not free(t, removed):
                     return state, 0.0, False
-                nmv = b
+                n_anchor = anchor
             eff = effect_at(lay.colour_at.get(t, lay.bg), removed)   # the column's learned dynamics
             nrem = removed
             if isinstance(eff, str) and eff.startswith("color_"):
@@ -187,9 +207,9 @@ class NeocortexPlanner:
                 col = int(col)
                 nrem = (removed | {col}) if kind == "gone" else (removed - {col})
             if eff == "death":                                 # signed value: aversive ⇒ terminal −1, never a wall
-                return (t, nmv, nrem), -1.0, True
-            done = (nmv == target) if focus is not None else (t == target)
-            return (t, nmv, nrem), (1.0 if done else 0.0), done
+                return (t, n_anchor, nrem), -1.0, True
+            done = (target in footprint(n_anchor)) if anchor is not None else (t == target)
+            return (t, n_anchor, nrem), (1.0 if done else 0.0), done
 
         return step
 
@@ -227,12 +247,15 @@ class NeocortexPlanner:
         if pending:
             C = pending[0]
             target = self._route(col, C)
-            free_movers = [m for m in lay.movers if m not in scene.req_cells]
-            if free_movers:                                    # COVER: the BG gates a focus object-column, push it
-                if self._focus not in free_movers:
-                    self._focus = self.neo.gate_focus(free_movers, [1.0 / (1.0 + _manh(m, C)) for m in free_movers])
-                step = self._forward_model(lay, target, self._focus)
-                return self.neo.achieve(step, (agent, self._focus, lay.removed0), n)
+            # an object already covering a pad is PLACED (its cells overlap a required cell) — don't disturb it
+            free = [(mid, cells) for mid, cells in lay.movers if not (cells & scene.req_cells)]
+            if free:                                           # COVER: the BG gates a focus OBJECT (by recognised id)
+                ids = [mid for mid, _ in free]
+                if self._focus not in ids:                     # gate on IDENTITY → affinity persists across the push
+                    self._focus = self.neo.gate_focus(ids, [1.0 / (1.0 + _near(cells, C)) for _, cells in free])
+                focus = min((cells for mid, cells in free if mid == self._focus), key=lambda cs: _near(cs, C))
+                step = self._forward_model(lay, target, focus)   # push the recognised object by its whole footprint
+                return self.neo.achieve(step, (agent, _anchor(focus), lay.removed0), n)
             step = self._forward_model(lay, target, None)      # COLLECT: no mover → the agent reaches it (emergent)
             return self.neo.achieve(step, (agent, None, lay.removed0), n)
         goals = sorted(scene.goal_cells)

@@ -13,12 +13,13 @@ planner (`perception/control.py`) consumes the `Scene` + the `WorldModel` to bui
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Tuple
+from dataclasses import dataclass, field
+from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
 from tasks import GameAction, GameState
 
-from .perceive import modal_background
+from .perceive import modal_background, segment
+from tbt.recognize import Recognizer
 
 Cell = Tuple[int, int]
 
@@ -75,13 +76,19 @@ def build_world(objp, goal) -> WorldModel:
 @dataclass
 class Scene:
     """One fully-observed frame: the body cell, the colour->cells map, and the (accumulated, static-over-a-
-    level) goal / required-absent cells. No raw grid leaves perception."""
+    level) goal / required-absent cells. No raw grid leaves perception.
+
+    `movers` = the pushable objects as RECOGNISED multi-cell components `(object_id, cells)`: a pushable colour
+    is segmented into connected objects and each is identified pose-invariantly (`tbt.recognize`), so the planner
+    plans over whole rigid OBJECTS (push the footprint), not independent colour-cells. A single-cell pushable is
+    the degenerate size-1 object (id by colour) — so the colour-keyed single-cell replica is unchanged."""
 
     body_pos: Optional[Cell]
     by_color: Dict[int, Set[Cell]]
     goal_cells: Set[Cell]
     req_cells: Set[Cell]
     bg: int
+    movers: List[Tuple[str, FrozenSet[Cell]]] = field(default_factory=list)
 
 
 @dataclass
@@ -100,6 +107,7 @@ class Perception(_ActionVocab):
 
     def __init__(self, world: WorldModel):
         self.world = world
+        self.rec = Recognizer()                               # pose-invariant object identity (learned online, label-free)
         self._level = -1
         self.new_level()
 
@@ -136,8 +144,21 @@ class Perception(_ActionVocab):
             self.goal_cells |= by_color.get(c, set())
         for c in self.world.required_absent:
             self.req_cells |= by_color.get(c, set())
-        return Scene(body_pos=body_pos, by_color=by_color,
-                     goal_cells=set(self.goal_cells), req_cells=set(self.req_cells), bg=bg)
+        return Scene(body_pos=body_pos, by_color=by_color, goal_cells=set(self.goal_cells),
+                     req_cells=set(self.req_cells), bg=bg, movers=self._movers(grid, bg))
+
+    def _movers(self, grid, bg) -> List[Tuple[str, FrozenSet[Cell]]]:
+        """Segment the pushable colours into connected OBJECTS and identify each pose-invariantly. A multi-cell
+        object gets a recognised id (so a rotated re-encounter is the SAME object — object permanence); a single
+        cell has no orientation, so it passes through with a colour id (the degenerate size-1 object)."""
+        movers: List[Tuple[str, FrozenSet[Cell]]] = []
+        for o in segment(grid, bg):
+            if o.color not in self.world.pushable:
+                continue
+            cells = frozenset(o.cells)
+            name = self.rec.recognize(sorted(cells))[0] if o.size >= 2 else f"pt{o.color}"
+            movers.append((name, cells))
+        return movers
 
 
 # ── Tetris: object-based perception (Step 4 — the controllable is a MULTI-CELL object) ─────────────────────

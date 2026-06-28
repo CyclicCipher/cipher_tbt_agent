@@ -506,6 +506,22 @@ Honest scope: steps 1, 2, 4 are replica-validatable; step 3's full hypothesis-vo
 - **Multi-column lateral VOTING** (`vote`): pool columns' `(object, pose)` hypotheses by their *shared world pose* and sum evidence — an object's world `(theta, t)` is the same for every column sensing it, so agreement IS consensus. Resolves single-glance ambiguity: **1 column 1 glance 64% → 2 columns voting 100%**.
 - Results: continuous-pose recognition **100%** id+pose over unseen random angles; partial-obs **70%→100%** by 2 fixations (evidence accumulation = the sensorimotor claim); irregular continuous (non-grid) objects 100% (not grid-tied). **Integrated**: the SAME `tbt.agent.Agent` plays Tetris L0/L1 via recognition + the operator; `TetrisLearner`/`shape_of`/the table are DELETED; suite 66/66. This is steps 2+3 done the Monty way — a dedicated continuous Evidence-Based recogniser (matching Monty's actual implementation, which uses continuous poses + displacement edges, not SR-frame phase codes), rather than per-object columns on the spatial map. Open: wire recognition into real-ARC perception (the click action, occlusion — where voting earns its keep); the value/L2 multi-piece-clear thread now runs on a *faithful* model (no irreducible model error to fight — EZ-V2 robustness reserved for real-ARC's genuinely-imperfect online models).
 
+**BUILT (2026-06-28) — the planner consumes RECOGNISED multi-cell objects (real-ARC step 1).** The recogniser
+(above) was wired into the achiever loop, not just Tetris: `perception/scene.py` now segments each pushable colour
+into connected OBJECTS and identifies each pose-invariantly (`Recognizer.recognize`), delivering `Scene.movers =
+[(object_id, cells)]`; `NeocortexPlanner` (`perception/control.py`) was GENERALISED from single-cell movers to
+RIGID multi-cell bodies — the rollout state is `(agent, focus-ANCHOR, removed)`, a push advances the whole
+FOOTPRINT (`shape` translated to the anchor) iff every advanced-into cell is voted free by the absolute map, and a
+single-cell object is the degenerate `shape={(0,0)}` case (byte-identical to the old cell-push, so all 5 replicas
+stay green). The recognised id is LOAD-BEARING: the basal-ganglia focus gate keys on object IDENTITY (affinity
+persists across a push, unlike a cell-set key), and same-colour objects are disambiguated by recognised shape (a
+thing the colour-keyed scene could not do). Bench: `Sokoban.MULTICELL_LEVELS` (the controllable obstacles are
+multi-cell rigid objects — a domino, an L) — the SAME `tbt.agent.Agent` solves M0 (10 actions = oracle-optimal),
+M1 (two same-colour different-shape objects, 27 vs oracle 25), full 2/2; suite 73/73. No new planner, no new game,
+no role-branch — the generalisation IS the single model. Open next (real-ARC): the click action (ACTION6 carries
+(x,y)); the ARC-AGI-3-Agents SDK wrapper; colour-as-feature + occlusion + rotation-permanence in perception (where
+`vote` and cross-frame id-tracking earn their keep — push-only does not exercise rotation, by design).
+
 Sources: [The Thousand Brains Project (arXiv 2412.18354)](https://arxiv.org/html/2412.18354v1) ·
 [Thousand-Brains Systems (arXiv 2507.04494)](https://arxiv.org/pdf/2507.04494) ·
 [Monty object behaviors](https://docs.thousandbrains.org/docs/object-behaviors) ·

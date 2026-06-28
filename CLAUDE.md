@@ -2,7 +2,7 @@
 
 ## ⚠ ACTIVE WORK (read first) — Phase 2 Step C: objects as column-models, recognized by voting
 **START HERE:** the memory **`reference_tbt_pose_invariant_recognition.md`** (the mechanism + sources) and
-**`src/tbt/RESEARCH.md` R11** (the "BUILT 2026-06-28" note). Run `PYTHONPATH=src python -m pytest src/tests` (69 green);
+**`src/tbt/RESEARCH.md` R11** (the two "BUILT 2026-06-28" notes). Run `PYTHONPATH=src python -m pytest src/tests` (73 green);
 the agent is one thin shell (`tbt/agent.py`) over a planner; the merge to `src/` is long done.
 
 Phase 2 dissolves the symbolic scaffolding into a learned model + SIGNED value. **Step A** (the column IS the forward
@@ -14,8 +14,23 @@ a Monty-style evidence-based recognizer — CONTINUOUS pose SOLVED not recalled,
 rotation OPERATOR (`cells_at`, correct by construction), and multi-column pose-aware VOTING (`1b871cb`, `fab849a`); the
 agent plays Tetris via recognition (the table is deleted). **Real-ARC STARTED** (`8772b36`): `perception/perceive.py`
 `ObjectRecognizer` bridges `segment()` → recognition for object permanence under rotation in 64×64 frames.
-NEXT (real-ARC): the planner consuming recognized object-ids+poses over multi-object scenes; the click action
-(`ACTION6`, grounding differs per game); the ARC-AGI-3-Agents SDK wrapper; colour-as-feature + occlusion robustness.
+**Real-ARC step 1 DONE (2026-06-28):** the planner now CONSUMES recognized objects over MULTI-OBJECT scenes —
+`scene.py` delivers `Scene.movers=[(object_id, cells)]` (segment→recognize per pushable colour), and
+`NeocortexPlanner` was generalized from single-cell movers to RIGID multi-cell bodies (rollout state `(agent,
+focus-anchor, removed)`, push the whole footprint; single-cell = degenerate, all 5 replicas stay green); the BG focus
+gate keys on object IDENTITY (so the id is load-bearing + same-colour objects disambiguate by shape). Bench:
+`Sokoban.MULTICELL_LEVELS` (domino + L), the SAME agent solves M0/M1/full 2/2; suite 73/73; no new planner/game/
+role-branch. See `RESEARCH.md` R11's 2nd "BUILT 2026-06-28" note.
+**SDK adapter DONE (2026-06-28):** `src/arc_sdk.py` bridges THE agent to the real ARC-AGI-3-Agents SDK —
+`TbtPolicy` (SDK-free, duck-typed on `FrameData`: `state`/`frame`/`levels_completed`) wraps `tbt.agent.Agent` into
+`choose_action`/`is_done` returning `(action_name, coords)`; `make_arc_agent(factory)` lazily subclasses the SDK
+`Agent` and maps name→`arcengine.GameAction` (+`set_data({"x","y"})` for ACTION6). Verified against a clone of
+arcprize/ARC-AGI-3-Agents (real `agent.py`/`random_agent.py`); offline-test-gated by driving multi-cell Sokoban to
+WIN through the SDK contract (suite 78/78, no API key). **Real SDK needs Python ≥3.12 + `pip install arc-agi>=0.9.1`
+(provides `arcengine`+`arc_agi`); our venv is 3.11.9 → a separate 3.12 env is needed to run LIVE.**
+NEXT (real-ARC): the click action (`ACTION6` — learn what a click DOES from the public games, NOT a replica; extend
+`DynamicsPerceiver` to coordinate actions + add ACTION7/undo); a live-capable learning agent for `make_arc_agent`;
+colour-as-feature + occlusion + rotation-permanence in perception (where `vote`/cross-frame id-tracking earn their keep).
 Also open: the value/L2 multi-piece-clear now runs on a FAITHFUL model (EZ-V2 robustness reserved for real-ARC's
 imperfect ONLINE models). The replica role-schema strand (CollectAll/Toggle) — see `project_reorient_and_reconnect.md`
 + R11. NB: the architecture/run-command sections BELOW may cite stale `experiments/…` paths.
@@ -89,9 +104,13 @@ code) but tested on a small replica. Next:
   before the SDK.
 - **Efficiency** (parked): the general agent is ~59.5% on LockPath vs the hand-coded 96.5% — the cost of the
   online door-bump + the factored cover-navigation; improve later.
-- **Real ARC-AGI-3**: 64×64×16-colour frames, multi-cell objects, a click action, level-completion-only signal,
-  135 multi-mechanic games. The interactive SDK is the **ARC-AGI-3-Agents** repo + an API key (the pip
-  `arc-agi` is only the static ARC-1/2 dataset lib). Wrap the agent's `choose_action`.
+- **Real ARC-AGI-3**: 64×64×16-colour frames, multi-cell objects, a click action, level-completion-only signal.
+  The interactive SDK is the **ARC-AGI-3-Agents** repo (`agents.agent.Agent` ABC: `choose_action`/`is_done`) + an
+  API key from three.arcprize.org; types come from **`pip install "arc-agi>=0.9.1"`** (the ARC-AGI-3 *toolkit*,
+  providing `arcengine` FrameData/GameAction/GameState + `arc_agi.EnvironmentWrapper` — NOT the old static ARC-1/2
+  lib; that earlier note was wrong). Needs Python ≥3.12. Our agent is wired in via `src/arc_sdk.py` (`make_arc_agent`).
+  Competition: Kaggle "ARC Prize 2026 – ARC-AGI-3", 3 public + 3 private games, sandboxed (NO internet, ~RTX 5090/8h)
+  → self-contained agents only (hosted-LLM agents disqualified); RHAE scoring; deadline 2026-11-02.
 
 ## Workflow & conventions
 - Work directly on `main`. **Always activate the venv** (`venv/Scripts/activate` on Windows) before running.
