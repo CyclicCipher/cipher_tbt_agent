@@ -37,7 +37,6 @@ class Planner:
         self.cap = cap
         self.novelty = novelty
         self.contact = contact                                 # salience: reward reaching an un-contacted object
-        self._optimism = 1.0 / (1.0 - gamma)                   # R-MAX optimistic value for a never-tried action
         self.neo = Neocortex(gamma=gamma, seed=seed)
 
     def reset(self):
@@ -50,10 +49,16 @@ class Planner:
         reachable -- the caller then falls back to (random / heavy-tailed) search."""
         if not actions:
             return None
-        goal, optimism, contact = self.goal, self._optimism, self.contact
+        goal, contact = self.goal, self.contact
+
+        # 1. CURIOSITY (motor babbling): an action still worth learning is just TRIED -- no rollout needed.
+        curious = [a for a in actions if curiosity.get(a, 1.0) > 0.1]
+        if curious:
+            return max(curious, key=lambda a: curiosity.get(a, 1.0))   # practise the most-uncertain action
+
+        # rollout setup (reached only once the operators are learned). Keep REAL poses (predict adds integer deltas,
+        # so they stay exact) -- rounding here would make the rollout's config_state disagree with perception's.
         sizes = {oid: size for oid, (_pose, size) in objects.items()}
-        # keep REAL poses in the rollout (predict adds integer deltas, so they stay exact) -- rounding here would make
-        # the rollout's config_state disagree with perception's, and the goal would never be recognised mid-rollout.
         start = tuple(sorted((oid, pose) for oid, (pose, _size) in objects.items()))
 
         def advance(state, key):
@@ -63,29 +68,28 @@ class Planner:
         def to_objects(state):
             return {oid: (pose, sizes.get(oid, 0)) for oid, pose in state}
 
-        def pragmatic(state, a):                               # learn an action's effect / reach the goal
-            key = actions[a]
-            c = curiosity.get(key, 1.0)
-            if c > 0.1:                                        # still something to LEARN -> practice it (curiosity,
-                return ("?", a), optimism * c, True            # learning-progress weighted; ~0 once learned/noise)
-            nxt = advance(state, key)                          # learned -> use it to reach the goal
-            if goal.is_goal(to_objects(nxt)):                  # the learned goal configuration -> exploit
-                return nxt, 1.0, True
-            return nxt, 0.0, False                             # unexplored OR visited: traversable toward the goal
+        # 2. EXPLOIT a learned goal -- only roll if a goal has actually been seen (else this is wasted work).
+        if goal.goals:
+            def pragmatic(state, a):
+                nxt = advance(state, actions[a])
+                if goal.is_goal(to_objects(nxt)):              # the learned goal configuration -> exploit
+                    return nxt, 1.0, True
+                return nxt, 0.0, False                         # traversable toward the goal
+            a = self.neo.achieve(pragmatic, start, len(actions), max_states=self.cap)
+            if self.neo.root_value > 1e-6:
+                return actions[a]
 
-        a = self.neo.achieve(pragmatic, start, len(actions), max_states=self.cap)
-        if self.neo.root_value > 1e-6:                         # a goal, or an action worth learning -> pursue it
-            return actions[a]
+        # 3. SALIENT: reach an un-contacted object -- only roll if some object-pair is not yet contacted.
+        szs = [size for _pose, size in objects.values()]
+        pairs = {(min(szs[i], szs[j]), max(szs[i], szs[j])) for i in range(len(szs)) for j in range(i + 1, len(szs))}
+        if pairs - goal.contacts:
+            def salient(state, a):
+                nxt = advance(state, actions[a])
+                if goal.new_contact(to_objects(nxt)):          # reach an un-contacted object (goals live there)
+                    return nxt, contact, True
+                return nxt, 0.0, False                         # else traversable -- a DISTANT contact stays reachable
+            a = self.neo.achieve(salient, start, len(actions), max_states=self.cap)
+            if self.neo.root_value > 1e-6:
+                return actions[a]
 
-        def salient(state, a):                                 # SALIENT: reach an un-contacted object (goals live there)
-            nxt = advance(state, actions[a])
-            if goal.new_contact(to_objects(nxt)):
-                return nxt, contact, True
-            return nxt, 0.0, False                             # else traversable -- so a DISTANT contact stays reachable
-
-        a = self.neo.achieve(salient, start, len(actions), max_states=self.cap)
-        if self.neo.root_value > 1e-6:                         # an un-contacted object is reachable -> head to it
-            return actions[a]
-
-        return None                                            # nothing to learn / exploit / contact -> the caller
-        #                                                        does (random now; heavy-tailed Lévy) search -- step 2
+        return None                                            # nothing to learn / exploit / contact -> caller's Lévy
