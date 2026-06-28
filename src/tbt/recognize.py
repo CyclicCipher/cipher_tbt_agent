@@ -155,6 +155,18 @@ class Recognizer:
         h = max(self.hyps, key=lambda h: h.ev)
         return h.obj if h.ev >= max(2.0, len(locs) - 1.0) else None
 
+    def recognize(self, cloud):
+        """Identify a shape's object + continuous pose, learning it online if novel (`add_if_novel`). Returns
+        (name, theta, t, ev) — the full pose-invariant recognition perception uses to TRACK an object across frames
+        despite rotation/translation (object permanence), where a translation-invariant shape key would not."""
+        if self.identify_model(cloud) is None:
+            self.add(f"obj{len(self.models)}", _canonical(cloud))
+        locs = [np.asarray(c, float) for c in cloud]
+        self.reset()
+        for i in range(len(locs)):
+            self.observe(locs[i], local_disps(locs, i, self.radius))
+        return self.best()
+
     # ---- the evidence loop ------------------------------------------------------------------------------
     def reset(self):
         self.hyps: list[_Hyp] = []

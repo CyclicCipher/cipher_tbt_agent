@@ -12,6 +12,7 @@ from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 
 from tasks import GameState                                   # DynamicsPerceiver's terminal/score check
+from tbt.recognize import Recognizer                          # pose-invariant object identity (real-ARC perception)
 
 _UNITS = [(0, -1), (0, 1), (-1, 0), (1, 0)]                   # 4-neighbourhood
 _8 = _UNITS + [(-1, -1), (-1, 1), (1, -1), (1, 1)]            # 8-neighbourhood (incl. diagonals)
@@ -133,6 +134,32 @@ def object_motion(prev, cur):
             _, i, co = min(opts); used[key].add(i)
             moved.append((po, (co.bbox[0] - px, co.bbox[1] - py)))
     return moved
+
+
+# ── pose-invariant object recognition: segment a frame + IDENTIFY each multi-cell object across rotations ──
+class ObjectRecognizer:
+    """Bridge segmentation → pose-invariant recognition (`tbt.recognize`): segment a frame into multi-cell objects
+    and IDENTIFY each one rotation+translation-invariantly, learning the object library online by watching. This is
+    the capability `Obj.shape` lacks — it is translation-invariant but NOT rotation-invariant, so a rotated object
+    reads as a NEW shape; recognition gives object PERMANENCE under rotation (the real-ARC condition). Single-cell
+    objects (a point has no orientation) pass through with no identity. Colour-blind by design (shape only) — colour
+    can later join as a pose-independent feature, the way Monty separates morphology from features."""
+
+    def __init__(self, radius: float = 1.5, min_cells: int = 2):
+        self.rec = Recognizer(radius=radius)
+        self.min_cells = min_cells
+
+    def perceive(self, grid, bg=None):
+        """Return [(Obj, object_id, pose)] for the frame — object_id + pose pose-invariant (None for objects below
+        `min_cells`, which carry no orientation). The library grows as new shapes are seen (online, label-free)."""
+        out = []
+        for o in segment(grid, bg=bg):
+            if o.size < self.min_cells:
+                out.append((o, None, None))
+            else:
+                name, theta, t, _ev = self.rec.recognize(list(o.cells))
+                out.append((o, name, (theta, t)))
+        return out
 
 
 # ── E: learn body / pushable / blocking / consumable from motion (no colour priors) ─────────────────────
