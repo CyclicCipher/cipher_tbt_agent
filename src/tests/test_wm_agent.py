@@ -12,6 +12,7 @@ import pytest
 
 _PKG_PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG_PARENT not in sys.path:
+    sys.path.insert(0, _PKG_PARENT)
 
 from tasks import Environment, run_episode  # noqa: E402
 from tasks.core import GameAction  # noqa: E402

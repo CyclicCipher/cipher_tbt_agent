@@ -112,6 +112,11 @@ class FrameData:
     def is_terminal(self) -> bool:
         return self.state in (GameState.WIN, GameState.GAME_OVER)
 
+    def is_win(self) -> bool:
+        """All levels completed. A generic lifecycle predicate (like is_terminal) so an env-driver can detect
+        success without importing GameState — keeps the thin-shell agent decoupled from the task enums."""
+        return self.state == GameState.WIN
+
 
 class ActionNotAvailable(Exception):
     """Raised when an action not in `available_actions` is submitted.

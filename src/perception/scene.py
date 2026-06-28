@@ -151,6 +151,19 @@ class StateEncoder(_ActionVocab):
     def _movers(self, scene):
         return sorted(c for col in sorted(self.world.pushable) for c in scene.by_color.get(col, set()))
 
+    def movers(self, scene):
+        """The pushable objects' current cells — the relational movers the planner pushes one at a time. Opaque
+        to the planner (just cells); a block sitting on a covered pad is included (so 'covered' can be detected)."""
+        return self._movers(scene)
+
+    def graph(self, scene):
+        """The cell adjacency the planner's SR-navigation runs over: {cell: [neighbour per action]}, where a move
+        into a wall / off-map / currently-shut door becomes a SELF-LOOP (you stay put). Perception owns 'which
+        cells connect' (walls via walkable, shut doors via gates); the planner gets an opaque graph keyed by cell."""
+        walk = self.walkable(scene) - set(self.gates(scene))   # a closed-door cell blocks navigation (S2 opens it)
+        return {c: [(c[0] + dx, c[1] + dy) if (c[0] + dx, c[1] + dy) in walk else c for dx, dy in self.deltas]
+                for c in walk}
+
     def encode(self, scene):
         """The factored state tuple (or None if the body is not visible)."""
         body = scene.body_pos

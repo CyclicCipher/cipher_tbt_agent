@@ -11,11 +11,21 @@ future task whose perception + planner implement the contract:
   planner.act(scene, explore) -> move index;  planner.reset() / new_level() / on_death()
 
 If this agent would crash on a non-grid environment, it is wrong by construction (feedback_thin_shell_agent).
-The reorient is folding the act-and-learn `play(env)` loop in here too, so this file — not a harness — is where
-the agent lives.
+The `play(env)` loop lives here too, so this file — not a harness — is where the agent lives: a transformer's
+capabilities live in the transformer, not a per-application shim.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass
+class Outcome:
+    """The result of playing one game: did we win, how many levels cleared, how many actions it cost."""
+    won: bool
+    levels: int
+    actions: int
 
 
 class Agent:
@@ -35,3 +45,15 @@ class Agent:
         if p.new_level:
             self.planner.new_level()
         return self.perception.to_action(self.planner.act(p.scene, explore=explore)), None
+
+    def play(self, env, max_steps=2000, explore=0.0):
+        """THE play loop — drive `env` to a win (or the action budget), in the agent, NOT a harness. The agent
+        self-heals GAME_OVER inside `choose_action` (it emits the reset action; the env reloads the level), so the
+        loop stops only on a win or exhaustion. Uses a generic env protocol (reset/step + frame.is_win /
+        .action_counter / .score) — no task import, so the same loop runs any environment perception can read."""
+        self.reset()
+        frame = env.reset()
+        while frame.action_counter < max_steps and not frame.is_win():
+            action, coords = self.choose_action(frame, explore=explore)
+            frame = env.step(action, coords)
+        return Outcome(won=frame.is_win(), levels=frame.score, actions=frame.action_counter)

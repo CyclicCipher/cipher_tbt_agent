@@ -42,7 +42,7 @@ from tbt.column import CorticalColumn                            # noqa: E402
 from tbt.reward import MOVES                                     # noqa: E402
 from tbt.thalamus import Thalamus                               # noqa: E402
 
-from scaling_probe import ConjGrid, conj_transitions, run_conj  # the flat baseline + the env  # noqa: E402
+from demos.scaling_probe import ConjGrid, conj_transitions, run_conj  # the flat baseline + the env  # noqa: E402
 
 
 def _cell(x, y, N):

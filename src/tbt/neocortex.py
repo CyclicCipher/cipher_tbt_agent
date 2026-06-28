@@ -27,6 +27,7 @@ import random
 from collections import defaultdict
 from dataclasses import dataclass
 
+from tbt.column import CorticalColumn
 from tbt.reward import RewardModel
 from tbt.thalamus import Thalamus
 
@@ -43,23 +44,29 @@ class Neocortex:
     """Task ⊕ space columns, joined by CMP messages; spatial nav by SR prioritized-replay; relational mechanics
     FACTORED into the agent + one mover (egocentric ⊗ absolute), never the joint."""
 
-    def __init__(self, space_col, task_col, gamma: float = 0.9, seed: int = 0):
-        self.space, self.task, self.thal = space_col, task_col, Thalamus()
+    def __init__(self, gamma: float = 0.9, seed: int = 0):
+        self.thal = Thalamus()
         self.rm = RewardModel(1, gamma=gamma, beta=0.0, prioritized=True, optimistic=False)   # the SR value field
         self.rng = random.Random(seed)
+        self.space = self.task = None                          # the columns are (re)bound per level by bind()
         self.reset()
 
     def reset(self):
-        self.R, self._sub, self._done, self._active, self._focus = None, [], set(), None, None
+        self.R, self._sub, self._done, self._active, self._focus, self._inv = None, [], set(), None, None, {}
 
-    def bind(self, subgoals, cid):
-        """`subgoals = [(content, node, is_mover), …]`, ordered (terminal last); `cid` maps a node to the spatial
-        column's frame index (the navigator works in nodes, the column in indices — `cid` is the bridge). Bind
-        each content ⊗ its goal-state into the thalamus register, the shared blackboard the columns read both
-        ways. `is_mover` = the sub-goal is met by a MOVER on the node (a relational push), not the agent on it."""
+    def bind(self, subgoals, space_col, cid):
+        """`subgoals = [(content, node, is_mover), …]`, ordered (terminal last). `space_col` is the spatial
+        column (perception-built, one per level); `cid` maps a node (cell) to its symbol in that column. Build
+        the task column (one content code per sub-goal), then bind each content ⊗ its goal-state's place into the
+        thalamus register — the shared blackboard the columns read both ways. `is_mover` = the sub-goal is met by
+        a MOVER on the node (a relational push), not the agent on it."""
+        self.space = space_col
+        self.task = CorticalColumn(n_entities=max(1, len(subgoals)))
         self._sub, self._done, self._active, self._focus = list(subgoals), set(), None, None
-        self._inv = {i: n for n, i in cid.items()}             # frame index → node, to decode the thalamus read
-        self.R = self.thal.bind(self.task, self.space, [(c, cid[n]) for c, n, _ in subgoals]) if subgoals else None
+        by_sym = {i: n for n, i in cid.items()}                # symbol → node
+        self._inv = {f: by_sym[s] for s, f in space_col.loc.items()}   # place-frame index → node (what read_location
+        self.R = (self.thal.bind(self.task, self.space, [(c, cid[n]) for c, n, _ in subgoals])   # returns); robust to
+                  if subgoals else None)                                                          # loc ≠ identity
 
     # ---- the CMP channels (through the thalamus) ----------------------------------------------------------
     def _goal_node(self, content):
@@ -113,21 +120,25 @@ class Neocortex:
         return self.rng.randrange(len(T[agent]))
 
     # ---- one step of the loop: acknowledge, sequence, route a goal-state, navigate ------------------------
-    def act(self, agent, movers, T, preds):
+    def act(self, agent, movers, T):
+        """`agent`/`movers` = current cells; `T` = the cell graph {cell: [neighbour per action]} (a wall = a
+        self-loop). `preds` is not an argument — `_filter` recomputes it for the obstacle-removed graph each nav."""
         for c, node, im in self._sub:                          # bottom-up CMP: which sub-goals are now satisfied?
             if c not in self._done and ((im and node in movers) or (not im and agent == node)):
                 self._done.add(c)
         remaining = [(c, node, im) for c, node, im in self._sub if c not in self._done]
         if not remaining:
             return self.rng.randrange(len(T[agent]))
-        c, _, is_mover = remaining[0]                          # ordered reveal: the first unmet sub-goal (terminal last)
+        c, node, is_mover = remaining[0]                       # ordered reveal: the first unmet sub-goal (terminal last)
         if c != self._active:                                  # a new sub-goal → drop the committed mover
             self._active, self._focus = c, None
         goal = self._goal_node(c)                              # top-down CMP: the goal-state
+        if goal is None:                                       # thalamus read missed → fall back to the bound node
+            goal = node
         if not is_mover:                                       # the AGENT reaches the goal-state
             a, _ = self._sr(*self._filter(T, set(movers)), agent, goal)
             return a if a is not None else self.rng.randrange(len(T[agent]))
-        occ = {node for cc, node, im in self._sub if im and cc in self._done}   # parked movers (done sub-goals)
+        occ = {nd for cc, nd, im in self._sub if im and cc in self._done}   # parked movers (done sub-goals)
         free = [m for m in movers if m not in occ]
         if self._focus not in free:                            # COMMIT one mover per sub-goal (re-picking flips it)
             if not free:
