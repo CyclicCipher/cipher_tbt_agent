@@ -17,7 +17,7 @@ import random
 import sys
 
 
-from tbt.dynamics import DynamicsModel                       # noqa: E402
+from tbt.column import CorticalColumn                        # noqa: E402
 
 FLOOR, KEY, SWITCH = 0, 2, 3                                  # cell colours
 _NAMES = {0: "stepped_on", 1: "block_on_pad", 2: "x_parity", 3: "y_parity"}
@@ -48,10 +48,10 @@ def experience(steps, seed=0):
 if __name__ == "__main__":
     print("dynamics learning — a column learns conditional effects (precondition -> effect) from experience.\n")
     obs = experience(4000, seed=0)
-    dm = DynamicsModel()
+    dm = CorticalColumn(n_entities=1)                        # the column's DYNAMICS faculty learns the conditional effects
     for f, e in obs:
-        dm.observe(f, e)
-    rules = dm.learn()
+        dm.observe_effect(f, e)
+    rules = dm.learn_dynamics()
 
     learned = {eff for _, _, eff in rules}
     print("  rules discovered (no hand-coded rule-types — the residual predicate search over perceived features):")
@@ -63,6 +63,6 @@ if __name__ == "__main__":
     print(f"    noise  -> {'REFUSED (no precondition feature -> the MDL stop, not memorised)' if 'noise' not in learned else 'WRONGLY LEARNED'}")
 
     cond = [(f, e) for f, e in obs if e in {'doorA', 'doorB', 'doorC'}]
-    correct = sum(dm.predict(f) == e for f, e in cond)
+    correct = sum(dm.predict_effect(f) == e for f, e in cond)
     print(f"\n  conditional effects predicted: {correct}/{len(cond)}   (every key/switch/pad event anticipated)")
     print("  this is the world-model the control loop plans THROUGH: 'reach the precondition -> the door opens'.")

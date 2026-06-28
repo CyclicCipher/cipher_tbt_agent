@@ -75,7 +75,7 @@ def build_world(dm, objp, goal) -> WorldModel:
     death: Set[int] = set()
     effects: Dict[int, Set[int]] = {}
     adds: Dict[int, Set[int]] = {}
-    for _pred, desc, eff in dm.rules:
+    for _pred, desc, eff in dm.dyn_rules:
         m = re.search(r"c0==(\d+)", desc)
         if not m:
             continue

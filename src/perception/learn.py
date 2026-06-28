@@ -11,7 +11,7 @@ play loop); this is where "perception owns its learning" actually lives.
   refresh()                          — re-decode the learners into the shared world (build_world, in place)
 
 The mechanics are LEARNED, not coded: the body is the efference copy, pushable/blocking come from motion, the
-door-opening is a residual conditional effect (tbt/dynamics.py, the same predicate search that found carry), and
+door-opening is a residual conditional effect (the column's dynamics faculty, the predicate search that found carry), and
 the goal is whatever colour the score rewards — no key/door/pad/goal token anywhere in here.
 """
 
@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from tasks import GameState
 
-from tbt.dynamics import DynamicsModel
+from tbt.column import CorticalColumn
 
 from .perceive import DynamicsPerceiver, GoalModel, ObjectPerceiver
 from .scene import build_world
@@ -32,7 +32,7 @@ class WorldLearner:
 
     def __init__(self):
         self.perc = DynamicsPerceiver()
-        self.dm = DynamicsModel()
+        self.dm = CorticalColumn(n_entities=1)                    # a column whose DYNAMICS faculty models world responses
         self.objp = ObjectPerceiver()
         self.goal = GoalModel()
         self.world = build_world(self.dm, self.objp, self.goal)   # empty until learned — shared by reference
@@ -43,7 +43,7 @@ class WorldLearner:
         f, e, present = self.perc.observe(prev_frame, action, frame)
         if f is None:
             return
-        self.dm.observe(f, e)
+        self.dm.observe_effect(f, e)
         if action.is_movement and prev_frame.state == GameState.NOT_FINISHED and frame.level == prev_frame.level:
             self.objp.observe(prev_frame.grid, action.delta, frame.grid)
         stepped_on = f[0]
@@ -55,7 +55,7 @@ class WorldLearner:
     def refresh(self):
         """Re-decode the learners into the shared world, IN PLACE — so the agent's perception/planner (holding the
         same `world` reference) immediately plan with any newly-learned role."""
-        self.dm.learn()
+        self.dm.learn_dynamics()
         self.world.__dict__.update(build_world(self.dm, self.objp, self.goal).__dict__)
 
     def new_level(self):

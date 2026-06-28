@@ -31,6 +31,7 @@ from .l5_displacement import L5_Displacement
 from .l6_grid import L6_GridLocation
 from .l23_object import L23_Object
 from .recurrence import SelectiveRecurrence            # the ONE canonical selective-gated recurrence
+from .residual import _find_predicate                  # the predicate search the column's dynamics faculty reuses
 
 
 def _orthonormal(rows, cols, gen):
@@ -78,6 +79,7 @@ class CorticalColumn(nn.Module):
         self._place_k_loc = 16                                # active units per sparse place code (~3% of d_mem)
         self._h = None                                        # L6 as a DYNAMIC path-integrated belief (the recurrence)
         self._rec = SelectiveRecurrence(d_mem, n_keys=1)      # the canonical gate for L6 correction (loc_sense)
+        self._dyn_obs, self.dyn_rules = [], []                # the conditional-dynamics faculty (forward model of world responses)
 
     # ----- learn a model of a domain (structure GIVEN) via the SR frame ----------------------------
     def learn_domain(self, name, entity_labels, relations, remap=True):
@@ -228,3 +230,37 @@ class CorticalColumn(nn.Module):
     def loc_where(self):
         """READ OUT the most likely current node — attractor match of the belief against the place codebook."""
         return self._inv_loc[int((self.place @ self._h).argmax())]
+
+    # ----- the conditional-DYNAMICS faculty: the column's forward model of the WORLD's responses ------------
+    # The location code above predicts where the BODY goes; this predicts what the WORLD does that self-motion
+    # cannot explain (the exafferent residual) — a door opens BECAUSE of a precondition. The SAME predicate
+    # search that found carry (residual.py): under what PRECONDITION (a feature of the sensed state) does each
+    # EFFECT occur. Folded INTO the column (it used to be a separate DynamicsModel) so the column that LEARNS the
+    # dynamics is the column that PREDICTS them — no external module the planner reads. The effect is a discrete
+    # world-change rather than a location delta, but the mechanism is identical, so there is no hand-coded rule.
+    def observe_effect(self, features, effect):
+        """One step of experience: the sensed-state `features` and the EXAFFERENT `effect` (hashable, or None)."""
+        self._dyn_obs.append((tuple(features), effect))
+
+    def learn_dynamics(self):
+        """For each distinct effect, find the SIMPLEST precondition (a predicate over the features) that selects
+        exactly the states where it occurred — the residual predicate search. An effect with no compressing
+        precondition is REFUSED (the MDL stop). Returns the rules [(predicate, description, effect)]."""
+        self.dyn_rules = []
+        obs = list(set(self._dyn_obs))                        # the search needs only the DISTINCT (features→effect) rows
+        for eff in sorted({e for _, e in obs if e is not None}, key=repr):
+            need = [f for f, e in obs if e == eff]
+            correct = [f for f, e in obs if e != eff]         # states where this effect did NOT occur
+            pred, desc = _find_predicate(need, correct)
+            if pred is not None:
+                self.dyn_rules.append((pred, desc, eff))
+        return self.dyn_rules
+
+    def predict_effect(self, features):
+        """The effect the current sensed state triggers (the first matching rule), or None — what the control
+        loop rolls forward to plan ('reach the precondition and the door opens')."""
+        f = tuple(features)
+        for pred, _desc, eff in self.dyn_rules:
+            if pred(f):
+                return eff
+        return None

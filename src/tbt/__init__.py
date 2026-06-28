@@ -25,7 +25,6 @@ _EXPORTS = {
     "BasalGanglia": ".basal_ganglia",             # the gate selector / emergent allocator (pure stdlib)
     "discover_factors": ".factorize",             # Higgins-style disentanglement from action orbits (pure stdlib)
     "recursive_residual": ".residual",            # the general structured-deviation learner (carry/context/...; pure stdlib)
-    "DynamicsModel": ".dynamics",                 # learn the world's conditional effects (precondition→effect; pure stdlib)
 }
 
 __all__ = list(_EXPORTS)
