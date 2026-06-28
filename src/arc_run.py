@@ -217,7 +217,7 @@ def play_live(game_id="ls20", max_actions=200, seed=0, verbose=True):
 
     arc = Arcade(arc_api_key=load_api_key(), operation_mode=OperationMode.ONLINE)
     card_id = arc.open_scorecard(tags=["cipher-tbt", "play"])
-    player = Player(seed=seed)
+    player = Player(cap=4096, seed=seed)                       # board-sized cap so directed routing reaches a visible target
     out = player.run(_PlayEnv(arc, game_id, card_id), max_steps=max_actions)
     result = arc.close_scorecard(card_id)
     if verbose:

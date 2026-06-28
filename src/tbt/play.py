@@ -28,7 +28,9 @@ class Player:
     """The assembled agent, self-free. `act(grid, actions, score)` returns the next action; `run(env)` drives it.
     `reset()` is a new GAME (fresh learner); `new_level()` keeps the learned goal and re-localises."""
 
-    def __init__(self, cap: int = 600, gamma: float = 0.95, novelty: float = 0.05, seed: int = 0):
+    def __init__(self, cap: int = 800, gamma: float = 0.95, novelty: float = 0.05, seed: int = 0):
+        # cap bounds the directed rollout (compute). A live 64x64 game passes a board-sized cap so directed routing can
+        # reach a VISIBLE distant object; the Lévy fallback covers the rest. Small scenes are bounded by reachability.
         self.cap, self.gamma, self.novelty, self.seed = cap, gamma, novelty, seed
         self.reset()
 
@@ -41,6 +43,7 @@ class Player:
         self.forwards: dict = {}                              # object_id -> ForwardModel (per-object operators)
         self._prev_objects = self._last = self._prev_frame = None
         self._prev_score = 0
+        self._run = (None, 0)                                 # current Lévy run: (action, steps remaining)
 
     def new_level(self):
         """A level cleared: keep the learned goal (transfer); re-localise and re-learn operators (a cheap babble)."""
@@ -49,6 +52,18 @@ class Player:
         self.field.reset()
         self.forwards = {}
         self._prev_objects = self._last = self._prev_frame = None
+        self._run = (None, 0)
+
+    def _levy(self, actions):
+        """Heavy-tailed (Lévy) random search -- commit to one direction for a heavy-tailed number of steps (mostly
+        short, occasionally long), the optimal memoryless search for sparse, unknown, far targets. Used only when the
+        planner has nothing to learn/exploit/contact to route toward."""
+        key, rem = self._run
+        if key not in actions or rem <= 0:
+            length = min(int(self.rng.paretovariate(1.5)), 25)   # Lévy-ish run length: usually small, rarely long
+            key, rem = self.rng.choice(list(actions)), length
+        self._run = (key, rem - 1)
+        return key
 
     def act(self, grid, actions, score):
         """Perceive the objects, learn each one's operator + the goal from the transition into this frame, then plan."""
@@ -66,8 +81,10 @@ class Player:
         # how much there is still to LEARN about each action (learning progress; 1.0 if untried) -- the curiosity drive
         curiosity = {a: max((fm.curiosity(a) for fm in self.forwards.values()), default=1.0) for a in actions}
         action = self.planner.act(objects, self.forwards, actions, curiosity)
-        if action is None:                                   # nothing to learn/exploit/contact -> random search (Lévy: step 2)
-            action = self.rng.choice(list(actions))
+        if action is None:                                   # nothing to route toward -> heavy-tailed (Lévy) search
+            action = self._levy(actions)
+        else:
+            self._run = (None, 0)                            # a directed plan took over -> end the Lévy run
         self._prev_objects, self._last, self._prev_score, self._prev_frame = objects, action, score, grid
         return action
 
