@@ -37,9 +37,10 @@ loop — it is not new work, it is re-grounding what we had on the columns.
 The column is "learn a structural map, predict from it," through four layers. Each faculty is **HAVE** (works today),
 **FOLD** (a current standalone script's *function* moves into a layer), or **BUILD** (Monty has it, we don't yet).
 
-- **L6 — reference frame (HAVE; absorbs `factorize`).** The SR-eigenvector frame of the transition graph
-  (Stachenfeld 2017: grid cells *are* the SR eigenvectors) — topology-general (grid-like on metric space, correct on
-  rings/trees/abstract spaces). **Factorization lives here:** independent factors are separable eigen-subspaces of the
+- **L6 — reference frame (HAVE offline; online learning is step 2; absorbs `factorize`).** The SR frame of the
+  transition graph (Stachenfeld 2017: grid cells *are* the SR eigenvectors) — topology-general (grid-like on metric
+  space, correct on rings/trees/abstract spaces). Today via a batch `eigh`; step 2 makes it **online (TD-SR + an
+  optional Hebbian grid layer)** — see "Incremental / online model building". **Factorization lives here:** independent factors are separable eigen-subspaces of the
   *action* graph, and where they don't separate, a second column is allocated (basal ganglia). So `factorize.py`'s job
   becomes a property of L6 + multi-column allocation, not a side script. *(Research check: eigen-subspaces ≈ disentangled
   factors because the frame is built from ACTIONS, not statics — validate, don't assume.)*
@@ -63,9 +64,20 @@ The column is "learn a structural map, predict from it," through four layers. Ea
   location; **infer pose** from sensed features; pick the most-likely hypothesis with a relative confidence/termination
   threshold. This is the core LM loop and the home of the deleted `recognize.py`. Single-hypothesis path integration
   (HAVE) is its degenerate case.
-- **Incremental / online model building (BUILD).** Add a point to the model when the sensed location is novel; learn
-  during one continuous interaction with **no batch re-eigendecomposition** (today's `consolidate()` re-eigh's the whole
-  graph — too slow per step on 64×64). Online TD-SR for the place codes.
+- **Incremental / online model building (BUILD).** Today's `consolidate()` runs a full `eigh` of the transition graph
+  (O(n³), recomputed from scratch) — a batch shortcut, too slow per step on 64×64. **Eigendecomposition is the wrong tool
+  online; replace it, in this order:**
+  1. **Factor the state first.** The `eigh` is only costly because n = raw cells; over a few *factored* coordinates the
+     graph is tiny and the algorithm choice nearly stops mattering. This is the `factorize → L6` job doing double duty,
+     and it is largely the sensor's responsibility (hand the column a small factored state, not 4096 pixels).
+  2. **Online TD successor representation.** Learn the SR by temporal difference — `M(s,·) ← M(s,·) + α[e_s + γM(s′,·) −
+     M(s,·)]`, O(visited states)/step, no `eigh`; its ROWS are place-cell-like codes that already encode topology
+     (Dayan 1993; STDP/theta-sweeps do exactly this in cortex — no organism runs a batch eigendecomposition). Add a node
+     when the sensed location is novel.
+  3. **Hebbian grid layer, only if needed.** Extract the top-k eigenvectors of the streaming SR by Oja/Sanger's GHA
+     (O(nk)/step) — the online, biologically-faithful route to the grid frame (grid cells emerge from the place-cell SR
+     by NON-NEGATIVE PCA — Dordek et al. 2016), for the grid's benefits (multi-scale, vector-navigation to UNVISITED
+     goals). The batch `eigh` is kept only as an offline reference / occasional partial-eigh fallback.
 - **Goal State Generator (BUILD).** From its own model, propose the next pose to visit that best disambiguates the
   leading hypotheses (epistemic value), emitted on the thalamic goal-state channel, arbitrated with reward (pragmatic)
   and gated by the basal ganglia.
@@ -115,7 +127,9 @@ thalamic VSA binding work now; pose-aware *voting* across heterogeneous frames i
 
 ## Build order (deadline-aware)
 1. **Evidence-based recognition with inferred pose**, in the column — the spine; subsumes `recognize.py`.
-2. **Incremental / online learning** (no batch eigh) — required to run live within the action budget.
+2. **Incremental / online learning** in L6, replacing the batch `eigh`, in this order: (1) factor the state so the
+   graph is small; (2) **online TD-SR** place codes (+ online L5 operators); (3) a **Hebbian grid layer** (Oja/Sanger /
+   non-negative PCA) only if vector-navigation to unseen targets needs it. Required to run live within the action budget.
 3. **GSG + reward + basal ganglia → the active-inference loop** (re-ground the prior-commit planner on the column).
 4. **Dorsal/ventral dynamics column** (the change stream) — cheap once 1–3 exist.
 5. **The sensor (retina)** → column input; run the continuous loop on a real game.
