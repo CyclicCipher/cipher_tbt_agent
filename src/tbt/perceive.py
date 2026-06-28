@@ -1,20 +1,22 @@
-"""Perception bridge -- raw frames to a scene of objects (the self + the others), for the playing loop.
+"""Perception bridge -- raw frames to TRACKED OBJECTS, with NO privileged 'self'.
 
-The planner reasons over `(self_pose, others)`; this turns `(prev, action, cur)` frames into that, with no role decode:
+The self is not a perception concept. There are only OBJECTS; which one is controllable is decided NOWHERE here -- it
+EMERGES downstream as the object whose learned operator is action-sensitive ("the self is the factor your operators
+move"). And colour is never used: it is an arbitrary label (anything sharing it breaks), so an object is identified by
+WHERE it is and its SIZE/shape.
 
-  * SEGMENT the frame into objects -- connected components of non-background cells (background = the modal cell value).
-    Connected-component objectness is a Core-Knowledge prior used ONLY as a sensor primitive (it proposes candidate
-    objects), never a role decoder ([[feedback_bitter_lesson]]).
-  * Identify the SELF as the object that MOVES under the agent's actions -- the controllable mover (its identity is
-    remembered once found, so a momentarily-still self is still located). Everything else is `others`: the static
-    landmarks the self navigates RELATIVE to (they are not in the dynamic residual, so the full frame is segmented).
-  * Report TRUE positions (object centroids in the current frame), so the forward model's operator and the goal's
-    relative encoding are exact -- unlike the change-blob centroid `objects.py` uses to recover the operator.
+The hard lesson from the live games: a moving object is often EMBEDDED in the static structure (it shares cells/colour
+with it), so segmenting the whole frame by connected components cannot isolate it -- on ls20 every non-background cell
+falls into a few big blobs and the mover vanishes inside one. So movers are read from the DYNAMIC RESIDUAL instead:
 
-Identity is the object's dominant colour, so a goal generalises by what an object IS, not which instance it is. This
-is the NEW perception, living in `tbt/` -- the dissolution direction (perception/ shrinks to a thin array sensor).
-Several movers / many static objects (a busy real frame) are the deferred grouping step; here one self + a few
-landmarks. Pure stdlib; reuses `objects.components`.
+  * MOVERS = connected components of the cells that CHANGED (`salient_cells`) and are occupied now -- the moving
+    objects, isolated from the static structure by their MOTION. Tracked across frames by pose-continuity (permanence)
+    so a per-object operator can be learned.
+  * STATIC anchor = everything else occupied (the structure that did not change), lumped into one big reference
+    object. Being the largest, it is the configuration anchor (a stable frame); it never decides "self".
+
+Returns `{object_id: (pose, size)}` (the static anchor under id `STATIC`). Pure stdlib; reuses `objects.components`
+and `retina.salient_cells`.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from __future__ import annotations
 from collections import Counter
 
 from .objects import components
+from .retina import salient_cells
 
 
 def background(frame):
@@ -29,67 +32,58 @@ def background(frame):
     return Counter(v for row in frame for v in row).most_common(1)[0][0]
 
 
-def segment(frame, bg=None):
-    """The frame's objects: each non-background 4-connected component as `(colour, cells, centroid)`, colour = the
-    component's dominant value."""
-    if bg is None:
-        bg = background(frame)
-    cells = {(x, y) for y, row in enumerate(frame) for x, v in enumerate(row) if v != bg}
-    out = []
-    for comp, centroid in components(cells):
-        colour = Counter(frame[y][x] for (x, y) in comp).most_common(1)[0][0]
-        out.append((colour, comp, centroid))
-    return out
+def _centroid(cells):
+    n = len(cells)
+    return (sum(x for x, _ in cells) / n, sum(y for _, y in cells) / n)
 
 
 def _dist(a, b):
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
-def _nearest_same_colour(colour, centroid, objs):
-    """The centroid of the nearest same-colour object in `objs`, or None."""
-    cands = [cen for (col, _cells, cen) in objs if col == colour]
-    return min(cands, key=lambda c: _dist(centroid, c)) if cands else None
+class ObjectField:
+    """The field of tracked objects -- no self. `perceive(prev, frame)` reads the moving objects from the dynamic
+    residual (isolated from the static structure by motion), tracks them by pose-continuity, and lumps the rest into a
+    single static anchor. Returns `{object_id: (pose, size)}`. `max_jump` bounds how far a mover may travel and still be
+    the same object."""
 
+    STATIC = -1                                                # the fixed id of the static-structure anchor
 
-class ScenePerceiver:
-    """Frames -> `(self_pose, others)`. Stateful only in remembering WHICH object is the self (by colour), learned
-    from motion: the object that moves most under an action is the controllable self. Until that is known, the self
-    is unlocated (the caller babbles to make something move). `others = [(colour, centroid), ...]`."""
-
-    def __init__(self, move_threshold: float = 0.5):
-        self.move_threshold = move_threshold                  # min centroid move to count an object as "the mover"
-        self.self_colour = None
+    def __init__(self, max_jump: float = 8.0):
+        self.max_jump = max_jump
+        self._last: dict = {}                                  # mover_id -> (pose, size)
+        self._next = 0
 
     def reset(self):
-        self.self_colour = None
+        self._last = {}
+        self._next = 0
 
-    def _identify_self(self, prev, cur_objs):
-        """Set `self_colour` to the object that moved most between `prev` and the current objects (the mover = the
-        controllable self). Called until the self is identified."""
-        prev_objs = segment(prev)
-        best, best_move = None, self.move_threshold
-        for colour, _cells, cen in cur_objs:
-            pc = _nearest_same_colour(colour, cen, prev_objs)
-            move = _dist(cen, pc) if pc is not None else 0.0
-            if move >= best_move:
-                best, best_move = colour, move
-        if best is not None:
-            self.self_colour = best
+    def perceive(self, prev, frame) -> dict:
+        bg = background(frame)
+        non_bg = {(x, y) for y, row in enumerate(frame) for x, v in enumerate(row) if v != bg}
+        salient = salient_cells(prev, frame) if prev is not None else set()
+        mover_cells = salient & non_bg                        # the movers' CURRENT footprints (changed + occupied now)
+        static_cells = non_bg - salient                       # the structure that did not change
 
-    def perceive(self, prev, action, cur):
-        """`(prev, action, cur)` -> `(self_pose, others)`. `self_pose` is None until the self is identified (so the
-        caller babbles); `others` is always the non-self objects (static landmarks)."""
-        objs = segment(cur)
-        if not objs:
-            return None, []
-        if self.self_colour is None and prev is not None:
-            self._identify_self(prev, objs)
-        if self.self_colour is None:
-            return None, [(col, cen) for col, _cells, cen in objs]
-        mine = [(col, cells, cen) for col, cells, cen in objs if col == self.self_colour]
-        if not mine:                                          # self temporarily not visible -> locate nothing this step
-            return None, [(col, cen) for col, _cells, cen in objs]
-        _col, _cells, self_pose = max(mine, key=lambda o: len(o[1]))   # the largest same-colour blob is the self body
-        others = [(col, cen) for col, _cells, cen in objs if cen != self_pose]
-        return self_pose, others
+        result = {}
+        if static_cells:
+            result[self.STATIC] = (_centroid(static_cells), len(static_cells))
+
+        movers = [(_centroid(cells), len(cells)) for cells, _ in components(mover_cells)]
+        prev_tracks, used, tracked = dict(self._last), set(), {}
+        for pose, size in movers:
+            best, best_d = None, self.max_jump
+            for oid, (ppose, _psize) in prev_tracks.items():
+                if oid in used:
+                    continue
+                d = _dist(pose, ppose)
+                if d <= best_d:
+                    best, best_d = oid, d
+            if best is None:                                  # a newly-seen moving object
+                best = self._next
+                self._next += 1
+            used.add(best)
+            tracked[best] = (pose, size)
+        self._last = tracked
+        result.update(tracked)
+        return result
