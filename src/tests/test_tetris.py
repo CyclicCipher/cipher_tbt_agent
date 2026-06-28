@@ -148,7 +148,7 @@ def test_one_agent_plays_tetris_via_learned_object_model():
     """The SAME tbt.agent.Agent (perception + the shared achiever) plays Tetris L0/L1 through an object-model built
     from perception + LEARNED operators (translate / the learned rotation cycle / gravity / collision vote), with NO
     game internals — Step 2 (multi-cell controllable object) + the step-3 collision vote, end to end in src/."""
-    learner = TetrisLearner(C_PIECE)
+    learner = TetrisLearner(C_PIECE, C_STACK)
     _learn_rotations(learner)
     assert len(learner.table) >= 4, f"rotation operator not learned: {len(learner.table)} entries"
     agent = Agent(TetrisPerception(C_PIECE, C_STACK, C_WALL), TetrisPlanner(learner, seed=0))
@@ -170,7 +170,7 @@ def test_value_learner_td_converges():
 
 
 def test_tetris_planner_gaps_encoding():
-    planner = TetrisPlanner(TetrisLearner(C_PIECE), seed=0)
+    planner = TetrisPlanner(TetrisLearner(C_PIECE, C_STACK), seed=0)
     stack = frozenset((x, 9) for x in range(1, 7) if x not in (3, 4))   # a 6-well bottom row, cols 3,4 empty
     assert planner.feats(stack, (0, 7, 10)) == frozenset({(3, 9), (4, 9)})   # the gaps in the occupied row
     assert planner.feats(frozenset(), (0, 7, 10)) == frozenset()        # no stack ⇒ no gaps

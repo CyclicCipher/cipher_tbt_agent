@@ -206,15 +206,23 @@ class TetrisLearner:
     reads `table` live (shared reference). Translation-invariant (`shape_of`), so it matches the game's rotation
     placed at the bbox-min anchor. (gravity (0,1) and the controllable colour are injected for 4.1.)"""
 
-    def __init__(self, piece_color: int):
+    def __init__(self, piece_color: int, stack_color: int):
         self.pc = piece_color
+        self.sc = stack_color                # the settled-stack colour — to tell a rotation from a lock+respawn
         self.table: Dict[frozenset, frozenset] = {}
 
     def _shape(self, grid) -> frozenset:
         return shape_of((x, y) for y, row in enumerate(grid) for x, v in enumerate(row) if v == self.pc)
 
+    def _settled(self, grid) -> frozenset:
+        return frozenset((x, y) for y, row in enumerate(grid) for x, v in enumerate(row) if v == self.sc)
+
     def observe(self, prev_frame, action, frame):
-        if action == GameAction.ACTION5:
+        # A rotation SETTLES nothing: if the stack is unchanged across the transition, the same piece rotated.
+        # If the stack CHANGED, a piece locked and a new one spawned, so prev→next is a spawn boundary
+        # (old-shape → fresh-shape), NOT a rotation — skip it. Without this filter the operator learns spurious
+        # entries like I→T from a lock/respawn (the 5/18-wrong-entries bug that broke the object-model).
+        if action == GameAction.ACTION5 and self._settled(prev_frame.grid) == self._settled(frame.grid):
             a, b = self._shape(prev_frame.grid), self._shape(frame.grid)
             if a and b and a != b:
                 self.table[a] = b            # this shape rotates to that shape (the learned operator)
