@@ -27,13 +27,14 @@ from tbt.agent import Agent
 
 def cold_start(game_cls, episodes=80, max_steps=200, explore=0.25, seed=0):
     """Learn the world model from scratch by self-directed play, then evaluate the learned policy. Returns
-    (learned world, levels-solved-per-episode, eval outcome)."""
+    (learner, levels-solved-per-episode, eval outcome) — the learner holds the object roles (`world`) AND the
+    dynamics column (`dm`, whose `predict_effect` the planner uses)."""
     learner = WorldLearner()
     agent = Agent(Perception(learner.world), NeocortexPlanner(learner.world, learner.dm, seed=seed))
     history = agent.explore_and_learn(Environment(game_cls()), learner,
                                       episodes=episodes, max_steps=max_steps, explore=explore)
     outcome = agent.play(Environment(game_cls()), max_steps=3000)
-    return learner.world, history, outcome
+    return learner, history, outcome
 
 
 if __name__ == "__main__":
@@ -41,12 +42,13 @@ if __name__ == "__main__":
     print("oracle), then solves the game. Every role is DISCOVERED: the goal from the sparse score; the body,")
     print("the pushable, the key->door effects and the hazard from watching.\n")
     for game_cls in (LockPath, MultiKey, Toggle):
-        world, history, outcome = cold_start(game_cls)
+        learner, history, outcome = cold_start(game_cls)
+        world = learner.world
         n = game_cls().level_count
         print(f"=== {game_cls.__name__} ({game_cls.game_id}) — {n} levels ===")
-        print(f"    learned roles: body={world.body}  pushable={world.pushable}  effects={world.effects}")
-        print(f"                   goal={world.goal_colors}  required_absent={world.required_absent}  "
-              f"death={world.death}")
+        print(f"    learned roles: body={world.body}  pushable={world.pushable}  "
+              f"goal={world.goal_colors}  required_absent={world.required_absent}")
+        print(f"    learned dynamics (in the column): {[(d, e) for _, d, e in learner.dm.dyn_rules]}")
         print(f"    convergence (levels solved per episode, last 10): {history[-10:]}")
         tag = "WIN" if outcome.won else "..."
         print(f"    eval with the LEARNED model: [{tag}] {outcome.levels}/{n} levels in {outcome.actions} "

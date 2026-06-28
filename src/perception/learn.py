@@ -35,7 +35,7 @@ class WorldLearner:
         self.dm = CorticalColumn(n_entities=1)                    # a column whose DYNAMICS faculty models world responses
         self.objp = ObjectPerceiver()
         self.goal = GoalModel()
-        self.world = build_world(self.dm, self.objp, self.goal)   # empty until learned — shared by reference
+        self.world = build_world(self.objp, self.goal)            # empty until learned — shared by reference
 
     def observe(self, prev_frame, action, frame):
         """Learn from one transition (prev_frame --action--> frame): the body/effect/context features feed the
@@ -55,8 +55,8 @@ class WorldLearner:
     def refresh(self):
         """Re-decode the learners into the shared world, IN PLACE — so the agent's perception/planner (holding the
         same `world` reference) immediately plan with any newly-learned role."""
-        self.dm.learn_dynamics()
-        self.world.__dict__.update(build_world(self.dm, self.objp, self.goal).__dict__)
+        self.dm.learn_dynamics()                                 # the dynamics live in the column; the planner reads them
+        self.world.__dict__.update(build_world(self.objp, self.goal).__dict__)
 
     def new_level(self):
         self.perc.new_level()

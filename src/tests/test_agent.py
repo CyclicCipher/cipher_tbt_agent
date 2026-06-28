@@ -36,40 +36,39 @@ from tbt.agent import Agent  # noqa: E402
 from tbt.column import CorticalColumn  # noqa: E402
 
 
-def _dyn_from_world(world) -> CorticalColumn:
-    """A dynamics column whose learned rules match the injected world — what F's cold-start would DISCOVER. The
-    planner reads dynamics ONLY from this column's `predict_effect` (Step C1), never from the world's effects/adds:
-    a contact that removes a colour → that colour 'gone'; a contact that BOTH removes and adds it → the
-    context-conditioned TOGGLE (door present → gone, absent → appeared); a death colour → 'death'. Features are
+def _dyn(rules) -> CorticalColumn:
+    """A dynamics column with rules injected directly — what F's cold-start would DISCOVER, set explicitly here for
+    the injected-role tests (the planner reads dynamics ONLY from `predict_effect`; the role schema no longer holds
+    them — Step C 4.2). `rules = [(predicate(features)->bool, desc, effect)]`; features are
     `(stepped_on,) + presence-bits[0..15]`, so a colour's presence sits at index 1+colour."""
-    rules = []
-    for c in sorted(world.death):
-        rules.append((lambda f, c=c: f[0] == c, f"c0=={c}", "death"))
-    for trig in sorted(world.effects):
-        for col in sorted(world.effects[trig]):
-            if col in world.adds.get(trig, set()):
-                rules.append((lambda f, t=trig, i=1 + col: f[0] == t and f[i] == 1, "", f"color_{col}_gone"))
-                rules.append((lambda f, t=trig, i=1 + col: f[0] == t and f[i] == 0, "", f"color_{col}_appeared"))
-            else:
-                rules.append((lambda f, t=trig: f[0] == t, f"c0=={trig}", f"color_{col}_gone"))
     dm = CorticalColumn(n_entities=1)
-    dm.dyn_rules = rules
+    dm.dyn_rules = list(rules)
     return dm
 
 
+# the per-game dynamics the cold-start would learn (here injected, for the planner tests)
+def _lockpath_dyn():
+    return _dyn([(lambda f: f[0] == C_KEY, f"c0=={C_KEY}", f"color_{C_DOOR}_gone"),     # key opens the door
+                 (lambda f: f[0] == C_HAZARD, f"c0=={C_HAZARD}", "death")])             # hazard is fatal
+
+
+def _toggle_dyn():
+    i = 1 + TG_DOOR                                                                     # the door's presence-bit
+    return _dyn([(lambda f: f[0] == C_SWITCH and f[i] == 1, "", f"color_{TG_DOOR}_gone"),       # door present → opens
+                 (lambda f: f[0] == C_SWITCH and f[i] == 0, "", f"color_{TG_DOOR}_appeared")])  # absent → closes
+
+
 def _sokoban_world() -> WorldModel:
-    """Sokoban's roles (INJECTED — RECONNECT S2 will discover these from the sparse score): the agent body, the
-    block as the only pushable, walls block, the goal colour is the reach target, an uncovered pad is the
-    required-absent (cover) term. No effects/doors/hazards."""
-    return WorldModel(
-        body=C_AGENT, pushable={C_BLOCK}, blocking={C_WALL}, death=set(),
-        effects={}, adds={}, harmful=set(), goal_colors={C_GOAL}, required_absent={C_PAD},
-    )
+    """Sokoban's roles (INJECTED — the cold-start discovers them from the sparse score): the agent body, the block
+    as the only pushable, walls block, the goal colour is the reach target, an uncovered pad is the required-absent
+    (cover) term. No dynamics (the dm is empty)."""
+    return WorldModel(body=C_AGENT, pushable={C_BLOCK}, blocking={C_WALL},
+                      goal_colors={C_GOAL}, required_absent={C_PAD})
 
 
 def _agent() -> Agent:
     world = _sokoban_world()
-    return Agent(Perception(world), NeocortexPlanner(world, _dyn_from_world(world), seed=0))
+    return Agent(Perception(world), NeocortexPlanner(world, _dyn([]), seed=0))
 
 
 @pytest.mark.parametrize("level", [0, 1, 2])
@@ -91,15 +90,13 @@ def _lockpath_world() -> WorldModel:
     """LockPath's roles (INJECTED — S2's cold-start will discover them): + the key→door effect (reaching the key
     opens the door) and the hazard as death. The Neocortex turns the key→door effect into an affordance sub-goal
     (reach the key first), with no hardcoded key/door knowledge — it just sees 'this trigger clears that blocker'."""
-    return WorldModel(
-        body=C_AGENT, pushable={C_BLOCK}, blocking={C_WALL}, death={C_HAZARD},
-        effects={C_KEY: {C_DOOR}}, adds={}, harmful=set(), goal_colors={C_GOAL}, required_absent={C_PAD},
-    )
+    return WorldModel(body=C_AGENT, pushable={C_BLOCK}, blocking={C_WALL},
+                      goal_colors={C_GOAL}, required_absent={C_PAD})
 
 
 def _lp_agent() -> Agent:
     world = _lockpath_world()
-    return Agent(Perception(world), NeocortexPlanner(world, _dyn_from_world(world), seed=0))
+    return Agent(Perception(world), NeocortexPlanner(world, _lockpath_dyn(), seed=0))
 
 
 @pytest.mark.parametrize("level", [0, 1, 2])
@@ -138,15 +135,13 @@ def _collectall_world() -> WorldModel:
     there is NO goal cell. There is no mover, so the rollout achiever reaches each item with the AGENT (collect) —
     the same achiever as cover/reach, the consumable falling out of signed value, with no new sub-goal type. This
     is the game the old typed (cover/reach) planner could not express; it is the proof the rollout generalises."""
-    return WorldModel(
-        body=CA_AGENT, pushable=set(), blocking={CA_WALL}, death=set(),
-        effects={}, adds={}, harmful=set(), goal_colors=set(), required_absent={C_ITEM},
-    )
+    return WorldModel(body=CA_AGENT, pushable=set(), blocking={CA_WALL},
+                      goal_colors=set(), required_absent={C_ITEM})
 
 
 def _ca_agent() -> Agent:
     world = _collectall_world()
-    return Agent(Perception(world), NeocortexPlanner(world, _dyn_from_world(world), seed=0))
+    return Agent(Perception(world), NeocortexPlanner(world, _dyn([]), seed=0))
 
 
 @pytest.mark.parametrize("level", [0, 1, 2])
@@ -170,11 +165,8 @@ def _toggle_world() -> WorldModel:
     EMERGES because the forward model rolls the flip and signed value sees that closing the door blocks the goal.
     The door starts open (invisible); its position is discovered when a toggle makes it appear, then the planner
     deliberately reopens + passes (no flailing). This is the mechanic that breaks a one-way `color_gone` model."""
-    return WorldModel(
-        body=TG_AGENT, pushable=set(), blocking={TG_WALL}, death=set(),
-        effects={C_SWITCH: {TG_DOOR}}, adds={C_SWITCH: {TG_DOOR}}, harmful=set(),
-        goal_colors={TG_GOAL}, required_absent=set(),
-    )
+    return WorldModel(body=TG_AGENT, pushable=set(), blocking={TG_WALL},
+                      goal_colors={TG_GOAL}, required_absent=set())
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2])
@@ -182,6 +174,6 @@ def test_neocortex_agent_solves_toggle(seed):
     """The switch flips the door; the agent must reason through the reversible effect (deterministically, no luck —
     a few seeds guard against a flailing 'win'). Solved by the rolled flip + signed value, not a 'harmful' role."""
     world = _toggle_world()
-    agent = Agent(Perception(world), NeocortexPlanner(world, _dyn_from_world(world), seed=seed))
+    agent = Agent(Perception(world), NeocortexPlanner(world, _toggle_dyn(), seed=seed))
     out = agent.play(Environment(Toggle(levels=[TG_LEVELS[0]])), max_steps=400)
     assert out.won, f"Toggle not solved (seed {seed}): {out}"

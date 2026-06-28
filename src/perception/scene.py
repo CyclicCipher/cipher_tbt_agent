@@ -13,7 +13,6 @@ planner (`perception/control.py`) consumes the `Scene` + the `WorldModel` to bui
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -48,57 +47,26 @@ class _ActionVocab:
 # ── the learned roles (decoded once) ─────────────────────────────────────────────────────────────────────
 @dataclass
 class WorldModel:
-    """The learned roles — the one-time decode of the three learners (dynamics + objects + goal) into the
-    planner's vocabulary. The ONLY place the dynamics' string-encoded effects are parsed."""
+    """The learned OBJECT roles — body / pushable / blocking + the goal (its colour + the required-absent context).
+    The DYNAMICS (what a contact changes, and death) are NOT here: they live in the column's learned faculty
+    (`predict_effect`), read live by the planner (Step C1). This is purely the object-role decode (Step C 4.2
+    will dissolve even these into per-object behaviours)."""
 
     body: int
     pushable: Set[int]
     blocking: Set[int]
-    death: Set[int]
-    effects: Dict[int, Set[int]]          # contact colour -> {colours it REMOVES}  (a door opens)
-    adds: Dict[int, Set[int]]             # contact colour -> {colours it ADDS}      (a door closes — symmetric)
-    harmful: Set[int]                     # a trigger that ADDS a blocker (kept for B1; B3 makes it emerge)
     goal_colors: Set[int]
     required_absent: Set[int]
 
-    @property
-    def doors(self) -> Set[int]:
-        """Colours some learned effect removes that are NOT pushable — removable BLOCKERS (a door), vs permanent
-        walls or movers. Excluding pushables stops a pushed block's vacated cell ('colour 6 gone') from being
-        misread as a door: a pushable is a mover, handled by the push, never a gated door."""
-        return (set().union(*self.effects.values()) - self.pushable) if self.effects else set()
 
-
-def build_world(dm, objp, goal) -> WorldModel:
-    """Decode the three learners into the role vocabulary. The dynamics' rules are string-encoded
-    ('color_5_gone' / 'color_5_appeared' / 'death'); this is the one place that string is read."""
-    death: Set[int] = set()
-    effects: Dict[int, Set[int]] = {}
-    adds: Dict[int, Set[int]] = {}
-    for _pred, desc, eff in dm.dyn_rules:
-        m = re.search(r"c0==(\d+)", desc)
-        if not m:
-            continue
-        v = int(m.group(1))
-        if eff == "death":
-            death.add(v)
-        elif eff.startswith("color_") and eff.endswith("_gone"):
-            effects.setdefault(v, set()).add(int(eff.split("_")[1]))
-        elif eff.startswith("color_") and eff.endswith("_appeared"):
-            adds.setdefault(v, set()).add(int(eff.split("_")[1]))
-    door_colors: Set[int] = set()
-    for s in effects.values():
-        door_colors |= s
-    for s in adds.values():
-        door_colors |= s
-    harmful = {t for t, added in adds.items() if added & door_colors}
+def build_world(objp, goal) -> WorldModel:
+    """Decode the OBJECT learners into roles (the dynamics are the column's, not decoded here)."""
     # A PUSHABLE colour is never a 'required-absent' cover-target: you push it, you don't make it vanish, and a
     # mover's trail of vacated cells would otherwise become phantom (uncoverable) cover-goals. This also undoes
     # GoalModel's cross-level pooling artefact (a blockless level's wins make the block colour look absent-in-wins).
     required_absent = set(goal.required_absent()) - set(objp.pushable)
     return WorldModel(
         body=objp.body_color, pushable=set(objp.pushable), blocking=set(objp.blocking),
-        death=death, effects=effects, adds=adds, harmful=harmful,
         goal_colors=set(goal.goal_colors), required_absent=required_absent,
     )
 
