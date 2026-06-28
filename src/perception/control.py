@@ -14,27 +14,27 @@ factor reference frames, and compose):
   - the FOCUS object-column — the egocentric push (the moved object advances in the heading) VOTED against the
     absolute map (the egocentric ⊗ absolute lateral vote); the basal ganglia GATES which object is the focus, so
     adding an object adds a column to gate among (additive), never a dimension of the rolled state (no 2^K);
-  - the DYNAMICS — a contact's effect (a blocker removed / added), the column's learned conditional faculty,
-    decoded here into the rolled door-state. (Role-based for Step B; Step C makes it the column's learned model.)
-  - SIGNED value — an aversive contact is a terminal −1 (avoided by VALUE, not walled off), success a terminal +1.
+  - the DYNAMICS — what a contact changes (a blocker removed / added) and death — come from the column's LEARNED
+    `predict_effect` (the LM), keyed on the sensed (stepped-on colour, colour-presence) of the rolled state, so the
+    toggle EMERGES from the context-conditioned rule (Step C1; no hand-coded opener / closer / flip).
+  - SIGNED value — an aversive predicted state is a terminal −1 (avoided by VALUE, not walled off), goal a terminal +1.
 
 The thalamus routes the active sub-goal's goal-state into the spatial frame (top-down CMP); the basal ganglia
 gates the focus. Reach / cover / collect / the affordance / hazard-avoidance are NOT branches here — they EMERGE
-from rolling this one model under signed value. The decode of which colour is a mover / a blocker / aversive / a
-goal stays in perception (the WorldModel `self.world`, read LIVE so a cold-start's freshly-learned roles apply).
+from rolling this one model under signed value. The residual role decode (body / mover / goal) stays in perception
+(`self.world`, read LIVE); the dynamics is the LEARNED column `self.dm` (its `predict_effect`), read live too.
 """
 
 from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Dict, FrozenSet, Optional, Set, Tuple
+from typing import Dict, FrozenSet, Optional, Tuple
 
 from tbt.column import CorticalColumn
 from tbt.neocortex import Neocortex
 
 Cell = Tuple[int, int]
-_EMPTY: FrozenSet[int] = frozenset()
 
 
 def _manh(a: Cell, b: Cell) -> int:
@@ -43,27 +43,40 @@ def _manh(a: Cell, b: Cell) -> int:
 
 @dataclass(frozen=True)
 class _Layout:
-    """The scene decoded into the forward model's geometry (the role-aware part, kept out of `tbt/`)."""
+    """The scene decoded into the rollout's geometry. The DYNAMICS (which contact changes which colour, and death)
+    come from the column's learned `predict_effect` (Step C1), not a decoded role schema; this holds only what the
+    rollout needs to evaluate it — the navigable frame, the movers, the removable-blocker cells + their start state,
+    and a static cell→colour map + colour-presence to reconstruct the sensed feature the dynamics keys on."""
     frame: FrozenSet[Cell]                 # the spatial map column's reference frame (its navigable nodes)
-    deaths: FrozenSet[Cell]                # aversive cells — steppable, terminal −1 (signed value, not walls)
     movers: FrozenSet[Cell]               # the relational objects (one is the focus; the rest are obstacles)
     door_at: Dict[Cell, int]               # a removable-blocker cell → its colour (shut until that colour is removed)
-    opener: Dict[Cell, Set[int]]           # a contact cell → the colours it REMOVES (a blocker opens)
-    closer: Dict[Cell, Set[int]]           # a contact cell → the colours it ADDS (a blocker closes — symmetric)
-    flip: Dict[Cell, Set[int]]             # a contact cell → colours it BOTH adds and removes = a TOGGLE (flip state)
     removed0: FrozenSet[int]               # colours already removed at the start (a blocker seen open)
+    door_colours: FrozenSet[int]           # colours the learned dynamics can change (read off predict_effect's rules)
+    colour_at: Dict[Cell, int]             # static cell → colour — the sensed 'stepped-on' feature
+    static_present: FrozenSet[int]         # colours present in the scene (the presence-context; doors overridden live)
+    bg: int                                # the background colour (a cell with no colour)
 
 
 class NeocortexPlanner:
     """A `planner` for `tbt.agent.Agent`: scene → move index, planning by rolling the multi-column forward model."""
 
-    def __init__(self, world, gamma: float = 0.95, seed: int = 0):
-        self.world = world                                     # the learned roles (shared by reference; read live)
+    def __init__(self, world, dynamics, gamma: float = 0.95, seed: int = 0):
+        self.world = world                                     # the residual roles (body/pushable/blocking/goal; read live)
+        self.dm = dynamics                                     # the dynamics column (the LM); predict_effect IS the forward model's dynamics
         self.neo = Neocortex(gamma=gamma, seed=seed)
         from .scene import DELTAS                              # the move geometry (perception owns it)
         self.deltas = DELTAS
         self.seed = seed
         self.reset()
+
+    def _door_colours(self) -> set:
+        """The colours the LEARNED dynamics can change — read off the column's rules (a `color_<c>_gone/appeared`
+        effect), so WHICH colours are removable blockers comes from the learned model, not a role schema."""
+        cols = set()
+        for _pred, _desc, eff in self.dm.dyn_rules:
+            if isinstance(eff, str) and eff.startswith("color_"):
+                cols.add(int(eff.split("_")[1]))
+        return cols
 
     # ---- lifecycle ---------------------------------------------------------------------------------------
     def reset(self):                                           # new game
@@ -103,42 +116,54 @@ class NeocortexPlanner:
             self._sym2cell = {i: c for c, i in cid.items()}
         return self._col
 
-    # ---- decode the scene into the forward model's geometry ----------------------------------------------
+    # ---- decode the scene into the rollout's geometry ----------------------------------------------------
     def _layout(self, scene) -> _Layout:
         w, by = self.world, scene.by_color
         non_bg = {p for cells in by.values() for p in cells} | {scene.body_pos}
         xs = [x for x, _ in non_bg]
         ys = [y for _, y in non_bg]
         bbox = {(x, y) for x in range(min(xs), max(xs) + 1) for y in range(min(ys), max(ys) + 1)}
-        removable = ((set().union(*w.effects.values()) if w.effects else set()) |
-                     (set().union(*w.adds.values()) if w.adds else set())) - w.pushable
-        walls = {p for c in w.blocking if c not in removable for p in by.get(c, ())}
-        opener = {p: set(rem) for tc, rem in w.effects.items() for p in by.get(tc, ())}
-        closer = {p: set(add) for tc, add in w.adds.items() for p in by.get(tc, ())}
-        # a contact that the learned dynamics says BOTH removes and adds a colour TOGGLES it (the switch flips the
-        # door open↔closed) — honour that as a flip, not a one-way effect, so the planner can reason through it
-        flip = {p: opener[p] & closer[p] for p in opener.keys() & closer.keys() if opener[p] & closer[p]}
+        door_colours = self._door_colours() - set(w.pushable)   # removable blockers the LEARNED dynamics changes
+        walls = {p for c in w.blocking if c not in door_colours for p in by.get(c, ())}
         return _Layout(
-            frame=frozenset(bbox - walls),                     # deaths + removable blockers stay IN the frame
-            deaths=frozenset(p for c in w.death for p in by.get(c, ())),
+            frame=frozenset(bbox - walls),                     # removable blockers + aversive cells stay IN the frame
             movers=frozenset(p for c in w.pushable for p in by.get(c, ())),
-            door_at={p: c for c in removable for p in by.get(c, ())},
-            opener=opener, closer=closer, flip=flip,
-            removed0=frozenset(c for c in removable if not by.get(c)),
+            door_at={p: c for c in door_colours for p in by.get(c, ())},
+            removed0=frozenset(c for c in door_colours if not by.get(c)),
+            door_colours=frozenset(door_colours),
+            colour_at={p: c for c, cells in by.items() for p in cells},
+            static_present=frozenset(by.keys()),
+            bg=scene.bg,
         )
 
     # ---- compose the active columns into one forward-model callable --------------------------------------
     def _forward_model(self, lay: _Layout, target: Cell, focus: Optional[Cell]):
-        """`step(state, action) -> (next_state, signed_reward, done)` over the factored state
-        `(agent, focus-object, removed-blockers)`. The composition: the spatial map column predicts the agent move
-        and votes free; if the agent enters the focus object's cell, the focus column advances it (egocentric) iff
-        the map votes the landing free (the lateral vote); the dynamics add/remove blockers; an aversive cell is a
-        terminal −1 and the goal-state a terminal +1 (signed value drives avoidance + pursuit, no role branches)."""
+        """`step(state, action) -> (next_state, signed_reward, done)` over `(agent, focus-object, removed-blockers)`.
+        The spatial map column predicts the agent move + votes free; the focus object-column advances on a push iff
+        the map votes the landing free (the egocentric ⊗ absolute lateral vote); the DYNAMICS — which colour
+        vanishes/appears, and death — come from the column's learned `predict_effect`, keyed on the sensed
+        (stepped-on colour, colour-presence) of the ROLLED state, so the toggle EMERGES from the context-conditioned
+        rule (no hand-coded flip). Signed value: a predicted-death state is a terminal −1, the goal-state a +1."""
         others = lay.movers - ({focus} if focus is not None else set())
 
         def free(t: Cell, removed: FrozenSet[int]) -> bool:
             return (t in lay.frame and t not in others
                     and not (t in lay.door_at and lay.door_at[t] not in removed))
+
+        def present_bits(removed):                             # colour-presence; the door colours set by the rolled state
+            bits = [1 if c in lay.static_present else 0 for c in range(16)]
+            for c in lay.door_colours:
+                if 0 <= c < 16:
+                    bits[c] = 0 if c in removed else 1
+            return tuple(bits)
+
+        memo: dict = {}                                        # predict_effect by (stepped-on, removed) — once per act, not per BFS step
+
+        def effect_at(stepped_on, removed):
+            key = (stepped_on, removed)
+            if key not in memo:
+                memo[key] = self.dm.predict_effect((stepped_on,) + present_bits(removed))
+            return memo[key]
 
         def step(state, a):
             ag, mv, removed = state
@@ -152,12 +177,16 @@ class NeocortexPlanner:
                 if not free(b, removed):                        # …voted against the absolute map (lateral)
                     return state, 0.0, False
                 nmv = b
-            o, c, fl = lay.opener.get(t, _EMPTY), lay.closer.get(t, _EMPTY), lay.flip.get(t, _EMPTY)
-            nrem = (((set(removed) | (o - fl)) - (c - fl)) ^ fl)   # dynamics: one-way effects, plus a toggle flip
-            if t in lay.deaths:                                # signed value: aversive ⇒ terminal −1, never a wall
-                return (t, nmv, frozenset(nrem)), -1.0, True
+            eff = effect_at(lay.colour_at.get(t, lay.bg), removed)   # the column's learned dynamics
+            nrem = removed
+            if isinstance(eff, str) and eff.startswith("color_"):
+                _, col, kind = eff.split("_")
+                col = int(col)
+                nrem = (removed | {col}) if kind == "gone" else (removed - {col})
+            if eff == "death":                                 # signed value: aversive ⇒ terminal −1, never a wall
+                return (t, nmv, nrem), -1.0, True
             done = (nmv == target) if focus is not None else (t == target)
-            return (t, nmv, frozenset(nrem)), (1.0 if done else 0.0), done
+            return (t, nmv, nrem), (1.0 if done else 0.0), done
 
         return step
 

@@ -29,7 +29,7 @@ def cold_start(game_cls, episodes=80, max_steps=200, explore=0.25, seed=0):
     """Learn the world model from scratch by self-directed play, then evaluate the learned policy. Returns
     (learned world, levels-solved-per-episode, eval outcome)."""
     learner = WorldLearner()
-    agent = Agent(Perception(learner.world), NeocortexPlanner(learner.world, seed=seed))
+    agent = Agent(Perception(learner.world), NeocortexPlanner(learner.world, learner.dm, seed=seed))
     history = agent.explore_and_learn(Environment(game_cls()), learner,
                                       episodes=episodes, max_steps=max_steps, explore=explore)
     outcome = agent.play(Environment(game_cls()), max_steps=3000)

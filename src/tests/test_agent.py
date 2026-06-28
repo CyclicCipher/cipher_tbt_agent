@@ -33,6 +33,28 @@ from tasks.games.toggle import C_AGENT as TG_AGENT, C_DOOR as TG_DOOR, C_GOAL as
 from tasks.games.toggle import C_SWITCH, C_WALL as TG_WALL  # noqa: E402
 from tasks.games.toggle import _LEVELS as TG_LEVELS  # noqa: E402
 from tbt.agent import Agent  # noqa: E402
+from tbt.column import CorticalColumn  # noqa: E402
+
+
+def _dyn_from_world(world) -> CorticalColumn:
+    """A dynamics column whose learned rules match the injected world — what F's cold-start would DISCOVER. The
+    planner reads dynamics ONLY from this column's `predict_effect` (Step C1), never from the world's effects/adds:
+    a contact that removes a colour → that colour 'gone'; a contact that BOTH removes and adds it → the
+    context-conditioned TOGGLE (door present → gone, absent → appeared); a death colour → 'death'. Features are
+    `(stepped_on,) + presence-bits[0..15]`, so a colour's presence sits at index 1+colour."""
+    rules = []
+    for c in sorted(world.death):
+        rules.append((lambda f, c=c: f[0] == c, f"c0=={c}", "death"))
+    for trig in sorted(world.effects):
+        for col in sorted(world.effects[trig]):
+            if col in world.adds.get(trig, set()):
+                rules.append((lambda f, t=trig, i=1 + col: f[0] == t and f[i] == 1, "", f"color_{col}_gone"))
+                rules.append((lambda f, t=trig, i=1 + col: f[0] == t and f[i] == 0, "", f"color_{col}_appeared"))
+            else:
+                rules.append((lambda f, t=trig: f[0] == t, f"c0=={trig}", f"color_{col}_gone"))
+    dm = CorticalColumn(n_entities=1)
+    dm.dyn_rules = rules
+    return dm
 
 
 def _sokoban_world() -> WorldModel:
@@ -47,7 +69,7 @@ def _sokoban_world() -> WorldModel:
 
 def _agent() -> Agent:
     world = _sokoban_world()
-    return Agent(Perception(world), NeocortexPlanner(world, seed=0))
+    return Agent(Perception(world), NeocortexPlanner(world, _dyn_from_world(world), seed=0))
 
 
 @pytest.mark.parametrize("level", [0, 1, 2])
@@ -77,7 +99,7 @@ def _lockpath_world() -> WorldModel:
 
 def _lp_agent() -> Agent:
     world = _lockpath_world()
-    return Agent(Perception(world), NeocortexPlanner(world, seed=0))
+    return Agent(Perception(world), NeocortexPlanner(world, _dyn_from_world(world), seed=0))
 
 
 @pytest.mark.parametrize("level", [0, 1, 2])
@@ -101,7 +123,7 @@ def test_cold_start_learns_goal_from_score_and_plans():
     this fast and deterministic (seed=0); the full multi-mechanic convergence (LockPath 4/4, MultiKey 2/2) is the
     heavier `demos/cold_start.py`."""
     learner = WorldLearner()
-    agent = Agent(Perception(learner.world), NeocortexPlanner(learner.world, seed=0))
+    agent = Agent(Perception(learner.world), NeocortexPlanner(learner.world, learner.dm, seed=0))
     agent.explore_and_learn(Environment(LockPath(levels=[LP_LEVELS[0]])), learner,
                             episodes=20, max_steps=120, explore=0.3, refresh_every=20)
     assert learner.world.body == C_AGENT                  # learned the body by the efference copy
@@ -124,7 +146,7 @@ def _collectall_world() -> WorldModel:
 
 def _ca_agent() -> Agent:
     world = _collectall_world()
-    return Agent(Perception(world), NeocortexPlanner(world, seed=0))
+    return Agent(Perception(world), NeocortexPlanner(world, _dyn_from_world(world), seed=0))
 
 
 @pytest.mark.parametrize("level", [0, 1, 2])
@@ -160,6 +182,6 @@ def test_neocortex_agent_solves_toggle(seed):
     """The switch flips the door; the agent must reason through the reversible effect (deterministically, no luck —
     a few seeds guard against a flailing 'win'). Solved by the rolled flip + signed value, not a 'harmful' role."""
     world = _toggle_world()
-    agent = Agent(Perception(world), NeocortexPlanner(world, seed=seed))
+    agent = Agent(Perception(world), NeocortexPlanner(world, _dyn_from_world(world), seed=seed))
     out = agent.play(Environment(Toggle(levels=[TG_LEVELS[0]])), max_steps=400)
     assert out.won, f"Toggle not solved (seed {seed}): {out}"
