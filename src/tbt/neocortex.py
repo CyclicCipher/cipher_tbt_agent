@@ -101,6 +101,30 @@ class Neocortex:
         a = self.rng.choice([i for i, v in enumerate(vals) if v == m])
         return a, T[start][a]
 
+    # ---- the affordance: open a door by reaching its trigger (means-ends, emergent from learned effects) --
+    def _component(self, T, start):
+        """The cells reachable from `start` in graph T — BFS over the per-action neighbour lists (a wall is a
+        self-loop, so it lands back on a seen cell and stops)."""
+        seen, stack = {start}, [start]
+        while stack:
+            for nb in T.get(stack.pop(), ()):
+                if nb not in seen:
+                    seen.add(nb); stack.append(nb)
+        return seen
+
+    def _unblock(self, Tf, agent, goal, openers):
+        """If `goal` is UNREACHABLE in `Tf`, return the nearest reachable trigger that would open a door (any door
+        — re-evaluated every step, so they open one at a time = factored, never 2^doors); else None. `openers =
+        {shut-door cell: [trigger cells]}` is perception's door↔opener join, so WHICH trigger opens WHICH door IS
+        the learned effect — reaching a 'key' to clear a 'door' EMERGES here, with no hardcoded key/door/fire."""
+        comp = self._component(Tf, agent)
+        if goal in comp:
+            return None                                        # already reachable — no door to open
+        cand = [t for trig in openers.values() for t in trig if t in comp]   # openers we can reach right now
+        if not cand:
+            return None
+        return min(cand, key=lambda t: abs(t[0] - agent[0]) + abs(t[1] - agent[1]))
+
     # ---- the egocentric ⊗ absolute factored relational navigator -----------------------------------------
     def _push(self, mover, target, agent, movers, T):
         """Move `mover` one step toward `target`, FACTORED: (1) SR-nav the mover toward the target [absolute],
@@ -120,9 +144,11 @@ class Neocortex:
         return self.rng.randrange(len(T[agent]))
 
     # ---- one step of the loop: acknowledge, sequence, route a goal-state, navigate ------------------------
-    def act(self, agent, movers, T):
+    def act(self, agent, movers, T, openers=None):
         """`agent`/`movers` = current cells; `T` = the cell graph {cell: [neighbour per action]} (a wall = a
-        self-loop). `preds` is not an argument — `_filter` recomputes it for the obstacle-removed graph each nav."""
+        self-loop). `openers = {shut-door cell: [trigger cells]}` (perception's door↔opener join): when the active
+        goal-state sits behind a shut door, the loop reaches an opener FIRST — the affordance sub-goal, EMERGENT
+        from the learned effect, factored one door at a time. `preds` is not an argument — `_filter` recomputes it."""
         for c, node, im in self._sub:                          # bottom-up CMP: which sub-goals are now satisfied?
             if c not in self._done and ((im and node in movers) or (not im and agent == node)):
                 self._done.add(c)
@@ -135,8 +161,14 @@ class Neocortex:
         goal = self._goal_node(c)                              # top-down CMP: the goal-state
         if goal is None:                                       # thalamus read missed → fall back to the bound node
             goal = node
+        Tf, pf = self._filter(T, set(movers))                  # the agent's navigable graph (other entities = walls)
+        if openers:                                            # AFFORDANCE: is the goal-state behind a shut door?
+            trig = self._unblock(Tf, agent, goal, openers)
+            if trig is not None:                               # yes → reach a reachable opener first (emergent sub-goal)
+                a, _ = self._sr(Tf, pf, agent, trig)
+                return a if a is not None else self.rng.randrange(len(T[agent]))
         if not is_mover:                                       # the AGENT reaches the goal-state
-            a, _ = self._sr(*self._filter(T, set(movers)), agent, goal)
+            a, _ = self._sr(Tf, pf, agent, goal)
             return a if a is not None else self.rng.randrange(len(T[agent]))
         occ = {nd for cc, nd, im in self._sub if im and cc in self._done}   # parked movers (done sub-goals)
         free = [m for m in movers if m not in occ]

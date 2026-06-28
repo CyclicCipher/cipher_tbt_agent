@@ -68,4 +68,4 @@ class NeocortexPlanner:
         agent = scene.body_pos
         if agent not in T:                                     # body off the navigable graph (shouldn't happen)
             return self.rng.randrange(len(self.deltas))
-        return self.neo.act(agent, self.enc.movers(scene), T)
+        return self.neo.act(agent, self.enc.movers(scene), T, self.enc.openers(scene))

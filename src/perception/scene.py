@@ -196,6 +196,24 @@ class StateEncoder(_ActionVocab):
                 gates[cell] = base + j
         return gates
 
+    def openers(self, scene):
+        """The door↔opener JOIN: {currently-shut-door cell: [trigger cells]} — for each visible door cell, the
+        cells whose LEARNED effect removes that door's colour. Done HERE (perception) because it is colour-level;
+        the planner gets opaque cells and reasons means-ends (reach an opener → the door vanishes next frame).
+        Emergent: WHICH colour opens WHICH door is read off `world.effects`, never hardcoded (no key/door tokens
+        in the planner). Empty when there are no effects/doors (e.g. Sokoban), so the planner is unchanged there."""
+        opens = {}                                             # door colour → {trigger colours} (invert the effects)
+        for tcol, removed in self.world.effects.items():
+            for d in removed:
+                opens.setdefault(d, set()).add(tcol)
+        out = {}
+        for d in self.doors:                                   # self.doors = the door colours (some effect removes)
+            trig_cells = [c for tcol in opens.get(d, ()) for c in scene.by_color.get(tcol, set())]
+            if trig_cells:
+                for door_cell in scene.by_color.get(d, set()):
+                    out[door_cell] = list(trig_cells)
+        return out
+
     def block_abs(self, coords):
         """The movers' ABSOLUTE cells recovered from a (possibly imagined) coord tuple — for pragmatic/factor
         checks and the value latent. Domain-general arithmetic on the opaque tuple."""

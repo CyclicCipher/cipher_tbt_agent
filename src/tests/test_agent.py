@@ -21,7 +21,9 @@ if _SRC not in sys.path:
 from perception.control import NeocortexPlanner  # noqa: E402
 from perception.scene import Perception, WorldModel  # noqa: E402
 from tasks import Environment  # noqa: E402
-from tasks.games import Sokoban  # noqa: E402
+from tasks.games import LockPath, Sokoban  # noqa: E402
+from tasks.games.lockpath import C_DOOR, C_HAZARD, C_KEY  # noqa: E402
+from tasks.games.lockpath import _LEVELS as LP_LEVELS  # noqa: E402
 from tasks.games.sokoban import C_AGENT, C_BLOCK, C_GOAL, C_PAD, C_WALL, _LEVELS  # noqa: E402
 from tbt.agent import Agent  # noqa: E402
 
@@ -53,3 +55,33 @@ def test_neocortex_agent_solves_full_sokoban():
     """All three levels in sequence through the one play loop — win == cleared every level."""
     out = _agent().play(Environment(Sokoban()), max_steps=2000)
     assert out.won and out.levels == len(_LEVELS), out
+
+
+# ── RECONNECT S2a: doors emerge as sub-goals (the affordance) ─────────────────────────────────────────────
+def _lockpath_world() -> WorldModel:
+    """LockPath's roles (INJECTED — S2's cold-start will discover them): + the key→door effect (reaching the key
+    opens the door) and the hazard as death. The Neocortex turns the key→door effect into an affordance sub-goal
+    (reach the key first), with no hardcoded key/door knowledge — it just sees 'this trigger clears that blocker'."""
+    return WorldModel(
+        body=C_AGENT, pushable={C_BLOCK}, blocking={C_WALL}, death={C_HAZARD},
+        effects={C_KEY: {C_DOOR}}, adds={}, harmful=set(), goal_colors={C_GOAL}, required_absent={C_PAD},
+    )
+
+
+def _lp_agent() -> Agent:
+    world = _lockpath_world()
+    return Agent(Perception(world), NeocortexPlanner(world, seed=0))
+
+
+@pytest.mark.parametrize("level", [0, 1, 2])
+def test_neocortex_agent_solves_each_lockpath_level(level):
+    """L0 navigation, L1 key+door (the affordance), L2 block+pad — each in isolation through the one agent."""
+    env = Environment(LockPath(levels=[LP_LEVELS[level]]))
+    out = _lp_agent().play(env, max_steps=800)
+    assert out.won, f"LockPath L{level} not solved: {out}"
+
+
+def test_neocortex_agent_solves_full_lockpath():
+    """All four levels in sequence (L3 composes key+door AND block+pad with a hazard) through the one play loop."""
+    out = _lp_agent().play(Environment(LockPath()), max_steps=3000)
+    assert out.won and out.levels == len(LP_LEVELS), out
