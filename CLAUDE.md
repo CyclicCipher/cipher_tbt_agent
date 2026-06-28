@@ -1,16 +1,24 @@
 # CLAUDE.md — Cipher's TBT Agent
 
-## ⚠ ACTIVE WORK (read first) — Phase 2 of the TBT-faithful refactor: the rollout planner over the multi-column spine
-**START HERE: [STEP_B_HANDOFF.md](STEP_B_HANDOFF.md)** (the runnable handoff: state + build order + the validated
-prototype) and the memory **`project_reorient_and_reconnect.md`** (READ-FIRST; the full plan + history) and
-**`src/tbt/RESEARCH.md` R10** (the research). The merge to `src/` is long DONE (run `PYTHONPATH=src python -m
-<pkg>.<mod>`); the agent is one thin shell (`tbt/agent.py`) over a planner.
-We are mid **Phase 2** (the bitter-lesson refactor that dissolves the symbolic scaffolding into a learned model +
-SIGNED value). **Step A is DONE+committed (`82b9bcd`)** — the cortical column IS the forward model (dynamics folded
-in). **Step B is IN PROGRESS** — replace the typed sub-goals with a value-driven ROLLOUT planner that plans OVER
-the multi-column world model (thalamus/CMP + basal ganglia + per-object columns STAY — never strip them; the rollout
-is the PLANNER, the spine is the WORLD MODEL). Prototype validated on 4/5 replica games; integration is next (see
-the handoff's build order). NB: the architecture/run-command sections BELOW may cite stale `experiments/…` paths.
+## ⚠ ACTIVE WORK (read first) — Phase 2 Step C: objects as column-models, recognized by voting
+**START HERE:** the memory **`reference_tbt_pose_invariant_recognition.md`** (the mechanism + sources) and
+**`src/tbt/RESEARCH.md` R11** (the "BUILT 2026-06-28" note). Run `PYTHONPATH=src python -m pytest src/tests` (69 green);
+the agent is one thin shell (`tbt/agent.py`) over a planner; the merge to `src/` is long done.
+
+Phase 2 dissolves the symbolic scaffolding into a learned model + SIGNED value. **Step A** (the column IS the forward
+model, `82b9bcd`) and **Step B** (the value-driven ROLLOUT planner over the multi-column spine — thalamus/CMP + basal
+ganglia + per-object columns STAY, never stripped) are DONE. **Step C** (objects as column-models, recognized by
+voting) — the OBJECT-RECOGNITION pivot is DONE (2026-06-28): a memorized rotation table was both buggy AND non-TBT
+(the 2019 grid-cell model cannot recognize a rotated pose — its stated limitation), replaced by **`tbt/recognize.py`**,
+a Monty-style evidence-based recognizer — CONTINUOUS pose SOLVED not recalled, online label-free object learning, the
+rotation OPERATOR (`cells_at`, correct by construction), and multi-column pose-aware VOTING (`1b871cb`, `fab849a`); the
+agent plays Tetris via recognition (the table is deleted). **Real-ARC STARTED** (`8772b36`): `perception/perceive.py`
+`ObjectRecognizer` bridges `segment()` → recognition for object permanence under rotation in 64×64 frames.
+NEXT (real-ARC): the planner consuming recognized object-ids+poses over multi-object scenes; the click action
+(`ACTION6`, grounding differs per game); the ARC-AGI-3-Agents SDK wrapper; colour-as-feature + occlusion robustness.
+Also open: the value/L2 multi-piece-clear now runs on a FAITHFUL model (EZ-V2 robustness reserved for real-ARC's
+imperfect ONLINE models). The replica role-schema strand (CollectAll/Toggle) — see `project_reorient_and_reconnect.md`
++ R11. NB: the architecture/run-command sections BELOW may cite stale `experiments/…` paths.
 
 ## What this project is
 
