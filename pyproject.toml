@@ -17,6 +17,7 @@ dependencies = [
 
 [project.optional-dependencies]
 demos = ["scipy>=1.10"]              # only demos/language.py needs scipy
+dev = ["pytest>=8"]                  # the test suite
 
 [project.urls]
 Homepage = "https://github.com/CyclicCipher/cipher_tbt_agent"
