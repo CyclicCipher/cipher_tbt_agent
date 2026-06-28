@@ -170,3 +170,92 @@ class Perception(_ActionVocab):
             self.req_cells |= by_color.get(c, set())
         return Scene(body_pos=body_pos, by_color=by_color,
                      goal_cells=set(self.goal_cells), req_cells=set(self.req_cells), bg=bg)
+
+
+# ── Tetris: object-based perception (Step 4 — the controllable is a MULTI-CELL object) ─────────────────────
+_TETRIS_MOVES = [GameAction.ACTION3, GameAction.ACTION4, GameAction.ACTION5, GameAction.ACTION2]  # left right rotate down
+
+
+def shape_of(cells) -> frozenset:
+    """A cell-set's translation-invariant shape (cells relative to the bbox corner) — the object's pose-shape, the
+    key on which the learned rotation operator is indexed (so a piece is recognised regardless of where it is)."""
+    cells = frozenset(cells)
+    if not cells:
+        return frozenset()
+    mnx, mny = min(x for x, _ in cells), min(y for _, y in cells)
+    return frozenset((x - mnx, y - mny) for x, y in cells)
+
+
+@dataclass
+class TetrisScene:
+    """One Tetris frame as objects: the controllable PIECE (multi-cell), the settled STACK, the WELL bounds."""
+    piece: frozenset                     # the controllable object's cells (multi-cell)
+    stack: frozenset                     # settled cells
+    well: Tuple[int, int, int]           # (left, right, floor)
+
+
+class TetrisPerception:
+    """Object-based perception for Tetris: read the frame into the controllable PIECE (a MULTI-CELL object), the
+    settled STACK, and the WELL. The controllable being multi-cell is the Step-4 point (not a 1-cell body). Colours
+    are injected here for 4.1; learning the controllable by efference (and the well/stack generically) is 4.1b/4.2.
+    Carries its own action vocabulary (left/right/rotate/down) so the agent driver stays game-agnostic."""
+
+    reset_action = RESET_ACTION
+
+    def __init__(self, piece_color: int, stack_color: int, wall_color: int):
+        self.pc, self.sc, self.wc = piece_color, stack_color, wall_color
+        self._level = -1
+
+    def to_action(self, move: int) -> GameAction:
+        return _TETRIS_MOVES[move]
+
+    def reset(self):
+        self._level = -1
+
+    def new_level(self):
+        pass
+
+    def _cells(self, grid, color) -> frozenset:
+        return frozenset((x, y) for y, row in enumerate(grid) for x, v in enumerate(row) if v == color)
+
+    def read(self, frame) -> Percept:
+        if frame.state == GameState.GAME_OVER:
+            return Percept(None, new_level=False, terminal=True)
+        new_level = frame.level != self._level
+        self._level = frame.level
+        grid = frame.grid
+        walls = self._cells(grid, self.wc)
+        left = min(x for x, _ in walls)
+        right = max(x for x, _ in walls)
+        floor = max(y for _, y in walls)
+        return Percept(TetrisScene(self._cells(grid, self.pc), self._cells(grid, self.sc), (left, right, floor)),
+                       new_level=new_level, terminal=False)
+
+
+class TetrisLearner:
+    """Learn the ROTATION operator from observation — the controllable object's orientation cycle (shape → next
+    shape), i.e. the learned 'rotate' (Step 4 / increment 2b). Driven by watching rotate transitions; the planner
+    reads `table` live (shared reference). Translation-invariant (`shape_of`), so it matches the game's rotation
+    placed at the bbox-min anchor. (gravity (0,1) and the controllable colour are injected for 4.1.)"""
+
+    def __init__(self, piece_color: int):
+        self.pc = piece_color
+        self.table: Dict[frozenset, frozenset] = {}
+
+    def _shape(self, grid) -> frozenset:
+        return shape_of((x, y) for y, row in enumerate(grid) for x, v in enumerate(row) if v == self.pc)
+
+    def observe(self, prev_frame, action, frame):
+        if action == GameAction.ACTION5:
+            a, b = self._shape(prev_frame.grid), self._shape(frame.grid)
+            if a and b and a != b:
+                self.table[a] = b            # this shape rotates to that shape (the learned operator)
+
+    def refresh(self):
+        pass
+
+    def new_level(self):
+        pass
+
+    def reset(self):
+        pass                                 # keep the learned table across episodes

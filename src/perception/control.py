@@ -238,3 +238,71 @@ class NeocortexPlanner:
         target = self._route(col, goals[0])
         step = self._forward_model(lay, target, None)
         return self.neo.achieve(step, (agent, None, lay.removed0), n)
+
+
+# ── Tetris: object-based planner (Step 4 — the SAME achiever, an object forward model, no game internals) ──
+class TetrisPlanner:
+    """Object-based planner: roll the controllable PIECE (a multi-cell object) under its LEARNED operators —
+    translate (a shift), rotate (the learned orientation cycle, placed at the bbox-min anchor), gravity (the
+    autonomous (0,1)) — gated by the absolute-map COLLISION VOTE (the well + stack); the goal (a filled row) is the
+    score. The SHARED `Neocortex.achieve` (bounded) plans one piece's placement (terminal on lock); the agent
+    re-perceives per piece. Same planner as the replica; the forward model is composed from the object + its learned
+    behaviours — no game internals. (Step 4.1: the one Agent plays Tetris; 4.2 unifies the replica onto this.)"""
+
+    _SHIFT = {0: (-1, 0), 1: (1, 0), 3: (0, 1)}            # left, right, down (rotate=2 uses the learned cycle)
+
+    def __init__(self, learner, gravity=(0, 1), gamma: float = 0.95, seed: int = 0, cap: int = 6000):
+        self.learner = learner
+        self.gravity = gravity
+        self.cap = cap
+        self.seed = seed
+        self.neo = Neocortex(gamma=gamma, seed=seed)
+        self.rng = random.Random(seed)
+
+    def reset(self):
+        self.neo.reset()
+        self.rng = random.Random(self.seed)
+
+    def new_level(self):
+        self.neo.reset()
+
+    def on_death(self):
+        pass
+
+    def _forward_model(self, stack, well):
+        from .scene import shape_of
+        left, right, floor = well
+        table = self.learner.table
+        gx, gy = self.gravity
+
+        def valid(cells):
+            return all(left < x < right and y < floor and (x, y) not in stack for x, y in cells)
+
+        def rotate(cells):
+            nxt = table.get(shape_of(cells))               # the LEARNED rotate operator (orientation cycle)
+            if nxt is None:
+                return cells
+            ax, ay = min(x for x, _ in cells), min(y for _, y in cells)
+            return frozenset((ax + dx, ay + dy) for dx, dy in nxt)   # placed at the bbox-min anchor (matches the game)
+
+        def step(piece, a):
+            moved = (rotate(piece) if a == 2
+                     else frozenset((x + self._SHIFT[a][0], y + self._SHIFT[a][1]) for x, y in piece))
+            if not valid(moved):                           # the move/rotate is blocked (the absolute-map vote)
+                moved = piece
+            fell = frozenset((x + gx, y + gy) for x, y in moved)
+            if valid(fell):
+                return fell, 0.0, False                    # gravity: keep falling
+            new_stack = stack | moved                      # cannot fall ⇒ LOCK
+            rows = [y for y in range(floor) if all((x, y) in new_stack for x in range(left + 1, right))]
+            return moved, float(len(rows)), True           # + the lines cleared (the learned goal); terminal on lock
+
+        return step
+
+    def act(self, scene, explore: float = 0.0):
+        if not scene.piece:                                # body not visible yet → wait (let gravity bring a piece)
+            return 3
+        if explore and self.rng.random() < explore:
+            return self.rng.randrange(4)
+        step = self._forward_model(scene.stack, scene.well)
+        return self.neo.achieve(step, scene.piece, 4, max_states=self.cap)

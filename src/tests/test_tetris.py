@@ -15,9 +15,12 @@ _PKG_PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
+from perception.control import TetrisPlanner  # noqa: E402
+from perception.scene import TetrisLearner, TetrisPerception  # noqa: E402
 from tasks import Environment, GameAction, GameState  # noqa: E402
 from tasks.games import Tetris  # noqa: E402
-from tasks.games.tetris import _LEVELS  # noqa: E402
+from tasks.games.tetris import C_PIECE, C_STACK, C_WALL, _LEVELS  # noqa: E402
+from tbt.agent import Agent  # noqa: E402
 from tbt.neocortex import Neocortex  # noqa: E402
 
 _ACTIONS = [GameAction.ACTION2, GameAction.ACTION3, GameAction.ACTION4, GameAction.ACTION5]
@@ -127,3 +130,28 @@ def test_achiever_plans_tetris_with_a_bounded_rollout():
         ai = neo.achieve(step, env.game.snapshot(), 4, max_states=4000)
         frame = env.step(acts[ai])
     assert frame.state == GameState.WIN, f"achiever did not clear a line: {frame.state}"
+
+
+# ── Step 4.1: the ONE agent plays Tetris via a LEARNED OBJECT-MODEL (perception + learned operators, no internals) ──
+def _learn_rotations(learner, seeds=range(8), steps=40):
+    """Learn the rotation operator by OBSERVATION — rotate freely in a tall well and watch the shape cycle."""
+    for s in seeds:
+        env = Environment(Tetris(levels=[dict(W=8, H=18, target=999, seed=s, pieces=20)]))
+        prev = env.reset()
+        for _ in range(steps):
+            nxt = env.step(GameAction.ACTION5)
+            learner.observe(prev, GameAction.ACTION5, nxt)
+            prev = nxt
+
+
+def test_one_agent_plays_tetris_via_learned_object_model():
+    """The SAME tbt.agent.Agent (perception + the shared achiever) plays Tetris L0/L1 through an object-model built
+    from perception + LEARNED operators (translate / the learned rotation cycle / gravity / collision vote), with NO
+    game internals — Step 2 (multi-cell controllable object) + the step-3 collision vote, end to end in src/."""
+    learner = TetrisLearner(C_PIECE)
+    _learn_rotations(learner)
+    assert len(learner.table) >= 4, f"rotation operator not learned: {len(learner.table)} entries"
+    agent = Agent(TetrisPerception(C_PIECE, C_STACK, C_WALL), TetrisPlanner(learner, seed=0))
+    for lvl in (0, 1):
+        out = agent.play(Environment(Tetris(levels=[_LEVELS[lvl]])), max_steps=200)
+        assert out.won, f"Tetris L{lvl} not solved via the object-model: {out}"
