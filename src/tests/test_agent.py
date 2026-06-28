@@ -19,6 +19,7 @@ if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
 from perception.control import NeocortexPlanner  # noqa: E402
+from perception.learn import WorldLearner  # noqa: E402
 from perception.scene import Perception, WorldModel  # noqa: E402
 from tasks import Environment  # noqa: E402
 from tasks.games import LockPath, Sokoban  # noqa: E402
@@ -85,3 +86,19 @@ def test_neocortex_agent_solves_full_lockpath():
     """All four levels in sequence (L3 composes key+door AND block+pad with a hazard) through the one play loop."""
     out = _lp_agent().play(Environment(LockPath()), max_steps=3000)
     assert out.won and out.levels == len(LP_LEVELS), out
+
+
+# ── RECONNECT S2b: F's cold-start — learn the roles, no injection ─────────────────────────────────────────
+def test_cold_start_learns_goal_from_score_and_plans():
+    """From an EMPTY world the agent learns the body (efference copy) and the GOAL colour (from the sparse score)
+    by self-directed play, then PLANS to it — the core autonomy claim, NO injected roles. A tiny L0 budget keeps
+    this fast and deterministic (seed=0); the full multi-mechanic convergence (LockPath 4/4, MultiKey 2/2) is the
+    heavier `demos/cold_start.py`."""
+    learner = WorldLearner()
+    agent = Agent(Perception(learner.world), NeocortexPlanner(learner.world, seed=0))
+    agent.explore_and_learn(Environment(LockPath(levels=[LP_LEVELS[0]])), learner,
+                            episodes=20, max_steps=120, explore=0.3, refresh_every=20)
+    assert learner.world.body == C_AGENT                  # learned the body by the efference copy
+    assert C_GOAL in learner.world.goal_colors            # learned the goal from the score (the cold-start claim)
+    out = agent.play(Environment(LockPath(levels=[LP_LEVELS[0]])), max_steps=400)
+    assert out.won, out                                   # and now PLANS to the learned goal (not random wandering)

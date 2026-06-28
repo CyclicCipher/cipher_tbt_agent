@@ -57,3 +57,33 @@ class Agent:
             action, coords = self.choose_action(frame, explore=explore)
             frame = env.step(action, coords)
         return Outcome(won=frame.is_win(), levels=frame.score, actions=frame.action_counter)
+
+    def explore_and_learn(self, env, learner, episodes=120, max_steps=250, explore=0.2, refresh_every=40):
+        """THE act-and-learn play loop — cold-start the world model by self-directed play, no injected roles, no
+        oracle. One online loop that ACTS (choose_action) and LEARNS (learner.observe) from the SAME experience;
+        the learner re-decodes the roles into the shared world in place, so this agent plans with them live. ε
+        anneals to 0 over the run (discover → exploit). Generic: only frame.score/level/is_win + the duck-typed
+        learner — no task import. Returns the per-episode count of levels solved (convergence is it rising)."""
+        history = []
+        for ep in range(episodes):
+            self.reset()
+            learner.reset()
+            learner.refresh()
+            eps = explore * max(0.0, 1.0 - ep / max(1, episodes - 1))
+            frame = env.reset()
+            solved = set()
+            for step in range(max_steps):
+                if step % refresh_every == 0:                  # the agent sees newly-learned roles
+                    learner.refresh()
+                action, _ = self.choose_action(frame, explore=eps)   # ACT (ε-explore inside)
+                nxt = env.step(action)
+                learner.observe(frame, action, nxt)            # LEARN from THIS transition — incl. the WINNING one
+                if nxt.score > frame.score:                    # (a win/level-up is where GoalModel learns the goal,
+                    solved.add(frame.level)                    #  so it must be observed BEFORE the break below)
+                if nxt.level != frame.level:                   # a level completed → reset per-level perceiver memory
+                    learner.new_level()
+                frame = nxt
+                if frame.is_win():
+                    break
+            history.append(len(solved))
+        return history

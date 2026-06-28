@@ -63,8 +63,10 @@ class WorldModel:
 
     @property
     def doors(self) -> Set[int]:
-        """Colours some learned effect removes — removable blockers (vs permanent walls)."""
-        return set().union(*self.effects.values()) if self.effects else set()
+        """Colours some learned effect removes that are NOT pushable — removable BLOCKERS (a door), vs permanent
+        walls or movers. Excluding pushables stops a pushed block's vacated cell ('colour 6 gone') from being
+        misread as a door: a pushable is a mover, handled by the push, never a gated door."""
+        return (set().union(*self.effects.values()) - self.pushable) if self.effects else set()
 
 
 def build_world(dm, objp, goal) -> WorldModel:
@@ -90,10 +92,14 @@ def build_world(dm, objp, goal) -> WorldModel:
     for s in adds.values():
         door_colors |= s
     harmful = {t for t, added in adds.items() if added & door_colors}
+    # A PUSHABLE colour is never a 'required-absent' cover-target: you push it, you don't make it vanish, and a
+    # mover's trail of vacated cells would otherwise become phantom (uncoverable) cover-goals. This also undoes
+    # GoalModel's cross-level pooling artefact (a blockless level's wins make the block colour look absent-in-wins).
+    required_absent = set(goal.required_absent()) - set(objp.pushable)
     return WorldModel(
         body=objp.body_color, pushable=set(objp.pushable), blocking=set(objp.blocking),
         death=death, effects=effects, adds=adds, harmful=harmful,
-        goal_colors=set(goal.goal_colors), required_absent=set(goal.required_absent()),
+        goal_colors=set(goal.goal_colors), required_absent=required_absent,
     )
 
 
@@ -114,8 +120,13 @@ class StateEncoder(_ActionVocab):
 
     def __init__(self, world: WorldModel):
         self.world = world
-        self.doors = sorted(world.doors)
         self.reset()
+
+    @property
+    def doors(self):
+        """The door colours (those some learned effect removes) — read LIVE off the world, so an online cold-start
+        that learns a new effect immediately yields new doors/openers (the world is updated in place)."""
+        return sorted(self.world.doors)
 
     def reset(self):                                            # new episode/level
         self._slots = None                                     # tracked mover cells, stable order; set on 1st encode
