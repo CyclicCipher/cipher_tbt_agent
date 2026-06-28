@@ -42,13 +42,16 @@ class Planner:
     def reset(self):
         self.neo.reset()
 
-    def act(self, objects, forwards, actions, curiosity, context=None):
+    def act(self, objects, forwards, actions, curiosity, context=None, contents=None):
         """The action to take. `objects = {id: (pose, size)}`, `forwards = {id: ForwardModel}`, `actions` = available
         action keys, `curiosity = {action: 0..1}` = how much there is still to LEARN about each action (1 = never
-        tried; ~0 once learned or unlearnable), and `context(oid, pose, action_key) -> ctx` supplies each rolled-forward
+        tried; ~0 once learned or unlearnable), `context(oid, pose, action_key) -> ctx` supplies each rolled-forward
         move's sensed context (the static-layout the move would enter), so the rollout uses the STATE-DEPENDENT operator
-        and routes AROUND high-cost contexts (walls) by value -- `None` = unconditioned (the base operator). Returns the
-        action key, or None if nothing pragmatic/salient is reachable -- the caller falls back to heavy-tailed search."""
+        and routes AROUND high-cost contexts (walls) by value, and `contents = {id: content}` adds each object's CONTENT
+        to the rolled state so the planner can pursue a goal/contact that is a state CHANGE (a colour toggle), not only a
+        spatial arrangement -- the same rollout, the spatial-goal assumption dissolved. `context`/`contents` None =
+        unconditioned / pose-only (the prior behaviour). Returns the action key, or None if nothing pragmatic/salient is
+        reachable -- the caller falls back to heavy-tailed search."""
         if not actions:
             return None
         goal, contact = self.goal, self.contact
@@ -58,24 +61,35 @@ class Planner:
         if curious:
             return max(curious, key=lambda a: curiosity.get(a, 1.0))   # practise the most-uncertain action
 
-        # rollout setup (reached only once the operators are learned). Keep REAL poses (predict adds integer deltas,
-        # so they stay exact) -- rounding here would make the rollout's config_state disagree with perception's.
+        # rollout setup (reached only once the operators are learned). The state is (id, pose, content): an operator
+        # moves the POSE and/or transforms the CONTENT -- movement and in-place change are ONE mechanism, so the self,
+        # the goal, and the plan are KIND-agnostic. Keep REAL poses (predict adds integer deltas, so they stay exact).
         sizes = {oid: size for oid, (_pose, size) in objects.items()}
-        start = tuple(sorted((oid, pose) for oid, (pose, _size) in objects.items()))
+        cont = contents or {}
+        aware = contents is not None
+        start = tuple(sorted((oid, pose, cont.get(oid)) for oid, (pose, _size) in objects.items()))
 
         def advance(state, key):
-            return tuple(sorted(
-                (oid, forwards[oid].predict(pose, key, context(oid, pose, key) if context else None)
-                 if oid in forwards else pose) for oid, pose in state))
+            out = []
+            for oid, pose, content in state:
+                if oid in forwards:
+                    fm = forwards[oid]
+                    pose = fm.predict(pose, key, context(oid, pose, key) if context else None)
+                    content = fm.next_content(content, key)
+                out.append((oid, pose, content))
+            return tuple(sorted(out))
 
         def to_objects(state):
-            return {oid: (pose, sizes.get(oid, 0)) for oid, pose in state}
+            return {oid: (pose, sizes.get(oid, 0)) for oid, pose, _c in state}
+
+        def to_contents(state):
+            return {oid: c for oid, _pose, c in state} if aware else None
 
         # 2. EXPLOIT a learned goal -- only roll if a goal has actually been seen (else this is wasted work).
         if goal.goals:
             def pragmatic(state, a):
                 nxt = advance(state, actions[a])
-                if goal.is_goal(to_objects(nxt)):              # the learned goal configuration -> exploit
+                if goal.is_goal(to_objects(nxt), to_contents(nxt)):    # the learned goal configuration -> exploit
                     return nxt, 1.0, True
                 return nxt, 0.0, False                         # traversable toward the goal
             a = self.neo.achieve(pragmatic, start, len(actions), max_states=self.cap)

@@ -45,6 +45,18 @@ def _dist(a, b):
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
+def _content_sig(frame, cells):
+    """A translation-invariant signature of an object's CONTENT (its 'what'): each cell's value at its position
+    RELATIVE to the object's corner. Stable as the object MOVES (movement lives in the pose, the 'where'); it changes
+    only when the appearance changes in place -- a colour toggle, a deformation -- which is the behavior the content
+    operator learns. Hashable, so it can key states and goals."""
+    if not cells:
+        return ()
+    minx = min(x for x, _y in cells)
+    miny = min(y for _x, y in cells)
+    return tuple(sorted((x - minx, y - miny, frame[y][x]) for (x, y) in cells))
+
+
 class ObjectField:
     """The field of tracked objects -- no self. `perceive(frame, predict)` segments the frame and RE-FINDS each
     previously-tracked object (object permanence), returning `{object_id: (pose, size)}` with ids stable across frames
@@ -56,11 +68,13 @@ class ObjectField:
         self.max_jump = max_jump
         self._last: dict = {}                                  # object_id -> (pose, size)
         self.cells: dict = {}                                  # object_id -> the object's cell set this frame
+        self.contents: dict = {}                              # object_id -> its content signature this frame (the 'what')
         self._next = 0
 
     def reset(self):
         self._last = {}
         self.cells = {}
+        self.contents = {}
         self._next = 0
 
     def perceive(self, frame, predict=None) -> dict:
@@ -107,4 +121,5 @@ class ObjectField:
                         cy = sum(y for _, y in gcells) / len(gcells)
                         result[oid], cells[oid] = ((cx, cy), len(gcells)), gcells
         self._last, self.cells = result, cells
+        self.contents = {oid: _content_sig(frame, cs) for oid, cs in cells.items()}   # the 'what' of each tracked object
         return result

@@ -1,10 +1,17 @@
-"""The forward model -- the per-action operator on an object's pose (Layer 5, learned not assumed), STATE-DEPENDENT.
+"""The forward model -- the per-action operator on an object's STATE (Layer 5, learned not assumed), STATE-DEPENDENT.
 
-This is L5 for the object-pose representation: `l5_displacement.py` holds the same thing (one movement operator per
-relation) over the column's SR-frame place vectors; here the operator acts on a tracked object's pose, because the
-rebuild found the controllable self is an OBJECT followed by pose, not a pattern of cells (`objects.py`). The
-operator for an action is LEARNED from observed `(pose, action, next_pose)` transitions -- never the hand-coded
-"ACTION1 = up" the old agent assumed, the rule real games break.
+This is L5 for the object representation: `l5_displacement.py` holds the same thing (one movement operator per
+relation) over the column's SR-frame place vectors; here the operator acts on a tracked object, because the
+rebuild found the controllable self is an OBJECT, not a pattern of cells (`objects.py`). The operator for an action is
+LEARNED from observed transitions -- never the hand-coded "ACTION1 = up" the old agent assumed, the rule real games break.
+
+**An object's state is `(pose, content)` -- where it is AND what it looks like -- and an action can move EITHER.** A
+movement game changes the pose (`observe`/`delta`/`predict`); a state-change game (ls20: a block toggles colour in
+place) changes the CONTENT (`observe_content`/`next_content`). Both use the SAME modal-transition mechanism over a
+factored state -- Monty's "movement and in-place change are one thing, a change at a location" -- so the operator's
+KIND (translate vs toggle) FALLS OUT of the transitions, never declared. The controllable self emerges
+(`is_action_sensitive`) from a pose- OR content-sensitive operator: "the self is the factor your operators move OR
+change." This removed the deadly assumption that the self must translate (which made ls20 invisible).
 
 **The operator is conditioned on CONTEXT, so a wall is not a special case.** An action's effect is keyed by
 `(action, context)`, where `context` is whatever the agent senses locally about the transition (supplied by
@@ -47,7 +54,8 @@ class ForwardModel:
     moving displacement that `(action, context)` has caused; `context=None` is the unconditioned (open-field) effect."""
 
     def __init__(self):
-        self._disp: dict = defaultdict(Counter)               # (action, context) -> Counter[ integer displacement -> count ]
+        self._disp: dict = defaultdict(Counter)               # (action, context) -> Counter[ integer pose displacement ]
+        self._content: dict = defaultdict(Counter)            # (action, from_content) -> Counter[ to_content ] (behavior)
 
     # ---- learning -------------------------------------------------------------------------------------------
     def observe(self, pose, action, next_pose, context=None) -> None:
@@ -55,6 +63,14 @@ class ForwardModel:
         a wall-adjacent context is logged like any other effect -- it is simply the `(0,0)` displacement THIS context
         produces, not a special blocked flag."""
         self._disp[(action, context)][_round(pose, next_pose)] += 1
+
+    def observe_content(self, content, action, next_content) -> None:
+        """Record how `action` transforms the object's CONTENT (its appearance/state) -- the BEHAVIOR operator. It is
+        the SAME modal-transition mechanism as the pose operator, over the feature factor instead of position (Monty:
+        movement and in-place change are one thing, "a change at a location"). Keyed by the current content, so a
+        toggle (A->B, B->A) or an action-set-state (any->X) is learnable. The KIND (move vs change) is never declared
+        -- it falls out of which factor an action actually moves."""
+        self._content[(action, content)][next_content] += 1
 
     def learn_track(self, track) -> None:
         """Learn from one `ObjectTracker` track ([(step, pose, action), ...]). Each consecutive pair is a transition
@@ -65,20 +81,26 @@ class ForwardModel:
     # ---- curiosity (competence-based intrinsic motivation -- explore until the operator is learned, not forever) ----
     def curiosity(self, action, context=None) -> float:
         """How much there is still to LEARN about `action` (the intrinsic-motivation drive that replaces count-based
-        novelty): 1.0 for a never-tried action, 0.0 once a MOVEMENT operator is established, and 0.0 once we have tried
-        enough with no movement (a no-op action -- do NOT keep chasing it; the noisy-TV problem raw novelty/error falls
-        for). With an explicit `context` it judges that context; with `None` it aggregates over all contexts seen for
-        the action (babbling learns the base operator -- the wall conditional is learned passively, on contact)."""
+        novelty), KIND-agnostic: 1.0 for a never-tried action, 0.0 once an EFFECT is established -- a movement (a pose
+        displacement) OR a behavior (a content change) -- and 0.0 once we have tried enough with no effect (a no-op
+        action; the noisy-TV problem raw novelty/error falls for). An explicit `context` judges the pose effect in that
+        context; `None` aggregates over contexts. So babbling learns the operator whatever KIND it is, not only when
+        the object MOVES (the residual pose-bias removed)."""
         if context is not None:
             counters = [c for c in (self._disp.get((action, context)),) if c]
         else:
             counters = [c for (a, _ctx), c in self._disp.items() if a == action and c]
-        if not counters:
+        pose_moves = sum(v for c in counters for d, v in c.items() if d != (0, 0))
+        pose_tries = sum(v for c in counters for v in c.values())
+        content_items = [(frm, c) for (a, frm), c in self._content.items() if a == action]
+        content_changes = sum(n for frm, c in content_items for nxt, n in c.items() if nxt != frm)
+        content_tries = sum(n for _frm, c in content_items for n in c.values())
+        if pose_tries == 0 and content_tries == 0:
             return 1.0                                        # never tried -> maximal curiosity
-        if sum(v for c in counters for d, v in c.items() if d != (0, 0)) >= 2:
-            return 0.0                                        # a movement operator is established -> learned
-        if sum(v for c in counters for v in c.values()) >= 5:
-            return 0.0                                        # tried enough, no movement -> no-op, give up
+        if pose_moves >= 2 or content_changes >= 2:
+            return 0.0                                        # an effect (movement OR behavior) is established -> learned
+        if max(pose_tries, content_tries) >= 5:
+            return 0.0                                        # tried enough, no effect -> a no-op action, give up
         return 1.0                                            # still confirming -> keep practising
 
     # ---- the operator ---------------------------------------------------------------------------------------
@@ -108,6 +130,24 @@ class ForwardModel:
     def summary(self):
         """{action: (delta, confidence)} for the unconditioned operator -- the whole base operator set, for inspection."""
         return {a: (self.delta(a), self.confidence(a)) for a in self.actions()}
+
+    # ---- content / behavior operator (the in-place change is the same mechanism as movement) ----------------
+    def next_content(self, content, action):
+        """The content `action` produces from `content`: its modal learned outcome, or `content` UNCHANGED if unseen
+        (a thing keeps its appearance unless an action is learned to change it -- the behavior analogue of the pose
+        operator's no-op default)."""
+        c = self._content.get((action, content))
+        return c.most_common(1)[0][0] if c else content
+
+    def is_action_sensitive(self) -> bool:
+        """Is this object CONTROLLABLE? -- the self emerges, KIND-agnostic, as the object some action moves where
+        another does not, in POSE (movement) OR in CONTENT (behavior). No declaration of which kind a game is."""
+        if len({self.delta(a) for a in self.actions()}) >= 2:    # pose varies by action -> a movement self
+            return True
+        by_from: dict = defaultdict(dict)                        # from_content -> {action: modal next_content}
+        for (a, frm), c in self._content.items():
+            by_from[frm][a] = c.most_common(1)[0][0]
+        return any(len(set(amap.values())) >= 2 for amap in by_from.values())   # content varies by action -> a behavior self
 
     # ---- prediction -----------------------------------------------------------------------------------------
     def predict(self, pose, action, context=None):

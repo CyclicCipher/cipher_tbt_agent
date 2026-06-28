@@ -7,8 +7,9 @@ reduce toward. The front-end (retina → agency → events → objects) and the 
 active-inference planner with directed exploration) are BUILT, and ASSEMBLED into one continuous agent that plays
 end-to-end on a controlled frame scene (see **STATUS** below; suite 121). The obstacle/cost layer is now BUILT too —
 a state-dependent operator + object permanence, no binary obstacle model (see *Obstacles and cost*). What remains is
-the LIVE adapter (run it on a real game) and the rest of step 4 (events→prediction-error, the click action ACTION6,
-the learned saccade policy, and removing the ls20 state-change assumption).
+the LIVE adapter (run it on a real game) plus two remaining step-4 items: the click action (ACTION6) and the learned
+saccade policy. (Events→prediction-error and the ls20 state-change assumption are now DONE — the operator KIND,
+translate vs toggle, EMERGES from a pose⊕content object state; see *Distilled learnings* and stage 4 below.)
 
 ## Thesis
 
@@ -89,8 +90,8 @@ remains, in order:
 - **Group / factor objects** (cn04's many objects move together — one controllable group? — and separate self from
   autonomous, which pose-spread already begins).
 - **Obstacles / cost** — DONE (state-dependent operator + object permanence; see *Obstacles and cost*). Still to do:
-  upgrade `events.py` magnitude → `forward.prediction_error` (the co-bootstrap), the click action (ACTION6), the
-  learned saccade policy, and removing the ls20 state-change assumption.
+  the click action (ACTION6) and the learned saccade policy. (`events.py` magnitude → reafference residual, and the
+  ls20 state-change assumption — the operator KIND now emerges from a pose⊕content state — are DONE.)
 
 NB on the original plan: stage 1 said "`factorize` over RF streams." What actually worked for the DYNAMIC factors is
 **object-pose tracking** (`objects.py`) — the objects ARE the dynamic factors, and the per-action operator over
@@ -374,13 +375,16 @@ Target: fewer files than today, and the broken assumptions cannot recur because 
    reach).
 4. **ASSEMBLE the continuous online agent — DONE (controlled-scene gate)** (`perceive.py` / `play.py`): perceive →
    learn operator + goal → plan, end-to-end on raw frames; babble + explore + exploit + cross-level transfer
-   validated. **The obstacle/cost layer is DONE** (state-dependent operator + object permanence; routes around a wall
-   5/5; see *Obstacles and cost*). **REMAINING in step 4:** the LIVE adapter (bridge `Player` to the real-game env and
-   complete a real level, folding the standalone mechanisms into the `CorticalColumn`, principle 2); the `events`
-   magnitude → `forward.prediction_error` upgrade (the co-bootstrap); the click action (ACTION6); the learned saccade
-   policy; and removing the ls20 state-change assumption (the pose-displacement model assumes a translating mover —
-   ls20 animates colour in place, so nothing translates and no operator is learnable; the operator KIND must come from
-   the dynamics, see task #6 / `project_ls20_is_state_change`).
+   validated. **Obstacle/cost — DONE** (state-dependent operator + object permanence; routes around a wall 5/5; see
+   *Obstacles and cost*). **Events→reafference-residual — DONE** (`play.py` feeds `events` the observed change minus the
+   operators' prediction; a big EXPLAINED move is no boundary, a scene-cut is). **Operator KIND emerges — DONE** (the
+   deadly translation assumption removed): an object's state is `(pose, content)` and the SAME modal-transition operator
+   moves the POSE (movement, cn04) or transforms the CONTENT (in-place toggle, ls20); the KIND, the self
+   (`is_action_sensitive`), the goal (`config_state` over content), the planner rollout, and curiosity are all
+   KIND-agnostic — a state-change game is solved by the same agent (test_play `ToggleScene`). This dissolved THREE
+   assumptions at once (self-must-translate, goal-is-spatial, content-is-just-size). **REMAINING in step 4:** the LIVE
+   adapter (bridge `Player` to the real-game env and complete a real level, folding the standalone mechanisms into the
+   `CorticalColumn`, principle 2); the click action (ACTION6); and the learned saccade policy.
 5. **Group / factor objects + online SR location** as the games demand (cn04's many objects move together; the SR
    frame over the few object-states, online).
 6. **Delete the scaffolding; `perception/` = the thin retina sensor.** The replica suite stays green as a

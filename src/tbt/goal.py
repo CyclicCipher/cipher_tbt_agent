@@ -27,17 +27,23 @@ def _r(v) -> int:
     return int(math.floor(v + 0.5))
 
 
-def config_state(objects):
+def config_state(objects, contents=None):
     """The configuration of `objects = {id: (pose, size)}` as a hashable, translation-invariant state: each object's
     `(size, integer pose relative to the LARGEST object)`, sorted. The same arrangement elsewhere on the board yields
     the SAME state. The anchor is the largest object -- an emergent, stable reference (the big static structure on a
     real frame), NOT a privileged self, and NOT the configuration mean (whose symmetry can't tell left from right for
-    two objects)."""
-    items = list(objects.values())
+    two objects). With `contents = {id: content}` each object's CONTENT (its 'what') joins the state, so a goal can be a
+    state CHANGE (an object turned a colour) and not only a spatial arrangement -- the same encoding, the spatial-goal
+    assumption dissolved."""
+    items = list(objects.items())                             # [(id, (pose, size)), ...]
     if not items:
         return ()
-    (ax, ay), _ = max(items, key=lambda it: (it[1], it[0]))   # the largest object (ties by pose) is the reference
-    return tuple(sorted((size, (_r(pose[0] - ax), _r(pose[1] - ay))) for pose, size in items))
+    (ax, ay), _ = max((v for _id, v in items), key=lambda it: (it[1], it[0]))   # the largest object is the reference
+    def rel(pose):
+        return (_r(pose[0] - ax), _r(pose[1] - ay))
+    if contents is None:
+        return tuple(sorted((size, rel(pose)) for _id, (pose, size) in items))
+    return tuple(sorted((size, rel(pose), contents.get(oid)) for oid, (pose, size) in items))
 
 
 def _contact_pairs(objects):
@@ -66,12 +72,12 @@ class GoalModel:
         self.goals: set = set()                              # the canonical configurations a score increment rewarded
         self.contacts: set = set()                           # object-kind pairs that have been in contact (salience)
 
-    def state(self, objects):
-        return config_state(objects)
+    def state(self, objects, contents=None):
+        return config_state(objects, contents)
 
-    def observe(self, objects, score_delta) -> tuple:
+    def observe(self, objects, score_delta, contents=None) -> tuple:
         """Record the current configuration (its visit + any contacts); if the score rose, mark it the goal."""
-        s = self.state(objects)
+        s = self.state(objects, contents)
         self.rm.observe(s, score_delta)
         if score_delta > 0:
             self.goals.add(s)
@@ -83,14 +89,14 @@ class GoalModel:
         (drive the controllable object to an un-contacted object, where goals live)."""
         return bool(_contact_pairs(objects) - self.contacts)
 
-    def is_goal(self, objects) -> bool:
-        """Is this configuration one the score has rewarded? (Recognised by its relative arrangement.)"""
-        return self.state(objects) in self.goals
+    def is_goal(self, objects, contents=None) -> bool:
+        """Is this configuration one the score has rewarded? (Recognised by its relative arrangement and content.)"""
+        return self.state(objects, contents) in self.goals
 
-    def reward(self, objects) -> float:
+    def reward(self, objects, contents=None) -> float:
         """Unified value of reaching this configuration: extrinsic (1.0 at a learned goal) plus the novelty bonus."""
-        return self.rm.reward_total(self.state(objects))
+        return self.rm.reward_total(self.state(objects, contents))
 
-    def visits(self, objects) -> int:
+    def visits(self, objects, contents=None) -> int:
         """How many times the agent has really been in this configuration -- the epistemic/novelty drive."""
-        return self.rm.visits.get(self.state(objects), 0)
+        return self.rm.visits.get(self.state(objects, contents), 0)

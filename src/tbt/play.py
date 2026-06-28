@@ -43,6 +43,7 @@ class Player:
         self.forwards: dict = {}                              # object_id -> ForwardModel (per-object operators)
         self._prev_objects = self._last = self._prev_frame = None
         self._prev_cells: dict = {}                           # last frame's per-object cells (for the move's context)
+        self._prev_contents: dict = {}                        # last frame's per-object content (for the behavior operator)
         self._prev_score = 0
         self._run = (None, 0)                                 # current Lévy run: (action, steps remaining)
 
@@ -54,6 +55,7 @@ class Player:
         self.forwards = {}
         self._prev_objects = self._last = self._prev_frame = None
         self._prev_cells = {}
+        self._prev_contents = {}
         self._run = (None, 0)
 
     def _levy(self, actions):
@@ -101,6 +103,7 @@ class Player:
         if not actions:
             return None
         objects = self.field.perceive(grid, self._predictor(self._last))
+        contents = self.field.contents                        # each object's CONTENT (the 'what') this frame
         if self._prev_objects is not None and self._last is not None:
             # the transitions of objects present in both frames, each with the context its move entered
             trans = [(oid, self._prev_objects[oid][0], pose,
@@ -120,18 +123,21 @@ class Player:
             boundary = self.events.is_boundary(len(observed - explained))
             if not boundary:
                 for (oid, p0, p1, ctx) in trans:         # learn each object's operator (the self emerges from these)
-                    self.forwards.setdefault(oid, ForwardModel()).observe(p0, self._last, p1, ctx)
-            self.goal.observe(objects, score - self._prev_score)
+                    fm = self.forwards.setdefault(oid, ForwardModel())
+                    fm.observe(p0, self._last, p1, ctx)                          # the POSE operator (movement)
+                    fm.observe_content(self._prev_contents.get(oid), self._last, contents.get(oid))   # the CONTENT operator
+            self.goal.observe(objects, score - self._prev_score, contents)
         # how much there is still to LEARN about each action (learning progress; 1.0 if untried) -- the curiosity drive
         curiosity = {a: max((fm.curiosity(a) for fm in self.forwards.values()), default=1.0) for a in actions}
         context = lambda oid, pose, key: self._context(oid, pose, key, grid, self.field.cells)
-        action = self.planner.act(objects, self.forwards, actions, curiosity, context=context)
+        action = self.planner.act(objects, self.forwards, actions, curiosity, context=context, contents=contents)
         if action is None:                                   # nothing to route toward -> heavy-tailed (Lévy) search
             action = self._levy(actions)
         else:
             self._run = (None, 0)                            # a directed plan took over -> end the Lévy run
         self._prev_objects, self._last, self._prev_score = objects, action, score
         self._prev_frame, self._prev_cells = grid, dict(self.field.cells)
+        self._prev_contents = dict(contents)
         return action
 
     def run(self, env, max_steps: int = 2000):

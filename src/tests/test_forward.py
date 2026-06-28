@@ -34,6 +34,7 @@ def test_learns_a_distinct_operator_per_action():
     assert fm.confidence("up") == 1.0
     assert set(fm.actions()) == {"up", "down"}
     assert fm.delta("never_seen") is None                    # no assumption about an action never taken
+    assert fm.is_action_sensitive()                          # distinct per-action POSE effects -> a movement self
 
 
 def test_mode_reads_through_blocked_moves():
@@ -46,6 +47,23 @@ def test_mode_reads_through_blocked_moves():
     fm.observe((0, 0), "go", (0, 0))
     assert fm.delta("go") == (3, 0)                          # the mode, not the (biased) mean
     assert 0.7 < fm.confidence("go") < 1.0                   # 7/9 -- deterministic-ish but not perfectly
+
+
+def test_content_operator_learns_an_in_place_toggle_and_emerges_as_controllable():
+    """The behavior operator: an action that changes the object's CONTENT in place (no movement at all) is learned the
+    SAME way as a displacement, and the object is recognized as controllable by CONTENT sensitivity -- so a state-change
+    game (ls20: colour toggles in place) is no longer invisible to a pose-only self. The KIND is never declared."""
+    fm = ForwardModel()
+    X, Y = ("a",), ("b",)
+    for _ in range(3):                                        # action 0 -> state X, action 1 -> state Y, from EITHER state
+        fm.observe((5, 5), 0, (5, 5)); fm.observe_content(X, 0, X)
+        fm.observe((5, 5), 1, (5, 5)); fm.observe_content(X, 1, Y)
+        fm.observe((5, 5), 0, (5, 5)); fm.observe_content(Y, 0, X)
+        fm.observe((5, 5), 1, (5, 5)); fm.observe_content(Y, 1, Y)
+    assert fm.delta(0) == (0, 0) and fm.delta(1) == (0, 0)    # nothing MOVES -- a pose-only model would see no self
+    assert fm.next_content(X, 1) == Y and fm.next_content(Y, 0) == X     # the content operator learned the toggle
+    assert fm.next_content(("c",), 0) == ("c",)              # unseen content -> unchanged (no-op default)
+    assert fm.is_action_sensitive()                          # controllable via CONTENT, though pose never changes
 
 
 def test_operator_is_state_dependent_and_generalizes():

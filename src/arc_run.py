@@ -222,8 +222,8 @@ def play_live(game_id="ls20", max_actions=200, seed=0, verbose=True):
     result = arc.close_scorecard(card_id)
     if verbose:
         ops = {oid: {a: fm.delta(a) for a in fm.actions()} for oid, fm in player.forwards.items()}
-        emergent = [oid for oid, fm in player.forwards.items()                   # action-sensitive operator
-                    if len({fm.delta(a) for a in fm.actions()}) >= 2]            # = a controllable object emerged
+        emergent = [oid for oid, fm in player.forwards.items()                   # a controllable object emerged --
+                    if fm.is_action_sensitive()]                                 # action-sensitive in POSE or CONTENT
         print(f"play_live {game_id}: won={out.won} levels={out.levels} actions={out.actions}")
         print(f"  objects tracked={len(player.forwards)} emergent-controllable ids={emergent} "
               f"goals_learned={len(player.goal.goals)}")

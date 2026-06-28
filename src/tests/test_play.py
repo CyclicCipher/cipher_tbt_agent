@@ -62,7 +62,7 @@ def test_loop_learns_operators_and_explores_on_frames():
     for _ in range(100):
         grid = env.step(p.act(grid, [0, 1, 2, 3], 0))         # score held 0 -> pure exploration, no goal
         seen.add(env.pos)
-    assert any(len({fm.delta(a) for a in fm.actions()}) >= 2 for fm in p.forwards.values())   # the self emerged
+    assert any(fm.is_action_sensitive() for fm in p.forwards.values())   # the self emerged (pose- or content-sensitive)
 
     rng = random.Random(0)
     pos, walk = (10, 10), set()
@@ -98,6 +98,52 @@ def test_explained_motion_is_not_a_boundary_but_a_scene_cut_is():
     cut = [[5 if (r + c) % 2 == 0 else 0 for c in range(30)] for r in range(30)]   # an unrelated full-frame replacement
     p.act(cut, [3], 0)
     assert fm.delta(3) == (3, 0) and fm.confidence(3) >= before   # the scene-cut did NOT corrupt the operator
+
+
+class ToggleScene:
+    """An ls20-like STATE-CHANGE game: a block that changes COLOUR in place (it never moves) under the actions, plus a
+    static landmark. ACTION0 sets it to colour A, ACTION1 to colour B; the score ticks up whenever it is colour B (a
+    goal that is a state, not a position). A pose-only agent is blind to this whole class -- nothing translates."""
+
+    def __init__(self):
+        self.colour = 3                                       # the block's state (colour A)
+        self.score = 0
+        self.actions = 0
+
+    def render(self):
+        g = [[0] * 20 for _ in range(20)]
+        for dx in range(4):
+            for dy in range(4):
+                g[8 + dy][8 + dx] = self.colour              # a 4x4 block, FIXED position, colour = its state
+        for dx in (0, 1):
+            for dy in (0, 1):
+                g[1 + dy][1 + dx] = 5                         # a static landmark (the configuration anchor)
+        return g
+
+    def step(self, a):
+        self.actions += 1
+        if a == 0:
+            self.colour = 3                                   # action 0 -> colour A
+        elif a == 1:
+            self.colour = 6                                   # action 1 -> colour B (the goal state)
+        if self.colour == 6:
+            self.score += 1
+        return self.render()
+
+
+def test_solves_an_in_place_state_change_game():
+    """The deadly assumption removed: the SAME agent that solves movement games now solves a game where the controllable
+    object changes COLOUR in place (nothing translates). The content operator learns 'ACTION1 turns the block to the goal
+    colour', the goal is a state configuration, and the planner reaches and HOLDS it -- the operator KIND emerged."""
+    env = ToggleScene()
+    p = Player(seed=0)
+    p.reset()
+    grid = env.render()
+    for _ in range(60):
+        grid = env.step(p.act(grid, [0, 1, 2, 3], env.score))
+    assert any(fm.is_action_sensitive() for fm in p.forwards.values())   # the block emerged controllable via CONTENT
+    assert env.colour == 6                                               # the agent reached AND holds the goal colour
+    assert env.score >= 5                                                # held the state, not a one-off accident
 
 
 class _Frame:
