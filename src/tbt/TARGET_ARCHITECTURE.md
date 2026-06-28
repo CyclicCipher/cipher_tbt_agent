@@ -5,8 +5,10 @@ broke every assumption in the perception scaffolding (action=delta, single-cell 
 spatial goal). The lesson is not "add those cases" — it is "assert nothing." This document is the target we
 reduce toward. The front-end (retina → agency → events → objects) and the playing loop (forward model → goal/value →
 active-inference planner with directed exploration) are BUILT, and ASSEMBLED into one continuous agent that plays
-end-to-end on a controlled frame scene (see **STATUS** below; suite 119). What remains is the LIVE adapter (run it on
-a real game), plus the obstacle/cost layer — researched and deliberately parked (see *Obstacles and cost*).
+end-to-end on a controlled frame scene (see **STATUS** below; suite 121). The obstacle/cost layer is now BUILT too —
+a state-dependent operator + object permanence, no binary obstacle model (see *Obstacles and cost*). What remains is
+the LIVE adapter (run it on a real game) and the rest of step 4 (events→prediction-error, the click action ACTION6,
+the learned saccade policy, and removing the ls20 state-change assumption).
 
 ## Thesis
 
@@ -86,9 +88,9 @@ remains, in order:
   (principle 2), and complete even one real level. *This is the true milestone.*
 - **Group / factor objects** (cn04's many objects move together — one controllable group? — and separate self from
   autonomous, which pose-spread already begins).
-- **Obstacles / cost** — a continuous value surface, researched and parked (see *Obstacles and cost*); unpark after
-  assembly. Plus upgrade `events.py` magnitude → `forward.prediction_error` (the co-bootstrap), the click action
-  (ACTION6), and the learned saccade policy.
+- **Obstacles / cost** — DONE (state-dependent operator + object permanence; see *Obstacles and cost*). Still to do:
+  upgrade `events.py` magnitude → `forward.prediction_error` (the co-bootstrap), the click action (ACTION6), the
+  learned saccade policy, and removing the ls20 state-change assumption.
 
 NB on the original plan: stage 1 said "`factorize` over RF streams." What actually worked for the DYNAMIC factors is
 **object-pose tracking** (`objects.py`) — the objects ARE the dynamic factors, and the per-action operator over
@@ -256,11 +258,10 @@ drop its fixed Euclidean frames, add value, and bind heterogeneous frames in a s
 that looked like a wall (the 2.9 s eigh) is a symptom of mapping pixels; over **factored** states the SR frame is
 small and cheap, and an online TD-SR removes the batch eigh entirely.
 
-## Obstacles and cost — a continuous value surface, not a free/blocked predicate (research, 2026-06-28)
+## Obstacles and cost — a continuous value surface, not a free/blocked predicate (research, 2026-06-28; BUILT 2026-06-28)
 
-The "wall" question — how to represent what blocks or resists movement — is deferred until after assembly, but the
-answer is now researched, and it must NOT be a binary obstacle model (the bitter lesson). Neuroscience gives the
-general form, and it already fits this architecture:
+The "wall" question — how to represent what blocks or resists movement — was researched, then BUILT, and it is NOT a
+binary obstacle model (the bitter lesson). Neuroscience gives the general form, and it already fits this architecture:
 
 - **A barrier is not an object; it is a change in TRANSITION STRUCTURE.** The hippocampal predictive map (the
   successor representation, Stachenfeld et al. 2017) WARPS around a barrier — the wall is reshaped reachability,
@@ -273,12 +274,20 @@ general form, and it already fits this architecture:
   quantity** (high resistance ≡ high potential ≡ low-probability transition). It generalises to abstract domains
   because the *same* grid/SR machinery maps conceptual spaces (Constantinescu et al. 2016; the Tolman-Eichenbaum
   Machine, Whittington et al. 2020) — "resistance in a wire" is the same computation as a physical wall.
-- **Design direction (apply after assembly):** an obstacle FALLS OUT of (learned transition model + SIGNED value),
-  with no obstacle concept — L6's SR-frame deforms around blocked transitions (no new module); `forward.py`'s
-  confidence < 1 flags a costly/blocked transition and `residual.py` learns its condition; `reward.py`'s signed value
-  weighs it on a continuum (a no-move = a wasted action, death = −1, slow = viscosity); the planner already minimises
-  cost-to-goal, so high-resistance regions are weighed by VALUE, not walled off by a rule. Learned online by
-  prediction error, as the brain updates its map after a detour.
+- **Design direction (BUILT 2026-06-28):** an obstacle FALLS OUT of (learned transition model + value), with no
+  obstacle concept. Concretely: (1) **`forward.py` is now a STATE-DEPENDENT operator** keyed by `(action, context)` —
+  `context` = the MATERIAL the move would enter (the destination cell, supplied by `play.py`). A wall is just the
+  `(0,0)` effect a wall-context produces — a context-gated effect (the door `residual.py` describes), and because the
+  context is the material not the cell, ONE bump generalises to every wall of that material. An unseen context falls
+  back to the base operator (R-MAX optimism: assume the move works until a bump proves otherwise), so the agent routes
+  TO objects and only AROUND ones it has learned block it. The continuum (a no-move = a wasted step, slow = viscosity,
+  death = a costly context) is the same machinery — other context→effect mappings, only the blocking case exercised so
+  far. (2) **`perceive.py` keeps OBJECT PERMANENCE through contact** — the self touching a wall stays the self at its own
+  pose (identity from dynamics, not appearance), which is what lets the blocked transition be recorded at all. (3) The
+  planner rolls the state-dependent operator forward and **routes around by VALUE** (its existing cost-to-goal
+  minimisation), nothing walled off by a rule. *Validated: 5/5 seeds route around a wall to a target behind it on a
+  controlled scene; suite 121. The SR-frame deformation / `residual.py` predicate search remain the deeper form for
+  context the destination-material proxy cannot express; live validation is still pending.*
 
 Citations: Stachenfeld, Botvinick & Gershman 2017 (Nat. Neurosci., the predictive map); Lever, Burton, Jeewajee,
 O'Keefe & Burgess 2009 (J. Neurosci., boundary vector cells); Solstad, Boccara, Kropff, Moser & Moser 2008 (Science,
@@ -365,10 +374,13 @@ Target: fewer files than today, and the broken assumptions cannot recur because 
    reach).
 4. **ASSEMBLE the continuous online agent — DONE (controlled-scene gate)** (`perceive.py` / `play.py`): perceive →
    learn operator + goal → plan, end-to-end on raw frames; babble + explore + exploit + cross-level transfer
-   validated. **NEXT: the LIVE adapter** — bridge `Player` to the real-game env (`arc_run.py`) and complete a real
-   level (folding the standalone mechanisms into the `CorticalColumn`, principle 2). **Then (scheduled): the parked
-   obstacle/cost layer**, grounded in the live wall failures (see *Obstacles and cost*); plus the `events` magnitude →
-   prediction-error upgrade, the click action (ACTION6), and the learned saccade policy.
+   validated. **The obstacle/cost layer is DONE** (state-dependent operator + object permanence; routes around a wall
+   5/5; see *Obstacles and cost*). **REMAINING in step 4:** the LIVE adapter (bridge `Player` to the real-game env and
+   complete a real level, folding the standalone mechanisms into the `CorticalColumn`, principle 2); the `events`
+   magnitude → `forward.prediction_error` upgrade (the co-bootstrap); the click action (ACTION6); the learned saccade
+   policy; and removing the ls20 state-change assumption (the pose-displacement model assumes a translating mover —
+   ls20 animates colour in place, so nothing translates and no operator is learnable; the operator KIND must come from
+   the dynamics, see task #6 / `project_ls20_is_state_change`).
 5. **Group / factor objects + online SR location** as the games demand (cn04's many objects move together; the SR
    frame over the few object-states, online).
 6. **Delete the scaffolding; `perception/` = the thin retina sensor.** The replica suite stays green as a

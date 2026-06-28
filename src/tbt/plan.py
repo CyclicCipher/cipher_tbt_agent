@@ -42,11 +42,13 @@ class Planner:
     def reset(self):
         self.neo.reset()
 
-    def act(self, objects, forwards, actions, curiosity):
+    def act(self, objects, forwards, actions, curiosity, context=None):
         """The action to take. `objects = {id: (pose, size)}`, `forwards = {id: ForwardModel}`, `actions` = available
         action keys, `curiosity = {action: 0..1}` = how much there is still to LEARN about each action (1 = never
-        tried; ~0 once learned or unlearnable). Returns the action key, or None if nothing pragmatic/salient is
-        reachable -- the caller then falls back to (random / heavy-tailed) search."""
+        tried; ~0 once learned or unlearnable), and `context(oid, pose, action_key) -> ctx` supplies each rolled-forward
+        move's sensed context (the static-layout the move would enter), so the rollout uses the STATE-DEPENDENT operator
+        and routes AROUND high-cost contexts (walls) by value -- `None` = unconditioned (the base operator). Returns the
+        action key, or None if nothing pragmatic/salient is reachable -- the caller falls back to heavy-tailed search."""
         if not actions:
             return None
         goal, contact = self.goal, self.contact
@@ -63,7 +65,8 @@ class Planner:
 
         def advance(state, key):
             return tuple(sorted(
-                (oid, forwards[oid].predict(pose, key) if oid in forwards else pose) for oid, pose in state))
+                (oid, forwards[oid].predict(pose, key, context(oid, pose, key) if context else None)
+                 if oid in forwards else pose) for oid, pose in state))
 
         def to_objects(state):
             return {oid: (pose, sizes.get(oid, 0)) for oid, pose in state}

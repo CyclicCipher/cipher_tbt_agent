@@ -42,6 +42,7 @@ class Player:
         self.planner = Planner(self.goal, cap=self.cap, gamma=self.gamma, novelty=self.novelty, seed=self.seed)
         self.forwards: dict = {}                              # object_id -> ForwardModel (per-object operators)
         self._prev_objects = self._last = self._prev_frame = None
+        self._prev_cells: dict = {}                           # last frame's per-object cells (for the move's context)
         self._prev_score = 0
         self._run = (None, 0)                                 # current Lévy run: (action, steps remaining)
 
@@ -52,6 +53,7 @@ class Player:
         self.field.reset()
         self.forwards = {}
         self._prev_objects = self._last = self._prev_frame = None
+        self._prev_cells = {}
         self._run = (None, 0)
 
     def _levy(self, actions):
@@ -65,27 +67,59 @@ class Player:
         self._run = (key, rem - 1)
         return key
 
+    def _predictor(self, action):
+        """Where each tracked object was expected to go under `action` (path integration via its learned operator) --
+        used by perception to tell objects apart when they touch (identity from dynamics, not appearance)."""
+        fwd = self.forwards
+        def predict(oid, pose):
+            fm = fwd.get(oid)
+            return fm.predict(pose, action, None) if (fm is not None and action is not None) else pose
+        return predict
+
+    def _context(self, oid, pose, action, grid, cells):
+        """The sensed context the move would enter: the MATERIAL at its destination cell -- another object's value (a
+        wall/obstacle/target) -- or None for open background. The operator is conditioned on this, so a blocked move is
+        a context-gated effect (not a binary obstacle flag). Reads the frame at pose + the action's base operator,
+        skipping the object's OWN cells (a thing is not an obstacle to itself); off-grid -> a boundary context."""
+        fm = self.forwards.get(oid)
+        d = fm.delta(action, None) if fm is not None else None
+        if not d or d == (0, 0):
+            return None
+        h = len(grid); w = len(grid[0]) if h else 0
+        tx, ty = round(pose[0]) + d[0], round(pose[1]) + d[1]
+        if not (0 <= ty < h and 0 <= tx < w):
+            return "edge"
+        if (tx, ty) in cells.get(oid, ()):                   # own cell -> not an obstacle to itself
+            return None
+        for o, cs in cells.items():
+            if o != oid and (tx, ty) in cs:
+                return grid[ty][tx]                          # destination occupied by another object -> its material
+        return None                                          # open background
+
     def act(self, grid, actions, score):
         """Perceive the objects, learn each one's operator + the goal from the transition into this frame, then plan."""
         if not actions:
             return None
-        objects = self.field.perceive(grid)
+        objects = self.field.perceive(grid, self._predictor(self._last))
         if self._prev_objects is not None and self._last is not None:
             boundary = self.events.is_boundary(len(salient_cells(self._prev_frame, grid)))
             if not boundary:
                 for oid, (pose, _size) in objects.items():
                     if oid in self._prev_objects:            # learn this object's operator (the self emerges from these)
-                        self.forwards.setdefault(oid, ForwardModel()).observe(
-                            self._prev_objects[oid][0], self._last, pose)
+                        prev_pose = self._prev_objects[oid][0]
+                        ctx = self._context(oid, prev_pose, self._last, self._prev_frame, self._prev_cells)
+                        self.forwards.setdefault(oid, ForwardModel()).observe(prev_pose, self._last, pose, ctx)
             self.goal.observe(objects, score - self._prev_score)
         # how much there is still to LEARN about each action (learning progress; 1.0 if untried) -- the curiosity drive
         curiosity = {a: max((fm.curiosity(a) for fm in self.forwards.values()), default=1.0) for a in actions}
-        action = self.planner.act(objects, self.forwards, actions, curiosity)
+        context = lambda oid, pose, key: self._context(oid, pose, key, grid, self.field.cells)
+        action = self.planner.act(objects, self.forwards, actions, curiosity, context=context)
         if action is None:                                   # nothing to route toward -> heavy-tailed (Lévy) search
             action = self._levy(actions)
         else:
             self._run = (None, 0)                            # a directed plan took over -> end the Lévy run
-        self._prev_objects, self._last, self._prev_score, self._prev_frame = objects, action, score, grid
+        self._prev_objects, self._last, self._prev_score = objects, action, score
+        self._prev_frame, self._prev_cells = grid, dict(self.field.cells)
         return action
 
     def run(self, env, max_steps: int = 2000):

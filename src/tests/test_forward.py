@@ -48,6 +48,22 @@ def test_mode_reads_through_blocked_moves():
     assert 0.7 < fm.confidence("go") < 1.0                   # 7/9 -- deterministic-ish but not perfectly
 
 
+def test_operator_is_state_dependent_and_generalizes():
+    """A wall is a context-gated effect, not a binary blocked-cell set: the SAME action moves in an OPEN context and is
+    stopped in a WALL context, learned per context. Because the conditional keys on the SENSED context (not the absolute
+    pose), one bump teaches the agent to expect a stop at EVERY wall-context destination -- it GENERALISES (the A∘B win a
+    per-pose blocked set cannot give). The same shape carries viscosity/risk -- a continuum, not a free/blocked flag."""
+    fm = ForwardModel()
+    for i in range(6):
+        fm.observe((i, 0), "go", (i + 1, 0), context="open")     # in the open, "go" moves +x
+    fm.observe((3, 0), "go", (3, 0), context="wall")             # bump a wall ONCE (a stall in the wall context)
+    fm.observe((3, 0), "go", (3, 0), context="wall")
+    assert fm.delta("go", "open") == (1, 0)                      # the base operator
+    assert fm.delta("go", "wall") == (0, 0)                      # stopped in the wall context
+    assert fm.predict((9, 9), "go", "open") == (10, 9)
+    assert fm.predict((9, 9), "go", "wall") == (9, 9)           # GENERALISES to a NEW pose: any wall context -> stop
+
+
 def test_predict_rolls_pose_and_footprint_forward():
     fm = ForwardModel()
     fm.observe((5, 5), "right", (7, 5))                      # operator (2, 0)

@@ -57,6 +57,23 @@ def test_a_multicell_object_stays_one_coherent_object():
     assert round(r1[oid][0][0] - r0[oid][0][0]) == 2          # its centroid moved by exactly the shift (clean operator)
 
 
+def test_self_does_not_fuse_with_a_wall_on_contact():
+    """Object permanence through CONTACT: when a moving object touches a static one (one connected blob), the tracker
+    keeps them as TWO objects at their own poses -- it does NOT fuse them into a new object and lose the mover. This is
+    the bug that blocked obstacle learning: without permanence, touching a wall erased the self, so its blocked move was
+    never recorded. (The self has not fused to the wall just because it is stuck to it.)"""
+    field = ObjectField()
+    wall = [(7, y) for y in range(3, 8)]                       # a 5-cell static wall at x=7
+    r0 = field.perceive(_render({7: [(5, 5)], 6: wall}))       # the mover, apart from the wall
+    assert len(r0) == 2
+    mover, wall_id = _id_of_size(r0, 1), _id_of_size(r0, 5)
+    moved = lambda oid, p: (p[0] + 1, p[1]) if oid == mover else p   # dynamics: the mover stepped +x; the wall is static
+    r1 = field.perceive(_render({7: [(6, 5)], 6: wall}), moved)      # the mover steps right and now TOUCHES the wall (one blob)
+    assert set(r1) == {mover, wall_id}                         # still two objects, same ids -- NOT fused
+    assert r1[mover][0] == (6.0, 5.0)                          # the mover kept its own pose
+    assert r1[mover][1] == 1 and r1[wall_id][1] == 5           # and its own size -- the wall did not absorb it
+
+
 def test_no_self_or_colour_anywhere_in_the_api():
     field = ObjectField()
     assert not hasattr(field, "self_colour")
