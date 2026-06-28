@@ -153,13 +153,20 @@ substrate for a reasoning model: attention as a learned sensorimotor saccade ove
 
 ## What we know that Monty doesn't
 
-Two things let us avoid Monty's ceiling while keeping its principles: (a) the **SR eigenframe is topology-general**
+Three things let us avoid Monty's ceiling while keeping its principles: (a) the **SR eigenframe is topology-general**
 — grid-like on metric factors, correct on rings/trees/graphs — so reference frames need no Euclidean (or 3-D)
-assumption; and (b) **value** — the score-driven active-inference drive Monty has no analogue of, which is what
-turns a recogniser into a goal-seeker. We keep Monty's evidence accumulation and voting, and its insight that an
-object is sensorimotor; we drop its fixed Euclidean frames and we add value. The location-scaling that looked like
-a wall (the 2.9 s eigh) is a symptom of mapping pixels; over **factored** states the SR frame is small and cheap,
-and an online TD-SR removes the batch eigh entirely.
+assumption; (b) **value** — the score-driven active-inference drive Monty has no analogue of, which is what turns a
+recogniser into a goal-seeker; and (c) a **frame-agnostic CMP**. Monty's cortical messaging protocol passes a 3-D
+Euclidean `(object, pose)`, and its relational vote ("where you should be sensing, by our relative displacement")
+works only *because every learning module shares that one Euclidean frame* — a real simplification of the theory,
+which says columns model things in their own, possibly abstract, frames. Our message is **not a metric pose but a
+high-dimensional code bound in a shared vector space**: each column projects its own-frame place code into the
+shared `d_mem` slot (`column.py`) and the **thalamus binds by VSA conjunction** (`thalamus.py`), so consensus is
+*vector agreement*, not pose-matching. Identity is always cross-frame-shareable; Monty's relative-displacement vote
+is the metric special case. We keep Monty's evidence accumulation, voting, and the sensorimotor-object insight; we
+drop its fixed Euclidean frames, add value, and bind heterogeneous frames in a shared space. The location-scaling
+that looked like a wall (the 2.9 s eigh) is a symptom of mapping pixels; over **factored** states the SR frame is
+small and cheap, and an online TD-SR removes the batch eigh entirely.
 
 ## The dissolution plan — what gets deleted, and what absorbs its job
 
@@ -201,9 +208,14 @@ Target: fewer files than today, and the broken assumptions cannot recur because 
 
 - **Recurrence — the wall that killed the global-frame plan — is now solved at the front-end (measured): local RFs
   recur ~99%, local transitions ~95%.** The risk has moved *downstream*, not away.
-- **Composing local into global is the new central risk.** Per-RF columns see local pieces; binding their votes
-  (relative-pose CMP) into the body / view / object factors and a coherent game-state, sample-efficiently, is the
-  unbuilt R9/R11 voting work. `factorize` over the RF streams must still recover the *right* global factors.
+- **Composing local into global is the new central risk — and it IS the CMP problem.** Per-RF columns see local
+  pieces; binding their votes into the body / object factors and a coherent game-state, sample-efficiently, is the
+  unbuilt R9/R11 voting work. The hard part is **learned cross-frame registration**: columns with *different* frames
+  must learn how their frames correspond (Hebbian/co-occurrence binding in the shared `d_mem` space), where today
+  the remap slots are merely *random*-orthogonal (coexisting, not aligned). Whether that binding converges to a
+  self-consistent global state across many columns is the A∘B / consistency question. (Mechanism + Monty contrast:
+  see "What we know that Monty doesn't". Deferred until the retina's many columns must vote; the single-object
+  factoring below needs only one column.)
 - **The saccade policy** (active inference + the exogenous-salience bootstrap) is new machinery; a poor policy
   wastes compute or never fixates the structure that matters.
 - **The two-motor integration** — saccade-learning the layout + action-learning the dynamics + value — is more than
