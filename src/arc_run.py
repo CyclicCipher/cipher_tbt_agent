@@ -19,6 +19,8 @@ from __future__ import annotations
 import os
 import random
 
+from arc_sdk import _primary_grid              # the canonical frame -> primary-grid extractor (duck-typed)
+
 
 def load_api_key(path: str = "api_key.env") -> str:
     """Load ARC_API_KEY from `path`, then a standard `.env`, then the environment. Never logs the value."""
@@ -96,8 +98,88 @@ def play_remote(policy, game_id: str, max_actions: int = 80, tags=None,
     return result
 
 
+def _our_state(state):
+    """Map an arcengine GameState (or anything with a .name) onto OUR GameState (same member names)."""
+    from tasks import GameState as OurGS
+    try:
+        return OurGS[_state_name(state)]
+    except KeyError:
+        return OurGS.NOT_FINISHED
+
+
+class _LiveFrame:
+    """Present an arc_agi `FrameDataRaw` as the frame the agent expects: `.grid` / `.state` (our GameState) /
+    `.level` / `.score` / `.action_counter` / `.is_win()`. score = level = levels_completed (a completion both
+    raises the score and advances the level). A None raw (a step error) is reported terminal so the loop stops."""
+
+    def __init__(self, raw, action_counter):
+        from tasks import GameState as OurGS
+        self.action_counter = action_counter
+        if raw is None:
+            self.grid, self.level, self.score, self.state = [[0]], 0, 0, OurGS.GAME_OVER
+        else:
+            self.grid = _primary_grid(raw.frame)
+            self.score = self.level = int(raw.levels_completed)
+            self.state = _our_state(raw.state)
+
+    def is_win(self):
+        from tasks import GameState as OurGS
+        return self.state == OurGS.WIN
+
+
+class RemoteEnv:
+    """Drive an arc_agi ONLINE game through the agent's `Environment` protocol (reset/step), so `Agent.learn_online`
+    and `Agent.play` run the LIVE games unchanged: it maps our `GameAction` -> arcengine (+ (x,y) for a coordinate
+    action) and `FrameDataRaw` -> a frame the agent reads. One game per instance."""
+
+    def __init__(self, arc, game_id, card_id):
+        self.arc, self.game_id, self.card_id = arc, game_id, card_id
+        self.env = None
+        self._actions = 0
+
+    def reset(self):
+        self.env = self.arc.make(self.game_id, scorecard_id=self.card_id)   # the remote wrapper auto-resets
+        if self.env is None:
+            raise SystemExit(f"could not make game {self.game_id}")
+        self._actions = 0
+        return _LiveFrame(self.env.observation_space, self._actions)
+
+    def step(self, action, coords=None):
+        from arcengine import GameAction
+        data = {"x": coords[0], "y": coords[1]} if coords is not None else None
+        raw = self.env.step(getattr(GameAction, action.name), data=data)
+        self._actions += 1
+        return _LiveFrame(raw, self._actions)
+
+
+def learn_remote(game_id="ls20", max_actions=500, seed=0, verbose=True):
+    """Cold-start the agent on a LIVE game with the continuous online loop, then report. Builds a FRESH
+    WorldLearner + Agent (no injected roles, no cross-game leakage), drives `RemoteEnv` via `Agent.learn_online`,
+    and closes the scorecard. Returns (Outcome, learner, scorecard)."""
+    from arc_agi import Arcade, OperationMode
+    from perception.control import NeocortexPlanner
+    from perception.scene import Perception
+    from perception.learn import WorldLearner
+    from tbt.agent import Agent
+
+    arc = Arcade(arc_api_key=load_api_key(), operation_mode=OperationMode.ONLINE)
+    card_id = arc.open_scorecard(tags=["cipher-tbt", "learn"])
+    learner = WorldLearner()
+    agent = Agent(Perception(learner.world), NeocortexPlanner(learner.world, learner.dm, seed=seed))
+    out = agent.learn_online(RemoteEnv(arc, game_id, card_id), learner, max_steps=max_actions)
+    result = arc.close_scorecard(card_id)
+    if verbose:
+        print(f"learn_remote {game_id}: won={out.won} levels={out.levels} actions={out.actions} "
+              f"| learned body={learner.world.body} goal={learner.goal.goal_colors}")
+    return out, learner, result
+
+
 if __name__ == "__main__":
     import sys
-    game = sys.argv[1] if len(sys.argv) > 1 else "ls20"
-    n = int(sys.argv[2]) if len(sys.argv) > 2 else 40
-    play_remote(RandomPolicy(seed=0), game, max_actions=n)
+    mode = sys.argv[1] if len(sys.argv) > 1 else "random"     # "random" | "learn"
+    game = sys.argv[2] if len(sys.argv) > 2 else "ls20"
+    n = int(sys.argv[3]) if len(sys.argv) > 3 else 40
+    if mode == "learn":
+        learn_remote(game, max_actions=n)
+    else:
+        play_remote(RandomPolicy(seed=0), game, max_actions=n)

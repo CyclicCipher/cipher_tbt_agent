@@ -241,13 +241,17 @@ class NeocortexPlanner:
         if explore and self.rng.random() < explore:           # optional epsilon (off in the continuous online loop)
             return self.rng.randrange(len(self.deltas))
         lay = self._layout(scene)
-        col = self._column(lay.frame)
-        factors = sorted(scene.req_cells) + sorted(scene.goal_cells)   # stable per level; the task column's sub-goals
-        self._rebind(factors, col)
         n = len(self.deltas)
         # the active sub-goal = the first still-unsatisfied required cell, else the goal (terminal last)
         req_visible = {p for c in self.world.required_absent for p in scene.by_color.get(c, ())}
         pending = [c for c in sorted(scene.req_cells) if c in req_visible]
+        goals = sorted(scene.goal_cells)
+        if not pending and not goals:                          # cold start, nothing to route yet → EXPLORE
+            return self._explore(lay, agent, n)                # (skips the SR-frame column build — fast on dense 64x64)
+        # a goal/sub-goal exists → build the spatial map column + bind the sub-goals (the eigh cost; cached per frame)
+        col = self._column(lay.frame)
+        factors = sorted(scene.req_cells) + sorted(scene.goal_cells)   # stable per level; the task column's sub-goals
+        self._rebind(factors, col)
         if pending:
             C = pending[0]
             target = self._route(col, C)
@@ -262,9 +266,6 @@ class NeocortexPlanner:
                 return self.neo.achieve(step, (agent, _anchor(focus), lay.removed0), n)
             step = self._forward_model(lay, target, None)      # COLLECT: no mover → the agent reaches it (emergent)
             return self.neo.achieve(step, (agent, None, lay.removed0), n)
-        goals = sorted(scene.goal_cells)
-        if not goals:
-            return self._explore(lay, agent, n)                # no goal learned yet → directed (novelty) exploration
         target = self._route(col, goals[0])
         step = self._forward_model(lay, target, None)
         return self.neo.achieve(step, (agent, None, lay.removed0), n)

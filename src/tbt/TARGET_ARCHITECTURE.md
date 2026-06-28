@@ -79,6 +79,12 @@ which is why TBT is sensorimotor in the first place — and the live games confi
 - **Structured (non-background) patches recur just as hard** (5×5 → 0.985) — real local content, not blank space.
 - **Local TRANSITIONS recur:** `(patch, action, next_patch)` at 5×5 has recurrence **0.95** (117 distinct of 2,560).
   The per-action operators are locally consistent, hence learnable from few samples — the thing absent globally.
+- **The localized dynamics are coherent, controllable objects.** The per-action change is only ~3.5% of the frame
+  (the rest is a static recurring layout, no global scroll), forms 1–5 connected components with a dominant large
+  one, and is locally reversible by the inverse action on ls20/cn04 (restore 0.64–1.00) even though the *global*
+  frame is 0/16 reversible — so a controllable "self" is recoverable from the residual, separable from an
+  irreversible background element. (sk48 is irreversible: coherent but one-way — a learnable operator with no
+  inverse, fine for forward planning.)
 
 So the front-end is a **retina of receptive fields**, and it breaks both walls at once: recurrence (local patterns
 repeat) and scale (many tiny columns over ~5×5 RFs, not one 4096-cell column whose eigh cost 2.9 s).
@@ -108,7 +114,7 @@ scarce (5× human median).**
 
 **Relations = relative pose (the CMP vote).** Columns vote not just "this feature" but "where my neighbour should be
 sensing, by our relative displacement" — so a relation between two local features IS the relative pose between the
-RFs sensing them. The structural observation that stays stable while pixels scroll falls out of the voting.
+RFs sensing them. The static layout (which is most of the frame) stays stable while the small dynamic residual moves.
 
 **Forward look (not for ARC now).** This same system — a learned policy over what to attend to next, with
 pose-relative binding — is structurally the attention mechanism of a sequence model. After ARC it is a candidate
@@ -119,10 +125,13 @@ substrate for a reasoning model: attention as a learned sensorimotor saccade ove
 - **Factor the local observations (`factorize.py`).** Disentangle the *retina's RF streams* (which recur) into
   independent coordinates by how they transform under the agent's actions (Higgins; Locatello: factors are only
   identifiable *with* action, never from
-  statics). The **body** is just the factor the agent's actions move; the **view/camera offset** is the factor that
-  shifts globally (ls20/cn04 scrolling becomes one coordinate, not a wall); **objects** are the remaining factors;
-  the **score** is a factor. None of these are named or assumed — they are discovered. This is the piece that makes
-  "no assumptions" possible, and it already exists for the 2-factor case.
+  statics). Measured reality on ls20/cn04/sk48: the frame is a **mostly-static recurring layout** (≈97% unchanged
+  per action) plus a **small localized dynamic residual** (~3.5% of cells) — so the factors are the static layout
+  and the few moving things in the residual. The **body** is the factor the agent's actions move; **objects** are
+  the other moving factors; the **score** is a factor; a **view/scroll offset**, *if* a game has one, is just one
+  more coordinate (the shared displacement across all RFs) — but it is ≈absent on the games measured so far. None of
+  these are named or assumed — they are discovered. This is the piece that makes "no assumptions" possible, and it
+  already exists for the 2-factor case.
 - **Learn each action's effect (`residual.py` + the column's `observe_effect`/`learn_dynamics`).** Over the factored
   coordinates, learn per action a decision list of `(predicate, delta)` rules — `ACTION_k` is *whatever it does*,
   context-dependent (a precondition gates an effect), with an MDL stop instead of a per-state lookup. No
@@ -199,8 +208,8 @@ Target: fewer files than today, and the broken assumptions cannot recur because 
   wastes compute or never fixates the structure that matters.
 - **The two-motor integration** — saccade-learning the layout + action-learning the dynamics + value — is more than
   Monty attempts; combining them into one agent is unproven.
-- **Discrete coordinates vs continuous structure** (positions, scroll offsets) for the predicate search; TD-SR
-  convergence within budget; value/active-inference integration. All real, all downstream of a working retina.
+- **Discrete coordinates vs continuous structure** (object positions, any view offset) for the predicate search;
+  TD-SR convergence within budget; value/active-inference integration. All real, all downstream of a working retina.
 - We still have **not solved a real game**; the milestone is the local → factor → operator → value loop completing
   one.
 
@@ -211,13 +220,14 @@ Target: fewer files than today, and the broken assumptions cannot recur because 
    motor** — an exogenous-salience bootstrap plus a learned active-inference policy — so the agent reads each frame
    in compute, not game actions.
 1. **Factor the local RF streams** (`factorize` over the retina's recurring observations, bound by relative-pose
-   CMP voting): confirm the body, the view/scroll offset, and objects emerge as global factors on ls20/cn04. The
-   enabler; deletes the perceivers' assumptions.
+   CMP voting): separate the static layout from the localized dynamic residual, and confirm the body and objects
+   emerge as global factors on ls20/cn04 (a view/scroll offset only if a game has one). The enabler; deletes the
+   perceivers' assumptions.
 2. **Learn the per-action path-integration operators over the factors** (`residual` / the dynamics faculty): each
    action becomes a context-dependent `M_a`; validate by the **A∘B test** — predict held-out transitions on ls20
    (opposite-direction) and a click game. Action semantics learned, none assumed.
 3. **Locate in factored-state space** with the SR frame, made online: cheap over few factors, correct on the replica
-   (regression), stable under a scrolling view.
+   (regression), stable under whatever the dynamic residual does.
 4. **Active inference**: value (pragmatic from the score factor) + epistemic (operator prediction error) replacing
    `_explore` and the role planner — the first attempt to *solve* a real game.
 5. **Delete the scaffolding; `perception/` = the thin retina sensor.** The 82-test replica suite stays green as a
