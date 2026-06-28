@@ -146,6 +146,32 @@ class RewardModel:
         return rng.choice([a for a in range(len(vals)) if vals[a] == m])
 
 
+class ValueLearner:
+    """A TD-learned HORIZON value, for the achiever to bootstrap at the rollout's horizon when a goal is beyond the
+    reachable/bounded sweep — so MULTI-STEP goals become plannable (EfficientZero-V2's value, `EZV2_NOTES.md`).
+    The piece reward.py was missing: prioritized sweeping propagates value from terminals WITHIN a rollout; this
+    estimates the return from a non-terminal horizon state so 'set up the goal' lives in a learned, GENERALISING
+    value (no enumeration) — e.g. Tetris L2's multi-piece clear, which the greedy one-piece rollout cannot reach.
+
+    DELIBERATELY GAME-AGNOSTIC: a linear value `V(f) = Σ w[k]` over a FEATURE SET `f` the caller supplies; online
+    TD `w[k] += α (target − V(f))`. The caller owns the encoding + the targets (reward + γ·V(next)). The encoding
+    is load-bearing — a generic raw-cell encoding fails when a constant substructure dominates; features that
+    CHANGE with the action (the gap to a goal) generalise (the lesson from the Tetris L2 validation)."""
+
+    def __init__(self, alpha: float = 0.25):
+        self.w: dict = {}
+        self.alpha = alpha
+
+    def value(self, feats) -> float:
+        w = self.w
+        return sum(w.get(k, 0.0) for k in feats)
+
+    def update(self, feats, target: float) -> None:
+        delta = self.alpha * (target - self.value(feats))
+        for k in feats:
+            self.w[k] = self.w.get(k, 0.0) + delta
+
+
 def run(env, agent="prioritized", steps=400, seed=0, **rmkw):
     rng = random.Random(seed)
     T, preds = augmented_transitions(env)

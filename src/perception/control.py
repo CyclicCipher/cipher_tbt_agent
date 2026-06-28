@@ -33,6 +33,7 @@ from typing import Dict, FrozenSet, Optional, Tuple
 
 from tbt.column import CorticalColumn
 from tbt.neocortex import Neocortex
+from tbt.reward import ValueLearner
 
 Cell = Tuple[int, int]
 
@@ -251,11 +252,15 @@ class TetrisPlanner:
 
     _SHIFT = {0: (-1, 0), 1: (1, 0), 3: (0, 1)}            # left, right, down (rotate=2 uses the learned cycle)
 
-    def __init__(self, learner, gravity=(0, 1), gamma: float = 0.95, seed: int = 0, cap: int = 6000):
+    def __init__(self, learner, gravity=(0, 1), gamma: float = 0.95, seed: int = 0, cap: int = 6000, value=None):
         self.learner = learner
         self.gravity = gravity
+        self.gamma = gamma
         self.cap = cap
         self.seed = seed
+        # the learned HORIZON value (EZ-V2), bootstrapped at the lock so the planner sets up MULTI-PIECE clears
+        # (the greedy one-piece rollout cannot). Trained online (demos/value_tetris.py); shareable across pieces.
+        self.value = value if value is not None else ValueLearner()
         self.neo = Neocortex(gamma=gamma, seed=seed)
         self.rng = random.Random(seed)
 
@@ -268,6 +273,14 @@ class TetrisPlanner:
 
     def on_death(self):
         pass
+
+    def feats(self, stack, well):
+        """The GAPS encoding the value learns over: empty interior cells in rows that have any stack — 'what's
+        needed to complete a line'. It CHANGES with placement (unlike raw occupancy, which a constant pre-fill
+        dominated — the Tetris-L2 lesson), so a generalising value can be learned over it."""
+        left, right, floor = well
+        rows = {y for _, y in stack}
+        return frozenset((x, y) for y in rows for x in range(left + 1, right) if (x, y) not in stack)
 
     def _forward_model(self, stack, well):
         from .scene import shape_of
@@ -295,7 +308,8 @@ class TetrisPlanner:
                 return fell, 0.0, False                    # gravity: keep falling
             new_stack = stack | moved                      # cannot fall ⇒ LOCK
             rows = [y for y in range(floor) if all((x, y) in new_stack for x in range(left + 1, right))]
-            return moved, float(len(rows)), True           # + the lines cleared (the learned goal); terminal on lock
+            v = self.value.value(self.feats(new_stack, (left, right, floor)))   # the learned HORIZON value (EZ-V2 bootstrap)
+            return moved, float(len(rows)) + self.gamma * v, True   # lines now + the future value of the resulting stack
 
         return step
 

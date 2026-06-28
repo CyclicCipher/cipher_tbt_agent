@@ -155,3 +155,22 @@ def test_one_agent_plays_tetris_via_learned_object_model():
     for lvl in (0, 1):
         out = agent.play(Environment(Tetris(levels=[_LEVELS[lvl]])), max_steps=200)
         assert out.won, f"Tetris L{lvl} not solved via the object-model: {out}"
+
+
+# ── the EZ-V2 horizon value (reward.py) + its encoding (the components; the learning curve is demos/value_tetris) ──
+def test_value_learner_td_converges():
+    from tbt.reward import ValueLearner
+    V = ValueLearner(alpha=0.5)
+    f = frozenset({(3, 9), (4, 9)})
+    assert V.value(f) == 0.0
+    for _ in range(20):
+        V.update(f, 2.0)                                 # TD toward target 2.0
+    assert abs(V.value(f) - 2.0) < 1e-3                  # converged
+    assert V.value(frozenset({(1, 1)})) == 0.0          # generalises only via shared features (untouched feature = 0)
+
+
+def test_tetris_planner_gaps_encoding():
+    planner = TetrisPlanner(TetrisLearner(C_PIECE), seed=0)
+    stack = frozenset((x, 9) for x in range(1, 7) if x not in (3, 4))   # a 6-well bottom row, cols 3,4 empty
+    assert planner.feats(stack, (0, 7, 10)) == frozenset({(3, 9), (4, 9)})   # the gaps in the occupied row
+    assert planner.feats(frozenset(), (0, 7, 10)) == frozenset()        # no stack ⇒ no gaps
