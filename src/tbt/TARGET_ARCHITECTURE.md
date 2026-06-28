@@ -3,7 +3,8 @@
 The north star. Written 2026-06-28 after the live public games (ls20, cn04, lp85, sk48, ft09, vc33, tu93)
 broke every assumption in the perception scaffolding (action=delta, single-cell body, static frame, movement-only,
 spatial goal). The lesson is not "add those cases" — it is "assert nothing." This document is the target we
-reduce toward; it is not yet built.
+reduce toward. The front-end (retina → agency → events → objects) is now BUILT and live-validated on the real games
+(see **STATUS** below); the value + planning loop that turns it into a *playing* agent is what remains.
 
 ## Thesis
 
@@ -14,6 +15,61 @@ dynamics predicate-search, `factorize`, `residual`, the recurrence, the SR frame
 the role schema) *bypassed* those faculties with hand-coded pre-processing, and every broken assumption lives in
 that pre-processing. The work is **reduction**: delete the scaffolding, feed the column raw data, let the roles
 emerge.
+
+## STATUS — built and validated (2026-06-28)
+
+The front-end is BUILT, live-validated on the real games, and committed (suite 99/99; the old agent + replica suite
+untouched as the regression baseline). Four pure-stdlib modules in `tbt/`, each one concept, no assumptions:
+
+- **`retina.py`** — narrow RF sensor: raw frame → recurring `(feature, pose)` observations via a label-free patch
+  vocabulary, plus the exogenous-attention residual. *Validated: ls20's 5,904 RF sweeps collapse to a 24-pattern
+  vocabulary; the global frame recurs 0%.*
+- **`agency.py`** — the controllable self from controllability alone (no body assumption); the static/dynamic split.
+  *Validated: controllability 1.00 on ls20/cn04.*
+- **`events.py`** — event-boundary segmentation by the reafference principle (a change the action can't explain),
+  excluded from operator learning. *Validated: caught ls20's full-frame scene-cuts that the API lifecycle flag
+  MISSED.*
+- **`objects.py`** — object tracking by POSE with permanence (a boundary resets linkage). *THE breakthrough:
+  recovers a clean, LEARNED, action-dependent per-action operator (cn04: ACTION1=up, ACTION2=down — discovered, not
+  assumed) where cell-level analysis found 0 action-selective cells.*
+
+The validated chain, no assumptions: **raw frame → retina (recurring local features) → agency (controllability) →
+events (clean boundaries) → objects (per-action operators over pose).** It fixes the original failure outright: the
+old agent hard-coded ACTION1=up and died; this LEARNS each action's real effect from the object's pose response.
+
+### Distilled learnings (what the experiments taught — they reshaped the plan)
+1. **Sense locally, never globally.** Global frames never recur (0 revisits, 0/16 reversible); 5×5 RFs recur ~99%.
+2. **The self is an OBJECT tracked by POSE, not pixels.** A moving self spreads its changes thinly, so NO cell
+   carries a stable signature (measured: 0 action-selective cells); only the object's pose has an action-dependent
+   operator. This is *why* TBT/Monty is object-and-pose-based — confirmed empirically, the hard way.
+3. **The games are mostly-static layout + a small localized dynamic residual** (~3.5% of cells), NOT scrolling (the
+   earlier "scrolling" read was a `detect_motion` artefact; the dominant global shift is (0,0)).
+4. **Event boundaries are reafference, not the lifecycle flag.** The API's GAME_OVER/WIN flag MISSES full-frame
+   scene-cuts inside NOT_FINISHED; "a change the action can't explain" catches them. The magnitude proxy is a
+   bootstrap for the proper prediction-error test, which the learned operator supplies (the two co-bootstrap).
+5. **The ACTION→effect mapping is LEARNED, not assumed** — the hand-coded ACTION1=up was the original sin.
+
+### What is next (the path to a PLAYING agent — not yet done)
+We can now SEE the dynamics (the operators); we have not yet PLAYED a game. In order:
+- **Operator as forward model** + upgrade `events.py` from magnitude to prediction-error (the co-bootstrap above).
+- **Group / factor objects** (cn04's many objects move together — one controllable group? — and separate self from
+  autonomous, which pose-spread already begins).
+- **Value / goal** — tie the score to object-states (which configurations score; `reward.py`).
+- **Plan** — the achiever (`neocortex.py`) over the operators toward the goal (active inference), then **assemble
+  into a loop and test whether it completes a real level.** That is the true milestone.
+
+NB on the original plan: stage 1 said "`factorize` over RF streams." What actually worked for the DYNAMIC factors is
+**object-pose tracking** (`objects.py`) — the objects ARE the dynamic factors, and the per-action operator over
+their pose IS the `residual`/dynamics. `factorize` (action-orbit disentanglement) still applies once states recur;
+object tracking is how recurrence is achieved for a moving thing. The architecture holds; the concrete mechanism is
+object-pose, not raw-frame factoring.
+
+NB on principle 2 (one column): the four modules are validated MECHANISMS, built standalone to de-risk them cheaply.
+`retina.py` is the sensor (Monty's sensor module) and rightly stays separate; but **`agency.py` / `events.py` /
+`objects.py` are column FACULTIES** — object tracking IS the learning module, the event boundary IS the column's
+prediction error (`residual`), the self IS the factor the operators move. Folding them INTO the `CorticalColumn` as
+we assemble the playing agent is what realizes "one column type" and keeps them from hardening into a NEW
+scaffolding. That fold-in is the spine of the next phase, not an afterthought.
 
 ## The five principles → the mechanism
 
@@ -207,7 +263,12 @@ Target: fewer files than today, and the broken assumptions cannot recur because 
 ## Honest risks (where this can fail)
 
 - **Recurrence — the wall that killed the global-frame plan — is now solved at the front-end (measured): local RFs
-  recur ~99%, local transitions ~95%.** The risk has moved *downstream*, not away.
+  recur ~99%, local transitions ~95%.** And the "cell vs object" question is resolved: **object-pose tracking
+  recovers the operators** where cells could not. The risk has moved *downstream*, not away.
+- **The dynamics are now recoverable — but turning them into a PLAYING agent is the live risk.** The operators are
+  noisy (pose = an approximate centroid), the objects may need grouping (cn04's many movers), and value + planning
+  + assembly are unbuilt. We can *see* the dynamics; making the agent *act* on them within the RHAE budget, and
+  completing even one real level, is the unproven milestone.
 - **Composing local into global is the new central risk — and it IS the CMP problem.** Per-RF columns see local
   pieces; binding their votes into the body / object factors and a coherent game-state, sample-efficiently, is the
   unbuilt R9/R11 voting work. The hard part is **learned cross-frame registration**: columns with *different* frames
@@ -227,22 +288,21 @@ Target: fewer files than today, and the broken assumptions cannot recur because 
 
 ## Reduction plan (staged, each stage deletes a scaffold and re-validates on replica + a real game)
 
-0. **The retina front-end** (validated): narrow RF columns (≈5×5, ARC-calibrated) over the frame, each emitting
-   `(features, pose)`; local recurrence ~99%, local transitions ~95%, vs 0 for the global frame. Add the **saccade
-   motor** — an exogenous-salience bootstrap plus a learned active-inference policy — so the agent reads each frame
-   in compute, not game actions.
-1. **Factor the local RF streams** (`factorize` over the retina's recurring observations, bound by relative-pose
-   CMP voting): separate the static layout from the localized dynamic residual, and confirm the body and objects
-   emerge as global factors on ls20/cn04 (a view/scroll offset only if a game has one). The enabler; deletes the
-   perceivers' assumptions.
-2. **Learn the per-action path-integration operators over the factors** (`residual` / the dynamics faculty): each
-   action becomes a context-dependent `M_a`; validate by the **A∘B test** — predict held-out transitions on ls20
-   (opposite-direction) and a click game. Action semantics learned, none assumed.
-3. **Locate in factored-state space** with the SR frame, made online: cheap over few factors, correct on the replica
-   (regression), stable under whatever the dynamic residual does.
-4. **Active inference**: value (pragmatic from the score factor) + epistemic (operator prediction error) replacing
-   `_explore` and the role planner — the first attempt to *solve* a real game.
-5. **Delete the scaffolding; `perception/` = the thin retina sensor.** The 82-test replica suite stays green as a
+0. **The retina front-end — DONE** (`retina.py`, validated): RF features recur ~99%, local transitions ~95%, vs 0%
+   for the global frame. The saccade motor's exogenous channel (`agency.py` salience) is in; the learned
+   active-inference saccade policy comes later.
+1. **Separate static layout from the dynamic objects — DONE** (`agency.py` / `events.py` / `objects.py`):
+   controllability 1.00, clean event boundaries (reafference), objects tracked by pose with permanence.
+   (Object-pose tracking replaced raw-frame `factorize` for the dynamic factors — see the STATUS note.)
+2. **Learn the per-action operators — DONE** (`objects.py`): action-dependent per-action motion recovered, LEARNED
+   not assumed (cn04: ACTION1=up). Still to stress-test: A∘B generalisation and a click game.
+3. **Operator as forward model + value + planning — NEXT (the playing agent).** Use the operators to predict (and
+   upgrade `events.py` magnitude → prediction-error); tie the score to object-states (`reward.py`); plan with the
+   achiever (`neocortex.py`) toward the goal (active inference); ASSEMBLE into a loop and test it completes a real
+   level. *This is the true milestone we have not reached.*
+4. **Group / factor objects + online SR location** as the games demand (cn04's many objects move together; the SR
+   frame over the few object-states, online).
+5. **Delete the scaffolding; `perception/` = the thin retina sensor.** The replica suite stays green as a
    regression guard; the real games are the truth.
 
 Reductions are where every previous wall fell (SR frame, pose-invariant recognition, recursive residual). This is
