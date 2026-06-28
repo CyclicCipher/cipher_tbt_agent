@@ -54,6 +54,43 @@ def _drive(player, env, target_score, budget):
     return env.actions - start
 
 
+class _Frame:
+    """A frame in the contract Player.run consumes -- the SAME shape arc_run._LiveFrame provides, so passing this
+    test means the live adapter's contract is met (offline gate, no API)."""
+
+    def __init__(self, grid, score, level, action_counter, win):
+        self.grid, self.score, self.level, self.action_counter, self._win = grid, score, level, action_counter, win
+        self.available = [0, 1, 2, 3]
+
+    def is_win(self):
+        return self._win
+
+
+class GridEnv:
+    """The controlled scene as a reset/step env returning `_Frame`s -- a single level won by reaching the goal."""
+
+    def __init__(self):
+        self.scene = GridScene()
+
+    def _frame(self):
+        s = self.scene
+        return _Frame(s.render(), s.score, s.score, s.actions, s.score >= 1)
+
+    def reset(self):
+        self.scene = GridScene()
+        return self._frame()
+
+    def step(self, action):
+        self.scene.step(action)
+        return self._frame()
+
+
+def test_player_run_completes_via_the_env_contract():
+    """Player.run drives the env through its full contract to a win -- the same contract the live adapter satisfies."""
+    out = Player(seed=0).run(GridEnv(), max_steps=150)
+    assert out.won and out.levels >= 1 and out.actions < 150
+
+
 def test_assembled_agent_finds_then_exploits_a_goal():
     env = GridScene()
     p = Player(seed=0)

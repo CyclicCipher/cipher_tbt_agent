@@ -117,10 +117,13 @@ class _LiveFrame:
         self.action_counter = action_counter
         if raw is None:
             self.grid, self.level, self.score, self.state = [[0]], 0, 0, OurGS.GAME_OVER
+            self.available = []
         else:
+            from arcengine import GameAction
             self.grid = _primary_grid(raw.frame)
             self.score = self.level = int(raw.levels_completed)
             self.state = _our_state(raw.state)
+            self.available = [GameAction.from_id(a).name for a in (raw.available_actions or [])]   # action keys
 
     def is_win(self):
         from tasks import GameState as OurGS
@@ -146,8 +149,9 @@ class RemoteEnv:
 
     def step(self, action, coords=None):
         from arcengine import GameAction
+        name = action if isinstance(action, str) else action.name   # accept a name key (Player) or a GameAction (old)
         data = {"x": coords[0], "y": coords[1]} if coords is not None else None
-        raw = self.env.step(getattr(GameAction, action.name), data=data)
+        raw = self.env.step(getattr(GameAction, name), data=data)
         self._actions += 1
         return _LiveFrame(raw, self._actions)
 
@@ -174,12 +178,34 @@ def learn_remote(game_id="ls20", max_actions=500, seed=0, verbose=True):
     return out, learner, result
 
 
+def play_live(game_id="ls20", max_actions=200, seed=0, verbose=True):
+    """Drive the ASSEMBLED rebuild agent (`tbt.play.Player`) on a LIVE game via the continuous loop. The Player's
+    contract (`act(grid, actions, score)` + `run(env)`) is met by `RemoteEnv` directly — `_LiveFrame` exposes
+    `.available` action keys and `RemoteEnv.step` accepts the name key the Player returns. The new-path counterpart
+    to `learn_remote` (which drives the OLD WorldLearner agent); this one carries no role decode. Movement games
+    first (ls20: ACTION1-4); the click action (ACTION6 coords) is the deferred step. Returns (Outcome, player, card)."""
+    from arc_agi import Arcade, OperationMode
+    from tbt.play import Player                                # lazy: pulls the column stack, kept out of import time
+
+    arc = Arcade(arc_api_key=load_api_key(), operation_mode=OperationMode.ONLINE)
+    card_id = arc.open_scorecard(tags=["cipher-tbt", "play"])
+    player = Player(seed=seed)
+    out = player.run(RemoteEnv(arc, game_id, card_id), max_steps=max_actions)
+    result = arc.close_scorecard(card_id)
+    if verbose:
+        ops = {a: player.forward.delta(a) for a in player.forward.actions()}
+        print(f"play_live {game_id}: won={out.won} levels={out.levels} actions={out.actions} | learned operators={ops}")
+    return out, player, result
+
+
 if __name__ == "__main__":
     import sys
-    mode = sys.argv[1] if len(sys.argv) > 1 else "random"     # "random" | "learn"
+    mode = sys.argv[1] if len(sys.argv) > 1 else "random"     # "random" | "learn" | "play"
     game = sys.argv[2] if len(sys.argv) > 2 else "ls20"
     n = int(sys.argv[3]) if len(sys.argv) > 3 else 40
     if mode == "learn":
         learn_remote(game, max_actions=n)
+    elif mode == "play":
+        play_live(game, max_actions=n)
     else:
         play_remote(RandomPolicy(seed=0), game, max_actions=n)
