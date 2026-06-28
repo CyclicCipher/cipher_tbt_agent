@@ -187,7 +187,11 @@ class _PlayEnv(RemoteEnv):
 
     @staticmethod
     def _playable(frame):
-        frame.available = [a for a in frame.available if a != "RESET"]
+        from arcengine import GameAction
+        # the Player plans real game actions only -- not RESET, and not (yet) the complex click action (ACTION6),
+        # which needs coordinates the pose-operator agent does not produce. The click is a deferred capability.
+        frame.available = [n for n in frame.available
+                           if n != "RESET" and not getattr(GameAction, n).is_complex()]
         return frame
 
     def reset(self):

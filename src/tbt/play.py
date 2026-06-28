@@ -56,7 +56,7 @@ class Player:
         """Perceive the objects, learn each one's operator + the goal from the transition into this frame, then plan."""
         if not actions:
             return None
-        objects = self.field.perceive(self._prev_frame, grid)
+        objects = self.field.perceive(grid)
         if self._prev_objects is not None and self._last is not None:
             boundary = self.events.is_boundary(len(salient_cells(self._prev_frame, grid)))
             if not boundary:
