@@ -415,3 +415,60 @@ Sources: [Thousand Brains Project / Monty (Numenta 2024)](https://arxiv.org/html
 Hawkins, Ahmad & Cui 2017 (voting) · [TBT voting overview (Numenta)](https://www.numenta.com/blog/2019/01/16/the-thousand-brains-theory-of-intelligence/) ·
 cortico-cortical laminar connectivity (feedforward L2/3→L4, feedback L5/6→L1, lateral uniform). Memory: see
 `reference_hierarchy_substrate`, `reference_exploration_replay`; architecture doc §3/§5/§6.
+
+
+## R10 — The TBT-faithful refactor: the column IS the forward model, value is SIGNED, location is continuous
+
+**The flag (Cipher, 2026-06-27, after A③+S2 shipped).** The agent works (Sokoban 4/4, LockPath 4/4, MultiKey 2/2,
+all autonomous — the world model learned from pixels+score), but it drifted back to the SYMBOLIC HACKS the bitter
+lesson forbids: a `WorldModel` role SCHEMA (pushable / door / consumable / harmful), a SEPARATE `DynamicsModel`
+the planner reads, TYPED sub-goals (cover / reach / affordance), a discrete CELL graph, and a POSITIVE-ONLY value
+field. Three questions: (1) why does the planner know "cell / role / consumable / harmful" — shouldn't a faithful
+column LEARN these? (2) why a separate `DynamicsModel` — shouldn't the COLUMN learn AND predict dynamics? (3)
+shouldn't reward go NEGATIVE? Constraints: location must be GENERAL + continuous-safe (not tied to "cells", must
+not break on continuous coords); there must be FEWER scripts at the end than the start.
+
+**Answer: yes to all three — they are one drift. Faithful TBT = a column that PREDICTS + a SIGNED value that
+EVALUATES; the roles dissolve into prediction + value.**
+
+- **1. The unit (Monty / Thousand-Brains Systems, arXiv 2507.04494, 2025).** ONE repeating unit — the **Learning
+  Module** — that MODELS an object, PREDICTS, and ACTS via a **Goal-State Generator**. The unit that learns IS the
+  unit that plans: no separate planner, no separate dynamics module. (Sensor Modules turn raw input into the common
+  language; the LM models it.) → kills the standalone `DynamicsModel` / `forward.py`; the column must learn + predict
+  dynamics itself (Q2).
+- **2. Location (same paper).** CONTINUOUS + pose-based: a feature at a pose `x ∈ ℝ³`, path-integrated by
+  displacement `x_t = x_{t-1} + v_t` ("dead reckoning"), movement transformed into the object's frame by the
+  hypothesised rotation (`v_M = R⁻¹ v_B`). NO grid of discrete cells. → our discrete SR-symbol / cell graph is the
+  un-general part; the faithful location is the displacement/recurrence machinery on a CONTINUOUS pose code
+  (Q1-location; continuous-safe by construction).
+- **3. Composition (same).** The **CMP** carries `(features, pose, confidence)` for feedforward / lateral voting /
+  **goal-states** — goal-directed action = emit a desired pose, move to close it (matches R9; the thalamus is the
+  substrate). NB Monty has **NO value and NO object-behaviour dynamics yet** — those are OUR additions, not a copy.
+- **4. Value — SIGNED; planning = active inference (Bogacz, eLife 53262, 2020).** Dopamine = a SIGNED reward-
+  prediction error `δ = actual − expected`, NEGATIVE for worse-than-expected / aversive (negative δ flips the weight
+  update = reversal learning). **Planning = within-trial action that MINIMISES the gap between the DESIRED state and
+  the EXPECTED state** (`da/dt ∝ ∂F/∂a`, `F = −δ²`; terminates when δ→0). Preferences = DESIRED STATES, not absolute
+  reward; cortex supplies the forward model, basal ganglia + dopamine supply value. → our `reward.py` is positive-
+  only (R_ext=1, novelty+, no negatives), which is exactly WHY we LABEL death/harmful and do graph-surgery instead
+  of letting value avoid them. Sign the value and those roles DISSOLVE: "harmful" = a predicted state with negative
+  value; "collect-all" = the desired state is all-items-gone; "door" = a predicted state-change the value wants.
+  The planner just closes the gap (Q1-roles + Q3).
+
+**The build (Phase 2 — supersedes the role-threading "finish the suite" patches; full plan in
+[[project_reorient_and_reconnect]]).** TARGET: `column.py` = the LM (continuous-pose frame via the recurrence +
+an IN-COLUMN forward model + a goal-state generator); `value.py` = SIGNED value; `neocortex.py` = a THIN active-
+inference loop (roll the forward models, score predicted states by signed value, emit goal-states — NO roles, NO
+typed sub-goals); a THIN sensor module (no role schema). STEPS, each a general method + validated on the suite +
+NET-deleting files: **A** the column becomes the forward model (fold `dynamics.py` + `forward.py` in; location →
+pose/continuous) [−2]; **B** signed value + active-inference planning (roll the column model + signed value + goal-
+states; replaces the cell-graph nav + typed sub-goals + openers + role-avoidance — CollectAll + Toggle FALL OUT)
+DELETE `planner.py`, `control.py`, neocortex → thin [−2]; **C** dissolve the role schema (perception → thin sensor
+module; the LM learns dynamics + the value field learns the goal) DELETE `learn.py`, shrink perceive/scene [−1].
+NET ~24 → ~19 agent files. Step B is the crux = MuZero / EZ-V2 search over the LEARNED model (see `EZV2_NOTES`).
+
+Sources: [Thousand-Brains Systems (arXiv 2507.04494, 2025)](https://arxiv.org/abs/2507.04494) ·
+[The Thousand Brains Project (arXiv 2412.18354)](https://arxiv.org/abs/2412.18354) ·
+[Dopamine role in learning and action inference — Bogacz, eLife 2020](https://elifesciences.org/articles/53262) ·
+[Locations in the Neocortex: cortical grid cells (Frontiers 2019)](https://www.frontiersin.org/journals/neural-circuits/articles/10.3389/fncir.2019.00022/full) ·
+[Thousand Brains principles](https://thousandbrains.org/learn/thousand-brains-principles/).
+Memory: [[reference_efficientzero_v2]], [[feedback_bitter_lesson]], [[project_general_world_model]].

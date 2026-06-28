@@ -20,7 +20,7 @@ from perception.learn import WorldLearner
 from perception.scene import Perception
 
 from tasks import Environment
-from tasks.games import LockPath, MultiKey
+from tasks.games import LockPath, MultiKey, Toggle
 
 from tbt.agent import Agent
 
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     print("F's cold-start — the ONE agent learns the world model from self-directed play (no injected roles, no")
     print("oracle), then solves the game. Every role is DISCOVERED: the goal from the sparse score; the body,")
     print("the pushable, the key->door effects and the hazard from watching.\n")
-    for game_cls in (LockPath, MultiKey):
+    for game_cls in (LockPath, MultiKey, Toggle):
         world, history, outcome = cold_start(game_cls)
         n = game_cls().level_count
         print(f"=== {game_cls.__name__} ({game_cls.game_id}) — {n} levels ===")

@@ -4,8 +4,7 @@ Deliberately tiny and task-agnostic. The agent does ONLY the part the column sho
 environment — read each observation through a `perception` (the senses), hand the resulting scene to a
 `planner` (the brain: the SR-frame map + recurrence + the Neocortex control loop, all in `tbt/`), and emit the
 action. Perception owns every grid/colour/action detail; the planner owns the model + planning. Both are
-INJECTED, so the SAME agent runs full-observation ARC games, the egocentric partial-observation variant, or any
-future task whose perception + planner implement the contract:
+INJECTED, so the SAME agent runs any task whose perception + planner implement the contract:
 
   perception.read(obs) -> Percept(scene, new_level, terminal);  perception.to_action(move);  .reset_action
   planner.act(scene, explore) -> move index;  planner.reset() / new_level() / on_death()

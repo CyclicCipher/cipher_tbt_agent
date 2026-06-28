@@ -1,14 +1,16 @@
 # CLAUDE.md — Cipher's TBT Agent
 
-## ⚠ ACTIVE WORK (read first) — merge to `src/` + reorient to the reusable architecture
-The agent had drifted into a 575-line ARC-specific solver (the anti-pattern). We are **killing the silo**: merge
-`experiments/ProgramSynthesis` + `experiments/RecurrentWorldModel` into one top-level `src/` package, then
-reorient the agent to a **thin shell over the column** (the `tbt/agent.py` 40-line template), with task-format
-code quarantined in `perception/`/`tasks/` and planning moved into the column. **The plan + live checklist is
-[REORG_PLAN.md](REORG_PLAN.md) — follow it; update its checkboxes as steps land.** **Part A (the merge) is DONE + validated** — everything now lives under `src/` (run
-`PYTHONPATH=src python -m <pkg>.<mod>`). **Part B (reorient the agent per `src/tbt/EMERGENT_PLAN.md`) is NEXT.**
-NB: the architecture/run-command sections BELOW still cite `experiments/…` paths — stale, pending a careful
-rewrite (see REORG_PLAN A6). Remove this note when REORG_PLAN.md is fully checked.
+## ⚠ ACTIVE WORK (read first) — Phase 2 of the TBT-faithful refactor: the rollout planner over the multi-column spine
+**START HERE: [STEP_B_HANDOFF.md](STEP_B_HANDOFF.md)** (the runnable handoff: state + build order + the validated
+prototype) and the memory **`project_reorient_and_reconnect.md`** (READ-FIRST; the full plan + history) and
+**`src/tbt/RESEARCH.md` R10** (the research). The merge to `src/` is long DONE (run `PYTHONPATH=src python -m
+<pkg>.<mod>`); the agent is one thin shell (`tbt/agent.py`) over a planner.
+We are mid **Phase 2** (the bitter-lesson refactor that dissolves the symbolic scaffolding into a learned model +
+SIGNED value). **Step A is DONE+committed (`82b9bcd`)** — the cortical column IS the forward model (dynamics folded
+in). **Step B is IN PROGRESS** — replace the typed sub-goals with a value-driven ROLLOUT planner that plans OVER
+the multi-column world model (thalamus/CMP + basal ganglia + per-object columns STAY — never strip them; the rollout
+is the PLANNER, the spine is the WORLD MODEL). Prototype validated on 4/5 replica games; integration is next (see
+the handoff's build order). NB: the architecture/run-command sections BELOW may cite stale `experiments/…` paths.
 
 ## What this project is
 
