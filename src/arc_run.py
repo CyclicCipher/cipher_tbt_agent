@@ -141,11 +141,13 @@ class RemoteEnv:
         self._actions = 0
 
     def reset(self):
-        self.env = self.arc.make(self.game_id, scorecard_id=self.card_id)   # the remote wrapper auto-resets
+        from arcengine import GameAction
+        self.env = self.arc.make(self.game_id, scorecard_id=self.card_id)
         if self.env is None:
             raise SystemExit(f"could not make game {self.game_id}")
         self._actions = 0
-        return _LiveFrame(self.env.observation_space, self._actions)
+        raw = self.env.step(GameAction.RESET)         # `make` leaves the game "available but not started"; RESET begins it
+        return _LiveFrame(raw, self._actions)
 
     def step(self, action, coords=None):
         from arcengine import GameAction
@@ -178,6 +180,28 @@ def learn_remote(game_id="ls20", max_actions=500, seed=0, verbose=True):
     return out, learner, result
 
 
+class _PlayEnv(RemoteEnv):
+    """The Player's live env. On top of RemoteEnv (which RESETs to start the game), it SELF-HEALS a GAME_OVER by
+    sending RESET to reload the level so the run continues (death-as-cost is the parked obstacle work), and hides
+    RESET from `available` so the Player only ever plans real game actions, never the lifecycle command."""
+
+    @staticmethod
+    def _playable(frame):
+        frame.available = [a for a in frame.available if a != "RESET"]
+        return frame
+
+    def reset(self):
+        return self._playable(super().reset())
+
+    def step(self, action, coords=None):
+        from arcengine import GameAction
+        from tasks import GameState
+        frame = super().step(action, coords)
+        if frame.state == GameState.GAME_OVER:                # reload the level and keep going
+            frame = _LiveFrame(self.env.step(GameAction.RESET), self._actions)
+        return self._playable(frame)
+
+
 def play_live(game_id="ls20", max_actions=200, seed=0, verbose=True):
     """Drive the ASSEMBLED rebuild agent (`tbt.play.Player`) on a LIVE game via the continuous loop. The Player's
     contract (`act(grid, actions, score)` + `run(env)`) is met by `RemoteEnv` directly — `_LiveFrame` exposes
@@ -190,11 +214,13 @@ def play_live(game_id="ls20", max_actions=200, seed=0, verbose=True):
     arc = Arcade(arc_api_key=load_api_key(), operation_mode=OperationMode.ONLINE)
     card_id = arc.open_scorecard(tags=["cipher-tbt", "play"])
     player = Player(seed=seed)
-    out = player.run(RemoteEnv(arc, game_id, card_id), max_steps=max_actions)
+    out = player.run(_PlayEnv(arc, game_id, card_id), max_steps=max_actions)
     result = arc.close_scorecard(card_id)
     if verbose:
         ops = {a: player.forward.delta(a) for a in player.forward.actions()}
-        print(f"play_live {game_id}: won={out.won} levels={out.levels} actions={out.actions} | learned operators={ops}")
+        print(f"play_live {game_id}: won={out.won} levels={out.levels} actions={out.actions}")
+        print(f"  perception: self_colour={player.perceiver.self_colour}  goals_learned={len(player.goal.goals)}  "
+              f"operators={ops}")
     return out, player, result
 
 
