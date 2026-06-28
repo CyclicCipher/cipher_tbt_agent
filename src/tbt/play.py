@@ -102,13 +102,25 @@ class Player:
             return None
         objects = self.field.perceive(grid, self._predictor(self._last))
         if self._prev_objects is not None and self._last is not None:
-            boundary = self.events.is_boundary(len(salient_cells(self._prev_frame, grid)))
+            # the transitions of objects present in both frames, each with the context its move entered
+            trans = [(oid, self._prev_objects[oid][0], pose,
+                      self._context(oid, self._prev_objects[oid][0], self._last, self._prev_frame, self._prev_cells))
+                     for oid, (pose, _size) in objects.items() if oid in self._prev_objects]
+            # REAFFERENCE: a boundary is the change the operators CANNOT explain, not merely a big change. Subtract each
+            # tracked object's predicted motion (the cells it vacates + enters) from the observed change; the residual is
+            # the exafferent (world-caused) magnitude. Before operators exist the residual == the raw change (bootstrap),
+            # and as operators sharpen the residual shrinks for explained moves -- the two co-bootstrap.
+            observed = salient_cells(self._prev_frame, grid)
+            explained = set()
+            for (oid, _p0, _p1, ctx) in trans:
+                fm = self.forwards.get(oid)
+                if fm is not None:
+                    pc = self._prev_cells.get(oid, set())
+                    explained |= pc | fm.predict_cells(pc, self._last, ctx)
+            boundary = self.events.is_boundary(len(observed - explained))
             if not boundary:
-                for oid, (pose, _size) in objects.items():
-                    if oid in self._prev_objects:            # learn this object's operator (the self emerges from these)
-                        prev_pose = self._prev_objects[oid][0]
-                        ctx = self._context(oid, prev_pose, self._last, self._prev_frame, self._prev_cells)
-                        self.forwards.setdefault(oid, ForwardModel()).observe(prev_pose, self._last, pose, ctx)
+                for (oid, p0, p1, ctx) in trans:         # learn each object's operator (the self emerges from these)
+                    self.forwards.setdefault(oid, ForwardModel()).observe(p0, self._last, p1, ctx)
             self.goal.observe(objects, score - self._prev_score)
         # how much there is still to LEARN about each action (learning progress; 1.0 if untried) -- the curiosity drive
         curiosity = {a: max((fm.curiosity(a) for fm in self.forwards.values()), default=1.0) for a in actions}

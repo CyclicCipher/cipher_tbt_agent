@@ -73,6 +73,33 @@ def test_loop_learns_operators_and_explores_on_frames():
     assert len(seen) > len(walk)                              # directed exploration beats a random walk
 
 
+def test_explained_motion_is_not_a_boundary_but_a_scene_cut_is():
+    """The events upgrade (reafference residual): once the operator is learned, even a BIG move is explained (residual
+    ~0) so it is not a boundary and is learned cleanly; an unexplained SCENE-CUT has a huge residual -> boundary ->
+    EXCLUDED from operator learning, so it cannot corrupt the operator."""
+    p = Player(seed=0)
+    p.reset()
+
+    def frame(x):
+        g = [[0] * 30 for _ in range(30)]
+        g[10][x] = 7                                          # a 1-cell mover
+        return g
+
+    x = 2
+    grid = frame(x)
+    for _ in range(7):                                        # the mover jumps +3 in x each step under the only action
+        p.act(grid, [3], 0)
+        x += 3
+        grid = frame(x)
+    fm = next(f for f in p.forwards.values() if f.delta(3))
+    assert fm.delta(3) == (3, 0)                              # the BIG move is learned cleanly, never flagged a boundary
+    before = fm.confidence(3)
+
+    cut = [[5 if (r + c) % 2 == 0 else 0 for c in range(30)] for r in range(30)]   # an unrelated full-frame replacement
+    p.act(cut, [3], 0)
+    assert fm.delta(3) == (3, 0) and fm.confidence(3) >= before   # the scene-cut did NOT corrupt the operator
+
+
 class _Frame:
     """A frame in the contract Player.run consumes -- the same shape arc_run._LiveFrame provides (the live-adapter gate)."""
 
