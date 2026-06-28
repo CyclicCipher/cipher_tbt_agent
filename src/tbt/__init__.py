@@ -18,9 +18,6 @@ _EXPORTS = {
     "L4_FeatureLocation": ".l4_feature_location",
     "L23_Object": ".l23_object",
     "RewardModel": ".reward",                     # pure stdlib — no torch
-    "Environment": ".env",                        # pure stdlib — no torch
-    "Step": ".env",                               # pure stdlib — no torch
-    "Agent": ".agent",                            # the agentic wrapper (torch, via the column)
     "Thalamus": ".thalamus",                      # inter-column routing / conjunction (torch)
     "BasalGanglia": ".basal_ganglia",             # the gate selector / emergent allocator (pure stdlib)
     "discover_factors": ".factorize",             # Higgins-style disentanglement from action orbits (pure stdlib)

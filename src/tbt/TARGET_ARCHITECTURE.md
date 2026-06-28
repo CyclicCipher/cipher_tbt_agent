@@ -1,394 +1,129 @@
-# TARGET ARCHITECTURE — the agent as ONE column over the game-as-object
+# TARGET ARCHITECTURE — the cortical column as the engine of intelligence
 
-The north star. Written 2026-06-28 after the live public games (ls20, cn04, lp85, sk48, ft09, vc33, tu93)
-broke every assumption in the perception scaffolding (action=delta, single-cell body, static frame, movement-only,
-spatial goal). The lesson is not "add those cases" — it is "assert nothing." This document is the target we
-reduce toward. The front-end (retina → agency → events → objects) and the playing loop (forward model → goal/value →
-active-inference planner with directed exploration) are BUILT, and ASSEMBLED into one continuous agent that plays
-end-to-end on a controlled frame scene (see **STATUS** below; suite 121). The obstacle/cost layer is now BUILT too —
-a state-dependent operator + object permanence, no binary obstacle model (see *Obstacles and cost*). What remains is
-the LIVE adapter (run it on a real game) plus two remaining step-4 items: the click action (ACTION6) and the learned
-saccade policy. (Events→prediction-error and the ls20 state-change assumption are now DONE — the operator KIND,
-translate vs toggle, EMERGES from a pose⊕content object state; see *Distilled learnings* and stage 4 below.)
+*Rewritten from scratch 2026-06-28, after the reset to **columns + API only**. Supersedes the previous doc. The
+agent is many copies of ONE column algorithm talking over a thin fabric; there is almost no harness.*
 
 ## Thesis
 
-**An ARC-AGI-3 game IS a sensorimotor object, and one cortical column learns it the way it learns any object:**
-by acting and observing how the raw input transforms. The column already has the faculties (L4/L5/L6/L23, the
-dynamics predicate-search, `factorize`, `residual`, the recurrence, the SR frame). The scaffolding
-(`DynamicsPerceiver`, `ObjectPerceiver`, `GoalModel`, `WorldLearner`, `NeocortexPlanner`, `segment`-as-perception,
-the role schema) *bypassed* those faculties with hand-coded pre-processing, and every broken assumption lives in
-that pre-processing. The work is **reduction**: delete the scaffolding, feed the column raw data, let the roles
-emerge.
+Intelligence is **many instances of one cortical-column algorithm**, each learning a reference frame and predicting
+within it, communicating over a thin fabric. The column is the engine: **perception, recognition, the world-model,
+dynamics, and goal-proposal are all column faculties.** Only four things are NOT the column:
 
-## STATUS — built and validated (2026-06-28)
+1. **Sensorimotor organs** — sensors (raw frame → *features at a location*, via receptive fields) and motors (ACTION1–6).
+2. **Thalamus** — the inter-column communication fabric (routing, binding; voting deferred) + the goal-state channel.
+3. **Basal ganglia** — the action gate (Go/NoGo, dopamine-RPE; emergent allocation).
+4. **Reward** — the pragmatic value signal from the score.
 
-The front-end is BUILT, live-validated on the real games, and committed (suite 99/99; the old agent + replica suite
-untouched as the regression baseline). Four pure-stdlib modules in `tbt/`, each one concept, no assumptions:
+Everything else flows through **columns + their communication**.
 
-- **`retina.py`** — narrow RF sensor: raw frame → recurring `(feature, pose)` observations via a label-free patch
-  vocabulary, plus the exogenous-attention residual. *Validated: ls20's 5,904 RF sweeps collapse to a 24-pattern
-  vocabulary; the global frame recurs 0%.*
-- **`agency.py`** — the controllable self from controllability alone (no body assumption); the static/dynamic split.
-  *Validated: controllability 1.00 on ls20/cn04.*
-- **`events.py`** — event-boundary segmentation by the reafference principle (a change the action can't explain),
-  excluded from operator learning. *Validated: caught ls20's full-frame scene-cuts that the API lifecycle flag
-  MISSED.*
-- **`objects.py`** — object tracking by POSE with permanence (a boundary resets linkage). *THE breakthrough:
-  recovers a clean, LEARNED, action-dependent per-action operator (cn04: ACTION1=up, ACTION2=down — discovered, not
-  assumed) where cell-level analysis found 0 action-selective cells.*
+We borrow from **Monty** (the Thousand Brains Project implementation) the faculties we lack — chiefly evidence-based
+recognition with *inferred pose*. We are **not** a Monty clone: our reference frame is the **SR-eigenframe**
+(topology-general, not 3-D Euclidean), we have **value** (Monty is a pure recogniser, and so cannot do a goal task
+like ARC), and we have a **conditional-dynamics** faculty. The aim is a *more* biologically faithful column than
+Monty's, keeping our advantages and adding its recognition/learning machinery.
 
-The validated chain, no assumptions: **raw frame → retina (recurring local features) → agency (controllability) →
-events (clean boundaries) → objects (per-action operators over pose).** It fixes the original failure outright: the
-old agent hard-coded ACTION1=up and died; this LEARNS each action's real effect from the object's pose response.
+## The loop (active inference — reuse from prior commits)
 
-### The playing loop — built and validated (2026-06-28, suite 114/114)
+> sense → each column **recognises** (which object, what pose) + **path-integrates** its belief + **predicts dynamics**
+> → each column's **GSG** proposes goal-states (epistemic value: resolve uncertainty) alongside **reward** (pragmatic
+> value) → **basal ganglia** gate → **motor** acts. One continuous interaction; the model persists across levels.
 
-Three more pure-stdlib modules turn the front-end into an active-inference agent that plans (the harness dissolved —
-~15 lines of planner logic vs `control.py`'s ~270, no role schema, no `DELTAS`, no `_explore`/ε):
+Expected free energy = epistemic + pragmatic; exploration and exploitation are ONE value. The achiever / EFE
+arbitration / goal-directed + novelty-directed planning we built before is reusable (see git history) and drives this
+loop — it is not new work, it is re-grounding what we had on the columns.
 
-- **`forward.py`** — the per-action operator as the column's forward model (L5): the MODAL integer pose-displacement
-  an action causes (reads through blocked/direction-switch noise the change-centroid introduces), with
-  `predict`/`predict_cells`/`prediction_error`. *Learned, never assumed; the same robustness that recovered cn04's
-  `(0,±3)`.* `prediction_error` is what upgrades `events.py` from "big change" to "unpredicted change".
-- **`goal.py`** — the goal/value bridge to `reward.py`: a score increment marks the reached object-configuration
-  rewarding, encoded position-canonically (each object's pose RELATIVE to the self), so a goal learned once transfers
-  across the board. No typed sub-goal; object-removal is a distinct goal for free (required-absent).
-- **`plan.py`** — active-inference action selection with DIRECTED EXPLORATION folded into one value: **motor babbling**
-  (R-MAX optimism makes a never-tried operator the top target → tries each action once), **novelty** (an unvisited
-  arrangement is a frontier *target* to route to), **goal** (exploit), arbitrated emergently (pursue a reachable
-  reward, else range — the LC phasic/tonic shift, no coded switch). The same epistemic currency a saccade policy will
-  spend. *Validated: babbling learns all operators in |actions| steps; frontier coverage ~72% vs random ~52%; a
-  learned goal reached in optimal steps, through unexplored space, trusting the operators.*
+## The column's faculties — HAVE / FOLD / BUILD
 
-**Assembled** (`perceive.py` + `play.py`): `ScenePerceiver` bridges frames → `(self_pose, others)` (segment by
-connected components, the self = the object that MOVES under an action, true positions); the thin `Player` runs the
-continuous loop — perceive → learn (the self's operator + the goal from the score) → plan — with the models persisting
-across levels. *Validated end-to-end on a controlled frame scene: from raw frames it babbles all four operators, then
-explores to find + learn the goal, then EXPLOITS it in optimal steps after a respawn (cross-level transfer, 6 ≪ 55).
-Not yet on a live game — that is the live adapter, next; v1 perceives one self + a few landmarks (many movers = the
-deferred grouping step).*
+The column is "learn a structural map, predict from it," through four layers. Each faculty is **HAVE** (works today),
+**FOLD** (a current standalone script's *function* moves into a layer), or **BUILD** (Monty has it, we don't yet).
 
-### Distilled learnings (what the experiments taught — they reshaped the plan)
-1. **Sense locally, never globally.** Global frames never recur (0 revisits, 0/16 reversible); 5×5 RFs recur ~99%.
-2. **The self is an OBJECT tracked by POSE, not pixels.** A moving self spreads its changes thinly, so NO cell
-   carries a stable signature (measured: 0 action-selective cells); only the object's pose has an action-dependent
-   operator. This is *why* TBT/Monty is object-and-pose-based — confirmed empirically, the hard way.
-3. **The games are mostly-static layout + a small localized dynamic residual** (~3.5% of cells), NOT scrolling (the
-   earlier "scrolling" read was a `detect_motion` artefact; the dominant global shift is (0,0)).
-4. **Event boundaries are reafference, not the lifecycle flag.** The API's GAME_OVER/WIN flag MISSES full-frame
-   scene-cuts inside NOT_FINISHED; "a change the action can't explain" catches them. The magnitude proxy is a
-   bootstrap for the proper prediction-error test, which the learned operator supplies (the two co-bootstrap).
-5. **The ACTION→effect mapping is LEARNED, not assumed** — the hand-coded ACTION1=up was the original sin.
+- **L6 — reference frame (HAVE; absorbs `factorize`).** The SR-eigenvector frame of the transition graph
+  (Stachenfeld 2017: grid cells *are* the SR eigenvectors) — topology-general (grid-like on metric space, correct on
+  rings/trees/abstract spaces). **Factorization lives here:** independent factors are separable eigen-subspaces of the
+  *action* graph, and where they don't separate, a second column is allocated (basal ganglia). So `factorize.py`'s job
+  becomes a property of L6 + multi-column allocation, not a side script. *(Research check: eigen-subspaces ≈ disentangled
+  factors because the frame is built from ACTIONS, not statics — validate, don't assume.)*
+- **L5 — operators (HAVE base; absorbs `residual`).** Per-action displacement operators, composed for inference and
+  path integration. The conditional/structured part — the carry, the "door", contact-gated effects — is the operator
+  made **state-dependent** (its effect depends on location/context). So `residual.py`'s predicate-search job becomes
+  "L5 operators conditioned on context," not a side script.
+- **L4 / L23 — content + memory (HAVE).** Bind entity ⊗ location (L4); pool in the one shared object memory (L23); read
+  back. This is Monty's "features at locations."
+- **Belief + recurrence/memory (HAVE function; absorbs `recurrence`).** The column carries a state across the
+  sensorimotor sequence: **PREDICT** by the L5 operator (efference copy — survives partial observability), **CORRECT**
+  toward what is sensed. We DO need this recurrence/memory. The current `recurrence.py` (a learned per-channel Mamba/SSD
+  gate) is a leftover from the language SSM; its *function* — the predict↔correct gain, i.e. precision-weighting /
+  Kalman gain — folds into the column's belief+evidence update. In the new design this recurrence becomes Monty-style
+  **evidence accumulation** (a running evidence sum; the gain starts fixed and may later be a learned precision). The
+  standalone SSM-gate does not earn its keep as a top-level concept.
 
-### What is next (the path to a PLAYING agent)
-The forward model, goal/value, and the active-inference planner with directed exploration are now BUILT (above). What
-remains, in order:
-- **ASSEMBLE** the front-end + playing loop into one continuous online agent and run it on a live game — wire each
-  frame through retina → objects → forward/goal → plan, fold the standalone mechanisms into the `CorticalColumn`
-  (principle 2), and complete even one real level. *This is the true milestone.*
-- **Group / factor objects** (cn04's many objects move together — one controllable group? — and separate self from
-  autonomous, which pose-spread already begins).
-- **Obstacles / cost** — DONE (state-dependent operator + object permanence; see *Obstacles and cost*). Still to do:
-  the click action (ACTION6) and the learned saccade policy. (`events.py` magnitude → reafference residual, and the
-  ls20 state-change assumption — the operator KIND now emerges from a pose⊕content state — are DONE.)
+### BUILD — Monty has, we lack (the spine)
+- **Evidence-based recognition with inferred pose (BUILD — the priority).** Carry MANY `(object, pose)` hypotheses with
+  graded evidence; each step, project every hypothesis by the (rotated) displacement and score the match at its new
+  location; **infer pose** from sensed features; pick the most-likely hypothesis with a relative confidence/termination
+  threshold. This is the core LM loop and the home of the deleted `recognize.py`. Single-hypothesis path integration
+  (HAVE) is its degenerate case.
+- **Incremental / online model building (BUILD).** Add a point to the model when the sensed location is novel; learn
+  during one continuous interaction with **no batch re-eigendecomposition** (today's `consolidate()` re-eigh's the whole
+  graph — too slow per step on 64×64). Online TD-SR for the place codes.
+- **Goal State Generator (BUILD).** From its own model, propose the next pose to visit that best disambiguates the
+  leading hypotheses (epistemic value), emitted on the thalamic goal-state channel, arbitrated with reward (pragmatic)
+  and gated by the basal ganglia.
 
-NB on the original plan: stage 1 said "`factorize` over RF streams." What actually worked for the DYNAMIC factors is
-**object-pose tracking** (`objects.py`) — the objects ARE the dynamic factors, and the per-action operator over
-their pose IS the `residual`/dynamics. `factorize` (action-orbit disentanglement) still applies once states recur;
-object tracking is how recurrence is achieved for a moving thing. The architecture holds; the concrete mechanism is
-object-pose, not raw-frame factoring.
+## Dorsal / ventral — one algorithm, two specialisations (this saves us a whole behaviour model)
 
-NB on principle 2 (one column): the four modules are validated MECHANISMS, built standalone to de-risk them cheaply.
-`retina.py` is the sensor (Monty's sensor module) and rightly stays separate; but **`agency.py` / `events.py` /
-`objects.py` are column FACULTIES** — object tracking IS the learning module, the event boundary IS the column's
-prediction error (`residual`), the self IS the factor the operators move. Folding them INTO the `CorticalColumn` as
-we assemble the playing agent is what realizes "one column type" and keeps them from hardening into a NEW
-scaffolding. That fold-in is the spine of the next phase, not an afterthought.
+Same column, same algorithm, **specialised only by its input stream** (Mountcastle's canonical microcircuit; the
+function of a cortical region is set by its connections, not a different algorithm). Parvocellular-like input (sustained,
+static features) → ventral **"what" / morphology**; magnocellular-like input (transient, **change**) → dorsal
+**"where/how" / dynamics**. Monty's object-behaviours doc states it directly: *"if parvocellular cells are input to L4,
+the column learns the static morphology; if magnocellular, the dynamic behavior."*
 
-## The five principles → the mechanism
+So we do **not** write a behaviour/dynamics model. A "dynamics column" is the **same `CorticalColumn` fed the change
+stream** (our reafference residual / salient cells) instead of the static-feature stream. One algorithm, two instances,
+differing only by input — the pose⊕content thing we built-and-lost collapses to "point a column at the change stream."
 
-1. **Only raw data, sensed locally.** The column consumes exactly what ARC-AGI-3 returns — the frame (N grids
-   ≤64×64, ints 0–15), the score (levels_completed), the state, the available actions, the action issued — with no
-   `segment`/`modal_background`/`detect_motion`/role decode. But "raw" cannot mean "the global frame is the state":
-   global frames never recur (measured: 0 revisits, 0/16 reversible on ls20), so there is no structure to learn. It
-   means **sensed through narrow receptive fields** (the retina, below), where local patterns recur ~99%.
-2. **One column type, many instances.** There already is one `CorticalColumn`. Use it for everything — perception,
-   dynamics, value, recognition — specialised only by what each instance is connected to (Mountcastle). Multiple
-   instances over different sensors/scales/views vote via the thalamus (CMP).
-3. **All core logic in `tbt/`.** `perception/` shrinks to a thin sensor: raw `FrameData` → arrays, nothing more.
-4. **No dynamics/perceiver/learner/exploration/role scripts.** Each is already a column faculty; dissolve the
-   scaffolding into it.
-5. **Robust by making NO assumptions**, not by adding cases. Below, nothing asserts what an action does, what the
-   body is, whether the view is stable, or what the goal is.
+## Attention is not a module
 
-## The unifying operation — path integration in a learned reference frame
+Attention is the **motor / path-integration system choosing where to sample**: OVERT = a saccade (move the sensor);
+COVERT/mental = path-integrate the belief over the reference frame **without** moving the body (a withheld movement —
+the premotor theory of attention). So attention = **GSG** (proposes the locus) + **path integration** (moves the locus)
++ **basal ganglia** (gates overt vs covert). No attention script. Salience still influences it, as the bottom-up
+estimate of expected information gain (the same epistemic currency the GSG spends).
 
-One operation underlies the world-model half of everything below: **location ← operator(location), composed along
-the trajectory.** A reference frame is just a set of per-action operators and how they compose.
+## Inter-column messaging — deferred (heterogeneous frames)
 
-- The 2-D hex grid (`L6_GridLocation`) is only the special case: location = plane-wave phases, operator = a phase
-  rotation by a displacement `(dx,dy)`. It bakes in "metric and Euclidean."
-- The **general** case is already in the column (`loc_move`): location = the SR-frame place code (L6), operator =
-  the learned per-action matrix `M_a = Σ place(s')⊗place(s)` (L5); path integration is `h ← M_a·h` (matrix
-  products), drift-corrected by the recurrence (`loc_sense`). Learned from observed `(s, a, s')`, so it holds on
-  ANY topology with no metric assumption.
-- They unify because **the SR eigenframe IS the grid on metric spaces (Stachenfeld)** and the correct frame on any
-  other topology. So operator-composition path integration *reduces to* the hex grid on metric factors and
-  *extends* to everything else — one mechanism, no Euclidean assumption.
+Monty's CMP voting works *because every LM shares ONE Euclidean frame* — a vote ("sense it *here*, by our relative
+displacement") transforms by a common displacement. **Our columns each learn a DIFFERENT SR-eigenframe**, so voting
+needs **learned cross-frame registration** (Hebbian / co-occurrence binding in the shared `d_mem` space). Feed-forward +
+thalamic VSA binding work now; pose-aware *voting* across heterogeneous frames is a genuinely harder, deferred problem.
 
-Per factor the operator's KIND falls out of the transitions, never declared: a **position** factor → a uniform
-translation (recovers exact, scale-free grid path integration); a **discrete/toggle** factor → a permutation/edge
-map; a **context-gated** effect (a door) → a *state-dependent* operator, which is exactly what `residual.py` learns.
-The whole game-state path-integrates as the product over factors.
+## What we keep that Monty lacks
+- The **SR-eigenframe** — topology-general, so the same machinery navigates abstract / relational / conceptual spaces
+  (the reasoning substrate; attention and "mental saccades" over concept space are the same operation).
+- **Value** (reward + basal ganglia) → goal-seeking. Monty is a recogniser; this is why we can do ARC and it can't.
+- The **conditional-dynamics** faculty (predict the world's responses, not just recognise form).
+- **Path integration** as a built-in belief.
 
-Through this lens the faculties are one thing: the **forward model / dynamics** (apply `M_a`), the **self model**
-(self = the factor your operators move — no body assumed), the **planner** (compose operators over hypothetical
-actions), and **recognition / localisation** (`loc_where` + `loc_sense`) are all path integration in the learned
-frame. That is most of the deleted harness, in one operation.
+## Script dispositions (the cleanup this implies)
+- `column_learner.py` — **DELETE** (orphaned demo driver; its drive-and-learn function is the agent loop, not a script).
+- `factorize.py` — dissolve into **L6** (eigen-subspace factors + BG allocation); remove once folded.
+- `residual.py` — dissolve into **L5** (state-dependent operators); remove once folded.
+- `recurrence.py` — dissolve into the column's **belief/evidence update** (precision-weighted predict↔correct); remove
+  the standalone SSM-gate once folded.
+- **Keep:** `column.py`, `l4/l5/l6/l23`, `thalamus.py`, `basal_ganglia.py`, `reward.py`, and the API
+  (`arc_run.py`, `arc_sdk.py`, `tasks/core.py`).
 
-**Two boundaries, stated honestly (where the lens stops):**
-1. **Path integration gives the map, not the values** — where actions lead, never which places are good.
-   Goal-direction is the score-driven value layered on top (active inference, `reward.py`). This is precisely what
-   Monty lacks and why a Monty-style system can't do a goal task like ARC; the world model is path integration,
-   **value/goal is the separate, deliberate addition.**
-2. **The operators must compose consistently AND generalise from few samples** — the A∘B problem ("consistency ≠
-   correctness"): `M_a` path-integrates *observed* edges perfectly but must predict *unobserved* state-actions to be
-   a real model, inside the RHAE action budget. It generalises only as well as the **factorisation** is regular:
-   good factors → low-D, group-structured operators that generalise from a handful of moves; bad factors → a
-   memorised edge table that drifts. This couples directly to disentanglement and is the make-or-break.
+## Build order (deadline-aware)
+1. **Evidence-based recognition with inferred pose**, in the column — the spine; subsumes `recognize.py`.
+2. **Incremental / online learning** (no batch eigh) — required to run live within the action budget.
+3. **GSG + reward + basal ganglia → the active-inference loop** (re-ground the prior-commit planner on the column).
+4. **Dorsal/ventral dynamics column** (the change stream) — cheap once 1–3 exist.
+5. **The sensor (retina)** → column input; run the continuous loop on a real game.
+6. Later: **cross-frame voting**; **compositional hierarchy** of columns.
 
-## The retina and the limbs — the sensorimotor front-end (validated 2026-06-28)
-
-The path-integration spine needs **recurring** states. The frame doesn't provide them: raw 64×64 frames never recur
-(0 revisits, 0/16 reversible), so `factorize`/the SR frame have no orbits to find. The fix is to sense **locally** —
-which is why TBT is sensorimotor in the first place — and the live games confirm it:
-
-- **Local receptive fields recur where global frames don't.** Distinct-patch recurrence over 41 ls20 frames: 5×5 →
-  **0.994** (945 distinct of 147,600), 8×8 → 0.982, 16×16 → 0.913, 32×32 → 0.737, 64×64 → **0.000**. cn04 matches.
-  A whole game is a vocabulary of a few hundred to ~2,400 local patterns.
-- **Structured (non-background) patches recur just as hard** (5×5 → 0.985) — real local content, not blank space.
-- **Local TRANSITIONS recur:** `(patch, action, next_patch)` at 5×5 has recurrence **0.95** (117 distinct of 2,560).
-  The per-action operators are locally consistent, hence learnable from few samples — the thing absent globally.
-- **The localized dynamics are coherent, controllable objects.** The per-action change is only ~3.5% of the frame
-  (the rest is a static recurring layout, no global scroll), forms 1–5 connected components with a dominant large
-  one, and is locally reversible by the inverse action on ls20/cn04 (restore 0.64–1.00) even though the *global*
-  frame is 0/16 reversible — so a controllable "self" is recoverable from the residual, separable from an
-  irreversible background element. (sk48 is irreversible: coherent but one-way — a learnable operator with no
-  inverse, fine for forward planning.)
-
-So the front-end is a **retina of receptive fields**, and it breaks both walls at once: recurrence (local patterns
-repeat) and scale (many tiny columns over ~5×5 RFs, not one 4096-cell column whose eigh cost 2.9 s).
-
-**The retina.** Tile the frame with narrow receptive fields, **one `CorticalColumn` per RF** (Monty: 1:1 sensor ↔
-learning module; HTM: one column per potential pool). Each RF column emits `(features, pose)` into the CMP. RF size
-≈ **5×5–8×8** is the ARC-calibrated sweet spot (≥98% recurrence, ~1k-pattern vocabulary, enough content to carry a
-feature). **Overlap** is optional (Monty tiles without it; cortex/retina overlap, more at the fovea) — relations come
-from the *relative pose* between RFs, not from overlap, but overlap buys coverage-continuity and redundancy, so we
-lean to a modest overlap. RF size / overlap / foveation are **hyperparameters calibrated to ARC** (re-tuned per
-application when this is later deployed on a real-world task), not first principles.
-
-**The limbs — two motors (the second is beyond Monty).**
-1. **Saccade / attention motor (free).** The agent moves its RFs over the *static* current frame, path-integrating
-   the sensor pose to build the frame's spatial model — Monty's loop, which Monty only does over static objects.
-   Saccades cost **compute, not game actions**, so the agent reads each frame exhaustively before spending a move.
-   The policy is a **learned active-inference** one (saccade where prediction error / hypothesis entropy is highest =
-   epistemic), **bootstrapped by a bio-inspired exogenous channel** (automatic capture by salience: motion, novelty,
-   edges); the endogenous (learned, voluntary) and exogenous channels influence each other, as in biological
-   attention.
-2. **Game-action motor (costly).** ACTION1–6 *transform the world*; the agent learns the per-action operators from
-   how the sensed local structure moves. Monty has no analogue (it never manipulates the world) — our interactive
-   extension, and the reason we also need value, which Monty lacks.
-
-The split maps onto the RHAE economics exactly: **compute is generous (saccade and plan freely), game actions are
-scarce (5× human median).**
-
-**Relations = relative pose (the CMP vote).** Columns vote not just "this feature" but "where my neighbour should be
-sensing, by our relative displacement" — so a relation between two local features IS the relative pose between the
-RFs sensing them. The static layout (which is most of the frame) stays stable while the small dynamic residual moves.
-
-**Forward look (not for ARC now).** This same system — a learned policy over what to attend to next, with
-pose-relative binding — is structurally the attention mechanism of a sequence model. After ARC it is a candidate
-substrate for a reasoning model: attention as a learned sensorimotor saccade over a learned reference frame.
-
-## How each faculty consumes raw data and what EMERGES
-
-- **Factor the local observations (`factorize.py`).** Disentangle the *retina's RF streams* (which recur) into
-  independent coordinates by how they transform under the agent's actions (Higgins; Locatello: factors are only
-  identifiable *with* action, never from
-  statics). Measured reality on ls20/cn04/sk48: the frame is a **mostly-static recurring layout** (≈97% unchanged
-  per action) plus a **small localized dynamic residual** (~3.5% of cells) — so the factors are the static layout
-  and the few moving things in the residual. The **body** is the factor the agent's actions move; **objects** are
-  the other moving factors; the **score** is a factor; a **view/scroll offset**, *if* a game has one, is just one
-  more coordinate (the shared displacement across all RFs) — but it is ≈absent on the games measured so far. None of
-  these are named or assumed — they are discovered. This is the piece that makes "no assumptions" possible, and it
-  already exists for the 2-factor case.
-- **Learn each action's effect (`residual.py` + the column's `observe_effect`/`learn_dynamics`).** Over the factored
-  coordinates, learn per action a decision list of `(predicate, delta)` rules — `ACTION_k` is *whatever it does*,
-  context-dependent (a precondition gates an effect), with an MDL stop instead of a per-state lookup. No
-  action→direction map, no movement assumption (a coordinate/click action is just an action whose effect is learned;
-  ACTION6's (x,y) is part of its parameterisation). This dissolves `DynamicsPerceiver` and `ObjectPerceiver`.
-- **Locate yourself in the game (L6, made online).** "Where am I" = a place code over the *factored state space*,
-  the successor-representation frame (general topology, no Euclidean assumption — unlike Monty's 3-D frames and
-  unlike our hex `L6_GridLocation`). **The 2.9 s eigh was a symptom of mapping 4096 pixel-cells**; over a handful of
-  factored coordinates the state graph is tiny, so the SR frame is cheap — and for streaming we move to an online
-  **TD successor representation** (incremental, no batch eigh). The recurrence (`loc_move`/`loc_sense`) tracks
-  position online, as now.
-- **Content + memory (L4/L23).** Factor-values bound to place codes in the one shared memory, read back by unbinding.
-- **Value + goal + exploration = active inference (`reward.py`, folded in).** The score factor makes score-raising
-  states **pragmatically** valuable; the transition model's **prediction error** is **epistemic** value (this is
-  exploration — no `_explore` script, no random ε). One drive, planned by rolling the learned model forward (the
-  achiever stays). Goals are discovered (the score), never assumed spatial.
-- **Multiple columns vote (`thalamus.py`/`basal_ganglia.py`).** Identical columns over different sensors/scales
-  exchange beliefs over (state, factors, action) via the CMP; consensus + emergent allocation, as in Monty's voting.
-
-## What we know that Monty doesn't
-
-Three things let us avoid Monty's ceiling while keeping its principles: (a) the **SR eigenframe is topology-general**
-— grid-like on metric factors, correct on rings/trees/graphs — so reference frames need no Euclidean (or 3-D)
-assumption; (b) **value** — the score-driven active-inference drive Monty has no analogue of, which is what turns a
-recogniser into a goal-seeker; and (c) a **frame-agnostic CMP**. Monty's cortical messaging protocol passes a 3-D
-Euclidean `(object, pose)`, and its relational vote ("where you should be sensing, by our relative displacement")
-works only *because every learning module shares that one Euclidean frame* — a real simplification of the theory,
-which says columns model things in their own, possibly abstract, frames. Our message is **not a metric pose but a
-high-dimensional code bound in a shared vector space**: each column projects its own-frame place code into the
-shared `d_mem` slot (`column.py`) and the **thalamus binds by VSA conjunction** (`thalamus.py`), so consensus is
-*vector agreement*, not pose-matching. Identity is always cross-frame-shareable; Monty's relative-displacement vote
-is the metric special case. We keep Monty's evidence accumulation, voting, and the sensorimotor-object insight; we
-drop its fixed Euclidean frames, add value, and bind heterogeneous frames in a shared space. The location-scaling
-that looked like a wall (the 2.9 s eigh) is a symptom of mapping pixels; over **factored** states the SR frame is
-small and cheap, and an online TD-SR removes the batch eigh entirely.
-
-## Obstacles and cost — a continuous value surface, not a free/blocked predicate (research, 2026-06-28; BUILT 2026-06-28)
-
-The "wall" question — how to represent what blocks or resists movement — was researched, then BUILT, and it is NOT a
-binary obstacle model (the bitter lesson). Neuroscience gives the general form, and it already fits this architecture:
-
-- **A barrier is not an object; it is a change in TRANSITION STRUCTURE.** The hippocampal predictive map (the
-  successor representation, Stachenfeld et al. 2017) WARPS around a barrier — the wall is reshaped reachability,
-  represented implicitly, never a labelled object. (Boundary-vector / border cells — Lever et al. 2009; Solstad et
-  al. 2008 — are only the *sensed* geometry, the specialised detector we must not import as a role.)
-- **The physics is exact** (and answers "is resistance-in-a-wire analogous?" — yes, the same mathematics): a random
-  walk on the state graph IS an electrical resistor network (commute time = effective resistance), and the value
-  function is a POTENTIAL — in the linearly-solvable MDP (Todorov 2006/2009) the exponentiated value ("desirability")
-  solves a linear diffusion / Laplace equation. So **wall / viscosity / resistance / risk are ONE continuous
-  quantity** (high resistance ≡ high potential ≡ low-probability transition). It generalises to abstract domains
-  because the *same* grid/SR machinery maps conceptual spaces (Constantinescu et al. 2016; the Tolman-Eichenbaum
-  Machine, Whittington et al. 2020) — "resistance in a wire" is the same computation as a physical wall.
-- **Design direction (BUILT 2026-06-28):** an obstacle FALLS OUT of (learned transition model + value), with no
-  obstacle concept. Concretely: (1) **`forward.py` is now a STATE-DEPENDENT operator** keyed by `(action, context)` —
-  `context` = the MATERIAL the move would enter (the destination cell, supplied by `play.py`). A wall is just the
-  `(0,0)` effect a wall-context produces — a context-gated effect (the door `residual.py` describes), and because the
-  context is the material not the cell, ONE bump generalises to every wall of that material. An unseen context falls
-  back to the base operator (R-MAX optimism: assume the move works until a bump proves otherwise), so the agent routes
-  TO objects and only AROUND ones it has learned block it. The continuum (a no-move = a wasted step, slow = viscosity,
-  death = a costly context) is the same machinery — other context→effect mappings, only the blocking case exercised so
-  far. (2) **`perceive.py` keeps OBJECT PERMANENCE through contact** — the self touching a wall stays the self at its own
-  pose (identity from dynamics, not appearance), which is what lets the blocked transition be recorded at all. (3) The
-  planner rolls the state-dependent operator forward and **routes around by VALUE** (its existing cost-to-goal
-  minimisation), nothing walled off by a rule. *Validated: 5/5 seeds route around a wall to a target behind it on a
-  controlled scene; suite 121. The SR-frame deformation / `residual.py` predicate search remain the deeper form for
-  context the destination-material proxy cannot express; live validation is still pending.*
-
-Citations: Stachenfeld, Botvinick & Gershman 2017 (Nat. Neurosci., the predictive map); Lever, Burton, Jeewajee,
-O'Keefe & Burgess 2009 (J. Neurosci., boundary vector cells); Solstad, Boccara, Kropff, Moser & Moser 2008 (Science,
-border cells); Todorov 2006/2009 (linearly-solvable MDPs / desirability); Doyle & Snell, *Random Walks and Electric
-Networks*; Constantinescu, O'Reilly & Behrens 2016 (Science, gridlike code for conceptual knowledge); Whittington et
-al. 2020 (Cell, the Tolman-Eichenbaum Machine). Synthesis saved as memory `reference_obstacle_as_transition_cost`.
-
-## The dissolution plan — what gets deleted, and what absorbs its job
-
-Nothing is deleted cold. Each scaffold is dissolved by moving its job into a column faculty, re-validated against the
-replica (regression) AND a real game, then removed. In dependency order:
-
-- **`ObjectPerceiver` (`perceive.py`)** — learns body/pushable/blocking/walkable/consumable from motion, assuming the
-  body is the single colour that moves by the issued 1-cell delta. → **`factorize`** (the body, the view, and objects
-  are factors) + **`residual`** (how each object-factor responds to an action is its operator; "pushable"/"blocking"
-  are contact-conditioned operators, not labels). *Deleted once factors + their operators reproduce the replica's
-  role behaviour.*
-- **`DynamicsPerceiver` (`perceive.py`)** — pre-digests `(prev, action, frame)` into (stepped-on colour, presence
-  bits, effect), assuming the efference copy is colour-moves-by-delta and an effect is a colour vanish/appear or
-  death/score. → fed nothing pre-digested: the column's **own** dynamics faculty (`observe_effect`/`learn_dynamics`/
-  `predict_effect`) consumes **raw factored transitions** — features = the factor coordinates, effect = a factor
-  delta. *Deleted once `learn_dynamics` runs on factors directly.*
-- **`GoalModel` (`perceive.py`)** — goal colour from a score increment + a required-absent context, assuming a
-  spatial/colour goal. → the **score is a factor**; pragmatic **value** (`reward.py`) labels score-raising states; the
-  conjunctive "required-absent" is just which factor-configurations score. *Deleted once value is learned over the
-  score factor.*
-- **`WorldLearner` (`learn.py`)** — bundles the perceivers and decodes a role `WorldModel`. → the **column IS the
-  learner** (`observe`/`consolidate`/`learn_dynamics`); there is no decode step. *Deleted with the perceivers.*
-- **`NeocortexPlanner` (`control.py`)** — the role decode, `_explore`, and the forward-model glue. → **active
-  inference** over the column's path-integration model + value (pragmatic + epistemic); the achiever (`neocortex.py`)
-  stays, renamed honestly. *Deleted once active inference plans on the column's own model.*
-- **`scene.py` role schema (`WorldModel`: body/pushable/blocking/goal)** and **`segment`-as-perception** → no role
-  labels; objects are factors. `perception/` shrinks to a **thin sensor**: raw `FrameData` → arrays. (Connected-
-  component objectness is a defensible Core-Knowledge prior; if kept, it is a cheap *sensor primitive* that proposes
-  candidate factors, never a role decoder.) *Deleted last, once nothing reads roles.*
-- **`recognize.py`** — evidence-based recognition over object point-clouds. → the **same evidence loop folded into the
-  column** as state/game recognition ("which state am I in, which game is this") over factors. *Kept as a principle,
-  dissolved as a separate script.*
-- **The hand-coded assumptions** (`ACTION1=up`, single-cell body, static frame, spatial goal) → gone, because no
-  faculty above states them.
-
-Target: fewer files than today, and the broken assumptions cannot recur because nothing states them.
-
-## Honest risks (where this can fail)
-
-- **Recurrence — the wall that killed the global-frame plan — is now solved at the front-end (measured): local RFs
-  recur ~99%, local transitions ~95%.** And the "cell vs object" question is resolved: **object-pose tracking
-  recovers the operators** where cells could not. The risk has moved *downstream*, not away.
-- **The dynamics are now recoverable — but turning them into a PLAYING agent is the live risk.** The operators are
-  noisy (pose = an approximate centroid), the objects may need grouping (cn04's many movers), and value + planning
-  + assembly are unbuilt. We can *see* the dynamics; making the agent *act* on them within the RHAE budget, and
-  completing even one real level, is the unproven milestone.
-- **Composing local into global is the new central risk — and it IS the CMP problem.** Per-RF columns see local
-  pieces; binding their votes into the body / object factors and a coherent game-state, sample-efficiently, is the
-  unbuilt R9/R11 voting work. The hard part is **learned cross-frame registration**: columns with *different* frames
-  must learn how their frames correspond (Hebbian/co-occurrence binding in the shared `d_mem` space), where today
-  the remap slots are merely *random*-orthogonal (coexisting, not aligned). Whether that binding converges to a
-  self-consistent global state across many columns is the A∘B / consistency question. (Mechanism + Monty contrast:
-  see "What we know that Monty doesn't". Deferred until the retina's many columns must vote; the single-object
-  factoring below needs only one column.)
-- **The saccade policy** (active inference + the exogenous-salience bootstrap) is new machinery; a poor policy
-  wastes compute or never fixates the structure that matters.
-- **The two-motor integration** — saccade-learning the layout + action-learning the dynamics + value — is more than
-  Monty attempts; combining them into one agent is unproven.
-- **Discrete coordinates vs continuous structure** (object positions, any view offset) for the predicate search;
-  TD-SR convergence within budget; value/active-inference integration. All real, all downstream of a working retina.
-- We still have **not solved a real game**; the milestone is the local → factor → operator → value loop completing
-  one.
-
-## Reduction plan (staged, each stage deletes a scaffold and re-validates on replica + a real game)
-
-0. **The retina front-end — DONE** (`retina.py`, validated): RF features recur ~99%, local transitions ~95%, vs 0%
-   for the global frame. The saccade motor's exogenous channel (`agency.py` salience) is in; the learned
-   active-inference saccade policy comes later.
-1. **Separate static layout from the dynamic objects — DONE** (`agency.py` / `events.py` / `objects.py`):
-   controllability 1.00, clean event boundaries (reafference), objects tracked by pose with permanence.
-   (Object-pose tracking replaced raw-frame `factorize` for the dynamic factors — see the STATUS note.)
-2. **Learn the per-action operators — DONE** (`objects.py`): action-dependent per-action motion recovered, LEARNED
-   not assumed (cn04: ACTION1=up). Still to stress-test: A∘B generalisation and a click game.
-3. **Operator as forward model + value + planning — DONE** (`forward.py` / `goal.py` / `plan.py`): the operators
-   predict (`forward.predict`), the score ties to object-states (`goal.py` over `reward.py`), and the achiever plans
-   toward the goal with DIRECTED EXPLORATION folded in (`plan.py`: babble + novelty + goal, no `_explore`/ε).
-   Validated in closed loop (babbling learns all operators in |actions| steps, coverage beats random, optimal goal
-   reach).
-4. **ASSEMBLE the continuous online agent — DONE (controlled-scene gate)** (`perceive.py` / `play.py`): perceive →
-   learn operator + goal → plan, end-to-end on raw frames; babble + explore + exploit + cross-level transfer
-   validated. **Obstacle/cost — DONE** (state-dependent operator + object permanence; routes around a wall 5/5; see
-   *Obstacles and cost*). **Events→reafference-residual — DONE** (`play.py` feeds `events` the observed change minus the
-   operators' prediction; a big EXPLAINED move is no boundary, a scene-cut is). **Operator KIND emerges — DONE** (the
-   deadly translation assumption removed): an object's state is `(pose, content)` and the SAME modal-transition operator
-   moves the POSE (movement, cn04) or transforms the CONTENT (in-place toggle, ls20); the KIND, the self
-   (`is_action_sensitive`), the goal (`config_state` over content), the planner rollout, and curiosity are all
-   KIND-agnostic — a state-change game is solved by the same agent (test_play `ToggleScene`). This dissolved THREE
-   assumptions at once (self-must-translate, goal-is-spatial, content-is-just-size). **REMAINING in step 4:** the LIVE
-   adapter (bridge `Player` to the real-game env and complete a real level, folding the standalone mechanisms into the
-   `CorticalColumn`, principle 2); the click action (ACTION6); and the learned saccade policy.
-5. **Group / factor objects + online SR location** as the games demand (cn04's many objects move together; the SR
-   frame over the few object-states, online).
-6. **Delete the scaffolding; `perception/` = the thin retina sensor.** The replica suite stays green as a
-   regression guard; the real games are the truth.
-
-Reductions are where every previous wall fell (SR frame, pose-invariant recognition, recursive residual). This is
-the same move at the scale of the whole agent.
+## Honest risks
+- The evidence loop + online learning over the SR-frame **within the action budget** is unproven — the make-or-break.
+- "Eigen-subspaces = disentangled factors" and "fixed gain vs learned precision" are **research questions to validate**,
+  not settled facts.
+- Heterogeneous-frame voting is genuinely hard; deferring it limits multi-column consensus for now.
+- We have **not completed a real ARC level** — that remains the milestone everything is judged against.

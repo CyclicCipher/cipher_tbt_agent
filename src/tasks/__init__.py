@@ -1,18 +1,7 @@
-"""An offline replica of the ARC-AGI-3 interactive reasoning environment.
+"""ARC-AGI-3 object-model types (the live API contract): FrameData / GameAction / GameState / colour grids.
 
-Faithful to the public ARC-AGI-3 object model (FrameData / GameAction / GameState
-/ Scorecard, 64x64 color grids, action-availability gating, the
-NOT_PLAYED->NOT_FINISHED->WIN|GAME_OVER lifecycle), with original games standing
-in for the proprietary ones so the harness is runnable offline.
-
-Quick start:
-
-    from tasks import Environment, RandomAgent, run_episode
-    from tasks.games import LockPath
-
-    env = Environment(LockPath())
-    result = run_episode(env, RandomAgent(seed=0), max_actions=2000)
-    print(result)
+Pared down to the types the live integration (`arc_run` / `arc_sdk`) speaks. The offline replica games, harness, and
+agents were removed in the reset to columns + API; rebuild any offline fixtures on the columns as needed.
 """
 
 from .core import (
@@ -26,9 +15,6 @@ from .core import (
     GRID_SIZE,
     NUM_COLORS,
 )
-from .game import Game
-from .harness import Environment, GameResult, Scorecard
-from .agents import Agent, RandomAgent, run_episode
 
 __all__ = [
     "ActionNotAvailable",
@@ -40,11 +26,4 @@ __all__ = [
     "Grid",
     "GRID_SIZE",
     "NUM_COLORS",
-    "Game",
-    "Environment",
-    "GameResult",
-    "Scorecard",
-    "Agent",
-    "RandomAgent",
-    "run_episode",
 ]

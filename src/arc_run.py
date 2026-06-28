@@ -160,37 +160,15 @@ class RemoteEnv:
         return _LiveFrame(raw, self._actions)
 
 
-def learn_remote(game_id="ls20", max_actions=500, seed=0, verbose=True):
-    """Cold-start the agent on a LIVE game with the continuous online loop, then report. Builds a FRESH
-    WorldLearner + Agent (no injected roles, no cross-game leakage), drives `RemoteEnv` via `Agent.learn_online`,
-    and closes the scorecard. Returns (Outcome, learner, scorecard)."""
-    from arc_agi import Arcade, OperationMode
-    from perception.control import NeocortexPlanner
-    from perception.scene import Perception
-    from perception.learn import WorldLearner
-    from tbt.agent import Agent
-
-    arc = Arcade(arc_api_key=load_api_key(), operation_mode=OperationMode.ONLINE)
-    card_id = arc.open_scorecard(tags=["cipher-tbt", "learn"])
-    learner = WorldLearner()
-    agent = Agent(Perception(learner.world), NeocortexPlanner(learner.world, learner.dm, seed=seed))
-    out = agent.learn_online(RemoteEnv(arc, game_id, card_id), learner, max_steps=max_actions)
-    result = arc.close_scorecard(card_id)
-    if verbose:
-        print(f"learn_remote {game_id}: won={out.won} levels={out.levels} actions={out.actions} "
-              f"| learned body={learner.world.body} goal={learner.goal.goal_colors}")
-    return out, learner, result
-
-
 class _PlayEnv(RemoteEnv):
-    """The Player's live env. On top of RemoteEnv (which RESETs to start the game), it SELF-HEALS a GAME_OVER by
-    sending RESET to reload the level so the run continues (death-as-cost is the parked obstacle work), and hides
-    RESET from `available` so the Player only ever plans real game actions, never the lifecycle command."""
+    """An agent's live env. On top of RemoteEnv (which RESETs to start the game), it SELF-HEALS a GAME_OVER by sending
+    RESET to reload the level so the run continues, and hides RESET from `available` so the agent only ever plans real
+    game actions; the click (ACTION6) is exposed via `coord_actions` (the agent supplies the (x, y))."""
 
     @staticmethod
     def _playable(frame):
-        # the Player plans real game actions only -- not RESET (the lifecycle command). The click (ACTION6) IS planned
-        # now: the planner picks a target object and `play` emits its cell as (x, y) coordinates (via coord_actions).
+        # plan real game actions only -- not RESET (the lifecycle command). The click (ACTION6) is exposed via
+        # coord_actions; the agent picks a target and supplies its cell as (x, y).
         frame.available = [n for n in frame.available if n != "RESET"]
         frame.coord_actions = [n for n in frame.coord_actions if n in frame.available]
         return frame
@@ -207,40 +185,8 @@ class _PlayEnv(RemoteEnv):
         return self._playable(frame)
 
 
-def play_live(game_id="ls20", max_actions=200, seed=0, verbose=True):
-    """Drive the ASSEMBLED rebuild agent (`tbt.play.Player`) on a LIVE game via the continuous loop. The Player's
-    contract (`act(grid, actions, score)` + `run(env)`) is met by `RemoteEnv` directly — `_LiveFrame` exposes
-    `.available` action keys (+ `.coord_actions` for the click) and `RemoteEnv.step` accepts the name key and optional
-    (x, y) the Player returns. The new-path counterpart to `learn_remote` (which drives the OLD WorldLearner agent);
-    this one carries no role decode. Handles movement (ls20/cn04: ACTION1-4) AND the click (ACTION6): the planner picks
-    a target object and `play` emits its cell as coordinates. Returns (Outcome, player, card)."""
-    from arc_agi import Arcade, OperationMode
-    from tbt.play import Player                                # lazy: pulls the column stack, kept out of import time
-
-    arc = Arcade(arc_api_key=load_api_key(), operation_mode=OperationMode.ONLINE)
-    card_id = arc.open_scorecard(tags=["cipher-tbt", "play"])
-    player = Player(cap=4096, seed=seed)                       # board-sized cap so directed routing reaches a visible target
-    out = player.run(_PlayEnv(arc, game_id, card_id), max_steps=max_actions)
-    result = arc.close_scorecard(card_id)
-    if verbose:
-        ops = {oid: {a: fm.delta(a) for a in fm.actions()} for oid, fm in player.forwards.items()}
-        emergent = [oid for oid, fm in player.forwards.items()                   # a controllable object emerged --
-                    if fm.is_action_sensitive()]                                 # action-sensitive in POSE or CONTENT
-        print(f"play_live {game_id}: won={out.won} levels={out.levels} actions={out.actions}")
-        print(f"  objects tracked={len(player.forwards)} emergent-controllable ids={emergent} "
-              f"goals_learned={len(player.goal.goals)}")
-        print(f"  operators={ops}")
-    return out, player, result
-
-
 if __name__ == "__main__":
     import sys
-    mode = sys.argv[1] if len(sys.argv) > 1 else "random"     # "random" | "learn" | "play"
-    game = sys.argv[2] if len(sys.argv) > 2 else "ls20"
-    n = int(sys.argv[3]) if len(sys.argv) > 3 else 40
-    if mode == "learn":
-        learn_remote(game, max_actions=n)
-    elif mode == "play":
-        play_live(game, max_actions=n)
-    else:
-        play_remote(RandomPolicy(seed=0), game, max_actions=n)
+    game = sys.argv[1] if len(sys.argv) > 1 else "ls20"
+    n = int(sys.argv[2]) if len(sys.argv) > 2 else 40
+    play_remote(RandomPolicy(seed=0), game, max_actions=n)     # the random baseline; the agent driver is rebuilt on the columns
