@@ -43,6 +43,8 @@ class Neocortex:
         self.bg = BasalGanglia(n_columns=n_columns, seed=seed)  # gates the active object-column (focus)
         self.rm = RewardModel(1, gamma=gamma, beta=0.0, prioritized=True, optimistic=False)   # SIGNED value field
         self.rng = random.Random(seed)
+        self.root_value = 0.0                                   # the planned value of the last chosen action (so a
+        #                                                        caller can arbitrate pragmatic vs epistemic plans)
 
     def reset(self):
         self.bg.gate_reset()                                    # focus-gate affinity is within-level only
@@ -86,9 +88,11 @@ class Neocortex:
         rm.budget = 6 * len(T)
         rm.plan(T, preds, start)
         if not T.get(start):
+            self.root_value = 0.0
             return self.rng.randrange(n_actions)
         vals = [rm.V[ns] for ns in T[start]]
         m = max(vals)
+        self.root_value = m                                    # expose the chosen action's value (caller may arbitrate)
         return self.rng.choice([a for a, v in enumerate(vals) if v == m])
 
     # ---- top-down CMP: the task column's sub-goals → goal-states in the spatial column (the thalamus) ----

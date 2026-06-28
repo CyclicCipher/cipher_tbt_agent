@@ -64,3 +64,9 @@ class GoalModel:
         """The unified value of reaching this configuration: extrinsic (1.0 at a learned goal) plus the intrinsic
         novelty bonus (reward.py keeps exploration and exploitation in ONE value, no explore/exploit switch)."""
         return self.rm.reward_total(self.state(self_pose, others))
+
+    def visits(self, self_pose, others) -> int:
+        """How many times the agent has REALLY been in this configuration (from `observe`, not rollout). The planner
+        turns this into the epistemic/novelty drive -- an arrangement never visited is worth visiting -- so directed
+        exploration and goal-seeking share one value (the active-inference epistemic + pragmatic split)."""
+        return self.rm.visits.get(self.state(self_pose, others), 0)
