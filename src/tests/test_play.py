@@ -100,6 +100,55 @@ def test_explained_motion_is_not_a_boundary_but_a_scene_cut_is():
     assert fm.delta(3) == (3, 0) and fm.confidence(3) >= before   # the scene-cut did NOT corrupt the operator
 
 
+class WallScene:
+    """A wall the agent must route AROUND: a vertical bar with gaps at top and bottom, and a target behind it. Moving
+    into the wall (or off-grid) is blocked. The obstacle is LEARNED as a context-gated no-move (no obstacle concept,
+    no binary free/blocked map) and the planner routes around it by value. This is the obstacle fix's regression test,
+    promoted from the scratchpad into the suite."""
+
+    N = 15
+    WALL_X = 7
+    WALL_YS = set(range(3, 12))                               # gaps only at y in {0,1,2,12,13,14}
+
+    def __init__(self):
+        self.pos = (3, 7)                                     # start LEFT of the wall, at its mid-height
+
+    def _wall(self, p):
+        return p[0] == self.WALL_X and p[1] in self.WALL_YS
+
+    def render(self):
+        g = [[0] * self.N for _ in range(self.N)]
+        for y in self.WALL_YS:
+            g[y][self.WALL_X] = 6                             # the wall (a static object)
+        g[7][13] = 5                                         # a target BEHIND the wall (drawn to it by salience)
+        g[self.pos[1]][self.pos[0]] = 7                      # the controllable object
+        return g
+
+    def step(self, a):
+        dx, dy = MOVES[a]
+        nx, ny = self.pos[0] + dx, self.pos[1] + dy
+        if 0 <= nx < self.N and 0 <= ny < self.N and not self._wall((nx, ny)):
+            self.pos = (nx, ny)                               # else BLOCKED (wall or edge) -> stay
+        return self.render()
+
+
+def test_routes_around_a_wall_to_a_target_behind_it():
+    """Obstacle routing end-to-end IN THE SUITE: the agent learns the wall as a context-gated no-move (one bump
+    generalises to the whole wall by material) and the planner routes AROUND it -- through a gap -- to reach a target on
+    the far side. It must not get stuck against the wall."""
+    env = WallScene()
+    p = Player(seed=0)
+    p.reset()
+    grid = env.render()
+    reached = False
+    for _ in range(80):
+        grid = env.step(p.act(grid, [0, 1, 2, 3], 0))
+        if env.pos[0] > WallScene.WALL_X:                    # crossed to the far side -> routed around
+            reached = True
+            break
+    assert reached
+
+
 class ToggleScene:
     """An ls20-like STATE-CHANGE game: a block that changes COLOUR in place (it never moves) under the actions, plus a
     static landmark. ACTION0 sets it to colour A, ACTION1 to colour B; the score ticks up whenever it is colour B (a
