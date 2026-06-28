@@ -3,10 +3,10 @@
 The north star. Written 2026-06-28 after the live public games (ls20, cn04, lp85, sk48, ft09, vc33, tu93)
 broke every assumption in the perception scaffolding (action=delta, single-cell body, static frame, movement-only,
 spatial goal). The lesson is not "add those cases" — it is "assert nothing." This document is the target we
-reduce toward. The front-end (retina → agency → events → objects) AND the playing loop (forward model → goal/value →
-active-inference planner with directed exploration) are now BUILT and validated (see **STATUS** below; suite 114).
-What remains is ASSEMBLING them into a continuous loop on a live game, plus the obstacle/cost layer — researched and
-deliberately parked (see *Obstacles and cost*).
+reduce toward. The front-end (retina → agency → events → objects) and the playing loop (forward model → goal/value →
+active-inference planner with directed exploration) are BUILT, and ASSEMBLED into one continuous agent that plays
+end-to-end on a controlled frame scene (see **STATUS** below; suite 119). What remains is the LIVE adapter (run it on
+a real game), plus the obstacle/cost layer — researched and deliberately parked (see *Obstacles and cost*).
 
 ## Thesis
 
@@ -57,6 +57,14 @@ Three more pure-stdlib modules turn the front-end into an active-inference agent
   reward, else range — the LC phasic/tonic shift, no coded switch). The same epistemic currency a saccade policy will
   spend. *Validated: babbling learns all operators in |actions| steps; frontier coverage ~72% vs random ~52%; a
   learned goal reached in optimal steps, through unexplored space, trusting the operators.*
+
+**Assembled** (`perceive.py` + `play.py`): `ScenePerceiver` bridges frames → `(self_pose, others)` (segment by
+connected components, the self = the object that MOVES under an action, true positions); the thin `Player` runs the
+continuous loop — perceive → learn (the self's operator + the goal from the score) → plan — with the models persisting
+across levels. *Validated end-to-end on a controlled frame scene: from raw frames it babbles all four operators, then
+explores to find + learn the goal, then EXPLOITS it in optimal steps after a respawn (cross-level transfer, 6 ≪ 55).
+Not yet on a live game — that is the live adapter, next; v1 perceives one self + a few landmarks (many movers = the
+deferred grouping step).*
 
 ### Distilled learnings (what the experiments taught — they reshaped the plan)
 1. **Sense locally, never globally.** Global frames never recur (0 revisits, 0/16 reversible); 5×5 RFs recur ~99%.
@@ -355,10 +363,12 @@ Target: fewer files than today, and the broken assumptions cannot recur because 
    toward the goal with DIRECTED EXPLORATION folded in (`plan.py`: babble + novelty + goal, no `_explore`/ε).
    Validated in closed loop (babbling learns all operators in |actions| steps, coverage beats random, optimal goal
    reach).
-4. **ASSEMBLE into one continuous online agent on a live game — NEXT (the true milestone).** Wire each frame through
-   retina → objects → forward/goal → plan, fold the standalone mechanisms into the `CorticalColumn` (principle 2),
-   and complete even one real level. Then: the parked obstacle/cost layer, the `events` magnitude → prediction-error
-   upgrade, the click action, and the learned saccade policy.
+4. **ASSEMBLE the continuous online agent — DONE (controlled-scene gate)** (`perceive.py` / `play.py`): perceive →
+   learn operator + goal → plan, end-to-end on raw frames; babble + explore + exploit + cross-level transfer
+   validated. **NEXT: the LIVE adapter** — bridge `Player` to the real-game env (`arc_run.py`) and complete a real
+   level (folding the standalone mechanisms into the `CorticalColumn`, principle 2). **Then (scheduled): the parked
+   obstacle/cost layer**, grounded in the live wall failures (see *Obstacles and cost*); plus the `events` magnitude →
+   prediction-error upgrade, the click action (ACTION6), and the learned saccade policy.
 5. **Group / factor objects + online SR location** as the games demand (cn04's many objects move together; the SR
    frame over the few object-states, online).
 6. **Delete the scaffolding; `perception/` = the thin retina sensor.** The replica suite stays green as a
