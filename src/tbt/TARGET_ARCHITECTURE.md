@@ -3,8 +3,10 @@
 The north star. Written 2026-06-28 after the live public games (ls20, cn04, lp85, sk48, ft09, vc33, tu93)
 broke every assumption in the perception scaffolding (action=delta, single-cell body, static frame, movement-only,
 spatial goal). The lesson is not "add those cases" — it is "assert nothing." This document is the target we
-reduce toward. The front-end (retina → agency → events → objects) is now BUILT and live-validated on the real games
-(see **STATUS** below); the value + planning loop that turns it into a *playing* agent is what remains.
+reduce toward. The front-end (retina → agency → events → objects) AND the playing loop (forward model → goal/value →
+active-inference planner with directed exploration) are now BUILT and validated (see **STATUS** below; suite 114).
+What remains is ASSEMBLING them into a continuous loop on a live game, plus the obstacle/cost layer — researched and
+deliberately parked (see *Obstacles and cost*).
 
 ## Thesis
 
@@ -37,6 +39,25 @@ The validated chain, no assumptions: **raw frame → retina (recurring local fea
 events (clean boundaries) → objects (per-action operators over pose).** It fixes the original failure outright: the
 old agent hard-coded ACTION1=up and died; this LEARNS each action's real effect from the object's pose response.
 
+### The playing loop — built and validated (2026-06-28, suite 114/114)
+
+Three more pure-stdlib modules turn the front-end into an active-inference agent that plans (the harness dissolved —
+~15 lines of planner logic vs `control.py`'s ~270, no role schema, no `DELTAS`, no `_explore`/ε):
+
+- **`forward.py`** — the per-action operator as the column's forward model (L5): the MODAL integer pose-displacement
+  an action causes (reads through blocked/direction-switch noise the change-centroid introduces), with
+  `predict`/`predict_cells`/`prediction_error`. *Learned, never assumed; the same robustness that recovered cn04's
+  `(0,±3)`.* `prediction_error` is what upgrades `events.py` from "big change" to "unpredicted change".
+- **`goal.py`** — the goal/value bridge to `reward.py`: a score increment marks the reached object-configuration
+  rewarding, encoded position-canonically (each object's pose RELATIVE to the self), so a goal learned once transfers
+  across the board. No typed sub-goal; object-removal is a distinct goal for free (required-absent).
+- **`plan.py`** — active-inference action selection with DIRECTED EXPLORATION folded into one value: **motor babbling**
+  (R-MAX optimism makes a never-tried operator the top target → tries each action once), **novelty** (an unvisited
+  arrangement is a frontier *target* to route to), **goal** (exploit), arbitrated emergently (pursue a reachable
+  reward, else range — the LC phasic/tonic shift, no coded switch). The same epistemic currency a saccade policy will
+  spend. *Validated: babbling learns all operators in |actions| steps; frontier coverage ~72% vs random ~52%; a
+  learned goal reached in optimal steps, through unexplored space, trusting the operators.*
+
 ### Distilled learnings (what the experiments taught — they reshaped the plan)
 1. **Sense locally, never globally.** Global frames never recur (0 revisits, 0/16 reversible); 5×5 RFs recur ~99%.
 2. **The self is an OBJECT tracked by POSE, not pixels.** A moving self spreads its changes thinly, so NO cell
@@ -49,14 +70,17 @@ old agent hard-coded ACTION1=up and died; this LEARNS each action's real effect 
    bootstrap for the proper prediction-error test, which the learned operator supplies (the two co-bootstrap).
 5. **The ACTION→effect mapping is LEARNED, not assumed** — the hand-coded ACTION1=up was the original sin.
 
-### What is next (the path to a PLAYING agent — not yet done)
-We can now SEE the dynamics (the operators); we have not yet PLAYED a game. In order:
-- **Operator as forward model** + upgrade `events.py` from magnitude to prediction-error (the co-bootstrap above).
+### What is next (the path to a PLAYING agent)
+The forward model, goal/value, and the active-inference planner with directed exploration are now BUILT (above). What
+remains, in order:
+- **ASSEMBLE** the front-end + playing loop into one continuous online agent and run it on a live game — wire each
+  frame through retina → objects → forward/goal → plan, fold the standalone mechanisms into the `CorticalColumn`
+  (principle 2), and complete even one real level. *This is the true milestone.*
 - **Group / factor objects** (cn04's many objects move together — one controllable group? — and separate self from
   autonomous, which pose-spread already begins).
-- **Value / goal** — tie the score to object-states (which configurations score; `reward.py`).
-- **Plan** — the achiever (`neocortex.py`) over the operators toward the goal (active inference), then **assemble
-  into a loop and test whether it completes a real level.** That is the true milestone.
+- **Obstacles / cost** — a continuous value surface, researched and parked (see *Obstacles and cost*); unpark after
+  assembly. Plus upgrade `events.py` magnitude → `forward.prediction_error` (the co-bootstrap), the click action
+  (ACTION6), and the learned saccade policy.
 
 NB on the original plan: stage 1 said "`factorize` over RF streams." What actually worked for the DYNAMIC factors is
 **object-pose tracking** (`objects.py`) — the objects ARE the dynamic factors, and the per-action operator over
@@ -224,6 +248,36 @@ drop its fixed Euclidean frames, add value, and bind heterogeneous frames in a s
 that looked like a wall (the 2.9 s eigh) is a symptom of mapping pixels; over **factored** states the SR frame is
 small and cheap, and an online TD-SR removes the batch eigh entirely.
 
+## Obstacles and cost — a continuous value surface, not a free/blocked predicate (research, 2026-06-28)
+
+The "wall" question — how to represent what blocks or resists movement — is deferred until after assembly, but the
+answer is now researched, and it must NOT be a binary obstacle model (the bitter lesson). Neuroscience gives the
+general form, and it already fits this architecture:
+
+- **A barrier is not an object; it is a change in TRANSITION STRUCTURE.** The hippocampal predictive map (the
+  successor representation, Stachenfeld et al. 2017) WARPS around a barrier — the wall is reshaped reachability,
+  represented implicitly, never a labelled object. (Boundary-vector / border cells — Lever et al. 2009; Solstad et
+  al. 2008 — are only the *sensed* geometry, the specialised detector we must not import as a role.)
+- **The physics is exact** (and answers "is resistance-in-a-wire analogous?" — yes, the same mathematics): a random
+  walk on the state graph IS an electrical resistor network (commute time = effective resistance), and the value
+  function is a POTENTIAL — in the linearly-solvable MDP (Todorov 2006/2009) the exponentiated value ("desirability")
+  solves a linear diffusion / Laplace equation. So **wall / viscosity / resistance / risk are ONE continuous
+  quantity** (high resistance ≡ high potential ≡ low-probability transition). It generalises to abstract domains
+  because the *same* grid/SR machinery maps conceptual spaces (Constantinescu et al. 2016; the Tolman-Eichenbaum
+  Machine, Whittington et al. 2020) — "resistance in a wire" is the same computation as a physical wall.
+- **Design direction (apply after assembly):** an obstacle FALLS OUT of (learned transition model + SIGNED value),
+  with no obstacle concept — L6's SR-frame deforms around blocked transitions (no new module); `forward.py`'s
+  confidence < 1 flags a costly/blocked transition and `residual.py` learns its condition; `reward.py`'s signed value
+  weighs it on a continuum (a no-move = a wasted action, death = −1, slow = viscosity); the planner already minimises
+  cost-to-goal, so high-resistance regions are weighed by VALUE, not walled off by a rule. Learned online by
+  prediction error, as the brain updates its map after a detour.
+
+Citations: Stachenfeld, Botvinick & Gershman 2017 (Nat. Neurosci., the predictive map); Lever, Burton, Jeewajee,
+O'Keefe & Burgess 2009 (J. Neurosci., boundary vector cells); Solstad, Boccara, Kropff, Moser & Moser 2008 (Science,
+border cells); Todorov 2006/2009 (linearly-solvable MDPs / desirability); Doyle & Snell, *Random Walks and Electric
+Networks*; Constantinescu, O'Reilly & Behrens 2016 (Science, gridlike code for conceptual knowledge); Whittington et
+al. 2020 (Cell, the Tolman-Eichenbaum Machine). Synthesis saved as memory `reference_obstacle_as_transition_cost`.
+
 ## The dissolution plan — what gets deleted, and what absorbs its job
 
 Nothing is deleted cold. Each scaffold is dissolved by moving its job into a column faculty, re-validated against the
@@ -296,13 +350,18 @@ Target: fewer files than today, and the broken assumptions cannot recur because 
    (Object-pose tracking replaced raw-frame `factorize` for the dynamic factors — see the STATUS note.)
 2. **Learn the per-action operators — DONE** (`objects.py`): action-dependent per-action motion recovered, LEARNED
    not assumed (cn04: ACTION1=up). Still to stress-test: A∘B generalisation and a click game.
-3. **Operator as forward model + value + planning — NEXT (the playing agent).** Use the operators to predict (and
-   upgrade `events.py` magnitude → prediction-error); tie the score to object-states (`reward.py`); plan with the
-   achiever (`neocortex.py`) toward the goal (active inference); ASSEMBLE into a loop and test it completes a real
-   level. *This is the true milestone we have not reached.*
-4. **Group / factor objects + online SR location** as the games demand (cn04's many objects move together; the SR
+3. **Operator as forward model + value + planning — DONE** (`forward.py` / `goal.py` / `plan.py`): the operators
+   predict (`forward.predict`), the score ties to object-states (`goal.py` over `reward.py`), and the achiever plans
+   toward the goal with DIRECTED EXPLORATION folded in (`plan.py`: babble + novelty + goal, no `_explore`/ε).
+   Validated in closed loop (babbling learns all operators in |actions| steps, coverage beats random, optimal goal
+   reach).
+4. **ASSEMBLE into one continuous online agent on a live game — NEXT (the true milestone).** Wire each frame through
+   retina → objects → forward/goal → plan, fold the standalone mechanisms into the `CorticalColumn` (principle 2),
+   and complete even one real level. Then: the parked obstacle/cost layer, the `events` magnitude → prediction-error
+   upgrade, the click action, and the learned saccade policy.
+5. **Group / factor objects + online SR location** as the games demand (cn04's many objects move together; the SR
    frame over the few object-states, online).
-5. **Delete the scaffolding; `perception/` = the thin retina sensor.** The replica suite stays green as a
+6. **Delete the scaffolding; `perception/` = the thin retina sensor.** The replica suite stays green as a
    regression guard; the real games are the truth.
 
 Reductions are where every previous wall fell (SR frame, pose-invariant recognition, recursive residual). This is
