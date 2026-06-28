@@ -64,13 +64,14 @@ class ForwardModel:
         produces, not a special blocked flag."""
         self._disp[(action, context)][_round(pose, next_pose)] += 1
 
-    def observe_content(self, content, action, next_content) -> None:
-        """Record how `action` transforms the object's CONTENT (its appearance/state) -- the BEHAVIOR operator. It is
-        the SAME modal-transition mechanism as the pose operator, over the feature factor instead of position (Monty:
-        movement and in-place change are one thing, "a change at a location"). Keyed by the current content, so a
-        toggle (A->B, B->A) or an action-set-state (any->X) is learnable. The KIND (move vs change) is never declared
-        -- it falls out of which factor an action actually moves."""
-        self._content[(action, content)][next_content] += 1
+    def observe_content(self, content, action, next_content, context=None) -> None:
+        """Record how `action`, in `context`, transforms the object's CONTENT (its appearance/state) -- the BEHAVIOR
+        operator. It is the SAME modal-transition mechanism as the pose operator, over the feature factor instead of
+        position (Monty: movement and in-place change are one thing, "a change at a location"). Keyed by the current
+        content, so a toggle (A->B, B->A) or an action-set-state (any->X) is learnable; the `context` lets the SAME
+        action differ -- e.g. a CLICK changes the object it lands on (context 'clicked') and not others (None), the
+        parameterized-action (ACTION6) case handled by this same mechanism. The KIND is never declared."""
+        self._content[(action, context, content)][next_content] += 1
 
     def learn_track(self, track) -> None:
         """Learn from one `ObjectTracker` track ([(step, pose, action), ...]). Each consecutive pair is a transition
@@ -92,7 +93,7 @@ class ForwardModel:
             counters = [c for (a, _ctx), c in self._disp.items() if a == action and c]
         pose_moves = sum(v for c in counters for d, v in c.items() if d != (0, 0))
         pose_tries = sum(v for c in counters for v in c.values())
-        content_items = [(frm, c) for (a, frm), c in self._content.items() if a == action]
+        content_items = [(frm, c) for (a, _ctx, frm), c in self._content.items() if a == action]
         content_changes = sum(n for frm, c in content_items for nxt, n in c.items() if nxt != frm)
         content_tries = sum(n for _frm, c in content_items for n in c.values())
         if pose_tries == 0 and content_tries == 0:
@@ -132,22 +133,23 @@ class ForwardModel:
         return {a: (self.delta(a), self.confidence(a)) for a in self.actions()}
 
     # ---- content / behavior operator (the in-place change is the same mechanism as movement) ----------------
-    def next_content(self, content, action):
-        """The content `action` produces from `content`: its modal learned outcome, or `content` UNCHANGED if unseen
-        (a thing keeps its appearance unless an action is learned to change it -- the behavior analogue of the pose
-        operator's no-op default)."""
-        c = self._content.get((action, content))
+    def next_content(self, content, action, context=None):
+        """The content `action` (in `context`) produces from `content`: its modal learned outcome, or `content`
+        UNCHANGED if unseen (a thing keeps its appearance unless an action is learned to change it -- the behavior
+        analogue of the pose operator's no-op default)."""
+        c = self._content.get((action, context, content))
         return c.most_common(1)[0][0] if c else content
 
     def is_action_sensitive(self) -> bool:
-        """Is this object CONTROLLABLE? -- the self emerges, KIND-agnostic, as the object some action moves where
-        another does not, in POSE (movement) OR in CONTENT (behavior). No declaration of which kind a game is."""
+        """Is this object CONTROLLABLE? -- the self emerges, KIND-agnostic, as one the agent's choice moves where it
+        otherwise would not: in POSE (movement) OR in CONTENT (behavior), the latter including a CLICK that changes it
+        in one context but not another. No declaration of which kind a game is."""
         if len({self.delta(a) for a in self.actions()}) >= 2:    # pose varies by action -> a movement self
             return True
-        by_from: dict = defaultdict(dict)                        # from_content -> {action: modal next_content}
-        for (a, frm), c in self._content.items():
-            by_from[frm][a] = c.most_common(1)[0][0]
-        return any(len(set(amap.values())) >= 2 for amap in by_from.values())   # content varies by action -> a behavior self
+        by_from: dict = defaultdict(set)                         # from_content -> the modal outcomes across (action, context)
+        for (_a, _ctx, frm), c in self._content.items():
+            by_from[frm].add(c.most_common(1)[0][0])
+        return any(len(outs) >= 2 for outs in by_from.values())  # content outcome depends on the agent's choice -> a self
 
     # ---- prediction -----------------------------------------------------------------------------------------
     def predict(self, pose, action, context=None):

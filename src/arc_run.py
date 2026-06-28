@@ -117,13 +117,15 @@ class _LiveFrame:
         self.action_counter = action_counter
         if raw is None:
             self.grid, self.level, self.score, self.state = [[0]], 0, 0, OurGS.GAME_OVER
-            self.available = []
+            self.available, self.coord_actions = [], []
         else:
             from arcengine import GameAction
             self.grid = _primary_grid(raw.frame)
             self.score = self.level = int(raw.levels_completed)
             self.state = _our_state(raw.state)
-            self.available = [GameAction.from_id(a).name for a in (raw.available_actions or [])]   # action keys
+            avail = [GameAction.from_id(a) for a in (raw.available_actions or [])]
+            self.available = [a.name for a in avail]                            # action keys
+            self.coord_actions = [a.name for a in avail if a.is_complex()]      # the click (ACTION6) -- needs (x, y)
 
     def is_win(self):
         from tasks import GameState as OurGS
@@ -187,11 +189,10 @@ class _PlayEnv(RemoteEnv):
 
     @staticmethod
     def _playable(frame):
-        from arcengine import GameAction
-        # the Player plans real game actions only -- not RESET, and not (yet) the complex click action (ACTION6),
-        # which needs coordinates the pose-operator agent does not produce. The click is a deferred capability.
-        frame.available = [n for n in frame.available
-                           if n != "RESET" and not getattr(GameAction, n).is_complex()]
+        # the Player plans real game actions only -- not RESET (the lifecycle command). The click (ACTION6) IS planned
+        # now: the planner picks a target object and `play` emits its cell as (x, y) coordinates (via coord_actions).
+        frame.available = [n for n in frame.available if n != "RESET"]
+        frame.coord_actions = [n for n in frame.coord_actions if n in frame.available]
         return frame
 
     def reset(self):
@@ -209,9 +210,10 @@ class _PlayEnv(RemoteEnv):
 def play_live(game_id="ls20", max_actions=200, seed=0, verbose=True):
     """Drive the ASSEMBLED rebuild agent (`tbt.play.Player`) on a LIVE game via the continuous loop. The Player's
     contract (`act(grid, actions, score)` + `run(env)`) is met by `RemoteEnv` directly — `_LiveFrame` exposes
-    `.available` action keys and `RemoteEnv.step` accepts the name key the Player returns. The new-path counterpart
-    to `learn_remote` (which drives the OLD WorldLearner agent); this one carries no role decode. Movement games
-    first (ls20: ACTION1-4); the click action (ACTION6 coords) is the deferred step. Returns (Outcome, player, card)."""
+    `.available` action keys (+ `.coord_actions` for the click) and `RemoteEnv.step` accepts the name key and optional
+    (x, y) the Player returns. The new-path counterpart to `learn_remote` (which drives the OLD WorldLearner agent);
+    this one carries no role decode. Handles movement (ls20/cn04: ACTION1-4) AND the click (ACTION6): the planner picks
+    a target object and `play` emits its cell as coordinates. Returns (Outcome, player, card)."""
     from arc_agi import Arcade, OperationMode
     from tbt.play import Player                                # lazy: pulls the column stack, kept out of import time
 

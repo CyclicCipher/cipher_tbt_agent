@@ -195,6 +195,48 @@ def test_solves_an_in_place_state_change_game():
     assert env.score >= 5                                                # held the state, not a one-off accident
 
 
+class ClickScene:
+    """A CLICK game: clicking the BUTTON toggles it to the goal colour; clicking the distractor does nothing. The only
+    lever is a coordinate action (ACTION6-like) -- the agent must learn the click's effect per target and CHOOSE which
+    object to click (the goal-state generator picking where to act)."""
+
+    def __init__(self):
+        self.button = 3                                       # the button's state (colour A); the goal colour is 6
+        self.score = 0
+        self.actions = 0
+
+    def render(self):
+        g = [[0] * 20 for _ in range(20)]
+        for dx in range(3):
+            for dy in range(3):
+                g[5 + dy][5 + dx] = self.button             # the button at (5..7, 5..7)
+                g[14 + dy][14 + dx] = 4                      # a distractor at (14..16, 14..16)
+        return g
+
+    def step(self, action, coords=None):
+        self.actions += 1
+        if coords is not None and 5 <= coords[0] <= 7 and 5 <= coords[1] <= 7:
+            self.button = 6                                  # clicking the button toggles it to the goal colour
+        if self.button == 6:
+            self.score += 1
+        return self.render()
+
+
+def test_solves_a_click_game_by_choosing_the_right_target():
+    """Parameterized actions the TBT way (the goal-state generator): the only lever is a CLICK (a coordinate action).
+    The agent learns the click's effect per target, then chooses to click the BUTTON (not the distractor) to reach and
+    hold the goal state. Generalizes beyond ACTION6 -- 'act on a perceived object', target chosen by value."""
+    env = ClickScene()
+    p = Player(seed=0)
+    p.reset()
+    grid = env.render()
+    for _ in range(40):
+        a = p.act(grid, ["CLICK"], env.score, coord_actions=["CLICK"])
+        grid = env.step(*a) if isinstance(a, tuple) else env.step(a)
+    assert env.button == 6                                   # the agent toggled the button to the goal colour
+    assert env.score >= 3                                    # and held the goal state by clicking the right target
+
+
 class _Frame:
     """A frame in the contract Player.run consumes -- the same shape arc_run._LiveFrame provides (the live-adapter gate)."""
 

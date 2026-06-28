@@ -44,6 +44,7 @@ class Player:
         self._prev_objects = self._last = self._prev_frame = None
         self._prev_cells: dict = {}                           # last frame's per-object cells (for the move's context)
         self._prev_contents: dict = {}                        # last frame's per-object content (for the behavior operator)
+        self._last_target = None                              # the object the last (coordinate) action targeted
         self._prev_score = 0
         self._run = (None, 0)                                 # current Lévy run: (action, steps remaining)
 
@@ -56,6 +57,7 @@ class Player:
         self._prev_objects = self._last = self._prev_frame = None
         self._prev_cells = {}
         self._prev_contents = {}
+        self._last_target = None
         self._run = (None, 0)
 
     def _levy(self, actions):
@@ -98,16 +100,23 @@ class Player:
                 return grid[ty][tx]                          # destination occupied by another object -> its material
         return None                                          # open background
 
-    def act(self, grid, actions, score):
-        """Perceive the objects, learn each one's operator + the goal from the transition into this frame, then plan."""
+    def act(self, grid, actions, score, coord_actions=()):
+        """Perceive the objects, learn each one's operator + the goal from the transition into this frame, then plan.
+        `coord_actions` = the available keys that are PARAMETERIZED by a target (the click, ACTION6); the planner picks
+        which object to click. Returns a plain action key, or `(action_key, (x, y))` for a click (the chosen target's
+        cell), which `run` passes to the env as coordinates."""
         if not actions:
             return None
         objects = self.field.perceive(grid, self._predictor(self._last))
         contents = self.field.contents                        # each object's CONTENT (the 'what') this frame
         if self._prev_objects is not None and self._last is not None:
-            # the transitions of objects present in both frames, each with the context its move entered
-            trans = [(oid, self._prev_objects[oid][0], pose,
-                      self._context(oid, self._prev_objects[oid][0], self._last, self._prev_frame, self._prev_cells))
+            # the context the LAST action applied to each object: 'clicked'/None for a coordinate action (which object it
+            # targeted), else the sensed material the move would enter (movement) -- one mechanism, both action kinds.
+            def ctx_of(oid, p0):
+                if self._last_target is not None:
+                    return "clicked" if oid == self._last_target else None
+                return self._context(oid, p0, self._last, self._prev_frame, self._prev_cells)
+            trans = [(oid, self._prev_objects[oid][0], pose, ctx_of(oid, self._prev_objects[oid][0]))
                      for oid, (pose, _size) in objects.items() if oid in self._prev_objects]
             # REAFFERENCE: a boundary is the change the operators CANNOT explain, not merely a big change. Subtract each
             # tracked object's predicted motion (the cells it vacates + enters) from the observed change; the residual is
@@ -125,29 +134,37 @@ class Player:
                 for (oid, p0, p1, ctx) in trans:         # learn each object's operator (the self emerges from these)
                     fm = self.forwards.setdefault(oid, ForwardModel())
                     fm.observe(p0, self._last, p1, ctx)                          # the POSE operator (movement)
-                    fm.observe_content(self._prev_contents.get(oid), self._last, contents.get(oid))   # the CONTENT operator
+                    fm.observe_content(self._prev_contents.get(oid), self._last, contents.get(oid), ctx)  # the CONTENT operator
             self.goal.observe(objects, score - self._prev_score, contents)
         # how much there is still to LEARN about each action (learning progress; 1.0 if untried) -- the curiosity drive
         curiosity = {a: max((fm.curiosity(a) for fm in self.forwards.values()), default=1.0) for a in actions}
         context = lambda oid, pose, key: self._context(oid, pose, key, grid, self.field.cells)
-        action = self.planner.act(objects, self.forwards, actions, curiosity, context=context, contents=contents)
-        if action is None:                                   # nothing to route toward -> heavy-tailed (Lévy) search
-            action = self._levy(actions)
+        planned = self.planner.act(objects, self.forwards, actions, curiosity,
+                                   context=context, contents=contents, coord_actions=set(coord_actions))
+        if planned is None:                                  # nothing to route toward -> heavy-tailed (Lévy) search
+            key, target = self._levy(actions), None
+            if key in set(coord_actions) and objects:        # a coordinate action still needs a target -> explore one
+                target = self.rng.choice(list(objects))
         else:
             self._run = (None, 0)                            # a directed plan took over -> end the Lévy run
-        self._prev_objects, self._last, self._prev_score = objects, action, score
+            key, target = planned if isinstance(planned, tuple) else (planned, None)   # (coord_action, target_id) | key
+        self._prev_objects, self._last, self._prev_score = objects, key, score
+        self._last_target = target                           # which object the (coordinate) action targeted, for its context
         self._prev_frame, self._prev_cells = grid, dict(self.field.cells)
         self._prev_contents = dict(contents)
-        return action
+        if target is not None:                               # a click -> emit the target object's cell as coordinates
+            tx, ty = objects[target][0]
+            return key, (int(round(tx)), int(round(ty)))
+        return key
 
     def run(self, env, max_steps: int = 2000):
         self.reset()
         frame = env.reset()
         while frame.action_counter < max_steps and not frame.is_win():
-            action = self.act(frame.grid, frame.available, frame.score)
+            action = self.act(frame.grid, frame.available, frame.score, getattr(frame, "coord_actions", ()))
             if action is None:
                 break
-            nxt = env.step(action)
+            nxt = env.step(*action) if isinstance(action, tuple) else env.step(action)   # (key, coords) for a click
             if nxt.level != frame.level:
                 self.new_level()
             frame = nxt
