@@ -446,7 +446,8 @@
       "Bash(/c/Users/julia/GitHub/predictive-coding-agent/venv/Scripts/python.exe -u -c ' *)",
       "mcp__visualize__read_me",
       "Bash(cd /c/Users/julia/GitHub/predictive-coding-agent/experiments/ProgramSynthesis && find . -type f -name \"*.py\" | head -50 && echo \"---ENV---\" && ls -la env/ agent/ agent/wm/ 2>/dev/null)",
-      "WebFetch(domain:docs.thousandbrains.org)"
+      "WebFetch(domain:docs.thousandbrains.org)",
+      "WebFetch(domain:www.kaggle.com)"
     ]
   }
 }
