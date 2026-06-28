@@ -30,6 +30,7 @@ from .l4_feature_location import L4_FeatureLocation
 from .l5_displacement import L5_Displacement
 from .l6_grid import L6_GridLocation
 from .l23_object import L23_Object
+from .recognize import Recognizer                      # the "what + pose" evidence faculty (object identity + orientation)
 from .recurrence import SelectiveRecurrence            # the ONE canonical selective-gated recurrence
 from .residual import _find_predicate                  # the predicate search the column's dynamics faculty reuses
 
@@ -68,6 +69,7 @@ class CorticalColumn(nn.Module):
         self.L5 = L5_Displacement()                                       # per-relation operators
         self.L4 = L4_FeatureLocation(n_entities, feat_dim=feat_dim, seed=seed)  # content codebook
         self.L23 = L23_Object(feat_dim=feat_dim, d_mem=d_mem)             # the one shared memory
+        self.recognizer = Recognizer()                                   # "what + pose" (object id + orientation), evidence-based
         self.d_mem = d_mem
         self._shared_U = _orthonormal(d_mem, d_mem, self.gen)            # shared slot for the no-remap control (sliced to frame size)
         self.dom = {}                                                    # name -> {place, labels, U}
@@ -189,6 +191,23 @@ class CorticalColumn(nn.Module):
             if self._sparse_place:
                 v = self._cleanup(v)
         return self.L4.readout(self.L23.S, v).argmax().item()
+
+    # ----- the "what + pose" recognition faculty (object identity + orientation; Monty evidence-based) --------
+    # Complementary to L6 (the "where"): L6 recognises navigable locations in a fixed frame; this SOLVES an object's
+    # pose so a known object is recognised at an orientation never seen (the 2019 grid-cell model's stated gap).
+    def learn_object(self, cloud, name=None):
+        """Add an object to this column's recogniser. `name` given → store under it; else learn ONLINE + label-free
+        (recognise-or-add). Returns the ObjectModel (named) or (name, is_new) (online)."""
+        return self.recognizer.add(name, cloud) if name is not None else self.recognizer.add_if_novel(cloud)
+
+    def recognize_object(self, cloud):
+        """Identify a sensed point cloud's (name, theta, t, evidence) at a pose never seen, learning it online if
+        novel — pose-invariant recognition (object permanence under rotation)."""
+        return self.recognizer.recognize(cloud)
+
+    def identify_object(self, cloud):
+        """Recognise a sensed shape against the learned library WITHOUT adding a new one — the name, or None."""
+        return self.recognizer.identify(cloud)
 
     # ----- codes exposed for cross-column composition (the thalamus binds content ⊗ location) --------
     def content_code(self, label):
