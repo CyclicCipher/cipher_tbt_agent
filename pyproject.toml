@@ -26,7 +26,7 @@ Homepage = "https://github.com/CyclicCipher/cipher_tbt_agent"
 # Tests and docs are not part of the installable package.
 [tool.setuptools]
 package-dir = { "" = "src" }
-py-modules = ["arc_sdk"]
+py-modules = ["arc_sdk", "arc_run"]   # arc_sdk: official-framework bridge; arc_run: lean live/submission runner
 
 [tool.setuptools.packages.find]
 where = ["src"]

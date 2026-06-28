@@ -28,9 +28,19 @@ role-branch. See `RESEARCH.md` R11's 2nd "BUILT 2026-06-28" note.
 arcprize/ARC-AGI-3-Agents (real `agent.py`/`random_agent.py`); offline-test-gated by driving multi-cell Sokoban to
 WIN through the SDK contract (suite 78/78, no API key). **Real SDK needs Python ≥3.12 + `pip install arc-agi>=0.9.1`
 (provides `arcengine`+`arc_agi`); our venv is 3.11.9 → a separate 3.12 env is needed to run LIVE.**
-NEXT (real-ARC): the click action (`ACTION6` — learn what a click DOES from the public games, NOT a replica; extend
-`DynamicsPerceiver` to coordinate actions + add ACTION7/undo); a live-capable learning agent for `make_arc_agent`;
-colour-as-feature + occlusion + rotation-permanence in perception (where `vote`/cross-frame id-tracking earn their keep).
+**LIVE CONNECTIVITY + LEAN RUNNER DONE (2026-06-28):** registered API key reaches the hosted API (25 public games)
+from a separate **3.12 `venv312/`** (Norton MITMs TLS → `pip install pip-system-certs`; see memory
+`project_arc_agi3_live_env`). `src/arc_run.py` = the LEAN runner (`arc_agi.Arcade` ONLINE + a TbtPolicy-contract
+policy), validated on live `ls20` (real frames = 64×64 single grid; `ls20` actions = ACTION1-4 movement). Lean chosen
+over the full framework (which drags the langchain/LLM stack); lean IS the Kaggle-notebook submission shape.
+**RE-ORIENTATION (THE ACTIVE PLAN) — memory `project_continuous_online_loop`:** the private test scores by RHAE
+`(human/agent_actions)²`, terminating at 5× the human median actions/level, with NO free practice on the held-out
+private games. So `explore_and_learn` (hundreds of random episodes) scores ~0 — WRONG loop. NEXT SESSION: build a
+sample-efficient **CONTINUOUS online learn-and-plan loop** (fast body-id via efference copy; prediction-error-directed
+exploration not random ε; goal-from-first-score; plan-on-model immediately; cross-level transfer), reusing
+perception + `WorldLearner`/`GoalModel` + `NeocortexPlanner` + `reward.py` novelty; validate + measure
+action-efficiency on public `ls20`. Then: the click action (`ACTION6`, learned from a click game), colour-as-feature
++ occlusion + rotation-permanence (where `vote`/cross-frame id-tracking earn their keep).
 Also open: the value/L2 multi-piece-clear now runs on a FAITHFUL model (EZ-V2 robustness reserved for real-ARC's
 imperfect ONLINE models). The replica role-schema strand (CollectAll/Toggle) — see `project_reorient_and_reconnect.md`
 + R11. NB: the architecture/run-command sections BELOW may cite stale `experiments/…` paths.
