@@ -217,10 +217,13 @@ def play_live(game_id="ls20", max_actions=200, seed=0, verbose=True):
     out = player.run(_PlayEnv(arc, game_id, card_id), max_steps=max_actions)
     result = arc.close_scorecard(card_id)
     if verbose:
-        ops = {a: player.forward.delta(a) for a in player.forward.actions()}
+        ops = {oid: {a: fm.delta(a) for a in fm.actions()} for oid, fm in player.forwards.items()}
+        emergent = [oid for oid, fm in player.forwards.items()                   # action-sensitive operator
+                    if len({fm.delta(a) for a in fm.actions()}) >= 2]            # = a controllable object emerged
         print(f"play_live {game_id}: won={out.won} levels={out.levels} actions={out.actions}")
-        print(f"  perception: self_colour={player.perceiver.self_colour}  goals_learned={len(player.goal.goals)}  "
-              f"operators={ops}")
+        print(f"  objects tracked={len(player.forwards)} emergent-controllable ids={emergent} "
+              f"goals_learned={len(player.goal.goals)}")
+        print(f"  operators={ops}")
     return out, player, result
 
 
