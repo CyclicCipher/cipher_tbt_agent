@@ -196,7 +196,22 @@ thalamic VSA binding work now; pose-aware *voting* across heterogeneous frames i
    mock game to WIN through the exact contract, converging to the per-level OPTIMUM (oracle ~5) and transferring across
    levels. The actual hosted run (3.12 `venv312/`, key) is a user-triggered spend; the click action (ACTION6) target is
    a step-7 placeholder (the saccade/GSG).
-7. Later: **cross-frame voting** (heterogeneous frames → learned registration) + the **BG column-allocation**;
+7. **Perception + full actions for real frames (the live attempt's findings) — 7a/7b/7c DONE 2026-06-28.**
+   - **7a click:** the ACTION6 click (any coordinate action) is a learnable action — one CLICK-SLOT per tracked object,
+     resolved to its centroid; which click matters EMERGES. (`arc_sdk.TbtPolicy`.)
+   - **7b recurrence:** global per-pixel states never recur on real 64×64 frames (live: cn04 0.04, ls20 0.01), starving
+     the loop. Recovered `retina.py` and gave the `Sensor` a `local=True` EGOCENTRIC window around the dynamic-residual
+     fovea → recurrence 0.04→0.88 / 0.01→0.90 (measured live). The recurring local view is the gate.
+   - **7c path integration:** the local view has no allocentric position → it ALIASES locations and the agent gets
+     stuck (saturates ~60 views). `integrate=True` path-integrates the controllable object's position by EFFERENCE
+     (the learned per-action displacement) + CORRECTION (snap to the residual; once the displacement is known, the
+     ARRIVED component nearest the efference prediction — clean, ignores animation). A SELF-GATE adds the position only
+     when the object is controllable (consistent non-trivial displacement), so STATE-CHANGE games keep their recurring
+     view. Validated: nav mock 8/8 (integrate) vs 0/8 (pure-ego) across seeds; LIVE ls20 gate-off keeps recurrence
+     0.90, cn04 gate-on covers the full position grid (275 states). See `project_live_failure_recurrence`.
+   - **OPEN:** still 0 live completions — now an EXPLORATION-DEPTH / click-mechanics question (cn04 has explored the
+     movement-position grid without reward; it likely needs the right ACTION6 click), not a representation block.
+8. Later: **cross-frame voting** (heterogeneous frames → learned registration) + the **BG column-allocation**;
    **compositional hierarchy** of columns.
 
 ## Honest risks

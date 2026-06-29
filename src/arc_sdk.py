@@ -97,9 +97,9 @@ class TbtPolicy:
     resolved to that object's centroid as (x, y), so the agent plans over a stable index space and LEARNS each click's
     effect — which click matters EMERGES (self-free), generalizing to any coordinate action, not just ACTION6."""
 
-    def __init__(self, build_agent=None, seed: int = 0, local: bool = True):
+    def __init__(self, build_agent=None, seed: int = 0, local: bool = True, integrate: bool = True):
         from tbt.sensor import Sensor                        # lazy: keep arc_sdk importable without torch
-        self.sensor = Sensor(local=local)                    # local=True: egocentric sensing -- the recurrence fix for real frames
+        self.sensor = Sensor(local=local, integrate=integrate)   # egocentric + path-integration -- recurrence + navigation
         self._build = build_agent
         self.seed = seed
         self.agent = None
@@ -107,6 +107,7 @@ class TbtPolicy:
         self.click: Optional[str] = None                     # the coordinate / click action name (ACTION6), if offered
         self.n_clicks = 0                                    # number of click-slots (one per object, capped)
         self.prev_level = 0
+        self._last_a = None                                  # the last agent action index (the efference for path integration)
 
     def is_done(self, frames, latest_frame) -> bool:
         return _state_name(latest_frame.state) == "WIN"
@@ -152,10 +153,12 @@ class TbtPolicy:
                 self.agent.complete(score_delta)            # the completing transition -> GOAL; ends the episode
             self.sensor.reset()
             self.prev_level = obs.level
-        state, _change = self.sensor.read(obs.grid)         # read first, so the click-slots can key on the objects
+            self._last_a = None
+        state, _change = self.sensor.read(obs.grid, action=self._last_a)   # efference = last action (path integration)
         if self.agent is None:
             self._init_actions(latest_frame)
         a = self.agent.step(state, 0.0)                     # learn + choose (predict-then-compare); reward via complete()
+        self._last_a = a
         return self._resolve(a)
 
 

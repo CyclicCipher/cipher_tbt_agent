@@ -1,23 +1,28 @@
 """The sensor / retina -- the bridge from raw ARC frames to the column's input.
 
-Two perception modes, ONE tracker underneath:
-  * GLOBAL (`config_state`) -- segment + track objects (`perceive.ObjectField`: permanence, contact) and encode the
-    scene as a TRANSLATION-INVARIANT (size, rel-pose, content) state. Faithful for STRUCTURED / small scenes, and the
-    home of the L5 operator's generalization. But on real 64x64 ARC frames it NEVER recurs (measured: global states
-    are unique every frame -> the loop is starved), because the full per-pixel content churns with any animation.
-  * LOCAL / EGOCENTRIC (`local=True`) -- the thousand-brains way: sense a small WINDOW around a FOVEA placed on the
-    dynamic residual (the controllable change; `retina.salient_cells`/`dominant_region`). Local views RECUR (measured
-    on real cn04/ls20: recurrence 0.00->0.6 vs the global encoding), so the column can finally learn. The fovea
-    persists (a no-change step keeps it; cold start = the largest object), the state is the raw WxW egocentric patch.
+Perception modes, ONE tracker underneath:
+  * GLOBAL (`config_state`) -- segment + track objects and encode a TRANSLATION-INVARIANT (size, rel-pose, content)
+    state. Faithful for STRUCTURED / small scenes (and the home of the L5 operator's generalization), but on real 64x64
+    ARC frames it NEVER recurs (the full per-pixel content churns with any animation -> the loop is starved).
+  * LOCAL / EGOCENTRIC (`local=True`) -- the thousand-brains way: sense a WINDOW around a FOVEA placed on the dynamic
+    residual (the controllable change). Local views RECUR (measured on real cn04/ls20: ~0 -> ~0.6-0.9), so the column
+    can learn. But a local view has NO allocentric position, so distinct board locations ALIAS and the agent cannot
+    tell explored from unexplored -> it gets stuck.
+  * PATH-INTEGRATED (`integrate=True`, on top of local) -- track the controllable object's ALLOCENTRIC position by
+    EFFERENCE (the learned per-action displacement predicts where it goes) + CORRECTION (snap to the residual sighting
+    NEAREST that prediction, so the ACTION-CONSISTENT object is followed and autonomous animation ignored). The coarse
+    position augments the state -> aliased views separate, novelty drives systematic COVERAGE, navigation works. A
+    SELF-GATE keeps the position out of the state until the object proves controllable (a consistent, non-trivial
+    learned displacement), so a STATE-CHANGE game (no controllable position) keeps its recurring local view.
 
-The object tracker runs in BOTH modes (so `objects()` still feeds the click-slots and the L5 poses); only the STATE
-the loop runs on differs. The change stream is returned in both. Pure stdlib.
+The object tracker runs in all modes (so `objects()` still feeds the click-slots). `read(frame, action)` takes the
+efference copy (the last action) for path integration. Pure stdlib.
 """
 
 from __future__ import annotations
 
-from .perceive import ObjectField, canonicalize
-from .retina import dominant_region, salient_cells          # the canonical residual + foveation (reused, not redefined)
+from .perceive import ObjectField, background, canonicalize, components
+from .retina import dominant_region, salient_cells          # the canonical dynamic residual + foveation (reused)
 
 
 def config_state(objects, contents=None):
@@ -34,28 +39,34 @@ def config_state(objects, contents=None):
 
 
 class Sensor:
-    """Frame -> column input. `read(frame)` tracks objects and returns `(state, change)`. `local=True` makes the state
-    an EGOCENTRIC window (size `window`) around the dynamic-residual fovea -- the representation that RECURS on real
-    64x64 frames; `local=False` (default) is the global translation-invariant `config_state`. `objects()` (the tracker)
-    works in both modes. `predict(oid, pose)->pose` (the column's L5) may be passed to disambiguate objects in contact."""
+    """Frame -> column input. `read(frame, action)` tracks objects and returns `(state, change)`. With `local=True` the
+    state is an EGOCENTRIC window (size `window`) around the dynamic-residual fovea; with `integrate=True` it is
+    `(window, coarse path-integrated position)` once the object proves controllable. `local=False` (default) is the
+    global translation-invariant `config_state`. `objects()` works in all modes."""
 
-    def __init__(self, local: bool = False, window: int = 7):
+    def __init__(self, local: bool = False, window: int = 7, integrate: bool = False, pos_bin: int = 4):
         self.field = ObjectField()
         self._prev = None
         self.local = local
         self.window = window
-        self._fovea = None                                   # the persistent attention locus (egocentric mode)
+        self.integrate = integrate
+        self.pos_bin = pos_bin
+        self._fovea = None                                   # the attention locus / path-integrated position
+        self._delta: dict = {}                               # action -> learned position displacement (the efference)
 
     def reset(self):
         self.field.reset()
         self._prev = None
         self._fovea = None
+        # self._delta PERSISTS across levels -- the per-action displacement is the same game mechanic everywhere.
 
-    def read(self, frame, predict=None):
+    def read(self, frame, action=None, predict=None):
         objects = self.field.perceive(frame, predict)
         change = salient_cells(self._prev, frame) if self._prev is not None else set()
         if self.local:
-            state = self._local_state(frame, change, objects)
+            self._update_fovea(frame, change, objects, action)
+            patch = self._patch(frame, self._fovea)
+            state = (patch, self._coarse_pos()) if self.integrate else patch
         else:
             state = config_state(objects, self.field.contents)
         self._prev = frame
@@ -65,22 +76,54 @@ class Sensor:
         """The current tracked objects `{id: (pose, size)}` -- poses feed the click-slots and the L5 reseat."""
         return dict(self.field._last)
 
-    # ----- egocentric local sensing (the recurrence fix) ------------------------------------------------
-    def _local_state(self, frame, change, objects):
-        """Place the FOVEA on the dynamic residual (the controllable change), persisting it across a no-change step,
-        and return the raw WxW egocentric patch -- a LOCAL view that recurs as the agent acts. Cold start (no change
-        yet) foveates the largest object, else the frame centre."""
+    # ----- egocentric local sensing + path integration (the recurrence + navigation fix) ----------------
+    def _update_fovea(self, frame, change, objects, action):
+        """Place the FOVEA on the controllable object, LEARN the per-action displacement from its move (the efference),
+        and snap (CORRECT). Cold start (no motion yet) foveates the largest object / the frame centre."""
         if change:
-            _comp, c = dominant_region(change)
+            c = self._locate(frame, change, action)
             if c is not None:
-                self._fovea = c
+                if action is not None and self._fovea is not None:   # learn the per-action displacement (EWMA -> the efference)
+                    actual = (c[0] - self._fovea[0], c[1] - self._fovea[1])
+                    old = self._delta.get(action)
+                    self._delta[action] = actual if old is None else (0.6 * old[0] + 0.4 * actual[0], 0.6 * old[1] + 0.4 * actual[1])
+                self._fovea = c                                      # correct (snap to the sighting)
         if self._fovea is None:
-            if objects:
-                (px, py), _size = max(objects.values(), key=lambda v: (v[1], v[0]))
-                self._fovea = (px, py)
-            else:
-                self._fovea = (len(frame[0]) / 2.0, len(frame) / 2.0)
-        return self._patch(frame, self._fovea)
+            self._fovea = self._largest_centroid(objects) or (len(frame[0]) / 2.0, len(frame) / 2.0)
+
+    def _locate(self, frame, change, action):
+        """Where the controllable object went. Once its per-action displacement is known, the ARRIVED (non-background)
+        residual region nearest the EFFERENCE prediction (fovea + displacement) -- clean tracking that ignores
+        autonomous animation. Until then (cold start / no efference), the largest connected residual (robust, the
+        7b behaviour validated live)."""
+        d = self._delta.get(action)
+        if d is not None and self._fovea is not None and (d[0] * d[0] + d[1] * d[1]) > 0.25:
+            bg = background(frame)
+            appeared = {(x, y) for (x, y) in change if frame[y][x] != bg}     # where the object IS now, not vacated
+            comps = components(appeared)
+            if comps:
+                pred = (self._fovea[0] + d[0], self._fovea[1] + d[1])
+                return min(comps, key=lambda cc: (cc[1][0] - pred[0]) ** 2 + (cc[1][1] - pred[1]) ** 2)[1]
+        _comp, c = dominant_region(change)
+        return c
+
+    def _largest_centroid(self, objects):
+        if not objects:
+            return None
+        (px, py), _size = max(objects.values(), key=lambda v: (v[1], v[0]))
+        return (px, py)
+
+    def _controllable(self) -> bool:
+        """The fovea's object responds to actions (a consistent, non-trivial learned displacement) -> its allocentric
+        POSITION is informative. Random animation averages to ~0 -> not controllable, so the gate stays off and a
+        state-change game keeps its recurring local view."""
+        return any(d[0] * d[0] + d[1] * d[1] > 1.0 for d in self._delta.values())
+
+    def _coarse_pos(self):
+        """The coarse allocentric position, gated by controllability (else a constant -- keeps the state type stable)."""
+        if self._fovea is None or not self._controllable():
+            return (0, 0)
+        return (int(round(self._fovea[0])) // self.pos_bin, int(round(self._fovea[1])) // self.pos_bin)
 
     def _patch(self, frame, fovea):
         """The raw `window x window` patch of `frame` centred on `fovea` (out-of-bounds = -1), as a hashable tuple."""
