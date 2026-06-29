@@ -115,7 +115,7 @@ class RewardModel:
 
     def _backup(self, s, T):
         self.backups += 1
-        nxts = T[s]                                             # variable action count: 4 on the grid, subgoals elsewhere
+        nxts = T.get(s, [])                                     # a state absent from T is TERMINAL/unknown (online partial T)
         new_v = (self.reward_total(s) if not nxts else
                  max(self.reward_total(s) + self.gamma * self.V[nxt] for nxt in nxts))
         delta = new_v - self.V[s]

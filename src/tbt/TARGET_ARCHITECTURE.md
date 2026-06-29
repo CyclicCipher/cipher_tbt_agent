@@ -32,6 +32,17 @@ Expected free energy = epistemic + pragmatic; exploration and exploitation are O
 arbitration / goal-directed + novelty-directed planning we built before is reusable (see git history) and drives this
 loop — it is not new work, it is re-grounding what we had on the columns.
 
+**Predictive-state structure (HTM-style — the learning signal).** The loop is *predict-then-compare*: at the END of a
+turn each column enters a PREDICTIVE STATE (it predicts the next state given the chosen action and the active goal); at
+the START of the next turn the actual sensation is compared to that prediction. **The mismatch is the single learning
+signal** — it sharpens the operators (a graph edge + its reliability, the SR, the recognition evidence) and flags
+surprise (an unpredicted change = a boundary; HTM's burst). This unifies the loop: a GOAL is a particular prediction (a
+desired future state), motor actions are chosen to *make the prediction come true* (active inference = acting to fulfil
+predictions), and motor learning is just the prediction error on an action's outcome — short-term (was this move's
+effect as expected) and long-term (the operator sharpens). No separate module: the column already predicts (`predict` /
+recognition / SR); the loop holds the prediction and learns from the comparison. This subsumes the old `events.py`
+reafference + `forward.prediction_error`.
+
 ## The column's faculties — HAVE / FOLD / BUILD
 
 The column is "learn a structural map, predict from it," through four layers. Each faculty is **HAVE** (works today),
@@ -132,9 +143,12 @@ thalamic VSA binding work now; pose-aware *voting* across heterogeneous frames i
    the L5 matrix operator AND `residual`); recognition carries continuous pose. Decided after neuroscience
    (reference_brain_reference_frames_orthogonalization): the brain orthogonalises by sparse pattern separation (not
    eigh) and path-integrates by a continuous-attractor bump / discrete snapping (not a matrix op over codes), so the
-   matrix operator + the recurrence are superseded online. `_sparsify_topk` (DG pattern separation) is the documented
-   route IF an associative matrix operator is ever needed; the Hebbian grid layer (Oja/Sanger) only if vector-navigation
-   to unseen targets demands it.
+   matrix operator + the recurrence are superseded online. *ARCHIVED alternatives to the chosen graph+SR (kept on the
+   shelf if it proves insufficient): (B) a **Hebbian grid layer** — Oja / Sanger's GHA / non-negative PCA on the
+   streaming SR → orthonormal SR-eigen ("grid") codes that drive a matrix operator + continuous operator composition +
+   vector-navigation to UNVISITED goals; (C) **`_sparsify_topk`** (random projection + top-k = DG / fly-mushroom-body
+   pattern separation) → near-orthogonal sparse codes for an associative operator. Revisit only if the discrete graph
+   can't generalise to unseen state-actions and the SR's reachability isn't enough.*
 3. **GSG + reward + basal ganglia → the active-inference loop** (re-ground the prior-commit planner on the column).
 4. **Dorsal/ventral dynamics column** (the change stream) — cheap once 1–3 exist.
 5. **The sensor (retina)** → column input; run the continuous loop on a real game.
