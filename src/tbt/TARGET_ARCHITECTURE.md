@@ -120,16 +120,21 @@ thalamic VSA binding work now; pose-aware *voting* across heterogeneous frames i
 - `column_learner.py` — **DELETE** (orphaned demo driver; its drive-and-learn function is the agent loop, not a script).
 - `factorize.py` — dissolve into **L6** (eigen-subspace factors + BG allocation); remove once folded.
 - `residual.py` — dissolve into **L5** (state-dependent operators); remove once folded.
-- `recurrence.py` — dissolve into the column's **belief/evidence update** (precision-weighted predict↔correct); remove
-  the standalone SSM-gate once folded.
+- `recurrence.py` — **SUPERSEDED online**: path integration is now discrete graph tracking (predict-by-edge + snap to a
+  sighting), not a gated vector belief, so the column no longer imports it. Removable (kept only as reference).
 - **Keep:** `column.py`, `l4/l5/l6/l23`, `thalamus.py`, `basal_ganglia.py`, `reward.py`, and the API
   (`arc_run.py`, `arc_sdk.py`, `tasks/core.py`).
 
 ## Build order (deadline-aware)
 1. **Evidence-based recognition with inferred pose**, in the column — the spine; subsumes `recognize.py`.
-2. **Incremental / online learning** in L6, replacing the batch `eigh`, in this order: (1) factor the state so the
-   graph is small; (2) **online TD-SR** place codes (+ online L5 operators); (3) a **Hebbian grid layer** (Oja/Sanger /
-   non-negative PCA) only if vector-navigation to unseen targets needs it. Required to run live within the action budget.
+2. **Incremental / online learning** in L6 — **DONE**. `OnlineSR` (TD, no `eigh`) carries value/topology; the column's
+   `predict` / `loc_*` run over the exact learned transition **graph** (state-dependent by construction — it subsumes
+   the L5 matrix operator AND `residual`); recognition carries continuous pose. Decided after neuroscience
+   (reference_brain_reference_frames_orthogonalization): the brain orthogonalises by sparse pattern separation (not
+   eigh) and path-integrates by a continuous-attractor bump / discrete snapping (not a matrix op over codes), so the
+   matrix operator + the recurrence are superseded online. `_sparsify_topk` (DG pattern separation) is the documented
+   route IF an associative matrix operator is ever needed; the Hebbian grid layer (Oja/Sanger) only if vector-navigation
+   to unseen targets demands it.
 3. **GSG + reward + basal ganglia → the active-inference loop** (re-ground the prior-commit planner on the column).
 4. **Dorsal/ventral dynamics column** (the change stream) — cheap once 1–3 exist.
 5. **The sensor (retina)** → column input; run the continuous loop on a real game.

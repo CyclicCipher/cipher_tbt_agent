@@ -29,9 +29,9 @@ import torch.nn as nn
 from .l4_feature_location import L4_FeatureLocation
 from .l5_displacement import L5_Displacement
 from .l6_grid import L6_GridLocation
+from .l6_sr import OnlineSR                            # the online TD successor representation (eigendecomposition-free L6)
 from .l23_object import L23_Object
 from .recognize import Recognizer                      # the "what + pose" evidence faculty (object identity + orientation)
-from .recurrence import SelectiveRecurrence            # the ONE canonical selective-gated recurrence
 from .residual import _find_predicate                  # the predicate search the column's dynamics faculty reuses
 
 
@@ -73,14 +73,14 @@ class CorticalColumn(nn.Module):
         self.d_mem = d_mem
         self._shared_U = _orthonormal(d_mem, d_mem, self.gen)            # shared slot for the no-remap control (sliced to frame size)
         self.dom = {}                                                    # name -> {place, labels, U}
-        # online structure learning (discover a structure from raw transitions; driven by agent.py) -------
+        # online structure learning (discover a structure from raw transitions) -------------------------------
+        self.sr = OnlineSR(gamma=0.95, alpha=0.3)             # the location frame, learned ONLINE by TD (no batch eigh)
         self.graph, self.loc, self.rel = {}, {}, {}           # observed edges; symbol→frame index; relation operators
         self.place = None                                     # (n, d_mem) per-node SR-frame codes (set by consolidate)
         self._inv_loc = {}                                    # frame index → symbol (set by consolidate)
         self._sparse_place = False                            # True once n > d_mem → sparse place codes + cleanup
         self._place_k_loc = 16                                # active units per sparse place code (~3% of d_mem)
-        self._h = None                                        # L6 as a DYNAMIC path-integrated belief (the recurrence)
-        self._rec = SelectiveRecurrence(d_mem, n_keys=1)      # the canonical gate for L6 correction (loc_sense)
+        self._cur = None                                      # the current node -- discrete path integration over the graph
         self._dyn_obs, self.dyn_rules = [], []                # the conditional-dynamics faculty (forward model of world responses)
 
     # ----- learn a model of a domain (structure GIVEN) via the SR frame ----------------------------
@@ -133,9 +133,11 @@ class CorticalColumn(nn.Module):
 
     # ----- discover a structure from raw transitions (online; the counterpart to learn_domain) ----------
     def observe(self, s, a, s2):
-        """Record one observed transition as a 1-shot edge. The geometry — line, ring, or 2-D grid — and
-        where each symbol sits is discovered later by consolidate() from the whole graph."""
-        if s2 != s:                                                   # ignore blocked moves (no edge there)
+        """Record one observed transition. It feeds the ONLINE SR (the location frame, TD-learned every step — no batch
+        eigh; `refresh()` reads it) AND the per-action edge graph (for the L5 operators). The geometry — line, ring,
+        2-D grid, tree — falls out of the SR; no metric-vs-non-metric switch."""
+        self.sr.observe(s, s2)                                       # online location learning (incl. self-loops / blocked moves)
+        if s2 != s:                                                  # the per-action operator has no edge for a blocked move
             self.graph.setdefault(s, {})[a] = s2
 
     def consolidate(self):
@@ -171,17 +173,47 @@ class CorticalColumn(nn.Module):
             self.L5.learn(("rel", a), self.place, edges)
             self.rel[a] = ("rel", a)
 
+    def refresh(self):
+        """ONLINE, eigendecomposition-free consolidation — the per-step-affordable replacement for `consolidate()`.
+        The location frame is the ONLINE SR (TD-learned by `observe`, no `eigh`); take its rows as place codes (padded
+        into d_mem so L4/L5/L23 are unchanged), then learn the L5 operators + pool L4/L23 from them with the SAME cheap
+        outer products `consolidate` uses. The batch `eigh` `consolidate` is kept only as the offline reference. (Up to
+        d_mem states are padded in; beyond d_mem a random projection is needed — deferred.)"""
+        syms = sorted(self.sr.idx, key=lambda s: self.sr.idx[s])
+        if not syms:
+            return
+        self.loc = dict(self.sr.idx)
+        self._inv_loc = {i: s for s, i in self.loc.items()}
+        codes = torch.zeros(len(syms), self.d_mem)
+        for s in syms:                                               # SR row -> place code (padded into d_mem)
+            row = torch.as_tensor(self.sr.code(s), dtype=torch.float32)
+            codes[self.loc[s], :row.shape[0]] = row[:self.d_mem]
+        self.place = torch.nn.functional.normalize(codes, dim=1)
+        self._sparse_place = False
+        relations: dict = {}
+        for s, e in self.graph.items():
+            for a, s2 in e.items():
+                if s in self.loc and s2 in self.loc:
+                    relations.setdefault(a, []).append((self.loc[s], self.loc[s2]))
+        self.rel = {}
+        for a, edges in relations.items():                          # operators from the current codes (outer products; no eigh)
+            self.L5.learn(("rel", a), self.place, edges)
+            self.rel[a] = ("rel", a)
+        for s, i in self.loc.items():                              # content bound at the online place codes
+            self.L23.pool(self.L4.bind(s, self.place[i]))
+
     def _cleanup(self, v):
         """Snap a noisy location vector to the nearest place code (attractor cleanup) — keeps sparse-code
         operator composition from accumulating error. Used only on the sparse path (n > d_mem)."""
         return self.place[(self.place @ v).argmax()]
 
     def predict(self, symbol, action):
-        """Apply the learned action operator at a symbol's place, read out the landing symbol."""
-        v = self.L5.apply(self.rel[action], self.place[self.loc[symbol]])
-        if self._sparse_place:
-            v = self._cleanup(v)
-        return self.L4.readout(self.L23.S, v).argmax().item()
+        """Where `action` leads from `symbol`: the learned next state, read straight from the transition GRAPH. The
+        graph is the state-dependent operator (each (s, a) has its own next state -- it subsumes the L5 matrix operator
+        AND residual's conditional structure, exactly and online); the online SR carries value/topology, recognition
+        carries continuous pose. An unobserved / blocked (s, a) stays put. (See the brain-reference-frames research:
+        the brain path-integrates by a continuous-attractor bump / discrete snapping, not a matrix op over codes.)"""
+        return self.graph.get(symbol, {}).get(action, symbol)
 
     def add(self, start, count, succ_action=0):
         """Arithmetic = navigation: apply the successor operator `count` times from `start`, read out."""
@@ -218,37 +250,32 @@ class CorticalColumn(nn.Module):
         """This column's location (Where / SR-frame) code for a node — discovered by observe/consolidate."""
         return self.place[self.loc[node]]
 
-    # ----- L6 driven as a DYNAMIC, path-integrated belief — the recurrence (architecture doc §14 stage 11) -----
-    # The static place_code above is a lookup; here L6 becomes a persistent state h, the same selective gated
-    # recurrence as the language SSM (precursor/language_recurrent.py) but on the LOCATION code: PREDICT by the
-    # L5 displacement operator (grid-cell path integration — needs no observation, so it works when position is
-    # NOT visible), CORRECT by the SSM decay gate toward a sensed node. This is what lets a column track where it
-    # is and integrate an observation sequence under PARTIAL observability, where the static lookup cannot.
+    # ----- path integration as DISCRETE graph tracking (predict by the learned edge, snap to a sighting) ----------
+    # NOT a matrix operator over codes: the brain path-integrates by a continuous-attractor bump shifted by velocity,
+    # with discrete-attractor SNAPPING on a clear sighting (reference_brain_reference_frames_orthogonalization). Here
+    # that is exact and online -- PREDICT the next node by the learned edge (efference copy; needs no observation, so it
+    # survives PARTIAL observability), CORRECT by snapping to a sensed node. The online SR carries value/topology;
+    # recognition carries continuous pose.
     def loc_reset(self, node):
-        """Begin the recurrent belief at a known node (the origin of dead reckoning)."""
-        self._h = self.place_code(node).clone()
+        """Begin dead reckoning at a known node."""
+        self._cur = node
         return node
 
     def loc_move(self, action):
-        """PREDICT: path-integrate the belief by the action's displacement operator (the efference copy). No
-        observation needed — this is the update that survives partial observability. Snapped to the nearest
-        place code (position is discrete) to keep the belief crisp over a long trajectory."""
-        self._h = self._cleanup(self.L5.apply(self.rel[action], self._h))
-        return self.loc_where()
+        """PREDICT: path-integrate by the learned edge (the efference copy) -- no observation needed. An unobserved or
+        blocked move stays put."""
+        self._cur = self.graph.get(self._cur, {}).get(action, self._cur)
+        return self._cur
 
-    def loc_sense(self, node, keep=None):
-        """CORRECT: selectively blend the belief toward an observed node via the canonical per-channel gate
-        (`tbt.recurrence.SelectiveRecurrence` — the SAME gate the language SSM uses). `keep` ∈ [0,1] overrides
-        it with a scalar (keep=0 snaps to a reliable sighting); the default uses the learned per-channel gate."""
-        a = self._rec.gate(0) if keep is None else keep
-        new = self._rec.step(self._h.detach().cpu().numpy(),
-                             self.place_code(node).detach().cpu().numpy(), a)
-        self._h = torch.as_tensor(new, dtype=self._h.dtype, device=self._h.device)
-        return self.loc_where()
+    def loc_sense(self, node):
+        """CORRECT: snap the belief to an observed node (the discrete-attractor sighting). Call only when a node is
+        actually sensed; otherwise keep dead-reckoning via loc_move."""
+        self._cur = node
+        return self._cur
 
     def loc_where(self):
-        """READ OUT the most likely current node — attractor match of the belief against the place codebook."""
-        return self._inv_loc[int((self.place @ self._h).argmax())]
+        """The current node."""
+        return self._cur
 
     # ----- the conditional-DYNAMICS faculty: the column's forward model of the WORLD's responses ------------
     # The location code above predicts where the BODY goes; this predicts what the WORLD does that self-motion
