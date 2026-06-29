@@ -74,8 +74,8 @@ class CorticalColumn(nn.Module):
         self._shared_U = _orthonormal(d_mem, d_mem, self.gen)            # shared slot for the no-remap control (sliced to frame size)
         self.dom = {}                                                    # name -> {place, labels, U}
         # online structure learning (discover a structure from raw transitions) -------------------------------
-        self.sr = OnlineSR(gamma=0.95, alpha=0.3)             # the location frame, learned ONLINE by TD (no batch eigh)
-        self.graph, self.loc, self.rel = {}, {}, {}           # observed edges; symbol→frame index; relation operators
+        self.sr = OnlineSR(gamma=0.95, alpha=0.3)             # L6: the location frame, learned ONLINE by TD (no batch eigh)
+        self.loc, self.rel = {}, {}                           # symbol→frame index; matrix-operator keys (the EDGES live in L5)
         self.place = None                                     # (n, d_mem) per-node SR-frame codes (set by consolidate)
         self._inv_loc = {}                                    # frame index → symbol (set by consolidate)
         self._sparse_place = False                            # True once n > d_mem → sparse place codes + cleanup
@@ -132,13 +132,17 @@ class CorticalColumn(nn.Module):
         return cand[int((like * prior).argmax())]
 
     # ----- discover a structure from raw transitions (online; the counterpart to learn_domain) ----------
+    @property
+    def graph(self):
+        """A read view of the per-action operator's edges -- they live in L5 now (the operator layer), not a bare dict."""
+        return self.L5.edges
+
     def observe(self, s, a, s2):
-        """Record one observed transition. It feeds the ONLINE SR (the location frame, TD-learned every step — no batch
-        eigh; `refresh()` reads it) AND the per-action edge graph (for the L5 operators). The geometry — line, ring,
-        2-D grid, tree — falls out of the SR; no metric-vs-non-metric switch."""
-        self.sr.observe(s, s2)                                       # online location learning (incl. self-loops / blocked moves)
-        if s2 != s:                                                  # the per-action operator has no edge for a blocked move
-            self.graph.setdefault(s, {})[a] = s2
+        """Record one observed transition: it feeds L6 (the ONLINE SR location frame, TD every step -- no batch eigh) AND
+        L5 (the per-action operator -- the edges; a blocked move is a state-dependent exception with no edge). The
+        geometry -- line, ring, 2-D grid, tree -- falls out of the SR; no metric-vs-non-metric switch."""
+        self.sr.observe(s, s2)                                       # L6: online location learning (incl. blocked moves)
+        self.L5.observe(s, a, s2)                                    # L5: the per-action operator (edges)
 
     def consolidate(self):
         """Discover the structure as the SR-eigenvector frame of the OBSERVED transition graph — the online
@@ -208,12 +212,11 @@ class CorticalColumn(nn.Module):
         return self.place[(self.place @ v).argmax()]
 
     def predict(self, symbol, action):
-        """Where `action` leads from `symbol`: the learned next state, read straight from the transition GRAPH. The
-        graph is the state-dependent operator (each (s, a) has its own next state -- it subsumes the L5 matrix operator
-        AND residual's conditional structure, exactly and online); the online SR carries value/topology, recognition
-        carries continuous pose. An unobserved / blocked (s, a) stays put. (See the brain-reference-frames research:
-        the brain path-integrates by a continuous-attractor bump / discrete snapping, not a matrix op over codes.)"""
-        return self.graph.get(symbol, {}).get(action, symbol)
+        """Where `action` leads from `symbol` -- the L5 operator (the efference copy). L5 owns the per-action operator:
+        the discrete edges are the state-dependent operator (each (s,a) its own next state; a wall/door is a blocked
+        exception). The online SR (L6) carries value/topology; recognition carries continuous pose. Unobserved/blocked
+        -> stay. (At the reseat, L5 also gains the position-invariant displacement for unvisited (s,a) + the motor output.)"""
+        return self.L5.predict(symbol, action)
 
     def add(self, start, count, succ_action=0):
         """Arithmetic = navigation: apply the successor operator `count` times from `start`, read out."""
@@ -262,9 +265,9 @@ class CorticalColumn(nn.Module):
         return node
 
     def loc_move(self, action):
-        """PREDICT: path-integrate by the learned edge (the efference copy) -- no observation needed. An unobserved or
+        """PREDICT: path-integrate by the L5 operator (the efference copy) -- no observation needed. An unobserved or
         blocked move stays put."""
-        self._cur = self.graph.get(self._cur, {}).get(action, self._cur)
+        self._cur = self.L5.predict(self._cur, action)
         return self._cur
 
     def loc_sense(self, node):
