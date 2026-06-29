@@ -76,7 +76,8 @@ class RewardModel:
     """Unified value (extrinsic reward + intrinsic novelty) maintained by prioritized sweeping
     (priority = gain x need). Set prioritized=False for the exhaustive value-iteration baseline."""
 
-    def __init__(self, N, gamma=0.9, beta=0.3, budget=40, theta=1e-5, prioritized=True, optimistic=True):
+    def __init__(self, N, gamma=0.9, beta=0.3, budget=40, theta=1e-5, prioritized=True, optimistic=True,
+                 epistemic="progress", a_fast=0.3, a_slow=0.05):
         self.gamma, self.beta, self.budget, self.theta = gamma, beta, budget, theta
         self.prioritized, self.sweeps = prioritized, 3 * N
         self.Vmax = 1.0 / (1.0 - gamma)                         # optimism under uncertainty (R-MAX): an
@@ -91,9 +92,38 @@ class RewardModel:
         self.visits = defaultdict(int)                          # visit counts (drive the novelty bonus)
         self.queue = {}                                         # pending backups: state -> priority
         self.backups = 0                                        # compute counter (efficiency comparison)
+        # --- the EPISTEMIC term (what the agent path-integrates TOWARD) -------------------------------------
+        # "progress" = LEARNING PROGRESS (the model's prediction-error REDUCTION per state) -- a navigable landscape:
+        # the agent is drawn to where it is LEARNING, ignores irreducible noise (the noisy-TV: high error, no
+        # reduction) and the already-mastered (no error), and winds into exploitation. "novelty" = count-based (the
+        # old bump); "error" = RAW prediction error (the noisy-TV trap -- baseline). See reference_animal_exploration.
+        self.epistemic = epistemic
+        self.a_fast, self.a_slow = a_fast, a_slow
+        self.err_fast: dict = {}                                # fast EWMA of prediction error at s
+        self.err_slow: dict = {}                                # slow EWMA (lags) -> slow - fast = recent error REDUCTION
+
+    def observe_error(self, state, error: float) -> None:
+        """The model's prediction error at `state` (the agent's surprise when leaving it: 1 mispredicted, 0 nailed).
+        Two EWMAs at different rates; their gap (slow - fast) is the LEARNING PROGRESS -- positive while error is
+        dropping (learnable), ~0 when error is persistently high (irreducible noise) or persistently low (mastered)."""
+        f, s = self.err_fast.get(state, error), self.err_slow.get(state, error)
+        self.err_fast[state] = (1.0 - self.a_fast) * f + self.a_fast * error
+        self.err_slow[state] = (1.0 - self.a_slow) * s + self.a_slow * error
 
     def reward_total(self, s):
-        return self.R_ext.get(s, 0.0) + self.beta / (1.0 + self.visits[s])     # extrinsic + novelty
+        ext = self.R_ext.get(s, 0.0)
+        if self.epistemic == "novelty":
+            return ext + self.beta / (1.0 + self.visits[s])                    # count-based novelty (the old bump)
+        if self.epistemic == "error":
+            return ext + self.beta * self.err_fast.get(s, 0.0)                 # RAW error (the noisy-TV trap; baseline)
+        # "progress" = the novelty frontier drive GATED by learnability. The gate is 1 wherever the model is learning or
+        # has learned (so on deterministic structure this is IDENTICAL to count-novelty -- no distraction) and falls to
+        # 0 on CONFIRMED noise: persistent prediction error NOT explained by ongoing learning progress (the noisy TV).
+        # So the agent stops paying novelty to a region it has proven it cannot predict, unlike RAW error which clings.
+        lp = max(self.err_slow.get(s, 0.0) - self.err_fast.get(s, 0.0), 0.0)  # measured progress = recent error reduction
+        noise = max(self.err_slow.get(s, 0.0) - 4.0 * lp, 0.0)               # persistent error with NO progress = noise
+        gate = 1.0 - min(noise, 1.0)
+        return ext + self.beta * gate / (1.0 + self.visits[s])
 
     def _need(self, s, current):
         """NEED = successor-representation relevance of s to the agent's future. The TRUE need is the SR

@@ -26,11 +26,12 @@ class Agent:
     state sensed this turn (and the score gained entering it) and returns the next action. The model persists across
     episodes; `new_episode()` only resets the per-episode prediction/linkage (do not path-integrate across a reset)."""
 
-    def __init__(self, n_actions: int, n_entities: int = 256, gamma: float = 0.9, beta: float = 0.3, seed: int = 0):
+    def __init__(self, n_actions: int, n_entities: int = 256, gamma: float = 0.9, beta: float = 0.3, seed: int = 0,
+                 epistemic: str = "progress"):
         self.actions = list(range(n_actions))
         self.rng = random.Random(seed)
         self.col = CorticalColumn(n_entities=n_entities, seed=seed)           # the world model (graph + SR), learned online
-        self.reward = RewardModel(16, gamma=gamma, beta=beta, optimistic=True)  # value: extrinsic (score) + novelty, R-MAX
+        self.reward = RewardModel(16, gamma=gamma, beta=beta, optimistic=True, epistemic=epistemic)  # value: score + LEARNING-PROGRESS
         self.tried: set = set()                                              # (state, action) ATTEMPTED -- persists across episodes
         self.new_episode()
 
@@ -63,6 +64,7 @@ class Agent:
             ps, pa = self._prev
             self.col.observe(ps, pa, state)                                  # learn the transition online (graph + SR)
             self.tried.add((ps, pa))                                         # attempted (even if blocked -> no edge)
+            self.reward.observe_error(ps, 1.0 if self.surprised else 0.0)    # LEARNING-PROGRESS signal: error at the state left
         self.reward.observe(state, score_delta)                             # value: reward where the score rose + novelty
         a = self._choose(state, blocked)
         self._pred = self.col.predict(state, a)                             # enter the predictive state
