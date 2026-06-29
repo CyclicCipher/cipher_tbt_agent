@@ -11,7 +11,8 @@ Requirements (see the project_arc_agi3_live_env memory): Python >=3.12, `pip ins
 ARC_API_KEY (from `api_key.env`, `.env`, or the environment), and on a TLS-intercepting host (e.g. Norton)
 `pip install pip-system-certs`. All third-party imports are lazy so this file imports cleanly without them.
 
-    python src/arc_run.py ls20 40        # play game ls20 for up to 40 actions with the random-baseline policy
+    python src/arc_run.py ls20 40         # play ls20 for up to 40 actions with the TBT agent (the continuous loop)
+    python src/arc_run.py ls20 40 random  # the random baseline (pipeline validation)
 """
 
 from __future__ import annotations
@@ -133,9 +134,10 @@ class _LiveFrame:
 
 
 class RemoteEnv:
-    """Drive an arc_agi ONLINE game through the agent's `Environment` protocol (reset/step), so `Agent.learn_online`
-    and `Agent.play` run the LIVE games unchanged: it maps our `GameAction` -> arcengine (+ (x,y) for a coordinate
-    action) and `FrameDataRaw` -> a frame the agent reads. One game per instance."""
+    """Drive an arc_agi ONLINE game through a reset/step `Environment` protocol: it maps our `GameAction` -> arcengine
+    (+ (x,y) for a coordinate action) and `FrameDataRaw` -> a `_LiveFrame` the agent reads. (The lean path the TBT
+    agent actually runs on is `play_remote` + `arc_sdk.TbtPolicy`, the choose_action/is_done contract; this env-protocol
+    form is kept for an env-style driver.) One game per instance."""
 
     def __init__(self, arc, game_id, card_id):
         self.arc, self.game_id, self.card_id = arc, game_id, card_id
@@ -189,4 +191,10 @@ if __name__ == "__main__":
     import sys
     game = sys.argv[1] if len(sys.argv) > 1 else "ls20"
     n = int(sys.argv[2]) if len(sys.argv) > 2 else 40
-    play_remote(RandomPolicy(seed=0), game, max_actions=n)     # the random baseline; the agent driver is rebuilt on the columns
+    which = sys.argv[3] if len(sys.argv) > 3 else "agent"
+    if which == "random":
+        policy = RandomPolicy(seed=0)                          # the pipeline-validation baseline
+    else:
+        from arc_sdk import TbtPolicy                          # the TBT agent: Sensor + Agent, the continuous online loop
+        policy = TbtPolicy(seed=0)
+    play_remote(policy, game, max_actions=n)

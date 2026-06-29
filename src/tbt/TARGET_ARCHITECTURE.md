@@ -187,7 +187,15 @@ thalamic VSA binding work now; pose-aware *voting* across heterogeneous frames i
    conditional-dynamics precondition search), so ONE column models any action effect (movement, colour, both). Validated
    end to end (agent solves a movement scene ~6 actions and a colour-change scene at the 5-action optimum). Rotation (θ)
    deferred — a clean one-dimension extension fed by the recogniser's angle. See `reference_l5_operator_kinds`.
-6. **The live loop on a real game** (`arc_run`).
+6. **The live loop on a real game** (`arc_run`) — **WIRED 2026-06-28.** `arc_sdk.TbtPolicy` now wraps the `Sensor` +
+   `tbt.agent.Agent` into ONE continuous online loop on the SDK/hosted `choose_action`/`is_done` contract: read frame ->
+   state, learn from the score (levels_completed), predict-then-compare step; the model PERSISTS across levels (a
+   boundary resets only the per-episode link + the sensor tracker), and a completion is credited as a transition to a
+   single GOAL terminal (so the agent learns to TAKE the completing action and the goal TRANSFERS). `arc_run.play_remote`
+   drives it live; `make_arc_agent` exposes it to the real SDK. Offline-gated (no API): the agent drives a multi-level
+   mock game to WIN through the exact contract, converging to the per-level OPTIMUM (oracle ~5) and transferring across
+   levels. The actual hosted run (3.12 `venv312/`, key) is a user-triggered spend; the click action (ACTION6) target is
+   a step-7 placeholder (the saccade/GSG).
 7. Later: **cross-frame voting** (heterogeneous frames → learned registration) + the **BG column-allocation**;
    **compositional hierarchy** of columns.
 

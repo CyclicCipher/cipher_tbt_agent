@@ -18,6 +18,8 @@ from collections import defaultdict
 from .column import CorticalColumn
 from .reward import RewardModel
 
+_GOAL = ("\x00GOAL",)                                                          # the single terminal a completing transition leads to
+
 
 class Agent:
     """One column + one reward model, driven by the predict-then-compare loop. `step(state, score_delta)` consumes the
@@ -36,6 +38,19 @@ class Agent:
         self._prev = None                                                    # (state, action) of the previous turn
         self._pred = None                                                    # the predictive state (predicted current state)
         self.surprised = False
+
+    def complete(self, score_delta: float = 1.0):
+        """A level completed: the PREVIOUS (state, action) was the completing transition. Record it as leading to a
+        single terminal GOAL sentinel and reward THAT -- so the agent learns to TAKE the completing action (value
+        flows back through that one edge), not to PARK on the state before the goal (which crediting the state would
+        teach). One GOAL across all levels = ARC's 'completion is the goal', and it transfers. Then end the episode
+        (the level boundary). For the live loop, where the next observed frame is already the next level."""
+        if self._prev is not None:
+            ps, pa = self._prev
+            self.col.observe(ps, pa, _GOAL)                                  # the completing transition -> the goal
+            self.tried.add((ps, pa))
+        self.reward.observe(_GOAL, max(score_delta, 1.0))                    # the goal is the rewarding terminal
+        self.new_episode()
 
     def step(self, state, score_delta: float = 0.0):
         """One turn: COMPARE last turn's prediction to the actual `state`, LEARN the transition (column + reward), PLAN

@@ -7,10 +7,12 @@ drives the game (its `main()` loops `choose_action` → `take_action`); an agent
     choose_action(frames, latest_frame) -> GameAction      # ACTION6 carries (x,y) via action.set_data
 
 The translation is split so it is TESTABLE WITHOUT the SDK or an API key:
-  * `TbtPolicy` — SDK-free. Wraps our `tbt.agent.Agent` (perception + planner), consumes a DUCK-TYPED frame
-    (anything with `.state`, `.frame`, `.levels_completed`/`.level`), and returns `(action_name, coords)`. It is
-    driven identically by the real SDK and by our offline replica `Environment` (whose `FrameData` is modelled on
-    the real one), so the same code path is exercised in the test suite — no parallel harness.
+  * `TbtPolicy` — SDK-free. Wraps the `Sensor` + `tbt.agent.Agent` into ONE CONTINUOUS online loop, consumes a
+    DUCK-TYPED frame (anything with `.state`, `.frame`, `.levels_completed`/`.level`, and the available actions),
+    and returns `(action_name, coords)`. Each call it reads the frame to a state, learns from the score change
+    (levels_completed), and the agent's predict-then-compare step picks the next action — the model PERSISTS across
+    levels (a level boundary only resets the per-episode link + the sensor tracker, never the model). It is driven
+    identically by the real SDK and by an offline mock game, so the same code path is exercised in the test suite.
   * `make_arc_agent(agent_factory)` — lazily imports the real SDK base + `arcengine.GameAction` and returns a
     class subclassing the SDK `Agent`, delegating to a `TbtPolicy` and mapping the action NAME back to the SDK
     enum (+ `set_data` for coordinates). Call it from a tiny stub inside the ARC-AGI-3-Agents repo.
@@ -68,32 +70,88 @@ def _to_obs(latest_frame) -> _Obs:
     return _Obs(state=_our_state(latest_frame.state), level=level, grid=_primary_grid(latest_frame.frame))
 
 
+def _action_names(latest_frame) -> List[str]:
+    """The available action NAMES, duck-typed: a frame may expose `.available` (names, our mock/_LiveFrame) or
+    `.available_actions` (arcengine action IDs, the real SDK — mapped via `GameAction.from_id`)."""
+    avail = getattr(latest_frame, "available", None)
+    if avail is not None:
+        return [n if isinstance(n, str) else n.name for n in avail]
+    ids = getattr(latest_frame, "available_actions", None) or []
+    from arcengine import GameAction                         # lazy: only the real-SDK path needs arcengine
+    return [GameAction.from_id(a).name for a in ids]
+
+
 # ── the SDK-free policy (the part the test drives, no arcengine needed) ─────────────────────────────────────
 class TbtPolicy:
-    """Adapt `tbt.agent.Agent` to the SDK's `choose_action`/`is_done` contract, returning `(action_name, coords)`.
+    """Adapt the `Sensor` + `tbt.agent.Agent` to the SDK's `choose_action`/`is_done` contract, as ONE CONTINUOUS
+    online loop, returning `(action_name, coords)`.
 
-    Lifecycle handled here: a NOT_PLAYED game must be RESET to start; a WIN ends play. GAME_OVER is delegated to
-    the agent itself (its `choose_action` fires `planner.on_death()` and emits the reset action), so the planner's
-    death handling is exercised — not bypassed."""
+    Each `choose_action` observes the RESULT of the previous action (the frame), reads it to a translation-invariant
+    state, learns from the score change (levels_completed — the only ARC-AGI-3 reward), and the agent's
+    predict-then-compare step picks the next action; the world model + value PERSIST across levels. A level boundary
+    is a discontinuity: reset the sensor's tracker + the agent's per-episode link (NOT the model). Lifecycle: a
+    NOT_PLAYED/GAME_OVER game is RESET (GAME_OVER self-heals the level and the run continues); a WIN ends play.
 
-    def __init__(self, agent):
-        self.agent = agent
-        self.agent.reset()
+    Action set: fixed from the first playable frame to the non-coordinate game actions (the agent plans over a stable
+    index space). The coordinate / click action (ACTION6) is a PURPOSEFUL-attention target — step 7 (the saccade /
+    GSG); until then it is excluded, and if a game offers only coordinate actions a centroid placeholder is used."""
+
+    def __init__(self, build_agent=None, seed: int = 0):
+        from tbt.sensor import Sensor                        # lazy: keep arc_sdk importable without torch
+        self.sensor = Sensor()
+        self._build = build_agent
+        self.seed = seed
+        self.agent = None
+        self.names: List[str] = []                           # action index -> name (fixed at the first playable frame)
+        self.coords: set = set()                             # names that need (x, y)
+        self.prev_level = 0
 
     def is_done(self, frames, latest_frame) -> bool:
         return _state_name(latest_frame.state) == "WIN"
 
+    def _init_actions(self, latest_frame) -> None:
+        from tbt.agent import Agent                          # lazy
+        avail = _action_names(latest_frame)
+        coord = {n for n in avail if n in ("ACTION6", "COMPLEX")}   # the click / coordinate actions
+        names = [n for n in avail if n != "RESET" and n not in coord] or [n for n in avail if n != "RESET"] or avail
+        self.names, self.coords = names, coord
+        build = self._build or (lambda n: Agent(n_actions=n, seed=self.seed))
+        self.agent = build(len(self.names))
+
+    def _target(self, obs, name) -> Coords:
+        """The (x, y) for a coordinate action — a placeholder until the step-7 attention policy: the centroid of the
+        largest tracked object (a salient locus), else None."""
+        if name not in self.coords:
+            return None
+        objs = self.sensor.objects()
+        if not objs:
+            return (0, 0)
+        (px, py), _size = max(objs.values(), key=lambda v: (v[1], v[0]))
+        return (int(round(px)), int(round(py)))
+
     def choose_action(self, frames, latest_frame) -> Tuple[str, Coords]:
-        if _state_name(latest_frame.state) == "NOT_PLAYED":
-            return "RESET", None                            # the game has not started; first action must be RESET
-        action, coords = self.agent.choose_action(_to_obs(latest_frame))
-        return action.name, coords                          # name → mapped back to the SDK enum by the caller
+        st = _state_name(latest_frame.state)
+        if st in ("NOT_PLAYED", "GAME_OVER"):               # not started / died -> RESET (GAME_OVER self-heals)
+            return "RESET", None
+        obs = _to_obs(latest_frame)
+        if self.agent is None:
+            self._init_actions(latest_frame)
+        score_delta = max(obs.level - self.prev_level, 0)   # ARC's only reward: a level completion
+        if score_delta > 0:                                 # a level boundary: a perceptual + linkage discontinuity
+            self.agent.complete(score_delta)                # the completing transition -> GOAL; ends the episode
+            self.sensor.reset()
+            self.prev_level = obs.level
+        state, _change = self.sensor.read(obs.grid)
+        a = self.agent.step(state, 0.0)                     # learn + choose (predict-then-compare); reward via complete()
+        name = self.names[a] if a < len(self.names) else self.names[0]
+        return name, self._target(obs, name)
 
 
 # ── the live SDK agent (lazy import; only usable inside the ARC-AGI-3-Agents repo) ──────────────────────────
-def make_arc_agent(agent_factory, max_actions: int = 100_000):
-    """Return a class subclassing the real SDK `Agent`, delegating to a `TbtPolicy(agent_factory())`. `agent_factory`
-    is a 0-arg callable building a fresh `tbt.agent.Agent` per game (a LEARNING agent, for real games).
+def make_arc_agent(build_agent=None, max_actions: int = 100_000):
+    """Return a class subclassing the real SDK `Agent`, delegating to a `TbtPolicy(build_agent)`. `build_agent` is an
+    optional `(n_actions) -> tbt.agent.Agent` factory (the action count is known only once the game's frame is seen);
+    the default builds a fresh learning `tbt.agent.Agent` per game.
 
     Going live needs Python >=3.12 + `pip install "arc-agi>=0.9.1"` (the ARC-AGI-3 toolkit — it provides BOTH
     `arcengine` and `arc_agi.EnvironmentWrapper`; NB this supersedes the old "arc-agi = static ARC-1/2 only" note).
@@ -121,7 +179,7 @@ def make_arc_agent(agent_factory, max_actions: int = 100_000):
 
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
-            self.policy = TbtPolicy(agent_factory())
+            self.policy = TbtPolicy(build_agent)
 
         def is_done(self, frames, latest_frame) -> bool:
             return self.policy.is_done(frames, latest_frame)
