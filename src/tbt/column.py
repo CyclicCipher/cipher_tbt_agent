@@ -213,10 +213,20 @@ class CorticalColumn(nn.Module):
 
     def predict(self, symbol, action):
         """Where `action` leads from `symbol` -- the L5 operator (the efference copy). L5 owns the per-action operator:
-        the discrete edges are the state-dependent operator (each (s,a) its own next state; a wall/door is a blocked
-        exception). The online SR (L6) carries value/topology; recognition carries continuous pose. Unobserved/blocked
-        -> stay. (At the reseat, L5 also gains the position-invariant displacement for unvisited (s,a) + the motor output.)"""
+        the observed EDGES are the state-dependent exceptions (each (s,a) its own next state; a wall/door is a blocked
+        self-edge), and the position-invariant DISPLACEMENT GENERALIZES the operator to UNVISITED (s,a). The online SR
+        (L6) carries value/topology; recognition carries continuous pose. Edge first, else displacement, else stay."""
         return self.L5.predict(symbol, action)
+
+    def motor(self, action):
+        """The MOTOR output -- the enacted action (L5 is the cortex's output layer; the name->GameAction mapping is the
+        motor organ in arc_sdk). The chosen displacement IS the motor command, the efference copy, and the driver."""
+        return self.L5.motor(action)
+
+    def driver(self, symbol, action):
+        """The feed-forward DRIVER message to other columns (via the higher-order thalamus): the displacements `action`
+        causes among the features in `symbol` -- L5's trans-thalamic output (Sherman & Guillery)."""
+        return self.L5.driver(symbol, action)
 
     def add(self, start, count, succ_action=0):
         """Arithmetic = navigation: apply the successor operator `count` times from `start`, read out."""

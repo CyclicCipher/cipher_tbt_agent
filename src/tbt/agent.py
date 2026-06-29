@@ -49,14 +49,16 @@ class Agent:
         a = self._choose(state)
         self._pred = self.col.predict(state, a)                             # enter the predictive state
         self._prev = (state, a)
-        return a
+        return self.col.motor(a)                                            # the action enacted via L5's motor output
 
     def _transitions(self):
-        """The transition model the value planner reads -- built from the column's learned graph (an unobserved action
-        stays put). This is the column supplying T; `reward` never sees the world directly."""
+        """The transition model the value planner reads -- the column's FULL predictive model: from each visited state,
+        `col.predict` returns the observed edge where there is one and the position-invariant DISPLACEMENT elsewhere, so
+        value propagates through predicted-but-UNVISITED states (the generalization the bare graph cannot do). This is
+        the column supplying T; `reward` never sees the world directly."""
         T, preds = {}, defaultdict(list)
-        for s, e in self.col.graph.items():
-            row = [e.get(a, s) for a in self.actions]
+        for s in list(self.col.graph):
+            row = [self.col.predict(s, a) for a in self.actions]
             T[s] = row
             for nxt in row:
                 preds[nxt].append(s)

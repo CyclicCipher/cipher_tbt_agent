@@ -16,7 +16,33 @@ So a self touching a wall stays the self at its own pose (it never fuses into a 
 
 from __future__ import annotations
 
+import math
 from collections import Counter, deque
+
+
+def _r(v) -> int:
+    """Round half UP (monotonic) -- not banker's rounding, whose half-to-even aliases adjacent half-integer poses."""
+    return int(math.floor(v + 0.5))
+
+
+def canonicalize(elements):
+    """The TRANSLATION-INVARIANT config of `elements` = [(pose, feature), ...] where `feature` is a tuple
+    `(size,)` or `(size, content, ...)`: each feature paired with its integer pose RELATIVE to the LARGEST element
+    (max by (size, pose) -- a stable emergent anchor, not a privileged self), sorted. The same RELATIVE arrangement
+    anywhere on the board yields the SAME tuple, so the loop's states RECUR and the SR / operator can learn them.
+
+    ONE encoding, shared by the sensor (frames -> state) and L5 (operator -> predicted next state): each element comes
+    out `(size, rel_pose, *content)` -- size first, the pose in the middle, any extra features last. A removed object
+    is simply absent (so a 'required-absent' goal needs no special case)."""
+    elements = list(elements)
+    if not elements:
+        return ()
+    ax, ay = max(elements, key=lambda e: (e[1][0], e[0]))[0]            # the largest object (ties by pose) = the anchor
+    def enc(e):
+        pose, feat = e
+        rp = (_r(pose[0] - ax), _r(pose[1] - ay))
+        return (feat[0], rp) + tuple(feat[1:])
+    return tuple(sorted(enc(e) for e in elements))
 
 
 def components(cells):

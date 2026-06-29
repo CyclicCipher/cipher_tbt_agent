@@ -12,30 +12,20 @@ future refinement for the STATIC layout; object-level segmentation is the percep
 
 from __future__ import annotations
 
-import math
-
-from .perceive import ObjectField
-
-
-def _r(v) -> int:
-    """Round half UP (monotonic) -- not banker's rounding, whose half-to-even aliases adjacent half-integer poses."""
-    return int(math.floor(v + 0.5))
+from .perceive import ObjectField, canonicalize
 
 
 def config_state(objects, contents=None):
     """The scene as a hashable, TRANSLATION-INVARIANT state: each object's `(size, integer pose relative to the LARGEST
-    object[, content])`, sorted. The same RELATIVE arrangement anywhere on the board yields the SAME state, so states
-    recur and the SR / operator can learn them. The anchor is the largest object -- a stable emergent reference, not a
-    privileged self; a removed object is simply absent (so a 'required-absent' goal needs no special case)."""
-    items = list(objects.items())
-    if not items:
-        return ()
-    (ax, ay), _ = max((v for _id, v in items), key=lambda it: (it[1], it[0]))   # the largest object (ties by pose)
-    def rel(pose):
-        return (_r(pose[0] - ax), _r(pose[1] - ay))
-    if contents is None:
-        return tuple(sorted((size, rel(pose)) for _id, (pose, size) in items))
-    return tuple(sorted((size, rel(pose), contents.get(oid)) for oid, (pose, size) in items))
+    object[, content])`, sorted. A thin wrapper over `perceive.canonicalize` (the ONE encoding the operator/L5 reuses):
+    each object becomes `(pose, feature)` with `feature = (size,)` or `(size, content)`, so the operator can apply a
+    position-invariant displacement and re-encode to the SAME form. The same RELATIVE arrangement anywhere on the board
+    yields the SAME state; a removed object is simply absent (so a 'required-absent' goal needs no special case)."""
+    elements = []
+    for oid, (pose, size) in objects.items():
+        feat = (size,) if contents is None else (size, contents.get(oid))
+        elements.append((pose, feat))
+    return canonicalize(elements)
 
 
 def salient_cells(prev, cur):
