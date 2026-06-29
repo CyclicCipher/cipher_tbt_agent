@@ -58,8 +58,8 @@ def test_motor_output_and_thalamus_driver():
     _teach_move_right(op)
     assert op.motor(RIGHT) == RIGHT
     msg = dict(op.driver(_scene((3, 3)), RIGHT))
-    assert msg[(1,)] == (1, 0)                   # the mover (size-1 feature) moves +1 in x
-    assert (4,) not in msg                       # the size-4 anchor has a zero displacement -> not in the message
+    assert msg[(1,)] == (("move", (1, 0)),)      # the mover (size-1 shape) moves +1 in x
+    assert (4,) not in msg                       # the size-4 anchor has a zero delta -> not in the message
 
 
 def test_opaque_states_are_unchanged_no_generalization():

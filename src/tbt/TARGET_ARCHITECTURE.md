@@ -64,10 +64,17 @@ The column is "learn a structural map, predict from it," through four layers. Ea
   modulatory feedback). `residual`'s conditional/structured part is the per-(s,a) **exceptions** to the base
   displacement (the wall/door), held by L5's edges. **Status:** the per-action OPERATOR is now SEATED IN L5
   (`L5.observe`/`predict`/`successors`; the column delegates, `predict` = the efference copy) — the *structural* reseat,
-  done (so 3b and the dynamics column build ON L5, not a bare dict). Remaining (the **L5 reseat (finish)**, build-order
-  step 5, with the sensor's poses): the position-invariant DISPLACEMENT (generalize to unvisited (s,a)) + the literal
-  motor / thalamus feed-forward output. **NOT superseded** — see `reference_layer5_role`. (Do NOT retire L5; nearly
-  doing so on 2026-06-28 was the error this records.)
+  done. **The L5 reseat is now FINISHED (steps 5a + 5b, 2026-06-28) and the operator is KIND-GENERAL:** it learns a
+  position-invariant DELTA in whatever feature dimension an action changes, keyed on the stable SHAPE (`size`) —
+  `disp[(shape,a)]` = the modal POSE delta (movement, 5a) AND `recolor[(shape,a)]` = the CONTENT transition map (an
+  in-place colour/feature change, 5b). `predict` applies both and re-encodes, GENERALIZING to unvisited (s,a)
+  (validated: the frame-read agent solves a movement scene at ~6 actions/level and a colour-change scene at the
+  5-action optimum); the EDGES hold the per-(state,action) EXCEPTIONS that override the rule (a wall/door; a
+  CONTEXT-dependent change), and the conditional-dynamics faculty generalizes a PRECONDITION (the rest of "conditioned
+  on context"). The MOTOR output (`motor`, the agent enacts through it) and the thalamus DRIVER (`driver`) are the
+  operator's other two uses. **NOT superseded** — see `reference_layer5_role`, `reference_l5_operator_kinds`. (Do NOT
+  retire L5; nearly doing so on 2026-06-28 was the error this records.) Rotation (θ) is the deferred extension: one
+  more delta dimension, fed by the recogniser's inferred angle.
 - **L4 / L23 — content + memory (HAVE).** Bind entity ⊗ location (L4); pool in the one shared object memory (L23); read
   back. This is Monty's "features at locations."
 - **Belief + recurrence/memory (HAVE function; absorbs `recurrence`).** The column carries a state across the
@@ -110,9 +117,14 @@ static features) → ventral **"what" / morphology**; magnocellular-like input (
 **"where/how" / dynamics**. Monty's object-behaviours doc states it directly: *"if parvocellular cells are input to L4,
 the column learns the static morphology; if magnocellular, the dynamic behavior."*
 
-So we do **not** write a behaviour/dynamics model. A "dynamics column" is the **same `CorticalColumn` fed the change
-stream** (our reafference residual / salient cells) instead of the static-feature stream. One algorithm, two instances,
-differing only by input — the pose⊕content thing we built-and-lost collapses to "point a column at the change stream."
+So we do **not** write a behaviour/dynamics model. **BUILT 2026-06-28 (step 5b), and UNIFIED further than "two
+instances":** rather than a separate column on a separate change stream, L5's operator is **KIND-general** — it learns a
+position-invariant delta in *whatever feature dimension an action changes* (`disp` = pose/movement, `recolor` = content/
+colour transition), keyed on shape. So ONE column models movement, recolouring, or both, and the "dorsal/ventral"
+specialisation becomes *which dimension carries the change* — emergent, not two hand-separated instances. This is the
+stronger reading of "one algorithm, no separate behaviour model." `salient_cells` is retained for salience/attention
+(it is not needed for the modelling). *Genuine* separate reference frames (a content frame vs a spatial frame) +
+cross-frame voting are a real thing — but they belong to the multi-column **step 7**, not to modelling action-effects.
 
 ## Attention is not a module
 
@@ -168,10 +180,13 @@ thalamic VSA binding work now; pose-aware *voting* across heterogeneous frames i
 4. **The sensor (retina)** — raw frames → features at poses + the CHANGE stream. The bridge to live, and the prerequisite
    for BOTH the dynamics column and the L5 reseat finish (each needs its output: poses / change). The GSG's
    hypothesis-testing goal lands here too (recognition supplies the hypotheses).
-5. **On the sensor's output:** (a) **L5 reseat (finish)** — with poses, L5's position-invariant DISPLACEMENT (generalize
-   to UNVISITED state-actions) + the literal motor output + the thalamus feed-forward driver; (b) the **dorsal/ventral
-   DYNAMICS column** — the SAME `CorticalColumn` fed the CHANGE stream (no separate behaviour model). Both build on the
-   L5 operator seat (structural reseat already done).
+5. **On the sensor's output — DONE 2026-06-28.** (a) **L5 reseat (finish)** — the position-invariant DISPLACEMENT
+   generalizes the operator to UNVISITED state-actions, plus the motor output + the thalamus driver (the four uses of
+   the one delta). (b) The **dynamics "column"** — realized as L5's operator going **KIND-general** (`disp` for
+   movement + `recolor` for in-place content/colour change, keyed on shape; context via edge exceptions + the
+   conditional-dynamics precondition search), so ONE column models any action effect (movement, colour, both). Validated
+   end to end (agent solves a movement scene ~6 actions and a colour-change scene at the 5-action optimum). Rotation (θ)
+   deferred — a clean one-dimension extension fed by the recogniser's angle. See `reference_l5_operator_kinds`.
 6. **The live loop on a real game** (`arc_run`).
 7. Later: **cross-frame voting** (heterogeneous frames → learned registration) + the **BG column-allocation**;
    **compositional hierarchy** of columns.
