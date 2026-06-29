@@ -52,16 +52,19 @@ class Agent:
         self.reward.observe(_GOAL, max(score_delta, 1.0))                    # the goal is the rewarding terminal
         self.new_episode()
 
-    def step(self, state, score_delta: float = 0.0):
+    def step(self, state, score_delta: float = 0.0, blocked=()):
         """One turn: COMPARE last turn's prediction to the actual `state`, LEARN the transition (column + reward), PLAN
-        value over the column's learned transitions, CHOOSE the value-maximising action, then PREDICT the next state."""
+        value over the column's learned transitions, CHOOSE the value-maximising action, then PREDICT the next state.
+        `blocked` = actions the WORLD MODEL predicts lead into a recognised barrier (from the object-behaviour faculty);
+        they lose R-MAX optimism, so the agent routes around a known barrier WITHOUT bumping it -- and because the
+        prediction is keyed on the recognised object, it generalises to a NEVER-bumped instance."""
         self.surprised = self._pred is not None and state != self._pred       # predict-then-compare = the learning signal
         if self._prev is not None:
             ps, pa = self._prev
             self.col.observe(ps, pa, state)                                  # learn the transition online (graph + SR)
             self.tried.add((ps, pa))                                         # attempted (even if blocked -> no edge)
         self.reward.observe(state, score_delta)                             # value: reward where the score rose + novelty
-        a = self._choose(state)
+        a = self._choose(state, blocked)
         self._pred = self.col.predict(state, a)                             # enter the predictive state
         self._prev = (state, a)
         return self.col.motor(a)                                            # the action enacted via L5's motor output
@@ -79,16 +82,21 @@ class Agent:
                 preds[nxt].append(s)
         return T, preds
 
-    def _choose(self, state):
+    def _choose(self, state, blocked=()):
         """The value-maximising action: plan value over the learned transitions, then pick the action whose predicted
         next state has the highest value -- an UNTRIED action is valued optimistically (R-MAX), so the frontier
-        attracts (epistemic) until the score teaches a goal (pragmatic). One value, exploration + exploitation."""
+        attracts (epistemic) until the score teaches a goal (pragmatic). A `blocked` action (a recognised barrier
+        ahead) instead takes its predicted-STAY value -- NOT the optimistic Vmax -- so the agent does not waste a bump
+        confirming a barrier it already recognises (the avoidance is value-driven, not hardcoded, and generalises)."""
         T, preds = self._transitions()
         if state in T:                                                       # plan only from a state with observed edges
             self.reward.plan(T, preds, state)                               # (an unvisited state has only R-MAX values)
         vals = []
         for a in self.actions:
-            if (state, a) not in self.tried:                                # never ATTEMPTED -> optimistic (R-MAX frontier)
+            if a in blocked:                                                # predicted barrier: a DISCOUNTED stay -- strictly
+                nxt = self.col.graph.get(state, {}).get(a, state)           # below the optimistic frontier, so a KNOWN barrier
+                vals.append(self.reward.gamma * self.reward.V[nxt])         # is avoided even at a fresh state (no false optimism)
+            elif (state, a) not in self.tried:                              # never ATTEMPTED -> optimistic (R-MAX frontier)
                 vals.append(self.reward.Vmax)
             else:                                                           # attempted: value its outcome (self-loop if blocked)
                 vals.append(self.reward.V[self.col.graph.get(state, {}).get(a, state)])

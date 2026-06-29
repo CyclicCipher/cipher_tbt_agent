@@ -97,8 +97,9 @@ class TbtPolicy:
     resolved to that object's centroid as (x, y), so the agent plans over a stable index space and LEARNS each click's
     effect — which click matters EMERGES (self-free), generalizing to any coordinate action, not just ACTION6."""
 
-    def __init__(self, build_agent=None, seed: int = 0, local: bool = True, integrate: bool = True):
+    def __init__(self, build_agent=None, seed: int = 0, local: bool = True, integrate: bool = True, barriers: bool = True):
         from tbt.sensor import Sensor                        # lazy: keep arc_sdk importable without torch
+        from tbt.behavior import ObjectBehaviour
         self.sensor = Sensor(local=local, integrate=integrate)   # egocentric + path-integration -- recurrence + navigation
         self._build = build_agent
         self.seed = seed
@@ -108,6 +109,9 @@ class TbtPolicy:
         self.n_clicks = 0                                    # number of click-slots (one per object, capped)
         self.prev_level = 0
         self._last_a = None                                  # the last agent action index (the efference for path integration)
+        self.barriers = barriers                             # learn + predict object barriers (object-behaviour faculty)
+        self.behaviour = ObjectBehaviour()                   # recognised-identity -> learned interaction effect
+        self._prev_pos = None                                # the agent's position before the last action (bump attribution)
 
     def is_done(self, frames, latest_frame) -> bool:
         return _state_name(latest_frame.state) == "WIN"
@@ -154,12 +158,56 @@ class TbtPolicy:
             self.sensor.reset()
             self.prev_level = obs.level
             self._last_a = None
+            self._prev_pos = None
         state, _change = self.sensor.read(obs.grid, action=self._last_a)   # efference = last action (path integration)
         if self.agent is None:
             self._init_actions(latest_frame)
-        a = self.agent.step(state, 0.0)                     # learn + choose (predict-then-compare); reward via complete()
+        blocked = self._object_barriers()                   # LEARN bumped barriers + PREDICT confident ones ahead
+        a = self.agent.step(state, 0.0, blocked=blocked)    # learn + choose (predict-then-compare); reward via complete()
         self._last_a = a
         return self._resolve(a)
+
+    def _object_barriers(self):
+        """The object-behaviour faculty in the loop: recognise the non-controllable objects, ATTRIBUTE the last move's
+        outcome to learn each object's barrier-ness (revisable, keyed on recognised identity -> generalises), and
+        return the actions whose target is a CONFIDENT barrier so the agent avoids them WITHOUT bumping. Gated to the
+        egocentric+path-integrated mode (it needs the agent's position); `barriers=False` disables it (the baseline)."""
+        from tbt.behavior import contact_outcome
+        if not (self.barriers and self.sensor.local and self.sensor.integrate and self.sensor._fovea is not None):
+            return ()
+        pos, omap = self.sensor._fovea, self._object_map()
+        if self._last_a is not None and self._prev_pos is not None:           # LEARN from the last move
+            d = self.sensor._delta.get(self._last_a)
+            if d is not None:
+                out = contact_outcome(self._prev_pos, pos, d, omap)
+                if out is not None:
+                    self.behaviour.observe_move(*out)
+        self._prev_pos = pos
+        blocked = set()                                                       # PREDICT: a confident barrier at the target
+        for a in range(len(self.simple)):
+            d = self.sensor._delta.get(a)
+            if d is None:
+                continue
+            target = (round(pos[0] + d[0]), round(pos[1] + d[1]))
+            if any(target in cs and self.behaviour.is_barrier(ident, thresh=0.66) for ident, cs in omap.items()):
+                blocked.add(a)
+        return frozenset(blocked)
+
+    def _object_map(self):
+        """{recognised-identity: cells} for the NON-controllable objects (the one nearest the fovea is the agent's body
+        -- excluded). Recognition (the column's faculty) keys the barrier on shape, so it generalises across instances
+        and poses, not memorised per cell."""
+        objs, cells, fov = self.sensor.objects(), self.sensor.field.cells, self.sensor._fovea
+        ctrl = min(objs, key=lambda o: abs(objs[o][0][0] - fov[0]) + abs(objs[o][0][1] - fov[1])) if objs and fov else None
+        omap: dict = {}
+        for oid, c in cells.items():
+            if oid == ctrl or len(c) < 2:                    # skip the body and 1-cell blobs (no shape to recognise)
+                continue
+            res = self.agent.col.recognize_object([(float(x), float(y)) for (x, y) in c])
+            if res is None:                                  # unrecognised this glance -> not a known object, skip
+                continue
+            omap.setdefault(res[0], set()).update(c)
+        return omap
 
 
 # ── the live SDK agent (lazy import; only usable inside the ARC-AGI-3-Agents repo) ──────────────────────────
