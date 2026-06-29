@@ -160,14 +160,21 @@ thalamic VSA binding work now; pose-aware *voting* across heterogeneous frames i
    vector-navigation to UNVISITED goals; (C) **`_sparsify_topk`** (random projection + top-k = DG / fly-mushroom-body
    pattern separation) → near-orthogonal sparse codes for an associative operator. Revisit only if the discrete graph
    can't generalise to unseen state-actions and the SR's reachability isn't enough.*
-3. **GSG + reward + basal ganglia → the active-inference loop** (re-ground the prior-commit planner on the column).
-4. **Dorsal/ventral dynamics column** (the change stream) — cheap once 1–3 exist.
-5. **L5 reseat (finish)** — the per-action OPERATOR is already SEATED IN L5 (`L5.observe`/`predict`; structural reseat
-   done before 3b, so 3b + the dynamics column build on L5). Finish it here, with poses: the position-invariant
-   DISPLACEMENT (generalize to UNVISITED state-actions), the agent's action as L5's motor output, and the thalamus
-   feed-forward driver = L5's output. Lands right before the sensor (the displacement needs poses). L5 is a column engine.
-6. **The sensor (retina)** → column input; run the continuous loop on a real game.
-7. Later: **cross-frame voting**; **compositional hierarchy** of columns.
+3. **Active-inference loop — DONE** (3a, `tbt/agent.py`: column + reward; explore + exploit in ONE value,
+   predict-then-compare). The **GSG and the basal-ganglia gate are NOT a standalone step** — on a single column they
+   would be a decoration (3a's unified value already explores + exploits). They fold in where they earn their keep: the
+   **GSG (hypothesis-testing / disambiguating goal) into the sensor + recognition step** (it needs recognition's
+   hypotheses to test), and the **BG allocation into the multi-column step**.
+4. **The sensor (retina)** — raw frames → features at poses + the CHANGE stream. The bridge to live, and the prerequisite
+   for BOTH the dynamics column and the L5 reseat finish (each needs its output: poses / change). The GSG's
+   hypothesis-testing goal lands here too (recognition supplies the hypotheses).
+5. **On the sensor's output:** (a) **L5 reseat (finish)** — with poses, L5's position-invariant DISPLACEMENT (generalize
+   to UNVISITED state-actions) + the literal motor output + the thalamus feed-forward driver; (b) the **dorsal/ventral
+   DYNAMICS column** — the SAME `CorticalColumn` fed the CHANGE stream (no separate behaviour model). Both build on the
+   L5 operator seat (structural reseat already done).
+6. **The live loop on a real game** (`arc_run`).
+7. Later: **cross-frame voting** (heterogeneous frames → learned registration) + the **BG column-allocation**;
+   **compositional hierarchy** of columns.
 
 ## Honest risks
 - The evidence loop + online learning over the SR-frame **within the action budget** is unproven — the make-or-break.
