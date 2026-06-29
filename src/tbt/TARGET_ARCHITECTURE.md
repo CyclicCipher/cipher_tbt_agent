@@ -55,10 +55,17 @@ The column is "learn a structural map, predict from it," through four layers. Ea
   *action* graph, and where they don't separate, a second column is allocated (basal ganglia). So `factorize.py`'s job
   becomes a property of L6 + multi-column allocation, not a side script. *(Research check: eigen-subspaces ≈ disentangled
   factors because the frame is built from ACTIONS, not statics — validate, don't assume.)*
-- **L5 — operators (HAVE base; absorbs `residual`).** Per-action displacement operators, composed for inference and
-  path integration. The conditional/structured part — the carry, the "door", contact-gated effects — is the operator
-  made **state-dependent** (its effect depends on location/context). So `residual.py`'s predicate-search job becomes
-  "L5 operators conditioned on context," not a side script.
+- **L5 — the displacement / MOTOR-OUTPUT / thalamus-driver layer (a column ENGINE, not a dead operator).** L5 holds the
+  per-action **displacement** as a first-class, position-invariant object — and that ONE object has four uses: the
+  *generalizing base operator* ("action a shifts by Δ", so it predicts a's effect at an UNVISITED state), the **motor
+  command** (cortex's main output → the enacted action — L5's PT/ET cells drive subcortical motor centres), the
+  **efference copy** (the predicted effect → the predictive state), and the **feed-forward DRIVER of the higher-order
+  thalamus** (the inter-column message; Sherman & Guillery — L5 is the trans-thalamic driver, L6 is first-order
+  modulatory feedback). `residual`'s conditional/structured part is the per-(s,a) **exceptions** to the base
+  displacement (the wall/door), held by the graph/context. **Status:** the online path currently uses the graph for
+  `predict` (option 1) and L5 is *not yet the output seat* — a KNOWN gap, scheduled as the **L5 reseat** (build order,
+  before the sensor), where the position-invariant displacement (needs poses) activates. **NOT superseded** — see
+  `reference_layer5_role`. (Do NOT retire L5; nearly doing so on 2026-06-28 was the error this records.)
 - **L4 / L23 — content + memory (HAVE).** Bind entity ⊗ location (L4); pool in the one shared object memory (L23); read
   back. This is Monty's "features at locations."
 - **Belief + recurrence/memory (HAVE function; absorbs `recurrence`).** The column carries a state across the
@@ -140,7 +147,9 @@ thalamic VSA binding work now; pose-aware *voting* across heterogeneous frames i
 1. **Evidence-based recognition with inferred pose**, in the column — the spine; subsumes `recognize.py`.
 2. **Incremental / online learning** in L6 — **DONE**. `OnlineSR` (TD, no `eigh`) carries value/topology; the column's
    `predict` / `loc_*` run over the exact learned transition **graph** (state-dependent by construction — it subsumes
-   the L5 matrix operator AND `residual`); recognition carries continuous pose. Decided after neuroscience
+   the L5 matrix-operator-AS-PREDICTOR and `residual`'s conditional structure; but L5's displacement / motor-output /
+   thalamus-driver ROLE is NOT subsumed — reseated before the sensor, step 5); recognition carries continuous pose.
+   Decided after neuroscience
    (reference_brain_reference_frames_orthogonalization): the brain orthogonalises by sparse pattern separation (not
    eigh) and path-integrates by a continuous-attractor bump / discrete snapping (not a matrix op over codes), so the
    matrix operator + the recurrence are superseded online. *ARCHIVED alternatives to the chosen graph+SR (kept on the
@@ -151,8 +160,12 @@ thalamic VSA binding work now; pose-aware *voting* across heterogeneous frames i
    can't generalise to unseen state-actions and the SR's reachability isn't enough.*
 3. **GSG + reward + basal ganglia → the active-inference loop** (re-ground the prior-commit planner on the column).
 4. **Dorsal/ventral dynamics column** (the change stream) — cheap once 1–3 exist.
-5. **The sensor (retina)** → column input; run the continuous loop on a real game.
-6. Later: **cross-frame voting**; **compositional hierarchy** of columns.
+5. **L5 reseat** — make L5 the column's displacement / motor-output / thalamus-driver seat: `predict` = L5 displacement
+   + graph exceptions (restores generalization to UNVISITED state-actions), the agent's action = L5's motor output, the
+   thalamus feed-forward driver = L5's output. The position-invariant displacement activates here (needs the sensor's
+   poses, so this lands right before the sensor). L5 is a column engine, not a decoration.
+6. **The sensor (retina)** → column input; run the continuous loop on a real game.
+7. Later: **cross-frame voting**; **compositional hierarchy** of columns.
 
 ## Honest risks
 - The evidence loop + online learning over the SR-frame **within the action budget** is unproven — the make-or-break.
