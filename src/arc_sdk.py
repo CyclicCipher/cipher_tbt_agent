@@ -92,9 +92,10 @@ class TbtPolicy:
     is a discontinuity: reset the sensor's tracker + the agent's per-episode link (NOT the model). Lifecycle: a
     NOT_PLAYED/GAME_OVER game is RESET (GAME_OVER self-heals the level and the run continues); a WIN ends play.
 
-    Action set: fixed from the first playable frame to the non-coordinate game actions (the agent plans over a stable
-    index space). The coordinate / click action (ACTION6) is a PURPOSEFUL-attention target — step 7 (the saccade /
-    GSG); until then it is excluded, and if a game offers only coordinate actions a centroid placeholder is used."""
+    Action set: fixed from the first playable frame to the simple game actions PLUS, if the game offers a coordinate
+    action (ACTION6 — the click), one CLICK-SLOT per tracked object (a stable size-ordered index). A click-slot is
+    resolved to that object's centroid as (x, y), so the agent plans over a stable index space and LEARNS each click's
+    effect — which click matters EMERGES (self-free), generalizing to any coordinate action, not just ACTION6."""
 
     def __init__(self, build_agent=None, seed: int = 0):
         from tbt.sensor import Sensor                        # lazy: keep arc_sdk importable without torch
@@ -102,49 +103,60 @@ class TbtPolicy:
         self._build = build_agent
         self.seed = seed
         self.agent = None
-        self.names: List[str] = []                           # action index -> name (fixed at the first playable frame)
-        self.coords: set = set()                             # names that need (x, y)
+        self.simple: List[str] = []                          # the non-coordinate game actions (index 0..len-1)
+        self.click: Optional[str] = None                     # the coordinate / click action name (ACTION6), if offered
+        self.n_clicks = 0                                    # number of click-slots (one per object, capped)
         self.prev_level = 0
 
     def is_done(self, frames, latest_frame) -> bool:
         return _state_name(latest_frame.state) == "WIN"
 
     def _init_actions(self, latest_frame) -> None:
+        """Fix the action space from the first playable frame: the simple game actions, then one CLICK-slot per tracked
+        object if a coordinate action is offered (so the click is a real, learnable action — which one matters emerges)."""
         from tbt.agent import Agent                          # lazy
         avail = _action_names(latest_frame)
-        coord = {n for n in avail if n in ("ACTION6", "COMPLEX")}   # the click / coordinate actions
-        names = [n for n in avail if n != "RESET" and n not in coord] or [n for n in avail if n != "RESET"] or avail
-        self.names, self.coords = names, coord
+        coord = [n for n in avail if n in ("ACTION6", "COMPLEX")]
+        self.simple = [n for n in avail if n != "RESET" and n not in coord]
+        self.click = coord[0] if coord else None
+        self.n_clicks = min(len(self.sensor.objects()), 12) if self.click else 0   # one click-slot per object (capped)
+        if not self.simple and not self.n_clicks:                                  # degenerate: nothing else playable
+            self.simple = [n for n in avail if n != "RESET"] or avail
         build = self._build or (lambda n: Agent(n_actions=n, seed=self.seed))
-        self.agent = build(len(self.names))
+        self.agent = build(len(self.simple) + self.n_clicks)
 
-    def _target(self, obs, name) -> Coords:
-        """The (x, y) for a coordinate action — a placeholder until the step-7 attention policy: the centroid of the
-        largest tracked object (a salient locus), else None."""
-        if name not in self.coords:
-            return None
-        objs = self.sensor.objects()
-        if not objs:
-            return (0, 0)
-        (px, py), _size = max(objs.values(), key=lambda v: (v[1], v[0]))
-        return (int(round(px)), int(round(py)))
+    def _ordered_objects(self):
+        """Tracked objects' (pose, size) ordered by (size desc, pose) — a STABLE index so 'click-slot k' means the same
+        object across frames (static buttons keep their slot)."""
+        return sorted(self.sensor.objects().values(), key=lambda v: (-v[1], v[0]))
+
+    def _resolve(self, a) -> Tuple[str, Coords]:
+        """Map an action index to (name, coords): a simple action, or a CLICK at the slot-th object's centroid."""
+        if a < len(self.simple):
+            return self.simple[a], None
+        slot = a - len(self.simple)
+        objs = self._ordered_objects()
+        if slot < len(objs):
+            (px, py), _size = objs[slot]
+            return self.click, (int(round(px)), int(round(py)))
+        return (self.simple[0] if self.simple else self.click), None   # no object for this slot -> a harmless fallback
 
     def choose_action(self, frames, latest_frame) -> Tuple[str, Coords]:
         st = _state_name(latest_frame.state)
         if st in ("NOT_PLAYED", "GAME_OVER"):               # not started / died -> RESET (GAME_OVER self-heals)
             return "RESET", None
         obs = _to_obs(latest_frame)
-        if self.agent is None:
-            self._init_actions(latest_frame)
         score_delta = max(obs.level - self.prev_level, 0)   # ARC's only reward: a level completion
         if score_delta > 0:                                 # a level boundary: a perceptual + linkage discontinuity
-            self.agent.complete(score_delta)                # the completing transition -> GOAL; ends the episode
+            if self.agent is not None:
+                self.agent.complete(score_delta)            # the completing transition -> GOAL; ends the episode
             self.sensor.reset()
             self.prev_level = obs.level
-        state, _change = self.sensor.read(obs.grid)
+        state, _change = self.sensor.read(obs.grid)         # read first, so the click-slots can key on the objects
+        if self.agent is None:
+            self._init_actions(latest_frame)
         a = self.agent.step(state, 0.0)                     # learn + choose (predict-then-compare); reward via complete()
-        name = self.names[a] if a < len(self.names) else self.names[0]
-        return name, self._target(obs, name)
+        return self._resolve(a)
 
 
 # ── the live SDK agent (lazy import; only usable inside the ARC-AGI-3-Agents repo) ──────────────────────────
