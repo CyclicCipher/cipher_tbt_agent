@@ -104,7 +104,7 @@ def test_agent_drives_the_live_contract_and_transfers_across_levels():
     world model + the GOAL transfer across levels -- converges to NEAR-ORACLE per-level cost, far below random. The
     offline proof that the Sensor+Agent continuous loop is correctly wired to the live runner."""
     levels = 60
-    completed, used, marks = _drive_policy(TbtPolicy(seed=0), MockLiveGame(levels), budget=6000)
+    completed, used, marks = _drive_policy(TbtPolicy(seed=0, local=False), MockLiveGame(levels), budget=6000)
     assert completed == levels, f"only completed {completed}/{levels} levels (a stall)"
 
     early = statistics.mean(marks[:20])                     # the exploration phase
@@ -119,7 +119,7 @@ def test_agent_drives_the_live_contract_and_transfers_across_levels():
 
 def test_policy_resets_an_unstarted_game():
     """Lifecycle: a NOT_PLAYED game's first action is RESET; a WIN reports done -- the contract's two endpoints."""
-    policy = TbtPolicy(seed=0)
+    policy = TbtPolicy(seed=0, local=False)
     game = MockLiveGame(levels=1)
     assert policy.choose_action([], game) == ("RESET", None)
     game.state = _St("WIN")

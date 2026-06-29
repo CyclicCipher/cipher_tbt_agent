@@ -97,9 +97,9 @@ class TbtPolicy:
     resolved to that object's centroid as (x, y), so the agent plans over a stable index space and LEARNS each click's
     effect — which click matters EMERGES (self-free), generalizing to any coordinate action, not just ACTION6."""
 
-    def __init__(self, build_agent=None, seed: int = 0):
+    def __init__(self, build_agent=None, seed: int = 0, local: bool = True):
         from tbt.sensor import Sensor                        # lazy: keep arc_sdk importable without torch
-        self.sensor = Sensor()
+        self.sensor = Sensor(local=local)                    # local=True: egocentric sensing -- the recurrence fix for real frames
         self._build = build_agent
         self.seed = seed
         self.agent = None

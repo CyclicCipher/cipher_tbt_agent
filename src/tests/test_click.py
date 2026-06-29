@@ -100,7 +100,7 @@ def test_agent_learns_which_click_completes_and_transfers():
     """The agent, given click-slots it must learn to use, discovers the click that completes the level and -- the model
     persisting -- repeats it near-optimally on every later level, far below random."""
     levels = 20
-    completed, marks = _drive(TbtPolicy(seed=0), ClickGame(levels), budget=400)
+    completed, marks = _drive(TbtPolicy(seed=0, local=False), ClickGame(levels), budget=400)
     assert completed == levels, f"only completed {completed}/{levels} levels"
 
     late = statistics.median(marks[-10:])                  # after the right click is learned
@@ -113,7 +113,7 @@ def test_agent_learns_which_click_completes_and_transfers():
 def test_movement_only_game_unchanged_by_click_wiring():
     """A game with no coordinate action gets NO click-slots -- the action space is exactly the simple actions (the
     movement path is untouched by the click wiring)."""
-    policy = TbtPolicy(seed=0)
+    policy = TbtPolicy(seed=0, local=False)
     game = ClickGame(levels=1)
     game.available_no_click = ["ACTION1", "ACTION2", "ACTION3"]
     # a frame exposing only simple actions
