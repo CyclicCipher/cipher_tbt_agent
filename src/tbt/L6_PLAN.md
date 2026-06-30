@@ -64,6 +64,22 @@ re-tunes to barriers/rewards). It gives BOTH:
     against `V_exploit` by gradient. The `_explore_bonus` eigenpurpose computation (grid-cells oriented toward under-
     visited, normalized [0,1]) is correct + reusable; only the WIRING (leaf-bonus -> swept-value) was wrong. Build I3 as
     the two-value `reward.py` refactor: parameterize the sweep by `(V_dict, reward_fn)`, run it twice, arbitrate.
+  - **I3 BUILT (2026-06-30, `fa0453f`), 89 green, no regressions.** `reward.py` sweeps TWO values (`_sweep(T,preds,cur,
+    V,reward_fn,q)` x2): **`V_exploit`** = `_reward_base` (reward + epistemic, optimistic) -- the NORMAL-operation value
+    -- and **`V`** = `_reward_base + intrinsic` (the eigenpurpose). The agent runs on `V_exploit` EVERYWHERE except the
+    measured **EFE dead-zone**, detected by a clean BOOLEAN (not a flatness threshold -- the key correction): `dead_zone
+    = not R_ext and all((state,a) in tried)` (reward-less anywhere yet AND every action HERE already tried). There it
+    switches to `V` for a propagated, DIRECTED escape. So the eigenpurpose fires throughout an explored pocket (-> its
+    frontier) but NOT at the boundary (untried -> frontier optimism), and NEVER after the first reward (-> pure exploit/
+    transfer). `_eigenpurpose()` = grid cells oriented anti-to-visits, normalized, `beta`-scaled; its SVD is THROTTLED
+    (`_ep_every=16`; the direction is slow-changing). **Result: MultiKey first goal 937 -> 250 (3.7x); LockPath 2/4 and
+    Sokoban 0/3 unchanged** (Sokoban needs the multi-step PUSH maneuver, not directed exploration -- a separate gap).
+  - **Two traps hit + fixed during the build (so they aren't repeated):** (1) `V_exploit` must KEEP the optimism +
+    epistemic (the OLD value); making it reward-ONLY lost the optimism-driven goal-seeking and regressed 3 tests
+    (live-loop convergence 9 vs 5, CollectAll exploit-over-forward, learning-progress contrast). (2) The forward-model /
+    dead-zone gate must read the `V_exploit` action-SPREAD, NOT an all-zero clean value -- gating on an always-zero
+    spread turned the dense field ON every step (1.2M `_field_all_bg` calls/60 steps = catastrophic). Gate on the right
+    spread; throttle the SVD.
 
 ## 4. Salvaged-prototype context (so it isn't relearned)
 The reverted eigenpurpose prototype (`reference_eigenoptions_subgoals`) computed the SR SVD inline in the agent and
