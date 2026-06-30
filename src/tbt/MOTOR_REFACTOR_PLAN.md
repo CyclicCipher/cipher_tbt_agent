@@ -376,6 +376,11 @@ already have, then add the identity-test as a competing candidate)? The staging 
   leads). Suite 65→**67 green**. HONEST nuance the trace exposed: the GSG (graph-mismatch over the top-2) is the
   FINAL 2-way disambiguation — 1 informative sample resolves it — but NOT the initial narrowing (a symmetric object
   yields many tied pose-hypotheses; passive sensing narrows faster there). Firing the GSG only when narrowed
-  (Monty's triggers) is the GD4 refinement; the mechanism is correct + in place. **GD3** — the BG arbitrates
-  disambiguation vs value vs `lp` candidates. **GD4** — effort + commitment triggers (incl. fire-when-narrowed).
+  (Monty's triggers) is the GD4 refinement; the mechanism is correct + in place. **GD3 ✅ DONE 2026-06-29** —
+  `column.propose_goals` (the ACT goal always + the DISAMBIGUATION goal when ambiguous, each with an EFE value) +
+  `BasalGanglia.gate` arbitrating them (Go the higher value; dopamine-RPE makes a consistently-valuable goal type
+  win past a value dip = Cisek's urge). The BG is in the loop (critique #2: selection by value+urgency competition,
+  not an agent-script argmax). 3 tests; suite 67→**69 green**. **GD4** — effort + commitment triggers (incl.
+  fire-when-narrowed) **+ the live-loop integration**: `agent.step` using `propose_goals` + BG + acting on the
+  chosen goal (recognition active in the loop + sensor-to-target navigation -- the remaining wiring).
   (Navigation/effort from §7.2–7.5 fold in at GD2–GD4.)
