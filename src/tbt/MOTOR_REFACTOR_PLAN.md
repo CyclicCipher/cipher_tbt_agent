@@ -314,3 +314,33 @@ disagreement measure; it is the most novel piece and the most plausible lever fo
    own stage after G1–G3 land?
 3. **GSG home:** the GSG is a **column** faculty (per-column, §1) reading the agent's value — agreed it lives in
    `column.py` (proposer + `navigate_to`), with the agent the thin coordinator?
+
+### 7.9 Research resolution (2026-06-29) — `reference_gsg_goal_generation`
+
+Grounded in TBT (Monty's GSG) + neuroscience (L5 "predictions not commands"; hierarchical priors; Cisek's
+affordance competition). The three decisions resolve, and one thing is reframed:
+
+- **The GSG's CORE function is uncertainty-resolution, with a CONCRETE algorithm — graph-mismatch.** Monty's GSG
+  generates a goal by overlaying the top-2 object hypotheses and sampling the point of MAXIMUM DISAGREEMENT (the
+  most-distant nearest-neighbour). So disambiguation is **not** an optional G4 — it is the GSG proper, and the
+  graph-mismatch algorithm **de-risks** it (a concrete computation over L2/3's hypotheses, not vague "info gain").
+  *Reframe of §7.1/§7.7:* the value-goal is OUR addition (Monty has no reward); the epistemic hypothesis-test is
+  the GSG's defining job.
+- **For ARC the GSG resolves THREE uncertainties:** object-IDENTITY (graph-mismatch — new), TRANSITION-dynamics
+  (the `lp`/epiplexity term — have it, Stage 1), and reach REWARD (value — have it). The new piece is
+  identity-disambiguation goals; the others already exist and just need to compete as goal candidates.
+- **Decision 1 (commitment) → trigger-based.** Monty fires the GSG on TRIGGERS (ID-confident → resolve pose; top
+  hypotheses reorder; leading pose shifts; staleness), pursues, then re-triggers. This is the principled form of
+  "light hysteresis" — emit on a trigger, pursue, re-trigger.
+- **Decision 3 (home) → confirmed:** per-column GSG in `column.py`; **L5 emits the goal** (the desired outcome,
+  "predictions not commands"); the motor organ fulfils it; the agent stays the thin coordinator.
+- **The BG gate is the affordance competition** (Cisek): candidate goals (identity-test / transition-explore /
+  reward) held in parallel, biased by value + a basal-ganglia urgency signal. So the gate is integral, not a late
+  add-on — though single-column it is a thin arbiter until the candidate TYPES compete.
+
+**Open strategic choice for you (the one thing the research surfaces but can't decide):** the GSG's *principled*
+core is identity-disambiguation (graph-mismatch), but our *immediate* completion blocker may be value/navigation /
+RULE-uncertainty, and graph-mismatch needs a recognition-ambiguity scene to exercise. So: build the GSG
+**disambiguation-first** (TBT-faithful, needs a new ambiguity scene + L2/3 hypothesis exposure), or
+**value/navigation-first** (G1–G3: explicit goal + navigate + effort + BG over the value/transition goals we
+already have, then add the identity-test as a competing candidate)? The staging in §7.7 is the latter.
