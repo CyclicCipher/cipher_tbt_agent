@@ -60,6 +60,33 @@ broke `test_live_loop` convergence (the persistent term contaminates the exploit
 sound but must live in a SEPARATE explore value (L6-I3), not be summed into the one value. The mechanism + the MultiKey
 validation are the evidence the split will work.
 
+## 6. AFTER L6 -- reconnect L4 / L5 / L2-3 + their L6 interactions (the predict-sense-update loop)
+Once L6 is a live location frame (I1-I3), wire the OTHER layers into the proper TBT loop -- today's opaque-config_state
+shortcut bypasses them. The TBT cycle (Hawkins): **L6 location -> L4 predicts the feature-at-location -> sense + compare
+-> L2/3 settles the object (lateral voting) -> L5 emits the next movement -> L6 path-integrates** to the next location.
+Reviving L6 makes the location frame the substrate the whole column reads; these steps reconnect to it.
+
+- **L7-A: L4 <-> L6 (feature-at-location, in the loop).** Run `L4.bind`/`readout`/`predict_feature` EVERY step (today
+  only `refresh`, which is uncalled, does this). The agent's state becomes the sensed FEATURE bound to the L6 grid
+  LOCATION, not the opaque `config_state`. L6 (location) modulates which feature L4 predicts; the mismatch is the
+  learning signal. This is the TEM canvas (content x location, `reference_brain_generative_model`) that the forward
+  model already half-uses -- now over the REAL grid frame, so it also lifts the DYNAMICS games (the forward model
+  predicts feature-at-grid-location, not raw cells).
+- **L7-B: L5 -> L6 (path integration closes the motor loop).** L5's chosen displacement (the efference copy)
+  PATH-INTEGRATES L6's grid (`l6_grid.path_integrate` / `loc_move`), so the location updates with every move. The
+  operator (`disp`/`recolor`/`edges`) stays, but now reads/writes the LOCATION-ANCHORED state instead of opaque symbols
+  -- the operator generalises over the grid metric (the same displacement anywhere).
+- **L7-C: L2/3 <-> L4(x)L6 (the object).** The object = the graph of (feature, grid-location) pooled over a sensing
+  sequence; recognition + lateral CMP voting run on THIS and predict (top-down) the feature L4 should expect. Folds the
+  standalone recognizer (`recognize_object`) into the loop; gives object permanence under the grid frame.
+- **L7-D: the STATE shift.** From opaque `config_state` -> LOCATION-ANCHORED (grid place + features-at-locations). This
+  is what finally gives the metric (vector nav), generalisation across positions, and the hippocampal binding the
+  cross-column / heterarchy work needs.
+
+Order: A (L4-over-L6) -> B (L5->L6 path integration) -> C (L2/3) -> the unified predict-sense-update loop. Validate each
+by the oracle metric (`arc_offline.py`) + the suite; expect navigation AND dynamics efficiency to lift together once
+the column predicts over a real location frame rather than memorising an opaque graph. (Then: cross-column heterarchy.)
+
 ## 5. Files / where things are
 `l6_sr.py` (OnlineSR -- `M`, `value`/`values` built+tested but the planning-value use was reverted; the SR is learned
 but unread in the loop), `l6_grid.py` (the inert innate hex grid), `reward.py` (the value sweep; `_need` flat proxy;

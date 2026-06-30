@@ -83,6 +83,26 @@ def test_sr_value_is_the_deep_discounted_future_reward():
     assert sr.value(9, {3: 1.0}) == 0.0                        # an unknown state -> 0
 
 
+def test_grid_cells_capture_the_bottleneck():
+    """L6-I1: the LEARNED grid cells = top-k SR eigenvectors. On two clusters joined by a single bottleneck edge, some
+    top grid cell SEPARATES the clusters by sign (the Fiedler / proto-value structure) -- the eigenoption / vector-nav
+    substrate. (Stachenfeld: grid = SR eigenvectors.) Plus: a state's grid code is its k eigen-coordinates."""
+    sr = OnlineSR(gamma=0.9, alpha=1.0)
+    edges = [(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 3), (2, 3)]   # two triangles joined by the 2-3 bottleneck
+    for s in range(6):
+        sr._ensure(s)
+    for _ in range(400):
+        for a, b in edges:
+            sr.observe(a, b)
+            sr.observe(b, a)                                            # symmetric -> the SR eigenvectors are the proto-value funcs
+    G = sr.grid(k=4)                                                    # (k, n) -- each row a grid cell
+    A, B = [0, 1, 2], [3, 4, 5]
+    gaps = [(float(np.mean(c[A])), float(np.mean(c[B]))) for c in G]
+    sep = any(np.sign(ma) != np.sign(mb) and abs(ma - mb) > 0.3 for ma, mb in gaps)
+    assert sep, f"no grid cell separates the clusters across the bottleneck: {[(round(a, 2), round(b, 2)) for a, b in gaps]}"
+    assert sr.grid_code(0, k=4).shape == (4,)                          # a state's grid code = its k eigen-coordinates
+
+
 def test_states_discovered_online():
     """A never-seen symbol gets a fresh row on first observation -- no fixed state set declared up front."""
     sr = OnlineSR()

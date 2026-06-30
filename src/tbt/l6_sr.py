@@ -33,6 +33,8 @@ class OnlineSR:
         self.alpha = alpha
         self.idx: dict = {}                                   # state symbol -> row index
         self.M = np.zeros((0, 0))                             # the SR matrix, grown as states are discovered
+        self._grid_U = None                                   # cached left singular vectors of M (the grid cells)
+        self._grid_n = -1                                     # state count the grid cache was built at (recompute when it grows)
 
     def _ensure(self, s) -> int:
         """Index of state `s`, allocating a fresh zero row+column the first time it is seen (online state discovery)."""
@@ -86,6 +88,28 @@ class OnlineSR:
         R = np.array([float(reward_map.get(st, 0.0)) for st in self._states_by_index()])
         V = self.M @ R
         return {st: float(V[i]) for st, i in self.idx.items()}
+
+    def grid(self, k: int = 5, refresh: bool = False):
+        """The LEARNED multi-scale GRID CELLS = the top-k singular vectors of the SR matrix `M` (Stachenfeld: grid
+        cells ARE the SR eigenvectors; mesh size ∝ eigenvalue -> a handful of geometric scales, `k≈5`). Returns
+        `(k, n)`: each ROW is one grid cell (one eigenvector over the states). The top vectors encode the diffusive /
+        bottleneck structure (they separate clusters -> the eigenoption / vector-nav substrate L6 was missing). Cached
+        and rebuilt when the state set GROWS (cheap `eigh`/SVD on the small game graphs; `refresh=True` forces it).
+        For scale the same vectors are the online Hebbian (Oja/Sanger) PCA of the place codes -- the streaming path."""
+        n = self.M.shape[0]
+        if n == 0:
+            return np.zeros((0, 0))
+        if refresh or self._grid_n != n or self._grid_U is None:
+            self._grid_U = np.linalg.svd(self.M)[0]
+            self._grid_n = n
+        return self._grid_U[:, :min(k, n)].T
+
+    def grid_code(self, s, k: int = 5):
+        """State `s`'s GRID-CELL CODE -- its coordinates in the top-k SR eigenbasis (the grid-cell activations at `s`).
+        The location signal L4 binds features to and L5 path-integrates; `None` for an unknown state."""
+        if s not in self.idx:
+            return None
+        return self.grid(k)[:, self.idx[s]]
 
     def sr(self):
         """The current SR matrix (rows ordered by discovery; `idx` maps symbol -> row)."""
