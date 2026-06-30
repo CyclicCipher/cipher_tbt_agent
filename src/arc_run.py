@@ -13,6 +13,7 @@ ARC_API_KEY (from `api_key.env`, `.env`, or the environment), and on a TLS-inter
 
     python src/arc_run.py ls20 40         # play ls20 for up to 40 actions with the TBT agent (the continuous loop)
     python src/arc_run.py ls20 40 random  # the random baseline (pipeline validation)
+    python src/arc_run.py cn04 60 fm      # the FORWARD-MODEL (dynamics-game) config: forward_model on, barriers off
 """
 
 from __future__ import annotations
@@ -196,5 +197,8 @@ if __name__ == "__main__":
         policy = RandomPolicy(seed=0)                          # the pipeline-validation baseline
     else:
         from arc_sdk import TbtPolicy                          # the TBT agent: Sensor + Agent, the continuous online loop
-        policy = TbtPolicy(seed=0)
+        fm = which in ("fm", "forward")                        # the dynamics-game config: the generative forward model drives,
+        policy = TbtPolicy(seed=0, forward_model=fm, barriers=not fm)   # the tabular barrier/navigation machinery off
+        if fm:
+            print("forward-model mode: forward_model=True, barriers=False (structured-dynamics games)")
     play_remote(policy, game, max_actions=n)
