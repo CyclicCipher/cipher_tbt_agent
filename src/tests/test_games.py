@@ -19,11 +19,11 @@ from arc_sdk import TbtPolicy  # noqa: E402
 
 def test_agent_wins_toggle():
     """Toggle (in-place state-change, the forward-model grain) -- the agent reaches WIN, all levels."""
-    lv, nlev, _act, st = play(GAMES["toggle"], TbtPolicy(seed=0, local=False), budget=1500)
+    lv, nlev, _act, st, _marks = play(GAMES["toggle"], TbtPolicy(seed=0, local=False), budget=1500)
     assert st == "WIN" and lv == nlev, f"Toggle {lv}/{nlev} {st}"
 
 
 def test_agent_wins_collectall():
     """CollectAll (gather all targets) -- the agent reaches WIN, all levels, through the revived harness."""
-    lv, nlev, _act, st = play(GAMES["collectall"], TbtPolicy(seed=0, local=False), budget=1500)
+    lv, nlev, _act, st, _marks = play(GAMES["collectall"], TbtPolicy(seed=0, local=False), budget=1500)
     assert st == "WIN" and lv == nlev, f"CollectAll {lv}/{nlev} {st}"
