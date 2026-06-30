@@ -197,6 +197,19 @@ class CorticalColumn(nn.Module):
                 self.L23.sense(*obs)                        # a cell there -> confirm
         return self.L23.best(), n
 
+    def propose_goals(self, act_value, g_value=0.0):
+        """The candidate goals the BASAL GANGLIA arbitrates (Cisek's affordance competition): ALWAYS the ACT goal
+        (pursue the value/explore policy via the inverse-model motor; value = `act_value` = the best action's EFE
+        value), PLUS the DISAMBIGUATION goal when L2/3's hypotheses still compete (value = `g_value` = the epistemic
+        value of resolving the identity, supplied on the same EFE scale by the caller). Returns [(GoalState, value),
+        ...]; the BG (Go/NoGo + dopamine-RPE) selects one. The heterarchy adds RECEIVED goal-messages to this same
+        list -- the competition is the only mechanism, regardless of where a candidate came from."""
+        goals = [(GoalState(target=None, kind="act"), float(act_value))]
+        dg = self.propose_goal()
+        if dg is not None:
+            goals.append((dg, float(g_value)))
+        return goals
+
     # ----- the inter-column interface (the thalamus binds content ⊗ location) -----------------------
     def content_code(self, label):
         """This column's content (What / L4) code for an entity label."""

@@ -115,3 +115,35 @@ def test_examine_actively_recognises_the_object():
     best, n = col.examine(sense_at, first)
     assert best is not None and best[0] == "A", f"misrecognised: {best}"
     assert n <= 12
+
+
+def _ambiguous_column():
+    col = CorticalColumn(n_entities=8, seed=0)
+    col.learn_object(A, name="A"); col.learn_object(B, name="B")
+    locs = [np.asarray(c, float) for c in A]
+    col.L23.start()
+    i = A.index((1, 0))
+    col.L23.sense(locs[i], local_disps(locs, i, col.L23.radius))   # one ambiguous glance -> disambiguate available
+    return col
+
+
+def test_propose_goals_lists_act_always_and_disambiguate_when_ambiguous():
+    col = _ambiguous_column()
+    assert [g.kind for g, _ in col.propose_goals(act_value=0.2, g_value=0.5)] == ["act", "disambiguate"]
+    col.L23.start()                                              # no competition -> only the act goal
+    assert [g.kind for g, _ in col.propose_goals(act_value=0.2, g_value=0.5)] == ["act"]
+
+
+def test_basal_ganglia_arbitrates_act_vs_disambiguate_and_learns():
+    """GD3: the basal ganglia arbitrates the column's goal candidates by EFE value (Go the higher), and dopamine-RPE
+    makes a consistently-valuable goal type win even when its critic value later dips -- the urge that resolves the
+    affordance competition (Cisek). On a single column the gate is a thin arbiter; it becomes consensus across
+    columns (and over received goal-messages) in the heterarchy."""
+    from tbt.basal_ganglia import BasalGanglia
+    kinds = ["act", "disambiguate"]
+    assert kinds[BasalGanglia(n_columns=1).gate(kinds, [0.2, 0.5])] == "disambiguate"   # higher EFE -> Go
+    assert kinds[BasalGanglia(n_columns=1).gate(kinds, [0.8, 0.3])] == "act"
+    bg = BasalGanglia(n_columns=1)                              # dopamine-RPE learning
+    for _ in range(5):
+        bg.gate(kinds, [0.3, 0.6])                              # disambiguate consistently more valuable
+    assert kinds[bg.gate(kinds, [0.5, 0.4])] == "disambiguate"  # learned affinity carries it past a value dip
