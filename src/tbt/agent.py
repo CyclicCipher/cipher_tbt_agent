@@ -89,22 +89,12 @@ class Agent:
         return T, preds
 
     def _choose(self, state, blocked=()):
-        """The value-maximising action: plan value over the learned transitions, then pick the action whose predicted
-        next state has the highest value -- an UNTRIED action is valued optimistically (R-MAX), so the frontier
-        attracts (epistemic) until the score teaches a goal (pragmatic). A `blocked` action (a recognised barrier
-        ahead) instead takes its predicted-STAY value -- NOT the optimistic Vmax -- so the agent does not waste a bump
-        confirming a barrier it already recognises (the avoidance is value-driven, not hardcoded, and generalises)."""
+        """Plan the EFE value over the learned transitions, then let the COLUMN's inverse-model motor (`col.act`)
+        select the action that best achieves the highest-value next-state -- selection is seated in the column (the
+        motor), not here. Untried actions take the bounded frontier optimism (epistemic frontier); a `blocked`
+        action takes its discounted stay value (a recognised barrier, avoided -- value-driven, generalising)."""
         T, preds = self._transitions()
         if state in T:                                                       # plan only from a state with observed edges
-            self.reward.plan(T, preds, state)                               # (an unvisited state has only R-MAX values)
-        vals = []
-        for a in self.actions:
-            if a in blocked:                                                # predicted barrier: a DISCOUNTED stay -- strictly
-                nxt = self.col.graph.get(state, {}).get(a, state)           # below the optimistic frontier, so a KNOWN barrier
-                vals.append(self.reward.gamma * self.reward.V[nxt])         # is avoided even at a fresh state (no false optimism)
-            elif (state, a) not in self.tried:                              # never ATTEMPTED -> the (bounded, decaying) frontier optimism
-                vals.append(self.reward.explore)
-            else:                                                           # attempted: value its outcome (self-loop if blocked)
-                vals.append(self.reward.V[self.col.graph.get(state, {}).get(a, state)])
-        best = max(vals)
-        return self.rng.choice([a for a in self.actions if vals[a] == best])
+            self.reward.plan(T, preds, state)                               # (an unvisited state has only frontier values)
+        return self.col.act(state, self.actions, value=lambda s: self.reward.V[s], explore=self.reward.explore,
+                            gamma=self.reward.gamma, tried=self.tried, blocked=blocked, rng=self.rng)

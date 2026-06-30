@@ -185,10 +185,23 @@ already in or adjacent to the design:
   **more** (≈299 vs 202 completions) *and* chases the noise **4× less** (2 vs 8 TV-visits); on a trivial clean grid,
   comparable (140 vs 183, both ≫ random). The noise-robustness is the epiplexity prediction, confirmed.
 
-**Stage 2 — goal-states + inverse-model motor (the structural reframe + L6 read).** The column emits a goal-state
-(initially the highest-EFE reachable state — a degenerate GSG); the motor selects the **fulfilling** action via
-L5's inverse operator + an SR/graph path plan (reads L6). L5.motor real; the organ maps the fulfilling action.
-*Gate:* solves nav/barrier scenes by goal-fulfilment; suite green. **This is where "generalizes to an arm" lands.**
+**Stage 2 — the inverse-model motor (selection seated in the column). ✅ DONE 2026-06-29.** Action-selection
+moved out of `agent._choose` into **`column.act`** — the MOTOR as an INVERSE MODEL: choose the action whose
+predicted effect (L5's forward operator) is most VALUABLE, i.e. invert the operator against the EFE value to
+achieve the highest-value next-state (the implicit goal-state). Behaviour-preserving relocation; the agent now
+only plans value + hands the choice to the column. **This is the generalizable kernel** — a continuous effector
+inverts the *same* operator against the *same* value; only the organ differs. *Gate met:* suite **61 green**.
+
+**Re-scoping (what the experiments forced):** the *explicit multi-step goal-state*, the **L6/SR read**, and the
+**effort cost** turned out to be **coupled to the GSG (Stage 4)**, not separable here:
+- An **SR-read for NEED** was tried and **reverted** — `1+occ` over-prioritizes near-current states and starves
+  the *backward* propagation of the distant goal's value (the code's own warning, confirmed: forward-SR-from-current
+  is the wrong signal for goal-value backup). The clean SR-read is **navigating to an explicit goal-state**
+  (argmax `occ(·, goal)` toward a *known* goal) — which needs Stage 4's explicit goals. **Deferred to Stage 4.**
+- The **effort cost** needs the explicit goal-commitment to be a tie-breaker *among goal-reaching paths* rather
+  than a flat cost that abandons far goals. **Deferred to Stage 4.**
+So Stage 2's cleanly-separable win is the inverse-model motor; the explicit-goal machinery (goal emission +
+SR-navigation + effort) consolidates into the GSG stage, where it is principled and necessary.
 
 **Stage 3 — BG gate (selection by the consensus mechanism).** Route overt action selection through
 `BasalGanglia.gate` over the goal-state proposals (Go/NoGo, dopamine-RPE); remove the agent argmax. *Gate:*

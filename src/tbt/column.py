@@ -103,6 +103,27 @@ class CorticalColumn(nn.Module):
         causes among the features in `symbol` -- L5's trans-thalamic output (Sherman & Guillery)."""
         return self.L5.driver(symbol, action)
 
+    def act(self, state, actions, value, explore, gamma, tried, blocked, rng):
+        """The MOTOR as an INVERSE MODEL (the action-selection seat -- in the COLUMN, not the agent script). Choose the
+        action whose predicted effect (L5's forward operator, via the learned graph) is most VALUABLE -- i.e. INVERT
+        the operator against `value` to find the action that best achieves the highest-value next-state (the implicit
+        goal-state of active inference: act to bring about the preferred prediction). An UNTRIED (state, a) takes the
+        frontier `explore` optimism (its outcome is uncertain -> resolving T(s,a) is epistemically valued); a `blocked`
+        action takes its DISCOUNTED stay value (a recognised barrier, avoided without a bump). This GENERALISES: a
+        continuous effector inverts the SAME operator against the SAME value -- only the organ (discrete action here)
+        differs. `value(s)` is the planned EFE value of state `s` (supplied by the agent's reward model)."""
+        vals = []
+        for a in actions:
+            nxt = self.graph.get(state, {}).get(a, state)
+            if a in blocked:
+                vals.append(gamma * value(nxt))                 # recognised barrier -> discounted stay (avoided)
+            elif (state, a) not in tried:
+                vals.append(explore)                            # untried -> bounded, decaying frontier optimism
+            else:
+                vals.append(value(nxt))                         # tried -> the value of its outcome
+        best = max(vals)
+        return rng.choice([a for a in actions if vals[a] == best])
+
     # ----- routing: the "what + pose" recognition faculty -> L2/3 (the object/identity layer) --------
     # Complementary to L6 (the "where"): L6 recognises navigable locations in a fixed frame; L2/3 SOLVES an object's
     # pose (via L5's pose operators) so a known object is recognised at an orientation never seen. The column merely
