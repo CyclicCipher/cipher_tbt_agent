@@ -61,6 +61,32 @@ class OnlineSR:
         nrm = float(np.linalg.norm(v))
         return v / nrm if nrm > 0 else v
 
+    def _states_by_index(self):
+        states = [None] * len(self.idx)
+        for st, i in self.idx.items():
+            states[i] = st
+        return states
+
+    def value(self, s, reward_map):
+        """The SR VALUE V(s) = M[s] · R = Σ_g M[s,g]·R[g] over the (typically SPARSE) rewarding states g -- the
+        expected DISCOUNTED FUTURE REWARD (Dayan 1993; Stachenfeld 2017; Gershman 2018) as a few cached lookups: the
+        deep multi-step propagation is PRECOMPUTED into the SR row M[s] (the future-occupancy), so there is NO rollout.
+        Iterating the NONZERO rewards (not the full row) keeps it O(rewarding states), so it scales as the map grows.
+        `reward_map` maps a state symbol to its immediate reward; an unknown state -> 0 (reference_brain_planning)."""
+        if s not in self.idx:
+            return 0.0
+        i = self.idx[s]
+        return float(sum(self.M[i, self.idx[g]] * r for g, r in reward_map.items() if r and g in self.idx))
+
+    def values(self, reward_map):
+        """V(s) = M·R for EVERY known state at once -- `{state: value}` from a single matrix-vector product (the cheap
+        deep value over the whole map; the per-plan form when scoring many states)."""
+        if not self.idx:
+            return {}
+        R = np.array([float(reward_map.get(st, 0.0)) for st in self._states_by_index()])
+        V = self.M @ R
+        return {st: float(V[i]) for st, i in self.idx.items()}
+
     def sr(self):
         """The current SR matrix (rows ordered by discovery; `idx` maps symbol -> row)."""
         return self.M

@@ -64,6 +64,25 @@ def test_place_codes_encode_topology():
     assert float(c0 @ c1) > float(c0 @ c3)                    # adjacent more similar than the antipode
 
 
+def test_sr_value_is_the_deep_discounted_future_reward():
+    """V(s) = M[s]·R is the DEEP, multi-step discounted future reward as ONE dot product -- no rollout. On a chain
+    0->1->2->3 with reward only at the absorbing goal 3, the value rises toward the goal and a state three steps away
+    is valued at ~gamma^3 of the goal -- the depth is precomputed into the cached SR (reference_brain_planning)."""
+    gamma = 0.9
+    sr = OnlineSR(gamma=gamma, alpha=1.0)
+    for s in (0, 1, 2, 3):
+        sr._ensure(s)
+    for _ in range(400):
+        for i in (0, 1, 2):
+            sr.observe(i, i + 1)
+        sr.observe(3, 3)                                         # the goal absorbs -> it occupies itself (M[3,3]=1/(1-gamma))
+    V = sr.values({3: 1.0})
+    assert V[0] < V[1] < V[2] < V[3]                            # a deep gradient toward the goal, from one matrix-vector product
+    assert abs(V[2] / V[3] - gamma) < 0.02                      # exactly one discount step apart
+    assert abs(V[0] / V[3] - gamma ** 3) < 0.02                # the goal 3 steps away, valued through the cached SR (no rollout)
+    assert sr.value(9, {3: 1.0}) == 0.0                        # an unknown state -> 0
+
+
 def test_states_discovered_online():
     """A never-seen symbol gets a fresh row on first observation -- no fixed state set declared up front."""
     sr = OnlineSR()

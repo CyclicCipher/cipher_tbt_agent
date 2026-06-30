@@ -140,31 +140,33 @@ class Agent:
         return T, preds
 
     def _choose(self, state, blocked=(), field=None):
-        """Plan the EFE value over the learned transitions, then let the COLUMN's inverse-model motor (`col.act`)
-        select the action that best achieves the highest-value next-state -- selection is seated in the column (the
-        motor), not here. Untried actions take the bounded frontier optimism (epistemic frontier); a `blocked`
-        action takes its discounted stay value (a recognised barrier, avoided -- value-driven, generalising).
+        """Plan the value, then let the COLUMN's inverse-model motor (`col.act`) select the action that best achieves
+        the highest-value next-state -- selection is seated in the column (the motor), not here.
 
-        With `field` (FM3): the FORWARD MODEL contributes a per-action EPISTEMIC bonus -- the learning potential of
-        each action -- so in a structured-dynamics game (where the tabular value is flat: states never recur) the
-        agent is DRIVEN to the action whose effect it understands least, and the drive winds down as each action's
-        rule is pinned (handing off to the pragmatic value)."""
+        The PLANNING VALUE is `reward.py`'s PRIORITIZED SWEEPING over the column's transition model (Mattar & Daw
+        prioritized replay -- the brain's efficient DEEP planner): bounded gain×need backups propagate BOTH the
+        pragmatic reward AND the epistemic frontier through the map, so distant reward/exploration is valued without a
+        per-step closed-form solve. (The SR's role here is the NEED that prioritizes the backups -- reference_brain_planning;
+        the closed-form V=M·R is dense/O(states^2) and is reserved for the NEED term, not the whole value.)
+
+        With `field` (FM3/FM4): when the tabular value is INDIFFERENT across actions (a dynamics game's novel states)
+        the FORWARD MODEL decides instead -- its per-action (pragmatic field-value + epistemic learning-potential)."""
         T, preds = self._transitions()
         if state in T:                                                       # plan only from a state with observed edges
-            self.reward.plan(T, preds, state)                               # (an unvisited state has only frontier values)
-        tab = [self._tab_value(state, a, blocked) for a in self.actions]    # the tabular action-values
-        self._tab_spread = max(tab) - min(tab)                              # the arbitration signal (0 = tabular is indifferent here)
+            self.reward.plan(T, preds, state)                               # prioritized sweeping (an unvisited state -> frontier values)
+        tab = [self._tab_value(state, a, blocked) for a in self.actions]
+        self._tab_spread = max(tab) - min(tab)                              # the arbitration signal (0 = the map is indifferent here)
         bonus = None
-        if field is not None and self._tab_spread <= 1e-9:                  # tabular leads nowhere -> the FORWARD MODEL decides
+        if field is not None and self._tab_spread <= 1e-9:                  # the map leads nowhere here -> the FORWARD MODEL decides
             plan = self._field_plan(field, self.actions, self.plan_depth)
             bonus = {a: prag + self.reward.beta * epi for a, (prag, epi) in plan.items()}
         return self.col.act(state, self.actions, value=lambda s: self.reward.V[s], explore=self.reward.explore,
                             gamma=self.reward.gamma, tried=self.tried, blocked=blocked, rng=self.rng, bonus=bonus)
 
     def _tab_value(self, state, a, blocked):
-        """The tabular value of action `a` from `state` -- the value `col.act` will use: a discounted stay for a
-        recognised barrier, the bounded frontier optimism for an untried action, else the value of its outcome. Their
-        SPREAD across actions is the arbitration signal (flat = the tabular loop has no preference -> the forward model)."""
+        """The value of action `a` from `state` that `col.act` will use: a discounted stay for a recognised barrier,
+        the bounded frontier optimism for an untried action, else the swept value `reward.V[nxt]` of its outcome. The
+        SPREAD across actions is the arbitration signal (flat = the map has no preference here -> the forward model)."""
         nxt = self.col.graph.get(state, {}).get(a, state)
         if a in blocked:
             return self.reward.gamma * self.reward.V[nxt]

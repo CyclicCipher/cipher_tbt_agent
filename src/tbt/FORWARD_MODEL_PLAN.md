@@ -98,21 +98,28 @@ per-game flag). They are arbitrated PER STATE by whether the **tabular value exp
 — a dynamics game's novel states, or a recurring state with no learned reward) the FORWARD MODEL decides, else the
 tabular value leads and the forward model stands down (and its costly rollout is skipped — the same signal is the
 performance gate). One model, no per-game switch; validated by the live-loop still converging to oracle while cn04
-auto-engages the forward model. The end goal is to **delete the tabular loop entirely** — the forward model is the
-general world model; tabular was a fast exact-memoisation shortcut it subsumes (movement / pushing / blocking /
-in-place transformation are all just field transformations):
+auto-engages the forward model.
 - **Step 1 ✅ DONE** — deprecate the recognition-based `barriers` faculty (`behavior.py` + its 2 tests deleted; the
   policy wiring stripped). OBSTACLES are handled by the forward model NATIVELY: a blocked move is predicted as
   no-change, so the planner makes no progress there (`test_forward_model_predicts_a_blocked_move_as_no_change`). The
   barriers' object-identity generalisation becomes a FUTURE forward-model/feature improvement, not a faculty.
-- **Step 2 — the forward model's VALUE grows up.** Its current value (per-colour COUNTS) can't represent a SPATIAL
-  goal ("reach this cell" changes no count), and the rollout is shallow where tabular's value-sweeping was deep. So:
-  spatial/relational field features + multi-step value bootstrapping, until the forward model subsumes the
-  navigation/recurring-state games. VALIDATE against the PRE-RESET replicas pulled from git history (LockPath,
-  MultiKey, Sokoban, Tetris, CollectAll, Toggle, partial-obs) — a far stronger bar than a synthetic env — plus cn04.
-- **Step 3 — delete the tabular loop** (L5 `edges`, the SR-value sweeping in `reward.py`, `col.act`-over-graph, the
-  inert `blocked` hook) once Step 2 clears the bar. The L4/L5-operator/L6/L2-3 layers STAY; only the discrete-state
-  value loop goes. Delete-last (keep tabular as the safety net until the forward model passes), not delete-first.
+- **"delete the tabular loop" — REVERSED by neuroscience (2026-06-30, `reference_brain_planning`).** Prototyping a
+  forward-model PLANNER (roll out `predict_field` to build a transition graph + value it) showed the forward model is
+  a great PREDICTOR but a poor, expensive PLANNER (146 ms/call on dense frames; navigated no better than random). The
+  brain does NOT plan by rolling out the fine sensory model: it plans over an ABSTRACT cognitive map with the
+  SUCCESSOR REPRESENTATION (cheap deep value, no rollout) + prioritized replay; the fine prediction is for PERCEPTION;
+  full rollout is sparing DELIBERATION (VTE). So the THREE roles map to pieces we have: **forward model = the
+  PERCEPTION/prediction grain** (cn04's dynamics); **the abstract `reward.py` prioritized-sweeping planner = the
+  PLANNING grain** (Mattar & Daw; the SR is its NEED) — KEEP it, it is the brain's efficient deep planner; **the
+  forward-model rollout = the DELIBERATION fallback**. The tabular loop is NOT deleted.
+- **SR value built (`l6_sr.value`/`values`, tested) but NOT the whole-value planner.** A closed-form `V = M·R` over
+  the dense reward is O(states²)/step and dropped the DEEP epistemic (it must propagate too -- explore-far-away);
+  prioritized sweeping does both deeply at a BOUNDED budget. The SR-value's right home is the sweeping's NEED term
+  (`reward.py._need`, currently a distance proxy) -- a focused-compute optimisation, not the value. Wire later.
+- **NEXT (was step 2): the forward model's VALUE for dynamics games** (cn04) -- spatial/relational FIELD features so
+  `field_value` represents goals counts can't, validated on the pre-reset replicas pulled from git history (LockPath,
+  MultiKey, Sokoban, Tetris, CollectAll, Toggle, partial-obs) + cn04. Navigation/recurring-state games stay on the
+  SR-sweeping planner; the forward model earns the dynamics games. Two grains, composed by the arbitration.
 
 ## 5. Seating discipline (the not-a-harness contract)
 Reads **L4** (feature-at-location), indexed by **L6** (the frame); lives in **L5** (the operator layer); writes the
