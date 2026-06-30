@@ -51,6 +51,19 @@ re-tunes to barriers/rewards). It gives BOTH:
   `V_explore` = epistemic + the EIGENPURPOSE (the SR-eigenvector gradient toward the under-visited extreme, off the
   L6-I1 grid). ARBITRATE per state (same shape as the `_tab_spread` tabular/forward gate): if `V_exploit` has a
   gradient here (a known way to reward), exploit; else explore. This is the brain's explore/exploit arbitration (Daw).
+  - **I3-attempt-1 (2026-06-30, reverted): the eigenpurpose as a GATED BONUS is too weak -- it MUST be PROPAGATED.**
+    Tried the cheap version first: in `_choose`'s flat case (`_tab_spread<=eps`), add `_explore_bonus(state)` = the
+    eigenpurpose of each action's predicted next-state (`col.predict`, so untried actions get a direction too), scaled
+    by `beta`, alongside the forward-model bonus. RESULT: `test_live_loop` stayed green (the GATING works -- proof the
+    flat-case gate preserves convergence, unlike the prototype's persistent term), but nav did NOT improve (MultiKey
+    1/2 @937, LockPath 2/4, Sokoban 0/3 -- identical to baseline). WHY: a one-step bonus (~`beta`*1 = 0.3) is dwarfed by
+    the FRONTIER OPTIMISM (`explore`=3.0) that every untried action already carries -> the agent still picks untried-
+    blindly, the eigenpurpose can't bend the trajectory. The prototype worked precisely because it was SWEPT into the
+    value (propagated deep across the graph), not added at the leaf. CONCLUSION: I3 needs a real second SWEEP -- a
+    separate `V_explore` dict that PROPAGATES the eigenpurpose (`reward.plan` over `reward_total + intrinsic`), arbitrated
+    against `V_exploit` by gradient. The `_explore_bonus` eigenpurpose computation (grid-cells oriented toward under-
+    visited, normalized [0,1]) is correct + reusable; only the WIRING (leaf-bonus -> swept-value) was wrong. Build I3 as
+    the two-value `reward.py` refactor: parameterize the sweep by `(V_dict, reward_fn)`, run it twice, arbitrate.
 
 ## 4. Salvaged-prototype context (so it isn't relearned)
 The reverted eigenpurpose prototype (`reference_eigenoptions_subgoals`) computed the SR SVD inline in the agent and
