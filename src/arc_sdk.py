@@ -98,10 +98,15 @@ class TbtPolicy:
     effect — which click matters EMERGES (self-free), generalizing to any coordinate action, not just ACTION6."""
 
     def __init__(self, build_agent=None, seed: int = 0, local: bool = True, integrate: bool = True, barriers: bool = True,
-                 max_obj_cells: int = 32):
+                 max_obj_cells: int = 32, forward_model: bool = False):
         from tbt.sensor import Sensor                        # lazy: keep arc_sdk importable without torch
         from tbt.behavior import ObjectBehaviour
         self.sensor = Sensor(local=local, integrate=integrate)   # egocentric + path-integration -- recurrence + navigation
+        # The generative forward model (FM1-4) is for STRUCTURED-DYNAMICS games (cn04/ls20); on a TABULAR game its
+        # epistemic bonus disrupts the converged policy and its rollout is costly, so it is OPT-IN per policy (the
+        # proper AUTO-arbitration -- engage the forward model only where the tabular state model is failing -- is the
+        # next design step). When on, `choose_action` feeds the FRAME to `agent.step` so the column models the dynamics.
+        self.forward_model = forward_model
         self._build = build_agent
         self.seed = seed
         self.agent = None
@@ -169,7 +174,9 @@ class TbtPolicy:
             self.sensor.field.reset()                       # undo the peek -- the real read starts the tracker clean
         state, _change = self.sensor.read(obs.grid, action=self._last_a)   # efference = last action (path integration)
         blocked = self._object_barriers()                   # LEARN bumped barriers + PREDICT confident ones ahead
-        a = self.agent.step(state, 0.0, blocked=blocked)    # learn + choose (predict-then-compare); reward via complete()
+        a = self.agent.step(state, 0.0, blocked=blocked,
+                            frame=(obs.grid if self.forward_model else None))   # the FRAME -> forward model (FM1-4), when enabled
+        #                                                     learn + choose (predict-then-compare); reward via complete()
         self._last_a = a
         return self._resolve(a)
 

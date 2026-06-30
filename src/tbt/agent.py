@@ -61,6 +61,8 @@ class Agent:
             ps, pa = self._prev
             self.col.observe(ps, pa, _GOAL)                                  # the completing transition -> the goal
             self.tried.add((ps, pa))
+        if self._prev_feats is not None:                                     # FM4: the field CONFIG that led to completion is
+            self.field_value.update(self._prev_feats, max(score_delta, 1.0))  # valuable -> plan toward it next level (goal in feature space)
         self.reward.observe(_GOAL, max(score_delta, 1.0))                    # the goal is the rewarding terminal
         self.new_episode()
 
