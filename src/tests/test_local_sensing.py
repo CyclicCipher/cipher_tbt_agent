@@ -57,3 +57,18 @@ def test_egocentric_fovea_tracks_the_moving_residual():
     s.read(frames[1])
     fx, fy = s._fovea
     assert 9 <= fx <= 14 and 9 <= fy <= 12, f"fovea {s._fovea} not on the mover"
+
+
+def test_feature_at_location_encodes_the_patch_and_preserves_recurrence():
+    """The L4 seam (Phase 4a): with the column's L4.encode wired in, the egocentric state becomes (feature_id,
+    position) -- a FEATURE-at-location, not a raw pixel tuple. The relabeling is INJECTIVE, so recurrence is
+    identical to the raw-patch state (same local view -> same feature id), keeping the 7b/7c gains intact."""
+    from tbt.column import CorticalColumn
+    frames = _noisy_frames(24)
+    raw = Sensor(local=True, window=7, integrate=True)
+    raw_states = [raw.read(f)[0] for f in frames]
+    col = CorticalColumn(n_entities=16, seed=0)
+    enc = Sensor(local=True, window=7, integrate=True, encode=col.L4.encode)
+    enc_states = [enc.read(f)[0] for f in frames]
+    assert all(isinstance(s[0], int) for s in enc_states), enc_states[:3]   # state[0] is now an L4 feature id
+    assert len(set(enc_states)) == len(set(raw_states))                     # injective -> identical recurrence

@@ -14,7 +14,7 @@ decoration, so wall learning could not be done correctly -- this is the correcte
 First effect modelled: BARRIER-ness -- 'moving into this object leaves the agent in place'. That IS the object's
 contribution to reachability (a wall = reshaped reachability, generalised by recognition rather than memorised per
 cell). Pushable / collectible / autonomous effects extend the same pattern (a learned outcome per identity, revised).
-Pure stdlib; the column composes this beside its Recognizer.
+Pure stdlib; the identity comes from L2/3's object recognition (`column.recognize_object`).
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """Interaction-learned object behaviour: a wall is learned to BLOCK by bumping it once, that learning GENERALISES to
-another instance (and a rotated instance) via the Recognizer WITHOUT re-bumping, a walk-through object stays passable,
-and a 'barrier' later found passable is REVISED. Nothing is assumed (an un-probed object is not a barrier). Pure
-stdlib + the column's Recognizer -- the corrected wall-learning the engine-column makes possible."""
+another instance (and a rotated instance) via L2/3 recognition WITHOUT re-bumping, a walk-through object stays
+passable, and a 'barrier' later found passable is REVISED. Nothing is assumed (an un-probed object is not a barrier).
+Pure stdlib + L2/3's object recognition -- the corrected wall-learning the engine-column makes possible."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
 from tbt.behavior import ObjectBehaviour, contact_outcome  # noqa: E402
-from tbt.recognize import Recognizer                        # noqa: E402
+from tbt.l23_object import L23_Object                       # noqa: E402  (object recognition lives in L2/3 now)
 
 
 def _ident(rec, cells):
@@ -32,7 +32,7 @@ def test_contact_outcome_attributes_the_bump():
 def test_wall_learned_and_generalised_across_instances():
     """Bump ONE wall once -> it blocks; a DIFFERENT instance of the same recognised object is predicted blocked WITHOUT
     bumping (and an un-probed object is not assumed a barrier)."""
-    rec = Recognizer()
+    rec = L23_Object()
     wall1 = {(10, 5), (11, 5), (12, 5)}                      # a 1x3 wall
     wall2 = {(30, 20), (31, 20), (32, 20)}                   # another 1x3 wall elsewhere -> the SAME object
     id1, id2 = _ident(rec, wall1), _ident(rec, wall2)
@@ -50,7 +50,7 @@ def test_wall_learned_and_generalised_across_instances():
 def test_wall_learning_generalises_across_rotation():
     """The Recognizer earns its place: a 1x3 wall learned to block, encountered as a 3x1 wall (the same object rotated
     90 deg), is still predicted blocked -- a translation-only shape key could not do this."""
-    rec = Recognizer()
+    rec = L23_Object()
     horiz = {(10, 5), (11, 5), (12, 5)}                      # 1x3
     vert = {(20, 8), (20, 9), (20, 10)}                     # 3x1 = the same wall rotated 90 deg
     idh, idv = _ident(rec, horiz), _ident(rec, vert)
@@ -64,7 +64,7 @@ def test_wall_learning_generalises_across_rotation():
 def test_walk_through_object_stays_passable_and_barrier_is_revised():
     """A different object passed through stays passable; and a 'barrier' that later passes is REVISED below threshold
     (the painting / a door that opened)."""
-    rec = Recognizer()
+    rec = L23_Object()
     wall = {(10, 5), (11, 5), (12, 5)}
     paint = {(5, 5), (6, 5), (5, 6), (6, 6)}                 # a 2x2 -> a different object
     idw, idp = _ident(rec, wall), _ident(rec, paint)

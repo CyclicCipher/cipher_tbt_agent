@@ -5,9 +5,10 @@ Perception modes, ONE tracker underneath:
     state. Faithful for STRUCTURED / small scenes (and the home of the L5 operator's generalization), but on real 64x64
     ARC frames it NEVER recurs (the full per-pixel content churns with any animation -> the loop is starved).
   * LOCAL / EGOCENTRIC (`local=True`) -- the thousand-brains way: sense a WINDOW around a FOVEA placed on the dynamic
-    residual (the controllable change). Local views RECUR (measured on real cn04/ls20: ~0 -> ~0.6-0.9), so the column
-    can learn. But a local view has NO allocentric position, so distinct board locations ALIAS and the agent cannot
-    tell explored from unexplored -> it gets stuck.
+    residual (the controllable change), and ENCODE it to an L4 FEATURE id (`self.encode` = the column's `L4.encode`,
+    the content vocabulary grown online) -- so the local state is a FEATURE-at-location, not a raw pixel tuple. Local
+    views RECUR (measured on real cn04/ls20: ~0 -> ~0.6-0.9), so the column can learn. But a local view has NO
+    allocentric position, so distinct board locations ALIAS and the agent cannot tell explored from unexplored.
   * PATH-INTEGRATED (`integrate=True`, on top of local) -- track the controllable object's ALLOCENTRIC position by
     EFFERENCE (the learned per-action displacement predicts where it goes) + CORRECTION (snap to the residual sighting
     NEAREST that prediction, so the ACTION-CONSISTENT object is followed and autonomous animation ignored). The coarse
@@ -44,7 +45,7 @@ class Sensor:
     `(window, coarse path-integrated position)` once the object proves controllable. `local=False` (default) is the
     global translation-invariant `config_state`. `objects()` works in all modes."""
 
-    def __init__(self, local: bool = False, window: int = 7, integrate: bool = False, pos_bin: int = 4):
+    def __init__(self, local: bool = False, window: int = 7, integrate: bool = False, pos_bin: int = 4, encode=None):
         self.field = ObjectField()
         self._prev = None
         self.local = local
@@ -53,6 +54,10 @@ class Sensor:
         self.pos_bin = pos_bin
         self._fovea = None                                   # the attention locus / path-integrated position
         self._delta: dict = {}                               # action -> learned position displacement (the efference)
+        # FEATURE-AT-LOCATION (the L4 seam): the egocentric patch is encoded to an L4 FEATURE id (the column's content
+        # vocabulary, grown online), so the local state is (feature, location) -- L4's job, not a raw pixel tuple.
+        # Defaults to identity (the raw patch) until the column wires its `L4.encode` in (so tests run column-free).
+        self.encode = encode if encode is not None else (lambda patch: patch)
 
     def reset(self):
         self.field.reset()
@@ -65,8 +70,8 @@ class Sensor:
         change = salient_cells(self._prev, frame) if self._prev is not None else set()
         if self.local:
             self._update_fovea(frame, change, objects, action)
-            patch = self._patch(frame, self._fovea)
-            state = (patch, self._coarse_pos()) if self.integrate else patch
+            feat = self.encode(self._patch(frame, self._fovea))             # L4 feature-at-location (identity until wired)
+            state = (feat, self._coarse_pos()) if self.integrate else feat
         else:
             state = config_state(objects, self.field.contents)
         self._prev = frame
@@ -115,9 +120,9 @@ class Sensor:
 
     def _controllable(self) -> bool:
         """The fovea's object responds to actions (a consistent, non-trivial learned displacement) -> its allocentric
-        POSITION is informative. Random animation averages to ~0 -> not controllable, so the gate stays off and a
-        state-change game keeps its recurring local view."""
-        return any(d[0] * d[0] + d[1] * d[1] > 1.0 for d in self._delta.values())
+        POSITION is informative. Threshold 0.5 catches a 1-cell-per-action mover (|delta|~1) while still rejecting
+        noise (random animation averages to ~0), so a state-change game keeps its recurring local view."""
+        return any(d[0] * d[0] + d[1] * d[1] > 0.5 for d in self._delta.values())
 
     def _coarse_pos(self):
         """The coarse allocentric position, gated by controllability (else a constant -- keeps the state type stable)."""

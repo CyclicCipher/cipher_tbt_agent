@@ -25,10 +25,74 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
+import numpy as np                                              # the pose operators act on small point clouds
 import torch
 import torch.nn as nn
 
 from .perceive import canonicalize
+
+
+# ---- pose = a GROUP ELEMENT acting on displacements (the displacement-cell geometry) -------------------------
+# A "pose" re-expresses one set of displacement vectors as another under a group element. The SPATIAL instance
+# (this visual column) is SO(2) + a translation, so pose = (theta, t). For an ABSTRACT column the group is
+# LEARNED from the action-orbit structure (see the memory reference_tbt_frames_and_hippocampus): these functions
+# are the SO(2) plug-in, deliberately shaped as "apply a group element to displacements" so the abstract case
+# slots in without a rewrite. They are the ONE home of this geometry -- recognition (L2/3) imports them here, it
+# does not keep its own copy.
+
+def rot(theta: float) -> np.ndarray:
+    """A group element in matrix form. Spatial instance: the 2-D rotation R(theta) in SO(2)."""
+    c, s = np.cos(theta), np.sin(theta)
+    return np.array([[c, -s], [s, c]])
+
+
+def local_disps(locs, i, radius):
+    """Node `i`'s local patch = the displacement vectors to cells within `radius` (group-EQUIVARIANT -- they
+    transform with the object). This is the sensed 'feature pose': the local neighbourhood geometry a pose acts on."""
+    p = locs[i]
+    return np.array([locs[j] - p for j in range(len(locs)) if j != i and np.linalg.norm(locs[j] - p) <= radius])
+
+
+def _sets_match(A, B, tol):
+    """Do point sets A, B coincide (each a in A matched to a distinct b in B within tol)?"""
+    B = list(B)
+    for a in A:
+        for k, b in enumerate(B):
+            if np.linalg.norm(a - b) <= tol:
+                B.pop(k)
+                break
+        else:
+            return False
+    return True
+
+
+def pose_between(model_disps, sensed_disps, tol=0.05):
+    """SOLVE the group element(s) g with g.model_disps ~= sensed_disps (as sets) -- 'which transform re-expresses
+    these displacements as those'. Spatial instance: g = a rotation, returned as theta in [0, 2pi); continuous, and
+    a symmetric patch yields several (Monty's multiple pose hypotheses). Reads the pose off the local geometry
+    rather than searching angles. (For an abstract column this becomes a solve over the learned group.)"""
+    if len(model_disps) != len(sensed_disps) or len(model_disps) == 0:
+        return []
+    out: list[float] = []
+    v0 = model_disps[0]
+    for w in sensed_disps:                                   # pair v0 with each equal-length sensed vector -> a candidate
+        if abs(np.linalg.norm(w) - np.linalg.norm(v0)) > tol:
+            continue
+        theta = float(np.arctan2(w[1], w[0]) - np.arctan2(v0[1], v0[0]))
+        if _sets_match([rot(theta) @ v for v in model_disps], sensed_disps, tol) and \
+                all(abs((theta - o + np.pi) % (2 * np.pi) - np.pi) > 1e-2 for o in out):
+            out.append(theta % (2 * np.pi))
+    return out
+
+
+def apply_pose(cloud, theta, t):
+    """Apply a pose (group element, translation) to a point cloud: R(theta).cloud + t. The universal, continuous
+    operator -- correct by construction (there is no per-orientation entry to learn wrong)."""
+    R, t = rot(theta), np.asarray(t, float)
+    return [R @ np.asarray(loc, float) + t for loc in cloud]
+
+
+align_rotations = pose_between                                  # the spatial-instance name (kept for callers)
 
 
 class L5_Displacement(nn.Module):
@@ -145,6 +209,14 @@ class L5_Displacement(nn.Module):
                 changed = True
             elements.append((pose, (elem[0],) + content))
         return canonicalize(elements) if changed else None
+
+    # ---- pose operators (the displacement-cell geometry, the layer's API) --------------------------------
+    # The continuous-pose half of L5: a pose is a GROUP ELEMENT acting on displacements (spatial instance: SO(2)
+    # + translation; abstract columns: a learned group -- reference_tbt_frames_and_hippocampus). Recognition
+    # (L2/3) reads its (object, pose) hypotheses through these; the module-level functions are the shared home.
+    local_disps = staticmethod(local_disps)                  # a patch's neighbour-displacement vectors (the feature pose)
+    pose_between = staticmethod(pose_between)                # SOLVE the group element(s) aligning model -> sensed
+    apply_pose = staticmethod(apply_pose)                   # APPLY a (group element, translation) to a point cloud
 
     # ---- the matrix associative-memory operator (offline / archived) -------------------------------------
     def learn(self, key, place: torch.Tensor, edges) -> None:

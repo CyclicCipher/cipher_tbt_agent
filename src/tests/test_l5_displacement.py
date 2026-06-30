@@ -88,3 +88,41 @@ def test_column_predict_generalizes_through_L5():
     col.observe(_scene((6, 6)), RIGHT, _scene((7, 6)))
     col.observe(_scene((7, 6)), RIGHT, _scene((8, 6)))
     assert col.predict(_scene((3, 3)), RIGHT) == _scene((4, 3))
+
+
+# ---- the pose operators (the displacement-cell geometry now seated in L5; recognition reads them) ------------
+import numpy as np                                                       # noqa: E402
+from tbt.l5_displacement import apply_pose, local_disps, pose_between, rot  # noqa: E402
+
+_L = [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (2.0, 1.0)]                     # an L-tromino+ (asymmetric, one pose only)
+
+
+def test_local_disps_are_the_neighbour_vectors_within_radius():
+    """local_disps = the patch's displacement vectors to cells within radius (the 'feature pose' a pose acts on)."""
+    locs = [np.asarray(c, float) for c in _L]
+    d = local_disps(locs, 0, radius=1.5)                                  # from (0,0): only (1,0) is within 1.5
+    assert {tuple(v) for v in d} == {(1.0, 0.0)}
+
+
+def test_pose_between_solves_the_group_element_and_apply_pose_reproduces_the_cloud():
+    """The group-action contract recognition relies on: pose_between SOLVES the rotation aligning model->sensed off
+    the local geometry (continuous, no angle search), and apply_pose with that pose reproduces the rotated cloud."""
+    locs = [np.asarray(c, float) for c in _L]
+    for theta in (0.3, 1.0, np.pi / 2, 2.7):
+        sensed = apply_pose(_L, theta, (3.0, -2.0))                       # the object at an unseen continuous pose
+        sd = local_disps([np.asarray(p, float) for p in sensed], 0, 1.5)
+        solved = pose_between(local_disps(locs, 0, 1.5), sd)
+        assert any(abs((s - theta + np.pi) % (2 * np.pi) - np.pi) < 1e-6 for s in solved), (theta, solved)
+
+
+def test_apply_pose_is_exact_on_the_grid_at_ninety_degrees():
+    """apply_pose IS the rotation -- continuous, and exact on the integer grid at 90 degrees (no lookup table)."""
+    got = {tuple(np.round(p, 6)) for p in apply_pose([(0, 0), (1, 0), (2, 0), (3, 0)], np.pi / 2, (0.0, 0.0))}
+    assert got == {(0.0, 0.0), (0.0, 1.0), (0.0, 2.0), (0.0, 3.0)}, got
+
+
+def test_pose_api_is_reachable_on_the_layer():
+    """L5 the LAYER exposes the pose operators (the column coordinates recognition through them, not a side library)."""
+    assert L5_Displacement.apply_pose is apply_pose
+    assert L5_Displacement.pose_between is pose_between
+    assert L5_Displacement.local_disps is local_disps
