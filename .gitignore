@@ -38,3 +38,7 @@ Thumbs.db
 build/
 dist/
 *.env
+
+# ANN fork (shelved 2026-06-29): cloned official Mamba repo + Triton kernel cache (re-clonable, not our code)
+experiments/mamba/
+experiments/.triton_cache/

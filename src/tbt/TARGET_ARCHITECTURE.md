@@ -214,6 +214,18 @@ thalamic VSA binding work now; pose-aware *voting* across heterogeneous frames i
 8. Later: **cross-frame voting** (heterogeneous frames → learned registration) + the **BG column-allocation**;
    **compositional hierarchy** of columns.
 
+## Event separation — an OPEN, SHARED requirement (TBT *and* the ANN line)
+The pre-reset code had a flawed `events.py`; the rebuilt agent only handles level boundaries via a sparse-score heuristic
+(`complete()` + tracker reset). We still need **robust event separation**: detecting when the stream's regime CHANGES —
+a death, a level start, a game/rules change — so the agent resets its *episodic* state (the recurrent belief / sensor
+tracker) WITHOUT wiping its *learned dynamics* (the slow model). **The likely free-ish solution: a PREDICTIVE model's
+SURPRISE spike IS the boundary** (predict-then-compare / HTM burst; an Earth-Mover/Wasserstein jump in the
+state-distribution is the same signal). So a sufficiently anticipatory model may separate events *naturally* — **verify
+this before building a separate module**. This requirement carries over to the **ANN line** (a modified Mamba3): the same
+surprise-triggered fast-state reset, with the slow weights preserved (which connects event separation to catastrophic
+forgetting — separate the fast episodic state from the slow weights, reset the fast on an event). See the new
+`experiments/` ANN line and `project_neocortex_missing_components`.
+
 ## Honest risks
 - The evidence loop + online learning over the SR-frame **within the action budget** is unproven — the make-or-break.
 - "Eigen-subspaces = disentangled factors" and "fixed gain vs learned precision" are **research questions to validate**,
