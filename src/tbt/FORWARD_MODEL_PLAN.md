@@ -66,9 +66,16 @@ L4's simplest encoding; location = cell; neighbourhood = L4-features at adjacent
   and a non-local wrap is correctly treated as bounded noise — noise-robust); cn04 online through the loop, field_error
   0.72 → 0.56 (learning the dynamics live). The error is still indexed by the opaque tabular state (the interim seam);
   FM3 moves PLANNING into field space.
-- **FM3 — planning by rollout.** Roll out action sequences through the forward model (sampled / shallow, EZ-V2
-  Sequential-Halving to bound cost over 64×64; reuse the all-background skip), evaluate the predicted maps toward the
-  goal, pick the best. Replaces/augments tabular-graph planning for dynamics games.
+- **FM3 — planning by rollout (epistemic first). ✅ DONE 2026-06-30 (suite 86, 3 new tests).** `col.act` gained a
+  per-action `bonus` channel (selection STAYS in the column's inverse-model motor); `Agent._field_plan(field, depth)`
+  computes each action's EPISTEMIC value via the forward model (`1 - field_confidence` = learning potential; depth>1
+  rolls out via `predict_field`), and `_choose` adds `beta·epistemic` as the bonus when a frame is present. So in a
+  dynamics game (flat tabular value -- states never recur) the forward model DRIVES the agent to the action it
+  understands least, winding down as each rule is pinned (handing off to pragmatic value). Validated: drives toward
+  the unseen action, winds down when both learned, rollout depth composes. Cost: **depth-1 98 ms/step** (the sound
+  default); depth-2 768 ms -> the deep/pragmatic rollout (FM4) must be SAMPLED (EZ-V2 Sequential-Halving), not full.
+  (Opt deferred: one cell-pass querying all actions would cut depth-1 ~6x.) The PRAGMATIC term toward the score is
+  FM4.
 - **FM4 — the goal in feature space.** Associate score rises with feature-map configurations (reward over predicted
   maps); the goal = the scoring configuration; plan toward it. The harder half (the goal in a dynamics game).
 - **FM5 — the hippocampus inherits it (deferred).** Apply the SAME machinery to the GLOBAL ALLOCENTRIC frame (the

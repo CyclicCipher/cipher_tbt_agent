@@ -144,3 +144,40 @@ def test_fm2_backward_compatible_without_frame():
     agent.step(("a",), 0.0)
     agent.step(("b",), 0.0)
     assert agent._prev_field is None and agent.field_error == 0.0
+
+
+# ---- FM3: the forward model DRIVES action selection (epistemic rollout) -------------------------------
+def test_fm3_drives_toward_least_understood_action():
+    """The forward model contributes a per-action epistemic value (learning potential). With one action's effect
+    learned and another unseen, the agent is DRIVEN to the unseen one -- action-space curiosity, forward-model-led."""
+    agent = Agent(n_actions=2, seed=0)
+    f0 = agent.col.feature_field(_marker_frame(3))
+    f1 = agent.col.feature_field(_marker_frame(4))
+    for _ in range(4):
+        agent.col.observe_field(f0, 0, f1)                       # action 0's effect on f0 learned (unambiguous)
+    epi = agent._field_plan(f0)                                  # action 1 never seen -> higher learning potential
+    assert epi[1] > epi[0]
+    assert agent._choose(("s",), field=f0) == 1                 # the tabular value is flat -> the forward model decides
+
+
+def test_fm3_epistemic_winds_down_when_actions_learned():
+    """When BOTH actions' effects are pinned, the epistemic drive collapses -> it hands off to the pragmatic value
+    (the bounded bonus no longer overrides a learned reward). The noise-robust wind-down, in the planner."""
+    agent = Agent(n_actions=2, seed=0)
+    f0 = agent.col.feature_field(_marker_frame(3))
+    fr = agent.col.feature_field(_marker_frame(4))               # action 0 -> right
+    fl = agent.col.feature_field(_marker_frame(2))               # action 1 -> left
+    for _ in range(4):
+        agent.col.observe_field(f0, 0, fr)
+        agent.col.observe_field(f0, 1, fl)                       # both actions learned on f0
+    epi = agent._field_plan(f0)
+    assert epi[0] < 0.5 and epi[1] < 0.5                         # both understood -> low epistemic -> pragmatic takes over
+
+
+def test_fm3_rollout_depth_runs():
+    """A shallow rollout (depth>1) composes via predict_field without error -- the rollout machinery for FM4."""
+    agent = Agent(n_actions=2, seed=0)
+    f0 = agent.col.feature_field(_marker_frame(3))
+    agent.col.observe_field(f0, 0, agent.col.feature_field(_marker_frame(4)))
+    epi = agent._field_plan(f0, depth=2)
+    assert set(epi) == {0, 1} and all(v >= 0.0 for v in epi.values())

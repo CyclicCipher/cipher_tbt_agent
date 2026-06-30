@@ -136,7 +136,7 @@ class CorticalColumn(nn.Module):
         """Predict the next feature-field via L5's per-location operator -- the field-grain efference copy."""
         return self.L5.predict_field(field, action)
 
-    def act(self, state, actions, value, explore, gamma, tried, blocked, rng):
+    def act(self, state, actions, value, explore, gamma, tried, blocked, rng, bonus=None):
         """The MOTOR as an INVERSE MODEL (the action-selection seat -- in the COLUMN, not the agent script). Choose the
         action whose predicted effect (L5's forward operator, via the learned graph) is most VALUABLE -- i.e. INVERT
         the operator against `value` to find the action that best achieves the highest-value next-state (the implicit
@@ -144,16 +144,20 @@ class CorticalColumn(nn.Module):
         frontier `explore` optimism (its outcome is uncertain -> resolving T(s,a) is epistemically valued); a `blocked`
         action takes its DISCOUNTED stay value (a recognised barrier, avoided without a bump). This GENERALISES: a
         continuous effector inverts the SAME operator against the SAME value -- only the organ (discrete action here)
-        differs. `value(s)` is the planned EFE value of state `s` (supplied by the agent's reward model)."""
+        differs. `value(s)` is the planned EFE value of state `s` (supplied by the agent's reward model). `bonus` is
+        an optional per-action additive value -- the forward model's EPISTEMIC drive (FM3): the learning potential of
+        each action, on the EFE scale, so it directs exploration when the tabular value is flat (a dynamics game's
+        non-recurring states) yet yields to a learned reward (the pragmatic value dominates the bounded bonus)."""
         vals = []
         for a in actions:
             nxt = self.graph.get(state, {}).get(a, state)
             if a in blocked:
-                vals.append(gamma * value(nxt))                 # recognised barrier -> discounted stay (avoided)
+                v = gamma * value(nxt)                          # recognised barrier -> discounted stay (avoided)
             elif (state, a) not in tried:
-                vals.append(explore)                            # untried -> bounded, decaying frontier optimism
+                v = explore                                     # untried -> bounded, decaying frontier optimism
             else:
-                vals.append(value(nxt))                         # tried -> the value of its outcome
+                v = value(nxt)                                  # tried -> the value of its outcome
+            vals.append(v + (bonus.get(a, 0.0) if bonus is not None else 0.0))   # + the forward-model epistemic drive
         best = max(vals)
         return rng.choice([a for a in actions if vals[a] == best])
 

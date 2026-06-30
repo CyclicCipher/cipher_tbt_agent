@@ -37,6 +37,7 @@ class Agent:
         self.reward = RewardModel(16, gamma=gamma, beta=beta, optimistic=True, epistemic=epistemic, rmax=rmax,
                                   effort=(0.0 if rmax else effort))           # EFE value (R-MAX = ablation)
         self.tried: set = set()                                              # (state, action) ATTEMPTED -- persists across episodes
+        self.plan_depth = 1                                                  # forward-model epistemic rollout depth (FM3; 1 = sound default)
         self.new_episode()
 
     def new_episode(self):
@@ -84,7 +85,7 @@ class Agent:
             err = self.field_error if field is not None else (1.0 if self.surprised else 0.0)
             self.reward.observe_error(ps, err)                              # LEARNING-PROGRESS: dense field error (or binary fallback)
         self.reward.observe(state, score_delta)                             # value: reward where the score rose + novelty
-        a = self._choose(state, blocked)
+        a = self._choose(state, blocked, field=field)
         self._pred = self.col.predict(state, a)                             # enter the predictive state
         if field is not None:
             self._pred_field = self.col.predict_field(field, a)             # the efference copy at field grain (the next predicted field)
@@ -120,13 +121,38 @@ class Agent:
                 preds[nxt].append(s)
         return T, preds
 
-    def _choose(self, state, blocked=()):
+    def _choose(self, state, blocked=(), field=None):
         """Plan the EFE value over the learned transitions, then let the COLUMN's inverse-model motor (`col.act`)
         select the action that best achieves the highest-value next-state -- selection is seated in the column (the
         motor), not here. Untried actions take the bounded frontier optimism (epistemic frontier); a `blocked`
-        action takes its discounted stay value (a recognised barrier, avoided -- value-driven, generalising)."""
+        action takes its discounted stay value (a recognised barrier, avoided -- value-driven, generalising).
+
+        With `field` (FM3): the FORWARD MODEL contributes a per-action EPISTEMIC bonus -- the learning potential of
+        each action -- so in a structured-dynamics game (where the tabular value is flat: states never recur) the
+        agent is DRIVEN to the action whose effect it understands least, and the drive winds down as each action's
+        rule is pinned (handing off to the pragmatic value)."""
         T, preds = self._transitions()
         if state in T:                                                       # plan only from a state with observed edges
             self.reward.plan(T, preds, state)                               # (an unvisited state has only frontier values)
+        bonus = None
+        if field is not None:
+            bonus = {a: self.reward.beta * v for a, v in self._field_plan(field, self.plan_depth).items()}
         return self.col.act(state, self.actions, value=lambda s: self.reward.V[s], explore=self.reward.explore,
-                            gamma=self.reward.gamma, tried=self.tried, blocked=blocked, rng=self.rng)
+                            gamma=self.reward.gamma, tried=self.tried, blocked=blocked, rng=self.rng, bonus=bonus)
+
+    def _field_plan(self, field, depth=1):
+        """Per-action EPISTEMIC value via the forward model: each action's LEARNING POTENTIAL = how unsure the model
+        is about its effect (`1 - field_confidence`). `depth > 1` adds the discounted best potential reachable after
+        it (a shallow rollout via `predict_field`). The forward model DRIVING exploration -- try the action whose
+        dynamics you understand least; it winds to 0 as each rule is pinned. depth-1 is the sound default (a deep
+        epistemic rollout leans on unseen->identity predictions); deeper rollout is reserved for the PRAGMATIC goal
+        (FM4), where the model is confident along the planned path."""
+        out = {}
+        for a in self.actions:
+            epi = 1.0 - self.col.L5.field_confidence(field, a)
+            if depth > 1:
+                nxt = self.col.predict_field(field, a)
+                out_next = self._field_plan(nxt, depth - 1)
+                epi += self.reward.gamma * (max(out_next.values()) if out_next else 0.0)
+            out[a] = epi
+        return out
