@@ -27,11 +27,15 @@ class Agent:
     episodes; `new_episode()` only resets the per-episode prediction/linkage (do not path-integrate across a reset)."""
 
     def __init__(self, n_actions: int, n_entities: int = 256, gamma: float = 0.9, beta: float = 0.3, seed: int = 0,
-                 epistemic: str = "progress"):
+                 epistemic: str = "progress", rmax: bool = False, effort: float = 0.0):
         self.actions = list(range(n_actions))
         self.rng = random.Random(seed)
         self.col = CorticalColumn(n_entities=n_entities, seed=seed)           # the world model (graph + SR), learned online
-        self.reward = RewardModel(16, gamma=gamma, beta=beta, optimistic=True, epistemic=epistemic)  # value: score + LEARNING-PROGRESS
+        # `effort` (the per-action efficiency cost) is plumbed but DEFAULTS OFF: at gamma=0.9 a flat per-step cost
+        # fragily fights FAR goals (effort*Sum(gamma^t) vs gamma^D), so it is DEFERRED to Stage 2 -- once the SR-read
+        # gives robust shortest-path value it becomes a tie-breaker among goal-reaching paths, not a force that abandons them.
+        self.reward = RewardModel(16, gamma=gamma, beta=beta, optimistic=True, epistemic=epistemic, rmax=rmax,
+                                  effort=(0.0 if rmax else effort))           # EFE value (R-MAX = ablation)
         self.tried: set = set()                                              # (state, action) ATTEMPTED -- persists across episodes
         self.new_episode()
 
@@ -98,8 +102,8 @@ class Agent:
             if a in blocked:                                                # predicted barrier: a DISCOUNTED stay -- strictly
                 nxt = self.col.graph.get(state, {}).get(a, state)           # below the optimistic frontier, so a KNOWN barrier
                 vals.append(self.reward.gamma * self.reward.V[nxt])         # is avoided even at a fresh state (no false optimism)
-            elif (state, a) not in self.tried:                              # never ATTEMPTED -> optimistic (R-MAX frontier)
-                vals.append(self.reward.Vmax)
+            elif (state, a) not in self.tried:                              # never ATTEMPTED -> the (bounded, decaying) frontier optimism
+                vals.append(self.reward.explore)
             else:                                                           # attempted: value its outcome (self-loop if blocked)
                 vals.append(self.reward.V[self.col.graph.get(state, {}).get(a, state)])
         best = max(vals)

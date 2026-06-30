@@ -77,17 +77,18 @@ class RewardModel:
     (priority = gain x need). Set prioritized=False for the exhaustive value-iteration baseline."""
 
     def __init__(self, N, gamma=0.9, beta=0.3, budget=40, theta=1e-5, prioritized=True, optimistic=True,
-                 epistemic="progress", a_fast=0.3, a_slow=0.05):
+                 epistemic="progress", a_fast=0.3, a_slow=0.05, effort=0.0, frontier=1.0, rmax=False):
         self.gamma, self.beta, self.budget, self.theta = gamma, beta, budget, theta
+        self.effort = effort                                    # per-step EFFORT cost (a small negative pragmatic value -> efficiency)
+        self.frontier = frontier                                # the frontier prior: epistemic optimism for an UNVISITED state (decays to lp)
         self.prioritized, self.sweeps = prioritized, 3 * N
-        self.Vmax = 1.0 / (1.0 - gamma)                         # optimism under uncertainty (R-MAX): an
-        self.V = defaultdict((lambda: self.Vmax) if optimistic else float)   # unvisited state maximally valued,
-                                                                # so the frontier attracts — forward novelty drive.
-                                                                # But for PLANNING over a fully-enumerated subgoal
-                                                                # -MDP set optimistic=False (0-init), or undecayed
-                                                                # optimism on a not-yet-winning self-loop (reach
-                                                                # goal before clearing its condition) outvalues
-                                                                # real progress and the agent lunges early.
+        self.Vmax = 1.0 / (1.0 - gamma)                         # R-MAX optimism = MAX cumulative REWARD (the ablation)
+        # The frontier optimism that an UNVISITED state carries. EFE (default): the bounded EPISTEMIC value of an
+        # unexplored region = the discounted sum of frontier info-gains (beta*frontier/(1-gamma)) -- it still
+        # propagates (so paths toward the unexplored are valued -> coverage), but it is BOUNDED (not max-reward) and
+        # DECAYS once visited (reward_total's lp -> 0 on noise/mastered). `rmax=True` restores the old Vmax ablation.
+        self.explore = self.Vmax if rmax else self.beta * self.frontier / (1.0 - gamma)
+        self.V = defaultdict((lambda: self.explore) if optimistic else float)
         self.R_ext = {}                                         # extrinsic reward (from the sparse score)
         self.visits = defaultdict(int)                          # visit counts (drive the novelty bonus)
         self.queue = {}                                         # pending backups: state -> priority
@@ -110,20 +111,26 @@ class RewardModel:
         self.err_fast[state] = (1.0 - self.a_fast) * f + self.a_fast * error
         self.err_slow[state] = (1.0 - self.a_slow) * s + self.a_slow * error
 
+    def epistemic_value(self, s):
+        """The epiplexity-extraction rate at `s` = LEARNING PROGRESS (the prediction-loss drop rate). Visited +
+        learnable -> high; a FLAT loss curve -> 0 whether the floor is LOW (mastered) or HIGH (noise), so noise and
+        mastery both wind down with NO separate gate; an UNVISITED state -> the frontier prior (optimism that decays to
+        the measured lp once visited). The principled, noise-robust epistemic currency (reference_efe_and_epiplexity)."""
+        if s not in self.err_slow:                                            # never left s -> unknown epiplexity -> optimism
+            return self.frontier
+        return max(self.err_slow[s] - self.err_fast[s], 0.0)                  # learning progress = epiplexity-extraction rate
+
     def reward_total(self, s):
         ext = self.R_ext.get(s, 0.0)
         if self.epistemic == "novelty":
             return ext + self.beta / (1.0 + self.visits[s])                    # count-based novelty (the old bump)
         if self.epistemic == "error":
             return ext + self.beta * self.err_fast.get(s, 0.0)                 # RAW error (the noisy-TV trap; baseline)
-        # "progress" = the novelty frontier drive GATED by learnability. The gate is 1 wherever the model is learning or
-        # has learned (so on deterministic structure this is IDENTICAL to count-novelty -- no distraction) and falls to
-        # 0 on CONFIRMED noise: persistent prediction error NOT explained by ongoing learning progress (the noisy TV).
-        # So the agent stops paying novelty to a region it has proven it cannot predict, unlike RAW error which clings.
-        lp = max(self.err_slow.get(s, 0.0) - self.err_fast.get(s, 0.0), 0.0)  # measured progress = recent error reduction
-        noise = max(self.err_slow.get(s, 0.0) - 4.0 * lp, 0.0)               # persistent error with NO progress = noise
-        gate = 1.0 - min(noise, 1.0)
-        return ext + self.beta * gate / (1.0 + self.visits[s])
+        # "progress"/EFE = pragmatic (reward minus a per-step EFFORT cost on non-goal states -> efficiency) + epistemic
+        # (the epiplexity-extraction rate -- learning progress, no noise gate: a flat loss gives lp -> 0 for noise AND
+        # mastered alike). Replaces the count-novelty-gated-by-learnability form with the grounded measure.
+        pragmatic = ext - (self.effort if ext <= 0.0 else 0.0)
+        return pragmatic + self.beta * self.epistemic_value(s)
 
     def _need(self, s, current):
         """NEED = successor-representation relevance of s to the agent's future. The TRUE need is the SR

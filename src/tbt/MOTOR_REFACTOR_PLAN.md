@@ -1,0 +1,220 @@
+# Motor refactor — action by active inference (GSG → BG gate → inverse-model motor)
+
+*Draft for review, 2026-06-29. Companion to `REFACTOR_PLAN.md` (the layer refactor, done) and
+`TARGET_ARCHITECTURE.md`. Nothing here is executed until signed off. This commits to the **full active-inference
+reframe** of motor output, not a patch.*
+
+---
+
+## 0. Why (the three critiques + the principle + the competition)
+
+The agent claims "expected free energy = epistemic + pragmatic," but the mechanism doesn't match:
+
+1. **R-MAX optimism is in the wrong place and double-counts.** `agent._choose` gives every untried `(s,a)` the
+   flat `Vmax`, while `reward_total` *already* adds a learning-progress epistemic bonus — two exploration drives
+   stacked, and the blunt one wins. R-MAX also inflates the *pragmatic* term ("unknown ⇒ max reward") when the
+   right home is the *epistemic* term ("unknown ⇒ max expected info gain, decaying as learned"), and it keys on
+   **state visits**, not the active-inference quantity: the model's **uncertainty about the action's outcome**.
+2. **Selection lives in the agent script.** A top-level argmax over `reward.V` is a monolithic policy. The
+   faithful selector is the **basal ganglia gating among proposed goal-states** (Go/NoGo + dopamine-RPE) — the
+   mechanism that becomes *consensus* with multiple columns. `BasalGanglia` exists and is simply not in the loop.
+3. **The motor organ won't generalize**, because the column picks an *action index*, not a *goal-state*. L5.motor
+   is `return a` (identity). In a faithful system the column emits a **goal-state** (a desired observation, i.e. a
+   desired **displacement** in its frame) and the motor selects the command that *fulfills* it (action-as-inference).
+
+**The principle (active inference):** action samples the world to lower free energy — either reach **preferred**
+states (pragmatic) or reduce **uncertainty** (epistemic). The agent should select the goal-state (and the action
+that fulfils it) that minimizes **expected free energy** `G = −pragmatic − epistemic`.
+
+**Why this generalizes beyond ARC (the competition's "spirit").** The thing that carries to an arm, a cursor, or
+any task is the **separation**: the column emits a *frame-relative goal-state*, an *effector-specific organ*
+realizes it via L5's operator run as an **inverse model**. The column never names "ACTION3." A discrete action
+set is then just the simplest organ; a continuous effector is a learned inverse model with the *same* interface.
+This separation is the generalizable architecture — it is a first-class goal here, not a side benefit.
+
+---
+
+## 1. The GSG — how it works, and why one per column
+
+**One GSG per column.** A column has its own reference frame and its own uncertainty, so "what sample would most
+reduce *my* uncertainty?" is column-local (Monty: every LM emits goal-states). A monolithic GSG can't know what
+disambiguates a given column's hypotheses and wouldn't generalize to a hierarchy.
+
+**A goal-state** = a target the column wants to bring about, in its representation: a target **location** (a node
+/ pose in its frame) or a target **feature-at-location** (sense feature F at location L), or a target
+**object-state**. The GSG proposes a *set* of candidates and scores each by EFE:
+
+- **Pragmatic value** = `reward.V(goal-state)` — expected reward of reaching it (toward the learned goal).
+- **Epistemic value** = expected information gain from reaching/sensing it:
+  - *world-model* uncertainty: how under-modeled is `(s,a)` near there — **transition-outcome uncertainty**,
+    **gated by learning-progress** (draws to *learnable* unknowns, ignores the noisy-TV — `reference_animal_exploration`).
+  - *recognition* uncertainty: how much would sensing there **disambiguate L2/3's `(object,pose)` hypotheses**
+    (sample where the hypotheses most disagree — Monty). Newly possible: L2/3 now *has* those hypotheses.
+
+**Covert vs overt — the resolution of "many columns, one body":**
+- **Epistemic goals are pursued COVERTLY where possible** — path-integrate the belief to a locus and sense the
+  *predicted* feature there, *without moving the body* (premotor theory of attention; "mental saccades"). Parallel
+  across columns, **free** (spends compute, not actions — the action-expensive / compute-cheap lever).
+- **Overt goals compete** (one effector). The **basal ganglia gates**: Go the highest-EFE overt proposal, NoGo the
+  rest; dopamine-RPE learns which proposals pay off. That is the consensus / arbitration.
+
+**Covert evaluation = how the GSG scores EFE.** To score a candidate, the GSG **rolls its belief forward mentally**
+over the SR/graph (path-integration via L5's operator) — imagination, no real action spent. This is also how
+expected info gain is estimated ("if I went there, what would I resolve?").
+
+---
+
+## 2. The faithful loop (and what each piece fixes)
+
+> each column's **GSG** proposes **goal-states** ranked by **EFE** (§1) → **covert** epistemic goals are sampled
+> in imagination (free) → **overt** proposals go to the **basal-ganglia gate** (Go/NoGo, dopamine-RPE) → the
+> **motor** selects the action that *fulfils* the gated goal-state via L5's **inverse** operator + an SR/graph
+> path plan → the **organ** maps that action to the effector.
+
+- Fixes **#1**: EFE replaces R-MAX — the epistemic bonus is expected info gain on transition-outcome uncertainty
+  (decaying as learned), placed in the epistemic term, not flat optimism in the pragmatic term.
+- Fixes **#2**: the BG gate replaces the agent argmax — selection is consensus-shaped (single-column degenerate,
+  multi-column real).
+- Fixes **#3**: the motor fulfils a *goal-state* via L5's inverse operator — column output is frame-relative and
+  effector-agnostic; only the organ is effector-specific.
+- **Bonus — fixes the deferred "L6 is write-only" thread:** reaching a goal-location is **navigation**, which
+  reads the SR (reachability / place-code distance) to plan the path. The motor is where `OnlineSR` finally gets
+  *read*. The SR is the navigational substrate the inverse-model motor plans over.
+
+---
+
+## 3. What a goal-state is, concretely (our representation)
+
+State is `(feature_id, position)` (feature-at-location). A goal-state is a partial target over that:
+- **navigation/exploration:** a target `position` (a node in the column's graph) — "be there". The motor plans a
+  path over the graph/SR; the action = the first edge / the L5 displacement reducing the gap.
+- **disambiguation:** a target `feature` to confirm at a `position` — "sense F there". Often covert (predict it).
+- **task:** a target object-state / required-absent — the pragmatic goal from the sparse score (already in `reward`).
+
+The **inverse model** for ARC: enumerate the discrete actions, pick the one whose L5 effect best reaches the
+goal (single-step) or whose path over the graph/SR reaches it (multi-step). For a continuous effector the same
+interface holds with a learned/optimized inverse policy (gradient on the goal-discrepancy).
+
+---
+
+## 3b. Computing EFE online (research-grounded — `reference_efe_and_epiplexity`)
+
+`G = −(pragmatic + epistemic)`; select the goal/action that **maximizes (pragmatic + epistemic)**.
+
+- **Pragmatic** = expected reward toward the goal (`reward.V` at the predicted outcome). Formally the *risk* term
+  `KL[predicted outcomes ‖ preferences]`; for sparse ARC the preference is "completion", so this is the learned
+  value. Unchanged from today.
+- **Epistemic** = expected **information gain**, and the noisy-TV is resolved *at the measure level* by
+  **epiplexity** (compute-bounded learnable structure ≈ the area between the loss curve and its floor). The clean
+  consequence: a **flat** loss curve has zero remaining epiplexity whether the floor is low (mastered) or high
+  (noise) — so the epistemic value → 0 for *both*, **with no separate noise gate** (drop reward.py's
+  `noise = err_slow − 4·lp` hack). Two grounded sources, both noise-robust:
+  1. **World-model epiplexity (curiosity).** Per `(s,a)`, the prediction-loss **drop rate** = learning progress
+     `lp = max(err_slow − err_fast, 0)` — the online epiplexity-extraction rate. Use `lp` **directly** as the
+     epistemic value for visited `(s,a)`.
+  2. **Recognition info gain (disambiguation).** Expected reduction in L2/3 `(object,pose)` hypothesis **entropy**
+     from a sample (sample where hypotheses disagree — Monty). A noisy region doesn't disambiguate → ≈ 0.
+- **The frontier without R-MAX.** An unvisited `(s,a)` has *unknown* epiplexity → a **prior expected-epiplexity
+  (optimism) that DECAYS to the measured `lp`** as it is visited. This is the principled replacement for R-MAX:
+  optimism lives in the **epistemic** term (decays to 0 once a region is shown unlearnable/noise, stays high while
+  learnable) — **not** flat in the pragmatic term (R-MAX's bug: noise looks max-valuable forever).
+- **Honest:** epiplexity's exact form is offline NN-training MDL; we use it as the *justification* for
+  learning-progress-as-epistemic + the cleaner "flat-curve → 0" rule, not as a literal online computation.
+
+**Sign structure (aversion vs curiosity).** Pragmatic value is a log-preference, so it is **≤ 0**: ~0 for
+expected *preferred* outcomes, strongly negative for un-preferred ones. **This is how "don't do this" works** —
+not a separate penalty, but assigning the bad outcome a low preference `p(o)≈0`, whose strongly-negative log
+dominates the EFE. Our `reward.V ≥ 0` today (no aversion); the natural aversive outcome to add is
+**GAME_OVER / death** (low preference → avoid traps), which is *distinct* from the zero-value "useless". Epistemic
+value is **≥ 0 always** — expected information gain = mutual information ≥ 0 (you can never *expect* to become less
+certain); its floor is 0 (learn nothing — a fully predictable *or* a pure-noise outcome). A *realized* observation
+(or a measured `lp`) can dip negative (surprise / forgetting) → we clamp at 0. Information *avoidance* (the ostrich
+effect) is a **pragmatic veto** (the outcome is aversive), never negative epistemic. So: **all aversion lives in
+the pragmatic term (≤ 0); the epistemic term is pure non-negative curiosity.**
+
+## 3c. Efficiency — reaching goals in the FEWEST actions (RHAE)
+
+RHAE scores `(human/agent_actions)²`, so efficiency is first-class. The principled driver is **minimizing EFE over
+the trajectory with a per-action COST**, plus learning that makes the true optimum findable. Five pressures, all
+already in or adjacent to the design:
+1. **Temporal discounting (have, γ):** reaching the goal sooner is worth more — the basic "fewer steps = better".
+2. **Action as cost / effort (ADD):** a small *negative pragmatic value per step* (occupying a non-goal state is
+   mildly un-preferred — the §3b aversion mechanism applied to *effort*). This makes minimizing action count a
+   *direct* objective. Resource-rationality / the brain's "law of less work"; the FEP *complexity* term is its
+   formal cousin (prefer the simplest policy that achieves the goal — Occam over actions).
+3. **Optimize, don't satisfice — via the accurate model + the SR:** EFE picks the min-cost policy, but only as
+   good as the model. As the epistemic term winds down (epiplexity extracted → model learned), the planner reads
+   the **SR's reachability/shortest-path gradient** (the deferred L6-read — now doubly motivated: navigation *and*
+   efficiency) and finds the true shortest path. The explore→exploit transition is automatic in EFE.
+4. **Cheap exploration (covert):** exploration *costs actions*, which hurts RHAE — so push it into **covert**
+   (compute, not actions) sampling wherever possible (the GSG's mental rollout). Learn by thinking, not by acting.
+   This makes the GSG's covert evaluation an *efficiency* mechanism, not only an attention one.
+5. **Habit amortization + residual policy-search (BG dopamine-RPE):** reinforce the successful efficient policy so
+   it is reused cheaply (cross-level transfer already shows this — a 2nd same-goal level ≈ oracle), while keeping a
+   *small* exploration in POLICY space (try alternatives where the value is near-tied / the policy is uncertain) to
+   discover shortcuts = "is there a *better* way?" — the difference between converging to optimal and satisficing.
+
+## 4. File-by-file disposition
+
+| File | Change |
+|---|---|
+| `reward.py` | EFE = pragmatic + epistemic (§3b). Epistemic = `lp` (the epiplexity-extraction rate) directly for visited `(s,a)` + a decaying prior for the frontier; **drop the R-MAX `Vmax`** AND the `noise = err_slow−4·lp` gate (both subsumed — a flat curve gives `lp→0`). Keep R-MAX as an ablation flag only. |
+| `basal_ganglia.py` | **Into the loop** as the overt action/goal-state gate (`gate` already exists: Go/NoGo + dopamine-RPE). |
+| `l5_displacement.py` | Add the **inverse operator** — `action_toward(state, goal)` / `fulfil(displacement)`: which action's learned effect best reaches the goal (the forward operator run backwards). L5.motor stops being identity. |
+| `l6_sr.py` / `column.py` | The motor **reads the SR** for multi-step path planning to a goal-location (fixes write-only). A `goal_state`/GSG faculty proposes + EFE-scores candidates; covert rollout via `loc_*` + L5. |
+| `agent.py` | Thin: hand the loop to GSG → gate → motor. **Remove the value-greedy argmax + R-MAX branch.** Still owns the predict-then-compare bookkeeping. |
+| `arc_sdk.py` | The **organ** stays here (goal-fulfilling action → name/coords → GameAction), unchanged in spirit; it now receives a *fulfilling action*, still maps to the effector. |
+| `thalamus.py` | Later: route goal-states between columns (multi-column); single-column no-op. |
+
+---
+
+## 5. Staging (each stage suite-green; debug on FAST OFFLINE reproductions, never longer live runs)
+
+**Stage 1 — EFE value (kill R-MAX). ✅ DONE 2026-06-29 (A+B; C deferred).** In three validated micro-steps:
+- **A — epiplexity-grounded epistemic term.** `reward.epistemic_value(s)` = `lp` (learning progress = the
+  epiplexity-extraction rate) for visited, the `frontier` prior for unvisited; **dropped the `noise=err_slow−4·lp`
+  gate** (a flat curve gives `lp→0` for noise AND mastered). Suite green (incl. the noisy-TV test).
+- **B — dropped R-MAX.** The unbounded `Vmax=1/(1−γ)` (max *reward*) optimism → a **bounded** frontier optimism
+  `β·frontier/(1−γ)` (the epistemic value of an unexplored region) in both the V-default and the untried-action
+  branch; `Vmax` kept only as the `rmax=True` ablation. Suite green.
+- **C — per-action effort cost: DEFERRED to Stage 2.** A flat per-step cost fragily fights FAR goals at γ=0.9
+  (`effort·Σγᵗ` vs `γ^D`: no single value satisfies all scene distances) — it abandons far goals OR suppresses
+  exploration. The mechanism is plumbed (`reward.effort`, default 0) but lands in Stage 2, where the SR-read makes
+  it a tie-breaker *among goal-reaching paths* instead of a force that abandons them.
+- *Gate met:* suite **61 green**; offline EFE-vs-R-MAX — on the **noisy-TV** grid (the realistic regime) EFE solves
+  **more** (≈299 vs 202 completions) *and* chases the noise **4× less** (2 vs 8 TV-visits); on a trivial clean grid,
+  comparable (140 vs 183, both ≫ random). The noise-robustness is the epiplexity prediction, confirmed.
+
+**Stage 2 — goal-states + inverse-model motor (the structural reframe + L6 read).** The column emits a goal-state
+(initially the highest-EFE reachable state — a degenerate GSG); the motor selects the **fulfilling** action via
+L5's inverse operator + an SR/graph path plan (reads L6). L5.motor real; the organ maps the fulfilling action.
+*Gate:* solves nav/barrier scenes by goal-fulfilment; suite green. **This is where "generalizes to an arm" lands.**
+
+**Stage 3 — BG gate (selection by the consensus mechanism).** Route overt action selection through
+`BasalGanglia.gate` over the goal-state proposals (Go/NoGo, dopamine-RPE); remove the agent argmax. *Gate:*
+behaviour preserved/improved; suite green.
+
+**Stage 4 — the full per-column GSG (epistemic richness + covert).** Enrich proposals: disambiguation goals
+(sample where L2/3 hypotheses disagree), multi-step pragmatic goals, and **covert** evaluation (mental rollout
+over the SR scores EFE without spending actions; covert pursuit of body-free epistemic goals). This is the
+attention system (GSG + path-integration + BG-gates-overt-vs-covert; `TARGET_ARCHITECTURE` "Attention is not a
+module"). *Gate:* directed exploration measurably beats Stage 1 on coverage/efficiency; suite green.
+
+---
+
+## 6. Risks / honest notes
+
+- **Single-column GSG+BG is a "decoration"** (the old doc's words) — its full value is multi-column. We build the
+  *mechanism* now because it's the generalizable one and it still improves exploration (EFE-directed > R-MAX) and
+  motor generality single-column. We should not oversell the BG gate's single-column benefit.
+- **"Better exploration completes a game" is a hypothesis**, not a certainty — Stage 1 tests it cheaply before we
+  commit the deeper stages. The 0-completions could have other causes (e.g. the right ACTION6 click mechanics).
+- **The inverse model is trivial for discrete ARC** (enumerate actions). The continuous-effector payoff is
+  structural/generalization, realized at the *interface*, not exercised by ARC — which is the point for the prize.
+- **Covert sampling burned us once** (Attention II) as a bolt-on; here it has a principled home (the GSG's EFE
+  scoring / mental rollout). Keep it as imagination-for-scoring first; covert *overt-avoidance* only once scored
+  goals are validated.
+- The EFE epistemic term uses **learning progress = the online epiplexity-extraction rate** (not raw novelty/
+  error), which is why it doesn't chase the noisy-TV (ls20's animation): a flat high-loss curve has zero
+  epiplexity → zero epistemic value. Grounded in `reference_efe_and_epiplexity` (resolves §3b), and it *removes*
+  the ad-hoc noise gate rather than adding to it.
