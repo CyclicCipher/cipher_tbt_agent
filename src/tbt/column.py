@@ -117,6 +117,25 @@ class CorticalColumn(nn.Module):
         causes among the features in `symbol` -- L5's trans-thalamic output (Sherman & Guillery)."""
         return self.L5.driver(symbol, action)
 
+    # ----- the generative forward model (FM1): L5's operator at LOCATION grain over L4's field ----------
+    # The column reads L4 (feature-at-location) and indexes by L6 (the frame); L5 owns the per-location operator.
+    # This is the TEM objective -- predict the next sensory observation (L4 content) at each position (L6) given the
+    # action -- seated as a COLUMN capability, never a raw-pixel buffer (reference_brain_generative_model). The
+    # whole-object disp/recolor stay the coarser form of the SAME operator.
+    def feature_field(self, frame):
+        """L4's feature-at-location field for a frame: each location's L4 feature id (cell grain: the colour is the
+        descriptor `(v,)` -> `L4.encode`, growing the content vocabulary online). The field the forward model predicts
+        IN -- content x bound to location g, the TEM canvas at cell grain."""
+        return [[self.L4.encode((v,)) for v in row] for row in frame]
+
+    def observe_field(self, field, action, next_field):
+        """Learn one feature-field transition (route to L5's per-location operator)."""
+        self.L5.observe_field(field, action, next_field)
+
+    def predict_field(self, field, action):
+        """Predict the next feature-field via L5's per-location operator -- the field-grain efference copy."""
+        return self.L5.predict_field(field, action)
+
     def act(self, state, actions, value, explore, gamma, tried, blocked, rng):
         """The MOTOR as an INVERSE MODEL (the action-selection seat -- in the COLUMN, not the agent script). Choose the
         action whose predicted effect (L5's forward operator, via the learned graph) is most VALUABLE -- i.e. INVERT

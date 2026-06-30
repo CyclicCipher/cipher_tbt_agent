@@ -51,12 +51,13 @@ L4's simplest encoding; location = cell; neighbourhood = L4-features at adjacent
   actual next map → DENSE per-location prediction error = the learning + epistemic signal (not opaque state equality).
 
 ## 4. Build stages (each suite-green; offline reproductions first, per feedback_no_debug_by_extending_actions)
-- **FM1 — the column predicts feature-at-location.** Give L5 `predict_features(feature_map, action) → next_feature_map`:
-  the position-invariant local-context operator, learned online from observed map transitions, keyed on
-  (local-feature-neighbourhood, action). `feature_map` = L4's feature-at-location over the L6 frame; cell grain
-  (feature = colour) first. Lives in L5, reads L4, indexed by L6 — NOT a standalone. Validate: cn04 offline
-  (≥0.66 on changed cells, via the column) + a synthetic deterministic-CA unit test (learn a known rule from a few
-  steps, predict the rest exactly; + action-conditioning).
+- **FM1 — the column predicts feature-at-location. ✅ DONE 2026-06-30 (suite 80, 4 new tests).** L5 gained
+  `observe_field`/`predict_field`/`field_confidence` (the per-location operator: rule `(local feature-neighbourhood,
+  action) -> next centre feature`, r=2); the column gained `feature_field` (frame -> L4 feature ids via `L4.encode`)
+  + `observe_field`/`predict_field` routing. Lives in L5, reads L4, indexed by L6 — not a standalone, no pixel buffer.
+  Validated: a synthetic hidden CA learned + predicted EXACTLY and ACTION-CONDITIONED (`test_forward_model.py`); cn04
+  THROUGH THE COLUMN reproduces the prototype exactly — per-cell 0.9822, **0.658 on CHANGED cells**, rule bounded
+  (~3.6k), 17 ms/step.
 - **FM2 — the predictive loop at feature grain.** The agent's predict-then-compare compares predicted vs actual
   feature-maps (dense surprise), feeding learning-progress epistemic value at the feature level (reuse `reward.py`).
 - **FM3 — planning by rollout.** Roll out action sequences through the forward model (sampled / shallow, EZ-V2

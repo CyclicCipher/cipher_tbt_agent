@@ -96,13 +96,22 @@ align_rotations = pose_between                                  # the spatial-in
 
 
 class L5_Displacement(nn.Module):
-    def __init__(self):
+    FIELD_OUT = -1                                                   # out-of-frame token for the per-location field operator
+
+    def __init__(self, field_radius: int = 2):
         super().__init__()
         self.ops: dict = {}                                          # (domain, relation) -> matrix operator (offline/archived)
         self.edges: dict = {}                                        # state -> {action -> next state}: observed transitions / exceptions
         self.disp: dict = {}                                         # (shape, action) -> modal pose delta (dx, dy): the movement operator
         self.recolor: dict = {}                                      # (shape, action) -> {old_content -> new_content}: the in-place-change operator
         self._votes: dict = {}                                       # (shape, action) -> Counter of pose deltas (-> disp = mode)
+        # The per-LOCATION operator (FM1) -- the SAME position-invariant, context-keyed principle as disp/recolor, at
+        # the FINEST grain: a location's next FEATURE from its local feature-NEIGHBOURHOOD + action. The generalizing
+        # base for STRUCTURED DYNAMICS (a propagating frontier) that the whole-object operator cannot see; it reads
+        # L4's feature-at-location field (NOT raw pixels) and is the TEM objective ("predict the next observation")
+        # at cell grain. disp/recolor stay the coarser whole-object form; the discrete edges stay the exceptions.
+        self.field_radius = field_radius
+        self.field_rule: dict = defaultdict(Counter)                 # (local feature-neighbourhood, action) -> Counter(center next feature)
 
     # ---- the online operator: edges (exceptions) + the position-invariant delta (generalization) -------------
     def observe(self, s, a, s2) -> None:
@@ -209,6 +218,71 @@ class L5_Displacement(nn.Module):
                 changed = True
             elements.append((pose, (elem[0],) + content))
         return canonicalize(elements) if changed else None
+
+    # ---- the per-LOCATION operator: the generative forward model (FM1) ------------------------------------
+    # L5's operator at the FINEST grain. `field` is L4's feature-at-location map (feature ids over the L6 grid); the
+    # rule `(local feature-neighbourhood, action) -> next centre feature` is learned online and applied per location.
+    # Position-invariant (the rule is keyed on the LOCAL pattern, not the absolute place), so it GENERALISES to
+    # board positions never visited whose local pattern was seen -- which is why it captures a propagating frontier
+    # that no tabular state recurs on. The column feeds the field (it reads L4); L5 owns the operator.
+    def _field_patch(self, field, x, y, H, W):
+        r = self.field_radius
+        return tuple(field[y + dy][x + dx] if 0 <= x + dx < W and 0 <= y + dy < H else self.FIELD_OUT
+                     for dy in range(-r, r + 1) for dx in range(-r, r + 1))
+
+    @staticmethod
+    def _field_bg(field):
+        return Counter(v for row in field for v in row).most_common(1)[0][0]
+
+    def _field_all_bg(self, field, x, y, H, W, bg) -> bool:
+        r = self.field_radius
+        for dy in range(-r, r + 1):
+            for dx in range(-r, r + 1):
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < W and 0 <= ny < H and field[ny][nx] != bg:
+                    return False
+        return True
+
+    def observe_field(self, field, action, next_field) -> None:
+        """Learn one feature-field transition: for every location vote `(its neighbourhood, action) -> its NEXT
+        feature`. All locations are learned (a no-change location teaches the identity branch), so prediction defaults
+        correctly. Deterministic dynamics -> a single-entry Counter (exact); the Counter holds not-yet-resolved context."""
+        H, W = len(field), len(field[0])
+        for y in range(H):
+            for x in range(W):
+                self.field_rule[(self._field_patch(field, x, y, H, W), action)][next_field[y][x]] += 1
+
+    def predict_field(self, field, action):
+        """Predict the next feature-field: apply the rule per location (majority; default = no change for an unseen
+        context). Skips locations whose neighbourhood is ALL background (they cannot change under any learned rule --
+        bounds the scan to the active region). The efference copy at field grain -> the column's predictive state."""
+        H, W = len(field), len(field[0])
+        bg = self._field_bg(field)
+        out = [row[:] for row in field]
+        for y in range(H):
+            for x in range(W):
+                if field[y][x] == bg and self._field_all_bg(field, x, y, H, W, bg):
+                    continue
+                c = self.field_rule.get((self._field_patch(field, x, y, H, W), action))
+                if c:
+                    out[y][x] = c.most_common(1)[0][0]
+        return out
+
+    def field_confidence(self, field, action) -> float:
+        """Fraction of the active locations whose rule is UNAMBIGUOUS (a single observed outcome) -- a trust signal
+        for the planner + a learning-progress measure (low = this context not yet pinned down)."""
+        H, W = len(field), len(field[0])
+        bg = self._field_bg(field)
+        seen = sure = 0
+        for y in range(H):
+            for x in range(W):
+                if field[y][x] == bg and self._field_all_bg(field, x, y, H, W, bg):
+                    continue
+                c = self.field_rule.get((self._field_patch(field, x, y, H, W), action))
+                if c:
+                    seen += 1
+                    sure += (len(c) == 1)
+        return sure / seen if seen else 0.0
 
     # ---- pose operators (the displacement-cell geometry, the layer's API) --------------------------------
     # The continuous-pose half of L5: a pose is a GROUP ELEMENT acting on displacements (spatial instance: SO(2)
