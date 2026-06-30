@@ -156,7 +156,7 @@ class Agent:
         the explore vacuum on a dynamics game (its per-action pragmatic field-value + epistemic learning-potential)."""
         self._ep_tick += 1                                                  # throttle the O(n^3) grid SVD: recompute the eigenpurpose occasionally, reuse between
         if self._ep_tick % self._ep_every == 1:
-            self._ep_cache = self._eigenpurpose()
+            self._ep_cache = self.col.sr.eigenpurpose(self.reward.visits, self.reward.beta)   # L6 owns the grid math
         self.reward.intrinsic = self._ep_cache                             # L6 eigenpurpose -> propagated by the EXPLORE sweep
         T, preds = self._transitions()
         if state in T:                                                       # plan only from a state with observed edges
@@ -192,34 +192,6 @@ class Agent:
         if (state, a) not in self.tried:
             return self.reward.explore
         return V[self.col.graph.get(state, {}).get(a, state)]
-
-    def _eigenpurpose(self, k: int = 5, cap: int = 400):
-        """The per-state EIGENPURPOSE intrinsic reward from the L6 GRID (top-k SR eigenvectors = `col.sr.grid`): high at
-        the UNDER-visited extreme of the eigenstructure (the frontier / bottleneck), oriented by anti-correlation with
-        the visit counts. Set as `reward.intrinsic` and PROPAGATED by the explore sweep, so the agent navigates DIRECTEDLY
-        out of a reward-less, locally-exhausted pocket (the EFE dead-zone) instead of random-walking. `{}` for a graph too
-        small (no structure) or too large (the SVD is O(n^3); Oja/Sanger streaming is the scale fix). Scaled by `beta`
-        (comparable to the frontier optimism it replaces)."""
-        import numpy as np
-
-        sr = self.col.sr
-        n = sr.M.shape[0]
-        if n < 3 or n > cap:
-            return {}
-        inv = {i: s for s, i in sr.idx.items()}
-        vis = np.array([self.reward.visits.get(inv[i], 0) for i in range(n)], dtype=float)
-        acc = np.zeros(n)
-        for e in sr.grid(k):                                               # each grid cell (eigenvector over states)
-            if e.std() < 1e-9:
-                continue
-            if vis.std() > 0 and np.corrcoef(e, vis)[0, 1] > 0:           # orient: HIGH value = UNDER-visited (the frontier extreme)
-                e = -e
-            e = e - e.min()
-            if e.max() > 0:
-                acc += e / e.max()
-        if acc.max() > 0:
-            acc /= acc.max()                                              # normalize the eigenpurpose to [0, 1]
-        return {inv[i]: self.reward.beta * float(acc[i]) for i in range(n)}
 
     def _field_plan(self, field, actions=None, depth=1):
         """Per-action `(pragmatic, epistemic)` via the forward model, ONE `field_step` pass each (predict + confidence
