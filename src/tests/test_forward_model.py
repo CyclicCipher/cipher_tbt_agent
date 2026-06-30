@@ -15,6 +15,7 @@ _PKG_PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
+from tbt.agent import Agent  # noqa: E402
 from tbt.column import CorticalColumn  # noqa: E402
 
 H, W = 5, 14
@@ -94,3 +95,52 @@ def test_unseen_context_defaults_to_no_change():
     col = CorticalColumn(n_entities=64)
     field = col.feature_field(_bar(3))
     assert col.predict_field(field, 9) == field                  # action 9 never trained -> identity
+
+
+# ---- FM2: the dense predict-then-compare loop in the agent --------------------------------------------
+def _marker_frame(pos, w=8):
+    """A 3xw frame with a single marker (colour 1) at column `pos` -- a deterministic moving-dynamics scene."""
+    g = [[0] * w for _ in range(3)]
+    g[1][pos] = 1
+    return g
+
+
+def test_fm2_dense_loop_learns_dynamics_online():
+    """FM2: given frames, the agent does dense field predict-then-compare; the per-location forward model learns the
+    (moving-marker) dynamics ONLINE, so its error on changed cells DROPS = learning progress."""
+    agent = Agent(n_actions=1, seed=0)
+    pos = 0
+    agent.step(("s",), 0.0, frame=_marker_frame(pos))            # prime (no prediction yet)
+    errs = []
+    for _ in range(24):                                          # 3 wrap-around cycles (w=8)
+        pos = (pos + 1) % 8
+        agent.step(("s",), 0.0, frame=_marker_frame(pos))
+        errs.append(agent.field_error)
+    assert agent.col.L5.field_rule                               # the per-location rule was learned online
+    early, late = sum(errs[:8]) / 8, sum(errs[-8:]) / 8         # full cycles (w=8): robust to where the wrap lands
+    assert late < early, f"no learning progress: early {early:.2f} late {late:.2f}"
+    assert late < 0.15, f"learnable motion not mastered: late cycle error {late:.2f}"
+
+
+def test_fm2_epistemic_value_winds_down_when_mastered():
+    """The dense error feeds learning-progress (reward's slow−fast EWMA). Once the LEARNABLE part is mastered (only
+    the non-local wrap stays a small irreducible error), learning progress winds DOWN — NOT stuck high like the
+    raw-error noisy-TV trap. The one unpredictable wrap per cycle is correctly treated as bounded noise."""
+    agent = Agent(n_actions=1, seed=0)
+    pos = 0
+    agent.step(("s",), 0.0, frame=_marker_frame(pos))
+    errs = []
+    for _ in range(48):
+        pos = (pos + 1) % 8
+        agent.step(("s",), 0.0, frame=_marker_frame(pos))
+        errs.append(agent.field_error)
+    assert sum(errs[-8:]) / 8 < 0.15                            # the learnable motion is mastered (last cycle avg low)
+    assert agent.reward.epistemic_value(("s",)) < 0.1          # learning progress wound down (noise-robust)
+
+
+def test_fm2_backward_compatible_without_frame():
+    """No frame → the field path is skipped; the agent runs exactly as before (binary state surprise)."""
+    agent = Agent(n_actions=4, seed=0)
+    agent.step(("a",), 0.0)
+    agent.step(("b",), 0.0)
+    assert agent._prev_field is None and agent.field_error == 0.0

@@ -58,8 +58,14 @@ L4's simplest encoding; location = cell; neighbourhood = L4-features at adjacent
   Validated: a synthetic hidden CA learned + predicted EXACTLY and ACTION-CONDITIONED (`test_forward_model.py`); cn04
   THROUGH THE COLUMN reproduces the prototype exactly — per-cell 0.9822, **0.658 on CHANGED cells**, rule bounded
   (~3.6k), 17 ms/step.
-- **FM2 — the predictive loop at feature grain.** The agent's predict-then-compare compares predicted vs actual
-  feature-maps (dense surprise), feeding learning-progress epistemic value at the feature level (reuse `reward.py`).
+- **FM2 — the predictive loop at feature grain. ✅ DONE 2026-06-30 (suite 83, 3 new tests).** `Agent.step(..., frame=)`
+  now does dense field predict-then-compare: L5's forward model predicts the next field, compared per location to the
+  actual; the fraction of CHANGED cells mispredicted (`field_error`) is fed to `reward.observe_error` as the
+  learning-progress signal (REPLACING the opaque binary state-surprise; binary stays the no-frame fallback, so it's
+  backward compatible). Validated: synthetic learning-progress (error drops, epistemic value winds DOWN when mastered,
+  and a non-local wrap is correctly treated as bounded noise — noise-robust); cn04 online through the loop, field_error
+  0.72 → 0.56 (learning the dynamics live). The error is still indexed by the opaque tabular state (the interim seam);
+  FM3 moves PLANNING into field space.
 - **FM3 — planning by rollout.** Roll out action sequences through the forward model (sampled / shallow, EZ-V2
   Sequential-Halving to bound cost over 64×64; reuse the all-background skip), evaluate the predicted maps toward the
   goal, pick the best. Replaces/augments tabular-graph planning for dynamics games.

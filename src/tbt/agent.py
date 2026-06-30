@@ -43,6 +43,9 @@ class Agent:
         self._prev = None                                                    # (state, action) of the previous turn
         self._pred = None                                                    # the predictive state (predicted current state)
         self.surprised = False
+        self._prev_field = None                                              # L4 feature-field at the previous turn (FM2)
+        self._pred_field = None                                              # the predicted next field (the efference at field grain)
+        self.field_error = 0.0                                               # dense forward-model prediction error last turn (on CHANGED cells)
 
     def complete(self, score_delta: float = 1.0):
         """A level completed: the PREVIOUS (state, action) was the completing transition. Record it as leading to a
@@ -57,23 +60,52 @@ class Agent:
         self.reward.observe(_GOAL, max(score_delta, 1.0))                    # the goal is the rewarding terminal
         self.new_episode()
 
-    def step(self, state, score_delta: float = 0.0, blocked=()):
+    def step(self, state, score_delta: float = 0.0, blocked=(), frame=None):
         """One turn: COMPARE last turn's prediction to the actual `state`, LEARN the transition (column + reward), PLAN
         value over the column's learned transitions, CHOOSE the value-maximising action, then PREDICT the next state.
         `blocked` = actions the WORLD MODEL predicts lead into a recognised barrier (from the object-behaviour faculty);
         they lose R-MAX optimism, so the agent routes around a known barrier WITHOUT bumping it -- and because the
-        prediction is keyed on the recognised object, it generalises to a NEVER-bumped instance."""
+        prediction is keyed on the recognised object, it generalises to a NEVER-bumped instance.
+
+        With `frame` (FM2): the column ALSO does dense predict-then-compare in L4's feature-FIELD -- L5's per-location
+        forward model predicts the next field, compared per location to the actual one. The fraction of CHANGED cells
+        it mispredicts is a DENSE, CONTINUOUS learning-progress signal (replacing the opaque binary state-surprise),
+        so the agent is drawn to where the DYNAMICS are still learnable (the structured-dynamics games H1 found). The
+        field rule is learned online; it persists across episodes (the same mechanic everywhere)."""
         self.surprised = self._pred is not None and state != self._pred       # predict-then-compare = the learning signal
+        field = self.col.feature_field(frame) if frame is not None else None
+        if field is not None and self._prev_field is not None and self._prev is not None:
+            self.field_error = self._field_err(self._pred_field, field, self._prev_field)   # dense error of last turn's field prediction
+            self.col.observe_field(self._prev_field, self._prev[1], field)   # learn the per-location rule online (L5)
         if self._prev is not None:
             ps, pa = self._prev
             self.col.observe(ps, pa, state)                                  # learn the transition online (graph + SR)
             self.tried.add((ps, pa))                                         # attempted (even if blocked -> no edge)
-            self.reward.observe_error(ps, 1.0 if self.surprised else 0.0)    # LEARNING-PROGRESS signal: error at the state left
+            err = self.field_error if field is not None else (1.0 if self.surprised else 0.0)
+            self.reward.observe_error(ps, err)                              # LEARNING-PROGRESS: dense field error (or binary fallback)
         self.reward.observe(state, score_delta)                             # value: reward where the score rose + novelty
         a = self._choose(state, blocked)
         self._pred = self.col.predict(state, a)                             # enter the predictive state
+        if field is not None:
+            self._pred_field = self.col.predict_field(field, a)             # the efference copy at field grain (the next predicted field)
         self._prev = (state, a)
+        self._prev_field = field
         return self.col.motor(a)                                            # the action enacted via L5's motor output
+
+    @staticmethod
+    def _field_err(pred_field, actual_field, prev_field) -> float:
+        """The forward model's error = fraction of the cells that ACTUALLY CHANGED (actual != prev) that the prediction
+        got wrong. Scoring on changed cells (not all cells, which the static background trivially inflates) makes it
+        the dynamics-learning signal -- 0 when the change is nailed, 1 when missed; -> 0 as the rule is mastered."""
+        if pred_field is None:
+            return 0.0
+        chg = wrong = 0
+        for row_p, row_a, row_v in zip(pred_field, actual_field, prev_field):
+            for p, a, v in zip(row_p, row_a, row_v):
+                if a != v:
+                    chg += 1
+                    wrong += (p != a)
+        return wrong / chg if chg else 0.0
 
     def _transitions(self):
         """The transition model the value planner reads -- the column's FULL predictive model: from each visited state,
