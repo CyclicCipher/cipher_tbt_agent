@@ -67,12 +67,9 @@ class Agent:
         self.reward.observe(_GOAL, max(score_delta, 1.0))                    # the goal is the rewarding terminal
         self.new_episode()
 
-    def step(self, state, score_delta: float = 0.0, blocked=(), frame=None):
+    def step(self, state, score_delta: float = 0.0, frame=None):
         """One turn: COMPARE last turn's prediction to the actual `state`, LEARN the transition (column + reward), PLAN
         value over the column's learned transitions, CHOOSE the value-maximising action, then PREDICT the next state.
-        `blocked` = actions the WORLD MODEL predicts lead into a recognised barrier (from the object-behaviour faculty);
-        they lose R-MAX optimism, so the agent routes around a known barrier WITHOUT bumping it -- and because the
-        prediction is keyed on the recognised object, it generalises to a NEVER-bumped instance.
 
         With `frame` (FM2): the column ALSO does dense predict-then-compare in L4's feature-FIELD -- L5's per-location
         forward model predicts the next field, compared per location to the actual one. The fraction of CHANGED cells
@@ -102,7 +99,7 @@ class Agent:
             err = self.field_error if field is not None else (1.0 if self.surprised else 0.0)
             self.reward.observe_error(ps, err)                              # LEARNING-PROGRESS: dense field error (or binary fallback)
         self.reward.observe(state, score_delta)                             # value: reward where the score rose + novelty
-        a = self._choose(state, blocked, field=field)
+        a = self._choose(state, field=field)
         self._pred = self.col.predict(state, a)                             # enter the predictive state
         if field is not None:
             self._pred_field = self.col.predict_field(field, a)             # the efference copy at field grain (the next predicted field)
@@ -139,7 +136,7 @@ class Agent:
                 preds[nxt].append(s)
         return T, preds
 
-    def _choose(self, state, blocked=(), field=None):
+    def _choose(self, state, field=None):
         """Plan the value, then let the COLUMN's inverse-model motor (`col.act`) select the action that best achieves
         the highest-value next-state -- selection is seated in the column (the motor), not here.
 
@@ -154,25 +151,22 @@ class Agent:
         T, preds = self._transitions()
         if state in T:                                                       # plan only from a state with observed edges
             self.reward.plan(T, preds, state)                               # prioritized sweeping (an unvisited state -> frontier values)
-        tab = [self._tab_value(state, a, blocked) for a in self.actions]
+        tab = [self._tab_value(state, a) for a in self.actions]
         self._tab_spread = max(tab) - min(tab)                              # the arbitration signal (0 = the map is indifferent here)
         bonus = None
         if field is not None and self._tab_spread <= 1e-9:                  # the map leads nowhere here -> the FORWARD MODEL decides
             plan = self._field_plan(field, self.actions, self.plan_depth)
             bonus = {a: prag + self.reward.beta * epi for a, (prag, epi) in plan.items()}
         return self.col.act(state, self.actions, value=lambda s: self.reward.V[s], explore=self.reward.explore,
-                            gamma=self.reward.gamma, tried=self.tried, blocked=blocked, rng=self.rng, bonus=bonus)
+                            tried=self.tried, rng=self.rng, bonus=bonus)
 
-    def _tab_value(self, state, a, blocked):
-        """The value of action `a` from `state` that `col.act` will use: a discounted stay for a recognised barrier,
-        the bounded frontier optimism for an untried action, else the swept value `reward.V[nxt]` of its outcome. The
-        SPREAD across actions is the arbitration signal (flat = the map has no preference here -> the forward model)."""
-        nxt = self.col.graph.get(state, {}).get(a, state)
-        if a in blocked:
-            return self.reward.gamma * self.reward.V[nxt]
+    def _tab_value(self, state, a):
+        """The value of action `a` from `state` that `col.act` will use: the bounded frontier optimism for an untried
+        action, else the swept value `reward.V[nxt]` of its outcome. The SPREAD across actions is the arbitration
+        signal (flat = the map has no preference here -> the forward model)."""
         if (state, a) not in self.tried:
             return self.reward.explore
-        return self.reward.V[nxt]
+        return self.reward.V[self.col.graph.get(state, {}).get(a, state)]
 
     def _field_plan(self, field, actions=None, depth=1):
         """Per-action `(pragmatic, epistemic)` via the forward model, ONE `field_step` pass each (predict + confidence

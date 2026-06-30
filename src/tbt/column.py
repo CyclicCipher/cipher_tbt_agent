@@ -136,25 +136,22 @@ class CorticalColumn(nn.Module):
         """Predict the next feature-field via L5's per-location operator -- the field-grain efference copy."""
         return self.L5.predict_field(field, action)
 
-    def act(self, state, actions, value, explore, gamma, tried, blocked, rng, bonus=None):
+    def act(self, state, actions, value, explore, tried, rng, bonus=None):
         """The MOTOR as an INVERSE MODEL (the action-selection seat -- in the COLUMN, not the agent script). Choose the
         action whose predicted effect (L5's forward operator, via the learned graph) is most VALUABLE -- i.e. INVERT
         the operator against `value` to find the action that best achieves the highest-value next-state (the implicit
         goal-state of active inference: act to bring about the preferred prediction). An UNTRIED (state, a) takes the
-        frontier `explore` optimism (its outcome is uncertain -> resolving T(s,a) is epistemically valued); a `blocked`
-        action takes its DISCOUNTED stay value (a recognised barrier, avoided without a bump). This GENERALISES: a
-        continuous effector inverts the SAME operator against the SAME value -- only the organ (discrete action here)
-        differs. `value(s)` is the planned EFE value of state `s` (supplied by the agent's reward model). `bonus` is
-        the forward model's per-action value (pragmatic + epistemic). The ONE-MODEL arbitration is the CALLER's: it
-        supplies `bonus` ONLY when the tabular value is INDIFFERENT (no spread across actions) -- so a converged
-        tabular decision is never disturbed, and on a dynamics game (where the tabular value is flat) the forward model
+        frontier `explore` optimism (its outcome is uncertain -> resolving T(s,a) is epistemically valued). This
+        GENERALISES: a continuous effector inverts the SAME operator against the SAME value -- only the organ (discrete
+        action here) differs. `value(s)` is the planned EFE value of state `s` (supplied by the agent's reward model).
+        `bonus` is the forward model's per-action value (pragmatic + epistemic). The ONE-MODEL arbitration is the
+        CALLER's: it supplies `bonus` ONLY when the tabular value is INDIFFERENT (no spread across actions) -- so a
+        converged tabular decision is never disturbed, and on a dynamics game (flat tabular value) the forward model
         fills the vacuum and decides. Here `bonus` is simply added (it is None / absent when the tabular value leads)."""
         vals = []
         for a in actions:
             nxt = self.graph.get(state, {}).get(a, state)
-            if a in blocked:
-                v = gamma * value(nxt)                          # recognised barrier -> discounted stay (avoided)
-            elif (state, a) not in tried:
+            if (state, a) not in tried:
                 v = explore                                     # untried -> bounded, decaying frontier optimism
             else:
                 v = value(nxt)                                  # tried -> the value of its outcome
