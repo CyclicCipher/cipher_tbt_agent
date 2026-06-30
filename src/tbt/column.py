@@ -99,6 +99,20 @@ class CorticalColumn(nn.Module):
         for s, i in self.loc.items():                              # content bound at the online place codes (L4 -> L23 store)
             self.L23.pool(self.L4.bind(s, self.place[i]))
 
+    # ----- routing: the SR value / reachability read (L6, the deep-planning substrate) --------------
+    def value(self, s, reward_map):
+        """The SR VALUE V(s) = M[s]·R over the (sparse) rewarding states -- the expected discounted future reward as a
+        few cached lookups, the deep multi-step propagation precomputed into the SR row (no rollout; reference_brain_
+        planning). Routes to L6's online SR; an unknown state -> 0."""
+        return self.sr.value(s, reward_map)
+
+    def reachable(self, s, reward_map) -> bool:
+        """Whether any REWARD state is reachable from `s` via the learned transitions -- read NATIVELY from the SR
+        (M[s,g] > 0 iff g is reachable = nonzero discounted future-occupancy), no graph BFS. The per-level dead-zone
+        signal: a fresh level whose states have no SR path to a reward is a fresh dead-zone, not a global 'reward-ever'
+        flag (the bug the oracle/human/agent trace exposed)."""
+        return self.value(s, reward_map) > 1e-9
+
     # ----- routing: the L5 operator (predict / motor / driver) --------------------------------------
     def predict(self, symbol, action):
         """Where `action` leads from `symbol` -- the L5 operator (the efference copy). L5 owns the per-action operator:

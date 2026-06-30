@@ -27,6 +27,21 @@ def test_column_learns_a_ring_online_without_eigendecomposition():
     assert preds == [(i + 1) % K for i in range(K)], preds
 
 
+def test_sr_reachability_and_value_read_from_the_online_sr():
+    """The column reads VALUE + REACHABILITY natively from the online SR (no graph BFS): on a chain 0->1->2->3 with a
+    reward only at the absorbing goal 3, every state can REACH the reward and its value rises toward it; a never-seen /
+    disconnected state is unreachable and valued 0. This is the deep-planning read the dead-zone / GSG (M1) use."""
+    col = CorticalColumn(n_entities=8, seed=0)
+    for _ in range(200):
+        for i in (0, 1, 2):
+            col.observe(i, 0, i + 1)
+        col.observe(3, 0, 3)                                    # the goal absorbs (occupies itself)
+    R = {3: 1.0}
+    assert all(col.reachable(s, R) for s in (0, 1, 2, 3))       # the reward is reachable from the whole chain
+    assert col.value(0, R) < col.value(1, R) < col.value(2, R) < col.value(3, R)   # value rises toward the goal
+    assert not col.reachable(9, R) and col.value(9, R) == 0.0   # a never-seen state -> unreachable, value 0
+
+
 def test_path_integration_is_discrete_graph_tracking():
     """Path integration = PREDICT the next node by the learned edge (no observation needed -- partial observability),
     CORRECT by snapping to a sighting. Discrete graph tracking, exact and online -- no matrix operator over codes."""
