@@ -3,6 +3,43 @@
 *Rewritten from scratch 2026-06-28, after the reset to **columns + API only**. Supersedes the previous doc. The
 agent is many copies of ONE column algorithm talking over a thin fabric; there is almost no harness.*
 
+## Post-refactor reframing (2026-06-29) — read this against everything below
+
+The `src/tbt/` layer refactor (`REFACTOR_PLAN.md`) reorganised the object machinery onto the layers, which
+reframes much of the plan below. The through-line: **an object is not a library or a module — it is a GRAPH
+distributed across the layers** (L6 locations + L4 features + L5 displacements + L2/3 identity), recognised by the
+column, not by a side faculty. What changed:
+
+- **L4 and L2/3 are no longer just "content + memory (HAVE)".** L4 = FEATURE-at-location (the label-free content
+  codebook `encode`, the rotation-INVARIANT feature descriptor, bind/readout, `predict_feature`). L2/3 = the
+  OBJECT/identity layer: the graph-memory of objects + INCREMENTAL evidence-based recognition (pose inferred) +
+  lateral CMP voting + the within-object content store. (`reference_tbt_layers_4_23`.)
+- **"BUILD: evidence-based recognition" is DONE and lives IN L2/3** (the dissolved `recognize.py`) — not a
+  separate priority/module; recognition is L2/3's job, **persistent** across the sensorimotor sequence.
+- **Two LOCATION frames, one mechanism at two hierarchy levels** (`reference_tbt_frames_and_hippocampus`): the
+  OBJECT metric frame (continuous Euclidean (θ,t) for the spatial column — the SPATIAL SPECIAL CASE) vs the
+  NAVIGATIONAL SR-eigenframe (`OnlineSR`, topology-general). Pose is a GROUP ACTION (L5; SO(2) the spatial
+  plug-in, abstract domains = a learned group). **No hippocampus needed yet** (OnlineSR is the global map) — it
+  becomes required only at one-shot episodic memory or cross-frame allocentric binding.
+- **Dorsal/ventral is now STRUCTURAL**, not two instances: L5's EQUIVARIANT `local_disps` (where/how) vs L4's
+  INVARIANT `invariant_sig` (what). One column; the dimension that is invariant vs equivariant is the split.
+- **Inter-column voting is PARTLY done**: object-recognition voting WORKS (`L23.vote`, the shared OBJECT metric
+  frame — Monty's CMP). Only voting across DIFFERENT learned SR NAVIGATIONAL frames is deferred (cross-frame
+  registration; = a hippocampal function).
+- **Perception: `ObjectField` is a STATELESS colour-aware proto-object proposer** (`reference_tbt_segmentation_and_grouping`).
+  The OBJECT is a recognition construct: boundaries emerge from prediction MISMATCH (not a segmenter), permanence
+  + identity are the column's (recognition + path-integration), not a hand-coded tracker. Colour is a weak
+  asymmetric feature for IDENTITY but a contrast-border cue for the PROPOSAL. These are Rensink's volatile
+  proto-objects (a revisable proposal); top-down split/merge = the compositional hierarchy.
+- **`column.py` is a COORDINATOR** (container + routing), no layer functionality. DELETED: `recognize.py`,
+  `recurrence.py`, the vestigial offline VSA path (`learn_domain`/`consolidate`/`recall`/`infer`/`anchor`/`add`).
+  ARCHIVED: the conditional-dynamics faculty (its purpose → L5 edge-exceptions + a learned precondition).
+
+**What is now LEFT** (the real remaining build): the **GSG / attention** (path-integration choosing where to
+sample), the **compositional hierarchy** (object-id-as-feature → multi-colour merge + part/whole), **navigational
+cross-frame voting** (+ BG column-allocation), and one loose thread — **L6 is updated but not yet READ by value**
+(make `reward._need` policy-aware via SR place-code similarity; a flagged, behaviour-changing enhancement).
+
 ## Thesis
 
 Intelligence is **many instances of one cortical-column algorithm**, each learning a reference frame and predicting
@@ -134,31 +171,45 @@ the premotor theory of attention). So attention = **GSG** (proposes the locus) +
 + **basal ganglia** (gates overt vs covert). No attention script. Salience still influences it, as the bottom-up
 estimate of expected information gain (the same epistemic currency the GSG spends).
 
-## Inter-column messaging — deferred (heterogeneous frames)
+## Inter-column messaging — PARTLY done (object frame), deferred for navigational frames
 
-Monty's CMP voting works *because every LM shares ONE Euclidean frame* — a vote ("sense it *here*, by our relative
-displacement") transforms by a common displacement. **Our columns each learn a DIFFERENT SR-eigenframe**, so voting
-needs **learned cross-frame registration** (Hebbian / co-occurrence binding in the shared `d_mem` space). Feed-forward +
-thalamic VSA binding work now; pose-aware *voting* across heterogeneous frames is a genuinely harder, deferred problem.
+**UPDATE (post-refactor):** pose-aware CMP voting in the shared OBJECT metric frame is **done** — `L23.vote`
+pools columns' `(object, pose)` hypotheses by world pose (columns sensing different parts of one object solve the
+SAME `(θ, t)`, so agreement IS the consensus). This works precisely *because* the object frame is a shared
+Euclidean frame. What remains deferred is voting across columns that learned a **different SR navigational
+frame** — that needs **learned cross-frame registration** (Hebbian / co-occurrence binding in the shared `d_mem`
+space), which is the same problem the hippocampus solves (a single allocentric frame all columns register into;
+`reference_tbt_frames_and_hippocampus`). Feed-forward + thalamic VSA binding (`thalamus.bind/read`) work now.
 
 ## What we keep that Monty lacks
 - The **SR-eigenframe** — topology-general, so the same machinery navigates abstract / relational / conceptual spaces
   (the reasoning substrate; attention and "mental saccades" over concept space are the same operation).
 - **Value** (reward + basal ganglia) → goal-seeking. Monty is a recogniser; this is why we can do ARC and it can't.
-- The **conditional-dynamics** faculty (predict the world's responses, not just recognise form).
+- **Conditional dynamics** (predict the world's responses, not just recognise form) — its purpose now lives **in
+  L5** (per-`(s,a)` edge-exceptions + a learned precondition), not a standalone column faculty (archived).
 - **Path integration** as a built-in belief.
 
-## Script dispositions (the cleanup this implies)
-- `column_learner.py` — **DELETE** (orphaned demo driver; its drive-and-learn function is the agent loop, not a script).
-- `factorize.py` — dissolve into **L6** (eigen-subspace factors + BG allocation); remove once folded.
-- `residual.py` — dissolve into **L5** (state-dependent operators); remove once folded.
-- `recurrence.py` — **SUPERSEDED online**: path integration is now discrete graph tracking (predict-by-edge + snap to a
-  sighting), not a gated vector belief, so the column no longer imports it. Removable (kept only as reference).
-- **Keep:** `column.py`, `l4/l5/l6/l23`, `thalamus.py`, `basal_ganglia.py`, `reward.py`, and the API
-  (`arc_run.py`, `arc_sdk.py`, `tasks/core.py`).
+## Script dispositions (post-refactor status)
+- `recognize.py` — **DELETED** ✅ (dissolved into the layers: pose ops → L5, graph-memory + evidence + vote → L2/3).
+- `recurrence.py` — **DELETED** ✅ (superseded online; path integration is discrete graph tracking, `loc_*`).
+- The offline VSA path in `column.py` (`learn_domain`/`consolidate`/`recall`/`infer`/`anchor`/`add`) — **DELETED** ✅
+  (vestigial; the arithmetic/language demos keep their own copy under `experiments/…/precursor/`).
+- The conditional-dynamics methods in `column.py` (`observe_effect`/`learn_dynamics`/`predict_effect`) — **ARCHIVED** ✅
+  (purpose → L5, above).
+- `perceive.py` `ObjectField` — **DEMOTED** ✅ to a stateless colour-aware proto-object proposer (the tracker is gone).
+- `factorize.py` — still to dissolve into **L6** (eigen-subspace factors + BG allocation); kept, not yet folded.
+- `residual.py` — still to dissolve into **L5** (the precondition search for context-dependent change); kept, not yet folded.
+- **Keep:** `column.py` (now a coordinator), `l4/l5/l6_sr/l6_grid/l23`, `thalamus.py`, `basal_ganglia.py`,
+  `reward.py`, `perceive.py`, `sensor.py`, and the API (`arc_run.py`, `arc_sdk.py`, `tasks/core.py`).
 
 ## Build order (deadline-aware)
-1. **Evidence-based recognition with inferred pose**, in the column — the spine; subsumes `recognize.py`.
+
+*Steps 1–7 are DONE (the live agent runs end to end); the `src/tbt/` refactor then redistributed the object
+machinery onto the layers (see the reframing banner at the top). What remains is step 8 + the loose threads.*
+
+1. **Evidence-based recognition with inferred pose — DONE, and now seated IN L2/3** (not "in the column" as a
+   separate faculty). The dissolved `recognize.py` is the graph-memory + incremental evidence + CMP voting in
+   `l23_object.py`; pose is a group action in L5. **Persistent** across the sensorimotor sequence.
 2. **Incremental / online learning** in L6 — **DONE**. `OnlineSR` (TD, no `eigh`) carries value/topology; the column's
    `predict` / `loc_*` run over the exact learned transition **graph** (state-dependent by construction — it subsumes
    the L5 matrix-operator-AS-PREDICTOR and `residual`'s conditional structure; L5's role is NOT subsumed — the per-action
@@ -211,8 +262,15 @@ thalamic VSA binding work now; pose-aware *voting* across heterogeneous frames i
      0.90, cn04 gate-on covers the full position grid (275 states). See `project_live_failure_recurrence`.
    - **OPEN:** still 0 live completions — now an EXPLORATION-DEPTH / click-mechanics question (cn04 has explored the
      movement-position grid without reward; it likely needs the right ACTION6 click), not a representation block.
-8. Later: **cross-frame voting** (heterogeneous frames → learned registration) + the **BG column-allocation**;
-   **compositional hierarchy** of columns.
+8. **What's left (post-refactor):**
+   - **GSG / attention** — path-integration choosing where to sample (overt saccade vs covert), spending the
+     epistemic value; needs recognition's hypotheses to test. Not built.
+   - **Compositional hierarchy** (object-id-as-feature) — the home of **multi-colour MERGE** (recombining the
+     parts colour-aware `segment` over-segments) and part/whole objects. The principled top-down split/merge.
+   - **Navigational cross-frame voting** (heterogeneous SR frames → learned registration; = a hippocampal
+     function) + the **BG column-allocation**. (Object-frame CMP voting is already done — `L23.vote`.)
+   - **Loose thread:** L6 (`OnlineSR`) is updated every step but **not yet READ by value** — make `reward._need`
+     policy-aware via SR place-code similarity (behaviour-changing; its own validated step).
 
 ## Event separation — an OPEN, SHARED requirement (TBT *and* the ANN line)
 The pre-reset code had a flawed `events.py`; the rebuilt agent only handles level boundaries via a sparse-score heuristic

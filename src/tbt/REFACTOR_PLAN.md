@@ -218,9 +218,16 @@ feature, never identity/role*; the two stages don't conflict, revisability is th
 4c** — folded INTO 4b (one mechanism), done now, not deferred; it is slightly beyond Monty but squarely
 brain-faithful (border-ownership + feedback).
 
-**Phase 5 — cleanup + docs.** Delete `recurrence.py`; resolve §4 decisions; update `TARGET_ARCHITECTURE.md`
-(build-order 1 "recognition" → done-distributed; the two-frames reconciliation) and the memories
-(`reference_tbt_layers_4_23`, `project_neocortex_missing_components`). *Gate:* green.
+**Phase 5 — cleanup + column-as-coordinator + docs. ✅ DONE 2026-06-29.** Deleted `recurrence.py` + the vestigial
+offline VSA path (`learn_domain`/`consolidate`/`recall`/`infer`/`revise`/`anchor`/`add`/`_cleanup` + the
+`_sr_frame`/`_orthonormal`/`_sparsify_topk` helpers + `dom`/`_inv_loc`/`_sparse_place` state); archived
+conditional-dynamics (`observe_effect`/`learn_dynamics`/`predict_effect`, purpose → L5). `column.py` is now a
+**coordinator** (container + routing only: `observe`/`predict`/`motor`/`driver`/`refresh`/`loc_*` +
+recognition→L2/3 + the thalamus interface). Reframed `TARGET_ARCHITECTURE.md` (a post-refactor banner mapping the
+old plan onto the new layer reality + updated script-dispositions/build-order/inter-column sections) and the
+memories. **Deferred (flagged, not cleanup):** `reward._need` reading the SR (L6 is updated but not yet read by
+value — behaviour-changing, its own validated step); `loc_*` left as column coordination (it routes L6's belief ⊕
+L5's operator — genuinely a coordination point, not layer-internal math). *Gate met:* suite **61 green**.
 
 Inter-column voting lands in **Phase 3** (shared object frame). SR-navigational cross-frame voting stays
 deferred. A single live run is reserved for **measuring** the end result, once, at a fixed budget.
