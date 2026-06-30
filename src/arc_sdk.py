@@ -112,6 +112,7 @@ class TbtPolicy:
         self.barriers = barriers                             # learn + predict object barriers (object-behaviour faculty)
         self.behaviour = ObjectBehaviour()                   # recognised-identity -> learned interaction effect
         self._prev_pos = None                                # the agent's position before the last action (bump attribution)
+        self._recog_cache: dict = {}                         # shape signature -> recognised identity (O(carry), not re-segment)
 
     def is_done(self, frames, latest_frame) -> bool:
         return _state_name(latest_frame.state) == "WIN"
@@ -197,19 +198,26 @@ class TbtPolicy:
         return frozenset(blocked)
 
     def _object_map(self):
-        """{recognised-identity: cells} for the NON-controllable objects (the one nearest the fovea is the agent's body
-        -- excluded). Recognition (the column's faculty) keys the barrier on shape, so it generalises across instances
-        and poses, not memorised per cell."""
+        """{recognised-identity: cells} for the NON-controllable proto-objects (the one nearest the fovea is the agent's
+        body -- excluded). Recognition (the column's L2/3 faculty) keys the barrier on shape, so it generalises across
+        instances and poses. PERSISTENT/O(carry): a proto-object's shape signature (translation-invariant) caches its
+        identity, so a recurring shape is recognised ONCE, not re-segmented from scratch every step (the slowness fix)."""
         objs, cells, fov = self.sensor.objects(), self.sensor.field.cells, self.sensor._fovea
         ctrl = min(objs, key=lambda o: abs(objs[o][0][0] - fov[0]) + abs(objs[o][0][1] - fov[1])) if objs and fov else None
         omap: dict = {}
         for oid, c in cells.items():
             if oid == ctrl or len(c) < 2:                    # skip the body and 1-cell blobs (no shape to recognise)
                 continue
-            res = self.agent.col.recognize_object([(float(x), float(y)) for (x, y) in c])
-            if res is None:                                  # unrecognised this glance -> not a known object, skip
-                continue
-            omap.setdefault(res[0], set()).update(c)
+            sig = self.sensor.field.contents.get(oid)        # the shape signature -> the persistent recognition key
+            ident = self._recog_cache.get(sig)
+            if ident is None:                                # first sighting of this shape -> recognise (+ learn) once
+                res = self.agent.col.recognize_object([(float(x), float(y)) for (x, y) in c])
+                if res is None:                              # unrecognised this glance -> not a known object, skip
+                    continue
+                ident = res[0]
+                if sig is not None:
+                    self._recog_cache[sig] = ident
+            omap.setdefault(ident, set()).update(c)
         return omap
 
 

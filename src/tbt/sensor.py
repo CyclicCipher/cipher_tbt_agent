@@ -16,8 +16,8 @@ Perception modes, ONE tracker underneath:
     SELF-GATE keeps the position out of the state until the object proves controllable (a consistent, non-trivial
     learned displacement), so a STATE-CHANGE game (no controllable position) keeps its recurring local view.
 
-The object tracker runs in all modes (so `objects()` still feeds the click-slots). `read(frame, action)` takes the
-efference copy (the last action) for path integration. Pure stdlib.
+The stateless proto-object proposer runs in all modes (so `objects()` still feeds the click-slots, per frame).
+`read(frame, action)` takes the efference copy (the last action) for path integration. Pure stdlib.
 """
 
 from __future__ import annotations
@@ -65,8 +65,8 @@ class Sensor:
         self._fovea = None
         # self._delta PERSISTS across levels -- the per-action displacement is the same game mechanic everywhere.
 
-    def read(self, frame, action=None, predict=None):
-        objects = self.field.perceive(frame, predict)
+    def read(self, frame, action=None):
+        objects = self.field.perceive(frame)                               # stateless proto-object proposal this frame
         change = salient_cells(self._prev, frame) if self._prev is not None else set()
         if self.local:
             self._update_fovea(frame, change, objects, action)

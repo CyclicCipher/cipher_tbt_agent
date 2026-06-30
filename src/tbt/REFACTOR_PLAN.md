@@ -197,17 +197,20 @@ COLUMN's job). So: keep the stateless proposal, move the binding/permanence/boun
     the transition graph is isomorphic → behaviour preserved. *Gate met:* suite **60→61 green**; offline on real
     cn04 frames: states are feature-at-location, L4 codebook grew to 44, and raw-vs-encoded over the same action
     sequence gave **identical** distinct-state counts (66=66) — recurrence untouched.
-  - **Remaining 4a (stateless proposal + remove the tracker):** colour-aware borders on `segment`; remove
-    `_last`/ids/`max_jump`/contact-split. **Coupled with 4b** — removing the tracker breaks permanence until the
-    column provides it, so it merges into the binding surgery below (the neuroscience already said binding is one
-    mechanism). Checkpoint before this step.
-- **4b — objecthood moves into the column (temporal binding + boundary refinement, ONE mechanism).** The
-  neuroscience says these are *not* separable: stable binding (permanence) is incremental grouping; boundary
-  split/merge is the *same* incremental grouping + V4→V2 feedback disagreeing with the proposal. So in one unit:
-  a persistent L2/3 recognition session per proto-object carried by path-integration (permanence), **driving the
-  `predict` hook** (sensor proposes, column disposes), with prediction-MISMATCH doing split/merge and a surprise
-  spike doing the off-object/transition (HTM burst = event-separation). The barrier faculty uses the persistent
-  session (the O(carry) slowness fix). *Gate:* green + offline speed check + an offline split/merge reproduction.
+  - **✅ Stateless colour-aware proposal + tracker removed — DONE 2026-06-29 (the binding surgery).**
+- **✅ 4b — objecthood moves into the column — DONE 2026-06-29.** The surgery turned out to be mostly
+  **deletion**: the hand-coded tracker was providing permanence that **recognition (identity) + the fovea
+  path-integration (the controllable object) already provide**, so removing it *is* moving objecthood to the
+  column. Concretely: `segment` is now **colour-aware** (a colour boundary = a candidate border — which is what
+  lets contact-split go: a mover bumping a different-colour wall no longer merges); `ObjectField` is a **stateless
+  proto-object proposer** (no `_last`/ids/`max_jump`/contact-split/`predict`/`_dist`); the barrier faculty caches
+  recognition by **shape signature** so a recurring shape is recognised **once** (the O(carry) fix). The `predict`
+  hook turned out **obsolete**, not something to drive — no consumer needs cross-frame id stability (config_state
+  snapshots, click-slots sort by size/pose, barriers key on recognition). *Gate met:* suite **61 green**; offline:
+  barrier game 2143 steps → **1** recognize call (was ~1/step), 6/6 solved, 1 bump; cn04 still feature-at-location.
+  **Deferred:** recognition-driven split/merge of *multi-colour* objects (colour-aware over-segments them) reduces
+  to the **compositional hierarchy** (object-id-as-feature, TARGET_ARCHITECTURE step 8) — not needed for the
+  demotion to be correct/green, and the failure mode (over-segment) is milder + recoverable vs the old merge.
 
 **Decisions — RESOLVED (2026-06-29, neuroscience-backed):** (i) **colour** — *colour-aware* volatile proposal
 (borders from contrast incl. colour; good for ARC) feeding recognition where colour is a *weak asymmetric L4
