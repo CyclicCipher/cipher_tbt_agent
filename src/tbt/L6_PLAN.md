@@ -90,6 +90,12 @@ sound but must live in a SEPARATE explore value (L6-I3), not be summed into the 
 validation are the evidence the split will work.
 
 ## 6. AFTER L6 -- reconnect L4 / L5 / L2-3 + their L6 interactions (the predict-sense-update loop)
+> **EXPANDED + RE-FRAMED 2026-06-30 -> `src/tbt/GROUNDING_PLAN.md`.** The L7-A..D below (the STATE migration) is now
+> migration **M5** of a TWO-migration plan: (a) the state -> L4⊗L6 (here), AND (b) drain the COGNITION that accreted in
+> `agent.py` (the 3-case arbitration, the inline eigenpurpose SVD, the reachability BFS) into the columns + basal
+> ganglia, neuroscientifically grounded -- the harness-trap fix. Read GROUNDING_PLAN first; M1 (SR value/reachability/
+> NEED) is the recommended start, M2 (BG arbitration) the keystone, M5 (below) the efficiency lever.
+
 Once L6 is a live location frame (I1-I3), wire the OTHER layers into the proper TBT loop -- today's opaque-config_state
 shortcut bypasses them. The TBT cycle (Hawkins): **L6 location -> L4 predicts the feature-at-location -> sense + compare
 -> L2/3 settles the object (lateral voting) -> L5 emits the next movement -> L6 path-integrates** to the next location.
