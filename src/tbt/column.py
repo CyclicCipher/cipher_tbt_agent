@@ -114,6 +114,15 @@ class CorticalColumn(nn.Module):
         flag (the bug the oracle/human/agent trace exposed)."""
         return self.value(s, reward_map) > 1e-9
 
+    def locate(self, state):
+        """C1 (COLUMN_AUDIT) — the column's WHERE: L6 READ as the location substrate. Returns `state`'s L6
+        SR-eigenframe place code (in the d_mem binding space) -- the location L4 binds a feature to (C2) and L5
+        path-integrates (C3). Topology-encoding (nearby-in-graph states get similar locations); `None` for a state the
+        L6 frame has not seen. Closes the doc's 'L6 is updated but not READ' loose thread."""
+        if state not in self.sr.idx:
+            return None
+        return self._place_code(state)
+
     # ----- routing: the feature-at-location MAP (M5 / L7-A: L4 feature ⊗ L6 location) ----------------
     def _place_code(self, loc):
         """The L6 place code for location `loc` -- its online SR row, padded into d_mem (the binding space). The

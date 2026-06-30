@@ -42,6 +42,20 @@ def test_sr_reachability_and_value_read_from_the_online_sr():
     assert not col.reachable(9, R) and col.value(9, R) == 0.0   # a never-seen state -> unreachable, value 0
 
 
+def test_l6_is_read_as_the_location_substrate():
+    """C1 (COLUMN_AUDIT): the column READS L6 as the location -- `locate(state)` returns the SR-eigenframe place code,
+    which ENCODES TOPOLOGY (adjacent states' locations more similar than the antipode) and lives in the binding space
+    L4/L5 will use. `None` for a state the L6 frame has not seen. A correctness (mechanism) test, not a score."""
+    col = CorticalColumn(n_entities=8, seed=0)
+    for _ in range(80):                                      # learn a ring -> the L6 frame has place codes
+        for i in range(6):
+            col.observe(i, 0, (i + 1) % 6)
+    l0, l1, l3 = col.locate(0), col.locate(1), col.locate(3)
+    assert l0 is not None and l0.shape[0] == col.d_mem       # the location lives in the binding space (d_mem)
+    assert float(l0 @ l1) > float(l0 @ l3)                   # adjacent more similar than the antipode -> topology encoded
+    assert col.locate(9) is None                             # a state unknown to the L6 frame -> no location
+
+
 def test_feature_at_location_map_binds_and_reads_back():
     """M5/L7-A: the column maintains an online allocentric MAP -- bind a SENSED feature at a LOCATION (L4 feature ⊗
     L6 place code) across a sensorimotor sequence, then READ it back (predict_feature). An object seen at a place is
