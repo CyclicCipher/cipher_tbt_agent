@@ -149,6 +149,19 @@ class L23_Object(nn.Module):
                 self.hyps = [h for h in self.hyps if h.ev > top - self.keep]
         self.prev = loc
 
+    def sense_absent(self, loc, tol: float = 0.4):
+        """The ABSENT half of a hypothesis-test: observe that `loc` is EMPTY (nothing sensed there) and PENALISE
+        each hypothesis that PREDICTED a cell there (its pose-placed cloud has a point within `tol`) -- the
+        prediction is falsified. The complement of `sense` (present); together they let a sample at a graph-mismatch
+        point discriminate EITHER way (present supports the predictor, absent eliminates it). Prune as usual."""
+        loc = np.asarray(loc, float)
+        for h in self.hyps:
+            if any(np.linalg.norm(loc - np.asarray(p, float)) < tol for p in h.obj.cells_at(h.theta, h.t)):
+                h.ev -= 1.0
+        if self.hyps:
+            top = max(h.ev for h in self.hyps)
+            self.hyps = [h for h in self.hyps if h.ev > top - self.keep]
+
     def best(self):
         """The winning (object name, theta, t, evidence) of the current session, or None."""
         if not self.hyps:

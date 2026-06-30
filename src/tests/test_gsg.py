@@ -82,3 +82,36 @@ def test_column_gsg_proposes_a_message_shaped_goal_state():
     assert isinstance(goal, GoalState) and goal.kind == "disambiguate" and goal.target is not None
     col.L23.start()
     assert col.propose_goal() is None                                    # nothing to resolve -> no goal
+
+
+def test_sense_absent_falsifies_only_the_predicting_hypothesis():
+    """The ABSENT half of a hypothesis-test: sampling a location ONE hypothesis predicts (but the other does not)
+    and finding it EMPTY penalises only the predictor -- so a graph-mismatch sample discriminates even by ABSENCE."""
+    l23 = L23_Object()
+    oa, ob = l23.learn(A, name="A"), l23.learn(B, name="B")
+    l23.hyps = [_Hyp(oa, 0.0, np.array([0.0, 0.0]), oa.locs[0], 1.0),
+                _Hyp(ob, 0.0, np.array([0.0, 0.0]), ob.locs[0], 1.0)]
+    l23.sense_absent((3.0, 2.0))                          # (3,2) is in B's cloud (right tip) but NOT A's
+    evA = next((h.ev for h in l23.hyps if h.obj.name == "A"), None)
+    evB = next((h.ev for h in l23.hyps if h.obj.name == "B"), -99.0)
+    assert evA == 1.0 and evB <= 0.0, f"A {evA} (should be 1.0, unaffected), B {evB} (should be falsified)"
+
+
+def test_examine_actively_recognises_the_object():
+    """examine -- the GSG DIRECTING the motor -- actively recognises the true object: begin on a shared (ambiguous)
+    cell, then the GSG covertly picks discriminating sample points and the motor samples them until one hypothesis
+    wins. The mechanism: think (graph-mismatch, no action), then act (sample the target)."""
+    col = CorticalColumn(n_entities=8, seed=0)
+    col.learn_object(A, name="A"); col.learn_object(B, name="B")
+    truth = [np.asarray(c, float) for c in A]
+
+    def sense_at(target):
+        t = np.asarray(target, float)
+        d = [np.linalg.norm(t - p) for p in truth]
+        i = int(np.argmin(d))
+        return (truth[i], local_disps(truth, i, col.L23.radius)) if d[i] < 0.6 else None  # cell here, or empty
+
+    first = (truth[1], local_disps(truth, 1, col.L23.radius))   # start on a shared bar cell (ambiguous)
+    best, n = col.examine(sense_at, first)
+    assert best is not None and best[0] == "A", f"misrecognised: {best}"
+    assert n <= 12

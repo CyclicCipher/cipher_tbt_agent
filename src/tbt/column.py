@@ -166,6 +166,37 @@ class CorticalColumn(nn.Module):
         target = self.L23.disambiguation_goal()
         return GoalState(target=target, kind="disambiguate") if target is not None else None
 
+    def examine(self, sense_at, first, max_samples: int = 12, confident: float = 2.0):
+        """ACTIVE recognition -- the GSG DIRECTING the motor. Begin a session with the `first` sensation
+        (loc, disps), then repeatedly: COVERTLY pick the disambiguating sample point (the GSG / graph-mismatch,
+        computed from the models -- no action spent), then OVERTLY sample there via the motor:
+        `sense_at(target) -> (loc, disps)` for a cell found there, or `None` for empty. Present -> `sense` (confirm
+        a predictor); absent -> `sense_absent` (falsify the predictors). Stop when one hypothesis leads by
+        `confident` evidence (or no goal / budget). Returns `(best, n_overt_samples)`. Resolves in FEWER overt
+        samples than undirected sensing because each sample is chosen to resolve the most uncertainty -- the point
+        of the GSG (think, then act). This is the inverse-model motor fulfilling a real goal-state; the live loop
+        will arbitrate it against value/explore goals via the basal ganglia (next step)."""
+        self.L23.start()
+        self.L23.sense(*first)
+        n = 1
+        while n < max_samples:
+            hyps = self.L23.hyps
+            if len(hyps) < 2:
+                break
+            ev = sorted((h.ev for h in hyps), reverse=True)
+            if ev[0] - ev[1] >= confident:                  # a hypothesis leads clearly -> resolved
+                break
+            goal = self.propose_goal()                      # COVERT: where to sample (graph-mismatch, no action)
+            if goal is None:
+                break
+            obs = sense_at(goal.target)                     # OVERT: the motor samples at the target
+            n += 1
+            if obs is None:
+                self.L23.sense_absent(goal.target)          # empty -> falsify the predictors
+            else:
+                self.L23.sense(*obs)                        # a cell there -> confirm
+        return self.L23.best(), n
+
     # ----- the inter-column interface (the thalamus binds content ⊗ location) -----------------------
     def content_code(self, label):
         """This column's content (What / L4) code for an entity label."""
