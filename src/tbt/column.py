@@ -59,6 +59,7 @@ class CorticalColumn(nn.Module):
         self.loc, self.rel = {}, {}                           # symbol→frame index; relation→operator key (the EDGES live in L5)
         self.place = None                                     # (n, d_mem) per-node SR-frame place codes (set by refresh)
         self._cur = None                                      # the current node -- discrete path integration over the graph
+        self._map = torch.zeros(feat_dim, d_mem)             # M5/L7-A: the online allocentric MAP (Σ feature ⊗ place), read by feature_at
 
     # ----- routing: learn the transition structure online (L6 + L5) ---------------------------------
     @property
@@ -112,6 +113,30 @@ class CorticalColumn(nn.Module):
         signal: a fresh level whose states have no SR path to a reward is a fresh dead-zone, not a global 'reward-ever'
         flag (the bug the oracle/human/agent trace exposed)."""
         return self.value(s, reward_map) > 1e-9
+
+    # ----- routing: the feature-at-location MAP (M5 / L7-A: L4 feature ⊗ L6 location) ----------------
+    def _place_code(self, loc):
+        """The L6 place code for location `loc` -- its online SR row, padded into d_mem (the binding space). The
+        'where' L4 binds a feature to; nearby-in-graph locations get similar codes (so the map generalizes)."""
+        code = self.sr.code(loc)                                          # the L6 place code (normalized SR row)
+        p = torch.zeros(self.d_mem)
+        m = min(len(code), self.d_mem)
+        p[:m] = torch.as_tensor(code[:m], dtype=torch.float32)
+        return p
+
+    def bind_at(self, loc, feature_id: int) -> None:
+        """M5/L7-A: bind a SENSED feature at a LOCATION into the online allocentric MAP (L4 feature ⊗ L6 place code),
+        accumulated across the sensorimotor sequence -- 'features at locations' (Monty). The map the agent reads to
+        REMEMBER the layout (an object seen then left is still mapped) -- the substrate the §3 mechanic library needs."""
+        if loc in self.sr.idx:
+            self._map = self._map + self.L4.bind(feature_id, self._place_code(loc))
+
+    def feature_at(self, loc):
+        """Read the MAP: the feature predicted at `loc` (L4 `predict_feature` over the accumulated map) -- the predict
+        half of predict-then-compare, seated in L4. `None` for a location unknown to the L6 frame."""
+        if loc not in self.sr.idx:
+            return None
+        return self.L4.predict_feature(self._map, self._place_code(loc))
 
     # ----- routing: the L5 operator (predict / motor / driver) --------------------------------------
     def predict(self, symbol, action):

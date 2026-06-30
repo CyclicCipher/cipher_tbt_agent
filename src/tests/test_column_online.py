@@ -42,6 +42,22 @@ def test_sr_reachability_and_value_read_from_the_online_sr():
     assert not col.reachable(9, R) and col.value(9, R) == 0.0   # a never-seen state -> unreachable, value 0
 
 
+def test_feature_at_location_map_binds_and_reads_back():
+    """M5/L7-A: the column maintains an online allocentric MAP -- bind a SENSED feature at a LOCATION (L4 feature ⊗
+    L6 place code) across a sensorimotor sequence, then READ it back (predict_feature). An object seen at a place is
+    REMEMBERED there, distinct from another place -- the feature-at-location substrate the §3 mechanic library needs."""
+    col = CorticalColumn(n_entities=16, seed=0)
+    for _ in range(80):                                      # learn a ring so L6 has distinct place codes
+        for i in range(6):
+            col.observe(i, 0, (i + 1) % 6)
+    fa, fb = col.L4.encode(("red",)), col.L4.encode(("blue",))   # two distinct features
+    col.bind_at(0, fa)                                       # red at location 0, blue at the antipode 3
+    col.bind_at(3, fb)
+    assert col.feature_at(0) == fa                           # the map remembers red at 0
+    assert col.feature_at(3) == fb                           # and blue at 3
+    assert col.feature_at(9) is None                         # a location unknown to the L6 frame -> None
+
+
 def test_path_integration_is_discrete_graph_tracking():
     """Path integration = PREDICT the next node by the learned edge (no observation needed -- partial observability),
     CORRECT by snapping to a sighting. Discrete graph tracking, exact and online -- no matrix operator over codes."""
