@@ -380,7 +380,13 @@ already have, then add the identity-test as a competing candidate)? The staging 
   `column.propose_goals` (the ACT goal always + the DISAMBIGUATION goal when ambiguous, each with an EFE value) +
   `BasalGanglia.gate` arbitrating them (Go the higher value; dopamine-RPE makes a consistently-valuable goal type
   win past a value dip = Cisek's urge). The BG is in the loop (critique #2: selection by value+urgency competition,
-  not an agent-script argmax). 3 tests; suite 67→**69 green**. **GD4** — effort + commitment triggers (incl.
-  fire-when-narrowed) **+ the live-loop integration**: `agent.step` using `propose_goals` + BG + acting on the
-  chosen goal (recognition active in the loop + sensor-to-target navigation -- the remaining wiring).
+  not an agent-script argmax). 3 tests; suite 67→**69 green**. **GD4 (refinements) ✅ DONE 2026-06-29** —
+  FIRE-WHEN-NARROWED (`disambiguation_goal` fires only at `2 ≤ len(hyps) ≤ narrowed`; `examine` does Monty's order:
+  passive-narrow then hypothesis-test — resolves the swamping scene in 2 samples, was 4) + the EFFORT goal-distance
+  tie-breaker in `propose_goals` (a far test is discounted; a uniquely-worth-it test still wins). 2 tests; suite
+  69→**71 green**. *Honest:* the efficiency win is object-dependent — on self-similar objects the NARROWING
+  dominates (the deferred symmetry work, `project_symmetry_opportunity`); the GSG's clear value is correct TIMING +
+  the final 2-way disambiguation. **REMAINING — the live-loop integration** (its own design pass): `agent.step`
+  using `propose_goals` + BG + acting on the chosen goal — recognition ACTIVE in the live loop (not just bolted on
+  for barriers) + sensor-to-target navigation + commitment/hysteresis.
   (Navigation/effort from §7.2–7.5 fold in at GD2–GD4.)
