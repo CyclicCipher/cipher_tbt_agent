@@ -390,3 +390,63 @@ already have, then add the identity-test as a competing candidate)? The staging 
   using `propose_goals` + BG + acting on the chosen goal — recognition ACTIVE in the live loop (not just bolted on
   for barriers) + sensor-to-target navigation + commitment/hysteresis.
   (Navigation/effort from §7.2–7.5 fold in at GD2–GD4.)
+
+---
+
+## 8. Live-loop integration — DESIGN PASS (2026-06-29)
+
+### 8.1 The current live flow + the gaps
+`arc_sdk.TbtPolicy.choose_action`: read frame → **(feature_id, position)** state (Stage 1 EFE value + Stage 2
+inverse-motor are ALREADY live via `agent.step`/`col.act`) → `_object_barriers` recognises non-controllable
+objects (one-shot `recognize_object`, cached by shape sig) to learn barrier-ness → `agent.step` picks the action.
+**Not wired:** the GSG (`propose_goals`/`examine`/the BG). Wiring it needs three things absent from the live path:
+(a) recognition **active in the loop** with hypotheses, (b) **sensor-to-target navigation** to act on a goal,
+(c) **commitment/hysteresis**.
+
+### 8.2 The pivotal finding — full-frame ARC makes identity disambiguation COVERT and cheap
+The GSG (graph-mismatch, GD1–GD4) does **active sensing to resolve which OBJECT** — its win is choosing *where to
+look* when looking is **expensive / partial** (Monty's fingertip robot). **ARC gives the WHOLE 64×64 frame every
+step.** So an object's identity is resolvable by simply sensing all its cells from the current frame — **covertly
+(no action) and cheaply (the whole shape is available).** The GSG's "sense fewer, smarter points" efficiency is
+**moot when sensing the whole object is free.** It would matter only under **occlusion** (a hidden cell) — and then
+resolving needs an **overt** action to move the occluder anyway.
+
+Consequence: in ARC the agent's real **overt** epistemic uncertainty is **NOT object identity** (covert, cheap) —
+it is **DYNAMICS** ("what does this action / this object DO?": a wall vs a walk-through painting; a button's
+effect) and the **GOAL** (what completes the level). Dynamics is resolved by **acting** (bump it, click it) — which
+is exactly the **`lp`/transition epistemic already in Stage 1's EFE**, plus the `ObjectBehaviour` faculty. So the
+overt directed-exploration lever in ARC is **Stage 1 (already live)**, not the disambiguation GSG.
+
+### 8.3 What this means for the GSG's live role (honest)
+- The disambiguation GSG is the **right, general** mechanism (it shines in partial-obs / expensive-sensing — the
+  competition's "works beyond ARC" spirit), and it is built + tested. But its **overt ARC value is limited** by
+  full-frame observation.
+- Its realistic ARC role is **covert recognition**: resolve each object's identity over the frame (cheap), feeding
+  **property-generalisation** (barrier-ness now; affordances later) and object permanence. The graph-mismatch can
+  *order* covert sampling, but covert sampling is free, so the efficiency is not the point — correctness is.
+- The **overt** action driver stays the **EFE value + inverse-motor** (Stage 1+2, live): `lp`/dynamics + reward.
+  The BG's `act` vs `disambiguate` competition is real, but `disambiguate` is mostly **covert (parallel, free)** or
+  collapses into the `lp`/dynamics goal when it needs an overt interaction — so it rarely *competes* for the action.
+
+### 8.4 Realistic live-integration scope
+Modest and correct, not "the GSG drives the agent":
+1. Recognition **active + covert** in the loop (resolve identities over the frame; the cache becomes a live
+   session), feeding barrier/affordance generalisation. *Largely the existing barrier path, made first-class.*
+2. Keep **EFE + inverse-motor** as the overt driver (live). 3. The **BG** arbitrates overt goals (mostly `act`).
+4. **Commitment/hysteresis** for value/navigation. 5. **Sensor-to-target navigation** only for the rare overt
+   disambiguation (occlusion / interaction-to-reveal — which is the `lp` goal).
+
+### 8.5 Strategic implication + recommendation
+The live integration **completes the architecture** (the GSG in the loop) and **demonstrates the general design**
+(the prize values it), but it is **unlikely to be the thing that moves the ARC score** — that lever is Stage 1's
+`lp`/dynamics + the goal, which is **already live but UNTESTED since the whole refactor** (the layer refactor +
+Stages 1–2 changed the live agent substantially, and we have not run it live since). Running the public games is
+**free** (no API/Kaggle cost — confirmed). So the grounded order is:
+- **FIRST: a small LIVE TEST of the refactored agent** (Stage 1+2, as-is) on a public game — to measure whether the
+  EFE/epiplexity + inverse-motor moved anything, AND to *observe whether identity-disambiguation even arises live*
+  (does the agent hit ambiguous recognition? is occlusion a thing?). This grounds the GSG integration in real need
+  rather than full-frame speculation. (Respects `feedback_no_debug_by_extending_actions`: a single fixed-budget
+  measurement, not a debugging loop.)
+- **THEN: scope the GSG live integration** to what the test shows — covert recognition + BG (§8.4) at minimum;
+  more only where the loop asks. If the live test shows the score is blocked by dynamics/goal, that (not the GSG)
+  is where to invest next.
