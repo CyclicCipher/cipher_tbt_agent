@@ -156,6 +156,30 @@ class L23_Object(nn.Module):
         h = max(self.hyps, key=lambda h: h.ev)
         return h.obj.name, h.theta, h.t, h.ev
 
+    def disambiguation_goal(self, margin: float = 1.5):
+        """The hypothesis-TESTING goal (Monty's GRAPH-MISMATCH): when >= 2 (object, pose) hypotheses still compete
+        in this session, return the WORLD location where the top-2 most DISAGREE -- a point present in one model (at
+        its hypothesised pose) but FAR from every point of the other. Sensing there maximally discriminates them
+        (present -> supports that hypothesis; absent -> the other). None when there is no genuine competition (one
+        hypothesis already leads by > `margin` evidence, or < 2 hypotheses). DOMAIN-GENERAL: it reads only the
+        column's own (object, pose) hypotheses -- nothing task-specific. The epistemic CORE of the GSG."""
+        if len(self.hyps) < 2:
+            return None
+        h1, h2 = sorted(self.hyps, key=lambda h: h.ev, reverse=True)[:2]
+        if h1.ev - h2.ev > margin:                             # a clear leader -> nothing to resolve
+            return None
+        c1 = [np.asarray(p, float) for p in h1.obj.cells_at(h1.theta, h1.t)]
+        c2 = [np.asarray(p, float) for p in h2.obj.cells_at(h2.theta, h2.t)]
+        if not c1 or not c2:
+            return None
+        best, best_d = None, -1.0                              # the point (in either model) most distant from the other
+        for cloud, other in ((c1, c2), (c2, c1)):
+            for p in cloud:
+                d = min(float(np.linalg.norm(p - q)) for q in other)
+                if d > best_d:
+                    best, best_d = p, d
+        return tuple(round(float(x), 3) for x in best) if best is not None and best_d > 1e-6 else None
+
     # ---- one-shot convenience (sense a whole shape; built on the session) --------------------------------
     def identify_model(self, cloud):
         """Recognise a complete shape in one shot (sense all its points) — the winning ObjectGraph, or None.

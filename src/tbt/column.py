@@ -22,6 +22,8 @@ SR; `loc_*` coordinate L6's belief with L5's operator (path integration).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import torch
 import torch.nn as nn
 
@@ -30,6 +32,18 @@ from .l5_displacement import L5_Displacement
 from .l6_grid import L6_GridLocation
 from .l6_sr import OnlineSR                            # the online TD successor representation (eigendecomposition-free L6)
 from .l23_object import L23_Object                     # the object/identity layer: graph-memory + recognition + voting
+
+
+@dataclass(frozen=True)
+class GoalState:
+    """A CMP-style goal-state MESSAGE -- active inference: L5 emits the desired OUTCOME, not a command
+    ('predictions not commands'; reference_gsg_goal_generation). `target` = the location/pose to bring about (here,
+    to go SENSE); `kind` = the uncertainty it resolves ('disambiguate' now; 'explore'/'reward' later); `source` =
+    the originating column (None = self). Shaped so a column can SELF-generate it OR RECEIVE it from a connected
+    column -- the heterarchy scale-up is just WHERE the message comes from, not a different mechanism."""
+    target: tuple
+    kind: str = "disambiguate"
+    source: object = None
 
 
 class CorticalColumn(nn.Module):
@@ -141,6 +155,16 @@ class CorticalColumn(nn.Module):
     def identify_object(self, cloud):
         """Recognise a sensed shape against L2/3's library WITHOUT adding a new one — the name, or None."""
         return self.L23.identify(cloud)
+
+    # ----- the GOAL STATE GENERATOR (per-column GSG; the column proposes, L5 emits) -------------------
+    def propose_goal(self):
+        """The column's Goal State Generator. TBT-faithful: its CORE is UNCERTAINTY-RESOLUTION -- when L2/3's top
+        (object, pose) hypotheses still compete, propose a hypothesis-TEST goal (the graph-mismatch sample point
+        that most discriminates them) as a message-shaped `GoalState`; None when there is nothing to resolve. The
+        value / transition-`lp` goal candidates + the basal-ganglia arbitration among them are the next build
+        steps; the heterarchy adds RECEIVED goal-messages to the same competition (reference_gsg_goal_generation)."""
+        target = self.L23.disambiguation_goal()
+        return GoalState(target=target, kind="disambiguate") if target is not None else None
 
     # ----- the inter-column interface (the thalamus binds content ⊗ location) -----------------------
     def content_code(self, label):

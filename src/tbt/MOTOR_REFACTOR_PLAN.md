@@ -344,3 +344,32 @@ RULE-uncertainty, and graph-mismatch needs a recognition-ambiguity scene to exer
 **disambiguation-first** (TBT-faithful, needs a new ambiguity scene + L2/3 hypothesis exposure), or
 **value/navigation-first** (G1–G3: explicit goal + navigate + effort + BG over the value/transition goals we
 already have, then add the identity-test as a competing candidate)? The staging in §7.7 is the latter.
+
+### 7.10 DECISION + build order (2026-06-29) — disambiguation-first, message-shaped
+
+- **Disambiguation-first** (TBT-faithful): the GSG is built around the **graph-mismatch hypothesis-test** (sample
+  where the top-2 L2/3 hypotheses most disagree), not value/navigation. The value (reward) + transition (`lp`)
+  goals are existing candidates that *compete*; the new core is the identity/hypothesis-test goal.
+- **GENERAL, not ARC-specific:** the GSG reads the column's OWN generic uncertainty (L2/3 hypothesis disagreement +
+  `lp`), never game features/colours/scene heuristics. Graph-mismatch is domain-general (resolve disagreement
+  between *any* two competing models — object, concept, rule, word). If we ever read ARC structure to pick a goal,
+  that is the bug.
+- **Message-shaped goal-states from the start:** `column.propose_goal()` returns a **GoalState object** (target +
+  the uncertainty it resolves + source), shaped so it can be *self-generated OR received from another column* —
+  even though, single-column, it only talks to its own motor. This keeps the heterarchy free later (the scale-up
+  is *where the message comes from*, not a different mechanism: a column combines its intrinsic goal with incoming
+  precision-weighted goal-messages; the BG arbitrates the competition; cycles resolve by confidence + BG urgency +
+  CMP voting — `reference_gsg_goal_generation`).
+- **⚠ CAVEAT for the heterarchy scale-up (cross this bridge later):** a goal-state is a pose in *some* reference
+  frame. Passing goals between columns that share an OBJECT frame works (CMP); passing between columns with
+  DIFFERENT learned SR navigational frames needs **cross-frame registration** — the SAME deferred problem as
+  heterogeneous-frame voting, the same place a hippocampus-like shared frame earns its keep
+  (`reference_tbt_frames_and_hippocampus`). Heterarchical goal-messaging inherits exactly this one hard problem and
+  no new ones. Heterarchy goal-resolution (loopy message passing + precision) is researched AFTER the motor refactor.
+- **Build order (revised):** **GD1 ✅ DONE 2026-06-29** — `L23.disambiguation_goal` (Monty graph-mismatch: the
+  point in the top hypothesis's predicted cloud most distant from the runner-up's; a `margin` gate suppresses it
+  when one hypothesis clearly leads), wrapped by `column.propose_goal` into a message-shaped `GoalState`. 4 tests
+  (graph-mismatch picks the appendage tip; margin gate; fires in a real recognition session; column message).
+  Suite 61→**65 green**. **GD2** — wire the goal to the motor (sample the target; covert evaluation). **GD3** — the
+  BG arbitrates disambiguation vs value vs `lp` candidates. **GD4** — effort + commitment triggers.
+  (Navigation/effort from §7.2–7.5 fold in at GD2–GD4.)
