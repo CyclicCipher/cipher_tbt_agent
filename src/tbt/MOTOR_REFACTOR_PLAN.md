@@ -370,6 +370,12 @@ already have, then add the identity-test as a competing candidate)? The staging 
   point in the top hypothesis's predicted cloud most distant from the runner-up's; a `margin` gate suppresses it
   when one hypothesis clearly leads), wrapped by `column.propose_goal` into a message-shaped `GoalState`. 4 tests
   (graph-mismatch picks the appendage tip; margin gate; fires in a real recognition session; column message).
-  Suite 61→**65 green**. **GD2** — wire the goal to the motor (sample the target; covert evaluation). **GD3** — the
-  BG arbitrates disambiguation vs value vs `lp` candidates. **GD4** — effort + commitment triggers.
+  Suite 61→**65 green**. **GD2 ✅ DONE 2026-06-29** — `L23.sense_absent` (the ABSENT half: a sample at a
+  predicted-empty location falsifies the predictor) + `column.examine` (the active-recognition loop: COVERTLY pick
+  the graph-mismatch target, OVERTLY sample it, present→`sense` / absent→`sense_absent`, until one hypothesis
+  leads). Suite 65→**67 green**. HONEST nuance the trace exposed: the GSG (graph-mismatch over the top-2) is the
+  FINAL 2-way disambiguation — 1 informative sample resolves it — but NOT the initial narrowing (a symmetric object
+  yields many tied pose-hypotheses; passive sensing narrows faster there). Firing the GSG only when narrowed
+  (Monty's triggers) is the GD4 refinement; the mechanism is correct + in place. **GD3** — the BG arbitrates
+  disambiguation vs value vs `lp` candidates. **GD4** — effort + commitment triggers (incl. fire-when-narrowed).
   (Navigation/effort from §7.2–7.5 fold in at GD2–GD4.)
