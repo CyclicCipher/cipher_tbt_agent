@@ -97,7 +97,8 @@ class TbtPolicy:
     resolved to that object's centroid as (x, y), so the agent plans over a stable index space and LEARNS each click's
     effect — which click matters EMERGES (self-free), generalizing to any coordinate action, not just ACTION6."""
 
-    def __init__(self, build_agent=None, seed: int = 0, local: bool = True, integrate: bool = True, barriers: bool = True):
+    def __init__(self, build_agent=None, seed: int = 0, local: bool = True, integrate: bool = True, barriers: bool = True,
+                 max_obj_cells: int = 32):
         from tbt.sensor import Sensor                        # lazy: keep arc_sdk importable without torch
         from tbt.behavior import ObjectBehaviour
         self.sensor = Sensor(local=local, integrate=integrate)   # egocentric + path-integration -- recurrence + navigation
@@ -110,6 +111,7 @@ class TbtPolicy:
         self.prev_level = 0
         self._last_a = None                                  # the last agent action index (the efference for path integration)
         self.barriers = barriers                             # learn + predict object barriers (object-behaviour faculty)
+        self.max_obj_cells = max_obj_cells                   # skip recognising objects bigger than this (structure, not interactive)
         self.behaviour = ObjectBehaviour()                   # recognised-identity -> learned interaction effect
         self._prev_pos = None                                # the agent's position before the last action (bump attribution)
         self._recog_cache: dict = {}                         # shape signature -> recognised identity (O(carry), not re-segment)
@@ -206,8 +208,10 @@ class TbtPolicy:
         ctrl = min(objs, key=lambda o: abs(objs[o][0][0] - fov[0]) + abs(objs[o][0][1] - fov[1])) if objs and fov else None
         omap: dict = {}
         for oid, c in cells.items():
-            if oid == ctrl or len(c) < 2:                    # skip the body and 1-cell blobs (no shape to recognise)
-                continue
+            if oid == ctrl or not (2 <= len(c) <= self.max_obj_cells):   # skip the body, 1-cell blobs, and large
+                continue                                                # STRUCTURE (board/background -- not an interactive
+                                                                        # object; navigation/local-sensing handles it, and
+                                                                        # recognising it bloats the library + is O(cells))
             sig = self.sensor.field.contents.get(oid)        # the shape signature -> the persistent recognition key
             ident = self._recog_cache.get(sig)
             if ident is None:                                # first sighting of this shape -> recognise (+ learn) once

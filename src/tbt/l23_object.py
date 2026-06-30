@@ -32,6 +32,29 @@ from .l4_feature_location import invariant_sig
 from .l5_displacement import align_rotations, apply_pose, local_disps, rot
 
 
+def _local_disps_all(locs, radius):
+    """Every node's local displacement-vectors at once, in O(n * neighbours) via a SPATIAL HASH on the (integer)
+    cell positions -- NOT O(n^2) scanning every pair, which is the cost that makes recognising a big object (e.g. a
+    144-cell ARC block) ~O(cells^2). `radius` is small (~1.5), so each node checks only a fixed cell neighbourhood.
+    Equivalent to per-node `local_disps` for integer-celled clouds (ARC cells; stored objects are integer)."""
+    import math
+    grid: dict = {}
+    for i, p in enumerate(locs):
+        grid.setdefault((round(float(p[0])), round(float(p[1]))), []).append(i)
+    r = int(math.ceil(radius))
+    out = []
+    for i, p in enumerate(locs):
+        px, py = round(float(p[0])), round(float(p[1]))
+        nb = []
+        for dx in range(-r, r + 1):
+            for dy in range(-r, r + 1):
+                for j in grid.get((px + dx, py + dy), ()):
+                    if j != i and np.linalg.norm(locs[j] - p) <= radius:
+                        nb.append(locs[j] - p)
+        out.append(np.array(nb) if nb else np.empty((0, 2)))
+    return out
+
+
 class ObjectGraph:
     """One object in the graph-memory, stored ONCE in its own reference frame: node LOCATIONS (L6) + each node's
     local DISPLACEMENTS (L5) + its rotation-invariant FEATURE signature (L4). `cells_at` = L5's pose operator —
@@ -41,7 +64,7 @@ class ObjectGraph:
         self.name = name
         self.radius = radius
         self.locs = [np.asarray(c, float) for c in cloud]
-        self.disps = [local_disps(self.locs, i, radius) for i in range(len(self.locs))]   # L5: equivariant geometry
+        self.disps = _local_disps_all(self.locs, radius)                                  # L5: equivariant geometry (O(n))
         self.sig = [invariant_sig(d) for d in self.disps]                                 # L4: invariant 'what'
 
     def nearest(self, loc):
@@ -195,34 +218,43 @@ class L23_Object(nn.Module):
         return tuple(round(float(x), 3) for x in best) if best is not None and best_d > 1e-6 else None
 
     # ---- one-shot convenience (sense a whole shape; built on the session) --------------------------------
-    def identify_model(self, cloud):
-        """Recognise a complete shape in one shot (sense all its points) — the winning ObjectGraph, or None.
-        Confidence = evidence reaching ~one match per point (a strong, full-object recognition)."""
+    def _sense_shape(self, cloud, max_sense: int = 16) -> int:
+        """Start a session and sense up to `max_sense` points SPREAD across `cloud` (every k/max_sense-th) -- so
+        recognition is O(max_sense * cells), not O(cells^2) (the cost that killed it on a 144-cell ARC block). A
+        handful of points discriminate; full-frame ARC never needs every cell, and the GSG is the principled
+        'which points' on top of this. Returns the number of points actually sensed."""
+        locs = [np.asarray(c, float) for c in cloud]
+        k = len(locs)
+        idx = range(k) if k <= max_sense else (j * k // max_sense for j in range(max_sense))
+        self.start()
+        m = 0
+        for i in idx:
+            self.sense(locs[i], local_disps(locs, i, self.radius))
+            m += 1
+        return m
+
+    def identify_model(self, cloud, max_sense: int = 16):
+        """Recognise a complete shape in one shot — the winning ObjectGraph, or None. Senses a SUBSAMPLE (≤
+        `max_sense` points) for affordability; confidence = evidence reaching ~one match per SENSED point."""
         if not self.objects:
             return None
-        locs = [np.asarray(c, float) for c in cloud]
-        self.start()
-        for i in range(len(locs)):
-            self.sense(locs[i], local_disps(locs, i, self.radius))
+        m = self._sense_shape(cloud, max_sense)
         if not self.hyps:
             return None
         h = max(self.hyps, key=lambda h: h.ev)
-        return h.obj if h.ev >= max(2.0, len(locs) - 1.0) else None
+        return h.obj if h.ev >= max(2.0, m - 1.0) else None
 
     def identify(self, cloud):
         """Recognise a complete shape against the library WITHOUT adding a new one — the name, or None."""
         m = self.identify_model(cloud)
         return m.name if m is not None else None
 
-    def recognize(self, cloud):
+    def recognize(self, cloud, max_sense: int = 16):
         """Identify a shape's object + continuous pose, learning it online if novel — (name, theta, t, ev). The
         pose-invariant recognition perception uses to TRACK an object across frames despite rotation/translation."""
-        if self.identify_model(cloud) is None:
+        if self.identify_model(cloud, max_sense) is None:
             self._learn_canonical(cloud)
-        locs = [np.asarray(c, float) for c in cloud]
-        self.start()
-        for i in range(len(locs)):
-            self.sense(locs[i], local_disps(locs, i, self.radius))
+        self._sense_shape(cloud, max_sense)
         return self.best()
 
     # ---- lateral voting (CMP) ----------------------------------------------------------------------------
