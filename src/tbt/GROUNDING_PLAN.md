@@ -69,28 +69,98 @@ down-weights it where it misleads).
 its own value: pragmatic field-value + epistemic learning-potential). It becomes the dynamics CHANNEL. *Validate:* the
 dynamics games (Toggle/Tetris/CollectAll) unchanged.
 
-**M5 — the STATE → L4 ⊗ L6 (feature-at-location).** The original §6 (L6_PLAN L7-A..D): run `L4.bind`/`readout`/
-`predict_feature` over the L6 grid location EVERY step, so the agent's state is the sensed FEATURE-at-LOCATION, not the
-opaque `config_state`. This is the metric `config_state` lacks → vector navigation, cross-position generalization, and
-cross-level transfer (the human's reusable navigation faculty; the oracle/human/agent trace showed L1 cost 12× *in
-exploit mode* because nothing geometric transfers). Heaviest change (touches perception); separable from M1–M4.
+**M5 — the STATE → L4 ⊗ L6, AND the full After-L6 reconnection (correct the column's predict-sense-update loop).**
+Today's opaque `config_state` BYPASSES the layers — the column never runs the TBT cycle. Complete L6_PLAN §6 (L7-A..D),
+which still applies and is what actually corrects the cortical column:
+- **L7-A — L4↔L6 in the loop:** run `L4.bind`/`readout`/`predict_feature` over the L6 grid LOCATION every step; the
+  state becomes the sensed FEATURE-at-LOCATION (the TEM canvas = structure × content), not `config_state`. Gives the
+  metric `config_state` lacks → vector navigation + cross-position generalization (the trace: L1 cost 12× *in exploit
+  mode* because nothing geometric transfers).
+- **L7-B — L5→L6 path integration:** L5's chosen displacement (efference copy) path-integrates L6, so the operator
+  reads/writes the LOCATION-anchored state and generalizes the same displacement anywhere.
+- **L7-C — L2/3 over L4⊗L6:** the object = the graph of (feature, grid-location) pooled over sensing; recognition +
+  lateral CMP voting predict the feature L4 should expect (object permanence under the grid frame).
+- **L7-D — the STATE shift** from opaque config → location-anchored (grid place + features-at-locations).
+The heaviest change (touches perception); it is the SUBSTRATE the mechanic layer (§3) rides on. Separable from M1–M4.
 
-## 3. The target `agent.py` (the thin loop that remains)
+## 3. The MECHANIC LIBRARY + the hypothesis-test loop (the cross-game lever — researched 2026-06-30)
+The human play-traces ([[reference_human_baseline_traces]]) prove the biggest RHAE lever is NOT navigation tuning: a
+human plays at/near ORACLE once the mechanic is known (all overhead = DISCOVERY), and **cross-GAME mechanic transfer**
+is decisive (LockPath L2 unsolvable cold → optimal 13 after Sokoban's push-block-onto-marker clicked). `MOTOR_REFACTOR
+§8.2` independently found ARC's real OVERT uncertainty is **dynamics/RULE + goal**, not object identity. So above the
+substrate the agent must DISCOVER, STORE, and RE-PROPOSE mechanics. This corrects two mappings I had wrong (Cipher
+caught it) and answers "what if the truth isn't derivable from priors?".
+
+- **What a MECHANIC is, neurally (corrected — NOT L2/3).** A mechanic = a **SCHEMA / latent cause = a cognitive map of
+  TASK-relational structure**, abstracted over episodes and generalizing across contexts (Ghosh & Gilboa; Tse et al.).
+  It lives in a **TASK-SPACE TEM module** — a SECOND map/column (PFC/OFC-like), composed with the spatial/object column
+  via the HETERARCHY (long-range connections), per [[reference_hierarchy_substrate]] — NOT in L2/3 (which is single-OBJECT
+  identity). The object behaviours/affordances it composes ("a block translates when pushed", "a pad is a marker") are
+  TBT **object states/behaviours** (L5 operators + L2/3 object — TBT models exactly these). The mechanic is the
+  RELATION: "movable object placed on salient marker → the score advances." (The L6 "location frame" is L6/SR; M5 wires
+  the STATE to it — M5 is not itself the frame; the second correction.)
+- **How a hypothesis is GENERATED — including BEYOND/AGAINST the priors (Cipher's challenge, now grounded).** The brain
+  does NOT generate from a fixed prior. It holds priors over an **OPEN set of latent structures** (seeded by Core-
+  Knowledge: objectness, movability-inferred-from-dynamics, goal-directedness) and ASSIMILATES observations into
+  existing schemas by Bayesian inference. When prediction error is LARGE — an action's outcome or a score-change no
+  current schema predicts — it **infers a NEW latent cause / SPLITS a state / mutates the schema** (Gershman–Norman–Niv;
+  Redish: "tonically negative prediction errors → higher probability of creating a new state"; the HIPPOCAMPUS binds the
+  prior-violating conjunction; lesions → everything forced onto one cause). So the priors SEED but never CAP the space;
+  surprise EXPANDS it. That is the formal fix for "the truth contradicts the priors" — accommodation, not just
+  assimilation. (Connects to [[project_discovery_program]] schema-mutation/MDL, [[reference_discovery_regime_transition]].)
+- **The LOOP = the GSG, extended from identity to RULE/DYNAMICS.** The GSG generates a candidate goal-state HYPOTHESIS
+  ("bring the movable object to the marker") from the task map + current uncertainty → the **basal ganglia gates** it
+  (value + epistemic + urgency, dopamine-RPE; Cisek affordance competition) → the agent ACTS to test it → the **SCORE**
+  confirms (reward-PE → raise the schema's affinity, consolidate) or refutes (no PE → drop for this context, or split a
+  new latent cause). The current GSG (`MOTOR_REFACTOR` GD1–GD4: `L23.disambiguation_goal` graph-mismatch, `propose_goals`,
+  `BasalGanglia.gate`) does this for object-IDENTITY — moot in full-frame ARC (§8.2). **EXTEND it to the rule/dynamics
+  hypothesis-test**: graph-mismatch is domain-general (resolve disagreement between any two competing models — object OR
+  rule); the message-shaped `GoalState` already exists. This is the GSG work `MOTOR_REFACTOR` left unfinished.
+- **CROSS-GAME transfer + negative-transfer SAFETY (reverses "transfer OFF").** A confirmed schema PERSISTS across games
+  (cortical consolidation), indexed by object-affordance so the same KIND of object retrieves it (Sokoban block ≡
+  LockPath block). It is re-proposed as a HYPOTHESIS (a top-down prior), never asserted — the BG gates it, the score
+  tests it; a wrong schema earns no reward-PE → its affinity drops → it's dropped for this game (or a new cause is
+  split). So cross-game transfer is SAFE *because* it's tested. Transfer MECHANICS (tested schemas), not weights/graphs.
+- **Bitter-lesson guardrail.** The hypothesis SPACE is general (Core-Knowledge priors + latent-cause expansion); the
+  specific mechanics are GENERATED + TESTED, never hand-coded — "block→pad" in code is the bug. The GSG reads only the
+  column's generic uncertainty + the score, never game colours/features ([[feedback_bitter_lesson]], [[feedback_subgoal_types_from_dynamics]]).
+
+## 4. The target `agent.py` (the thin loop that remains)
 `step` (predict→compare→learn→**delegate select**→predict), `new_episode`, `complete` (episode boundary + reward
 observe), `motor`. The select is `column.act(...)` consulting the channels + BG. Target ≈ 80–110 lines, no value
 math, no arbitration, no SVD, no BFS. The column becomes the cognition; the agent becomes the body.
 
-## 4. Sequencing (each suite-green; validate by the oracle metric AND the human play-traces)
+## 5. Sequencing (each suite-green; validate by the oracle metric AND the human play-traces)
+SUBSTRATE first (it's what §3 rides on — the BG is the hypothesis selector, the SR the value, L4⊗L6 the execution frame):
 1. **M1** (SR value/reachability/NEED) — cleanest, deletes the most glue, PURE REUSE, de-risks M2.
 2. **M3 + M4** (turn the eigenpurpose and the field value into CHANNELS in their layers).
-3. **M2** (the BG composes the channels — the keystone; this is what removes the hand-coded glue for good).
-4. **M5** (the location-anchored state — the efficiency lever; can proceed in PARALLEL, different files).
+3. **M2** (the BG composes the channels — the keystone; ALSO the hypothesis SELECTOR §3 needs).
+4. **M5 / After-L6** (L7-A..D — the location-anchored state; the metric lever; parallel-able, different files).
+THEN the human-level lever:
+5. **§3 — the task-space map + the rule/dynamics GSG + cross-game schema persistence** (the biggest RHAE win per the
+   traces; the latent-cause expansion / beyond-priors lands here). It RIDES on M1 (value), M2 (selector), M5 (frame).
 Gate each on: the suite stays green for CORRECTNESS, and the oracle metric does not regress — but per
-[[feedback_dont_salvage_between_critical_steps]], M2 is one change across several channels; judge it WHOLE, not mid-way.
+[[feedback_dont_salvage_between_critical_steps]], M2 (and §3) is one change across several channels; judge it WHOLE.
 
-## 5. What legitimately STAYS in the agent + open questions
+## 6. What legitimately STAYS in the agent + open questions
 - Stays: the reafference loop itself, the episode boundary (`complete`), the `_GOAL` terminal convention, the motor call.
-- Open: the M2 context key (above) is the crux; the SR-value performance bound (M1 risk); whether the eigenpurpose
-  survives as a channel or is subsumed once M5 gives a true metric (it may become redundant — re-evaluate after M5).
-- The human play-traces (`src/play.py`, built alongside) ground HOW the BG should weight exploration vs. a salient
-  target, and whether M5 alone closes the human gap (Findings B/C of the trace).
+- Open: the M2 context key (the crux); the SR-value performance bound (M1 risk); whether the eigenpurpose survives as a
+  channel or is subsumed once M5/§3 give a true metric + relational structure (re-evaluate after M5).
+- §3 open: how the task-space TEM module is learned ONLINE from a single playthrough (TEM normally learns structure
+  offline over many envs — [[reference_hierarchy_substrate]] flags this); the affordance-index for cross-game schema
+  retrieval; the latent-cause "split" threshold (surprise magnitude) without it thrashing.
+- The human play-traces (`src/play.py`) ground HOW the BG weights exploration vs. a salient target, and whether M5
+  alone closes the gap or §3 is required.
+
+## Sources (the 2026-06-30 research)
+- **Latent-cause inference / structure expansion:** Gershman, Norman & Niv 2015, *Discovering latent causes in RL*;
+  Gershman & Niv 2010, *Learning latent structure: carving nature at its joints* (PMC2862793) — priors over an open
+  structure space; large prediction error → state-splitting / new latent cause; dopamine gates it; hippocampus binds it.
+- **Schemas:** Ghosh & Gilboa 2014, *What is a memory schema?*; Tse et al. 2007 — schema = abstracted relational
+  knowledge, mPFC/hippocampus, assimilation vs accommodation; prediction error updates/creates schemas.
+- **Task-space cognitive map / heterarchy:** Whittington et al. 2020 (TEM); Behrens et al. 2018 (*What is a cognitive
+  map?*); Hawkins et al. 2019 (grid framework); TBP *Hierarchy or Heterarchy?* (arXiv 2507.05888) — via [[reference_hierarchy_substrate]].
+- **TBT object behaviours/states + GSG:** Thousand Brains Project (arXiv 2412.18354; Thousand-Brains Systems arXiv
+  2507.04494) — learning modules model object states/behaviours + compositional objects; each LM has a GSG.
+- **Selection / goals:** Cisek 2007 (affordance competition); Adams/Shipp/Friston (*predictions not commands*) — via
+  [[reference_gsg_goal_generation]].
