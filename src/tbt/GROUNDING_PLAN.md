@@ -116,6 +116,22 @@ caught it) and answers "what if the truth isn't derivable from priors?".
   `BasalGanglia.gate`) does this for object-IDENTITY — moot in full-frame ARC (§8.2). **EXTEND it to the rule/dynamics
   hypothesis-test**: graph-mismatch is domain-general (resolve disagreement between any two competing models — object OR
   rule); the message-shaped `GoalState` already exists. This is the GSG work `MOTOR_REFACTOR` left unfinished.
+- **The EXECUTION = MODEL-BASED planning + COMMITMENT (the crux; [[reference_commit_to_test_a_hypothesis]], 2026-06-30).**
+  Sokoban/LockPath give NO intermediate signal -- only full completion. So the agent must COMMIT to and execute a whole
+  multi-step plan (push the block all the way to the marker) to TEST the hypothesis, BEFORE any reward. A coverage-
+  shaping DIAGNOSTIC (reward = pads covered, from the true state) did NOT solve Sokoban L0 (3 seeds, both modes) --
+  model-free shaping is the WRONG fix (it rewards coverage after the fact, but nothing makes the agent commit to the
+  untested push). The brain does it by: (1) **model-based SIMULATION** -- the forward model rolls the plan out
+  (hippocampal preplay / vicarious trial-and-error), so the plan's value comes from the IMAGINED goal back-propagated
+  through the rollout, NOT reward-along-the-way; (2) the hypothesis as a **PRIOR PREFERENCE** (active inference -- min
+  EFE toward preferred outcomes); (3) the **EPISTEMIC value** of testing the hypothesis is the drive to commit to an
+  UNTESTED plan (EFE = pragmatic + epistemic; resolving the rule is worth it before you know it works); (4)
+  **COMMITMENT** -- the BG gates the plan as ONE option with hysteresis (no per-step re-deliberation; PFC goal-
+  maintenance), VTE only at deliberation then automation. So the loop's "ACTS to test it" is precisely: the forward
+  model (**FM1-4**, the simulator) ROLLS OUT the GSG goal-hypothesis to value the plan toward the IMAGINED, UNVISITED
+  config (the **achiever/`ValueLearner`** in feature space earns its keep here, unproven at this depth) → the **BG**
+  COMMITS → the **score** confirms/refutes. All pieces exist; the wiring "GSG-hypothesis → rollout-to-value → commit →
+  confirm" is §3's core build. Denser reward shaping is NOT the fix -- this is model-based, not model-free.
 - **CROSS-GAME transfer + negative-transfer SAFETY (reverses "transfer OFF").** A confirmed schema PERSISTS across games
   (cortical consolidation), indexed by object-affordance so the same KIND of object retrieves it (Sokoban block ≡
   LockPath block). It is re-proposed as a HYPOTHESIS (a top-down prior), never asserted — the BG gates it, the score
@@ -124,6 +140,17 @@ caught it) and answers "what if the truth isn't derivable from priors?".
 - **Bitter-lesson guardrail.** The hypothesis SPACE is general (Core-Knowledge priors + latent-cause expansion); the
   specific mechanics are GENERATED + TESTED, never hand-coded — "block→pad" in code is the bug. The GSG reads only the
   column's generic uncertainty + the score, never game colours/features ([[feedback_bitter_lesson]], [[feedback_subgoal_types_from_dynamics]]).
+- **Build order (§3 increments, each suite-green; validate on Sokoban L0 + LockPath L2):**
+  - **G-A — the goal-HYPOTHESIS generator.** From the frame + dynamics, detect MOVABLE objects (seen to move) and
+    SALIENT MARKERS (rare/distinct static cells; the goal-cell + pad are instances), and propose the goal-state
+    "movable object at marker location" (general — never reads a colour id). Extends `column.propose_goals`.
+  - **G-B — ROLLOUT-to-value (the crux).** The forward model (FM1-4) imagines the plan to the proposed (UNVISITED)
+    goal config; the achiever (`ValueLearner` in feature space) values the IMAGINED goal so the plan's value flows
+    back through the rollout (model-based, no reward-along-the-way). This is the diagnostic's lesson made real.
+  - **G-C — COMMIT.** The BG gates the chosen goal as ONE option with hysteresis (`MOTOR_REFACTOR` §7.3) so the
+    multi-step push executes without per-step re-deliberation; the EPISTEMIC value of testing drives committing.
+  - **G-D — CONFIRM + persist.** Completion confirms the schema (reward-PE) → store it indexed by object-affordance →
+    re-propose on the next game (cross-game transfer); no completion refutes it → drop/split. Safe because tested.
 
 ## 4. The target `agent.py` (the thin loop that remains)
 `step` (predict→compare→learn→**delegate select**→predict), `new_episode`, `complete` (episode boundary + reward
