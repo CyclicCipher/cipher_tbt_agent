@@ -50,6 +50,7 @@ class Agent:
         self._pred_field = None                                              # the predicted next field (the efference at field grain)
         self.field_error = 0.0                                               # dense forward-model prediction error last turn (on CHANGED cells)
         self._prev_feats = None                                              # field FEATURES at the previous turn (FM4 TD target)
+        self._tab_spread = 0.0                                               # last turn's tabular value spread (the arbitration signal; 0 = engage the forward model)
 
     def complete(self, score_delta: float = 1.0):
         """A level completed: the PREVIOUS (state, action) was the completing transition. Record it as leading to a
@@ -79,7 +80,12 @@ class Agent:
         so the agent is drawn to where the DYNAMICS are still learnable (the structured-dynamics games H1 found). The
         field rule is learned online; it persists across episodes (the same mechanic everywhere)."""
         self.surprised = self._pred is not None and state != self._pred       # predict-then-compare = the learning signal
-        field = self.col.feature_field(frame) if frame is not None else None
+        # ONE-MODEL arbitration + cost gate: run the generative forward model only where the TABULAR value is
+        # INDIFFERENT (no spread across actions last turn -- a dynamics game's novel states, where the tabular loop is
+        # starved). Where the tabular value leads (a converged decision), skip the forward model entirely -> it never
+        # disturbs that policy and costs nothing there. `_tab_spread` is set each turn by `_choose`.
+        use_fwd = frame is not None and self._tab_spread <= 1e-9
+        field = self.col.feature_field(frame) if use_fwd else None
         feats = self.field_features(field) if field is not None else None
         if field is not None and self._prev_field is not None and self._prev is not None:
             self.field_error = self._field_err(self._pred_field, field, self._prev_field)   # dense error of last turn's field prediction
@@ -146,27 +152,40 @@ class Agent:
         T, preds = self._transitions()
         if state in T:                                                       # plan only from a state with observed edges
             self.reward.plan(T, preds, state)                               # (an unvisited state has only frontier values)
+        tab = [self._tab_value(state, a, blocked) for a in self.actions]    # the tabular action-values
+        self._tab_spread = max(tab) - min(tab)                              # the arbitration signal (0 = tabular is indifferent here)
         bonus = None
-        if field is not None:                                               # PRAGMATIC (field value) + beta * EPISTEMIC (learning potential)
-            bonus = {a: prag + self.reward.beta * epi
-                     for a, (prag, epi) in self._field_plan(field, self.plan_depth).items()}
+        if field is not None and self._tab_spread <= 1e-9:                  # tabular leads nowhere -> the FORWARD MODEL decides
+            plan = self._field_plan(field, self.actions, self.plan_depth)
+            bonus = {a: prag + self.reward.beta * epi for a, (prag, epi) in plan.items()}
         return self.col.act(state, self.actions, value=lambda s: self.reward.V[s], explore=self.reward.explore,
                             gamma=self.reward.gamma, tried=self.tried, blocked=blocked, rng=self.rng, bonus=bonus)
 
-    def _field_plan(self, field, depth=1):
+    def _tab_value(self, state, a, blocked):
+        """The tabular value of action `a` from `state` -- the value `col.act` will use: a discounted stay for a
+        recognised barrier, the bounded frontier optimism for an untried action, else the value of its outcome. Their
+        SPREAD across actions is the arbitration signal (flat = the tabular loop has no preference -> the forward model)."""
+        nxt = self.col.graph.get(state, {}).get(a, state)
+        if a in blocked:
+            return self.reward.gamma * self.reward.V[nxt]
+        if (state, a) not in self.tried:
+            return self.reward.explore
+        return self.reward.V[nxt]
+
+    def _field_plan(self, field, actions=None, depth=1):
         """Per-action `(pragmatic, epistemic)` via the forward model, ONE `field_step` pass each (predict + confidence
         shared). PRAGMATIC (FM4) = the field VALUE of the predicted next field (the learned goal in feature space).
-        EPISTEMIC (FM3) = the action's LEARNING POTENTIAL (`1 - confidence`). `depth > 1` folds the discounted best
-        reachable value into pragmatic -- a shallow rollout (sampled/EZ-V2 when deep, the FM4 cost note). So the agent
-        plans TOWARD the score (pragmatic) while still drawn to the unlearned (epistemic), and the epistemic winds
-        down -> pragmatic takes over as the dynamics is mastered."""
+        EPISTEMIC (FM3) = the action's LEARNING POTENTIAL (`1 - confidence`). `actions` restricts the evaluation (the
+        caller passes only the UNTRIED actions -- the tabular edge handles the rest). `depth > 1` folds the discounted
+        best reachable value into pragmatic -- a shallow rollout (sampled/EZ-V2 when deep). So the agent plans TOWARD
+        the score (pragmatic) while still drawn to the unlearned (epistemic), the epistemic winding down as mastered."""
         out = {}
-        for a in self.actions:
+        for a in (self.actions if actions is None else actions):
             nxt, conf = self.col.L5.field_step(field, a)                    # ONE pass: predicted field + confidence
             prag = self.field_value.value(self.field_features(nxt))         # pragmatic: value of the predicted next field
             epi = 1.0 - conf                                                # epistemic: learning potential of the action
             if depth > 1:
-                sub = self._field_plan(nxt, depth - 1)
+                sub = self._field_plan(nxt, None, depth - 1)
                 prag += self.reward.gamma * max((p + self.reward.beta * e for p, e in sub.values()), default=0.0)
             out[a] = (prag, epi)
         return out

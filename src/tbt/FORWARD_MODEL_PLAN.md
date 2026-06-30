@@ -91,6 +91,29 @@ L4's simplest encoding; location = cell; neighbourhood = L4-features at adjacent
 - **FM5 — the hippocampus inherits it (deferred).** Apply the SAME machinery to the GLOBAL ALLOCENTRIC frame (the
   hippocampus's L6 over the whole world) = allocentric world modelling. Build once (column) → free for the hippocampus.
 
+## 4b. Unification — ONE model (the forward model subsumes tabular), 2026-06-30
+The forward model and the tabular loop are NOT separate algorithms for separate games (Cipher's objection to a
+per-game flag). They are arbitrated PER STATE by whether the **tabular value expresses a preference**: in
+`agent._choose`, `_tab_spread = max−min` of the tabular action-values; if it is ~0 (the tabular loop is INDIFFERENT
+— a dynamics game's novel states, or a recurring state with no learned reward) the FORWARD MODEL decides, else the
+tabular value leads and the forward model stands down (and its costly rollout is skipped — the same signal is the
+performance gate). One model, no per-game switch; validated by the live-loop still converging to oracle while cn04
+auto-engages the forward model. The end goal is to **delete the tabular loop entirely** — the forward model is the
+general world model; tabular was a fast exact-memoisation shortcut it subsumes (movement / pushing / blocking /
+in-place transformation are all just field transformations):
+- **Step 1 ✅ DONE** — deprecate the recognition-based `barriers` faculty (`behavior.py` + its 2 tests deleted; the
+  policy wiring stripped). OBSTACLES are handled by the forward model NATIVELY: a blocked move is predicted as
+  no-change, so the planner makes no progress there (`test_forward_model_predicts_a_blocked_move_as_no_change`). The
+  barriers' object-identity generalisation becomes a FUTURE forward-model/feature improvement, not a faculty.
+- **Step 2 — the forward model's VALUE grows up.** Its current value (per-colour COUNTS) can't represent a SPATIAL
+  goal ("reach this cell" changes no count), and the rollout is shallow where tabular's value-sweeping was deep. So:
+  spatial/relational field features + multi-step value bootstrapping, until the forward model subsumes the
+  navigation/recurring-state games. VALIDATE against the PRE-RESET replicas pulled from git history (LockPath,
+  MultiKey, Sokoban, Tetris, CollectAll, Toggle, partial-obs) — a far stronger bar than a synthetic env — plus cn04.
+- **Step 3 — delete the tabular loop** (L5 `edges`, the SR-value sweeping in `reward.py`, `col.act`-over-graph, the
+  inert `blocked` hook) once Step 2 clears the bar. The L4/L5-operator/L6/L2-3 layers STAY; only the discrete-state
+  value loop goes. Delete-last (keep tabular as the safety net until the forward model passes), not delete-first.
+
 ## 5. Seating discipline (the not-a-harness contract)
 Reads **L4** (feature-at-location), indexed by **L6** (the frame); lives in **L5** (the operator layer); writes the
 **column's predictive state**. NO raw-pixel buffer — the `Sensor` still bridges frames→L4 features; the column

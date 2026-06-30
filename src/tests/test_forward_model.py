@@ -223,6 +223,34 @@ def test_fm4_value_learns_from_score_in_loop():
     assert agent.field_value.value(feats5) > before
 
 
+# ---- obstacle handling is NATIVE to the forward model (step 1: the `barriers` faculty deprecated) -----
+def test_forward_model_predicts_a_blocked_move_as_no_change():
+    """A move BLOCKED by a wall is predicted as NO CHANGE; a move into free space changes the field. So the planner
+    sees a blocked move makes no progress (and, once learned, offers no epistemic gain) -- obstacle handling falls
+    out of the generative prediction, no recognition faculty needed. (The full navigate-AROUND-an-obstacle behaviour
+    needs the spatial value -- step 2; this is the prediction primitive it stands on.)"""
+    col = CorticalColumn(n_entities=64)
+    W, WALL = 10, 7
+
+    def frame(p):                                                # agent (2) at column p; a wall (1) fixed at WALL, row 1
+        g = [[0] * W for _ in range(3)]
+        g[1][WALL] = 1
+        g[1][p] = 2
+        return g
+
+    seq, p = [], 2                                               # the agent moves right until the wall blocks it
+    for _ in range(8):
+        seq.append(p)
+        p = p + 1 if p + 1 != WALL else p
+    fields = [col.feature_field(frame(pp)) for pp in seq]
+    for i in range(len(seq) - 1):
+        col.observe_field(fields[i], 0, fields[i + 1])           # learn: free move -> shifts; blocked move -> no change
+    free = col.feature_field(frame(3))
+    assert col.predict_field(free, 0) != free                    # free space: the move changes the field
+    blocked = col.feature_field(frame(WALL - 1))
+    assert col.predict_field(blocked, 0) == blocked              # against the wall: predicted NO CHANGE (blocked)
+
+
 def test_fm4_end_to_end_scores_more_than_random():
     """END TO END: a dynamics env (grow/shrink a bar) scoring at a target the random walk struggles to reach (5
     directed grows from the start). The agent learns the dynamics + the field value from the sparse score and PLANS

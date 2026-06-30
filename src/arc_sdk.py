@@ -97,16 +97,15 @@ class TbtPolicy:
     resolved to that object's centroid as (x, y), so the agent plans over a stable index space and LEARNS each click's
     effect — which click matters EMERGES (self-free), generalizing to any coordinate action, not just ACTION6."""
 
-    def __init__(self, build_agent=None, seed: int = 0, local: bool = True, integrate: bool = True, barriers: bool = True,
-                 max_obj_cells: int = 32, forward_model: bool = False):
+    def __init__(self, build_agent=None, seed: int = 0, local: bool = True, integrate: bool = True):
         from tbt.sensor import Sensor                        # lazy: keep arc_sdk importable without torch
-        from tbt.behavior import ObjectBehaviour
         self.sensor = Sensor(local=local, integrate=integrate)   # egocentric + path-integration -- recurrence + navigation
-        # The generative forward model (FM1-4) is for STRUCTURED-DYNAMICS games (cn04/ls20); on a TABULAR game its
-        # epistemic bonus disrupts the converged policy and its rollout is costly, so it is OPT-IN per policy (the
-        # proper AUTO-arbitration -- engage the forward model only where the tabular state model is failing -- is the
-        # next design step). When on, `choose_action` feeds the FRAME to `agent.step` so the column models the dynamics.
-        self.forward_model = forward_model
+        # The generative forward model (FM1-4) is ALWAYS fed the frame -- it is ONE model with the tabular loop, not a
+        # per-game mode: the column learns the field dynamics every step, and its value only FILLS IN where the tabular
+        # value is INDIFFERENT (the arbitration in agent._choose), so it drives a dynamics game's novel states yet
+        # never disturbs a converged tabular policy. OBSTACLES are handled by the forward model NATIVELY (a blocked move
+        # is predicted as no-change -> the planner makes no progress there); the old recognition-based `barriers`
+        # faculty is gone (step 1 of folding everything into the one forward model).
         self._build = build_agent
         self.seed = seed
         self.agent = None
@@ -115,11 +114,6 @@ class TbtPolicy:
         self.n_clicks = 0                                    # number of click-slots (one per object, capped)
         self.prev_level = 0
         self._last_a = None                                  # the last agent action index (the efference for path integration)
-        self.barriers = barriers                             # learn + predict object barriers (object-behaviour faculty)
-        self.max_obj_cells = max_obj_cells                   # skip recognising objects bigger than this (structure, not interactive)
-        self.behaviour = ObjectBehaviour()                   # recognised-identity -> learned interaction effect
-        self._prev_pos = None                                # the agent's position before the last action (bump attribution)
-        self._recog_cache: dict = {}                         # shape signature -> recognised identity (O(carry), not re-segment)
 
     def is_done(self, frames, latest_frame) -> bool:
         return _state_name(latest_frame.state) == "WIN"
@@ -166,70 +160,16 @@ class TbtPolicy:
             self.sensor.reset()
             self.prev_level = obs.level
             self._last_a = None
-            self._prev_pos = None
         if self.agent is None:                              # first playable frame: build the agent + wire the L4 encode
             self.sensor.field.perceive(obs.grid)            # peek to size the click-slots (objects())
             self._init_actions(latest_frame)
             self.sensor.encode = self.agent.col.L4.encode   # the sensor emits FEATURE-at-location via the column's L4
             self.sensor.field.reset()                       # undo the peek -- the real read starts the tracker clean
         state, _change = self.sensor.read(obs.grid, action=self._last_a)   # efference = last action (path integration)
-        blocked = self._object_barriers()                   # LEARN bumped barriers + PREDICT confident ones ahead
-        a = self.agent.step(state, 0.0, blocked=blocked,
-                            frame=(obs.grid if self.forward_model else None))   # the FRAME -> forward model (FM1-4), when enabled
-        #                                                     learn + choose (predict-then-compare); reward via complete()
+        a = self.agent.step(state, 0.0, frame=obs.grid)     # the FRAME -> the generative forward model (FM1-4); obstacles
+        #                                                     handled natively (a blocked move -> no-change); reward via complete()
         self._last_a = a
         return self._resolve(a)
-
-    def _object_barriers(self):
-        """The object-behaviour faculty in the loop: recognise the non-controllable objects, ATTRIBUTE the last move's
-        outcome to learn each object's barrier-ness (revisable, keyed on recognised identity -> generalises), and
-        return the actions whose target is a CONFIDENT barrier so the agent avoids them WITHOUT bumping. Gated to the
-        egocentric+path-integrated mode (it needs the agent's position); `barriers=False` disables it (the baseline)."""
-        from tbt.behavior import contact_outcome
-        if not (self.barriers and self.sensor.local and self.sensor.integrate and self.sensor._fovea is not None):
-            return ()
-        pos, omap = self.sensor._fovea, self._object_map()
-        if self._last_a is not None and self._prev_pos is not None:           # LEARN from the last move
-            d = self.sensor._delta.get(self._last_a)
-            if d is not None:
-                out = contact_outcome(self._prev_pos, pos, d, omap)
-                if out is not None:
-                    self.behaviour.observe_move(*out)
-        self._prev_pos = pos
-        blocked = set()                                                       # PREDICT: a confident barrier at the target
-        for a in range(len(self.simple)):
-            d = self.sensor._delta.get(a)
-            if d is None:
-                continue
-            target = (round(pos[0] + d[0]), round(pos[1] + d[1]))
-            if any(target in cs and self.behaviour.is_barrier(ident, thresh=0.66) for ident, cs in omap.items()):
-                blocked.add(a)
-        return frozenset(blocked)
-
-    def _object_map(self):
-        """{recognised-identity: cells} for the NON-controllable proto-objects (the one nearest the fovea is the agent's
-        body -- excluded). Recognition (the column's L2/3 faculty) keys the barrier on shape, so it generalises across
-        instances and poses. PERSISTENT/O(carry): a proto-object's shape signature (translation-invariant) caches its
-        identity, so a recurring shape is recognised ONCE, not re-segmented from scratch every step (the slowness fix)."""
-        objs, cells, fov = self.sensor.objects(), self.sensor.field.cells, self.sensor._fovea
-        ctrl = min(objs, key=lambda o: abs(objs[o][0][0] - fov[0]) + abs(objs[o][0][1] - fov[1])) if objs and fov else None
-        omap: dict = {}
-        for oid, c in cells.items():
-            if oid == ctrl or not (2 <= len(c) <= self.max_obj_cells):   # skip the body, 1-cell blobs, and large
-                continue                                                # STRUCTURE (board/background -- not an interactive
-                                                                        # object; navigation/local-sensing handles it, and
-                                                                        # recognising it bloats the library + is O(cells))
-            sig = self.sensor.field.contents.get(oid)        # the shape signature -> the persistent recognition key
-            ident = self._recog_cache.get(sig)
-            if ident is None:                                # first sighting of this shape -> recognise (+ learn) once
-                res = self.agent.col.recognize_object([(float(x), float(y)) for (x, y) in c])
-                if res is None:                              # unrecognised this glance -> not a known object, skip
-                    continue
-                ident = res[0]
-                if sig is not None:
-                    self._recog_cache[sig] = ident
-            omap.setdefault(ident, set()).update(c)
-        return omap
 
 
 # ── the live SDK agent (lazy import; only usable inside the ARC-AGI-3-Agents repo) ──────────────────────────

@@ -145,9 +145,10 @@ class CorticalColumn(nn.Module):
         action takes its DISCOUNTED stay value (a recognised barrier, avoided without a bump). This GENERALISES: a
         continuous effector inverts the SAME operator against the SAME value -- only the organ (discrete action here)
         differs. `value(s)` is the planned EFE value of state `s` (supplied by the agent's reward model). `bonus` is
-        an optional per-action additive value -- the forward model's EPISTEMIC drive (FM3): the learning potential of
-        each action, on the EFE scale, so it directs exploration when the tabular value is flat (a dynamics game's
-        non-recurring states) yet yields to a learned reward (the pragmatic value dominates the bounded bonus)."""
+        the forward model's per-action value (pragmatic + epistemic). The ONE-MODEL arbitration is the CALLER's: it
+        supplies `bonus` ONLY when the tabular value is INDIFFERENT (no spread across actions) -- so a converged
+        tabular decision is never disturbed, and on a dynamics game (where the tabular value is flat) the forward model
+        fills the vacuum and decides. Here `bonus` is simply added (it is None / absent when the tabular value leads)."""
         vals = []
         for a in actions:
             nxt = self.graph.get(state, {}).get(a, state)
@@ -157,7 +158,7 @@ class CorticalColumn(nn.Module):
                 v = explore                                     # untried -> bounded, decaying frontier optimism
             else:
                 v = value(nxt)                                  # tried -> the value of its outcome
-            vals.append(v + (bonus.get(a, 0.0) if bonus is not None else 0.0))   # + the forward-model epistemic drive
+            vals.append(v + (bonus.get(a, 0.0) if bonus is not None else 0.0))   # + the forward-model value (when tabular is indifferent)
         best = max(vals)
         return rng.choice([a for a in actions if vals[a] == best])
 
