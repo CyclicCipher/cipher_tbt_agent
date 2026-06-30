@@ -43,6 +43,30 @@ raw board (stable, doesn't recur) and the raw egocentric patch (recurs, not stab
 - **Path integration** = `column.loc_*` (predict-by-edge + snap) → the agent's place, updated by the efference.
 - **Place codes** = the SR rows / grid codes. The cognitive map is these pieces *assembled* + the transform.
 
+## 3b. How the hippocampus talks to the columns (entorhinal-in, thalamus-out)
+The brain uses **two** routes, and they split cleanly onto what we have:
+- **IN = the entorhinal gateway (cortico-cortical, NOT thalamic).** Cortex → entorhinal superficial → hippocampus →
+  entorhinal deep → cortex is the *binding* loop. The EC is where grid cells live, and TBT says the cortex
+  *replicated* the EC-grid into every column's L6 — so the columns are evolved-from-entorhinal; the hippocampus
+  proper is the one structure that binds *across* columns into a single world. **In our terms:** the hippocampus
+  module reads each column's **L2/3 recognition output** (which object) + its egocentric position + the **efference**
+  (`sensor._delta`) DIRECTLY — no thalamus on the way in. The column's own L6 grid stays its *local* object-centric
+  frame; the hippocampus is the *global* one.
+- **OUT = the thalamic context route (this is the part that DOES go through the thalamus).** Hippocampal context and
+  head-direction reach the cortex via the **nucleus reuniens** (HC↔mPFC) and the **anterior thalamic nuclei** (Papez:
+  HC→mammillary→anterior thalamus→retrosplenial, head-direction). **In our terms:** the hippocampus broadcasts the
+  allocentric frame back as a **top-down prior through `thalamus.py`** — and the channel already exists:
+  **`read_location`** ("top-down goal-state SET... the task column setting a goal-state in the spatial column"). The
+  hippocampus's "where am I / where is object X in the world" is the same shape — a location bound to content,
+  broadcast to whichever column needs it. We REUSE the location channel; we do not invent a new fabric.
+
+This is the same top-down-prior mechanism as the deferred **heterarchy** ("a higher level's goal sets the prior of
+the level below") — the thalamus is the ONE routing fabric for both goal-states and allocentric context. **For cn04
+(H1, a transformation game)** there is no movement and ~one column's worth of scene, so the thalamic *broadcast* is
+barely exercised yet; the immediate work is the **entorhinal-gateway side** (build the object-level allocentric scene
+from the columns' recognition). The thalamic broadcast earns its keep at multi-column / movement games (the
+head-direction/position prior).
+
 ## 4. Build plan (each stage suite-green; offline reproductions)
 - **H0 — frame-check. ✅ DONE 2026-06-29 — and it changes the plan.** Result: the best global shift that explains
   each movement-action transition is **(0,0)** (identity matches as well as any shift) → **cn04 is a
@@ -56,9 +80,19 @@ raw board (stable, doesn't recur) and the raw egocentric patch (recurs, not stab
   deltas. So: **H1 first (the substrate, general); flow-cancellation (H2) DEFERRED to a real movement game; cn04's
   path = H1 + the `recolor` operator.** Open: most public games may be transformation games (ls20 too) — check the
   KIND before assuming movement.
-- **H1 — the allocentric object map.** A world-anchored map: objects placed at WORLD coords by recognised identity +
-  the agent's place. For a fixed board the transform is near-identity (image≈world) + track the agent; for an
-  ego-centred/scrolling view, apply the efference transform. The map is the new substrate the state reads from.
+- **H1 — the allocentric object map. ✅ BUILT 2026-06-30 (`hippocampus.py`, 5 tests green).** `Hippocampus.scene(frame)`
+  binds proto-objects to allocentric world SLOTS (corner-anchored = growth-stable place cells) → a FACTORED
+  `(slot, colour, size)` state. PROVEN (synthetic): it recurs where the per-pixel `content_sig` churns (a reshaping
+  object of the same colour+size is ONE state) and a real transformation (toggle/growth) moves it. **HONEST cn04
+  measurement — it does NOT crack cn04 (recurrence 0.08, worse than the egocentric patch's 0.35), and the reason is
+  diagnostic:** cn04's recurrence-killer is the *spatial reshaping* of the tree's branches, and a FAITHFUL allocentric
+  map correctly *preserves* that (so it can't recur). The only cn04 encoding that recurred — the position-free
+  `(colour,size)` multiset (33 states, 0.57) — does so only by THROWING AWAY the reshaping that is cn04's whole
+  mechanic, so it's too lossy to plan with. **Conclusion: no tabular state both recurs AND preserves cn04's dynamics
+  → cn04 (and ls20) need a GENERATIVE FORWARD MODEL (predict the transformation, plan by rollout), not the tabular
+  graph. H1 is the correct SUBSTRATE that model predicts in (per-object features), and the right representation for
+  movement/multi-object scenes — but it is not, by itself, the unlock for structured-dynamics games.** Next: the
+  generative dynamics on top of H1 (see the new strand below).
 - **H2 — self-motion cancellation (flow parsing).** Estimate the per-action GLOBAL self-displacement (efference);
   subtract it; the residual is world-motion. Distinguishes "I moved" from "the world changed".
 - **H3 — landmark anchoring (loop closure).** Re-seeing a recognised object resets the drifting agent place
