@@ -13,10 +13,10 @@ The column supplies the transition model (its learned graph) + path integration;
 from __future__ import annotations
 
 import random
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from .column import CorticalColumn
-from .reward import RewardModel
+from .reward import RewardModel, ValueLearner
 
 _GOAL = ("\x00GOAL",)                                                          # the single terminal a completing transition leads to
 
@@ -37,7 +37,9 @@ class Agent:
         self.reward = RewardModel(16, gamma=gamma, beta=beta, optimistic=True, epistemic=epistemic, rmax=rmax,
                                   effort=(0.0 if rmax else effort))           # EFE value (R-MAX = ablation)
         self.tried: set = set()                                              # (state, action) ATTEMPTED -- persists across episodes
-        self.plan_depth = 1                                                  # forward-model epistemic rollout depth (FM3; 1 = sound default)
+        self.plan_depth = 1                                                  # forward-model rollout depth (FM3/FM4; 1 = sound default)
+        self.field_value = ValueLearner(alpha=0.25)                         # FM4: a GENERALISING value over field FEATURES (the goal in feature space)
+        self.field_bin = 8                                                  # per-colour count binning for field features (coarse -> generalises)
         self.new_episode()
 
     def new_episode(self):
@@ -47,6 +49,7 @@ class Agent:
         self._prev_field = None                                              # L4 feature-field at the previous turn (FM2)
         self._pred_field = None                                              # the predicted next field (the efference at field grain)
         self.field_error = 0.0                                               # dense forward-model prediction error last turn (on CHANGED cells)
+        self._prev_feats = None                                              # field FEATURES at the previous turn (FM4 TD target)
 
     def complete(self, score_delta: float = 1.0):
         """A level completed: the PREVIOUS (state, action) was the completing transition. Record it as leading to a
@@ -75,9 +78,15 @@ class Agent:
         field rule is learned online; it persists across episodes (the same mechanic everywhere)."""
         self.surprised = self._pred is not None and state != self._pred       # predict-then-compare = the learning signal
         field = self.col.feature_field(frame) if frame is not None else None
+        feats = self.field_features(field) if field is not None else None
         if field is not None and self._prev_field is not None and self._prev is not None:
             self.field_error = self._field_err(self._pred_field, field, self._prev_field)   # dense error of last turn's field prediction
             self.col.observe_field(self._prev_field, self._prev[1], field)   # learn the per-location rule online (L5)
+            self.field_value.update(self._prev_feats,                         # FM4: TD the GOAL in feature space from the score
+                                    score_delta + self.reward.gamma * self.field_value.value(feats))
+        if feats is not None and score_delta > 0.0:                          # the rewarded CONFIG itself is valuable (state/config
+            self.field_value.update(feats, score_delta)                      # reward) -- so planning greedy on V(next) climbs TO the goal,
+            #                                                                  not just to the pre-goal (the terminal-credit fix)
         if self._prev is not None:
             ps, pa = self._prev
             self.col.observe(ps, pa, state)                                  # learn the transition online (graph + SR)
@@ -91,6 +100,7 @@ class Agent:
             self._pred_field = self.col.predict_field(field, a)             # the efference copy at field grain (the next predicted field)
         self._prev = (state, a)
         self._prev_field = field
+        self._prev_feats = feats
         return self.col.motor(a)                                            # the action enacted via L5's motor output
 
     @staticmethod
@@ -135,24 +145,35 @@ class Agent:
         if state in T:                                                       # plan only from a state with observed edges
             self.reward.plan(T, preds, state)                               # (an unvisited state has only frontier values)
         bonus = None
-        if field is not None:
-            bonus = {a: self.reward.beta * v for a, v in self._field_plan(field, self.plan_depth).items()}
+        if field is not None:                                               # PRAGMATIC (field value) + beta * EPISTEMIC (learning potential)
+            bonus = {a: prag + self.reward.beta * epi
+                     for a, (prag, epi) in self._field_plan(field, self.plan_depth).items()}
         return self.col.act(state, self.actions, value=lambda s: self.reward.V[s], explore=self.reward.explore,
                             gamma=self.reward.gamma, tried=self.tried, blocked=blocked, rng=self.rng, bonus=bonus)
 
     def _field_plan(self, field, depth=1):
-        """Per-action EPISTEMIC value via the forward model: each action's LEARNING POTENTIAL = how unsure the model
-        is about its effect (`1 - field_confidence`). `depth > 1` adds the discounted best potential reachable after
-        it (a shallow rollout via `predict_field`). The forward model DRIVING exploration -- try the action whose
-        dynamics you understand least; it winds to 0 as each rule is pinned. depth-1 is the sound default (a deep
-        epistemic rollout leans on unseen->identity predictions); deeper rollout is reserved for the PRAGMATIC goal
-        (FM4), where the model is confident along the planned path."""
+        """Per-action `(pragmatic, epistemic)` via the forward model, ONE `field_step` pass each (predict + confidence
+        shared). PRAGMATIC (FM4) = the field VALUE of the predicted next field (the learned goal in feature space).
+        EPISTEMIC (FM3) = the action's LEARNING POTENTIAL (`1 - confidence`). `depth > 1` folds the discounted best
+        reachable value into pragmatic -- a shallow rollout (sampled/EZ-V2 when deep, the FM4 cost note). So the agent
+        plans TOWARD the score (pragmatic) while still drawn to the unlearned (epistemic), and the epistemic winds
+        down -> pragmatic takes over as the dynamics is mastered."""
         out = {}
         for a in self.actions:
-            epi = 1.0 - self.col.L5.field_confidence(field, a)
+            nxt, conf = self.col.L5.field_step(field, a)                    # ONE pass: predicted field + confidence
+            prag = self.field_value.value(self.field_features(nxt))         # pragmatic: value of the predicted next field
+            epi = 1.0 - conf                                                # epistemic: learning potential of the action
             if depth > 1:
-                nxt = self.col.predict_field(field, a)
-                out_next = self._field_plan(nxt, depth - 1)
-                epi += self.reward.gamma * (max(out_next.values()) if out_next else 0.0)
-            out[a] = epi
+                sub = self._field_plan(nxt, depth - 1)
+                prag += self.reward.gamma * max((p + self.reward.beta * e for p, e in sub.values()), default=0.0)
+            out[a] = (prag, epi)
         return out
+
+    def field_features(self, field):
+        """The field's GENERALISING features for the value (FM4): per-colour cell COUNTS, binned (`field_bin`) so
+        nearby configurations share features -> the value generalises over a field that never recurs. The DIFFERENTIATING
+        signal is the changing colours' counts (e.g. cn04's growing tree); the background is a near-constant bias feature.
+        Game-agnostic -- no domain tokens; the encoding is load-bearing (a feature that CHANGES with the action carries
+        the gradient, the ValueLearner lesson)."""
+        c = Counter(v for row in field for v in row)
+        return frozenset(("cnt", colour, n // self.field_bin) for colour, n in c.items())

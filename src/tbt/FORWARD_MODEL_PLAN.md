@@ -76,8 +76,18 @@ L4's simplest encoding; location = cell; neighbourhood = L4-features at adjacent
   default); depth-2 768 ms -> the deep/pragmatic rollout (FM4) must be SAMPLED (EZ-V2 Sequential-Halving), not full.
   (Opt deferred: one cell-pass querying all actions would cut depth-1 ~6x.) The PRAGMATIC term toward the score is
   FM4.
-- **FM4 — the goal in feature space.** Associate score rises with feature-map configurations (reward over predicted
-  maps); the goal = the scoring configuration; plan toward it. The harder half (the goal in a dynamics game).
+- **FM4 — the goal in feature space. ✅ DONE 2026-06-30 (suite 89, 3 new tests).** `Agent.field_value` (a
+  `ValueLearner`) learns a GENERALISING value over field FEATURES (`field_features` = per-colour binned counts,
+  game-agnostic), TD-trained online from the sparse score; `_field_plan` now returns `(pragmatic, epistemic)` per
+  action (pragmatic = the field value of the predicted next field), combined in `_choose` as `pragmatic +
+  beta·epistemic` -- the unified EFE drive (plan TOWARD the score while still drawn to the unlearned). KEY FIX (the
+  terminal-credit / config-reward bug): the rewarded CONFIGURATION itself is credited (`update(feats, score_delta)`),
+  not only the pre-goal config -- else greedy-on-V(next) climbs only to the pre-goal and stalls. Perf: `L5.field_step`
+  returns predict+confidence in ONE pass (the planner's hot path) -> `_choose` stays ~100 ms/step at depth 1.
+  Validated: the value DIRECTS planning toward the target from either side (grow below / shrink above); the value
+  LEARNS from the score in-loop; END-TO-END on a grow-to-target env it scores ~3x a random walk at a hard target
+  (30 vs 11). The loop is complete: learn dynamics (FM1) -> dense learning-progress (FM2) -> epistemic drive (FM3) ->
+  pragmatic goal (FM4).
 - **FM5 — the hippocampus inherits it (deferred).** Apply the SAME machinery to the GLOBAL ALLOCENTRIC frame (the
   hippocampus's L6 over the whole world) = allocentric world modelling. Build once (column) → free for the hippocampus.
 

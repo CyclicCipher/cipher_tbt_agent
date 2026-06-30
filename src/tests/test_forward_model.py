@@ -155,7 +155,7 @@ def test_fm3_drives_toward_least_understood_action():
     f1 = agent.col.feature_field(_marker_frame(4))
     for _ in range(4):
         agent.col.observe_field(f0, 0, f1)                       # action 0's effect on f0 learned (unambiguous)
-    epi = agent._field_plan(f0)                                  # action 1 never seen -> higher learning potential
+    epi = {a: e for a, (_p, e) in agent._field_plan(f0).items()}   # action 1 never seen -> higher learning potential
     assert epi[1] > epi[0]
     assert agent._choose(("s",), field=f0) == 1                 # the tabular value is flat -> the forward model decides
 
@@ -170,14 +170,90 @@ def test_fm3_epistemic_winds_down_when_actions_learned():
     for _ in range(4):
         agent.col.observe_field(f0, 0, fr)
         agent.col.observe_field(f0, 1, fl)                       # both actions learned on f0
-    epi = agent._field_plan(f0)
+    epi = {a: e for a, (_p, e) in agent._field_plan(f0).items()}
     assert epi[0] < 0.5 and epi[1] < 0.5                         # both understood -> low epistemic -> pragmatic takes over
 
 
 def test_fm3_rollout_depth_runs():
-    """A shallow rollout (depth>1) composes via predict_field without error -- the rollout machinery for FM4."""
+    """A shallow rollout (depth>1) composes via field_step without error -- the rollout machinery for FM4."""
     agent = Agent(n_actions=2, seed=0)
     f0 = agent.col.feature_field(_marker_frame(3))
     agent.col.observe_field(f0, 0, agent.col.feature_field(_marker_frame(4)))
-    epi = agent._field_plan(f0, depth=2)
-    assert set(epi) == {0, 1} and all(v >= 0.0 for v in epi.values())
+    plan = agent._field_plan(f0, depth=2)
+    assert set(plan) == {0, 1} and all(isinstance(v, tuple) and len(v) == 2 for v in plan.values())
+
+
+# ---- FM4: the goal in feature space -- the agent PLANS toward a scoring configuration -----------------
+def _hbar(size, w=12):
+    g = [[0] * w for _ in range(3)]
+    for x in range(size):
+        g[1][x] = 1
+    return g
+
+
+def test_fm4_value_directs_planning_toward_target():
+    """The FM4 contract: with the dynamics learned (action 0 grows, action 1 shrinks a bar) AND a field value that
+    knows the TARGET configuration is rewarding, the forward-model rollout DIRECTS the agent toward the target from
+    EITHER side -- grow when below, shrink when above. Planning in feature space toward the goal."""
+    agent = Agent(n_actions=2, seed=0)
+    agent.field_bin = 1                                          # this tiny env needs size resolution (real games generalise)
+    TARGET = 7
+    for size in range(2, 11):                                    # learn the dynamics for both actions
+        f = agent.col.feature_field(_hbar(size))
+        for _ in range(3):
+            agent.col.observe_field(f, 0, agent.col.feature_field(_hbar(size + 1)))
+            agent.col.observe_field(f, 1, agent.col.feature_field(_hbar(size - 1)))
+    for _ in range(40):                                          # learn the value: the TARGET configuration is rewarding
+        agent.field_value.update(agent.field_features(agent.col.feature_field(_hbar(TARGET))), 1.0)
+    assert agent._choose(("s",), field=agent.col.feature_field(_hbar(TARGET - 1))) == 0   # below the target -> grow
+    assert agent._choose(("s",), field=agent.col.feature_field(_hbar(TARGET + 1))) == 1   # above the target -> shrink
+
+
+def test_fm4_value_learns_from_score_in_loop():
+    """The TD wiring: a sparse score entering a configuration RAISES the learned value of the configuration left --
+    so the generalising goal-in-feature-space is acquired online from the score (no hand-coded goal)."""
+    agent = Agent(n_actions=2, seed=0)
+    agent.field_bin = 1
+    feats5 = agent.field_features(agent.col.feature_field(_hbar(5)))
+    before = agent.field_value.value(feats5)
+    for _ in range(15):
+        agent.new_episode()
+        agent.step(("s",), 0.0, frame=_hbar(5))                  # in bar(5)
+        agent.step(("s",), 1.0, frame=_hbar(6))                  # entering bar(6) scores -> TD credits bar(5)
+    assert agent.field_value.value(feats5) > before
+
+
+def test_fm4_end_to_end_scores_more_than_random():
+    """END TO END: a dynamics env (grow/shrink a bar) scoring at a target the random walk struggles to reach (5
+    directed grows from the start). The agent learns the dynamics + the field value from the sparse score and PLANS
+    there, scoring far more than an undirected random policy."""
+    import random as _rng
+    W, TARGET = 12, 7
+
+    def run(agent, steps=400):
+        size = 2
+        rng = _rng.Random(1)
+
+        def frame():
+            g = [[0] * W for _ in range(3)]
+            for x in range(size):
+                g[1][x] = 1
+            return g
+
+        comps = 0
+        for _ in range(steps):
+            a = agent.step(("s",), 0.0, frame=frame()) if agent is not None else rng.randrange(2)
+            size = min(size + 1, W) if a == 0 else max(size - 1, 1) if a == 1 else size
+            if size == TARGET:
+                comps += 1
+                if agent is not None:
+                    agent.step(("s",), 1.0, frame=frame())
+                    agent.new_episode()
+                size = 2
+        return comps
+
+    ag = Agent(n_actions=2, seed=0)
+    ag.field_bin = 1
+    fm4 = run(ag)
+    rnd = sum(run(None) for _ in range(3)) / 3
+    assert fm4 > 1.5 * rnd and fm4 > 20, f"FM4 planned {fm4} vs random {rnd:.1f}"

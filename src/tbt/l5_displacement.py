@@ -252,27 +252,15 @@ class L5_Displacement(nn.Module):
             for x in range(W):
                 self.field_rule[(self._field_patch(field, x, y, H, W), action)][next_field[y][x]] += 1
 
-    def predict_field(self, field, action):
-        """Predict the next feature-field: apply the rule per location (majority; default = no change for an unseen
-        context). Skips locations whose neighbourhood is ALL background (they cannot change under any learned rule --
-        bounds the scan to the active region). The efference copy at field grain -> the column's predictive state."""
+    def field_step(self, field, action):
+        """ONE pass over the active region -> (predicted next field, confidence). The planner's hot path needs BOTH
+        the next field (pragmatic value) and the trust (epistemic value) per action, so they share a single scan
+        (avoids double-iterating the active region -- the FM4 performance fix). `confidence` = fraction of active
+        locations whose rule is UNAMBIGUOUS; an unseen context keeps its current feature (the no-change default).
+        Skips ALL-background neighbourhoods (they cannot change) -> the scan is bounded to the active region."""
         H, W = len(field), len(field[0])
         bg = self._field_bg(field)
         out = [row[:] for row in field]
-        for y in range(H):
-            for x in range(W):
-                if field[y][x] == bg and self._field_all_bg(field, x, y, H, W, bg):
-                    continue
-                c = self.field_rule.get((self._field_patch(field, x, y, H, W), action))
-                if c:
-                    out[y][x] = c.most_common(1)[0][0]
-        return out
-
-    def field_confidence(self, field, action) -> float:
-        """Fraction of the active locations whose rule is UNAMBIGUOUS (a single observed outcome) -- a trust signal
-        for the planner + a learning-progress measure (low = this context not yet pinned down)."""
-        H, W = len(field), len(field[0])
-        bg = self._field_bg(field)
         seen = sure = 0
         for y in range(H):
             for x in range(W):
@@ -281,8 +269,20 @@ class L5_Displacement(nn.Module):
                 c = self.field_rule.get((self._field_patch(field, x, y, H, W), action))
                 if c:
                     seen += 1
-                    sure += (len(c) == 1)
-        return sure / seen if seen else 0.0
+                    if len(c) == 1:
+                        sure += 1
+                        out[y][x] = next(iter(c))                # the single outcome (skip most_common)
+                    else:
+                        out[y][x] = c.most_common(1)[0][0]
+        return out, (sure / seen if seen else 0.0)
+
+    def predict_field(self, field, action):
+        """The predicted next feature-field -- the efference copy at field grain (thin wrapper over `field_step`)."""
+        return self.field_step(field, action)[0]
+
+    def field_confidence(self, field, action) -> float:
+        """Fraction of active locations whose rule is UNAMBIGUOUS -- a trust / learning-progress signal (over `field_step`)."""
+        return self.field_step(field, action)[1]
 
     # ---- pose operators (the displacement-cell geometry, the layer's API) --------------------------------
     # The continuous-pose half of L5: a pose is a GROUP ELEMENT acting on displacements (spatial instance: SO(2)
