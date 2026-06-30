@@ -231,3 +231,86 @@ module"). *Gate:* directed exploration measurably beats Stage 1 on coverage/effi
   error), which is why it doesn't chase the noisy-TV (ls20's animation): a flat high-loss curve has zero
   epiplexity → zero epistemic value. Grounded in `reference_efe_and_epiplexity` (resolves §3b), and it *removes*
   the ad-hoc noise gate rather than adding to it.
+
+---
+
+## 7. The GSG stage — detailed re-plan (2026-06-29)
+
+After Stage 2, the GSG stage carries everything the experiments showed is coupled to explicit goal-states:
+**explicit goal emission + commitment, SR-navigation (the L6 read), the effort cost, the BG gate, disambiguation
+goals, and covert evaluation.** This section designs it before any code.
+
+### 7.1 The key realization — where the GSG actually earns its keep
+
+The current loop already navigates to the highest-EFE region implicitly: the EFE **value** `V` propagates reward
+(pragmatic) + frontier optimism (epistemic) backward through the graph, and `column.act` (Stage 2) greedily
+climbs it. So **for the degenerate goal `g = argmax V`, an explicit goal-state + navigation is just a reframe —
+it reproduces value-greedy.** The GSG is only worth its complexity when it proposes a goal **`g ≠ argmax V`**:
+- **A committed FAR goal** chosen over a nearer distraction (reach distant reward; enable the effort cost).
+- **A DISAMBIGUATION goal** — sample where L2/3's `(object,pose)` hypotheses disagree (resolve recognition
+  uncertainty). The value gradient does *not* produce this; it's about the recognition posterior, not reward.
+So the re-plan **centers on `g ≠ argmax V`** and treats the degenerate reframe as near-zero-value churn to avoid.
+
+### 7.2 Navigation — the known-vs-frontier resolution (the crux)
+
+You **cannot SR-navigate to an unvisited goal** (its SR row is empty — the Stage-2 finding). So `navigate_to(g)`:
+- **`g` known (in the SR):** the SR occupancy gradient — `argmax_a occ(predict(s,a), g)`, where
+  `occ(s,t)=M[s][t]` is the expected discounted visits to `t` from `s`. Greedy-toward-`g` ≈ shortest path. **This
+  is the clean L6 read** (and where `OnlineSR.occ` returns, removed in Stage 2 as premature).
+- **`g` frontier (unvisited):** the **value gradient** (optimism propagation) — the only thing that can pull
+  toward the unexplored, and exactly what chose `g`. So frontier goals fall back to `column.act`.
+One function, two regimes; the SR is read precisely where it is valid.
+
+### 7.3 Commitment — light hysteresis, not hard commit
+
+Re-emitting `g = argmax` every step is myopic (dithers between attractors) and defeats the effort cost; a hard
+commit risks getting stuck on a stale/unreachable goal. **Design: light hysteresis** — keep the current goal
+until (a) it is reached, (b) a different candidate beats it by a margin, or (c) a surprise spike invalidates the
+model. This is the minimal commitment that reduces dithering and lets the effort cost mean something, without the
+stuck-goal failure.
+
+### 7.4 The effort cost — a goal-RANKING tie-breaker (now safe)
+
+Stage 1's per-*state* effort abandoned far goals (it accumulated along every path). With explicit goals it moves
+to **goal RANKING**: `EFE(g) = (pragmatic+epistemic)(g) − effort·dist(s,g)`, where `dist` is read from the SR
+(`occ`)/graph. So among goals of similar intrinsic value the **nearer** wins (efficiency / RHAE), but a uniquely
+rewarding far goal still wins (its pragmatic value ≫ `effort·dist`). The navigation to a chosen `g` is already
+shortest-path (SR-greedy), so effort does **not** re-enter per step — no far-goal abandonment.
+
+### 7.5 The BG gate — arbitration among goal candidates
+
+The GSG proposes a few candidates of **different types** — the value-max (pragmatic/frontier), the committed
+goal, the disambiguation goal — and `BasalGanglia.gate` (Go/NoGo + dopamine-RPE) selects one, learning which
+types pay off. Single-column it is a thin arbiter (it earns its keep across types and, later, across columns).
+This is the user's "selection by consensus" mechanism, seated.
+
+### 7.6 Disambiguation goals + covert (the completion lever — and the novel/risky piece)
+
+The recognition-epistemic goal: pick the locus where sampling most reduces L2/3 hypothesis **entropy** (where the
+`(object,pose)` hypotheses most disagree). Its EFE = expected entropy reduction (a true mutual-information term,
+noise-robust). **Covert**: score it by a *mental* rollout (path-integrate the belief to the locus, predict the
+feature, estimate the entropy drop) — compute, not actions. This needs L2/3 to expose its hypothesis set + a
+disagreement measure; it is the most novel piece and the most plausible lever for *completing a game* (directed
+"figure out what's here" rather than undirected coverage).
+
+### 7.7 Sub-staging (each suite-green; offline reproductions)
+
+- **G1 — explicit goal + `navigate_to` + light commitment.** `column.propose_goal(value, candidates)` (degenerate:
+  argmax EFE, but *may* commit to a far goal) + `column.navigate_to(state, g)` (SR-occ for known, value for
+  frontier; restores `OnlineSR.occ`). *Gate:* solves nav/sparse/barrier ≥ Stage 2; suite green. *Risk:* commitment
+  destabilizes — hysteresis must be conservative.
+- **G2 — effort as a goal-distance tie-breaker.** Re-enable `reward.effort` in goal ranking (§7.4). *Gate:* fewer
+  actions on a scene with a near + a far goal, **no** far-goal abandonment; suite green.
+- **G3 — the BG gate over candidates.** Route goal selection through `BasalGanglia.gate`. *Gate:* behaviour
+  preserved/improved; suite green.
+- **G4 — disambiguation goals + covert.** The recognition-epistemic goal + mental rollout. *Gate:* on a scene
+  where the object is ambiguous from one glance, the agent samples to disambiguate in fewer actions than
+  undirected coverage. **May split into its own stage.**
+
+### 7.8 Decisions to confirm before G1
+1. **Commitment:** light hysteresis (§7.3) — agreed, or prefer pure re-emit (no commitment, lower risk but no
+   effort/anti-dither benefit)?
+2. **Disambiguation goals (G4):** in-scope for this stage (highest completion-lever, highest risk), or split to its
+   own stage after G1–G3 land?
+3. **GSG home:** the GSG is a **column** faculty (per-column, §1) reading the agent's value — agreed it lives in
+   `column.py` (proposer + `navigate_to`), with the agent the thin coordinator?
