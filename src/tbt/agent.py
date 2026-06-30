@@ -40,6 +40,9 @@ class Agent:
         self.plan_depth = 1                                                  # forward-model rollout depth (FM3/FM4; 1 = sound default)
         self.field_value = ValueLearner(alpha=0.25)                         # FM4: a GENERALISING value over field FEATURES (the goal in feature space)
         self.field_bin = 8                                                  # per-colour count binning for field features (coarse -> generalises)
+        self._ep_cache: dict = {}                                          # the last computed eigenpurpose (reused between recomputes)
+        self._ep_tick = 0                                                  # THROTTLE: the grid SVD is O(n^3) -> recompute the eigenpurpose only every _ep_every steps
+        self._ep_every = 16                                                # the exploration DIRECTION is slow-changing, so a stale-by-a-few-steps eigenpurpose is fine
         self.new_episode()
 
     def new_episode(self):
@@ -146,27 +149,77 @@ class Agent:
         per-step closed-form solve. (The SR's role here is the NEED that prioritizes the backups -- reference_brain_planning;
         the closed-form V=M·R is dense/O(states^2) and is reserved for the NEED term, not the whole value.)
 
-        With `field` (FM3/FM4): when the tabular value is INDIFFERENT across actions (a dynamics game's novel states)
-        the FORWARD MODEL decides instead -- its per-action (pragmatic field-value + epistemic learning-potential)."""
+        The action is chosen by the brain's EXPLORE/EXPLOIT arbitration (Daw): where the CLEAN reward value
+        (`V_exploit`) has a gradient across actions -- a known way to reach reward -- EXPLOIT it; elsewhere EXPLORE, on
+        the directed explore value (epistemic + the L6 eigenpurpose, propagated by the sweep -> a DIRECTED gradient out
+        of a reward-less, locally-exhausted pocket, the dead-zone fix). With `field` (FM3/FM4) the FORWARD MODEL fills
+        the explore vacuum on a dynamics game (its per-action pragmatic field-value + epistemic learning-potential)."""
+        self._ep_tick += 1                                                  # throttle the O(n^3) grid SVD: recompute the eigenpurpose occasionally, reuse between
+        if self._ep_tick % self._ep_every == 1:
+            self._ep_cache = self._eigenpurpose()
+        self.reward.intrinsic = self._ep_cache                             # L6 eigenpurpose -> propagated by the EXPLORE sweep
         T, preds = self._transitions()
         if state in T:                                                       # plan only from a state with observed edges
-            self.reward.plan(T, preds, state)                               # prioritized sweeping (an unvisited state -> frontier values)
-        tab = [self._tab_value(state, a) for a in self.actions]
-        self._tab_spread = max(tab) - min(tab)                              # the arbitration signal (0 = the map is indifferent here)
+            self.reward.plan(T, preds, state)                               # sweeps BOTH the explore and the exploit value
+        # NORMAL operation runs on V_exploit (reward + epistemic, NO eigenpurpose): its action-spread gates everything.
+        # >0 = the value decides here (reward-seeking OR local frontier exploration) -> act on it: the OLD behavior, so
+        # the eigenpurpose never perturbs a converged policy / a dynamics game / the learning-progress contrast.
+        ev = [self._explore_value(state, a, self.reward.V_exploit) for a in self.actions]
+        self._tab_spread = max(ev) - min(ev)
+        # the EFE DEAD-ZONE (the measured nav-failure mode): reward-less (no reward found ANYWHERE yet) AND locally
+        # exhausted (every action HERE already tried -> the frontier optimism is spent, V_exploit is ~flat -> a random
+        # walk). A clean boolean, not a fragile flatness threshold -- it fires throughout an explored pocket (directing
+        # to its frontier) but NOT at the boundary (an untried action there -> frontier optimism explores), and never
+        # once the first reward is found (-> pure exploit/transfer thereafter).
+        dead_zone = not self.reward.R_ext and all((state, a) in self.tried for a in self.actions)
+        if self._tab_spread > 1e-9 and not dead_zone:                      # NORMAL: V_exploit (reward-seeking / local exploration) decides
+            return self.col.act(state, self.actions, value=lambda s: self.reward.V_exploit[s],
+                                explore=self.reward.explore, tried=self.tried, rng=self.rng)
+        # the eigenpurpose-laden V acts here: a DYNAMICS vacuum (flat V_exploit -> the forward model fills it) OR the nav
+        # DEAD-ZONE (the propagated, DIRECTED gradient out of the pocket toward the frontier/bottleneck).
         bonus = None
-        if field is not None and self._tab_spread <= 1e-9:                  # the map leads nowhere here -> the FORWARD MODEL decides
+        if field is not None:
             plan = self._field_plan(field, self.actions, self.plan_depth)
             bonus = {a: prag + self.reward.beta * epi for a, (prag, epi) in plan.items()}
         return self.col.act(state, self.actions, value=lambda s: self.reward.V[s], explore=self.reward.explore,
                             tried=self.tried, rng=self.rng, bonus=bonus)
 
-    def _tab_value(self, state, a):
-        """The value of action `a` from `state` that `col.act` will use: the bounded frontier optimism for an untried
-        action, else the swept value `reward.V[nxt]` of its outcome. The SPREAD across actions is the arbitration
-        signal (flat = the map has no preference here -> the forward model)."""
+    def _explore_value(self, state, a, V):
+        """The value of action `a` for the arbitration: the frontier optimism for an UNTRIED action, else `V[next]` of
+        its outcome. Evaluated over V_exploit (no eigenpurpose), its action-spread is the arbitration signal: >0 = the
+        value decides (normal reward-seeking / local exploration); flat = the locally-exhausted, reward-less dead-zone
+        (switch to the eigenpurpose-laden V). The same flat-gate keeps the dense forward model off during normal nav."""
         if (state, a) not in self.tried:
             return self.reward.explore
-        return self.reward.V[self.col.graph.get(state, {}).get(a, state)]
+        return V[self.col.graph.get(state, {}).get(a, state)]
+
+    def _eigenpurpose(self, k: int = 5, cap: int = 400):
+        """The per-state EIGENPURPOSE intrinsic reward from the L6 GRID (top-k SR eigenvectors = `col.sr.grid`): high at
+        the UNDER-visited extreme of the eigenstructure (the frontier / bottleneck), oriented by anti-correlation with
+        the visit counts. Set as `reward.intrinsic` and PROPAGATED by the explore sweep, so the agent navigates DIRECTEDLY
+        out of a reward-less, locally-exhausted pocket (the EFE dead-zone) instead of random-walking. `{}` for a graph too
+        small (no structure) or too large (the SVD is O(n^3); Oja/Sanger streaming is the scale fix). Scaled by `beta`
+        (comparable to the frontier optimism it replaces)."""
+        import numpy as np
+
+        sr = self.col.sr
+        n = sr.M.shape[0]
+        if n < 3 or n > cap:
+            return {}
+        inv = {i: s for s, i in sr.idx.items()}
+        vis = np.array([self.reward.visits.get(inv[i], 0) for i in range(n)], dtype=float)
+        acc = np.zeros(n)
+        for e in sr.grid(k):                                               # each grid cell (eigenvector over states)
+            if e.std() < 1e-9:
+                continue
+            if vis.std() > 0 and np.corrcoef(e, vis)[0, 1] > 0:           # orient: HIGH value = UNDER-visited (the frontier extreme)
+                e = -e
+            e = e - e.min()
+            if e.max() > 0:
+                acc += e / e.max()
+        if acc.max() > 0:
+            acc /= acc.max()                                              # normalize the eigenpurpose to [0, 1]
+        return {inv[i]: self.reward.beta * float(acc[i]) for i in range(n)}
 
     def _field_plan(self, field, actions=None, depth=1):
         """Per-action `(pragmatic, epistemic)` via the forward model, ONE `field_step` pass each (predict + confidence

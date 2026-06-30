@@ -88,11 +88,14 @@ class RewardModel:
         # propagates (so paths toward the unexplored are valued -> coverage), but it is BOUNDED (not max-reward) and
         # DECAYS once visited (reward_total's lp -> 0 on noise/mastered). `rmax=True` restores the old Vmax ablation.
         self.explore = self.Vmax if rmax else self.beta * self.frontier / (1.0 - gamma)
-        self.V = defaultdict((lambda: self.explore) if optimistic else float)
-        self.R_ext = {}                                         # extrinsic reward (from the sparse score)
+        self.V = defaultdict((lambda: self.explore) if optimistic else float)   # the explore value (reward + epistemic + the EIGENPURPOSE)
+        self.V_exploit = defaultdict((lambda: self.explore) if optimistic else float)  # the NORMAL value (reward + epistemic, NO eigenpurpose -> never perturbed by it)
+        self.intrinsic: dict = {}                              # the L6 EIGENPURPOSE per state (set per-step by the agent; propagated by the explore sweep)
+        self.R_ext = {}                                        # extrinsic reward (from the sparse score)
         self.visits = defaultdict(int)                          # visit counts (drive the novelty bonus)
-        self.queue = {}                                         # pending backups: state -> priority
-        self.backups = 0                                        # compute counter (efficiency comparison)
+        self.queue = {}                                        # pending EXPLORE backups: state -> priority
+        self._q_exploit = {}                                  # pending EXPLOIT backups
+        self.backups = 0                                       # compute counter (efficiency comparison)
         # --- the EPISTEMIC term (what the agent path-integrates TOWARD) -------------------------------------
         # "progress" = LEARNING PROGRESS (the model's prediction-error REDUCTION per state) -- a navigable landscape:
         # the agent is drawn to where it is LEARNING, ignores irreducible noise (the noisy-TV: high error, no
@@ -121,6 +124,13 @@ class RewardModel:
         return max(self.err_slow[s] - self.err_fast[s], 0.0)                  # learning progress = epiplexity-extraction rate
 
     def reward_total(self, s):
+        """The EXPLORE reward (swept into V): the base pragmatic+epistemic PLUS the L6 EIGENPURPOSE intrinsic
+        (`intrinsic[s]`, set per-step by the agent -> a DIRECTED gradient toward the under-visited extreme, replacing the
+        flat frontier optimism in the dead-zone). Kept SEPARATE from the exploit value so it never perturbs a converged
+        policy (the explore/exploit split, Daw -- reference_eigenoptions_subgoals)."""
+        return self._reward_base(s) + self.intrinsic.get(s, 0.0)
+
+    def _reward_base(self, s):
         ext = self.R_ext.get(s, 0.0)
         if self.epistemic == "novelty":
             return ext + self.beta / (1.0 + self.visits[s])                    # count-based novelty (the old bump)
@@ -132,6 +142,14 @@ class RewardModel:
         pragmatic = ext - (self.effort if ext <= 0.0 else 0.0)
         return pragmatic + self.beta * self.epistemic_value(s)
 
+    def reward_exploit(self, s):
+        """The NORMAL-operation reward = the base pragmatic + epistemic, WITHOUT the eigenpurpose. Swept into V_exploit,
+        the value the agent uses for reward-seeking AND local (frontier / learning-progress) exploration -- so the
+        eigenpurpose never perturbs normal operation (the reason a converged policy stays converged). The eigenpurpose
+        lives ONLY in V (reward_total), which the agent switches to when V_exploit is INDIFFERENT across actions (the
+        locally-exhausted, reward-less DEAD-ZONE -- where a directed escape is exactly what's missing)."""
+        return self._reward_base(s)
+
     def _need(self, s, current):
         """NEED = successor-representation relevance of s to the agent's future. The TRUE need is the SR
         under the current (exploring) policy — distant unexplored states have HIGH need because the agent
@@ -140,40 +158,53 @@ class RewardModel:
         SR via place-code similarity."""
         return 1.0
 
-    def _push(self, s, pri):
+    def _push(self, q, s, pri):
         if pri > self.theta:
-            self.queue[s] = max(self.queue.get(s, 0.0), pri)
+            q[s] = max(q.get(s, 0.0), pri)
 
     def observe(self, state, score_delta):
         self.visits[state] += 1
         if score_delta > 0:
             self.R_ext[state] = 1.0                              # infer_goal: reached state was rewarding
-        self._push(state, 1.0)                                  # reward/novelty changed here — back it up
+        self._push(self.queue, state, 1.0)                     # reward/novelty changed here -> back it up in BOTH values
+        self._push(self._q_exploit, state, 1.0)
 
-    def _backup(self, s, T):
+    def _backup(self, s, T, V, reward_fn):
         self.backups += 1
         nxts = T.get(s, [])                                     # a state absent from T is TERMINAL/unknown (online partial T)
-        new_v = (self.reward_total(s) if not nxts else
-                 max(self.reward_total(s) + self.gamma * self.V[nxt] for nxt in nxts))
-        delta = new_v - self.V[s]
-        self.V[s] = new_v
+        new_v = (reward_fn(s) if not nxts else
+                 max(reward_fn(s) + self.gamma * V[nxt] for nxt in nxts))
+        delta = new_v - V[s]
+        V[s] = new_v
         return abs(delta)
 
+    def _sweep(self, T, preds, current, V, reward_fn, q):
+        """One prioritized sweep (Mattar & Daw) of value dict `V` under `reward_fn`, draining queue `q`: pop the
+        highest-priority (gain x need) state, back it up, push its predecessors by the propagated gain. Bounded by
+        `budget`; the queue persists pending backups across steps (deep value keeps propagating)."""
+        self._push(q, current, 1.0)                            # forward (need) seed from where we are
+        for _ in range(self.budget):
+            if not q:
+                break
+            s = max(q, key=q.get)                              # highest priority = gain x need
+            del q[s]
+            delta = self._backup(s, T, V, reward_fn)
+            for p in preds[s]:                                 # propagate to predecessors (reverse replay)
+                self._push(q, p, self.gamma * delta * self._need(p, current))
+
     def plan(self, T, preds, current):
+        """Sweep BOTH values from `current`: the EXPLORE value V (reward + epistemic + the eigenpurpose) and the EXPLOIT
+        value V_exploit (clean reward). The agent arbitrates per state -- exploit where V_exploit has a gradient (a known
+        way to reward), else explore (the directed eigenpurpose). Two cheap bounded sweeps; the eigenpurpose lives ONLY
+        in the explore sweep, so a converged exploit policy is never perturbed (the dead-zone fix, done as a SPLIT)."""
         if self.prioritized:
-            self._push(current, 1.0)                            # forward (need) seed from where we are
-            for _ in range(self.budget):
-                if not self.queue:
-                    break
-                s = max(self.queue, key=self.queue.get)         # highest priority = gain x need
-                del self.queue[s]
-                delta = self._backup(s, T)
-                for p in preds[s]:                              # propagate to predecessors (reverse replay)
-                    self._push(p, self.gamma * delta * self._need(p, current))
+            self._sweep(T, preds, current, self.V, self.reward_total, self.queue)                    # EXPLORE
+            self._sweep(T, preds, current, self.V_exploit, self.reward_exploit, self._q_exploit)     # EXPLOIT
         else:
             for _ in range(self.sweeps):                        # exhaustive value iteration (baseline)
                 for s in T:
-                    self._backup(s, T)
+                    self._backup(s, T, self.V, self.reward_total)
+                    self._backup(s, T, self.V_exploit, self.reward_exploit)
 
     def act(self, current, T, preds, rng):
         self.plan(T, preds, current)
