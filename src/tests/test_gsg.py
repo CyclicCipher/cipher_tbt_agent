@@ -147,3 +147,35 @@ def test_basal_ganglia_arbitrates_act_vs_disambiguate_and_learns():
     for _ in range(5):
         bg.gate(kinds, [0.3, 0.6])                              # disambiguate consistently more valuable
     assert kinds[bg.gate(kinds, [0.5, 0.4])] == "disambiguate"  # learned affinity carries it past a value dip
+
+
+def test_gsg_holds_off_until_the_field_is_narrowed():
+    """GD4 fire-when-narrowed (Monty's trigger): with MANY tied pose-hypotheses (a self-similar object, not yet
+    narrowed) the GSG HOLDS OFF -- the top-2 graph-mismatch would be premature; passive sensing must narrow first
+    (this is why the GD2 trace showed the GSG swamped by 12 tied hypotheses). It fires once the field is a few."""
+    bar = [(x, 0) for x in range(12)]
+    big_a, big_b = bar + [(0, 1)], bar + [(11, 1)]
+    l23 = L23_Object()
+    l23.learn(big_a, name="A"); l23.learn(big_b, name="B")
+    locs = [np.asarray(c, float) for c in big_a]
+    l23.start()
+    l23.sense(locs[5], local_disps(locs, 5, l23.radius))       # one glance at a self-similar middle cell
+    assert len(l23.hyps) > 4                                    # many tied hypotheses -- not narrowed
+    assert l23.disambiguation_goal() is None                    # the GSG holds off (fire-when-narrowed)
+    assert l23.disambiguation_goal(narrowed=99) is not None     # raising the threshold lets it fire -> it IS the gate
+
+
+def test_effort_tie_breaker_discounts_a_far_disambiguation_goal():
+    """GD4 efficiency: the disambiguation goal is charged for the TRIP to its target, so a FAR test is less
+    attractive than acting -- but a uniquely-worth-it test still wins. The goal-distance tie-breaker (now safe,
+    because the goal is explicit), not the per-state cost that abandoned far goals in Stage 1."""
+    col = _ambiguous_column()
+    col.L23.prev = np.array([1.0, 0.0])                         # the current sensor locus
+    near = col.propose_goals(act_value=0.5, g_value=0.5, effort=0.0)
+    far = col.propose_goals(act_value=0.5, g_value=0.5, effort=0.1)
+    gv_near = next(v for g, v in near if g.kind == "disambiguate")
+    gv_far = next(v for g, v in far if g.kind == "disambiguate")
+    assert gv_far < gv_near                                     # effort discounts the far trip
+    # a uniquely valuable test still beats acting despite the trip
+    rich = col.propose_goals(act_value=0.2, g_value=2.0, effort=0.1)
+    assert next(v for g, v in rich if g.kind == "disambiguate") > next(v for g, v in rich if g.kind == "act")

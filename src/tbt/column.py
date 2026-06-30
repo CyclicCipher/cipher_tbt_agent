@@ -167,17 +167,23 @@ class CorticalColumn(nn.Module):
         return GoalState(target=target, kind="disambiguate") if target is not None else None
 
     def examine(self, sense_at, first, max_samples: int = 12, confident: float = 2.0):
-        """ACTIVE recognition -- the GSG DIRECTING the motor. Begin a session with the `first` sensation
-        (loc, disps), then repeatedly: COVERTLY pick the disambiguating sample point (the GSG / graph-mismatch,
-        computed from the models -- no action spent), then OVERTLY sample there via the motor:
-        `sense_at(target) -> (loc, disps)` for a cell found there, or `None` for empty. Present -> `sense` (confirm
-        a predictor); absent -> `sense_absent` (falsify the predictors). Stop when one hypothesis leads by
-        `confident` evidence (or no goal / budget). Returns `(best, n_overt_samples)`. Resolves in FEWER overt
-        samples than undirected sensing because each sample is chosen to resolve the most uncertainty -- the point
-        of the GSG (think, then act). This is the inverse-model motor fulfilling a real goal-state; the live loop
-        will arbitrate it against value/explore goals via the basal ganglia (next step)."""
+        """ACTIVE recognition -- the GSG DIRECTING the motor, in Monty's order: PASSIVE-narrow then hypothesis-TEST.
+        Begin a session with `first` (loc, disps). Each step: if the GSG fires (the field has NARROWED -- the
+        graph-mismatch on the top-2 is now worthwhile), COVERTLY pick the disambiguating point and OVERTLY sample it;
+        ELSE (not yet narrowed) PASSIVELY sample the leading hypothesis's nearest UNSENSED predicted cell to gather
+        evidence. The motor sample is `sense_at(target) -> (loc, disps)` for a cell there, or `None` for empty
+        (present -> `sense` confirms a predictor; absent -> `sense_absent` falsifies them). Stop when one hypothesis
+        leads by `confident` (or budget). Returns `(best, n_overt_samples)`. The GSG spends each ACTIVE sample where
+        it resolves the most uncertainty (think, then act); the live loop arbitrates this against value/explore goals
+        via the basal ganglia."""
+        import numpy as np
+
+        def _key(p):
+            return (round(float(p[0]), 1), round(float(p[1]), 1))
+
         self.L23.start()
         self.L23.sense(*first)
+        sensed = {_key(first[0])}
         n = 1
         while n < max_samples:
             hyps = self.L23.hyps
@@ -186,28 +192,42 @@ class CorticalColumn(nn.Module):
             ev = sorted((h.ev for h in hyps), reverse=True)
             if ev[0] - ev[1] >= confident:                  # a hypothesis leads clearly -> resolved
                 break
-            goal = self.propose_goal()                      # COVERT: where to sample (graph-mismatch, no action)
-            if goal is None:
-                break
-            obs = sense_at(goal.target)                     # OVERT: the motor samples at the target
+            goal = self.propose_goal()                      # the GSG fires only once narrowed
+            if goal is not None:
+                target = goal.target                        # ACTIVE: the graph-mismatch discriminating point
+            else:                                           # PASSIVE: narrow via the leading hypothesis's next cell
+                top = max(hyps, key=lambda h: h.ev)
+                cands = [p for p in top.obj.cells_at(top.theta, top.t) if _key(p) not in sensed]
+                if not cands:
+                    break
+                ref = self.L23.prev if self.L23.prev is not None else np.zeros(2)
+                target = tuple(round(float(x), 3) for x in min(cands, key=lambda p: np.linalg.norm(np.asarray(p, float) - ref)))
+            obs = sense_at(target)                          # OVERT: the motor samples at the target
             n += 1
             if obs is None:
-                self.L23.sense_absent(goal.target)          # empty -> falsify the predictors
+                self.L23.sense_absent(target)               # empty -> falsify the predictors
             else:
                 self.L23.sense(*obs)                        # a cell there -> confirm
+                sensed.add(_key(obs[0]))
         return self.L23.best(), n
 
-    def propose_goals(self, act_value, g_value=0.0):
+    def propose_goals(self, act_value, g_value=0.0, effort=0.0):
         """The candidate goals the BASAL GANGLIA arbitrates (Cisek's affordance competition): ALWAYS the ACT goal
         (pursue the value/explore policy via the inverse-model motor; value = `act_value` = the best action's EFE
         value), PLUS the DISAMBIGUATION goal when L2/3's hypotheses still compete (value = `g_value` = the epistemic
-        value of resolving the identity, supplied on the same EFE scale by the caller). Returns [(GoalState, value),
-        ...]; the BG (Go/NoGo + dopamine-RPE) selects one. The heterarchy adds RECEIVED goal-messages to this same
-        list -- the competition is the only mechanism, regardless of where a candidate came from."""
+        value of resolving the identity, supplied on the same EFE scale by the caller). `effort` is the per-distance
+        cost the EFFICIENCY tie-breaker charges the disambiguation goal for the trip to its target (from the current
+        sensor locus) -- so a FAR test is less attractive than acting, but a uniquely-worth-it test still wins
+        (g_value >> effort*dist). Returns [(GoalState, value), ...]; the BG selects one. The heterarchy adds
+        RECEIVED goal-messages to this same list -- the competition is the only mechanism, wherever a candidate came from."""
         goals = [(GoalState(target=None, kind="act"), float(act_value))]
         dg = self.propose_goal()
         if dg is not None:
-            goals.append((dg, float(g_value)))
+            v = float(g_value)
+            if effort > 0.0 and self.L23.prev is not None:          # the goal-distance tie-breaker (efficiency)
+                dx, dy = dg.target[0] - float(self.L23.prev[0]), dg.target[1] - float(self.L23.prev[1])
+                v -= effort * (dx * dx + dy * dy) ** 0.5
+            goals.append((dg, v))
         return goals
 
     # ----- the inter-column interface (the thalamus binds content ⊗ location) -----------------------

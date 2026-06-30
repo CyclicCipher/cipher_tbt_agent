@@ -169,14 +169,15 @@ class L23_Object(nn.Module):
         h = max(self.hyps, key=lambda h: h.ev)
         return h.obj.name, h.theta, h.t, h.ev
 
-    def disambiguation_goal(self, margin: float = 1.5):
-        """The hypothesis-TESTING goal (Monty's GRAPH-MISMATCH): when >= 2 (object, pose) hypotheses still compete
-        in this session, return the WORLD location where the top-2 most DISAGREE -- a point present in one model (at
-        its hypothesised pose) but FAR from every point of the other. Sensing there maximally discriminates them
-        (present -> supports that hypothesis; absent -> the other). None when there is no genuine competition (one
-        hypothesis already leads by > `margin` evidence, or < 2 hypotheses). DOMAIN-GENERAL: it reads only the
-        column's own (object, pose) hypotheses -- nothing task-specific. The epistemic CORE of the GSG."""
-        if len(self.hyps) < 2:
+    def disambiguation_goal(self, margin: float = 1.5, narrowed: int = 4):
+        """The hypothesis-TESTING goal (Monty's GRAPH-MISMATCH): when the field has NARROWED to a few competing
+        (object, pose) hypotheses, return the WORLD location where the top-2 most DISAGREE -- a point present in one
+        model (at its hypothesised pose) but FAR from every point of the other. Sensing there maximally
+        discriminates them (present -> supports that hypothesis; absent -> the other). None when there is nothing to
+        resolve: < 2 hypotheses; one already leads by > `margin`; or the field is NOT YET narrowed (> `narrowed`
+        competitors -- the top-2 graph-mismatch is premature, let passive sensing narrow first; this is why Monty
+        fires the test on TRIGGERS, not every step). DOMAIN-GENERAL: it reads only the column's own hypotheses."""
+        if not (2 <= len(self.hyps) <= narrowed):              # nothing to resolve, or not yet narrowed to a few
             return None
         h1, h2 = sorted(self.hyps, key=lambda h: h.ev, reverse=True)[:2]
         if h1.ev - h2.ev > margin:                             # a clear leader -> nothing to resolve
