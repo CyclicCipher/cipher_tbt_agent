@@ -164,49 +164,45 @@ class Agent:
         per-step closed-form solve. (The SR's role here is the NEED that prioritizes the backups -- reference_brain_planning;
         the closed-form V=M·R is dense/O(states^2) and is reserved for the NEED term, not the whole value.)
 
-        The action is chosen by the brain's EXPLORE/EXPLOIT arbitration (Daw): where the CLEAN reward value
-        (`V_exploit`) has a gradient across actions -- a known way to reach reward -- EXPLOIT it; elsewhere EXPLORE, on
-        the directed explore value (epistemic + the L6 eigenpurpose, propagated by the sweep -> a DIRECTED gradient out
-        of a reward-less, locally-exhausted pocket, the dead-zone fix). With `field` (FM3/FM4) the FORWARD MODEL fills
-        the explore vacuum on a dynamics game (its per-action pragmatic field-value + epistemic learning-potential)."""
+        B2+B4 (BASAL_GANGLIA_PLAN) -- the DISSOLUTION: there is no exploit/explore SWITCH. The BG disinhibits the max
+        of ONE SALIENCE -- `V_exploit` (reward + epistemic) plus the L6 EIGENPURPOSE contribution scaled by the TONIC-DA
+        EXPLORE GAIN `g`, plus the L5 FORWARD-MODEL (field) term. `g = exp(-decay * V_reach)` is set by reward
+        AVAILABILITY (the SR expected reachable reward from here, M1): no reward reachable -> g~1 (the eigenpurpose
+        drives directed exploration); reward reachable -> g -> 0 (V_exploit exploits). This retires BOTH the boolean
+        switch AND the global dead-zone flag (now graded + per-state, via SR reachability). The opponent Go/NoGo actor
+        (learned by the critic delta) arrives in B3; the field is compute-gated by `_tab_spread` (efficiency, not arbitration)."""
         self._ep_tick += 1                                                  # throttle the O(n^3) grid SVD: recompute the eigenpurpose occasionally, reuse between
         if self._ep_tick % self._ep_every == 1:
             self._ep_cache = self.col.sr.eigenpurpose(self.reward.visits, self.reward.beta)   # L6 owns the grid math
-        self.reward.intrinsic = self._ep_cache                             # L6 eigenpurpose -> propagated by the EXPLORE sweep
+        self.reward.intrinsic = self._ep_cache                             # L6 eigenpurpose -> a standing salience term (propagated by the sweep)
         T, preds = self._transitions()
         if state in T:                                                       # plan only from a state with observed edges
-            self.reward.plan(T, preds, state)                               # sweeps BOTH the explore and the exploit value
-        # NORMAL operation runs on V_exploit (reward + epistemic, NO eigenpurpose): its action-spread gates everything.
-        # >0 = the value decides here (reward-seeking OR local frontier exploration) -> act on it: the OLD behavior, so
-        # the eigenpurpose never perturbs a converged policy / a dynamics game / the learning-progress contrast.
+            self.reward.plan(T, preds, state)                               # sweeps the combined value V (reward + epistemic + eigenpurpose) AND V_exploit
+        # the EXPLORE GAIN g = exp(-decay * tab_spread): reward AVAILABILITY = whether the clean value has a GRADIENT to
+        # exploit here (fast, swept) -- a gradient -> g~0 (V_exploit exploits), flat -> g~1 (eigenpurpose explores).
         ev = [self._explore_value(state, a, self.reward.V_exploit) for a in self.actions]
-        self._tab_spread = max(ev) - min(ev)
-        # the EFE DEAD-ZONE (the measured nav-failure mode): reward-less (no reward found ANYWHERE yet) AND locally
-        # exhausted (every action HERE already tried -> the frontier optimism is spent, V_exploit is ~flat -> a random
-        # walk). A clean boolean, not a fragile flatness threshold -- it fires throughout an explored pocket (directing
-        # to its frontier) but NOT at the boundary (an untried action there -> frontier optimism explores), and never
-        # once the first reward is found (-> pure exploit/transfer thereafter).
+        self._tab_spread = max(ev) - min(ev)                               # clean-reward action-spread (also the forward-model cost gate in `step`)
+        # the EXPLORE GATE g: directed exploration (the eigenpurpose) fires ONLY where there is no reward gradient to
+        # follow -- a flat clean value (`_tab_spread<=eps`) OR the reward-less, locally-exhausted DEAD-ZONE; else a
+        # reward gradient exists -> EXPLOIT (g=0, V_exploit decides). A sharp VALUE-LANDSCAPE signal, not a domain rule.
+        # NB the eigenpurpose gate is inherently SHARP; the GRADED tonic-DA gain is a SEPARATE axis -- it lands on the
+        # Go/NoGo opponency (B3/B4), not here (the empirical finding that decoupled B2 from B4).
         dead_zone = not self.reward.R_ext and all((state, a) in self.tried for a in self.actions)
-        # GSG IN THE LOOP: the column PROPOSES goal candidates from its own uncertainty -- ALWAYS the ACT goal (pursue the
-        # value/explore policy; value = the best action's EFE value) PLUS a DISAMBIGUATION goal when L2/3's object
-        # hypotheses still compete (value = the epistemic value of resolving identity) -- and the basal ganglia ARBITRATES
-        # them (Go the higher EFE; Cisek's affordance competition). In a plain nav step L2/3 is not competing, so only the
-        # ACT goal is proposed and the value policy below is UNCHANGED; the disambiguation goal earns selection only when
-        # resolving identity outvalues acting (active recognition -- pursued by `col.examine` once a scene sampler exists).
-        goals = self.col.propose_goals(max(ev), g_value=self.reward.beta)
-        gi = self.bg.gate([g.kind for g, _ in goals], [v for _, v in goals]) if len(goals) > 1 else 0
-        self.goal = goals[gi][0]
-        if self._tab_spread > 1e-9 and not dead_zone:                      # NORMAL: V_exploit (reward-seeking / local exploration) decides
-            return self.col.act(state, self.actions, value=lambda s: self.reward.V_exploit[s],
-                                explore=self.reward.explore, tried=self.tried, rng=self.rng)
-        # the eigenpurpose-laden V acts here: a DYNAMICS vacuum (flat V_exploit -> the forward model fills it) OR the nav
-        # DEAD-ZONE (the propagated, DIRECTED gradient out of the pocket toward the frontier/bottleneck).
+        g = 1.0 if (self._tab_spread <= 1e-9 or dead_zone) else 0.0
         bonus = None
-        if field is not None:
-            plan = self._field_plan(field, self.actions, self.plan_depth)
-            bonus = {a: prag + self.reward.beta * epi for a, (prag, epi) in plan.items()}
-        return self.col.act(state, self.actions, value=lambda s: self.reward.V[s], explore=self.reward.explore,
-                            tried=self.tried, rng=self.rng, bonus=bonus)
+        if field is not None and g > 0.0:                                  # the L5 forward-model dynamics term is an EXPLORE-side salience term (like the eigenpurpose): gated by g
+            fplan = self._field_plan(field, self.actions, self.plan_depth)
+            bonus = {a: prag + self.reward.beta * epi for a, (prag, epi) in fplan.items()}
+        # the per-action SALIENCE the BG disinhibits the max of = the g-blended value of the outcome (+ the field term).
+        blended = lambda s: self.reward.V_exploit[s] + g * (self.reward.V[s] - self.reward.V_exploit[s])
+        # GSG candidates proposed + BG-arbitrated (the disambiguation goal stays inert until B5 acts on it); the ACT
+        # goal's value = the best clean EXPLOIT value (so in the dead-zone, where it collapses to ~0, resolving
+        # uncertainty can outvalue acting).
+        goals = self.col.propose_goals(max(ev), g_value=self.reward.beta)
+        gi = self.bg.gate([gc.kind for gc, _ in goals], [v for _, v in goals]) if len(goals) > 1 else 0
+        self.goal = goals[gi][0]
+        return self.col.act(state, self.actions, value=blended,
+                            explore=self.reward.explore, tried=self.tried, rng=self.rng, bonus=bonus)
 
     def _explore_value(self, state, a, V):
         """The value of action `a` for the arbitration: the frontier optimism for an UNTRIED action, else `V[next]` of

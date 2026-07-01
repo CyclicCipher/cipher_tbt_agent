@@ -65,15 +65,22 @@ booleans — one salience, one DA gain, one STN threshold. `_choose` returns to 
   for the actor (unwired). *Tests (mechanism, `test_basal_ganglia.py`):* δ equals the explicit TD formula; δ→0 along the
   optimal path once converged + mastered (lp=0); δ<0 for a step AWAY from reward; δ winds down as the reward is learned.
   Suite 101→103 (additive).
-- **B2 — single-actor salience selection (dissolve the channels).** Replace `_choose`'s 2-case switch with ONE salience
-  `Act(a) = value(a) ⊕ eigenpurpose ⊕ field`, actor-weighted, trained by `δ`; `col.act` selects the max. *Test:* on the
-  replica graphs the selection reproduces reward-seeking where the old switch exploited AND directed exploration where it
-  explored — no `dead_zone`/`tab_spread` — and the brittle regressions do NOT recur. **This is the core dissolution.**
-- **B3 — OpAL opponency.** Add `N(a)` (costs) + the three-factor Go/NoGo updates; GAME_OVER (or a blocked/no-progress
-  outcome) as a COST. *Test:* the agent AVOIDS an aversive outcome the single value could not represent; Go/NoGo
-  specialize (a mechanism check on a rich vs lean replica).
-- **B4 — tonic-DA `ρ` (explore/exploit gain).** `ρ` from the value landscape sets `β_g/β_n`; delete `dead_zone`. *Test:*
-  reward-rich → exploit; reward-less/uncertain → explore — GRADED, learned, no boolean; the dead-zone nav case still escapes.
+- **B2 ✅ — STRUCTURAL dissolution (behaviour-neutral).** `_choose`'s two-branch `if/else` + the `dead_zone`-forced
+  branch collapse into ONE salience `V_exploit + g·(V − V_exploit)` selected by a single `col.act` (field gated by `g`).
+  Suite 103 green, behaviour-IDENTICAL. **KEY FINDING (corrects the plan):** the eigenpurpose's explore/exploit gate is
+  inherently a SHARP step ("any reward gradient → exploit"), NOT a graded tonic-DA gain — a graded/reachability gain
+  *poisons* (the eigenpurpose fights the reward gradient; SR reachability also LAGS the reward sweep). So the sharp gate
+  `g = (tab_spread≈0 or dead_zone)` is KEPT as a principled value-landscape signal, and **the graded tonic-DA gain
+  DECOUPLES from here and moves to B3's Go/NoGo** (a different axis: reward exploit-gains vs avoid-losses). What B2 did
+  NOT do: introduce a learned actor (that is B3) — B2 is the one-salience BASE B3 rides on. [The eigenpurpose stays
+  (load-bearing for long-horizon planning, user); its SVD → online Hebbian PCA is a LATER swap, not now — §6 below.]
+- **B3 — OpAL Go/NoGo opponent actor (the LEARNED selection) + the tonic-DA gain.** Add `G(a)`/`N(a)` (three-factor OpAL,
+  trained by the B1 critic `δ`) to `basal_ganglia.py`; `Act(a)=β_g·G−β_n·N` with `β_g=β·max(0,1+ρ)`, `β_n=β·max(0,1−ρ)`,
+  `ρ` = the tonic-DA gain from reward availability. This is where hand-coded value-selection becomes a LEARNED one, and
+  where the graded tonic-DA belongs. Stage: **B3a** the actor + mechanism tests in isolation (additive, like B1 — Go/NoGo
+  specialize, `ρ` shifts the balance, benefit beats cost); **B3b** wire it into the salience (Go/NoGo start ≈neutral so
+  behaviour is preserved, then refine by `δ`). *Test:* the agent AVOIDS an aversive outcome (`N`/GAME_OVER) the single
+  value could not represent; suite green.
 - **B5 — STN commitment.** The conflict term raises the threshold on near-tied saliences (hold the current choice). *Test:*
   anti-thrash on a two-attractor scene; and it supplies the GSG's commitment (cross-check `MOTOR_REFACTOR §8.6`).
 
@@ -106,6 +113,16 @@ higher-order driver). It is a heterarchy-era prerequisite, tackled AFTER the BG 
   the BG adds the OPPONENCY + `ρ` + STN, nothing else.
 - **Rides on:** M1 (the critic value — B1 advances it), M3/M4 (eigenpurpose/field become salience terms — subsumed
   here). Precedes P3/P4 only loosely; B1's critic work overlaps M1.
+
+## 6. Reviewed 2026-06-30: the eigenpurpose SVD (KEEP; online Hebbian PCA is a LATER swap)
+The ONLY SVD in the system is `l6_sr.grid()` (`np.linalg.svd(M)`, top-k=5 singular vectors = grid cells), consumed by
+`eigenpurpose()` (directed-exploration intrinsic reward; capped n≤400, throttled every 16 steps). O(n³). **Decision
+(user):** the eigenpurpose is load-bearing (it is how long-horizon planning/action is achieved — eigenoptions/bottleneck
+sub-goals), so KEEP it; switch the batch SVD to **online Hebbian PCA (Oja/Sanger/GHA)** — the intended scale path already
+noted in `l6_sr` — WHEN APPROPRIATE (better perf: streaming O(nk); fresher: no 16-step staleness; more faithful: grid
+cells emerge online, not by batch eigh). NOT now (it does not block B3). Free interim option if the SVD ever bites:
+truncated/randomized top-k SVD (`svds`/randomized), same result, O(n²k). Deferred rethink: directed exploration could
+become a GSG EXPLORATION GOAL (SR-frontier, no SVD) at the exploration/§3 step — recorded, not scheduled.
 
 ## Sources
 Redgrave, Prescott & Gurney 1999 (selection problem, PubMed 10362291); Gurney–Prescott–Redgrave 2001 (GPR model,
