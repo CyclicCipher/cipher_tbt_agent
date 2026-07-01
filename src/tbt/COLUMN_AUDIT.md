@@ -66,6 +66,21 @@ CONVERTS egocentric→object-centric. (Monty's third frame **B** = body-centric,
 - **C5 — the CYCLE runs end-to-end** (`L6→L4→sense→L2/3→L5→L6`), predict-then-compare driving cross-layer learning.
   *Test:* the loop runs the cycle on a small world and the per-layer predictions sharpen.
 
+## Progress + the C2↔C4 coupling (2026-06-30)
+- **C1 ✅** `column.locate` — L6 READ as the location (topology-encoding place code; mechanism-tested).
+- **C2 ✅** `column.sense_at` + the live loop (`TbtPolicy`) — L4-over-L6 predict-then-compare over the movement-
+  bootstrapped POSITION frame; `config_state` dissolved as the LIVE representation. **C2a ✅** — DG pattern-separation
+  of the location code (the raw place code at γ≈0.95 was too DIFFUSE → a global bag; adjacent 0.987 vs antipode 0.977)
+  → the cycle now recognises a multi-location object.
+- **The C2↔C4 COUPLING (finding, the audit working):** the position-ONLY planning state is the correct NAV substrate
+  (LockPath L0 **31** vs the joint state 254, near-oracle 8) BUT regresses BOARD-STATE games (MultiKey 2/2→**0/2**,
+  LockPath 2/4→1/4) — it conflates the BOARD STATE (which keys are collected), which `config_state` had been secretly
+  carrying. That board-state is the **OBJECT STATE = C4's job** (like Monty's "stapler open/closed"). So the planning
+  state = **position (C2) + object-state (C4) TOGETHER**; C4 restores MultiKey/LockPath *correctly* (factored). Per
+  [[feedback_dont_salvage_between_critical_steps]] do NOT revert C2 — C4 is the fix. **⇒ C4 is the next step.**
+- **C3** (L5→L6 path integration) is largely already present as the sensor's 7c path integration (`coarse_pos`, the
+  position the frame reads); wire/verify it as a column mechanism after C4.
+
 ## DEFERRED until the column is correct (then they ride ON a correct column, and should stop being brittle)
 Value/exploration (the dead-zone, the eigenpurpose), **§3** (the GSG mechanic library + model-based rollout + commit),
 **M2** (the basal-ganglia channel arbitration), and every game/oracle SCORE. These are policy/optimisation on top of the
