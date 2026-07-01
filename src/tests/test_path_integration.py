@@ -111,3 +111,33 @@ def test_achiever_beelines_a_known_goal_after_learning_it():
     assert game.levels_completed == 8, per_level
     assert max(per_level[3:]) <= 16, per_level                     # steady-state at/near ORACLE (12) once the goal is learned
     assert per_level[0] >= 2 * max(per_level[3:]), per_level       # the first (discovery) level costs far more than the transfer levels
+
+
+def test_online_operator_learns_from_the_live_stream_no_regression():
+    """L6_NONABELIAN Stage 1 (live wiring, the PARALLEL learner): driving the REAL agent on NavGame, the per-action
+    operators learned ONLINE in the column converge to FAITHFUL operators (spectral radius 1, low grid-code prediction
+    error) -- validating online operator learning on the agent's OWN exploration stream (COVERAGE in practice, the reframed
+    linchpin) -- while the run still solves 8/8 (the learner is PARALLEL to the additive `move`; zero behaviour change)."""
+    import numpy as np
+    import torch
+    game = NavGame(8)
+    policy = TbtPolicy(seed=0, local=True, integrate=True)
+    frame = game
+    for _ in range(1000):
+        if policy.is_done([], frame):
+            break
+        name, coords = policy.choose_action([], frame)
+        frame = game.step(name, coords)
+    assert game.levels_completed == 8                              # NO REGRESSION: the parallel learner didn't disturb the achiever
+    col = policy.agent.col
+    assert set(col.action_ops) == {0, 1, 2, 3}                     # one operator learned per nav action, online
+    for a in col.action_ops:
+        op = col.action_operator(a)
+        assert abs(op.spectral_radius() - 1.0) < 1e-6             # the constraint held throughout (orthogonal)
+        dx, dy = col.L5.move(a)
+        errs = []
+        for p in [(3.0, 5.0), (10.0, 10.0), (18.0, 7.0), (2.0, 20.0)]:
+            b = col.L6.code_at(torch.tensor(p)).numpy()
+            tgt = col.L6.code_at(torch.tensor((p[0] + dx, p[1] + dy))).numpy()
+            errs.append(float(np.linalg.norm(op.apply(b) - tgt) / 3.0))
+        assert np.mean(errs) < 0.15                               # learned online from the REAL stream -> predicts the next code (coverage OK)

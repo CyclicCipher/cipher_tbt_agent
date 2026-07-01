@@ -32,6 +32,7 @@ from .l5_displacement import L5_Displacement
 from .l6_grid import L6_GridLocation
 from .l6_sr import OnlineSR                            # the online TD successor representation (eigendecomposition-free L6)
 from .l23_object import L23_Object                     # the object/identity layer: graph-memory + recognition + voting
+from .operator import Operator, OnlineOperator        # L6_NONABELIAN: the per-action operator (composable; learned online)
 
 IMPASSABLE = 1e6                                       # the COST-FIELD limit: cost >= this = a WALL (you cannot occupy it) -> hard-excluded
 
@@ -65,6 +66,7 @@ class CorticalColumn(nn.Module):
         self._map = torch.zeros(feat_dim, d_mem)             # M5/L7-A: the online allocentric MAP (Σ feature ⊗ place), read by feature_at
         self._changed: dict = {}                             # C4: L2/3 object STATE -- {location: feature} where a known feature CHANGED
         self.cost: dict = {}                                 # the COST FIELD: location -> expected interaction cost (ONE currency for walls/hazards/slow/risky)
+        self.action_ops: dict = {}                           # L6_NONABELIAN Stage 1: per-action OnlineOperator, learned online from the path-integration stream (parallel to `move`)
 
     # ----- routing: learn the transition structure online (L6 + L5) ---------------------------------
     @property
@@ -491,10 +493,29 @@ class CorticalColumn(nn.Module):
         if chosen is not None:
             if action is not None and self._fovea is not None:            # learn the per-action translation (the efference)
                 self.L5.observe_move(action, (chosen[0] - self._fovea[0], chosen[1] - self._fovea[1]))
+                self._observe_operator(action, self._fovea, chosen)       # L6_NONABELIAN Stage 1: learn the operator online (parallel; no behaviour change)
             self._fovea = chosen                                          # correct: snap to the sighting
         if self._fovea is None:
             self._fovea = cold
         return self._fovea
+
+    def _observe_operator(self, action, pos_before, pos_after):
+        """L6_NONABELIAN Stage 1 (live wiring -- the PARALLEL learner). Learn the per-action OPERATOR online from the
+        path-integration stream: the L6 grid-code transition `code_at(before) -> code_at(after)`. Runs ALONGSIDE the
+        additive `move` (NOTHING reads it yet -> zero behaviour change); it validates online operator learning on the REAL
+        stream -- does the agent's exploration give enough COVERAGE (the reframed linchpin)? Driving state by the learned
+        operator awaits a NON-ABELIAN environment (and the grid's codebook bound, which `_fovea` does not have)."""
+        if action not in self.action_ops:
+            self.action_ops[action] = OnlineOperator(self.L6.dim)
+        b = self.L6.code_at(torch.tensor(pos_before, dtype=torch.float32)).detach().numpy()
+        a = self.L6.code_at(torch.tensor(pos_after, dtype=torch.float32)).detach().numpy()
+        self.action_ops[action].observe(b, a)
+
+    def action_operator(self, action):
+        """The per-action OPERATOR learned online from the live stream (L6_NONABELIAN Stage 1) -- Identity if unseen. The
+        read re-SVDs the cross-covariance, so THROTTLE it (like the eigenpurpose), do not call every step."""
+        op = self.action_ops.get(action)
+        return op.operator() if op is not None else Operator.identity(self.L6.dim)
 
     def _locate_candidate(self, action, appeared, dominant):
         """Which residual is the controllable object. Once the action's translation is known, the arrived candidate

@@ -82,10 +82,18 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
   the operator PRIMITIVE is validated end to end: abelian (batch + online) + non-abelian, learnable, with the constraint a
   projection (not a gradient fight).** *Fallback:* keep the hand-coded grid for abelian domains; learned operators where
   non-abelian structure is present.
-  **What REMAINS for Stage 1 = the LIVE WIRING** (the behaviour-affecting part, deferred deliberately): route the agent's
-  L6/`track` path-integration through a learned `OnlineOperator` per action (throttled read) instead of the additive
-  `move`, feed it from the (coverage-providing) directed-exploration stream, and confirm no regression on abelian games
-  before any non-abelian one. That is where the real integration risk lives, distinct from the now-validated primitive.
+  **LIVE WIRING — slice 1 DONE (the PARALLEL learner, 2026-07-01, `column.action_ops`/`_observe_operator`/`action_operator`):**
+  the column now learns a per-action `OnlineOperator` ONLINE from the live path-integration stream (the L6 grid-code
+  transition `code_at(before)→code_at(after)`), fed inside `track` ALONGSIDE the additive `move` — nothing reads it yet, so
+  ZERO behaviour change (integrate-mode only; config-mode/offline benchmark untouched). *Gate met (`test_path_integration.py`,
+  suite 126):* driving the REAL agent on NavGame, all four nav operators converge (spectral radius 1, grid-code prediction
+  err ~0.01–0.07) while the run still solves 8/8 — so **the agent's own exploration gives enough COVERAGE in practice** (the
+  reframed linchpin validated on the live loop, not a synthetic sweep).
+  **What still REMAINS = DRIVING state by the learned operator** (the truly behaviour-affecting step): route `track`'s state
+  read through the operator instead of the additive `_fovea`. Deferred deliberately because it (a) only pays off on a
+  NON-ABELIAN environment (which we don't yet have — the current games are abelian), and (b) hits the grid's CODEBOOK BOUND
+  (`decode`/`place` cover only N×N cells while `_fovea` is unbounded) — a real regression hazard to solve first. So: build/
+  find a non-abelian test env, then drive + gate no-regression on abelian first.
 - **Stage 2 — DISCOVER relations by loop closure (the quotient).** Free composition path-integrates; relations (incl.
   commutativity) are found by loop closure under the **predictive-sufficiency** criterion (causal states / bisimulation, per
   `MATH_PHASE.md`) — close the coarsest partition that stays a sufficient statistic. *Gate:* on a task with a KNOWN
