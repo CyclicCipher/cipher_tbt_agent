@@ -1,0 +1,69 @@
+"""The faithful basal ganglia (BASAL_GANGLIA_PLAN; reference_basal_ganglia). Test by MECHANISM, never a score.
+
+B1: the CRITIC's reward-prediction-error δ. `reward.py` IS the actor-critic critic; `critic_delta(s, s2)` = the TD
+error δ = r(s) + γ·V(s2) − V(s) the dopamine signal represents. It is the signal the BG ACTOR learns Go/NoGo from
+(B2/B3): δ > 0 → a Go (benefit), δ < 0 → a NoGo (cost); δ → 0 as the transition is MASTERED (nothing left to learn)."""
+
+from __future__ import annotations
+
+import os
+import sys
+from collections import defaultdict
+
+_PKG_PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _PKG_PARENT not in sys.path:
+    sys.path.insert(0, _PKG_PARENT)
+
+from tbt.reward import RewardModel  # noqa: E402
+
+
+def _chain():
+    """A 4-state chain 0→1→2→3 (one action, deterministic), extrinsic reward only at the goal 3. `preds` is a
+    defaultdict(list) — the shape `reward.plan` expects (matching `reward.augmented_transitions`)."""
+    T = {0: [1], 1: [2], 2: [3], 3: [3]}
+    preds = defaultdict(list, {1: [0], 2: [1], 3: [2, 3]})
+    return T, preds
+
+
+def test_critic_delta_is_the_td_reward_prediction_error():
+    """B1: `critic_delta` IS the actor-critic TD reward-prediction-error δ = r(s) + γ·V(s2) − V(s). Once the value has
+    CONVERGED and the transitions are MASTERED (lp→0): δ → 0 along the optimal path (a fully-predicted reward drives no
+    learning — the dopamine dip), δ equals the explicit formula, and a step AWAY from reward is DISAPPOINTING (δ < 0)."""
+    rm = RewardModel(4, gamma=0.9, beta=0.3, epistemic="progress")
+    T, preds = _chain()
+    for _ in range(120):
+        for s in (0, 1, 2, 3):
+            rm.observe(s, 1.0 if s == 3 else 0.0)             # extrinsic reward only at the goal
+            rm.observe_error(s, 0.0)                          # the world model has MASTERED these transitions → lp = 0
+        rm.plan(T, preds, 0)
+    # δ IS the explicit TD reward-prediction-error (the residual of the critic's own Bellman)
+    for s, s2 in [(0, 1), (1, 2), (2, 3)]:
+        expect = rm.reward_exploit(s) + rm.gamma * rm.V_exploit[s2] - rm.V_exploit[s]
+        assert abs(rm.critic_delta(s, s2) - expect) < 1e-9
+    # mastered + converged → δ ≈ 0 along the optimal path
+    opt = [rm.critic_delta(s, s2) for s, s2 in [(0, 1), (1, 2), (2, 3)]]
+    assert all(abs(d) < 0.05 for d in opt), opt
+    # a step AWAY from reward (to a lower-value state) is worse than the state predicted → δ < 0 (a NoGo signal)
+    assert rm.critic_delta(2, 1) < -0.01, rm.critic_delta(2, 1)
+
+
+def test_critic_delta_winds_down_as_the_reward_is_learned():
+    """δ is the LEARNING signal: while the reward is still propagating the value, |δ| along the path is appreciable;
+    as the value converges (the reward is mastered) |δ| → 0. The RPE winds down when there is nothing left to learn —
+    which is exactly why a mastered edge stops training the actor."""
+    rm = RewardModel(4, gamma=0.9, beta=0.0, epistemic="progress")   # beta=0 isolates the reward-prediction term
+    T, preds = _chain()
+
+    def one_round():
+        for s in (0, 1, 2, 3):
+            rm.observe(s, 1.0 if s == 3 else 0.0)
+            rm.observe_error(s, 0.0)
+        rm.plan(T, preds, 0)
+
+    one_round()                                              # the reward is known but not yet propagated up the chain
+    early = abs(rm.critic_delta(2, 3))
+    for _ in range(120):
+        one_round()
+    late = abs(rm.critic_delta(2, 3))
+    assert early > 0.1, early                                # early: the reward at 3 has not reached V(2) yet
+    assert late < 0.05 and late < early, (early, late)       # mastered: δ → 0

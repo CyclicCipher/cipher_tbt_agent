@@ -48,7 +48,11 @@ substitutes is the same work as finishing M1/M2/M4 + one NEW item the audit crea
 
 **Sequencing under the objective (supersedes §5's order for the immediate work — retire parallel mechanisms BEFORE the heterarchy):**
 1. **P1 — path integration into the column** (dissolve `sensor._delta` → L5/L6; live pos = `loc_where`). Isolated, kills the sharpest duplication, and the live loop finally uses the "TBT-correct" path integrator instead of shadowing it.
-2. **P2 — M2 (BG arbitration)** replaces the if/else; folds in the M3/M4 channels.
+2. **P2 — M2 (BG arbitration), reframed to "make the BG FAITHFUL, then wire it"** (once we studied the organ — memory
+   `reference_basal_ganglia`). The hand-coded `_choose` switch DISSOLVES into a faithful basal ganglia: opponent Go/NoGo
+   over ONE combined salience (reward ⊕ epistemic ⊕ eigenpurpose ⊕ field — M3/M4 fold in as salience TERMS, not
+   channels), tonic-DA explore/exploit gain (replaces `dead_zone`), STN commitment. Critic = `reward.py`. **Full plan:
+   `BASAL_GANGLIA_PLAN.md` (B1–B5).** Still absorbs **P1c** (reconcile `track_*`/`loc_*`).
 3. **P3 — M1 sparse SR reads** (reachability, NEED) so the SR value stops being dormant.
 4. **P4 — `object_state` LIVE** (C4 consumed by the planner). This is where the **C2↔C4 coupling forces H0**: does one L6 hold `(position, object_state)` as separable eigen-subspaces (→ a structured single column, no 2nd column) or not (→ the task column)? So **H0 is NOT skipped — it re-enters HERE**, as the gate on making C4 live, correctly sequenced after the parallel mechanisms are gone.
 5. THEN §3 / the heterarchy (the task column + the rule/goal GSG, where the GSG's overt rebuild belongs).
@@ -78,9 +82,20 @@ S-frame; L6 tracks the location; L5 = the efference) and L5's own SO(2)+translat
   `sensor.column` + `col.track_reset()` per level; DELETED the sensor's `_delta`/`_coarse_pos`/`_controllable`/
   `_update_fovea`/`_locate` (pure S-frame `_residual_candidates` remains); the sensor-internal gate test → the column
   test; `test_path_integration_navigates…` stays green (nav 8/8, ego≤2 — behaviour-equivalent). Suite **101 green**.
-  ⇒ the SENSOR no longer path-integrates; the COLUMN owns it LIVE. **P1c (open)** — reconcile the two column
-  path-integration APIs: the now-LIVE continuous `track_*` (spatial, metric) and the tests-only discrete `loc_*`
-  (symbolic-graph) into one L5-operator-driven belief (the internal duplication P1 left; not blocking P2).
+  ⇒ the SENSOR no longer path-integrates; the COLUMN owns it LIVE. **P1c** — reconcile the two column path-integration
+  APIs: the now-LIVE continuous `track_*` (spatial, metric) and the tests-only discrete `loc_*` (symbolic-graph) into one
+  L5-operator-driven belief (the internal duplication P1 left) — **FOLDED INTO P2** (companion cleanup; user 2026-06-30 s2).
+
+### P2 — design → SUPERSEDED by `BASAL_GANGLIA_PLAN.md` (the BG-faithful reframe, 2026-06-30 s2)
+The earlier sketch here (BG *gates 3 value-CHANNELS*, with open questions on merit / context / RPE) was a LEGACY of the
+hand-coded switch. Studying the organ (memory `reference_basal_ganglia`) RESOLVED those questions and reshaped the step:
+- **Merit = SALIENCE (value), not spread; RPE = a DELAYED critic OUTCOME, not an in-call bid-nudge; context = the
+  value-landscape regime, not game features.** All three fall out of the neuroscience (actor–critic + GPR selection).
+- **The channels DISSOLVE:** the BG selects the ACTION via opponent Go/NoGo over ONE combined salience; explore/exploit =
+  the tonic-DA gain (retiring `dead_zone`); commitment = the STN conflict term; M3 (eigenpurpose) + M4 (field) become
+  salience TERMS. Critic = `reward.py`.
+- **The full build (B1–B5), the code mapping, and the one remaining OPEN decision (the dissolved shape above vs an
+  explicit-channel shape) live in `BASAL_GANGLIA_PLAN.md`.** P1c (reconcile `track_*`/`loc_*`) rides along.
 
 ## 0. The principle (and why it likely cures the failures)
 The agent should be the **active-inference / reafference LOOP** and nothing more: sense → predict → compare (surprise)

@@ -483,3 +483,6 @@ disagreement between ANY two competing models (object, concept, **rule**, word),
 - **Supersedes 8.3–8.5's "live test first" recommendation** for the immediate work: per the user's objective, the
   priority is retiring the parallel mechanisms so the correct TBT loop is the live path (GROUNDING P1–P4), not a live
   score measurement. The live test remains a valid later check, but it is not the next step.
+- **The GSG's COMMITMENT/hysteresis (§7.3) is anatomically the STN "hold your horses"** — a decision-conflict threshold,
+  not an ad-hoc rule. It is being built as part of the faithful basal ganglia (`BASAL_GANGLIA_PLAN.md` B5, memory
+  `reference_basal_ganglia`), so the GSG inherits commitment from the BG rather than reimplementing it (one model).

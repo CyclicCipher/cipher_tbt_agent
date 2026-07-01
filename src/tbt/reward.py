@@ -150,6 +150,16 @@ class RewardModel:
         locally-exhausted, reward-less DEAD-ZONE -- where a directed escape is exactly what's missing)."""
         return self._reward_base(s)
 
+    def critic_delta(self, s, s2) -> float:
+        """The reward-prediction ERROR δ for the OBSERVED transition s→s2 — the actor-critic TD error the dopamine
+        signal represents (B1 of BASAL_GANGLIA_PLAN; the CRITIC that trains the basal-ganglia actor —
+        reference_basal_ganglia). δ = r(s) + γ·V(s2) − V(s): the residual of THIS critic's OWN Bellman
+        (`reward_exploit` / `V_exploit`), i.e. the clean reward + learning-progress value WITHOUT the eigenpurpose (an
+        exploration bias, not reward). δ > 0 = the transition did BETTER than the state predicted (a Go signal for the
+        actor); δ < 0 = worse (a NoGo signal). δ → 0 as the transition is MASTERED — the reward value converges AND
+        lp → 0 — so a fully-predicted reward stops training the actor (the dopamine dip). Consumed by the actor in B2/B3."""
+        return self.reward_exploit(s) + self.gamma * self.V_exploit[s2] - self.V_exploit[s]
+
     def _need(self, s, current):
         """NEED = successor-representation relevance of s to the agent's future. The TRUE need is the SR
         under the current (exploring) policy — distant unexplored states have HIGH need because the agent
