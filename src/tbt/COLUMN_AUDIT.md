@@ -6,6 +6,24 @@ the inter-layer messages run the predict-sense-update CYCLE. This audit is groun
 score-driven task list. Spec sources: `TARGET_ARCHITECTURE.md`, `reference_tbt_layers_4_23`, `reference_layer5_role`,
 `reference_grid_sr_eigenbasis`, `reference_tbt_frames_and_hippocampus`.*
 
+## Build strategy — single correct COLUMN → communication → heterarchy (2026-06-30)
+TBT = MANY copies of ONE column algorithm + communication, so the build order is a DEPENDENCY chain, not a preference:
+1. **ONE CORRECT COLUMN first (the current priority).** A column's output IS the CMP message (pose + features +
+   object-state); until the column is correct, that message is MALFORMED and every copy + every communication built on
+   it inherits the flaw (`config_state` was exactly a malformed message). = finish the single-column cycle (C1–C5 below)
+   + wire the built-but-BYPASSED faculties into the loop: **L2/3 RECOGNITION + voting**, the **GSG** (goal generation),
+   and the **L6 FACTORISATION** capability (which decides whether a 2nd column is even needed).
+2. **THEN inter-column + thalamus communication** — `thalamus.bind/read` (have) + CMP voting `L23.vote` (have, object
+   frame); only meaningful once the column emits correct messages.
+3. **THEN the heterarchy is easy** — two correct columns wired through correct communication, OR one column whose L6
+   factors both. The SPATIAL+TASK split (the C4 integration), MultiKey/LockPath returning correctly factored, and the
+   PFC-like task column all FALL OUT of 1–2. NB Mountcastle: a "PFC column" is the SAME algorithm fed task-state input,
+   not a new mechanism; and `TARGET_ARCHITECTURE` says FACTOR within one column first (L6 eigen-subspaces), allocate a
+   2nd column (basal ganglia) only when factors don't separate — so the heterarchy is the FALLBACK, not the first move.
+
+**⇒ The C4 INTEGRATION (the spatial/task heterarchy) is DEFERRED until the single column is correct.** The next
+single-column piece: wire **L2/3 RECOGNITION into the loop** (the object SETTLED by recognition, not bypassed).
+
 ## The root deviation (why every score-fix was brittle)
 The live loop is: **`sensor` → `config_state` → `L5.edges` (the graph) + `reward.py`'s value sweep → `col.act` (motor)**.
 That is a bare tabular-RL loop over a perception SHORTCUT. The column never runs `L6 → L4 → L2/3` to FORM its state — the
@@ -84,8 +102,9 @@ CONVERTS egocentric→object-centric. (Monty's third frame **B** = body-centric,
   frame over POSITIONS (clean place codes, the metric). One frame can't be both without the diffuse/joint problems
   returning. So C4's integration is a SECOND (task/relational) frame composed with the spatial one — exactly
   [[reference_hierarchy_substrate]]'s spatial-map + task-map heterarchy (spatial: SR+L5 over positions; task: value over
-  `(position, object_state)`). `object_state` is the input to it. **The hierarchy is the next substantial step**, and it
-  is where MultiKey/LockPath return, correctly factored (position from the spatial map, keys-collected from the task map).
+  `(position, object_state)`). `object_state` is the input to it. **The hierarchy is DEFERRED until the single column is
+  correct** (see *Build strategy* above); it is where MultiKey/LockPath return, correctly factored (position from the
+  spatial map, keys-collected from the task map) — but it is step 3, and we are mid-step-1.
 - **C3** (L5→L6 path integration) is largely already present as the sensor's 7c path integration (`coarse_pos`, the
   position the frame reads); wire/verify it as a column mechanism after C4.
 
