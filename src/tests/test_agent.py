@@ -54,6 +54,24 @@ def test_agent_loop_runs_the_l4_over_l6_cycle():
         assert ag.col.feature_at(p) == f, (p, ag.col.feature_at(p), f)   # the object is built + recognised through the loop
 
 
+def test_agent_loop_maps_recognized_objects():
+    """C4 (COLUMN_AUDIT): the agent loop runs the perception->recognition->map pipeline -- given a sensed object CLOUD
+    at its position, `agent.step` recognises it (L2/3, pose-invariant) and maps its IDENTITY at the location. Walking a
+    scene where a recognisable object recurs at a location: re-sensing it is recognised (not surprised); a structurally
+    different object there is a boundary (surprised). The live-loop path of sense_object -- the map is over RECOGNISED
+    objects, not raw patches."""
+    ag = Agent(n_actions=4, seed=0)
+    L = [(0, 0), (1, 0), (0, 1)]                             # an L-tromino object
+    bar = [(0, 0), (1, 0), (2, 0)]                           # a structurally different object
+    for _ in range(4):                                       # establish the position frame + learn the object at pos 0
+        for p in range(6):
+            ag.step(p, 0.0, cloud=(L if p == 0 else None), location=p)
+    ag.step(0, 0.0, cloud=L, location=0)                    # re-sense the SAME object at 0 -> recognised
+    assert ag.sensed_surprise is False
+    ag.step(0, 0.0, cloud=bar, location=0)                  # a DIFFERENT object at 0 -> boundary
+    assert ag.sensed_surprise is True
+
+
 def test_predictive_state_fires_and_settles():
     """The HTM predict-then-compare: early on the agent is often surprised (model unlearned); once the dynamics are
     learned, a correctly-predicted move leaves it un-surprised. The predictive state is real, not vestigial."""

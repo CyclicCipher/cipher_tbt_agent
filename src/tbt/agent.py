@@ -71,7 +71,7 @@ class Agent:
         self.reward.observe(_GOAL, max(score_delta, 1.0))                    # the goal is the rewarding terminal
         self.new_episode()
 
-    def step(self, state, score_delta: float = 0.0, frame=None, feature=None, location=None):
+    def step(self, state, score_delta: float = 0.0, frame=None, feature=None, location=None, cloud=None):
         """One turn: COMPARE last turn's prediction to the actual `state`, LEARN the transition (column + reward), PLAN
         value over the column's learned transitions, CHOOSE the value-maximising action, then PREDICT the next state.
 
@@ -108,7 +108,10 @@ class Agent:
             err = self.field_error if field is not None else (1.0 if self.surprised else 0.0)
             self.reward.observe_error(ps, err)                              # LEARNING-PROGRESS: dense field error (or binary fallback)
         self.reward.observe(state, score_delta)                             # value: reward where the score rose + novelty
-        if feature is not None:                                             # C2: the L4-over-L6 cycle -- the object emerges at the location
+        if cloud is not None:                                               # C4: the perception->recognition->map pipeline (a whole object)
+            loc = location if location is not None else state
+            _name, self.sensed_surprise = self.col.sense_object(cloud, loc)  # L2/3 RECOGNISES (pose-invariant) -> map the identity at the location
+        elif feature is not None:                                           # C2: the L4-over-L6 cycle -- the object emerges at the location
             loc = location if location is not None else state              # bind at the L6 POSITION (given explicitly when the state is a joint symbol)
             self.sensed_surprise = self.col.sense_at(loc, feature)          # predict feature-at-location -> compare -> LEARN (bind)
         a = self._choose(state, field=field)
