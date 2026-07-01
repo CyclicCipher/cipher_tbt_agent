@@ -166,8 +166,12 @@ class TbtPolicy:
             self.sensor.encode = self.agent.col.L4.encode   # the sensor emits FEATURE-at-location via the column's L4
             self.sensor.field.reset()                       # undo the peek -- the real read starts the tracker clean
         state, _change = self.sensor.read(obs.grid, action=self._last_a)   # efference = last action (path integration)
-        a = self.agent.step(state, 0.0, frame=obs.grid)     # the FRAME -> the generative forward model (FM1-4); obstacles
-        #                                                     handled natively (a blocked move -> no-change); reward via complete()
+        if self.sensor.local and self.sensor.integrate:      # C2 (COLUMN_AUDIT): the movement-bootstrapped (feature, position)
+            feat, pos = state                                #   CMP message. The STATE is the POSITION (L6 over positions), and L4
+            a = self.agent.step(pos, 0.0, frame=obs.grid, feature=feat)   #   binds the feature at it (sense_at) -> the object EMERGES; config_state gone
+        else:
+            a = self.agent.step(state, 0.0, frame=obs.grid)  # the FRAME -> the generative forward model (FM1-4); obstacles
+            #                                                  handled natively (a blocked move -> no-change); reward via complete()
         self._last_a = a
         return self._resolve(a)
 
