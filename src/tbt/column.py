@@ -130,16 +130,21 @@ class CorticalColumn(nn.Module):
                 best_v, best_a = v, a
         return best_a
 
-    def vector_action(self, here, goal, actions):
-        """V1 (VECTOR_NAV): the ATTRACTIVE step of the potential field -- grid-cell VECTOR navigation. The goal VECTOR
-        `v = goal − here` (L6's metric displacement to the goal) is realised by L5's INVERSE operator: pick the action
-        whose learned displacement `move_delta[a]` (P1) best ALIGNS with `v` (max dot product). This steers straight
-        toward the goal, including novel SHORTCUTS (the vector is straight-line in the metric, not a walked path).
-        `here`/`goal` are positions in the L6 frame. Returns the best-aligned action, or `None` when no action reduces
-        the vector (at the goal, or every displacement is unlearned/perpendicular -> the caller's V2/V3 handles it)."""
+    def vector_action(self, here, goal, actions, blocked=()):
+        """VECTOR_NAV: one step of the POTENTIAL FIELD toward `goal`, realised by L5's INVERSE operator.
+        V1 -- ATTRACTION: the goal VECTOR `v = goal − here` (L6's metric displacement to the goal) pulls; pick the action
+        whose learned displacement `move_delta[a]` (P1) best ALIGNS with `v` (max dot product) -- straight toward the
+        goal, incl. novel SHORTCUTS (the vector is straight-line in the metric, not a walked path).
+        V2 -- REPULSION: obstacles push back. Actions in `blocked` (a wall in that direction, bump-learned or sensed =
+        border cells) are EXCLUDED, so the field steers the aligned-UNBLOCKED action AROUND the obstacle (curved
+        avoidance) while keeping goal-ward progress.
+        `here`/`goal` are positions in the L6 frame. Returns the best-aligned UNBLOCKED action, or `None` when none has
+        positive alignment (at the goal, or a local minimum where the vector is fully blocked -> the caller's V3 detour)."""
         vx, vy = goal[0] - here[0], goal[1] - here[1]
         best_a, best_align = None, 1e-9
         for a in actions:
+            if a in blocked:                                 # V2 REPULSION: an obstacle in that direction -> excluded
+                continue
             dx, dy = self.L5.move(a)                          # L5's learned per-action displacement ((0,0) if unlearned)
             align = dx * vx + dy * vy                         # alignment of the displacement with the goal vector
             if align > best_align:

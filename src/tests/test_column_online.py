@@ -227,3 +227,15 @@ def test_vector_action_steers_along_the_goal_vector():
     assert col.vector_action((0, 0), (0, 5), [0, 1, 2, 3]) == 3             # goal to the +y -> move down
     assert col.vector_action((5, 0), (0, 0), [0, 1, 2, 3]) == 1             # goal to the -x -> move left
     assert col.vector_action((3, 3), (3, 3), [0, 1, 2, 3]) is None          # at the goal -> no move
+
+
+def test_vector_action_repulsion_steers_around_a_blocked_direction():
+    """V2 (VECTOR_NAV): the REPULSIVE field -- an obstacle in the direct line (a `blocked` direction = a border cell)
+    is excluded, so the field steers the aligned OPEN action AROUND it (curved avoidance), still making goal-ward
+    progress toward the goal's other component."""
+    col = CorticalColumn(n_entities=16, seed=0)
+    for a, d in {0: (1, 0), 1: (-1, 0), 2: (0, -1), 3: (0, 1)}.items():
+        col.L5.observe_move(a, d)
+    assert col.vector_action((0, 0), (5, 2), [0, 1, 2, 3]) == 0                  # open: straight toward the dominant +x
+    assert col.vector_action((0, 0), (5, 2), [0, 1, 2, 3], blocked={0}) == 3     # +x blocked -> go +y (down), around it
+    assert col.vector_action((0, 0), (5, 0), [0, 1, 2, 3], blocked={0}) is None  # only path blocked -> None (V3 detour)
