@@ -33,6 +33,8 @@ from .l6_grid import L6_GridLocation
 from .l6_sr import OnlineSR                            # the online TD successor representation (eigendecomposition-free L6)
 from .l23_object import L23_Object                     # the object/identity layer: graph-memory + recognition + voting
 
+IMPASSABLE = 1e6                                       # the COST-FIELD limit: cost >= this = a WALL (you cannot occupy it) -> hard-excluded
+
 
 @dataclass(frozen=True)
 class GoalState:
@@ -62,6 +64,7 @@ class CorticalColumn(nn.Module):
         self._fovea = None                                    # P1: the CONTINUOUS metric location belief (pixel), path-integrated by L5's translation
         self._map = torch.zeros(feat_dim, d_mem)             # M5/L7-A: the online allocentric MAP (Σ feature ⊗ place), read by feature_at
         self._changed: dict = {}                             # C4: L2/3 object STATE -- {location: feature} where a known feature CHANGED
+        self.cost: dict = {}                                 # the COST FIELD: location -> expected interaction cost (ONE currency for walls/hazards/slow/risky)
 
     # ----- routing: learn the transition structure online (L6 + L5) ---------------------------------
     @property
@@ -116,54 +119,88 @@ class CorticalColumn(nn.Module):
         flag (the bug the oracle/human/agent trace exposed)."""
         return self.value(s, reward_map) > 1e-9
 
+    def learn_cost(self, loc, c, rate=0.5):
+        """ASSIGN/update the COST of interacting with `loc` -- the ONE repulsion currency (walls/hazards/slow/risky). A
+        running MEAN, so a STOCHASTIC outcome (touch it -> some fraction of the time something bad) converges to its
+        EXPECTATION `p·penalty` for free (risky = a fractional cost, no special case); a deterministic hazard converges
+        to its penalty; a slow tile to its extra step-cost; a WALL is the `cost=IMPASSABLE` limit. Fed by the SAME
+        signals the value model sees -- a bad score (AVERSION) and a no-progress BUMP -- so repulsion is LEARNED, not a
+        hand-coded map. (The agent wires the calls in V4; here is the mechanism.)"""
+        if c >= IMPASSABLE:                                  # a wall is absorbing, not averaged (you never occupy it)
+            self.cost[loc] = float(c)
+        else:
+            self.cost[loc] = (1.0 - rate) * self.cost.get(loc, 0.0) + rate * float(c)
+
+    def _cost(self, loc):
+        """The learned expected cost of occupying `loc` (0 if unknown) -- the cost field read by the potential field + SR."""
+        return self.cost.get(loc, 0.0)
+
     def navigate_to(self, state, reward_map, actions, blocked=()):
         """SR SHORTEST-PATH navigation: the action whose OUTCOME has the highest SR VALUE `V(next) = M[next]·R`. Because
-        the SR occupancy `M[s,g] ~ γ^(distance to g)`, greedy on it steps along the SHORTEST path to the reward
-        structure `reward_map`, read DIRECTLY from the SR (no rollout / no per-step sweep -- reference_brain_planning).
-        Unlike the swept value it carries NO frontier optimism, so near a KNOWN goal it does not wander into untried
-        actions -- the efficiency lever. The SR WARPS around barriers (a bumped move records a self-loop), so this is the
-        GEODESIC (obstacle-aware) path = the VECTOR_NAV V3 DETOUR when the potential field is stuck. `blocked` actions
-        (border cells) are excluded. Returns the best action, or `None` when no reward is reachable (the explore policy takes over)."""
+        the SR occupancy `M[s,g] ~ γ^(distance to g)`, greedy on it steps along the SHORTEST path to the reward structure
+        `reward_map`, read DIRECTLY from the SR (no rollout / no per-step sweep -- reference_brain_planning). Unlike the
+        swept value it carries NO frontier optimism, so near a KNOWN goal it does not wander -- the efficiency lever. The
+        SR WARPS around barriers (a bumped move records a self-loop), so this is the GEODESIC (obstacle-aware) path = the
+        VECTOR_NAV V3 DETOUR when the potential field is stuck. COST-AWARE on the ONE currency: the caller folds FINITE
+        costs into `reward_map` as NEGATIVE reward, so `V = M·(reward − cost)` routes around costly REGIONS globally (the
+        cost's own self-occupancy penalises stepping onto it too); `blocked` and `cost>=IMPASSABLE` cells (WALLS -- which
+        the SR also never routes through) are hard-excluded. Returns the best action, or `None` when no reward is reachable."""
         best_a, best_v = None, 1e-9
         for a in actions:
             if a in blocked:                                 # V3: an obstacle in that direction (border cell) -> excluded
                 continue
-            v = self.value(self.predict(state, a), reward_map)
+            nxt = self.predict(state, a)
+            if self._cost(nxt) >= IMPASSABLE:                # a wall cell -> cannot occupy it
+                continue
+            v = self.value(nxt, reward_map)
             if v > best_v:
                 best_v, best_a = v, a
         return best_a
 
-    def vector_action(self, here, goal, actions, blocked=()):
+    def vector_action(self, here, goal, actions, blocked=(), cost_weight=1.0):
         """VECTOR_NAV: one step of the POTENTIAL FIELD toward `goal`, realised by L5's INVERSE operator.
-        V1 -- ATTRACTION: the goal VECTOR `v = goal − here` (L6's metric displacement to the goal) pulls; pick the action
-        whose learned displacement `move_delta[a]` (P1) best ALIGNS with `v` (max dot product) -- straight toward the
-        goal, incl. novel SHORTCUTS (the vector is straight-line in the metric, not a walked path).
-        V2 -- REPULSION: obstacles push back. Actions in `blocked` (a wall in that direction, bump-learned or sensed =
-        border cells) are EXCLUDED, so the field steers the aligned-UNBLOCKED action AROUND the obstacle (curved
-        avoidance) while keeping goal-ward progress.
-        `here`/`goal` are positions in the L6 frame. Returns the best-aligned UNBLOCKED action, or `None` when none has
-        positive alignment (at the goal, or a local minimum where the vector is fully blocked -> the caller's V3 detour)."""
+        V1 -- ATTRACTION: the UNIT goal vector `v̂ = (goal − here)/|·|` pulls; each action's score is the alignment of its
+        learned displacement `move_delta[a]` (P1) with `v̂` (∈[−1,1]) -- straight toward the goal, incl. novel SHORTCUTS.
+        V2 -- REPULSION (the COST FIELD): each action is penalised by `cost_weight · cost(dest)` where `dest = here +
+        move_delta[a]` -- the ONE currency for walls/hazards/slow/risky. `cost >= IMPASSABLE` (a wall) or `a in blocked` ->
+        EXCLUDED (the ∞ limit, recovering binary border cells); a big finite cost (hazard) is avoided unless nothing else
+        makes net progress; a small cost (slow) is crossed only when a detour would be longer. The field thus curves AROUND
+        obstacles while keeping goal-ward progress, graded by how costly they are.
+        Returns the best-scoring action with POSITIVE net progress, or `None` (at the goal, or a local minimum where the
+        vector is fully blocked/repelled -> the caller's V3 detour)."""
         vx, vy = goal[0] - here[0], goal[1] - here[1]
-        best_a, best_align = None, 1e-9
+        norm = (vx * vx + vy * vy) ** 0.5 or 1.0             # UNIT goal vector -> attraction commensurate with the cost penalty
+        ux, uy = vx / norm, vy / norm
+        best_a, best_score = None, 1e-9
         for a in actions:
-            if a in blocked:                                 # V2 REPULSION: an obstacle in that direction -> excluded
+            if a in blocked:                                 # V2: a border cell in that direction -> excluded (cost=inf limit)
                 continue
             dx, dy = self.L5.move(a)                          # L5's learned per-action displacement ((0,0) if unlearned)
-            align = dx * vx + dy * vy                         # alignment of the displacement with the goal vector
-            if align > best_align:
-                best_align, best_a = align, a
+            dest = (here[0] + dx, here[1] + dy)
+            c = self._cost(dest)
+            if c >= IMPASSABLE:                              # a wall cell -> excluded
+                continue
+            score = (dx * ux + dy * uy) - cost_weight * c    # attraction − repulsion (the potential field)
+            if score > best_score:
+                best_score, best_a = score, a
         return best_a
 
-    def achieve(self, state, goal, actions, blocked=()):
+    def achieve(self, state, goal, actions, blocked=(), cost_weight=1.0):
         """VECTOR_NAV V3 -- the ACHIEVER cascade (navigate `state` -> `goal`): the POTENTIAL FIELD (`vector_action`: V1
-        attraction + V2 repulsion) by DEFAULT, and when it is STUCK (a local minimum -- fully blocked toward the goal ->
-        `vector_action` returns None) fall back to the SR-GEODESIC DETOUR (`navigate_to`, which routes around the
-        bump-learned walls the SR reflects). `state`/`goal` are positions in the L6 frame (= the graph states). Returns
-        the action, or None if no progress is possible. The GENERAL goal-navigation primitive -- the goal may be a known
-        reward (exploit) OR a GSG hypothesis (goal-directed exploration); see VECTOR_NAV_PLAN + reference_vector_navigation."""
-        a = self.vector_action(state, goal, actions, blocked)   # V1+V2: the potential field toward the goal
+        attraction + V2 cost-field repulsion) by DEFAULT, and when it is STUCK (a local minimum -- fully blocked/repelled
+        toward the goal -> `vector_action` returns None) fall back to the SR-GEODESIC DETOUR (`navigate_to`). The detour is
+        cost-aware GLOBALLY: finite costs are folded into the reward_map (negative) so `V = M·(reward − cost)` routes
+        around costly REGIONS, not just the next cell (walls fall out of the SR structure -- never routed through).
+        `state`/`goal` are positions in the L6 frame (= the graph states). Returns the action, or None if no progress is
+        possible. The GENERAL goal-navigation primitive -- the goal may be a known reward (exploit) OR a GSG hypothesis
+        (goal-directed exploration); see VECTOR_NAV_PLAN + reference_vector_navigation."""
+        a = self.vector_action(state, goal, actions, blocked, cost_weight)   # V1+V2: the potential field toward the goal
         if a is None:                                           # V3: local minimum / fully blocked -> SR geodesic detour
-            a = self.navigate_to(state, {goal: 1.0}, actions, blocked)
+            rmap = {goal: 1.0}                                  # fold FINITE costs in as negative reward -> the geodesic warps around costly regions
+            for loc, c in self.cost.items():
+                if c < IMPASSABLE:
+                    rmap[loc] = rmap.get(loc, 0.0) - cost_weight * c
+            a = self.navigate_to(state, rmap, actions, blocked)
         return a
 
     def locate(self, state):

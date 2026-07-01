@@ -11,7 +11,7 @@ _PKG_PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
-from tbt.column import CorticalColumn  # noqa: E402
+from tbt.column import CorticalColumn, IMPASSABLE  # noqa: E402
 
 
 def test_column_learns_a_ring_online_without_eigendecomposition():
@@ -254,3 +254,59 @@ def test_achieve_cascades_from_vector_field_to_sr_detour():
         col.observe((1, 0), 0, (1, 0))                                          # the goal is an SR SOURCE (self-loop) so its occupancy propagates back
     assert col.achieve((0, 0), (1, 0), [0, 1, 2, 3]) == 0                        # unobstructed: the field goes straight (+x) -- it will bump the wall + learn it
     assert col.achieve((0, 0), (1, 0), [0, 1, 2, 3], blocked={0}) == 3          # wall known -> field stuck -> SR-geodesic detour starts around (+y)
+
+
+def _grid_col(n=16):
+    col = CorticalColumn(n_entities=n, seed=0)
+    for a, d in {0: (1, 0), 1: (-1, 0), 2: (0, -1), 3: (0, 1)}.items():          # 4-connected grid moves
+        col.L5.observe_move(a, d)
+    return col
+
+
+def test_learn_cost_assigns_a_running_expected_cost():
+    """COST FIELD (VECTOR_NAV): the repulsion is ASSIGNED as a running EXPECTED cost -- so a deterministic HAZARD converges
+    to its penalty, and a STOCHASTIC ('risky') tile converges to p*penalty (the EXPECTATION) with NO special case: the one
+    currency handles walls/hazards/slow/risky. This is how the model assigns repulsion to the mental map in the first place."""
+    col = CorticalColumn(n_entities=16, seed=0)
+    for _ in range(30):
+        col.learn_cost((3, 0), 10.0)                                            # a deterministic hazard: every touch costs 10
+    assert 9.5 < col._cost((3, 0)) < 10.5                                       # -> converges to the penalty
+    for i in range(80):
+        col.learn_cost((4, 0), 10.0 if i % 2 == 0 else 0.0, rate=0.2)           # RISKY: touch -> HALF the time the -10 outcome
+    assert 3.5 < col._cost((4, 0)) < 6.5                                        # -> ~5 = p*penalty, the expectation, for free
+
+
+def test_wall_is_the_cost_infinity_limit():
+    """A WALL is just `cost >= IMPASSABLE` -- the LIMIT of the same field; the achiever hard-excludes it exactly as it
+    excludes a `blocked` border cell (the binary set is the cost=inf special case of the one currency)."""
+    col = _grid_col()
+    col.learn_cost((1, 0), IMPASSABLE)                                         # +x from the origin is a WALL (cannot occupy)
+    assert col.vector_action((0, 0), (5, 0), [0, 1, 2, 3]) is None            # the only goal-ward path is into the wall -> None (== blocked)
+    assert col.vector_action((0, 0), (5, 2), [0, 1, 2, 3]) == 3               # wall on +x -> curve to +y toward the goal
+
+
+def test_cost_field_curves_around_a_hazard_graded_by_magnitude():
+    """V2 GENERALIZED: a traversable HAZARD (not a wall) REPELS the potential field in proportion to its cost -- a big cost
+    flips the local choice AROUND it, a small (slow-tile) cost is CROSSED. Same mechanism, graded by magnitude."""
+    col = _grid_col()
+    assert col.vector_action((0, 0), (2, 1), [0, 1, 2, 3]) == 0               # open: +x is the better-aligned axis to (2,1)
+    col.learn_cost((1, 0), 50.0)                                             # a big HAZARD on the +x cell (still traversable)
+    assert col.vector_action((0, 0), (2, 1), [0, 1, 2, 3]) == 3               # -> curve to +y (avoid), still goal-ward
+    slow = _grid_col()
+    slow.learn_cost((1, 0), 0.1)                                             # a SMALL (slow-tile) cost
+    assert slow.vector_action((0, 0), (2, 1), [0, 1, 2, 3]) == 0             # 0.1 < the alignment gap -> CROSS it (detour not worth it)
+
+
+def test_cost_field_routes_the_geodesic_and_achiever_around_a_region():
+    """The cost field is GLOBAL, not just the next cell: a finite cost folded into `V = M·(reward − cost)` depresses value
+    along paths THROUGH the costly region, so BOTH the raw SR geodesic (navigate_to) AND the full achiever cascade detour."""
+    col = _grid_col(n=32)
+    for _ in range(300):                                                       # DIRECT (0,0)->(1,0)->(2,0); DETOUR (0,0)->(0,1)->(1,1)->(2,1)->(2,0)
+        col.observe((0, 0), 0, (1, 0)); col.observe((1, 0), 0, (2, 0))
+        col.observe((0, 0), 3, (0, 1)); col.observe((0, 1), 0, (1, 1))
+        col.observe((1, 1), 0, (2, 1)); col.observe((2, 1), 2, (2, 0))
+        col.observe((2, 0), 0, (2, 0))                                         # goal self-loop -> an SR SOURCE (occupancy propagates)
+    assert col.navigate_to((0, 0), {(2, 0): 1.0}, [0, 1, 2, 3]) == 0          # no cost -> the SHORTER direct route (+x)
+    col.learn_cost((1, 0), 5.0)                                              # a big finite cost on the direct cell
+    assert col.navigate_to((0, 0), {(2, 0): 1.0, (1, 0): -5.0}, [0, 1, 2, 3]) == 3   # cost-folded map -> the geodesic detours (+y)
+    assert col.achieve((0, 0), (2, 0), [0, 1, 2, 3]) == 3                     # achiever folds col.cost ITSELF -> same detour, end to end

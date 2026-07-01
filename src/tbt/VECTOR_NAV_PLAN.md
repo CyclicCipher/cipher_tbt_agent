@@ -40,6 +40,48 @@ value-sweep baseline. Reuses the L5⊗L6 machinery P1 built + the SR (`navigate_
   bumped move records a self-loop → M routes around) — so `navigate_to` also takes `blocked`. *Test:* integrate-mode nav
   (NavGame + a replica `local=True`) — FEWER actions RE-reaching a known goal than the swept value; suite green.
 
+## THE COST FIELD — ONE currency for walls / hazards / slow / risky (generalizes V2 repulsion)
+*User's insight (2026-07-01): a wall and a hazard (and a slow tile, and a coin-flip-bad tile) should be the SAME
+mechanism — not just in how the map AVOIDS them, but in how the model ASSIGNS the repulsion in the first place. They
+are.* There is no special "obstacle" object. Every location has ONE learned scalar: the **expected COST of interacting
+with it**. Walls, hazards, slow, and risky are just points on that one scale. This makes V2's binary `blocked` set the
+`cost = ∞` LIMIT of a graded, learned field — grounds + extends [[reference_obstacle_as_transition_cost]] (obstacle =
+reshaped reachability + SIGNED value) to graded and STOCHASTIC costs.
+
+### The one currency — `cost(s)` = the running EXPECTED cost of interacting with `s`
+| tile | what happens | cost it converges to | learned from |
+|---|---|---|---|
+| open | free | `0` | (default) |
+| **wall** | you can't enter (no progress) | `∞` (IMPASSABLE) | a no-progress BUMP (`predict(s,a)==s`) |
+| **hazard** | step on it → die / big penalty | the penalty (large) | AVERSION (a negative score, `reward.py` R_ext<0) |
+| **slow** | costs 2 actions to cross | the extra step-cost | the traversal taking > 1 action |
+| **risky** | 50% chance of something bad | `p · penalty` (the EXPECTATION) | the RUNNING MEAN of outcomes |
+The stochastic case falls out for FREE: a running mean of "touch it → half the time −big" converges to `0.5·big`, so
+"risky" is just a fractional cost — no new machinery, no special-casing. `cost(s)` is fed by the SAME `observe` the value
+model already sees (aversion + the bump); one currency = expected discounted cost.
+
+### Repulsion = the gradient of that one field (local steering + global geodesic)
+- **LOCAL (the potential field, in `vector_action`):** action score = **attraction − repulsion** = `align(move_delta,
+  UNIT goal-vector) − λ·cost(dest)`. Attraction is the unit-normalized goal alignment (∈[−1,1]); repulsion is `λ·cost` of
+  the cell the action moves INTO. `cost ≥ IMPASSABLE` → hard-excluded (recovers V2's `blocked` as the ∞ limit); a big
+  finite cost (hazard) is avoided unless nothing else makes net progress; a small cost (slow) is crossed only when the
+  detour is longer. Graded, principled, one line.
+- **GLOBAL (the SR geodesic, in `navigate_to`):** the `reward_map` carries `goal:+1` MINUS the finite costs, so `V =
+  M·(reward − cost)` propagates the cost GLOBALLY → the geodesic routes around costly REGIONS (not just the next cell).
+  Walls need no negative reward — the SR `M` never routed through them (no transition observed INTO a wall), so they fall
+  out of the transition structure; only FINITE costs enter the reward map.
+- ⇒ walls, hazards, slow, risky are ONE field, one gradient. `blocked` becomes a convenience alias for `cost=∞`.
+
+### Build (this step, mechanism-tested, additive — BEFORE V4 wires it into the loop)
+- `column.cost` (dict loc→expected cost) + `column.learn_cost(loc, c, rate)` = the running-mean ASSIGNMENT (the
+  stochastic→expectation piece). `IMPASSABLE` constant.
+- Thread `cost` through `vector_action` / `achieve` / `navigate_to` (unit-normalized attraction − λ·cost; the fallback
+  builds a cost-subtracted reward_map). *Tests:* back-compat (V1/V2/V3 green); a HAZARD on the direct path → detours like
+  a wall though not `blocked`; a SLOW tile → crossed when the detour is longer, avoided when the detour is short (graded);
+  `learn_cost` with alternating good/bad outcomes → converges to the MEAN (risky = fractional cost); `cost=IMPASSABLE` →
+  excluded like `blocked`.
+- The ASSIGNMENT WIRING (agent calls `learn_cost` on aversion + bump) lands with V4 (the same loop that wires the achiever).
+
 ## THE REFRAME (2026-07-01) — vector nav is the ACHIEVER half of the GSG's hypothesis-test loop
 (User's insight, from playing Sokoban/LockPath — it resolves how the GSG is supposed to work.)
 - **Exploration is NOT only wander-to-discover** (the eigenpurpose/frontier = COVERAGE). It is ALSO **navigate to a
