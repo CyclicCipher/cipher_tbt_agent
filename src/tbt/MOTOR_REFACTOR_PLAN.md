@@ -1,5 +1,10 @@
 # Motor refactor — action by active inference (GSG → BG gate → inverse-model motor)
 
+> **STATUS (2026-07-01): LARGELY SUPERSEDED, kept as REFERENCE.** Stages 1–2 (EFE value, inverse-model motor) + GD1–GD4
+> (the GSG) are built; the direction is now `BASAL_GANGLIA_PLAN.md` (the faithful BG) + `COLUMN_AUDIT.md` §Correction
+> (the GSG is inert; its overt rebuild is a heterarchy thing). Still actively cited for §7.3/§8.6 (the GSG's
+> commitment = the STN) — do NOT delete. Live north-stars: `COLUMN_AUDIT.md`, `GROUNDING_PLAN.md`, `BASAL_GANGLIA_PLAN.md`.
+
 *Draft for review, 2026-06-29. Companion to `REFACTOR_PLAN.md` (the layer refactor, done) and
 `TARGET_ARCHITECTURE.md`. Nothing here is executed until signed off. This commits to the **full active-inference
 reframe** of motor output, not a patch.*

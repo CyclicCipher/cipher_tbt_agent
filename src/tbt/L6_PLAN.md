@@ -1,5 +1,9 @@
 # L6_PLAN — revive Layer 6 (the location frame: grid cells), then wire it into planning
 
+> **STATUS (2026-07-01): DONE / HISTORICAL.** L6 is revived + live (`l6_sr.py` — the online TD-SR, grid cells,
+> eigenpurpose). §6 (L7-A..D, the after-L6 reconnection) was executed as the C1–C5 cycle — see `COLUMN_AUDIT.md`. The
+> remaining L6 lever (SR shortest-path / reachability reads = M1) is tracked LIVE in `GROUNDING_PLAN.md` P3. Kept for the reasoning.
+
 *Plan, 2026-06-30. Survives context compaction. The navigation gap (the agent is 5-100x over the oracle on the
 revived games, Sokoban 0/3) traces to L6 being DISCONNECTED. Companion to `FORWARD_MODEL_PLAN.md`,
 `reference_eigenoptions_subgoals`, `reference_brain_planning`, `reference_grid_sr_eigenbasis`, `project_offline_game_benchmark`.*

@@ -1,5 +1,9 @@
 # FORWARD_MODEL_PLAN — columns that do generative forward modelling
 
+> **STATUS (2026-07-01): DONE / HISTORICAL.** The generative forward model (FM1–4) is built + live (`l5_displacement.py`
+> `feature_field`/`observe_field`/`field_step`; `agent.py` `_field_plan`/`field_value`). Kept for the reasoning; live
+> north-stars: `COLUMN_AUDIT.md`, `GROUNDING_PLAN.md`, `BASAL_GANGLIA_PLAN.md`.
+
 *Plan, 2026-06-30. The pivot the cn04/ls20 measurements forced (HIPPOCAMPUS.md H1): structured-dynamics games need a
 GENERATIVE forward model, not a tabular transition graph. Settled with neuroscience first (memory
 `reference_brain_generative_model`) so the model is a COLUMN CAPABILITY, not a harness. Companion to

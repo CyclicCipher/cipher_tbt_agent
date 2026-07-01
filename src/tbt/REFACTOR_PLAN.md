@@ -1,5 +1,8 @@
 # TBT folder refactor — making the layers do their real TBT jobs
 
+> **STATUS (2026-07-01): DONE / HISTORICAL.** The layer refactor is complete (the object machinery is on the layers).
+> Kept for the reasoning; the LIVE north-stars are `COLUMN_AUDIT.md`, `TARGET_ARCHITECTURE.md`, `GROUNDING_PLAN.md`, `BASAL_GANGLIA_PLAN.md`.
+
 *Draft for review, 2026-06-29. Companion to `TARGET_ARCHITECTURE.md` (the north star) and the memory
 `reference_tbt_layers_4_23.md` (the researched cell/structure facts this plan implements). Nothing here is
 executed until signed off. The governing constraint: **ONE model, no parallel systems** — every layer is a
