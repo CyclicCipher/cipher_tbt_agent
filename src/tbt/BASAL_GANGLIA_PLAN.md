@@ -74,13 +74,21 @@ booleans — one salience, one DA gain, one STN threshold. `_choose` returns to 
   DECOUPLES from here and moves to B3's Go/NoGo** (a different axis: reward exploit-gains vs avoid-losses). What B2 did
   NOT do: introduce a learned actor (that is B3) — B2 is the one-salience BASE B3 rides on. [The eigenpurpose stays
   (load-bearing for long-horizon planning, user); its SVD → online Hebbian PCA is a LATER swap, not now — §6 below.]
-- **B3 — OpAL Go/NoGo opponent actor (the LEARNED selection) + the tonic-DA gain.** Add `G(a)`/`N(a)` (three-factor OpAL,
-  trained by the B1 critic `δ`) to `basal_ganglia.py`; `Act(a)=β_g·G−β_n·N` with `β_g=β·max(0,1+ρ)`, `β_n=β·max(0,1−ρ)`,
-  `ρ` = the tonic-DA gain from reward availability. This is where hand-coded value-selection becomes a LEARNED one, and
-  where the graded tonic-DA belongs. Stage: **B3a** the actor + mechanism tests in isolation (additive, like B1 — Go/NoGo
-  specialize, `ρ` shifts the balance, benefit beats cost); **B3b** wire it into the salience (Go/NoGo start ≈neutral so
-  behaviour is preserved, then refine by `δ`). *Test:* the agent AVOIDS an aversive outcome (`N`/GAME_OVER) the single
-  value could not represent; suite green.
+- **B3a ✅ — the OpAL Go/NoGo actor, in isolation.** `basal_ganglia.OpponentActor`: opponent `G`/`N` per (context,action),
+  three-factor OpAL updates trained by the B1 critic `δ`, `Act=β_g·G−β_n·N`, tonic-DA `ρ` sets `β_g/β_n`. Mechanism-tested
+  (`test_basal_ganglia.py`): Go/NoGo specialize (benefit vs cost), a cost earns NEGATIVE actor value (aversion), `ρ`
+  shifts the gain. Additive, not wired. Suite 103→105.
+- **B3b — live integration: BLOCKED, needs redesign (finding 2026-06-30).** Naively ADDING `Act(a)` to the salience +
+  training on every-step TD `δ` REGRESSED navigation (0/8). TWO causes: (i) the model-free actor's per-(state,action)
+  values FIGHT the strong model-based planner (`reward.py`) and, worse, its NoGo suppresses the SUBOPTIMAL exploratory
+  steps nav needs; (ii) the actor's raison d'être is AVERSION, but `reward.py` is reward-ONLY — so TD `δ<0` means merely
+  "worse-than-expected" (normal in exploration), NOT "bad." Training NoGo on that penalises exploration. ⇒ the actor
+  earns its keep only with a GENUINE cost signal (GAME_OVER / punishment) it can learn NoGo from, on scenes that HAVE
+  aversion (the current replicas are reward-only → nothing for it to add). **Redesigned B3b:** add GAME_OVER (+ blocked/
+  no-progress) as a COST; the actor learns NoGo from THAT (aversion = NEW info, not duplicating the reward value);
+  demonstrate the agent avoiding an aversive outcome. The generic-TD-every-step wiring is the wrong signal — DROPPED.
+  (Deeper alt if that's insufficient: arbitrate the model-free actor vs the model-based planner as two controllers — a
+  bigger design, deferred.)
 - **B5 — STN commitment.** The conflict term raises the threshold on near-tied saliences (hold the current choice). *Test:*
   anti-thrash on a two-attractor scene; and it supplies the GSG's commitment (cross-check `MOTOR_REFACTOR §8.6`).
 
