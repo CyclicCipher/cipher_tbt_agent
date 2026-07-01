@@ -58,10 +58,16 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
   is open; nothing is exploited yet.
 - **Stage 1 — LEARN operators as a representation (TEM + Gao).** Learn a per-action operator matrix from observed
   transitions, CONSTRAINED to a proper representation (orthogonal, composition-consistent). L6 = the acted-on latent.
-  *Gate (abelian):* the learned rep matches the hand-coded grid's EXTRAPOLATION — composition fidelity `M(a∘b)=M(a)·M(b)`
-  (the [[project_recurrent_world_model]] probe). *Gate (non-abelian):* a small non-abelian task (planar rotations / S₃) —
-  the learned operators represent the order-dependence the abelian grid cannot. *Fallback:* keep the hand-coded grid for
-  abelian domains; use learned operators only where non-abelian structure is present.
+  **ABELIAN GATE VALIDATED (the discipline task, 2026-07-01, `Operator.fit` + `test_operator.py`, suite 123):** operators
+  LEARNED from noisy grid transitions pass composition fidelity `M(a∘b)=M(a)·M(b)` — the learned +1 op EXTRAPOLATES 100–200
+  steps out (rel err ~0.02–0.04), learned E/N COMMUTE + compose to (1,1) — **but ONLY with the orthogonality constraint**:
+  unconstrained least-squares fits one step yet its spectral radius drifts off 1 so its POWERS drift (~5× worse extrapolation
+  at n=200); Procrustes-orthogonal pins the spectrum to the unit circle (ρ=1.0000) → faithful composition. So Gao's
+  constraint is REQUIRED, empirically — and the machinery is validated on abelian, so non-abelian failures next are
+  diagnosable as non-abelianness, not learnability. *Remaining (non-abelian) gate:* a small non-abelian task (planar
+  rotations / S₃) — learned operators represent the order-dependence the abelian grid cannot. *Open for the LIVE build:*
+  `Operator.fit` is BATCH; an ONLINE constrained update is the linchpin risk (constraint⊥expressivity). *Fallback:* keep the
+  hand-coded grid for abelian domains; use learned operators only where non-abelian structure is present.
 - **Stage 2 — DISCOVER relations by loop closure (the quotient).** Free composition path-integrates; relations (incl.
   commutativity) are found by loop closure under the **predictive-sufficiency** criterion (causal states / bisimulation, per
   `MATH_PHASE.md`) — close the coarsest partition that stays a sufficient statistic. *Gate:* on a task with a KNOWN

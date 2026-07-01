@@ -84,3 +84,49 @@ def test_L5_operator_reproduces_additive_move_NO_regression():
     for n in range(1, 25):
         z = succ.operator(0).apply(z)
         assert np.allclose(dehomog(z), [float(n), 0.0])
+
+
+def test_LEARNED_operator_composition_fidelity_abelian_gate():
+    """L6_NONABELIAN Stage 1 GATE (learnability, ABELIAN FIRST): operators LEARNED from noisy transitions on the grid code
+    satisfy COMPOSITION FIDELITY -- but ONLY with the GAO orthogonality constraint. The constrained operator is a proper
+    rotation (spectral radius 1) that COMMUTES (abelian), COMPOSES to the right multi-step target, and EXTRAPOLATES far
+    beyond the trained one-steps; the UNCONSTRAINED fit predicts one step but its powers DRIFT (spectral radius != 1).
+    Passing here means later NON-ABELIAN failures are diagnosable as non-abelianness, not the operator-learning machinery."""
+    import torch
+
+    from tbt.l6_grid import L6_GridLocation
+    g = L6_GridLocation()
+    rng = np.random.default_rng(0)
+    SC, noise = 3.0, 0.03                                                       # |grid code| = sqrt(#modules) = 3
+
+    def code(pos):
+        return g.code_at(torch.tensor(pos, dtype=torch.float32)).numpy()
+
+    def extrap_err(op, n):                                                      # apply the learned op n times from the origin
+        z = code([0.0, 0.0])
+        for _ in range(n):
+            z = op.apply(z)
+        return float(np.linalg.norm(z - code([float(n), 0.0])) / SC)
+
+    # learn the +1 (succession) operator from noisy pairs, constrained vs not
+    Z = np.stack([code([n, 0.0]) for n in range(201)])
+    Zn = Z + noise * rng.standard_normal(Z.shape)
+    plus_o = Operator.fit(Zn[:-1], Zn[1:], orthogonal=True)
+    plus_u = Operator.fit(Zn[:-1], Zn[1:], orthogonal=False)
+    assert abs(plus_o.spectral_radius() - 1.0) < 1e-6                           # constrained => a faithful rotation
+    assert extrap_err(plus_o, 100) < 0.05                                       # composition stays faithful 100 steps out
+    assert extrap_err(plus_o, 200) < 0.5 * extrap_err(plus_u, 200)             # the CONSTRAINT is required (unconstrained drifts ~5x)
+
+    # 2-D: learn EAST + NORTH from a random walk; abelian => they must COMMUTE and COMPOSE
+    moves = {"E": (1.0, 0.0), "N": (0.0, 1.0)}
+    before = {k: [] for k in moves}
+    after = {k: [] for k in moves}
+    pos = np.array([0.0, 0.0])
+    for _ in range(400):
+        k = rng.choice(list(moves))
+        before[k].append(code(pos) + noise * rng.standard_normal(g.dim))
+        pos = pos + np.array(moves[k])
+        after[k].append(code(pos) + noise * rng.standard_normal(g.dim))
+    E, N = Operator.fit(before["E"], after["E"]), Operator.fit(before["N"], after["N"])
+    assert np.linalg.norm(E.M @ N.M - N.M @ E.M) / SC < 0.05                    # learned E, N COMMUTE (abelian)
+    assert np.linalg.norm(E.then(N).apply(code([0.0, 0.0])) - code([1.0, 1.0])) / SC < 0.05   # compose E∘N -> (1,1)

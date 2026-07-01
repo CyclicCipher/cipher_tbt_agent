@@ -71,6 +71,27 @@ class Operator:
         c, s = float(np.cos(theta)), float(np.sin(theta))
         return Operator([[c, -s, 0.0], [s, c, 0.0], [0.0, 0.0, 1.0]])
 
+    # ----- LEARN an operator from transitions (Stage 1) — the constraint is what buys composition fidelity ----
+    @staticmethod
+    def fit(before, after, orthogonal: bool = True) -> "Operator":
+        """LEARN the operator mapping each `before` state code to its `after` (rows = samples, cols = dim) — L6_NONABELIAN
+        Stage 1. `orthogonal=True` imposes the GAO REPRESENTATION CONSTRAINT (orthogonal Procrustes: `M = U Vᵀ` from
+        `afterᵀ·before = U S Vᵀ`) → the learned operator is a proper rotation (spectral radius 1), so its COMPOSITION /
+        POWERS stay faithful and EXTRAPOLATE. `False` = unconstrained least-squares (`M = after⁺·before`): fits ONE step
+        but its powers DRIFT (spectral radius ≠ 1). The abelian composition-fidelity gate (`test_operator.py`) shows the
+        constraint is REQUIRED — validated empirically before trusting non-abelian. (Batch; an ONLINE constrained update is
+        a later Stage-1 refinement.)"""
+        before = np.atleast_2d(np.asarray(before, dtype=float))
+        after = np.atleast_2d(np.asarray(after, dtype=float))
+        if orthogonal:
+            U, _, Vt = np.linalg.svd(after.T @ before)
+            return Operator(U @ Vt)
+        return Operator(after.T @ np.linalg.pinv(before.T))
+
+    def spectral_radius(self) -> float:
+        """max |eigenvalue| — 1.0 for a faithful (unitary) representation; ≠ 1 means COMPOSITIONS/POWERS drift."""
+        return float(np.max(np.abs(np.linalg.eigvals(self.M))))
+
 
 def homog(pos):
     """Lift a position to homogeneous coords `[x…, 1]` — the state that `translation`/`rotation` operators act on."""
