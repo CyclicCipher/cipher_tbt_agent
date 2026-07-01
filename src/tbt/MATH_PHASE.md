@@ -59,6 +59,55 @@ amount domain-GENERAL (the same knob helps Sokoban) or bespoke (we cheated)?**
   exist to read a hypothesis off. This is TBT-native (grid/path-integration), NOT the pruned symbolic `factorize.py`/
   `residual.py` (orbit-partitions + predicate decision-lists — the abandoned CTKG flavour; a warning, not a tool).
 
+## THE REFERENCE FRAME — a translation-invariant operator × an (adaptive) multi-scale grid
+The frame we are after: a number is a POSITION reached by path-integrating ONE operator over a multi-scale periodic code.
+- **Translation-invariance (`L5.move_delta`, ALREADY LIVE):** `+1` = one displacement applied everywhere → it GENERALISES
+  (predict any successor) and, crucially, COMPOSES: `a+b` = apply `+1` `b` times = **path-integrate `a` by `b`**. Addition
+  is not invented; it is the operator's composition, read off the frame. (Baseline P0 missed this — it used per-state edges
+  over opaque atoms, never the `move_delta`/`track` path.)
+- **Multi-scale (`l6_grid`, COMPLETE but SHELVED):** magnitude that EXTRAPOLATES (residue/CRT over incommensurate scales);
+  and if the scales are NESTED powers of ten, each module's phase IS a digit (place value) and **carry is FREE** — advancing
+  position by 1 rotates the λ=100 phase by exactly one tenth of its cycle, so ten unit-steps roll the tens digit over. Carry
+  is the ROLLOVER of nested periodic phases under the same path-integration, not a learned rule. ⇒ in the right frame,
+  succession / addition / place value / carry are ALL path integration. (This REFINES outcome C: carry may be free in a
+  nested frame; the real question becomes whether the model can FIND that frame.)
+- **Continuous / fractional displacement + the "+1" GAUGE:** the substrate is continuous — `move_delta` is a float, and
+  `l6_grid.path_integrate` rotates phases by ANY real displacement — so a fraction is a position BETWEEN integer landmarks
+  (a finer codebook). The DISCRETE unit is a gauge fixed by LOOP CLOSURE: the multi-scale error-correcting `decode`/`place`
+  snaps to the nearest codeword, and the incommensurate scales CORRECT path-integration drift — so multi-scale is what keeps
+  `+1` CONSISTENT over an unbounded count (stability, not just range). Live gap: the grid is shelved (raw `_fovea` is used),
+  and the successor needs canonical-unit re-anchoring at landmarks (a pure EWMA drifts if step sizes vary).
+
+## ADAPTIVE SCALES — how the frame is LEARNED (the real lever, currently fixed `(11,13,17)`)
+Two principled routes, both reusing existing machinery:
+1. **Scales = the dominant eigen-FREQUENCIES of the learned SR / transition operator** (grid = SR eigenvectors, Stachenfeld;
+   we ALREADY compute this eigenframe as the eigenpurpose). A cyclic domain of period `p` peaks the spectrum at `1/p` →
+   adopt scale `p`; an OPEN counting line is BROADBAND → no discrete scale emerges (self-consistent with the P0 line).
+2. **An over-complete scale BANK + learned sparse SELECTION** (the biology: universal scales + attention) — don't relearn
+   frequencies, learn which are load-bearing per domain.
+Criterion for both = **MDL / prediction-error reduction** (a scale earns its place by compressing) — the same principle as
+the construction engine (outcome B). **The catch, precise:** adaptive scales discover INTRINSIC periodicity (cycles, wraps,
+modular dynamics). Base-10 place value is NOTATIONAL, not an intrinsic period of counting → it will NOT fall out of a raw
+count; it must be present in the input (numerals) or the task made modular (clock arithmetic). That IS the scaffolding knob.
+
+## THE UNDERLYING MATHEMATICS — a compass, not an engine
+- **Group representation theory is the rigorous WHY** (the load-bearing half). Translation-invariance is a GROUP; grid cells
+  are its unitary (Fourier) REPRESENTATION — path integration REQUIRES the group-representation condition (Gao et al. 2021),
+  and the grid eigenvectors ≈ Fourier plane waves = the irreducible reps of the translation group (Sorscher/Ganguli 2019).
+  So "composition" and the periodic "scales" are not a coincidence — they are the group structure and its representation;
+  **addition = the free monoid on the successor.**
+- **Category theory is the language ONE LEVEL UP, for cross-domain generalisation** (the Sokoban/ARC hope). A domain = a
+  CATEGORY (states = objects, operators = morphisms); a hypothesis/solution = a COMPOSITE MORPHISM to a goal object;
+  cross-domain transfer = a FUNCTOR (shared structure, content varies) = exactly TEM's structure/content split; transfer =
+  a universal construction (pullback). It unifies "hypothesis = a path to a goal" across math / Sokoban / ARC, and its
+  universal constructions are the "forced, no ad-hoc design" appeal that could SAVE WORK.
+- **Caution (bitter lesson):** both are DESCRIPTIVE — they say WHAT structure to capture, not HOW to learn it from data (the
+  geometric mechanism stays ours). The project already ran a CT-SYMBOLIC line (CTKG / Kan extensions) and PAUSED it for the
+  geometric TBT line. ⇒ use them as a COMPASS (is our operator set a group, closed under composition? do transfer + the
+  universal constructions fall out?), a focused STUDY to see if category theory names the ONE unifying abstraction — NOT a
+  resurrected symbolic engine to build in place of learning. See [[reference_discovery_regime_transition]] (Kan-extension
+  transport was the CTKG framing).
+
 ## The probes (open-ended — each is a QUESTION: what is GIVEN, what is DISCOVERED, what we MEASURE, the Sokoban analogue)
 - **P0 (done)** — naive atomic succession → baseline: no structure, no generalisation.
 - **P-succession** — learn `+1` as a translation-invariant operator + path-integrate. *Does a grid/periodic code emerge,
@@ -67,18 +116,20 @@ amount domain-GENERAL (the same knob helps Sokoban) or bespoke (we cheated)?**
 - **P-plus** — with succession learned, present `a+b` examples with `+` OPAQUE. *Can the model DISCOVER the answer is `b`
   succession-steps from `a` — read `+` off the structure?* What signal drives it there — the score, prediction error, or
   the geometry itself? Sokoban analogue: discover the rewarding configuration is REACHABLE through the learned dynamics.
-- **P-carry** — multi-digit: the recursive rung. *Where does structure-reading break?* Does it need an explicit
-  CONSTRUCTION step (compress the recurring carry into a reusable sub-operator during CONSOLIDATION — the DreamCoder
-  *principle*: MDL compression into a growing library; TBT-native = TEM/grid + replay, not a symbolic DSL) — or is carry
-  irreducibly procedural?
+- **P-carry** — multi-digit: the recursive rung. *Is carry FREE in a nested multi-scale frame (the rollover of nested
+  periodic phases), or does structure-reading break?* If it breaks, does it need an explicit CONSTRUCTION step (discover the
+  nested scales + compress the recurring carry into a reusable sub-operator during CONSOLIDATION — the DreamCoder *principle*:
+  MDL compression into a growing library; TBT-native = TEM/grid + replay, not a symbolic DSL) — or is carry irreducibly
+  procedural? NB whether the nested (base-matched) scales are DISCOVERED vs imposed is the scaffolding knob here.
 - **(later) P-mult / distributivity** — does a discovered operator become an OVERHYPOTHESIS the next rung composes (the
   ladder / blessing of abstraction, and its TRANSFER)?
 
 ## Competing outcomes (what we might learn — not mutually exclusive across rungs)
 - **A — STRUCTURE-GUIDED discovery WORKS:** with the right geometry `+` is found as composition, cheaply, by a
   domain-general knob → strong support for building the GSG as STRUCTURE-READING; directly informs Sokoban.
-- **B — a CONSTRUCTION step is needed:** discovery requires compressing recurring structure into a new reusable operator
-  during consolidation (library-learning, TBT-native via TEM/grid + replay — NOT symbolic factorize/residual).
+- **B — a CONSTRUCTION step is needed:** discovery requires DISCOVERING the frame's scales (the SR-eigenspectrum / MDL scale
+  selection) and compressing recurring structure into a new reusable operator during consolidation (library-learning,
+  TBT-native via TEM/grid + replay — NOT symbolic factorize/residual).
 - **C — exact carry is irreducibly PROCEDURAL/symbolic:** it does not fall out of geometry — a real boundary (the
   ANS-vs-symbolic fork) telling us where the geometric agent ends and a learned tool / the heterarchy begins.
 Likely A for succession/plus, B or C for carry — and *that boundary* is the phase's main deliverable.
