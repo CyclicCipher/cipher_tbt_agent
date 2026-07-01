@@ -56,6 +56,20 @@ def test_l6_is_read_as_the_location_substrate():
     assert col.locate(9) is None                             # a state unknown to the L6 frame -> no location
 
 
+def test_sense_at_is_l4_over_l6_predict_then_compare():
+    """C2 (COLUMN_AUDIT): the TBT cycle step -- L4 predicts the feature at the L6 location, compares to the sensed
+    feature, learns by binding it. A FRESH location predicts nothing (not surprised, just learns); re-sensing the SAME
+    feature there is PREDICTED (not surprised); a DIFFERENT feature is SURPRISING (the predict-then-compare fires)."""
+    col = CorticalColumn(n_entities=16, seed=0)
+    for _ in range(80):                                      # an L6 frame over locations 0..5
+        for i in range(6):
+            col.observe(i, 0, (i + 1) % 6)
+    fa, fb = col.L4.encode(("red",)), col.L4.encode(("blue",))
+    assert col.sense_at(0, fa) is False                     # nothing bound at 0 yet -> not surprised; learns fa@0
+    assert col.sense_at(0, fa) is False                     # re-sense fa@0 -> PREDICTED, not surprised
+    assert col.sense_at(0, fb) is True                      # a DIFFERENT feature at 0 -> SURPRISED (the learning signal)
+
+
 def test_feature_at_location_map_binds_and_reads_back():
     """M5/L7-A: the column maintains an online allocentric MAP -- bind a SENSED feature at a LOCATION (L4 feature ⊗
     L6 place code) across a sensorimotor sequence, then READ it back (predict_feature). An object seen at a place is

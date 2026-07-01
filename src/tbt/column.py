@@ -141,11 +141,23 @@ class CorticalColumn(nn.Module):
             self._map = self._map + self.L4.bind(feature_id, self._place_code(loc))
 
     def feature_at(self, loc):
-        """Read the MAP: the feature predicted at `loc` (L4 `predict_feature` over the accumulated map) -- the predict
-        half of predict-then-compare, seated in L4. `None` for a location unknown to the L6 frame."""
+        """Read the MAP: the feature predicted at `loc` (L4 readout over the accumulated map) -- the predict half of
+        predict-then-compare, seated in L4. `None` for a location unknown to the L6 frame OR one where nothing is
+        CONFIDENTLY bound yet (a near-zero readout -> no prediction, so a fresh location is not a false surprise)."""
         if loc not in self.sr.idx:
             return None
-        return self.L4.predict_feature(self._map, self._place_code(loc))
+        scores = self.L4.readout(self._map, self._place_code(loc))
+        return int(scores.argmax()) if float(scores.max()) > 0.5 else None
+
+    def sense_at(self, location, sensed_feature: int) -> bool:
+        """C2 (COLUMN_AUDIT) -- the TBT cycle step, L4 over L6: PREDICT the feature at the L6 `location` (from the map),
+        COMPARE to the `sensed_feature`, then LEARN by binding the sensed feature there. Returns True if SURPRISED (a
+        confident prediction MISSED) -- the single predict-then-compare learning signal (HTM burst). The object EMERGES
+        as the accumulated feature-at-location map; a persistent mismatch is a boundary (a different object)."""
+        predicted = self.feature_at(location)
+        surprised = predicted is not None and predicted != sensed_feature
+        self.bind_at(location, sensed_feature)                            # learn: bind the sensed feature at the location
+        return surprised
 
     # ----- routing: the L5 operator (predict / motor / driver) --------------------------------------
     def predict(self, symbol, action):
