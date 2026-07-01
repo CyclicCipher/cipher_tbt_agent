@@ -72,6 +72,22 @@ def test_agent_loop_maps_recognized_objects():
     assert ag.sensed_surprise is True
 
 
+def test_full_cycle_end_to_end():
+    """C5 (COLUMN_AUDIT): the full predict-sense-update cycle end-to-end, through the agent loop. An agent walking a
+    feature-ring learns BOTH (a) L4 to PREDICT the feature at each L6 location (`feature_at` correct -> the L4↔L6 cycle
+    converged) AND (b) L5 to path-integrate L6 (`loc_move` dead-reckons the ring by the learned displacement). L6
+    location + L4 feature-at-location + L5→L6 path integration, one loop."""
+    ag = Agent(n_actions=1, seed=0)                         # one action: step forward on the ring
+    feat_at = {0: ag.col.L4.encode(("A",)), 2: ag.col.L4.encode(("B",)), 4: ag.col.L4.encode(("C",))}
+    for _ in range(10):                                     # walk the ring, running the full cycle each step
+        for p in range(6):
+            ag.step(p, 0.0, feature=feat_at.get(p), location=p)
+    for p, f in feat_at.items():                            # (a) L4 OVER L6: the feature is predicted at each location
+        assert ag.col.feature_at(p) == f, (p, ag.col.feature_at(p), f)
+    ag.col.loc_reset(0)                                     # (b) L5 -> L6: path-integrate by the learned displacement
+    assert ag.col.loc_move(0) == 1 and ag.col.loc_move(0) == 2
+
+
 def test_predictive_state_fires_and_settles():
     """The HTM predict-then-compare: early on the agent is often surprised (model unlearned); once the dynamics are
     learned, a correctly-predicted move leaves it un-surprised. The predictive state is real, not vestigial."""
