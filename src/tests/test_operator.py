@@ -17,7 +17,7 @@ _PKG_PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
-from tbt.operator import Operator, dehomog, homog  # noqa: E402
+from tbt.operator import Operator, OnlineOperator, dehomog, homog  # noqa: E402
 
 
 def test_operator_apply_compose_identity_basics():
@@ -130,3 +130,47 @@ def test_LEARNED_operator_composition_fidelity_abelian_gate():
     E, N = Operator.fit(before["E"], after["E"]), Operator.fit(before["N"], after["N"])
     assert np.linalg.norm(E.M @ N.M - N.M @ E.M) / SC < 0.05                    # learned E, N COMMUTE (abelian)
     assert np.linalg.norm(E.then(N).apply(code([0.0, 0.0])) - code([1.0, 1.0])) / SC < 0.05   # compose E∘N -> (1,1)
+
+
+def test_ONLINE_operator_learns_from_a_stream__COVERAGE_not_constraint_is_the_bottleneck():
+    """L6_NONABELIAN Stage 1 ONLINE gate (needed for an agent): `OnlineOperator` learns from a STREAM of transitions. On a
+    BROAD-coverage stream it CONVERGES to a faithful operator (spectral radius 1, extrapolates far); the CONSTRAINT is never
+    the bottleneck (orthogonality is a projection at read, so constraint⊥expressivity does NOT bite). The real requirement is
+    COVERAGE: a LOCAL random walk's peaked occupancy under-samples the state space → a much worse operator."""
+    import torch
+
+    from tbt.l6_grid import L6_GridLocation
+    g = L6_GridLocation()
+    rng = np.random.default_rng(0)
+    SC, noise = 3.0, 0.03
+
+    def code(pos):
+        return g.code_at(torch.tensor([pos, 0.0], dtype=torch.float32)).numpy()
+
+    def extrap_err(op, n):
+        z = code(0.0)
+        for _ in range(n):
+            z = op.apply(z)
+        return float(np.linalg.norm(z - code(float(n))) / SC)
+
+    # BROAD coverage (a forward sweep): converges to a faithful operator
+    sweep = OnlineOperator(g.dim)
+    for n in range(4000):
+        sweep.observe(code(n) + noise * rng.standard_normal(g.dim), code(n + 1) + noise * rng.standard_normal(g.dim))
+    assert abs(sweep.operator().spectral_radius() - 1.0) < 1e-6                 # constraint held THROUGHOUT (not the bottleneck)
+    good = extrap_err(sweep.operator(), 100)
+    assert good < 0.15                                                          # converged: composition fidelity / extrapolation
+
+    # CONFINED walk (bouncing in a narrow band): the state space is genuinely under-covered → a much worse operator, no
+    # matter the seed. This isolates COVERAGE as the bottleneck (the constraint is still perfectly held).
+    confined = OnlineOperator(g.dim)
+    pos = 0
+    for _ in range(4000):
+        npos = pos + int(rng.choice([1, -1]))
+        if abs(npos) > 4:                                                       # reflect at ±4 -> occupancy pinned to 9 positions
+            npos = pos - (npos - pos)
+        if npos == pos + 1:                                                     # a +1 transition (the operator we read)
+            confined.observe(code(pos) + noise * rng.standard_normal(g.dim), code(npos) + noise * rng.standard_normal(g.dim))
+        pos = npos
+    assert abs(confined.operator().spectral_radius() - 1.0) < 1e-6             # constraint STILL held (it is never the issue)
+    assert extrap_err(confined.operator(), 100) > max(0.3, 3.0 * good)         # COVERAGE is the bottleneck, not the constraint

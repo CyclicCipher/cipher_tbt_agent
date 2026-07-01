@@ -93,6 +93,41 @@ class Operator:
         return float(np.max(np.abs(np.linalg.eigvals(self.M))))
 
 
+class OnlineOperator:
+    """LEARN an operator ONLINE from a STREAM of (before, after) transitions — the AGENT form of `Operator.fit`
+    (L6_NONABELIAN Stage 1). Maintains a running cross-covariance `C ≈ Σ after ⊗ before` (a cheap rank-1 update per
+    transition); the operator is read as its orthogonal PROCRUSTES `M = U Vᵀ` (SVD only on read — throttle it).
+
+    KEY PROPERTY: this DECOUPLES accumulation (unconstrained → EXPRESSIVE) from the representation CONSTRAINT (a PROJECTION
+    at read), so the constraint⊥expressivity tension does NOT bite — the constraint never fights the fit, and the operator
+    stays a proper rotation (spectral radius 1) throughout. The real online challenge is COVERAGE, not the constraint: the
+    operator is well-estimated only over the region the stream samples, so it needs BROAD/relatively-uniform exploration
+    (a running SUM, `decay=1.0`, for a stationary operator; a gentle `decay<1` for a drifting one). A LOCAL random walk's
+    peaked occupancy under-covers → poor extrapolation. (Empirically validated in `test_operator.py`.)"""
+
+    def __init__(self, dim: int, decay: float = 1.0):
+        self.dim = dim
+        self.decay = decay                                            # 1.0 = a pure running SUM (stationary op); <1 = EWMA (drift)
+        self.C = np.zeros((dim, dim))
+        self._M = np.eye(dim)
+        self._dirty = False
+
+    def observe(self, before, after) -> None:
+        """Accumulate one transition into the cross-covariance (cheap; the SVD is deferred to `operator()`)."""
+        outer = np.outer(np.asarray(after, dtype=float), np.asarray(before, dtype=float))
+        self.C = self.C + outer if self.decay >= 1.0 else self.decay * self.C + (1.0 - self.decay) * outer
+        self._dirty = True
+
+    def operator(self) -> Operator:
+        """Read the current operator = orthogonal Procrustes of the accumulated cross-covariance (SVD; cached until the
+        next `observe`). The agent throttles this (read every N steps), like the eigenpurpose SVD."""
+        if self._dirty:
+            U, _, Vt = np.linalg.svd(self.C)
+            self._M = U @ Vt
+            self._dirty = False
+        return Operator(self._M)
+
+
 def homog(pos):
     """Lift a position to homogeneous coords `[x…, 1]` — the state that `translation`/`rotation` operators act on."""
     return np.concatenate([np.asarray(pos, dtype=float), [1.0]])

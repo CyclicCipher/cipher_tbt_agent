@@ -64,10 +64,19 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
   unconstrained least-squares fits one step yet its spectral radius drifts off 1 so its POWERS drift (~5× worse extrapolation
   at n=200); Procrustes-orthogonal pins the spectrum to the unit circle (ρ=1.0000) → faithful composition. So Gao's
   constraint is REQUIRED, empirically — and the machinery is validated on abelian, so non-abelian failures next are
-  diagnosable as non-abelianness, not learnability. *Remaining (non-abelian) gate:* a small non-abelian task (planar
-  rotations / S₃) — learned operators represent the order-dependence the abelian grid cannot. *Open for the LIVE build:*
-  `Operator.fit` is BATCH; an ONLINE constrained update is the linchpin risk (constraint⊥expressivity). *Fallback:* keep the
-  hand-coded grid for abelian domains; use learned operators only where non-abelian structure is present.
+  diagnosable as non-abelianness, not learnability.
+  **ONLINE GATE VALIDATED — and it REFRAMES the linchpin (2026-07-01, `OnlineOperator`):** learning from a STREAM works —
+  `OnlineOperator` keeps a running cross-covariance (cheap rank-1 update/step) and reads the operator as its orthogonal
+  Procrustes (throttled SVD). On a broad-coverage stream it converges to a faithful operator (spectral radius 1,
+  extrapolates); **the CONSTRAINT is NEVER the bottleneck** — orthogonality is a PROJECTION AT READ, so it never fights the
+  fit (constraint⊥expressivity does not bite — unlike a constrained *gradient* update, which is where the DEQ wall was). The
+  REAL online challenge is COVERAGE: the operator is well-estimated only over the region the stream samples, so a
+  narrow/confined walk under-covers → poor extrapolation while a broad sweep converges (a running SUM for a stationary op;
+  gentle decay for drift). ⇒ the linchpin moves from *learnability under constraint* to *EXPLORATION/coverage* — a more
+  tractable axis the agent already has levers for (directed exploration / eigenpurpose).
+  *Remaining (non-abelian) gate:* a small non-abelian task (planar rotations / S₃) — learned operators represent the
+  order-dependence the abelian grid cannot. *Fallback:* keep the hand-coded grid for abelian domains; learned operators only
+  where non-abelian structure is present.
 - **Stage 2 — DISCOVER relations by loop closure (the quotient).** Free composition path-integrates; relations (incl.
   commutativity) are found by loop closure under the **predictive-sufficiency** criterion (causal states / bisimulation, per
   `MATH_PHASE.md`) — close the coarsest partition that stays a sufficient statistic. *Gate:* on a task with a KNOWN
@@ -80,10 +89,13 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
   gates isolate whether the residual gap is representation (here) or planning/GSG (elsewhere).
 
 ## Risks (the spine — where this breaks)
-1. **LEARNABILITY of the constrained representation.** Can operator matrices constrained to a proper rep be learned ONLINE
-   from few samples? Our own DEQ line is the warning: **constraint ⊥ expressivity** (contraction ⊥ expressivity killed the
-   single-operator equilibrium — [[project_recurrent_world_model]]). The representation/isometry constraint may be as hard
-   to satisfy online as the contraction was. This is the linchpin risk.
+1. **LEARNABILITY of the constrained representation — REFRAMED (2026-07-01).** The feared constraint⊥expressivity tension
+   does NOT bite for `OnlineOperator`: orthogonality is a PROJECTION AT READ (Procrustes), not a constrained gradient step,
+   so it never fights the fit (spectral radius stays 1; validated). The DEQ wall came from forcing ONE operator to be both
+   contractive AND expressive via gradient — the projection-at-read design sidesteps exactly that. **The linchpin moves to
+   COVERAGE/EXPLORATION:** the online operator is only well-estimated over the state region the stream samples, so broad
+   (relatively uniform) exploration is required — a narrow/confined walk under-covers. Tractable (the agent has directed-
+   exploration levers), but now the explicit dependency to design for. NB `OnlineOperator.operator()` re-SVDs on read → THROTTLE it (like the eigenpurpose).
 2. **COST / dimensionality.** Non-abelian irreps are higher-dimensional (matrices, not phases); the code + operators are
    heavier. Needs truncation / band-limiting (low-order irreps only), the group analogue of the grid's finite scales.
 3. **EXTRAPOLATION without the engineered guarantee.** A learned rep may not extrapolate like the hand-coded grid; Gao's
