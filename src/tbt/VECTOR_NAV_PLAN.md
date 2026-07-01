@@ -32,9 +32,31 @@ value-sweep baseline. Reuses the L5⊗L6 machinery P1 built + the SR (`navigate_
 - **V3 — stuck → SR-geodesic subgoal.** Detect the local minimum (no unblocked action reduces `|v|`); fall back to
   `navigate_to` toward a waypoint; resume vector nav on arrival. *Test:* a U-shaped (concave) obstacle → escapes via the
   detour, does not oscillate in the local minimum.
-- **V4 — wire into the agent's EXPLOIT navigation.** When a reward goal is reachable (`col.reachable`), navigate by the
-  V1–V3 cascade instead of the swept value; keep the explore machinery (eigenpurpose/frontier) for when no goal is known.
-  *Test:* integrate-mode nav (NavGame + a replica driven `local=True`) — FEWER actions than the value-sweep baseline; suite green.
+- **V4 — wire vector nav as the GENERAL goal-navigation ACHIEVER** (NOT exploit-only — the reframe, user 2026-07-01, §
+  below). Vector nav navigates to a GOAL-STATE whatever its source: a KNOWN reward (exploit) OR a HYPOTHESIZED target
+  (explore — Sokoban's "block on the marker"). `vector_action` already takes an arbitrary `goal`, so the wiring supplies
+  (a) the goal from a GOAL SOURCE (for V4: a remembered completing position; later: the GSG hypothesis), (b) the `blocked`
+  set (bumped walls = border cells), and runs in INTEGRATE mode. NB the V3 detour needs the SR to REFLECT walls (a
+  bumped move records a self-loop → M routes around) — so `navigate_to` also takes `blocked`. *Test:* integrate-mode nav
+  (NavGame + a replica `local=True`) — FEWER actions RE-reaching a known goal than the swept value; suite green.
+
+## THE REFRAME (2026-07-01) — vector nav is the ACHIEVER half of the GSG's hypothesis-test loop
+(User's insight, from playing Sokoban/LockPath — it resolves how the GSG is supposed to work.)
+- **Exploration is NOT only wander-to-discover** (the eigenpurpose/frontier = COVERAGE). It is ALSO **navigate to a
+  HYPOTHESIZED goal to TEST it**: in Sokoban you hypothesise "block on the marker", COMMIT, navigate the block there, and
+  the SCORE confirms — there is NO reward gradient (score only at the end) and NO coverage win, so ONLY a goal-hypothesis
+  + an achiever solves it (why Sokoban is 0/3).
+- **So vector nav (the ACHIEVER) serves BOTH exploit (reward goal) AND goal-directed exploration (hypothesis goal)** —
+  the same primitive, "go to a goal-state," differing only in where the goal came from. Do NOT hard-wire it to exploit.
+- **This un-sidelines the GSG.** I'd wrongly called the single-column GSG *redundant*; it is **INCOMPLETE** — it emits
+  only an `"act"` goal with NO target. Its REAL job = propose **goal-HYPOTHESES with targets** (from Core-Knowledge
+  priors: movable objects + salient markers + current uncertainty). The loop: **GSG proposes a target → STN COMMIT (hold
+  it through the multi-step maneuver, B5) → vector-nav ACHIEVE (this plan) → SCORE confirms/refutes.** That is the
+  goal-directed-exploration loop of `GROUNDING_PLAN §3` + [[reference_commit_to_test_a_hypothesis]] — the Sokoban / hard-
+  multi-step-level lever. We have every piece (goal proposal, commitment, navigation, achiever, score), UNWIRED.
+- **Sequencing:** V4 = the achiever (this plan) — the prerequisite. THEN the goal-HYPOTHESIS loop (the next chapter) =
+  the GSG made live as a TARGET generator + commit + achieve + confirm — where the GSG stops being inert AND Sokoban
+  unblocks. "What goal" (GSG) and "how to get there" (vector nav) are two halves of ONE loop, not competing steps.
 
 ## Honest caveats
 - POSITION-based → measured in INTEGRATE mode (the live-ARC path it targets); the config_state benchmark has no positions.

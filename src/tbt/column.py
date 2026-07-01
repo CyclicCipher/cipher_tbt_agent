@@ -116,15 +116,18 @@ class CorticalColumn(nn.Module):
         flag (the bug the oracle/human/agent trace exposed)."""
         return self.value(s, reward_map) > 1e-9
 
-    def navigate_to(self, state, reward_map, actions):
+    def navigate_to(self, state, reward_map, actions, blocked=()):
         """SR SHORTEST-PATH navigation: the action whose OUTCOME has the highest SR VALUE `V(next) = M[next]·R`. Because
         the SR occupancy `M[s,g] ~ γ^(distance to g)`, greedy on it steps along the SHORTEST path to the reward
         structure `reward_map`, read DIRECTLY from the SR (no rollout / no per-step sweep -- reference_brain_planning).
         Unlike the swept value it carries NO frontier optimism, so near a KNOWN goal it does not wander into untried
-        actions -- the efficiency lever. `predict` (L5) gives each action's outcome. Returns the best action, or `None`
-        when no reward is reachable (`V=0` everywhere -> the caller's explore policy takes over)."""
+        actions -- the efficiency lever. The SR WARPS around barriers (a bumped move records a self-loop), so this is the
+        GEODESIC (obstacle-aware) path = the VECTOR_NAV V3 DETOUR when the potential field is stuck. `blocked` actions
+        (border cells) are excluded. Returns the best action, or `None` when no reward is reachable (the explore policy takes over)."""
         best_a, best_v = None, 1e-9
         for a in actions:
+            if a in blocked:                                 # V3: an obstacle in that direction (border cell) -> excluded
+                continue
             v = self.value(self.predict(state, a), reward_map)
             if v > best_v:
                 best_v, best_a = v, a
@@ -150,6 +153,18 @@ class CorticalColumn(nn.Module):
             if align > best_align:
                 best_align, best_a = align, a
         return best_a
+
+    def achieve(self, state, goal, actions, blocked=()):
+        """VECTOR_NAV V3 -- the ACHIEVER cascade (navigate `state` -> `goal`): the POTENTIAL FIELD (`vector_action`: V1
+        attraction + V2 repulsion) by DEFAULT, and when it is STUCK (a local minimum -- fully blocked toward the goal ->
+        `vector_action` returns None) fall back to the SR-GEODESIC DETOUR (`navigate_to`, which routes around the
+        bump-learned walls the SR reflects). `state`/`goal` are positions in the L6 frame (= the graph states). Returns
+        the action, or None if no progress is possible. The GENERAL goal-navigation primitive -- the goal may be a known
+        reward (exploit) OR a GSG hypothesis (goal-directed exploration); see VECTOR_NAV_PLAN + reference_vector_navigation."""
+        a = self.vector_action(state, goal, actions, blocked)   # V1+V2: the potential field toward the goal
+        if a is None:                                           # V3: local minimum / fully blocked -> SR geodesic detour
+            a = self.navigate_to(state, {goal: 1.0}, actions, blocked)
+        return a
 
     def locate(self, state):
         """C1 (COLUMN_AUDIT) — the column's WHERE: L6 READ as the location substrate. Returns `state`'s L6

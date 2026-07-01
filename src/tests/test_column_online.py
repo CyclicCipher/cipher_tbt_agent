@@ -239,3 +239,18 @@ def test_vector_action_repulsion_steers_around_a_blocked_direction():
     assert col.vector_action((0, 0), (5, 2), [0, 1, 2, 3]) == 0                  # open: straight toward the dominant +x
     assert col.vector_action((0, 0), (5, 2), [0, 1, 2, 3], blocked={0}) == 3     # +x blocked -> go +y (down), around it
     assert col.vector_action((0, 0), (5, 0), [0, 1, 2, 3], blocked={0}) is None  # only path blocked -> None (V3 detour)
+
+
+def test_achieve_cascades_from_vector_field_to_sr_detour():
+    """V3 (VECTOR_NAV): the ACHIEVER cascade -- achieve uses the potential field by DEFAULT (vector_action), and when
+    stuck (fully blocked toward the goal) falls back to the SR-geodesic DETOUR (navigate_to) around the walls."""
+    col = CorticalColumn(n_entities=16, seed=0)
+    for a, d in {0: (1, 0), 1: (-1, 0), 2: (0, -1), 3: (0, 1)}.items():
+        col.L5.observe_move(a, d)
+    for _ in range(200):                                                        # the DETOUR graph around a wall at (0,0)->(1,0): (0,0)->(0,1)->(1,1)->(1,0)
+        col.observe((0, 0), 3, (0, 1))
+        col.observe((0, 1), 0, (1, 1))
+        col.observe((1, 1), 2, (1, 0))
+        col.observe((1, 0), 0, (1, 0))                                          # the goal is an SR SOURCE (self-loop) so its occupancy propagates back
+    assert col.achieve((0, 0), (1, 0), [0, 1, 2, 3]) == 0                        # unobstructed: the field goes straight (+x) -- it will bump the wall + learn it
+    assert col.achieve((0, 0), (1, 0), [0, 1, 2, 3], blocked={0}) == 3          # wall known -> field stuck -> SR-geodesic detour starts around (+y)
