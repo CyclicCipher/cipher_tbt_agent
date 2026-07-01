@@ -90,6 +90,34 @@ the construction engine (outcome B). **The catch, precise:** adaptive scales dis
 modular dynamics). Base-10 place value is NOTATIONAL, not an intrinsic period of counting → it will NOT fall out of a raw
 count; it must be present in the input (numerals) or the task made modular (clock arithmetic). That IS the scaffolding knob.
 
+## FACTORED LOOP CLOSURE — how the cyclic frame EMERGES from naive input (and why it is a GENERAL map upgrade)
+The mechanism *behind* adaptive scales — the TRIGGER that discovers the periods — and the answer to "why did naive base-10
+give a LINE when the model can clearly hold a cycle?"
+- **Diagnosis:** what folds a dead-reckoned LINE into a CYCLE is **loop closure** — recognising a state you have RETURNED
+  to. The `Z/10` control closed because the state RECURRED; counting gave a line because every number is a UNIQUE state, so
+  nothing recurs at the full-state grain, so nothing closes. The missing ingredient was a loop-closure TRIGGER, not a
+  cyclic representation.
+- **The fix: loop-close on FACTORS, not whole states.** Base-10 cyclicity lives in a PROJECTION — the units digit recurs
+  every 10 while the number never does. Recognise the recurring units-content → close a loop in the UNITS SUBSPACE → a
+  10-cycle; tens recurs every 100 → a 100-cycle; nested → place value. The PERIODS are DISCOVERED as the recurrence
+  intervals (not imposed) and become the grid scales; carry = the operator coupling (units-wrap → tens+1); extrapolation is
+  free (cycles are defined at any magnitude).
+- **Why it MUST be factored:** naive WHOLE-state loop closure would wrongly MERGE 0 and 10 (same units). Closing only in the
+  units subspace while the tens keeps them distinct = a PRODUCT of cycles, not a collapse. Disentanglement and per-factor
+  loop closure are two sides of one coin: factor the state SO THAT loop closure can fire; FIND the factors as the
+  projections that recur periodically (the SR-eigenspectrum / recurrence-interval read). "Which projection to loop-close" is
+  the hard part = the general structured-world-model problem, not a base-10 special case.
+- **Boundary (self-consistent):** from ATOMIC counting (no digit projection) nothing recurs → still a line (base-10 is
+  notational). MODULAR tasks (mod 10) make the FULL state recur → ordinary loop closure → a ring (the P0 control). Positional
+  place value is exactly what needs the FACTORED version.
+- **Why it is a general win, not a math hack:** loop closure is THE mechanism that turns path integration into a correct
+  TOPOLOGICAL map (SLAM; hippocampus; `l6_grid` defers topology to "loop closure in the layers above"). At the FACTOR grain
+  it discovers PRODUCT/cyclic structure that whole-state closure misses → smaller, correctly-topological, transferable maps
+  of ANY environment with recurring substructure: a re-entered room's corner (map closes, drift corrected); a game's
+  counter/toggle/patrol (a cycle, not an ever-growing tree of "new" states); periodic dynamics (a short cycle). It is the
+  shelved GRID MODULES earning their keep — the multi-scale periodic codes ARE the per-factor loop-closure codes,
+  complementary to the conjunctive full-state SR — i.e. the TEM move (factorise structure/content → generalise).
+
 ## THE UNDERLYING MATHEMATICS — a compass, not an engine
 - **Group representation theory is the rigorous WHY** (the load-bearing half). Translation-invariance is a GROUP; grid cells
   are its unitary (Fourier) REPRESENTATION — path integration REQUIRES the group-representation condition (Gao et al. 2021),
