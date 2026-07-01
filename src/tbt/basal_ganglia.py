@@ -63,6 +63,23 @@ class BasalGanglia:
         not-yet-winning goal / over-fits to a recurring cell. Reset it when the layout changes."""
         self._opt_aff = {}
 
+    def commit(self, current, saliences, frac: float = 0.05, rng=None):
+        """The STN 'hold your horses' commitment (Frank 2006; reference_basal_ganglia): SELECT the max-salience action,
+        but HOLD the CURRENT action unless a competitor beats it by a margin -- so near-tied options (decision CONFLICT)
+        do NOT trigger a switch (deliberate, don't snap), while a CLEAR winner IS taken. The margin scales with the
+        decision's magnitude (`frac` of the largest |salience|), so it is scale-free. Prevents dithering between
+        near-tied attractors and supplies the GSG's commitment/hysteresis. Returns the selected action index.
+
+        (Anatomically the STN raises the GLOBAL threshold under conflict, delaying commitment; in this per-step discrete
+        agent that is 'keep the current plan unless a competitor is decisively better' -- the same anti-impulsive brake.)"""
+        m = max(saliences)
+        ties = [a for a in range(len(saliences)) if saliences[a] == m]
+        best = rng.choice(ties) if (rng is not None and len(ties) > 1) else ties[0]
+        if current is None or not (0 <= current < len(saliences)):
+            return best
+        margin = frac * max((abs(v) for v in saliences), default=0.0)
+        return best if saliences[best] - saliences[current] > margin else current
+
 
 class OpponentActor:
     """The OpAL opponent Go/NoGo actor (Collins & Frank; reference_basal_ganglia) — the basal-ganglia ACTOR the critic's

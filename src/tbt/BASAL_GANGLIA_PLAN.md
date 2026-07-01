@@ -96,8 +96,16 @@ booleans — one salience, one DA gain, one STN threshold. `_choose` returns to 
   demonstrate the agent avoiding an aversive outcome. The generic-TD-every-step wiring is the wrong signal — DROPPED.
   (Deeper alt if that's insufficient: arbitrate the model-free actor vs the model-based planner as two controllers — a
   bigger design, deferred.)
-- **B5 — STN commitment.** The conflict term raises the threshold on near-tied saliences (hold the current choice). *Test:*
-  anti-thrash on a two-attractor scene; and it supplies the GSG's commitment (cross-check `MOTOR_REFACTOR §8.6`).
+- **B5a ✅ — STN 'hold your horses' commitment, in isolation.** `basal_ganglia.commit(current, saliences, frac, rng)`:
+  select the max salience but HOLD the current action against a near-tied competitor (conflict → don't snap), take a
+  clear winner; scale-free margin. Mechanism-tested (`test_basal_ganglia.py`: holds near-ties, takes a clear winner,
+  no-dither on two tied attractors). Additive; suite 106→108.
+- **B5b — live wiring: the ACTION level is the wrong grain (finding 2026-06-30).** Wiring `commit(prev_action, saliences)`
+  into `_choose` regressed nav (5 fails, 2× slower): holding the previous ACTION either clings to near-optimal actions
+  and breaks tight navigation (any real margin) or does nothing (a tiny margin — the true dithering case, all untried
+  tied at the frontier value, doesn't include the now-"tried" previous action). Proper commitment is at the GOAL/PLAN
+  level — hold the plan, RE-PLAN the action toward it — which needs the LIVE GSG (currently inert). So B5b couples to
+  making the GSG drive behaviour; the STN mechanism (B5a) is ready to serve it. The action-level wiring is DROPPED.
 
 ## 4b. The BG↔THALAMUS connection — what to account for NOW (the thalamus rework itself is DEFERRED)
 The BG does not emit actions — it **selects by DISINHIBITING a thalamocortical LOOP** (Alexander/DeLong/Strick parallel

@@ -124,3 +124,38 @@ def test_negative_reward_makes_the_efe_value_avoid_aversion():
     fresh.observe(4, -1.0)                                          # freshly experience the aversion at 4
     fresh.observe_error(4, 0.0)
     assert fresh.critic_delta(4, 4) < 0.0, fresh.critic_delta(4, 4)  # being at an aversive state is worse than expected -> δ<0
+
+
+# ── B5: the STN 'hold your horses' commitment (basal_ganglia.commit) ─────────────────────────────────────────
+def test_stn_commitment_holds_under_conflict_but_takes_a_clear_winner():
+    """B5: `commit` selects the max salience but HOLDS the current action against a near-tied competitor (decision
+    conflict -> don't snap), while a clearly-better option IS taken. Anti-thrash + the GSG's commitment."""
+    from tbt.basal_ganglia import BasalGanglia
+    bg = BasalGanglia(n_columns=1)
+    assert bg.commit(0, [1.0, 1.0001, 0.9999]) == 0     # near-tied -> HOLD the current, don't flip to a marginal winner
+    assert bg.commit(0, [1.0, 5.0, 0.9]) == 1           # a CLEAR winner -> switch (commitment doesn't freeze it)
+    assert bg.commit(None, [1.0, 5.0, 0.9]) == 1        # no prior commitment -> take the best
+    assert bg.commit(1, [1.0, 5.0, 0.9]) == 1           # already on the clear best -> stay
+    assert bg.commit(2, [-10.0, 5.0, 3.0]) == 1         # holds even with an aversive option in the field (scale-free)
+
+
+def test_stn_commitment_reduces_dithering_between_two_attractors():
+    """B5 anti-thrash: with two exactly-tied attractors, committing HOLDS one across steps; the memoryless argmax flips
+    between them on tie-breaks. Zero switches with commitment, many without."""
+    from tbt.basal_ganglia import BasalGanglia
+    import random
+    bg = BasalGanglia(n_columns=1)
+    rng = random.Random(0)
+    tied = [1.0, 1.0]                                   # two exactly-tied attractors
+    cur, committed_switches = bg.commit(None, tied, rng=rng), 0
+    for _ in range(50):
+        nxt = bg.commit(cur, tied, rng=rng)             # commitment: holds whatever it settled on
+        committed_switches += (nxt != cur)
+        cur = nxt
+    prev, memoryless_switches = bg.commit(None, tied, rng=rng), 0
+    for _ in range(50):
+        m = bg.commit(None, tied, rng=rng)              # memoryless: rng tie-break each step
+        memoryless_switches += (m != prev)
+        prev = m
+    assert committed_switches == 0, committed_switches
+    assert memoryless_switches > 5, f"memoryless argmax should dither on ties, got {memoryless_switches}"
