@@ -70,6 +70,24 @@ def test_sense_at_is_l4_over_l6_predict_then_compare():
     assert col.sense_at(0, fb) is True                      # a DIFFERENT feature at 0 -> SURPRISED (the learning signal)
 
 
+def test_l23_recognition_wired_to_feature_at_location():
+    """C4 (COLUMN_AUDIT): L2/3 RECOGNITION wired into the feature-at-location cycle -- `sense_object` recognises the
+    sensed object (pose-invariant identity via L2/3) and binds THAT identity at the L6 location, so the map is over
+    RECOGNISED objects, not raw patches. Re-sensing the SAME object at a location is recognised (not surprised); a
+    DIFFERENT object there is a boundary (surprised). 'The object settled by recognition.'"""
+    col = CorticalColumn(n_entities=64, seed=0)
+    for _ in range(80):
+        for i in range(6):
+            col.observe(i, 0, (i + 1) % 6)
+    L = [(0, 0), (1, 0), (0, 1)]                             # an L-tromino
+    bar = [(0, 0), (1, 0), (2, 0)]                           # a bar -- a structurally different object
+    col.sense_object(L, 0)                                  # learn the L-object + bind its identity at location 0
+    name, surprised = col.sense_object(L, 0)                # re-sense the SAME object -> recognised
+    assert surprised is False, (name, col.feature_at(0))
+    _n2, surprised2 = col.sense_object(bar, 0)              # a DIFFERENT object at 0 -> boundary
+    assert surprised2 is True
+
+
 def test_object_state_tracks_the_dynamic_scene():
     """C4 (COLUMN_AUDIT): L2/3's OBJECT STATE -- the compact summary of the DYNAMIC scene (features CHANGED at their
     locations, from sense_at's surprise). Learning the initial scene sets NO state; a CHANGE (a feature replaced at a

@@ -173,6 +173,15 @@ class CorticalColumn(nn.Module):
         self.bind_at(location, sensed_feature)                            # learn: bind the sensed feature at the location
         return surprised
 
+    def sense_object(self, cloud, location):
+        """C4 (COLUMN_AUDIT): L2/3 RECOGNITION wired into the feature-at-location cycle. RECOGNISE the sensed object
+        (pose-INVARIANT identity via L2/3's evidence loop, learned online) and bind THAT identity at the L6 `location`
+        (`sense_at`), so the map is over RECOGNISED objects -- permanent across rotation/translation -- not raw patches.
+        This is 'the object SETTLED by recognition' + 'L2/3 over L4⊗L6'. Returns `(identity, surprised)`."""
+        name, _theta, _t, _ev = self.recognize_object(cloud)             # L2/3: pose-invariant identity (learn if novel)
+        fid = self.L4.encode(("obj", name))                             # the recognised identity -> an L4 feature id
+        return name, self.sense_at(location, fid)
+
     def object_state(self):
         """C4 (COLUMN_AUDIT): L2/3's OBJECT STATE -- the compact summary of the DYNAMIC scene: the frozenset of
         (location, feature) where a known feature has CHANGED (emergent from sense_at's predict-then-compare surprise --
