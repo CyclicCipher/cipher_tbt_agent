@@ -78,6 +78,14 @@ CONVERTS egocentric→object-centric. (Monty's third frame **B** = body-centric,
   carrying. That board-state is the **OBJECT STATE = C4's job** (like Monty's "stapler open/closed"). So the planning
   state = **position (C2) + object-state (C4) TOGETHER**; C4 restores MultiKey/LockPath *correctly* (factored). Per
   [[feedback_dont_salvage_between_critical_steps]] do NOT revert C2 — C4 is the fix. **⇒ C4 is the next step.**
+- **C4 ✅ (mechanism)** `column.object_state` — L2/3's dynamic object STATE (the frozenset of changed feature-at-locations
+  from sense_at's surprise; `reset_object_state` per level). Mechanism-tested. **⇒ but its INTEGRATION is the HIERARCHY:**
+  the planner must run over `(position, object_state)` to distinguish board-states, while the SR/L6 + `sense_at` need the
+  frame over POSITIONS (clean place codes, the metric). One frame can't be both without the diffuse/joint problems
+  returning. So C4's integration is a SECOND (task/relational) frame composed with the spatial one — exactly
+  [[reference_hierarchy_substrate]]'s spatial-map + task-map heterarchy (spatial: SR+L5 over positions; task: value over
+  `(position, object_state)`). `object_state` is the input to it. **The hierarchy is the next substantial step**, and it
+  is where MultiKey/LockPath return, correctly factored (position from the spatial map, keys-collected from the task map).
 - **C3** (L5→L6 path integration) is largely already present as the sensor's 7c path integration (`coarse_pos`, the
   position the frame reads); wire/verify it as a column mechanism after C4.
 
