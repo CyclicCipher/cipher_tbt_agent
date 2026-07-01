@@ -125,12 +125,23 @@ class CorticalColumn(nn.Module):
 
     # ----- routing: the feature-at-location MAP (M5 / L7-A: L4 feature ⊗ L6 location) ----------------
     def _place_code(self, loc):
-        """The L6 place code for location `loc` -- its online SR row, padded into d_mem (the binding space). The
-        'where' L4 binds a feature to; nearby-in-graph locations get similar codes (so the map generalizes)."""
-        code = self.sr.code(loc)                                          # the L6 place code (normalized SR row)
+        """The L6 place code for `loc` -- its online SR row, DG-SPARSIFIED (top-k active units) and padded into d_mem
+        (the binding space). The raw SR row at gamma~0.95 is too DIFFUSE for binding (all states ~0.98 similar -> the
+        feature-at-location map degenerates to a global bag); sparse pattern separation makes distant locations
+        near-ORTHOGONAL (their top-k units are disjoint) while nearby ones still OVERLAP (topology kept) -- the
+        dentate-gyrus orthogonalisation (reference_brain_reference_frames_orthogonalization)."""
+        code = torch.as_tensor(self.sr.code(loc), dtype=torch.float32)    # the L6 place code (normalized SR row)
+        n = code.shape[0]
+        k = max(2, n // 4)                                               # DG sparsity: keep the top-k magnitudes
+        if k < n:
+            keep = torch.zeros_like(code)
+            idx = torch.topk(code.abs(), k).indices
+            keep[idx] = code[idx]
+            nrm = float(keep.norm())
+            code = keep / nrm if nrm > 0 else keep
         p = torch.zeros(self.d_mem)
-        m = min(len(code), self.d_mem)
-        p[:m] = torch.as_tensor(code[:m], dtype=torch.float32)
+        m = min(n, self.d_mem)
+        p[:m] = code[:m]
         return p
 
     def bind_at(self, loc, feature_id: int) -> None:

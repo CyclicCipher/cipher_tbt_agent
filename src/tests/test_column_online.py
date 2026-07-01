@@ -70,6 +70,24 @@ def test_sense_at_is_l4_over_l6_predict_then_compare():
     assert col.sense_at(0, fb) is True                      # a DIFFERENT feature at 0 -> SURPRISED (the learning signal)
 
 
+def test_the_cycle_recognizes_a_multi_location_object():
+    """C2 (COLUMN_AUDIT): the L4-over-L6 cycle over MOVEMENT builds a multi-location OBJECT and RECOGNISES it -- after
+    learning distinct features at separated locations, re-sensing each is PREDICTED (not surprised); a wrong feature
+    SURPRISES (a boundary). Works because the location code is DG-SPARSIFIED (near-orthogonal across locations); the raw
+    diffuse SR place code would degenerate to a global bag."""
+    col = CorticalColumn(n_entities=16, seed=0)
+    for _ in range(80):                                      # the L6 frame over a 6-location ring
+        for i in range(6):
+            col.observe(i, 0, (i + 1) % 6)
+    feats = {0: col.L4.encode(("A",)), 2: col.L4.encode(("B",)), 4: col.L4.encode(("C",))}
+    for _ in range(4):                                       # move over the object: sense each location
+        for loc, f in feats.items():
+            col.sense_at(loc, f)
+    for loc, f in feats.items():
+        assert col.sense_at(loc, f) is False, (loc, col.feature_at(loc), f)   # recognised: predicted, not surprised
+    assert col.sense_at(0, col.L4.encode(("X",))) is True    # a wrong feature at a known location -> surprise (boundary)
+
+
 def test_feature_at_location_map_binds_and_reads_back():
     """M5/L7-A: the column maintains an online allocentric MAP -- bind a SENSED feature at a LOCATION (L4 feature ⊗
     L6 place code) across a sensorimotor sequence, then READ it back (predict_feature). An object seen at a place is
