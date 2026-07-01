@@ -97,3 +97,30 @@ def test_opal_tonic_dopamine_sets_the_go_nogo_gain():
         ac.learn("s", 1, -0.5)                               # a cost-via-NoGo action
     assert ac.act_value("s", 0, rho=+0.8) > ac.act_value("s", 0, rho=-0.8)   # rich DA amplifies the benefit (Go)
     assert ac.act_value("s", 1, rho=-0.8) < ac.act_value("s", 1, rho=+0.8)   # lean DA amplifies the aversion (NoGo)
+
+
+# ── AVERSION: the '−' side of pleasure/pain, as a NEGATIVE preference in the free-energy value ────────────────
+def test_negative_reward_makes_the_efe_value_avoid_aversion():
+    """A bad outcome recorded with score_delta<0 becomes a NEGATIVE R_ext -- the aversion the free-energy value lacked.
+    The model-based EFE value then AVOIDS it (a fork's reward branch outvalues its aversion branch; the aversive state's
+    value is negative), and the critic δ for stepping INTO aversion is NEGATIVE (the cost the NoGo actor learns from).
+    This is where 'make pragmatic value negative' actually lands -- the pragmatic term's '−' side."""
+    rm = RewardModel(9, gamma=0.9, beta=0.0, epistemic="progress")   # beta=0 isolates the pragmatic (reward) value
+    T = {0: [1, 3], 1: [2], 2: [2], 3: [4], 4: [4]}                  # a fork: 0→1→2 (REWARD) vs 0→3→4 (AVERSION)
+    preds = defaultdict(list, {1: [0], 2: [1], 3: [0], 4: [3]})
+    for _ in range(80):
+        rm.observe(2, +1.0)                                          # state 2 = reward
+        rm.observe(4, -1.0)                                          # state 4 = AVERSION (a negative preference)
+        for s in (0, 1, 2, 3, 4):
+            rm.observe(s, 0.0)
+            rm.observe_error(s, 0.0)                                 # mastered -> lp = 0 (isolate the pragmatic value)
+        rm.plan(T, preds, 0)
+    assert rm.V_exploit[2] > 0.5, rm.V_exploit[2]                    # reward: positive value
+    assert rm.V_exploit[4] < -0.5, rm.V_exploit[4]                  # AVERSION: negative pragmatic value
+    assert rm.V_exploit[1] > rm.V_exploit[3]                        # the value AVOIDS the aversion branch
+    # the 'pain' signal: on FIRST experiencing an aversive state (its value not yet learned) the critic δ is negative --
+    # the cost the NoGo actor learns from. δ(4→4) = reward(4) + γ·V(4) − V(4) = −1 while V(4) is still ~0.
+    fresh = RewardModel(9, gamma=0.9, beta=0.0, epistemic="progress")
+    fresh.observe(4, -1.0)                                          # freshly experience the aversion at 4
+    fresh.observe_error(4, 0.0)
+    assert fresh.critic_delta(4, 4) < 0.0, fresh.critic_delta(4, 4)  # being at an aversive state is worse than expected -> δ<0

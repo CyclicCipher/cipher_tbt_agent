@@ -78,7 +78,14 @@ booleans — one salience, one DA gain, one STN threshold. `_choose` returns to 
   three-factor OpAL updates trained by the B1 critic `δ`, `Act=β_g·G−β_n·N`, tonic-DA `ρ` sets `β_g/β_n`. Mechanism-tested
   (`test_basal_ganglia.py`): Go/NoGo specialize (benefit vs cost), a cost earns NEGATIVE actor value (aversion), `ρ`
   shifts the gain. Additive, not wired. Suite 103→105.
-- **B3b — live integration: BLOCKED, needs redesign (finding 2026-06-30).** Naively ADDING `Act(a)` to the salience +
+- **AVERSION landed in the FREE-ENERGY VALUE ✅ (2026-06-30).** `reward.observe` now records a bad outcome
+  (`score_delta<0`) as a NEGATIVE `R_ext` — the "−" side of the pragmatic term the value lacked. `_reward_base` already
+  passed negative `ext` through, so the model-based EFE value now AVOIDS aversive states (a fork's reward branch outvalues
+  its aversion branch) and the critic `δ<0` on first experiencing one (the "pain"; `δ(bad→bad)=−1` while its value is
+  unlearned). Mechanism-tested (`test_basal_ganglia.py`). This is the ONE-MODEL way to add aversion (the planner avoids
+  it) — and it gives the NoGo actor a GENUINE cost signal for B3b. NB the state-reward convention: the aversion `δ` shows
+  as the cost of BEING AT the bad state, not the step INTO it (matters for how the actor is trained in B3b).
+- **B3b — live integration of the ACTOR: still needs the composition fix.** Naively ADDING `Act(a)` to the salience +
   training on every-step TD `δ` REGRESSED navigation (0/8). TWO causes: (i) the model-free actor's per-(state,action)
   values FIGHT the strong model-based planner (`reward.py`) and, worse, its NoGo suppresses the SUBOPTIMAL exploratory
   steps nav needs; (ii) the actor's raison d'être is AVERSION, but `reward.py` is reward-ONLY — so TD `δ<0` means merely

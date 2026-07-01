@@ -91,7 +91,7 @@ class RewardModel:
         self.V = defaultdict((lambda: self.explore) if optimistic else float)   # the explore value (reward + epistemic + the EIGENPURPOSE)
         self.V_exploit = defaultdict((lambda: self.explore) if optimistic else float)  # the NORMAL value (reward + epistemic, NO eigenpurpose -> never perturbed by it)
         self.intrinsic: dict = {}                              # the L6 EIGENPURPOSE per state (set per-step by the agent; propagated by the explore sweep)
-        self.R_ext = {}                                        # extrinsic reward (from the sparse score)
+        self.R_ext = {}                                        # extrinsic reward (from the sparse score): +1 rewarding, <0 AVERSIVE (a bad outcome to avoid)
         self.visits = defaultdict(int)                          # visit counts (drive the novelty bonus)
         self.queue = {}                                        # pending EXPLORE backups: state -> priority
         self._q_exploit = {}                                  # pending EXPLOIT backups
@@ -176,6 +176,11 @@ class RewardModel:
         self.visits[state] += 1
         if score_delta > 0:
             self.R_ext[state] = 1.0                              # infer_goal: reached state was rewarding
+        elif score_delta < 0:
+            self.R_ext[state] = float(score_delta)              # AVERSION: a bad outcome (score dropped / GAME_OVER) -> a
+            #                                                     NEGATIVE preference (`_reward_base` passes it through),
+            #                                                     so the EFE value AVOIDS it and the critic δ<0 carries
+            #                                                     the cost to the NoGo actor -- the '−' side of pleasure/pain.
         self._push(self.queue, state, 1.0)                     # reward/novelty changed here -> back it up in BOTH values
         self._push(self._q_exploit, state, 1.0)
 
