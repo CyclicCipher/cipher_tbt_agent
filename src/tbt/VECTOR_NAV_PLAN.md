@@ -37,8 +37,13 @@ value-sweep baseline. Reuses the L5⊗L6 machinery P1 built + the SR (`navigate_
   (explore — Sokoban's "block on the marker"). `vector_action` already takes an arbitrary `goal`, so the wiring supplies
   (a) the goal from a GOAL SOURCE (for V4: a remembered completing position; later: the GSG hypothesis), (b) the `blocked`
   set (bumped walls = border cells), and runs in INTEGRATE mode. NB the V3 detour needs the SR to REFLECT walls (a
-  bumped move records a self-loop → M routes around) — so `navigate_to` also takes `blocked`. *Test:* integrate-mode nav
-  (NavGame + a replica `local=True`) — FEWER actions RE-reaching a known goal than the swept value; suite green.
+  bumped move records a self-loop → M routes around) — so `navigate_to` also takes `blocked`.
+  **EXPLOIT SLICE DONE (2026-07-01):** the agent remembers the completing POSITION (`_goal_pos` on `complete`), the
+  cost field is ASSIGNED from experience (`step`: a no-progress bump → wall, a negative score → hazard), and `_choose`'s
+  EXPLOIT arm (g~0) navigates there via `col.achieve` (a beeline, no frontier optimism). `arc_sdk` sets `agent._integrate`
+  so config-mode is untouched. RESULT on NavGame(8): 8/8 in 412 total actions, steady-state 12/level = ORACLE (vs the
+  wandering ~500/level); RHAE≈1 on the transfer levels. **REMAINING:** route the goal through `propose_goals`→BG (the GSG
+  unification — the `reward`/`identity`/`dynamics` generators), so the EXPLORE-side hypothesis goal (Sokoban) also achieves.
 
 ## THE COST FIELD — ONE currency for walls / hazards / slow / risky (generalizes V2 repulsion)
 *User's insight (2026-07-01): a wall and a hazard (and a slow tile, and a coin-flip-bad tile) should be the SAME

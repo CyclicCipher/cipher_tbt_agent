@@ -91,3 +91,23 @@ def test_path_integration_navigates_where_pure_egocentric_stalls():
 
     # The non-controllable-scene gate is now tested at the COLUMN level (where L5+L6 own path integration): see
     # test_column_online.py::test_track_gate_stays_off_for_a_non_controllable_scene (the P1 unification).
+
+
+def test_achiever_beelines_a_known_goal_after_learning_it():
+    """V4 (VECTOR_NAV): once a level is solved the agent REMEMBERS the goal position, and the cost-aware ACHIEVER BEELINES
+    there on later levels -- cross-level transfer to near-ORACLE cost (12 two-cell moves from the origin to the (12,12)
+    goal), the RHAE efficiency lever, vs the swept value's wandering. The GSG's `reward` generator made live; integrate mode."""
+    game = NavGame(8)
+    policy = TbtPolicy(seed=0, local=True, integrate=True)
+    frame, per_level, last = game, [], 0
+    for _ in range(2000):
+        if policy.is_done([], frame):
+            break
+        name, coords = policy.choose_action([], frame)
+        before = game.levels_completed
+        frame = game.step(name, coords)
+        if game.levels_completed > before:
+            per_level.append(game.actions_taken - last); last = game.actions_taken
+    assert game.levels_completed == 8, per_level
+    assert max(per_level[3:]) <= 16, per_level                     # steady-state at/near ORACLE (12) once the goal is learned
+    assert per_level[0] >= 2 * max(per_level[3:]), per_level       # the first (discovery) level costs far more than the transfer levels

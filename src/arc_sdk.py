@@ -131,6 +131,7 @@ class TbtPolicy:
             self.simple = [n for n in avail if n != "RESET"] or avail
         build = self._build or (lambda n: Agent(n_actions=n, seed=self.seed))
         self.agent = build(len(self.simple) + self.n_clicks)
+        self.agent._integrate = bool(self.sensor.local and self.sensor.integrate)   # V4: the cost-aware achiever is live only with path-integrated POSITIONS
 
     def _ordered_objects(self):
         """Tracked objects' (pose, size) ordered by (size desc, pose) — a STABLE index so 'click-slot k' means the same

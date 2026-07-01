@@ -16,7 +16,7 @@ import random
 from collections import Counter, defaultdict
 
 from .basal_ganglia import BasalGanglia
-from .column import CorticalColumn
+from .column import CorticalColumn, GoalState, IMPASSABLE
 from .reward import RewardModel, ValueLearner
 
 _GOAL = ("\x00GOAL",)                                                          # the single terminal a completing transition leads to
@@ -45,6 +45,8 @@ class Agent:
         self._ep_tick = 0                                                  # THROTTLE: the grid SVD is O(n^3) -> recompute the eigenpurpose only every _ep_every steps
         self._ep_every = 16                                                # the exploration DIRECTION is slow-changing, so a stale-by-a-few-steps eigenpurpose is fine
         self.bg = BasalGanglia(n_columns=1, seed=seed)                     # the GSG gate: arbitrates the column's goal candidates (ACT vs DISAMBIGUATE)
+        self._integrate = False                                            # V4: position/integrate mode (set by TbtPolicy) -> the cost-aware achiever is live
+        self._goal_pos = None                                              # V4: the remembered goal POSITION (from a completion) -- the `reward` GSG generator's target
         self.new_episode()
 
     def new_episode(self):
@@ -69,6 +71,8 @@ class Agent:
             ps, pa = self._prev
             self.col.observe(ps, pa, _GOAL)                                  # the completing transition -> the goal
             self.tried.add((ps, pa))
+            if self._integrate:                                             # V4: REMEMBER the goal position -- next level the achiever beelines here (transfer)
+                self._goal_pos = ps
         if self._prev_feats is not None:                                     # FM4: the field CONFIG that led to completion is
             self.field_value.update(self._prev_feats, max(score_delta, 1.0))  # valuable -> plan toward it next level (goal in feature space)
         self.reward.observe(_GOAL, max(score_delta, 1.0))                    # the goal is the rewarding terminal
@@ -110,6 +114,12 @@ class Agent:
             self.tried.add((ps, pa))                                         # attempted (even if blocked -> no edge)
             err = self.field_error if field is not None else (1.0 if self.surprised else 0.0)
             self.reward.observe_error(ps, err)                              # LEARNING-PROGRESS: dense field error (or binary fallback)
+            if self._integrate:                                            # V4 COST-FIELD assignment: LEARN repulsion from experience (positions only)
+                dx, dy = self.col.L5.move(pa)
+                if (dx, dy) != (0, 0) and state == ps:                     # a no-progress BUMP -> the intended cell is a WALL (cost=inf)
+                    self.col.learn_cost((ps[0] + dx, ps[1] + dy), IMPASSABLE)
+                if score_delta < 0.0:                                      # AVERSION -> a graded hazard cost at the cell entered (the same currency)
+                    self.col.learn_cost(state, -float(score_delta))
         self.reward.observe(state, score_delta)                             # value: reward where the score rose + novelty
         if cloud is not None:                                               # C4: the perception->recognition->map pipeline (a whole object)
             loc = location if location is not None else state
@@ -201,6 +211,15 @@ class Agent:
         goals = self.col.propose_goals(max(ev), g_value=self.reward.beta)
         gi = self.bg.gate([gc.kind for gc, _ in goals], [v for _, v in goals]) if len(goals) > 1 else 0
         self.goal = goals[gi][0]
+        # V4 (VECTOR_NAV): when EXPLOITING (g~0: a reward gradient exists) toward a KNOWN goal POSITION, navigate there
+        # with the cost-aware ACHIEVER -- a beeline carrying NO frontier optimism (the efficiency lever vs the swept
+        # value's wandering) that curves around learned walls/hazards (the cost field). This is the GSG's `reward`
+        # generator made LIVE (the goal is no longer inert); explore (g>0) still runs the eigenpurpose via `col.act`.
+        if self._integrate and self._goal_pos is not None and g <= 0.0 and state != self._goal_pos:
+            a = self.col.achieve(state, self._goal_pos, self.actions)
+            if a is not None:
+                self.goal = GoalState(target=self._goal_pos, kind="reward")   # the ACTIVE goal this turn
+                return a
         return self.col.act(state, self.actions, value=blended,
                             explore=self.reward.explore, tried=self.tried, rng=self.rng, bonus=bonus)
 
