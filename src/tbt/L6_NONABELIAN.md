@@ -74,9 +74,18 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
   narrow/confined walk under-covers → poor extrapolation while a broad sweep converges (a running SUM for a stationary op;
   gentle decay for drift). ⇒ the linchpin moves from *learnability under constraint* to *EXPLORATION/coverage* — a more
   tractable axis the agent already has levers for (directed exploration / eigenpurpose).
-  *Remaining (non-abelian) gate:* a small non-abelian task (planar rotations / S₃) — learned operators represent the
-  order-dependence the abelian grid cannot. *Fallback:* keep the hand-coded grid for abelian domains; learned operators only
-  where non-abelian structure is present.
+  **NON-ABELIAN GATE PASSED (2026-07-01, `test_operator.py`):** learned operators for **S₃** (the smallest non-abelian
+  group, regular rep) from Cayley-graph transitions are FAITHFUL (recover the permutation matrices), do NOT commute
+  (`M(a)M(b) ≠ M(b)M(a)`), satisfy the group RELATIONS (`a²=e`, `(ab)³=e`), and COMPOSE faithfully — and a COMMUTING
+  (abelian) model is order-blind, so it has irreducible error (≥ 0.7) on the order-dependent composite while the matrix
+  operators nail it (~0). Online (streaming a walk on the 6-node Cayley graph) recovers the non-abelian operators too. **So
+  the operator PRIMITIVE is validated end to end: abelian (batch + online) + non-abelian, learnable, with the constraint a
+  projection (not a gradient fight).** *Fallback:* keep the hand-coded grid for abelian domains; learned operators where
+  non-abelian structure is present.
+  **What REMAINS for Stage 1 = the LIVE WIRING** (the behaviour-affecting part, deferred deliberately): route the agent's
+  L6/`track` path-integration through a learned `OnlineOperator` per action (throttled read) instead of the additive
+  `move`, feed it from the (coverage-providing) directed-exploration stream, and confirm no regression on abelian games
+  before any non-abelian one. That is where the real integration risk lives, distinct from the now-validated primitive.
 - **Stage 2 — DISCOVER relations by loop closure (the quotient).** Free composition path-integrates; relations (incl.
   commutativity) are found by loop closure under the **predictive-sufficiency** criterion (causal states / bisimulation, per
   `MATH_PHASE.md`) — close the coarsest partition that stays a sufficient statistic. *Gate:* on a task with a KNOWN

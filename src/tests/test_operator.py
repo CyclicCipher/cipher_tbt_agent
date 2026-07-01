@@ -174,3 +174,72 @@ def test_ONLINE_operator_learns_from_a_stream__COVERAGE_not_constraint_is_the_bo
         pos = npos
     assert abs(confined.operator().spectral_radius() - 1.0) < 1e-6             # constraint STILL held (it is never the issue)
     assert extrap_err(confined.operator(), 100) > max(0.3, 3.0 * good)         # COVERAGE is the bottleneck, not the constraint
+
+
+def _s3():
+    """S₃ (the smallest NON-ABELIAN group) as permutations of (0,1,2): elements, index, composition p∘q, one-hot, and the
+    regular-representation operator for a generator g (the permutation matrix mapping one-hot(h) -> one-hot(g∘h))."""
+    from itertools import permutations
+    elts = list(permutations((0, 1, 2)))
+    idx = {e: i for i, e in enumerate(elts)}
+
+    def compose(p, q):
+        return tuple(p[q[i]] for i in range(3))
+
+    def onehot(e):
+        v = np.zeros(len(elts))
+        v[idx[e]] = 1.0
+        return v
+
+    def perm(g):
+        P = np.zeros((len(elts), len(elts)))
+        for h in elts:
+            P[idx[compose(g, h)], idx[h]] = 1.0
+        return P
+
+    return elts, compose, onehot, perm
+
+
+def test_NON_ABELIAN_gate_learned_operators_represent_S3():
+    """L6_NONABELIAN Stage 1 -- THE non-abelian gate (the refactor's REASON TO EXIST). Learn per-generator operators for S₃
+    from Cayley-graph transitions (one-hot(h) -> one-hot(g∘h)); the LEARNED operators must (i) be FAITHFUL (recover the
+    permutation matrices), (ii) NOT commute (the order-dependence a commuting-phase grid CANNOT hold), (iii) satisfy the
+    group RELATIONS (a²=e, (ab)³=e), (iv) COMPOSE faithfully over the group. And a COMMUTING (abelian) model is order-blind,
+    so it has IRREDUCIBLE error on the order-dependent composite -- exactly why non-abelian structure needs matrices."""
+    elts, compose, onehot, perm = _s3()
+    a, b = (1, 0, 2), (0, 2, 1)                                                 # two transpositions generate S₃; a∘b ≠ b∘a
+
+    def learn(g, orthogonal=True):
+        before = np.stack([onehot(h) for h in elts])
+        after = np.stack([onehot(compose(g, h)) for h in elts])
+        return Operator.fit(before, after, orthogonal=orthogonal)
+
+    Ma, Mb = learn(a), learn(b)
+    assert np.allclose(Ma.M, perm(a), atol=1e-6) and np.allclose(Mb.M, perm(b), atol=1e-6)   # (i) FAITHFUL
+    assert not Ma.commutes_with(Mb)                                                          # (ii) NON-commuting...
+    assert np.linalg.norm(Ma.M @ Mb.M - Mb.M @ Ma.M) > 1.0                                   #      ...by a clear margin
+    assert np.allclose(Ma.then(Ma).M, np.eye(len(elts)), atol=1e-6)                          # (iii) a² = e (transposition)
+    ab = Ma.then(Mb)                                                                         #       (ab) is a 3-cycle...
+    assert np.allclose(ab.then(ab).then(ab).M, np.eye(len(elts)), atol=1e-6)                 #       ...(ab)³ = e
+    e = onehot((0, 1, 2))                                                                    # (iv) COMPOSITION fidelity:
+    assert np.allclose(Ma.then(Mb).apply(e), onehot(compose(b, a)))                          #      a-op then b-op lands on b∘a
+    assert np.allclose(Mb.then(Ma).apply(e), onehot(compose(a, b)))                          #      reversed -> a∘b (a DIFFERENT state)
+
+    # THE ABELIAN CONTRAST: the two orders land on different states, but a COMMUTING model predicts them EQUAL -> its error
+    # is >= half their distance, while the learned MATRIX operators nail both. This gap is the whole reason for the refactor.
+    true_ab, true_ba = onehot(compose(a, b)), onehot(compose(b, a))
+    assert np.linalg.norm(true_ab - true_ba) > 1.0                                           # a∘b and b∘a are different states
+    matrix_err = max(np.linalg.norm(Mb.then(Ma).apply(e) - true_ab), np.linalg.norm(Ma.then(Mb).apply(e) - true_ba))
+    commuting_lower_bound = np.linalg.norm(true_ab - true_ba) / 2.0                          # any commuting model: ab == ba
+    assert matrix_err < 1e-6 < commuting_lower_bound                                         # matrices ~0; abelian >= 0.7
+
+    # ONLINE + non-abelian: streaming a random walk on the 6-node Cayley graph (coverage is trivial) recovers the operators
+    online = {a: OnlineOperator(len(elts)), b: OnlineOperator(len(elts))}
+    rng = np.random.default_rng(0)
+    h = (0, 1, 2)
+    for _ in range(400):
+        g = (a, b)[int(rng.integers(2))]
+        online[g].observe(onehot(h), onehot(compose(g, h)))
+        h = compose(g, h)
+    assert np.allclose(online[a].operator().M, perm(a), atol=1e-6)                           # online learns the non-abelian op too
+    assert not online[a].operator().commutes_with(online[b].operator())
