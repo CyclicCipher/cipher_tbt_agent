@@ -60,6 +60,7 @@ class CorticalColumn(nn.Module):
         self.place = None                                     # (n, d_mem) per-node SR-frame place codes (set by refresh)
         self._cur = None                                      # the current node -- discrete path integration over the graph
         self._map = torch.zeros(feat_dim, d_mem)             # M5/L7-A: the online allocentric MAP (Σ feature ⊗ place), read by feature_at
+        self._changed: dict = {}                             # C4: L2/3 object STATE -- {location: feature} where a known feature CHANGED
 
     # ----- routing: learn the transition structure online (L6 + L5) ---------------------------------
     @property
@@ -167,8 +168,22 @@ class CorticalColumn(nn.Module):
         as the accumulated feature-at-location map; a persistent mismatch is a boundary (a different object)."""
         predicted = self.feature_at(location)
         surprised = predicted is not None and predicted != sensed_feature
+        if surprised:
+            self._changed[location] = sensed_feature                      # C4: a KNOWN feature changed here -> the object's dynamic state
         self.bind_at(location, sensed_feature)                            # learn: bind the sensed feature at the location
         return surprised
+
+    def object_state(self):
+        """C4 (COLUMN_AUDIT): L2/3's OBJECT STATE -- the compact summary of the DYNAMIC scene: the frozenset of
+        (location, feature) where a known feature has CHANGED (emergent from sense_at's predict-then-compare surprise --
+        a key collected, a block moved). This is Monty's object 'state' (open/closed). NOT config_state: layer-derived,
+        metric-anchored, and only the DYNAMIC part (the static scene is not in it). The planner reads (position,
+        object_state) so it distinguishes board-states (which keys are collected) -- the C2<->C4 coupling."""
+        return frozenset(self._changed.items())
+
+    def reset_object_state(self):
+        """Clear the dynamic object state (a level boundary: the board resets)."""
+        self._changed = {}
 
     # ----- routing: the L5 operator (predict / motor / driver) --------------------------------------
     def predict(self, symbol, action):
