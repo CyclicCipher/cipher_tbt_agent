@@ -58,12 +58,74 @@ value-sweep baseline. Reuses the L5⊗L6 machinery P1 built + the SR (`navigate_
   the GSG made live as a TARGET generator + commit + achieve + confirm — where the GSG stops being inert AND Sokoban
   unblocks. "What goal" (GSG) and "how to get there" (vector nav) are two halves of ONE loop, not competing steps.
 
+## THE GSG — hypothesis GENERATION & testing (research 2026-07-01; the unified, SMALLER design)
+*The user's Sokoban/multipath-blind question, unresolved until now: WHAT hypotheses does the brain generate, WHY those,
+and by what MECHANISM? Our GSG notes covered TESTING (graph-mismatch, [[reference_gsg_goal_generation]]) and COMMITMENT
+([[reference_commit_to_test_a_hypothesis]]) but never GENERATION — where a candidate like "push the block onto the
+marker" even comes from. Answered below, and it lets the GSG SHRINK to one competition over target-states.*
+
+### What the brain does (the three sub-problems)
+1. **GENERATION — hypotheses are a SMALL SAMPLE from memory, cued by context (not enumeration).** The mind does not
+   score the combinatorial space; it *stochastically samples a handful* of candidates from memory, the proposal biased by
+   the PRIOR (what's usually true) and by RELEVANCE to the current scene (Dasgupta, Schulz & Gershman 2017, *Where do
+   hypotheses come from?*). Resource-rational: generate the FEWEST samples that suffice, and generate MORE when UNCERTAIN
+   (Lieder & Griffiths 2020). ⇒ the candidate set is tiny and context-cued, so "what goal to test" is cheap.
+2. **WHY those — the candidates are cued by PRIORS: salience × CONTROLLABILITY × ambiguity.** A hypothesis isn't drawn
+   from nowhere. "Block → marker" = a CONTROLLABLE object (it moved when pushed — a learned affordance / EMPOWERMENT: the
+   drive to explore what you can CONTROL, Klyubin; sparse-reward empowerment 2021) crossed with a SALIENT location (the
+   marker: novel/distinct — core-knowledge salience). Selection among the few = AFFORDANCE COMPETITION (Cisek) biased by
+   VALUE (PFC) and URGENCY (BG) — parallel candidates, value+urgency-weighted, exactly GSG-proposes + BG-gates.
+3. **HOW (the circuit) — generate, hold, and SWITCH.** Early in learning PFC holds a HIGH-DIMENSIONAL, flexible code of
+   many candidate rules, collapsing to a low-dim rule-selective code once one is found (primate PFC geometry 2023/26) —
+   the "try mappings, keep the one that works." Frontopolar cortex encodes the explore/exploit STAGE + the GOAL of the
+   action. **The persist-vs-switch arbiter is the ACC** (Tervo & Karpova 2021, *ACC directs exploration of alternative
+   strategies*): an OPPONENT micro-circuit that COMMITS to the ongoing strategy and, when its reliability drops, drives a
+   switch to sample an ALTERNATIVE. That is exactly our commitment (STN B5a) + the trigger to abandon a REFUTED hypothesis
+   and draw the next sample. Directed vs random exploration split by uncertainty type (relative→rlPFC directed;
+   total→dlPFC random) — our g-gate/eigenpurpose is the directed arm.
+
+### The synthesis — a GSG hypothesis IS a candidate TARGET-STATE, and testing = achieve + observe
+Unify all of it: **a hypothesis = "bring about target-state X and see what happens."** Generation = sample a few
+candidate X from priors; testing = the ACHIEVER (vector nav, this plan) navigates to X; the OUTCOME (score = pragmatic,
+prediction-error = epistemic) confirms/refutes and updates value; the ACC/STN holds X through the maneuver and switches on
+repeated refutation. This is EFE end to end: pick the X maximizing predicted **pragmatic (might reward) + epistemic
+(resolves the most uncertainty)**, generate more X when uncertain.
+
+### ⇒ our GSG gets SMALLER: three candidate-GENERATORS feeding ONE competition + the achiever
+Today's GSG is a *bespoke* `disambiguation_goal` (Monty graph-mismatch, object-IDENTITY only) plus an inert `self.goal`
+and a special `act`-vs-`disambiguate` list — object identity is a case games barely exercise, so it's dead weight in the
+loop. The unification makes every goal a **navigable TARGET** valued by EFE; the graph-mismatch becomes ONE generator, not
+a faculty:
+| candidate generator (samples a few targets) | resolves | value = EFE |
+|---|---|---|
+| **identity** — graph-mismatch point ([[reference_gsg_goal_generation]], keep `disambiguation_goal`) | which object | epistemic (ID) |
+| **dynamics** — the state where the model is least certain (transition-`lp` / epiplexity, [[reference_efe_and_epiplexity]]) | the RULE | epistemic (lp) |
+| **reward** — a SALIENT × CONTROLLABLE target (a movable object at a salient marker) — the Sokoban hypothesis | does X complete? | pragmatic + epistemic |
+| **act** (degenerate) — the greedy-value NEXT-state | — | pragmatic (the current `col.act`) |
+- Every candidate is a `GoalState(target=…)` the ACHIEVER can navigate to — so **the inert `self.goal` dies**: the winner's
+  `target` is handed to `col.achieve` (V4). The `act` goal stops being a special `target=None` case — it's just the
+  greedy next-state, i.e. `col.act` is the degenerate achiever. `examine`'s bespoke passive/active loop collapses into the
+  same competition (identity is one generator). **Net: one `propose_goals` (a few cheap generators) + the existing BG
+  competition + `col.achieve` — the per-hypothesis-type branches go away.**
+- **Sequencing:** V4 (the achiever) first — it's the shared executor every generator needs. THEN wire `propose_goals` →
+  BG-select → `achieve` (goal live, no longer inert), starting with the `act`+`reward` generators (unblocks Sokoban);
+  fold `disambiguation`/`dynamics` in as the other two generators. Commitment (B5a/ACC) holds the target across the push;
+  the score switches it. This is the [[reference_commit_to_test_a_hypothesis]] loop, now with its GENERATION half filled.
+
 ## Honest caveats
+- The `reward` generator's priors (salience, controllability) must stay LEARNED, not hand-coded (the bitter lesson):
+  controllability = the object moved under our action (L5 affordance); salience = novelty/prediction-error, not a colour rule.
 - POSITION-based → measured in INTEGRATE mode (the live-ARC path it targets); the config_state benchmark has no positions.
 - Border cells are BUMP-learned (L5 records a wall after hitting it); perceptual obstacle-sensing (see the wall) is later.
 - The goal position must be KNOWN (visited) — vector nav accelerates RE-reaching, not first discovery (exploration finds
   it; vector nav exploits it efficiently). So it composes WITH the explore grain, doesn't replace it.
 
-## Sources — [[reference_vector_navigation]]
-Edvardsen 2020 (cluttered-env cascade); Stachenfeld 2017 (SR warps around barriers = geodesic); goal-vector fields
-(Nature 2022); Bush 2015 (grid vector nav). Robotics: artificial potential fields (Khatib) + a global planner for local minima.
+## Sources
+Vector nav — [[reference_vector_navigation]]: Edvardsen 2020 (cluttered-env cascade); Stachenfeld 2017 (SR warps around
+barriers = geodesic); goal-vector fields (Nature 2022); Bush 2015 (grid vector nav). Robotics: artificial potential fields
+(Khatib) + a global planner for local minima.
+GSG hypothesis generation — [[reference_hypothesis_generation]]: Dasgupta, Schulz & Gershman 2017 *Where do hypotheses
+come from?* (Cognitive Psychology); Lieder & Griffiths 2020 *Resource-rational analysis* (Behav Brain Sci); Tervo,
+Kuchibhotla & Karpova 2021 *The anterior cingulate cortex directs exploration of alternative strategies* (Neuron); Cisek
+2007 (affordance competition); empowerment/controllability (Klyubin 2005; sparse-reward empowerment arXiv:2107.07031);
+primate PFC learning geometry (Nat Neurosci 2026); directed-vs-random exploration by uncertainty (Tomov/Gershman 2020).
