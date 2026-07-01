@@ -7,7 +7,6 @@ egocentric does not. A non-controllable (state-change) scene keeps the gate OFF,
 from __future__ import annotations
 
 import os
-import random
 import sys
 
 _PKG_PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -15,7 +14,6 @@ if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
 from arc_sdk import TbtPolicy  # noqa: E402
-from tbt.sensor import Sensor  # noqa: E402
 
 
 class _St:
@@ -91,17 +89,5 @@ def test_path_integration_navigates_where_pure_egocentric_stalls():
     assert nav >= 3 * max(ego, 1) and ego <= 2, f"path-integration {nav} not far above pure-egocentric {ego}"
 
 
-def test_gate_stays_off_for_a_non_controllable_scene():
-    """A scene whose change is NOT action-driven (in-place colour animation) keeps the position gate OFF -- the
-    coarse position stays constant, so the recurring local view (the state-change game's signal) is preserved."""
-    s = Sensor(local=True, integrate=True, window=5)
-    rng = random.Random(0)
-    N = 30
-    for t in range(20):
-        g = [[0] * N for _ in range(N)]
-        for k in range(4):                                   # a fixed 2x2 block toggling colour in place (no movement)
-            g[10 + (k // 2)][10 + (k % 2)] = rng.choice([2, 3])
-        (_patch, pos), _change = s.read(g, action=(t % 4))
-        last_pos = pos
-    assert not s._controllable(), f"gate wrongly ON: learned deltas {s._delta}"
-    assert last_pos == (0, 0), f"position should be the constant gate-off value, got {last_pos}"
+    # The non-controllable-scene gate is now tested at the COLUMN level (where L5+L6 own path integration): see
+    # test_column_online.py::test_track_gate_stays_off_for_a_non_controllable_scene (the P1 unification).

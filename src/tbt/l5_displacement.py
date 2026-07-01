@@ -103,6 +103,7 @@ class L5_Displacement(nn.Module):
         self.ops: dict = {}                                          # (domain, relation) -> matrix operator (offline/archived)
         self.edges: dict = {}                                        # state -> {action -> next state}: observed transitions / exceptions
         self.disp: dict = {}                                         # (shape, action) -> modal pose delta (dx, dy): the movement operator
+        self.move_delta: dict = {}                                   # action -> continuous pixel translation (dx, dy): the metric efference (the tracker path-integrates by it)
         self.recolor: dict = {}                                      # (shape, action) -> {old_content -> new_content}: the in-place-change operator
         self._votes: dict = {}                                       # (shape, action) -> Counter of pose deltas (-> disp = mode)
         # The per-LOCATION operator (FM1) -- the SAME position-invariant, context-keyed principle as disp/recolor, at
@@ -136,6 +137,30 @@ class L5_Displacement(nn.Module):
     def successors(self, s):
         """{action -> next state} learned from `s` — the operator's outgoing edges."""
         return self.edges.get(s, {})
+
+    # ---- the CONTINUOUS per-action displacement (the SPATIAL column's group action) --------------------------
+    # L5's operator "in whatever dimension the action changes" at the METRIC grain: the pixel translation an action
+    # produces. The spatial column's group is SO(2)+translation; with rotation deferred this is just the translation
+    # `move_delta[action]`, learned online by EWMA from the sensed displacement (the efference copy). This is the ONE
+    # home of the per-action displacement -- the sensor no longer keeps its own copy (the P1 unification): L6 (the
+    # column tracker) path-integrates the location belief by this delta, and reads `controllable` to gate the position.
+    def observe_move(self, action, delta, rate: float = 0.4) -> None:
+        """Learn the per-action pixel translation from one sensed move `delta=(dx,dy)` -- an EWMA (the efference the
+        tracker path-integrates by). First sighting sets it; later ones average (robust to a noisy sighting)."""
+        old = self.move_delta.get(action)
+        self.move_delta[action] = tuple(delta) if old is None else (
+            (1.0 - rate) * old[0] + rate * delta[0], (1.0 - rate) * old[1] + rate * delta[1])
+
+    def move(self, action):
+        """The learned per-action translation (dx, dy) -- the efference the location belief dead-reckons by; (0, 0)
+        for an action whose effect is not yet learned (dead-reckon says 'stay', the sighting then corrects)."""
+        return self.move_delta.get(action, (0.0, 0.0))
+
+    def controllable(self, thresh: float = 0.5) -> bool:
+        """Does SOME action produce a non-trivial translation? -> the tracked object responds to actions, so its
+        allocentric POSITION is informative (gate ON). A state-change scene (in-place animation) averages to ~0 ->
+        gate OFF, keeping the recurring local view. The `_controllable` gate, now sourced from L5's displacement."""
+        return any(d[0] * d[0] + d[1] * d[1] > thresh for d in self.move_delta.values())
 
     # ---- motor output + thalamus driver (the other two uses of the one operator) -------------------------
     def motor(self, a):

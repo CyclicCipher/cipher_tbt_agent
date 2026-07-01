@@ -450,3 +450,36 @@ Stages 1–2 changed the live agent substantially, and we have not run it live s
 - **THEN: scope the GSG live integration** to what the test shows — covert recognition + BG (§8.4) at minimum;
   more only where the loop asks. If the live test shows the score is blocked by dynamics/goal, that (not the GSG)
   is where to invest next.
+
+### 8.6 RE-AUDIT (2026-06-30, session 2) — the GSG is computed-but-INERT; the reframe supersedes 8.3–8.5
+A code re-audit against the live call graph (see `COLUMN_AUDIT.md` → *Correction (session 2)*) found the GSG **wired
+but inert**: `agent._choose` computes `self.goal = propose_goals(...)` gated by `bg.gate` every step, but neither
+`_choose` return branch dispatches on `self.goal` — both call `col.act(...)` with the value function regardless — so
+the selection changes **nothing**. Two compounding causes, and they confirm this plan's own §8.2:
+1. **No hypotheses ever compete live.** `arc_sdk` passes `agent.step(pos, feature=feat)` — never `cloud=` — so no L2/3
+   recognition SESSION runs; `L23.disambiguation_goal()` → `None` → `propose_goal()` → `None` → `propose_goals()`
+   returns ONLY the ACT goal → `bg.gate` (len==1) trivially returns ACT. The disambiguation branch is unreachable.
+2. **Even with hypotheses, overt identity-disambiguation is moot** (§8.2): full-frame ARC gives the whole 64×64 grid
+   every step, so identity is resolvable COVERTLY and cheaply; the GSG's "sense fewer, smarter points" efficiency has
+   no overt purchase. The real OVERT uncertainty is DYNAMICS/RULE + GOAL.
+
+**Why the plan mis-aimed (the user's read, confirmed).** GD1–GD4 (2026-06-29) predate BOTH the column-correctness work
+AND the §3 reframe (`GROUNDING_PLAN §3`, 2026-06-30). They implement the TBT-faithful CORE — Monty's graph-mismatch
+hypothesis-test — but bound it to the ONE uncertainty (object identity) that the live ARC loop never overtly faces. The
+mechanism is right; the target was wrong for this environment.
+
+**The corrected GSG design (grounded in §8.2 + `GROUNDING_PLAN §3` + [[reference_gsg_goal_generation]]).** The GSG's
+defining job is uncertainty-resolution by hypothesis-test, and graph-mismatch is **model-general** — it resolves
+disagreement between ANY two competing models (object, concept, **rule**, word), not just object graphs. So:
+- **Single-column live role = COVERT recognition only** (feed property-generalisation / permanence over the frame,
+  §8.4). It is NOT an overt action competitor here, and should not be presented as one. ⇒ the inert `self.goal`
+  computation should be removed from the live `_choose` (or made a real channel) when M2 (BG arbitration) is wired —
+  see `GROUNDING_PLAN` P2; carrying dead selection in the loop is exactly the parallel-mechanism smell.
+- **The OVERT hypothesis-test GSG = the RULE/GOAL hypothesis over a TASK-SPACE schema** = `GROUNDING_PLAN §3`, which
+  lives in the TASK column (the heterarchy), because a mechanic is a task-relational schema, not a single-object
+  identity (the §3 correction). The GD1–GD4 graph-mismatch machinery is **REUSED verbatim** there — only the models it
+  overlays change (object graphs → task/rule graphs); no new mechanism (Mountcastle). ⇒ the GSG's overt rebuild is
+  DEFERRED to §3/the heterarchy, NOT attempted in the single column.
+- **Supersedes 8.3–8.5's "live test first" recommendation** for the immediate work: per the user's objective, the
+  priority is retiring the parallel mechanisms so the correct TBT loop is the live path (GROUNDING P1–P4), not a live
+  score measurement. The live test remains a valid later check, but it is not the next step.

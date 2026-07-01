@@ -10,6 +10,78 @@ SMELL of un-grounded glue: a pile of special-cased thresholds is robust only on 
 trace (this session). The fix the user named: make the COLUMNS natively capable of these behaviors, neuroscientifically
 grounded, so the agent returns to a thin reafference loop.*
 
+## STATUS (2026-06-30 rev, re-audited against the LIVE call graph) — what LANDED, what's OPEN, the reframe
+A code re-audit (session 2) corrects `project_agent_grounding`'s claim that "C1–C5 executed the grounding." C1–C5
+executed **M5's MECHANISM** (the state → L4⊗L6, `sense_at` live). The rest is PARTIAL, and — the point the user named —
+the audit made the COLUMN faculties more correct but did NOT retire the old glue, so the live loop now runs BOTH the
+correct faculty AND its substitute (parallel mechanisms). Per-migration truth:
+
+| migration | claimed | ACTUAL (live: `arc_sdk` → `agent.step` → `_choose`) |
+|---|---|---|
+| **M1** SR value / reachability / NEED | collapse into reading the SR | **PARTIAL.** `col.value`/`col.reachable` un-reverted + mechanism-tested, but **tests-only** — the live value is still `reward.py`'s tabular prioritized sweep; `reward._need` is still flat `1.0` (the SR-NEED is unwired). The BFS `_reward_reachable` IS gone, but the dead-zone is a **hand-coded boolean** (`not R_ext and all-tried`, [agent.py](agent.py) `_choose`), not the SR-reachability the plan specified. |
+| **M2** arbitration → `BG.gate` | **the keystone** | **NOT DONE.** `_choose` still holds a hand-coded **2-case if/else** (`tab_spread>1e-9 & not dead_zone` → exploit-value `col.act`; else → explore-value + field-bonus). `BG.gate` gates ONLY the (inert) GSG act/disambiguate goal, never the action grain. |
+| **M3** eigenpurpose → L6 | | **DONE.** `col.sr.eigenpurpose`, read live in `_choose`. |
+| **M4** forward-value → L5 | | **PARTIAL.** `L5.field_step`/`observe_field`/`predict_field` exist, but `_field_plan`/`field_features`/`field_value` (the value orchestration) still live in `agent.py`. |
+| **M5** state → L4⊗L6 (L7-A..D) | | **MECHANISM DONE, LIVE-WIRING INCOMPLETE** = the C1–C5 audit. `sense_at` runs live; `object_state`/`loc_*`/`sense_object` are **tests-only** (see `COLUMN_AUDIT.md` → *Correction (session 2)*). |
+| **§3** mechanic library + rule GSG | | **NOT STARTED.** |
+
+**The GSG is computed-but-inert (the user's suspicion, confirmed).** The GSG (GD1–GD4, `MOTOR_REFACTOR §7`) was built
+*disambiguation-first*: graph-mismatch over L2/3's top-2 OBJECT-IDENTITY hypotheses — Monty's expensive/partial-sensing
+problem. But `MOTOR_REFACTOR §8.2` (2026-06-29) already found that **full-frame ARC makes identity-disambiguation covert
+and moot**; the real OVERT uncertainty is DYNAMICS/RULE + GOAL. Live, `arc_sdk` passes `feature=`, never `cloud=` → no
+recognition session → no competing hypotheses → `propose_goal`→`None` → only the ACT goal → the BG selection is trivially
+ACT → `self.goal` never changes behaviour. ⇒ the GSG's live role is **covert recognition** (free); its OVERT epistemic
+goal is DYNAMICS (`lp`, already in the EFE) + the GOAL/mechanic-HYPOTHESIS — and the hypothesis-test couples to the TASK
+column, so its real rebuild lands in the heterarchy (§3), NOT the single column. See `MOTOR_REFACTOR §8.6` (this session).
+
+**The reframe — the remaining grounding IS the "one live TBT loop, no parallel mechanisms" objective.** Retiring the
+substitutes is the same work as finishing M1/M2/M4 + one NEW item the audit created:
+- **NEW — path-integration duplication.** The audit built L5→L6 path integration in the column (`loc_*`, C3) but left the
+  **sensor's** `_delta`/`_coarse_pos`/`_update_fovea` (`sensor.py`) as the LIVE path integrator — TWO learners of the
+  per-action displacement. TBT ([[reference_tbt_reference_frame]], [[reference_layer5_role]]): L5 OWNS the efference/
+  displacement, L6 path-integrates; the sensor is the egocentric **S-frame** (feature + raw sighting) ONLY. ⇒ dissolve the
+  sensor's displacement-learning into L5; the live position becomes `col.loc_where()`. The sharpest parallel mechanism.
+- **M2** dissolves the hand-coded arbitration into the BG (still the keystone); M3's eigenpurpose + M4's field value fold
+  in as CHANNELS the BG gates.
+- **M1** wires the SPARSE SR reads (reachability, NEED) so the dormant SR COMPOSES with the sweep instead of being dead
+  code — NOT a dense per-step solve (the O(states²) risk stands; the bounded sweep stays the planner — [[reference_brain_planning]] two grains).
+
+**Sequencing under the objective (supersedes §5's order for the immediate work — retire parallel mechanisms BEFORE the heterarchy):**
+1. **P1 — path integration into the column** (dissolve `sensor._delta` → L5/L6; live pos = `loc_where`). Isolated, kills the sharpest duplication, and the live loop finally uses the "TBT-correct" path integrator instead of shadowing it.
+2. **P2 — M2 (BG arbitration)** replaces the if/else; folds in the M3/M4 channels.
+3. **P3 — M1 sparse SR reads** (reachability, NEED) so the SR value stops being dormant.
+4. **P4 — `object_state` LIVE** (C4 consumed by the planner). This is where the **C2↔C4 coupling forces H0**: does one L6 hold `(position, object_state)` as separable eigen-subspaces (→ a structured single column, no 2nd column) or not (→ the task column)? So **H0 is NOT skipped — it re-enters HERE**, as the gate on making C4 live, correctly sequenced after the parallel mechanisms are gone.
+5. THEN §3 / the heterarchy (the task column + the rule/goal GSG, where the GSG's overt rebuild belongs).
+
+### P1 — design (fully unify path integration into the column; user-chosen 2026-06-30 s2)
+A faithful RELOCATION, not a redesign: the sensor's path-integration machinery moves into the column, expressed through
+the layers TBT assigns it — L5 (the displacement/efference) + L6 (the location belief). The sensor drops to pure
+S-frame perception (detect the residual, extract the feature). Grounded in [[reference_tbt_reference_frame]] (sensor =
+S-frame; L6 tracks the location; L5 = the efference) and L5's own SO(2)+translation-vs-learned-group framing.
+- **L5 gains the continuous displacement** (the sensor's `_delta`, verbatim EWMA): `observe_move(action, delta)` /
+  `move(action)` / `controllable(thresh)`. This IS L5's job ("a position-invariant DELTA in whatever dimension the
+  action changes" — here pixel translation); the spatial column's group action is continuous translation.
+- **The column gains the location belief + gate** (the sensor's `_fovea`/`_coarse_pos`/`_controllable`, relocated):
+  a continuous tracker that, given the residual CANDIDATES the sensor detects, DISAMBIGUATES (pick the candidate nearest
+  `fovea + L5.move(action)` — animation rejection), snaps, learns `L5.observe_move`, and coarsens to the state node
+  (gated by `L5.controllable()` — a state-change scene keeps a constant position, the recurring local view).
+- **The sensor** keeps only: `salient_cells`→residual, `dominant_region`/`components`→candidate centroids, `_patch`→
+  feature. It passes candidates to the column and reads back the chosen sighting to extract the patch. No `_delta`, no
+  position, no gate. (The column imports NO perception — the sensor passes pre-extracted centroids.)
+- **Grain note (the honest one):** this is the CONTINUOUS-metric tracker for the SPATIAL column. The existing discrete
+  `loc_*` (graph tracking over symbolic nodes, the ring test) is the SAME idea for an ABSTRACT column's learned group;
+  reconciling `track_*` (continuous) and `loc_*` (discrete) into one L5-operator-driven belief is a follow-up (P1c),
+  not P1 — P1's win is that the SENSOR no longer computes position; the COLUMN does.
+- **Steps (each suite-green):** **P1a ✅** — L5 `move_*` (`move_delta`/`observe_move`/`move`/`controllable`) + column
+  `track_*` (`track`/`track_state`/`track_reset`/`track_pos`) + 2 mechanism tests (ADDITIVE; suite 100→102). **P1b ✅** —
+  the sensor delegates the fovea to `column.track` (BOTH modes; integrate ADDS `track_state`), `arc_sdk` wires
+  `sensor.column` + `col.track_reset()` per level; DELETED the sensor's `_delta`/`_coarse_pos`/`_controllable`/
+  `_update_fovea`/`_locate` (pure S-frame `_residual_candidates` remains); the sensor-internal gate test → the column
+  test; `test_path_integration_navigates…` stays green (nav 8/8, ego≤2 — behaviour-equivalent). Suite **101 green**.
+  ⇒ the SENSOR no longer path-integrates; the COLUMN owns it LIVE. **P1c (open)** — reconcile the two column
+  path-integration APIs: the now-LIVE continuous `track_*` (spatial, metric) and the tests-only discrete `loc_*`
+  (symbolic-graph) into one L5-operator-driven belief (the internal duplication P1 left; not blocking P2).
+
 ## 0. The principle (and why it likely cures the failures)
 The agent should be the **active-inference / reafference LOOP** and nothing more: sense → predict → compare (surprise)
 → learn → **select (delegate)** → motor. Every behavior that is *cognition* — what to value, where reward is, which

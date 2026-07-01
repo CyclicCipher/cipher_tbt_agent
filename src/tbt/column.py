@@ -59,6 +59,7 @@ class CorticalColumn(nn.Module):
         self.loc, self.rel = {}, {}                           # symbol→frame index; relation→operator key (the EDGES live in L5)
         self.place = None                                     # (n, d_mem) per-node SR-frame place codes (set by refresh)
         self._cur = None                                      # the current node -- discrete path integration over the graph
+        self._fovea = None                                    # P1: the CONTINUOUS metric location belief (pixel), path-integrated by L5's translation
         self._map = torch.zeros(feat_dim, d_mem)             # M5/L7-A: the online allocentric MAP (Σ feature ⊗ place), read by feature_at
         self._changed: dict = {}                             # C4: L2/3 object STATE -- {location: feature} where a known feature CHANGED
 
@@ -381,3 +382,51 @@ class CorticalColumn(nn.Module):
     def loc_where(self):
         """The current node."""
         return self._cur
+
+    # ----- CONTINUOUS-metric path integration: the SPATIAL location belief (L6 ⊕ L5 translation) -----------
+    # P1 (GROUNDING_PLAN): the column OWNS the allocentric position (was the sensor's `_coarse_pos`). Given the
+    # residual CANDIDATES the sensor detects, the column DISAMBIGUATES the controllable one (nearest the efference
+    # prediction fovea+L5.move -- animation rejection), path-integrates the belief, LEARNS the per-action translation
+    # (L5.observe_move), and coarsens to a recurring state node -- gated by L5.controllable so a state-change scene
+    # keeps a constant position. The continuous sibling of the discrete `loc_*` (P1c reconciles them). The column
+    # imports no perception: the sensor passes pre-extracted centroids and reads back the chosen sighting.
+    def track_reset(self):
+        """A level boundary: drop the location belief (the board resets; do not path-integrate across it)."""
+        self._fovea = None
+
+    def track(self, action, appeared, dominant, cold=None):
+        """Path-integrate one step. `appeared` = candidate centroids (arrived controllable cells), `dominant` = the
+        fallback dominant-residual centroid (or None), `cold` = the cold-start centroid (largest object / frame centre).
+        DISAMBIGUATE via the efference (L5.move) when the action's translation is known, else take the dominant; on a
+        real sighting LEARN the translation (L5.observe_move) and snap. Returns the chosen sighting (pixel) so the
+        sensor extracts the feature there; keeps the belief put when nothing was sensed."""
+        chosen = self._locate_candidate(action, appeared, dominant)
+        if chosen is not None:
+            if action is not None and self._fovea is not None:            # learn the per-action translation (the efference)
+                self.L5.observe_move(action, (chosen[0] - self._fovea[0], chosen[1] - self._fovea[1]))
+            self._fovea = chosen                                          # correct: snap to the sighting
+        if self._fovea is None:
+            self._fovea = cold
+        return self._fovea
+
+    def _locate_candidate(self, action, appeared, dominant):
+        """Which residual is the controllable object. Once the action's translation is known, the arrived candidate
+        nearest the EFFERENCE prediction (fovea + L5.move) -- clean tracking that ignores autonomous animation; until
+        then (cold start / unlearned action), the dominant residual."""
+        d = self.L5.move(action)
+        if self._fovea is not None and (d[0] * d[0] + d[1] * d[1]) > 0.25 and appeared:
+            pred = (self._fovea[0] + d[0], self._fovea[1] + d[1])
+            return min(appeared, key=lambda c: (c[0] - pred[0]) ** 2 + (c[1] - pred[1]) ** 2)
+        return dominant
+
+    def track_pos(self):
+        """The continuous location belief (pixel) -- where the sensor foveates to extract the feature."""
+        return self._fovea
+
+    def track_state(self, pos_bin: int = 4):
+        """The coarse allocentric STATE node -- the belief binned so aliased views separate and positions RECUR, GATED
+        by controllability: a scene the agent cannot move (no learned translation) returns the constant gate-off value,
+        preserving its recurring local view (a state-change game)."""
+        if self._fovea is None or not self.L5.controllable():
+            return (0, 0)
+        return (int(round(self._fovea[0])) // pos_bin, int(round(self._fovea[1])) // pos_bin)

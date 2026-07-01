@@ -157,6 +157,7 @@ class TbtPolicy:
         if score_delta > 0:                                 # a level boundary: a perceptual + linkage discontinuity
             if self.agent is not None:
                 self.agent.complete(score_delta)            # the completing transition -> GOAL; ends the episode
+                self.agent.col.track_reset()                # drop the column's location belief (the board resets)
             self.sensor.reset()
             self.prev_level = obs.level
             self._last_a = None
@@ -164,6 +165,7 @@ class TbtPolicy:
             self.sensor.field.perceive(obs.grid)            # peek to size the click-slots (objects())
             self._init_actions(latest_frame)
             self.sensor.encode = self.agent.col.L4.encode   # the sensor emits FEATURE-at-location via the column's L4
+            self.sensor.column = self.agent.col             # P1: the column OWNS path integration; the sensor feeds it residuals
             self.sensor.field.reset()                       # undo the peek -- the real read starts the tracker clean
         state, _change = self.sensor.read(obs.grid, action=self._last_a)   # efference = last action (path integration)
         if self.sensor.local and self.sensor.integrate:      # C2 (COLUMN_AUDIT): the movement-bootstrapped (feature, position)

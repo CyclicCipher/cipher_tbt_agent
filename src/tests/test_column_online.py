@@ -170,3 +170,32 @@ def test_column_learns_a_line_online():
     col.refresh()
     preds = [col.predict(i, 0) for i in range(K - 1)]
     assert preds == [i + 1 for i in range(K - 1)], preds
+
+
+def test_column_owns_continuous_path_integration_and_disambiguates_animation():
+    """P1: the COLUMN (not the sensor) path-integrates the metric location belief. Fed the residual candidates a sensor
+    would detect, it LEARNS the per-action translation (L5), tracks the controllable mover, rejects an animation
+    distractor via the efference prediction, and coarsens to a recurring state node once controllable."""
+    col = CorticalColumn(n_entities=64, seed=0)
+    col.track_reset()
+    assert col.track(None, [], (2.0, 2.0), cold=(2.0, 2.0)) == (2.0, 2.0)     # cold start: foveate the object
+    assert col.track(0, [(4.0, 2.0)], (4.0, 2.0)) == (4.0, 2.0)               # action 0 -> the mover stepped +2x
+    assert col.L5.controllable(), "the first real move learns a non-trivial translation -> controllable"
+    # a SECOND action-0 with a distractor (autonomous animation far away): the efference (fovea + learned +2x) picks
+    # the action-consistent residual, NOT the distractor.
+    assert col.track(0, [(6.0, 2.0), (18.0, 18.0)], (18.0, 18.0)) == (6.0, 2.0)
+    assert abs(col.L5.move(0)[0] - 2.0) < 0.5 and abs(col.L5.move(0)[1]) < 0.5
+    assert col.track_pos() == (6.0, 2.0)
+    assert col.track_state(pos_bin=4) == (1, 0)                               # (6//4, 2//4) -- the coarse recurring node
+
+
+def test_track_gate_stays_off_for_a_non_controllable_scene():
+    """P1 (the relocated gate): a scene whose change is NOT action-driven (in-place animation, a constant residual)
+    learns a ~zero translation -> NOT controllable -> the state position stays the constant gate-off value, preserving
+    the recurring local view a state-change game depends on. Replaces the sensor-internal gate test."""
+    col = CorticalColumn(n_entities=64, seed=0)
+    col.track_reset()
+    for t in range(12):                                                      # a 2x2 block toggling colour IN PLACE
+        col.track(t % 4, [(10.5, 10.5)], (10.5, 10.5))
+    assert not col.L5.controllable(), f"gate wrongly ON: deltas {col.L5.move_delta}"
+    assert col.track_state(pos_bin=4) == (0, 0), "non-controllable scene must keep the constant gate-off position"

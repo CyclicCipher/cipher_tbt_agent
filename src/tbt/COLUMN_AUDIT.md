@@ -133,10 +133,37 @@ The bypass (`config_state`) is dissolved as the live representation; the real cy
 | **GSG + BG** goal generation/arbitration | ✅ proposes goals from the column's uncertainty; BG arbitrates by EFE | ✅ in `agent._choose` each step | `test_gsg.py` (12) |
 | **the CYCLE** | ✅ `L6→L4→sense→L2/3→L5→L6` runs end-to-end | ✅ one loop | `test_full_cycle_end_to_end` |
 
-**Conclusion:** the single column is anatomically correct — every layer performs its TBT job and the predict-sense-update
-cycle is closed. The one message the column emits (pose + feature-at-location + recognised identity + object-state) is now
-WELL-FORMED, so copies + communication can be built on it without inheriting a malformed message. **⇒ proceed to step 2/3
-(the heterarchy), per `HETERARCHY_PLAN.md`.**
+**Conclusion (AMENDED — see *Correction* below).** The single column's FACULTIES are individually TBT-shaped and
+mechanism-green, and the core bypass (`config_state` as the *planning symbol*) IS dissolved on the live path (plan over
+`pos`, `sense_at` live). That part holds. BUT the table above conflated "mechanism-tested in isolation" with "connected
+on the LIVE drive path": four faculties (C3 path-integration, C4 object-state, the GSG, L2/3 recognition) are
+tests-only live, and were built ALONGSIDE the old live substitutes rather than REPLACING them (parallel mechanisms). So
+"every layer does its TBT job AND is connected in the live cycle" is OVERSTATED. The corrected precondition for the
+heterarchy is in *Correction* — H0 does NOT come first; retiring the parallel mechanisms does.
+
+## Correction (2026-06-30, session 2): mechanism-tested ≠ live-connected — the four gaps + the no-parallel-mechanisms objective
+The *Verification* table asked "connected? ✅" and answered it with MECHANISM TESTS. That conflates two different claims:
+(i) a faculty EXISTS, is wired to the other layers WITHIN the column, and passes a `src/tests` mechanism test; vs
+(ii) it is CALLED on the LIVE drive path (`arc_sdk.choose_action` → `agent.step` → `_choose` → `column`). For four
+faculties only (i) holds. Grep evidence: `col.loc_move/loc_where/loc_reset/loc_sense`, `col.object_state`, `col.locate`,
+`col.value`, `col.reachable`, `col.sense_object`, `col.recognize_object`, `col.refresh`, `col.examine` are called ONLY
+from `src/tests/` — never from `agent.py`/`arc_sdk.py`. The live loop exercises `observe` (SR+L5), `sense_at` (L4-over-L6),
+`predict`/`motor`/`act` (L5), the field FM, and `sr.eigenpurpose`; it also *computes* `propose_goals`+`bg.gate` but does
+not act on the result. **Wherever an implementation choice is ambiguous, resolve by TBT** — done per gap below.
+
+| gap | TBT job (spec) | LIVE reality | resolution (by TBT) |
+|---|---|---|---|
+| **C3 — L6 path integration** | L5's efference-copy displacement path-integrates L6; the sensor is the egocentric **S-frame** | the LIVE position `pos` is path-integrated by the **SENSOR** (`sensor._delta`/`_coarse_pos`/`_update_fovea`); the column's `loc_*` (built "TBT-correct" by C3) is **tests-only** → TWO path integrators | L5 OWNS the efference/displacement, L6 path-integrates; the sensor emits feature + raw sighting ONLY ([[reference_tbt_reference_frame]], [[reference_layer5_role]]). ⇒ dissolve `sensor._delta` into L5; live pos = `col.loc_where()`. GROUNDING **P1** |
+| **C4 — object-state** | L2/3's dynamic object-state reaches the value so board-states are distinguished | `_changed` is written by `sense_at`, but NO live caller reads `col.object_state()`; the planner plans **position-only** (the MultiKey 2/2→0/2 regression the audit itself flagged — STILL live) | the object-state must reach the value; whether via ONE L6 (factored eigen-subspaces) or a TASK column is exactly **H0**. ∴ making C4 live == running H0. GROUNDING **P4** |
+| **GSG** | the column proposes goal-states from its uncertainty; the BG gates; the motor pursues the winner | `self.goal` is SELECTED but neither `_choose` branch dispatches on it → behaviour UNCHANGED (inert). Root cause (`MOTOR_REFACTOR §8.2`): the GSG resolves object-IDENTITY (graph-mismatch), which full-frame ARC makes covert/moot; and `arc_sdk` never passes `cloud` → no hypotheses ever compete → only ACT is proposed | the GSG's live role is COVERT recognition (free); its OVERT epistemic goal is DYNAMICS (`lp`, already in the EFE) + the GOAL/mechanic-HYPOTHESIS, which couples to the TASK column ⇒ the overt rebuild lands in the heterarchy (§3), not the single column. Downgrade "GSG in the loop ✅" → **computed but inert**. See `MOTOR_REFACTOR §8.6` |
+| **L2/3 recognition/voting** | the object SETTLED by pose-invariant recognition + lateral CMP voting, bound into the map | `sense_object`/`recognize_object`/`vote` are wired to `agent.step(cloud=…)`, but `arc_sdk` passes `feature=`, never `cloud=` → the pose-invariant recognition faculty is **tests-only** live | covert recognition over the frame should feed the feature-at-location map (`MOTOR_REFACTOR §8.4`); until a cloud is produced live (perception), L2/3-recognition is not on the drive path. Rides on P1/§3 |
+
+**The objective (user, this session).** Make the correct TBT loop the LIVE path in ALL situations, with NO parallel
+mechanisms — this simplifies the code, prevents future confusion, and makes the heterarchy easier. That work is
+`GROUNDING_PLAN.md`'s revised **P1–P4** (path-integration into the column → M2 BG arbitration → M1 sparse SR reads →
+object_state live == H0), THEN §3 / the heterarchy. **H0 is not the first move; it re-enters at P4.** The single column
+is *close* to correct — the faculties are right and mechanism-green — but "correct AND the live path AND singular" is the
+bar, and four faculties are not yet the live path.
 
 ## DEFERRED to the heterarchy / policy tuning (they ride ON the now-correct column)
 The **C4 INTEGRATION** (planning over `(position, object_state)` — where MultiKey/LockPath return correctly factored)
