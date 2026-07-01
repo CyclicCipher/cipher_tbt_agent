@@ -21,8 +21,9 @@ TBT = MANY copies of ONE column algorithm + communication, so the build order is
    not a new mechanism; and `TARGET_ARCHITECTURE` says FACTOR within one column first (L6 eigen-subspaces), allocate a
    2nd column (basal ganglia) only when factors don't separate — so the heterarchy is the FALLBACK, not the first move.
 
-**⇒ The C4 INTEGRATION (the spatial/task heterarchy) is DEFERRED until the single column is correct.** The next
-single-column piece: wire **L2/3 RECOGNITION into the loop** (the object SETTLED by recognition, not bypassed).
+**⇒ The single-column cycle is now COMPLETE and VERIFIED (C1–C5 + the GSG in the loop; see *Verification* below).**
+The C4 INTEGRATION (the spatial/task heterarchy) remains DEFERRED to step 2/3 — the plan is written in
+`HETERARCHY_PLAN.md` (spatial-map + task-map, communication via the thalamus + CMP voting). That is the next session.
 
 ## The root deviation (why every score-fix was brittle)
 The live loop is: **`sensor` → `config_state` → `L5.edges` (the graph) + `reward.py`'s value sweep → `col.act` (motor)**.
@@ -105,11 +106,41 @@ CONVERTS egocentric→object-centric. (Monty's third frame **B** = body-centric,
   `(position, object_state)`). `object_state` is the input to it. **The hierarchy is DEFERRED until the single column is
   correct** (see *Build strategy* above); it is where MultiKey/LockPath return, correctly factored (position from the
   spatial map, keys-collected from the task map) — but it is step 3, and we are mid-step-1.
-- **C3** (L5→L6 path integration) is largely already present as the sensor's 7c path integration (`coarse_pos`, the
-  position the frame reads); wire/verify it as a column mechanism after C4.
+- **C3 ✅ (verified)** `column.loc_reset/loc_move/loc_sense/loc_where` — L5's learned edge (the efference) path-integrates
+  L6's location (dead-reckon by the displacement, snap-to-sighting correction). The location loop is CLOSED: the same L5
+  operator that predicts the next state also advances the L6 belief. Mechanism-tested (`test_path_integration_*`,
+  `test_full_cycle_end_to_end` (b)).
+- **C4 ✅ (recognition wired)** `column.sense_object` — L2/3 RECOGNISES the sensed cloud (pose-invariant identity via the
+  evidence recogniser + CMP voting) and binds THAT identity into the feature-at-location map, so the object is SETTLED by
+  recognition, not a raw patch. Boundaries = recognition mismatch (`sensed_surprise`). In the loop via `agent.step(cloud=…)`.
+  Mechanism-tested (`test_l23_recognition_wired_to_feature_at_location`, `test_agent_loop_maps_recognized_objects`).
+- **C5 ✅** the CYCLE runs end-to-end through the agent loop — one walk learns BOTH L4-over-L6 (`feature_at` predicts the
+  feature at each L6 location) AND L5→L6 path integration (`loc_move` dead-reckons by the learned displacement)
+  (`test_full_cycle_end_to_end`).
+- **GSG in the loop ✅** `agent._choose` consults `column.propose_goals` + `basal_ganglia.gate` every step — goal
+  generation from the column's OWN uncertainty (ACT always; DISAMBIGUATION when L2/3 hypotheses compete), arbitrated by
+  the BG. Plain nav → ACT (value policy unchanged); the reward-less dead-zone with an ambiguous object → DISAMBIGUATE
+  (active recognition). Mechanism-tested (`test_gsg_and_basal_ganglia_select_the_goal_in_the_agent_loop`).
 
-## DEFERRED until the column is correct (then they ride ON a correct column, and should stop being brittle)
-Value/exploration (the dead-zone, the eigenpurpose), **§3** (the GSG mechanic library + model-based rollout + commit),
-**M2** (the basal-ganglia channel arbitration), and every game/oracle SCORE. These are policy/optimisation on top of the
-cycle — premature until C1–C5 land. (The grounding migrations M1/M3/M5-A already did the cheap, correct *reads*; C1–C5
-turn them into the live cycle.)
+## Verification — each layer does its TBT job AND is connected (2026-06-30)
+The bypass (`config_state`) is dissolved as the live representation; the real cycle runs. Per-layer, in the loop:
+| layer | does its TBT job? | connected? | evidence (mechanism test) |
+|---|---|---|---|
+| **L6** location frame | ✅ READ as the "where": `locate` returns the SR-eigenframe place code, DG-sparsified so it encodes topology (adjacent ≈, antipode ≠) | ✅ L4 binds to it; L5 path-integrates it; `value`/`reachable` read it | `test_l6_is_read_as_the_location_substrate`, `test_the_cycle_recognizes_a_multi_location_object` |
+| **L4** feature-at-location | ✅ PREDICTS the feature at the L6 location, compares, binds (predict-then-compare seated here) | ✅ over L6 locations; feeds L2/3 | `test_sense_at_is_l4_over_l6_predict_then_compare`, `test_feature_at_location_map_binds_and_reads_back` |
+| **L5** displacement/motor | ✅ position-invariant displacement + motor + forward model | ✅ path-integrates L6 (C3); drives `col.act` | `test_l5_displacement.py` (7), `test_path_integration_is_discrete_graph_tracking` |
+| **L2/3** object/identity | ✅ RECOGNISES the object (pose-invariant + CMP voting); tracks the dynamic object-STATE | ✅ settles over L4⊗L6; emits the GSG goal | `test_l23_object.py` (9), `test_object_state_tracks_the_dynamic_scene` |
+| **GSG + BG** goal generation/arbitration | ✅ proposes goals from the column's uncertainty; BG arbitrates by EFE | ✅ in `agent._choose` each step | `test_gsg.py` (12) |
+| **the CYCLE** | ✅ `L6→L4→sense→L2/3→L5→L6` runs end-to-end | ✅ one loop | `test_full_cycle_end_to_end` |
+
+**Conclusion:** the single column is anatomically correct — every layer performs its TBT job and the predict-sense-update
+cycle is closed. The one message the column emits (pose + feature-at-location + recognised identity + object-state) is now
+WELL-FORMED, so copies + communication can be built on it without inheriting a malformed message. **⇒ proceed to step 2/3
+(the heterarchy), per `HETERARCHY_PLAN.md`.**
+
+## DEFERRED to the heterarchy / policy tuning (they ride ON the now-correct column)
+The **C4 INTEGRATION** (planning over `(position, object_state)` — where MultiKey/LockPath return correctly factored)
+belongs to the spatial+task heterarchy (`HETERARCHY_PLAN.md`), NOT the single column. Value/exploration (dead-zone,
+eigenpurpose), **§3** (the mechanic library + model-based rollout + commit), **M2** (BG channel arbitration), and every
+game/oracle SCORE are policy/optimisation on top of the cycle — now unblocked (they ride on a correct column, so they
+should stop being brittle), but sequenced after the heterarchy foundation.
