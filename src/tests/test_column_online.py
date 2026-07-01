@@ -199,3 +199,31 @@ def test_track_gate_stays_off_for_a_non_controllable_scene():
         col.track(t % 4, [(10.5, 10.5)], (10.5, 10.5))
     assert not col.L5.controllable(), f"gate wrongly ON: deltas {col.L5.move_delta}"
     assert col.track_state(pos_bin=4) == (0, 0), "non-controllable scene must keep the constant gate-off position"
+
+
+# ── SR shortest-path navigation (navigate_to) + grid-cell VECTOR navigation (vector_action) ──────────────────
+def test_navigate_to_takes_the_sr_shortest_path_to_a_goal():
+    """M1/P3: navigate_to picks the action whose OUTCOME has the highest SR occupancy M[next, goal] (~ γ^distance),
+    so it steps along the SHORTEST path to a known goal -- read directly from the SR (no sweep)."""
+    col = CorticalColumn(n_entities=6, seed=0)
+    ring = 6
+    for _ in range(200):                                    # learn the ring: action 0 = +1, action 1 = -1
+        for i in range(ring):
+            col.observe(i, 0, (i + 1) % ring)
+            col.observe(i, 1, (i - 1) % ring)
+    R = {2: 1.0}                                            # reward at state 2
+    assert col.navigate_to(0, R, [0, 1]) == 0               # 0->1->2 (dist 2) beats 0->5->4->3->2 (dist 4)
+    assert col.navigate_to(4, R, [0, 1]) == 1               # 4->3->2 (dist 2) beats the long way
+    assert col.navigate_to(0, {99: 1.0}, [0, 1]) is None    # unreachable reward -> None (explore takes over)
+
+
+def test_vector_action_steers_along_the_goal_vector():
+    """V1 (VECTOR_NAV): the ATTRACTIVE field -- vector_action picks the action whose L5 displacement `move_delta` best
+    aligns with the goal vector `goal − here`, steering straight toward the goal (grid-cell vector navigation)."""
+    col = CorticalColumn(n_entities=16, seed=0)
+    for a, d in {0: (1, 0), 1: (-1, 0), 2: (0, -1), 3: (0, 1)}.items():     # the 4 moves' displacements (as P1 learns them)
+        col.L5.observe_move(a, d)
+    assert col.vector_action((0, 0), (5, 0), [0, 1, 2, 3]) == 0             # goal to the +x -> move right
+    assert col.vector_action((0, 0), (0, 5), [0, 1, 2, 3]) == 3             # goal to the +y -> move down
+    assert col.vector_action((5, 0), (0, 0), [0, 1, 2, 3]) == 1             # goal to the -x -> move left
+    assert col.vector_action((3, 3), (3, 3), [0, 1, 2, 3]) is None          # at the goal -> no move

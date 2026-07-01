@@ -116,6 +116,36 @@ class CorticalColumn(nn.Module):
         flag (the bug the oracle/human/agent trace exposed)."""
         return self.value(s, reward_map) > 1e-9
 
+    def navigate_to(self, state, reward_map, actions):
+        """SR SHORTEST-PATH navigation: the action whose OUTCOME has the highest SR VALUE `V(next) = M[next]·R`. Because
+        the SR occupancy `M[s,g] ~ γ^(distance to g)`, greedy on it steps along the SHORTEST path to the reward
+        structure `reward_map`, read DIRECTLY from the SR (no rollout / no per-step sweep -- reference_brain_planning).
+        Unlike the swept value it carries NO frontier optimism, so near a KNOWN goal it does not wander into untried
+        actions -- the efficiency lever. `predict` (L5) gives each action's outcome. Returns the best action, or `None`
+        when no reward is reachable (`V=0` everywhere -> the caller's explore policy takes over)."""
+        best_a, best_v = None, 1e-9
+        for a in actions:
+            v = self.value(self.predict(state, a), reward_map)
+            if v > best_v:
+                best_v, best_a = v, a
+        return best_a
+
+    def vector_action(self, here, goal, actions):
+        """V1 (VECTOR_NAV): the ATTRACTIVE step of the potential field -- grid-cell VECTOR navigation. The goal VECTOR
+        `v = goal − here` (L6's metric displacement to the goal) is realised by L5's INVERSE operator: pick the action
+        whose learned displacement `move_delta[a]` (P1) best ALIGNS with `v` (max dot product). This steers straight
+        toward the goal, including novel SHORTCUTS (the vector is straight-line in the metric, not a walked path).
+        `here`/`goal` are positions in the L6 frame. Returns the best-aligned action, or `None` when no action reduces
+        the vector (at the goal, or every displacement is unlearned/perpendicular -> the caller's V2/V3 handles it)."""
+        vx, vy = goal[0] - here[0], goal[1] - here[1]
+        best_a, best_align = None, 1e-9
+        for a in actions:
+            dx, dy = self.L5.move(a)                          # L5's learned per-action displacement ((0,0) if unlearned)
+            align = dx * vx + dy * vy                         # alignment of the displacement with the goal vector
+            if align > best_align:
+                best_align, best_a = align, a
+        return best_a
+
     def locate(self, state):
         """C1 (COLUMN_AUDIT) — the column's WHERE: L6 READ as the location substrate. Returns `state`'s L6
         SR-eigenframe place code (in the d_mem binding space) -- the location L4 binds a feature to (C2) and L5
