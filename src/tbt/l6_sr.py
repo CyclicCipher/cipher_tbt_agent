@@ -90,17 +90,25 @@ class OnlineSR:
         return {st: float(V[i]) for st, i in self.idx.items()}
 
     def grid(self, k: int = 5, refresh: bool = False):
-        """The LEARNED multi-scale GRID CELLS = the top-k singular vectors of the SR matrix `M` (Stachenfeld: grid
+        """The LEARNED multi-scale GRID CELLS = the top-k left singular vectors of the SR matrix `M` (Stachenfeld: grid
         cells ARE the SR eigenvectors; mesh size ∝ eigenvalue -> a handful of geometric scales, `k≈5`). Returns
-        `(k, n)`: each ROW is one grid cell (one eigenvector over the states). The top vectors encode the diffusive /
-        bottleneck structure (they separate clusters -> the eigenoption / vector-nav substrate L6 was missing). Cached
-        and rebuilt when the state set GROWS (cheap `eigh`/SVD on the small game graphs; `refresh=True` forces it).
-        For scale the same vectors are the online Hebbian (Oja/Sanger) PCA of the place codes -- the streaming path."""
+        `(k, n)`: each ROW is one grid cell (one eigenvector over the states); they encode the diffusive / bottleneck
+        structure (separate clusters -> the eigenoption / vector-nav substrate). Cached, rebuilt when the state set GROWS.
+
+        We compute ONLY the top-k (a truncated LANCZOS solve, `scipy.sparse.linalg.svds`), O(n²k) not the full-SVD's
+        O(n³) -- the EXACT same vectors, so the (load-bearing) eigenpurpose is unchanged, without the O(n³) spike as the
+        state space grows. (The approximate online/Hebbian subspace-iteration path shifts the eigenpurpose and is
+        deferred; a batch truncated solve is the safe scale win -- see BASAL_GANGLIA_PLAN §6.) Tiny graphs fall back to
+        the full SVD (trivial, and ARPACK is finicky near k≈n)."""
         n = self.M.shape[0]
         if n == 0:
             return np.zeros((0, 0))
         if refresh or self._grid_n != n or self._grid_U is None:
-            self._grid_U = np.linalg.svd(self.M)[0]
+            if n <= 2 * k:
+                self._grid_U = np.linalg.svd(self.M)[0]                    # small: the full SVD is trivial (and svds/ARPACK needs k << n)
+            else:
+                from scipy.sparse.linalg import svds
+                self._grid_U = svds(self.M, k=k)[0]                       # EXACT top-k left singular vectors, O(n²k) not O(n³)
             self._grid_n = n
         return self._grid_U[:, :min(k, n)].T
 

@@ -137,15 +137,16 @@ higher-order driver). It is a heterarchy-era prerequisite, tackled AFTER the BG 
 - **Rides on:** M1 (the critic value — B1 advances it), M3/M4 (eigenpurpose/field become salience terms — subsumed
   here). Precedes P3/P4 only loosely; B1's critic work overlaps M1.
 
-## 6. Reviewed 2026-06-30: the eigenpurpose SVD (KEEP; online Hebbian PCA is a LATER swap)
-The ONLY SVD in the system is `l6_sr.grid()` (`np.linalg.svd(M)`, top-k=5 singular vectors = grid cells), consumed by
-`eigenpurpose()` (directed-exploration intrinsic reward; capped n≤400, throttled every 16 steps). O(n³). **Decision
-(user):** the eigenpurpose is load-bearing (it is how long-horizon planning/action is achieved — eigenoptions/bottleneck
-sub-goals), so KEEP it; switch the batch SVD to **online Hebbian PCA (Oja/Sanger/GHA)** — the intended scale path already
-noted in `l6_sr` — WHEN APPROPRIATE (better perf: streaming O(nk); fresher: no 16-step staleness; more faithful: grid
-cells emerge online, not by batch eigh). NOT now (it does not block B3). Free interim option if the SVD ever bites:
-truncated/randomized top-k SVD (`svds`/randomized), same result, O(n²k). Deferred rethink: directed exploration could
-become a GSG EXPLORATION GOAL (SR-frontier, no SVD) at the exploration/§3 step — recorded, not scheduled.
+## 6. The eigenpurpose SVD — SWAPPED ✅ (2026-06-30): full SVD → EXACT truncated top-k
+The ONLY SVD was `l6_sr.grid()` (`np.linalg.svd(M)`, top-k=5 = grid cells), consumed by `eigenpurpose()` (directed-
+exploration; capped n≤400, throttled every 16 steps). O(n³). **Done:** replaced with `scipy.sparse.linalg.svds(M, k)`
+— a truncated LANCZOS solve computing ONLY the top-k, **O(n²k) not O(n³)**, the EXACT same vectors (tiny graphs fall
+back to full SVD). So the (load-bearing) eigenpurpose is UNCHANGED (suite green) and the O(n³) spike on state-growth is
+gone. **Why NOT the literal online Hebbian PCA:** an approximate online subspace-iteration version was tried and it
+SHIFTED the eigenpurpose (regressed `test_learning_progress` — the error-agent's exploration). The user's own constraint
+(the eigenpurpose is load-bearing → protect it) beats the "fresher/online" property, and the SVD is cached/throttled so
+"fresh" was marginal. The exact truncated solve gets the perf win with zero behaviour change. Deferred (unchanged):
+truly-online grid cells, and directed exploration as a GSG SR-frontier goal (no SVD) at the exploration/§3 step.
 
 ## Sources
 Redgrave, Prescott & Gurney 1999 (selection problem, PubMed 10362291); Gurney–Prescott–Redgrave 2001 (GPR model,
