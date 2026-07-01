@@ -259,46 +259,52 @@ class L5_Displacement(nn.Module):
     def _field_bg(field):
         return Counter(v for row in field for v in row).most_common(1)[0][0]
 
-    def _field_all_bg(self, field, x, y, H, W, bg) -> bool:
+    def _active_cells(self, field, H, W, bg):
+        """The cells that can predict a change = those within `field_radius` of a NON-background cell (a pure-background
+        neighbourhood cannot change and `field_step` skips it -> it defaults to no-change). Computed in ONE pass over the
+        non-bg cells, marking each one's r-neighbourhood -- O(non-bg · (2r+1)²), not O(H·W · (2r+1)²) rescanning EVERY
+        cell's neighbourhood (the large-mostly-background-grid cost, e.g. a 64×64 Tetris/ARC frame). Set of (x, y)."""
         r = self.field_radius
-        for dy in range(-r, r + 1):
-            for dx in range(-r, r + 1):
-                nx, ny = x + dx, y + dy
-                if 0 <= nx < W and 0 <= ny < H and field[ny][nx] != bg:
-                    return False
-        return True
+        active = set()
+        for y in range(H):
+            row = field[y]
+            for x in range(W):
+                if row[x] != bg:
+                    for ny in range(max(0, y - r), min(H, y + r + 1)):
+                        for nx in range(max(0, x - r), min(W, x + r + 1)):
+                            active.add((nx, ny))
+        return active
 
     def observe_field(self, field, action, next_field) -> None:
-        """Learn one feature-field transition: for every location vote `(its neighbourhood, action) -> its NEXT
-        feature`. All locations are learned (a no-change location teaches the identity branch), so prediction defaults
-        correctly. Deterministic dynamics -> a single-entry Counter (exact); the Counter holds not-yet-resolved context."""
+        """Learn one feature-field transition: for every ACTIVE location (within r of a non-bg cell) vote `(its
+        neighbourhood, action) -> its NEXT feature`. Pure-background cells are skipped -- they cannot change and
+        `field_step` never queries them (they default to no-change), so skipping keeps prediction IDENTICAL while making
+        the scan O(active) not O(H·W). Deterministic dynamics -> a single-entry Counter (exact)."""
         H, W = len(field), len(field[0])
-        for y in range(H):
-            for x in range(W):
-                self.field_rule[(self._field_patch(field, x, y, H, W), action)][next_field[y][x]] += 1
+        bg = self._field_bg(field)
+        for (x, y) in self._active_cells(field, H, W, bg):
+            self.field_rule[(self._field_patch(field, x, y, H, W), action)][next_field[y][x]] += 1
 
     def field_step(self, field, action):
         """ONE pass over the active region -> (predicted next field, confidence). The planner's hot path needs BOTH
         the next field (pragmatic value) and the trust (epistemic value) per action, so they share a single scan
         (avoids double-iterating the active region -- the FM4 performance fix). `confidence` = fraction of active
         locations whose rule is UNAMBIGUOUS; an unseen context keeps its current feature (the no-change default).
-        Skips ALL-background neighbourhoods (they cannot change) -> the scan is bounded to the active region."""
+        Scans only the ACTIVE region (cells within r of a non-bg cell; `_active_cells`) -> bounded to where a change
+        can propagate, computed once instead of an O((2r+1)²) all-background test PER cell (the large-grid fix)."""
         H, W = len(field), len(field[0])
         bg = self._field_bg(field)
         out = [row[:] for row in field]
         seen = sure = 0
-        for y in range(H):
-            for x in range(W):
-                if field[y][x] == bg and self._field_all_bg(field, x, y, H, W, bg):
-                    continue
-                c = self.field_rule.get((self._field_patch(field, x, y, H, W), action))
-                if c:
-                    seen += 1
-                    if len(c) == 1:
-                        sure += 1
-                        out[y][x] = next(iter(c))                # the single outcome (skip most_common)
-                    else:
-                        out[y][x] = c.most_common(1)[0][0]
+        for (x, y) in self._active_cells(field, H, W, bg):
+            c = self.field_rule.get((self._field_patch(field, x, y, H, W), action))
+            if c:
+                seen += 1
+                if len(c) == 1:
+                    sure += 1
+                    out[y][x] = next(iter(c))                    # the single outcome (skip most_common)
+                else:
+                    out[y][x] = c.most_common(1)[0][0]
         return out, (sure / seen if seen else 0.0)
 
     def predict_field(self, field, action):
