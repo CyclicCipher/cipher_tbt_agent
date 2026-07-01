@@ -95,20 +95,16 @@ class OnlineSR:
         `(k, n)`: each ROW is one grid cell (one eigenvector over the states); they encode the diffusive / bottleneck
         structure (separate clusters -> the eigenoption / vector-nav substrate). Cached, rebuilt when the state set GROWS.
 
-        We compute ONLY the top-k (a truncated LANCZOS solve, `scipy.sparse.linalg.svds`), O(n²k) not the full-SVD's
-        O(n³) -- the EXACT same vectors, so the (load-bearing) eigenpurpose is unchanged, without the O(n³) spike as the
-        state space grows. (The approximate online/Hebbian subspace-iteration path shifts the eigenpurpose and is
-        deferred; a batch truncated solve is the safe scale win -- see BASAL_GANGLIA_PLAN §6.) Tiny graphs fall back to
-        the full SVD (trivial, and ARPACK is finicky near k≈n)."""
+        Uses the full `np.linalg.svd` (DETERMINISTic). NB a truncated `svds` was tried and REVERTED: it is only O(n²k)
+        vs O(n³), but (a) `eigenpurpose` CAPS grid use at n≤400 where the full SVD is already fast, so the win is moot,
+        and (b) `svds` uses a RANDOM start vector and, on the degenerate singular subspaces common in a small SR, returns
+        DIFFERENT individual vectors run-to-run -> a nondeterministic, shifted eigenpurpose (it flaked MultiKey/Tetris).
+        The truly-online grid (deferred) must preserve determinism + the exact vectors. See BASAL_GANGLIA_PLAN §6."""
         n = self.M.shape[0]
         if n == 0:
             return np.zeros((0, 0))
         if refresh or self._grid_n != n or self._grid_U is None:
-            if n <= 2 * k:
-                self._grid_U = np.linalg.svd(self.M)[0]                    # small: the full SVD is trivial (and svds/ARPACK needs k << n)
-            else:
-                from scipy.sparse.linalg import svds
-                self._grid_U = svds(self.M, k=k)[0]                       # EXACT top-k left singular vectors, O(n²k) not O(n³)
+            self._grid_U = np.linalg.svd(self.M)[0]
             self._grid_n = n
         return self._grid_U[:, :min(k, n)].T
 

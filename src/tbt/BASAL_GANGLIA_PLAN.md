@@ -137,16 +137,19 @@ higher-order driver). It is a heterarchy-era prerequisite, tackled AFTER the BG 
 - **Rides on:** M1 (the critic value — B1 advances it), M3/M4 (eigenpurpose/field become salience terms — subsumed
   here). Precedes P3/P4 only loosely; B1's critic work overlaps M1.
 
-## 6. The eigenpurpose SVD — SWAPPED ✅ (2026-06-30): full SVD → EXACT truncated top-k
-The ONLY SVD was `l6_sr.grid()` (`np.linalg.svd(M)`, top-k=5 = grid cells), consumed by `eigenpurpose()` (directed-
-exploration; capped n≤400, throttled every 16 steps). O(n³). **Done:** replaced with `scipy.sparse.linalg.svds(M, k)`
-— a truncated LANCZOS solve computing ONLY the top-k, **O(n²k) not O(n³)**, the EXACT same vectors (tiny graphs fall
-back to full SVD). So the (load-bearing) eigenpurpose is UNCHANGED (suite green) and the O(n³) spike on state-growth is
-gone. **Why NOT the literal online Hebbian PCA:** an approximate online subspace-iteration version was tried and it
-SHIFTED the eigenpurpose (regressed `test_learning_progress` — the error-agent's exploration). The user's own constraint
-(the eigenpurpose is load-bearing → protect it) beats the "fresher/online" property, and the SVD is cached/throttled so
-"fresh" was marginal. The exact truncated solve gets the perf win with zero behaviour change. Deferred (unchanged):
-truly-online grid cells, and directed exploration as a GSG SR-frontier goal (no SVD) at the exploration/§3 step.
+## 6. The eigenpurpose SVD — REVIEWED, kept the full SVD (2026-06-30; a swap was tried + REVERTED)
+The ONLY SVD is `l6_sr.grid()` (`np.linalg.svd(M)`, top-k=5 = grid cells), consumed by `eigenpurpose()` (directed-
+exploration; capped n≤400, throttled every 16 steps). O(n³). Two swaps were tried and BOTH reverted:
+1. **Online subspace-iteration (approximate):** shifted the eigenpurpose (regressed `test_learning_progress`).
+2. **Exact truncated `svds` (Lanczos):** O(n²k), and I claimed "same vectors" — WRONG. On the DEGENERATE singular
+   subspaces common in a small SR, `svds` (RANDOM start vector) returns different individual vectors run-to-run → a
+   NONDETERMINISTic, shifted eigenpurpose. Caught by the OFFLINE GAME benchmark: it flaked **MultiKey (1/2→0/2, recovered
+   on revert)**. The unit suite missed it (game-level, not unit-level).
+**Conclusion — the swap was solving a NON-problem:** `eigenpurpose` CAPS grid use at n≤400, where the full SVD is
+already fast (O(400³) cached on state-growth); the O(n³) "spike at scale" never happens (the cap prevents it). So the
+full SVD is the right choice: DETERMINISTIC + exact + fast in the only regime it runs. A truly-online grid (deferred)
+must preserve determinism + the exact vectors, or it is not worth it. LESSON: verify perf changes on the GAME benchmark,
+not just the unit suite.
 
 ## Sources
 Redgrave, Prescott & Gurney 1999 (selection problem, PubMed 10362291); Gurney–Prescott–Redgrave 2001 (GPR model,
