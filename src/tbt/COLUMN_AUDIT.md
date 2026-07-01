@@ -13,6 +13,25 @@ sensor hands it a ready-made `config_state` symbol. So three of four layers are 
 Tuning value/exploration/§3 on top of this was optimizing a bypassed organ — the source of the brittleness and of both
 harnesses. **`config_state` is the original harness.** Correctness = dissolve it and run the real cycle.
 
+## Reference-frame grounding — what L6 is OVER (TBT-checked 2026-06-30)
+The frame is **OBJECT-CENTRIC, not sensor/egocentric** (Lewis/Hawkins 2019 *Locations in the Neocortex*, frontiersin
+fncir.2019.00022; Monty 2025 arXiv 2507.04494): the sensor detects features EGOCENTRICALLY (the **S**/surface-patch
+frame), but learning in egocentric coords is inefficient (relearn at every shifted position — *exactly* `config_state`'s
+problem), so L6 grid cells represent the sensor's location RELATIVE TO THE OBJECT (the **M** frame) and the brain
+CONVERTS egocentric→object-centric. (Monty's third frame **B** = body-centric, shared, for inter-column CMP.)
+- **The chicken-and-egg (object needs a frame, frame needs an object) is broken by SELF-MOTION.** The efference copy —
+  HOW you moved — is self-generated, known WITHOUT knowing the object (grid cells path-integrate "from self-motion cues
+  without external landmarks"). A metric frame is laid down from MOVEMENT alone; the object EMERGES as the coherent set
+  of (feature, displacement) relations inside it. Allocate a fresh frame on novelty; the ORIGIN IS ARBITRARY (the frame
+  is defined by RELATIVE displacements); move + bind features at path-integrated locations; the coherent structure IS
+  the object — a MATCH aligns to an existing frame (recognise), a mismatch allocates a new one (learn). Landmarks
+  RE-ANCHOR the drifting path-integrated frame (grid cells re-anchor to task objects; Nature Neuro 2025 s41593-025-02054-6).
+- **For us:** L6 = the **MOVEMENT-BOOTSTRAPPED location frame** — exactly the sensor's step-7c path integration (`_delta`
+  = the efference, `coarse_pos` = the path-integrated position from an arbitrary origin, "snap to a sighting" = the
+  landmark correction). The board/level is NOT presupposed — it EMERGES as the features-at-positions map (L7-A).
+  `config_state` was wrong precisely because it defines the scene WITHOUT the movement-bootstrapped location — it skips
+  the one primitive (self-motion) that makes an object-centric frame possible.
+
 ## Per-layer: TBT spec vs. ACTUAL (what the loop calls)
 | layer | TBT job (spec) | ACTUAL in the live loop | gap |
 |---|---|---|---|
@@ -32,10 +51,12 @@ harnesses. **`config_state` is the original harness.** Correctness = dissolve it
 - **C1 — L6 READ as the location substrate.** The column's "where" each step = the L6 place code (`sr.code`), exposed
   as the location the other layers use (the reads exist: `col.value`/`reachable`, `col._place_code`). *Test:* the
   location code encodes topology (nearby states → similar codes; the place-code test) and is the value the loop reads.
-- **C2 — L4 ↔ L6 in the loop; DISSOLVE `config_state`.** Every step L4 predicts the feature at the current L6 location,
-  senses, compares; the mismatch is the learning signal. The STATE becomes feature-at-location (the column FORMS it),
-  not the sensor's `config_state` symbol. *Test:* `L4.predict_feature` at the location matches the sensed feature once
-  learned; the error drives learning. **This is the core fix — the bypass is removed here.**
+- **C2 — L4 ↔ L6 over the MOVEMENT-BOOTSTRAPPED location frame; DISSOLVE `config_state`.** L6 = the object-centric
+  POSITION frame (the sensor's path-integrated `coarse_pos`, origin arbitrary — see *Reference-frame grounding*). Every
+  step: L4 predicts the feature at the current L6 location, senses the egocentric local view, compares (the mismatch is
+  the learning signal), binds it into the map — the object EMERGES. The STATE becomes egocentric-feature ⊗
+  object-centric-position, not the `config_state` symbol. *Test:* `L4.predict_feature` at the location matches the
+  sensed feature once learned; the error drives learning. **This is the core fix — the bypass is removed here.**
 - **C3 — L5 → L6 path integration.** L5's chosen displacement (efference copy) path-integrates L6's location
   (`loc_move`/`path_integrate`); the location updates with each move (predict, then correct by a sighting). *Test:* the
   existing `loc_*` discrete-graph-tracking test, now driven by the loop's efference.
