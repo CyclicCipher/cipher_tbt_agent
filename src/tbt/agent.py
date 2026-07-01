@@ -15,6 +15,7 @@ from __future__ import annotations
 import random
 from collections import Counter, defaultdict
 
+from .basal_ganglia import BasalGanglia
 from .column import CorticalColumn
 from .reward import RewardModel, ValueLearner
 
@@ -43,6 +44,7 @@ class Agent:
         self._ep_cache: dict = {}                                          # the last computed eigenpurpose (reused between recomputes)
         self._ep_tick = 0                                                  # THROTTLE: the grid SVD is O(n^3) -> recompute the eigenpurpose only every _ep_every steps
         self._ep_every = 16                                                # the exploration DIRECTION is slow-changing, so a stale-by-a-few-steps eigenpurpose is fine
+        self.bg = BasalGanglia(n_columns=1, seed=seed)                     # the GSG gate: arbitrates the column's goal candidates (ACT vs DISAMBIGUATE)
         self.new_episode()
 
     def new_episode(self):
@@ -55,6 +57,7 @@ class Agent:
         self._prev_feats = None                                              # field FEATURES at the previous turn (FM4 TD target)
         self._tab_spread = 0.0                                               # last turn's tabular value spread (the arbitration signal; 0 = engage the forward model)
         self.sensed_surprise = False                                         # C2: last turn's L4-over-L6 feature-at-location mismatch
+        self.goal = None                                                     # the basal-ganglia-selected GoalState this turn (GSG in the loop)
 
     def complete(self, score_delta: float = 1.0):
         """A level completed: the PREVIOUS (state, action) was the completing transition. Record it as leading to a
@@ -184,6 +187,15 @@ class Agent:
         # to its frontier) but NOT at the boundary (an untried action there -> frontier optimism explores), and never
         # once the first reward is found (-> pure exploit/transfer thereafter).
         dead_zone = not self.reward.R_ext and all((state, a) in self.tried for a in self.actions)
+        # GSG IN THE LOOP: the column PROPOSES goal candidates from its own uncertainty -- ALWAYS the ACT goal (pursue the
+        # value/explore policy; value = the best action's EFE value) PLUS a DISAMBIGUATION goal when L2/3's object
+        # hypotheses still compete (value = the epistemic value of resolving identity) -- and the basal ganglia ARBITRATES
+        # them (Go the higher EFE; Cisek's affordance competition). In a plain nav step L2/3 is not competing, so only the
+        # ACT goal is proposed and the value policy below is UNCHANGED; the disambiguation goal earns selection only when
+        # resolving identity outvalues acting (active recognition -- pursued by `col.examine` once a scene sampler exists).
+        goals = self.col.propose_goals(max(ev), g_value=self.reward.beta)
+        gi = self.bg.gate([g.kind for g, _ in goals], [v for _, v in goals]) if len(goals) > 1 else 0
+        self.goal = goals[gi][0]
         if self._tab_spread > 1e-9 and not dead_zone:                      # NORMAL: V_exploit (reward-seeking / local exploration) decides
             return self.col.act(state, self.actions, value=lambda s: self.reward.V_exploit[s],
                                 explore=self.reward.explore, tried=self.tried, rng=self.rng)

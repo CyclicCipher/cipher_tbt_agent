@@ -179,3 +179,28 @@ def test_effort_tie_breaker_discounts_a_far_disambiguation_goal():
     # a uniquely valuable test still beats acting despite the trip
     rich = col.propose_goals(act_value=0.2, g_value=2.0, effort=0.1)
     assert next(v for g, v in rich if g.kind == "disambiguate") > next(v for g, v in rich if g.kind == "act")
+
+
+def test_gsg_and_basal_ganglia_select_the_goal_in_the_agent_loop():
+    """GSG IN THE LOOP (COLUMN_AUDIT): the agent CONSULTS its column's GSG + the basal ganglia every step -- goal
+    generation from the column's OWN uncertainty, arbitrated by the BG (Cisek's affordance competition). A plain nav
+    step has only the ACT candidate, so the BG selects ACT and the value policy is untouched. When the column's L2/3
+    hypotheses COMPETE (an ambiguous object) AND acting has run dry (the reward-less, explored DEAD-ZONE, where act
+    value ~ 0), resolving identity outvalues acting, so the GSG proposes the DISAMBIGUATION goal and the BG selects it
+    -- active recognition chosen IN THE LOOP, exactly where a random walk would otherwise flail."""
+    from tbt.agent import Agent
+    plain = Agent(n_actions=4, seed=0)
+    plain.step(0, 0.0)                                          # a plain nav step -> only the ACT goal is proposed
+    assert plain.goal is not None and plain.goal.kind == "act"
+
+    ag = Agent(n_actions=1, seed=0)                            # one action for a clean, controllable act value
+    ag.col.learn_object(A, name="A"); ag.col.learn_object(B, name="B")
+    ag.col.L23.start()
+    locs = [np.asarray(c, float) for c in A]
+    i = A.index((1, 0))
+    ag.col.L23.sense(locs[i], local_disps(locs, i, ag.col.L23.radius))   # one ambiguous glance -> disambiguate available
+    ag.col.observe(0, 0, 1)                                    # the DEAD-ZONE: the only action is tried and leads to a
+    ag.tried.add((0, 0))                                       # zero-value, reward-less outcome -> act value collapses to 0
+    ag.reward.V_exploit[1] = 0.0
+    ag.step(0, 0.0)                                            # the step runs propose_goals + BG.gate over the ambiguity
+    assert ag.goal is not None and ag.goal.kind == "disambiguate"
