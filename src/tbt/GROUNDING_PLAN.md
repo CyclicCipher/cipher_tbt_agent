@@ -57,6 +57,26 @@ substitutes is the same work as finishing M1/M2/M4 + one NEW item the audit crea
 4. **P4 — `object_state` LIVE** (C4 consumed by the planner). This is where the **C2↔C4 coupling forces H0**: does one L6 hold `(position, object_state)` as separable eigen-subspaces (→ a structured single column, no 2nd column) or not (→ the task column)? So **H0 is NOT skipped — it re-enters HERE**, as the gate on making C4 live, correctly sequenced after the parallel mechanisms are gone.
 5. THEN §3 / the heterarchy (the task column + the rule/goal GSG, where the GSG's overt rebuild belongs).
 
+### TAKING STOCK (2026-06-30, after the BG detour) — where P1–P5 actually stand
+- **P1 ✅** path integration into the column (sensor `_delta` → L5/L6; live).
+- **P2 — MECHANISMS DONE, LIVE INTEGRATION DEFERRED.** `BASAL_GANGLIA_PLAN` B1–B5a are BUILT + mechanism-tested: the
+  critic RPE (`reward.critic_delta`), the collapsed selection (**B2, the only BG piece LIVE** — the hand-coded switch is
+  gone, one salience + `col.act`), the OpAL Go/NoGo actor (`OpponentActor`), aversion (negative pragmatic in the value),
+  the STN commitment (`bg.commit`), + the truncated-SVD grid. BUT — honestly — **only B2 is wired**; `critic_delta`,
+  `OpponentActor`, `commit` are tested-in-isolation, NOT in the live loop. **B3b (wire the actor) and B5b (wire
+  commitment) BOTH deferred, blocked on the SAME thing: a LIVE, GOAL-level GSG** (the actor needs real costs + not to
+  suppress exploration; commitment must hold the PLAN not the last action). So P2's CORE goal (no hand-coded
+  arbitration) is MET, the learned-selection upgrade is STAGED behind the GSG.
+- **THE KEYSTONE (new, from the BG detour):** the **LIVE GSG** — goal generation that DRIVES behaviour. It is (a) the
+  audit's open item (`self.goal` is computed every step and thrown away — inert since GD4), and (b) what unblocks B3b +
+  B5b. The BG work and the column audit CONVERGE on it. Likely the next real move.
+- **P3 (M1 SR reads) — OPEN.** The SR reachability/value is still tests-only live (the driver-2 attempt was reverted).
+- **P4 (`object_state` live == H0) — OPEN.** The C2↔C4 coupling / one-column-factorises question, untouched.
+- **Cleanup the BG completion enables:** the staged-inert BG faculties are correct + await the GSG (do NOT delete);
+  candidate STALE docs to archive/fold (the layer refactor + FM + L6 are long done): `REFACTOR_PLAN`, `FORWARD_MODEL_PLAN`,
+  `L6_PLAN`, and `MOTOR_REFACTOR` (largely superseded by `COLUMN_AUDIT` §Correction + `BASAL_GANGLIA_PLAN`). Active
+  north-stars stay: `TARGET_ARCHITECTURE`, `COLUMN_AUDIT`, `GROUNDING_PLAN`, `BASAL_GANGLIA_PLAN`; future: `HETERARCHY_PLAN`, `HIPPOCAMPUS`.
+
 ### P1 — design (fully unify path integration into the column; user-chosen 2026-06-30 s2)
 A faithful RELOCATION, not a redesign: the sensor's path-integration machinery moves into the column, expressed through
 the layers TBT assigns it — L5 (the displacement/efference) + L6 (the location belief). The sensor drops to pure
