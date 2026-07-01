@@ -54,6 +54,7 @@ class Agent:
         self.field_error = 0.0                                               # dense forward-model prediction error last turn (on CHANGED cells)
         self._prev_feats = None                                              # field FEATURES at the previous turn (FM4 TD target)
         self._tab_spread = 0.0                                               # last turn's tabular value spread (the arbitration signal; 0 = engage the forward model)
+        self.sensed_surprise = False                                         # C2: last turn's L4-over-L6 feature-at-location mismatch
 
     def complete(self, score_delta: float = 1.0):
         """A level completed: the PREVIOUS (state, action) was the completing transition. Record it as leading to a
@@ -70,9 +71,14 @@ class Agent:
         self.reward.observe(_GOAL, max(score_delta, 1.0))                    # the goal is the rewarding terminal
         self.new_episode()
 
-    def step(self, state, score_delta: float = 0.0, frame=None):
+    def step(self, state, score_delta: float = 0.0, frame=None, feature=None):
         """One turn: COMPARE last turn's prediction to the actual `state`, LEARN the transition (column + reward), PLAN
         value over the column's learned transitions, CHOOSE the value-maximising action, then PREDICT the next state.
+
+        C2 (COLUMN_AUDIT): with `feature` (the egocentric feature sensed at the current L6 LOCATION `state`), the column
+        also runs the L4-over-L6 predict-then-compare CYCLE (`sense_at`) -- predict the feature at the location, compare,
+        learn -- so the OBJECT emerges as the feature-at-location map. Optional + additive: a featureless world passes
+        `feature=None` and the loop is unchanged.
 
         With `frame` (FM2): the column ALSO does dense predict-then-compare in L4's feature-FIELD -- L5's per-location
         forward model predicts the next field, compared per location to the actual one. The fraction of CHANGED cells
@@ -102,6 +108,8 @@ class Agent:
             err = self.field_error if field is not None else (1.0 if self.surprised else 0.0)
             self.reward.observe_error(ps, err)                              # LEARNING-PROGRESS: dense field error (or binary fallback)
         self.reward.observe(state, score_delta)                             # value: reward where the score rose + novelty
+        if feature is not None:                                             # C2: the L4-over-L6 cycle -- the object emerges at the location
+            self.sensed_surprise = self.col.sense_at(state, feature)        # predict feature-at-location -> compare -> LEARN (bind)
         a = self._choose(state, field=field)
         self._pred = self.col.predict(state, a)                             # enter the predictive state
         if field is not None:

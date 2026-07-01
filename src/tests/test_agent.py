@@ -39,6 +39,21 @@ def test_agent_solves_sparse_reward_grid_online():
     assert completions > 5 * max(rnd, 1), f"online agent {completions} vs random {rnd}"
 
 
+def test_agent_loop_runs_the_l4_over_l6_cycle():
+    """C2 (COLUMN_AUDIT): `agent.step`, given a FEATURE sensed at its position, runs the L4-over-L6 cycle IN THE LOOP --
+    the OBJECT emerges as the feature-at-location map, through the live step path (observe -> sense_at). Walk a ring of
+    positions carrying distinct features at separated locations; afterwards the column predicts the right feature at
+    each (built + recognised via the loop, not just the column methods directly)."""
+    ag = Agent(n_actions=4, seed=0)
+    fa, fb, fc = ag.col.L4.encode(("A",)), ag.col.L4.encode(("B",)), ag.col.L4.encode(("C",))
+    feat_at = {0: fa, 2: fb, 4: fc}                          # features at separated positions on a 6-position ring walk
+    for _ in range(8):                                       # walk the ring several times
+        for p in range(6):
+            ag.step(p, 0.0, feature=feat_at.get(p))         # feature only at 0,2,4 (None elsewhere) -> the loop runs sense_at
+    for p, f in feat_at.items():
+        assert ag.col.feature_at(p) == f, (p, ag.col.feature_at(p), f)   # the object is built + recognised through the loop
+
+
 def test_predictive_state_fires_and_settles():
     """The HTM predict-then-compare: early on the agent is often surprised (model unlearned); once the dynamics are
     learned, a correctly-predicted move leaves it un-surprised. The predictive state is real, not vestigial."""
