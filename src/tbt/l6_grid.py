@@ -69,6 +69,20 @@ class L6_GridLocation(nn.Module):
         x, y = zr[..., 0], zr[..., 1]
         return torch.stack([c * x - s * y, s * x + c * y], dim=-1).reshape(z.shape)
 
+    def operator(self, disp):
+        """L6_NONABELIAN Stage 0 -- `path_integrate` RE-EXPRESSED as an `Operator`: a BLOCK-DIAGONAL rotation (one 2×2
+        phase rotation per module) acting on the grid code, so `operator(disp).apply(z) == path_integrate(z, disp)`. This
+        exhibits the abelian grid AS a (commuting, unitary) GROUP REPRESENTATION of translation -- the special case the
+        non-abelian refactor generalises (Stage 1: learned, possibly non-commuting blocks). Returns a `tbt.operator.Operator`."""
+        import numpy as np
+        from .operator import Operator
+        ang = self.W.detach().cpu().numpy() @ np.asarray(disp, dtype=float)   # (M,) phase increment per module
+        blocks = np.zeros((self.dim, self.dim))
+        for m in range(self.M):                                       # block-diagonal: one 2×2 rotation per module
+            c, s = np.cos(ang[m]), np.sin(ang[m])
+            blocks[2 * m:2 * m + 2, 2 * m:2 * m + 2] = [[c, -s], [s, c]]
+        return Operator(blocks)
+
     def place(self, z: torch.Tensor, k: int | None = None) -> torch.Tensor:
         """Grid→place: sparse, near-orthogonal location code = top-k of the similarity to the grid
         codebook (z·Zgrid). Binding in this space has capacity ≈ #cells. Shapes: (...,dim) -> (...,L)."""

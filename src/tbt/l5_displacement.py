@@ -29,6 +29,7 @@ import numpy as np                                              # the pose opera
 import torch
 import torch.nn as nn
 
+from .operator import Operator                                # L6_NONABELIAN Stage 0: the composable (matrix) form of an action
 from .perceive import canonicalize
 
 
@@ -155,6 +156,14 @@ class L5_Displacement(nn.Module):
         """The learned per-action translation (dx, dy) -- the efference the location belief dead-reckons by; (0, 0)
         for an action whose effect is not yet learned (dead-reckon says 'stay', the sighting then corrects)."""
         return self.move_delta.get(action, (0.0, 0.0))
+
+    def operator(self, action) -> Operator:
+        """L6_NONABELIAN Stage 0 -- the per-action OPERATOR: the GENERAL (composable) form of `move`. HERE it is the
+        abelian TRANSLATION by `move_delta[action]` (a homogeneous matrix), so `operator(a).apply(homog(pos)) ==
+        homog(pos + move(a))` and composing operators reproduces additive path integration -- no behaviour change, `move`
+        is just the additive VIEW. Stage 1 makes this a LEARNED matrix constrained to a group representation (Gao/TEM), so
+        a NON-COMMUTING action becomes representable and the additive translation is then only the abelian special case."""
+        return Operator.translation(self.move(action))
 
     def controllable(self, thresh: float = 0.5) -> bool:
         """Does SOME action produce a non-trivial translation? -> the tracked object responds to actions, so its

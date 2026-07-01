@@ -47,10 +47,15 @@ FALSIFIED, and the staged gates are designed so that a remaining failure is diag
 vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; sell it as the missing SUBSTRATE.
 
 ## The staged plan (each stage gated + a fallback; abelian behaviour preserved throughout)
-- **Stage 0 — STOP hard-coding commutativity (the negative first step).** Generalise L5's operator INTERFACE from
-  `move_delta` (a vector you add) to an OPERATOR applied to the L6 code (a map), and re-express `l6_grid.path_integrate` as
-  that operator acting (it already is a per-module 2×2 rotation). *Gate:* NO regression — NavGame navigation + the counting
-  probe reproduce the additive-grid behaviour through the operator interface. Opens the door without yet exploiting it.
+- **Stage 0 — STOP hard-coding commutativity (the negative first step). DONE (2026-07-01).** `tbt/operator.py` = the
+  `Operator` primitive (a matrix; `apply` = act, `then` = compose by matrix product = NON-commutative in general;
+  `translation`/`rotation` factories; `commutes_with`). `L5.operator(a)` = the abelian TRANSLATION view of `move` (Stage 1
+  makes it a learned matrix); `l6_grid.operator(disp)` = `path_integrate` re-expressed as a block-diagonal phase rotation.
+  *Gate met (`test_operator.py`, suite 122):* translation is a faithful abelian representation (composition fidelity +
+  commutes); the interface HOLDS a non-commuting operator (rotation ∘ translation ≠ translation ∘ rotation) — commutativity
+  is no longer baked in; `operator(disp).apply(z) == path_integrate(z, disp)`; and L5's operator reproduces the additive
+  `move` on a NavGame path + a counting succession (NO regression — the live `track` still uses `move`, unchanged). The door
+  is open; nothing is exploited yet.
 - **Stage 1 — LEARN operators as a representation (TEM + Gao).** Learn a per-action operator matrix from observed
   transitions, CONSTRAINED to a proper representation (orthogonal, composition-consistent). L6 = the acted-on latent.
   *Gate (abelian):* the learned rep matches the hand-coded grid's EXTRAPOLATION — composition fidelity `M(a∘b)=M(a)·M(b)`
