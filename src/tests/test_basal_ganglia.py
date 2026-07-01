@@ -67,3 +67,33 @@ def test_critic_delta_winds_down_as_the_reward_is_learned():
     late = abs(rm.critic_delta(2, 3))
     assert early > 0.1, early                                # early: the reward at 3 has not reached V(2) yet
     assert late < 0.05 and late < early, (early, late)       # mastered: δ → 0
+
+
+# ── B3: the OpAL Go/NoGo opponent actor (basal_ganglia.OpponentActor) ────────────────────────────────────────
+def test_opal_actor_learns_benefits_and_costs_and_represents_aversion():
+    """B3: the Go/NoGo actor learns from the critic RPE δ. A BENEFIT action (repeated δ>0) grows Go over NoGo; a COST
+    action (repeated δ<0) grows NoGo over Go and earns a NEGATIVE actor value -- the principled AVERSION a single reward
+    value cannot represent. The actor prefers the benefit to the cost. Neutral (untrained) actions contribute 0."""
+    from tbt.basal_ganglia import OpponentActor
+    ac = OpponentActor(alpha_g=0.2, alpha_n=0.2, beta=1.0, init=1.0)
+    assert ac.act_value("s", 9) == 0.0                       # untrained (Go=NoGo, ρ=0) -> no bias: behaviour-neutral to wire
+    for _ in range(20):
+        ac.learn("s", 0, +0.5)                               # action 0 = a BENEFIT (dopamine bursts)
+        ac.learn("s", 1, -0.5)                               # action 1 = a COST (dopamine dips)
+    assert ac.G[("s", 0)] > ac.N[("s", 0)], "benefit: Go should exceed NoGo"
+    assert ac.N[("s", 1)] > ac.G[("s", 1)], "cost: NoGo should exceed Go"
+    assert ac.act_value("s", 1) < 0.0, "a cost action has NEGATIVE actor value (aversion)"
+    assert ac.act_value("s", 0) > ac.act_value("s", 1), "the actor prefers the benefit to the cost"
+
+
+def test_opal_tonic_dopamine_sets_the_go_nogo_gain():
+    """B3: tonic dopamine `ρ` sets the Go/NoGo gain balance. Rich (ρ>0) amplifies the GO (benefit) side -> a benefit
+    action is valued MORE; lean (ρ<0) amplifies the NoGo (cost) side -> a cost action is valued LESS (more aversive).
+    This is the OpAL explore/exploit + vigor knob, not a hard switch."""
+    from tbt.basal_ganglia import OpponentActor
+    ac = OpponentActor(alpha_g=0.2, alpha_n=0.2, beta=1.0, init=1.0)
+    for _ in range(20):
+        ac.learn("s", 0, +0.5)                               # a benefit-via-Go action
+        ac.learn("s", 1, -0.5)                               # a cost-via-NoGo action
+    assert ac.act_value("s", 0, rho=+0.8) > ac.act_value("s", 0, rho=-0.8)   # rich DA amplifies the benefit (Go)
+    assert ac.act_value("s", 1, rho=-0.8) < ac.act_value("s", 1, rho=+0.8)   # lean DA amplifies the aversion (NoGo)

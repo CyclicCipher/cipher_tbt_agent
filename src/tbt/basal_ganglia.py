@@ -62,3 +62,36 @@ class BasalGanglia:
         subgoal types) recur across other levels by coincidence, and letting their affinity transfer re-inflates a
         not-yet-winning goal / over-fits to a recurring cell. Reset it when the layout changes."""
         self._opt_aff = {}
+
+
+class OpponentActor:
+    """The OpAL opponent Go/NoGo actor (Collins & Frank; reference_basal_ganglia) — the basal-ganglia ACTOR the critic's
+    dopamine RPE trains. TWO opponent weights per (context, action): **Go** learns BENEFITS (potentiated by DA bursts,
+    δ>0), **NoGo** learns COSTS (potentiated by DA dips, δ<0), each by the THREE-FACTOR Hebbian rule (the weight scales
+    its OWN update — `G ← G + αG·G·δ`, `N ← N − αN·N·δ`), so the two SPECIALIZE by reward range rather than duplicating
+    one value. Choice value `Act = βg·Go − βn·NoGo`; **tonic dopamine `ρ`** sets `βg = β·max(0,1+ρ)`, `βn = β·max(0,1−ρ)`
+    — the explore/exploit + vigor gain (ρ>0 rich → Go/exploit; ρ<0 lean → NoGo/avoid). `N` gives principled AVERSION
+    (a punished/GAME_OVER action) that a single reward value cannot represent. B3 of BASAL_GANGLIA_PLAN.
+
+    Weights start at `init>0` (the three-factor rule needs a non-zero seed to bootstrap); with Go=NoGo and ρ=0 the
+    contribution is 0, so wiring it into the salience is behaviour-neutral until the RPE trains it apart."""
+
+    def __init__(self, alpha_g: float = 0.1, alpha_n: float = 0.1, beta: float = 1.0, init: float = 1.0):
+        self.alpha_g, self.alpha_n, self.beta, self.init = alpha_g, alpha_n, beta, init
+        self.G: dict = {}                                    # (context, action) -> Go weight (benefits)
+        self.N: dict = {}                                    # (context, action) -> NoGo weight (costs)
+
+    def learn(self, context, action, delta: float) -> None:
+        """Three-factor OpAL update of the chosen (context, action) by the critic RPE `delta`: Go up on δ>0 (a benefit),
+        NoGo up on δ<0 (a cost). Weights are clamped ≥0 (non-negative benefit/cost magnitudes)."""
+        k = (context, action)
+        g, n = self.G.get(k, self.init), self.N.get(k, self.init)
+        self.G[k] = max(g + self.alpha_g * g * delta, 0.0)
+        self.N[k] = max(n - self.alpha_n * n * delta, 0.0)
+
+    def act_value(self, context, action, rho: float = 0.0) -> float:
+        """The actor's contribution to the salience: `Act = βg·Go − βn·NoGo`, with tonic-DA `rho` setting the gains
+        (rho>0 rich → Go/benefits dominate = exploit/vigor; rho<0 lean → NoGo/costs dominate = avoid)."""
+        k = (context, action)
+        g, n = self.G.get(k, self.init), self.N.get(k, self.init)
+        return self.beta * max(0.0, 1.0 + rho) * g - self.beta * max(0.0, 1.0 - rho) * n
