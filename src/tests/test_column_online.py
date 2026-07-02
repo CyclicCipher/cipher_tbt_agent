@@ -344,3 +344,24 @@ def test_forward_predicts_self_motion_over_the_factored_rep():
     assert abs(pred_pose[0] - obs_pose[0]) < 0.6 and abs(pred_pose[1] - obs_pose[1]) < 0.6   # forward matched the observation
     pred_stay, _ = col.forward(9, ("stuff",))                    # action 9 has no learned operator -> predicts staying put
     assert abs(pred_stay[0] - float(col._pose[0, 2])) < 0.6 and abs(pred_stay[1] - float(col._pose[1, 2])) < 0.6
+
+
+def test_perceive_prediction_error_is_the_forward_model_residual():
+    """P2b: `perceive._pred_error` is the FORWARD MODEL's residual -- the PREDICTED pose (operator) vs the OBSERVED pose,
+    as a fraction of the move (§4c, the learning signal). The FIRST action-0 move has no learned operator (identity
+    predicts staying put) -> the prediction MISSES (error high); once the operator converges, the prediction NAILS the
+    next pose (error ~0). Finer than the old binary state-surprise."""
+    col = CorticalColumn(n_entities=16, seed=0)
+    shape = [(0, 0), (1, 0), (2, 0), (2, 1)]
+
+    def sense(a, ox):
+        return col.perceive(a, [(x + ox, y) for (x, y) in shape], ("stuff",))
+
+    sense(None, 0)                                                 # cold observe at the origin
+    sense(0, 2)                                                    # FIRST action-0 move: operator unlearned -> identity predict misses
+    first_error = col._pred_error
+    for k in range(2, 8):                                          # keep moving +2x -> the operator converges
+        sense(0, 2 * k)
+    late_error = col._pred_error
+    assert first_error > 0.5, first_error                         # identity predicted staying -> a big residual
+    assert late_error < 0.2, late_error                           # operator learned -> the prediction nails the pose

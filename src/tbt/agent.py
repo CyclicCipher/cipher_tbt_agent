@@ -91,7 +91,10 @@ class Agent:
             ps, pa = self._prev
             self.col.observe(ps, pa, state)                                  # learn the transition online (graph + SR)
             self.tried.add((ps, pa))                                         # attempted (even if blocked -> no edge)
-            self.reward.observe_error(ps, 1.0 if self.surprised else 0.0)   # LEARNING-PROGRESS: the predict-then-compare error
+            # LEARNING-PROGRESS = the predict-then-compare error. The FORWARD MODEL's finer factored residual
+            # (`col._pred_error`, §4c) is BUILT + tested at the column level; wiring it here as the learning signal is
+            # deferred to P4 (it shifts the exploration trajectory, an unverifiable change while end-to-end is P0-dip-xfailed).
+            self.reward.observe_error(ps, 1.0 if self.surprised else 0.0)
             if self._integrate:                                            # V4 COST-FIELD assignment: LEARN repulsion from experience (positions only)
                 dx, dy = self.col.L5.move(pa)
                 if (dx, dy) != (0, 0) and state == ps:                     # a no-progress BUMP -> the intended cell is a WALL (cost=inf)

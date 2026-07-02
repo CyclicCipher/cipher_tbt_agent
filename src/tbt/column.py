@@ -66,6 +66,7 @@ class CorticalColumn(nn.Module):
         self.cost: dict = {}                                 # the COST FIELD (AVERSIVE value): location -> expected interaction cost (ARCHITECTURE.md §3; kept)
         self._pose = None                                    # L6_NONABELIAN S1e: the POSE belief (SE(2) matrix) path-integrated by COMPOSING operators (non-abelian)
         self.pose_ops: dict = {}                             # L6_NONABELIAN S1e: per-action body-frame SE(2) operator (learned) -- the pose-aware achiever composes these
+        self._pred_error = 0.0                               # P2b: the forward model's last prediction error (predicted vs observed pose; the learning signal, §4c)
 
     # ----- routing: learn the transition structure online (L6 + L5) ---------------------------------
     @property
@@ -526,8 +527,10 @@ class CorticalColumn(nn.Module):
         """The unified TBT perception step (P1 2b/2c) — recognize → PREDICT → CORRECT → LEARN → read content, returning
         `(feature, pose)`. ONE path for abelian and non-abelian; the coordinator over the layers' primitives:
           PREDICT   — dead-reckon the pose belief by the action's operator (`path_integrate`, the efference copy);
-          OBSERVE+CORRECT — recognize the mover's pose from its `cells` (L2/3 `sense_heading`) and snap the belief to it
-            (`sense_pose`); an UNRELIABLE (partial/occluded) view skips the correction, keeping the dead-reckoned predict;
+          OBSERVE   — recognize the mover's pose from its `cells` (L2/3 `sense_heading`);
+          COMPARE   — the forward model's ERROR = the PREDICTED pose vs the OBSERVED pose, as a fraction of the move
+            (`_pred_error`, the learning signal §4c); an UNRELIABLE (partial/occluded) view has no error (keeps the predict);
+          CORRECT   — snap the belief to the observed pose (`sense_pose`);
           LEARN     — the per-action operator = the observed transformation (`learn_pose_op`, pose_before → corrected pose);
           CONTENT   — encode the OPAQUE content descriptor to an L4 feature id (an SDR).
         `cells` = the mover's cells `[(x, y), ...]` (the morphology, colour-blind -> the pose). `content` = the OPAQUE
@@ -535,14 +538,21 @@ class CorticalColumn(nn.Module):
         inspects it (no colour here, reference_tbt_feature_definition). Abelian is the commuting special case (heading ≈ 0)."""
         cells = [(float(p[0]), float(p[1])) for p in cells]
         pose_before = self._pose.copy() if self._pose is not None else None
+        before_pos = (float(pose_before[0, 2]), float(pose_before[1, 2])) if pose_before is not None else None
         if action is not None and self._pose is not None:            # PREDICT (efference)
             self.path_integrate(action)
+        predicted_pos = (float(self._pose[0, 2]), float(self._pose[1, 2])) if self._pose is not None else None
         self.sense_heading(cells)                                    # OBSERVE: recognize the pose (L2/3)
-        if getattr(self, "_heading_reliable", False):                # a reliable sighting -> CORRECT + LEARN
+        self._pred_error = 0.0                                        # P2b: the forward model's prediction error (§4c)
+        if getattr(self, "_heading_reliable", False):                # a reliable sighting -> COMPARE + CORRECT + LEARN
             sx, sy = self._sensed_pos
-            self.sense_pose(sx, sy, self._heading)
+            if predicted_pos is not None and before_pos is not None and action is not None:   # COMPARE: predicted vs observed
+                r = ((sx - predicted_pos[0]) ** 2 + (sy - predicted_pos[1]) ** 2) ** 0.5       # residual
+                m = ((predicted_pos[0] - before_pos[0]) ** 2 + (predicted_pos[1] - before_pos[1]) ** 2) ** 0.5   # move size
+                self._pred_error = min(1.0, r / (m + 1.0))          # residual as a FRACTION of the move (0 = nailed, ~1 = missed)
+            self.sense_pose(sx, sy, self._heading)                  # CORRECT
             if pose_before is not None and action is not None:
-                self.learn_pose_op(action, pose_before, self._pose)
+                self.learn_pose_op(action, pose_before, self._pose)  # LEARN
         elif self._pose is None:                                     # no reliable view yet -> cold start at identity
             self.track_pose_reset()
         feat = self.L4.encode(content)                              # the opaque content -> an L4 feature id (SDR); no colour in the column
