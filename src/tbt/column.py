@@ -558,20 +558,27 @@ class CorticalColumn(nn.Module):
         return (sum(p[0] for p in shape) / len(shape), sum(p[1] for p in shape) / len(shape))
 
     def operator(self, action) -> Operator:
-        """The ONE per-action OPERATOR (L6_NONABELIAN — axis 2 unified). The SE(2) POSE operator (`pose_ops`) when the
-        dynamics are heading-dependent (non-abelian), else the abelian TRANSLATION (`L5.operator` = `move_delta` as a
-        homogeneous matrix) — the commuting SPECIAL CASE, same 3×3 interface. No separate grid-code learner: the abelian
-        grid's role was only to give operator learning a code space, and that is now the pose/position the operator already
-        acts on. Identity if the (heading-dependent) action has no learned pose op yet."""
-        if self.pose_ops and self.L5.heading_dependent():
-            return self.pose_ops.get(action, Operator.identity(3))
-        return self.L5.operator(action)
+        """The ONE per-action OPERATOR (P1 slice 2a): the learned SE(2) POSE operator (`pose_ops[action]`) when one was
+        learned for this action — the non-abelian general case — else the abelian TRANSLATION (`L5.operator`, the
+        commuting SPECIAL CASE, same 3×3 interface). NO game-type gate: a `pose_ops` entry is ONLY ever learned in the
+        non-abelian case (`learn_pose_op`), so its PRESENCE selects the form — not a `heading_dependent` assumption about
+        the game (which was a forbidden abelian-vs-non-abelian switch)."""
+        op = self.pose_ops.get(action)
+        return op if op is not None else self.L5.operator(action)
 
     def _operator_gens(self):
-        """The learned per-action operators as a generator list (for `discover_relations` / `factor_dynamics`): the SE(2)
-        pose ops when heading-dependent, else the abelian translations. ONE source (`self.operator`)."""
-        keys = sorted(self.pose_ops) if (self.pose_ops and self.L5.heading_dependent()) else sorted(self.L5.move_delta)
+        """The learned per-action operators as a generator list (for `discover_relations` / `factor_dynamics`) — every
+        action with a learned pose op OR translation, each via the ONE `operator` accessor. No `heading_dependent` gate."""
+        keys = sorted(set(self.pose_ops) | set(self.L5.move_delta))
         return [self.operator(a) for a in keys]
+
+    def path_integrate(self, action):
+        """Path-integrate the location belief by the action's operator — the doc's `location ← operator(action)·location`
+        (§2 L6): the EFFERENCE-driven PREDICT half of predict-then-correct (correct = `sense_pose` on a sighting). ONE
+        mechanism for abelian and non-abelian: `operator(action)` is the learned SE(2) pose op (non-abelian) or the
+        translation (abelian special case), right-composed with the pose belief in the BODY frame (`track_pose`, matching
+        how `learn_pose_op` learns the body-frame increment). Returns (x, y, theta)."""
+        return self.track_pose(self.operator(action))
 
     def _locate_candidate(self, action, appeared, dominant):
         """Which residual is the controllable object. Once the action's translation is known, the arrived candidate

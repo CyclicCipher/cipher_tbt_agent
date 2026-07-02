@@ -146,6 +146,41 @@ def test_gsg_unification_reward_goal_is_live_and_drives_the_achiever():
     assert policy.agent._goal_pos is not None                       # ... carrying the remembered completing target the achiever navigates to
 
 
+def test_path_integrate_unifies_abelian_and_nonabelian_by_the_operator():
+    """P1 slice 2a: the ONE location belief is path-integrated by the learned `operator(action)` — `location ←
+    operator(action)·location` (§2 L6). Abelian (a translation) and non-abelian (an SE(2) rotation+translation) go
+    through the SAME `path_integrate`, the translation being the commuting special case; `sense_pose` snap-corrects. The
+    operator has NO `heading_dependent` game-type gate — a learned `pose_ops` entry (not a game assumption) selects the
+    SE(2) form."""
+    import numpy as np
+    from tbt.column import CorticalColumn
+    from tbt.l5_displacement import pose_operator
+
+    # ABELIAN: per-action translations -> operator() returns the translation (the commuting special case)
+    col = CorticalColumn(n_entities=8, seed=0)
+    col.L5.observe_move(0, (2.0, 0.0))                         # action 0 = +2x
+    col.L5.observe_move(1, (0.0, 3.0))                         # action 1 = +3y
+    assert np.allclose(col.operator(0).M, col.L5.operator(0).M)   # no pose op learned -> the translation
+    col.track_pose_reset()
+    col.path_integrate(0); col.path_integrate(0)
+    x, y, th = col.path_integrate(1)                           # (0,0) -> +2x +2x +3y = (4, 3), heading 0
+    assert abs(x - 4.0) < 1e-6 and abs(y - 3.0) < 1e-6 and abs(th) < 1e-6
+    col.sense_pose(10.0, 7.0, 0.0)                             # CORRECT: snap to an observed pose
+    xx, yy, _ = col.path_integrate(0)                         # from the corrected (10,7): +2x -> (12, 7)
+    assert abs(xx - 12.0) < 1e-6 and abs(yy - 7.0) < 1e-6
+
+    # NON-ABELIAN: a learned SE(2) op -> operator() returns the pose op; path_integrate composes in the BODY frame
+    col2 = CorticalColumn(n_entities=8, seed=0)
+    col2.pose_ops = {0: pose_operator(0.0, (1.0, 0.0)),        # FORWARD: +1 in body-x
+                     1: pose_operator(np.pi / 2, (0.0, 0.0))}  # TURN_L: +90 deg in place
+    assert np.allclose(col2.operator(1).M, col2.pose_ops[1].M)   # the LEARNED pose op is used (not gated on the game)
+    col2.track_pose_reset()
+    col2.path_integrate(0)                                     # forward -> (1, 0), heading 0
+    col2.path_integrate(1)                                     # turn L -> heading 90, still at (1, 0)
+    x2, y2, th2 = col2.path_integrate(0)                       # forward in the NEW heading -> +1 in y -> (1, 1)
+    assert abs(x2 - 1.0) < 1e-6 and abs(y2 - 1.0) < 1e-6 and abs(th2 - np.pi / 2) < 1e-6
+
+
 def test_unified_operator_is_the_abelian_translation_on_navgame():
     """L6_NONABELIAN (axis-2 unification, MECHANISM): the ONE per-action operator `col.operator(a)` handles the abelian
     case as its SPECIAL CASE -- driving the agent on NavGame (fixed-direction actions → `heading_dependent` is False), the
