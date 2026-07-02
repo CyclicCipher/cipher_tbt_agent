@@ -35,6 +35,31 @@ non-abelian structure WITH generalisation.**
   (`MATH_PHASE.md`) thus generalises from cyclic factors (abelian) to RELATION discovery (non-abelian). Read-off = the
   free/tree part; SEARCH = the relations (the quotient). The abelian grid = "assume every commutator loop closes."
 
+## AFFECTED LAYERS — this UNIFIES a currently-FRAGMENTED operator set (L4 + L2/3, not just L5/L6)
+The column ALREADY has TWO operator families that disagree on their group — the redesign's real job is to merge them into
+ONE learned group representation, used by all four layers.
+- **The fragmentation (grounded in the code):** *movement/navigation* = `L5.move_delta` (learned translation) → **L6** path
+  integration = TRANSLATION-only, ABELIAN (rotation "a deferred extension"). *pose/recognition* = `L5.rot(θ)`/`apply_pose`/
+  `pose_between` → **L2/3** = the full **SE(2)** pose group (rotation + translation) = NON-ABELIAN, and already MATRIX-based
+  — but HAND-CODED (`rot` is a closed-form SO(2) matrix). So the column represents a non-abelian group for RECOGNITION yet
+  only an abelian one for NAVIGATION. The redesign makes the FRAME as expressive as the recogniser already is.
+- **L2/3 (already the non-abelian half):** pose-invariant recognition infers a group element `(θ,t)` (`align_rotations`),
+  reconstitutes the object at any pose (`cells_at`=`apply_pose`), and VOTES over shared world poses. The redesign gives it
+  (i) CONSISTENCY — the inferred pose is an element of the SAME group L5/L6 use, so navigation and recognition compose poses
+  identically and Stage-2 loop-closure/relations run on ONE group; (ii) a BITTER-LESSON win — LEARN the group matrices (as
+  validated on S₃) instead of the hand-coded `rot(θ)`, general for ABSTRACT columns (the docstring notes "for an abstract
+  column the group is not SO(2)").
+- **L4 (mechanism unchanged; "location" → POSE):** the `feature ⊗ location` bind is representation-agnostic, so it is
+  untouched — but its "location" generalises to a full POSE (a group element), making L4 *feature-at-pose* = the TBT object
+  model (`object = {(feature, pose)}`). The FORWARD MODEL (`predict_feature`/`predict_field` under an action) now applies the
+  NON-commuting operator (order matters). The CONTENT codebook is unaffected — the hyle/morphe (what-vs-where) split: only
+  the "where" generalises.
+- **Payoff:** ONE learned group representation (the `Operator` primitive) shared across L6 (pose frame), L5 (motor +
+  prediction), L4 (feature-at-pose), L2/3 (recognition + voting) — replacing the three fragmented families (learned
+  translation + hand-coded SE(2) + the new primitive). Simplification + consistency + bitter-lesson. NB DESIGN IMPLICATION,
+  not built: the primitive + the parallel learner are done; folding `rot`/`apply_pose` into the learned Operator (L2/3) and
+  L4 feature-at-pose are downstream, and the L2/3 fold is load-bearing (it is where the non-abelian structure already lives).
+
 ## Why this (hopefully) unlocks Sokoban — honestly
 Sokoban's dynamics are non-abelian and config-dependent: the effect of a move depends on what is ahead (push vs. not),
 and move-orders do not commute once walls/blocks intervene. The current abelian grid can only map FREE translation (the
