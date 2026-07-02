@@ -355,6 +355,29 @@ def test_S2_discover_relations_from_the_agents_own_learned_operators():
     assert not turn_l.commutes_with(fwd)                                    # NON-ABELIAN: FORWARD∘TURN ≠ TURN∘FORWARD (the quotient needs search)
 
 
+def test_pose_achiever_honors_the_cost_field_V2_one_vector_nav():
+    """(b) vector-nav unification: the POSE achiever is a FULL vector-nav citizen on the ONE cost currency (V2), NOT a
+    stripped parallel variant. With the forward cell WALLED (cost = IMPASSABLE) it EXCLUDES that step, where without the wall
+    it would advance -- the same cost-field repulsion the abelian `vector_action` has. (The geodesic detour when fully stuck
+    stays the SR `navigate_to`, not a search -- no Dijkstra.)"""
+    import numpy as np
+
+    from tbt.column import CorticalColumn, IMPASSABLE
+    from tbt.operator import Operator
+
+    def se2(x, y, th):
+        c, s = np.cos(th), np.sin(th)
+        return np.array([[c, -s, x], [s, c, y], [0.0, 0.0, 1.0]])
+
+    col = CorticalColumn(n_entities=8, seed=0)
+    col.pose_ops = {0: Operator(se2(1, 0, 0)), 1: Operator(se2(0, 0, np.pi / 2)), 2: Operator(se2(0, 0, -np.pi / 2))}
+    col.track_pose_reset()                                                # at (0,0), facing east
+    goal = (4.0, 0.0)
+    assert col._pose_vector_action(goal, [0, 1, 2]) == 0                  # normally: FORWARD, straight to the east goal
+    col.learn_cost((1, 0), IMPASSABLE)                                    # WALL the forward cell (FORWARD lands at (1,0))
+    assert col._pose_vector_action(goal, [0, 1, 2]) != 0                  # V2: FORWARD excluded -- the cost field repels the pose achiever too
+
+
 def test_S1e_step2_pose_path_engages_on_the_non_abelian_env():
     """S1e step 2 (live wiring): driving the REAL agent on OrientationGame, the POSE path ENGAGES -- the non-abelian GATE
     trips (`heading_dependent`: FORWARD's direction is inconsistent) and the agent's state node becomes a POSE (3-tuple:

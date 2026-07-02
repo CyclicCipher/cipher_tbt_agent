@@ -176,7 +176,7 @@ class CorticalColumn(nn.Module):
         L6_NONABELIAN S1e: when the dynamics are HEADING-DEPENDENT (non-abelian) the fixed-displacement assumption fails --
         no single action moves in an arbitrary direction -- so delegate to the POSE-AWARE achiever (align-then-advance)."""
         if self.L5.heading_dependent() and self._pose is not None and self.pose_ops:
-            return self._pose_vector_action(goal, actions)
+            return self._pose_vector_action(goal, actions, cost_weight=cost_weight)
         vx, vy = goal[0] - here[0], goal[1] - here[1]
         norm = (vx * vx + vy * vy) ** 0.5 or 1.0             # UNIT goal vector -> attraction commensurate with the cost penalty
         ux, uy = vx / norm, vy / norm
@@ -194,13 +194,15 @@ class CorticalColumn(nn.Module):
                 best_score, best_a = score, a
         return best_a
 
-    def _pose_vector_action(self, goal, actions, lam: float = 1.0):
+    def _pose_vector_action(self, goal, actions, lam: float = 1.0, cost_weight: float = 1.0):
         """L6_NONABELIAN S1e -- POSE-AWARE vector navigation (the NON-ABELIAN achiever). The actions TRANSFORM the pose, so
         no fixed per-action displacement exists; instead descend a POTENTIAL over the pose after each action's learned
         body-frame operator (`pose_ops`): `Φ(P) = distance(P.pos, goal) + λ·heading_error(P → goal)`. This yields
         ALIGN-THEN-ADVANCE emergently -- a TURN cuts the heading-error term, a FORWARD cuts the distance term -- the
-        non-abelian generalisation of `vector_action` (the abelian fixed-displacement case is its degenerate limit). Returns
-        the action that most reduces Φ, or None (already at the goal / no improving action)."""
+        non-abelian generalisation of `vector_action` (the abelian fixed-displacement case is its degenerate limit).
+        Like abelian `vector_action` it is a FULL vector-nav citizen on the ONE cost currency (V2): a step onto `cost>=IMPASSABLE`
+        (a wall) is EXCLUDED, and a finite `cost(dest)` is ADDED to Φ (repulsion) -- so it curves AROUND learned hazards/walls,
+        no stripped parallel achiever. Returns the action that most reduces Φ+cost, or None (already at the goal / no improving move)."""
         if self._pose is None:
             return None
         gx, gy = float(goal[0]), float(goal[1])
@@ -219,7 +221,12 @@ class CorticalColumn(nn.Module):
             G = self.pose_ops.get(a)
             if G is None:
                 continue
-            cand = potential(self._pose @ np.asarray(G.M, dtype=float))   # the pose after applying a's operator (dead-reckon)
+            P = self._pose @ np.asarray(G.M, dtype=float)                # the pose after applying a's operator (dead-reckon)
+            dest = (int(round(P[0, 2])), int(round(P[1, 2])))
+            c = self._cost(dest)
+            if c >= IMPASSABLE:                                          # V2: a wall cell -> excluded (the cost=∞ limit)
+                continue
+            cand = potential(P) + cost_weight * c                       # V1+heading attraction + V2 cost repulsion (ONE currency)
             if cand < best - 1e-9:
                 best, best_a = cand, a
         return best_a

@@ -63,6 +63,13 @@ relations. SHARED RISK = the wrong-merge / similarity-kernel smuggle (Phase III)
   achiever), unchanged from V4. **REMAINING:** fold in the `dynamics` (transition-lp/epiplexity) and `identity`
   (disambiguation) TARGET generators (each a navigable goal in the SAME competition), so the EXPLORE-side hypothesis goal
   (Sokoban) also achieves — Phase II slice 2 / and the S2 relations that make a non-abelian goal findable.
+- **ONE VECTOR-NAV, no parallel search (2026-07-01, suite 144).** Audit: there is NO Dijkstra/rollout planner anywhere —
+  navigation is the POTENTIAL FIELD (`vector_action`/`_pose_vector_action`) + the SR GEODESIC detour (`navigate_to`, = the SR
+  value `V=M·R`, not a search). The one gap was that the non-abelian `_pose_vector_action` was a STRIPPED citizen (missing V2);
+  it now carries the SAME cost-field repulsion (a step onto `cost≥IMPASSABLE` excluded, finite cost added to Φ), so abelian and
+  non-abelian achievers are ONE mechanism on the ONE cost currency (validated: the pose achiever excludes a walled cell;
+  OrientationGame 8/8 unchanged). The "geodesic in the learned Cayley graph" (S3) will be computed the brain's way — SR value
+  propagation over the operator-generalised rep → the potential field — never Dijkstra (reference_brain_planning).
 
 ## THE COST FIELD — ONE currency for walls / hazards / slow / risky (generalizes V2 repulsion)
 *User's insight (2026-07-01): a wall and a hazard (and a slow tile, and a coin-flip-bad tile) should be the SAME
