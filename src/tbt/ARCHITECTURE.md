@@ -280,7 +280,10 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
   eigenpurpose SR-eigendecomposition explorer** in favour of the one epistemic term — §8; **unify the cost field as the ONE
   value's AVERSIVE component** — keep its learned-expectation (the running-mean → `p·penalty`; make the critic's crude
   last-write aversion use the same expectation so there is ONE aversive-value learner), obstacle-avoidance emerging from
-  `V = M·(reward − cost)` over the barrier-warping SR (§3); the cost field is NOT deleted); object = recognition construct
+  `V = M·(reward − cost)` over the barrier-warping SR (§3); the cost field is NOT deleted. ⚠ "one aversive-value learner"
+  does NOT mean collapsing cost into a homogeneous reward channel: PRESERVE the appetitive/aversive ASYMMETRY of §3 (the
+  brain uses a partly SEPARATE circuit — it may need its own learning rate, Go/NoGo opponency, or consumers; do not flatten
+  it away)); object = recognition construct
   (delete the segmentation heuristic + `object_state`/`_changed`); thin column
   + agent (subsystems → layers); retina/motor-organ reduced to transduction/effection. Suite-green throughout; git
   branches for risk. **This is the bulk of the work.**
