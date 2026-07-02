@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -67,6 +68,7 @@ class CorticalColumn(nn.Module):
         self._changed: dict = {}                             # C4: L2/3 object STATE -- {location: feature} where a known feature CHANGED
         self.cost: dict = {}                                 # the COST FIELD: location -> expected interaction cost (ONE currency for walls/hazards/slow/risky)
         self.action_ops: dict = {}                           # L6_NONABELIAN Stage 1: per-action OnlineOperator, learned online from the path-integration stream (parallel to `move`)
+        self._pose = None                                    # L6_NONABELIAN S1e: the POSE belief (SE(2) matrix) path-integrated by COMPOSING operators (non-abelian)
 
     # ----- routing: learn the transition structure online (L6 + L5) ---------------------------------
     @property
@@ -538,3 +540,30 @@ class CorticalColumn(nn.Module):
         if self._fovea is None or not self.L5.controllable():
             return (0, 0)
         return (int(round(self._fovea[0])) // pos_bin, int(round(self._fovea[1])) // pos_bin)
+
+    # ----- L6_NONABELIAN S1e: path-integrate a POSE by COMPOSING operators (the non-abelian generalisation of track) ----
+    def track_pose_reset(self):
+        """Reset the POSE belief (an SE(2) matrix) to the identity (origin, heading 0)."""
+        self._pose = np.eye(3)
+
+    def track_pose(self, op: Operator):
+        """Path-integrate the POSE by RIGHT-composing the body-frame action operator: `P ← P·G` (L6_NONABELIAN S1e).
+        Because composition is NON-COMMUTATIVE, the pose distinguishes HEADINGS -- so a non-abelian env's dynamics (e.g.
+        FORWARD, whose effect depends on heading) become DETERMINISTIC over the pose, which the additive `_fovea` position
+        CANNOT. `op` = the per-action operator (an `Operator`, the learned body-frame increment). Returns (x, y, theta).
+        NB the abelian case (a pure translation op) reproduces `_fovea`; this is `track` generalised from position to pose.
+        Live-wiring into the agent's state awaits HEADING PERCEPTION (the agent perceives position, not orientation)."""
+        if self._pose is None:
+            self._pose = np.eye(3)
+        self._pose = self._pose @ np.asarray(op.M, dtype=float)
+        return (float(self._pose[0, 2]), float(self._pose[1, 2]),
+                float(np.arctan2(self._pose[1, 0], self._pose[0, 0]) % (2 * np.pi)))
+
+    def pose_state(self, pos_bin: int = 1, ang_bins: int = 4):
+        """The POSE belief binned -> the discrete state key `(x, y, heading-bucket)`. Includes HEADING, so a non-abelian
+        env's dynamics are DETERMINISTIC over it (unlike position-only `track_state`). `ang_bins` buckets over [0, 2pi)."""
+        if self._pose is None:
+            return (0, 0, 0)
+        th = float(np.arctan2(self._pose[1, 0], self._pose[0, 0]) % (2 * np.pi))
+        return (int(round(self._pose[0, 2])) // pos_bin, int(round(self._pose[1, 2])) // pos_bin,
+                int(round(th / (2 * np.pi) * ang_bins)) % ang_bins)

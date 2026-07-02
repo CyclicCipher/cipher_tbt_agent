@@ -145,10 +145,17 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
     `Operator.fit`), which must stay SYMMETRY-AWARE (`pose_between` returns MULTIPLE poses for symmetric patches = the
     stabilizer coset; plain Procrustes gives one). That is exactly [[project_symmetry_opportunity]] — it matters for
     ABSTRACT columns (whose group isn't SO(2)); for the visual column SO(2) inference is a legitimate Core-Knowledge plug-in.
-  - **S1e — DRIVE STATE by the operator** (the behaviour-affecting step): route `track`'s state read through the operator /
-    pose instead of the additive `_fovea`; needs the grid's CODEBOOK BOUND fixed (`decode`/`place` cover only N×N while
-    `_fovea` is unbounded). *Gate:* no-regression on the abelian games first, then it SOLVES the non-abelian env (which the
-    abelian `move_delta` provably cannot).
+  - **S1e — DRIVE STATE by the operator. ENGINE DONE (2026-07-01, `column.track_pose`/`pose_state`, suite 131):** the
+    column path-integrates a POSE (an SE(2) matrix) by RIGHT-COMPOSING the learned body-frame operator (`P ← P·G`), and
+    `pose_state` bins `(x, y, heading)`. Validated on OrientationWorld (`test_nonabelian_env.py`): the body-frame op is
+    CONSTANT per action (learnable as `pose_before⁻¹·pose_after`), composing it dead-reckons the pose to MATCH the env
+    (position + heading), FORWARD∘TURN ≠ TURN∘FORWARD in the belief, and **FORWARD is DETERMINISTIC over `pose_state`**
+    (heading in the key: 4 headings → 4 distinct outcomes) — which the additive position CANNOT. The operator DRIVING a
+    non-abelian state. NB the CODEBOOK BOUND is AVOIDED: the pose is binned DIRECTLY (no grid `decode`), and it is unbounded.
+    **REMAINING (the live prerequisite): HEADING PERCEPTION.** The engine is additive/parallel (doesn't touch `_fovea`/
+    `track_state`) because the live agent perceives POSITION, not orientation — to drive the live state it must observe or
+    dead-reckon heading (and OrientationWorld must become a real perceivable frame). That perception is the next slice;
+    then swap `track_state`→`pose_state` in the agent, gate no-regression on abelian, and SOLVE the env end to end.
 - **Stage 2 — DISCOVER relations by loop closure (the quotient).** Free composition path-integrates; relations (incl.
   commutativity) are found by loop closure under the **predictive-sufficiency** criterion (causal states / bisimulation, per
   `MATH_PHASE.md`) — close the coarsest partition that stays a sufficient statistic. *Gate:* on a task with a KNOWN

@@ -82,3 +82,62 @@ def test_abelian_move_delta_CANNOT_represent_forward():
         after = w.step("FORWARD")
         seen[before] = after
     assert len(seen) == 4 and all(a != b for b, a in seen.items())          # deterministic pose->pose (distinct per heading)
+
+
+def test_S1e_operator_pose_path_integration_makes_forward_deterministic():
+    """L6_NONABELIAN S1e (the ENGINE): the column path-integrates a POSE by COMPOSING learned body-frame operators
+    (`track_pose`: P ← P·G), so the belief tracks HEADING, matches OrientationWorld, and makes FORWARD DETERMINISTIC over
+    the pose state -- which the additive POSITION cannot. The operator DRIVING a non-abelian state. (Live wiring into the
+    agent awaits HEADING PERCEPTION -- the agent perceives position, not orientation.)"""
+    import numpy as np
+
+    from tbt.column import CorticalColumn
+    from tbt.operator import Operator
+
+    def se2(x, y, th):
+        c, s = np.cos(th), np.sin(th)
+        return np.array([[c, -s, x], [s, c, y], [0.0, 0.0, 1.0]])
+
+    # LEARN the body-frame operator per action: G = pose_before^-1 · pose_after -- CONSTANT per action (so learnable).
+    # (Use the RAW pose attributes, not pose() which rounds to 6 decimals.)
+    Gs = {}
+    for a in ("FORWARD", "TURN_L", "TURN_R"):
+        incs = []
+        for turns in range(4):
+            w = OrientationWorld()
+            for _ in range(turns):
+                w.step("TURN_L")
+            before = se2(w.x, w.y, w.theta)
+            w.step(a)
+            incs.append(np.linalg.inv(before) @ se2(w.x, w.y, w.theta))
+        assert all(np.allclose(incs[0], g, atol=1e-9) for g in incs)         # the body-frame op is CONSTANT -> learnable
+        Gs[a] = Operator(incs[0])
+
+    # path-integrate a sequence through the column -> matches OrientationWorld's pose
+    col = CorticalColumn(n_entities=8, seed=0)
+    col.track_pose_reset()
+    world = OrientationWorld()
+    pose = (0.0, 0.0, 0.0)
+    for a in ["FORWARD", "TURN_L", "FORWARD", "FORWARD", "TURN_R", "FORWARD", "TURN_L", "FORWARD"]:
+        pose = col.track_pose(Gs[a])
+        world.step(a)
+    assert np.allclose(pose[:2], (world.x, world.y), atol=1e-6)              # position matches the env
+    assert abs(((pose[2] - world.theta + np.pi) % (2 * np.pi)) - np.pi) < 1e-6   # heading matches (dead-reckoned from turns)
+
+    # FORWARD is DETERMINISTIC over the POSE state (heading is in the key) -- 4 headings -> 4 distinct outcomes
+    fwd = {}
+    for turns in range(4):
+        col.track_pose_reset()
+        for _ in range(turns):
+            col.track_pose(Gs["TURN_L"])
+        before = col.pose_state()
+        col.track_pose(Gs["FORWARD"])
+        fwd[before] = col.pose_state()
+    assert len(fwd) == 4 and len(set(fwd.values())) == 4                     # distinct, deterministic (vs 4-valued over position)
+
+    # non-abelian in the BELIEF: FORWARD∘TURN ≠ TURN∘FORWARD
+    col.track_pose_reset(); col.track_pose(Gs["FORWARD"]); col.track_pose(Gs["TURN_L"])
+    p1 = col.pose_state()
+    col.track_pose_reset(); col.track_pose(Gs["TURN_L"]); col.track_pose(Gs["FORWARD"])
+    p2 = col.pose_state()
+    assert p1 != p2
