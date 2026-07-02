@@ -86,11 +86,26 @@ whole world, not one object): grid × content bound across columns and episodes 
 it is inherited for allocentric world-modelling and cross-frame/episodic binding; a plain single-column task needs it only
 when episodic memory or multi-frame binding does.
 
-**Value / reward.** The domain-agnostic **critic**: expected future reward, learned online from the sparse score. **Cost
-is negative value in the same currency** — a wall, a hazard, a slow tile, a risky tile are all points on one scalar
-(walls are the `−∞` limit), so obstacles are *not* special objects. This one value, read over the learned frame, is the
-planning substrate (§8), and its two components (pragmatic + epistemic) are what make explore vs exploit *emerge* rather
-than switch.
+**Value / reward — appetitive and aversive.** The domain-agnostic **critic**: expected future reward, learned online from
+the sparse score. **Cost is the AVERSIVE component of this one signed value**, not a separate currency — a wall, a hazard,
+a slow tile, a risky tile are points on the same scalar (walls the `−∞` limit), so obstacles are *not* special objects.
+Two things make this work and must be preserved:
+- *Cost is LEARNED as an EXPECTATION* (a running-mean / TD estimate), so a **stochastic** ("risky") location converges to
+  `p·penalty` with no special case — the property that makes the cost field robust obstacle-avoidance in abstract and
+  stochastic domains. A crude last-write of the aversive score is the wrong representation; the expectation is the right
+  one. This is the empirically strongest obstacle mechanism and is not to be discarded.
+- *The brain represents cost through a partly SEPARATE circuit from reward* — an appetitive/aversive **asymmetry** (Go/
+  reward vs NoGo/cost), not one homogeneous signal: reward via dopamine / D1-Go; **cost via the anterior cingulate**
+  (integrating effort / pain / risk into an *expected-cost* signal), the **lateral habenula** (negative reward-prediction
+  error / aversive *expectation* value), the **D2-NoGo** striatal pathway (avoidance value), and serotonin (active-
+  avoidance expectation). So a first-class cost representation is biologically grounded, not a rule-1 parallel system —
+  provided there is ONE aversive-value learner, not two.
+
+Spatially, obstacle-avoidance **emerges** from this signed value read over the learned frame, whose SR/grid map **warps
+around barriers** (boundary-vector-cell → SR): `V = M·(reward − cost)` gives the geodesic detour (§8), a wall being the
+`−∞` / transition-dead-end limit. The two axes of the one value — pragmatic (reward − cost) + epistemic — are what make
+explore vs exploit, and approach vs avoid, *emerge* rather than switch. (ACC expected-cost: Kennerley & Walton; LHb
+aversive value: Matsumoto & Hikosaka 2007; barrier-warping BVC-SR: de Cothi & Barry 2020.)
 
 ## 4. The sensorimotor loop — how the model touches the world
 
@@ -262,8 +277,11 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
   into the one mechanism: one prediction (delete the location-blind CA); one location = the L6 code path-integrated by the
   operator (delete the fovea / pose-matrix / `state_node` / `_obs` / `heading_dependent` fork); one value (fold
   `V`/`V_exploit` + the `g`-gate + the `_tab_spread` tabular/forward arbiter into the single EFE value; **drop the
-  eigenpurpose SR-eigendecomposition explorer** in favour of the one epistemic term — §8; move `cost` into the critic);
-  object = recognition construct (delete the segmentation heuristic + `object_state`/`_changed`); thin column
+  eigenpurpose SR-eigendecomposition explorer** in favour of the one epistemic term — §8; **unify the cost field as the ONE
+  value's AVERSIVE component** — keep its learned-expectation (the running-mean → `p·penalty`; make the critic's crude
+  last-write aversion use the same expectation so there is ONE aversive-value learner), obstacle-avoidance emerging from
+  `V = M·(reward − cost)` over the barrier-warping SR (§3); the cost field is NOT deleted); object = recognition construct
+  (delete the segmentation heuristic + `object_state`/`_changed`); thin column
   + agent (subsystems → layers); retina/motor-organ reduced to transduction/effection. Suite-green throughout; git
   branches for risk. **This is the bulk of the work.**
 - **P1 — Factored perception.** L2/3 recognition + L4 content deliver `(location, content)` factored, from the live field —
