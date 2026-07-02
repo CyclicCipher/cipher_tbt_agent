@@ -673,6 +673,19 @@ class CorticalColumn(nn.Module):
             return [], []
         return discover_group(gens, tol=tol, max_elements=max_elements)
 
+    def factor_dynamics(self, tol: float = 1e-6, max_elements: int = 256):
+        """L6_NONABELIAN Stage 2 (wired into the COLUMN) -- factor the column's LEARNED dynamics into a DIRECT PRODUCT of
+        cyclic factors (`operator.factor_group` over the learned operators: pose_ops when heading-dependent, else the grid-code
+        action_ops). The product-of-cycles map of the agent's OWN experience -- counters/toggles/patrols as cycles rather than
+        an ever-growing tree. Returns the [(generator_index, period)] factors, or None if the dynamics are not a finite direct
+        product (e.g. SE(2), whose FORWARD is an unbounded translation -- honestly not a product of cycles)."""
+        from .operator import factor_group
+        if self.pose_ops and self.L5.heading_dependent():
+            gens = [self.pose_ops[a] for a in sorted(self.pose_ops)]
+        else:
+            gens = [self.action_operator(a) for a in sorted(self.action_ops)]
+        return factor_group(gens, tol=tol, max_elements=max_elements) if gens else None
+
     def pose_state(self, pos_bin: int = 1, ang_bins: int = 4):
         """The POSE belief binned -> the discrete state key `(x, y, heading-bucket)`. Includes HEADING, so a non-abelian
         env's dynamics are DETERMINISTIC over it (unlike position-only `track_state`). `ang_bins` buckets over [0, 2pi)."""

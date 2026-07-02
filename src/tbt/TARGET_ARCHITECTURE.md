@@ -197,8 +197,11 @@ space), which is the same problem the hippocampus solves (a single allocentric f
 - The conditional-dynamics methods in `column.py` (`observe_effect`/`learn_dynamics`/`predict_effect`) — **ARCHIVED** ✅
   (purpose → L5, above).
 - `perceive.py` `ObjectField` — **DEMOTED** ✅ to a stateless colour-aware proto-object proposer (the tracker is gone).
-- `factorize.py` — still to dissolve into **L6** (eigen-subspace factors + BG allocation); kept, not yet folded.
-- `residual.py` — still to dissolve into **L5** (the precondition search for context-dependent change); kept, not yet folded.
+- `factorize.py` — **REMOVED (2026-07-01)** ✅. Dissolved into the TBT-native GEOMETRIC form: `operator.discover_periods`
+  (eigen-subspace/spectral factors) + `factor_group` (the direct-product decomposition, guarded) = the disentanglement read
+  off the ACTION operators, not the symbolic orbit-partitions. See `L6_NONABELIAN.md` S2.
+- `residual.py` — **REMOVED (2026-07-01)** ✅. Dissolved into `operator.is_predictively_sufficient` (the bisimulation guard
+  that detects the coupling/carry = context-dependent change) — the geometric form of the precondition search.
 - **Keep:** `column.py` (now a coordinator), `l4/l5/l6_sr/l6_grid/l23`, `thalamus.py`, `basal_ganglia.py`,
   `reward.py`, `perceive.py`, `sensor.py`, and the API (`arc_run.py`, `arc_sdk.py`, `tasks/core.py`).
 

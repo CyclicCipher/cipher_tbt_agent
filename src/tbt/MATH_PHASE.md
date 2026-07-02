@@ -101,8 +101,9 @@ amount domain-GENERAL (the same knob helps Sokoban) or bespoke (we cheated)?**
 - ⇒ the missing prerequisite is a **translation-invariant successor OPERATOR + PATH INTEGRATION** over multi-scale
   periodic modules (a grid / residue code — Fiete; incommensurate periods = huge unambiguous range + extrapolation),
   reusing our SHELVED `l6_grid` (`scales=(11,13,17)`) — the SAME machinery P1 built for space. Only then does a structure
-  exist to read a hypothesis off. This is TBT-native (grid/path-integration), NOT the pruned symbolic `factorize.py`/
-  `residual.py` (orbit-partitions + predicate decision-lists — the abandoned CTKG flavour; a warning, not a tool).
+  exist to read a hypothesis off. This is TBT-native (grid/path-integration). The old symbolic `factorize.py`/`residual.py`
+  (orbit-partitions + predicate decision-lists — the CTKG flavour) are now REMOVED (2026-07-01); S2's GEOMETRIC replacements
+  (`operator.discover_periods`/`factor_group`/`is_predictively_sufficient`) do the same jobs off the learned operators.
 
 ## THE REFERENCE FRAME — a translation-invariant operator × an (adaptive) multi-scale grid
 The frame we are after: a number is a POSITION reached by path-integrating ONE operator over a multi-scale periodic code.

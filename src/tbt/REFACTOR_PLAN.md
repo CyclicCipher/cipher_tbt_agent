@@ -152,7 +152,7 @@ Monty/TBP 2024 (predictive L4, lateral voting, evidence accumulation). All recor
 | `behavior.py` | **Keep.** `ObjectBehaviour` (revisable barrier-ness keyed on recognised identity) is correct; it just consumes L2/3 ids now. |
 | `perceive.py` (`ObjectField`) | **Demote to a sensor organ** (Phase 4, see below). Keep `background`/`segment`/`components`/`content_sig` + the change channel as a cheap *revisable* proto-object proposal; **move** stable-id permanence, `max_jump` matching, and contact-splitting **into the column** (recognition + path-integration). It is currently hand-coded cognition (`reference_tbt_segmentation_and_grouping`). |
 | `thalamus.py`, `basal_ganglia.py`, `reward.py` | **Keep.** `reward._need` gains the SR read. |
-| `factorize.py`, `residual.py` | **Keep for now** (residual's `_find_predicate` backs conditional-dynamics). Dissolution into L6/L5 is a *later* step, not this refactor. |
+| `factorize.py`, `residual.py` | **REMOVED (2026-07-01)** — dissolved into the geometric S2 (`operator.discover_periods`/`factor_group`/`is_predictively_sufficient`); the symbolic orbit-partition/decision-list versions are gone. |
 
 ---
 
