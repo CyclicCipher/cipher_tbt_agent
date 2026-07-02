@@ -121,10 +121,13 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
     body-frame FORWARD/TURN = SE(2)) — `test_nonabelian_env.py`. First result: FORWARD∘TURN ≠ TURN∘FORWARD, and the abelian
     `move_delta` (ONE Δ per action) CANNOT represent FORWARD (4 different displacements, one per heading) → over
     POSITION-only the dynamics are non-deterministic; over the full POSE they are deterministic. **KEY SUBTLETY this
-    surfaced:** the state must be the POSE (the group element), not the position — so this is a genuine SE(2) task, and
-    body-frame actions are RIGHT-multiplication (fixed operators only in the regular rep of a discretised pose space; the
-    continuous case wants a Lie generator, not a single Procrustes matrix). S₃ validated discrete finite groups; SE(2) adds
-    the continuous spatial group.
+    surfaced:** the state must be the POSE (the group element), not the position — so this is a genuine SE(2) task, and the
+    continuous case (rotation by any angle) wanted a LIE GENERATOR, not a single Procrustes matrix. **CONTINUOUS FORM BUILT
+    (2026-07-01, `Operator.power`/`generator`, suite 129):** from a LEARNED discrete-step operator, `power(t) = exp(t·log M)`
+    gives any group element along its 1-parameter subgroup (a fractional rotation / fractional path-integration step); the
+    `generator` is the skew-symmetric Lie-algebra element. Gate: fit a 36° turn step from transitions → `power(t)`
+    reconstructs `rot(t·36°)` for any `t` — i.e. LEARN the step, read off any continuous pose, replacing the hand-coded
+    `rot(θ)`. So S1d has its tool (S₃ = finite groups; SE(2) + `power` = the continuous spatial group, learned).
   - **S1d — the CROSS-LAYER UNIFICATION (the high-priority fold):** replace L5's hand-coded `rot`/`apply_pose` with the
     LEARNED `Operator` (one group machinery); generalise L4 to feature-at-POSE; make L2/3 recognition/voting read the unified
     group. *Gate:* the recognition tests still pass (no regression) with the learned operators; the pose group is one, shared.

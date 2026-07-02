@@ -42,6 +42,22 @@ class Operator:
         """Does composition order matter? `M·N == N·M`? Abelian ⇒ True for all pairs; non-abelian ⇒ False for some."""
         return np.allclose(self.M @ other.M, other.M @ self.M, atol=tol)
 
+    # ----- the CONTINUOUS (Lie-group) form: a learned DISCRETE step -> any group element along its 1-parameter subgroup ---
+    def power(self, t: float) -> "Operator":
+        """`M^t = exp(t·log M)` -- the operator at CONTINUOUS parameter `t` along its 1-parameter subgroup (`t=1`→self,
+        `t=0`→identity, `t=0.5`→the "half" step). For an orthogonal M (a rotation) this is a valid rotation by `t`× the
+        angle: the LIE-GROUP form that turns a LEARNED DISCRETE-STEP operator into the CONTINUOUS group -- learn the step,
+        read off ANY pose (what L2/3's HAND-CODED `rot(θ)` does, but LEARNED); also = fractional path integration. Via
+        eigendecomposition (principal branch -> well-defined for |rotation angle| < π; a ½-turn step is the branch limit)."""
+        vals, vecs = np.linalg.eig(self.M)
+        return Operator((vecs @ np.diag(vals ** t) @ np.linalg.inv(vecs)).real)
+
+    def generator(self):
+        """The Lie-algebra GENERATOR `G` with `M = exp(G)` (i.e. `log M`); `power(t) = exp(t·G)`. SKEW-SYMMETRIC for an
+        orthogonal M (the `so(n)` algebra) -- the INFINITESIMAL form of the learned continuous group (its tangent at I)."""
+        vals, vecs = np.linalg.eig(self.M)
+        return (vecs @ np.diag(np.log(vals)) @ np.linalg.inv(vecs)).real
+
     def __eq__(self, other) -> bool:
         return isinstance(other, Operator) and self.M.shape == other.M.shape and np.allclose(self.M, other.M)
 

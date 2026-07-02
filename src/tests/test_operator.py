@@ -176,6 +176,30 @@ def test_ONLINE_operator_learns_from_a_stream__COVERAGE_not_constraint_is_the_bo
     assert extrap_err(confined.operator(), 100) > max(0.3, 3.0 * good)         # COVERAGE is the bottleneck, not the constraint
 
 
+def test_operator_power_gives_the_CONTINUOUS_group_from_a_learned_step():
+    """L6_NONABELIAN Stage 1d (the CONTINUOUS / Lie form): from a LEARNED discrete-step rotation operator, `power(t)`
+    generates the CONTINUOUS group (rotation by ANY angle) -- so the pose group can be LEARNED (fit the step) and any pose
+    read off (power a fractional amount), replacing L2/3's HAND-CODED `rot(θ)`. Also = fractional path integration."""
+    R = Operator.rotation(np.pi / 3)                                            # a 60-degree step
+    assert R.power(1.0) == R                                                    # t=1 -> self
+    assert np.allclose(R.power(0.0).M, np.eye(3), atol=1e-9)                    # t=0 -> identity
+    assert np.allclose(R.power(0.5).M, Operator.rotation(np.pi / 6).M, atol=1e-8)      # half step = 30 deg
+    assert np.allclose(R.power(2.0).M, Operator.rotation(2 * np.pi / 3).M, atol=1e-8)  # double = 120 deg
+    assert np.allclose(R.power(0.3).then(R.power(0.4)).M, R.power(0.7).M, atol=1e-8)   # 1-parameter subgroup: R^a∘R^b = R^(a+b)
+    G = R.generator()
+    assert np.allclose(G + G.T, 0.0, atol=1e-9)                                 # the generator is SKEW-SYMMETRIC (so(n))
+
+    # LEARN the continuous group: fit the discrete step from rotation transitions, then power(t) reconstructs ANY angle
+    rng = np.random.default_rng(0)
+    theta_step = np.pi / 5                                                      # a 36-degree "turn" action
+    Rt = Operator.rotation(theta_step)
+    pts = np.array([[float(x), float(y), 1.0] for x, y in rng.standard_normal((30, 2))])
+    learned = Operator.fit(pts, (Rt.M @ pts.T).T, orthogonal=True)
+    assert np.allclose(learned.M, Rt.M, atol=1e-6)                             # recovered the step
+    for t in (0.5, 1.0, 2.5, 4.0):                                             # the CONTINUOUS family from the learned step
+        assert np.allclose(learned.power(t).M, Operator.rotation(t * theta_step).M, atol=1e-5)
+
+
 def _s3():
     """S₃ (the smallest NON-ABELIAN group) as permutations of (0,1,2): elements, index, composition p∘q, one-hot, and the
     regular-representation operator for a generator g (the permutation matrix mapping one-hot(h) -> one-hot(g∘h))."""
