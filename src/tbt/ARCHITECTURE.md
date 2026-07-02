@@ -312,6 +312,13 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
 - **P4 — Planning & hypothesis generation.** The one EFE value / SR geodesic (§8); the goal-state generator proposes
   cued target-states (§9), the BG select, the motor achieves, value confirms; the heterarchy (multi-column voting via the
   thalamus) scales the same loop.
+- **P5 — The semantic SDR encoder** (a generality/robustness upgrade, post-P4; not blocking). The general feature data
+  type is an **SDR** (which `L4.E` already is — `reference_tbt_feature_definition`); generality comes from the peripheral
+  ENCODER, which today is EXACT-MATCH (similar views → orthogonal codes). Replace it with an HTM-style encoder obeying the
+  three rules (semantic OVERLAP = similarity, determinism, fixed length + sparsity): hand-designed sub-encoders
+  (scalar/periodic/category) concatenated (colour ⊕ geometry), or a LEARNED **spatial pooler**. Then content GENERALISES
+  over similar features and continuous/cyclic features are native. (From Cipher's HTM notes: Purdy "Encoding Data for HTM
+  Systems"; NuPIC spatial pooling.)
 
 Honest status (2026-07-02): P0's clean deletions — the **parallel SYSTEMS** — are DONE (the field-CA second prediction;
 the `V`/`V_exploit` + `g`-gate + eigenpurpose second value; the `object_state`/`_changed` change-log). The remainder of P0
