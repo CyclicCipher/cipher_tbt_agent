@@ -32,6 +32,26 @@ def invariant_sig(disps):
     return tuple(sorted(round(float(np.linalg.norm(v)), 3) for v in disps))
 
 
+def view_signature(cloud, ndigits: int = 3):
+    """The rotation+translation-invariant, COLOUR-AWARE content descriptor of a whole LOCAL VIEW — the ventral 'what' at
+    view grain (L4). `cloud` = the view's coloured cells `[(x, y, colour), ...]`. The descriptor pairs the sorted COLOUR
+    multiset (the composition; also covers a single cell) with the sorted multiset of `(colour-pair, pairwise distance)`
+    over all cell pairs (the invariant GEOMETRY). Pairwise distances are preserved by any rotation/translation, so the
+    SAME shape+colours at any pose/position yields the SAME descriptor, while a different colouring or shape differs —
+    the invariant-distance idea of `invariant_sig` lifted to view grain and made colour-aware. `encode()` turns it into a
+    feature id, so content RECURS across pose (the prerequisite P2's operator needs: content invariant to where/how)."""
+    cells = [(float(x), float(y), c) for (x, y, c) in cloud]
+    colours = tuple(sorted(c for _x, _y, c in cells))
+    pairs = []
+    for i in range(len(cells)):
+        xi, yi, ci = cells[i]
+        for j in range(i + 1, len(cells)):
+            xj, yj, cj = cells[j]
+            d = round(((xi - xj) ** 2 + (yi - yj) ** 2) ** 0.5, ndigits)
+            pairs.append((min(ci, cj), max(ci, cj), d))
+    return colours, tuple(sorted(pairs))
+
+
 class L4_FeatureLocation(nn.Module):
     def __init__(self, n_entities: int, feat_dim: int = 256, k: int = 12, seed: int = 0):
         super().__init__()
@@ -61,6 +81,7 @@ class L4_FeatureLocation(nn.Module):
         return torch.nn.functional.normalize(row, dim=1)
 
     invariant_sig = staticmethod(invariant_sig)                       # the rotation-invariant feature descriptor (L4's 'what')
+    view_signature = staticmethod(view_signature)                     # the colour-aware invariant descriptor of a whole local view
 
     # ---- feature ⊗ location: bind, read back, and PREDICT (predict-then-compare seated in L4) -------------
     def bind(self, label: int, place: torch.Tensor) -> torch.Tensor:

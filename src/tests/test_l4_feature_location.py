@@ -15,7 +15,7 @@ _PKG_PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
-from tbt.l4_feature_location import L4_FeatureLocation, invariant_sig  # noqa: E402
+from tbt.l4_feature_location import L4_FeatureLocation, invariant_sig, view_signature  # noqa: E402
 from tbt.l5_displacement import apply_pose, local_disps               # noqa: E402
 
 
@@ -76,3 +76,23 @@ def test_invariant_sig_is_rotation_invariant():
 def test_invariant_sig_exposed_on_the_layer():
     """L4 the LAYER exposes the feature descriptor (the column reads the 'what' through it)."""
     assert L4_FeatureLocation.invariant_sig is invariant_sig
+
+
+def test_view_signature_is_pose_invariant_and_colour_aware():
+    """L4's WHOLE-VIEW content descriptor (P1 slice 1): rotation+translation-invariant (the same shape+colours at any
+    pose/position -> the same descriptor -> the same content id) AND colour-aware + shape-aware (a different colouring or
+    shape -> a different id). This is the 'what' P2's operator needs -- content invariant to where/how it is."""
+    l4 = L4_FeatureLocation(n_entities=8, feat_dim=64, seed=0)
+    shape = [(0, 0), (1, 0), (2, 0), (2, 1)]                        # an L-shaped tetromino stub
+    view = [(x, y, 7) for (x, y) in shape]                          # colour 7
+    sig = view_signature(view)
+    for theta in (np.pi / 2, np.pi, 2.0):                          # rotate (incl. a non-axis angle) + translate far away
+        moved = [(px, py, 7) for (px, py) in apply_pose(shape, theta, (5.0, -4.0))]
+        assert view_signature(moved) == sig                        # pose-invariant descriptor
+        assert l4.encode(view_signature(moved)) == l4.encode(sig)  # -> the same content id (recurs across pose)
+    other_colour = [(x, y, 3) for (x, y) in shape]                 # same shape, different colour
+    assert view_signature(other_colour) != sig
+    assert l4.encode(view_signature(other_colour)) != l4.encode(sig)
+    diff_shape = [(0, 0, 7), (1, 0, 7), (0, 1, 7), (1, 1, 7)]      # a 2x2 block (same colour, different shape)
+    assert view_signature(diff_shape) != sig
+    assert L4_FeatureLocation.view_signature is view_signature      # exposed on the layer
