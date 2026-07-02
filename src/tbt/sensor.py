@@ -73,7 +73,13 @@ class Sensor:
             if self.column is not None:                                    # the COLUMN owns the fovea (efference disambiguation) -- both modes
                 self._fovea = self.column.track(action, appeared, dominant, cold)
                 feat = self.encode(self._patch(frame, self._fovea))
-                state = (feat, self.column.track_state(self.pos_bin)) if self.integrate else feat   # integrate ADDS the position node
+                if self.integrate:                                          # integrate ADDS the location node: the POSE (x,y,heading)
+                    node = (self.column.pose_state(self.pos_bin)             # when the dynamics are heading-dependent (non-abelian),
+                            if self.column.L5.heading_dependent()           # else the abelian POSITION (== track_state, no regression).
+                            else self.column.track_state(self.pos_bin))     # L6_NONABELIAN S1e gate (scaffolding -> dissolve at step 5)
+                    state = (feat, node)
+                else:
+                    state = feat
             else:                                                          # standalone sensor (no column): dominant-residual fovea, no path integration
                 self._fovea = dominant if dominant is not None else (self._fovea or cold)
                 feat = self.encode(self._patch(frame, self._fovea))

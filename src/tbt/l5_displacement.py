@@ -116,6 +116,8 @@ class L5_Displacement(nn.Module):
         self.edges: dict = {}                                        # state -> {action -> next state}: observed transitions / exceptions
         self.disp: dict = {}                                         # (shape, action) -> modal pose delta (dx, dy): the movement operator
         self.move_delta: dict = {}                                   # action -> continuous pixel translation (dx, dy): the metric efference (the tracker path-integrates by it)
+        self._move_dir: dict = {}                                     # action -> EWMA unit DIRECTION of its moves (L6_NONABELIAN S1e non-abelian detector)
+        self._move_resid: dict = {}                                   # action -> EWMA direction INCONSISTENCY (1-cos): high => heading-dependent (non-abelian)
         self.recolor: dict = {}                                      # (shape, action) -> {old_content -> new_content}: the in-place-change operator
         self._votes: dict = {}                                       # (shape, action) -> Counter of pose deltas (-> disp = mode)
         # The per-LOCATION operator (FM1) -- the SAME position-invariant, context-keyed principle as disp/recolor, at
@@ -158,10 +160,29 @@ class L5_Displacement(nn.Module):
     # column tracker) path-integrates the location belief by this delta, and reads `controllable` to gate the position.
     def observe_move(self, action, delta, rate: float = 0.4) -> None:
         """Learn the per-action pixel translation from one sensed move `delta=(dx,dy)` -- an EWMA (the efference the
-        tracker path-integrates by). First sighting sets it; later ones average (robust to a noisy sighting)."""
+        tracker path-integrates by). First sighting sets it; later ones average (robust to a noisy sighting). Also tracks
+        the move's DIRECTION consistency (L6_NONABELIAN S1e): a nonzero move updates the EWMA unit direction + its
+        inconsistency (1-cos to the mean) -- high inconsistency => the action's effect depends on a hidden heading."""
+        dx, dy = float(delta[0]), float(delta[1])
+        mag = (dx * dx + dy * dy) ** 0.5
+        if mag > 1e-6:                                              # only real moves inform DIRECTION consistency (bumps skipped)
+            ux, uy = dx / mag, dy / mag
+            prev = self._move_dir.get(action)
+            if prev is not None:
+                self._move_resid[action] = (1.0 - rate) * self._move_resid.get(action, 0.0) + rate * (1.0 - (ux * prev[0] + uy * prev[1]))
+                self._move_dir[action] = ((1.0 - rate) * prev[0] + rate * ux, (1.0 - rate) * prev[1] + rate * uy)
+            else:
+                self._move_dir[action] = (ux, uy)
         old = self.move_delta.get(action)
         self.move_delta[action] = tuple(delta) if old is None else (
             (1.0 - rate) * old[0] + rate * delta[0], (1.0 - rate) * old[1] + rate * delta[1])
+
+    def heading_dependent(self, thresh: float = 0.3) -> bool:
+        """L6_NONABELIAN S1e (SCAFFOLDING -- to be dissolved at step 5 into proper factorisation): does some action move in
+        INCONSISTENT directions -> its effect depends on a hidden HEADING -> the dynamics are NON-ABELIAN, so the agent
+        needs the POSE state (`pose_state`), not just position (`track_state`). Detected as a high direction-inconsistency
+        residual (a consistent action -- NavGame's N/S/E/W -- stays ~0)."""
+        return any(r > thresh for r in self._move_resid.values())
 
     def move(self, action):
         """The learned per-action translation (dx, dy) -- the efference the location belief dead-reckons by; (0, 0)

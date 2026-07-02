@@ -166,14 +166,19 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
     - **Step 1 DONE (2026-07-01, `OrientationGame`, suite 133):** a real perceivable non-abelian FRAME (duck-typed like
       NavGame): an ORIENTED mover (asymmetric L) with body-frame FORWARD/TURN, reach-the-goal levels; validated non-abelian +
       solvable. `test_nonabelian_env.py`.
-    - **Steps 2-5 REMAINING (the perception-heavy behaviour-affecting integration):** (2) wire heading perception +
-      predict(`track_pose`)/correct(`sense_pose`) into the agent loop and select `pose_state` via a NON-ABELIAN GATE (use
-      pose only when an action's displacement is INCONSISTENT/heading-dependent; else `track_state`) — the gate must not
-      misfire on abelian; (3) gate no-regression on the abelian games; (4) SOLVE (the existing SR/graph planner over
-      `pose_state`); (5) DISSOLVE the redundant `_fovea`/`track_state` once the pose path is validated as the single one.
-      NB a real subtlety surfaced: the asymmetric mover's centroid SHIFTS on a turn (~0.5 cell) vs a forward (2 cells), so
-      route-2 heading needs a threshold that separates them (or a symmetric mover / route-1 shape-orientation) — a
-      perception-robustness decision for step 2.
+    - **Steps 2-3 DONE (2026-07-01, suite 134):** heading perception + pose maintenance are wired into `column.track`
+      (`track_heading` from the movement delta → `sense_pose` corrects the belief each step), and `sensor.read` selects the
+      state via the NON-ABELIAN GATE — `col.pose_state` when `L5.heading_dependent()` (an action's DIRECTION is inconsistent),
+      else `track_state`. `L5.heading_dependent` = a high per-action direction-inconsistency residual (skips bumps; robust).
+      OrientationGame now uses a SYMMETRIC mover (heading HIDDEN, rendered un-rotated) so heading-from-movement is clean.
+      *Validated (`test_nonabelian_env.py`):* driving the real agent on OrientationGame, the gate trips (FORWARD inconsistent)
+      and the state node becomes a POSE 3-tuple; NavGame stays on `track_state` — NO abelian regression (step 3 met).
+      The gate + `track_heading` are SCAFFOLDING to dissolve at step 5 (into proper factorisation / one pose path).
+    - **Steps 4-5 REMAINING:** (4) SOLVE OrientationGame — the agent engages the pose path but does NOT yet navigate it (0/8):
+      it needs pose-aware planning (the SR/graph planner over `pose_state` — the transitions are now learned over poses, so
+      this is planning, not new representation; NB the V4 vector achiever is position-based and won't help a body-frame env,
+      so solving leans on the SR/graph planner + the turn-staleness of route-2 heading). (5) DISSOLVE the redundant
+      `_fovea`/`track_state` + the gate once the pose path is validated as the single one.
 - **Stage 2 — DISCOVER relations by loop closure (the quotient).** Free composition path-integrates; relations (incl.
   commutativity) are found by loop closure under the **predictive-sufficiency** criterion (causal states / bisimulation, per
   `MATH_PHASE.md`) — close the coarsest partition that stays a sufficient statistic. *Gate:* on a task with a KNOWN

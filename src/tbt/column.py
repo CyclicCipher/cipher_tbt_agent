@@ -494,9 +494,12 @@ class CorticalColumn(nn.Module):
         chosen = self._locate_candidate(action, appeared, dominant)
         if chosen is not None:
             if action is not None and self._fovea is not None:            # learn the per-action translation (the efference)
-                self.L5.observe_move(action, (chosen[0] - self._fovea[0], chosen[1] - self._fovea[1]))
+                delta = (chosen[0] - self._fovea[0], chosen[1] - self._fovea[1])
+                self.L5.observe_move(action, delta)
                 self._observe_operator(action, self._fovea, chosen)       # L6_NONABELIAN Stage 1: learn the operator online (parallel; no behaviour change)
+                self.track_heading(delta)                                 # L6_NONABELIAN S1e: perceive heading from the movement direction
             self._fovea = chosen                                          # correct: snap to the sighting
+            self.sense_pose(chosen[0], chosen[1], getattr(self, "_heading", 0.0))   # S1e: maintain the pose belief (position + perceived heading)
         if self._fovea is None:
             self._fovea = cold
         return self._fovea

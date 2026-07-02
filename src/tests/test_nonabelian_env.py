@@ -63,8 +63,9 @@ class OrientationGame:
     N = 24
     STEP = 2
     GOAL = (12, 12)
-    SHAPE = [(0, 0), (1, 0), (0, 1)]                                # an asymmetric L -> orientation is visible
-    HEADINGS = [(1, 0), (0, 1), (-1, 0), (0, -1)]                   # h = 0..3 -> E/N/W/S
+    SHAPE = [(0, 0), (1, 0), (0, 1), (1, 1)]                        # a SYMMETRIC 2x2 mover -> a turn causes NO centroid
+    #                                                                shift (clean heading-from-movement); heading is HIDDEN
+    HEADINGS = [(1, 0), (0, 1), (-1, 0), (0, -1)]                   # h = 0..3 -> E/N/W/S (only revealed by moving)
 
     def __init__(self, levels=8):
         self.n_levels = levels
@@ -73,18 +74,10 @@ class OrientationGame:
         self.actions_taken = 0
         self.mx, self.my, self.h = 2, 2, 0
 
-    @staticmethod
-    def _rot(cell, h):
-        x, y = cell
-        for _ in range(h):
-            x, y = -y, x                                            # 90-degree CCW
-        return x, y
-
     @property
     def frame(self):
         g = [[0] * self.N for _ in range(self.N)]
-        for cell in self.SHAPE:
-            dx, dy = self._rot(cell, self.h)
+        for dx, dy in self.SHAPE:                                   # heading is HIDDEN -> the mover is rendered un-rotated
             x, y = self.mx + dx, self.my + dy
             if 0 <= x < self.N and 0 <= y < self.N:
                 g[y][x] = 7
@@ -125,7 +118,10 @@ def test_orientation_game_is_a_valid_non_abelian_frame():
     g = OrientationGame()
     g.step("RESET")
     assert len(g.frame) == 1 and len(g.frame[0]) == 24 and set(g.available) == {"FORWARD", "TURN_L", "TURN_R"}
-    assert sum(v == 7 for row in g.frame[0] for v in row) == 3               # the 3-cell oriented mover is rendered
+    assert sum(v == 7 for row in g.frame[0] for v in row) == 4               # the 4-cell (2x2) mover is rendered
+    # a TURN produces NO visible change (symmetric mover) -- heading is HIDDEN, revealed only by moving
+    t = OrientationGame(); t.step("RESET"); before = t.frame; t.step("TURN_L")
+    assert t.frame == before                                                 # turn is invisible in the frame
     # non-abelian: from the start, FORWARD (heading E) vs TURN_L-then-FORWARD (heading N) go different ways
     a = OrientationGame(); a.step("RESET"); a.step("FORWARD")
     b = OrientationGame(); b.step("RESET"); b.step("TURN_L"); b.step("FORWARD")
@@ -232,6 +228,25 @@ def test_S1e_operator_pose_path_integration_makes_forward_deterministic():
     col.track_pose_reset(); col.track_pose(Gs["TURN_L"]); col.track_pose(Gs["FORWARD"])
     p2 = col.pose_state()
     assert p1 != p2
+
+
+def test_S1e_step2_pose_path_engages_on_the_non_abelian_env():
+    """S1e step 2 (live wiring): driving the REAL agent on OrientationGame, the POSE path ENGAGES -- the non-abelian GATE
+    trips (`heading_dependent`: FORWARD's direction is inconsistent) and the agent's state node becomes a POSE (3-tuple:
+    x, y, heading), not just position. NavGame stays on `track_state` (no abelian regression -- test_path_integration).
+    (SOLVING OrientationGame is step 4; this validates the wiring + gate.)"""
+    from arc_sdk import TbtPolicy
+    game = OrientationGame(8)
+    policy = TbtPolicy(seed=0, local=True, integrate=True)
+    frame = game
+    for _ in range(400):
+        if policy.is_done([], frame):
+            break
+        name, coords = policy.choose_action([], frame)
+        frame = game.step(name, coords)
+    col = policy.agent.col
+    assert col.L5.heading_dependent()                                       # the non-abelian gate tripped (FORWARD inconsistent)
+    assert policy.agent._prev is not None and len(policy.agent._prev[0]) == 3   # the agent's state node is a POSE (x, y, heading)
 
 
 def test_S1e_heading_PERCEIVED_from_movement_direction_drives_the_pose():
