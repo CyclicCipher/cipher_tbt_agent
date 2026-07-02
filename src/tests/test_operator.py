@@ -176,6 +176,38 @@ def test_ONLINE_operator_learns_from_a_stream__COVERAGE_not_constraint_is_the_bo
     assert extrap_err(confined.operator(), 100) > max(0.3, 3.0 * good)         # COVERAGE is the bottleneck, not the constraint
 
 
+def test_L2_3_pose_machinery_is_ONE_operator_machinery():
+    """L6_NONABELIAN Stage 1d (the cross-layer FOLD): L2/3's SO(2)+translation pose machinery is ONE instance of the
+    operator machinery. (i) pose INFERENCE (`pose_between`) = `Operator.fit` (Procrustes IS the pose solve); (ii) pose
+    APPLICATION (`apply_pose`) = the SE(2) `pose_operator` acting; (iii) poses COMPOSE non-abelianly (SE(2)); (iv) the
+    CONTINUOUS rotation family = `power` (learn the step, read any pose) -- so the hand-coded `rot(θ)` becomes replaceable
+    by the learned Operator, general for an abstract column whose group isn't SO(2)."""
+    from tbt.l5_displacement import apply_pose, pose_between, pose_operator, rot
+    rng = np.random.default_rng(0)
+    model = rng.standard_normal((6, 2))
+    theta = 0.7
+    sensed = (rot(theta) @ model.T).T                                          # the patch rotated by theta
+
+    # (i) INFERENCE: pose_between's angle and Operator.fit's rotation agree
+    th = pose_between(list(model), list(sensed))[0]
+    assert abs(((th - theta + np.pi) % (2 * np.pi)) - np.pi) < 1e-6            # pose_between recovers theta
+    learned = Operator.fit(model, sensed, orthogonal=True)                     # Procrustes = the pose solve, group-general
+    assert np.allclose(learned.M, rot(theta), atol=1e-6)                       # ... the SAME rotation
+
+    # (ii) APPLICATION: apply_pose == the SE(2) pose_operator acting on homogeneous points
+    cloud = rng.standard_normal((5, 2))
+    t = (1.5, -2.0)
+    P = pose_operator(theta, t)
+    for got, loc in zip(apply_pose(list(cloud), theta, t), cloud):
+        assert np.allclose(got, P.apply((loc[0], loc[1], 1.0))[:2])
+        assert np.allclose(got, rot(theta) @ loc + np.array(t))               # ... and both match R·loc + t
+
+    # (iii) SE(2) is NON-ABELIAN: rotate-then-translate ≠ translate-then-rotate
+    assert not pose_operator(theta).commutes_with(pose_operator(0.0, (1.0, 0.0)))
+    # (iv) CONTINUOUS: from the learned step, power reads off any fraction of the rotation
+    assert np.allclose(learned.power(0.5).M, rot(theta / 2), atol=1e-6)
+
+
 def test_operator_power_gives_the_CONTINUOUS_group_from_a_learned_step():
     """L6_NONABELIAN Stage 1d (the CONTINUOUS / Lie form): from a LEARNED discrete-step rotation operator, `power(t)`
     generates the CONTINUOUS group (rotation by ANY angle) -- so the pose group can be LEARNED (fit the step) and any pose

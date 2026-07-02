@@ -86,11 +86,21 @@ def pose_between(model_disps, sensed_disps, tol=0.05):
     return out
 
 
+def pose_operator(theta, t=(0.0, 0.0)) -> Operator:
+    """A pose (SE(2) group element) as an `Operator` (L6_NONABELIAN unification): the 3x3 HOMOGENEOUS rotation-θ +
+    translation-t. This makes L2/3's pose ONE instance of the ONE operator machinery (L5/L6), not a separate SO(2)
+    plug-in: poses COMPOSE via `.then` (non-abelian SE(2)), interpolate/extrapolate via `.power` (the CONTINUOUS group),
+    and can be LEARNED via `Operator.fit` (Procrustes IS the pose solve) -- so the hand-coded `rot`/`apply_pose` become the
+    special case, and an abstract column's group slots in by LEARNING the operator instead of exponentiating SO(2)."""
+    c, s = np.cos(theta), np.sin(theta)
+    return Operator([[c, -s, float(t[0])], [s, c, float(t[1])], [0.0, 0.0, 1.0]])
+
+
 def apply_pose(cloud, theta, t):
-    """Apply a pose (group element, translation) to a point cloud: R(theta).cloud + t. The universal, continuous
-    operator -- correct by construction (there is no per-orientation entry to learn wrong)."""
-    R, t = rot(theta), np.asarray(t, float)
-    return [R @ np.asarray(loc, float) + t for loc in cloud]
+    """Apply a pose (group element + translation) to a point cloud = the SE(2) `pose_operator(theta, t)` acting on each
+    (homogeneous) point -- `R(theta)·loc + t`. ONE operator machinery (L6_NONABELIAN); correct by construction."""
+    P = pose_operator(theta, t)
+    return [P.apply((float(loc[0]), float(loc[1]), 1.0))[:2] for loc in cloud]
 
 
 align_rotations = pose_between                                  # the spatial-instance name (kept for callers)

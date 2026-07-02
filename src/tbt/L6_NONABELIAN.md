@@ -128,9 +128,15 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
     `generator` is the skew-symmetric Lie-algebra element. Gate: fit a 36° turn step from transitions → `power(t)`
     reconstructs `rot(t·36°)` for any `t` — i.e. LEARN the step, read off any continuous pose, replacing the hand-coded
     `rot(θ)`. So S1d has its tool (S₃ = finite groups; SE(2) + `power` = the continuous spatial group, learned).
-  - **S1d — the CROSS-LAYER UNIFICATION (the high-priority fold):** replace L5's hand-coded `rot`/`apply_pose` with the
-    LEARNED `Operator` (one group machinery); generalise L4 to feature-at-POSE; make L2/3 recognition/voting read the unified
-    group. *Gate:* the recognition tests still pass (no regression) with the learned operators; the pose group is one, shared.
+  - **S1d — the CROSS-LAYER UNIFICATION (the high-priority fold). Slice 1 DONE (2026-07-01, `l5.pose_operator`, suite 130):**
+    a pose (SE(2)) is now an `Operator` (`pose_operator(θ,t)` = the 3×3 homogeneous element), and `apply_pose` is ROUTED
+    through it — behaviour-IDENTICAL, all recognition tests green (no regression). Subsumption PROVEN (`test_operator.py`):
+    pose INFERENCE = `Operator.fit` (Procrustes recovers the same rotation as `pose_between`); pose APPLICATION = the
+    operator acting; poses COMPOSE non-abelianly (SE(2)); the CONTINUOUS family = `power`. So L2/3's pose IS one instance of
+    the ONE machinery, and hand-coded `rot(θ)` is now replaceable by the learned Operator (general for abstract columns).
+    *Slice 1 REMAINING:* fold pose INFERENCE (`pose_between`) into `Operator.fit` in the LIVE recognition path — deferred
+    because `pose_between` also returns MULTIPLE poses for SYMMETRIC patches (the stabilizer group), which the plain
+    Procrustes solve doesn't; that needs symmetry-aware handling. Then L4 → feature-at-POSE (the binding's location arg).
   - **S1e — DRIVE STATE by the operator** (the behaviour-affecting step): route `track`'s state read through the operator /
     pose instead of the additive `_fovea`; needs the grid's CODEBOOK BOUND fixed (`decode`/`place` cover only N×N while
     `_fovea` is unbounded). *Gate:* no-regression on the abelian games first, then it SOLVES the non-abelian env (which the
