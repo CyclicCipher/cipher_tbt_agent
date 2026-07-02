@@ -22,7 +22,7 @@ The stateless proto-object proposer runs in all modes (so `objects()` still feed
 from __future__ import annotations
 
 from .perceive import ObjectField, background, canonicalize, components
-from .retina import dominant_region, salient_cells          # the canonical dynamic residual + foveation (reused)
+from .retina import dominant_region, salient_cells, view_signature   # the residual/foveation + the content encoder (peripheral)
 
 
 def config_state(objects, contents=None):
@@ -72,7 +72,8 @@ class Sensor:
             appeared, dominant, cold = self._residual_candidates(frame, change, objects)
             if self.column is not None and self.integrate:                 # the FACTORED (content, location) via the column's ONE perception step
                 cloud = self._mover_cloud(frame)                           # the controllable mover's coloured cells
-                content, _pose = self.column.perceive(action, cloud)       # recognize -> PREDICT -> CORRECT -> LEARN -> content (P1)
+                cells = [(x, y) for (x, y, _c) in cloud]                    # the morphology (colour-blind) -> the pose
+                content, _pose = self.column.perceive(action, cells, view_signature(cloud))   # the PERIPHERAL encodes content; the column stays opaque
                 self._fovea = ((float(self.column._pose[0, 2]), float(self.column._pose[1, 2]))   # the belief position (foveal read-back)
                                if self.column._pose is not None else (dominant or cold))
                 state = (content, self.column.state_node(self.pos_bin))    # (content, location) -- the pose node (heading self-degenerates for abelian)

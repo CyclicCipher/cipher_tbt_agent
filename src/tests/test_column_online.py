@@ -12,6 +12,14 @@ if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
 from tbt.column import CorticalColumn, IMPASSABLE  # noqa: E402
+from tbt.retina import view_signature  # noqa: E402
+
+
+def _perceive(col, action, cloud):
+    """Drive `column.perceive` from a coloured cloud, doing the PERIPHERAL split (P1 slice 3): cells (colour-blind -> the
+    pose) + the opaque content descriptor (`retina.view_signature` -> an L4 feature id). The column stays content-opaque."""
+    cells = [(x, y) for (x, y, _c) in cloud]
+    return col.perceive(action, cells, view_signature(cloud))
 
 
 def test_column_learns_a_ring_online_without_eigendecomposition():
@@ -157,9 +165,9 @@ def test_column_owns_path_integration_via_perceive():
     col = CorticalColumn(n_entities=64, seed=0)
     shape = [(0, 0), (1, 0), (0, 1)]                                         # an asymmetric L (unique pose)
     cloud = lambda ox, oy: [(x + ox, y + oy, 7) for (x, y) in shape]         # noqa: E731
-    col.perceive(None, cloud(2, 2))                                         # cold: recognize the object at (2,2)
-    col.perceive(0, cloud(4, 2))                                            # action 0 -> stepped +2x (learns the operator)
-    col.perceive(0, cloud(6, 2))                                            # again -> predict + correct + refine
+    _perceive(col, None, cloud(2, 2))                                         # cold: recognize the object at (2,2)
+    _perceive(col, 0, cloud(4, 2))                                            # action 0 -> stepped +2x (learns the operator)
+    _perceive(col, 0, cloud(6, 2))                                            # again -> predict + correct + refine
     assert col.controllable()                                              # the learned operator moves things
     op = col.operator(0)
     assert abs(op.M[0, 2] - 2.0) < 0.6 and abs(op.M[1, 2]) < 0.6            # ~(2, 0) translation
@@ -173,7 +181,7 @@ def test_state_node_stays_constant_for_a_non_controllable_scene():
     col = CorticalColumn(n_entities=64, seed=0)
     shape = [(0, 0), (1, 0), (0, 1)]
     for t in range(12):                                                     # the object sits IN PLACE; only its colour toggles
-        col.perceive(t % 4, [(x + 10, y + 10, (t % 2) + 1) for (x, y) in shape])
+        _perceive(col, t % 4, [(x + 10, y + 10, (t % 2) + 1) for (x, y) in shape])
     assert not col.controllable(), col.pose_ops                            # in-place -> ~identity operator -> not controllable
     assert col.state_node(pos_bin=4) == (0, 0, 0)
 
@@ -303,10 +311,10 @@ def test_perceive_unifies_recognize_predict_correct_learn():
     def cloud_at(ox, oy, colour=7):
         return [(x + ox, y + oy, colour) for (x, y) in shape]
 
-    c0, (x0, y0, _t0) = col.perceive(None, cloud_at(0, 0))        # cold: observe at the origin
+    c0, (x0, y0, _t0) = _perceive(col, None, cloud_at(0, 0))        # cold: observe at the origin
     contents, xs = [c0], [x0]
     for k in range(1, 6):                                          # the mover translates +2x each step under action 0
-        c, (x, y, _t) = col.perceive(0, cloud_at(2 * k, 0))
+        c, (x, y, _t) = _perceive(col, 0, cloud_at(2 * k, 0))
         contents.append(c)
         xs.append(x)
     assert len(set(contents)) == 1, contents                      # content invariant to position (same shape)

@@ -11,7 +11,23 @@ _PKG_PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
-from tbt.retina import Retina, dominant_region, salient_cells  # noqa: E402
+from tbt.retina import Retina, dominant_region, salient_cells, view_signature  # noqa: E402
+
+
+def test_view_signature_is_pose_invariant_and_colour_aware():
+    """The retina's CONTENT ENCODER (P1 slice 3): the whole-view descriptor is rotation+translation-invariant (the same
+    shape+colours at any pose/position -> the same OPAQUE key) AND colour- + shape-aware. This is the peripheral's
+    modality-specific extraction; the column stays content-opaque (it only `encode`s the key to an SDR)."""
+    import numpy as np
+    from tbt.l5_displacement import apply_pose
+
+    shape = [(0, 0), (1, 0), (2, 0), (2, 1)]                        # an L-shaped tetromino stub
+    sig = view_signature([(x, y, 7) for (x, y) in shape])          # colour 7
+    for theta in (np.pi / 2, np.pi, 2.0):                          # rotate (incl. a non-axis angle) + translate far away
+        moved = [(px, py, 7) for (px, py) in apply_pose(shape, theta, (5.0, -4.0))]
+        assert view_signature(moved) == sig                        # pose-invariant descriptor
+    assert view_signature([(x, y, 3) for (x, y) in shape]) != sig   # same shape, different colour -> different key
+    assert view_signature([(0, 0, 7), (1, 0, 7), (0, 1, 7), (1, 1, 7)]) != sig   # a 2x2 block: same colour, different shape
 
 
 def _frame(n=8, fill=0):

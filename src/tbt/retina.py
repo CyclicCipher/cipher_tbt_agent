@@ -63,6 +63,27 @@ def salient_cells(prev, cur):
     return {(x, y) for y in range(len(cur)) for x in range(len(cur[0])) if prev[y][x] != cur[y][x]}
 
 
+def view_signature(cloud, ndigits: int = 3):
+    """The retina's CONTENT ENCODER (P1 slice 3): the rotation+translation-invariant, colour-aware descriptor of a local
+    VIEW -- raw coloured cells -> an OPAQUE key the column encodes to an L4 feature id (an SDR). It pairs the sorted
+    COLOUR multiset (composition; also covers a single cell) with the sorted multiset of `(colour-pair, pairwise distance)`
+    over all cell pairs (the invariant GEOMETRY): pairwise distances are preserved by any rotation/translation, so the
+    SAME shape+colours at any pose/position -> the SAME descriptor, while a different colouring or shape differs. This is
+    MODALITY-SPECIFIC extraction and lives in the PERIPHERAL (reference_tbt_feature_definition); the column stays
+    content-opaque. NB an EXACT-MATCH encoder: a truly general one would map SIMILAR views to OVERLAPPING SDRs (deferred).
+    `cloud` = `[(x, y, colour), ...]`."""
+    cells = [(float(x), float(y), c) for (x, y, c) in cloud]
+    colours = tuple(sorted(c for _x, _y, c in cells))
+    pairs = []
+    for i in range(len(cells)):
+        xi, yi, ci = cells[i]
+        for j in range(i + 1, len(cells)):
+            xj, yj, cj = cells[j]
+            d = round(((xi - xj) ** 2 + (yi - yj) ** 2) ** 0.5, ndigits)
+            pairs.append((min(ci, cj), max(ci, cj), d))
+    return colours, tuple(sorted(pairs))
+
+
 def dominant_region(cells):
     """The largest 4-connected component of `cells` and its centroid -- where exogenous attention foveates (the
     primary moving object). Returns (component, (cx, cy)), or (set(), None) if there was no change."""

@@ -522,17 +522,18 @@ class CorticalColumn(nn.Module):
         how `learn_pose_op` learns the body-frame increment). Returns (x, y, theta)."""
         return self.track_pose(self.operator(action))
 
-    def perceive(self, action, cloud):
+    def perceive(self, action, cells, content):
         """The unified TBT perception step (P1 2b/2c) — recognize → PREDICT → CORRECT → LEARN → read content, returning
-        `(content, pose)`. ONE path for abelian and non-abelian; the coordinator over the layers' primitives:
+        `(feature, pose)`. ONE path for abelian and non-abelian; the coordinator over the layers' primitives:
           PREDICT   — dead-reckon the pose belief by the action's operator (`path_integrate`, the efference copy);
-          OBSERVE+CORRECT — recognize the mover's pose from its cloud (L2/3 `sense_heading`) and snap the belief to it
+          OBSERVE+CORRECT — recognize the mover's pose from its `cells` (L2/3 `sense_heading`) and snap the belief to it
             (`sense_pose`); an UNRELIABLE (partial/occluded) view skips the correction, keeping the dead-reckoned predict;
           LEARN     — the per-action operator = the observed transformation (`learn_pose_op`, pose_before → corrected pose);
-          CONTENT   — the pose-invariant 'what' of the view (`L4.view_signature` → an L4 feature id).
-        `cloud` = the mover's cells `[(x, y, colour), ...]`. Replaces the fovea / observe_move / _track_pose split; the
-        abelian case is the commuting special case (a translation operator, heading ≈ 0)."""
-        cells = [(float(p[0]), float(p[1])) for p in cloud]
+          CONTENT   — encode the OPAQUE content descriptor to an L4 feature id (an SDR).
+        `cells` = the mover's cells `[(x, y), ...]` (the morphology, colour-blind -> the pose). `content` = the OPAQUE
+        descriptor the PERIPHERAL's encoder produced (retina.view_signature); the column is CONTENT-OPAQUE -- it never
+        inspects it (no colour here, reference_tbt_feature_definition). Abelian is the commuting special case (heading ≈ 0)."""
+        cells = [(float(p[0]), float(p[1])) for p in cells]
         pose_before = self._pose.copy() if self._pose is not None else None
         if action is not None and self._pose is not None:            # PREDICT (efference)
             self.path_integrate(action)
@@ -544,10 +545,10 @@ class CorticalColumn(nn.Module):
                 self.learn_pose_op(action, pose_before, self._pose)
         elif self._pose is None:                                     # no reliable view yet -> cold start at identity
             self.track_pose_reset()
-        content = self.L4.encode(self.L4.view_signature(cloud))
+        feat = self.L4.encode(content)                              # the opaque content -> an L4 feature id (SDR); no colour in the column
         x, y = float(self._pose[0, 2]), float(self._pose[1, 2])
         th = float(np.arctan2(self._pose[1, 0], self._pose[0, 0]) % (2 * np.pi))
-        return content, (x, y, th)
+        return feat, (x, y, th)
 
     def here_position(self):
         """The RAW metric position of the location belief (the pose translation) -- the ACHIEVER's coordinate frame (raw
