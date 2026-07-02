@@ -410,6 +410,41 @@ def test_S2_factored_closure_product_of_cycles_from_a_microworld():
     assert factor_group([TICK, TICK.then(TICK)]) is None                      # overlapping factors (⟨TICK⟩ = ⟨TICK²⟩ region) -> product ≠ |G|
 
 
+def test_S2_nested_carry_is_the_coupling_detected_by_predictive_sufficiency():
+    """L6_NONABELIAN Stage 2 (the NESTED/coupled case = place value / CARRY). The honest boundary + the principled result:
+    (i) HONEST BOUNDARY -- a raw single '+1' count is ONE big cycle Z/(b^k); from that generator alone there is NO free
+    digit-factoring (`factor_group([+1]) = [(0, b^k)]`). The notational factoring must come from OBSERVING the digits.
+    (ii) Given the digits, CARRY is the COUPLING, detected by predictive sufficiency: the UNITS digit is an autonomous cycle
+    (its next value depends only on itself -> sufficient), but the TENS digit is NOT sufficient alone (its next value depends
+    on whether the units WRAPPED -> the carry). (iii) CONTRAST: an INDEPENDENT counter+toggle passes predictive sufficiency
+    on BOTH factors (a true direct product) -- so the checker discriminates coupled (odometer) from independent."""
+    from tbt.operator import Operator, discover_periods, factor_group, is_predictively_sufficient
+
+    b, k = 4, 2
+    N = b ** k
+
+    # (i) HONEST BOUNDARY: the raw +1 over the full one-hot code is ONE cycle of order N (no free factoring from one generator)
+    plus1 = np.zeros((N, N))
+    for i in range(N):
+        plus1[(i + 1) % N, i] = 1.0
+    assert N in discover_periods(Operator(plus1))                              # a primitive Nth root -> one big cycle
+    assert factor_group([Operator(plus1)]) == [(0, N)]                         # one generator -> one Z/N cycle, NOT b*b
+
+    # the ODOMETER's +1 as digit-transitions (units then carry)
+    def digits(v):
+        return tuple((v // (b ** i)) % b for i in range(k))
+    odo = [(digits(v), digits((v + 1) % N)) for v in range(N)]
+    # (ii) units autonomous (sufficient); tens COUPLED to the units wrap (NOT sufficient) = carry detected
+    assert is_predictively_sufficient(odo, lambda d: d[0])
+    assert not is_predictively_sufficient(odo, lambda d: d[1])
+
+    # (iii) CONTRAST -- an INDEPENDENT counter(Z/n) + toggle(Z/2) under one combined step: BOTH factors sufficient (product)
+    n = 5
+    indep = [((c, t), ((c + 1) % n, 1 - t)) for c in range(n) for t in range(2)]
+    assert is_predictively_sufficient(indep, lambda s: s[0])                   # counter autonomous
+    assert is_predictively_sufficient(indep, lambda s: s[1])                   # toggle autonomous -> a true direct product
+
+
 def test_S2_discover_relations_by_loop_closure_cyclic_nonabelian_abelian():
     """L6_NONABELIAN Stage 2 -- DISCOVER relations by LOOP CLOSURE (the quotient), the Stage-2 gate on KNOWN presentations.
     Predictive sufficiency = operator EQUALITY (identical action ⇒ same element ⇒ same future). A 90° rotation generator:

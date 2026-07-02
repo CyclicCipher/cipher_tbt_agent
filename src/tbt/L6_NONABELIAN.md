@@ -251,10 +251,18 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
   from the LEARNED operators it recovers `[(TICK, n), (FLIP, 2)]`; it is BASIS-INDEPENDENT (a random orthogonal recoding that
   scrambles the one-hot blocks gives the SAME factoring — the factors are in the operators' joint eigenstructure, NOT the
   code's axes, so nothing is smuggled from a pre-separated code); and the GUARD rejects the wrong factoring — non-commuting
-  generators (S₃ → None) and overlapping factors (TICK & TICK² → product ≠ |G| → None). **REMAINING (slice 2 cont.):** the
-  NESTED/coupled case (place value / carry — the odometer where a single action couples the wheels; the `MATH_PHASE` P-carry
-  rehearsal, where the honest boundary is that a raw count is one big cycle, not the notational factoring) + the per-factor
-  loop-closure MAP wired into the column's path integration. Then S3.
+  generators (S₃ → None) and overlapping factors (TICK & TICK² → product ≠ |G| → None). **NESTED/CARRY CASE DONE (2026-07-01, `operator.is_predictively_sufficient`, suite 143):** the honest boundary + the
+  principled result. (i) HONEST BOUNDARY — a raw single-`+1` count is ONE big cycle Z/(bᵏ); from that generator alone there is
+  NO free digit-factoring (`factor_group([+1]) = [(0, bᵏ)]`), so the notational place-value factoring must come from OBSERVING
+  the digits, not from the count dynamics (we do NOT conjure it). (ii) Given the digits, CARRY is the COUPLING, DETECTED by
+  predictive sufficiency (bisimulation/lumpability, made an explicit checker): the UNITS digit is autonomous (its projection is
+  a congruence → sufficient), but the TENS digit is NOT sufficient alone (its next value depends on whether the units WRAPPED —
+  the carry) → the independent-factoring is correctly rejected for the coupled digit. (iii) The SAME checker passes BOTH factors
+  of a genuinely INDEPENDENT counter+toggle → it discriminates coupled (odometer, triangular) from independent (direct product).
+  So the S2 story is complete on the algebra: free/read-off (relations by whole-operator closure) + factored discovery (spectrum)
+  + factored closure (direct product, guarded) + the coupled/carry boundary (predictive sufficiency detects it; depth-wall on
+  UNBOUNDED carry stays the `MATH_PHASE`/DEQ boundary, not attempted here). **REMAINING:** wire the per-factor loop-closure MAP
+  into the column's path integration (so the agent USES product-of-cycles maps on real games — counters/toggles/patrols). Then S3.
   **NB the "geodesic planner" is NOT Dijkstra** (that would be a parallel non-neuroscientific system): the geodesic is computed
   the brain's way — SR / prioritised-sweeping VALUE PROPAGATION over the operator-generalised representation → the POTENTIAL
   FIELD `vector_action`/`achieve` already follow (reference_brain_planning; the SR warps around barriers = the geodesic). The

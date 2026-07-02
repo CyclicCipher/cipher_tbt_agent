@@ -243,6 +243,23 @@ def factor_group(generators, tol: float = 1e-6, max_elements: int = 256):
     return [(i, orders[i]) for i in range(len(generators))]
 
 
+def is_predictively_sufficient(transitions, project) -> bool:
+    """L6_NONABELIAN Stage 2 — the PREDICTIVE-SUFFICIENCY (bisimulation / lumpability) test that GUARDS a factored closure.
+    A projection (a candidate factor) is SUFFICIENT iff states sharing a projected value ALWAYS transition to states sharing
+    a projected value — i.e. the projection is a CONGRUENCE for the dynamics, so closing/merging within it loses no predictive
+    information. `transitions` = `(state, next_state)` pairs under ONE action; `project` = `state -> factor value` (hashable).
+    An INDEPENDENT factor passes; a COUPLED factor FAILS — e.g. base-b carry: the tens digit's next value depends on whether
+    the UNITS wrapped, so projecting to the tens alone is NOT a congruence. That failure IS the carry, detected — and the
+    wrong-merge the guard rejects. The causal-state / bisimulation criterion (Crutchfield) made an explicit checker."""
+    seen = {}
+    for s, nxt in transitions:
+        k, pn = project(s), project(nxt)
+        if k in seen and seen[k] != pn:
+            return False
+        seen[k] = pn
+    return True
+
+
 def homog(pos):
     """Lift a position to homogeneous coords `[x…, 1]` — the state that `translation`/`rotation` operators act on."""
     return np.concatenate([np.asarray(pos, dtype=float), [1.0]])
