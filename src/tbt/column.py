@@ -62,7 +62,6 @@ class CorticalColumn(nn.Module):
         self.loc, self.rel = {}, {}                           # symbol→frame index; relation→operator key (the EDGES live in L5)
         self.place = None                                     # (n, d_mem) per-node SR-frame place codes (set by refresh)
         self._cur = None                                      # the current node -- discrete path integration over the graph
-        self._fovea = None                                    # P1: the CONTINUOUS metric location belief (pixel), path-integrated by L5's translation
         self._map = torch.zeros(feat_dim, d_mem)             # M5/L7-A: the online allocentric MAP (Σ feature ⊗ place), read by feature_at
         self.cost: dict = {}                                 # the COST FIELD (AVERSIVE value): location -> expected interaction cost (ARCHITECTURE.md §3; kept)
         self._pose = None                                    # L6_NONABELIAN S1e: the POSE belief (SE(2) matrix) path-integrated by COMPOSING operators (non-abelian)
@@ -494,68 +493,11 @@ class CorticalColumn(nn.Module):
         """The current node."""
         return self._cur
 
-    # ----- CONTINUOUS-metric path integration: the SPATIAL location belief (L6 ⊕ L5 translation) -----------
-    # P1 (GROUNDING_PLAN): the column OWNS the allocentric position (was the sensor's `_coarse_pos`). Given the
-    # residual CANDIDATES the sensor detects, the column DISAMBIGUATES the controllable one (nearest the efference
-    # prediction fovea+L5.move -- animation rejection), path-integrates the belief, LEARNS the per-action translation
-    # (L5.observe_move), and coarsens to a recurring state node -- gated by L5.controllable so a state-change scene
-    # keeps a constant position. The continuous sibling of the discrete `loc_*` (P1c reconciles them). The column
-    # imports no perception: the sensor passes pre-extracted centroids and reads back the chosen sighting.
+    # ----- the location belief reset (a level boundary) ---------------------------------------------------
     def track_reset(self):
-        """A level boundary: drop the location belief -- BOTH the fovea (position) and the POSE belief (they are the ONE
-        belief; `state_node` reads the pose, so a stale pose across a reset would corrupt every transfer level). The board
-        resets; do not path-integrate across it."""
-        self._fovea = None
+        """A level boundary: drop the location belief (the pose) -- the board resets, so do not path-integrate across it.
+        `perceive` re-initialises the belief from the next reliable sighting (or a cold-start identity)."""
         self._pose = None
-
-    def track(self, action, appeared, dominant, cold=None, shape=None):
-        """Path-integrate one step. `appeared` = candidate centroids (arrived controllable cells), `dominant` = the
-        fallback dominant-residual centroid (or None), `cold` = the cold-start centroid (largest object / frame centre).
-        DISAMBIGUATE via the efference (L5.move) when the action's translation is known, else take the dominant; on a
-        real sighting LEARN the translation (L5.observe_move) and snap. Returns the chosen sighting (pixel) so the
-        sensor extracts the feature there; keeps the belief put when nothing was sensed.
-
-        L6_NONABELIAN S1e ROUTE-1 (`shape` given -> the mover's FULL cloud, only once the non-abelian gate has tripped):
-        pose tracking from the SHAPE -- see `_track_pose`. `shape=None` (all abelian games) is byte-identical to before."""
-        if shape:
-            return self._track_pose(action, shape, cold)
-        chosen = self._locate_candidate(action, appeared, dominant)
-        if chosen is not None:
-            if action is not None and self._fovea is not None:            # learn the per-action translation (the efference)
-                delta = (chosen[0] - self._fovea[0], chosen[1] - self._fovea[1])
-                self.L5.observe_move(action, delta)
-                self.track_heading(delta)                                 # ROUTE-2: perceive heading from the movement direction
-            self._fovea = chosen                                          # correct: snap to the sighting
-            self.sense_pose(chosen[0], chosen[1], getattr(self, "_heading", 0.0))   # S1e: maintain the pose belief (position + perceived heading)
-        if self._fovea is None:
-            self._fovea = cold
-        return self._fovea
-
-    def _track_pose(self, action, shape, cold):
-        """L6_NONABELIAN S1e ROUTE-1: track the POSE from the mover's SHAPE. Update the belief + LEARN the body-frame SE(2)
-        operator ONLY from a FULL, reliably-recognised view (`sense_heading` sets `_heading_reliable` -- a PARTIAL/clipped
-        view at a border teaches a wrong pose, so it must not poison the operator). On a full view: perceive heading, snap
-        position to the shape centroid, learn `pose_ops`. On a partial view: DEAD-RECKON with the learned operator (or hold
-        if none yet). Position + `pose_ops` feed the pose-aware achiever (`_pose_vector_action`)."""
-        self.sense_heading(shape)                                          # sets self._heading + self._sensed_pos + self._heading_reliable
-        moved = action is not None and self._fovea is not None
-        if self._heading_reliable:
-            chosen = self._sensed_pos                                      # the orientation-invariant anchor (no turn jitter)
-            pose_before = self._pose.copy() if self._pose is not None else None
-            self._fovea = chosen
-            self.sense_pose(chosen[0], chosen[1], self._heading)
-            if pose_before is not None and moved:
-                self.learn_pose_op(action, pose_before, self._pose)       # LEARN the body-frame operator (clean view only)
-        elif moved and self._pose is not None and action in self.pose_ops:  # partial view -> dead-reckon with the learned op
-            self._pose = self._pose @ np.asarray(self.pose_ops[action].M, dtype=float)
-            self._fovea = (float(self._pose[0, 2]), float(self._pose[1, 2]))
-        if self._fovea is None:
-            self._fovea = cold
-        return self._fovea
-
-    @staticmethod
-    def _shape_centroid(shape):
-        return (sum(p[0] for p in shape) / len(shape), sum(p[1] for p in shape) / len(shape))
 
     def operator(self, action) -> Operator:
         """The ONE per-action OPERATOR (P1 slice 2a): the learned SE(2) POSE operator (`pose_ops[action]`) when one was
@@ -607,27 +549,11 @@ class CorticalColumn(nn.Module):
         th = float(np.arctan2(self._pose[1, 0], self._pose[0, 0]) % (2 * np.pi))
         return content, (x, y, th)
 
-    def _locate_candidate(self, action, appeared, dominant):
-        """Which residual is the controllable object. Once the action's translation is known, the arrived candidate
-        nearest the EFFERENCE prediction (fovea + L5.move) -- clean tracking that ignores autonomous animation; until
-        then (cold start / unlearned action), the dominant residual."""
-        d = self.L5.move(action)
-        if self._fovea is not None and (d[0] * d[0] + d[1] * d[1]) > 0.25 and appeared:
-            pred = (self._fovea[0] + d[0], self._fovea[1] + d[1])
-            return min(appeared, key=lambda c: (c[0] - pred[0]) ** 2 + (c[1] - pred[1]) ** 2)
-        return dominant
-
-    def track_pos(self):
-        """The continuous location belief (pixel) -- where the sensor foveates to extract the feature."""
-        return self._fovea
-
     def here_position(self):
-        """The RAW metric position of the current belief -- the POSE position when the dynamics are heading-dependent
-        (non-abelian), else the tracked fovea. The ACHIEVER's coordinate frame (raw pixels), distinct from the binned
-        tabular state node -- so pose-aware `distance`-to-goal is measured in the same units as the goal."""
-        if self._pose is not None and self.L5.heading_dependent():
-            return (float(self._pose[0, 2]), float(self._pose[1, 2]))
-        return self._fovea
+        """The RAW metric position of the location belief (the pose translation) -- the ACHIEVER's coordinate frame (raw
+        pixels), distinct from the binned tabular state node, so pose-aware `distance`-to-goal is measured in the goal's
+        units. `None` before the belief is set."""
+        return (float(self._pose[0, 2]), float(self._pose[1, 2])) if self._pose is not None else None
 
     def controllable(self) -> bool:
         """Does the learned per-action OPERATOR move things? -> the tracked mover responds to actions, so its allocentric
@@ -657,12 +583,11 @@ class CorticalColumn(nn.Module):
         self._pose = np.eye(3)
 
     def track_pose(self, op: Operator):
-        """Path-integrate the POSE by RIGHT-composing the body-frame action operator: `P ← P·G` (L6_NONABELIAN S1e).
-        Because composition is NON-COMMUTATIVE, the pose distinguishes HEADINGS -- so a non-abelian env's dynamics (e.g.
-        FORWARD, whose effect depends on heading) become DETERMINISTIC over the pose, which the additive `_fovea` position
-        CANNOT. `op` = the per-action operator (an `Operator`, the learned body-frame increment). Returns (x, y, theta).
-        NB the abelian case (a pure translation op) reproduces `_fovea`; this is `track` generalised from position to pose.
-        Live-wiring into the agent's state awaits HEADING PERCEPTION (the agent perceives position, not orientation)."""
+        """Path-integrate the POSE by RIGHT-composing the body-frame action operator: `P ← P·G`. Because composition is
+        NON-COMMUTATIVE, the pose distinguishes HEADINGS -- so a non-abelian env's dynamics (e.g. FORWARD, whose effect
+        depends on heading) become DETERMINISTIC over the pose; the abelian case (a pure translation op) accumulates the
+        position, heading ≈ 0 -- the commuting special case. `op` = the per-action operator (the learned body-frame
+        increment). Returns (x, y, theta). The predict primitive `path_integrate` calls; `perceive` drives it."""
         if self._pose is None:
             self._pose = np.eye(3)
         self._pose = self._pose @ np.asarray(op.M, dtype=float)
@@ -725,17 +650,6 @@ class CorticalColumn(nn.Module):
         return (int(round(self._pose[0, 2])) // pos_bin, int(round(self._pose[1, 2])) // pos_bin,
                 int(round(th / (2 * np.pi) * ang_bins)) % ang_bins)
 
-    def track_heading(self, pos_delta, thresh: float = 0.25):
-        """PERCEIVE the heading from the MOVEMENT DIRECTION (L6_NONABELIAN S1e heading perception): a move that changes
-        position (a forward) reveals `heading = atan2(delta)` -- the agent perceives its orientation by HOW IT MOVES, no
-        shape-orientation machinery needed, reusing the position observation it already has. A ~zero delta (a turn) leaves
-        the heading STALE (to be re-perceived on the next forward -- the honest limitation; robust heading via shape
-        recognition or turn dead-reckoning is a follow-up). Returns the current heading belief."""
-        dx, dy = float(pos_delta[0]), float(pos_delta[1])
-        if dx * dx + dy * dy > thresh:                       # a real move -> its direction IS the heading
-            self._heading = float(np.arctan2(dy, dx))
-        return getattr(self, "_heading", 0.0)
-
     def sense_heading(self, cloud):
         """PERCEIVE heading from the mover's SHAPE (L6_NONABELIAN S1e ROUTE-1 -- the UNIFIED recognition path): L2/3
         recognises the object and SOLVES its pose theta -- the orientation IS the heading, clean EVERY frame incl. after a
@@ -758,9 +672,9 @@ class CorticalColumn(nn.Module):
         return self._heading
 
     def sense_pose(self, x, y, theta):
-        """CORRECT the pose belief to an OBSERVED pose (L6_NONABELIAN S1e): snap `_pose` to the perceived (x, y, heading)
-        -- the pose analogue of `track`'s snap-to-sighting (position from the tracked centroid, heading from
-        `track_heading`). Complements `track_pose` (dead-reckon from efference) as predict+correct. Returns `pose_state`."""
+        """CORRECT the pose belief to an OBSERVED pose: snap `_pose` to the recognized (x, y, heading) from `sense_heading`
+        (L2/3). Complements `path_integrate`/`track_pose` (dead-reckon from efference) as the correct half of
+        predict-then-correct. Returns `pose_state`."""
         c, s = np.cos(theta), np.sin(theta)
         self._pose = np.array([[c, -s, float(x)], [s, c, float(y)], [0.0, 0.0, 1.0]])
         return self.pose_state()

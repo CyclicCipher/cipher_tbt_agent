@@ -114,17 +114,6 @@ class Sensor:
         comp, _centroid = max(components(cells), key=lambda cc: len(cc[0]))
         return [(x, y, frame[y][x]) for (x, y) in comp]
 
-    def _mover_shape(self, frame):
-        """L6_NONABELIAN S1e ROUTE-1: the FULL connected cloud of the controllable mover (the largest non-background
-        component of the CURRENT frame), so L2/3 can recover its orientation. Unlike the change residual, this is the whole
-        object even on an in-place TURN (where the residual is only the cells that differ). Cells as `(x, y)`; None if empty."""
-        bg = background(frame)
-        cells = {(x, y) for y, row in enumerate(frame) for x, v in enumerate(row) if v != bg}
-        if not cells:
-            return None
-        comp, _centroid = max(components(cells), key=lambda cc: len(cc[0]))
-        return list(comp)
-
     def _largest_centroid(self, objects):
         if not objects:
             return None

@@ -406,31 +406,3 @@ def test_S1e_step2_pose_path_engages_on_the_non_abelian_env():
     assert col.controllable()                                              # the learned operator moves things
     assert len(col.state_node()) == 3                                      # the location node is a POSE (x, y, heading)
     assert any(abs(np.asarray(op.M)[1, 0]) > 0.3 for op in col.pose_ops.values())   # some TURN learned a real ROTATION (non-abelian)
-
-
-def test_S1e_heading_PERCEIVED_from_movement_direction_drives_the_pose():
-    """L6_NONABELIAN S1e (heading perception): the agent PERCEIVES its heading from HOW IT MOVES -- a forward move's
-    position-delta direction IS the heading (no shape-orientation needed, reusing the position observation). This is the
-    observable signal that feeds the pose belief and makes the 4 headings DISTINGUISHABLE in the state -- so FORWARD becomes
-    deterministic. (Limitation: a turn produces no movement, so heading is stale until the next forward.)"""
-    import numpy as np
-
-    from tbt.column import CorticalColumn
-    col = CorticalColumn(n_entities=8, seed=0)
-
-    states = set()
-    for turns in range(4):                                                      # each of the 4 headings
-        w = OrientationWorld()
-        for _ in range(turns):
-            w.step("TURN_L")
-        x0, y0 = w.x, w.y
-        w.step("FORWARD")                                                       # a forward move reveals the heading
-        perceived = col.track_heading((w.x - x0, w.y - y0))
-        assert abs(((perceived - w.theta + np.pi) % (2 * np.pi)) - np.pi) < 1e-6   # movement direction == true heading
-        col.sense_pose(x0, y0, perceived)                                       # correct the pose belief from perception
-        states.add(col.pose_state())
-    assert len(states) == 4                                                     # perception distinguishes the 4 headings -> FORWARD deterministic
-
-    # the honest limitation: a TURN (no movement) leaves the heading stale
-    h = col.track_heading((2.0, 0.0))                                           # a real move sets heading to 0
-    assert col.track_heading((0.0, 0.0)) == h                                   # a zero-delta (turn) leaves it unchanged
