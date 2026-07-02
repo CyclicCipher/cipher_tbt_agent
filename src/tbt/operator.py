@@ -243,6 +243,26 @@ def factor_group(generators, tol: float = 1e-6, max_elements: int = 256):
     return [(i, orders[i]) for i in range(len(generators))]
 
 
+def permutation_operator(mapping, alphabet=None):
+    """L6_NONABELIAN Stage 2 step (c) — bridge a CONTENT transition map `{old -> new}` (e.g. L5.recolor: the *what changed*
+    operator) into a permutation OPERATOR over the content alphabet (one-hot content), so the content dynamics become an
+    `Operator` whose CYCLIC structure is readable by `discover_periods` — a TOGGLE `{0->1, 1->0}` is a 2-cycle, a counter a
+    longer cycle. This makes `x` (content) a first-class factor of the `g × x` model, learned + factorable the SAME way as
+    `g`. Unmapped alphabet values map to THEMSELVES (identity). Returns `(Operator, alphabet)`; the alphabet gives the
+    one-hot index so callers encode/decode content <-> vector. NB a partial/non-bijective map is not a clean permutation
+    (two olds → one new), so its spectrum won't be pure roots of unity — honestly reflecting an incompletely-observed cycle."""
+    if alphabet is None:
+        alphabet = sorted(set(mapping.keys()) | set(mapping.values()), key=repr)
+    idx = {v: i for i, v in enumerate(alphabet)}
+    k = len(alphabet)
+    M = np.eye(k)
+    for old, new in mapping.items():
+        i = idx[old]
+        M[:, i] = 0.0                                          # override the identity column for a mapped value
+        M[idx[new], i] = 1.0
+    return Operator(M), alphabet
+
+
 def is_predictively_sufficient(transitions, project) -> bool:
     """L6_NONABELIAN Stage 2 — the PREDICTIVE-SUFFICIENCY (bisimulation / lumpability) test that GUARDS a factored closure.
     A projection (a candidate factor) is SUFFICIENT iff states sharing a projected value ALWAYS transition to states sharing

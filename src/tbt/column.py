@@ -307,6 +307,17 @@ class CorticalColumn(nn.Module):
         self.bind_at(location, sensed_feature)                            # learn: bind the sensed feature at the location
         return surprised
 
+    def predict_gx(self, g, action):
+        """L6_NONABELIAN Stage 2 step (c) -- the `g × x` FORWARD prediction (the TBT/TEM generative model): predict the next
+        observation given position + action by BINDING the two halves the fragmented FM kept apart. Path-integrate the
+        STRUCTURE -- `g'` = `predict(g, action)` (L5's operator / the learned edge = the *where* transition) -- then read the
+        CONTENT bound there -- `x'` = `feature_at(g')` (the L4-over-L6 map = the *what* at that location). Returns `(g', x')`
+        = 'where I'll be + what's there'. This is TEM's objective ('predict next observation | position, action') as ONE
+        model, replacing the location-blind `field_rule` CA. (In-place content DYNAMICS -- a toggle -- compose the
+        `content_operator` at `g'`; that + the predictive-sufficiency gate for context-dependent content is c2.)"""
+        g2 = self.predict(g, action)
+        return g2, self.feature_at(g2)
+
     def sense_object(self, cloud, location):
         """C4 (COLUMN_AUDIT): L2/3 RECOGNITION wired into the feature-at-location cycle. RECOGNISE the sensed object
         (pose-INVARIANT identity via L2/3's evidence loop, learned online) and bind THAT identity at the L6 `location`
@@ -685,6 +696,16 @@ class CorticalColumn(nn.Module):
         else:
             gens = [self.action_operator(a) for a in sorted(self.action_ops)]
         return factor_group(gens, tol=tol, max_elements=max_elements) if gens else None
+
+    def content_operator(self, shape, action):
+        """L6_NONABELIAN Stage 2 step (c) -- the CONTENT operator for `(shape, action)`: L5's `recolor` transition map
+        `{old -> new}` (the *what changed* half) as a permutation `Operator` (`operator.permutation_operator`), so content
+        dynamics are a first-class, FACTORABLE part of the `g × x` model -- a TOGGLE is a 2-cycle, a counter a longer cycle,
+        readable by `discover_periods`. This is the `x` half's operator, learned the SAME way as `g`. Returns `(Operator,
+        alphabet)`, or None if no content transition is learned for `(shape, action)`."""
+        from .operator import permutation_operator
+        mapping = self.L5.recolor.get((shape, action))
+        return permutation_operator(mapping) if mapping else None
 
     def pose_state(self, pos_bin: int = 1, ang_bins: int = 4):
         """The POSE belief binned -> the discrete state key `(x, y, heading-bucket)`. Includes HEADING, so a non-abelian

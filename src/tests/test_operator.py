@@ -354,6 +354,45 @@ def test_S2_factored_periods_from_the_spectrum_the_smuggle_guard():
     assert 6 in discover_periods(onl.operator())                              # the factor period read from the LEARNED operator's spectrum
 
 
+def test_S2c_recolor_content_becomes_a_factorable_cycle_operator():
+    """L6_NONABELIAN Stage 2 step (c) -- the FM `g × x` unification, the content half: L5's `recolor` transition map (the
+    *what changed* operator) bridges into a permutation OPERATOR (`permutation_operator` / `col.content_operator`), so
+    content dynamics are FACTORABLE the same way as structure. A learned TOGGLE is recognised as a 2-cycle and a 3-counter as
+    a 3-cycle, purely from the content operator's spectrum -- so `x` joins `g` as a first-class factor of the one model."""
+    from tbt.column import CorticalColumn
+    from tbt.operator import discover_periods, permutation_operator
+
+    # the bridge in isolation: a toggle map -> a 2-cycle; a 3-counter -> a 3-cycle
+    op2, _a2 = permutation_operator({0: 1, 1: 0})
+    assert discover_periods(op2) == [2]
+    op3, _a3 = permutation_operator({0: 1, 1: 2, 2: 0})
+    assert discover_periods(op3) == [3]
+
+    # LEARNED through the column: config-state transitions whose CONTENT toggles -> L5.recolor -> content_operator = 2-cycle
+    col = CorticalColumn(n_entities=8, seed=0)
+    a = 0
+    col.L5.observe(((1, (0, 0), 0),), a, ((1, (0, 0), 1),))                     # content 0 -> 1 (in place)
+    col.L5.observe(((1, (0, 0), 1),), a, ((1, (0, 0), 0),))                     # content 1 -> 0
+    op, alphabet = col.content_operator((1,), a)
+    assert set(alphabet) == {(0,), (1,)} and discover_periods(op) == [2]        # a learned toggle = a content 2-cycle
+    assert col.content_operator((1,), 99) is None                              # no content transition learned -> None
+
+
+def test_S2c_predict_gx_binds_structure_and_content():
+    """L6_NONABELIAN Stage 2 step (c) -- the `g × x` FORWARD prediction binds the two halves the fragmented FM kept apart:
+    the STRUCTURE predictor (`predict` -> g') with the CONTENT map (`feature_at` -> x' at g'). This is TEM's objective
+    ('predict the next observation | position, action') as ONE model -- where I'll be + what's there -- vs the location-blind
+    `field_rule` CA."""
+    from tbt.column import CorticalColumn
+    col = CorticalColumn(n_entities=8, seed=0)
+    for _ in range(5):                                                          # train the structure g (A<->B) so the SR place codes are non-trivial
+        col.observe("A", 0, "B")
+        col.observe("B", 1, "A")
+    col.sense_at("B", 3)                                                        # bind content x = feature 3 at node B (= g)
+    g2, x2 = col.predict_gx("A", 0)
+    assert g2 == "B" and x2 == 3                                                # predicts: after action 0 from A -> at B, feature 3 (where + what)
+
+
 class _CounterToggle:
     """A two-factor MICROWORLD: a COUNTER (Z/n, advanced by TICK) and an independent TOGGLE (Z/2, flipped by FLIP). The two
     actions act on ORTHOGONAL factors, so the dynamics are a genuine PRODUCT of cycles (Z/n × Z/2). Encoded as one-hot(counter)

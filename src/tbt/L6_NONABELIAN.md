@@ -261,8 +261,19 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
   of a genuinely INDEPENDENT counter+toggle → it discriminates coupled (odometer, triangular) from independent (direct product).
   So the S2 story is complete on the algebra: free/read-off (relations by whole-operator closure) + factored discovery (spectrum)
   + factored closure (direct product, guarded) + the coupled/carry boundary (predictive sufficiency detects it; depth-wall on
-  UNBOUNDED carry stays the `MATH_PHASE`/DEQ boundary, not attempted here). **REMAINING:** wire the per-factor loop-closure MAP
-  into the column's path integration (so the agent USES product-of-cycles maps on real games — counters/toggles/patrols). Then S3.
+  UNBOUNDED carry stays the `MATH_PHASE`/DEQ boundary, not attempted here).
+  **STEP (c) = REBUILD THE FORWARD MODEL AS THE `g × x` BOUND GENERATIVE MODEL (`FORWARD_MODEL_PLAN.md` REFRAME).** Studying
+  the FM against the neuroscience showed it is FRAGMENTED (four disconnected predictors), NOT the TEM `g × x` model: the
+  `field_rule` CA predicts content LOCATION-BLIND (it abandoned `g`), while the operator (`g`) never feeds content. The fix:
+  ONE model — path-integrate `g` (the S1/S2 operator) and predict `x` (L4 content) bound at `g`. **STEP 1 DONE (2026-07-01,
+  suite 146):** the two content bridges — `operator.permutation_operator` + `column.content_operator` turn L5's `recolor`
+  transition map into a permutation OPERATOR (a learned TOGGLE = a 2-cycle, a counter = a 3-cycle, readable by
+  `discover_periods` — content joins `g` as a factorable operator); and `column.predict_gx` BINDS the structure predictor
+  (`predict` → g') with the content map (`feature_at` → x' at g') = TEM's "predict next observation | position, action".
+  **REMAINING (c2):** compose the `content_operator` for in-place content dynamics (toggles) + GATE per-factor-vs-joint by
+  `is_predictively_sufficient` (context-dependent content = the coupling); PROVE the `g × x` model subsumes the CA's job
+  (cn04 frontier), the dynamics games (Toggle/Tetris/CollectAll), and config-mode (`disp`); THEN delete `disp`, the
+  `field_rule` CA, and `field_features` (the per-piece verdict + no-parallel-system staging in `FORWARD_MODEL_PLAN.md`). Then S3.
   **NB the "geodesic planner" is NOT Dijkstra** (that would be a parallel non-neuroscientific system): the geodesic is computed
   the brain's way — SR / prioritised-sweeping VALUE PROPAGATION over the operator-generalised representation → the POTENTIAL
   FIELD `vector_action`/`achieve` already follow (reference_brain_planning; the SR warps around barriers = the geodesic). The

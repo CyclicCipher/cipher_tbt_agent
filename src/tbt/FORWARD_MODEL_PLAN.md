@@ -1,8 +1,32 @@
 # FORWARD_MODEL_PLAN — columns that do generative forward modelling
 
-> **STATUS (2026-07-01): DONE / HISTORICAL.** The generative forward model (FM1–4) is built + live (`l5_displacement.py`
-> `feature_field`/`observe_field`/`field_step`; `agent.py` `_field_plan`/`field_value`). Kept for the reasoning; live
-> north-stars: `COLUMN_AUDIT.md`, `GROUNDING_PLAN.md`, `BASAL_GANGLIA_PLAN.md`.
+> **STATUS (2026-07-01): FM1–4 BUILT, but REFRAMED — it is not yet the TBT `g × x` model.** The pieces below are live
+> (`l5_displacement.py` `field_rule`/`field_step`; `agent.py` `_field_plan`/`field_value`), but studying them against the
+> neuroscience (§1–2) shows the FM is **FRAGMENTED**, not the factored-and-bound generative model TEM prescribes. See the
+> REFRAME below; this is now L6_NONABELIAN Stage 2 step (c). Live north-stars: `COLUMN_AUDIT.md`, `L6_NONABELIAN.md`.
+>
+> ## REFRAME (2026-07-01) — the FM must become the ONE `g × x` bound generative model
+> TEM (§1–2) prescribes ONE model: path-integrate STRUCTURE `g` (the grid/operator = *where*) and predict CONTENT `x`
+> (L4 feature = *what*) BOUND at `g` — predict the next observation given position + action. What is built instead is
+> FOUR disconnected predictors: the **operator** (`move_delta`/`pose_ops` = `g`) never feeds content; the **`field_rule`
+> CA** predicts content from the LOCAL NEIGHBOURHOOD, **location-blind** (it abandoned `g` — the entorhinal machinery TBT
+> says the cortex REUSES); plus object-level `disp`/`recolor` and the tabular `edges` as two more separate stores. The
+> S1/S2 operator work IS the `g` half done right (non-abelian + factored); the FM should be rebuilt on it as `g × x`.
+> **Per-piece verdict (step c):**
+> - `move_delta`/`pose_ops`/`Operator` — **KEEP: this is `g`** (the structure half). | `sense_at` / L4-over-L6 —
+>   **KEEP + PROMOTE: the `x` predictor at `g`** (the bind). | `recolor {old→new}` — **REFRAME: the content OPERATOR**
+>   (a permutation, factorable by `discover_periods`; a toggle = a 2-cycle).
+> - `disp` — **REMOVE: redundant with the operator** (`g`); migrate config-mode `_generalize` onto it. | `field_rule` CA —
+>   **DEMOTE → REMOVE: the non-neuroscientific piece**; its job (local *context-dependent* content) becomes the content
+>   operator + predictive-sufficiency; kept as a fallback only until `g×x` is proven on cn04-style frontiers. |
+>   `field_features`/`field_value` — **DEMOTE/REFRAME: value over the `g×x` state** (the SR value); the count-bag is a
+>   structure-free proxy. | `edges`/graph/SR — **KEEP: the conjunctive lookup complement** (`reference_brain_planning`;
+>   not deleted — the brain has both the generalizing grid and the conjunctive lookup), reframed as the residual where the
+>   operator is insufficient.
+> **STAGING (no parallel system — build, prove, then delete):** (1) build the `g×x` predictor (operator → `g'`;
+> `sense_at`+content-operator → `x'`; predictive-sufficiency gates per-factor vs joint); (2) PROVE it subsumes the CA's
+> job (cn04 frontier), the dynamics games (Toggle/Tetris/CollectAll), and config-mode (`disp`/`_generalize`); (3) THEN
+> delete `disp`, the `field_rule` CA, and `field_features` (judged at the end, not on an intermediate dip).
 
 *Plan, 2026-06-30. The pivot the cn04/ls20 measurements forced (HIPPOCAMPUS.md H1): structured-dynamics games need a
 GENERATIVE forward model, not a tabular transition graph. Settled with neuroscience first (memory
