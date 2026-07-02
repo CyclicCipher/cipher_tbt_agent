@@ -5,7 +5,7 @@ reward (the "acquire goals on the fly" capability). This is the piece the column
 
 Exploration is done the way animals actually do it (see memory: reference_exploration_replay):
   * NOVELTY IS INTRINSIC REWARD, unified with extrinsic value — no separate explore/exploit phase.
-    reward_total(s) = extrinsic_R(s) + beta/(1+visits) (novelty decays with visits). Dopamine encodes
+    reward(s) = extrinsic_R(s) + beta/(1+visits) (novelty decays with visits). Dopamine encodes
     novelty as reward; one value carries both pragmatic (toward score) and epistemic (toward the unknown).
   * PLANNING = PRIORITIZED REPLAY, not exhaustive value iteration (Mattar & Daw 2018, Nature Neuro).
     Back up states in priority order, priority = GAIN x NEED. GAIN = |value change| (spikes after a
@@ -86,15 +86,12 @@ class RewardModel:
         # The frontier optimism that an UNVISITED state carries. EFE (default): the bounded EPISTEMIC value of an
         # unexplored region = the discounted sum of frontier info-gains (beta*frontier/(1-gamma)) -- it still
         # propagates (so paths toward the unexplored are valued -> coverage), but it is BOUNDED (not max-reward) and
-        # DECAYS once visited (reward_total's lp -> 0 on noise/mastered). `rmax=True` restores the old Vmax ablation.
+        # DECAYS once visited (reward's lp -> 0 on noise/mastered). `rmax=True` restores the old Vmax ablation.
         self.explore = self.Vmax if rmax else self.beta * self.frontier / (1.0 - gamma)
-        self.V = defaultdict((lambda: self.explore) if optimistic else float)   # the explore value (reward + epistemic + the EIGENPURPOSE)
-        self.V_exploit = defaultdict((lambda: self.explore) if optimistic else float)  # the NORMAL value (reward + epistemic, NO eigenpurpose -> never perturbed by it)
-        self.intrinsic: dict = {}                              # the L6 EIGENPURPOSE per state (set per-step by the agent; propagated by the explore sweep)
+        self.V = defaultdict((lambda: self.explore) if optimistic else float)   # the ONE value = pragmatic (reward) + epistemic (learning-progress + frontier novelty)
         self.R_ext = {}                                        # extrinsic reward (from the sparse score): +1 rewarding, <0 AVERSIVE (a bad outcome to avoid)
         self.visits = defaultdict(int)                          # visit counts (drive the novelty bonus)
-        self.queue = {}                                        # pending EXPLORE backups: state -> priority
-        self._q_exploit = {}                                  # pending EXPLOIT backups
+        self.queue = {}                                        # pending value backups: state -> priority
         self.backups = 0                                       # compute counter (efficiency comparison)
         # --- the EPISTEMIC term (what the agent path-integrates TOWARD) -------------------------------------
         # "progress" = LEARNING PROGRESS (the model's prediction-error REDUCTION per state) -- a navigable landscape:
@@ -123,14 +120,12 @@ class RewardModel:
             return self.frontier
         return max(self.err_slow[s] - self.err_fast[s], 0.0)                  # learning progress = epiplexity-extraction rate
 
-    def reward_total(self, s):
-        """The EXPLORE reward (swept into V): the base pragmatic+epistemic PLUS the L6 EIGENPURPOSE intrinsic
-        (`intrinsic[s]`, set per-step by the agent -> a DIRECTED gradient toward the under-visited extreme, replacing the
-        flat frontier optimism in the dead-zone). Kept SEPARATE from the exploit value so it never perturbs a converged
-        policy (the explore/exploit split, Daw -- reference_eigenoptions_subgoals)."""
-        return self._reward_base(s) + self.intrinsic.get(s, 0.0)
-
-    def _reward_base(self, s):
+    def reward(self, s):
+        """The ONE reward swept into the ONE value: pragmatic (extrinsic score minus a per-step EFFORT cost on non-goal
+        states -> efficiency) + epistemic (the learning-progress epiplexity rate, or count novelty / raw error under the
+        ablations). Explore/exploit is not a switch -- it EMERGES: an unvisited state carries the bounded frontier
+        optimism (coverage), reward propagates via the sweep (exploitation), the epistemic term winds down on
+        mastered/noise. There is no separate exploit value and no eigenpurpose (ARCHITECTURE.md §8)."""
         ext = self.R_ext.get(s, 0.0)
         if self.epistemic == "novelty":
             return ext + self.beta / (1.0 + self.visits[s])                    # count-based novelty (the old bump)
@@ -142,23 +137,14 @@ class RewardModel:
         pragmatic = ext - (self.effort if ext <= 0.0 else 0.0)
         return pragmatic + self.beta * self.epistemic_value(s)
 
-    def reward_exploit(self, s):
-        """The NORMAL-operation reward = the base pragmatic + epistemic, WITHOUT the eigenpurpose. Swept into V_exploit,
-        the value the agent uses for reward-seeking AND local (frontier / learning-progress) exploration -- so the
-        eigenpurpose never perturbs normal operation (the reason a converged policy stays converged). The eigenpurpose
-        lives ONLY in V (reward_total), which the agent switches to when V_exploit is INDIFFERENT across actions (the
-        locally-exhausted, reward-less DEAD-ZONE -- where a directed escape is exactly what's missing)."""
-        return self._reward_base(s)
-
     def critic_delta(self, s, s2) -> float:
         """The reward-prediction ERROR δ for the OBSERVED transition s→s2 — the actor-critic TD error the dopamine
         signal represents (B1 of BASAL_GANGLIA_PLAN; the CRITIC that trains the basal-ganglia actor —
-        reference_basal_ganglia). δ = r(s) + γ·V(s2) − V(s): the residual of THIS critic's OWN Bellman
-        (`reward_exploit` / `V_exploit`), i.e. the clean reward + learning-progress value WITHOUT the eigenpurpose (an
-        exploration bias, not reward). δ > 0 = the transition did BETTER than the state predicted (a Go signal for the
-        actor); δ < 0 = worse (a NoGo signal). δ → 0 as the transition is MASTERED — the reward value converges AND
-        lp → 0 — so a fully-predicted reward stops training the actor (the dopamine dip). Consumed by the actor in B2/B3."""
-        return self.reward_exploit(s) + self.gamma * self.V_exploit[s2] - self.V_exploit[s]
+        reference_basal_ganglia). δ = r(s) + γ·V(s2) − V(s): the residual of the ONE value's Bellman. δ > 0 = the
+        transition did BETTER than the state predicted (a Go signal for the actor); δ < 0 = worse (a NoGo signal). δ → 0
+        as the transition is MASTERED — the reward value converges AND lp → 0 — so a fully-predicted reward stops
+        training the actor (the dopamine dip). Consumed by the actor in B2/B3."""
+        return self.reward(s) + self.gamma * self.V[s2] - self.V[s]
 
     def _need(self, s, current):
         """NEED = successor-representation relevance of s to the agent's future. The TRUE need is the SR
@@ -181,8 +167,7 @@ class RewardModel:
             #                                                     NEGATIVE preference (`_reward_base` passes it through),
             #                                                     so the EFE value AVOIDS it and the critic δ<0 carries
             #                                                     the cost to the NoGo actor -- the '−' side of pleasure/pain.
-        self._push(self.queue, state, 1.0)                     # reward/novelty changed here -> back it up in BOTH values
-        self._push(self._q_exploit, state, 1.0)
+        self._push(self.queue, state, 1.0)                     # reward/novelty changed here -> back it up
 
     def _backup(self, s, T, V, reward_fn):
         self.backups += 1
@@ -208,18 +193,15 @@ class RewardModel:
                 self._push(q, p, self.gamma * delta * self._need(p, current))
 
     def plan(self, T, preds, current):
-        """Sweep BOTH values from `current`: the EXPLORE value V (reward + epistemic + the eigenpurpose) and the EXPLOIT
-        value V_exploit (clean reward). The agent arbitrates per state -- exploit where V_exploit has a gradient (a known
-        way to reward), else explore (the directed eigenpurpose). Two cheap bounded sweeps; the eigenpurpose lives ONLY
-        in the explore sweep, so a converged exploit policy is never perturbed (the dead-zone fix, done as a SPLIT)."""
+        """Sweep the ONE value V from `current` (Mattar & Daw prioritized replay): pragmatic reward + epistemic
+        (learning-progress + frontier novelty), one bounded sweep. Explore/exploit emerges from this one value; there is
+        no separate exploit sweep and no eigenpurpose (ARCHITECTURE.md §8)."""
         if self.prioritized:
-            self._sweep(T, preds, current, self.V, self.reward_total, self.queue)                    # EXPLORE
-            self._sweep(T, preds, current, self.V_exploit, self.reward_exploit, self._q_exploit)     # EXPLOIT
+            self._sweep(T, preds, current, self.V, self.reward, self.queue)
         else:
             for _ in range(self.sweeps):                        # exhaustive value iteration (baseline)
                 for s in T:
-                    self._backup(s, T, self.V, self.reward_total)
-                    self._backup(s, T, self.V_exploit, self.reward_exploit)
+                    self._backup(s, T, self.V, self.reward)
 
     def act(self, current, T, preds, rng):
         self.plan(T, preds, current)

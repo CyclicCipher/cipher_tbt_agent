@@ -173,8 +173,8 @@ class TbtPolicy:
             feat, pos = state                                #   CMP message. The STATE is the POSITION (L6 over positions), and L4
             a = self.agent.step(pos, 0.0, frame=obs.grid, feature=feat)   #   binds the feature at it (sense_at) -> the object EMERGES; config_state gone
         else:
-            a = self.agent.step(state, 0.0, frame=obs.grid)  # the FRAME -> the generative forward model (FM1-4); obstacles
-            #                                                  handled natively (a blocked move -> no-change); reward via complete()
+            a = self.agent.step(state, 0.0, frame=obs.grid)  # `frame` is the raw sensory field (accepted, not yet consumed --
+            #                                                  P1 factored perception / P2 the operator prediction); reward via complete()
         self._last_a = a
         return self._resolve(a)
 

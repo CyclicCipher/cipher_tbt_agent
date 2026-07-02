@@ -38,7 +38,7 @@ def test_critic_delta_is_the_td_reward_prediction_error():
         rm.plan(T, preds, 0)
     # δ IS the explicit TD reward-prediction-error (the residual of the critic's own Bellman)
     for s, s2 in [(0, 1), (1, 2), (2, 3)]:
-        expect = rm.reward_exploit(s) + rm.gamma * rm.V_exploit[s2] - rm.V_exploit[s]
+        expect = rm.reward(s) + rm.gamma * rm.V[s2] - rm.V[s]
         assert abs(rm.critic_delta(s, s2) - expect) < 1e-9
     # mastered + converged → δ ≈ 0 along the optimal path
     opt = [rm.critic_delta(s, s2) for s, s2 in [(0, 1), (1, 2), (2, 3)]]
@@ -115,9 +115,9 @@ def test_negative_reward_makes_the_efe_value_avoid_aversion():
             rm.observe(s, 0.0)
             rm.observe_error(s, 0.0)                                 # mastered -> lp = 0 (isolate the pragmatic value)
         rm.plan(T, preds, 0)
-    assert rm.V_exploit[2] > 0.5, rm.V_exploit[2]                    # reward: positive value
-    assert rm.V_exploit[4] < -0.5, rm.V_exploit[4]                  # AVERSION: negative pragmatic value
-    assert rm.V_exploit[1] > rm.V_exploit[3]                        # the value AVOIDS the aversion branch
+    assert rm.V[2] > 0.5, rm.V[2]                                    # reward: positive value
+    assert rm.V[4] < -0.5, rm.V[4]                                  # AVERSION: negative pragmatic value
+    assert rm.V[1] > rm.V[3]                                        # the value AVOIDS the aversion branch
     # the 'pain' signal: on FIRST experiencing an aversive state (its value not yet learned) the critic δ is negative --
     # the cost the NoGo actor learns from. δ(4→4) = reward(4) + γ·V(4) − V(4) = −1 while V(4) is still ~0.
     fresh = RewardModel(9, gamma=0.9, beta=0.0, epistemic="progress")

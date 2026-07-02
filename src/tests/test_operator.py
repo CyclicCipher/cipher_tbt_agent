@@ -360,8 +360,8 @@ def test_S2c_recolor_content_becomes_a_factorable_cycle_operator():
 def test_S2c_predict_gx_binds_structure_and_content():
     """L6_NONABELIAN Stage 2 step (c) -- the `g × x` FORWARD prediction binds the two halves the fragmented FM kept apart:
     the STRUCTURE predictor (`predict` -> g') with the CONTENT map (`feature_at` -> x' at g'). This is TEM's objective
-    ('predict the next observation | position, action') as ONE model -- where I'll be + what's there -- vs the location-blind
-    `field_rule` CA."""
+    ('predict the next observation | position, action') as ONE model -- where I'll be + what's there. The ONE prediction
+    (ARCHITECTURE.md §5): apply the operator to the location, read the content there."""
     from tbt.column import CorticalColumn
     col = CorticalColumn(n_entities=8, seed=0)
     for _ in range(5):                                                          # train the structure g (A<->B) so the SR place codes are non-trivial
@@ -375,7 +375,7 @@ def test_S2c_predict_gx_binds_structure_and_content():
 def test_S2c_predict_gx_composes_content_operator_and_generalises():
     """L6_NONABELIAN Stage 2 step (c): `predict_gx` COMPOSES structure × content. A learned CONTENT OPERATOR (a recolor
     toggle) is applied IN PLACE and GENERALISES to a (g, content) combination never observed together -- the TEM win the
-    conjunctive graph / the local-context CA cannot do (the CA is kept as the complement for context-dependent propagation)."""
+    conjunctive graph cannot do."""
     from tbt.column import CorticalColumn
     col = CorticalColumn(n_entities=8, seed=0)
     for _ in range(5):                                                          # structure A<->B (train the SR place codes)

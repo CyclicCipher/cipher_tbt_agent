@@ -201,6 +201,6 @@ def test_gsg_and_basal_ganglia_select_the_goal_in_the_agent_loop():
     ag.col.L23.sense(locs[i], local_disps(locs, i, ag.col.L23.radius))   # one ambiguous glance -> disambiguate available
     ag.col.observe(0, 0, 1)                                    # the DEAD-ZONE: the only action is tried and leads to a
     ag.tried.add((0, 0))                                       # zero-value, reward-less outcome -> act value collapses to 0
-    ag.reward.V_exploit[1] = 0.0
+    ag.reward.V[1] = 0.0                                        # the one value at the act outcome -> act value 0
     ag.step(0, 0.0)                                            # the step runs propose_goals + BG.gate over the ambiguity
     assert ag.goal is not None and ag.goal.kind == "disambiguate"

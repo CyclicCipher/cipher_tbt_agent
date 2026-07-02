@@ -96,10 +96,9 @@ class OnlineSR:
         structure (separate clusters -> the eigenoption / vector-nav substrate). Cached, rebuilt when the state set GROWS.
 
         Uses the full `np.linalg.svd` (DETERMINISTic). NB a truncated `svds` was tried and REVERTED: it is only O(n²k)
-        vs O(n³), but (a) `eigenpurpose` CAPS grid use at n≤400 where the full SVD is already fast, so the win is moot,
-        and (b) `svds` uses a RANDOM start vector and, on the degenerate singular subspaces common in a small SR, returns
-        DIFFERENT individual vectors run-to-run -> a nondeterministic, shifted eigenpurpose (it flaked MultiKey/Tetris).
-        The truly-online grid (deferred) must preserve determinism + the exact vectors. See BASAL_GANGLIA_PLAN §6."""
+        vs O(n³), but `svds` uses a RANDOM start vector and, on the degenerate singular subspaces common in a small SR,
+        returns DIFFERENT individual vectors run-to-run -> a nondeterministic, shifted grid. The truly-online grid
+        (deferred) must preserve determinism + the exact vectors."""
         n = self.M.shape[0]
         if n == 0:
             return np.zeros((0, 0))
@@ -107,30 +106,6 @@ class OnlineSR:
             self._grid_U = np.linalg.svd(self.M)[0]
             self._grid_n = n
         return self._grid_U[:, :min(k, n)].T
-
-    def eigenpurpose(self, visits, scale: float = 1.0, k: int = 5, cap: int = 400):
-        """The per-state EIGENPURPOSE intrinsic reward from the GRID (top-k SR eigenvectors): high at the UNDER-visited
-        extreme of the eigenstructure (the frontier / bottleneck), oriented by anti-correlation with `visits` (a
-        state->count map) and normalized to [0, 1] x `scale`. The DIRECTED-exploration drive out of a reward-less,
-        locally-exhausted pocket (the EFE dead-zone; reference_eigenoptions_subgoals). `{}` for a graph too small (no
-        structure) or too large (SVD is O(n^3); Oja/Sanger streaming is the scale fix). Was `agent._eigenpurpose`."""
-        n = self.M.shape[0]
-        if n < 3 or n > cap:
-            return {}
-        inv = {i: s for s, i in self.idx.items()}
-        vis = np.array([visits.get(inv[i], 0) for i in range(n)], dtype=float)
-        acc = np.zeros(n)
-        for e in self.grid(k):                                            # each grid cell (eigenvector over states)
-            if e.std() < 1e-9:
-                continue
-            if vis.std() > 0 and np.corrcoef(e, vis)[0, 1] > 0:          # orient: HIGH value = UNDER-visited (the frontier extreme)
-                e = -e
-            e = e - e.min()
-            if e.max() > 0:
-                acc += e / e.max()
-        if acc.max() > 0:
-            acc /= acc.max()                                             # normalize the eigenpurpose to [0, 1]
-        return {inv[i]: scale * float(acc[i]) for i in range(n)}
 
     def grid_code(self, s, k: int = 5):
         """State `s`'s GRID-CELL CODE -- its coordinates in the top-k SR eigenbasis (the grid-cell activations at `s`).
