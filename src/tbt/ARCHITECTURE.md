@@ -275,7 +275,11 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
 
 - **P0 — Converge the code to this document (mostly DELETION).** Collapse every parallel system, estimator, and arbiter
   into the one mechanism: one prediction (delete the location-blind CA); one location = the L6 code path-integrated by the
-  operator (delete the fovea / pose-matrix / `state_node` / `_obs` / `heading_dependent` fork); one value (fold
+  operator — vetted 2026-07-02: the fovea / pose-matrix / `state_node` tracker is the LIVE perception→location bridge
+  (sensor → `track` → `state_node` = the agent's state), while the doc-target mechanism (a node path-integrated by the
+  operator, cf. `loc_*`) is LATENT and needs perception to feed it a location; so this fork — and the `heading_dependent`
+  fork, which needs the learned-group operator (abelian = the commuting special case) before it can go, else abelian games
+  gain a spurious heading — is REPLACED-then-deleted in P1/P2, not cut here; one value (fold
   `V`/`V_exploit` + the `g`-gate + the `_tab_spread` tabular/forward arbiter into the single EFE value; **drop the
   eigenpurpose SR-eigendecomposition explorer** in favour of the one epistemic term — §8; **unify the cost field as the ONE
   value's AVERSIVE component** — keep its learned-expectation (the running-mean → `p·penalty`; make the critic's crude
@@ -301,8 +305,13 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
   cued target-states (§9), the BG select, the motor achieves, value confirms; the heterarchy (multi-column voting via the
   thalamus) scales the same loop.
 
-Honest status: the **operator** primitive and **relation/factor discovery** (the P3 sequence structure) exist and are
-tested; the SR is the one L6. Everything else is entangled with the P0 estimator/arbiter stack. **We are at P0.**
+Honest status (2026-07-02): P0's clean deletions — the **parallel SYSTEMS** — are DONE (the field-CA second prediction;
+the `V`/`V_exploit` + `g`-gate + eigenpurpose second value; the `object_state`/`_changed` change-log). The remainder of P0
+— the **estimator STACK** (the fovea/pose/`state_node` location, the segmentation heuristic, the cost-consuming achiever)
+— is LOAD-BEARING infrastructure, deletable only once its principled replacement exists: it is **REPLACE-then-delete,
+gated on P1** (factored perception delivers the location + content) **and P2** (the operator-seated prediction). So P0's
+pure-deletion phase is complete; the location / segmentation / cost collapses land as P1/P2 builds their replacements. The
+**operator** primitive and **relation/factor discovery** exist and are tested; the SR is the one L6. **We move to P1.**
 
 ## 11. Acceptance test for every change (the paper test)
 
