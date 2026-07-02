@@ -288,3 +288,29 @@ def test_cost_field_routes_the_geodesic_and_achiever_around_a_region():
     col.learn_cost((1, 0), 5.0)                                              # a big finite cost on the direct cell
     assert col.navigate_to((0, 0), {(2, 0): 1.0, (1, 0): -5.0}, [0, 1, 2, 3]) == 3   # cost-folded map -> the geodesic detours (+y)
     assert col.achieve((0, 0), (2, 0), [0, 1, 2, 3]) == 3                     # achiever folds col.cost ITSELF -> same detour, end to end
+
+
+def test_perceive_unifies_recognize_predict_correct_learn():
+    """P1 perception rework (2b/2c): `column.perceive` unifies recognize -> PREDICT -> CORRECT -> LEARN -> content, one
+    path for abelian + non-abelian. A shape TRANSLATING by a consistent per-action delta is recognized each step; the
+    pose is path-integrated + snap-corrected, the operator is LEARNED (a ~(2,0) translation), and content
+    (`view_signature`) is invariant to the mover's position (same shape -> one content id)."""
+    import numpy as np
+    from tbt.operator import dehomog, homog
+
+    col = CorticalColumn(n_entities=16, seed=0)
+    shape = [(0, 0), (1, 0), (2, 0), (2, 1)]                       # an asymmetric L-tromino (unique pose)
+
+    def cloud_at(ox, oy, colour=7):
+        return [(x + ox, y + oy, colour) for (x, y) in shape]
+
+    c0, (x0, y0, _t0) = col.perceive(None, cloud_at(0, 0))        # cold: observe at the origin
+    contents, xs = [c0], [x0]
+    for k in range(1, 6):                                          # the mover translates +2x each step under action 0
+        c, (x, y, _t) = col.perceive(0, cloud_at(2 * k, 0))
+        contents.append(c)
+        xs.append(x)
+    assert len(set(contents)) == 1, contents                      # content invariant to position (same shape)
+    assert xs[-1] > xs[0] + 6 and xs == sorted(xs), xs            # the location tracked the translation (monotone +x)
+    op = col.operator(0)                                           # the per-action operator was LEARNED (~(2,0) translation)
+    assert np.allclose(dehomog(op.apply(homog([0.0, 0.0]))), [2.0, 0.0], atol=0.5), op.M
