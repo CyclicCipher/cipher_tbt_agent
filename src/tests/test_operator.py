@@ -372,6 +372,24 @@ def test_S2c_predict_gx_binds_structure_and_content():
     assert g2 == "B" and x2 == 3                                                # predicts: after action 0 from A -> at B, feature 3 (where + what)
 
 
+def test_S2c_predict_gx_composes_content_operator_and_generalises():
+    """L6_NONABELIAN Stage 2 step (c): `predict_gx` COMPOSES structure × content. A learned CONTENT OPERATOR (a recolor
+    toggle) is applied IN PLACE and GENERALISES to a (g, content) combination never observed together -- the TEM win the
+    conjunctive graph / the local-context CA cannot do (the CA is kept as the complement for context-dependent propagation)."""
+    from tbt.column import CorticalColumn
+    col = CorticalColumn(n_entities=8, seed=0)
+    for _ in range(5):                                                          # structure A<->B (train the SR place codes)
+        col.observe("A", 0, "B")
+        col.observe("B", 1, "A")
+    col.sense_at("B", 7)                                                        # content 7 bound at B
+    col.L5.recolor[((1,), 2)] = {0: 1, 1: 0}                                    # a learned content operator: action 2 toggles content 0<->1
+
+    assert col.predict_gx("A", 0) == ("B", 7)                                   # MOVEMENT: reads the content bound at g'
+    # CONTENT transform GENERALISES over g -- the toggle applies at positions never seen with that (g, content) pair:
+    assert col.predict_gx("A", 2, content=0, shape=(1,)) == (col.predict("A", 2), 1)   # 0 -> 1
+    assert col.predict_gx("B", 2, content=1, shape=(1,)) == (col.predict("B", 2), 0)   # 1 -> 0, at B (never toggled there)
+
+
 class _CounterToggle:
     """A two-factor MICROWORLD: a COUNTER (Z/n, advanced by TICK) and an independent TOGGLE (Z/2, flipped by FLIP). The two
     actions act on ORTHOGONAL factors, so the dynamics are a genuine PRODUCT of cycles (Z/n × Z/2). Encoded as one-hot(counter)

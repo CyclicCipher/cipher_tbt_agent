@@ -16,17 +16,22 @@
 > - `move_delta`/`pose_ops`/`Operator` — **KEEP: this is `g`** (the structure half). | `sense_at` / L4-over-L6 —
 >   **KEEP + PROMOTE: the `x` predictor at `g`** (the bind). | `recolor {old→new}` — **REFRAME: the content OPERATOR**
 >   (a permutation, factorable by `discover_periods`; a toggle = a 2-cycle).
-> - `disp` — **REMOVE: redundant with the operator** (`g`); migrate config-mode `_generalize` onto it. | `field_rule` CA —
->   **DEMOTE → REMOVE: the non-neuroscientific piece**; its job (local *context-dependent* content) becomes the content
->   operator + predictive-sufficiency; kept as a fallback only until `g×x` is proven on cn04-style frontiers. |
->   `field_features`/`field_value` — **DEMOTE/REFRAME: value over the `g×x` state** (the SR value); the count-bag is a
->   structure-free proxy. | `edges`/graph/SR — **KEEP: the conjunctive lookup complement** (`reference_brain_planning`;
->   not deleted — the brain has both the generalizing grid and the conjunctive lookup), reframed as the residual where the
->   operator is insufficient.
-> **STAGING (no parallel system — build, prove, then delete):** (1) build the `g×x` predictor (operator → `g'`;
-> `sense_at`+content-operator → `x'`; predictive-sufficiency gates per-factor vs joint); (2) PROVE it subsumes the CA's
-> job (cn04 frontier), the dynamics games (Toggle/Tetris/CollectAll), and config-mode (`disp`/`_generalize`); (3) THEN
-> delete `disp`, the `field_rule` CA, and `field_features` (judged at the end, not on an intermediate dip).
+> - `disp` — reframe as the config-grain STRUCTURE operator (`g`). | `field_rule` CA — **CORRECTION (2026-07-01, from studying
+>   c2 for the build): KEEP as the LOCAL-CONTEXT complement, not delete.** It is local predictive coding (predict a cell from
+>   its neighbourhood) — the right pathway for cell-PROPAGATION dynamics (cn04) that are not object-based and have no
+>   allocentric `g`. The brain runs BOTH local-context prediction (cortex) and allocentric g×x binding (entorhinal/TEM). So
+>   the CA is complementary (like the SR is to the operator), chosen by predictive sufficiency — my earlier "delete the CA"
+>   was WRONG. | `field_features`/`field_value` — KEEP for now (the dynamics-game value the SR can't replace when states
+>   don't recur). | `edges`/graph/SR — **KEEP: the conjunctive lookup complement** (`reference_brain_planning`).
+> **KEY FINDING:** the CONFIG-grain FM (`predict` = `disp`+`recolor`) is ALREADY the g×x model (generalizes). The new work is
+> the INTEGRATE-grain allocentric g×x (`predict_gx`, over the SR map) — integrate mode previously had ONLY the CA. So c2 is
+> INTEGRATE (g×x-primary/CA-complement, gated), NOT delete.
+> **STAGING:** (1) DONE (2026-07-01, suite 146) — the g×x PRIMITIVE: `predict_gx` composes STRUCTURE (`predict`→g') ×
+> CONTENT (the `content_operator`/`recolor`→x', else `feature_at`), and GENERALISES to (g, content) combos never seen
+> (the TEM win the conjunctive graph / local CA cannot). (2) wire `predict_gx` into the integrate-mode forward model as the
+> object-based g×x, COMPLEMENTING the CA, gated by predictive sufficiency (g×x where a factor is sufficient, CA for
+> context-dependent propagation) — no dynamics-game regression. (3) unify the config/integrate content operator (recolor ⇄
+> content_operator) so there is ONE content operator across grains.
 
 *Plan, 2026-06-30. The pivot the cn04/ls20 measurements forced (HIPPOCAMPUS.md H1): structured-dynamics games need a
 GENERATIVE forward model, not a tabular transition graph. Settled with neuroscience first (memory

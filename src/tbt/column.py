@@ -305,16 +305,24 @@ class CorticalColumn(nn.Module):
         self.bind_at(location, sensed_feature)                            # learn: bind the sensed feature at the location
         return surprised
 
-    def predict_gx(self, g, action):
+    def predict_gx(self, g, action, content=None, shape=None):
         """L6_NONABELIAN Stage 2 step (c) -- the `g × x` FORWARD prediction (the TBT/TEM generative model): predict the next
-        observation given position + action by BINDING the two halves the fragmented FM kept apart. Path-integrate the
-        STRUCTURE -- `g'` = `predict(g, action)` (L5's operator / the learned edge = the *where* transition) -- then read the
-        CONTENT bound there -- `x'` = `feature_at(g')` (the L4-over-L6 map = the *what* at that location). Returns `(g', x')`
-        = 'where I'll be + what's there'. This is TEM's objective ('predict next observation | position, action') as ONE
-        model, replacing the location-blind `field_rule` CA. (In-place content DYNAMICS -- a toggle -- compose the
-        `content_operator` at `g'`; that + the predictive-sufficiency gate for context-dependent content is c2.)"""
+        observation given position + action by COMPOSING the two learned operators the fragmented FM kept apart. STRUCTURE:
+        `g'` = `predict(g, action)` (L5's operator / edge = the *where* transition). CONTENT `x'` = the *what*:
+          • an IN-PLACE content transform -- the CONTENT OPERATOR (`L5.recolor` for `(shape, action)`) applied to `content`,
+            when that factor is PREDICTIVELY SUFFICIENT (a learned recolor that GENERALISES to `content` values / positions
+            never seen with it -- the TEM win) -- returned as `(g', x')` with the transformed content;
+          • else the content BOUND at `g'` (`feature_at`, the L4-over-L6 map = 'what's there when I move').
+        Composing structure × content generalises to (g, content) combinations never seen together -- which the conjunctive
+        graph and the LOCAL-CONTEXT `field_rule` CA (kept as the complement for context-dependent propagation) cannot.
+        `content`/`shape` optional (a pure-movement prediction omits them). Returns `(g', x')`."""
         g2 = self.predict(g, action)
-        return g2, self.feature_at(g2)
+        if content is not None and shape is not None:
+            nxt = self.L5.recolor.get((shape, action), {}).get(content)
+            if nxt is not None:
+                return g2, nxt                                             # content OPERATOR (predictively sufficient -> generalises over g)
+        x2 = self.feature_at(g2)
+        return g2, (x2 if x2 is not None else content)                     # else the content bound at g' (or unchanged)
 
     def sense_object(self, cloud, location):
         """C4 (COLUMN_AUDIT): L2/3 RECOGNITION wired into the feature-at-location cycle. RECOGNISE the sensed object
