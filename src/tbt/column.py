@@ -550,6 +550,22 @@ class CorticalColumn(nn.Module):
         th = float(np.arctan2(self._pose[1, 0], self._pose[0, 0]) % (2 * np.pi))
         return feat, (x, y, th)
 
+    def forward(self, action, content):
+        """The ONE forward prediction (P2, §5) over the FACTORED representation — predict the next observation given the
+        current pose + action + content: apply the operator to the LOCATION and read the CONTENT there. A PURE query (does
+        NOT mutate the belief — for predict-then-compare and for rollout/planning §8), unlike `path_integrate` (which
+        commits the efference predict inside `perceive`):
+          LOCATION — the pose advanced by the action's operator (`operator(action)`; the abelian translation the special case);
+          CONTENT  — self-motion: the mover's own view is INVARIANT under its own motion (reafference), so the predicted
+            content is `content` unchanged. (A mapped ENVIRONMENT would read `feature_at` the predicted location; other
+            objects' content DYNAMICS are a learned behavior — P3.)
+        Returns `(predicted (x, y, theta), predicted_content)`, or `(None, content)` before the belief is set. The
+        efference half of predict-then-compare; the error against what is next perceived is the learning signal (§4c)."""
+        if self._pose is None:
+            return None, content
+        p = self._pose @ np.asarray(self.operator(action).M, dtype=float)   # pure: operator applied to a COPY, no assign
+        return (float(p[0, 2]), float(p[1, 2]), float(np.arctan2(p[1, 0], p[0, 0]) % (2 * np.pi))), content
+
     def here_position(self):
         """The RAW metric position of the location belief (the pose translation) -- the ACHIEVER's coordinate frame (raw
         pixels), distinct from the binned tabular state node, so pose-aware `distance`-to-goal is measured in the goal's

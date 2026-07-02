@@ -321,3 +321,26 @@ def test_perceive_unifies_recognize_predict_correct_learn():
     assert xs[-1] > xs[0] + 6 and xs == sorted(xs), xs            # the location tracked the translation (monotone +x)
     op = col.operator(0)                                           # the per-action operator was LEARNED (~(2,0) translation)
     assert np.allclose(dehomog(op.apply(homog([0.0, 0.0]))), [2.0, 0.0], atol=0.5), op.M
+
+
+def test_forward_predicts_self_motion_over_the_factored_rep():
+    """P2a: the ONE forward prediction over the factored (pose, content) rep -- apply the operator to the LOCATION, read
+    the CONTENT. Self-motion: once the operator is learned, `forward` PREDICTS the next pose (the mover advanced by the
+    action) and the content is INVARIANT (reafference); it is a PURE query (does not mutate the belief). An unlearned
+    action predicts NO movement -> the prediction would MISS a real move (the surprise / learning signal)."""
+    import numpy as np
+    col = CorticalColumn(n_entities=16, seed=0)
+    shape = [(0, 0), (1, 0), (2, 0), (2, 1)]                       # asymmetric (unique pose)
+
+    def sense(a, ox):
+        return col.perceive(a, [(x + ox, y) for (x, y) in shape], ("stuff",))
+
+    sense(None, 0); sense(0, 2); sense(0, 4)                       # learn action 0 = +2x, belief now at (4,0)
+    pose_before = col._pose.copy()
+    pred_pose, pred_content = col.forward(0, ("stuff",))          # PURE forward prediction from (4,0)
+    assert np.allclose(col._pose, pose_before)                    # pure: did NOT mutate the belief
+    assert pred_content == ("stuff",)                             # self-motion: content invariant (reafference)
+    _feat, obs_pose = sense(0, 6)                                 # the ACTUAL next observation (mover at 6,0)
+    assert abs(pred_pose[0] - obs_pose[0]) < 0.6 and abs(pred_pose[1] - obs_pose[1]) < 0.6   # forward matched the observation
+    pred_stay, _ = col.forward(9, ("stuff",))                    # action 9 has no learned operator -> predicts staying put
+    assert abs(pred_stay[0] - float(col._pose[0, 2])) < 0.6 and abs(pred_stay[1] - float(col._pose[1, 2])) < 0.6
