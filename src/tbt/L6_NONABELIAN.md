@@ -162,11 +162,18 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
     perceived (x, y, heading) (the pose analogue of `track`'s snap-to-sighting). Validated on OrientationWorld: movement
     direction == true heading at all 4 headings, and perception makes the 4 headings DISTINGUISHABLE in `pose_state` → FORWARD
     deterministic. *Honest limitation:* a TURN produces no movement, so heading is STALE until the next forward (robust
-    heading via shape recognition / turn dead-reckoning is a follow-up). **STILL REMAINING for the live solve:** (1) an
-    OrientationWorld that is a real perceivable FRAME (asymmetric mover on a grid the sensor reads); (2) wire perceive→predict
-    (`track_pose`)+correct (`sense_pose`) into the agent loop, swapping `track_state`→`pose_state`; (3) gate no-regression on
-    the abelian games; (4) SOLVE the env. Then — per the plan — DISSOLVE the now-redundant `_fovea`/`track_state` path (no
-    parallel systems), once the pose path is validated as the single one.
+    heading via shape recognition / turn dead-reckoning is a follow-up). **LIVE-SOLVE steps (Cipher's 1-5):**
+    - **Step 1 DONE (2026-07-01, `OrientationGame`, suite 133):** a real perceivable non-abelian FRAME (duck-typed like
+      NavGame): an ORIENTED mover (asymmetric L) with body-frame FORWARD/TURN, reach-the-goal levels; validated non-abelian +
+      solvable. `test_nonabelian_env.py`.
+    - **Steps 2-5 REMAINING (the perception-heavy behaviour-affecting integration):** (2) wire heading perception +
+      predict(`track_pose`)/correct(`sense_pose`) into the agent loop and select `pose_state` via a NON-ABELIAN GATE (use
+      pose only when an action's displacement is INCONSISTENT/heading-dependent; else `track_state`) — the gate must not
+      misfire on abelian; (3) gate no-regression on the abelian games; (4) SOLVE (the existing SR/graph planner over
+      `pose_state`); (5) DISSOLVE the redundant `_fovea`/`track_state` once the pose path is validated as the single one.
+      NB a real subtlety surfaced: the asymmetric mover's centroid SHIFTS on a turn (~0.5 cell) vs a forward (2 cells), so
+      route-2 heading needs a threshold that separates them (or a symmetric mover / route-1 shape-orientation) — a
+      perception-robustness decision for step 2.
 - **Stage 2 — DISCOVER relations by loop closure (the quotient).** Free composition path-integrates; relations (incl.
   commutativity) are found by loop closure under the **predictive-sufficiency** criterion (causal states / bisimulation, per
   `MATH_PHASE.md`) — close the coarsest partition that stays a sufficient statistic. *Gate:* on a task with a KNOWN

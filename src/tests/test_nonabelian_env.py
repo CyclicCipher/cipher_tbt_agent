@@ -49,6 +49,97 @@ def _drive(actions):
     return w
 
 
+class _St:
+    def __init__(self, name):
+        self.name = name
+
+
+class OrientationGame:
+    """L6_NONABELIAN S1e step 1 -- a NON-ABELIAN nav FRAME (duck-typed like NavGame, drivable by TbtPolicy). An ORIENTED
+    mover (an asymmetric L, so heading is visible) with BODY-FRAME actions FORWARD / TURN_L / TURN_R (SE(2)); reach the
+    interior goal -> level up. FORWARD depends on the heading, so navigation requires COMPOSING turns + forwards
+    (non-abelian) -- the env the pose machinery (`track_pose`/`pose_state`) targets and the abelian `move_delta` cannot."""
+
+    N = 24
+    STEP = 2
+    GOAL = (12, 12)
+    SHAPE = [(0, 0), (1, 0), (0, 1)]                                # an asymmetric L -> orientation is visible
+    HEADINGS = [(1, 0), (0, 1), (-1, 0), (0, -1)]                   # h = 0..3 -> E/N/W/S
+
+    def __init__(self, levels=8):
+        self.n_levels = levels
+        self.levels_completed = 0
+        self.state = _St("NOT_PLAYED")
+        self.actions_taken = 0
+        self.mx, self.my, self.h = 2, 2, 0
+
+    @staticmethod
+    def _rot(cell, h):
+        x, y = cell
+        for _ in range(h):
+            x, y = -y, x                                            # 90-degree CCW
+        return x, y
+
+    @property
+    def frame(self):
+        g = [[0] * self.N for _ in range(self.N)]
+        for cell in self.SHAPE:
+            dx, dy = self._rot(cell, self.h)
+            x, y = self.mx + dx, self.my + dy
+            if 0 <= x < self.N and 0 <= y < self.N:
+                g[y][x] = 7
+        return [g]
+
+    @property
+    def available(self):
+        return ["FORWARD", "TURN_L", "TURN_R"]
+
+    def step(self, name, data=None):
+        if name == "RESET":
+            self.state = _St("NOT_FINISHED")
+            self.mx, self.my, self.h = 2, 2, 0
+            return self
+        if self.state.name in ("WIN", "NOT_PLAYED"):
+            return self
+        self.actions_taken += 1
+        if name == "FORWARD":
+            dx, dy = self.HEADINGS[self.h]
+            self.mx = min(max(self.mx + dx * self.STEP, 0), self.N - 2)
+            self.my = min(max(self.my + dy * self.STEP, 0), self.N - 2)
+        elif name == "TURN_L":
+            self.h = (self.h + 1) % 4
+        elif name == "TURN_R":
+            self.h = (self.h - 1) % 4
+        if abs(self.mx - self.GOAL[0]) <= 1 and abs(self.my - self.GOAL[1]) <= 1:
+            self.levels_completed += 1
+            if self.levels_completed >= self.n_levels:
+                self.state = _St("WIN")
+            else:
+                self.mx, self.my, self.h = 2, 2, 0
+        return self
+
+
+def test_orientation_game_is_a_valid_non_abelian_frame():
+    """Step 1: OrientationGame is a duck-typed FRAME (frame/available/step/levels) whose dynamics are non-abelian --
+    FORWARD's effect depends on heading (turn-then-forward != forward), and it is SOLVABLE (turn to face the goal, advance)."""
+    g = OrientationGame()
+    g.step("RESET")
+    assert len(g.frame) == 1 and len(g.frame[0]) == 24 and set(g.available) == {"FORWARD", "TURN_L", "TURN_R"}
+    assert sum(v == 7 for row in g.frame[0] for v in row) == 3               # the 3-cell oriented mover is rendered
+    # non-abelian: from the start, FORWARD (heading E) vs TURN_L-then-FORWARD (heading N) go different ways
+    a = OrientationGame(); a.step("RESET"); a.step("FORWARD")
+    b = OrientationGame(); b.step("RESET"); b.step("TURN_L"); b.step("FORWARD")
+    assert (a.mx, a.my) != (b.mx, b.my) and a.mx > 2 and b.my > 2
+    # SOLVABLE: face E, advance to x=12; face N, advance to y=12 -> goal
+    g = OrientationGame(levels=1); g.step("RESET")
+    for _ in range(5):
+        g.step("FORWARD")                                                    # E: x 2->12
+    g.step("TURN_L")
+    for _ in range(5):
+        g.step("FORWARD")                                                    # N: y 2->12
+    assert g.levels_completed == 1
+
+
 def test_env_is_non_abelian_forward_and_turn_do_not_commute():
     """The env is genuinely NON-ABELIAN: FORWARD then TURN lands in a different place than TURN then FORWARD (because
     FORWARD's direction depends on the heading TURN changes). This is the order-dependence the abelian grid cannot hold."""
