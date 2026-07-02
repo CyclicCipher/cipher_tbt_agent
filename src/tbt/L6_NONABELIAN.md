@@ -244,8 +244,17 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
   only 2nd+3rd roots) is DISTINGUISHED from one big cycle (Z/6, a primitive 6th root) → the notational factoring of a raw count
   is NOT hallucinated; works on a LEARNED operator too. Honest boundary (unchanged): this discovers factors that EXIST in the
   dynamics; it will NOT conjure place value from a raw atomic count (correct) — notation/modularity must supply the recurrence.
-  **REMAINING (slice 2 cont.):** the actual CLOSURE — close a loop within each periodic eigenspace, GUARDED by predictive
-  sufficiency (reject the wrong-merge 0≡10 that mispredicts the coupled future), building the product-of-cycles map; then S3.
+  **FACTORED CLOSURE DONE (2026-07-01, `operator.factor_group`, suite 142):** decompose the learned dynamics into a DIRECT
+  PRODUCT of cyclic factors, GUARDED by predictive sufficiency in its operational form — the generators must COMMUTE and their
+  orders must multiply to the group order |G| (every state = a UNIQUE product of factor-phases → the factored map loses no
+  information → reproduces the dynamics). *Gate met on a two-factor MICROWORLD (counter Z/n + toggle Z/2, `test_operator.py`):*
+  from the LEARNED operators it recovers `[(TICK, n), (FLIP, 2)]`; it is BASIS-INDEPENDENT (a random orthogonal recoding that
+  scrambles the one-hot blocks gives the SAME factoring — the factors are in the operators' joint eigenstructure, NOT the
+  code's axes, so nothing is smuggled from a pre-separated code); and the GUARD rejects the wrong factoring — non-commuting
+  generators (S₃ → None) and overlapping factors (TICK & TICK² → product ≠ |G| → None). **REMAINING (slice 2 cont.):** the
+  NESTED/coupled case (place value / carry — the odometer where a single action couples the wheels; the `MATH_PHASE` P-carry
+  rehearsal, where the honest boundary is that a raw count is one big cycle, not the notational factoring) + the per-factor
+  loop-closure MAP wired into the column's path integration. Then S3.
   **NB the "geodesic planner" is NOT Dijkstra** (that would be a parallel non-neuroscientific system): the geodesic is computed
   the brain's way — SR / prioritised-sweeping VALUE PROPAGATION over the operator-generalised representation → the POTENTIAL
   FIELD `vector_action`/`achieve` already follow (reference_brain_planning; the SR warps around barriers = the geodesic). The

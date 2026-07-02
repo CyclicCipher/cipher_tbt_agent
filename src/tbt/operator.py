@@ -210,6 +210,39 @@ def discover_periods(op, tol: float = 1e-6, max_period: int = 128):
     return sorted(periods)
 
 
+def factor_group(generators, tol: float = 1e-6, max_elements: int = 256):
+    """L6_NONABELIAN Stage 2 (FACTORED closure) — decompose the group the learned `generators` generate into a DIRECT PRODUCT
+    of cyclic FACTORS (the product-of-cycles map behind place value / a game's independent counter+toggle). Each generator's
+    cyclic subgroup has order = its period; the factoring is PREDICTIVELY SUFFICIENT (loses no information → reproduces the
+    dynamics) iff the generators COMMUTE and the product of their orders equals the group order |G| — i.e. every element is a
+    UNIQUE product of factor-powers. Non-commuting generators (no direct product) or overlapping factors (product ≠ |G|)
+    FAIL — the wrong-merge the guard rejects (a factoring that mispredicts is not accepted). Basis-INDEPENDENT: the factors
+    live in the COMMUTING operators' joint eigenstructure, not the code's axes, so the factorisation cannot be smuggled from a
+    pre-separated code. Returns the list of (generator_index, order) factors, or None if no valid direct-product factoring."""
+    dim = generators[0].dim
+    ident = np.eye(dim)
+    orders = []
+    for g in generators:
+        m, k = np.asarray(g.M, dtype=float), 1
+        while not np.allclose(m, ident, atol=tol):
+            m = g.M @ m
+            k += 1
+            if k > max_elements:
+                return None                                 # non-torsion generator (no finite cyclic factor)
+        orders.append(k)
+    for i in range(len(generators)):                        # a DIRECT product needs COMMUTING factors
+        for j in range(i + 1, len(generators)):
+            if not generators[i].commutes_with(generators[j], tol):
+                return None
+    elements, _ = discover_group(generators, tol=tol, max_elements=max_elements)
+    prod = 1
+    for o in orders:
+        prod *= o
+    if prod != len(elements):                               # factors overlap / don't span → the product loses/duplicates info
+        return None                                         # (predictive sufficiency fails — reject the wrong factoring)
+    return [(i, orders[i]) for i in range(len(generators))]
+
+
 def homog(pos):
     """Lift a position to homogeneous coords `[x…, 1]` — the state that `translation`/`rotation` operators act on."""
     return np.concatenate([np.asarray(pos, dtype=float), [1.0]])

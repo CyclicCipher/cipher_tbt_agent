@@ -354,6 +354,62 @@ def test_S2_factored_periods_from_the_spectrum_the_smuggle_guard():
     assert 6 in discover_periods(onl.operator())                              # the factor period read from the LEARNED operator's spectrum
 
 
+class _CounterToggle:
+    """A two-factor MICROWORLD: a COUNTER (Z/n, advanced by TICK) and an independent TOGGLE (Z/2, flipped by FLIP). The two
+    actions act on ORTHOGONAL factors, so the dynamics are a genuine PRODUCT of cycles (Z/n × Z/2). Encoded as one-hot(counter)
+    ⊕ one-hot(toggle) so the operators are LEARNABLE from the transition stream."""
+
+    def __init__(self, n=6):
+        self.n, self.c, self.t = n, 0, 0
+
+    def code(self):
+        v = np.zeros(self.n + 2)
+        v[self.c] = 1.0
+        v[self.n + self.t] = 1.0
+        return v
+
+    def step(self, action):
+        if action == "TICK":
+            self.c = (self.c + 1) % self.n
+        else:
+            self.t ^= 1
+        return self.code()
+
+
+def test_S2_factored_closure_product_of_cycles_from_a_microworld():
+    """L6_NONABELIAN Stage 2 (FACTORED closure) -- on a two-factor MICROWORLD (a counter Z/n + a toggle Z/2), LEARN the two
+    operators online, then `factor_group` decomposes the dynamics into a DIRECT PRODUCT of cycles guarded by predictive
+    sufficiency (commute + orders multiply to |G| = unique factorisation). It (i) recovers [(TICK, n), (FLIP, 2)] from the
+    LEARNED operators; (ii) is BASIS-INDEPENDENT -- a random orthogonal change of code gives the SAME factoring (the factors
+    live in the operators' joint eigenstructure, not the code's axes -> not smuggled from a pre-separated code); (iii) the
+    GUARD rejects the wrong factoring -- non-commuting generators (S₃) and overlapping factors (TICK & TICK²) return None."""
+    from tbt.operator import Operator, OnlineOperator, discover_periods, factor_group
+
+    n = 6
+    w = _CounterToggle(n)
+    tick, flip = OnlineOperator(n + 2), OnlineOperator(n + 2)
+    rng = np.random.default_rng(0)
+    for _ in range(300):                                                       # drive a mix; route each transition to its operator
+        a = "TICK" if rng.random() < 0.5 else "FLIP"
+        before = w.code()
+        after = w.step(a)
+        (tick if a == "TICK" else flip).observe(before, after)
+    TICK, FLIP = tick.operator(), flip.operator()
+
+    assert n in discover_periods(TICK) and discover_periods(FLIP) == [2]       # the periods, from the LEARNED operators
+    assert factor_group([TICK, FLIP]) == [(0, n), (1, 2)]                      # (i) the product-of-cycles decomposition
+
+    # (ii) BASIS-INDEPENDENCE -- a random orthogonal recoding scrambles the one-hot blocks, factoring is unchanged
+    Q, _ = np.linalg.qr(rng.standard_normal((n + 2, n + 2)))
+    TICKr, FLIPr = Operator(Q @ TICK.M @ Q.T), Operator(Q @ FLIP.M @ Q.T)
+    assert factor_group([TICKr, FLIPr]) == [(0, n), (1, 2)]
+
+    # (iii) the GUARD rejects non-factorable dynamics
+    _elts, _compose, _onehot, perm = _s3()
+    assert factor_group([Operator(perm((1, 0, 2))), Operator(perm((0, 2, 1)))]) is None   # S₃ non-abelian -> no direct product
+    assert factor_group([TICK, TICK.then(TICK)]) is None                      # overlapping factors (⟨TICK⟩ = ⟨TICK²⟩ region) -> product ≠ |G|
+
+
 def test_S2_discover_relations_by_loop_closure_cyclic_nonabelian_abelian():
     """L6_NONABELIAN Stage 2 -- DISCOVER relations by LOOP CLOSURE (the quotient), the Stage-2 gate on KNOWN presentations.
     Predictive sufficiency = operator EQUALITY (identical action ⇒ same element ⇒ same future). A 90° rotation generator:
