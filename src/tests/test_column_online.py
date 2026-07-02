@@ -88,28 +88,6 @@ def test_l23_recognition_wired_to_feature_at_location():
     assert surprised2 is True
 
 
-def test_object_state_tracks_the_dynamic_scene():
-    """C4 (COLUMN_AUDIT): L2/3's OBJECT STATE -- the compact summary of the DYNAMIC scene (features CHANGED at their
-    locations, from sense_at's surprise). Learning the initial scene sets NO state; a CHANGE (a feature replaced at a
-    known location -- a key collected) advances the object-state; distinct board-states differ. Not config_state:
-    layer-derived, metric, and only the dynamic part."""
-    col = CorticalColumn(n_entities=16, seed=0)
-    for _ in range(80):
-        for i in range(6):
-            col.observe(i, 0, (i + 1) % 6)
-    key, blk, empty = col.L4.encode(("key",)), col.L4.encode(("block",)), col.L4.encode(("floor",))
-    for _ in range(4):                                       # learn the initial scene: key@0, block@3 (antipodes)
-        col.sense_at(0, key)
-        col.sense_at(3, blk)
-    assert col.object_state() == frozenset()                # learning the scene -> no DYNAMIC state yet
-    col.sense_at(0, empty)                                   # the key at 0 is COLLECTED (a known feature changes)
-    assert col.object_state() == frozenset({(0, empty)})    # the object-state records the change at 0
-    col.sense_at(3, empty)                                   # the block leaves 3 -> another change
-    assert (3, empty) in col.object_state() and (0, empty) in col.object_state()   # a distinct board-state
-    col.reset_object_state()
-    assert col.object_state() == frozenset()                # a level boundary resets the dynamic state
-
-
 def test_the_cycle_recognizes_a_multi_location_object():
     """C2 (COLUMN_AUDIT): the L4-over-L6 cycle over MOVEMENT builds a multi-location OBJECT and RECOGNISES it -- after
     learning distinct features at separated locations, re-sensing each is PREDICTED (not surprised); a wrong feature

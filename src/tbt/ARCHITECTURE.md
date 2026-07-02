@@ -284,7 +284,8 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
   does NOT mean collapsing cost into a homogeneous reward channel: PRESERVE the appetitive/aversive ASYMMETRY of §3 (the
   brain uses a partly SEPARATE circuit — it may need its own learning rate, Go/NoGo opponency, or consumers; do not flatten
   it away)); object = recognition construct
-  (delete the segmentation heuristic + `object_state`/`_changed`); thin column
+  (delete the `object_state`/`_changed` change-log — DONE; the segmentation heuristic is LOAD-BEARING as the live
+  perception front-end, so it is REPLACED-then-deleted in P1, not cut here); thin column
   + agent (subsystems → layers); retina/motor-organ reduced to transduction/effection. Suite-green throughout; git
   branches for risk. **This is the bulk of the work.**
 - **P1 — Factored perception.** L2/3 recognition + L4 content deliver `(location, content)` factored, from the live field —

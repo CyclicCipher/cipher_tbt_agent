@@ -64,8 +64,7 @@ class CorticalColumn(nn.Module):
         self._cur = None                                      # the current node -- discrete path integration over the graph
         self._fovea = None                                    # P1: the CONTINUOUS metric location belief (pixel), path-integrated by L5's translation
         self._map = torch.zeros(feat_dim, d_mem)             # M5/L7-A: the online allocentric MAP (Σ feature ⊗ place), read by feature_at
-        self._changed: dict = {}                             # C4: L2/3 object STATE -- {location: feature} where a known feature CHANGED
-        self.cost: dict = {}                                 # the COST FIELD: location -> expected interaction cost (ONE currency for walls/hazards/slow/risky)
+        self.cost: dict = {}                                 # the COST FIELD (AVERSIVE value): location -> expected interaction cost (ARCHITECTURE.md §3; kept)
         self._pose = None                                    # L6_NONABELIAN S1e: the POSE belief (SE(2) matrix) path-integrated by COMPOSING operators (non-abelian)
         self.pose_ops: dict = {}                             # L6_NONABELIAN S1e: per-action body-frame SE(2) operator (learned) -- the pose-aware achiever composes these
 
@@ -300,10 +299,8 @@ class CorticalColumn(nn.Module):
         as the accumulated feature-at-location map; a persistent mismatch is a boundary (a different object)."""
         predicted = self.feature_at(location)
         surprised = predicted is not None and predicted != sensed_feature
-        if surprised:
-            self._changed[location] = sensed_feature                      # C4: a KNOWN feature changed here -> the object's dynamic state
         self.bind_at(location, sensed_feature)                            # learn: bind the sensed feature at the location
-        return surprised
+        return surprised                                                  # change is CARRIED by prediction error, not a stored change-log (rule 5)
 
     def predict_gx(self, g, action, content=None, shape=None):
         """L6_NONABELIAN Stage 2 step (c) -- the `g × x` FORWARD prediction (the TBT/TEM generative model): predict the next
@@ -314,8 +311,7 @@ class CorticalColumn(nn.Module):
             never seen with it -- the TEM win) -- returned as `(g', x')` with the transformed content;
           • else the content BOUND at `g'` (`feature_at`, the L4-over-L6 map = 'what's there when I move').
         Composing structure × content generalises to (g, content) combinations never seen together -- which the conjunctive
-        graph and the LOCAL-CONTEXT `field_rule` CA (kept as the complement for context-dependent propagation) cannot.
-        `content`/`shape` optional (a pure-movement prediction omits them). Returns `(g', x')`."""
+        graph cannot. `content`/`shape` optional (a pure-movement prediction omits them). Returns `(g', x')`."""
         g2 = self.predict(g, action)
         if content is not None and shape is not None:
             nxt = self.L5.recolor.get((shape, action), {}).get(content)
@@ -332,18 +328,6 @@ class CorticalColumn(nn.Module):
         name, _theta, _t, _ev = self.recognize_object(cloud)             # L2/3: pose-invariant identity (learn if novel)
         fid = self.L4.encode(("obj", name))                             # the recognised identity -> an L4 feature id
         return name, self.sense_at(location, fid)
-
-    def object_state(self):
-        """C4 (COLUMN_AUDIT): L2/3's OBJECT STATE -- the compact summary of the DYNAMIC scene: the frozenset of
-        (location, feature) where a known feature has CHANGED (emergent from sense_at's predict-then-compare surprise --
-        a key collected, a block moved). This is Monty's object 'state' (open/closed). NOT config_state: layer-derived,
-        metric-anchored, and only the DYNAMIC part (the static scene is not in it). The planner reads (position,
-        object_state) so it distinguishes board-states (which keys are collected) -- the C2<->C4 coupling."""
-        return frozenset(self._changed.items())
-
-    def reset_object_state(self):
-        """Clear the dynamic object state (a level boundary: the board resets)."""
-        self._changed = {}
 
     # ----- routing: the L5 operator (predict / motor / driver) --------------------------------------
     def predict(self, symbol, action):
