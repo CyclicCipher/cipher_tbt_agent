@@ -2,131 +2,185 @@
 
 *The single source of truth for the TBT agent. If the code and this document disagree, one of them is a bug. This
 document must remain explainable, in full, to anyone fluent in the domain jargon — if it cannot, the architecture is
-wrong and the architecture is what changes. It supersedes the older plan web (`L6_NONABELIAN.md`, `MATH_PHASE.md`,
-`VECTOR_NAV_PLAN.md`, `FORWARD_MODEL_PLAN.md`, `COLUMN_AUDIT.md`, `GROUNDING_PLAN.md`, …), which are demoted to background
+wrong, and the architecture is what changes. It supersedes the older plan web (`L6_NONABELIAN.md`, `MATH_PHASE.md`,
+`VECTOR_NAV_PLAN.md`, `FORWARD_MODEL_PLAN.md`, `COLUMN_AUDIT.md`, `GROUNDING_PLAN.md`, …), demoted to background
 references. There is one plan, here.*
 
 ---
 
-## 1. The model, in one paragraph (the paper abstract)
+## 1. The one mechanism
 
 A single reusable **cortical column** learns the structure of any domain as a navigable **reference frame** and predicts
-within it. **L6** is the *location*: an online successor-representation frame whose eigenvectors are grid cells
-(Stachenfeld 2017). **L5** is the *operator*: one learned per-action transition on the location code — a group
-representation, of which additive translation is the abelian special case and rotations/orderings are the non-abelian
-general case. **Path integration is applying the operator.** **L4** is *content*: the feature bound at a location
-(feature-at-location). The **forward model** is L5's operator predicting the next L4 content at the L6 location it
-path-integrates to, given an action — *predict the next observation given position and action* (TEM, Whittington 2020).
-**L2/3** recognises **objects** — a stored map of content-at-displacements — by incremental evidence voting, inferring
-pose so a known object is recognised at a pose never seen. A domain-agnostic **value critic** learns expected future
-reward (walls/hazards are negative value, not special objects); the **basal ganglia** select which goal-state to bring
-about; the column's **motor** acts to fulfil the prediction (active inference). Composed through the **thalamus**
-(content⊗location binding), columns vote — the Thousand-Brains consensus. No hand-coded rules and no domain priors:
-structure, content, value, and goals are all learned online from the sparse signal.
+within it. It holds one **current location**, moves it by learned **operators**, binds **content** to locations, and
+recognises **objects**. It **predicts the next observation given the current location and an action** — that is the
+column's nature, not a bolt-on. Many identical columns, bound and voting through the thalamus, are the Thousand-Brains
+consensus. A value critic and the basal ganglia turn prediction into goal-directed action. No hand-coded rules, no domain
+priors: structure, content, value, and goals are learned online from the sparse signal.
 
-## 2. The model, one line per part (the simple explanation)
+**Forward modelling is not a separate system.** A column predicts one step by construction (path-integrate the location,
+read the content there). "Forward modelling" is that same prediction *run forward without acting*; "planning over the map"
+is the value read off the learned frame (§6). There is no `forward_model` object — only the column predicting, iterated.
 
-| part | question it answers | the one mechanism |
-|---|---|---|
-| **L6** | *where am I?* | a learned SR location frame (grid cells = its eigenvectors) |
-| **L5** | *how does it change?* | one learned operator per action; path integration = applying it |
-| **L4** | *what is here?* | content bound at a location |
-| **forward model** | *what will I see next?* | L5's operator → L4 content at the next L6 location |
-| **L2/3** | *which object is this?* | recognition by evidence voting; pose inferred |
-| **value** | *how good?* | expected reward + cost, one currency |
-| **basal ganglia** | *what should I do?* | select the goal-state to bring about |
-| **thalamus** | *do the columns agree?* | bind content⊗location and vote |
+## 2. The layers
 
-## 3. Vocabulary — one definition each (the anti-spaghetti glossary)
+**L6 — LOCATION (where).**
+- *Structure:* an online, TD-learned **successor representation** over discovered states; its eigenvectors are the
+  multi-scale, periodic **grid cells** (Stachenfeld 2017). One frame, learned; the innate hex grid is only an
+  initial-state prior expressible within it, never a parallel code.
+- *Function:* holds the **current location** (one code). **Path integration = applying L5's operator to it**
+  (`location ← operator(action)·location`; the abelian phase-advance is the special case). Supplies the reference frame
+  everything is indexed in, and the SR value that is the planning substrate (§6).
 
-Every term has EXACTLY this meaning everywhere in the code and the docs. A second meaning is a bug, not a nuance.
+**L5 — OPERATOR / motor (how it changes; what to do).**
+- *Structure:* one learned **operator per action** — a group-representation matrix. Translation (abelian, commuting) is
+  the special case; rotations/orderings/constrained moves are the non-abelian general case (composition = matrix product).
+- *Function:* **path-integrates** L6's location (apply the operator); **predicts** by carrying the location forward; is
+  the **motor** — emits the action that brings about the predicted/desired state (active inference: predictions, not
+  commands); is the **driver** — the inter-column message a higher-order thalamus relays.
 
-- **location** `g` — a point in a learned reference frame = an SR code (L6). The ONLY location representation. There is
-  no separate fovea / pose-matrix / binned-node belief; those were parallel estimators (deleted, see §6 P0).
-- **operator** — the learned per-action transition on the location code (L5), a group-representation matrix. The ONLY
-  transition and the ONLY path integrator. Translation is its abelian special case, not a second mechanism.
-- **content** `x` — the feature at a location = L4's code. Location-invariant (the *what*, separate from the *where*).
-- **feature-at-location** — the binding of content to a location, `g ⊗ x` (L4). The ONLY map.
-- **forward model** — L5's operator predicting the next content at the path-integrated location, given an action. The
-  ONLY forward model. Local/propagation dynamics live *inside* it (content over neighbouring locations), never as a
-  second, location-blind predictor.
-- **object** — a learned reference frame holding content-at-locations, recognised by matching sensed
-  features-at-displacements to the stored map (L2/3 over L4⊗L6). NOT a segmented colour-blob, NOT a change-log, NOT a
-  tracked mover. Boundaries emerge from prediction MISMATCH, not a segmentation heuristic.
-- **recognition** — settling an object's identity + pose by incremental evidence voting (L2/3).
-- **prediction error / surprise** — the mismatch between predicted and sensed content. The ONLY "something changed"
-  signal; there is no stored change-log (`object_state`/`_changed` were bookkeeping — deleted).
-- **value** — expected future reward, learned by the critic (`reward.py`). Cost (walls/hazards/slow/risky) is negative
-  value in the same currency. The ONLY value; obstacles are not objects.
-- **goal** — a target-state (a location/content to bring about). The agent acts to fulfil it (active inference).
+**L4 — CONTENT / feature-at-location (what is here).**
+- *Structure:* a **content codebook** learned online (label-free) + the **feature ⊗ location** binding; a
+  pose/rotation-invariant feature descriptor.
+- *Function:* bind the sensed content to the current L6 location; **read out** the predicted content at a location — the
+  "what will I see" half of the column's prediction.
+
+**L2/3 — OBJECT / identity (which object this is).**
+- *Structure:* a **graph-memory of objects**, each an arrangement of content-at-displacements in its own frame.
+- *Function:* **recognise** the object and **infer its pose** by incremental evidence voting, so a known object is
+  recognised at a pose never seen; **group by structure** (boundaries emerge from prediction mismatch, never a colour/
+  connected-component heuristic); vote laterally and across columns.
+
+## 3. The subsystems
+
+**Thalamus.** The inter-column router: it **binds content ⊗ location** into the conjunctive representation and relays L5's
+driver messages, so columns modelling the same world **vote** toward a consensus (the higher-order thalamic loop of the
+Thousand-Brains theory). It is how "many columns" becomes "one percept."
+
+**Basal ganglia.** The **selector**. Given the candidate goal-states / actions and their values, it disinhibits the one to
+pursue (default-closed Go/NoGo, dopamine-RPE-trained), with STN "hold-your-horses" commitment under conflict. It is the
+*only* place arbitration between competing options is allowed, because it is the brain's arbitration organ (rule 4).
+
+**Hippocampus.** Not a separate algorithm — **the same column mechanism applied to the global, allocentric frame** (the
+whole world, not one object): grid × content bound across columns and episodes (TEM). Built once as the column algorithm,
+it is inherited for allocentric world-modelling and cross-frame/episodic binding; a plain single-column task needs it only
+when episodic memory or multi-frame binding does.
+
+**Value / reward.** The domain-agnostic **critic**: expected future reward, learned online from the sparse score. **Cost
+is negative value in the same currency** — a wall, a hazard, a slow tile, a risky tile are all points on one scalar
+(walls are the `−∞` limit), so obstacles are *not* special objects. This one value, read over the learned frame, is the
+planning substrate (§6), and its two components (pragmatic + epistemic) are what make explore vs exploit *emerge* rather
+than switch.
+
+## 4. Glossary — one definition each (a second meaning is a bug)
+
+- **location** `g` — the current point in the learned frame = the L6 SR code. The ONLY location representation.
+- **operator** — the learned per-action transition on the location code (L5). The ONLY transition and path-integrator;
+  translation is its special case.
+- **content** `x` — the feature at a location (L4). Location-invariant.
+- **feature-at-location** — the binding `g ⊗ x` (L4). The ONLY map.
+- **prediction** — the column carrying the location forward (L5 operator) and reading the content there (L4). Forward
+  modelling / rollout is this, iterated. There is no separate forward-model module.
+- **object** — a learned frame of content-at-displacements, recognised by voting; pose inferred; boundaries from
+  prediction mismatch. NOT a segment, a change-log, or a tracked mover.
+- **prediction error / surprise** — predicted vs sensed content. The ONLY "something changed" signal; no stored change-log.
+- **value** — expected future reward incl. cost, one currency (the critic). The ONLY value.
+- **goal** — a target-state to bring about; the motor acts to fulfil it.
 - **selection** — the basal ganglia choosing among goals/actions.
 
-## 4. The five rules (development law)
+## 5. The five rules (development law; a violation is reverted, not documented around)
 
-These are hard constraints. A change that breaks one is reverted, not documented around.
-
-1. **No parallel systems — ever, including for experiments.** Exactly one way to forward-model, one way to
-   path-integrate, one feature-at-location, one way a grid module learns its structure, one recogniser, one value, one
-   selector. Manage comparison and risk with **git branches**, never by keeping two mechanisms in the tree. A flag that
-   switches between two implementations (e.g. an abelian-vs-non-abelian `heading_dependent` fork) is a parallel system in
-   disguise — forbidden; the general mechanism must contain the special case.
-2. **One definition per concept.** See §3. A new meaning for an existing word is a bug to fix, not a footnote to add.
-3. **The column and the agent are thin coordinators.** They hold references + routing — never math or state. Every
-   belief, map, operator, and value lives in a layer/module. If `column.py` or `agent.py` grows a subsystem with its own
-   state, that state belongs in a layer.
-4. **No load-bearing harness, no domain-specific code, no special-casing, no ungrounded arbitration.** Nothing branches
-   on which game/domain it is. Every arbitration (explore/exploit, tabular/forward, goal selection) must name the brain
-   mechanism it implements (basal-ganglia selection, tonic-dopamine gain, STN commitment, …) or it is removed.
+1. **No parallel systems — ever, including for experiments.** Exactly one way to path-integrate, one way to predict, one
+   feature-at-location, one way a grid module learns its structure, one recogniser, one value, one selector. Manage
+   comparison and risk with **git branches**, never by keeping two mechanisms in the tree. Two "complementary" mechanisms
+   plus an **arbiter** (e.g. tabular-vs-forward, explore-vs-exploit as a hard switch, CA-vs-g×x) is a parallel system in
+   disguise — collapse it into the one mechanism whose behaviour subsumes both cases.
+2. **One definition per concept.** See §4. A new meaning for an existing word is a bug to fix.
+3. **The column and the agent are thin coordinators.** They hold references + routing — never math or state. Every belief,
+   map, operator, and value lives in a layer/module.
+4. **No load-bearing harness, no domain-specific code, no special-casing, no ungrounded arbitration.** Nothing branches on
+   which game/domain it is. Every arbitration must name the brain mechanism it implements (basal-ganglia selection,
+   tonic-dopamine gain, STN commitment) or it is removed. Selection lives in the basal ganglia, nowhere else.
 5. **No symbolic estimators, object heuristics, or change logs.** No hand-coded "what is an object / how to split it,"
-   no Kalman-style tracker banks (fovea centroids, pose matrices, binned nodes kept in parallel), no dicts of "what
-   changed." Structure is learned; change is carried by prediction error; the object is a recognition construct.
+   no Kalman-style tracker banks (fovea centroids, pose matrices, binned nodes in parallel), no dicts of "what changed."
+   Structure is learned; change is carried by prediction error; the object is a recognition construct.
 
-## 5. The architecture (who owns what; one mechanism per function)
+## 6. Planning — how the model decides (explore, exploit, act)
 
-| module | owns (the ONE mechanism) |
-|---|---|
-| `l6_sr` (**L6**) | the location frame — the online TD successor representation; grid cells = its eigenvectors; path integration = applying the L5 operator to the code |
-| `l5_displacement` (**L5**) | the per-action **operator** (transition), the **forward model** (operator over L4-content-at-L6-location), the **motor** (act to fulfil the prediction), the thalamus **driver** |
-| `l4_feature_location` (**L4**) | **feature-at-location** (bind + readout), the content codebook, the feature descriptor |
-| `l23_object` (**L2/3**) | **object recognition** (evidence voting, pose inferred) and the object map; boundaries from prediction mismatch |
-| `operator` | the group-representation primitive the operator IS (compose, learn, powers, relation/factor discovery) |
-| `thalamus` | content⊗location binding + cross-column voting |
-| `basal_ganglia` | goal/action **selection** |
-| `reward` | the **value** critic (reward + cost, one currency) and planning (SR value / prioritised sweeping) |
-| `column` | **routing only** — wire the layers; hold no state |
-| `agent` | the **loop only** — perceive → predict → select → act; hold no solver |
+**What planning is in real brains.** Routine planning is *not* rollout. The **successor representation** already stores
+the discounted future occupancy of the learned map, so value is a cheap read — `V = M·R`, a dot product over the frame —
+and greedy-on-`V` follows the shortest path, warping around barriers (the geodesic). Deliberative rollout (vicarious
+trial-and-error, hippocampal replay) is **sparing**, reserved for the novel/hard case. Prioritised replay schedules the
+value updates by gain × need (Mattar & Daw). (`reference_brain_planning`, `reference_exploration_replay`.)
 
-## 6. The plan (one dependency-ordered spine)
+**What planning is in TBT / our model.** The same: the column's learned frame (L6 SR) *is* the map; planning is the value
+read off it. **One planner, one value.** The geodesic to a goal falls out of the SR; rollout is only the column's own
+prediction (§1) iterated, used sparingly when the SR is insufficient — never a second, parallel planner.
 
-The old Phase/Stage/slice/step web is retired. What actually depends on what:
+**How it knows to explore vs exploit — one value, not a switch.** The critic's value is **Expected Free Energy**:
+- **pragmatic** = expected reward on the way to the goal;
+- **epistemic** = expected information gain, grounded by **epiplexity** (learning-*progress*, so it → 0 for both
+  irreducible noise *and* mastered structure — no noisy-TV trap, no separate gate).
 
-- **P0 — Converge the code to this document (the deletion pass).** Make the code equal §1. Concretely: collapse the two
-  forward models into one (delete the location-blind `field_rule` CA; the operator-over-content-at-location is the one);
-  collapse the location estimators into the SR code path-integrated by the operator (delete the fovea / pose-matrix /
-  `state_node` / `_obs` / `heading_dependent` fork); make the object a recognition construct (delete the
-  colour-segmentation heuristic and `object_state`/`_changed`); move the cost field into the value critic; make `column`
-  and `agent` thin (subsystems → layers). Suite-green throughout; git branches for anything risky. **This is the bulk of
-  the work and it is mostly DELETION.**
-- **P1 — Factored perception.** L2/3 recognition + L4 content deliver `(location, content)` factored, from the live
-  frame — not a raw entangled patch. This is the prerequisite the forward model always assumed and never had (why the
-  FM could not be built before).
-- **P2 — The forward model.** Trivial once P1 exists: L5's operator over L4-content-at-L6-location, predicting the next
-  observation. One model, one place. (This was the tangled "c".)
-- **P3 — Relations & planning.** Operators (learned) → relations by loop closure → geodesic planning over the learned
-  frame (SR value / prioritised sweeping, never explicit search) → the order/config-dependent case (Sokoban).
-- **P4 — The goal loop.** A goal-state generator proposes target-states → basal-ganglia selection → the motor achieves
-  → value confirms. The heterarchy (multi-column voting via the thalamus) scales the same loop.
+The policy maximises the one EFE value. **Exploit emerges** where the pragmatic term dominates (reward is reachable);
+**explore emerges** where the epistemic term dominates (learnable uncertainty remains). Directed exploration is the
+**SR-eigenvector eigenpurpose** — a gradient toward under-explored bottlenecks — which is *part of* the epistemic term,
+not a separate mode. There is no `g`-gate and no `V`/`V_exploit` split; those were a two-mechanism arbitration (a rule-1
+violation, a P0 target). (`reference_efe_and_epiplexity`, `reference_animal_exploration`, `reference_eigenoptions_subgoals`.)
 
-Honest status: the **operator** primitive and **relation/factor discovery** (part of P3) exist and are tested; the SR is
-the one L6; everything else is entangled with the estimator stack listed in P0 and must go through P0 first. We are at P0.
+**Acting = testing a hypothesis.** A goal-state is a hypothesis "bring about X." The agent plans to X (the value/geodesic
+above), the motor achieves it, and the **outcome** (reward = pragmatic, prediction-error = epistemic) confirms or refutes;
+the basal ganglia commit through the maneuver and switch on repeated refutation. Testing a hypothesis *is* planning.
 
-## 7. Acceptance test for every change (the paper test)
+## 7. Hypothesis generation — how the model proposes what to try (the frontier)
 
-Before any change lands, BOTH must hold:
+Testing is §6; **generation** — where a candidate target-state comes from — is the genuinely open problem. The proposal,
+from the research and the number-domain probes (`MATH_PHASE.md`):
 
-1. **Explainability** — the change is stateable in one sentence that fits the §1 paragraph and the §3 vocabulary. If
-   explaining it needs a new term, a second meaning, or a "well, in this mode…", stop.
-2. **The five rules** — it introduces no parallel system, no second definition, no coordinator bloat, no
-   harness/special-case/ungrounded arbitration, and no symbolic estimator/heuristic/change-log.
+- **Not enumeration.** The mind does not score the combinatorial space; it **samples a few candidates from memory**, cued
+  by context and biased by priors: **salience × controllability × ambiguity** (Dasgupta, Schulz & Gershman 2017;
+  resource-rational, more samples when more uncertain). Controllability = "it moved when I acted" (a learned affordance);
+  salience = novelty/prediction-error; both learned, never a colour/domain rule. (`reference_hypothesis_generation`.)
 
-If a change cannot pass both, the design is wrong. Fix the design, not the change.
+- **A hypothesis is a short composition of learned operators toward a cued target** — geodesic-finding in the learned
+  structure. The **master boundary** (from `MATH_PHASE`) predicts its cost: where the structure is **free/abelian**, the
+  hypothesis is **READ OFF** — a homomorphism is fixed by its action on the generators, so the extension to all
+  compositions is forced and cheap (e.g. `+b` = `b` succession steps; a straight-line vector to a goal). Where the
+  structure is **relational / quotient** (non-commuting, constrained — Sokoban-with-walls, carry), it must be
+  **SEARCHED**. So generation = *read off where the structure is free, search where it is relational*, over targets the
+  priors cue.
+
+- **What is proposed vs open.** Proposed and grounded: the shape (sample cued target-states; test by achieving; EFE
+  selects; read-off vs search set by the structure). **Open (honestly): (a)** learning the priors that cue *which*
+  targets to sample (must stay learned, not hand-coded), and **(b)** whether the relational **search** is tractable at
+  scale (the carry / Sokoban case). These are what the `MATH_PHASE` microworlds exist to probe; no code commits to a
+  solution until they answer.
+
+## 8. The plan — one dependency-ordered spine
+
+- **P0 — Converge the code to this document (mostly DELETION).** Collapse every parallel system and estimator into the
+  one mechanism: one prediction (delete the location-blind CA; the operator-over-content-at-location is the one); one
+  location = the L6 code path-integrated by the operator (delete the fovea / pose-matrix / `state_node` / `_obs` /
+  `heading_dependent` fork); one value (fold `V`/`V_exploit` + the `g`-gate + the `_tab_spread` tabular/forward arbiter
+  into the single EFE value; move `cost` into the critic); object = recognition construct (delete the segmentation
+  heuristic + `object_state`/`_changed`); thin column + agent (subsystems → layers). Suite-green throughout; git branches
+  for risk. **This is the bulk of the work.**
+- **P1 — Factored perception.** L2/3 recognition + L4 content deliver `(location, content)` factored, from the live frame
+  — the prerequisite prediction always assumed and never had.
+- **P2 — Prediction over the factored representation.** Trivial once P1 exists (the column's §1 prediction, now with a
+  clean content). This is the old, tangled "c."
+- **P3 — Relations & planning.** Operators (learned) → relations by loop closure → the SR-value geodesic over the learned
+  frame → the order/config-dependent case (Sokoban).
+- **P4 — Hypothesis generation (§7).** The proposal made live: cue target-states, achieve, confirm; the heterarchy
+  (multi-column voting via the thalamus) scales the same loop.
+
+Honest status: the **operator** primitive and **relation/factor discovery** (P3 middle) exist and are tested; the SR is
+the one L6. Everything else is entangled with the P0 estimator/arbiter stack. **We are at P0.**
+
+## 9. Acceptance test for every change (the paper test)
+
+Both must hold, or the change does not land:
+1. **Explainable** in one sentence that fits §1–§4 (no new term, no second meaning, no "well, in this mode…").
+2. **Obeys the five rules** (no parallel system, no second definition, no coordinator bloat, no harness/special-case/
+   ungrounded arbitration, no symbolic estimator/heuristic/change-log).
+
+If a change cannot pass both, the design is wrong — fix the design, not the change.
