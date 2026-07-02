@@ -184,6 +184,32 @@ def discover_group(generators, tol: float = 1e-6, max_elements: int = 256):
     return [(w, Operator(m)) for w, m in zip(words, mats)], relations
 
 
+def discover_periods(op, tol: float = 1e-6, max_period: int = 128):
+    """L6_NONABELIAN Stage 2 (the FACTORED case) — DISCOVER the cyclic factor PERIODS latent in a learned operator from its
+    SPECTRUM: the ORDERS of its root-of-unity eigenvalues (= the operator's PERIODIC invariant subspaces / irreducible cyclic
+    reps). The factorisation thus comes from the DYNAMICS (the learned operator), NOT from the input labelling — the
+    PRINCIPLED answer to the similarity-kernel SMUGGLE: you cannot loop-close on a projection you did not earn from the
+    operator itself. A BROADBAND / non-recurring spectrum (eigenvalues off the unit circle) yields NO period — the NEGATIVE
+    CONTROL that a raw, non-recurring count stays a LINE. And the spectrum distinguishes a single n-CYCLE (a PRIMITIVE nth
+    root present) from a genuine PRODUCT of smaller cycles (only the small roots) — so the notational factoring of one big
+    cycle (a raw Z/1000 count → 10×100) is NOT hallucinated; only genuine product structure in the dynamics is found.
+    Returns the sorted distinct periods (>1). Feeds FACTORED loop closure (close a loop every `period` steps in that factor's
+    eigenspace, guarded by predictive sufficiency) — the group-theoretic form of place value, honest about what is GIVEN."""
+    vals = np.linalg.eigvals(np.asarray(op.M, dtype=float))
+    periods = set()
+    for lam in vals:
+        if abs(abs(lam) - 1.0) > tol:                     # off the unit circle → decaying/nilpotent, not a cycle
+            continue
+        frac = float(np.angle(lam)) / (2.0 * np.pi)       # λ = exp(2πi·frac); its ORDER = smallest q with q·frac an integer
+        if abs(frac - round(frac)) < tol:                 # frac ≈ 0 → λ = 1, the trivial fixed direction (period 1)
+            continue
+        for q in range(2, max_period + 1):
+            if abs(frac * q - round(frac * q)) < tol:
+                periods.add(q)
+                break
+    return sorted(periods)
+
+
 def homog(pos):
     """Lift a position to homogeneous coords `[x…, 1]` — the state that `translation`/`rotation` operators act on."""
     return np.concatenate([np.asarray(pos, dtype=float), [1.0]])

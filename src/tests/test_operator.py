@@ -301,6 +301,59 @@ def test_NON_ABELIAN_gate_learned_operators_represent_S3():
     assert not online[a].operator().commutes_with(online[b].operator())
 
 
+def test_S2_factored_periods_from_the_spectrum_the_smuggle_guard():
+    """L6_NONABELIAN Stage 2 (the FACTORED case) -- the PRINCIPLED smuggle guard. Cyclic factors are DISCOVERED from the
+    operator's SPECTRUM (root-of-unity eigenvalues = periodic invariant subspaces), NOT from the input labelling -- so the
+    factorisation cannot be smuggled in. (i) A single n-CYCLE has a PRIMITIVE nth root -> period n. (ii) NEGATIVE CONTROL: a
+    non-recurring shift (nilpotent) AND a random map have NO root-of-unity structure -> NO period (a raw count stays a line).
+    (iii) The spectrum DISTINGUISHES one big cycle (Z/6: a primitive 6th root) from a genuine PRODUCT of small cycles
+    (Z/2⊕Z/3: only 2nd+3rd roots, NO 6) -- same group order, different dynamics -> the notational factoring of a raw count is
+    NOT hallucinated; only genuine product structure in the dynamics is found."""
+    from tbt.operator import Operator, discover_periods
+
+    def cycle(n):                                                              # the regular-rep n-cycle shift (a permutation)
+        M = np.zeros((n, n))
+        for i in range(n):
+            M[(i + 1) % n, i] = 1.0
+        return Operator(M)
+
+    def block_diag(*mats):
+        n = sum(m.shape[0] for m in mats)
+        B = np.zeros((n, n))
+        i = 0
+        for m in mats:
+            k = m.shape[0]
+            B[i:i + k, i:i + k] = m
+            i += k
+        return B
+
+    assert 4 in discover_periods(cycle(4))                                     # (i) Z/4 -> period 4
+    assert 6 in discover_periods(cycle(6))                                     #     Z/6 single cycle -> a PRIMITIVE 6th root
+
+    # (ii) NEGATIVE CONTROL -- no periodic structure -> nothing discovered (the smuggle guard)
+    nilpotent = np.zeros((6, 6))
+    for i in range(5):
+        nilpotent[i + 1, i] = 1.0                                             # open line, no wrap -> all eigenvalues 0
+    assert discover_periods(Operator(nilpotent)) == []
+    rng = np.random.default_rng(0)
+    assert discover_periods(Operator(rng.standard_normal((6, 6)))) == []       # structureless map -> no roots of unity
+
+    # (iii) PRODUCT of small cycles (Z/2 ⊕ Z/3) is DISTINCT from one 6-cycle: periods {2,3}, NO 6
+    prod = discover_periods(Operator(block_diag(cycle(2).M, cycle(3).M)))
+    assert 2 in prod and 3 in prod and 6 not in prod                          # genuine product, not a smuggled 6-factoring
+
+    # (iv) from a LEARNED operator (not hand-built): stream a walk on the Z/6 cycle -> the period is discovered
+    from tbt.operator import OnlineOperator
+    n = 6
+    onl = OnlineOperator(n)
+    h = 0
+    for _ in range(60):
+        b = np.zeros(n); b[h] = 1.0
+        a = np.zeros(n); a[(h + 1) % n] = 1.0
+        onl.observe(b, a); h = (h + 1) % n
+    assert 6 in discover_periods(onl.operator())                              # the factor period read from the LEARNED operator's spectrum
+
+
 def test_S2_discover_relations_by_loop_closure_cyclic_nonabelian_abelian():
     """L6_NONABELIAN Stage 2 -- DISCOVER relations by LOOP CLOSURE (the quotient), the Stage-2 gate on KNOWN presentations.
     Predictive sufficiency = operator EQUALITY (identical action ⇒ same element ⇒ same future). A 90° rotation generator:

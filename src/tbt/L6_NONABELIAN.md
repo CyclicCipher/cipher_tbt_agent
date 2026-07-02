@@ -233,9 +233,23 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
   commutativity closure); Z/6 (two commuting rots) → SAME order 6 but commutativity CLOSES — same order, opposite relations =
   the master boundary made discoverable. *From LEARNED operators (`test_nonabelian_env.py`):* after playing OrientationGame,
   `col.discover_relations` finds from its OWN learned `pose_ops` that a TURN round-trip closes to identity and the group is
-  non-abelian (FORWARD∤commute∤TURN). **REMAINING (slice 2+):** the FACTORED case (subspace loop closure = products of cycles,
-  where the similarity-kernel smuggle bites — the number/place-value rehearsal, `MATH_PHASE` P-carry) + wiring the Cayley
-  graph into the geodesic planner (feeds S3).
+  non-abelian (FORWARD∤commute∤TURN).
+  **SLICE 2 STARTED — the FACTORED case + its PRINCIPLED smuggle guard (2026-07-01, `operator.discover_periods`, suite 141):**
+  whole-operator closure (slice 1) fires only when the WHOLE state recurs; a base-10-style count never does (→ the flat line),
+  but a PROJECTION recurs. The principled answer to the top risk (the similarity-kernel SMUGGLE — the projection you loop-close
+  on IS the factorisation you claim to discover): discover the factors from the LEARNED OPERATOR'S SPECTRUM — the ORDERS of its
+  root-of-unity eigenvalues = its PERIODIC INVARIANT SUBSPACES (irreducible cyclic reps). The factorisation is then a property
+  of the DYNAMICS, not of the input labelling. *Gate met (`test_operator.py`):* a single n-cycle → period n; **NEGATIVE CONTROL**
+  — a nilpotent (non-recurring) shift AND a random map → NO period (a raw count stays a line); and a genuine PRODUCT (Z/2⊕Z/3,
+  only 2nd+3rd roots) is DISTINGUISHED from one big cycle (Z/6, a primitive 6th root) → the notational factoring of a raw count
+  is NOT hallucinated; works on a LEARNED operator too. Honest boundary (unchanged): this discovers factors that EXIST in the
+  dynamics; it will NOT conjure place value from a raw atomic count (correct) — notation/modularity must supply the recurrence.
+  **REMAINING (slice 2 cont.):** the actual CLOSURE — close a loop within each periodic eigenspace, GUARDED by predictive
+  sufficiency (reject the wrong-merge 0≡10 that mispredicts the coupled future), building the product-of-cycles map; then S3.
+  **NB the "geodesic planner" is NOT Dijkstra** (that would be a parallel non-neuroscientific system): the geodesic is computed
+  the brain's way — SR / prioritised-sweeping VALUE PROPAGATION over the operator-generalised representation → the POTENTIAL
+  FIELD `vector_action`/`achieve` already follow (reference_brain_planning; the SR warps around barriers = the geodesic). The
+  only extension is letting that value propagate over the COMPOSED-operator rep (generalising past visited states), not a search.
 - **Stage 3 — SOKOBAN / non-abelian planning.** Faithful non-abelian map → planning = geodesic-in-Cayley-graph; the GSG
   proposes goal-configs; commitment holds the multi-step maneuver. *Gate:* Sokoban — the map now represents push dynamics
   and the planner searches the non-abelian graph. Confirms or falsifies the unlock. *Diagnosis on failure:* the Stage-0..2
