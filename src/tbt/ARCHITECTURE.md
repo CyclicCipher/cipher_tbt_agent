@@ -292,8 +292,16 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
   perception front-end, so it is REPLACED-then-deleted in P1, not cut here); thin column
   + agent (subsystems → layers); retina/motor-organ reduced to transduction/effection. Suite-green throughout; git
   branches for risk. **This is the bulk of the work.**
-- **P1 — Factored perception.** L2/3 recognition + L4 content deliver `(location, content)` factored, from the live field —
-  the prerequisite prediction always assumed and never had. (Why the FM could not be built before.)
+- **P1 — Factored perception.** Deliver a factored `(location, content)` from the live field — the prerequisite prediction
+  always assumed and never had. **TBT-accurate sourcing (do not drift):** **location = the L6 code path-integrated by the
+  operator** (grid-cell dead-reckoning by efference — `loc_move`; anchored/corrected by sensing — `loc_sense`), NOT
+  re-derived from recognition each step (in TBT, movement path-integrates location and recognition *consumes* it — the
+  `loc_*` skeleton is the canonical one, the fovea tracker its continuous form + estimator binning). **content = L4**'s
+  rotation-invariant descriptor (the same local shape at any pose → the same `x`). **L2/3 recognition** consumes the
+  `(location, content)` stream to infer the object + its reference frame and supplies the anchor that corrects L6 — a
+  *consumer* of location, not its source. This replaces the estimator-stack halves (the fovea/`state_node` location; the
+  raw-patch content). Slices: (1) content = the invariant descriptor; (2) location = operator-path-integrated L6,
+  recognition-corrected — where #1's fork deletion lands; (3) retina reduced to pure transduction.
 - **P2 — The one prediction over the factored representation.** The column's §5 prediction with clean content: apply the
   operator to the location, read the content. **Self-motion** works here (the next displacement = your efference).
 - **P3 — Temporal sequence memory & behaviors.** The one sequence-memory mechanism (§5) in L4 (features), L2/3
@@ -315,9 +323,13 @@ pure-deletion phase is complete; the location / segmentation / cost collapses la
 
 ## 11. Acceptance test for every change (the paper test)
 
-Both must hold, or the change does not land:
+All must hold, or the change does not land:
 1. **Explainable** in one sentence that fits §1–§6 (no new term, no second meaning, no "well, in this mode…").
 2. **Obeys the five rules** (no parallel system, no second definition, no coordinator bloat, no harness/special-case/
    ungrounded arbitration, no symbolic estimator/heuristic/change-log).
+3. **TBT-accurate mechanism.** Before a step begins, verify its mechanism against real TBT / neuroscience — *not* just
+   this doc's wording, which can drift (P1's "location from the recognized pose" was such a drift). State the mechanism in
+   one sentence, ask "is this how a real cortical column does it?" (which layer, what drives it, does the research back
+   it), and research when unsure. If the doc's wording is wrong, **fix the doc first**, then build.
 
-If a change cannot pass both, the design is wrong — fix the design, not the change.
+If a change cannot pass all three, the design is wrong — fix the design, not the change.
