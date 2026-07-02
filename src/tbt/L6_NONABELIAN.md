@@ -114,11 +114,24 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
   suite 126):* driving the REAL agent on NavGame, all four nav operators converge (spectral radius 1, grid-code prediction
   err ~0.01–0.07) while the run still solves 8/8 — so **the agent's own exploration gives enough COVERAGE in practice** (the
   reframed linchpin validated on the live loop, not a synthetic sweep).
-  **What still REMAINS = DRIVING state by the learned operator** (the truly behaviour-affecting step): route `track`'s state
-  read through the operator instead of the additive `_fovea`. Deferred deliberately because it (a) only pays off on a
-  NON-ABELIAN environment (which we don't yet have — the current games are abelian), and (b) hits the grid's CODEBOOK BOUND
-  (`decode`/`place` cover only N×N cells while `_fovea` is unbounded) — a real regression hazard to solve first. So: build/
-  find a non-abelian test env, then drive + gate no-regression on abelian first.
+  **STAGE 1 SCOPE EXPANDED (2026-07-01, Cipher): FOLD IN the cross-layer UNIFICATION** — "unification / inconsistency
+  resolution across all layers" is now high priority (see AFFECTED LAYERS above: the column already has a hand-coded SE(2)
+  pose group in L2/3 that the abelian L6 doesn't share). The remaining Stage-1 work, sequenced by dependency:
+  - **S1c — a NON-ABELIAN TEST ENV (the prerequisite; STARTED 2026-07-01).** A heading-carrying agent (pose = x,y,θ;
+    body-frame FORWARD/TURN = SE(2)) — `test_nonabelian_env.py`. First result: FORWARD∘TURN ≠ TURN∘FORWARD, and the abelian
+    `move_delta` (ONE Δ per action) CANNOT represent FORWARD (4 different displacements, one per heading) → over
+    POSITION-only the dynamics are non-deterministic; over the full POSE they are deterministic. **KEY SUBTLETY this
+    surfaced:** the state must be the POSE (the group element), not the position — so this is a genuine SE(2) task, and
+    body-frame actions are RIGHT-multiplication (fixed operators only in the regular rep of a discretised pose space; the
+    continuous case wants a Lie generator, not a single Procrustes matrix). S₃ validated discrete finite groups; SE(2) adds
+    the continuous spatial group.
+  - **S1d — the CROSS-LAYER UNIFICATION (the high-priority fold):** replace L5's hand-coded `rot`/`apply_pose` with the
+    LEARNED `Operator` (one group machinery); generalise L4 to feature-at-POSE; make L2/3 recognition/voting read the unified
+    group. *Gate:* the recognition tests still pass (no regression) with the learned operators; the pose group is one, shared.
+  - **S1e — DRIVE STATE by the operator** (the behaviour-affecting step): route `track`'s state read through the operator /
+    pose instead of the additive `_fovea`; needs the grid's CODEBOOK BOUND fixed (`decode`/`place` cover only N×N while
+    `_fovea` is unbounded). *Gate:* no-regression on the abelian games first, then it SOLVES the non-abelian env (which the
+    abelian `move_delta` provably cannot).
 - **Stage 2 — DISCOVER relations by loop closure (the quotient).** Free composition path-integrates; relations (incl.
   commutativity) are found by loop closure under the **predictive-sufficiency** criterion (causal states / bisimulation, per
   `MATH_PHASE.md`) — close the coarsest partition that stays a sufficient statistic. *Gate:* on a task with a KNOWN
