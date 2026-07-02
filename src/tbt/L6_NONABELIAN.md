@@ -134,9 +134,17 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
     pose INFERENCE = `Operator.fit` (Procrustes recovers the same rotation as `pose_between`); pose APPLICATION = the
     operator acting; poses COMPOSE non-abelianly (SE(2)); the CONTINUOUS family = `power`. So L2/3's pose IS one instance of
     the ONE machinery, and hand-coded `rot(θ)` is now replaceable by the learned Operator (general for abstract columns).
-    *Slice 1 REMAINING:* fold pose INFERENCE (`pose_between`) into `Operator.fit` in the LIVE recognition path — deferred
-    because `pose_between` also returns MULTIPLE poses for SYMMETRIC patches (the stabilizer group), which the plain
-    Procrustes solve doesn't; that needs symmetry-aware handling. Then L4 → feature-at-POSE (the binding's location arg).
+    **Slice 2 DONE — `rot` DERIVES FROM `pose_operator` (suite 130):** `l5.rot(θ) = pose_operator(θ).M[:2,:2]`, so L2/3's
+    direct `rot(±θ) @ v` uses in `sense()` flow through the ONE operator machinery (behaviour-identical, recognition green) —
+    there is no longer a separate hand-coded rotation. **HONEST SCOPE CORRECTION (2026-07-01):** L2/3 was NOT broken — it
+    already used SE(2) correctly; the *inconsistency* was L6/NAVIGATION being abelian while recognition was correctly
+    non-abelian, so the fix is bringing L6 UP to the pose group (S1e), not rewriting L2/3. And **L4 needs NO direct edit** —
+    `feature ⊗ location` is representation-agnostic, so "feature-at-pose" is INHERITED the moment L6 supplies a pose (S1e).
+    So the AFFECTED-LAYERS "L4 → feature-at-pose / L2/3 reads the group" are CONSEQUENCES of L5/L6, not separate refactors.
+    **The one genuinely-remaining L2/3-specific fold** = making pose INFERENCE group-general + LEARNED (`align_rotations` →
+    `Operator.fit`), which must stay SYMMETRY-AWARE (`pose_between` returns MULTIPLE poses for symmetric patches = the
+    stabilizer coset; plain Procrustes gives one). That is exactly [[project_symmetry_opportunity]] — it matters for
+    ABSTRACT columns (whose group isn't SO(2)); for the visual column SO(2) inference is a legitimate Core-Knowledge plug-in.
   - **S1e — DRIVE STATE by the operator** (the behaviour-affecting step): route `track`'s state read through the operator /
     pose instead of the additive `_fovea`; needs the grid's CODEBOOK BOUND fixed (`decode`/`place` cover only N×N while
     `_fovea` is unbounded). *Gate:* no-regression on the abelian games first, then it SOLVES the non-abelian env (which the

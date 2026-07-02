@@ -42,9 +42,10 @@ from .perceive import canonicalize
 # does not keep its own copy.
 
 def rot(theta: float) -> np.ndarray:
-    """A group element in matrix form. Spatial instance: the 2-D rotation R(theta) in SO(2)."""
-    c, s = np.cos(theta), np.sin(theta)
-    return np.array([[c, -s], [s, c]])
+    """A group element in matrix form: the 2-D rotation R(theta) in SO(2) -- now the 2x2 block of the unified SE(2)
+    `pose_operator` (L6_NONABELIAN: ONE source of the rotation, in the operator machinery; L2/3's direct `rot` uses flow
+    through it transparently)."""
+    return pose_operator(theta).M[:2, :2]
 
 
 def local_disps(locs, i, radius):
