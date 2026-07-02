@@ -59,6 +59,14 @@ prediction, different driver. "Planning over the map" is the value read off the 
   (boundaries from prediction mismatch, never a colour/connected-component heuristic); vote laterally and across columns.
   Holds **temporal sequence memory over displacements** (§5): recognise the object's **phase** in its behavior and predict
   the next displacement.
+- *Learn a new object (allocate-on-mismatch):* when accumulating evidence matches **no** stored model across steps,
+  allocate a **new frame** anchored at **first contact** and populate it by sensorimotor exploration — sense content at the
+  current location, move (path-integrate the operator), sense the next, adding each `(content, displacement)` node only if
+  novel (de-duplicated). Unsupervised, label-free, incremental; the learn-vs-recognise decision is driven by **persistent
+  prediction mismatch**, never a segmentation heuristic (rule 5). The same column machinery — path integration + prediction
+  error — that recognises also learns. The object's **form** (this static graph) is learned first; its **behaviors** (§5)
+  are the temporal-sequence layer on top. (Numenta grid-cell framework, Hawkins et al. 2019; Monty / Thousand Brains
+  Project 2024: "no match during recognition → add a new graph"; novelty-gated node addition.)
 
 **Temporal sequence memory is one mechanism, instantiated per layer** — L4 (features), L2/3 (displacements), L5 (actions)
 — differing only in the context that drives the prediction; L6's temporal structure is the SR, not this. See §5.
@@ -170,7 +178,8 @@ agent," would be a load-bearing harness (rules 4–5); that decision is the colu
   (high-order) representations; instantiated in L4 (features), L2/3 (displacements), L5 (actions). L6's is the SR.
 - **phase** — the current position in a behavior/sequence = the temporal context; a recurrent state.
 - **object** — a learned frame of content-at-displacements (with behaviors), recognised by voting; pose and phase
-  inferred; boundaries from prediction mismatch. NOT a segment, a change-log, or a tracked mover.
+  inferred; boundaries from prediction mismatch; **learned by allocate-on-mismatch** — recognise, else add a new frame and
+  populate it by sensorimotor exploration (§2). NOT a segment, a change-log, or a tracked mover.
 - **prediction error / surprise** — predicted vs sensed content. The ONLY "something changed" signal; no stored change-log.
 - **value** — expected future reward incl. cost, one currency (the critic). The ONLY value.
 - **goal** — a target-state to bring about; the motor acts to fulfil it.
@@ -211,9 +220,21 @@ prediction (§5) iterated, used sparingly — never a second, parallel planner.
 **How it knows to explore vs exploit — one value, not a switch.** The critic's value is **Expected Free Energy**:
 pragmatic (expected reward toward the goal) + epistemic (expected information gain, grounded by **epiplexity** =
 learning-*progress*, so it → 0 for both irreducible noise *and* mastered structure). The policy maximises the one value:
-**exploit emerges** where pragmatic dominates, **explore emerges** where epistemic dominates. Directed exploration is the
-SR-eigenvector eigenpurpose — *part of* the epistemic term, not a separate mode. There is no `g`-gate and no `V`/`V_exploit`
-split (those were a two-mechanism arbitration, a P0 target). (`reference_efe_and_epiplexity`, `reference_eigenoptions_subgoals`.)
+**exploit emerges** where pragmatic dominates, **explore emerges** where epistemic dominates. There is no `g`-gate and no
+`V`/`V_exploit` split (those were a two-mechanism arbitration, a P0 target).
+
+*On the eigenpurpose — a reassessment (do not treat as a first-class mechanism).* Eigenpurposes (Machado et al. 2017/2018)
+were built as **task-agnostic** intrinsic rewards along the SR/Laplacian eigenvectors, to discover reusable exploration
+*options* that traverse the state-space geometry to bottlenecks. We adopted one as the directed explorer for the flat
+dead-zone. On reflection it is **redundant and costly**: (a) it *duplicates* the epistemic term — reaching unexplored
+regions is what a learning-progress / info-gain explorer already does; (b) being reward-blind it covers geometry
+**uniformly**, wasting actions under the RHAE budget (the value-aware-eigenoptions critique, arXiv 2507.09127); (c) it needs
+an **O(n³) eigendecomposition** of the SR — prohibitive on 64×64 frames (the code band-aids it with a throttle, itself a
+smell); (d) in the code it is a **separate `g`-gated salience** — exactly the parallel-explorer-plus-arbiter rule 1 forbids.
+**Decision:** the primary — and only — explorer is the one **epistemic term** (learning-progress + novelty); the SR
+**geodesic** (a cheap dot-product read, `V = M·R`, *not* its eigendecomposition) does the reaching once a target exists.
+Eigenpurpose is dropped — or at most a cheap geometry prior folded *inside* the epistemic term for the flat case, never a
+separate gated term. (`reference_efe_and_epiplexity`, `reference_eigenoptions_subgoals`.)
 
 **Acting = testing a hypothesis.** A goal-state is a hypothesis "bring about X." The agent plans to X, the motor achieves
 it, and the **outcome** (reward = pragmatic, prediction-error = epistemic) confirms or refutes; the basal ganglia commit
@@ -240,8 +261,9 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
 - **P0 — Converge the code to this document (mostly DELETION).** Collapse every parallel system, estimator, and arbiter
   into the one mechanism: one prediction (delete the location-blind CA); one location = the L6 code path-integrated by the
   operator (delete the fovea / pose-matrix / `state_node` / `_obs` / `heading_dependent` fork); one value (fold
-  `V`/`V_exploit` + the `g`-gate + the `_tab_spread` tabular/forward arbiter into the single EFE value; move `cost` into
-  the critic); object = recognition construct (delete the segmentation heuristic + `object_state`/`_changed`); thin column
+  `V`/`V_exploit` + the `g`-gate + the `_tab_spread` tabular/forward arbiter into the single EFE value; **drop the
+  eigenpurpose SR-eigendecomposition explorer** in favour of the one epistemic term — §8; move `cost` into the critic);
+  object = recognition construct (delete the segmentation heuristic + `object_state`/`_changed`); thin column
   + agent (subsystems → layers); retina/motor-organ reduced to transduction/effection. Suite-green throughout; git
   branches for risk. **This is the bulk of the work.**
 - **P1 — Factored perception.** L2/3 recognition + L4 content deliver `(location, content)` factored, from the live field —
