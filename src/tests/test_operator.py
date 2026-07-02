@@ -299,3 +299,38 @@ def test_NON_ABELIAN_gate_learned_operators_represent_S3():
         h = compose(g, h)
     assert np.allclose(online[a].operator().M, perm(a), atol=1e-6)                           # online learns the non-abelian op too
     assert not online[a].operator().commutes_with(online[b].operator())
+
+
+def test_S2_discover_relations_by_loop_closure_cyclic_nonabelian_abelian():
+    """L6_NONABELIAN Stage 2 -- DISCOVER relations by LOOP CLOSURE (the quotient), the Stage-2 gate on KNOWN presentations.
+    Predictive sufficiency = operator EQUALITY (identical action ⇒ same element ⇒ same future). A 90° rotation generator:
+    closure finds the CYCLIC group Z/4 with the relation g⁴=e (a length-4 loop to identity). S₃ (two transpositions):
+    closure finds the 6-element NON-ABELIAN group -- word (a,b) is a DISTINCT element from (b,a) (no commutativity closure).
+    Two COMMUTING rotations (Z/6): the SAME order 6 but (a,b)==(b,a) DOES close -- same order, opposite RELATIONS = the
+    master boundary (free/abelian READ-OFF vs quotient SEARCH) made discoverable from the learned operators alone."""
+    from tbt.operator import Operator, discover_group
+
+    def op_of(word, gens):
+        m = np.eye(gens[0].dim)
+        for gi in word:
+            m = gens[gi].M @ m
+        return m
+
+    # Z/4: one 90° rotation -> 4 elements; g⁴=e discovered as a length-4 loop back to identity
+    elts4, rel4 = discover_group([Operator.rotation(np.pi / 2)])
+    assert len(elts4) == 4
+    assert any(w == (0, 0, 0, 0) and eqw == () for w, eqw in rel4)             # g⁴ = e (loop closure to identity)
+
+    # S₃ (non-abelian, order 6): 6 elements discovered; (a,b) is a DISTINCT element from (b,a)
+    _elts, _compose, _onehot, perm = _s3()
+    a, b = (1, 0, 2), (0, 2, 1)
+    Ma, Mb = Operator(perm(a)), Operator(perm(b))
+    eltsS3, _relS3 = discover_group([Ma, Mb])
+    assert len(eltsS3) == 6 and not Ma.commutes_with(Mb)
+    assert not np.allclose(op_of((0, 1), [Ma, Mb]), op_of((1, 0), [Ma, Mb]))   # (a,b) ≠ (b,a): no commutativity closure (SEARCH)
+
+    # Z/6 (two COMMUTING rotations, 120° & 180°): same order 6, but commutativity CLOSES
+    Ra, Rb = Operator.rotation(2 * np.pi / 3), Operator.rotation(np.pi)
+    elts6, _rel6 = discover_group([Ra, Rb])
+    assert len(elts6) == 6 and Ra.commutes_with(Rb)
+    assert np.allclose(op_of((0, 1), [Ra, Rb]), op_of((1, 0), [Ra, Rb]))       # (a,b) == (b,a): commutativity (READ-OFF)

@@ -652,6 +652,20 @@ class CorticalColumn(nn.Module):
         self.pose_ops[action] = Operator(m)
         return self.pose_ops[action]
 
+    def discover_relations(self, tol: float = 1e-6, max_elements: int = 64):
+        """L6_NONABELIAN Stage 2 -- DISCOVER the RELATIONS among this column's LEARNED per-action operators (the QUOTIENT of
+        the free monoid on them) by loop closure under predictive sufficiency (`operator.discover_group`). Uses the SE(2)
+        POSE operators when the dynamics are heading-dependent (non-abelian), else the grid-code action operators. Turns the
+        free tree of action-words into the finite Cayley graph a geodesic planner (S3) searches. Returns (elements, relations)."""
+        from .operator import discover_group
+        if self.pose_ops and self.L5.heading_dependent():
+            gens = [self.pose_ops[a] for a in sorted(self.pose_ops)]
+        else:
+            gens = [self.action_operator(a) for a in sorted(self.action_ops)]
+        if not gens:
+            return [], []
+        return discover_group(gens, tol=tol, max_elements=max_elements)
+
     def pose_state(self, pos_bin: int = 1, ang_bins: int = 4):
         """The POSE belief binned -> the discrete state key `(x, y, heading-bucket)`. Includes HEADING, so a non-abelian
         env's dynamics are DETERMINISTIC over it (unlike position-only `track_state`). `ang_bins` buckets over [0, 2pi)."""

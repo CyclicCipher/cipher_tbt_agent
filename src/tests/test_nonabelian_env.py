@@ -333,6 +333,28 @@ def test_S1e_step4_solves_orientation_game_end_to_end():
     assert gr is not None and abs(gr[0] - 12.0) <= 1.0 and abs(gr[1] - 12.0) <= 1.0   # the RAW goal, derived via the completing operator
 
 
+def test_S2_discover_relations_from_the_agents_own_learned_operators():
+    """L6_NONABELIAN Stage 2 (from LEARNED operators, not a hand-built group): after the agent plays OrientationGame and
+    learns its SE(2) `pose_ops` online, `col.discover_relations` LOOP-CLOSES the free monoid on them into the Cayley graph.
+    It discovers, purely from the learned operators, that a TURN round-trip is a RELATION (TURN_L∘TURN_R = e, a length-2 loop
+    to identity), and that the group is NON-ABELIAN (FORWARD does not commute with a TURN). The quotient a planner searches."""
+    from arc_sdk import TbtPolicy
+    game = OrientationGame(8)
+    policy = TbtPolicy(seed=0, local=True, integrate=True)
+    frame = game
+    for _ in range(400):                                                    # play enough to learn the three pose operators
+        if policy.is_done([], frame):
+            break
+        name, coords = policy.choose_action([], frame)
+        frame = game.step(name, coords)
+    col = policy.agent.col
+    assert set(col.pose_ops) == {0, 1, 2}                                   # FORWARD / TURN_L / TURN_R learned
+    _elements, relations = col.discover_relations()
+    assert any(eqw == () and len(w) == 2 for w, eqw in relations)           # a TURN round-trip closes to identity (a discovered relation)
+    turn_l, fwd = col.pose_ops[1], col.pose_ops[0]
+    assert not turn_l.commutes_with(fwd)                                    # NON-ABELIAN: FORWARD∘TURN ≠ TURN∘FORWARD (the quotient needs search)
+
+
 def test_S1e_step2_pose_path_engages_on_the_non_abelian_env():
     """S1e step 2 (live wiring): driving the REAL agent on OrientationGame, the POSE path ENGAGES -- the non-abelian GATE
     trips (`heading_dependent`: FORWARD's direction is inconsistent) and the agent's state node becomes a POSE (3-tuple:

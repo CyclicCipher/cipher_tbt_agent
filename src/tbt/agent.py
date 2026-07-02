@@ -232,8 +232,8 @@ class Agent:
         gi = self.bg.gate([gc.kind for gc, _ in goals], [v for _, v in goals]) if len(goals) > 1 else 0
         self.goal = goals[gi][0]
         # DISPATCH on the selected goal: a reward TARGET → the cost-aware ACHIEVER (vector nav -- the beeline, curving
-        # around learned walls/hazards, no frontier optimism); the degenerate ACT goal (and, until B5 wires it,
-        # disambiguate) → the inverse-model motor `col.act` (the value/eigenpurpose policy).
+        # around learned walls/hazards); the degenerate ACT goal (and, until B5 wires it, disambiguate) → the inverse-model
+        # motor `col.act` (the value/eigenpurpose per-action policy, which IS the directed explorer -- see dynamics note below).
         if self.goal.kind == "reward" and self.goal.target is not None:
             here = self.col.here_position() if self.col.L5.heading_dependent() else state
             a = self.col.achieve(here, self.goal.target, self.actions)

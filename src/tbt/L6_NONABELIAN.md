@@ -224,6 +224,18 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
   presentation, the discovered relations match; the free part reads off, the relations are found. Fully dissolves the
   abelian assumption. *Fallback:* if online relation-discovery is unstable, restrict to relations that recur within a bounded
   horizon (bounded loop length) — the analogue of bounded-depth carry.
+  **SLICE 1 DONE (2026-07-01, `operator.discover_group` + `column.discover_relations`, suite 140):** loop closure = **operator
+  EQUALITY** — the predictive-sufficiency criterion made EXACT (equal operators act identically on every code → same future →
+  bisimulation; NO similarity-kernel smuggle at the whole-operator grain — that risk is specific to the FACTORED number case).
+  BFS the free monoid on the learned generators; a word CLOSES when its operator equals a known element's → the infinite free
+  TREE collapses to the finite Cayley graph (spanning part READS OFF, closures are the SEARCHED relations). *Known-presentation
+  gate met (`test_operator.py`):* Z/4 (one 90° rot) → 4 elements + `g⁴=e`; S₃ → 6 elements, NON-abelian ((a,b)≠(b,a), no
+  commutativity closure); Z/6 (two commuting rots) → SAME order 6 but commutativity CLOSES — same order, opposite relations =
+  the master boundary made discoverable. *From LEARNED operators (`test_nonabelian_env.py`):* after playing OrientationGame,
+  `col.discover_relations` finds from its OWN learned `pose_ops` that a TURN round-trip closes to identity and the group is
+  non-abelian (FORWARD∤commute∤TURN). **REMAINING (slice 2+):** the FACTORED case (subspace loop closure = products of cycles,
+  where the similarity-kernel smuggle bites — the number/place-value rehearsal, `MATH_PHASE` P-carry) + wiring the Cayley
+  graph into the geodesic planner (feeds S3).
 - **Stage 3 — SOKOBAN / non-abelian planning.** Faithful non-abelian map → planning = geodesic-in-Cayley-graph; the GSG
   proposes goal-configs; commitment holds the multi-step maneuver. *Gate:* Sokoban — the map now represents push dynamics
   and the planner searches the non-abelian graph. Confirms or falsifies the unlock. *Diagnosis on failure:* the Stage-0..2

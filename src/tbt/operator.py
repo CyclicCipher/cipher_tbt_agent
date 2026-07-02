@@ -144,6 +144,46 @@ class OnlineOperator:
         return Operator(self._M)
 
 
+def discover_group(generators, tol: float = 1e-6, max_elements: int = 256):
+    """L6_NONABELIAN Stage 2 — DISCOVER a group's RELATIONS by LOOP CLOSURE (the QUOTIENT of the free monoid on the learned
+    `generators`). BFS the tree of operator-words; a new word CLOSES (denotes an element already found) when its operator is
+    EQUAL to a known one — the PREDICTIVE-SUFFICIENCY criterion made exact: equal operators act identically on EVERY code, so
+    they have the same future (bisimulation / causal-state equivalence, `MATH_PHASE.md`). This collapses the infinite free
+    TREE (the free-monoid words) into the FINITE Cayley graph — the spanning/free part READS OFF, the closures are the
+    SEARCHED relations (the master boundary: free/abelian = read-off, quotient = search). Returns `(elements, relations)`:
+      elements  = list of (word, Operator); word = a tuple of generator indices, the SHORTEST (BFS) representative of the element;
+      relations = list of (word, equal_word); each discovered CLOSURE (a non-tree edge). `equal_word=()` ⇒ a loop to identity (r=e).
+    ABELIAN generators produce COMMUTATIVITY closures ((i,j)==(j,i)); non-abelian ones do not (that gap IS the boundary).
+    `max_elements` caps an infinite/large group (e.g. free translations) — the early relations (incl. commutativity) still
+    surface before the cap. The generators come from S1 (learned `pose_ops` / `action_ops`); this is the mechanism a
+    geodesic planner (S3) searches, and the group-theoretic form of the number domain's factored loop closure."""
+    gens = [np.asarray(g.M, dtype=float) for g in generators]
+    dim = gens[0].shape[0]
+    words = [()]                                           # BFS-ordered canonical words (the SHORTEST rerep of each element)
+    mats = [np.eye(dim)]                                   # the element operators (parallel to `words`)
+    relations = []
+
+    def _find(m):
+        for i, em in enumerate(mats):
+            if np.allclose(em, m, atol=tol):              # predictive sufficiency: identical action ⇒ same element
+                return words[i]
+        return None
+
+    head = 0
+    while head < len(words):
+        w, wm = words[head], mats[head]
+        head += 1
+        for gi, gm in enumerate(gens):
+            nm = gm @ wm                                   # apply `w`, then generator `gi`
+            hit = _find(nm)
+            if hit is not None:
+                relations.append((w + (gi,), hit))        # a CLOSURE = a relation (this word ≡ the found element)
+            elif len(words) < max_elements:
+                words.append(w + (gi,))
+                mats.append(nm)
+    return [(w, Operator(m)) for w, m in zip(words, mats)], relations
+
+
 def homog(pos):
     """Lift a position to homogeneous coords `[x…, 1]` — the state that `translation`/`rotation` operators act on."""
     return np.concatenate([np.asarray(pos, dtype=float), [1.0]])
