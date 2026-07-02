@@ -150,33 +150,32 @@ def test_column_learns_a_line_online():
     assert preds == [i + 1 for i in range(K - 1)], preds
 
 
-def test_column_owns_continuous_path_integration_and_disambiguates_animation():
-    """P1: the COLUMN (not the sensor) path-integrates the metric location belief. Fed the residual candidates a sensor
-    would detect, it LEARNS the per-action translation (L5), tracks the controllable mover, rejects an animation
-    distractor via the efference prediction, and coarsens to a recurring state node once controllable."""
+def test_column_owns_path_integration_via_perceive():
+    """P1: the COLUMN path-integrates the location belief via `perceive` (recognize -> PREDICT -> CORRECT -> LEARN). Fed
+    the mover's cloud each step, it recognizes the pose, LEARNS the per-action operator (a ~(2,0) translation), is
+    `controllable`, and coarsens to a recurring state node."""
     col = CorticalColumn(n_entities=64, seed=0)
-    col.track_reset()
-    assert col.track(None, [], (2.0, 2.0), cold=(2.0, 2.0)) == (2.0, 2.0)     # cold start: foveate the object
-    assert col.track(0, [(4.0, 2.0)], (4.0, 2.0)) == (4.0, 2.0)               # action 0 -> the mover stepped +2x
-    assert col.L5.controllable(), "the first real move learns a non-trivial translation -> controllable"
-    # a SECOND action-0 with a distractor (autonomous animation far away): the efference (fovea + learned +2x) picks
-    # the action-consistent residual, NOT the distractor.
-    assert col.track(0, [(6.0, 2.0), (18.0, 18.0)], (18.0, 18.0)) == (6.0, 2.0)
-    assert abs(col.L5.move(0)[0] - 2.0) < 0.5 and abs(col.L5.move(0)[1]) < 0.5
-    assert col.track_pos() == (6.0, 2.0)
-    assert col.state_node(pos_bin=4) == (1, 0)                                # (6//4, 2//4) -- the coarse recurring node (position, abelian special case)
+    shape = [(0, 0), (1, 0), (0, 1)]                                         # an asymmetric L (unique pose)
+    cloud = lambda ox, oy: [(x + ox, y + oy, 7) for (x, y) in shape]         # noqa: E731
+    col.perceive(None, cloud(2, 2))                                         # cold: recognize the object at (2,2)
+    col.perceive(0, cloud(4, 2))                                            # action 0 -> stepped +2x (learns the operator)
+    col.perceive(0, cloud(6, 2))                                            # again -> predict + correct + refine
+    assert col.controllable()                                              # the learned operator moves things
+    op = col.operator(0)
+    assert abs(op.M[0, 2] - 2.0) < 0.6 and abs(op.M[1, 2]) < 0.6            # ~(2, 0) translation
+    assert col.state_node(pos_bin=4)[:2] == (6 // 4, 2 // 4)                # (1, 0) coarse recurring position
 
 
-def test_track_gate_stays_off_for_a_non_controllable_scene():
-    """P1 (the relocated gate): a scene whose change is NOT action-driven (in-place animation, a constant residual)
-    learns a ~zero translation -> NOT controllable -> the state position stays the constant gate-off value, preserving
-    the recurring local view a state-change game depends on. Replaces the sensor-internal gate test."""
+def test_state_node_stays_constant_for_a_non_controllable_scene():
+    """P1: an IN-PLACE scene (change is NOT action-driven, only content toggles) -> `perceive` learns a ~identity
+    operator -> NOT `controllable` -> the state node stays the constant (0,0,0), preserving the recurring local view a
+    state-change game depends on."""
     col = CorticalColumn(n_entities=64, seed=0)
-    col.track_reset()
-    for t in range(12):                                                      # a 2x2 block toggling colour IN PLACE
-        col.track(t % 4, [(10.5, 10.5)], (10.5, 10.5))
-    assert not col.L5.controllable(), f"gate wrongly ON: deltas {col.L5.move_delta}"
-    assert col.state_node(pos_bin=4) == (0, 0), "non-controllable scene must keep the constant gate-off position"
+    shape = [(0, 0), (1, 0), (0, 1)]
+    for t in range(12):                                                     # the object sits IN PLACE; only its colour toggles
+        col.perceive(t % 4, [(x + 10, y + 10, (t % 2) + 1) for (x, y) in shape])
+    assert not col.controllable(), col.pose_ops                            # in-place -> ~identity operator -> not controllable
+    assert col.state_node(pos_bin=4) == (0, 0, 0)
 
 
 # ── SR shortest-path navigation (navigate_to) + grid-cell VECTOR navigation (vector_action) ──────────────────

@@ -629,19 +629,27 @@ class CorticalColumn(nn.Module):
             return (float(self._pose[0, 2]), float(self._pose[1, 2]))
         return self._fovea
 
+    def controllable(self) -> bool:
+        """Does the learned per-action OPERATOR move things? -> the tracked mover responds to actions, so its allocentric
+        location is informative. Sourced from the learned operators (`pose_ops`): a non-trivial translation OR rotation
+        for some action. A non-controllable in-place animation's per-action pose-deltas are inconsistent and average
+        (EWMA in `learn_pose_op`) to ~identity -> False -> the location stays constant. No `move_delta`/`heading_dependent`
+        gate (those were the retiring abelian tracker + game-type switch)."""
+        for op in self.pose_ops.values():
+            m = np.asarray(op.M, dtype=float)
+            if abs(m[0, 2]) + abs(m[1, 2]) > 0.5 or abs(m[0, 0] - 1.0) + abs(m[1, 0]) > 0.05:
+                return True                                          # a non-trivial translation OR rotation
+        return False
+
     def state_node(self, pos_bin: int = 4):
-        """The ONE coarse allocentric STATE node for the SR/graph (L6_NONABELIAN — axis 2 unified; replaces the
-        track_state/pose_state sensor gate). The belief binned so aliased views separate and positions RECUR, GATED by
-        controllability (a non-controllable state-change scene keeps the constant (0,0), preserving its recurring local
-        view). The node is the full POSE `(x, y, heading)` when the dynamics are heading-dependent (non-abelian), else
-        position-only `(x, y)` — the abelian SPECIAL CASE (no heading factor). Position/heading come from the ONE pose
-        belief (`pose_state`), so there is no parallel abelian tracker."""
-        # controllable = the object responds to actions: abelian via a non-zero `move_delta`, OR non-abelian via
-        # `heading_dependent` (a heading-dependent mover whose per-action `move_delta` averages to ~0 is STILL controllable).
-        if self._pose is None or not (self.L5.controllable() or self.L5.heading_dependent()):
-            return (0, 0)
-        node = self.pose_state(pos_bin)
-        return node if self.L5.heading_dependent() else node[:2]
+        """The ONE coarse allocentric STATE node from the pose belief -- `(x, y, heading-bucket)`, binned so aliased views
+        separate and positions RECUR. The heading comes from RECOGNITION (`perceive`), so it self-degenerates to a
+        CONSTANT bucket for a non-rotating (abelian) mover -- no spurious dimension and no game-type gate, the non-abelian
+        heading emerges only when the mover actually rotates. GATED by `controllable`: a non-controllable in-place
+        animation keeps the constant `(0, 0, 0)`, preserving its recurring local view."""
+        if self._pose is None or not self.controllable():
+            return (0, 0, 0)
+        return self.pose_state(pos_bin)
 
     # ----- L6_NONABELIAN S1e: path-integrate a POSE by COMPOSING operators (the non-abelian generalisation of track) ----
     def track_pose_reset(self):

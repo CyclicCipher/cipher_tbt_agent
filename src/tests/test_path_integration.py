@@ -181,26 +181,24 @@ def test_path_integrate_unifies_abelian_and_nonabelian_by_the_operator():
     assert abs(x2 - 1.0) < 1e-6 and abs(y2 - 1.0) < 1e-6 and abs(th2 - np.pi / 2) < 1e-6
 
 
-def test_unified_operator_is_the_abelian_translation_on_navgame():
-    """L6_NONABELIAN (axis-2 unification, MECHANISM): the ONE per-action operator `col.operator(a)` handles the abelian
-    case as its SPECIAL CASE -- driving the agent on NavGame (fixed-direction actions → `heading_dependent` is False), the
-    operator is the abelian TRANSLATION reproducing the learned `move` (composing additively = path integration). A short
-    drive LEARNS the move deltas; this asserts the operator WIRING, not end-to-end solving (that is the xfailed P0-dip test
-    above, re-earned at P4)."""
+def test_perceive_learns_translating_operators_on_navgame():
+    """P1 (MECHANISM, live): driving the agent on NavGame, `perceive` recognizes the mover each step and LEARNS per-action
+    operators that TRANSLATE the location (path integration is live on the real game). NB NavGame's mover is a
+    rotationally SYMMETRIC 2×2 block, so its heading is ambiguous and the operator may carry a spurious rotation — the
+    deferred stabilizer-group / multiple-pose-hypotheses work (project_symmetry_opportunity). The CLEAN-translation
+    operator (no spurious rotation) is verified on an ASYMMETRIC mover in
+    test_column_online::test_column_owns_path_integration_via_perceive."""
     import numpy as np
-    from tbt.operator import dehomog, homog
     game = NavGame(8)
     policy = TbtPolicy(seed=0, local=True, integrate=True)
     frame = game
-    for _ in range(300):                                           # enough to move in every direction + learn the deltas
+    for _ in range(300):                                           # enough to move in every direction + learn the operators
         if policy.is_done([], frame):
             break
         name, coords = policy.choose_action([], frame)
         frame = game.step(name, coords)
     col = policy.agent.col
-    learned = [a for a in [0, 1, 2, 3] if col.L5.move_delta.get(a, (0, 0)) != (0, 0)]
-    assert learned                                                 # the drive learned real (non-trivial) move deltas
-    assert not col.L5.heading_dependent()                          # NavGame is abelian -> the operator is the translation special case
-    for a in learned:
-        op = col.operator(a)
-        assert np.allclose(dehomog(op.apply(homog([5.0, 7.0]))), np.array([5.0, 7.0]) + np.array(col.L5.move(a)))  # operator == move
+    moved = [a for a in col.pose_ops                               # the actions whose learned operator translates the location
+             if abs(np.asarray(col.pose_ops[a].M)[0, 2]) + abs(np.asarray(col.pose_ops[a].M)[1, 2]) > 0.5]
+    assert moved, col.pose_ops                                     # perceive learned real (non-trivial) translating operators
+    assert col.controllable()                                      # -> the mover is controllable (its location is informative)

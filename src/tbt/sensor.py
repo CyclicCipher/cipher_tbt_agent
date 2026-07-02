@@ -70,17 +70,13 @@ class Sensor:
         change = salient_cells(self._prev, frame) if self._prev is not None else set()
         if self.local:
             appeared, dominant, cold = self._residual_candidates(frame, change, objects)
-            if self.column is not None:                                    # the COLUMN owns the fovea (efference disambiguation) -- both modes
-                shape = (self._mover_shape(frame)                          # ROUTE-1 (S1e): the mover's FULL cloud -> orientation from shape,
-                         if (self.integrate and self.column.L5.heading_dependent())   # only once the non-abelian gate has tripped
-                         else None)                                        # (abelian games get shape=None -> track is byte-identical)
-                self._fovea = self.column.track(action, appeared, dominant, cold, shape=shape)
-                feat = self.encode(self._patch(frame, self._fovea))
-                if self.integrate:                                          # integrate ADDS the location node -- the ONE state_node:
-                    state = (feat, self.column.state_node(self.pos_bin))     # POSE (x,y,heading) if non-abelian, else position (abelian special case)
-                else:
-                    state = feat
-            else:                                                          # standalone sensor (no column): dominant-residual fovea, no path integration
+            if self.column is not None and self.integrate:                 # the FACTORED (content, location) via the column's ONE perception step
+                cloud = self._mover_cloud(frame)                           # the controllable mover's coloured cells
+                content, _pose = self.column.perceive(action, cloud)       # recognize -> PREDICT -> CORRECT -> LEARN -> content (P1)
+                self._fovea = ((float(self.column._pose[0, 2]), float(self.column._pose[1, 2]))   # the belief position (foveal read-back)
+                               if self.column._pose is not None else (dominant or cold))
+                state = (content, self.column.state_node(self.pos_bin))    # (content, location) -- the pose node (heading self-degenerates for abelian)
+            else:                                                          # local feature-only (no integration) / standalone (no column): dominant-residual fovea
                 self._fovea = dominant if dominant is not None else (self._fovea or cold)
                 feat = self.encode(self._patch(frame, self._fovea))
                 state = (feat, (0, 0)) if self.integrate else feat         # integrate w/o a column -> the gate-off constant position
@@ -106,6 +102,17 @@ class Sensor:
         _comp, dominant = dominant_region(change)
         cold = self._largest_centroid(objects) or (len(frame[0]) / 2.0, len(frame) / 2.0)
         return appeared, dominant, cold
+
+    def _mover_cloud(self, frame):
+        """The controllable mover's COLOURED cells `[(x, y, colour), ...]` -- the largest non-background connected
+        component of the current frame (the whole object, even on an in-place turn). `[]` if empty. The perception input
+        the column's `perceive` recognizes (pose) + encodes (content)."""
+        bg = background(frame)
+        cells = {(x, y) for y, row in enumerate(frame) for x, v in enumerate(row) if v != bg}
+        if not cells:
+            return []
+        comp, _centroid = max(components(cells), key=lambda cc: len(cc[0]))
+        return [(x, y, frame[y][x]) for (x, y) in comp]
 
     def _mover_shape(self, frame):
         """L6_NONABELIAN S1e ROUTE-1: the FULL connected cloud of the controllable mover (the largest non-background

@@ -342,7 +342,6 @@ def test_S1e_step4_solves_orientation_game_end_to_end():
     assert gr is not None and abs(gr[0] - 12.0) <= 1.0 and abs(gr[1] - 12.0) <= 1.0   # the RAW goal, derived via the completing operator
 
 
-@pytest.mark.xfail(reason=_P0_DIP, strict=False)
 def test_S2_discover_relations_from_the_agents_own_learned_operators():
     """L6_NONABELIAN Stage 2 (from LEARNED operators, not a hand-built group): after the agent plays OrientationGame and
     learns its SE(2) `pose_ops` online, `col.discover_relations` LOOP-CLOSES the free monoid on them into the Cayley graph.
@@ -389,10 +388,11 @@ def test_pose_achiever_honors_the_cost_field_V2_one_vector_nav():
 
 
 def test_S1e_step2_pose_path_engages_on_the_non_abelian_env():
-    """S1e step 2 (live wiring): driving the REAL agent on OrientationGame, the POSE path ENGAGES -- the non-abelian GATE
-    trips (`heading_dependent`: FORWARD's direction is inconsistent) and the agent's state node becomes a POSE (3-tuple:
-    x, y, heading), not just position. NavGame stays on `track_state` (no abelian regression -- test_path_integration).
-    (SOLVING OrientationGame is step 4; this validates the wiring + gate.)"""
+    """S1e step 2 (live wiring): driving the REAL agent on OrientationGame, the POSE path ENGAGES via `perceive` -- the
+    location node is a POSE (3-tuple: x, y, heading), the mover is `controllable`, and a TURN operator carries a real
+    ROTATION. The non-abelian case EMERGES from recognition (a rotating mover -> a rotation operator), not a
+    `heading_dependent` game-type gate. (SOLVING OrientationGame is the xfailed step 4.)"""
+    import numpy as np
     from arc_sdk import TbtPolicy
     game = OrientationGame(8)
     policy = TbtPolicy(seed=0, local=True, integrate=True)
@@ -403,8 +403,9 @@ def test_S1e_step2_pose_path_engages_on_the_non_abelian_env():
         name, coords = policy.choose_action([], frame)
         frame = game.step(name, coords)
     col = policy.agent.col
-    assert col.L5.heading_dependent()                                       # the non-abelian gate tripped (FORWARD inconsistent)
-    assert policy.agent._prev is not None and len(policy.agent._prev[0]) == 3   # the agent's state node is a POSE (x, y, heading)
+    assert col.controllable()                                              # the learned operator moves things
+    assert len(col.state_node()) == 3                                      # the location node is a POSE (x, y, heading)
+    assert any(abs(np.asarray(op.M)[1, 0]) > 0.3 for op in col.pose_ops.values())   # some TURN learned a real ROTATION (non-abelian)
 
 
 def test_S1e_heading_PERCEIVED_from_movement_direction_drives_the_pose():
