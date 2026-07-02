@@ -186,7 +186,7 @@ def test_column_owns_continuous_path_integration_and_disambiguates_animation():
     assert col.track(0, [(6.0, 2.0), (18.0, 18.0)], (18.0, 18.0)) == (6.0, 2.0)
     assert abs(col.L5.move(0)[0] - 2.0) < 0.5 and abs(col.L5.move(0)[1]) < 0.5
     assert col.track_pos() == (6.0, 2.0)
-    assert col.track_state(pos_bin=4) == (1, 0)                               # (6//4, 2//4) -- the coarse recurring node
+    assert col.state_node(pos_bin=4) == (1, 0)                                # (6//4, 2//4) -- the coarse recurring node (position, abelian special case)
 
 
 def test_track_gate_stays_off_for_a_non_controllable_scene():
@@ -198,7 +198,7 @@ def test_track_gate_stays_off_for_a_non_controllable_scene():
     for t in range(12):                                                      # a 2x2 block toggling colour IN PLACE
         col.track(t % 4, [(10.5, 10.5)], (10.5, 10.5))
     assert not col.L5.controllable(), f"gate wrongly ON: deltas {col.L5.move_delta}"
-    assert col.track_state(pos_bin=4) == (0, 0), "non-controllable scene must keep the constant gate-off position"
+    assert col.state_node(pos_bin=4) == (0, 0), "non-controllable scene must keep the constant gate-off position"
 
 
 # ── SR shortest-path navigation (navigate_to) + grid-cell VECTOR navigation (vector_action) ──────────────────

@@ -213,11 +213,17 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
       metric coords, and the GOAL is derived EXACTLY as `pre-pose ∘ pose_ops[completing_action]` (`_goal_raw` = where the
       completing action LANDED — reset-timing-robust, and the learned operator doing double duty). NavGame 8/8 stays green
       (abelian byte-identical — the pose path is gated on `heading_dependent`; `shape=None` → `track` unchanged).
-    - **Step 5 REMAINING (DEFERRED past Phase II):** DISSOLVE the redundant `_fovea`/`track_state` + the non-abelian gate +
-      route-2 `track_heading` into the ONE pose path. Deferred deliberately: the dissolution is the riskiest edit (it touches
-      the shared hot path used by every abelian game), and "no parallel systems" is a cleanup that should follow — not
-      precede — the GSG unification (Phase II), which will exercise the same achiever across more envs and surface any
-      remaining coordinate/coupling issues to fold in at once. Validation first (done: it solves); dissolve as the finale.
+    - **Step 5 DONE — the PARALLEL machinery DISSOLVED (2026-07-01, suite 145).** No more abelian-vs-non-abelian forks:
+      **(1) ONE L6 script** — `l6_grid.py` DELETED; the hex metric frame collapsed to `l6_sr.hex_code` (an initial-state
+      descriptor within the ONE L6 framework, not a parallel class). **(2) ONE operator** — `col.operator(a)` = the SE(2)
+      pose op (non-abelian) or the abelian TRANSLATION (`L5.operator`, the commuting special case); the parallel grid-code
+      learner (`action_ops`/`_observe_operator`/`action_operator`) is GONE (it only existed to give operator learning a code
+      space). **(3) ONE state node** — `col.state_node` subsumes the `track_state`/`pose_state` sensor gate: the full pose
+      `(x,y,heading)` when heading-dependent, else position-only (abelian special case), from the ONE pose belief. Two
+      subsumption BUGS surfaced + fixed (the point of "no parallel systems"): `track_reset` now drops `_pose` too (a stale
+      pose across a level boundary was corrupting transfer levels), and `state_node`'s controllability admits the
+      non-abelian mover (whose `move_delta` averages to ~0). NO abelian regression — NavGame 8/8 and OrientationGame 8/8 at
+      their exact baselines, by construction (the non-abelian machinery IS the abelian special case).
 - **Stage 2 — DISCOVER relations by loop closure (the quotient).** Free composition path-integrates; relations (incl.
   commutativity) are found by loop closure under the **predictive-sufficiency** criterion (causal states / bisimulation, per
   `MATH_PHASE.md`) — close the coarsest partition that stays a sufficient statistic. *Gate:* on a task with a KNOWN

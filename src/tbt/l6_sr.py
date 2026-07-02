@@ -142,3 +142,20 @@ class OnlineSR:
     def sr(self):
         """The current SR matrix (rows ordered by discovery; `idx` maps symbol -> row)."""
         return self.M
+
+
+def hex_code(disp, scales=(11, 13, 17), lattice: str = "hex"):
+    """The HEX reference frame's INITIAL-STATE descriptor, WITHIN the one L6 module (the collapsed `l6_grid`). A specific
+    frame whose geometry is known a-priori -- the spatial column's innate entorhinal grid -- is described here by the MINIMAL
+    data + code: the multi-scale plane-wave code at a (relative) displacement `disp=(dx,dy)`, each module = plane waves at
+    0/120/240° (hex) with an incommensurate scale (Wei-Fiete), giving a metric, path-integrable code over `lcm(scales)`. It
+    is a valid ABELIAN representation of translation (`hex_code(a+b)` = the phase-composition of a and b), so it doubles as a
+    code space for operator learning. NB the SR above is the LEARNED substrate that runs live; this is only the OPTIONAL
+    metric prior for an a-priori-known frame -- one L6 script, the frame as an initial-state descriptor, not a parallel class."""
+    import math
+    disp = np.asarray(disp, dtype=float)
+    angles = [0.0, 120.0, 240.0] if lattice == "hex" else [0.0, 90.0]
+    dirs = np.array([[math.cos(math.radians(a)), math.sin(math.radians(a))] for a in angles])
+    W = np.concatenate([(2.0 * math.pi / s) * dirs for s in scales], axis=0)    # (M, 2) grid frequencies (incommensurate)
+    ph = disp @ W.T                                                             # (M,) phase increment per module
+    return np.stack([np.cos(ph), np.sin(ph)], axis=-1).reshape(-1)              # (2M,) the hex grid code

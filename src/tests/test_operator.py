@@ -2,9 +2,9 @@
 behaviour, and PROVING the interface can hold a NON-COMMUTING operator (commutativity is no longer hard-wired).
 
 Gates: (1) translation is a faithful ABELIAN group representation (composition fidelity + commutes); (2) the interface
-HOLDS non-commuting operators (a rotation vs a translation); (3) `l6_grid.path_integrate` IS the operator acting (no
-behaviour change); (4) L5's per-action operator reproduces the additive `move` on a NavGame path + a counting succession
-(no regression)."""
+HOLDS non-commuting operators (a rotation vs a translation); (3) L5's per-action operator reproduces the additive `move`
+on a NavGame path + a counting succession (no regression). Plus S1 learning (on the `l6_sr.hex_code` frame), S2 relations
+/ factored discovery, and the step-(c) content operator + `g × x` bind."""
 
 from __future__ import annotations
 
@@ -46,23 +46,6 @@ def test_interface_HOLDS_non_commuting_operators():
     assert not np.allclose(T.then(R).apply(p), R.then(T).apply(p))               #   +x then rotate ≠ rotate then +x
 
 
-def test_grid_path_integrate_IS_the_operator_acting():
-    """l6_grid.path_integrate re-expressed as an Operator (block-diagonal phase rotation): identical output, and the grid
-    operators compose FAITHFULLY and COMMUTE = an abelian (unitary) representation of translation."""
-    import torch
-
-    from tbt.l6_grid import L6_GridLocation
-    g = L6_GridLocation()
-    torch.manual_seed(0)
-    z = torch.randn(g.dim)
-    for disp in ([1.0, 0.0], [2.0, -3.0], [0.7, 0.4]):
-        want = g.path_integrate(z, torch.tensor(disp, dtype=torch.float32)).numpy()
-        assert np.allclose(g.operator(disp).apply(z.numpy()), want, atol=1e-4)   # the operator IS path_integrate
-    a, b = [1.0, 2.0], [0.5, -1.0]
-    assert np.allclose(g.operator(a).then(g.operator(b)).M, g.operator([1.5, 1.0]).M, atol=1e-4)   # composition fidelity
-    assert g.operator(a).commutes_with(g.operator(b), tol=1e-6)                  # abelian
-
-
 def test_L5_operator_reproduces_additive_move_NO_regression():
     """The GATE: L5's per-action OPERATOR reproduces the additive `move` -- on a NavGame-like path AND a counting
     succession the abelian behaviour is UNCHANGED when routed through the operator interface (Stage 0 = no regression)."""
@@ -92,15 +75,13 @@ def test_LEARNED_operator_composition_fidelity_abelian_gate():
     rotation (spectral radius 1) that COMMUTES (abelian), COMPOSES to the right multi-step target, and EXTRAPOLATES far
     beyond the trained one-steps; the UNCONSTRAINED fit predicts one step but its powers DRIFT (spectral radius != 1).
     Passing here means later NON-ABELIAN failures are diagnosable as non-abelianness, not the operator-learning machinery."""
-    import torch
-
-    from tbt.l6_grid import L6_GridLocation
-    g = L6_GridLocation()
+    from tbt.l6_sr import hex_code                                              # the hex frame's code (collapsed into the one L6 script)
+    g_dim = len(hex_code([0.0, 0.0]))
     rng = np.random.default_rng(0)
     SC, noise = 3.0, 0.03                                                       # |grid code| = sqrt(#modules) = 3
 
     def code(pos):
-        return g.code_at(torch.tensor(pos, dtype=torch.float32)).numpy()
+        return hex_code(pos)
 
     def extrap_err(op, n):                                                      # apply the learned op n times from the origin
         z = code([0.0, 0.0])
@@ -124,9 +105,9 @@ def test_LEARNED_operator_composition_fidelity_abelian_gate():
     pos = np.array([0.0, 0.0])
     for _ in range(400):
         k = rng.choice(list(moves))
-        before[k].append(code(pos) + noise * rng.standard_normal(g.dim))
+        before[k].append(code(pos) + noise * rng.standard_normal(g_dim))
         pos = pos + np.array(moves[k])
-        after[k].append(code(pos) + noise * rng.standard_normal(g.dim))
+        after[k].append(code(pos) + noise * rng.standard_normal(g_dim))
     E, N = Operator.fit(before["E"], after["E"]), Operator.fit(before["N"], after["N"])
     assert np.linalg.norm(E.M @ N.M - N.M @ E.M) / SC < 0.05                    # learned E, N COMMUTE (abelian)
     assert np.linalg.norm(E.then(N).apply(code([0.0, 0.0])) - code([1.0, 1.0])) / SC < 0.05   # compose E∘N -> (1,1)
@@ -137,15 +118,13 @@ def test_ONLINE_operator_learns_from_a_stream__COVERAGE_not_constraint_is_the_bo
     BROAD-coverage stream it CONVERGES to a faithful operator (spectral radius 1, extrapolates far); the CONSTRAINT is never
     the bottleneck (orthogonality is a projection at read, so constraint⊥expressivity does NOT bite). The real requirement is
     COVERAGE: a LOCAL random walk's peaked occupancy under-samples the state space → a much worse operator."""
-    import torch
-
-    from tbt.l6_grid import L6_GridLocation
-    g = L6_GridLocation()
+    from tbt.l6_sr import hex_code                                              # the hex frame's code (collapsed into the one L6 script)
+    g_dim = len(hex_code([0.0, 0.0]))
     rng = np.random.default_rng(0)
     SC, noise = 3.0, 0.03
 
     def code(pos):
-        return g.code_at(torch.tensor([pos, 0.0], dtype=torch.float32)).numpy()
+        return hex_code([pos, 0.0])
 
     def extrap_err(op, n):
         z = code(0.0)
@@ -154,23 +133,23 @@ def test_ONLINE_operator_learns_from_a_stream__COVERAGE_not_constraint_is_the_bo
         return float(np.linalg.norm(z - code(float(n))) / SC)
 
     # BROAD coverage (a forward sweep): converges to a faithful operator
-    sweep = OnlineOperator(g.dim)
+    sweep = OnlineOperator(g_dim)
     for n in range(4000):
-        sweep.observe(code(n) + noise * rng.standard_normal(g.dim), code(n + 1) + noise * rng.standard_normal(g.dim))
+        sweep.observe(code(n) + noise * rng.standard_normal(g_dim), code(n + 1) + noise * rng.standard_normal(g_dim))
     assert abs(sweep.operator().spectral_radius() - 1.0) < 1e-6                 # constraint held THROUGHOUT (not the bottleneck)
     good = extrap_err(sweep.operator(), 100)
     assert good < 0.15                                                          # converged: composition fidelity / extrapolation
 
     # CONFINED walk (bouncing in a narrow band): the state space is genuinely under-covered → a much worse operator, no
     # matter the seed. This isolates COVERAGE as the bottleneck (the constraint is still perfectly held).
-    confined = OnlineOperator(g.dim)
+    confined = OnlineOperator(g_dim)
     pos = 0
     for _ in range(4000):
         npos = pos + int(rng.choice([1, -1]))
         if abs(npos) > 4:                                                       # reflect at ±4 -> occupancy pinned to 9 positions
             npos = pos - (npos - pos)
         if npos == pos + 1:                                                     # a +1 transition (the operator we read)
-            confined.observe(code(pos) + noise * rng.standard_normal(g.dim), code(npos) + noise * rng.standard_normal(g.dim))
+            confined.observe(code(pos) + noise * rng.standard_normal(g_dim), code(npos) + noise * rng.standard_normal(g_dim))
         pos = npos
     assert abs(confined.operator().spectral_radius() - 1.0) < 1e-6             # constraint STILL held (it is never the issue)
     assert extrap_err(confined.operator(), 100) > max(0.3, 3.0 * good)         # COVERAGE is the bottleneck, not the constraint

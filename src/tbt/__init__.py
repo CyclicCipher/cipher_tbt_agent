@@ -13,15 +13,13 @@ import importlib
 # public name -> submodule that defines it
 _EXPORTS = {
     "CorticalColumn": ".column",
-    "L6_GridLocation": ".l6_grid",
+    "OnlineSR": ".l6_sr",                          # L6 — the online successor-representation location code (the ONE L6 substrate)
     "L5_Displacement": ".l5_displacement",
     "L4_FeatureLocation": ".l4_feature_location",
     "L23_Object": ".l23_object",
     "RewardModel": ".reward",                     # pure stdlib — no torch
     "Thalamus": ".thalamus",                      # inter-column routing / conjunction (torch)
     "BasalGanglia": ".basal_ganglia",             # the gate selector / emergent allocator (pure stdlib)
-    "discover_factors": ".factorize",             # Higgins-style disentanglement from action orbits (pure stdlib)
-    "recursive_residual": ".residual",            # the general structured-deviation learner (carry/context/...; pure stdlib)
 }
 
 __all__ = list(_EXPORTS)

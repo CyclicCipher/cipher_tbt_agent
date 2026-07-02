@@ -76,11 +76,8 @@ class Sensor:
                          else None)                                        # (abelian games get shape=None -> track is byte-identical)
                 self._fovea = self.column.track(action, appeared, dominant, cold, shape=shape)
                 feat = self.encode(self._patch(frame, self._fovea))
-                if self.integrate:                                          # integrate ADDS the location node: the POSE (x,y,heading)
-                    node = (self.column.pose_state(self.pos_bin)             # when the dynamics are heading-dependent (non-abelian),
-                            if self.column.L5.heading_dependent()           # else the abelian POSITION (== track_state, no regression).
-                            else self.column.track_state(self.pos_bin))     # L6_NONABELIAN S1e gate (scaffolding -> dissolve at step 5)
-                    state = (feat, node)
+                if self.integrate:                                          # integrate ADDS the location node -- the ONE state_node:
+                    state = (feat, self.column.state_node(self.pos_bin))     # POSE (x,y,heading) if non-abelian, else position (abelian special case)
                 else:
                     state = feat
             else:                                                          # standalone sensor (no column): dominant-residual fovea, no path integration

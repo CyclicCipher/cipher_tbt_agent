@@ -2,10 +2,11 @@
 out to the thalamus / other columns. It holds no layer functionality of its own (the coordinator principle,
 REFACTOR_PLAN): math + state live in the layers; the column only routes.
 
-  L6  the LOCATION frame. The online TD successor representation (`l6_sr.OnlineSR`, eigendecomposition-free —
-      Stachenfeld 2017: grid cells ARE the SR eigenvectors, topology-general) is the navigational / relational
-      frame; the innate hex grid (`l6_grid`) is a shelved metric prior. Path integration = discrete graph
-      tracking (`loc_*`).
+  L6  the LOCATION frame — ONE script (`l6_sr`). The online TD successor representation (`OnlineSR`,
+      eigendecomposition-free — Stachenfeld 2017: grid cells ARE the SR eigenvectors, topology-general) is the
+      navigational / relational frame; a frame whose geometry is known a-priori (the hex metric prior) is an
+      initial-state descriptor within it (`l6_sr.hex_code`), not a parallel class. Path integration = the pose belief
+      + the ONE per-action `operator` (SE(2) non-abelian, translation abelian special case).
   L5  the DISPLACEMENT / operator / motor / thalamus-driver layer. The per-action operator (observed edges +
       the position-invariant generalizing delta) AND the continuous-pose group operators recognition reads.
   L4  FEATURE-at-location. The label-free content codebook (`encode`), the rotation-invariant feature
@@ -30,10 +31,9 @@ import torch.nn as nn
 
 from .l4_feature_location import L4_FeatureLocation
 from .l5_displacement import L5_Displacement
-from .l6_grid import L6_GridLocation
 from .l6_sr import OnlineSR                            # the online TD successor representation (eigendecomposition-free L6)
 from .l23_object import L23_Object                     # the object/identity layer: graph-memory + recognition + voting
-from .operator import Operator, OnlineOperator        # L6_NONABELIAN: the per-action operator (composable; learned online)
+from .operator import Operator                        # L6_NONABELIAN: the per-action operator (composable; learned online)
 
 IMPASSABLE = 1e6                                       # the COST-FIELD limit: cost >= this = a WALL (you cannot occupy it) -> hard-excluded
 
@@ -54,7 +54,6 @@ class CorticalColumn(nn.Module):
     def __init__(self, n_entities, feat_dim=256, d_mem=512, torus_size=12, scales=(11, 13, 17),
                  place_k=1, seed=0):
         super().__init__()
-        self.L6 = L6_GridLocation(torus_size=torus_size, scales=scales, place_k=place_k)   # innate metric PRIOR (off; SR is the substrate)
         self.L5 = L5_Displacement()                                       # displacement / operator / motor / driver
         self.L4 = L4_FeatureLocation(n_entities, feat_dim=feat_dim, seed=seed)  # feature-at-location + content codebook
         self.L23 = L23_Object(feat_dim=feat_dim, d_mem=d_mem)             # object/identity: graph-memory + recognition + content store
@@ -67,7 +66,6 @@ class CorticalColumn(nn.Module):
         self._map = torch.zeros(feat_dim, d_mem)             # M5/L7-A: the online allocentric MAP (Σ feature ⊗ place), read by feature_at
         self._changed: dict = {}                             # C4: L2/3 object STATE -- {location: feature} where a known feature CHANGED
         self.cost: dict = {}                                 # the COST FIELD: location -> expected interaction cost (ONE currency for walls/hazards/slow/risky)
-        self.action_ops: dict = {}                           # L6_NONABELIAN Stage 1: per-action OnlineOperator, learned online from the path-integration stream (parallel to `move`)
         self._pose = None                                    # L6_NONABELIAN S1e: the POSE belief (SE(2) matrix) path-integrated by COMPOSING operators (non-abelian)
         self.pose_ops: dict = {}                             # L6_NONABELIAN S1e: per-action body-frame SE(2) operator (learned) -- the pose-aware achiever composes these
 
@@ -535,8 +533,11 @@ class CorticalColumn(nn.Module):
     # keeps a constant position. The continuous sibling of the discrete `loc_*` (P1c reconciles them). The column
     # imports no perception: the sensor passes pre-extracted centroids and reads back the chosen sighting.
     def track_reset(self):
-        """A level boundary: drop the location belief (the board resets; do not path-integrate across it)."""
+        """A level boundary: drop the location belief -- BOTH the fovea (position) and the POSE belief (they are the ONE
+        belief; `state_node` reads the pose, so a stale pose across a reset would corrupt every transfer level). The board
+        resets; do not path-integrate across it."""
         self._fovea = None
+        self._pose = None
 
     def track(self, action, appeared, dominant, cold=None, shape=None):
         """Path-integrate one step. `appeared` = candidate centroids (arrived controllable cells), `dominant` = the
@@ -554,7 +555,6 @@ class CorticalColumn(nn.Module):
             if action is not None and self._fovea is not None:            # learn the per-action translation (the efference)
                 delta = (chosen[0] - self._fovea[0], chosen[1] - self._fovea[1])
                 self.L5.observe_move(action, delta)
-                self._observe_operator(action, self._fovea, chosen)       # L6_NONABELIAN Stage 1: learn the operator online (parallel; no behaviour change)
                 self.track_heading(delta)                                 # ROUTE-2: perceive heading from the movement direction
             self._fovea = chosen                                          # correct: snap to the sighting
             self.sense_pose(chosen[0], chosen[1], getattr(self, "_heading", 0.0))   # S1e: maintain the pose belief (position + perceived heading)
@@ -588,23 +588,21 @@ class CorticalColumn(nn.Module):
     def _shape_centroid(shape):
         return (sum(p[0] for p in shape) / len(shape), sum(p[1] for p in shape) / len(shape))
 
-    def _observe_operator(self, action, pos_before, pos_after):
-        """L6_NONABELIAN Stage 1 (live wiring -- the PARALLEL learner). Learn the per-action OPERATOR online from the
-        path-integration stream: the L6 grid-code transition `code_at(before) -> code_at(after)`. Runs ALONGSIDE the
-        additive `move` (NOTHING reads it yet -> zero behaviour change); it validates online operator learning on the REAL
-        stream -- does the agent's exploration give enough COVERAGE (the reframed linchpin)? Driving state by the learned
-        operator awaits a NON-ABELIAN environment (and the grid's codebook bound, which `_fovea` does not have)."""
-        if action not in self.action_ops:
-            self.action_ops[action] = OnlineOperator(self.L6.dim)
-        b = self.L6.code_at(torch.tensor(pos_before, dtype=torch.float32)).detach().numpy()
-        a = self.L6.code_at(torch.tensor(pos_after, dtype=torch.float32)).detach().numpy()
-        self.action_ops[action].observe(b, a)
+    def operator(self, action) -> Operator:
+        """The ONE per-action OPERATOR (L6_NONABELIAN — axis 2 unified). The SE(2) POSE operator (`pose_ops`) when the
+        dynamics are heading-dependent (non-abelian), else the abelian TRANSLATION (`L5.operator` = `move_delta` as a
+        homogeneous matrix) — the commuting SPECIAL CASE, same 3×3 interface. No separate grid-code learner: the abelian
+        grid's role was only to give operator learning a code space, and that is now the pose/position the operator already
+        acts on. Identity if the (heading-dependent) action has no learned pose op yet."""
+        if self.pose_ops and self.L5.heading_dependent():
+            return self.pose_ops.get(action, Operator.identity(3))
+        return self.L5.operator(action)
 
-    def action_operator(self, action):
-        """The per-action OPERATOR learned online from the live stream (L6_NONABELIAN Stage 1) -- Identity if unseen. The
-        read re-SVDs the cross-covariance, so THROTTLE it (like the eigenpurpose), do not call every step."""
-        op = self.action_ops.get(action)
-        return op.operator() if op is not None else Operator.identity(self.L6.dim)
+    def _operator_gens(self):
+        """The learned per-action operators as a generator list (for `discover_relations` / `factor_dynamics`): the SE(2)
+        pose ops when heading-dependent, else the abelian translations. ONE source (`self.operator`)."""
+        keys = sorted(self.pose_ops) if (self.pose_ops and self.L5.heading_dependent()) else sorted(self.L5.move_delta)
+        return [self.operator(a) for a in keys]
 
     def _locate_candidate(self, action, appeared, dominant):
         """Which residual is the controllable object. Once the action's translation is known, the arrived candidate
@@ -628,13 +626,19 @@ class CorticalColumn(nn.Module):
             return (float(self._pose[0, 2]), float(self._pose[1, 2]))
         return self._fovea
 
-    def track_state(self, pos_bin: int = 4):
-        """The coarse allocentric STATE node -- the belief binned so aliased views separate and positions RECUR, GATED
-        by controllability: a scene the agent cannot move (no learned translation) returns the constant gate-off value,
-        preserving its recurring local view (a state-change game)."""
-        if self._fovea is None or not self.L5.controllable():
+    def state_node(self, pos_bin: int = 4):
+        """The ONE coarse allocentric STATE node for the SR/graph (L6_NONABELIAN — axis 2 unified; replaces the
+        track_state/pose_state sensor gate). The belief binned so aliased views separate and positions RECUR, GATED by
+        controllability (a non-controllable state-change scene keeps the constant (0,0), preserving its recurring local
+        view). The node is the full POSE `(x, y, heading)` when the dynamics are heading-dependent (non-abelian), else
+        position-only `(x, y)` — the abelian SPECIAL CASE (no heading factor). Position/heading come from the ONE pose
+        belief (`pose_state`), so there is no parallel abelian tracker."""
+        # controllable = the object responds to actions: abelian via a non-zero `move_delta`, OR non-abelian via
+        # `heading_dependent` (a heading-dependent mover whose per-action `move_delta` averages to ~0 is STILL controllable).
+        if self._pose is None or not (self.L5.controllable() or self.L5.heading_dependent()):
             return (0, 0)
-        return (int(round(self._fovea[0])) // pos_bin, int(round(self._fovea[1])) // pos_bin)
+        node = self.pose_state(pos_bin)
+        return node if self.L5.heading_dependent() else node[:2]
 
     # ----- L6_NONABELIAN S1e: path-integrate a POSE by COMPOSING operators (the non-abelian generalisation of track) ----
     def track_pose_reset(self):
@@ -676,10 +680,7 @@ class CorticalColumn(nn.Module):
         POSE operators when the dynamics are heading-dependent (non-abelian), else the grid-code action operators. Turns the
         free tree of action-words into the finite Cayley graph a geodesic planner (S3) searches. Returns (elements, relations)."""
         from .operator import discover_group
-        if self.pose_ops and self.L5.heading_dependent():
-            gens = [self.pose_ops[a] for a in sorted(self.pose_ops)]
-        else:
-            gens = [self.action_operator(a) for a in sorted(self.action_ops)]
+        gens = self._operator_gens()
         if not gens:
             return [], []
         return discover_group(gens, tol=tol, max_elements=max_elements)
@@ -691,10 +692,7 @@ class CorticalColumn(nn.Module):
         an ever-growing tree. Returns the [(generator_index, period)] factors, or None if the dynamics are not a finite direct
         product (e.g. SE(2), whose FORWARD is an unbounded translation -- honestly not a product of cycles)."""
         from .operator import factor_group
-        if self.pose_ops and self.L5.heading_dependent():
-            gens = [self.pose_ops[a] for a in sorted(self.pose_ops)]
-        else:
-            gens = [self.action_operator(a) for a in sorted(self.action_ops)]
+        gens = self._operator_gens()
         return factor_group(gens, tol=tol, max_elements=max_elements) if gens else None
 
     def content_operator(self, shape, action):
