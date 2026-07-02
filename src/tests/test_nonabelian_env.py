@@ -230,6 +230,41 @@ def test_S1e_operator_pose_path_integration_makes_forward_deterministic():
     assert p1 != p2
 
 
+def test_S1e_step4_pose_aware_vector_nav_navigates_the_non_abelian_env():
+    """S1e step 4 (FIX vector nav): the POSE-AWARE achiever composes TURN + FORWARD to reach a goal in the non-abelian env
+    -- ALIGN-THEN-ADVANCE -- which the abelian `vector_action` (fixed per-action displacement) cannot. Given the pose belief
+    + the learned SE(2) operators, it descends Φ = distance + λ·heading-error to the goal, and it USES turns."""
+    import numpy as np
+
+    from tbt.column import CorticalColumn
+    from tbt.operator import Operator
+
+    def se2(x, y, th):
+        c, s = np.cos(th), np.sin(th)
+        return np.array([[c, -s, x], [s, c, y], [0.0, 0.0, 1.0]])
+
+    Gs = {}                                                                    # learn the body-frame SE(2) operator per action
+    for idx, name in [(0, "FORWARD"), (1, "TURN_L"), (2, "TURN_R")]:
+        w = OrientationWorld()
+        before = se2(w.x, w.y, w.theta)
+        w.step(name)
+        Gs[idx] = Operator(np.linalg.inv(before) @ se2(w.x, w.y, w.theta))
+
+    col = CorticalColumn(n_entities=8, seed=0)
+    col.pose_ops = Gs
+    col.track_pose_reset()                                                     # _pose = identity (0, 0, heading 0/east)
+    goal, used_turn = (4.0, 4.0), False
+    for _ in range(60):
+        a = col._pose_vector_action(goal, [0, 1, 2])
+        if a is None:
+            break
+        used_turn = used_turn or a in (1, 2)
+        col.track_pose(Gs[a])                                                  # apply the chosen operator (dead-reckon the pose)
+    x, y = float(col._pose[0, 2]), float(col._pose[1, 2])
+    assert (x - 4.0) ** 2 + (y - 4.0) ** 2 <= 2.0                              # navigated to the goal (align-then-advance)
+    assert used_turn                                                          # it TURNED -- non-abelian, not just forward
+
+
 def test_S1e_step2_pose_path_engages_on_the_non_abelian_env():
     """S1e step 2 (live wiring): driving the REAL agent on OrientationGame, the POSE path ENGAGES -- the non-abelian GATE
     trips (`heading_dependent`: FORWARD's direction is inconsistent) and the agent's state node becomes a POSE (3-tuple:

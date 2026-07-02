@@ -174,11 +174,19 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
       *Validated (`test_nonabelian_env.py`):* driving the real agent on OrientationGame, the gate trips (FORWARD inconsistent)
       and the state node becomes a POSE 3-tuple; NavGame stays on `track_state` — NO abelian regression (step 3 met).
       The gate + `track_heading` are SCAFFOLDING to dissolve at step 5 (into proper factorisation / one pose path).
-    - **Steps 4-5 REMAINING:** (4) SOLVE OrientationGame — the agent engages the pose path but does NOT yet navigate it (0/8):
-      it needs pose-aware planning (the SR/graph planner over `pose_state` — the transitions are now learned over poses, so
-      this is planning, not new representation; NB the V4 vector achiever is position-based and won't help a body-frame env,
-      so solving leans on the SR/graph planner + the turn-staleness of route-2 heading). (5) DISSOLVE the redundant
-      `_fovea`/`track_state` + the gate once the pose path is validated as the single one.
+    - **Step 4 — FIX VECTOR NAV (Cipher: fix the achiever, do NOT lean on the SR/graph planner). CORE DONE (2026-07-01,
+      `column._pose_vector_action`, suite 135):** the POSE-AWARE achiever. The actions transform the POSE, so there is no
+      fixed per-action displacement; instead descend `Φ(P) = distance(P.pos, goal) + λ·heading_error` over the pose after
+      each action's learned body-frame operator (`pose_ops`) → ALIGN-THEN-ADVANCE emerges (TURN cuts the error term, FORWARD
+      cuts the distance). `vector_action` GATES to it when `heading_dependent` (abelian stays byte-identical → no regression).
+      Validated at the column level: given the pose belief + learned SE(2) operators, it navigates OrientationWorld to the
+      goal USING turns (which the abelian `vector_action` cannot). **REMAINING for the LIVE solve:** (a) LEARN `pose_ops`
+      online (the body-frame SE(2) increment per action, `pose_before⁻¹·pose_after`) in `track`; (b) CLEAN heading so the
+      achiever has a current pose at decision time — route-2 has TURN-STALENESS (heading unknown after a turn), so either
+      DEAD-RECKON through turns (needs the learned turn operator) or ROUTE-1 (perceive orientation from an asymmetric mover
+      via L2/3 recognition — the unified machinery); (c) wire `achieve` into the agent's goal-directed loop; then SOLVE.
+    - **Step 5 REMAINING:** DISSOLVE the redundant `_fovea`/`track_state` + the non-abelian gate once the pose path solves and
+      is validated as the single one.
 - **Stage 2 — DISCOVER relations by loop closure (the quotient).** Free composition path-integrates; relations (incl.
   commutativity) are found by loop closure under the **predictive-sufficiency** criterion (causal states / bisimulation, per
   `MATH_PHASE.md`) — close the coarsest partition that stays a sufficient statistic. *Gate:* on a task with a KNOWN

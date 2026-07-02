@@ -69,6 +69,7 @@ class CorticalColumn(nn.Module):
         self.cost: dict = {}                                 # the COST FIELD: location -> expected interaction cost (ONE currency for walls/hazards/slow/risky)
         self.action_ops: dict = {}                           # L6_NONABELIAN Stage 1: per-action OnlineOperator, learned online from the path-integration stream (parallel to `move`)
         self._pose = None                                    # L6_NONABELIAN S1e: the POSE belief (SE(2) matrix) path-integrated by COMPOSING operators (non-abelian)
+        self.pose_ops: dict = {}                             # L6_NONABELIAN S1e: per-action body-frame SE(2) operator (learned) -- the pose-aware achiever composes these
 
     # ----- routing: learn the transition structure online (L6 + L5) ---------------------------------
     @property
@@ -171,7 +172,11 @@ class CorticalColumn(nn.Module):
         makes net progress; a small cost (slow) is crossed only when a detour would be longer. The field thus curves AROUND
         obstacles while keeping goal-ward progress, graded by how costly they are.
         Returns the best-scoring action with POSITIVE net progress, or `None` (at the goal, or a local minimum where the
-        vector is fully blocked/repelled -> the caller's V3 detour)."""
+        vector is fully blocked/repelled -> the caller's V3 detour).
+        L6_NONABELIAN S1e: when the dynamics are HEADING-DEPENDENT (non-abelian) the fixed-displacement assumption fails --
+        no single action moves in an arbitrary direction -- so delegate to the POSE-AWARE achiever (align-then-advance)."""
+        if self.L5.heading_dependent() and self._pose is not None and self.pose_ops:
+            return self._pose_vector_action(goal, actions)
         vx, vy = goal[0] - here[0], goal[1] - here[1]
         norm = (vx * vx + vy * vy) ** 0.5 or 1.0             # UNIT goal vector -> attraction commensurate with the cost penalty
         ux, uy = vx / norm, vy / norm
@@ -187,6 +192,36 @@ class CorticalColumn(nn.Module):
             score = (dx * ux + dy * uy) - cost_weight * c    # attraction − repulsion (the potential field)
             if score > best_score:
                 best_score, best_a = score, a
+        return best_a
+
+    def _pose_vector_action(self, goal, actions, lam: float = 1.0):
+        """L6_NONABELIAN S1e -- POSE-AWARE vector navigation (the NON-ABELIAN achiever). The actions TRANSFORM the pose, so
+        no fixed per-action displacement exists; instead descend a POTENTIAL over the pose after each action's learned
+        body-frame operator (`pose_ops`): `Φ(P) = distance(P.pos, goal) + λ·heading_error(P → goal)`. This yields
+        ALIGN-THEN-ADVANCE emergently -- a TURN cuts the heading-error term, a FORWARD cuts the distance term -- the
+        non-abelian generalisation of `vector_action` (the abelian fixed-displacement case is its degenerate limit). Returns
+        the action that most reduces Φ, or None (already at the goal / no improving action)."""
+        if self._pose is None:
+            return None
+        gx, gy = float(goal[0]), float(goal[1])
+
+        def potential(P):
+            x, y = P[0, 2], P[1, 2]
+            dist = ((gx - x) ** 2 + (gy - y) ** 2) ** 0.5
+            if dist < 1e-9:
+                return 0.0
+            th = np.arctan2(P[1, 0], P[0, 0])
+            err = abs((np.arctan2(gy - y, gx - x) - th + np.pi) % (2 * np.pi) - np.pi)   # heading error in [0, π]
+            return dist + lam * err
+
+        best_a, best = None, potential(self._pose)
+        for a in actions:
+            G = self.pose_ops.get(a)
+            if G is None:
+                continue
+            cand = potential(self._pose @ np.asarray(G.M, dtype=float))   # the pose after applying a's operator (dead-reckon)
+            if cand < best - 1e-9:
+                best, best_a = cand, a
         return best_a
 
     def achieve(self, state, goal, actions, blocked=(), cost_weight=1.0):
