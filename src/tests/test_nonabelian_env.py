@@ -63,9 +63,9 @@ class OrientationGame:
     N = 24
     STEP = 2
     GOAL = (12, 12)
-    SHAPE = [(0, 0), (1, 0), (0, 1), (1, 1)]                        # a SYMMETRIC 2x2 mover -> a turn causes NO centroid
-    #                                                                shift (clean heading-from-movement); heading is HIDDEN
-    HEADINGS = [(1, 0), (0, 1), (-1, 0), (0, -1)]                   # h = 0..3 -> E/N/W/S (only revealed by moving)
+    SHAPE = [(0, 0), (1, 0), (0, 1)]                                # an ASYMMETRIC L-tromino -> its 4 rotations are DISTINCT,
+    #                                                                so a turn is VISIBLE and heading is READABLE from the shape
+    HEADINGS = [(1, 0), (0, 1), (-1, 0), (0, -1)]                   # h = 0..3 -> E/N/W/S (theta = h*90 matches the shape rotation)
 
     def __init__(self, levels=8):
         self.n_levels = levels
@@ -74,10 +74,19 @@ class OrientationGame:
         self.actions_taken = 0
         self.mx, self.my, self.h = 2, 2, 0
 
+    @staticmethod
+    def _rotate(shape, h):
+        out = []
+        for dx, dy in shape:
+            for _ in range(h % 4):
+                dx, dy = -dy, dx                                    # 90 deg CCW about the anchor
+            out.append((dx, dy))
+        return out
+
     @property
     def frame(self):
         g = [[0] * self.N for _ in range(self.N)]
-        for dx, dy in self.SHAPE:                                   # heading is HIDDEN -> the mover is rendered un-rotated
+        for dx, dy in self._rotate(self.SHAPE, self.h):            # heading is VISIBLE -> the mover is rendered ROTATED
             x, y = self.mx + dx, self.my + dy
             if 0 <= x < self.N and 0 <= y < self.N:
                 g[y][x] = 7
@@ -118,10 +127,10 @@ def test_orientation_game_is_a_valid_non_abelian_frame():
     g = OrientationGame()
     g.step("RESET")
     assert len(g.frame) == 1 and len(g.frame[0]) == 24 and set(g.available) == {"FORWARD", "TURN_L", "TURN_R"}
-    assert sum(v == 7 for row in g.frame[0] for v in row) == 4               # the 4-cell (2x2) mover is rendered
-    # a TURN produces NO visible change (symmetric mover) -- heading is HIDDEN, revealed only by moving
+    assert sum(v == 7 for row in g.frame[0] for v in row) == 3               # the 3-cell (L-tromino) mover is rendered
+    # a TURN rotates the ASYMMETRIC mover -> the frame CHANGES: heading is VISIBLE in the shape (route-1 perception)
     t = OrientationGame(); t.step("RESET"); before = t.frame; t.step("TURN_L")
-    assert t.frame == before                                                 # turn is invisible in the frame
+    assert t.frame != before                                                 # turn IS visible (the asymmetric shape rotates)
     # non-abelian: from the start, FORWARD (heading E) vs TURN_L-then-FORWARD (heading N) go different ways
     a = OrientationGame(); a.step("RESET"); a.step("FORWARD")
     b = OrientationGame(); b.step("RESET"); b.step("TURN_L"); b.step("FORWARD")
@@ -302,6 +311,26 @@ def test_S1e_step4a_pose_ops_learned_online_then_the_achiever_navigates():
         used_turn = used_turn or a in (1, 2)
         col.track_pose(col.pose_ops[a])
     assert (col._pose[0, 2] - 4.0) ** 2 + (col._pose[1, 2] - 4.0) ** 2 <= 2.0 and used_turn
+
+
+def test_S1e_step4_solves_orientation_game_end_to_end():
+    """S1e step 4 (the LIVE SOLVE): the REAL agent solves the non-abelian OrientationGame end to end -- ROUTE-1 perception
+    (orientation from the mover's shape via L2/3) → online pose-operator learning (`learn_pose_op`) → the pose-aware achiever
+    (`_pose_vector_action`, align-then-advance) → the goal in RAW metric coords derived from the completing action's operator.
+    This is the whole S1e stack (perception + operators + achiever) closing the loop on a genuinely non-abelian env that the
+    abelian machinery cannot represent. The abelian games stay green (no regression -- test_path_integration NavGame 8/8)."""
+    from arc_sdk import TbtPolicy
+    game = OrientationGame(8)
+    policy = TbtPolicy(seed=0, local=True, integrate=True)
+    frame = game
+    for _ in range(1500):
+        if policy.is_done([], frame):
+            break
+        name, coords = policy.choose_action([], frame)
+        frame = game.step(name, coords)
+    assert game.levels_completed == 8, game.levels_completed          # SOLVED the non-abelian env end to end
+    gr = policy.agent._goal_raw
+    assert gr is not None and abs(gr[0] - 12.0) <= 1.0 and abs(gr[1] - 12.0) <= 1.0   # the RAW goal, derived via the completing operator
 
 
 def test_S1e_step2_pose_path_engages_on_the_non_abelian_env():

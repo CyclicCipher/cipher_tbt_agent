@@ -6,6 +6,16 @@ hypothesis GENERATION, not testing (it is easy to test a hypothesis, hard to gen
 know BOTH the target hypotheses AND the domain structure, with no perception/mechanic confound. NB the ANS (analog
 magnitude) is NOT the object of study here — EXACT calculation is.*
 
+## THREADING — this phase is the CLEAN-ROOM rehearsal of the `L6_NONABELIAN.md` stages (and the GSG's difficulty gauge)
+The rungs here ARE the `L6_NONABELIAN.md` stages in NUMBER instead of SPACE, feeding the GSG (`VECTOR_NAV_PLAN.md`): **a
+hypothesis = a target-state; testing = a GEODESIC in the learned Cayley graph; free/abelian → READ OFF, quotient → SEARCH.**
+Correspondence: P-succession/P-plus = **S1** (learn the generators; `M(a∘b)=M(a)·M(b)` — ALREADY validated by the S₃
+operator gate) ; P-carry = **S2** (relations by factored loop closure under predictive sufficiency) ; the geodesic mechanism
+= **S3** / the GSG's achiever. So this doc is the DIAGNOSTIC RAIL: the two microworlds + the carry-position error profile
+(uniform = A read-off / post-consolidation = B / spikes-at-rollover = C) say WHERE read-off breaks, so each L6 stage's
+success is attributable and the "unlocks Sokoban" claim is tested here before the messy env. Outcome B ⇒ the GSG needs a
+consolidation/library step. See `L6_NONABELIAN.md` (the substrate), `VECTOR_NAV_PLAN.md` (the loop).
+
 ## The central question
 **If the meaning of an operation (e.g. `+`) is unknown to the model, can it FIND the answer LATENT IN THE STRUCTURE of
 the domain — when the domain is engineered so — by a mechanism that GENERALISES to learning Sokoban?** I.e. is hypothesis

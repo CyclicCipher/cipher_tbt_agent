@@ -520,24 +520,55 @@ class CorticalColumn(nn.Module):
         """A level boundary: drop the location belief (the board resets; do not path-integrate across it)."""
         self._fovea = None
 
-    def track(self, action, appeared, dominant, cold=None):
+    def track(self, action, appeared, dominant, cold=None, shape=None):
         """Path-integrate one step. `appeared` = candidate centroids (arrived controllable cells), `dominant` = the
         fallback dominant-residual centroid (or None), `cold` = the cold-start centroid (largest object / frame centre).
         DISAMBIGUATE via the efference (L5.move) when the action's translation is known, else take the dominant; on a
         real sighting LEARN the translation (L5.observe_move) and snap. Returns the chosen sighting (pixel) so the
-        sensor extracts the feature there; keeps the belief put when nothing was sensed."""
+        sensor extracts the feature there; keeps the belief put when nothing was sensed.
+
+        L6_NONABELIAN S1e ROUTE-1 (`shape` given -> the mover's FULL cloud, only once the non-abelian gate has tripped):
+        pose tracking from the SHAPE -- see `_track_pose`. `shape=None` (all abelian games) is byte-identical to before."""
+        if shape:
+            return self._track_pose(action, shape, cold)
         chosen = self._locate_candidate(action, appeared, dominant)
         if chosen is not None:
             if action is not None and self._fovea is not None:            # learn the per-action translation (the efference)
                 delta = (chosen[0] - self._fovea[0], chosen[1] - self._fovea[1])
                 self.L5.observe_move(action, delta)
                 self._observe_operator(action, self._fovea, chosen)       # L6_NONABELIAN Stage 1: learn the operator online (parallel; no behaviour change)
-                self.track_heading(delta)                                 # L6_NONABELIAN S1e: perceive heading from the movement direction
+                self.track_heading(delta)                                 # ROUTE-2: perceive heading from the movement direction
             self._fovea = chosen                                          # correct: snap to the sighting
             self.sense_pose(chosen[0], chosen[1], getattr(self, "_heading", 0.0))   # S1e: maintain the pose belief (position + perceived heading)
         if self._fovea is None:
             self._fovea = cold
         return self._fovea
+
+    def _track_pose(self, action, shape, cold):
+        """L6_NONABELIAN S1e ROUTE-1: track the POSE from the mover's SHAPE. Update the belief + LEARN the body-frame SE(2)
+        operator ONLY from a FULL, reliably-recognised view (`sense_heading` sets `_heading_reliable` -- a PARTIAL/clipped
+        view at a border teaches a wrong pose, so it must not poison the operator). On a full view: perceive heading, snap
+        position to the shape centroid, learn `pose_ops`. On a partial view: DEAD-RECKON with the learned operator (or hold
+        if none yet). Position + `pose_ops` feed the pose-aware achiever (`_pose_vector_action`)."""
+        self.sense_heading(shape)                                          # sets self._heading + self._sensed_pos + self._heading_reliable
+        moved = action is not None and self._fovea is not None
+        if self._heading_reliable:
+            chosen = self._sensed_pos                                      # the orientation-invariant anchor (no turn jitter)
+            pose_before = self._pose.copy() if self._pose is not None else None
+            self._fovea = chosen
+            self.sense_pose(chosen[0], chosen[1], self._heading)
+            if pose_before is not None and moved:
+                self.learn_pose_op(action, pose_before, self._pose)       # LEARN the body-frame operator (clean view only)
+        elif moved and self._pose is not None and action in self.pose_ops:  # partial view -> dead-reckon with the learned op
+            self._pose = self._pose @ np.asarray(self.pose_ops[action].M, dtype=float)
+            self._fovea = (float(self._pose[0, 2]), float(self._pose[1, 2]))
+        if self._fovea is None:
+            self._fovea = cold
+        return self._fovea
+
+    @staticmethod
+    def _shape_centroid(shape):
+        return (sum(p[0] for p in shape) / len(shape), sum(p[1] for p in shape) / len(shape))
 
     def _observe_operator(self, action, pos_before, pos_after):
         """L6_NONABELIAN Stage 1 (live wiring -- the PARALLEL learner). Learn the per-action OPERATOR online from the
@@ -569,6 +600,14 @@ class CorticalColumn(nn.Module):
 
     def track_pos(self):
         """The continuous location belief (pixel) -- where the sensor foveates to extract the feature."""
+        return self._fovea
+
+    def here_position(self):
+        """The RAW metric position of the current belief -- the POSE position when the dynamics are heading-dependent
+        (non-abelian), else the tracked fovea. The ACHIEVER's coordinate frame (raw pixels), distinct from the binned
+        tabular state node -- so pose-aware `distance`-to-goal is measured in the same units as the goal."""
+        if self._pose is not None and self.L5.heading_dependent():
+            return (float(self._pose[0, 2]), float(self._pose[1, 2]))
         return self._fovea
 
     def track_state(self, pos_bin: int = 4):
@@ -632,6 +671,27 @@ class CorticalColumn(nn.Module):
         if dx * dx + dy * dy > thresh:                       # a real move -> its direction IS the heading
             self._heading = float(np.arctan2(dy, dx))
         return getattr(self, "_heading", 0.0)
+
+    def sense_heading(self, cloud):
+        """PERCEIVE heading from the mover's SHAPE (L6_NONABELIAN S1e ROUTE-1 -- the UNIFIED recognition path): L2/3
+        recognises the object and SOLVES its pose theta -- the orientation IS the heading, clean EVERY frame incl. after a
+        turn (no route-2 staleness), dissolving the movement-direction heading into the object-recognition machinery.
+        Learns the shape online on first sight. A PARTIAL view (fewer cells than the full shape ever seen -- clipped at a
+        border) is UNRELIABLE: hold the heading and flag it (`_heading_reliable=False`) so the caller does not learn from it.
+        Returns the heading belief (unchanged if the cloud is empty/partial/unrecognised)."""
+        if not cloud:
+            self._heading_reliable = False
+            return getattr(self, "_heading", 0.0)
+        self._obj_size = max(getattr(self, "_obj_size", 0), len(cloud))    # the full shape = the most cells ever seen
+        res = self.recognize_object(list(cloud)) if len(cloud) >= self._obj_size else None
+        if res is None:                                                    # a partial / degenerate cloud -> orientation not reliably perceivable; hold
+            self._heading_reliable = False
+            return getattr(self, "_heading", 0.0)
+        _name, theta, t, _ev = res
+        self._heading = float(theta)
+        self._sensed_pos = (float(t[0]), float(t[1]))                      # the recognizer's ANCHOR -- orientation-invariant (no centroid jitter on a turn)
+        self._heading_reliable = True
+        return self._heading
 
     def sense_pose(self, x, y, theta):
         """CORRECT the pose belief to an OBSERVED pose (L6_NONABELIAN S1e): snap `_pose` to the perceived (x, y, heading)

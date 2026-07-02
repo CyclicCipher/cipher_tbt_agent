@@ -47,6 +47,7 @@ class Agent:
         self.bg = BasalGanglia(n_columns=1, seed=seed)                     # the GSG gate: arbitrates the column's goal candidates (ACT vs DISAMBIGUATE)
         self._integrate = False                                            # V4: position/integrate mode (set by TbtPolicy) -> the cost-aware achiever is live
         self._goal_pos = None                                              # V4: the remembered goal POSITION (from a completion) -- the `reward` GSG generator's target
+        self._goal_raw = None                                              # V4 (S1e non-abelian): the goal in RAW metric coords (the pose achiever measures DISTANCE, not just direction, so it needs raw not the binned node)
         self.new_episode()
 
     def new_episode(self):
@@ -60,6 +61,7 @@ class Agent:
         self._tab_spread = 0.0                                               # last turn's tabular value spread (the arbitration signal; 0 = engage the forward model)
         self.sensed_surprise = False                                         # C2: last turn's L4-over-L6 feature-at-location mismatch
         self.goal = None                                                     # the basal-ganglia-selected GoalState this turn (GSG in the loop)
+        self._prev_pose = None                                               # S1e: the RAW pose belief when `_prev`'s state was observed (so the goal = pre-pose ∘ completing-op)
 
     def complete(self, score_delta: float = 1.0):
         """A level completed: the PREVIOUS (state, action) was the completing transition. Record it as leading to a
@@ -73,6 +75,12 @@ class Agent:
             self.tried.add((ps, pa))
             if self._integrate:                                             # V4: REMEMBER the goal position -- next level the achiever beelines here (transfer)
                 self._goal_pos = ps
+                # S1e (non-abelian): the RAW metric goal = where the COMPLETING action LANDED = the pre-completion pose
+                # composed with that action's learned operator (exact + reset-timing-robust; the env resets on completion,
+                # so reading the post-frame position is unreliable). The learned `pose_ops` doing double duty.
+                if self._prev_pose is not None and pa in self.col.pose_ops:
+                    gp = self._prev_pose @ self.col.pose_ops[pa].M
+                    self._goal_raw = (float(gp[0, 2]), float(gp[1, 2]))
         if self._prev_feats is not None:                                     # FM4: the field CONFIG that led to completion is
             self.field_value.update(self._prev_feats, max(score_delta, 1.0))  # valuable -> plan toward it next level (goal in feature space)
         self.reward.observe(_GOAL, max(score_delta, 1.0))                    # the goal is the rewarding terminal
@@ -132,6 +140,7 @@ class Agent:
         if field is not None:
             self._pred_field = self.col.predict_field(field, a)             # the efference copy at field grain (the next predicted field)
         self._prev = (state, a)
+        self._prev_pose = self.col._pose.copy() if self.col._pose is not None else None   # S1e: the raw pose at this state (for the completion-goal derivation)
         self._prev_field = field
         self._prev_feats = feats
         return self.col.motor(a)                                            # the action enacted via L5's motor output
@@ -216,7 +225,10 @@ class Agent:
         # value's wandering) that curves around learned walls/hazards (the cost field). This is the GSG's `reward`
         # generator made LIVE (the goal is no longer inert); explore (g>0) still runs the eigenpurpose via `col.act`.
         if self._integrate and self._goal_pos is not None and g <= 0.0 and state != self._goal_pos:
-            a = self.col.achieve(state, self._goal_pos, self.actions)
+            if self.col.L5.heading_dependent() and self._goal_raw is not None:   # S1e: the pose achiever navigates in RAW metric coords
+                a = self.col.achieve(self.col.here_position(), self._goal_raw, self.actions)
+            else:                                                            # abelian: the binned state node (direction-based; byte-identical)
+                a = self.col.achieve(state, self._goal_pos, self.actions)
             if a is not None:
                 self.goal = GoalState(target=self._goal_pos, kind="reward")   # the ACTIVE goal this turn
                 return a

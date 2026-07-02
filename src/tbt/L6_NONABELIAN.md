@@ -7,6 +7,25 @@ what is preserved. Grounds: `MATH_PHASE.md` (THE MASTER BOUNDARY + the ABELIAN C
 a GROUP REPRESENTATION + isometry). North star: L6 should represent the domain's transformation GROUP, of which the
 current translation/plane-wave grid is the abelian special case.*
 
+## THREADING — S1/S2/S3 ⇔ hypothesis generation (`MATH_PHASE.md`) ⇔ the GSG (`VECTOR_NAV_PLAN.md`)
+The three docs are ONE loop: **a hypothesis is a target-state; testing it = finding the shortest composition of learned
+GENERATORS (a GEODESIC in the learned Cayley graph) that reaches it; the representation decides whether that geodesic is
+READ OFF (free/abelian) or SEARCHED (quotient/non-abelian).** This doc builds the SUBSTRATE (generators + graph);
+`MATH_PHASE.md` is the DIAGNOSTIC (per rung: read-off vs search — the clean-room rehearsal); `VECTOR_NAV_PLAN.md` is the
+CONTROL LOOP (propose target-states → BG-select → achieve → confirm → commit/switch). The stages are the SAME staircase in
+two domains:
+| this doc (space) | `MATH_PHASE` (number) | produces | GSG role |
+|---|---|---|---|
+| **S1 learn operators** | **P-succession/P-plus** (`M(a∘b)=M(a)·M(b)`) | the GENERATORS (the alphabet) | the ACHIEVER |
+| **S2 relations by loop closure** | **P-carry** (factored loop closure + predictive-sufficiency) | the QUOTIENT (the finite graph) | makes the geodesic FINDABLE |
+| **S3 Sokoban** | geodesic-in-Cayley-graph | the PLAN | GSG proposes goal-configs; commit holds it |
+S1 ≈ P-plus is ALREADY validated — the S₃ non-abelian operator gate IS the composition-fidelity read-off test.
+**BUILD ORDER:** I finish the achiever (S1 remaining: wire `achieve` with a well-formed goal, then dissolve `_fovea`/gate)
+→ II the GSG UNIFICATION (`VECTOR_NAV_PLAN`, validated on abelian+SE(2); retires the inert `self.goal`) → III relations
+(S2 = `MATH_PHASE` factored loop closure, rehearsed on P-carry) → IV Sokoban (S3 = GSG + relations). SHARED RISK across all
+three = the similarity-kernel smuggle / wrong-merge (WHICH projection to loop-close) — Phase III's crux; guard = predictive
+sufficiency. See [[project_math_hypothesis_probe]], [[reference_hypothesis_generation]].
+
 ## Why — the abelian ceiling (the thing this refactor removes)
 L5's operator today is an ADDITIVE displacement (`move_delta[a]=(dx,dy)`, you ADD it); L6's grid is PLANE WAVES and
 `path_integrate` ROTATES phases by that displacement. Both are the abelian move: addition and phase-rotation COMMUTE, and
@@ -184,12 +203,21 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
       **(a) ONLINE POSE-OP LEARNING DONE (2026-07-01, `column.learn_pose_op`, suite 136):** `G_a = pose_before⁻¹·pose_after`
       (the constant body-frame increment), EWMA'd + re-projected to SE(2); validated — learned from OrientationWorld pose
       transitions it recovers the true operators, and the achiever navigates with the LEARNED (not hand-given) operators.
-      **REMAINING for the LIVE solve — it is now WIRING (the primitives are all built + validated):** (b) feed CLEAN heading
-      online — route-1: the sensor extracts the mover's SHAPE and L2/3's `pose_between` recovers its orientation (already
-      validated) → `sense_pose`; needs OrientationGame to render an ASYMMETRIC mover rotated (route-2 turn-staleness is why
-      route-1 is chosen — the turn is visible in the shape). (c) call `learn_pose_op` + `achieve` in the agent loop; then SOLVE.
-    - **Step 5 REMAINING:** DISSOLVE the redundant `_fovea`/`track_state` + the non-abelian gate once the pose path solves and
-      is validated as the single one.
+      **LIVE SOLVE DONE — OrientationGame 8/8 end to end (2026-07-01, suite 137):** the whole S1e stack closes the loop.
+      (b) ROUTE-1 heading online: `sensor._mover_shape` extracts the mover's FULL cloud (segment the frame, not the change
+      residual — a turn's residual is partial) → `column.sense_heading` = L2/3 `recognize_object` recovers the orientation
+      (EXACT `h·90°`); position from the recognizer's ANCHOR `t` (orientation-invariant → zero turn-jitter, unlike the
+      centroid); `track` learns the pose op ONLY from a FULL, reliably-recognised view (a border-clipped partial view would
+      poison it — dead-reckon on partials). Learned operators come out PERFECT (FORWARD `t=(2,0)`, turns ±90°, no spurious
+      translation). (c) the agent loop calls `learn_pose_op` (in `track`) + `achieve`: the pose achiever navigates in RAW
+      metric coords, and the GOAL is derived EXACTLY as `pre-pose ∘ pose_ops[completing_action]` (`_goal_raw` = where the
+      completing action LANDED — reset-timing-robust, and the learned operator doing double duty). NavGame 8/8 stays green
+      (abelian byte-identical — the pose path is gated on `heading_dependent`; `shape=None` → `track` unchanged).
+    - **Step 5 REMAINING (DEFERRED past Phase II):** DISSOLVE the redundant `_fovea`/`track_state` + the non-abelian gate +
+      route-2 `track_heading` into the ONE pose path. Deferred deliberately: the dissolution is the riskiest edit (it touches
+      the shared hot path used by every abelian game), and "no parallel systems" is a cleanup that should follow — not
+      precede — the GSG unification (Phase II), which will exercise the same achiever across more envs and surface any
+      remaining coordinate/coupling issues to fold in at once. Validation first (done: it solves); dissolve as the finale.
 - **Stage 2 — DISCOVER relations by loop closure (the quotient).** Free composition path-integrates; relations (incl.
   commutativity) are found by loop closure under the **predictive-sufficiency** criterion (causal states / bisimulation, per
   `MATH_PHASE.md`) — close the coarsest partition that stays a sufficient statistic. *Gate:* on a task with a KNOWN

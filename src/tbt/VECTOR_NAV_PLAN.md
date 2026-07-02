@@ -6,6 +6,16 @@ vector navigation is the metric SHORTEST-PATH / shortcut grain the SR value can'
 `pos` + L5 `move_delta`), NOT the config_state benchmark. Benchmark = mechanism correctness + FEWER actions vs the
 value-sweep baseline. Reuses the L5⊗L6 machinery P1 built + the SR (`navigate_to`); if it can't, we built L5/L6 wrong.*
 
+## THREADING — the GSG is the CONTROL LOOP wrapping `L6_NONABELIAN.md`'s achiever (built AFTER S1)
+One loop across three docs: **a hypothesis = a target-state; testing = achieve (a GEODESIC in the learned Cayley graph); the
+representation decides read-off (free/abelian) vs search (quotient/non-abelian).** `L6_NONABELIAN.md` builds the SUBSTRATE
+(the generators S1 + the graph's relations S2 + Sokoban planning S3); `MATH_PHASE.md` is the DIAGNOSTIC (read-off vs search,
+per rung — the clean-room rehearsal). This doc is the CONTROL LOOP: propose target-states → BG-select → `col.achieve` →
+score confirms → commit/switch. **BUILD ORDER:** the achiever (V4, DONE incl. the pose-aware non-abelian case) is Phase I;
+the GSG UNIFICATION here (`propose_goals`→BG→`achieve`, the inert `self.goal` dies) is **Phase II — the next major move**,
+validated on abelian+SE(2) envs (no relations needed yet). Sokoban (S3) is Phase IV — it needs BOTH this loop AND S2's
+relations. SHARED RISK = the wrong-merge / similarity-kernel smuggle (Phase III). See `L6_NONABELIAN.md`, `MATH_PHASE.md`.
+
 ## The mechanism — a POTENTIAL FIELD, steered by L5's inverse operator (3-level cascade)
 1. **ATTRACTION (vector nav).** L6 gives the goal VECTOR `v = pos(goal) − pos(here)` (grid-code difference = the metric
    displacement). The attractive gradient; handles novel SHORTCUTS (straight line in the metric).

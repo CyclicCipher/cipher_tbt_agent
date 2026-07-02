@@ -71,7 +71,10 @@ class Sensor:
         if self.local:
             appeared, dominant, cold = self._residual_candidates(frame, change, objects)
             if self.column is not None:                                    # the COLUMN owns the fovea (efference disambiguation) -- both modes
-                self._fovea = self.column.track(action, appeared, dominant, cold)
+                shape = (self._mover_shape(frame)                          # ROUTE-1 (S1e): the mover's FULL cloud -> orientation from shape,
+                         if (self.integrate and self.column.L5.heading_dependent())   # only once the non-abelian gate has tripped
+                         else None)                                        # (abelian games get shape=None -> track is byte-identical)
+                self._fovea = self.column.track(action, appeared, dominant, cold, shape=shape)
                 feat = self.encode(self._patch(frame, self._fovea))
                 if self.integrate:                                          # integrate ADDS the location node: the POSE (x,y,heading)
                     node = (self.column.pose_state(self.pos_bin)             # when the dynamics are heading-dependent (non-abelian),
@@ -106,6 +109,17 @@ class Sensor:
         _comp, dominant = dominant_region(change)
         cold = self._largest_centroid(objects) or (len(frame[0]) / 2.0, len(frame) / 2.0)
         return appeared, dominant, cold
+
+    def _mover_shape(self, frame):
+        """L6_NONABELIAN S1e ROUTE-1: the FULL connected cloud of the controllable mover (the largest non-background
+        component of the CURRENT frame), so L2/3 can recover its orientation. Unlike the change residual, this is the whole
+        object even on an in-place TURN (where the residual is only the cells that differ). Cells as `(x, y)`; None if empty."""
+        bg = background(frame)
+        cells = {(x, y) for y, row in enumerate(frame) for x, v in enumerate(row) if v != bg}
+        if not cells:
+            return None
+        comp, _centroid = max(components(cells), key=lambda cc: len(cc[0]))
+        return list(comp)
 
     def _largest_centroid(self, objects):
         if not objects:
