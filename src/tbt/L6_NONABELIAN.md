@@ -180,11 +180,14 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
       each action's learned body-frame operator (`pose_ops`) → ALIGN-THEN-ADVANCE emerges (TURN cuts the error term, FORWARD
       cuts the distance). `vector_action` GATES to it when `heading_dependent` (abelian stays byte-identical → no regression).
       Validated at the column level: given the pose belief + learned SE(2) operators, it navigates OrientationWorld to the
-      goal USING turns (which the abelian `vector_action` cannot). **REMAINING for the LIVE solve:** (a) LEARN `pose_ops`
-      online (the body-frame SE(2) increment per action, `pose_before⁻¹·pose_after`) in `track`; (b) CLEAN heading so the
-      achiever has a current pose at decision time — route-2 has TURN-STALENESS (heading unknown after a turn), so either
-      DEAD-RECKON through turns (needs the learned turn operator) or ROUTE-1 (perceive orientation from an asymmetric mover
-      via L2/3 recognition — the unified machinery); (c) wire `achieve` into the agent's goal-directed loop; then SOLVE.
+      goal USING turns (which the abelian `vector_action` cannot).
+      **(a) ONLINE POSE-OP LEARNING DONE (2026-07-01, `column.learn_pose_op`, suite 136):** `G_a = pose_before⁻¹·pose_after`
+      (the constant body-frame increment), EWMA'd + re-projected to SE(2); validated — learned from OrientationWorld pose
+      transitions it recovers the true operators, and the achiever navigates with the LEARNED (not hand-given) operators.
+      **REMAINING for the LIVE solve — it is now WIRING (the primitives are all built + validated):** (b) feed CLEAN heading
+      online — route-1: the sensor extracts the mover's SHAPE and L2/3's `pose_between` recovers its orientation (already
+      validated) → `sense_pose`; needs OrientationGame to render an ASYMMETRIC mover rotated (route-2 turn-staleness is why
+      route-1 is chosen — the turn is visible in the shape). (c) call `learn_pose_op` + `achieve` in the agent loop; then SOLVE.
     - **Step 5 REMAINING:** DISSOLVE the redundant `_fovea`/`track_state` + the non-abelian gate once the pose path solves and
       is validated as the single one.
 - **Stage 2 — DISCOVER relations by loop closure (the quotient).** Free composition path-integrates; relations (incl.

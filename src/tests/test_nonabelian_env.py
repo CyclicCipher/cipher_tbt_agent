@@ -265,6 +265,45 @@ def test_S1e_step4_pose_aware_vector_nav_navigates_the_non_abelian_env():
     assert used_turn                                                          # it TURNED -- non-abelian, not just forward
 
 
+def test_S1e_step4a_pose_ops_learned_online_then_the_achiever_navigates():
+    """S1e step 4a: the per-action SE(2) operators are LEARNED ONLINE (`learn_pose_op` from pose transitions), recover the
+    true body-frame increments, and the pose-aware achiever then navigates OrientationWorld to the goal with the LEARNED
+    operators (not hand-given ones)."""
+    import numpy as np
+
+    from tbt.column import CorticalColumn
+    from tbt.operator import Operator
+
+    def se2(x, y, th):
+        c, s = np.cos(th), np.sin(th)
+        return np.array([[c, -s, x], [s, c, y], [0.0, 0.0, 1.0]])
+
+    col = CorticalColumn(n_entities=8, seed=0)
+    # LEARN the operators online: for each action, feed several (pose_before, pose_after) transitions from the env
+    for idx, name in [(0, "FORWARD"), (1, "TURN_L"), (2, "TURN_R")]:
+        for turns in range(4):                                                  # from each heading -> the SAME body-frame increment
+            w = OrientationWorld()
+            for _ in range(turns):
+                w.step("TURN_L")
+            before = se2(w.x, w.y, w.theta)
+            w.step(name)
+            col.learn_pose_op(idx, before, se2(w.x, w.y, w.theta))
+    # the learned FORWARD op is the body-frame translate(+1); TURN_L is a +90 rotation
+    assert np.allclose(col.pose_ops[0].M, se2(1.0, 0.0, 0.0), atol=1e-6)
+    assert np.allclose(col.pose_ops[1].M[:2, :2], se2(0, 0, np.pi / 2)[:2, :2], atol=1e-6)
+
+    # the achiever navigates with the LEARNED operators
+    col.track_pose_reset()
+    used_turn = False
+    for _ in range(60):
+        a = col._pose_vector_action((4.0, 4.0), [0, 1, 2])
+        if a is None:
+            break
+        used_turn = used_turn or a in (1, 2)
+        col.track_pose(col.pose_ops[a])
+    assert (col._pose[0, 2] - 4.0) ** 2 + (col._pose[1, 2] - 4.0) ** 2 <= 2.0 and used_turn
+
+
 def test_S1e_step2_pose_path_engages_on_the_non_abelian_env():
     """S1e step 2 (live wiring): driving the REAL agent on OrientationGame, the POSE path ENGAGES -- the non-abelian GATE
     trips (`heading_dependent`: FORWARD's direction is inconsistent) and the agent's state node becomes a POSE (3-tuple:

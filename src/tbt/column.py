@@ -597,6 +597,22 @@ class CorticalColumn(nn.Module):
         return (float(self._pose[0, 2]), float(self._pose[1, 2]),
                 float(np.arctan2(self._pose[1, 0], self._pose[0, 0]) % (2 * np.pi)))
 
+    def learn_pose_op(self, action, pose_before, pose_after, rate: float = 0.4):
+        """L6_NONABELIAN S1e -- LEARN the per-action body-frame SE(2) operator ONLINE (feeds the pose-aware achiever's
+        `pose_ops`). The body-frame increment `G = pose_before⁻¹·pose_after` is CONSTANT per action, so EWMA it and
+        RE-PROJECT to SE(2) (orthogonalise the 2x2 rotation block; keep the translation) so it stays a proper operator."""
+        before = np.asarray(pose_before, dtype=float)
+        after = np.asarray(pose_after, dtype=float)
+        g = np.linalg.inv(before) @ after
+        cur = self.pose_ops.get(action)
+        m = g if cur is None else (1.0 - rate) * cur.M + rate * g
+        u, _, vt = np.linalg.svd(m[:2, :2])                  # re-project the rotation block to O(2) (Procrustes)
+        m = m.copy()
+        m[:2, :2] = u @ vt
+        m[2] = [0.0, 0.0, 1.0]
+        self.pose_ops[action] = Operator(m)
+        return self.pose_ops[action]
+
     def pose_state(self, pos_bin: int = 1, ang_bins: int = 4):
         """The POSE belief binned -> the discrete state key `(x, y, heading-bucket)`. Includes HEADING, so a non-abelian
         env's dynamics are DETERMINISTIC over it (unlike position-only `track_state`). `ang_bins` buckets over [0, 2pi)."""
