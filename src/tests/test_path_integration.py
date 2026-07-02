@@ -113,6 +113,28 @@ def test_achiever_beelines_a_known_goal_after_learning_it():
     assert per_level[0] >= 2 * max(per_level[3:]), per_level       # the first (discovery) level costs far more than the transfer levels
 
 
+def test_gsg_unification_reward_goal_is_live_and_drives_the_achiever():
+    """Phase II (GSG unification, VECTOR_NAV_PLAN): the reward goal is no longer INERT -- it competes in the ONE
+    basal-ganglia competition (`propose_goals` + the reward generator) and, when it wins, `self.goal` DISPATCHES the shared
+    achiever (`col.achieve`), retiring the separate V4 exploit branch. Driving NavGame, the reward goal is SELECTED on the
+    exploit/transfer levels (`self.goal.kind == 'reward'`) and the run still solves 8/8 at oracle -- the achiever executed by
+    the competition winner, not a hard-coded branch. (The abelian direction-based achiever; OrientationGame covers SE(2).)"""
+    game = NavGame(8)
+    policy = TbtPolicy(seed=0, local=True, integrate=True)
+    frame, kinds = game, set()
+    for _ in range(2000):
+        if policy.is_done([], frame):
+            break
+        name, coords = policy.choose_action([], frame)
+        ag = getattr(policy, "agent", None)                            # created lazily on the first real move (after RESET)
+        if ag is not None and ag.goal is not None:
+            kinds.add(ag.goal.kind)
+        frame = game.step(name, coords)
+    assert game.levels_completed == 8
+    assert "reward" in kinds                                        # the reward goal was SELECTED by the competition (live, not computed-and-discarded)
+    assert policy.agent._goal_pos is not None                       # ... carrying the remembered completing target the achiever navigates to
+
+
 def test_online_operator_learns_from_the_live_stream_no_regression():
     """L6_NONABELIAN Stage 1 (live wiring, the PARALLEL learner): driving the REAL agent on NavGame, the per-action
     operators learned ONLINE in the column converge to FAITHFUL operators (spectral radius 1, low grid-code prediction

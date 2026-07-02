@@ -52,8 +52,17 @@ relations. SHARED RISK = the wrong-merge / similarity-kernel smuggle (Phase III)
   cost field is ASSIGNED from experience (`step`: a no-progress bump → wall, a negative score → hazard), and `_choose`'s
   EXPLOIT arm (g~0) navigates there via `col.achieve` (a beeline, no frontier optimism). `arc_sdk` sets `agent._integrate`
   so config-mode is untouched. RESULT on NavGame(8): 8/8 in 412 total actions, steady-state 12/level = ORACLE (vs the
-  wandering ~500/level); RHAE≈1 on the transfer levels. **REMAINING:** route the goal through `propose_goals`→BG (the GSG
-  unification — the `reward`/`identity`/`dynamics` generators), so the EXPLORE-side hypothesis goal (Sokoban) also achieves.
+  wandering ~500/level); RHAE≈1 on the transfer levels.
+  **GSG UNIFICATION SLICE 1 DONE (Phase II, 2026-07-01, suite 138):** the reward goal is no longer INERT — it competes in
+  the ONE basal-ganglia competition and, when it wins, `self.goal` DISPATCHES the shared achiever (`col.achieve`); the
+  separate V4 exploit branch is RETIRED. `_choose`: `propose_goals` (the `act` goal) + the **reward generator** (the
+  remembered completing target, valued by the PEAK exploit value) → `bg.gate` → dispatch (reward TARGET → `col.achieve`,
+  else `col.act`). One subtlety fixed: in the exploit regime (g<=0) the `act` goal competes on its CLEAN exploit value —
+  the untried-frontier optimism in `ev` is an EXPLORE signal that spuriously beat reward, so it is stripped once g has
+  arbitrated for exploit. Byte-faithful: NavGame 8/8 @ 412 (oracle 12/level) and OrientationGame 8/8 @ 354 (SE(2) pose
+  achiever), unchanged from V4. **REMAINING:** fold in the `dynamics` (transition-lp/epiplexity) and `identity`
+  (disambiguation) TARGET generators (each a navigable goal in the SAME competition), so the EXPLORE-side hypothesis goal
+  (Sokoban) also achieves — Phase II slice 2 / and the S2 relations that make a non-abelian goal findable.
 
 ## THE COST FIELD — ONE currency for walls / hazards / slow / risky (generalizes V2 repulsion)
 *User's insight (2026-07-01): a wall and a hazard (and a slow tile, and a coin-flip-bad tile) should be the SAME

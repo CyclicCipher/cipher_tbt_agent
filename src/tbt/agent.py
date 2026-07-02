@@ -214,23 +214,30 @@ class Agent:
             bonus = {a: prag + self.reward.beta * epi for a, (prag, epi) in fplan.items()}
         # the per-action SALIENCE the BG disinhibits the max of = the g-blended value of the outcome (+ the field term).
         blended = lambda s: self.reward.V_exploit[s] + g * (self.reward.V[s] - self.reward.V_exploit[s])
-        # GSG candidates proposed + BG-arbitrated (the disambiguation goal stays inert until B5 acts on it); the ACT
-        # goal's value = the best clean EXPLOIT value (so in the dead-zone, where it collapses to ~0, resolving
-        # uncertainty can outvalue acting).
+        # THE GSG COMPETITION (Phase II unification): propose candidate GOAL-STATES → ONE basal-ganglia arbitration → the
+        # winner is EXECUTED by the shared ACHIEVER (a target goal) or the degenerate `col.act` (the act goal). `self.goal`
+        # is now LIVE -- it DISPATCHES execution (no longer computed-and-discarded). Candidates: `act` (greedy value,
+        # always) + `disambiguate` (L2/3, when hypotheses compete) + `reward` -- the REMEMBERED completing target, a
+        # NAVIGABLE goal valued by its propagated exploit value, generated in the EXPLOIT regime (a reward gradient exists:
+        # g<=0). This retires the separate V4 exploit branch. [the `dynamics` (transition-lp) generator = a later fold.]
         goals = self.col.propose_goals(max(ev), g_value=self.reward.beta)
+        if self._integrate and self._goal_pos is not None and g <= 0.0 and state != self._goal_pos:
+            # EXPLOIT regime (g<=0 already arbitrated explore→exploit): the ACT goal competes on its CLEAN exploit value
+            # (the untried-frontier optimism in `ev` is an EXPLORE signal, irrelevant here); the REWARD generator adds the
+            # remembered completing TARGET valued by the PEAK exploit value (the goal is where value peaks) -> it wins + beelines.
+            clean_act = max((self.reward.V_exploit[self.col.predict(state, a)] for a in self.actions), default=0.0)
+            goals[0] = (goals[0][0], float(clean_act))
+            target = self._goal_raw if (self.col.L5.heading_dependent() and self._goal_raw is not None) else self._goal_pos
+            goals.append((GoalState(target=target, kind="reward"), float(max(self.reward.V_exploit.values(), default=0.0))))
         gi = self.bg.gate([gc.kind for gc, _ in goals], [v for _, v in goals]) if len(goals) > 1 else 0
         self.goal = goals[gi][0]
-        # V4 (VECTOR_NAV): when EXPLOITING (g~0: a reward gradient exists) toward a KNOWN goal POSITION, navigate there
-        # with the cost-aware ACHIEVER -- a beeline carrying NO frontier optimism (the efficiency lever vs the swept
-        # value's wandering) that curves around learned walls/hazards (the cost field). This is the GSG's `reward`
-        # generator made LIVE (the goal is no longer inert); explore (g>0) still runs the eigenpurpose via `col.act`.
-        if self._integrate and self._goal_pos is not None and g <= 0.0 and state != self._goal_pos:
-            if self.col.L5.heading_dependent() and self._goal_raw is not None:   # S1e: the pose achiever navigates in RAW metric coords
-                a = self.col.achieve(self.col.here_position(), self._goal_raw, self.actions)
-            else:                                                            # abelian: the binned state node (direction-based; byte-identical)
-                a = self.col.achieve(state, self._goal_pos, self.actions)
+        # DISPATCH on the selected goal: a reward TARGET → the cost-aware ACHIEVER (vector nav -- the beeline, curving
+        # around learned walls/hazards, no frontier optimism); the degenerate ACT goal (and, until B5 wires it,
+        # disambiguate) → the inverse-model motor `col.act` (the value/eigenpurpose policy).
+        if self.goal.kind == "reward" and self.goal.target is not None:
+            here = self.col.here_position() if self.col.L5.heading_dependent() else state
+            a = self.col.achieve(here, self.goal.target, self.actions)
             if a is not None:
-                self.goal = GoalState(target=self._goal_pos, kind="reward")   # the ACTIVE goal this turn
                 return a
         return self.col.act(state, self.actions, value=blended,
                             explore=self.reward.explore, tried=self.tried, rng=self.rng, bonus=bonus)
