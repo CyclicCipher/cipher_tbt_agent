@@ -567,3 +567,22 @@ class CorticalColumn(nn.Module):
         th = float(np.arctan2(self._pose[1, 0], self._pose[0, 0]) % (2 * np.pi))
         return (int(round(self._pose[0, 2])) // pos_bin, int(round(self._pose[1, 2])) // pos_bin,
                 int(round(th / (2 * np.pi) * ang_bins)) % ang_bins)
+
+    def track_heading(self, pos_delta, thresh: float = 0.25):
+        """PERCEIVE the heading from the MOVEMENT DIRECTION (L6_NONABELIAN S1e heading perception): a move that changes
+        position (a forward) reveals `heading = atan2(delta)` -- the agent perceives its orientation by HOW IT MOVES, no
+        shape-orientation machinery needed, reusing the position observation it already has. A ~zero delta (a turn) leaves
+        the heading STALE (to be re-perceived on the next forward -- the honest limitation; robust heading via shape
+        recognition or turn dead-reckoning is a follow-up). Returns the current heading belief."""
+        dx, dy = float(pos_delta[0]), float(pos_delta[1])
+        if dx * dx + dy * dy > thresh:                       # a real move -> its direction IS the heading
+            self._heading = float(np.arctan2(dy, dx))
+        return getattr(self, "_heading", 0.0)
+
+    def sense_pose(self, x, y, theta):
+        """CORRECT the pose belief to an OBSERVED pose (L6_NONABELIAN S1e): snap `_pose` to the perceived (x, y, heading)
+        -- the pose analogue of `track`'s snap-to-sighting (position from the tracked centroid, heading from
+        `track_heading`). Complements `track_pose` (dead-reckon from efference) as predict+correct. Returns `pose_state`."""
+        c, s = np.cos(theta), np.sin(theta)
+        self._pose = np.array([[c, -s, float(x)], [s, c, float(y)], [0.0, 0.0, 1.0]])
+        return self.pose_state()

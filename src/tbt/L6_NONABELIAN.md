@@ -156,6 +156,17 @@ vs PLANNING/GSG (the other line). Do not sell the refactor as a Sokoban solve; s
     `track_state`) because the live agent perceives POSITION, not orientation — to drive the live state it must observe or
     dead-reckon heading (and OrientationWorld must become a real perceivable frame). That perception is the next slice;
     then swap `track_state`→`pose_state` in the agent, gate no-regression on abelian, and SOLVE the env end to end.
+    **HEADING-PERCEPTION PRIMITIVE DONE (2026-07-01, `column.track_heading`/`sense_pose`, suite 132):** the agent perceives
+    its heading from the MOVEMENT DIRECTION — a forward move's position-delta direction IS the heading (`atan2(delta)`), no
+    shape-orientation machinery, reusing the position observation it already has; `sense_pose` snaps the pose belief to the
+    perceived (x, y, heading) (the pose analogue of `track`'s snap-to-sighting). Validated on OrientationWorld: movement
+    direction == true heading at all 4 headings, and perception makes the 4 headings DISTINGUISHABLE in `pose_state` → FORWARD
+    deterministic. *Honest limitation:* a TURN produces no movement, so heading is STALE until the next forward (robust
+    heading via shape recognition / turn dead-reckoning is a follow-up). **STILL REMAINING for the live solve:** (1) an
+    OrientationWorld that is a real perceivable FRAME (asymmetric mover on a grid the sensor reads); (2) wire perceive→predict
+    (`track_pose`)+correct (`sense_pose`) into the agent loop, swapping `track_state`→`pose_state`; (3) gate no-regression on
+    the abelian games; (4) SOLVE the env. Then — per the plan — DISSOLVE the now-redundant `_fovea`/`track_state` path (no
+    parallel systems), once the pose path is validated as the single one.
 - **Stage 2 — DISCOVER relations by loop closure (the quotient).** Free composition path-integrates; relations (incl.
   commutativity) are found by loop closure under the **predictive-sufficiency** criterion (causal states / bisimulation, per
   `MATH_PHASE.md`) — close the coarsest partition that stays a sufficient statistic. *Gate:* on a task with a KNOWN
