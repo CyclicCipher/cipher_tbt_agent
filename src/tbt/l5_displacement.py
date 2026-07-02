@@ -189,12 +189,6 @@ class L5_Displacement(nn.Module):
         a NON-COMMUTING action becomes representable and the additive translation is then only the abelian special case."""
         return Operator.translation(self.move(action))
 
-    def controllable(self, thresh: float = 0.5) -> bool:
-        """Does SOME action produce a non-trivial translation? -> the tracked object responds to actions, so its
-        allocentric POSITION is informative (gate ON). A state-change scene (in-place animation) averages to ~0 ->
-        gate OFF, keeping the recurring local view. The `_controllable` gate, now sourced from L5's displacement."""
-        return any(d[0] * d[0] + d[1] * d[1] > thresh for d in self.move_delta.values())
-
     # ---- motor output + thalamus driver (the other two uses of the one operator) -------------------------
     def motor(self, a):
         """The MOTOR command: the enacted action. L5 is the cortex's output layer -- the chosen action is its output

@@ -320,13 +320,20 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
   over similar features and continuous/cyclic features are native. (From Cipher's HTM notes: Purdy "Encoding Data for HTM
   Systems"; NuPIC spatial pooling.)
 
-Honest status (2026-07-02): P0's clean deletions — the **parallel SYSTEMS** — are DONE (the field-CA second prediction;
-the `V`/`V_exploit` + `g`-gate + eigenpurpose second value; the `object_state`/`_changed` change-log). The remainder of P0
-— the **estimator STACK** (the fovea/pose/`state_node` location, the segmentation heuristic, the cost-consuming achiever)
-— is LOAD-BEARING infrastructure, deletable only once its principled replacement exists: it is **REPLACE-then-delete,
-gated on P1** (factored perception delivers the location + content) **and P2** (the operator-seated prediction). So P0's
-pure-deletion phase is complete; the location / segmentation / cost collapses land as P1/P2 builds their replacements. The
-**operator** primitive and **relation/factor discovery** exist and are tested; the SR is the one L6. **We move to P1.**
+Status (2026-07-02, after P1 + P2's mechanism): **P0** collapsed the parallel systems (one prediction, one value, no
+change-log; cost = the kept aversive value). **P1** made perception factored and live — `perceive` delivers
+`(location, content)` through recognize→predict→correct→learn, and the old **fovea/`track`/pose location dispatch is
+DELETED**. **P2** built the one forward prediction over that rep (`col.forward` + the `_pred_error` residual).
+
+Re-vetted what P1/P2 was thought to unblock (the estimator stack): P1 DID unblock the location-dispatch deletion (done).
+But the rest was mis-attributed — it is **the PLANNING system, gated on P4**, not P1/P2: `move_delta` / `heading_dependent`
+/ `here_position` / the cost-bump / the achiever (`vector_action`/`navigate_to`/`achieve`/`_pose_vector_action`) are all
+read by the **reward-goal beeline in `_choose`**; they retire/unify *together* onto the one value + SR geodesic at **P4**
+(with `state_node`'s binning and the tabular `col.predict`). And the **segmentation heuristic** was not eliminated by P1 —
+`perceive` swapped `ObjectField` for `_mover_cloud`'s own connected-component heuristic; true elimination = recognition-
+proposed boundaries from prediction mismatch (§2 L2/3), a **P3+ figure-ground** build, not a deletion. So the remaining
+"estimator stack" is really *planning + figure-ground*, not P1/P2 leftovers. The **operator** primitive + relation/factor
+discovery are tested; the SR is the one L6. **Next build: P3.**
 
 ## 11. Acceptance test for every change (the paper test)
 
