@@ -308,7 +308,12 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
   (displacements/behaviors), L5 (actions), with the **phase** as one recurrence and the learned **relations** (loop
   closure — already built) as the sequence structure. This is where **other objects' dynamics** are forward-modelled (the
   next displacement = the object's learned behavior), and **backward modelling** (inverse operators — retrodiction,
-  reverse-replay credit assignment) lands. Then the order/config-dependent case (Sokoban).
+  reverse-replay credit assignment) lands. The **order/config-dependent case (Sokoban)** is the SAME context-conditioned
+  mechanism — **order**-dependence is the non-commuting Cayley graph (`discover_relations`, built), **config**-dependence
+  is the sequence memory with the *config* in the context (the spatial twin of the temporal phase); the **general
+  relational RULE** (generalising the config-rule to unseen configs) is the open MATH_PHASE search (§9), not committed to.
+  *Status: the mechanisms — `SequenceMemory`, `Behavior` (other-object dynamics), `inverse` (backward), config-as-context —
+  are built + tested; the multi-object self/other LOOP wiring is loop-coupled (P4-adjacent).*
 - **P4 — Planning & hypothesis generation.** The one EFE value / SR geodesic (§8); the goal-state generator proposes
   cued target-states (§9), the BG select, the motor achieves, value confirms; the heterarchy (multi-column voting via the
   thalamus) scales the same loop.

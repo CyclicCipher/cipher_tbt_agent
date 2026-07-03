@@ -123,3 +123,19 @@ def test_backward_modelling_is_inverse_operators():
     for d in disps[:-1]:
         check = check @ d
     assert np.allclose(prior, check, atol=1e-9)                # -> the pose that PRECEDED `end`
+
+
+def test_config_dependent_transition_is_context_conditioning():
+    """P3d (the order/config-dependent case, Sokoban): the SAME context-conditioned mechanism handles CONFIG-dependence --
+    a transition whose OUTCOME depends on the CONFIG (a box PUSHED moves if the cell behind is empty, stays if it's a
+    wall) is just the sequence memory with the CONFIG in the CONTEXT (spatial), the twin of ORDER-dependence (the temporal
+    phase; the high-order test). §5: one mechanism, differing only in the context. NB the GENERAL relational RULE --
+    generalizing the push-rule to UNSEEN configs -- is the open MATH_PHASE search (§9), not committed to here."""
+    sm = SequenceMemory(order=1)
+    for _ in range(3):
+        sm.reset(); sm.observe(("behind_empty", "push")); sm.observe("box_moved")     # push into empty -> the box moves
+        sm.reset(); sm.observe(("behind_wall", "push")); sm.observe("box_stayed")     # push into a wall -> blocked
+    sm.reset(); sm.observe(("behind_empty", "push"))
+    assert sm.predict() == "box_moved" and sm.confident()     # config = empty -> the push moves the box
+    sm.reset(); sm.observe(("behind_wall", "push"))
+    assert sm.predict() == "box_stayed" and sm.confident()    # config = wall -> the push is blocked (config-dependent)
