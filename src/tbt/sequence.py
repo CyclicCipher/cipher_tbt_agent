@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from collections import Counter
 
+import numpy as np
+
 
 class SequenceMemory:
     """Predict the next element of a sequence from the recent CONTEXT (the PHASE), learned online. `order` = how much
@@ -48,3 +50,44 @@ class SequenceMemory:
     def reset(self) -> None:
         """A sequence boundary: clear the phase (do not carry context across it). The learned `table` persists."""
         self.phase = ()
+
+
+class Behavior:
+    """An OTHER object's DYNAMICS as a learned temporal sequence of DISPLACEMENTS (§5) — the self/other unification: your
+    EFFERENCE drives self-motion (`column.forward`), and this learned behavior drives an OTHER object's next displacement,
+    both by the SAME apply-operator-to-pose. `observe(pose)` reads the object's SE(2) pose each step, takes the body-frame
+    displacement `pose_before⁻¹·pose_after`, quantizes it to a hashable KEY, and a `SequenceMemory` over the keys learns
+    the behavior (a patrol, a toggle-cycle, an opening/closing) indexed by its PHASE. `predict()` returns the next
+    displacement (a 3×3 SE(2) matrix) to apply — the OTHER-object driver of the forward model. Because operators are
+    invertible, the behavior also runs BACKWARD via `predict().inverse` (P3c)."""
+
+    def __init__(self, order: int = 2, pos_tol: float = 0.5, ang_bins: int = 16):
+        self.mem = SequenceMemory(order=order)
+        self.disps: dict = {}                                    # displacement KEY -> the representative displacement (3×3)
+        self.pos_tol, self.ang_bins = pos_tol, ang_bins
+        self._prev = None                                        # the previous observed pose (3×3)
+
+    def _key(self, d):
+        """A hashable, tolerance-quantized key for a displacement (so a repeating behavior recurs as the SAME symbol)."""
+        return (round(float(d[0, 2]) / self.pos_tol), round(float(d[1, 2]) / self.pos_tol),
+                round(float(np.arctan2(d[1, 0], d[0, 0]) / (2 * np.pi) * self.ang_bins)) % self.ang_bins)
+
+    def observe(self, pose) -> None:
+        """The object's SE(2) pose this step: learn the DISPLACEMENT since the last pose into the sequence memory."""
+        pose = np.asarray(pose, dtype=float)
+        if self._prev is not None:
+            d = np.linalg.inv(self._prev) @ pose                 # the body-frame displacement (the operator)
+            k = self._key(d)
+            self.disps.setdefault(k, d)
+            self.mem.observe(k)
+        self._prev = pose
+
+    def predict(self):
+        """The predicted next DISPLACEMENT (3×3), from the behavior's phase — or None (no learned continuation yet)."""
+        k = self.mem.predict()
+        return self.disps.get(k) if k is not None else None
+
+    def reset(self) -> None:
+        """A boundary (the object left / a new episode): drop the phase + the last pose; keep the learned behavior."""
+        self.mem.reset()
+        self._prev = None

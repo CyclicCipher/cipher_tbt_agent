@@ -57,3 +57,41 @@ def test_sequence_memory_predicts_a_cyclic_behavior():
     assert sm.phase == () and sm.table                       # the boundary CLEARED the phase without forgetting the behavior
     sm.observe("left"); sm.observe("left")                   # a context never seen in the cycle -> a BURST (no prediction)
     assert sm.predict() is None
+
+
+def test_behavior_forward_models_an_object_toggle():
+    """P3b: a Behavior learns an OTHER object's dynamics as a DISPLACEMENT sequence and forward-models its next pose. A
+    toggling object (x alternates 0<->1) -> the behavior predicts the toggle-back displacement; applying it to the pose
+    (the SAME apply-operator-to-pose as self-motion) predicts where the object goes next -- the self/other unification."""
+    import numpy as np
+    from tbt.sequence import Behavior
+
+    def pose(x):
+        m = np.eye(3); m[0, 2] = float(x); return m
+
+    b = Behavior(order=1)
+    for x in (0, 1, 0, 1, 0, 1, 0, 1):                            # the object toggles between x=0 and x=1
+        b.observe(pose(x))
+    d = b.predict()                                               # from the last pose (x=1), the next displacement
+    assert d is not None
+    nxt = pose(1) @ d                                             # forward-model: apply the behavior's operator to the pose
+    assert abs(float(nxt[0, 2]) - 0.0) < 0.6                     # -> predicts x=0 (toggle back)
+
+
+def test_behavior_learns_a_high_order_patrol():
+    """A patrol (right, right, left, left) repeats the SAME displacement (+x) with a DIFFERENT continuation by phase, so
+    it needs the HIGH-ORDER memory (order>=2). The behavior forward-models the turn-back correctly."""
+    import numpy as np
+    from tbt.sequence import Behavior
+
+    def pose(x):
+        m = np.eye(3); m[0, 2] = float(x); return m
+
+    b = Behavior(order=2)
+    for x in [0, 1, 2, 1] * 4:                                    # the patrol: 0->1->2->1->0->1->2->1 ...
+        b.observe(pose(x))
+    b.reset()
+    b.observe(pose(0)); b.observe(pose(1)); b.observe(pose(2))   # phase = (+1, +1): two rights
+    d = b.predict()                                               # the patrol turns back -> -1
+    assert d is not None
+    assert abs(float((pose(2) @ d)[0, 2]) - 1.0) < 0.6           # forward-models x=1 (turning back)
