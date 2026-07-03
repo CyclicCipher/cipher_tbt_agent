@@ -95,3 +95,31 @@ def test_behavior_learns_a_high_order_patrol():
     d = b.predict()                                               # the patrol turns back -> -1
     assert d is not None
     assert abs(float((pose(2) @ d)[0, 2]) - 1.0) < 0.6           # forward-models x=1 (turning back)
+
+
+def test_backward_modelling_is_inverse_operators():
+    """P3c: backward modelling = INVERSE operators (§5). inv(d) UNDOES d (retrodiction -> the prior pose); a behavior's
+    displacement sequence run BACKWARD (the inverses, in reverse order) recovers the start -- the stapler: closing IS
+    opening reversed. Not a separate mechanism, just the forward sequence with inverse operators."""
+    import numpy as np
+    from tbt.sequence import inverse
+
+    def se2(x, y, th):
+        c, s = np.cos(th), np.sin(th)
+        return np.array([[c, -s, float(x)], [s, c, float(y)], [0.0, 0.0, 1.0]])
+
+    disps = [se2(1, 0, 0), se2(0, 1, np.pi / 6), se2(1, 0, 0), se2(0, 0, np.pi / 6)]   # an "opening" behavior
+    start = np.eye(3)
+    pose = start.copy()
+    for d in disps:                                              # OPEN: apply the forward displacements
+        pose = pose @ d
+    end = pose.copy()
+    for d in reversed(disps):                                    # CLOSE = OPEN reversed: inverses in reverse order
+        pose = pose @ inverse(d)
+    assert np.allclose(pose, start, atol=1e-9)                  # -> recovered the start pose (closing IS opening reversed)
+
+    prior = end @ inverse(disps[-1])                            # RETRODICTION: undo the last displacement
+    check = start.copy()
+    for d in disps[:-1]:
+        check = check @ d
+    assert np.allclose(prior, check, atol=1e-9)                # -> the pose that PRECEDED `end`

@@ -52,6 +52,15 @@ class SequenceMemory:
         self.phase = ()
 
 
+def inverse(displacement):
+    """BACKWARD MODELLING (§5): the INVERSE of an SE(2) displacement. Because operators are invertible group elements,
+    running a behavior BACKWARD is just applying the inverse displacements in REVERSE order (the stapler: closing IS
+    opening reversed) — it is NOT a separate mechanism, only the forward sequence memory with inverse operators. Uses:
+    RETRODICTION (infer the pose that PRECEDED a state: `prior = pose @ inverse(d)`) and reverse-replay credit assignment
+    (walk a trajectory backward to propagate reward to the earlier states/actions that led to it)."""
+    return np.linalg.inv(np.asarray(displacement, dtype=float))
+
+
 class Behavior:
     """An OTHER object's DYNAMICS as a learned temporal sequence of DISPLACEMENTS (§5) — the self/other unification: your
     EFFERENCE drives self-motion (`column.forward`), and this learned behavior drives an OTHER object's next displacement,
