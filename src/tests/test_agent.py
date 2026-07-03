@@ -35,6 +35,7 @@ def test_agent_solves_sparse_reward_grid_online():
     predict-then-compare loop reaches the goal many times -- far more than a random walk."""
     env = GridWorld(N=5, goal=(4, 4))
     completions = _run(Agent(n_actions=4, seed=0), env, steps=2000)
+    random.seed(0)                                               # seed the random BASELINE too (else the >5x threshold flakes)
     rnd = sum(_run(None, GridWorld(N=5, goal=(4, 4)), steps=2000) for _ in range(3)) / 3
     assert completions > 5 * max(rnd, 1), f"online agent {completions} vs random {rnd}"
 
