@@ -325,10 +325,14 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
   over similar features and continuous/cyclic features are native. (From Cipher's HTM notes: Purdy "Encoding Data for HTM
   Systems"; NuPIC spatial pooling.)
 
-Status (2026-07-02, after P1 + P2's mechanism): **P0** collapsed the parallel systems (one prediction, one value, no
-change-log; cost = the kept aversive value). **P1** made perception factored and live — `perceive` delivers
-`(location, content)` through recognize→predict→correct→learn, and the old **fovea/`track`/pose location dispatch is
-DELETED**. **P2** built the one forward prediction over that rep (`col.forward` + the `_pred_error` residual).
+Status (2026-07-02, P0–P3 mechanisms DONE — next is P4): **P0** collapsed the parallel systems (one prediction, one value,
+no change-log; cost = the kept aversive value). **P1** made perception factored and live — `perceive` delivers
+`(location, content)` through recognize→predict→correct→learn; the old fovea/`track`/pose dispatch is DELETED and the
+column is content-opaque (colour confined to the peripheral `retina.view_signature`). **P2** built the one forward
+prediction over that rep (`col.forward` + the `_pred_error` residual). **P3** built the temporal sequence memory
+(`sequence.SequenceMemory`), behaviors (`sequence.Behavior` — other objects' dynamics), backward modelling
+(`sequence.inverse`), and the order/config-dependent case (context-conditioning). Suite: **137 passed, 4 xfailed**
+(the xfailed = end-to-end SOLVING, P0-dip casualties re-earned at P4).
 
 Re-vetted what P1/P2 was thought to unblock (the estimator stack): P1 DID unblock the location-dispatch deletion (done).
 But the rest was mis-attributed — it is **the PLANNING system, gated on P4**, not P1/P2: `move_delta` / `heading_dependent`
@@ -338,7 +342,14 @@ read by the **reward-goal beeline in `_choose`**; they retire/unify *together* o
 `perceive` swapped `ObjectField` for `_mover_cloud`'s own connected-component heuristic; true elimination = recognition-
 proposed boundaries from prediction mismatch (§2 L2/3), a **P3+ figure-ground** build, not a deletion. So the remaining
 "estimator stack" is really *planning + figure-ground*, not P1/P2 leftovers. The **operator** primitive + relation/factor
-discovery are tested; the SR is the one L6. **Next build: P3.**
+discovery are tested; the SR is the one L6.
+
+**Next: P4 — the hard phase (a fresh session).** It is the convergence point: the one EFE value / SR-geodesic planning
+(§8) + hypothesis generation (§9, an OPEN ML question needing research + experiments) + the loop integration everything
+deferred here — re-seating the loop onto the pose rep, retiring `state_node`'s binning + the tabular `col.predict` + the
+achiever/`move_delta`/`heading_dependent` web, the cost unification, wiring the factored learning signal (P2b) and the
+multi-object self/other behaviors (P3). Open it with the TBT-accuracy check + a design/vetting pass before cutting; expect
+experiments, not a straight-line build.
 
 ## 11. Acceptance test for every change (the paper test)
 
