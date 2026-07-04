@@ -1,9 +1,16 @@
 """Layer 5 — the per-action OPERATOR layer: the column's dynamics + motor-output seat.
 
-L5 is the cortex's main OUTPUT layer and its displacement-cell layer (see reference_layer5_role). The chosen change is
-ONE object with four uses: the position-invariant GENERALIZING base operator (predicts an action's effect at an
-UNVISITED state), the MOTOR command (the enacted action), the EFFERENCE COPY (the predicted effect -> the predictive
-state), and the feed-forward DRIVER of the higher-order thalamus (the inter-column message).
+L5 is the cortex's main OUTPUT layer and its displacement-cell layer (reference_layer5_role; TBP arxiv 2412.18354). L5a
+originates the MOTOR command AND its **efference copy** — the predicted BODY-FRAME pose displacement the action produces.
+That efference copy is the SOLE home of the self's per-action displacement (`self.eff`, `efference()`): **L6 reads it and
+applies the head-direction gain field to path-integrate the location — L6 keeps NO copy** (HIPPOCAMPUS.md). The controllable
+body is then NOT selected anywhere — it FALLS OUT as the sensory change consistent with this efference (reafference, von
+Holst; `sensor._reafferent`). Self and OTHER objects are the SAME displacement mechanism differing only in the driver
+(§5): the self's is the efference; another object's is its learned DYNAMICS (`disp`/`recolor` per shape), which L5
+broadcasts as the feed-forward DRIVER of the higher-order thalamus — the inter-column message. The four uses of the one
+displacement: the position-invariant GENERALIZING operator, the MOTOR command, the EFFERENCE COPY (self), and the DRIVER
+(others). NB the config-state `disp`/`edges` symbolic operator below is the TEST-ONLY multi-object/tabular form (the live
+path is egocentric — the efference + L6 gain field); it retires with the tabular path.
 
 The operator is KIND-GENERAL: an action does not just MOVE things, so L5 learns a position-invariant DELTA in whatever
 feature dimension the action changes (see reference_l5_operator_kinds), keyed on the stable SHAPE identity (`size`):

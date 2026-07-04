@@ -174,9 +174,16 @@ reorient-then-advance, abelian nav); the remaining work is WIRING it into the lo
   path-integrated belief gives CLEAN displacement measurements, so `ego[FORWARD]` learns `2.0` (was `1.01` under the hard
   snap — the wobble had corrupted it). NB it did NOT fully fix OrientationGame transfer: with a bimodal recognised anchor the
   residual belief wobble is still ~1 cell (≈ the completion tolerance), so exploit is marginal — see the L23 note below.
-  **Still to build:** the reafference self/world split — cancel the efference-predicted global flow (residual = world-motion),
-  retiring the largest-component "self" heuristic (`sensor._mover_cloud`). Gate: a moving distractor does not corrupt the
-  agent's own path integration.
+  ✅ **reafference split done** — and it forced the RIGHT architecture (the efference copy). L5 now owns the ONE efference
+  copy (the body-frame per-action displacement, `L5.eff`/`efference`; TBP arxiv 2412.18354); L6 READS it and applies the
+  gain field (keeps NO copy — the hippocampus's `ego`/`dtheta` duplicate is deleted). The controllable body is NOT
+  selected: it FALLS OUT as the sensory change consistent with L5's efference (`sensor._reafferent` — the object that
+  MOVED into background this frame, nearest the forward model's predicted location). No "which is me" code exists; no size
+  heuristic; no stateful tracker. Also removed a fragile running-max cloud-size guard in `sense_heading`. Results: **NavGame
+  8/8 in ~119 actions (near-oracle)**; OrientationGame 4/8 (L23 anchor still caps it); MockLiveGame 60/60 (completion — the
+  static anchor is no longer tracked). Remaining: near-oracle TRANSFER (re-explores rather than beelining) and, for a
+  moving-world distractor, the finer efference-displacement match (the arrival-into-background rule handles static
+  distractors; a moving distractor needs the displacement comparator).
 - **H5 — landmark anchoring / loop closure.** Re-seeing a recognised object resets the drifting place, so the map stays
   world-anchored over a long run.
 - **H6 — the allocentric OBJECT map (what–where index, §1b).** Store, at each place, a POINTER to the object `l23_object`
