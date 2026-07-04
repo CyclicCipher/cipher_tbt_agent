@@ -17,6 +17,12 @@ if _PKG not in sys.path:
     sys.path.insert(0, _PKG)
 
 from tbt.hippocampus import Hippocampus, _rot  # noqa: E402
+from tbt.l5_displacement import L5_Displacement  # noqa: E402
+
+
+def _hip(**kw):
+    """A Hippocampus over a fresh L5 (the efference-copy source)."""
+    return Hippocampus(L5_Displacement(), **kw)
 
 
 class _Body:
@@ -66,20 +72,21 @@ class _GridBody:
 def test_gain_field_one_observation_generalizes_to_all_headings():
     """The crux: ONE FORWARD sighting (at heading 0) pins the egocentric displacement, and rotating it by head-direction
     gives the correct world move for EVERY heading — no per-heading learning (the coverage sweep is dissolved)."""
-    hip, w = Hippocampus(board=32, n_head=4), _Body()
+    hip, w = _hip(board=32, n_head=4), _Body()
     hip.observe(None, w.pos(), w.head())                       # cold: set the belief
     w.step(0); hip.observe(0, w.pos(), w.head())               # a SINGLE forward at heading 0
-    assert np.allclose(hip.ego[0], [2.0, 0.0], atol=0.3), hip.ego[0]
+    ego = np.array(hip.l5.efference(0)[0])                     # L5 owns the efference copy (body-frame displacement)
+    assert np.allclose(ego, [2.0, 0.0], atol=0.3), ego
     truth = {0: (2, 0), 1: (0, 2), 2: (-2, 0), 3: (0, -2)}     # E/N/W/S
     for h, t in truth.items():
-        pred = _rot(h * np.pi / 2) @ hip.ego[0]                # world Δ = R(head)·ego — derived, not re-learned
+        pred = _rot(h * np.pi / 2) @ ego                       # world Δ = R(head)·ego — derived, not re-learned
         assert np.allclose(pred, t, atol=0.3), (h, pred, t)
 
 
 def test_reorient_then_advance_reaches_goal_nonabelian():
     """A non-abelian body (FORWARD + turns) reaches an interior goal: after ONE observation of each action, the inverse
     gain field turns to face the goal then advances (SE(2), the order-dependent case)."""
-    hip, w, goal = Hippocampus(board=32, n_head=4), _Body(), (12.0, 12.0)
+    hip, w, goal = _hip(board=32, n_head=4), _Body(), (12.0, 12.0)
     hip.observe(None, w.pos(), w.head())
     for a in (1, 0, 2, 0):                                     # warm-up: one of each action to learn its effect
         w.step(a); hip.observe(a, w.pos(), w.head())
@@ -95,7 +102,7 @@ def test_reorient_then_advance_reaches_goal_nonabelian():
 def test_abelian_navigation_reaches_goal_translations():
     """A translation-only (abelian) body reaches the goal by the aligned move — the degenerate one-heading case of the
     same navigator (NavGame's ACTION1-4)."""
-    hip, w, goal = Hippocampus(board=32, n_head=4), _GridBody(), (12.0, 12.0)
+    hip, w, goal = _hip(board=32, n_head=4), _GridBody(), (12.0, 12.0)
     hip.observe(None, w.pos(), w.head())
     for a in (0, 1, 2, 3):                                     # learn each move once
         w.step(a); hip.observe(a, w.pos(), w.head())

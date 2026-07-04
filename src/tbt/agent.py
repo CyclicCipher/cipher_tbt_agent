@@ -85,13 +85,10 @@ class Agent:
         return tuple(self.rng.uniform(max(0.0, lo[i] - margin), min(self.board - 1, hi[i] + margin)) for i in range(2))
 
     def _learned(self, a) -> bool:
-        """Has action `a`'s effect been learned — a nonzero MOVE or TURN? The hippocampus's gain field generalises ONE
+        """Has action `a`'s effect been learned — a nonzero MOVE or TURN (L5's efference)? The gain field generalises ONE
         forward observation to every heading, so cold-start ends as soon as every action has shown its effect (no
         per-heading sweep). An action seen only while blocked (zero effect) keeps babbling until it is seen acting."""
-        hip = self.col.hip
-        ego = hip.ego.get(a)
-        moved = ego is not None and (float(ego[0]) ** 2 + float(ego[1]) ** 2) ** 0.5 > 0.5
-        return moved or abs(hip.dtheta.get(a, 0.0)) > 1e-2
+        return self.col.L5.learned(a)
 
     def _choose(self, here):
         """Priority: EXPLOIT a remembered reward goal > test a CUED salient target > goal-BABBLE toward a sampled target.

@@ -114,9 +114,7 @@ class L5_Displacement(nn.Module):
         self.ops: dict = {}                                          # (domain, relation) -> matrix operator (offline/archived)
         self.edges: dict = {}                                        # state -> {action -> next state}: observed transitions / exceptions
         self.disp: dict = {}                                         # (shape, action) -> modal pose delta (dx, dy): the movement operator
-        self.move_delta: dict = {}                                   # action -> continuous pixel translation (dx, dy): the metric efference (the tracker path-integrates by it)
-        self._move_dir: dict = {}                                     # action -> EWMA unit DIRECTION of its moves (L6_NONABELIAN S1e non-abelian detector)
-        self._move_resid: dict = {}                                   # action -> EWMA direction INCONSISTENCY (1-cos): high => heading-dependent (non-abelian)
+        self.eff: dict = {}                                          # action -> (dx, dy, dtheta): the EFFERENCE COPY -- the action's BODY-FRAME pose delta
         self.recolor: dict = {}                                      # (shape, action) -> {old_content -> new_content}: the in-place-change operator
         self._votes: dict = {}                                       # (shape, action) -> Counter of pose deltas (-> disp = mode)
 
@@ -144,50 +142,32 @@ class L5_Displacement(nn.Module):
         """{action -> next state} learned from `s` — the operator's outgoing edges."""
         return self.edges.get(s, {})
 
-    # ---- the CONTINUOUS per-action displacement (the SPATIAL column's group action) --------------------------
-    # L5's operator "in whatever dimension the action changes" at the METRIC grain: the pixel translation an action
-    # produces. The spatial column's group is SO(2)+translation; with rotation deferred this is just the translation
-    # `move_delta[action]`, learned online by EWMA from the sensed displacement (the efference copy). This is the ONE
-    # home of the per-action displacement -- the sensor no longer keeps its own copy (the P1 unification): L6 (the
-    # column tracker) path-integrates the location belief by this delta, and reads `controllable` to gate the position.
-    def observe_move(self, action, delta, rate: float = 0.4) -> None:
-        """Learn the per-action pixel translation from one sensed move `delta=(dx,dy)` -- an EWMA (the efference the
-        tracker path-integrates by). First sighting sets it; later ones average (robust to a noisy sighting). Also tracks
-        the move's DIRECTION consistency (L6_NONABELIAN S1e): a nonzero move updates the EWMA unit direction + its
-        inconsistency (1-cos to the mean) -- high inconsistency => the action's effect depends on a hidden heading."""
-        dx, dy = float(delta[0]), float(delta[1])
-        mag = (dx * dx + dy * dy) ** 0.5
-        if mag > 1e-6:                                              # only real moves inform DIRECTION consistency (bumps skipped)
-            ux, uy = dx / mag, dy / mag
-            prev = self._move_dir.get(action)
-            if prev is not None:
-                self._move_resid[action] = (1.0 - rate) * self._move_resid.get(action, 0.0) + rate * (1.0 - (ux * prev[0] + uy * prev[1]))
-                self._move_dir[action] = ((1.0 - rate) * prev[0] + rate * ux, (1.0 - rate) * prev[1] + rate * uy)
-            else:
-                self._move_dir[action] = (ux, uy)
-        old = self.move_delta.get(action)
-        self.move_delta[action] = tuple(delta) if old is None else (
-            (1.0 - rate) * old[0] + rate * delta[0], (1.0 - rate) * old[1] + rate * delta[1])
+    # ---- the EFFERENCE COPY: the per-action BODY-FRAME pose delta (L5's core, TBP paper) ----------------------
+    # TBT: L5a originates the motor command AND its EFFERENCE COPY -- the predicted pose displacement the action
+    # produces (arxiv 2412.18354). It is the ONE per-action operator in the BODY frame: a translation `(dx, dy)` + a
+    # turn `dtheta`. L6 (the allocentric map) reads it and applies the head-direction GAIN FIELD (`R(head)·(dx,dy)`,
+    # the heading turned by `dtheta`) to path-integrate the location -- so FORWARD is learned ONCE and rotated to every
+    # heading (HIPPOCAMPUS.md). This is the SOLE home of the self's displacement; L6 keeps NO copy.
+    def learn_efference(self, action, disp, dtheta: float = 0.0, rate: float = 0.5) -> None:
+        """Learn the action's BODY-FRAME efference from one observed transition (`disp=(dx,dy)` de-rotated to the body
+        frame by L6, `dtheta` the heading change) -- an EWMA (first sighting sets it; later ones average out a noisy
+        recognition). The move-vs-turn KIND is emergent (a large `disp` vs a large `dtheta`), never assigned."""
+        dx, dy, dth = float(disp[0]), float(disp[1]), float(dtheta)
+        old = self.eff.get(action)
+        self.eff[action] = (dx, dy, dth) if old is None else (
+            (1 - rate) * old[0] + rate * dx, (1 - rate) * old[1] + rate * dy, (1 - rate) * old[2] + rate * dth)
 
-    def heading_dependent(self, thresh: float = 0.3) -> bool:
-        """L6_NONABELIAN S1e (SCAFFOLDING -- to be dissolved at step 5 into proper factorisation): does some action move in
-        INCONSISTENT directions -> its effect depends on a hidden HEADING -> the dynamics are NON-ABELIAN, so the agent
-        needs the POSE state (`pose_state`), not just position (`track_state`). Detected as a high direction-inconsistency
-        residual (a consistent action -- NavGame's N/S/E/W -- stays ~0)."""
-        return any(r > thresh for r in self._move_resid.values())
+    def efference(self, action):
+        """The action's efference copy `((dx, dy), dtheta)` in the BODY frame -- what L6 path-integrates by (the gain
+        field rotates the translation by the head-direction). `((0,0), 0)` for an action whose effect is not yet learned
+        (dead-reckon says 'stay', the sighting then corrects)."""
+        dx, dy, dth = self.eff.get(action, (0.0, 0.0, 0.0))
+        return (dx, dy), dth
 
-    def move(self, action):
-        """The learned per-action translation (dx, dy) -- the efference the location belief dead-reckons by; (0, 0)
-        for an action whose effect is not yet learned (dead-reckon says 'stay', the sighting then corrects)."""
-        return self.move_delta.get(action, (0.0, 0.0))
-
-    def operator(self, action) -> Operator:
-        """L6_NONABELIAN Stage 0 -- the per-action OPERATOR: the GENERAL (composable) form of `move`. HERE it is the
-        abelian TRANSLATION by `move_delta[action]` (a homogeneous matrix), so `operator(a).apply(homog(pos)) ==
-        homog(pos + move(a))` and composing operators reproduces additive path integration -- no behaviour change, `move`
-        is just the additive VIEW. Stage 1 makes this a LEARNED matrix constrained to a group representation (Gao/TEM), so
-        a NON-COMMUTING action becomes representable and the additive translation is then only the abelian special case."""
-        return Operator.translation(self.move(action))
+    def learned(self, action) -> bool:
+        """Has `action`'s efference been learned as a real MOVE or TURN? (a nonzero displacement or heading change)."""
+        e = self.eff.get(action)
+        return e is not None and ((e[0] * e[0] + e[1] * e[1]) ** 0.5 > 0.5 or abs(e[2]) > 1e-2)
 
     # ---- motor output + thalamus driver (the other two uses of the one operator) -------------------------
     def motor(self, a):

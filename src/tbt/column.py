@@ -32,7 +32,7 @@ class CorticalColumn(nn.Module):
         self.L4 = L4_FeatureLocation(n_entities, feat_dim=feat_dim, seed=seed)
         self.L23 = L23_Object(feat_dim=feat_dim, d_mem=d_mem)
         self.board = int(board)
-        self.hip = Hippocampus(board=board)                  # the allocentric map + head-direction gain field (owns the pose belief)
+        self.hip = Hippocampus(self.L5, board=board)         # the allocentric map + head-direction gain field (reads L5's efference copy)
         self.sf = SuccessorFeatures(d=self.hip.grid.n)       # value over the allocentric position SDR (the grid-cell code)
         self._pred_error = 0.0
 

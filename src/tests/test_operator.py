@@ -46,29 +46,6 @@ def test_interface_HOLDS_non_commuting_operators():
     assert not np.allclose(T.then(R).apply(p), R.then(T).apply(p))               #   +x then rotate ≠ rotate then +x
 
 
-def test_L5_operator_reproduces_additive_move_NO_regression():
-    """The GATE: L5's per-action OPERATOR reproduces the additive `move` -- on a NavGame-like path AND a counting
-    succession the abelian behaviour is UNCHANGED when routed through the operator interface (Stage 0 = no regression)."""
-    from tbt.l5_displacement import L5_Displacement
-    L5 = L5_Displacement()
-    moves = {0: (1.0, 0.0), 1: (-1.0, 0.0), 2: (0.0, -1.0), 3: (0.0, 1.0)}       # NavGame directions
-    for a, d in moves.items():
-        L5.observe_move(a, d)
-    for a in moves:                                                             # one step: operator == additive move
-        assert np.allclose(dehomog(L5.operator(a).apply(homog([4.0, 7.0]))), np.array([4.0, 7.0]) + L5.move(a))
-    seq, pos_add, z = [0, 0, 3, 3, 0, 2, 1, 3], np.array([0.0, 0.0]), homog([0.0, 0.0])
-    for a in seq:                                                               # a whole PATH: operators == additive accumulation
-        pos_add = pos_add + np.asarray(L5.move(a))
-        z = L5.operator(a).apply(z)
-    assert np.allclose(dehomog(z), pos_add)
-    succ = L5_Displacement()                                                    # COUNTING: a +1 operator composed n times = n
-    succ.observe_move(0, (1.0, 0.0))
-    z = homog([0.0, 0.0])
-    for n in range(1, 25):
-        z = succ.operator(0).apply(z)
-        assert np.allclose(dehomog(z), [float(n), 0.0])
-
-
 def test_LEARNED_operator_composition_fidelity_abelian_gate():
     """L6_NONABELIAN Stage 1 GATE (learnability, ABELIAN FIRST): operators LEARNED from noisy transitions on the grid code
     satisfy COMPOSITION FIDELITY -- but ONLY with the GAO orthogonality constraint. The constrained operator is a proper
