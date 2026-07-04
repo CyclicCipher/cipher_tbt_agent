@@ -280,8 +280,10 @@ through the maneuver and switch on repeated refutation. Testing a hypothesis *is
 
 ## 9. Hypothesis generation — how the model proposes what to try (the frontier)
 
-Testing is §8; **generation** — where a candidate target-state comes from — is the genuinely open problem. The proposal,
-from the research and the number-domain probes (`MATH_PHASE.md`):
+Testing is §8; **generation** — where a candidate target-state comes from — is the genuinely open problem. The full
+research + staged plan for *all* forms of discovery (model-acquisition babbling, cued/uncued exploration, hypothesis
+generation & testing, up to Sokoban) lives in the companion **`DISCOVERY.md`**; this section is the load-bearing summary.
+The proposal, from the research and the number-domain probes (`MATH_PHASE.md`):
 
 - **Not enumeration.** The mind **samples a few candidates from memory**, cued by context and biased by priors:
   **salience × controllability × ambiguity** (Dasgupta, Schulz & Gershman 2017; more samples when more uncertain).
