@@ -1,169 +1,73 @@
-"""The sensor / retina -- the bridge from raw ARC frames to the column's input.
+"""The sensor / retina — the bridge from raw ARC frames to the column's input.
 
-Perception modes, ONE tracker underneath:
-  * GLOBAL (`config_state`) -- segment + track objects and encode a TRANSLATION-INVARIANT (size, rel-pose, content)
-    state. Faithful for STRUCTURED / small scenes (and the home of the L5 operator's generalization), but on real 64x64
-    ARC frames it NEVER recurs (the full per-pixel content churns with any animation -> the loop is starved).
-  * LOCAL / EGOCENTRIC (`local=True`) -- the thousand-brains way: sense a WINDOW around a FOVEA placed on the dynamic
-    residual (the controllable change), and ENCODE it to an L4 FEATURE id (`self.encode` = the column's `L4.encode`,
-    the content vocabulary grown online) -- so the local state is a FEATURE-at-location, not a raw pixel tuple. Local
-    views RECUR (measured on real cn04/ls20: ~0 -> ~0.6-0.9), so the column can learn. But a local view has NO
-    allocentric position, so distinct board locations ALIAS and the agent cannot tell explored from unexplored.
-  * PATH-INTEGRATED (`integrate=True`, on top of local) -- the controllable object's ALLOCENTRIC position, but the
-    sensor no longer computes it: it DETECTS the residual candidates and hands them to the COLUMN (`column.track`),
-    which owns the efference (L5's per-action displacement), the correction (snap to the sighting nearest the
-    prediction -> action-consistent tracking, animation ignored), the controllability GATE, and the coarse state node
-    (`column.track_state`). The P1 unification (GROUNDING_PLAN): ONE path integrator, in the column where TBT seats it.
-
-The stateless proto-object proposer runs in all modes (so `objects()` still feeds the click-slots, per frame).
-`read(frame, action)` passes the efference copy (the last action) THROUGH to the column's path integration. Pure stdlib.
-"""
+The retina does ONLY retina-level work: adapt to the background, deliver the frame's non-background cells as raw
+FEATURE-AT-LOCATIONS `[(x, y, colour), ...]`, and compute a bottom-up SALIENCE peak (center-surround pop-out). It does
+NOT segment the scene into proto-objects — object membership, permanence, and identity are the COLUMN's doing (common-fate
+attention + L2/3 recognition + the hippocampus's path-integrated bump), never a hand-coded tracker (the old proto-object /
+config-state harness is gone). `read(frame, action)` passes the efference copy (the last action) through to the column's
+one perception step and returns `(state, change)`; `salient_target()` is the cued-discovery peak; `objects()` are the
+salience peaks a coordinate (click) action can address. Pure stdlib + the retina primitives."""
 
 from __future__ import annotations
 
-from .perceive import ObjectField, background, canonicalize, components
-from .retina import dominant_region, salient_cells, view_signature   # the residual/foveation + the content encoder (peripheral)
-
-
-def config_state(objects, contents=None):
-    """The scene as a hashable, TRANSLATION-INVARIANT state: each object's `(size, integer pose relative to the LARGEST
-    object[, content])`, sorted. A thin wrapper over `perceive.canonicalize` (the ONE encoding the operator/L5 reuses):
-    each object becomes `(pose, feature)` with `feature = (size,)` or `(size, content)`, so the operator can apply a
-    position-invariant displacement and re-encode to the SAME form. The same RELATIVE arrangement anywhere on the board
-    yields the SAME state; a removed object is simply absent (so a 'required-absent' goal needs no special case)."""
-    elements = []
-    for oid, (pose, size) in objects.items():
-        feat = (size,) if contents is None else (size, contents.get(oid))
-        elements.append((pose, feat))
-    return canonicalize(elements)
+from .retina import background, salient_cells, salient_targets, view_signature   # retina primitives (adaptation, change, pop-out, content)
 
 
 class Sensor:
-    """Frame -> column input. `read(frame, action)` tracks objects and returns `(state, change)`. With `local=True` the
-    state is an EGOCENTRIC window (size `window`) around the dynamic-residual fovea; with `integrate=True` it is
-    `(window, coarse path-integrated position)` once the object proves controllable. `local=False` (default) is the
-    global translation-invariant `config_state`. `objects()` works in all modes."""
+    """Frame -> column input. With `integrate=True` (the live path) the column OWNS perception: the retina hands it the
+    frame's raw coloured cells and it returns `(content, here)` — the recognised content id + the path-integrated
+    allocentric position. Without a column (standalone) it returns the whole-frame content signature. `salient_target()`
+    / `objects()` are the retina's bottom-up salience peaks (the self is excluded via the column's tracked body)."""
 
     def __init__(self, local: bool = False, window: int = 7, integrate: bool = False, pos_bin: int = 4, encode=None):
-        self.field = ObjectField()
         self._prev = None
         self.local = local
         self.window = window
         self.integrate = integrate
         self.pos_bin = pos_bin
-        self._fovea = None                                   # the S-frame attention locus (where the patch is extracted)
-        self.column = None                                   # P1: the column that OWNS path integration (its `track_*`); wired by arc_sdk, like `encode`
-        # FEATURE-AT-LOCATION (the L4 seam): the egocentric patch is encoded to an L4 FEATURE id (the column's content
-        # vocabulary, grown online), so the local state is (feature, location) -- L4's job, not a raw pixel tuple.
-        # Defaults to identity (the raw patch) until the column wires its `L4.encode` in (so tests run column-free).
-        self.encode = encode if encode is not None else (lambda patch: patch)
+        self.column = None                                   # the column that OWNS perception + path integration (wired by arc_sdk)
+        self.encode = encode if encode is not None else (lambda patch: patch)   # kept for the sensory contract (unused in the factored path)
 
     def reset(self):
-        self.field.reset()
         self._prev = None
-        self._fovea = None
-        # The column's L5 displacement (the efference) PERSISTS across levels (the same mechanic everywhere); its
-        # location belief is reset separately by the loop (`column.track_reset`). The sensor keeps no position state.
+        # The column's L5 efference PERSISTS across levels; its location belief is reset separately (`column.track_reset`).
+
+    def _coloured(self, frame):
+        """The frame's raw non-background feature-at-locations `[(x, y, colour), ...]` — the retina's whole output (no
+        segmentation, no grouping): the column groups the self by common fate and recognises it."""
+        bg = background(frame)
+        return [(x, y, v) for y, row in enumerate(frame) for x, v in enumerate(row) if v != bg]
 
     def read(self, frame, action=None):
-        objects = self.field.perceive(frame)                               # stateless proto-object proposal this frame
+        """One perception step. Integrate + column: the column GROUPS the self (common fate) + recognises it + path-
+        integrates the pose; returns `((content, here), change)`. Otherwise: the whole-frame content signature."""
         change = salient_cells(self._prev, frame) if self._prev is not None else set()
-        if self.local:
-            appeared, dominant, cold = self._residual_candidates(frame, change, objects)
-            if self.column is not None and self.integrate:                 # the FACTORED (content, location) via the column's ONE perception step
-                cloud = self._reafferent(frame, change, action)            # the change consistent with L5's efference (von Holst)
-                cells = [(x, y) for (x, y, _c) in cloud]                    # the morphology (colour-blind) -> the pose
-                content, _pose = self.column.perceive(action, cells, view_signature(cloud))   # the PERIPHERAL encodes content; the column stays opaque
-                here = self.column.here_position()                         # the belief position (decoded from the pose code)
-                self._fovea = here if here is not None else (dominant or cold)   # foveal read-back
-                state = (content, here)                                     # (content, location) -- the pose position (the SF/navigate_vector currency)
-            else:                                                          # local feature-only (no integration) / standalone (no column): dominant-residual fovea
-                self._fovea = dominant if dominant is not None else (self._fovea or cold)
-                feat = self.encode(self._patch(frame, self._fovea))
-                state = (feat, (0, 0)) if self.integrate else feat         # integrate w/o a column -> the gate-off constant position
+        coloured = self._coloured(frame)
+        if self.column is not None and self.integrate:
+            content, _pose = self.column.perceive(action, coloured)   # the ONE perception step (recognise -> bump belief)
+            here = self.column.here_position()
+            state = (content, here)
         else:
-            state = config_state(objects, self.field.contents)
+            state = view_signature(coloured)                 # standalone / no column: the whole-frame content id
         self._prev = frame
         return state, change
 
-    def objects(self):
-        """The current tracked objects `{id: (pose, size)}` -- poses feed the click-slots and the L5 reseat."""
-        return dict(self.field._last)
+    def _self_cells(self):
+        """The column's currently-tracked self body (to exclude from salience), or ()."""
+        return getattr(self.column, "_self_cells", None) or () if self.column is not None else ()
 
     def salient_target(self):
-        """Feature-contrast salience (DISCOVERY.md D1) -- the position of a distinct proto-object that is NOT the
-        controllable mover: the bottom-up 'distinct from surround' channel that complements motion-salience, so a STATIC
-        distinct object becomes a candidate goal. The mover is the proto-object nearest the column's pose belief (the
-        tracked self); the salient target is the nearest OTHER object. Returns `(x, y)` or None (nothing distinct)."""
-        items = list(self.field._last.values())                            # [(centroid, size), ...] this frame (stateless)
-        if len(items) < 2:
+        """Feature-contrast salience (DISCOVERY.md D1): the most distinct location that is NOT the tracked self — the
+        bottom-up 'distinct from surround' cue that lets a static marker become a candidate goal. `(x, y)` or None."""
+        if self._prev is None:
             return None
-        here = self.column.here_position() if self.column is not None else None   # the belief position (pose code)
-        if here is None:                                                   # no pose yet -> the smallest object is the likely marker (the mover is the large body)
-            return min(items, key=lambda v: v[1])[0]
-        mover = min(items, key=lambda v: (v[0][0] - here[0]) ** 2 + (v[0][1] - here[1]) ** 2)   # the self = nearest the belief
-        others = [v for v in items if v is not mover]
-        return min(others, key=lambda v: (v[0][0] - here[0]) ** 2 + (v[0][1] - here[1]) ** 2)[0] if others else None
+        peaks = salient_targets(self._prev, exclude=self._self_cells(), k=1)
+        return peaks[0] if peaks else None
 
-    # ----- egocentric S-frame perception: detect the residual candidates the COLUMN path-integrates ------------
-    def _residual_candidates(self, frame, change, objects):
-        """The S-frame perception the column's tracker consumes -- (appeared, dominant, cold):
-          appeared = centroids of the ARRIVED (non-background) change components -- the candidate controllable sightings
-                     the column DISAMBIGUATES by the efference (rejecting autonomous animation);
-          dominant = the largest connected change centroid (the cold-motion / fallback sighting), or None;
-          cold     = the largest object's centroid / the frame centre -- the cold-start locus before anything moves.
-        The sensor only DETECTS; the COLUMN owns the displacement + position (no `_delta`/position here -- the P1 unification)."""
-        bg = background(frame)
-        appeared = [c for _comp, c in components({(x, y) for (x, y) in change if frame[y][x] != bg})]
-        _comp, dominant = dominant_region(change)
-        cold = self._largest_centroid(objects) or (len(frame[0]) / 2.0, len(frame) / 2.0)
-        return appeared, dominant, cold
-
-    def _reafferent(self, frame, change, action):
-        """The REAFFERENT change — the sensory change consistent with L5's efference (von Holst's reafference; the
-        comparator model of agency). NO object is labelled 'me'; the controllable body FALLS OUT of the efference:
-          * candidates are only the objects that MOVED this frame (their cells overlap the CHANGE) — a STATIC world object
-            (a marker, a fixed anchor) never moves, so it is never a candidate and can neither be mistaken for the body nor
-            corrupt the belief;
-          * among the movers, the one nearest the efference-PREDICTED next location (`column.predicted_position`) — the
-            change the forward model expected. A wrongly-drifted belief still re-acquires, because only movers compete and
-            the real moving body is the only mover.
-        `[]` when nothing moved (a blocked action / static scene) — the belief HOLDS (agency: I acted, nothing moved as
-        predicted → I am blocked). Cold start (no belief / unlearned efference): the moving object bootstraps it. Returns
-        the reafferent object's coloured cells `[(x, y, colour), ...]`. (A multi-mover cold start is momentarily ambiguous
-        until the efference is learned — the comparator then resolves it; our single-mover games are unambiguous.)
-
-        A reafferent move is an ARRIVAL into space that was BACKGROUND last frame (the body moved there). An in-place
-        colour swap / a reveal (a marker turning from the occluding body's colour back to its own) is NOT a spatial move,
-        so it is excluded — this also disambiguates a level RESET (the body jumps to start into empty space = an arrival;
-        the revealed marker is a colour swap = not)."""
-        bg = background(frame)
-        cells = {(x, y) for y, row in enumerate(frame) for x, v in enumerate(row) if v != bg}
-        if not cells:
-            return []
-        prev, pbg = self._prev, (background(self._prev) if self._prev is not None else None)
-
-        def arrived(comp):                                                              # moved INTO space that was background last frame
-            return prev is not None and any(prev[y][x] == pbg for (x, y) in comp)
-
-        movers = [([(x, y, frame[y][x]) for (x, y) in comp], cen) for comp, cen in components(cells) if arrived(comp)]
-        if not movers:
-            return []
-        pred = self.column.predicted_position(action) if self.column is not None else None
-        if pred is None:                                                                # cold: the moving object bootstraps
-            return movers[0][0]
-        return min(movers, key=lambda c: (c[1][0] - pred[0]) ** 2 + (c[1][1] - pred[1]) ** 2)[0]   # the mover the efference expected
-
-    def _largest_centroid(self, objects):
-        if not objects:
-            return None
-        (px, py), _size = max(objects.values(), key=lambda v: (v[1], v[0]))
-        return (px, py)
-
-    def _patch(self, frame, fovea):
-        """The raw `window x window` patch of `frame` centred on `fovea` (out-of-bounds = -1), as a hashable tuple."""
-        h = self.window // 2
-        cx, cy = int(round(fovea[0])), int(round(fovea[1]))
-        H, W = len(frame), len(frame[0])
-        return tuple(tuple(frame[y][x] if 0 <= x < W and 0 <= y < H else -1
-                           for x in range(cx - h, cx + h + 1)) for y in range(cy - h, cy + h + 1))
+    def objects(self):
+        """The retina's salience PEAKS as click-addressable targets `{index: ((x, y), 1)}` (top-K, non-max suppressed) —
+        the coordinate-action slots. Not a proto-object tracker: just the winner-take-all peaks of the pop-out map."""
+        if self._prev is None:
+            return {}
+        peaks = salient_targets(self._prev, exclude=self._self_cells(), k=12)
+        return {i: ((float(x), float(y)), 1) for i, (x, y) in enumerate(peaks)}

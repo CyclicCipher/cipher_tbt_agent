@@ -1,57 +1,18 @@
-"""The sensor (tbt.sensor): raw frames -> the column's input. The scene state is translation-invariant (so states
-recur), the change stream reports what moved, and END TO END the SAME agent solves a sparse-reward scene read FROM
-FRAMES (segment -> track -> state -> loop) -- the offline gate before the live game."""
+"""The retina + sensor after the symbolic-path retirement: the retina delivers raw feature-at-locations, reports what
+CHANGED, and computes a bottom-up SALIENCE peak (center-surround pop-out). Object segmentation/tracking is gone — the
+column owns it. The end-to-end sensorimotor loop is covered by the game tests (test_path_integration / test_live_loop)."""
 
 from __future__ import annotations
 
 import os
-import random
 import sys
 
 _PKG_PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
-from tbt.agent import Agent  # noqa: E402
-from tbt.sensor import Sensor, config_state, salient_cells  # noqa: E402
-
-MOVES = {0: (0, -1), 1: (0, 1), 2: (-1, 0), 3: (1, 0)}
-N = 12
-
-
-def _clamp(v):
-    return min(max(v, 0), N - 1)
-
-
-class FrameScene:
-    """A rendered-frame sparse-reward scene: a 1-cell mover (colour 7) + a 2x2 landmark (colour 5, the config anchor).
-    Reaching the border ring scores -- a goal directed exploration reliably reaches. Emits raw grids (frames)."""
-
-    def __init__(self, pos=(6, 6)):
-        self.pos = pos
-
-    def render(self):
-        g = [[0] * N for _ in range(N)]
-        for dx in (0, 1):
-            for dy in (0, 1):
-                g[2 + dy][2 + dx] = 5                         # 2x2 landmark (the largest object -> the anchor)
-        g[self.pos[1]][self.pos[0]] = 7                      # the (1-cell) mover
-        return g
-
-    def step(self, a):
-        dx, dy = MOVES[a]
-        self.pos = (_clamp(self.pos[0] + dx), _clamp(self.pos[1] + dy))
-        scored = 1 if (self.pos[0] in (0, N - 1) or self.pos[1] in (0, N - 1)) else 0
-        return self.render(), scored
-
-
-def test_config_state_is_translation_invariant():
-    """The same RELATIVE arrangement shifted anywhere on the board is ONE state -- so states recur for the SR/operator."""
-    a = {0: ((3.0, 3.0), 1), 1: ((6.0, 6.0), 4)}
-    b = {0: ((8.0, 8.0), 1), 1: ((11.0, 11.0), 4)}           # the same arrangement, shifted by +5
-    assert config_state(a) == config_state(b)
-    c = {0: ((3.0, 5.0), 1), 1: ((6.0, 6.0), 4)}             # a different arrangement
-    assert config_state(a) != config_state(c)
+from tbt.retina import background, salient_cells, salient_targets  # noqa: E402
+from tbt.sensor import Sensor  # noqa: E402
 
 
 def test_salient_cells_reports_what_changed():
@@ -60,34 +21,29 @@ def test_salient_cells_reports_what_changed():
     assert salient_cells(prev, cur) == {(1, 0), (1, 1)}
 
 
-def test_sensor_tracks_a_mover_and_reports_change():
-    s = Sensor()
-    env = FrameScene(pos=(6, 6))
-    st0, ch0 = s.read(env.render())
-    assert ch0 == set()                                      # no previous frame -> no change yet
-    frame, _ = env.step(3)                                   # mover steps right
-    st1, ch1 = s.read(frame)
-    assert st1 != st0                                        # the state changed (the mover moved)
-    assert ch1                                               # the change stream reports the moved cells
+def test_background_is_the_dominant_value():
+    frame = [[0, 0, 0], [0, 7, 0], [0, 0, 3]]
+    assert background(frame) == 0
 
 
-def _run(agent, sensor, steps):
-    env = FrameScene()
-    s, _ = (sensor.read(env.render()) if sensor is not None else (None, None))
-    delta, completions = 0, 0
-    for _ in range(steps):
-        a = agent.step(s, delta) if agent is not None else random.randrange(4)
-        frame, delta = env.step(a)
-        if agent is not None:
-            s, _ = sensor.read(frame)
-        if delta > 0:
-            if agent is not None:
-                agent.step(s, delta)                         # learn the rewarding arrival
-                agent.new_episode(); sensor.reset()
-            completions += 1
-            env.pos = (6, 6)
-            if agent is not None:
-                s, _ = sensor.read(env.render())
-            delta = 0
-    return completions
+def test_salience_peak_pops_out_the_distinct_marker_not_the_block_interior():
+    """Center-surround pop-out: an isolated distinct cell (a marker) beats a uniform block's interior, and the tracked
+    self is excluded — so a static marker becomes the cued-discovery target."""
+    frame = [[0] * 8 for _ in range(8)]
+    for dx in (0, 1):                                          # a 2x2 block (colour 7) — its interior does NOT pop out
+        for dy in (0, 1):
+            frame[1 + dy][1 + dx] = 7
+    frame[5][6] = 3                                            # an isolated distinct marker (colour 3) — full contrast
+    peaks = salient_targets(frame, exclude=[(1, 1), (2, 1), (1, 2), (2, 2)], k=1)
+    assert peaks == [(6, 5)], peaks
 
+
+def test_sensor_read_delivers_change_without_a_column():
+    """Standalone (no column): the sensor still reports the change stream between frames."""
+    s = Sensor(local=True, integrate=True)
+    a = [[0, 0], [0, 7]]
+    b = [[0, 7], [0, 0]]
+    _s0, ch0 = s.read(a)
+    assert ch0 == set()                                       # no previous frame -> no change yet
+    _s1, ch1 = s.read(b)
+    assert ch1 == {(1, 0), (1, 1)}

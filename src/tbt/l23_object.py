@@ -260,12 +260,17 @@ class L23_Object(nn.Module):
         m = self.identify_model(cloud)
         return m.name if m is not None else None
 
-    def recognize(self, cloud, max_sense: int = 16):
-        """Identify a shape's object + continuous pose, learning it online if novel — (name, theta, t, ev). The
-        pose-invariant recognition perception uses to TRACK an object across frames despite rotation/translation."""
-        if self.identify_model(cloud, max_sense) is None:
+    def recognize(self, cloud, max_sense: int = 16, learn: bool = True):
+        """Identify a shape's object + continuous pose — (name, theta, t, ev). The pose-invariant recognition perception
+        uses to TRACK an object across frames despite rotation/translation. The object IDENTITY is PERSISTENT: it is
+        learned once and then re-recognised, not re-guessed every frame — so `learn=False` senses the pose against the
+        established library WITHOUT spawning a spurious duplicate (the caller keeps the identity stable across frames, which
+        is what stops the per-frame flip; §2 L2/3, TBP)."""
+        m = self._sense_shape(cloud, max_sense)
+        best_ev = max((h.ev for h in self.hyps), default=0.0)
+        if learn and (not self.objects or best_ev < 1.0):        # clearly novel -> learn; a weak-but-nonzero match is a known object seen poorly
             self._learn_canonical(cloud)
-        self._sense_shape(cloud, max_sense)
+            self._sense_shape(cloud, max_sense)
         return self.best()
 
     # ---- lateral voting (CMP) ----------------------------------------------------------------------------

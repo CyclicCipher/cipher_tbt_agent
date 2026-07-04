@@ -25,6 +25,11 @@ def _hip(**kw):
     return Hippocampus(L5_Displacement(), **kw)
 
 
+def _obs(hip, action, w):
+    """Feed one sighting as a single-mode evidence FIELD `[((x, y), theta, weight)]` (the population API)."""
+    hip.observe(action, [(w.pos(), w.head(), 1.0)])
+
+
 class _Body:
     """A heading-carrying body (SE(2)): action 0 = FORWARD (2 cells in the current heading), 1 = TURN_L, 2 = TURN_R."""
 
@@ -73,8 +78,8 @@ def test_gain_field_one_observation_generalizes_to_all_headings():
     """The crux: ONE FORWARD sighting (at heading 0) pins the egocentric displacement, and rotating it by head-direction
     gives the correct world move for EVERY heading — no per-heading learning (the coverage sweep is dissolved)."""
     hip, w = _hip(board=32, n_head=4), _Body()
-    hip.observe(None, w.pos(), w.head())                       # cold: set the belief
-    w.step(0); hip.observe(0, w.pos(), w.head())               # a SINGLE forward at heading 0
+    _obs(hip, None, w)                       # cold: set the belief
+    w.step(0); _obs(hip, 0, w)               # a SINGLE forward at heading 0
     ego = np.array(hip.l5.efference(0)[0])                     # L5 owns the efference copy (body-frame displacement)
     assert np.allclose(ego, [2.0, 0.0], atol=0.3), ego
     truth = {0: (2, 0), 1: (0, 2), 2: (-2, 0), 3: (0, -2)}     # E/N/W/S
@@ -87,15 +92,15 @@ def test_reorient_then_advance_reaches_goal_nonabelian():
     """A non-abelian body (FORWARD + turns) reaches an interior goal: after ONE observation of each action, the inverse
     gain field turns to face the goal then advances (SE(2), the order-dependent case)."""
     hip, w, goal = _hip(board=32, n_head=4), _Body(), (12.0, 12.0)
-    hip.observe(None, w.pos(), w.head())
+    _obs(hip, None, w)
     for a in (1, 0, 2, 0):                                     # warm-up: one of each action to learn its effect
-        w.step(a); hip.observe(a, w.pos(), w.head())
+        w.step(a); _obs(hip, a, w)
     assert hip.moves([0, 1, 2]) == [0] and set(hip.turns([0, 1, 2])) == {1, 2}   # move vs turn EMERGED
     for _ in range(80):
         a = hip.navigate(goal, [0, 1, 2])
         if a is None:
             break
-        w.step(a); hip.observe(a, w.pos(), w.head())
+        w.step(a); _obs(hip, a, w)
     assert abs(w.x - 12) <= 1 and abs(w.y - 12) <= 1, (w.x, w.y)
 
 
@@ -103,12 +108,12 @@ def test_abelian_navigation_reaches_goal_translations():
     """A translation-only (abelian) body reaches the goal by the aligned move — the degenerate one-heading case of the
     same navigator (NavGame's ACTION1-4)."""
     hip, w, goal = _hip(board=32, n_head=4), _GridBody(), (12.0, 12.0)
-    hip.observe(None, w.pos(), w.head())
+    _obs(hip, None, w)
     for a in (0, 1, 2, 3):                                     # learn each move once
-        w.step(a); hip.observe(a, w.pos(), w.head())
+        w.step(a); _obs(hip, a, w)
     for _ in range(80):
         a = hip.navigate(goal, [0, 1, 2, 3])
         if a is None:
             break
-        w.step(a); hip.observe(a, w.pos(), w.head())
+        w.step(a); _obs(hip, a, w)
     assert abs(w.x - 12) <= 1 and abs(w.y - 12) <= 1, (w.x, w.y)

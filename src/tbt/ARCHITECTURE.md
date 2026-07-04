@@ -134,13 +134,18 @@ or *where* to look — it only makes the raw field readable as features-at-locat
 
 **(c) What receives it, and what is done.** **L4** binds the feature at **L6**'s current location; **L2/3** accumulates
 recognition evidence (object, pose, and behavior phase); **L6** corrects its current-location belief against what was
-sensed — **reliability-weighted** (a Kalman gain: path-integrate, correct drift), not a hard snap, so a rotation-induced
-or noisy sighting averages out (place cells path-integrate; landmarks correct drift); the **critic** turns the score into
-value. The column had already *predicted* the feature it would sense (§5) — the **prediction error** is the learning
-signal. The model identifies the **controllable** part of the field by **reafference** (von Holst): the change consistent
-with **L5's efference copy** (the predicted displacement) is controllable; world-caused change is not so predicted. This is
-**not a selected "self"** — there is NO "which object is me" code (rule 5); the controllable **falls out** of the efference
-(realised: `sensor._reafferent`), and controllability is *learned*, never a size / fovea-on-residual heuristic.
+sensed. That belief is a **POPULATION**, not a point: a place-cell activity **bump** over the location SDR (+ a
+head-direction ring). Correction is the **superposition** of the path-integrated prior bump with the sensory likelihood —
+the L2/3 evidence field, one bump per near-top (object, pose) hypothesis. Reliability weighting is **emergent** (there is
+NO scalar `conf`/Kalman-gain register — that is not how the brain codes certainty; probabilistic population codes, Ma/Beck/
+Pouget 2006): a sharp unimodal sighting dominates the posterior, a flat/split/orientation-less one barely moves the prior
+and path integration carries through. A symmetric object is thus a sharp *position* bump and a flat *heading* bump — no
+special case. The **critic** turns the score into value. The column had already *predicted* the feature it would sense
+(§5) — the **prediction error** is the learning signal. The model identifies the **controllable** part of the field by
+**reafference** (von Holst): the change consistent with **L5's efference copy** is controllable; a differently-placed
+object is off the model's predicted footprint (top-down figure-ground) and excluded. This is **not a selected "self"** —
+there is NO "which object is me" code (rule 5); the controllable **falls out** of the efference (`column._attend_self`:
+common-fate bootstrap → top-down footprint), and controllability is *learned*, never a size / fovea-on-residual heuristic.
 
 **(d) Choosing to move.** The **motor (L5)** selects the action that best brings about the goal-state under the one EFE
 value (§8) — pragmatic toward reward, epistemic toward what most resolves uncertainty; the **basal ganglia** select among
@@ -481,6 +486,24 @@ top-down frame → no unbounded drift), **H6 (the object map) deferred** until a
 lesson). The two open game gaps are **L2/3 RECOGNITION**, not the hippocampus — OrientationGame's rotating-anchor and
 MockLiveGame's featureless 1-cell mover (no shape → no pose) — the next debug targets. Also open (test-only): retiring L5's
 config-state symbolic operator (`disp`/`edges`) with the tabular path.
+
+**Population belief + the retina-only front-end (2026-07-04, branch `p4-collapse`).** Two collapses landed together.
+(1) **The location belief is a POPULATION, not a point + scalar gain.** The hippocampus belief is a place-cell activity
+**bump** over the location SDR (+ a head-direction ring); perception UPDATES it by **superimposing** the sensory likelihood
+(the L2/3 evidence field — one bump per near-top hypothesis) on the path-integrated prior bump. The scalar `conf`/Kalman
+gain is **deleted** — reliability weighting is emergent from the bump widths (probabilistic population codes; a sharp
+sighting dominates, a flat/split/orientation-less one is carried by path integration). A symmetric object → sharp position
+bump + flat heading bump, no special case; a <2-cell view emits a flat head population (no false θ=0 spike). `_attend_self`
+is now **top-down figure-ground** (the recognized model predicts its own rigid footprint; reafference) with a **common-fate
++ cohesion** bootstrap (Spelke). (2) **`perceive.py` is DELETED** — the proto-object segmentation harness (`ObjectField`/
+`segment`/`config_state`/`canonicalize`/`components`) violated rule 4 (a retina delivers raw feature-at-locations, it does
+not segment). The front-end is now **retina-only** (`retina.py`): background adaptation, raw non-background cells, and
+**center-surround salience** (`salient_targets` — SC pop-out, replacing the ObjectField marker cue); all grouping is the
+column's. The **L5 config-state/tabular operator** (`observe`/`predict`/`edges`/`disp`/`recolor`/`driver`) is retired with
+it — L5 is now just the efference copy + motor + pose geometry. Results: **NavGame 8/8**, MockLiveGame solves, suite 76
+passed / 7 xfailed. OrientationGame is discovery-limited (its goal is invisible → babble lottery, not perception). Open:
+the retina salience cue is less efficient than the old proto-object centroid on MockLive; the P4 goal loop (§9) for
+invisible-goal discovery.
 
 ## 11. Acceptance test for every change (the paper test)
 

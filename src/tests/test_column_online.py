@@ -17,10 +17,10 @@ from tbt.retina import view_signature  # noqa: E402
 
 
 def _perceive(col, action, cloud):
-    """Drive `column.perceive` from a coloured cloud, doing the PERIPHERAL split: cells (colour-blind -> the pose) +
-    the opaque content descriptor (`retina.view_signature` -> an L4 feature id). The column stays content-opaque."""
-    cells = [(x, y) for (x, y, _c) in cloud]
-    return col.perceive(action, cells, view_signature(cloud))
+    """Drive `column.perceive` from a coloured cloud `[(x, y, colour), ...]`. The column does the PERIPHERAL split
+    itself (common-fate attention → cells for the pose; `view_signature` → the opaque L4 content id), staying
+    content-opaque; the caller just hands it the frame's coloured cells."""
+    return col.perceive(action, cloud)
 
 
 def test_perceive_unifies_recognize_predict_correct_learn():
@@ -55,7 +55,7 @@ def test_forward_predicts_self_motion_over_the_factored_rep():
     shape = [(0, 0), (1, 0), (2, 0), (2, 1)]                       # asymmetric (unique pose)
 
     def sense(a, ox):
-        return col.perceive(a, [(x + ox, y) for (x, y) in shape], ("stuff",))
+        return col.perceive(a, [(x + ox, y, 7) for (x, y) in shape])
 
     sense(None, 0); sense(0, 2); sense(0, 4)                       # learn action 0 = +2x, belief now at (4,0)
     here_before = col.here_position()
@@ -77,7 +77,7 @@ def test_perceive_prediction_error_is_the_forward_model_residual():
     shape = [(0, 0), (1, 0), (2, 0), (2, 1)]
 
     def sense(a, ox):
-        return col.perceive(a, [(x + ox, y) for (x, y) in shape], ("stuff",))
+        return col.perceive(a, [(x + ox, y, 7) for (x, y) in shape])
 
     sense(None, 0)                                                 # cold observe at the origin
     sense(0, 2)                                                    # FIRST action-0 move: operator unlearned -> identity predict misses

@@ -163,11 +163,11 @@ class TbtPolicy:
             self.prev_level = obs.level
             self._last_a = None
         if self.agent is None:                              # first playable frame: build the agent + wire the L4 encode
-            self.sensor.field.perceive(obs.grid)            # peek to size the click-slots (objects())
+            self.sensor._prev = obs.grid                    # seed the retina so objects() can size the click-slots (salience peaks)
             self._init_actions(latest_frame)
             self.sensor.encode = self.agent.col.L4.encode   # the sensor emits FEATURE-at-location via the column's L4
-            self.sensor.column = self.agent.col             # P1: the column OWNS path integration; the sensor feeds it residuals
-            self.sensor.field.reset()                       # undo the peek -- the real read starts the tracker clean
+            self.sensor.column = self.agent.col             # the column OWNS perception + path integration
+            self.sensor._prev = None                        # the real read starts clean (first-frame change = none)
         state, _change = self.sensor.read(obs.grid, action=self._last_a)   # efference = last action (path integration)
         salient = self.sensor.salient_target() if (self.sensor.local and self.sensor.integrate) else None   # cued-discovery target
         a = self.agent.step(state, 0.0, frame=obs.grid, salient=salient)   # the agent reads the pose position directly; `salient` = a candidate goal

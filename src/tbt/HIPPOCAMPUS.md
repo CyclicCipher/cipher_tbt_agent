@@ -148,12 +148,20 @@ So the conjunctive-per-heading operator is itself a leaked parallel to retire; t
 ## 4. Build plan (each stage suite-green; fast offline reproductions; NavGame → OrientationGame the gate)
 
 **STATUS (2026-07-04): the hippocampus is COMPLETE for its current scope — SELF-LOCALISATION.** H1–H4 built + wired
-(HD ring + allocentric grid + gain field + reliability-weighted correction + reafference, the efference copy seated in
+(HD ring + allocentric grid + gain field + population-code correction + reafference, the efference copy seated in
 L5); H5 SUBSUMED (world-anchored top-down frame, no drift); H6 (the OBJECT map) DEFERRED until a multi-object game drives
-it. Proof: **NavGame 8/8 at ~119 actions (near-oracle)**, MockLiveGame 60/60. The two remaining game gaps are **L2/3
-RECOGNITION**, not the hippocampus: OrientationGame's rotating-anchor (§5 L23 canonical-origin) and MockLiveGame's
-featureless 1-cell mover (no shape → no pose → the belief rarely establishes → it completes by babble not exploit). Those
-are the next debug targets.
+it. Proof: **NavGame 8/8**, MockLiveGame solves.
+
+**UPDATE (2026-07-04): the belief is a POPULATION, not a point + scalar gain.** The place belief is a place-cell activity
+**bump** over the location SDR (`_P`, a board-sized map) and the head-direction a ring bump (`_Q`); `observe` PREDICTS by
+shifting the bumps by the efference (the gain field) and UPDATES by **superimposing** the sensory likelihood — the L2/3
+evidence field, one bump per near-top (object, pose) hypothesis, built by `column._sense_field`. There is **NO scalar
+`conf`/Kalman-gain register** (that is not how the brain codes certainty — probabilistic population codes, Ma/Beck/Pouget
+2006): a sharp unimodal sighting dominates the posterior, a flat/split one barely moves the prior and path integration
+carries through; an UNLEARNED action's prior diffuses to uniform → the sighting is adopted (the old "adopt-fully" gain,
+emergent). A symmetric object → sharp *position* bump + flat *heading* bump (no special case); a <2-cell view emits a flat
+head population (`theta=None`), no false θ=0 spike. The remaining game gaps are **L2/3 RECOGNITION** + **discovery** (an
+invisible goal → babble), not the hippocampus.
 
 - **H1 — HD ring + allocentric grid as SEPARATE codes.** ✅ core built (`Hippocampus`: `grid` + `hd`). The turn updates the
   ring (angular velocity), sensing corrects both. NavGame (one heading) is the degenerate case.

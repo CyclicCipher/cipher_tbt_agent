@@ -19,8 +19,66 @@ test venv. RF size / stride are ARC-calibrated hyperparameters (5x5-8x8 measured
 
 from __future__ import annotations
 
-from collections import deque
+from collections import Counter, deque
 from typing import Optional
+
+
+def background(frame):
+    """The background colour = the most common cell value — retinal ADAPTATION to the dominant level (a sensor primitive,
+    not a colour assumption). The one legitimate frame-wide reduction a retina does before delivering feature-at-locations."""
+    return Counter(v for row in frame for v in row).most_common(1)[0][0]
+
+
+def connected_figure(cells, seeds):
+    """The 4-connected figure of `cells` that CONTAINS any of `seeds` — retinal figure-ground COMPLETION of a motion-defined
+    seed into the whole cohesive body (Spelke cohesion). Motion-gated (the seed is the cells that MOVED), so it is NOT a
+    global colour segmenter — it completes ONE figure the motion already picked out. Returns the cell set (or empty)."""
+    cells, seeds = set(cells), set(seeds)
+    figure, q = set(), deque(s for s in seeds if s in cells)
+    figure.update(q)
+    while q:
+        x, y = q.popleft()
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            p = (x + dx, y + dy)
+            if p in cells and p not in figure:
+                figure.add(p)
+                q.append(p)
+    return figure
+
+
+def salient_targets(frame, exclude=(), k: int = 1, bg=None, suppress: float = 2.5):
+    """The retina/SC SALIENCE peaks — the most feature-CONTRASTING locations, excluding the tracked self (`exclude` cells).
+    Center-surround: a cell's pop-out = the fraction of its 4-neighbours whose colour DIFFERS (an isolated distinct cell —
+    a marker — pops out; a uniform block's interior does not). Returns up to `k` winner-take-all peaks `[(x, y), ...]`
+    with non-max suppression (radius `suppress`), so distinct objects get distinct slots. NO segmentation — just local
+    maxima of a per-cell contrast map (colour as a peripheral feature, not identity)."""
+    if bg is None:
+        bg = background(frame)
+    H, W = len(frame), len(frame[0])
+    exclude = set((int(round(x)), int(round(y))) for x, y in exclude)
+    scored = []
+    for y in range(H):
+        for x in range(W):
+            v = frame[y][x]
+            if v == bg or (x, y) in exclude:
+                continue
+            diff = tot = 0
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < W and 0 <= ny < H:
+                    tot += 1
+                    diff += (frame[ny][nx] != v)
+            pop = diff / tot if tot else 0.0
+            if pop > 0:
+                scored.append((pop, x, y))
+    scored.sort(reverse=True)
+    peaks: list = []
+    for _pop, x, y in scored:
+        if all((x - px) ** 2 + (y - py) ** 2 > suppress ** 2 for px, py in peaks):   # non-max suppression
+            peaks.append((x, y))
+            if len(peaks) >= k:
+                break
+    return peaks
 
 
 class Retina:

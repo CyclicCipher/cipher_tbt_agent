@@ -311,27 +311,17 @@ def test_S2_factored_periods_from_the_spectrum_the_smuggle_guard():
 
 
 def test_S2c_recolor_content_becomes_a_factorable_cycle_operator():
-    """L6_NONABELIAN Stage 2 step (c) -- the FM `g × x` unification, the content half: L5's `recolor` transition map (the
-    *what changed* operator) bridges into a permutation OPERATOR (`permutation_operator` / `col.content_operator`), so
-    content dynamics are FACTORABLE the same way as structure. A learned TOGGLE is recognised as a 2-cycle and a 3-counter as
-    a 3-cycle, purely from the content operator's spectrum -- so `x` joins `g` as a first-class factor of the one model."""
-    from tbt.column import CorticalColumn
+    """L6_NONABELIAN Stage 2 step (c) -- the FM `g × x` unification, the content half: a CONTENT transition map (the *what
+    changed* operator) bridges into a permutation OPERATOR (`permutation_operator`), so content dynamics are FACTORABLE the
+    same way as structure. A TOGGLE is recognised as a 2-cycle and a 3-counter as a 3-cycle, purely from the operator's
+    spectrum -- so `x` joins `g` as a first-class factor of the one model. (The config-state learning path that populated
+    `recolor` retired with the symbolic path; the permutation-operator bridge it fed is what stays.)"""
     from tbt.operator import discover_periods, permutation_operator
 
-    # the bridge in isolation: a toggle map -> a 2-cycle; a 3-counter -> a 3-cycle
-    op2, _a2 = permutation_operator({0: 1, 1: 0})
+    op2, _a2 = permutation_operator({0: 1, 1: 0})              # a toggle map -> a 2-cycle
     assert discover_periods(op2) == [2]
-    op3, _a3 = permutation_operator({0: 1, 1: 2, 2: 0})
+    op3, _a3 = permutation_operator({0: 1, 1: 2, 2: 0})        # a 3-counter -> a 3-cycle
     assert discover_periods(op3) == [3]
-
-    # LEARNED through the column: config-state transitions whose CONTENT toggles -> L5.recolor -> content_operator = 2-cycle
-    col = CorticalColumn(n_entities=8, seed=0)
-    a = 0
-    col.L5.observe(((1, (0, 0), 0),), a, ((1, (0, 0), 1),))                     # content 0 -> 1 (in place)
-    col.L5.observe(((1, (0, 0), 1),), a, ((1, (0, 0), 0),))                     # content 1 -> 0
-    op, alphabet = col.content_operator((1,), a)
-    assert set(alphabet) == {(0,), (1,)} and discover_periods(op) == [2]        # a learned toggle = a content 2-cycle
-    assert col.content_operator((1,), 99) is None                              # no content transition learned -> None
 
 
 class _CounterToggle:
