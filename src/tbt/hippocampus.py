@@ -40,11 +40,12 @@ class Hippocampus:
     increment, a running mean) and CORRECTS the belief; `path_integrate(action)` dead-reckons by the gain field;
     `navigate(goal, actions)` returns the action that reorients-then-advances toward `goal`."""
 
-    def __init__(self, board: int = 64, scales=(7, 11, 13, 17), n_head: int = 8, lr: float = 0.5):
+    def __init__(self, board: int = 64, scales=(7, 11, 13, 17), n_head: int = 8, lr: float = 0.5, gain: float = 0.3):
         self.board = int(board)
         self.grid = GridEncoder(scales=scales, dims=2, mw=3, bounds=[(0, board - 1)] * 2)   # allocentric position (grid cells)
         self.hd = ScalarEncoder(0.0, 2 * np.pi, n=int(n_head), w=1, periodic=True)          # head-direction ring
         self.lr = float(lr)
+        self.gain = float(gain)                              # the CORRECTION (Kalman) gain once the action is learned — how much the SIGHTING corrects the path-integrated belief
         self.pos = None                                     # allocentric position belief (x, y), or None
         self.head = 0.0                                     # head-direction belief (radians)
         self.ego: dict = {}                                 # action -> learned egocentric displacement (ONE vector)
@@ -84,21 +85,33 @@ class Hippocampus:
         pos = tuple(np.asarray(self.pos, float) + _rot(self.head) @ ego) if ego is not None else self.pos
         return pos, _wrap(self.head + self.dtheta.get(action, 0.0))
 
-    # ----- LEARN (the gain field, inverted) + CORRECT (snap to the sighting) -------------------------------------
+    # ----- LEARN (the gain field, inverted) + CORRECT (path-integrate, reliability-weighted) --------------------
     def observe(self, action, sensed_pos, sensed_head) -> None:
-        """LEARN the action's effect from the sensed transition, then CORRECT the belief. The egocentric displacement is
-        the world move DE-ROTATED by the head-direction (`R(−head)·Δworld`) — so one sighting at any heading pins FORWARD
-        for ALL headings. Move vs turn emerge (large ego vs large dtheta); no action-kind is assumed."""
-        if action is not None and self.pos is not None and sensed_pos is not None and sensed_head is not None:
-            dworld = np.asarray(sensed_pos, float) - np.asarray(self.pos, float)
+        """LEARN the action's effect from the sensed transition, then CORRECT the belief — RELIABILITY-WEIGHTED, not a hard
+        snap (HIPPOCAMPUS.md H4/H5). The belief is PATH-INTEGRATED by the action (the gain field) and only NUDGED toward the
+        sighting by a Kalman `gain`: place cells path-integrate (direction-invariant), landmarks correct DRIFT, not every
+        frame (Etienne/Jeffery; the reliability weighting is Kalman — PLOS CB 2021). So a turn-in-place keeps the position
+        stable and an orientation-dependent / wobbling recognised anchor AVERAGES OUT instead of jerking the position. The
+        gain is reliability-adaptive: an UNLEARNED action's prediction is worthless → adopt the sighting fully (gain 1); a
+        LEARNED action's prediction is trusted → correct gently (`self.gain`). The egocentric displacement is the world move
+        DE-ROTATED by the head-direction (`R(−head)·Δworld`) — one sighting at any heading pins FORWARD for all headings."""
+        if sensed_pos is None or sensed_head is None:
+            return
+        sx, sy, sh = float(sensed_pos[0]), float(sensed_pos[1]), _wrap(float(sensed_head))
+        if self.pos is None:                                # cold start: adopt the first sighting
+            self.pos, self.head = (sx, sy), sh
+            return
+        (px, py), ph = self.predict(action) if action is not None else (self.pos, self.head)   # PREDICT (established operator)
+        reliable = action is not None and action in self.ego   # was the operator ESTABLISHED *before* this observation?
+        if action is not None:                              # LEARN the action's effect from the observed transition
+            dworld = np.asarray((sx - self.pos[0], sy - self.pos[1]), float)
             ego = _rot(-self.head) @ dworld                 # de-rotate to the body frame (the gain field, inverted)
-            dth = _wrap(float(sensed_head) - self.head)
+            dth = _wrap(sh - self.head)
             self.ego[action] = ego if action not in self.ego else (1 - self.lr) * self.ego[action] + self.lr * ego
             self.dtheta[action] = dth if action not in self.dtheta else (1 - self.lr) * self.dtheta[action] + self.lr * dth
-        if sensed_pos is not None:
-            self.pos = (float(sensed_pos[0]), float(sensed_pos[1]))
-        if sensed_head is not None:
-            self.head = _wrap(float(sensed_head))
+        g = self.gain if reliable else 1.0                  # reliability-adaptive: adopt an unlearned action's sighting fully
+        self.pos = ((1 - g) * px + g * sx, (1 - g) * py + g * sy)               # CORRECT (Kalman blend toward the sighting)
+        self.head = _wrap(ph + g * _wrap(sh - ph))
 
     def here(self):
         """The allocentric position belief, or None."""

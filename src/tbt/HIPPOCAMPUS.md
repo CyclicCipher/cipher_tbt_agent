@@ -162,11 +162,20 @@ reorient-then-advance, abelian nav); the remaining work is WIRING it into the lo
   operator, the directed-coverage explorer, and the rollout (~150 lines). **NavGame 8/8** (fast, suite green, ~7× faster).
   ⚠ **OrientationGame DISCOVERS but does not TRANSFER** — blocked by an ORTHOGONAL L23 issue: recognition returns a
   heading-dependent / bimodal anchor for the *rotating* L-tromino (the belief wobbles ±2 by heading), so a fixed
-  goal-in-belief-space misses the completion zone across headings. The pose `(theta, t)` should resolve to the object's
-  rotation-invariant anchor (bbox-min-of-the-rotated-cloud wobbles); a centroid tracker is forbidden (rule 5). **NEXT:
-  stabilise L23's recognised anchor for rotating movers**, then OrientationGame transfers.
-- **H4 — reafference self/world split.** Cancel the efference-predicted global flow; the residual is world-motion. Retire
-  the largest-component "self" heuristic (`sensor._mover_cloud`). Gate: a moving distractor object does not corrupt the
+  goal-in-belief-space misses the completion zone across headings. **Mitigated (not cured) by H4's reliability-weighted
+  correction** (below) — it cut the belief wobble and fixed the gain field, but the residual ~1-cell wobble still makes
+  exploit marginal. The full cure is an L23 change (future / as-needed — §5).
+- **H4 — path-integrate + reliability-weighted correction (started), then reafference self/world split.**
+  ✅ **correction landed:** `observe` no longer HARD-SNAPS the belief to the momentary sighting — it PATH-INTEGRATES by the
+  gain field and NUDGES toward the sighting by a Kalman `gain` (reliability-adaptive: adopt an unlearned action's sighting
+  fully, correct a learned action's gently). This is what the brain does — place cells path-integrate (direction-invariant),
+  landmarks correct DRIFT, not every frame; the weighting is Kalman ([Nature 2019](https://www.nature.com/articles/s41586-019-0939-3),
+  [PLOS CB 2021](https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1009222)). Payoff already: the stable
+  path-integrated belief gives CLEAN displacement measurements, so `ego[FORWARD]` learns `2.0` (was `1.01` under the hard
+  snap — the wobble had corrupted it). NB it did NOT fully fix OrientationGame transfer: with a bimodal recognised anchor the
+  residual belief wobble is still ~1 cell (≈ the completion tolerance), so exploit is marginal — see the L23 note below.
+  **Still to build:** the reafference self/world split — cancel the efference-predicted global flow (residual = world-motion),
+  retiring the largest-component "self" heuristic (`sensor._mover_cloud`). Gate: a moving distractor does not corrupt the
   agent's own path integration.
 - **H5 — landmark anchoring / loop closure.** Re-seeing a recognised object resets the drifting place, so the map stays
   world-anchored over a long run.
@@ -183,6 +192,14 @@ reorient-then-advance, abelian nav); the remaining work is WIRING it into the lo
 - **Single organ vs per-column.** TBT says each column replicates grid machinery for its *object* frames; the *global*
   allocentric map binding columns is the hippocampal organ. For our single/few-column agent, this module IS that map;
   cross-column binding (many frames → one world) is the deferred hard part.
+- **L23 canonical-origin (FUTURE / as-needed).** L23's recognised pose `(theta, t)` currently resolves `t` to the
+  bbox-min of the observed cloud, which WOBBLES / goes bimodal for a *rotating* object (the OrientationGame transfer
+  blocker). The brain-correct reference is the object's **canonical frame origin — its principal axes**, consistent across
+  rotations ([object-centred origin = principal axes / canonical view](https://pmc.ncbi.nlm.nih.gov/articles/PMC11358284/)),
+  which recognition maps the observed pose onto (Numenta's orientation-invariant grid-cell recognition does exactly this).
+  H4's path-integration + Kalman correction makes this UNNECESSARY for the *self* (path-integrated, corrected gently), so it
+  is deferred — build it when a task needs a precise per-object anchor for rotating objects (e.g. the H6 object map of
+  rotating others, or if OrientationGame-style exploit precision is required). A centroid tracker remains forbidden (rule 5).
 - **Module boundary (rule 1/3).** The hippocampus must be a real module the column reads/writes — not a second copy of L6.
   The column's L6 stays its *local* object-centric frame; the hippocampus is the *global* one, broadcast as a top-down
   location prior (the `thalamus.read_location` channel already exists — reuse it, do not invent a fabric).
