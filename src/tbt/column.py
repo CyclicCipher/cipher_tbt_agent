@@ -269,23 +269,10 @@ class CorticalColumn(nn.Module):
                 best, best_a = cand, a
         return best_a
 
-    def achieve(self, state, goal, actions, blocked=(), cost_weight=1.0):
-        """VECTOR_NAV V3 -- the ACHIEVER cascade (navigate `state` -> `goal`): the POTENTIAL FIELD (`vector_action`: V1
-        attraction + V2 cost-field repulsion) by DEFAULT, and when it is STUCK (a local minimum -- fully blocked/repelled
-        toward the goal -> `vector_action` returns None) fall back to the SR-GEODESIC DETOUR (`navigate_to`). The detour is
-        cost-aware GLOBALLY: finite costs are folded into the reward_map (negative) so `V = M·(reward − cost)` routes
-        around costly REGIONS, not just the next cell (walls fall out of the SR structure -- never routed through).
-        `state`/`goal` are positions in the L6 frame (= the graph states). Returns the action, or None if no progress is
-        possible. The GENERAL goal-navigation primitive -- the goal may be a known reward (exploit) OR a GSG hypothesis
-        (goal-directed exploration); see VECTOR_NAV_PLAN + reference_vector_navigation."""
-        a = self.vector_action(state, goal, actions, blocked, cost_weight)   # V1+V2: the potential field toward the goal
-        if a is None:                                           # V3: local minimum / fully blocked -> SR geodesic detour
-            rmap = {goal: 1.0}                                  # fold FINITE costs in as negative reward -> the geodesic warps around costly regions
-            for loc, c in self.cost.items():
-                if c < IMPASSABLE:
-                    rmap[loc] = rmap.get(loc, 0.0) - cost_weight * c
-            a = self.navigate_to(state, rmap, actions, blocked)
-        return a
+    # `achieve` (the Euclidean-field-then-SR-geodesic cascade ARBITER) DELETED — §8 names it the rule-1 parallel-system
+    # violation; the live loop navigates with `navigate_vector` (the goal-oriented vector field: grid-cell vector ⊗ SF
+    # value). `vector_action`/`_pose_vector_action`/`navigate_to` remain as the underlying primitives (the non-abelian
+    # pose navigator + the SR read) until the full tabular retirement (P4a re-seat 2/2, gated on the explorer).
 
     def locate(self, state):
         """C1 (COLUMN_AUDIT) — the column's WHERE: L6 READ as the location substrate. Returns `state`'s L6

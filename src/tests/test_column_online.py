@@ -226,21 +226,6 @@ def test_vector_action_repulsion_steers_around_a_blocked_direction():
     assert col.vector_action((0, 0), (5, 0), [0, 1, 2, 3], blocked={0}) is None  # only path blocked -> None (V3 detour)
 
 
-def test_achieve_cascades_from_vector_field_to_sr_detour():
-    """V3 (VECTOR_NAV): the ACHIEVER cascade -- achieve uses the potential field by DEFAULT (vector_action), and when
-    stuck (fully blocked toward the goal) falls back to the SR-geodesic DETOUR (navigate_to) around the walls."""
-    col = CorticalColumn(n_entities=16, seed=0)
-    for a, d in {0: (1, 0), 1: (-1, 0), 2: (0, -1), 3: (0, 1)}.items():
-        col.L5.observe_move(a, d)
-    for _ in range(200):                                                        # the DETOUR graph around a wall at (0,0)->(1,0): (0,0)->(0,1)->(1,1)->(1,0)
-        col.observe((0, 0), 3, (0, 1))
-        col.observe((0, 1), 0, (1, 1))
-        col.observe((1, 1), 2, (1, 0))
-        col.observe((1, 0), 0, (1, 0))                                          # the goal is an SR SOURCE (self-loop) so its occupancy propagates back
-    assert col.achieve((0, 0), (1, 0), [0, 1, 2, 3]) == 0                        # unobstructed: the field goes straight (+x) -- it will bump the wall + learn it
-    assert col.achieve((0, 0), (1, 0), [0, 1, 2, 3], blocked={0}) == 3          # wall known -> field stuck -> SR-geodesic detour starts around (+y)
-
-
 def _grid_col(n=16):
     col = CorticalColumn(n_entities=n, seed=0)
     for a, d in {0: (1, 0), 1: (-1, 0), 2: (0, -1), 3: (0, 1)}.items():          # 4-connected grid moves
@@ -282,9 +267,9 @@ def test_cost_field_curves_around_a_hazard_graded_by_magnitude():
     assert slow.vector_action((0, 0), (2, 1), [0, 1, 2, 3]) == 0             # 0.1 < the alignment gap -> CROSS it (detour not worth it)
 
 
-def test_cost_field_routes_the_geodesic_and_achiever_around_a_region():
+def test_cost_field_routes_the_geodesic_around_a_region():
     """The cost field is GLOBAL, not just the next cell: a finite cost folded into `V = M·(reward − cost)` depresses value
-    along paths THROUGH the costly region, so BOTH the raw SR geodesic (navigate_to) AND the full achiever cascade detour."""
+    along paths THROUGH the costly region, so the SR geodesic (navigate_to) detours around it."""
     col = _grid_col(n=32)
     for _ in range(300):                                                       # DIRECT (0,0)->(1,0)->(2,0); DETOUR (0,0)->(0,1)->(1,1)->(2,1)->(2,0)
         col.observe((0, 0), 0, (1, 0)); col.observe((1, 0), 0, (2, 0))
@@ -294,7 +279,6 @@ def test_cost_field_routes_the_geodesic_and_achiever_around_a_region():
     assert col.navigate_to((0, 0), {(2, 0): 1.0}, [0, 1, 2, 3]) == 0          # no cost -> the SHORTER direct route (+x)
     col.learn_cost((1, 0), 5.0)                                              # a big finite cost on the direct cell
     assert col.navigate_to((0, 0), {(2, 0): 1.0, (1, 0): -5.0}, [0, 1, 2, 3]) == 3   # cost-folded map -> the geodesic detours (+y)
-    assert col.achieve((0, 0), (2, 0), [0, 1, 2, 3]) == 3                     # achiever folds col.cost ITSELF -> same detour, end to end
 
 
 def test_perceive_unifies_recognize_predict_correct_learn():
