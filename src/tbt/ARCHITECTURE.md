@@ -255,6 +255,22 @@ decodable via `GridEncoder`), moved along by the operator. The successor-feature
 reward attraction, cost/barrier repulsion (§3, de Cothi & Barry) — it does not replace it. So the one navigator is
 **the vector to the goal, warped by the SF value**, not value-gradient-ascent. (Finding `project_sf_value_not_greedy_navigable`.)
 
+**From the vector to the action — the egocentric↔allocentric GAIN-FIELD transform (2026-07-03 neuroscience pass).** The
+goal vector is **allocentric** (world-frame); the body acts **egocentrically** (FORWARD is "ahead of *me*"; a TURN rotates
+"me"). Converting between them is a coordinate transform **gain-modulated by head-direction** — a retrosplenial gain field
+(Bicanski & Burgess 2018; Byrne, Becker & Burgess 2007; Hasselmo et al. 2023). It runs **both ways with one machinery**:
+- **Perception / path integration** rotates the **one** egocentric self-motion displacement **by** the current
+  head-direction before it updates allocentric position — so FORWARD is a *single* displacement rotated, **not a separate
+  operator per heading**.
+- **Action** rotates the allocentric goal vector **by −(head-direction)** into the egocentric frame; the motor then picks a
+  **TURN** (if the goal is not yet ahead) or **FORWARD** (if it is) — reorient-then-advance falls out of the transform.
+This is a **hippocampal-formation** function (a head-direction ring attractor, updated by the turn's efference/angular
+velocity, coupled to the allocentric grid by the gain field), and it belongs in the **hippocampus module (§10 P4)** — **not**
+baked into the column as a per-heading conjunctive operator. Baking it in forces relearning FORWARD in every heading (a
+self-inflicted coverage cost the gain field removes) and makes navigation myopic on a turning body; a depth-N reorienting
+**rollout is a brute-force STAND-IN** for this transform, not the mechanism. It is **dimension-general**: an SO(3)
+head-direction rotates a 3-D displacement — no centre of rotation (`reference_operator_as_group_representation`).
+
 **How it knows to explore vs exploit — one value, not a switch.** The critic's value is **Expected Free Energy**:
 pragmatic (expected reward toward the goal) + epistemic (expected information gain, grounded by **epiplexity** =
 learning-*progress*, so it → 0 for both irreducible noise *and* mastered structure). The policy maximises the one value:
@@ -354,9 +370,13 @@ The proposal, from the research and the number-domain probes (`MATH_PHASE.md`):
   probe + a neuroscience pass): the *bulk* of P4 is **finishing P0's parallel-system collapse, which leaked into
   `column.py`** (a 707-line god-object — `project_column_godobject_diagnosis`), NOT new machinery. Most of the column is a
   *second copy* of a layer mechanism; collapse each into the ONE (rule 1), do not relocate:
-  (a) **one location** = the SR/grid code path-integrated by the operator (§2; grid cells = the SR's eigenvectors, one
-  frame — Stachenfeld 2017) — retire the parallel `_pose` SE(2) integrator + the lossy `state_node` binning; the grid
-  eigenbasis carries the continuous metric and, via the learned non-abelian operator, the heading, *within* the one frame
+  (a) **one location** = the allocentric SR/grid code path-integrated by self-motion (§2; grid cells = the SR's
+  eigenvectors, one frame — Stachenfeld 2017), with a **separate head-direction ring** coupled to it by a **head-direction
+  gain field** (retrosplenial — Bicanski & Burgess 2018), **NOT** one conjunctive per-heading operator: self-motion is
+  **one egocentric displacement rotated by head-direction**, so FORWARD is learned once, not per heading (the 2026-07-03
+  finding — §8 "from the vector to the action"). This allocentric machinery is the **hippocampus module**, extracted from
+  the column (it is *not* a cortical-column function — a column's frames are egocentric/object-centred). Retire the parallel
+  `_pose` SE(2) integrator, the lossy `state_node` binning, and the leaked conjunctive-pose operator built this session
   (**this requires P5** — the SDR test showed the SR-over-localist-symbols has NO a-priori metric overlap, so the location
   SDR needs the encoder; P5 is pulled forward as a prerequisite);
   (b) **one operator** per action in L5 (retire the column `pose_ops` store); (c) **one navigator** = the SR
@@ -367,9 +387,14 @@ The proposal, from the research and the number-domain probes (`MATH_PHASE.md`):
   prioritized-sweeping into it; rollout = the sparing fallback — §8). Remove the non-TBT proto-object **segmentation
   heuristic** (`ObjectField`/`segment`/`_mover_cloud`); TBT creates objects by allocate-on-mismatch (§2). THEN the **goal
   loop**: the priority map proposes cued target-states (§9), the BG select, the operator-inversion motor achieves, value
-  confirms. The **hippocampus** (allo frame + self/world-motion split via reafference + object-vector-cell displacement
-  binding) is a PREREQUISITE for salience-cued nav — a static distinct object is invisible to motion-only salience
-  (`project_marker_exposes_hippocampus_prereq`), not a late add-on; the heterarchy scales the same loop.
+  confirms. The **hippocampus** is where (a)'s allocentric machinery lives — its concrete parts (2026-07-03 research,
+  `HIPPOCAMPUS.md`): a **head-direction ring attractor** updated by the turn's efference/angular velocity; the
+  **allocentric grid/place** code path-integrated by self-motion and reset by sensing (loop closure); the **gain-field
+  coupling** that rotates self-motion by head-direction on the way in and the goal vector by −head-direction on the way out
+  (§8); and the **reafference self/world-motion split** (the same efference-copy comparison — cancel self-induced flow, the
+  residual is world-motion; today only a largest-component heuristic exists — §4c). It is a PREREQUISITE for salience-cued
+  nav — a static distinct object is invisible to motion-only salience (`project_marker_exposes_hippocampus_prereq`), not a
+  late add-on; the heterarchy scales the same loop.
 - **P5 — The semantic SDR encoder (a PREREQUISITE for P4a — re-assessed 2026-07-03, not post-P4).** The general data
   type — for **content** (`L4.E`, `reference_tbt_feature_definition`) AND for **location** — is an **SDR**, whose point is
   semantic OVERLAP (similarity), determinism, fixed length + sparsity. Today BOTH are EXACT-MATCH / LOCALIST (similar
@@ -421,6 +446,17 @@ successor features), pulled forward — the SDR test showed the SR-over-localist
 so "location is an SDR" needs the encoder first (`project_location_is_an_sdr`). Open each slice with the TBT-accuracy
 check + a consumer map before cutting; suite-green throughout; git branches for risk. Empirical anchor: suite 132 passed
 / 4 xfailed (hippocampus.py parallel removed); NavGame (now colour-cued) 0/8.
+
+**Gain-field finding (2026-07-03, branch `p4-collapse`).** Building the location collapse (a) inside the column exposed
+the architectural error directly. The circulant-shift operator (`ModularOperator`, no SVD) restored NavGame 8/8 fast and,
+with a per-heading-conditioned shift on a conjunctive `pos⊗head` code, made the non-abelian **OrientationGame reach 4/8** —
+proving the SE(2) mechanism works on the SDR. **But** it forced (i) a directed explorer to cover FORWARD in *every* heading
+and (ii) a depth-2 rollout to reorient — both fragile, both symptoms of a missing gain field. The neuroscience pass (§8
+"from the vector to the action") named it: FORWARD is **one** egocentric displacement **rotated by head-direction**, and
+that transform is a **hippocampal** gain field, not a per-heading column operator. So the conjunctive-per-heading operator
+is itself a leaked parallel system to retire; the location collapse (a) proceeds as the **hippocampus module** (HD ring +
+allocentric grid + gain-field coupling), which dissolves both the coverage and the myopic-navigation problems. The
+session's operator/agent changes are a validated stepping-stone, not the destination.
 
 ## 11. Acceptance test for every change (the paper test)
 

@@ -200,6 +200,11 @@ class GridEncoder(Encoder):
                 active |= self._window(self._module(k, axis), c[axis], s)
         return SDR(self.n, active)
 
+    def modules(self):
+        """The index groups of the independent MODULES (each (scale, axis) ring) — the block structure a block-diagonal
+        operator learns over (each small ring is a continuous-attractor; Burak & Fiete). A partition of `0..n`."""
+        return [list(range(int(self._off[k]), int(self._off[k + 1]))) for k in range(len(self._off) - 1)]
+
     def decode(self, sdr: SDR, bounds=None):
         bounds = bounds or self.bounds or [(0, int(np.lcm.reduce(self.scales)) - 1)] * self.dims
         out = []
@@ -259,6 +264,26 @@ class ConjunctiveEncoder(Encoder):
             acts = e.encode(values[name]).active
             combos = [c * e.n + a for c in combos for a in acts]
         return SDR(self.n, combos)
+
+    def modules(self):
+        """The block structure for a block-diagonal operator on the tensor code: each module of the FIRST (base) field
+        crossed with ALL of the coupled factors — so a base-shift CONDITIONED on the others (e.g. heading-dependent
+        FORWARD) stays within one block. A partition of the code indices."""
+        _name0, e0 = self.fields[0]
+        rest_n = self.n // e0.n
+        base = e0.modules() if hasattr(e0, "modules") else [list(range(e0.n))]
+        return [[p * rest_n + r for p in mod for r in range(rest_n)] for mod in base]
+
+    def module_grids(self):
+        """Each base module as a 2-TORUS index grid `(s_base × rest_n)`: `grid[i, j]` = the flat conjunctive index of the
+        i-th base-ring cell crossed with rest-index j. Axis 0 = the base (location) phase (cyclic within the ring); axis
+        1 = the coupled rest phase (e.g. heading, cyclic). This is the structure the `ModularOperator` learns a
+        heading-conditioned shift over — a base shift that MAY DEPEND on the rest coordinate (the semidirect / non-abelian
+        coupling), which the flat `modules()` block cannot express. A partition of the code indices (as 2-D grids)."""
+        _name0, e0 = self.fields[0]
+        rest_n = self.n // e0.n
+        base = e0.modules() if hasattr(e0, "modules") else [list(range(e0.n))]
+        return [np.array([[p * rest_n + r for r in range(rest_n)] for p in mod]) for mod in base]
 
     def decode(self, sdr: SDR) -> dict:
         ns = [e.n for _, e in self.fields]

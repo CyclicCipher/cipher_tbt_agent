@@ -144,6 +144,106 @@ class OnlineOperator:
         return Operator(self._M)
 
 
+class ModularOperator:
+    """A learned group-representation operator on a grid SDR, learned as a CIRCULANT SHIFT per module — the
+    continuous-attractor mechanism (Burak & Fiete 2009: a velocity-driven rigid shift of the bump), which is Gao's group
+    representation in its natural per-module form. Each module is a 2-TORUS `(base ring × rest ring)`: the module's
+    location phase crossed with the COUPLED factor (e.g. heading). The operator shifts it by
+
+        (base, rest) → ((base + dp[rest]) mod s,  (rest + dh) mod r),
+
+    i.e. a rest-ring shift `dh` AND a base-ring shift `dp[rest]` that MAY DEPEND ON the rest coordinate. That dependence
+    is the SEMIDIRECT / NON-ABELIAN coupling — heading-conditioned FORWARD (`dp` differs per heading) vs a pure TURN
+    (`dh≠0`, `dp≡0`) vs an abelian translation (`dh=0`, `dp` the same for every heading). One structure covers all three.
+
+    Learned as the MODE of the observed phase displacements (per module: `dh` = the rest shift; `dp[rest]` = the base
+    shift seen while in that rest slice). A rigid shift is one parameter, so a HANDFUL of transitions pin it —
+    COVERAGE-ROBUST (unlike a full-matrix Procrustes fit, which needs Gram≈I over the whole space), and NO SVD. It KEEPS
+    THE SDR (learned in the sparse basis, no plane-wave change). Coverage for the non-abelian case = visit each rest
+    slice (heading) with a few base steps; each ring wraps in a few, so it fills fast."""
+
+    def __init__(self, grids, n: int, decay: float = 1.0):
+        self.grids = [np.asarray(g, dtype=int) for g in grids]        # per module a 2-D index array (s_base × r_rest) of code cells
+        self.n = int(n)
+        self.dh = [{} for _ in self.grids]                            # per module: histogram of the REST-ring shift
+        self.dp = [[{} for _ in range(g.shape[1])] for g in self.grids]  # per module, per rest-slice: histogram of the BASE-ring shift
+        self._P = None                                               # the assembled permutation (cached)
+        self._dirty = True
+
+    @staticmethod
+    def _mode(hist, default=0):
+        return max(hist, key=hist.get) if hist else default
+
+    @staticmethod
+    def _center(marginal, n):
+        """The bump CENTRE on a ring of `n` cells — the CIRCULAR MEAN of the active cells (weighted). `np.argmax` would
+        return the first active cell, which is `centre − halfwidth` for an interior bump and 0 for a bump that wraps around
+        0 — an off-by-halfwidth error with a wrap artefact that corrupts the learned shift. The circular mean is exact."""
+        w = np.asarray(marginal, dtype=float)
+        if w.sum() <= 0:
+            return 0
+        ang = 2.0 * np.pi * np.arange(n) / n
+        m = np.arctan2((w * np.sin(ang)).sum(), (w * np.cos(ang)).sum()) % (2.0 * np.pi)
+        return int(round(m / (2.0 * np.pi) * n)) % n
+
+    def rest_seen(self):
+        """The rest-slices (headings) for which ANY base-shift has been observed — i.e. this action was experienced there."""
+        return {j for gi in range(len(self.grids)) for j in range(self.grids[gi].shape[1]) if self.dp[gi][j]}
+
+    def moves_at(self, j: int) -> bool:
+        """Does this action's LEARNED operator DISPLACE the location at rest-slice (heading) `j`? — some module has a
+        nonzero base-shift mode there. The robust coverage signal: a blocked/mis-recognized sighting records `dp=0`, so a
+        single sample can be spurious; the MODE over several is nonzero once a real move has been seen."""
+        return any(self._mode(self.dp[gi][j]) != 0 for gi in range(len(self.grids)) if j < self.grids[gi].shape[1])
+
+    def observe(self, before, after) -> None:
+        """Accumulate one transition. Per module (2-torus), read the DOMINANT active cell before/after (the bump centre,
+        as a `(base, rest)` pair), and histogram the rest shift `dh` and the base shift `dp` KEYED ON the before rest-slice
+        — so a heading-conditioned base shift is captured separately per heading (the non-abelian coupling), while a pure
+        turn records `dh` with `dp=0` and an abelian move records the same `dp` under every heading."""
+        before = np.asarray(before, dtype=float)
+        after = np.asarray(after, dtype=float)
+        for gi, g in enumerate(self.grids):
+            s, r = g.shape
+            b2, a2 = before[g], after[g]                              # (s, r) activity over this module's torus
+            if b2.max() < 0.5 or a2.max() < 0.5:
+                continue
+            ib, jb = self._center(b2.sum(axis=1), s), self._center(b2.sum(axis=0), r)   # bump CENTRE (base, rest) before
+            ia, ja = self._center(a2.sum(axis=1), s), self._center(a2.sum(axis=0), r)   # ... and after (circular mean, exact)
+            k = (ja - jb) % r
+            self.dh[gi][k] = self.dh[gi].get(k, 0) + 1
+            d = (ia - ib) % s
+            self.dp[gi][jb][d] = self.dp[gi][jb].get(d, 0) + 1
+        self._dirty = True
+
+    def _perm(self):
+        """The assembled permutation matrix — each module's 2-torus shifted by its learned `(dh, dp[rest])` (cached)."""
+        if self._dirty or self._P is None:
+            P = np.zeros((self.n, self.n))
+            for gi, g in enumerate(self.grids):
+                s, r = g.shape
+                dh = self._mode(self.dh[gi])
+                for j in range(r):
+                    dp = self._mode(self.dp[gi][j])                   # the base shift WHILE in rest-slice j (0 if never seen)
+                    for i in range(s):
+                        P[g[(i + dp) % s, (j + dh) % r], g[i, j]] = 1.0
+            self._P = P
+            self._dirty = False
+        return self._P
+
+    def apply(self, v):
+        """Apply the operator to a code vector — the permutation `P·v` (a rigid shift of the bump on each module torus)."""
+        return self._perm() @ np.asarray(v, dtype=float)
+
+    def matrix(self):
+        """The full operator matrix (for relation/factor discovery)."""
+        return self._perm()
+
+    def operator(self) -> "Operator":
+        """The operator as an `Operator` (for relation/factor discovery)."""
+        return Operator(self.matrix())
+
+
 def discover_group(generators, tol: float = 1e-6, max_elements: int = 256):
     """L6_NONABELIAN Stage 2 — DISCOVER a group's RELATIONS by LOOP CLOSURE (the QUOTIENT of the free monoid on the learned
     `generators`). BFS the tree of operator-words; a new word CLOSES (denotes an element already found) when its operator is

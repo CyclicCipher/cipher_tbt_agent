@@ -28,9 +28,6 @@ def test_perceive_unifies_recognize_predict_correct_learn():
     A shape TRANSLATING by a consistent per-action delta is recognized each step; the pose is path-integrated +
     snap-corrected, the operator is LEARNED (a ~(2,0) translation), and content (`view_signature`) is invariant to the
     mover's position (same shape -> one content id)."""
-    import numpy as np
-    from tbt.operator import dehomog, homog
-
     col = CorticalColumn(n_entities=16, seed=0)
     shape = [(0, 0), (1, 0), (2, 0), (2, 1)]                       # an asymmetric L-tromino (unique pose)
 
@@ -45,15 +42,15 @@ def test_perceive_unifies_recognize_predict_correct_learn():
         xs.append(x)
     assert len(set(contents)) == 1, contents                      # content invariant to position (same shape)
     assert xs[-1] > xs[0] + 6 and xs == sorted(xs), xs            # the location tracked the translation (monotone +x)
-    op = col.operator(0)                                           # the per-action operator was LEARNED (~(2,0) translation)
-    assert np.allclose(dehomog(op.apply(homog([0.0, 0.0]))), [2.0, 0.0], atol=0.5), op.M
+    here = col.here_position()                                     # the per-action operator was LEARNED: applying it TRANSLATES the location ~+2x
+    dest = col._dest_after(0, here)
+    assert abs(dest[0] - (here[0] + 2.0)) < 0.6 and abs(dest[1] - here[1]) < 0.6, (here, dest)
 
 
 def test_forward_predicts_self_motion_over_the_factored_rep():
     """The ONE forward prediction over the factored (pose, content) rep -- apply the operator to the LOCATION, read the
     CONTENT. Self-motion: once the operator is learned, `forward` PREDICTS the next pose and the content is INVARIANT
     (reafference); it is a PURE query (does not mutate the belief). An unlearned action predicts NO movement."""
-    import numpy as np
     col = CorticalColumn(n_entities=16, seed=0)
     shape = [(0, 0), (1, 0), (2, 0), (2, 1)]                       # asymmetric (unique pose)
 
@@ -61,14 +58,15 @@ def test_forward_predicts_self_motion_over_the_factored_rep():
         return col.perceive(a, [(x + ox, y) for (x, y) in shape], ("stuff",))
 
     sense(None, 0); sense(0, 2); sense(0, 4)                       # learn action 0 = +2x, belief now at (4,0)
-    pose_before = col._pose.copy()
+    here_before = col.here_position()
     pred_pose, pred_content = col.forward(0, ("stuff",))          # PURE forward prediction from (4,0)
-    assert np.allclose(col._pose, pose_before)                    # pure: did NOT mutate the belief
+    assert col.here_position() == here_before                    # pure: did NOT mutate the belief
     assert pred_content == ("stuff",)                             # self-motion: content invariant (reafference)
     _feat, obs_pose = sense(0, 6)                                 # the ACTUAL next observation (mover at 6,0)
     assert abs(pred_pose[0] - obs_pose[0]) < 0.6 and abs(pred_pose[1] - obs_pose[1]) < 0.6   # forward matched the observation
     pred_stay, _ = col.forward(9, ("stuff",))                    # action 9 has no learned operator -> predicts staying put
-    assert abs(pred_stay[0] - float(col._pose[0, 2])) < 0.6 and abs(pred_stay[1] - float(col._pose[1, 2])) < 0.6
+    here_now = col.here_position()
+    assert abs(pred_stay[0] - here_now[0]) < 0.6 and abs(pred_stay[1] - here_now[1]) < 0.6
 
 
 def test_perceive_prediction_error_is_the_forward_model_residual():

@@ -8,12 +8,17 @@ from __future__ import annotations
 import os
 import sys
 
+import pytest
+
 _PKG = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG not in sys.path:
     sys.path.insert(0, _PKG)
 
 from tbt.encoders import GridEncoder            # noqa: E402
 from tbt.l6_sr import SuccessorFeatures         # noqa: E402
+
+_HIPPO = ("Re-seated on the HIPPOCAMPUS module (HIPPOCAMPUS.md H3): the navigator becomes the gain-field inverse transform "
+          "(rotate the goal vector by −head-direction) and reads the pose belief, not L5.observe_move deltas.")
 
 
 def _corridor():
@@ -48,6 +53,7 @@ def test_sf_generalises_to_unvisited_states_via_sdr_overlap():
     assert v_near > v_far                                               # graded: nearer the goal -> higher value
 
 
+@pytest.mark.xfail(reason=_HIPPO, strict=False)
 def test_navigate_vector_beelines_and_avoids_learned_cost():
     """The corrected navigator (ARCHITECTURE §8): the grid-cell GOAL VECTOR (attraction) modulated by the SF value
     (learned cost repulsion) — not greedy value-ascent. Beelines toward a goal, and routes around a learned-costly

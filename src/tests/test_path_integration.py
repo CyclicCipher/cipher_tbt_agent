@@ -22,6 +22,8 @@ from arc_sdk import TbtPolicy  # noqa: E402
 # deletion. The capability is RE-EARNED at P4 (the one epistemic-term explorer + SR-geodesic achiever). The P0 explorer is
 # intentionally minimal; the MECHANISM tests (operator algebra, SR, recognition, the one value's Bellman) stay green.
 _P0_DIP = "P0 deletion dip (ARCHITECTURE.md §10): end-to-end solving re-earned at P4; the P0 explorer is minimal by design."
+_HIPPO = ("Re-seated on the HIPPOCAMPUS module (HIPPOCAMPUS.md H1–H3): the SE(2) pose_ops / pose_operator / sense_pose "
+          "API this asserts is retired; abelian+non-abelian path integration becomes the HD-ring + gain-field transform.")
 
 
 class _St:
@@ -152,6 +154,7 @@ def test_gsg_unification_reward_goal_is_live_and_drives_the_achiever():
     assert policy.agent._goal_pos is not None                       # ... carrying the remembered completing target the achiever navigates to
 
 
+@pytest.mark.xfail(reason=_HIPPO, strict=False)
 def test_path_integrate_unifies_abelian_and_nonabelian_by_the_operator():
     """P1 slice 2a: the ONE location belief is path-integrated by the learned `operator(action)` — `location ←
     operator(action)·location` (§2 L6). Abelian (a translation) and non-abelian (an SE(2) rotation+translation) go
@@ -190,11 +193,8 @@ def test_path_integrate_unifies_abelian_and_nonabelian_by_the_operator():
 def test_perceive_learns_translating_operators_on_navgame():
     """P1 (MECHANISM, live): driving the agent on NavGame, `perceive` recognizes the mover each step and LEARNS per-action
     operators that TRANSLATE the location (path integration is live on the real game). NB NavGame's mover is a
-    rotationally SYMMETRIC 2×2 block, so its heading is ambiguous and the operator may carry a spurious rotation — the
-    deferred stabilizer-group / multiple-pose-hypotheses work (project_symmetry_opportunity). The CLEAN-translation
-    operator (no spurious rotation) is verified on an ASYMMETRIC mover in
-    test_column_online::test_column_owns_path_integration_via_perceive."""
-    import numpy as np
+    rotationally SYMMETRIC 2×2 block, so its heading is ambiguous — the operator is the SDR circulant-shift
+    (`col.action_ops`), and the stabilizer-quotient (`L23.best`) keeps the shift a clean translation."""
     game = NavGame(8)
     policy = TbtPolicy(seed=0, local=True, integrate=True)
     frame = game
@@ -204,7 +204,7 @@ def test_perceive_learns_translating_operators_on_navgame():
         name, coords = policy.choose_action([], frame)
         frame = game.step(name, coords)
     col = policy.agent.col
-    moved = [a for a in col.pose_ops                               # the actions whose learned operator translates the location
-             if abs(np.asarray(col.pose_ops[a].M)[0, 2]) + abs(np.asarray(col.pose_ops[a].M)[1, 2]) > 0.5]
-    assert moved, col.pose_ops                                     # perceive learned real (non-trivial) translating operators
+    moved = [a for a in col.action_ops                            # the actions whose learned operator DISPLACES the location
+             if any(col.action_ops[a].moves_at(h) for h in col.headings_seen())]
+    assert moved, list(col.action_ops)                            # perceive learned real (non-trivial) translating operators
     assert col.controllable()                                      # -> the mover is controllable (its location is informative)

@@ -74,9 +74,9 @@ class Sensor:
                 cloud = self._mover_cloud(frame)                           # the controllable mover's coloured cells
                 cells = [(x, y) for (x, y, _c) in cloud]                    # the morphology (colour-blind) -> the pose
                 content, _pose = self.column.perceive(action, cells, view_signature(cloud))   # the PERIPHERAL encodes content; the column stays opaque
-                self._fovea = ((float(self.column._pose[0, 2]), float(self.column._pose[1, 2]))   # the belief position (foveal read-back)
-                               if self.column._pose is not None else (dominant or cold))
-                state = (content, self.column.here_position())             # (content, location) -- the raw pose position (the SF/navigate_vector currency; state_node retired)
+                here = self.column.here_position()                         # the belief position (decoded from the pose code)
+                self._fovea = here if here is not None else (dominant or cold)   # foveal read-back
+                state = (content, here)                                     # (content, location) -- the pose position (the SF/navigate_vector currency)
             else:                                                          # local feature-only (no integration) / standalone (no column): dominant-residual fovea
                 self._fovea = dominant if dominant is not None else (self._fovea or cold)
                 feat = self.encode(self._patch(frame, self._fovea))
@@ -98,9 +98,7 @@ class Sensor:
         items = list(self.field._last.values())                            # [(centroid, size), ...] this frame (stateless)
         if len(items) < 2:
             return None
-        here = None
-        if self.column is not None and getattr(self.column, "_pose", None) is not None:
-            here = (float(self.column._pose[0, 2]), float(self.column._pose[1, 2]))
+        here = self.column.here_position() if self.column is not None else None   # the belief position (pose code)
         if here is None:                                                   # no pose yet -> the smallest object is the likely marker (the mover is the large body)
             return min(items, key=lambda v: v[1])[0]
         mover = min(items, key=lambda v: (v[0][0] - here[0]) ** 2 + (v[0][1] - here[1]) ** 2)   # the self = nearest the belief
