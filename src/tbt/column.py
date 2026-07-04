@@ -31,7 +31,8 @@ import torch.nn as nn
 
 from .l4_feature_location import L4_FeatureLocation
 from .l5_displacement import L5_Displacement
-from .l6_sr import OnlineSR                            # the online TD successor representation (eigendecomposition-free L6)
+from .l6_sr import OnlineSR, SuccessorFeatures        # the online TD SR (retiring) + successor FEATURES over the SDR (§2 L6)
+from .encoders import GridEncoder                      # the location SDR encoder (grid cells; §2 L6)
 from .l23_object import L23_Object                     # the object/identity layer: graph-memory + recognition + voting
 from .operator import Operator                        # L6_NONABELIAN: the per-action operator (composable; learned online)
 
@@ -52,13 +53,15 @@ class GoalState:
 
 class CorticalColumn(nn.Module):
     def __init__(self, n_entities, feat_dim=256, d_mem=512, torus_size=12, scales=(11, 13, 17),
-                 place_k=1, seed=0):
+                 place_k=1, seed=0, board=64):
         super().__init__()
         self.L5 = L5_Displacement()                                       # displacement / operator / motor / driver
         self.L4 = L4_FeatureLocation(n_entities, feat_dim=feat_dim, seed=seed)  # feature-at-location + content codebook
         self.L23 = L23_Object(feat_dim=feat_dim, d_mem=d_mem)             # object/identity: graph-memory + recognition + content store
         self.d_mem = d_mem
-        self.sr = OnlineSR(gamma=0.95, alpha=0.3)             # L6: the location frame, learned ONLINE by TD (no batch eigh)
+        self.sr = OnlineSR(gamma=0.95, alpha=0.3)             # L6: the localist SR (RETIRING -> sf), learned ONLINE by TD
+        self.loc_enc = GridEncoder(scales=(7, 11, 13, 17), dims=2, mw=3, bounds=[(0, board - 1)] * 2)  # the LOCATION SDR (§2 L6)
+        self.sf = SuccessorFeatures(d=self.loc_enc.n)         # L6 predictive map over the SDR (successor features; generalises)
         self.loc, self.rel = {}, {}                           # symbol→frame index; relation→operator key (the EDGES live in L5)
         self.place = None                                     # (n, d_mem) per-node SR-frame place codes (set by refresh)
         self._cur = None                                      # the current node -- discrete path integration over the graph
@@ -120,6 +123,44 @@ class CorticalColumn(nn.Module):
         signal: a fresh level whose states have no SR path to a reward is a fresh dead-zone, not a global 'reward-ever'
         flag (the bug the oracle/human/agent trace exposed)."""
         return self.value(s, reward_map) > 1e-9
+
+    # ----- the SDR location + successor-features value + the goal-oriented VECTOR navigator (§2 L6, §8) ---------
+    # Retiring the localist OnlineSR `sr`: the location is an SDR (`loc_enc`), value is successor FEATURES over it
+    # (`sf`, generalises to unvisited cells), navigation is the grid-cell GOAL VECTOR modulated by that value.
+    def location_sdr(self, pos):
+        """The location SDR φ for a metric position (the pose translation) — the grid-cell code (§2 L6): the currency
+        the SF values and L4 binds to. Semantic overlap: nearby positions share bits (generalisation)."""
+        return self.loc_enc.encode((float(pos[0]), float(pos[1]))).dense()
+
+    def learn_location_value(self, pos, pos_next, reward: float = 0.0):
+        """One SF TD update for the observed move pos->pos_next carrying `reward` (>0 appetitive; <0 aversive cost — the
+        ONE signed value, §3). Value generalises across nearby positions via SDR overlap (unlike the localist SR)."""
+        self.sf.observe(self.location_sdr(pos), self.location_sdr(pos_next), reward)
+
+    def location_value(self, pos):
+        """V(pos) = the SF value over the location SDR — expected discounted future reward incl. cost, GENERALISING to
+        positions not individually visited. The modulation the vector navigator warps by."""
+        return self.sf.value(self.location_sdr(pos))
+
+    def navigate_vector(self, here, goal, actions, lam: float = 1.0):
+        """The ONE navigator (§8, corrected) — the goal-oriented VECTOR FIELD. ATTRACTION = the grid-cell goal vector
+        (the unit displacement `goal − here`, the direction grid cells encode — Bush, Barry & Burgess 2015), scored by
+        how well each action's operator displacement (`L5.move`) advances along it. MODULATION = the SF value at the
+        destination (reward pulls, learned cost/barrier repels — de Cothi & Barry). NOT greedy value-ascent (the periodic
+        grid traps it — `project_sf_value_not_greedy_navigable`). Returns the best action, or None at the goal."""
+        vx, vy = goal[0] - here[0], goal[1] - here[1]
+        norm = (vx * vx + vy * vy) ** 0.5
+        if norm < 1e-9:
+            return None                                                    # already at the goal
+        ux, uy = vx / norm, vy / norm
+        best_a, best = None, float("-inf")
+        for a in actions:
+            dx, dy = self.L5.move(a)
+            dest = (here[0] + dx, here[1] + dy)
+            score = (dx * ux + dy * uy) + lam * self.location_value(dest)   # vector attraction + SF value modulation
+            if score > best:
+                best, best_a = score, a
+        return best_a
 
     def learn_cost(self, loc, c, rate=0.5):
         """ASSIGN/update the COST of interacting with `loc` -- the ONE repulsion currency (walls/hazards/slow/risky). A

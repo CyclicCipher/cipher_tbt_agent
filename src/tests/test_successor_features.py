@@ -52,3 +52,20 @@ def test_sf_generalises_to_unvisited_states_via_sdr_overlap():
         for x in range(20, 30, 2):
             sr.observe(x, x + 2)
     assert sr.value(25, {30: 1.0}) == 0.0                              # an UNVISITED symbol -> zero generalisation
+
+
+def test_navigate_vector_beelines_and_avoids_learned_cost():
+    """The corrected navigator (ARCHITECTURE §8): the grid-cell GOAL VECTOR (attraction) modulated by the SF value
+    (learned cost repulsion) — not greedy value-ascent. Beelines toward a goal, and routes around a learned-costly
+    cell (the SF value there is negative)."""
+    from tbt.column import CorticalColumn
+    col = CorticalColumn(n_entities=8, board=32, seed=0)
+    for a, d in {0: (0, -1), 1: (0, 1), 2: (-1, 0), 3: (1, 0)}.items():   # the 4 moves' displacements (as P1 learns them)
+        col.L5.observe_move(a, d)
+    assert col.navigate_vector((0, 0), (10, 0), [0, 1, 2, 3]) == 3        # goal to +x -> move +x (action 3)
+    assert col.navigate_vector((0, 0), (0, 10), [0, 1, 2, 3]) == 1        # goal to +y -> move +y (action 1)
+    assert col.navigate_vector((5, 5), (5, 5), [0, 1, 2, 3]) is None      # at the goal -> no move
+
+    for _ in range(200):                                                 # LEARN a strong aversive value (a wall/hazard) at (1,0)
+        col.learn_location_value((1, 0), (1, 0), -5.0)
+    assert col.navigate_vector((0, 0), (10, 0), [0, 1, 2, 3]) != 3        # +x now leads into the cost -> routed around
