@@ -74,6 +74,12 @@ class CorticalColumn(nn.Module):
         """The allocentric position of the belief (from the hippocampus), or None."""
         return self.hip.here()
 
+    def predicted_position(self, action):
+        """The forward model's predicted next LOCATION (§5) — where L5's efference path-integrates the belief to. None
+        before the belief is set. (Perception uses it to find the REAFFERENT change — the one consistent with the efference.)"""
+        p = self.hip.predict(action)
+        return p[0] if p is not None else None
+
     def controllable(self) -> bool:
         """Does some learned action MOVE the location? (the tracked mover responds to actions) — the hippocampus knows."""
         return self.hip.controllable()
@@ -122,12 +128,13 @@ class CorticalColumn(nn.Module):
 
     def sense_heading(self, cloud):
         """PERCEIVE the pose from the mover's SHAPE (the unified recognition path): L2/3 recognises the object and SOLVES
-        its pose theta + position (symmetry quotiented in `L23.best`). A PARTIAL view is UNRELIABLE: hold + flag it."""
+        its pose theta + position (symmetry quotiented in `L23.best`). Recognition returns None (→ unreliable, hold) when
+        the evidence is too weak; the reliability is L2/3's, not a raw cloud-size threshold (a transient merge with an
+        adjacent object inflated a running-max guard and then rejected the real object forever)."""
         if not cloud:
             self._heading_reliable = False
             return getattr(self, "_heading", 0.0)
-        self._obj_size = max(getattr(self, "_obj_size", 0), len(cloud))
-        res = self.recognize_object(list(cloud)) if len(cloud) >= self._obj_size else None
+        res = self.recognize_object(list(cloud))
         if res is None:
             self._heading_reliable = False
             return getattr(self, "_heading", 0.0)

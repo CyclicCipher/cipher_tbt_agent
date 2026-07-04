@@ -19,9 +19,10 @@ if _PKG_PARENT not in sys.path:
 
 from arc_sdk import TbtPolicy  # noqa: E402
 
-_HIPPO = ("Re-earned at the HIPPOCAMPUS module (HIPPOCAMPUS.md H4): MockLiveGame has a static 2×2 anchor (size 4) beside a "
-          "1-cell mover, so `_mover_cloud`'s largest-component 'self' heuristic tracks the anchor. Correct self-identification "
-          "is reafference (the self is what moves as the efference predicts), which the hippocampus provides.")
+_HIPPO = ("Completion (60/60) now WORKS via reafference (the controllable body falls out of L5's efference — the static "
+          "anchor is no longer tracked). What remains xfailed is the NEAR-ORACLE transfer (late_median<=6 actions/level): "
+          "the agent completes every level but re-explores rather than beelining the learned goal — a transfer-efficiency "
+          "gap, not self-identification.")
 
 
 class _St:

@@ -71,7 +71,7 @@ class Sensor:
         if self.local:
             appeared, dominant, cold = self._residual_candidates(frame, change, objects)
             if self.column is not None and self.integrate:                 # the FACTORED (content, location) via the column's ONE perception step
-                cloud = self._mover_cloud(frame)                           # the controllable mover's coloured cells
+                cloud = self._reafferent(frame, change, action)            # the change consistent with L5's efference (von Holst)
                 cells = [(x, y) for (x, y, _c) in cloud]                    # the morphology (colour-blind) -> the pose
                 content, _pose = self.column.perceive(action, cells, view_signature(cloud))   # the PERIPHERAL encodes content; the column stays opaque
                 here = self.column.here_position()                         # the belief position (decoded from the pose code)
@@ -119,16 +119,40 @@ class Sensor:
         cold = self._largest_centroid(objects) or (len(frame[0]) / 2.0, len(frame) / 2.0)
         return appeared, dominant, cold
 
-    def _mover_cloud(self, frame):
-        """The controllable mover's COLOURED cells `[(x, y, colour), ...]` -- the largest non-background connected
-        component of the current frame (the whole object, even on an in-place turn). `[]` if empty. The perception input
-        the column's `perceive` recognizes (pose) + encodes (content)."""
+    def _reafferent(self, frame, change, action):
+        """The REAFFERENT change — the sensory change consistent with L5's efference (von Holst's reafference; the
+        comparator model of agency). NO object is labelled 'me'; the controllable body FALLS OUT of the efference:
+          * candidates are only the objects that MOVED this frame (their cells overlap the CHANGE) — a STATIC world object
+            (a marker, a fixed anchor) never moves, so it is never a candidate and can neither be mistaken for the body nor
+            corrupt the belief;
+          * among the movers, the one nearest the efference-PREDICTED next location (`column.predicted_position`) — the
+            change the forward model expected. A wrongly-drifted belief still re-acquires, because only movers compete and
+            the real moving body is the only mover.
+        `[]` when nothing moved (a blocked action / static scene) — the belief HOLDS (agency: I acted, nothing moved as
+        predicted → I am blocked). Cold start (no belief / unlearned efference): the moving object bootstraps it. Returns
+        the reafferent object's coloured cells `[(x, y, colour), ...]`. (A multi-mover cold start is momentarily ambiguous
+        until the efference is learned — the comparator then resolves it; our single-mover games are unambiguous.)
+
+        A reafferent move is an ARRIVAL into space that was BACKGROUND last frame (the body moved there). An in-place
+        colour swap / a reveal (a marker turning from the occluding body's colour back to its own) is NOT a spatial move,
+        so it is excluded — this also disambiguates a level RESET (the body jumps to start into empty space = an arrival;
+        the revealed marker is a colour swap = not)."""
         bg = background(frame)
         cells = {(x, y) for y, row in enumerate(frame) for x, v in enumerate(row) if v != bg}
         if not cells:
             return []
-        comp, _centroid = max(components(cells), key=lambda cc: len(cc[0]))
-        return [(x, y, frame[y][x]) for (x, y) in comp]
+        prev, pbg = self._prev, (background(self._prev) if self._prev is not None else None)
+
+        def arrived(comp):                                                              # moved INTO space that was background last frame
+            return prev is not None and any(prev[y][x] == pbg for (x, y) in comp)
+
+        movers = [([(x, y, frame[y][x]) for (x, y) in comp], cen) for comp, cen in components(cells) if arrived(comp)]
+        if not movers:
+            return []
+        pred = self.column.predicted_position(action) if self.column is not None else None
+        if pred is None:                                                                # cold: the moving object bootstraps
+            return movers[0][0]
+        return min(movers, key=lambda c: (c[1][0] - pred[0]) ** 2 + (c[1][1] - pred[1]) ** 2)[0]   # the mover the efference expected
 
     def _largest_centroid(self, objects):
         if not objects:
