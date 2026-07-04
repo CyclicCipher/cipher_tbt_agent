@@ -42,6 +42,7 @@ class Agent:
         self._integrate = False                                            # V4: position/integrate mode (set by TbtPolicy) -> the cost-aware achiever is live
         self._goal_pos = None                                              # V4: the remembered goal POSITION (from a completion) -- the `reward` GSG generator's target
         self._goal_raw = None                                              # V4 (S1e non-abelian): the goal in RAW metric coords (the pose achiever measures DISTANCE, not just direction, so it needs raw not the binned node)
+        self._goal_pos_raw = None                                          # P4a: the remembered goal POSITION (raw) -- navigate_vector's target (persists across levels for transfer)
         self.new_episode()
 
     def new_episode(self):
@@ -51,6 +52,8 @@ class Agent:
         self.sensed_surprise = False                                         # C2: last turn's L4-over-L6 feature-at-location mismatch
         self.goal = None                                                     # the basal-ganglia-selected GoalState this turn (GSG in the loop)
         self._prev_pose = None                                               # S1e: the RAW pose belief when `_prev`'s state was observed (so the goal = pre-pose ∘ completing-op)
+        self._here = None                                                    # P4a: the current pose POSITION (col.here_position()) -- SF value + navigate_vector operate on this
+        self._here_prev = None                                               # P4a: the previous pose position (for the SF value transition)
 
     def complete(self, score_delta: float = 1.0):
         """A level completed: the PREVIOUS (state, action) was the completing transition. Record it as leading to a
@@ -70,6 +73,11 @@ class Agent:
                 if self._prev_pose is not None and pa in self.col.pose_ops:
                     gp = self._prev_pose @ self.col.pose_ops[pa].M
                     self._goal_raw = (float(gp[0, 2]), float(gp[1, 2]))
+            if self._here is not None:                                      # P4a: remember the goal POSITION + reward it in the SF (a self-loop = a reward SOURCE)
+                self._goal_pos_raw = self._here
+                if self._here_prev is not None:
+                    self.col.learn_location_value(self._here_prev, self._here, 1.0)   # the completing transition -> reward
+                self.col.learn_location_value(self._here, self._here, 1.0)            # goal self-loop -> value propagates back
         self.reward.observe(_GOAL, max(score_delta, 1.0))                    # the goal is the rewarding terminal
         self.new_episode()
 
@@ -87,6 +95,9 @@ class Agent:
         then the loop runs on the discrete `state` + the L4-over-L6 cycle; `frame` is accepted only so the sensory
         contract (arc_sdk) stays stable across the P1 build."""
         self.surprised = self._pred is not None and state != self._pred       # predict-then-compare = the learning signal
+        self._here_prev, self._here = self._here, self.col.here_position()    # P4a: the raw pose position (SF value + navigate_vector operate on this, not the binned node)
+        if self._here_prev is not None and self._here is not None:            # P4a: learn the SF value over the SDR (generalises to unvisited nearby cells)
+            self.col.learn_location_value(self._here_prev, self._here, float(score_delta) if score_delta < 0 else 0.0)
         if self._prev is not None:
             ps, pa = self._prev
             self.col.observe(ps, pa, state)                                  # learn the transition online (graph + SR)
@@ -161,9 +172,8 @@ class Agent:
         # DISPATCH on the selected goal: a reward TARGET → the cost-aware ACHIEVER (SR-geodesic beeline, curving around
         # learned walls/hazards); the degenerate ACT goal (and, until B5 wires it, disambiguate) → the inverse-model
         # motor `col.act` (the value + frontier-optimism per-action policy, which IS the directed explorer).
-        if self.goal.kind == "reward" and self.goal.target is not None:
-            here = self.col.here_position() if self.col.L5.heading_dependent() else state
-            a = self.col.achieve(here, self.goal.target, self.actions)
+        if self.goal.kind == "reward" and self._goal_pos_raw is not None and self._here is not None:
+            a = self.col.navigate_vector(self._here, self._goal_pos_raw, self.actions)   # P4a: the goal-VECTOR navigator (grid-cell vector ⊗ SF value) -- retires the Euclidean achiever
             if a is not None:
                 return a
         return self.col.act(state, self.actions, value=lambda s: V[s],
