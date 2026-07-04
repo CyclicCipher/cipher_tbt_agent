@@ -41,6 +41,56 @@ Three populations linked by one gain field:
 The one thing the literature leaves genuinely open (the reviews call it "largely the realm of theory") is the **exact
 learned form** of the gain field — settled in implementation, constrained by the above.
 
+## 1b. What the map stores at a place — a POINTER to the model, not the stimulus (researched 2026-07-03)
+
+The hippocampus has TWO jobs: **self-localisation** (where am *I* — §1, the gain field, built) and the **allocentric object
+map** (what is *where* in the world — not yet built). This section is about the second: what is stored at a place.
+
+**A pointer (index), not the raw stimulus, and not the generic model.** *Hippocampal indexing theory* (Teyler & Rudy
+2007): "the hippocampus itself does not contain the content of an experience but it does provide an **index** that allows
+the content to be retrieved" — indices are "sets of **pointers** to cortically stored representations." The raw sensory
+field and the object *model* live in **neocortex** (our COLUMN — L2/3's recognised "car"); the hippocampus stores, at each
+allocentric place, a **pointer to the recognised object** bound to that place — the **what–where conjunction** (conjunctive
+item–place coding, Komorowski 2009; place cells modulated by objects — "misplace cells"). A partial cue reactivates the
+cortical model (pattern completion). Concretely this IS the `thalamus.bind` register **`R = Σ content ⊗ place`**: `content`
+= a pointer to the recognised object (its L4/L23 code), `place` = the allocentric grid code. Indexing theory ≈ that register.
+
+**Variation = the model/index split (Complementary Learning Systems; McClelland & O'Reilly).** The *generic* model — what a
+car IS, its parts and invariances — is **neocortical** (slow, distributed, semantic). The *specific instance* — THIS car,
+here, in this pose/state — is the **hippocampal index** (fast, sparse, **pattern-separated**, so this-car-here stays
+distinct from that-car-there). So the instance's variation is stored as (a) a distinct pattern-separated index and (b) the
+**pose/state bound to the object's frame** (the column solves the pose; the hippocampus binds object+pose at the place) —
+never raw pixels, never a copy of the model.
+
+**Why this is the right substrate (and a design law):** the object-pointer map **RECURS where the raw pixel frame churns** —
+a car that reshapes or recolours is still "car-pointer at slot X", ONE stable state, while the 64×64 field changes every
+step. So the hippocampal map stores **object-pointers-at-places, corrected by recognition — never raw stimuli** (that would
+reintroduce the non-recurring per-pixel state, rule-5). This is the old H1 "allocentric object map", now with a mechanism.
+
+## 1c. How the columns and the hippocampus communicate — entorhinal-IN, thalamus-OUT (restored 2026-07-03)
+
+Two ASYMMETRIC routes (from `legacy docs/THALAMO_CORTICAL_ARCHITECTURE.md` §5/§6; the anatomy is `reference_hippocampus`):
+
+- **IN (columns → hippocampus): the entorhinal gateway — cortico-cortical, NOT thalamic.** Cortex → entorhinal superficial
+  → hippocampus → entorhinal deep → cortex is the binding loop; TBT says the cortex *replicated* the entorhinal grid into
+  every column's L6, so columns are evolved-from-entorhinal and the hippocampus is the one structure that binds *across*
+  them into a single world. The hippocampus reads each column's outputs DIRECTLY: **L2/3 recognition** (which object + its
+  sensed pose — the landmark for loop closure / the reafference correction), the column's **egocentric position** estimate,
+  and the **efference copy** (the last action — drives path integration). In our module: `observe(action, sensed_pos,
+  sensed_head)` IS the entorhinal-IN.
+- **OUT (hippocampus → columns): the thalamic context route.** Hippocampal context + head-direction reach cortex via the
+  **nucleus reuniens** (HC↔mPFC) and the **anterior thalamic nuclei** (Papez: HC → mammillary → anterior thalamus →
+  retrosplenial head-direction). The allocentric frame is broadcast back as a **top-down prior through `thalamus.py`** — and
+  the channel already exists: **`read_location`** (content → location = "where is object X in the world" = the task-column-
+  sets-a-goal-state-in-the-spatial-column loop). We REUSE the location channel, not invent a fabric. In our module:
+  `here()` / `location_sdr()` IS the thalamus-OUT.
+
+The reciprocal **control loop** (transthalamic, BG-gated): TOP-DOWN a goal-state (a target place/object) the column
+vector-navigates to (MD-thalamus latches it as context); BOTTOM-UP the **achieved state** or **prediction-error/exafference**
+updates the map (loop closure) and *learns* the dependency; LATERAL is L2/3 consensus voting (multi-column recognition, not
+the control loop). **Single-column now:** the OUT broadcast can be read directly (the hippocampus location IS the belief);
+the `thalamus.read_location` route earns its keep once we are genuinely multi-column.
+
 ## 2. Why now — the gain field dissolves two P4 blockers (2026-07-03 finding)
 
 Building (a) inside the column with a conjunctive per-heading operator worked mechanically (OrientationGame 4/8) but forced:
@@ -63,23 +113,34 @@ So the conjunctive-per-heading operator is itself a leaked parallel to retire; t
 - **Reafference** = the efference copy already threaded (`arc_sdk` `_last_a` → `sensor.read` → `column.perceive`); add the
   flow-cancellation (subtract the efference-predicted global shift; residual = world-motion) that today's largest-component
   heuristic stands in for.
+- **The allocentric object map (what–where index)** = `thalamus.bind`'s register `R = Σ content ⊗ place` (§1b) — `content`
+  = a POINTER to the object recognised by `l23_object` (its L4/L23 code), `place` = the `GridEncoder` code. Store pointers,
+  never raw stimuli. (This is a SEPARATE hippocampal function from self-localisation; the module built so far does only the
+  latter.)
 
 ## 4. Build plan (each stage suite-green; fast offline reproductions; NavGame → OrientationGame the gate)
 
-- **H1 — HD ring + allocentric grid as SEPARATE codes.** Split the conjunctive `pos⊗head` belief into a grid SDR (position)
-  and a periodic HD ring; the turn updates the ring (angular velocity), sensing corrects both. NavGame (one heading) is the
-  degenerate case; suite green.
-- **H2 — the gain-field coupling (IN).** Path integration = `position += R(head-direction)·(one egocentric displacement)`.
-  Learn the *single* forward displacement once; derive every heading by rotation. Retire the per-heading `dp` coverage.
-  Gate: OrientationGame path-integration faithful after FORWARD is seen in **one** heading only.
-- **H3 — the gain-field coupling (OUT) = the navigator.** Action = rotate the goal vector by −head-direction → TURN if not
-  ahead, else FORWARD. Retire the depth-2 rollout. Gate: OrientationGame solves; NavGame stays 8/8 (translation = the
-  identity-heading special case).
+*Self-localisation core (H1–H3) is BUILT in `hippocampus.py` (isolation-tested: one-observation generalisation, non-abelian
+reorient-then-advance, abelian nav); the remaining work is WIRING it into the loop and then the object map + reafference.*
+
+- **H1 — HD ring + allocentric grid as SEPARATE codes.** ✅ core built (`Hippocampus`: `grid` + `hd`). The turn updates the
+  ring (angular velocity), sensing corrects both. NavGame (one heading) is the degenerate case.
+- **H2 — the gain-field coupling (IN).** ✅ core built (`path_integrate`: `position += R(head)·ego`). One forward observation
+  derives every heading by rotation (isolation-tested); retires the per-heading `dp` coverage on wiring.
+- **H3 — the gain-field coupling (OUT) = the navigator.** ✅ core built (`navigate`: rotate the goal by −head → TURN/FORWARD;
+  reorient-then-advance). Retires the depth-2 rollout on wiring.
+- **H3w — WIRE into the loop.** Feed the hippocampus from `column.perceive`'s recognised pose + the efference (entorhinal-IN,
+  §1c); read the belief back from `hippocampus.here()` (thalamus-OUT). Delete the conjunctive `_pose_code` + per-heading
+  operator, the directed-coverage explorer, and the rollout. Gate: NavGame 8/8, OrientationGame solved, suite green.
 - **H4 — reafference self/world split.** Cancel the efference-predicted global flow; the residual is world-motion. Retire
   the largest-component "self" heuristic (`sensor._mover_cloud`). Gate: a moving distractor object does not corrupt the
   agent's own path integration.
 - **H5 — landmark anchoring / loop closure.** Re-seeing a recognised object resets the drifting place, so the map stays
   world-anchored over a long run.
+- **H6 — the allocentric OBJECT map (what–where index, §1b).** Store, at each place, a POINTER to the object `l23_object`
+  recognised (the `thalamus.bind` register `content ⊗ place`) — never raw stimuli. This is the map that RECURS where the
+  pixel frame churns, and the substrate multi-object scenes / Sokoban plan over. Gate: an object that reshapes/recolours in
+  place is ONE stable state at its slot; a moved object updates its slot.
 
 ## 5. Honest risks / open
 
