@@ -246,6 +246,15 @@ fallback. The action falls out by **inverting the operator (L5)** against that v
 Euclidean potential-field navigator with an SR-geodesic *fallback arbiter* is a rule-1 parallel system — deleted; the SR
 goal-oriented vector field is the one navigator.
 
+**How the navigator reads the map — corrected by experiment (2026-07-03).** Greedy ascent on a scalar value is the
+*tabular* idealisation; over the grid **SDR** with a linear value (successor features) it FAILS — the value is accurate
+only LOCALLY and the periodic grid wraps, so greedy-on-V has spurious local maxima and gets stuck (probed: a 2-D point
+goal is never reached, V(dist-20) > V(dist-10)). The TBT-real primitive is the **grid-cell goal VECTOR** — the
+displacement from the current location code to the goal's, read off the grid phases (Bush, Barry & Burgess 2015;
+decodable via `GridEncoder`), moved along by the operator. The successor-feature **value MODULATES** this vector —
+reward attraction, cost/barrier repulsion (§3, de Cothi & Barry) — it does not replace it. So the one navigator is
+**the vector to the goal, warped by the SF value**, not value-gradient-ascent. (Finding `project_sf_value_not_greedy_navigable`.)
+
 **How it knows to explore vs exploit — one value, not a switch.** The critic's value is **Expected Free Energy**:
 pragmatic (expected reward toward the goal) + epistemic (expected information gain, grounded by **epiplexity** =
 learning-*progress*, so it → 0 for both irreducible noise *and* mastered structure). The policy maximises the one value:
