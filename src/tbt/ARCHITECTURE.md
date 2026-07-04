@@ -232,6 +232,14 @@ updates by gain × need (Mattar & Daw). (`reference_brain_planning`, `reference_
 off it. **One planner, one value.** The geodesic to a goal falls out of the SR; rollout is only the column's own
 prediction (§5) iterated, used sparingly — never a second, parallel planner.
 
+**There is no planner *module*.** Vector navigation is a read over the spatial cells: **grid cells** (L6) give the goal
+*vector* — direction + distance to a set target (Bush, Barry & Burgess 2015); place-cell populations carry
+**goal-oriented vector fields that converge on the goal** (the "potential field" itself — Ormond & O'Keefe 2022); the
+**SR warps around barriers** for the detour (de Cothi & Barry 2020). One object, not a Euclidean field plus a geodesic
+fallback. The action falls out by **inverting the operator (L5)** against that value; the **basal ganglia** select. So a
+Euclidean potential-field navigator with an SR-geodesic *fallback arbiter* is a rule-1 parallel system — deleted; the SR
+goal-oriented vector field is the one navigator.
+
 **How it knows to explore vs exploit — one value, not a switch.** The critic's value is **Expected Free Energy**:
 pragmatic (expected reward toward the goal) + epistemic (expected information gain, grounded by **epiplexity** =
 learning-*progress*, so it → 0 for both irreducible noise *and* mastered structure). The policy maximises the one value:
@@ -263,6 +271,17 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
 - **Not enumeration.** The mind **samples a few candidates from memory**, cued by context and biased by priors:
   **salience × controllability × ambiguity** (Dasgupta, Schulz & Gershman 2017; more samples when more uncertain).
   Controllability = "it moved when I acted" (the reafference of §4c); salience = novelty / prediction-error; both learned.
+- **Where the candidate comes from — the priority map (what *sets* the goal).** A goal is a *target-state*, and the
+  target is set by a **priority map** that fuses **bottom-up salience** (feature-contrast + prediction-error surprise —
+  superior colliculus; NOT motion alone, a live gap) with **top-down value / memory** (reward- and goal-tagged
+  locations — Gauthier & Tank 2018); the **basal ganglia** select its peak (Fecteau & Munoz 2006). The winner is held as
+  a **goal vector** — goal-direction + goal-distance cells, memory-based even for an *occluded* goal (Sarel et al. 2017,
+  bat CA1) — which is exactly the vector the grid cells compute toward (§8). This IS `salience × controllability ×
+  ambiguity` in neural form: controllability = reafference (§4c), salience = feature-contrast + prediction-error.
+- **Testing is simulated, then enacted.** Before committing, the hippocampus **preplays** candidate trajectories
+  (vicarious trial-and-error), the critic scores them (pragmatic + epistemic), and the **BG/STN** commit and switch on
+  repeated refutation (hippocampal–prefrontal replay selecting the path) — §8's "acting = testing a hypothesis" made
+  concrete.
 - **A hypothesis is a short composition of learned operators toward a cued target** — geodesic-finding in the learned
   structure. The **master boundary** predicts its cost: where the structure is **free/abelian**, the hypothesis is
   **READ OFF** (a homomorphism is fixed by its action on generators — cheap); where it is **relational / quotient**
@@ -314,9 +333,24 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
   relational RULE** (generalising the config-rule to unseen configs) is the open MATH_PHASE search (§9), not committed to.
   *Status: the mechanisms — `SequenceMemory`, `Behavior` (other-object dynamics), `inverse` (backward), config-as-context —
   are built + tested; the multi-object self/other LOOP wiring is loop-coupled (P4-adjacent).*
-- **P4 — Planning & hypothesis generation.** The one EFE value / SR geodesic (§8); the goal-state generator proposes
-  cued target-states (§9), the BG select, the motor achieves, value confirms; the heterarchy (multi-column voting via the
-  thalamus) scales the same loop.
+- **P4 — The convergence: collapse the leaked parallels, then the goal loop.** Re-vetted 2026-07-03 (the coloured-marker
+  probe + a neuroscience pass): the *bulk* of P4 is **finishing P0's parallel-system collapse, which leaked into
+  `column.py`** (a 707-line god-object — `project_column_godobject_diagnosis`), NOT new machinery. Most of the column is a
+  *second copy* of a layer mechanism; collapse each into the ONE (rule 1), do not relocate:
+  (a) **one location** = the SR/grid code path-integrated by the operator (§2; grid cells = the SR's eigenvectors, one
+  frame — Stachenfeld 2017) — retire the parallel `_pose` SE(2) integrator + the lossy `state_node` binning; the grid
+  eigenbasis carries the continuous metric and, via the learned non-abelian operator, the heading, *within* the one frame;
+  (b) **one operator** per action in L5 (retire the column `pose_ops` store); (c) **one navigator** = the SR
+  goal-oriented vector field `V=M·(reward−cost)` (delete the Euclidean `vector_action`/`_pose_vector_action`/`achieve` +
+  its SR-fallback arbiter — §8); (d) **one aversive value** (fold the column `cost` field into the value module's aversive
+  component, appetitive/aversive asymmetry preserved — §3); (e) **one allo map** in L4⊗L6 (retire the column `_map` AND
+  the parallel, unwired `hippocampus.py`); (f) **one planner** = the SR value read (collapse reward.py's parallel
+  prioritized-sweeping into it; rollout = the sparing fallback — §8). Remove the non-TBT proto-object **segmentation
+  heuristic** (`ObjectField`/`segment`/`_mover_cloud`); TBT creates objects by allocate-on-mismatch (§2). THEN the **goal
+  loop**: the priority map proposes cued target-states (§9), the BG select, the operator-inversion motor achieves, value
+  confirms. The **hippocampus** (allo frame + self/world-motion split via reafference + object-vector-cell displacement
+  binding) is a PREREQUISITE for salience-cued nav — a static distinct object is invisible to motion-only salience
+  (`project_marker_exposes_hippocampus_prereq`), not a late add-on; the heterarchy scales the same loop.
 - **P5 — The semantic SDR encoder** (a generality/robustness upgrade, post-P4; not blocking). The general feature data
   type is an **SDR** (which `L4.E` already is — `reference_tbt_feature_definition`); generality comes from the peripheral
   ENCODER, which today is EXACT-MATCH (similar views → orthogonal codes). Replace it with an HTM-style encoder obeying the
@@ -344,12 +378,16 @@ proposed boundaries from prediction mismatch (§2 L2/3), a **P3+ figure-ground**
 "estimator stack" is really *planning + figure-ground*, not P1/P2 leftovers. The **operator** primitive + relation/factor
 discovery are tested; the SR is the one L6.
 
-**Next: P4 — the hard phase (a fresh session).** It is the convergence point: the one EFE value / SR-geodesic planning
-(§8) + hypothesis generation (§9, an OPEN ML question needing research + experiments) + the loop integration everything
-deferred here — re-seating the loop onto the pose rep, retiring `state_node`'s binning + the tabular `col.predict` + the
-achiever/`move_delta`/`heading_dependent` web, the cost unification, wiring the factored learning signal (P2b) and the
-multi-object self/other behaviors (P3). Open it with the TBT-accuracy check + a design/vetting pass before cutting; expect
-experiments, not a straight-line build.
+**Next: P4 — the convergence (in progress, 2026-07-03).** Re-vetted against the coloured-marker probe and a neuroscience
+pass (goal-vector cells, the priority map, preplay/VTE, grid = SR eigenvectors — §8/§9): P4's bulk is **finishing P0's
+parallel-system collapse that leaked into `column.py`**, NOT new machinery — most of the column is a *second copy* of a
+layer mechanism (a second location code, operator store, navigator, aversive signal, allo map; reward.py a second
+planner). Collapse each into the ONE (§10 P4 (a)–(f), rule 1), remove the non-TBT proto-object segmentation heuristic,
+THEN build the **hippocampus** (allo frame + self/world-motion split via reafference), which the marker probe showed is
+the PREREQUISITE for salience-cued nav (`project_marker_exposes_hippocampus_prereq`), THEN the priority-map goal loop
+(§9 — where the target comes from is now specified: salience ⊕ value → priority map → goal-vector cells; test by
+preplay/VTE). Open each slice with the TBT-accuracy check + a consumer map before cutting; suite-green throughout; git
+branches for risk. Empirical anchor: suite 137 passed / 4 xfailed; NavGame (now colour-cued) 0/8.
 
 ## 11. Acceptance test for every change (the paper test)
 

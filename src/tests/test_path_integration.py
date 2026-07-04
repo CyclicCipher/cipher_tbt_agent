@@ -30,14 +30,18 @@ class _St:
 
 
 class NavGame:
-    """Duck-typed like the raw frame. A 2x2 mover on a 24x24 board must reach a goal in the OPEN INTERIOR (no marker,
-    far from any edge) -- so the egocentric window is uniform there and ALIASES with everywhere else; only allocentric
-    POSITION can navigate to it. Moves are 2 cells. Reaching the goal completes the level; advances in place; last ->
-    WIN. (A goal at an edge/corner would be solvable by local sensing alone -- the window sees the out-of-bounds edge.)"""
+    """Duck-typed like the raw frame. A 2x2 mover on a 24x24 board must reach a goal in the OPEN INTERIOR, marked by a
+    DISTINCT-COLOUR cell (a salience cue -- not invisible background), far from any edge. Discovery is therefore not a
+    blind random-contact search: the cue lets a hypothesis form ('that colour is the goal') and be tested by navigating
+    to it -- but the goal marker enters the EGOCENTRIC window only when the mover is near it, so COVERAGE is still needed
+    to bring it into view, and allocentric POSITION is still what re-finds it across levels. Moves are 2 cells. Reaching
+    the goal completes the level; advances in place; last -> WIN. (A goal at an edge/corner would be solvable by local
+    sensing of the out-of-bounds edge alone -- the interior placement is what forces real coverage.)"""
 
     N = 24
     STEP = 2
     GOAL = (12, 12)
+    GOAL_COLOR = 3                                            # the goal cell is PERCEPTUALLY DISTINCT (a salience cue), not background
     MOVES = {"ACTION1": (0, -1), "ACTION2": (0, 1), "ACTION3": (-1, 0), "ACTION4": (1, 0)}
 
     def __init__(self, levels=8):
@@ -50,9 +54,11 @@ class NavGame:
     @property
     def frame(self):
         g = [[0] * self.N for _ in range(self.N)]
+        gx, gy = self.GOAL
+        g[gy][gx] = self.GOAL_COLOR                          # paint the goal marker first...
         for dx in (0, 1):
             for dy in (0, 1):
-                g[self.my + dy][self.mx + dx] = 7            # the 2x2 mover (the only object -- the goal is invisible)
+                g[self.my + dy][self.mx + dx] = 7            # ...then the 2x2 mover on top (it occludes the marker on arrival)
         return [g]
 
     @property
