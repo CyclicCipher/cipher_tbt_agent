@@ -475,9 +475,12 @@ copy seat** (TBP): it owns the one per-action body-frame displacement (`eff`); *
 no duplicate** (the hippocampus's `ego`/`dtheta` copy is erased, as is L5's legacy `move_delta`). The **controllable body
 is no longer selected** — no "which is me" code — it **falls out** of L5's efference by reafference (`sensor._reafferent`;
 §4c). Results: **NavGame 8/8 (~119 actions, near-oracle)**, MockLiveGame 60/60, OrientationGame 4/8 (capped by L23's
-heading-dependent recognised anchor — the deferred §5 L23 canonical-origin fix), suite 82 passed / 7 xfailed. Remaining
-hippocampus work: **H5 landmark loop-closure, H6 the allocentric OBJECT map (pointers-at-places, §1b indexing)**, near-
-oracle transfer, and (test-only) retiring L5's config-state symbolic operator (`disp`/`edges`) with the tabular path.
+heading-dependent recognised anchor — the deferred §5 L23 canonical-origin fix), suite 82 passed / 7 xfailed. **The
+hippocampus is COMPLETE for its scope (self-localisation, 2026-07-04):** H1–H4 done, **H5 subsumed** (world-anchored
+top-down frame → no unbounded drift), **H6 (the object map) deferred** until a multi-object game drives it (the bitter
+lesson). The two open game gaps are **L2/3 RECOGNITION**, not the hippocampus — OrientationGame's rotating-anchor and
+MockLiveGame's featureless 1-cell mover (no shape → no pose) — the next debug targets. Also open (test-only): retiring L5's
+config-state symbolic operator (`disp`/`edges`) with the tabular path.
 
 ## 11. Acceptance test for every change (the paper test)
 

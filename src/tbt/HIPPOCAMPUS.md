@@ -147,8 +147,13 @@ So the conjunctive-per-heading operator is itself a leaked parallel to retire; t
 
 ## 4. Build plan (each stage suite-green; fast offline reproductions; NavGame → OrientationGame the gate)
 
-*Self-localisation core (H1–H3) is BUILT in `hippocampus.py` (isolation-tested: one-observation generalisation, non-abelian
-reorient-then-advance, abelian nav); the remaining work is WIRING it into the loop and then the object map + reafference.*
+**STATUS (2026-07-04): the hippocampus is COMPLETE for its current scope — SELF-LOCALISATION.** H1–H4 built + wired
+(HD ring + allocentric grid + gain field + reliability-weighted correction + reafference, the efference copy seated in
+L5); H5 SUBSUMED (world-anchored top-down frame, no drift); H6 (the OBJECT map) DEFERRED until a multi-object game drives
+it. Proof: **NavGame 8/8 at ~119 actions (near-oracle)**, MockLiveGame 60/60. The two remaining game gaps are **L2/3
+RECOGNITION**, not the hippocampus: OrientationGame's rotating-anchor (§5 L23 canonical-origin) and MockLiveGame's
+featureless 1-cell mover (no shape → no pose → the belief rarely establishes → it completes by babble not exploit). Those
+are the next debug targets.
 
 - **H1 — HD ring + allocentric grid as SEPARATE codes.** ✅ core built (`Hippocampus`: `grid` + `hd`). The turn updates the
   ring (angular velocity), sensing corrects both. NavGame (one heading) is the degenerate case.
@@ -184,12 +189,17 @@ reorient-then-advance, abelian nav); the remaining work is WIRING it into the lo
   static anchor is no longer tracked). Remaining: near-oracle TRANSFER (re-explores rather than beelining) and, for a
   moving-world distractor, the finer efference-displacement match (the arrival-into-background rule handles static
   distractors; a moving distractor needs the displacement comparator).
-- **H5 — landmark anchoring / loop closure.** Re-seeing a recognised object resets the drifting place, so the map stays
-  world-anchored over a long run.
-- **H6 — the allocentric OBJECT map (what–where index, §1b).** Store, at each place, a POINTER to the object `l23_object`
-  recognised (the `thalamus.bind` register `content ⊗ place`) — never raw stimuli. This is the map that RECURS where the
-  pixel frame churns, and the substrate multi-object scenes / Sokoban plan over. Gate: an object that reshapes/recolours in
-  place is ONE stable state at its slot; a moved object updates its slot.
+- **H5 — landmark anchoring / loop closure.** ✅ **SUBSUMED (2026-07-04).** Our sensor reads a **world-anchored top-down
+  frame** — image coordinates ARE the allocentric coordinates — and L2/3 recognition corrects the belief EVERY step (H4's
+  reliability-weighted correction), so there is no unbounded dead-reckoning drift to re-anchor. Explicit
+  re-seeing-a-landmark loop closure earns its keep only with an **egocentric moving-fovea** sensor (long path-integration
+  between sightings) or a partially-observed world; build it then. NavGame 8/8 near-oracle over 8 levels confirms no drift.
+- **H6 — the allocentric OBJECT map (what–where index, §1b).** ⏸ **DEFERRED (2026-07-04) — gated on a MULTI-OBJECT game.**
+  Store, at each place, a POINTER to the object `l23_object` recognised (the `thalamus.bind` register `content ⊗ place`) —
+  never raw stimuli; the map that RECURS where the pixel frame churns, the substrate multi-object scenes / Sokoban plan
+  over. Our live games are single-mover, so building it now would be speculative (the bitter lesson). Build it when a
+  multi-object game drives it; the design + the SDR index encoding (§1b) are settled and waiting. Gate then: an object that
+  reshapes/recolours in place is ONE stable state at its slot; a moved object updates its slot.
 
 ## 5. Honest risks / open
 
