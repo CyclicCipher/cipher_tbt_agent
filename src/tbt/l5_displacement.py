@@ -80,8 +80,10 @@ def pose_between(model_disps, sensed_disps, tol=0.05):
     these displacements as those'. Spatial instance: g = a rotation, returned as theta in [0, 2pi); continuous, and
     a symmetric patch yields several (Monty's multiple pose hypotheses). Reads the pose off the local geometry
     rather than searching angles. (For an abstract column this becomes a solve over the learned group.)"""
-    if len(model_disps) != len(sensed_disps) or len(model_disps) == 0:
+    if len(model_disps) != len(sensed_disps):
         return []
+    if len(model_disps) == 0:                                # a POINT (no local structure): orientation-free -> canonical θ=0
+        return [0.0]
     out: list[float] = []
     v0 = model_disps[0]
     for w in sensed_disps:                                   # pair v0 with each equal-length sensed vector -> a candidate

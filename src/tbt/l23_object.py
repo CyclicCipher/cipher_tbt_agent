@@ -253,7 +253,7 @@ class L23_Object(nn.Module):
         if not self.hyps:
             return None
         h = max(self.hyps, key=lambda h: h.ev)
-        return h.obj if h.ev >= max(2.0, m - 1.0) else None
+        return h.obj if h.ev >= max(1.0, m - 1.0) else None      # confidence scales with size (a 1-point object: 1 match suffices)
 
     def identify(self, cloud):
         """Recognise a complete shape against the library WITHOUT adding a new one — the name, or None."""
