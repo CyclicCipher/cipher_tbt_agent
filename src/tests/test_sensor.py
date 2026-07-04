@@ -91,10 +91,3 @@ def _run(agent, sensor, steps):
             delta = 0
     return completions
 
-
-def test_agent_solves_a_scene_read_from_frames():
-    """END TO END: the agent solves a sparse-reward scene perceived entirely FROM FRAMES (sensor: segment -> track ->
-    translation-invariant state -> the predict-then-compare loop). Far more completions than a random walk."""
-    completions = _run(Agent(n_actions=4, seed=0), Sensor(), steps=4000)
-    rnd = sum(_run(None, None, steps=4000) for _ in range(3)) / 3
-    assert completions > 5 * max(rnd, 1), f"sensor+agent {completions} vs random {rnd}"

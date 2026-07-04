@@ -357,39 +357,6 @@ def test_S2c_recolor_content_becomes_a_factorable_cycle_operator():
     assert col.content_operator((1,), 99) is None                              # no content transition learned -> None
 
 
-def test_S2c_predict_gx_binds_structure_and_content():
-    """L6_NONABELIAN Stage 2 step (c) -- the `g × x` FORWARD prediction binds the two halves the fragmented FM kept apart:
-    the STRUCTURE predictor (`predict` -> g') with the CONTENT map (`feature_at` -> x' at g'). This is TEM's objective
-    ('predict the next observation | position, action') as ONE model -- where I'll be + what's there. The ONE prediction
-    (ARCHITECTURE.md §5): apply the operator to the location, read the content there."""
-    from tbt.column import CorticalColumn
-    col = CorticalColumn(n_entities=8, seed=0)
-    for _ in range(5):                                                          # train the structure g (A<->B) so the SR place codes are non-trivial
-        col.observe("A", 0, "B")
-        col.observe("B", 1, "A")
-    col.sense_at("B", 3)                                                        # bind content x = feature 3 at node B (= g)
-    g2, x2 = col.predict_gx("A", 0)
-    assert g2 == "B" and x2 == 3                                                # predicts: after action 0 from A -> at B, feature 3 (where + what)
-
-
-def test_S2c_predict_gx_composes_content_operator_and_generalises():
-    """L6_NONABELIAN Stage 2 step (c): `predict_gx` COMPOSES structure × content. A learned CONTENT OPERATOR (a recolor
-    toggle) is applied IN PLACE and GENERALISES to a (g, content) combination never observed together -- the TEM win the
-    conjunctive graph cannot do."""
-    from tbt.column import CorticalColumn
-    col = CorticalColumn(n_entities=8, seed=0)
-    for _ in range(5):                                                          # structure A<->B (train the SR place codes)
-        col.observe("A", 0, "B")
-        col.observe("B", 1, "A")
-    col.sense_at("B", 7)                                                        # content 7 bound at B
-    col.L5.recolor[((1,), 2)] = {0: 1, 1: 0}                                    # a learned content operator: action 2 toggles content 0<->1
-
-    assert col.predict_gx("A", 0) == ("B", 7)                                   # MOVEMENT: reads the content bound at g'
-    # CONTENT transform GENERALISES over g -- the toggle applies at positions never seen with that (g, content) pair:
-    assert col.predict_gx("A", 2, content=0, shape=(1,)) == (col.predict("A", 2), 1)   # 0 -> 1
-    assert col.predict_gx("B", 2, content=1, shape=(1,)) == (col.predict("B", 2), 0)   # 1 -> 0, at B (never toggled there)
-
-
 class _CounterToggle:
     """A two-factor MICROWORLD: a COUNTER (Z/n, advanced by TICK) and an independent TOGGLE (Z/2, flipped by FLIP). The two
     actions act on ORTHOGONAL factors, so the dynamics are a genuine PRODUCT of cycles (Z/n × Z/2). Encoded as one-hot(counter)

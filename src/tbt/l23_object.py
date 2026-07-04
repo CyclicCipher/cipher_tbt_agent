@@ -186,10 +186,21 @@ class L23_Object(nn.Module):
             self.hyps = [h for h in self.hyps if h.ev > top - self.keep]
 
     def best(self):
-        """The winning (object name, theta, t, evidence) of the current session, or None."""
+        """The winning (object name, theta, t, evidence) of the current session, or None.
+
+        SYMMETRY (the stabiliser): a symmetric object produces several tied (object, pose) hypotheses — its symmetry
+        group (e.g. a square's C4) maps the object onto itself, so those poses are genuinely equivalent and their
+        evidence stays tied forever. `max` alone breaks that tie by list order, which flips frame-to-frame -> a
+        jittering pose. Instead the pose is QUOTIENTED by the stabiliser: among the tied top hypotheses (the orbit) we
+        report the CANONICAL representative (a deterministic key), so a rotationally-symmetric mover tracks with a
+        STABLE pose and a clean translation — no spurious rotation, no centroid tracker (rule 5). Genuine two-object
+        ambiguity (tied across DIFFERENT objects) is resolved by `disambiguation_goal`, not here."""
         if not self.hyps:
             return None
-        h = max(self.hyps, key=lambda h: h.ev)
+        top_ev = max(h.ev for h in self.hyps)
+        orbit = [h for h in self.hyps if top_ev - h.ev < 1e-6]         # the tied top hypotheses = the object's stabiliser orbit
+        h = min(orbit, key=lambda h: (h.obj.name, round(float(h.theta) % (2 * np.pi), 6),
+                                      round(float(h.t[0]), 3), round(float(h.t[1]), 3)))   # canonical rep (pose mod stabiliser)
         return h.obj.name, h.theta, h.t, h.ev
 
     def disambiguation_goal(self, margin: float = 1.5, narrowed: int = 4):

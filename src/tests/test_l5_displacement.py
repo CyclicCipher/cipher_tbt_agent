@@ -81,15 +81,6 @@ def test_canonicalize_is_translation_and_order_invariant():
     assert a == b
 
 
-def test_column_predict_generalizes_through_L5():
-    """End to end through the column: observe a few moves, then col.predict answers an unvisited (s, a) by the
-    position-invariant displacement -- the operator the planner now rolls forward over."""
-    col = CorticalColumn(n_entities=64, seed=0)
-    col.observe(_scene((6, 6)), RIGHT, _scene((7, 6)))
-    col.observe(_scene((7, 6)), RIGHT, _scene((8, 6)))
-    assert col.predict(_scene((3, 3)), RIGHT) == _scene((4, 3))
-
-
 # ---- the pose operators (the displacement-cell geometry now seated in L5; recognition reads them) ------------
 import numpy as np                                                       # noqa: E402
 from tbt.l5_displacement import apply_pose, local_disps, pose_between, rot  # noqa: E402

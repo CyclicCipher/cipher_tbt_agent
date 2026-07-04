@@ -13,11 +13,10 @@ import importlib
 # public name -> submodule that defines it
 _EXPORTS = {
     "CorticalColumn": ".column",
-    "OnlineSR": ".l6_sr",                          # L6 — the online successor-representation location code (the ONE L6 substrate)
+    "SuccessorFeatures": ".l6_sr",                # L6 — successor features over the SDR location code (the ONE value/predictive map)
     "L5_Displacement": ".l5_displacement",
     "L4_FeatureLocation": ".l4_feature_location",
     "L23_Object": ".l23_object",
-    "RewardModel": ".reward",                     # pure stdlib — no torch
     "Thalamus": ".thalamus",                      # inter-column routing / conjunction (torch)
     "BasalGanglia": ".basal_ganglia",             # the gate selector / emergent allocator (pure stdlib)
 }

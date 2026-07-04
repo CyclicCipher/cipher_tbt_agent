@@ -13,7 +13,7 @@ if _PKG not in sys.path:
     sys.path.insert(0, _PKG)
 
 from tbt.encoders import GridEncoder            # noqa: E402
-from tbt.l6_sr import SuccessorFeatures, OnlineSR   # noqa: E402
+from tbt.l6_sr import SuccessorFeatures         # noqa: E402
 
 
 def _corridor():
@@ -44,14 +44,8 @@ def test_sf_generalises_to_unvisited_states_via_sdr_overlap():
     g, sf = _corridor()
     phi = lambda x: g.encode([x]).dense()
     v_near, v_far = sf.value(phi(29)), sf.value(phi(21))                # 29 and 21 were NEVER visited (odd)
-    assert v_far > 0.0                                                  # generalises at all (not a zero row)
+    assert v_far > 0.0                                                  # generalises at all (a localist SR gives 0 for an unvisited symbol)
     assert v_near > v_far                                               # graded: nearer the goal -> higher value
-
-    sr = OnlineSR(gamma=0.9)                                            # the localist contrast
-    for _ in range(400):
-        for x in range(20, 30, 2):
-            sr.observe(x, x + 2)
-    assert sr.value(25, {30: 1.0}) == 0.0                              # an UNVISITED symbol -> zero generalisation
 
 
 def test_navigate_vector_beelines_and_avoids_learned_cost():

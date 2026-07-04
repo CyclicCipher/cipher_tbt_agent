@@ -76,7 +76,7 @@ class Sensor:
                 content, _pose = self.column.perceive(action, cells, view_signature(cloud))   # the PERIPHERAL encodes content; the column stays opaque
                 self._fovea = ((float(self.column._pose[0, 2]), float(self.column._pose[1, 2]))   # the belief position (foveal read-back)
                                if self.column._pose is not None else (dominant or cold))
-                state = (content, self.column.state_node(self.pos_bin))    # (content, location) -- the pose node (heading self-degenerates for abelian)
+                state = (content, self.column.here_position())             # (content, location) -- the raw pose position (the SF/navigate_vector currency; state_node retired)
             else:                                                          # local feature-only (no integration) / standalone (no column): dominant-residual fovea
                 self._fovea = dominant if dominant is not None else (self._fovea or cold)
                 feat = self.encode(self._patch(frame, self._fovea))
@@ -89,6 +89,23 @@ class Sensor:
     def objects(self):
         """The current tracked objects `{id: (pose, size)}` -- poses feed the click-slots and the L5 reseat."""
         return dict(self.field._last)
+
+    def salient_target(self):
+        """Feature-contrast salience (DISCOVERY.md D1) -- the position of a distinct proto-object that is NOT the
+        controllable mover: the bottom-up 'distinct from surround' channel that complements motion-salience, so a STATIC
+        distinct object becomes a candidate goal. The mover is the proto-object nearest the column's pose belief (the
+        tracked self); the salient target is the nearest OTHER object. Returns `(x, y)` or None (nothing distinct)."""
+        items = list(self.field._last.values())                            # [(centroid, size), ...] this frame (stateless)
+        if len(items) < 2:
+            return None
+        here = None
+        if self.column is not None and getattr(self.column, "_pose", None) is not None:
+            here = (float(self.column._pose[0, 2]), float(self.column._pose[1, 2]))
+        if here is None:                                                   # no pose yet -> the smallest object is the likely marker (the mover is the large body)
+            return min(items, key=lambda v: v[1])[0]
+        mover = min(items, key=lambda v: (v[0][0] - here[0]) ** 2 + (v[0][1] - here[1]) ** 2)   # the self = nearest the belief
+        others = [v for v in items if v is not mover]
+        return min(others, key=lambda v: (v[0][0] - here[0]) ** 2 + (v[0][1] - here[1]) ** 2)[0] if others else None
 
     # ----- egocentric S-frame perception: detect the residual candidates the COLUMN path-integrates ------------
     def _residual_candidates(self, frame, change, objects):

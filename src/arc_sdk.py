@@ -169,12 +169,8 @@ class TbtPolicy:
             self.sensor.column = self.agent.col             # P1: the column OWNS path integration; the sensor feeds it residuals
             self.sensor.field.reset()                       # undo the peek -- the real read starts the tracker clean
         state, _change = self.sensor.read(obs.grid, action=self._last_a)   # efference = last action (path integration)
-        if self.sensor.local and self.sensor.integrate:      # C2 (COLUMN_AUDIT): the movement-bootstrapped (feature, position)
-            feat, pos = state                                #   CMP message. The STATE is the POSITION (L6 over positions), and L4
-            a = self.agent.step(pos, 0.0, frame=obs.grid, feature=feat)   #   binds the feature at it (sense_at) -> the object EMERGES; config_state gone
-        else:
-            a = self.agent.step(state, 0.0, frame=obs.grid)  # `frame` is the raw sensory field (accepted, not yet consumed --
-            #                                                  P1 factored perception / P2 the operator prediction); reward via complete()
+        salient = self.sensor.salient_target() if (self.sensor.local and self.sensor.integrate) else None   # cued-discovery target
+        a = self.agent.step(state, 0.0, frame=obs.grid, salient=salient)   # the agent reads the pose position directly; `salient` = a candidate goal
         self._last_a = a
         return self._resolve(a)
 
