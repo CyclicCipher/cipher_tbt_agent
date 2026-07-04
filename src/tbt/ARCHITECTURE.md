@@ -370,7 +370,11 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
   location/content SDR has overlap; and the SR becomes **successor *features*** over that SDR encoding (Barreto et al.
   2017; *Neurobiological successor features for spatial navigation*, Hippocampus 2021), retiring the symbol-indexed
   tabular `OnlineSR`. This is what makes P4a's "location is an SDR" real — the linchpin, pulled forward. (Purdy, *Encoding
-  Data for HTM Systems*; NuPIC spatial pooling.)
+  Data for HTM Systems*; NuPIC spatial pooling.) **BUILT 2026-07-03 (`tbt/encoders.py`, `test_encoders.py` 10/10):** the
+  bidirectional library — `SDR` + `Scalar`(+periodic)/`Category`/`Grid`/`Multi` encoders + a `SpatialPooler`; each
+  encoder IS its decoder (the inverse), so a motor SDR "thought" is read back by the same encoder that senses it (§4 — no
+  parallel motor-decoder can fester). NEXT: successor *features* over the `GridEncoder` location SDR, then re-seat the
+  loop off `state_node`.
 
 Status (2026-07-02, P0–P3 mechanisms DONE — next is P4): **P0** collapsed the parallel systems (one prediction, one value,
 no change-log; cost = the kept aversive value). **P1** made perception factored and live — `perceive` delivers

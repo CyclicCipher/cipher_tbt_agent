@@ -1,0 +1,112 @@
+"""The SDR encoder/decoder library (tbt.encoders) — the three SDR rules (overlap=similarity, determinism, sparsity),
+decode round-trips (each encoder is bidirectional), and the MOTOR-decode design (a motor SDR 'thought' interpreted by
+the same encoder that would sense it — the anti-parallel-system property)."""
+
+from __future__ import annotations
+
+import os
+import sys
+
+_PKG = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _PKG not in sys.path:
+    sys.path.insert(0, _PKG)
+
+from tbt.encoders import (SDR, ScalarEncoder, CategoryEncoder, GridEncoder,   # noqa: E402
+                          MultiEncoder, SpatialPooler)
+
+
+# ── SDR type ────────────────────────────────────────────────────────────────────────────────────────────────
+def test_sdr_overlap_and_concat():
+    a, b = SDR(10, {1, 2, 3}), SDR(10, {2, 3, 4})
+    assert a.overlap(b) == 2 and a.w == 3
+    c = SDR.concat([a, b])                                    # fields laid side by side
+    assert c.n == 20 and c.active == {1, 2, 3, 12, 13, 14}
+
+
+# ── ScalarEncoder ───────────────────────────────────────────────────────────────────────────────────────────
+def test_scalar_rules_and_roundtrip():
+    e = ScalarEncoder(0.0, 100.0, n=100, w=21)
+    assert e.encode(50).w == 21                              # SPARSITY: fixed w
+    assert e.encode(50) == e.encode(50)                      # DETERMINISM
+    assert abs(e.decode(e.encode(50)) - 50) < 2.0            # round-trip within resolution
+    assert abs(e.decode(e.encode(12.5)) - 12.5) < 2.0
+    near = e.encode(50).overlap(e.encode(52))                # OVERLAP=similarity: near > far
+    far = e.encode(50).overlap(e.encode(90))
+    assert near > far and far == 0
+
+
+def test_scalar_periodic_wraps():
+    e = ScalarEncoder(0.0, 360.0, n=90, w=11, periodic=True)
+    assert e.encode(0).overlap(e.encode(359)) > 0            # 0 and max are NEAR (wraparound overlap)
+    assert e.encode(0).overlap(e.encode(180)) == 0           # opposite phases disjoint
+    d = e.decode(e.encode(350))
+    assert min(abs(d - 350), 360 - abs(d - 350)) < 8         # circular round-trip
+
+
+# ── CategoryEncoder ─────────────────────────────────────────────────────────────────────────────────────────
+def test_category_disjoint_and_roundtrip():
+    e = CategoryEncoder(categories=["red", "green", "blue"], w=8, capacity=16)
+    assert e.encode("red").overlap(e.encode("blue")) == 0    # categories are disjoint (no false nearness)
+    assert e.decode(e.encode("green")) == "green"            # round-trip
+    e.add("cyan")                                            # grows online within capacity, fixed length
+    assert e.encode("red").n == e.encode("cyan").n and e.decode(e.encode("cyan")) == "cyan"
+
+
+# ── GridEncoder (the LOCATION encoder — the point of the SDR pivot) ──────────────────────────────────────────
+def test_grid_graded_metric_overlap():
+    """The property the localist state_node LACKS: overlap GRADED by distance, a-priori (before any learning)."""
+    g = GridEncoder(scales=(7, 11, 13, 17), dims=2, mw=3, bounds=[(0, 63), (0, 63)])
+    o = g.encode((30, 30))
+    assert o.overlap(g.encode((31, 30))) > o.overlap(g.encode((34, 30))) > o.overlap(g.encode((30, 30))) - o.w
+    assert o.overlap(g.encode((31, 30))) > o.overlap(g.encode((2, 30)))   # near shares more than far
+
+
+def test_grid_roundtrip_and_capacity():
+    g = GridEncoder(scales=(7, 11, 13, 17), dims=2, mw=3, bounds=[(0, 63), (0, 63)])
+    for p in [(0, 0), (12, 12), (30, 47), (63, 63)]:
+        assert g.decode(g.encode(p)) == p                    # exact round-trip over the board
+    assert g.encode((10, 10)) != g.encode((40, 40))          # distinct far positions are distinct codes
+
+
+def test_grid_is_path_integrable():
+    """A translation shifts each phase additively (mod scale) -> encode(p+d) == the phase-shifted code; the operator
+    can path-integrate the SDR (ARCHITECTURE §2 L6)."""
+    g = GridEncoder(scales=(7, 11, 13), dims=1, mw=3, bounds=[(0, 100)])
+    assert g.decode(g.encode([40])) == (40,)
+    assert g.decode(g.encode([40 + 5])) == (45,)             # a +5 translation lands exactly
+
+
+# ── MultiEncoder (feature-at-location = colour ⊗ location) ───────────────────────────────────────────────────
+def test_multi_encode_decode_roundtrip():
+    m = MultiEncoder([("colour", CategoryEncoder(["red", "blue"], w=8, capacity=8)),
+                      ("loc", GridEncoder(scales=(7, 11, 13), dims=2, mw=3, bounds=[(0, 31), (0, 31)]))])
+    sdr = m.encode({"colour": "blue", "loc": (10, 20)})
+    out = m.decode(sdr)
+    assert out["colour"] == "blue" and out["loc"] == (10, 20)
+
+
+# ── SpatialPooler (the learned general SENSORY encoder) ──────────────────────────────────────────────────────
+def test_spatial_pooler_rules():
+    import numpy as np
+    sp = SpatialPooler(n_inputs=200, n_cols=512, w=20, seed=0)
+    x = (np.random.default_rng(1).random(200) < 0.1).astype(float)
+    assert sp.encode(x, learn=False) == sp.encode(x, learn=False)     # DETERMINISM (no learning)
+    assert sp.encode(x, learn=False).w <= 20                          # SPARSITY
+    y = x.copy(); flip = np.flatnonzero(x)[:2]; y[flip] = 0           # a SIMILAR input (2 bits off)
+    z = np.zeros(200); z[:20] = 1                                     # a DISSIMILAR input
+    sim = sp.encode(x, learn=False).overlap(sp.encode(y, learn=False))
+    dis = sp.encode(x, learn=False).overlap(sp.encode(z, learn=False))
+    assert sim > dis                                                  # OVERLAP=similarity
+
+
+# ── MOTOR DECODE: a motor 'thought' (SDR) is interpreted by the SAME encoder that would sense it ─────────────
+def test_motor_decode_is_the_encoder_inverse():
+    """The anti-parallel-system property (ARCHITECTURE §4): L5 emits an SDR; the motor ORGAN decodes it with the
+    encoder — a discrete action via a CategoryEncoder, a click (x,y) via the GridEncoder. No separate decoder."""
+    actions = CategoryEncoder(["ACTION1", "ACTION2", "ACTION3", "ACTION4"], w=8, capacity=8)
+    thought = actions.encode("ACTION3")                      # a motor 'thought' emitted by L5
+    assert actions.decode(thought) == "ACTION3"              # the effector reads it back -> the action
+
+    clicks = GridEncoder(scales=(7, 11, 13, 17), dims=2, mw=3, bounds=[(0, 63), (0, 63)])
+    target = clicks.encode((41, 12))                         # a target-location 'thought' (ARC ACTION6)
+    assert clicks.decode(target) == (41, 12)                 # decoded to the click coordinate
