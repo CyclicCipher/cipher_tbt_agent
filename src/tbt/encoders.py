@@ -124,9 +124,13 @@ class ScalarEncoder(Encoder):
 
 
 class CategoryEncoder(Encoder):
-    """A discrete category -> a DISJOINT block of `w` bits (zero overlap between categories: a category has no
-    "nearness", rule 1's degenerate case). Grows online up to `capacity` (fixed length). `decode` = the category
-    whose block the SDR most overlaps. The natural encoder for colour (ARC's 16) and the discrete action set."""
+    """A discrete, UNORDERED category -> a DISJOINT block of `w` bits (zero overlap between categories: the labels have
+    no "nearness"). Grows online up to `capacity` (fixed length). `decode` = the category whose block the SDR most
+    overlaps. For ARBITRARY symbols: ARC's 16 palette INDICES (symbolic — a task cares about which cells SHARE a colour,
+    not colour similarity; assuming colour-3 ≈ colour-4 would inject a false prior, the bitter lesson) and the discrete
+    action set. NB a CONTINUOUS colour space (RGB) is NOT categorical — its points have metric relations; encode it with
+    per-channel `ScalarEncoder`s combined by a `MultiEncoder` so similar colours OVERLAP. Category is a deliberate
+    per-datatype choice (ARC's palette is unordered), not colour's universal encoding."""
 
     def __init__(self, categories=(), w: int = 11, capacity: int = 32) -> None:
         self.w, self.capacity = int(w), int(capacity)
