@@ -67,6 +67,26 @@ a car that reshapes or recolours is still "car-pointer at slot X", ONE stable st
 step. So the hippocampal map stores **object-pointers-at-places, corrected by recognition — never raw stimuli** (that would
 reintroduce the non-recurring per-pixel state, rule-5). This is the old H1 "allocentric object map", now with a mechanism.
 
+**How the index is encoded as an SDR — identity vs features use TWO mechanisms (researched 2026-07-03).** The index is an
+SDR (the brain's currency), and it is `content-pointer ⊗ place` — the two factors carry the two kinds of distinction:
+- **Different FEATURES (red car vs blue car) = the CONTENT SDR, where OVERLAP = SIMILARITY.** The object code is a
+  composite/conjunctive SDR ≈ the union of its feature SDRs (`shape("car") ⊕ colour("red")`): red- and blue-car SHARE the
+  shape bits (→ "both cars") and DIFFER on the colour bits (distinguishable). Colour is a CONTINUOUS space → a per-channel
+  `ScalarEncoder` (not a category — `encoders.py` already), so red overlaps orange more than blue (graded similarity). The
+  binding problem (don't misbind red-car + blue-truck as red-truck + blue-car — "illusory conjunctions") is solved by
+  binding features **through their shared place/token**, not a global feature pool.
+- **Same-type IDENTITY (two IDENTICAL red cars) = the SPATIOTEMPORAL INDEX, NOT features.** Identical objects have identical
+  content SDRs → features cannot individuate them; they are individuated by the **object file / token** addressed by its
+  **place**, not any label (Kahneman & Treisman object files; Pylyshyn FINST — the identical-cans-on-a-shelf case). So
+  **place is the individuator**, and the **dentate gyrus PATTERN-SEPARATES** — distinct instances get ORTHOGONAL sparse
+  indices even when their content overlaps. The token persists as the object moves (spatiotemporal continuity = object
+  permanence / tracking).
+
+So in our terms the index SDR = `content ⊗ place`: `content` = the column's recognised object + features (overlap =
+similarity), `place` = the `GridEncoder` code (individuation, pattern-separated). Two identical red cars = the SAME
+content-pointer at two DIFFERENT places = two distinct tokens. (`reference_tbt_feature_definition` — colour is the
+non-morphological, peripheral feature; this says how it and identity enter the index.)
+
 ## 1c. How the columns and the hippocampus communicate — entorhinal-IN, thalamus-OUT (restored 2026-07-03)
 
 Two ASYMMETRIC routes (from `legacy docs/THALAMO_CORTICAL_ARCHITECTURE.md` §5/§6; the anatomy is `reference_hippocampus`):
@@ -84,6 +104,13 @@ Two ASYMMETRIC routes (from `legacy docs/THALAMO_CORTICAL_ARCHITECTURE.md` §5/�
   the channel already exists: **`read_location`** (content → location = "where is object X in the world" = the task-column-
   sets-a-goal-state-in-the-spatial-column loop). We REUSE the location channel, not invent a fabric. In our module:
   `here()` / `location_sdr()` IS the thalamus-OUT.
+
+  ⚠ **`thalamus.py` is OLD (pre-SDR) — review before reusing.** It is torch-based, operates on dense place/content codes
+  and node INDICES (`content_col.place_code(node)`, `L4.E @ …`), and predates the SDR encoders + successor features. Before
+  wiring the OUT broadcast (and the H6 `content ⊗ place` object index) through it, re-vet it against the current SDR model —
+  the `bind`/`read`/`read_location` SHAPE is right (it IS the index register), but the representation it binds must be the
+  SDRs (`GridEncoder` place, the L4/L23 content SDR), not the old dense node-indexed codes. Single-column, OUT can be read
+  directly meanwhile.
 
 The reciprocal **control loop** (transthalamic, BG-gated): TOP-DOWN a goal-state (a target place/object) the column
 vector-navigates to (MD-thalamus latches it as context); BOTTOM-UP the **achieved state** or **prediction-error/exafference**
