@@ -35,19 +35,26 @@ prediction, different driver. "Planning over the map" is the value read off the 
   et al. 2019). The SR must therefore be learned **over the SDR encoding** (successor *features*), not over localist
   state symbols; today's symbol-indexed `OnlineSR` (and the `state_node` bin) is scaffolding to retire — the SDR test
   (2026-07-03) showed it carries no a-priori metric overlap (§10 P4a/P5).
-- *Function:* holds the **current location** (one code). **Path integration = applying L5's operator to it**
-  (`location ← operator(action)·location`; the abelian phase-advance is the special case). The **SR is also L6's temporal
-  structure** — a *predictive map* of future occupancy (Stachenfeld's predictive map), used for planning (§8). Note: this
-  is L6's *only* temporal structure — L6 does **not** hold sequence memory (§5); adding one would be a parallel system.
+- *Function:* holds the **current location** (one code) **and a head-direction**. **Path integration = reading L5's
+  efference and applying the head-direction GAIN FIELD** (`position ← position + R(head-direction)·(L5's body-frame
+  displacement)`; the head advances by the turn). So a body-frame action (FORWARD) is learned once and rotated to every
+  heading; the abelian phase-advance (no rotation) is the special case. L6 keeps **no copy** of the operator — it reads
+  L5's (§HIPPOCAMPUS.md; the head-direction gain field is a hippocampal/retrosplenial function, not the column's). The **SR
+  is also L6's temporal structure** — a *predictive map* of future occupancy (Stachenfeld's predictive map), used for
+  planning (§8). Note: this is L6's *only* temporal structure — L6 does **not** hold sequence memory (§5).
 
-**L5 — OPERATOR / motor / displacement (how it changes; what to do).**
-- *Structure:* one learned **operator per action** — a group-representation matrix and an invertible **displacement**.
-  Translation (abelian) is the special case; rotations/orderings/constrained moves are the non-abelian general case
-  (composition = matrix product). Between two objects, the operator is the **relative-position displacement** relating
-  their frames (Numenta's *displacement cells*) — the basis of composition and of representing where *other* objects are.
-- *Function:* **path-integrates** L6's location; **predicts** by carrying the location forward; is the **motor** — emits
-  the action that brings about the predicted/desired state (predictions, not commands); is the **driver** — the
-  inter-column message a higher-order thalamus relays. Holds **temporal sequence memory over actions** (§5): a motor
+**L5 — OPERATOR / motor / displacement / EFFERENCE COPY (how it changes; what to do).**
+- *Structure:* one learned **operator per action** — the action's **body-frame displacement** (a translation + a turn;
+  `L5.eff`). This is L5a's **efference copy** (TBP, Hawkins 2019): the predicted effect of the motor command, the SOLE home
+  of the self's per-action displacement. Translation (abelian) is the special case; the non-abelian general case is a turn
+  composed with a translation (the head-direction gain field, applied by L6, rotates the body displacement to the world).
+  Between two OTHER objects, the operator is the **relative-position displacement** relating their frames (Numenta's
+  *displacement cells*) — the basis of composition and of where *other* objects are.
+- *Function:* provides the **efference copy** L6 path-integrates by (L6, not L5, applies the gain field); **predicts** by
+  carrying the location forward; is the **motor** — emits the action that brings about the predicted/desired state
+  (predictions, not commands); is the **driver** — the inter-column message a higher-order thalamus relays (an *other*
+  object's dynamics; §5 self-vs-other). The **controllable body is not selected anywhere — it FALLS OUT** as the sensory
+  change consistent with this efference (reafference, §4c). Holds **temporal sequence memory over actions** (§5): a motor
   skill/habit is a learned sequence of operators (the production side of a behavior).
 
 **L4 — CONTENT / feature-at-location (what is here).**
@@ -127,11 +134,13 @@ or *where* to look — it only makes the raw field readable as features-at-locat
 
 **(c) What receives it, and what is done.** **L4** binds the feature at **L6**'s current location; **L2/3** accumulates
 recognition evidence (object, pose, and behavior phase); **L6** corrects its current-location belief against what was
-sensed (the predict-then-compare snap); the **critic** turns the score into value. The column had already *predicted* the
-feature it would sense (§5) — the **prediction error** is the learning signal. The model identifies *itself* by
-**reafference** (von Holst): the part of the field that changes as its own operator predicts is the **controllable**
-location (the "self"); world-caused change is not so predicted — controllability is *learned*, never a fovea-on-residual
-heuristic (rule 5).
+sensed — **reliability-weighted** (a Kalman gain: path-integrate, correct drift), not a hard snap, so a rotation-induced
+or noisy sighting averages out (place cells path-integrate; landmarks correct drift); the **critic** turns the score into
+value. The column had already *predicted* the feature it would sense (§5) — the **prediction error** is the learning
+signal. The model identifies the **controllable** part of the field by **reafference** (von Holst): the change consistent
+with **L5's efference copy** (the predicted displacement) is controllable; world-caused change is not so predicted. This is
+**not a selected "self"** — there is NO "which object is me" code (rule 5); the controllable **falls out** of the efference
+(realised: `sensor._reafferent`), and controllability is *learned*, never a size / fovea-on-residual heuristic.
 
 **(d) Choosing to move.** The **motor (L5)** selects the action that best brings about the goal-state under the one EFE
 value (§8) — pragmatic toward reward, epistemic toward what most resolves uncertainty; the **basal ganglia** select among
@@ -457,6 +466,18 @@ that transform is a **hippocampal** gain field, not a per-heading column operato
 is itself a leaked parallel system to retire; the location collapse (a) proceeds as the **hippocampus module** (HD ring +
 allocentric grid + gain-field coupling), which dissolves both the coverage and the myopic-navigation problems. The
 session's operator/agent changes are a validated stepping-stone, not the destination.
+
+**Hippocampus + L5 efference (2026-07-03/04, branch `p4-collapse`).** The location collapse (a) landed as a **hippocampus
+module** (`hippocampus.py`): a head-direction ring + allocentric grid + the **gain field** (one body-frame displacement
+rotated by head-direction — HIPPOCAMPUS.md), with a **reliability-weighted (Kalman) correction** replacing the hard snap.
+The conjunctive per-heading operator + directed-coverage explorer + depth-2 rollout are deleted. **L5 is now the efference-
+copy seat** (TBP): it owns the one per-action body-frame displacement (`eff`); **L6 reads it and applies the gain field —
+no duplicate** (the hippocampus's `ego`/`dtheta` copy is erased, as is L5's legacy `move_delta`). The **controllable body
+is no longer selected** — no "which is me" code — it **falls out** of L5's efference by reafference (`sensor._reafferent`;
+§4c). Results: **NavGame 8/8 (~119 actions, near-oracle)**, MockLiveGame 60/60, OrientationGame 4/8 (capped by L23's
+heading-dependent recognised anchor — the deferred §5 L23 canonical-origin fix), suite 82 passed / 7 xfailed. Remaining
+hippocampus work: **H5 landmark loop-closure, H6 the allocentric OBJECT map (pointers-at-places, §1b indexing)**, near-
+oracle transfer, and (test-only) retiring L5's config-state symbolic operator (`disp`/`edges`) with the tabular path.
 
 ## 11. Acceptance test for every change (the paper test)
 
