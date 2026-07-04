@@ -29,7 +29,12 @@ prediction, different driver. "Planning over the map" is the value read off the 
 **L6 — LOCATION (where).**
 - *Structure:* an online, TD-learned **successor representation** over discovered states; its eigenvectors are the
   multi-scale, periodic **grid cells** (Stachenfeld 2017). One frame, learned; the innate hex grid is only an
-  initial-state prior expressible within it, never a parallel code.
+  initial-state prior expressible within it, never a parallel code. **The location is an SDR** — a sparse, distributed
+  grid-cell population whose defining property is *semantic overlap* (nearby locations share active bits → they
+  generalise; distant ones are near-orthogonal), NOT a localist symbol (HTM: "each grid cell is a bit in an SDR"; Lewis
+  et al. 2019). The SR must therefore be learned **over the SDR encoding** (successor *features*), not over localist
+  state symbols; today's symbol-indexed `OnlineSR` (and the `state_node` bin) is scaffolding to retire — the SDR test
+  (2026-07-03) showed it carries no a-priori metric overlap (§10 P4a/P5).
 - *Function:* holds the **current location** (one code). **Path integration = applying L5's operator to it**
   (`location ← operator(action)·location`; the abelian phase-advance is the special case). The **SR is also L6's temporal
   structure** — a *predictive map* of future occupancy (Stachenfeld's predictive map), used for planning (§8). Note: this
@@ -179,7 +184,8 @@ agent," would be a load-bearing harness (rules 4–5); that decision is the colu
 
 ## 6. Glossary — one definition each (a second meaning is a bug)
 
-- **location** `g` — the current point in the learned frame = the L6 SR code. The ONLY location representation.
+- **location** `g` — the current point in the learned frame = the L6 SR/grid code, **an SDR** (sparse, distributed,
+  overlap = similarity), NOT a localist symbol or a dense pose matrix. The ONLY location representation.
 - **operator / displacement** — the learned per-action transition on the location code (L5), a group-representation
   matrix, invertible. The ONLY transition and path-integrator; translation is its special case; between two objects it is
   the relative-position displacement relating their frames.
@@ -339,7 +345,9 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
   *second copy* of a layer mechanism; collapse each into the ONE (rule 1), do not relocate:
   (a) **one location** = the SR/grid code path-integrated by the operator (§2; grid cells = the SR's eigenvectors, one
   frame — Stachenfeld 2017) — retire the parallel `_pose` SE(2) integrator + the lossy `state_node` binning; the grid
-  eigenbasis carries the continuous metric and, via the learned non-abelian operator, the heading, *within* the one frame;
+  eigenbasis carries the continuous metric and, via the learned non-abelian operator, the heading, *within* the one frame
+  (**this requires P5** — the SDR test showed the SR-over-localist-symbols has NO a-priori metric overlap, so the location
+  SDR needs the encoder; P5 is pulled forward as a prerequisite);
   (b) **one operator** per action in L5 (retire the column `pose_ops` store); (c) **one navigator** = the SR
   goal-oriented vector field `V=M·(reward−cost)` (delete the Euclidean `vector_action`/`_pose_vector_action`/`achieve` +
   its SR-fallback arbiter — §8); (d) **one aversive value** (fold the column `cost` field into the value module's aversive
@@ -351,13 +359,18 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
   confirms. The **hippocampus** (allo frame + self/world-motion split via reafference + object-vector-cell displacement
   binding) is a PREREQUISITE for salience-cued nav — a static distinct object is invisible to motion-only salience
   (`project_marker_exposes_hippocampus_prereq`), not a late add-on; the heterarchy scales the same loop.
-- **P5 — The semantic SDR encoder** (a generality/robustness upgrade, post-P4; not blocking). The general feature data
-  type is an **SDR** (which `L4.E` already is — `reference_tbt_feature_definition`); generality comes from the peripheral
-  ENCODER, which today is EXACT-MATCH (similar views → orthogonal codes). Replace it with an HTM-style encoder obeying the
-  three rules (semantic OVERLAP = similarity, determinism, fixed length + sparsity): hand-designed sub-encoders
-  (scalar/periodic/category) concatenated (colour ⊕ geometry), or a LEARNED **spatial pooler**. Then content GENERALISES
-  over similar features and continuous/cyclic features are native. (From Cipher's HTM notes: Purdy "Encoding Data for HTM
-  Systems"; NuPIC spatial pooling.)
+- **P5 — The semantic SDR encoder (a PREREQUISITE for P4a — re-assessed 2026-07-03, not post-P4).** The general data
+  type — for **content** (`L4.E`, `reference_tbt_feature_definition`) AND for **location** — is an **SDR**, whose point is
+  semantic OVERLAP (similarity), determinism, fixed length + sparsity. Today BOTH are EXACT-MATCH / LOCALIST (similar
+  inputs → orthogonal codes; `OnlineSR` indexed by localist `state_node` symbols), so nothing generalises across
+  similar-but-unseen inputs. The **SDR test** made this concrete: `hex_code` has graded a-priori metric overlap (cos
+  +1→0.94, +4→0.28, far→−0.39) while `state_node` is aliased-or-orthogonal and the SR relates only VISITED states (an
+  unvisited neighbour has no row). Fix: an HTM-style encoder obeying the three rules — hand-designed sub-encoders
+  (scalar/periodic/category; the hex grid is the periodic *location* prior) or a LEARNED **spatial pooler** — so the
+  location/content SDR has overlap; and the SR becomes **successor *features*** over that SDR encoding (Barreto et al.
+  2017; *Neurobiological successor features for spatial navigation*, Hippocampus 2021), retiring the symbol-indexed
+  tabular `OnlineSR`. This is what makes P4a's "location is an SDR" real — the linchpin, pulled forward. (Purdy, *Encoding
+  Data for HTM Systems*; NuPIC spatial pooling.)
 
 Status (2026-07-02, P0–P3 mechanisms DONE — next is P4): **P0** collapsed the parallel systems (one prediction, one value,
 no change-log; cost = the kept aversive value). **P1** made perception factored and live — `perceive` delivers
@@ -386,8 +399,11 @@ planner). Collapse each into the ONE (§10 P4 (a)–(f), rule 1), remove the non
 THEN build the **hippocampus** (allo frame + self/world-motion split via reafference), which the marker probe showed is
 the PREREQUISITE for salience-cued nav (`project_marker_exposes_hippocampus_prereq`), THEN the priority-map goal loop
 (§9 — where the target comes from is now specified: salience ⊕ value → priority map → goal-vector cells; test by
-preplay/VTE). Open each slice with the TBT-accuracy check + a consumer map before cutting; suite-green throughout; git
-branches for risk. Empirical anchor: suite 137 passed / 4 xfailed; NavGame (now colour-cued) 0/8.
+preplay/VTE). **NB the ordering shifted (2026-07-03): (a) the location collapse now depends on P5** (the SDR encoder /
+successor features), pulled forward — the SDR test showed the SR-over-localist-symbols gives no a-priori metric overlap,
+so "location is an SDR" needs the encoder first (`project_location_is_an_sdr`). Open each slice with the TBT-accuracy
+check + a consumer map before cutting; suite-green throughout; git branches for risk. Empirical anchor: suite 132 passed
+/ 4 xfailed (hippocampus.py parallel removed); NavGame (now colour-cued) 0/8.
 
 ## 11. Acceptance test for every change (the paper test)
 
