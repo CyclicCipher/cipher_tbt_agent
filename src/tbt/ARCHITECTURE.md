@@ -373,8 +373,10 @@ from the research and the number-domain probes (`MATH_PHASE.md`):
   Data for HTM Systems*; NuPIC spatial pooling.) **BUILT 2026-07-03 (`tbt/encoders.py`, `test_encoders.py` 10/10):** the
   bidirectional library — `SDR` + `Scalar`(+periodic)/`Category`/`Grid`/`Multi` encoders + a `SpatialPooler`; each
   encoder IS its decoder (the inverse), so a motor SDR "thought" is read back by the same encoder that senses it (§4 — no
-  parallel motor-decoder can fester). NEXT: successor *features* over the `GridEncoder` location SDR, then re-seat the
-  loop off `state_node`.
+  parallel motor-decoder can fester). **Successor features BUILT 2026-07-03 (`l6_sr.SuccessorFeatures`,
+  `test_successor_features.py`):** `ψ=W·φ`, `V=w·ψ` learned by TD over the SDR φ — value GENERALISES to UNVISITED states
+  graded by overlap (V(29)=9.4 vs V(21)=6.8 on a corridor where only even cells were visited), where `OnlineSR` gives a
+  flat 0. NEXT: re-seat the loop off `state_node` onto (`GridEncoder` φ + `SuccessorFeatures`), retiring `OnlineSR`.
 
 Status (2026-07-02, P0–P3 mechanisms DONE — next is P4): **P0** collapsed the parallel systems (one prediction, one value,
 no change-log; cost = the kept aversive value). **P1** made perception factored and live — `perceive` delivers

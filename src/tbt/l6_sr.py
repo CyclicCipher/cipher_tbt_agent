@@ -119,6 +119,42 @@ class OnlineSR:
         return self.M
 
 
+class SuccessorFeatures:
+    """Successor FEATURES over an SDR encoding — the SDR-native replacement for the localist-symbol-indexed `OnlineSR`
+    (ARCHITECTURE §2 L6, §10 P4a/P5). The predictive map is linear in an SDR feature `phi = encoder.encode(obs).dense()`:
+    `psi(s) = W·phi(s)` estimates the discounted future feature occupancy, learned online by TD (Dayan 1993; Barreto et
+    al. 2017; *Neurobiological successor features*, 2021). Because states with OVERLAPPING phi share columns of W,
+    value/occupancy GENERALISE across nearby states BEFORE each is individually visited — the a-priori metric
+    generalisation the localist `OnlineSR` cannot give (an unvisited symbol has a zero row). Value `V(s) = w·psi(s)`,
+    with reward weights `w` s.t. `r(s) ~ w·phi(s)`, learned online. The operator path-integrates `phi` (the SDR), not a
+    symbol. Pure numpy."""
+
+    def __init__(self, d: int, gamma: float = 0.95, alpha: float = 0.1, beta: float = 0.5):
+        self.d = int(d)
+        self.gamma, self.alpha, self.beta = gamma, alpha, beta
+        self.W = np.zeros((d, d))                             # psi(s) = W·phi(s): the successor-feature operator
+        self.w = np.zeros(d)                                 # reward weights: r(s) ~ w·phi(s)
+
+    def psi(self, phi):
+        """The successor features of `phi` = the discounted future feature occupancy."""
+        return self.W @ np.asarray(phi, dtype=float)
+
+    def value(self, phi) -> float:
+        """V(s) = w·psi(s) = w·(W·phi) — expected discounted future reward, read from the SDR (no rollout)."""
+        phi = np.asarray(phi, dtype=float)
+        return float(self.w @ (self.W @ phi))
+
+    def observe(self, phi, phi_next, reward: float = 0.0) -> None:
+        """One TD update for a transition phi -> phi_next carrying immediate `reward`: regress the reward weights `w`
+        (r ~ w·phi) and take an LMS step on the SF operator `W` toward the Bellman target phi + gamma·W·phi_next."""
+        phi = np.asarray(phi, dtype=float)
+        phi_next = np.asarray(phi_next, dtype=float)
+        nrm = float(phi @ phi) + 1e-9
+        self.w += self.beta * (reward - self.w @ phi) * phi / nrm            # reward regression
+        err = (phi + self.gamma * (self.W @ phi_next)) - self.W @ phi        # SF Bellman TD error
+        self.W += self.alpha * np.outer(err, phi) / nrm                      # LMS gradient step
+
+
 def hex_code(disp, scales=(11, 13, 17), lattice: str = "hex"):
     """The HEX reference frame's INITIAL-STATE descriptor, WITHIN the one L6 module (the collapsed `l6_grid`). A specific
     frame whose geometry is known a-priori -- the spatial column's innate entorhinal grid -- is described here by the MINIMAL
