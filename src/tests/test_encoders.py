@@ -12,7 +12,7 @@ if _PKG not in sys.path:
     sys.path.insert(0, _PKG)
 
 from tbt.encoders import (SDR, ScalarEncoder, CategoryEncoder, GridEncoder,   # noqa: E402
-                          MultiEncoder, SpatialPooler)
+                          MultiEncoder, ConjunctiveEncoder, SpatialPooler)
 
 
 # ── SDR type ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -97,6 +97,18 @@ def test_spatial_pooler_rules():
     sim = sp.encode(x, learn=False).overlap(sp.encode(y, learn=False))
     dis = sp.encode(x, learn=False).overlap(sp.encode(z, learn=False))
     assert sim > dis                                                  # OVERLAP=similarity
+
+
+# ── ConjunctiveEncoder (the tensor-product / SE(2) representation space) ─────────────────────────────────────
+def test_conjunctive_encoder_tensor_product_roundtrip():
+    """The TENSOR product of position ⊗ heading — a cell active iff both fields are; n = ∏ n, decode projects back."""
+    import numpy as np
+    c = ConjunctiveEncoder([("pos", GridEncoder(scales=(5, 7, 9), dims=2, mw=1, bounds=[(0, 20), (0, 20)])),
+                            ("head", ScalarEncoder(0.0, 2 * np.pi, n=4, w=1, periodic=True))])
+    assert c.n == c.fields[0][1].n * c.fields[1][1].n            # tensor: n = n_pos * n_head
+    out = c.decode(c.encode({"pos": (10, 12), "head": np.pi / 2}))
+    assert out["pos"] == (10, 12)                                # position recovered
+    assert min(abs(out["head"] - np.pi / 2), 2 * np.pi - abs(out["head"] - np.pi / 2)) < 1.0   # heading recovered
 
 
 # ── MOTOR DECODE: a motor 'thought' (SDR) is interpreted by the SAME encoder that would sense it ─────────────

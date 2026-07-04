@@ -240,6 +240,39 @@ class MultiEncoder(Encoder):
         return out
 
 
+class ConjunctiveEncoder(Encoder):
+    """The TENSOR-PRODUCT (conjunctive) of sub-encoders — e.g. grid × head-direction cells, the SE(2) representation
+    space (`reference_operator_as_group_representation`). `encode` = the OUTER PRODUCT of the sub-SDRs, flattened: a cell
+    is active iff EVERY field is active there (mixed-radix index). This is the code a heading-DEPENDENT action (FORWARD)
+    acts on LINEARLY (an orthogonal permutation), so a learned operator `M(action)` can represent the non-abelian group —
+    which a `MultiEncoder` concatenation CANNOT. `n` = ∏ fields' n; `w` = ∏ fields' w. `decode` projects back per field."""
+
+    def __init__(self, fields) -> None:
+        self.fields = list(fields)                             # [(name, encoder), ...]
+        self.n = 1
+        for _, e in self.fields:
+            self.n *= e.n
+
+    def encode(self, values: dict) -> SDR:
+        combos = [0]                                           # flatten (a0,a1,...) -> a0·(n1·n2…) + a1·(n2…) + …
+        for name, e in self.fields:
+            acts = e.encode(values[name]).active
+            combos = [c * e.n + a for c in combos for a in acts]
+        return SDR(self.n, combos)
+
+    def decode(self, sdr: SDR) -> dict:
+        ns = [e.n for _, e in self.fields]
+        per_field = [set() for _ in self.fields]              # project the flat indices back to each field's active set
+        for flat in sdr.active:
+            rem, coords = flat, []
+            for n in reversed(ns):
+                coords.append(rem % n)
+                rem //= n
+            for k, c in enumerate(reversed(coords)):
+                per_field[k].add(c)
+        return {name: e.decode(SDR(e.n, acts)) for (name, e), acts in zip(self.fields, per_field)}
+
+
 class SpatialPooler:
     """The LEARNED general encoder (HTM spatial pooler): a raw input (binary vector / SDR) -> a stable output SDR with
     semantic overlap, learned online. k-winners-take-all over random potential synapses + Hebbian permanence + boosting
