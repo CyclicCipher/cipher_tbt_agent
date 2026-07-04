@@ -156,9 +156,15 @@ reorient-then-advance, abelian nav); the remaining work is WIRING it into the lo
   derives every heading by rotation (isolation-tested); retires the per-heading `dp` coverage on wiring.
 - **H3 — the gain-field coupling (OUT) = the navigator.** ✅ core built (`navigate`: rotate the goal by −head → TURN/FORWARD;
   reorient-then-advance). Retires the depth-2 rollout on wiring.
-- **H3w — WIRE into the loop.** Feed the hippocampus from `column.perceive`'s recognised pose + the efference (entorhinal-IN,
-  §1c); read the belief back from `hippocampus.here()` (thalamus-OUT). Delete the conjunctive `_pose_code` + per-heading
-  operator, the directed-coverage explorer, and the rollout. Gate: NavGame 8/8, OrientationGame solved, suite green.
+- **H3w — WIRE into the loop.** ✅ mostly done (`f4b3181`). The column DELEGATES its pose interface to an internal
+  `Hippocampus`: `perceive` feeds it the recognised pose + efference (entorhinal-IN), `here()`/`forward`/`navigate`/
+  `controllable`/`track_reset` read the belief back (thalamus-OUT). Deleted the conjunctive `_pose_code` + per-heading
+  operator, the directed-coverage explorer, and the rollout (~150 lines). **NavGame 8/8** (fast, suite green, ~7× faster).
+  ⚠ **OrientationGame DISCOVERS but does not TRANSFER** — blocked by an ORTHOGONAL L23 issue: recognition returns a
+  heading-dependent / bimodal anchor for the *rotating* L-tromino (the belief wobbles ±2 by heading), so a fixed
+  goal-in-belief-space misses the completion zone across headings. The pose `(theta, t)` should resolve to the object's
+  rotation-invariant anchor (bbox-min-of-the-rotated-cloud wobbles); a centroid tracker is forbidden (rule 5). **NEXT:
+  stabilise L23's recognised anchor for rotating movers**, then OrientationGame transfers.
 - **H4 — reafference self/world split.** Cancel the efference-predicted global flow; the residual is world-motion. Retire
   the largest-component "self" heuristic (`sensor._mover_cloud`). Gate: a moving distractor object does not corrupt the
   agent's own path integration.
