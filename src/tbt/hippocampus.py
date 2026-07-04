@@ -76,6 +76,14 @@ class Hippocampus:
         self.head = _wrap(self.head + self.dtheta.get(action, 0.0))                  # angular path integration
         return self.pos, self.head
 
+    def predict(self, action):
+        """PURE forward query (§5): the belief `(position, head)` AFTER `action`, WITHOUT mutating it. None if unset."""
+        if self.pos is None:
+            return None
+        ego = self.ego.get(action)
+        pos = tuple(np.asarray(self.pos, float) + _rot(self.head) @ ego) if ego is not None else self.pos
+        return pos, _wrap(self.head + self.dtheta.get(action, 0.0))
+
     # ----- LEARN (the gain field, inverted) + CORRECT (snap to the sighting) -------------------------------------
     def observe(self, action, sensed_pos, sensed_head) -> None:
         """LEARN the action's effect from the sensed transition, then CORRECT the belief. The egocentric displacement is

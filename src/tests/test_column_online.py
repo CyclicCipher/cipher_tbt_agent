@@ -42,9 +42,9 @@ def test_perceive_unifies_recognize_predict_correct_learn():
         xs.append(x)
     assert len(set(contents)) == 1, contents                      # content invariant to position (same shape)
     assert xs[-1] > xs[0] + 6 and xs == sorted(xs), xs            # the location tracked the translation (monotone +x)
-    here = col.here_position()                                     # the per-action operator was LEARNED: applying it TRANSLATES the location ~+2x
-    dest = col._dest_after(0, here)
-    assert abs(dest[0] - (here[0] + 2.0)) < 0.6 and abs(dest[1] - here[1]) < 0.6, (here, dest)
+    here = col.here_position()                                     # the gain field LEARNED action 0 -> forward PREDICTS a ~+2x move
+    pred, _ = col.forward(0, ("x",))
+    assert pred is not None and abs(pred[0] - (here[0] + 2.0)) < 0.6 and abs(pred[1] - here[1]) < 0.6, (here, pred)
 
 
 def test_forward_predicts_self_motion_over_the_factored_rep():

@@ -204,7 +204,8 @@ def test_perceive_learns_translating_operators_on_navgame():
         name, coords = policy.choose_action([], frame)
         frame = game.step(name, coords)
     col = policy.agent.col
-    moved = [a for a in col.action_ops                            # the actions whose learned operator DISPLACES the location
-             if any(col.action_ops[a].moves_at(h) for h in col.headings_seen())]
-    assert moved, list(col.action_ops)                            # perceive learned real (non-trivial) translating operators
+    hip = col.hip
+    moved = [a for a in hip.ego                                   # the actions whose learned gain-field displacement is non-trivial
+             if (float(hip.ego[a][0]) ** 2 + float(hip.ego[a][1]) ** 2) ** 0.5 > 0.5]
+    assert moved, {a: hip.ego.get(a) for a in policy.agent.actions}   # perceive learned real (non-trivial) translating displacements
     assert col.controllable()                                      # -> the mover is controllable (its location is informative)

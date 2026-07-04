@@ -7,13 +7,13 @@ priority
 
     exploit (a remembered reward goal) > cued (a salient target) > babble (a sampled target),
 
-with a motor-babbling cold start (random actions until the operators are learned, so `navigate_vector` has displacements
-to steer by). The model persists across levels; `new_episode()` resets only the per-episode belief linkage. Pure stdlib.
+with a motor-babbling cold start (random actions until each action's effect is learned — the hippocampus's gain field
+generalises one observation to every heading, so no per-heading coverage sweep is needed). The model persists across levels;
+`new_episode()` resets only the per-episode belief linkage. Pure stdlib.
 """
 
 from __future__ import annotations
 
-import math
 import random
 
 
@@ -34,7 +34,8 @@ class Agent:
         self.col = CorticalColumn(n_entities=n_entities, seed=seed, board=board)
         self._integrate = False                                               # position mode (set by the policy); the loop is position-based regardless
         self._goal_pos_raw = None                                             # a remembered reward goal (exploit target) — persists across levels (transfer)
-        self._cov: dict = {}                                                   # (action, heading-bin) -> count: DIRECTED-coverage counts (persists across levels)
+        self._seen_lo = None                                                   # per-axis min/max of VISITED positions — bounds babble to the reachable region
+        self._seen_hi = None                                                   # (the board is unknown a-priori; sampling 0..board wastes targets off the playable area)
         self.new_episode()
 
     def new_episode(self):
@@ -66,52 +67,40 @@ class Agent:
         if prev is not None and here is not None:                             # LEARN the SF value over the transition (reward from the score; <0 = aversion)
             self.col.learn_location_value(prev, here, float(score_delta) if score_delta < 0 else 0.0)
         self._stuck = self._stuck + 1 if (prev is not None and here is not None and _dist(prev, here) < 0.5) else 0
-        self._heading = self._heading_bin()                                   # the current heading slice (for directed operator coverage)
+        if here is not None:                                                  # track the reachable region (for bounded babble)
+            if self._seen_lo is None:
+                self._seen_lo, self._seen_hi = [here[0], here[1]], [here[0], here[1]]
+            else:
+                self._seen_lo = [min(self._seen_lo[0], here[0]), min(self._seen_lo[1], here[1])]
+                self._seen_hi = [max(self._seen_hi[0], here[0]), max(self._seen_hi[1], here[1])]
         self._here_prev, self._here = prev, here
         self._salient = salient
         return self.col.motor(self._choose(here))
 
-    def _heading_bin(self):
-        """The current heading as an integer slice (matching the operator's rest-ring), or None before the belief is set."""
-        dp = self.col._decode_pose()
-        if dp is None:
-            return None
-        return int(round(dp[1] / (math.pi / 2))) % 4
+    def _sample_babble(self, margin: float = 6.0):
+        """A goal-babbling target inside the VISITED region grown by `margin` (clamped to the board) — so targets stay
+        REACHABLE (not stranded off the playable area) while the margin pushes the frontier outward, covering the board."""
+        lo = self._seen_lo or [0.0, 0.0]
+        hi = self._seen_hi or [self.board - 1, self.board - 1]
+        return tuple(self.rng.uniform(max(0.0, lo[i] - margin), min(self.board - 1, hi[i] + margin)) for i in range(2))
 
-    def _needs_coverage(self) -> bool:
-        """Is the operator under-covered? Measured from the OPERATOR'S OWN KNOWLEDGE, not action-selection counts (a
-        selection may hit a wall or a mis-recognition and teach nothing). True until, for every heading the body has been
-        IN: (a) some action DISPLACES the location there (`can_move_at` — so the body is never stuck facing a way it can't
-        leave; this is FORWARD's per-heading displacement, the non-abelian requirement), and (b) every action has been
-        TRIED there (so turns are exercised and new headings get discovered). A translation-only body sees one heading and
-        releases fast; a turning body cascades through all reachable headings before releasing."""
-        seen = self.col.headings_seen() | {h for (_a, h) in self._cov if h is not None}
-        if not seen:
-            return True
-        for h in seen:
-            if not self.col.can_move_at(h):
-                return True
-            if any(self._cov.get((a, h), 0) == 0 for a in self.actions):
-                return True
-        return False
+    def _learned(self, a) -> bool:
+        """Has action `a`'s effect been learned — a nonzero MOVE or TURN? The hippocampus's gain field generalises ONE
+        forward observation to every heading, so cold-start ends as soon as every action has shown its effect (no
+        per-heading sweep). An action seen only while blocked (zero effect) keeps babbling until it is seen acting."""
+        hip = self.col.hip
+        ego = hip.ego.get(a)
+        moved = ego is not None and (float(ego[0]) ** 2 + float(ego[1]) ** 2) ** 0.5 > 0.5
+        return moved or abs(hip.dtheta.get(a, 0.0)) > 1e-2
 
     def _choose(self, here):
         """Priority: EXPLOIT a remembered reward goal > test a CUED salient target > goal-BABBLE toward a sampled target.
-        Cold start = DIRECTED motor babble: pick the LEAST-taken action from the current heading (count-based, so FORWARD
-        is tried in EVERY heading — the non-abelian coverage a heading-conditioned operator needs; a single sighting leaves
-        the other headings' FORWARD unlearned). Runs until every OBSERVED heading's actions are covered. NB the release is
-        coverage-based, NOT an absolute prediction-error threshold: a symmetric/ambiguous mover (NavGame's 2×2 block) has an
-        irreducible recognition-error floor it can never beat, so a `pred_err` gate would never release."""
+        Cold start = motor babble (random) until every action's effect is learned, so `navigate_vector` (the hippocampus's
+        inverse gain field) has displacements + turns to steer by."""
         acts = self.actions
-        if here is None or len(self.col.action_ops) < len(acts) or self._needs_coverage():
-            hb = self._heading
-            if hb is not None:                                               # the least-explored action from HERE's heading (ties broken at random)
-                a = min(acts, key=lambda x: (self._cov.get((x, hb), 0), self.rng.random()))
-                self._cov[(a, hb)] = self._cov.get((a, hb), 0) + 1
-            else:
-                a = self.rng.choice(acts)
+        if here is None or not all(self._learned(a) for a in acts):
             self.goal = ("motor_babble", None)
-            return a
+            return self.rng.choice(acts)
         if self._goal_pos_raw is not None:                                    # EXPLOIT: beeline the remembered reward goal
             a = self.col.navigate_vector(here, self._goal_pos_raw, acts)
             self.goal = ("exploit", self._goal_pos_raw)
@@ -123,7 +112,7 @@ class Agent:
             if a is not None:
                 return a
         if self._babble_target is None or _dist(here, self._babble_target) < 2.0 or self._stuck >= 4:   # UNCUED goal babbling — resample on arrival OR when STALLED (a target we can't approach, e.g. past a wall)
-            self._babble_target = (self.rng.uniform(0, self.board - 1), self.rng.uniform(0, self.board - 1))
+            self._babble_target = self._sample_babble()
             self._stuck = 0
         self.goal = ("babble", self._babble_target)
         a = self.col.navigate_vector(here, self._babble_target, acts)
