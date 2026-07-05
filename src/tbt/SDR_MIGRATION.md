@@ -39,23 +39,45 @@ the SUBSTRATE rather than a side module.
 | **Value** (`SuccessorFeatures`) | linear read `V = w·φ` on the location SDR | ✓ | keep — the one genuinely SDR-native live op |
 | **Encoders** (`encoders.py`) | bidirectional Scalar/Grid/Category + SpatialPooler | ✓ | keep — the substrate the rest migrates onto |
 
-## The migration plan (dependency-ordered)
-Gated by the acceptance test (ARCHITECTURE §11) + the five rules; each step keeps the suite green.
-- **M1 — efference → `Operator` (the entry point).** Collapse the redundancy: the self's per-action motion is ONE thing,
-  currently encoded THREE ways (efference tuple, pose matrix, head scalar). Make the efference an **`Operator`** (an SE(2)
-  element to start), so "path integration" is `operator.apply(location)` and "head" is the accumulated composition — one
-  representation, composed by `.then`, no `R(head)·v`/`atan2` by hand. This unifies L5's efference with L2/3's pose
-  machinery (they are the same SE(2) group element). NB it is still a matrix-on-coordinates until M2 puts it on the SDR.
-- **M2 — location + heading as SDRs.** Retire the dense localist `_P` / scalar `head`: the belief IS the grid-cell SDR (+
-  HD-ring SDR), and the M1 operator acts on THAT (a learned phase shift), path-integration = operator-on-SDR. The bump
-  belief's population-coding instinct is preserved, but sparse + distributed + generalizing.
-- **M3 — content as an overlapping SDR (= plan step B's prerequisite).** Replace `view_signature`/`L4.encode` exact-match
-  ids with a content SDR (encoder / spatial pooler) so similar views overlap; enables associative recall.
-- **M4 — L2/3 recognition as SDR overlap/union.** Replace Euclidean `nearest` + `atan2` with SDR overlap against a library
-  union (θ); the object identity becomes a stable L2/3 SDR (the temporal-pooler output). Folds in plan steps A (persistent
-  session / convergence) + B (associative recall).
-- **M5 — HTM temporal memory.** Replace the symbolic `SequenceMemory` dict with predictive cells in an SDR (distal-context
-  → predictive state → bursting), so "predictive state / bursting / non-convergence" are literal, not simulated.
+## The migration plan — M1–M4 TOGETHER (one SDR-native loop), then M5
+**Decision (2026-07-04):** do M1–M4 as ONE coherent change, NOT staged. Rationale learned the hard way: staging M1 as a
+POINT SE(2) pose (matrix-on-coordinates, population dropped "until M2") **destabilized navigation** — the population bump
+was silently providing smoothing/robustness (a cue-commitment gap it masked), so the point-pose interim regressed NavGame
+8/8→0/8 and collectall. Keeping the population **throughout** (as the SDR) avoids any destabilizing interim. So the belief
+is SDR + population from the first commit; the operator, content, and recognition all move onto the SDR together.
+
+**The unified SDR-native belief + operator (M1 ⊕ M2).**
+- The self's pose belief is ONE population state **φ = (grid-cell SDR for position) ⊕ (HD ring SDR for heading)** — sparse,
+  distributed, generalizing. `GridEncoder`/`ScalarEncoder(periodic)` are the substrate.
+- The efference is a learned **`Operator` acting ON φ** (a group representation — Gao 2021, `reference_operator_as_group_
+  representation`; the L6_NONABELIAN frontier): a translation is a PHASE SHIFT of the grid modules, a turn is a ring-shift
+  of the HD SDR (+ a rotation of the grid frame). ONE operator type, unifying L5's efference with L2/3's pose machinery.
+- **Path integration = `φ ← M_a · φ`** (the operator applied to the SDR) — the gain field as a phase operation, NO
+  `R(head)·v`, NO `atan2` of a scalar. **Correction = SUPERIMPOSE the sensory likelihood SDR** (from recognition) on φ —
+  the population combination keeps reliability-weighting emergent (no scalar gain; the no-scalar-confidence win preserved
+  throughout). A point read-out (for the motor / goal vector) is the encoder INVERSE, only at the periphery.
+
+**Content SDR + recognition as overlap (M3 ⊕ M4).**
+- Content = an **overlapping SDR** (a spatial pooler over the view) so similar views share bits (retire `view_signature`
+  exact-match / `L4.encode` integer ids).
+- The object identity is a **stable L2/3 SDR** = the temporal-pooler union of predicted content SDRs over the sensorimotor
+  sequence (folds in plan step A's persistent session — convergence is now SDR settling).
+- **Recognition = SDR overlap/union** against the library (θ-thresholded, ~O(1) — folds in plan step B, associative
+  recall); pose inferred via the displacement-cell SDRs / the operator. Retire Euclidean `nearest` + `atan2` pose-solve.
+
+**Build order WITHIN the combined change (each keeps the suite green + the population intact):**
+1. φ + the operator-on-SDR for the self pose (M1⊕M2 core) — replace `hip._P`/`_Q`/`R(head)·v` with `φ` + `M_a·φ`, keeping
+   the superposition correction. Un-xfails `test_forward` WITHOUT the point-pose regression (population retained).
+2. content SDR (M3) — the overlapping encoder feeding L4/L2/3.
+3. recognition as overlap + the L2/3 identity SDR (M4) — over the content SDR, folding in A/B.
+- **M5 — HTM temporal memory (follow-on).** Replace the symbolic `SequenceMemory` dict with predictive cells in an SDR
+  (distal-context → predictive state → bursting), so "predictive state / bursting / non-convergence" are literal.
+
+**Prerequisite surfaced by the M1 attempt: cue commitment.** The point-pose exposed that the agent DROPS a cued target
+when its salience flickers (e.g. the marker's pop-out vanishes when the body is adjacent) → a 2-cycle one step from the
+goal. Whether the population masks it or not, this is a real discovery-robustness gap (BG "hold your horses" —
+`reference_basal_ganglia`): once cued to a target, COMMIT to reaching it. Fix it as part of the combined change (or just
+before), and verify NavGame/collectall stay green.
 
 ## Relationship to the existing plan
 This is not a new axis — it is the SUBSTRATE the A–E plan (ARCHITECTURE §10) already assumes: A (persistent session /
