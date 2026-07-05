@@ -42,6 +42,7 @@ def _local_disps_all(locs, radius):
     for i, p in enumerate(locs):
         grid.setdefault((round(float(p[0])), round(float(p[1]))), []).append(i)
     r = int(math.ceil(radius))
+    r2 = radius * radius
     out = []
     for i, p in enumerate(locs):
         px, py = round(float(p[0])), round(float(p[1]))
@@ -49,7 +50,7 @@ def _local_disps_all(locs, radius):
         for dx in range(-r, r + 1):
             for dy in range(-r, r + 1):
                 for j in grid.get((px + dx, py + dy), ()):
-                    if j != i and np.linalg.norm(locs[j] - p) <= radius:
+                    if j != i and (locs[j][0] - p[0]) ** 2 + (locs[j][1] - p[1]) ** 2 <= r2:
                         nb.append(locs[j] - p)
         out.append(np.array(nb) if nb else np.empty((0, 2)))
     return out
@@ -64,13 +65,14 @@ class ObjectGraph:
         self.name = name
         self.radius = radius
         self.locs = [np.asarray(c, float) for c in cloud]
+        self.locs_arr = np.asarray(self.locs, float) if self.locs else np.empty((0, 2))   # (N,2) for a VECTORISED nearest (no per-node np.linalg.norm)
         self.disps = _local_disps_all(self.locs, radius)                                  # L5: equivariant geometry (O(n))
         self.sig = [invariant_sig(d) for d in self.disps]                                 # L4: invariant 'what'
 
     def nearest(self, loc):
-        d = [np.linalg.norm(loc - n) for n in self.locs]
-        i = int(np.argmin(d))
-        return i, d[i]
+        d2 = ((self.locs_arr - loc) ** 2).sum(axis=1)                                     # squared distances, one vectorised op — sqrt only the winner
+        i = int(np.argmin(d2))
+        return i, float(d2[i] ** 0.5)
 
     def cells_at(self, theta, t):
         return apply_pose(self.locs, theta, t)

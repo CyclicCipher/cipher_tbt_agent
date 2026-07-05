@@ -16,6 +16,8 @@ extension (one more delta dimension, fed by the recogniser's inferred angle)."""
 
 from __future__ import annotations
 
+import math                                                     # cheap 2-vector magnitude (np.linalg.norm has crippling per-call overhead)
+
 import numpy as np                                              # the pose operators act on small point clouds
 import torch.nn as nn
 
@@ -41,15 +43,18 @@ def local_disps(locs, i, radius):
     """Node `i`'s local patch = the displacement vectors to cells within `radius` (group-EQUIVARIANT -- they
     transform with the object). This is the sensed 'feature pose': the local neighbourhood geometry a pose acts on."""
     p = locs[i]
-    return np.array([locs[j] - p for j in range(len(locs)) if j != i and np.linalg.norm(locs[j] - p) <= radius])
+    r2 = radius * radius
+    return np.array([locs[j] - p for j in range(len(locs))
+                     if j != i and (locs[j][0] - p[0]) ** 2 + (locs[j][1] - p[1]) ** 2 <= r2])
 
 
 def _sets_match(A, B, tol):
     """Do point sets A, B coincide (each a in A matched to a distinct b in B within tol)?"""
     B = list(B)
+    t2 = tol * tol
     for a in A:
         for k, b in enumerate(B):
-            if np.linalg.norm(a - b) <= tol:
+            if (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 <= t2:
                 B.pop(k)
                 break
         else:
@@ -68,8 +73,9 @@ def pose_between(model_disps, sensed_disps, tol=0.05):
         return [0.0]
     out: list[float] = []
     v0 = model_disps[0]
+    n0 = math.hypot(v0[0], v0[1])
     for w in sensed_disps:                                   # pair v0 with each equal-length sensed vector -> a candidate
-        if abs(np.linalg.norm(w) - np.linalg.norm(v0)) > tol:
+        if abs(math.hypot(w[0], w[1]) - n0) > tol:
             continue
         theta = float(np.arctan2(w[1], w[0]) - np.arctan2(v0[1], v0[0]))
         if _sets_match([rot(theta) @ v for v in model_disps], sensed_disps, tol) and \
