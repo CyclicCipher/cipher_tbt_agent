@@ -42,6 +42,7 @@ class Agent:
         self._here = None                                                     # the current pose position (col.here_position())
         self._here_prev = None                                                # the previous pose position (the SF value transition)
         self._salient = None                                                  # a salient target this turn (cued discovery)
+        self._cued = None                                                     # the COMMITTED cued target — held until reached or stuck (the cue's salience flickers off when the body is adjacent)
         self._babble_target = None                                            # the current goal-babbling target (resampled on arrival/stall)
         self._stuck = 0                                                        # consecutive no-progress steps (a target we can't approach — abandon it)
         self.goal = None                                                      # (kind, target) chosen this turn — for introspection
@@ -103,11 +104,17 @@ class Agent:
             self.goal = ("exploit", self._goal_pos_raw)
             if a is not None:
                 return a
-        if self._salient is not None:                                        # CUED discovery: a salient percept is a candidate goal to test
-            a = self.col.navigate_vector(here, self._salient, acts)
-            self.goal = ("cued", self._salient)
-            if a is not None:
-                return a
+        if self._salient is not None:                                        # a salient percept this turn → COMMIT to it (the cue flickers off when the body is adjacent — hold it)
+            self._cued = self._salient
+        if self._cued is not None:                                           # CUED discovery: navigate to the committed target ("hold your horses")
+            if _dist(here, self._cued) < 2.0 or self._stuck >= 4:            # reached it (the game scores here if it was the goal), or can't approach → release to re-acquire
+                self._cued = None
+            else:
+                a = self.col.navigate_vector(here, self._cued, acts)
+                if a is not None:
+                    self.goal = ("cued", self._cued)
+                    return a
+                self._cued = None                                            # navigator gave up → release
         if self._babble_target is None or _dist(here, self._babble_target) < 2.0 or self._stuck >= 4:   # UNCUED goal babbling — resample on arrival OR when STALLED (a target we can't approach, e.g. past a wall)
             self._babble_target = self._sample_babble()
             self._stuck = 0
