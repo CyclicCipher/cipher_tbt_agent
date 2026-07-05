@@ -79,6 +79,17 @@ prediction, different driver. "Planning over the map" is the value read off the 
   error — that recognises also learns. The object's **form** (this static graph) is learned first; its **behaviors** (§5)
   are the temporal-sequence layer on top. (Numenta grid-cell framework, Hawkins et al. 2019; Monty / Thousand Brains
   Project 2024: "no match during recognition → add a new graph"; novelty-gated node addition.)
+- *Temporal pooling — the identity is STABLE and PERSISTENT (not recomputed each step).* L4 runs the transition memory
+  (predict the next sensation, §5); a subpopulation in L2/3 **pools** the succession of predicted L4 SDRs — a slowly-decaying
+  **union** — into ONE stable object SDR that stays fixed as the sensor moves over the object, and is **re-pooled only when
+  L4's prediction ERRORS** (surprise). So recognition is *tracked*, not re-solved from scratch every step; this is the
+  temporal-pooler circuit (L4 transition memory → L2/3 union pooling, Numenta) and the fix for both the per-step
+  re-recognition cost and the per-step spurious re-learning (a new object is allocated only when the pooled SDR is
+  confidently novel).
+- *Associative recall, not a serial scan.* Matching the pooled SDR against the object library is an **SDR overlap** against
+  a library **UNION** (θ-thresholded), ~independent of library size — never a nearest-neighbour scan over every stored node
+  (the O(n²) trap the notes call out). This needs the content/location as **overlap-bearing SDRs** (P5), not exact-match
+  keys; capacity is not the constraint (sparse codes don't interfere) — recall *speed* is, and the union solves it.
 
 **Temporal sequence memory is one mechanism, instantiated per layer** — L4 (features), L2/3 (displacements), L5 (actions)
 — differing only in the context that drives the prediction; L6's temporal structure is the SR, not this. See §5.
@@ -118,6 +129,48 @@ around barriers** (boundary-vector-cell → SR): `V = M·(reward − cost)` give
 `−∞` / transition-dead-end limit. The two axes of the one value — pragmatic (reward − cost) + epistemic — are what make
 explore vs exploit, and approach vs avoid, *emerge* rather than switch. (ACC expected-cost: Kennerley & Walton; LHb
 aversive value: Matsumoto & Hikosaka 2007; barrier-warping BVC-SR: de Cothi & Barry 2020.)
+
+## 3b. The heterarchy — receptive fields, the column sheet, and communication
+
+The rest of this doc says "columns vote" (§3) and "many columns become one percept" but never specifies the **multi-column
+substrate**: how a column gets its slice of the world, how a region is built from columns, and how they talk. That substrate
+is here. One column models a *whole* object through its own small window; a **region is a sheet of such columns**; the
+percept is their consensus (Numenta TBT). Today we run **one column on the whole frame** — the single-object bottleneck that
+makes a multi-object scene thrash (re-segmenting a different blob each step). The sheet is what fixes that.
+
+**Receptive field.** A column attends to exactly ONE overlapping **window of the input** — its "straw." Every column runs
+the identical algorithm; a column *is* its RF plus what it has learned to model there (a retinal patch → a V1 column; a
+patch of the thalamus → a PFC attention column). RFs **overlap** and tile the input. On ARC's 2-D screen a visual patch simply
+*is* a frame window — the notes' "project a patch across space" caveat needs depth only in 3-D. The RF is the source of L4's
+**proximal (feedforward)** input, and it is **fixed transduction geometry** (like the retina's sampling), *not* a learned or
+per-task heuristic (rule 4): what is learned is the MODEL in the window, never the window itself.
+
+**The column sheet (a region — our "visual cortex").** A region = a sheet of the identical column, each on one overlapping
+RF, each **independently** modelling the scene from its patch — thousands of models in parallel (Hawkins 2019). This is MANY
+INSTANCES of the ONE column, not a parallel *system* (rule 1): the mechanism is replicated, not forked. It is the substrate
+for parallel/robust recognition and (later) voting; a single column cannot vote with itself.
+
+**RF creation + assignment.** Topology assigns each column its window: in HTM the spatial pooler's *potential pool* is
+restricted to a local neighbourhood, which *is* the column's RF; neighbouring RFs map to neighbouring columns (topographic),
+so neighbours vote as neighbours. For us the tiling is a **fixed peripheral choice** — overlapping windows over the frame,
+one column each, calibrated like RF size/stride — anatomy, not a learned rule.
+
+**Communication — three dendrite channels + the thalamus.** **Proximal** = feedforward (the RF / the layer below drives
+firing); **basal/distal** = lateral, same-level (context + the **voting** channel between columns, at L2/3); **apical** =
+feedback (top-down predictions from a higher region). Cross-region routing is the **thalamus** (§3). Axon bundles may merge
+and split freely — SDRs are overlap/noise-robust — so a local clue in one column spreads laterally or up/down to *any* level
+(the horse-in-the-distance: an edge column, a shape column, and a ground column combine into one answer).
+
+**Heterarchy, not hierarchy.** More than 40% of possible inter-region connections exist; *any* level can inform any other. A
+higher region models the SAME objects at a **larger scale / a more abstract, more permanent domain** — it extracts MODELS at
+different scales, NOT bigger features (the deep-learning error). Object **composition** is the displacement mechanism at a
+bigger grain: a LARGE inter-object displacement places one object's frame inside another's (objects-in-objects), so a
+multi-object **scene** is ONE composed model and a *sequence* of such displacements is the scene's behavior (§5). Abstract /
+task levels reuse the same grid machinery on a task-space map (PFC/OFC — `reference_hierarchy_substrate`).
+
+**Where voting sits.** Voting is the **last** step (§3, at L2/3): columns sensing different patches independently solve the
+SAME world pose and pool their evidence by it, so the truth wins in a single glance (Numenta CMP; `tbt/l23_object.vote`). It
+presupposes the sheet + per-column pooled identities (§2 L2/3) — so it comes *after* the sheet and the pooler, not before.
 
 ## 4. The sensorimotor loop — how the model touches the world
 
@@ -504,6 +557,23 @@ it — L5 is now just the efference copy + motor + pose geometry. Results: **Nav
 passed / 7 xfailed. OrientationGame is discovery-limited (its goal is invisible → babble lottery, not perception). Open:
 the retina salience cue is less efficient than the old proto-object centroid on MockLive; the P4 goal loop (§9) for
 invisible-goal discovery.
+
+**Perception scaling + the multi-column substrate (PLAN, 2026-07-04).** Profiling the retired-tabular games exposed a
+**catastrophe**: recognition is re-run FROM SCRATCH every frame (`_sense_shape → start()`) as a serial nearest-neighbour
+scan over the whole object library, and on a multi-object scene the single-self grouping is unstable, so a **new object is
+learned almost every frame** (→52 on Sokoban) and per-frame cost grows O(library). TBT/HTM (notes + the Numenta temporal
+pooler) say the perf problem and the duplication problem are ONE disease with one cure. Dependency-ordered next steps:
+- **A — L2/3 temporal pooling + persistence (immediate).** L4 transition memory (reuse `SequenceMemory`) predicts the next
+  sensation; L2/3 pools the predicted-SDR succession into a STABLE identity, re-pooled only on L4 surprise; recognition is
+  *tracked*, not recomputed; learning is gated to confident novelty (§2 L2/3). Kills the per-step scan + the duplication →
+  the unsupported games fail FAST.
+- **B — associative recall (SDR union + overlap-θ).** Replace the serial library scan with overlap against a library union,
+  ~O(1) in library size. Needs overlap-bearing content/location SDRs (P5) — pulled forward for perception, not just location.
+- **C — receptive fields + the column sheet (§3b).** Tile the frame with overlapping RF windows, one ONE-column instance
+  each — the multi-object substrate (retire the single-whole-frame column). Needed regardless; the fix to multi-object.
+- **D — communication + heterarchy (§3b).** Proximal/basal/apical channels + thalamus routing; object composition by large
+  inter-object displacements.
+- **E — voting (last).** Pool (object, pose) across the sheet by world pose (`vote()` exists); presupposes C+A.
 
 ## 11. Acceptance test for every change (the paper test)
 
