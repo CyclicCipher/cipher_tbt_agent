@@ -71,12 +71,15 @@ prediction, different driver. "Planning over the map" is the value read off the 
   (boundaries from prediction mismatch, never a colour/connected-component heuristic); vote laterally and across columns.
   Holds **temporal sequence memory over displacements** (§5): recognise the object's **phase** in its behavior and predict
   the next displacement.
-- *Learn a new object (allocate-on-mismatch):* when accumulating evidence matches **no** stored model across steps,
-  allocate a **new frame** anchored at **first contact** and populate it by sensorimotor exploration — sense content at the
-  current location, move (path-integrate the operator), sense the next, adding each `(content, displacement)` node only if
-  novel (de-duplicated). Unsupervised, label-free, incremental; the learn-vs-recognise decision is driven by **persistent
-  prediction mismatch**, never a segmentation heuristic (rule 5). The same column machinery — path integration + prediction
-  error — that recognises also learns. The object's **form** (this static graph) is learned first; its **behaviors** (§5)
+- *Learn a new object (CONVERGENCE-or-not, no novelty detector).* Recognition is a **settling process over a PERSISTENT
+  session** — evidence accumulates across the moving sensor (the session is NOT restarted each frame; hypotheses are
+  path-integrated by the efference between sensations) + lateral voting. If the feedforward keeps supporting one object as
+  the sensor moves, it **converges** → recognised. If **none** converges (sustained non-convergence — the predictions keep
+  bursting), the unexplained observations **seed a NEW frame**, populated by continued sensorimotor exploration (each
+  `(content, displacement)` node added if unpredicted). There is NO explicit novelty test / threshold / shape-hash (Hawkins
+  2017): the same settling that recognises also allocates — a new object is just what wins when nothing existing does. The
+  same column machinery — path integration + prediction error — that recognises also learns; never a segmentation heuristic
+  (rule 5). The object's **form** (this static graph) is learned first; its **behaviors** (§5)
   are the temporal-sequence layer on top. (Numenta grid-cell framework, Hawkins et al. 2019; Monty / Thousand Brains
   Project 2024: "no match during recognition → add a new graph"; novelty-gated node addition.)
 - *Temporal pooling — the identity is STABLE and PERSISTENT (not recomputed each step).* L4 runs the transition memory
@@ -266,9 +269,18 @@ agent," would be a load-bearing harness (rules 4–5); that decision is the colu
   (high-order) representations; instantiated in L4 (features), L2/3 (displacements), L5 (actions). L6's is the SR.
 - **phase** — the current position in a behavior/sequence = the temporal context; a recurrent state.
 - **object** — a learned frame of content-at-displacements (with behaviors), recognised by voting; pose and phase
-  inferred; boundaries from prediction mismatch; **learned by allocate-on-mismatch** — recognise, else add a new frame and
-  populate it by sensorimotor exploration (§2). NOT a segment, a change-log, or a tracked mover.
-- **prediction error / surprise** — predicted vs sensed content. The ONLY "something changed" signal; no stored change-log.
+  inferred; boundaries from prediction mismatch; **learned by CONVERGENCE-or-not** (see *novelty*), NOT a segment, a
+  change-log, or a tracked mover.
+- **predictive state** — a cell/hypothesis primed by context (distal/apical) to fire next; the model's PREDICTION of the
+  next sensation. A hypothesis in good standing during recognition is one. (HTM temporal memory; `SequenceMemory`'s
+  predicted next element.)
+- **bursting / prediction error / surprise** — the input was NOT predicted (no primed cell / all hypotheses mismatch). The
+  ONLY "something changed" signal and the ONLY learn-trigger ("you only learn when a prediction is wrong"); no stored
+  change-log, no threshold — it is the discrete predict-vs-sense mismatch (sensor tolerance, not a novelty knob).
+- **novelty** — NOT a detected score (like *confidence*, it is not a scalar). Novelty is the **absence of CONVERGENCE**:
+  recognition is a settling process (persistent evidence over a moving sensor + lateral voting); if the feedforward keeps
+  supporting one object across sensations it CONVERGES → recognised; if NONE converges, the unexplained observations seed a
+  new object → allocation. No explicit novelty detector (Hawkins 2017); "sustained novelty" = sustained non-convergence.
 - **value** — expected future reward incl. cost, one currency (the critic). The ONLY value.
 - **goal** — a target-state to bring about; the motor acts to fulfil it.
 - **selection** — the basal ganglia choosing among goals/actions.
@@ -563,10 +575,13 @@ invisible-goal discovery.
 scan over the whole object library, and on a multi-object scene the single-self grouping is unstable, so a **new object is
 learned almost every frame** (→52 on Sokoban) and per-frame cost grows O(library). TBT/HTM (notes + the Numenta temporal
 pooler) say the perf problem and the duplication problem are ONE disease with one cure. Dependency-ordered next steps:
-- **A — L2/3 temporal pooling + persistence (immediate).** L4 transition memory (reuse `SequenceMemory`) predicts the next
-  sensation; L2/3 pools the predicted-SDR succession into a STABLE identity, re-pooled only on L4 surprise; recognition is
-  *tracked*, not recomputed; learning is gated to confident novelty (§2 L2/3). Kills the per-step scan + the duplication →
-  the unsupported games fail FAST.
+- **A — persistent recognition session (settling → convergence-or-not) (immediate).** Stop restarting recognition each
+  frame (`_sense_shape → start()`); keep ONE session, path-integrating hypotheses by the efference between frames, so
+  evidence accumulates across the moving sensor (temporal integration; L4 `SequenceMemory` feeds the next-feature
+  prediction). Recognition is *tracked*, not recomputed. Novelty = **non-convergence** (no explicit detector/threshold — §2
+  L2/3, glossary): recognised = a hypothesis converges; novel = none converges → seed a new object. Delete the scalar/
+  heuristic proxies (`_shape_key`/`_novel_key`/`best_ev<1.0`, dead `agent.surprised`). Kills the per-step from-scratch scan
+  + the duplication → the unsupported games fail FAST.
 - **B — associative recall (SDR union + overlap-θ).** Replace the serial library scan with overlap against a library union,
   ~O(1) in library size. Needs overlap-bearing content/location SDRs (P5) — pulled forward for perception, not just location.
 - **C — receptive fields + the column sheet (§3b).** Tile the frame with overlapping RF windows, one ONE-column instance
