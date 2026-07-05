@@ -22,7 +22,7 @@ import torch.nn as nn
 from .l4_feature_location import L4_FeatureLocation
 from .l5_displacement import L5_Displacement
 from .l6_sr import SuccessorFeatures
-from .l23_object import L23_Object
+from .l23_object import L23_Object, ObjectGraph, _canonical
 from .hippocampus import Hippocampus
 from .retina import connected_figure, view_signature
 
@@ -39,6 +39,8 @@ class CorticalColumn(nn.Module):
         self._pred_error = 0.0
         self._prev_cells: dict = {}                          # the previous frame's feature-at-locations {(x,y): colour} (for common-fate bootstrap)
         self._self_cells = None                              # the last self body's world cells (the top-down footprint the model predicts forward)
+        self._tracked = None                                 # the currently CONVERGED object identity (persistent recognition session, §10-A)
+        self._cand = None                                    # a provisional candidate object — committed only when it CONVERGES across a frame
 
     # ----- perception: recognise → feed the hippocampus (entorhinal-IN) → read the belief back -------------------
     def perceive(self, action, coloured_cells):
@@ -107,10 +109,13 @@ class CorticalColumn(nn.Module):
         return (pts - c) @ _rot(dth).T + c + world               # rigid body motion of the footprint
 
     def track_reset(self):
-        """A level boundary: drop the pose belief AND the previous-frame store (the board resets)."""
+        """A level boundary: drop the pose belief AND the previous-frame store (the board resets). The object LIBRARY
+        persists (the same objects recur next level), but the tracked identity + candidate re-acquire by settling."""
         self.hip.reset()
         self._prev_cells = {}
         self._self_cells = None
+        self._tracked = None
+        self._cand = None
 
     def forward(self, action, content):
         """The ONE forward prediction (§5) — a PURE query via the hippocampus (`predict`); the content is INVARIANT under
@@ -172,28 +177,55 @@ class CorticalColumn(nn.Module):
         return self.L4.E[label]
 
     def _sense_field(self, cloud):
-        """PERCEIVE the mover as a sensory EVIDENCE FIELD (a population, not a point) — the near-top L2/3 (object, pose)
-        hypotheses, each reported as `((x, y) centroid, theta, weight)`. L2/3 recognises the shape and SOLVES its pose;
-        the hippocampus superimposes these bumps on its prior, so the SHAPE of this field (sharp / flat / bimodal) IS the
-        sighting's reliability — no scalar confidence (§2 L2/3). The CENTROID of the pose-placed cloud (not the raw
-        hypothesis translation) is the position: it is pose-invariant, so a symmetric object's tied poses share ONE
-        centroid — a sharp position bump — while its headings stay ambiguous (a flat head bump). `[]` when nothing is
-        recognised (→ the belief holds and path-integrates)."""
+        """PERCEIVE the mover as a sensory EVIDENCE FIELD (a population, not a point), via the PERSISTENT recognition
+        session (§2 L2/3, §10-A): recognition is a SETTLING process, and the recognizer's pruning IS convergence — a
+        hypothesis that keeps matching survives, one that stops matching is pruned; surviving hyps ⟺ CONVERGED, none ⟺
+        a burst (using only the sensor tolerance, no novelty threshold). Three cases, no scalar/heuristic gate:
+          1. TRACK — verify the currently-tracked identity ALONE (no library scan). If it still converges, keep it.
+          2. SETTLE — else recognize against the whole library; if a hypothesis converges, that IS the object (track it).
+          3. NON-CONVERGENCE (novelty) — else a provisional CANDIDATE must CONVERGE across a frame before it is committed:
+             a rigid object moves predictably so its candidate re-explains the next frame (→ commit, a real object); an
+             unstable multi-object blob never does (→ never committed, so the library stays bounded). Meanwhile the belief
+             still gets a POSITION sighting (the cloud CENTROID; recognition only adds ORIENTATION).
+        The field's centroid (pose-invariant) is the position; a symmetric object's tied poses share ONE centroid (sharp
+        position bump) while its headings stay ambiguous (flat head bump)."""
         if not cloud:
             return []
-        if self.recognize_object(list(cloud)) is None:
-            return []
+        L = self.L23
+        if self._tracked is not None:                          # 1. TRACK the converged identity (verify it alone)
+            L._sense_shape(list(cloud), only=[self._tracked])
+            if L.hyps:
+                return self._field_from_hyps(cloud)
+        L._sense_shape(list(cloud))                            # 2. SETTLE over the whole library
+        if L.hyps:
+            self._tracked = max(L.hyps, key=lambda h: h.ev).obj   # a hypothesis converged → that is the object
+            self._cand = None
+            return self._field_from_hyps(cloud)
+        if self._cand is not None:                             # 3. NON-CONVERGENCE: the candidate must re-explain THIS frame to be committed
+            L._sense_shape(list(cloud), only=[self._cand])
+            if L.hyps:                                         # it converged across the frame → a real, trackable object → COMMIT
+                self._tracked = L._learn_canonical(list(cloud))
+                self._cand = None
+                L._sense_shape(list(cloud), only=[self._tracked])
+                return self._field_from_hyps(cloud)
+        self._cand = ObjectGraph("cand", _canonical(list(cloud)), L.radius)   # (re)seed the provisional candidate from this cloud
+        c = np.mean(np.asarray([(float(x), float(y)) for (x, y) in cloud], float), axis=0)
+        return [((float(c[0]), float(c[1])), None, 1.0)]        # POSITION-only sighting (no orientation → flat head)
+
+    def _field_from_hyps(self, cloud):
+        """Build the sensory evidence field from the surviving (converged) hypotheses — the near-top population, each a
+        `((x, y) centroid, theta, weight)`; theta is None for a <2-cell view (no orientation → a flat head population)."""
         hyps = self.L23.hyps
         if not hyps:
             return []
-        oriented = len(cloud) >= 2                             # a view of < 2 cells carries NO orientation → it cannot constrain heading
+        oriented = len(cloud) >= 2
         top = max(h.ev for h in hyps)
         field = []
         for h in hyps:
             if top - h.ev >= 1.0:                              # keep the near-top (competing) hypotheses = the evidence population
                 continue
             c = np.mean(np.asarray(h.obj.cells_at(h.theta, h.t), float), axis=0)   # the pose-invariant centroid = the position
-            theta = float(h.theta) if oriented else None       # None = heading UNCONSTRAINED → a flat head population (path-integrate the heading)
+            theta = float(h.theta) if oriented else None
             field.append(((float(c[0]), float(c[1])), theta, float(np.exp(h.ev - top))))
         return field
 

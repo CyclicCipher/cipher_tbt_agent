@@ -143,16 +143,17 @@ class L23_Object(nn.Module):
         self.hyps: list[_Hyp] = []
         self.prev = None
 
-    def sense(self, loc, disps):
+    def sense(self, loc, disps, only=None):
         """One sensation (location + local displacements) — accumulate evidence over the (object, pose) hypotheses.
         INIT (first sensation): for each model node whose LOCAL structure matches, SOLVE the pose(s) (L5) aligning
         it onto the sensed patch; seed evidence. UPDATE: project each hypothesis by the (rotated) displacement,
         find the nearest node, compare — match adds evidence, a morphology mismatch subtracts it; prune. Persistent
-        across calls (never recomputed)."""
+        across calls (never recomputed). `only` restricts the INIT seed to a given object list (TRACKING one identity
+        without scanning the whole library)."""
         loc = np.asarray(loc, float)
         sig = invariant_sig(disps)
         if not self.hyps:                                   # INIT: solve pose from the first sensation
-            for O in self.objects:
+            for O in (self.objects if only is None else only):
                 for i in range(len(O.locs)):
                     if O.sig[i] != sig:
                         continue
@@ -231,18 +232,19 @@ class L23_Object(nn.Module):
         return tuple(round(float(x), 3) for x in best) if best is not None and best_d > 1e-6 else None
 
     # ---- one-shot convenience (sense a whole shape; built on the session) --------------------------------
-    def _sense_shape(self, cloud, max_sense: int = 16) -> int:
+    def _sense_shape(self, cloud, max_sense: int = 16, only=None) -> int:
         """Start a session and sense up to `max_sense` points SPREAD across `cloud` (every k/max_sense-th) -- so
         recognition is O(max_sense * cells), not O(cells^2) (the cost that killed it on a 144-cell ARC block). A
         handful of points discriminate; full-frame ARC never needs every cell, and the GSG is the principled
-        'which points' on top of this. Returns the number of points actually sensed."""
+        'which points' on top of this. `only` restricts the seed to a given object list (TRACKING one identity).
+        Returns the number of points actually sensed."""
         locs = [np.asarray(c, float) for c in cloud]
         k = len(locs)
         idx = range(k) if k <= max_sense else (j * k // max_sense for j in range(max_sense))
         self.start()
         m = 0
         for i in idx:
-            self.sense(locs[i], local_disps(locs, i, self.radius))
+            self.sense(locs[i], local_disps(locs, i, self.radius), only=only)
             m += 1
         return m
 
