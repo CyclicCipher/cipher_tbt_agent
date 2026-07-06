@@ -20,10 +20,12 @@ import numpy as np
 import torch.nn as nn
 
 from .l4_feature_location import L4_FeatureLocation
+from .l4 import L4Layer
 from .l5_displacement import L5_Displacement
 from .l6_sr import SuccessorFeatures
 from .l23_object import L23_Object, ObjectGraph, _canonical
-from .hippocampus import Hippocampus
+from .hippocampus import Hippocampus, _rot
+from .encoders import SDR, CategoryEncoder, GridEncoder
 from .retina import connected_figure, view_sdr
 
 
@@ -32,11 +34,15 @@ class CorticalColumn(nn.Module):
         super().__init__()
         self.L5 = L5_Displacement()
         self.L4 = L4_FeatureLocation(n_entities, feat_dim=feat_dim, seed=seed)
+        self.L4map = L4Layer(cells_per_column=8, activation_threshold=6, min_threshold=4, init_perm=0.55)   # the feature-at-location content map (MICROCIRCUIT Stage 4)
+        self._feat_enc = CategoryEncoder(range(16), w=8, capacity=16)                                       # colour → feature minicolumns
+        self._objloc_enc = GridEncoder(scales=(5, 7, 11), dims=2, mw=1, bounds=[(-24, 24), (-24, 24)])      # the OBJECT-FRAME location code (crisp: exact under translation)
         self.L23 = L23_Object()
         self.board = int(board)
         self.hip = Hippocampus(self.L5, board=board)         # the allocentric map + head-direction gain field (reads L5's efference copy)
         self.sf = SuccessorFeatures(d=self.hip.grid.n)       # value over the allocentric position SDR (the grid-cell code)
         self._pred_error = 0.0
+        self._content_burst = 0.0                            # the fraction of self-cells whose colour was UNPREDICTED at its location (content surprise, §3.4)
         self._prev_cells: dict = {}                          # the previous frame's feature-at-locations {(x,y): colour} (for common-fate bootstrap)
         self._self_cells = None                              # the last self body's world cells (the top-down footprint the model predicts forward)
         self._tracked = None                                 # the currently CONVERGED object identity (persistent recognition session, §10-A)
@@ -56,9 +62,46 @@ class CorticalColumn(nn.Module):
         field = self._sense_field(cells)                           # L2/3 recognition → the sensory EVIDENCE FIELD (a population)
         self._pred_error = self._residual(action, field)          # the forward-model residual (§4c) BEFORE the update
         self.hip.observe(action, field)                            # PATH-INTEGRATE the prior + SUPERIMPOSE the likelihood (no gain/conf)
+        self._bind_content(self_cells, self._object_pose())        # bind colour-at-object-frame-location in L4 (the content map; additive, MICROCIRCUIT Stage 4)
         p = self.hip.here()
         x, y = p if p is not None else (0.0, 0.0)
         return feat, (float(x), float(y), float(self.hip.head))
+
+    # ----- L4 feature-at-location content map (MICROCIRCUIT Stage 4): content prediction / imagination + burst --------
+    def _object_pose(self):
+        """The recognised object's pose `(theta, t)` from L2/3 (M4), or None — the anchoring that maps a WORLD cell into
+        the object's own frame (`R(-theta)·(cell - t)`), so the content map is keyed by feature-at-OBJECT-frame-location."""
+        rec = self.L23.best()
+        return (float(rec[1]), rec[2]) if rec is not None and rec[2] is not None else None
+
+    def _obj_frame(self, wx, wy, pose):
+        """A world cell → its integer OBJECT-FRAME location under `pose=(theta, t)` (the L4 map's key)."""
+        theta, t = pose
+        ofl = _rot(-theta) @ (np.array([float(wx), float(wy)]) - np.asarray(t, float))
+        return (int(round(float(ofl[0]))), int(round(float(ofl[1]))))
+
+    def _bind_content(self, self_cells, pose):
+        """Bind each self-cell's COLOUR at its OBJECT-FRAME location in L4 (the feature-at-location map), and record the
+        BURST fraction (colours sensed where a DIFFERENT colour was learned = content surprise, §3.4). No-op until a pose is
+        recognised (needs the object frame). Additive: touches only `L4map` + `_content_burst`, never the localization loop."""
+        if pose is None or not self_cells:
+            return
+        burst = 0
+        for (wx, wy, colour) in self_cells:
+            loc = self._objloc_enc.encode(self._obj_frame(wx, wy, pose)).active
+            self.L4map.observe(self._feat_enc.encode(int(colour)).active, loc)
+            burst += int(self.L4map.burst())
+        self._content_burst = burst / len(self_cells)
+
+    def predict_content_at_world(self, wx, wy, pose=None):
+        """IMAGINATION (§3.3, object permanence): the COLOUR L4 predicts at world cell `(wx, wy)` — map it into the object
+        frame (the current recognised pose unless given) and query the L4 content map WITHOUT sensing it. None if unmapped
+        (the map does not cover that object-frame location). A pure query; does not mutate the map."""
+        pose = pose or self._object_pose()
+        if pose is None:
+            return None
+        cols = self.L4map.predict_feature(self._objloc_enc.encode(self._obj_frame(wx, wy, pose)).active)
+        return self._feat_enc.decode(SDR(self._feat_enc.n, cols)) if cols else None
 
     def _attend_self(self, action, coloured_cells, tol: float = 1.6):
         """Group the frame's feature-at-locations into the SELF by TOP-DOWN FIGURE-GROUND (reference_tbt_segmentation_and_

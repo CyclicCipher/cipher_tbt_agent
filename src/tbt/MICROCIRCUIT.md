@@ -172,13 +172,26 @@ not grid bits. **Scope split (correction to the earlier wording):** Stage 3 subs
 wiring — so "recognise at an unseen POSE" is a **Stage 4** item (§6 Risk 2), not Stage 3. `test_l23_object` (the M4
 recogniser) stays GREEN — the live recogniser until Stage 5 retires it. Suite 77 passed / 6 xfailed / 1 xpassed.
 
-**Stage 4 — wire the microcircuit in the column.** Rewire `column.perceive`/`forward` to the §2 loop; keep the
-hippocampus localization loop + navigation. Verify: the games (MockLive, sokoban, collectall) + recognition tests stay
-green. HIGHEST risk (integration + the pose migration) — do it behind the existing method signatures, swapping the
-content/recognition path while the localization loop is untouched; revert-and-instrument on any regression (M1 lesson).
+**Stage 4 — wire the L4 feature-at-location CONTENT MAP into the column. ✅ DONE (2026-07-06).** The additive half of "wire
+the microcircuit": `perceive` now drives `l4.L4Layer` (`self.L4map`) — each self-cell's COLOUR bound at its OBJECT-FRAME
+location (world cell mapped through the RECOGNISED pose, `R(−θ)·(cell−t)`, `_bind_content`), so L4 learns the object's
+feature-at-location map. This gives the NEW capabilities L4 exists for — **content PREDICTION / imagination**
+(`predict_content_at_world`: the colour L4 expects at a location, before sensing it → object permanence) and a **content
+BURST** (`_content_burst`: colours sensed where a different one was learned = surprise, the dense learning signal, §3.4).
+Kept STRICTLY behind the tested contracts (perceive still returns `view_sdr` + the hippocampus pose; `forward` still echoes
+content; `_pred_error` stays the pose residual) — the localization loop is UNTOUCHED and the L4 path only ADDS `_content_burst`
++ the imagination query. Pose comes from the M4 recogniser (`L23.best()`); using it (not an ad-hoc centroid) keeps the
+object frame a recognition product (rule 1). `test_column_microcircuit.py` (2 tests): the column IMAGINES the object's
+colours at its cells from the learned map, and the content burst RISES when a cell's colour changes. Additive, revert the
+one `perceive` call on any regression (M1 lesson). Suite 79 passed / 6 xfailed / 1 xpassed — games (MockLive/sokoban/
+collectall/NavGame) + the pose tests all green.
 
-**Stage 5 — retire the subsumed machinery.** The old L4 int codebook + `content_code`; M4's now-redundant pose machinery
-(or keep virtual rotation as the L6-anchor search). Cleanup + delete the dead tests, suite green.
+**Stage 5 — the pose→L6 migration: the L2/3 pooler becomes the live recogniser, retiring M4.** The risky half. Infer pose
+as the **L6 anchoring that makes L4's predictions match** (the virtual-rotation search migrated from M4 onto the grid
+modules — §6 Risk 2), so the Stage-3 `L23Pooler` (SP-over-L4 + union-then-narrow) becomes the column's live recogniser and
+`_sense_field`/`L23_Object` (M4) is retired. Then retire the old L4 int codebook + `content_code`. Cleanup + delete the dead
+tests; suite green. (Until here M4 stays the live pose/recogniser — the pooler is redundant with it, so wiring the pooler
+LIVE only earns its place once it also owns pose.)
 
 **Stage 6 — validate the NEW capabilities (the payoff).** New tests + wiring: content dynamics (a toggling feature),
 object behavior (open/close via the L2/3 sequence), config-dependence (Sokoban push as basal context), imagination
