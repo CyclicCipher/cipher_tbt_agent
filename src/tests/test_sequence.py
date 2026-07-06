@@ -143,3 +143,37 @@ def test_config_dependent_transition_is_context_conditioning():
     assert sm.predict() == "box_moved" and sm.confident()     # config = empty -> the push moves the box
     sm.reset(); sm.observe(("behind_wall", "push"))
     assert sm.predict() == "box_stayed" and sm.confident()    # config = wall -> the push is blocked (config-dependent)
+
+
+def test_apical_is_a_pure_tiebreak_on_basal_predictions():
+    """MICROCIRCUIT Stage 1 — the APICAL channel (top-down feedback, `observe(element, apical=...)`) is a PURE TIEBREAK on
+    the BASAL prediction (Hawkins & Ahmad 2016; Numenta apical_tiebreak_temporal_memory): an active BASAL segment predicts
+    a cell, an active APICAL segment ALONE does NOT. Among the cells a column basally predicts, apical NARROWS to the
+    apically-supported subset IF ANY exist, else keeps ALL of them; apical never fires a cell and never causes/prevents a
+    burst. Set up a column W with TWO cells both basally predicted (W-cell0->D tagged apical F1, W-cell1->E tagged apical
+    F2) and check the SAME basal prediction resolves differently by the top-down feedback, the mismatch-fallback, and no
+    burst. (`apical=None` reducing EXACTLY to the basal TM is covered by every other test above, which pass unchanged.)"""
+    sm = SequenceMemory(order=2)
+    F1, F2, F3 = set(range(1000, 1008)), set(range(2000, 2008)), set(range(9000, 9008))
+    conn = sm.connected + 0.1
+    W = sorted(sm._cols("W")); D = sorted(sm._cols("D")); E = sorted(sm._cols("E"))
+    for w in W:                                                    # W-cell0 tagged apical F1; W-cell1 tagged apical F2
+        sm.apical_seg[(w, 0)] = [{b: conn for b in F1}]
+        sm.apical_seg[(w, 1)] = [{b: conn for b in F2}]
+    for c in D:
+        sm.seg[(c, 0)] = [{(w, 0): conn for w in W}]              # W-cell0 basally predicts D
+    for c in E:
+        sm.seg[(c, 0)] = [{(w, 1): conn for w in W}]              # W-cell1 basally predicts E
+
+    def preset():                                                 # both W cells basally predicted = an AMBIGUOUS basal prediction
+        sm._predictive = {(w, 0) for w in W} | {(w, 1) for w in W}
+        sm._active_segs = {}
+
+    preset(); sm.observe("W")
+    assert sm.candidates() == {"D", "E"} and not sm._burst        # no feedback -> BOTH basal cells fire -> ambiguous
+    preset(); sm.observe("W", apical=F1)
+    assert sm.predict() == "D" and sm.confident() and not sm._burst   # F1 narrows to W-cell0 -> D
+    preset(); sm.observe("W", apical=F2)
+    assert sm.predict() == "E" and sm.confident() and not sm._burst   # F2 narrows to W-cell1 -> E (SAME basal, different top-down)
+    preset(); sm.observe("W", apical=F3)
+    assert sm.candidates() == {"D", "E"} and not sm._burst        # MISMATCH: falls back to ALL basal, NEVER bursts on apical

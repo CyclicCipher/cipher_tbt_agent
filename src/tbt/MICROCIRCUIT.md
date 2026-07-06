@@ -22,9 +22,10 @@ NOT the **content/prediction** loop:
 2. **The layers are three incompatible mechanisms, not one substrate.** L4 = int codebook; L2/3 = a point-cloud
    evidence recogniser (M4); L5 = float efference tuples/matrices. §5's "ONE temporal-sequence-memory mechanism
    instantiated per layer" is aspirational — the M5 HTM TM exists but is a detached component, wired into nothing.
-3. **There is NO top-down (apical) channel.** Nothing feeds back down. So: no **frame gating** (the object cannot select
-   which of its many learned frames is active — §"one active frame" discussion), no **hierarchy / modes**, no **top-down
-   attention**.
+3. **There is NO top-down (apical) channel and NO output-layer pooler.** Nothing feeds back down, and there is no
+   location-invariant object layer. So: no **frame selection** (the pooler + voting that pick which learned frame is
+   active — §"one active frame"; this is L2/3's job, Stage 3), no top-down **confirm/bias/mismatch** (the apical tiebreak),
+   no **hierarchy / modes**, no **top-down attention**.
 4. **No content prediction.** `forward` merely ECHOES the given content (valid only for self-motion reafference). The
    column cannot predict a feature that CHANGES, nor the feature at an unvisited location.
 5. **The column models static shapes at poses.** No dynamics / behaviors / order-config rules, even though `Behavior`
@@ -45,14 +46,17 @@ Layer roles (Numenta "Columns"; Lewis grid-cell framework):
   built** (`hippocampus`, M1). One reusable coordinate system (§"single cohesive reference frame").
 - **L4 — the sensorimotor INPUT layer.** Minicolumns = the feed-forward feature (the content SDR). Cells-per-column give
   context. **Basal context = the L6 location ⊕ L5 efference** (so the same feature at a different location / under a
-  different movement is a different cell). **Apical = the L2/3 object** (gates which object's map is predicted). L4 IS the
-  object's **feature-at-location map**: query it with a location (L6) + object (L2/3) → the predicted feature there. A
-  *burst* = the sensed feature was not predicted = surprise / wrong-object / new-object.
+  different movement is a different cell). **Apical = the L2/3 object** — a pure TIEBREAK that CONFIRMS / biases L4's
+  BASAL prediction and detects mismatch; it does NOT by itself select the object (see the correction note below). L4 IS the
+  object's **feature-at-location map**: query it with a location (L6), narrowed by the object (L2/3) → the predicted
+  feature there. A *burst* = the sensed feature was not BASALLY predicted = surprise / new-feature (apical never bursts).
 - **L2/3 — the OUTPUT / object layer (the "column pooler").** Proximal = the active L4 cells. It **temporal-pools** them
   into a STABLE, location-INVARIANT object SDR (a slowly-decaying union, re-pooled on L4 surprise — reuse M5's pooling
   idea). Lateral = **voting** across columns + within-column stability. Apical = higher-region feedback (hierarchy;
   deferred). Recognition = which pooled object SDR the current L4 activity matches (**associative recall / overlap**, the
-  M4 primitive, now over the L4 representation). It feeds **back to L4 (apical)** — this is frame gating.
+  M4 primitive, now over the L4 representation). It feeds **back to L4 (apical)** to bias/confirm L4's predictions — but
+  the OBJECT is SELECTED HERE (this pooling + lateral voting), NOT by the apical channel. **THIS is where frame selection
+  lives** (correction below).
 - **L5 — motor / output.** The efference copy (per-action displacement → L6) — **already built** (M1). Plus a minicolumn
   TM over ACTIONS (motor skills / sequences), basal context = the program phase. (The efference is load-bearing; the
   action-sequence memory is a lower-priority add.)
@@ -63,27 +67,39 @@ Layer roles (Numenta "Columns"; Lewis grid-cell framework):
                                   │
    L6 path-integrates location by a  ─►  new location SDR ─┐
                                                            ▼ (basal)
-   L2/3 object ──(apical)──►  L4: PREDICT the feature at the new location
+   L2/3 object ──(apical, tiebreak)──►  L4: narrow the BASAL (location) prediction of the feature
                                   ▲ (proximal)
    retina view_sdr ─────────────►  L4: the SENSED feature fires the predicted cells (or BURSTS = surprise)
                                   │
                                   ▼ (proximal, up)
-   L4 active cells ───────────►  L2/3: POOL → the stable object SDR ──► vote (lateral)
+   L4 active cells ───────────►  L2/3: POOL → the stable object SDR ──► vote (lateral) ── SELECTS the object/frame
                                   │
-                                  └──(apical, down)──►  gates L4's next prediction   ⟲
+                                  └──(apical, down)──►  biases/confirms L4's next prediction (tiebreak, never gates)  ⟲
 ```
 Pose = the L6 location (+ orientation/anchor) combined with the object identity — **not a separate solve** (this is the
 key migration: M4's virtual-rotation pose inference becomes "which L6 anchoring makes L4's predictions match," i.e. pose
 lives in L6, the object in L2/3 is location-invariant). **Is this how a real column does it?** Yes — Numenta's input/output
 two-layer circuit is exactly this; the location-invariant object + location-variant input is the core of "Columns."
 
+> **⚠ CORRECTION (2026-07-06, from the Stage 1 research — Numenta `apical_tiebreak_temporal_memory`, Hawkins & Ahmad
+> 2016).** An earlier draft of this doc (and my framing of it) OVERSTATED the apical channel as "gating" / "frame
+> selection." The literature is unambiguous: **an active basal segment predicts a cell; an active apical segment alone
+> does NOT.** Apical is a pure TIEBREAK — among the cells a column *basally* predicts, it narrows to the apically-supported
+> subset if any exist, else keeps ALL of them; it never fires a cell, never causes or prevents a burst, and its learning
+> is downstream of the basal winner. Consequently apical **cannot split a cell that basal made shared**, so it does NOT
+> disambiguate two identical-prefix sequences — the OBJECT is selected by the **L2/3 pooler + lateral voting** (Stage 3),
+> and the apical to L4 only CONFIRMS / biases / detects-mismatch. This reassigns the load-bearing "frame selection" from
+> Stage 1 (apical) to Stage 3 (L2/3), and simplifies Stage 1 to the faithful tiebreak (BUILT 2026-07-06, `sequence.py`,
+> `test_apical_is_a_pure_tiebreak_on_basal_predictions`).
+
 ## 3. What it unlocks (why, beyond biological accuracy)
 
 1. **Context-dependence at every layer → modeling CHANGE, not just static structure** (the big one): L4 content dynamics
    (a toggling/cycling feature), L2/3 object **behaviors** (open/close, a machine cycle, a patrol), L5 motor skills, and
    **order/config-dependence** (Sokoban: config as basal context) — the mechanics most ARC-AGI-3 games actually are.
-2. **A top-down (apical) channel** we currently lack entirely: **frame gating** (many frames, one active — mechanical),
-   **hierarchy / "which behavior" modes** (Jiang & Rao), **top-down attention / active sensing**.
+2. **A top-down (apical) channel** we currently lack entirely: **confirm/bias toward an expected sequence + detect
+   mismatch** (a tiebreak — the frame itself is SELECTED by the L2/3 pooler, not the apical), **hierarchy / "which
+   behavior" modes** (Jiang & Rao, via the higher-region apical), **top-down attention / active sensing**.
 3. **Sensorimotor imagination**: predict the feature at an UNVISITED / occluded location from the object map → **object
    permanence** + **planning by simulated sensing** ("if I move there, do I see the goal-feature?") without physically
    moving — the RHAE efficiency lever.
@@ -94,8 +110,9 @@ two-layer circuit is exactly this; the location-invariant object + location-vari
 
 ## 4. What we're going to build
 
-- **`sequence.py`**: add the **apical channel** to the HTM TM (a second top-down context input that biases which cell
-  wins / pre-depolarises) — the "apical tiebreak temporal memory" (Numenta htmresearch). The one new primitive.
+- **`sequence.py`**: add the **apical channel** to the HTM TM (a pure TIEBREAK — narrows the BASAL prediction to the
+  apically-supported subset if any, else keeps all; never fires a cell or bursts) — the "apical tiebreak temporal memory"
+  (Numenta htmresearch). The one new primitive. **BUILT 2026-07-06.**
 - **L4** (rewrite `l4_feature_location` → the sensorimotor input layer): a minicolumn TM, proximal = content SDR, basal =
   L6 location ⊕ L5 efference, apical = L2/3 object; predicts feature-at-location; queryable at unvisited locations.
 - **L2/3** (evolve `l23_object` → add the column pooler): pool L4 → a stable location-invariant object SDR; recognition by
@@ -109,9 +126,14 @@ two-layer circuit is exactly this; the location-invariant object + location-vari
 
 **Stage 0 — this doc + the accuracy check.** (This commit.) One prediction, one substrate, no parallel systems.
 
-**Stage 1 — the apical channel on the HTM TM.** Extend `SequenceMemory` with a top-down context input; a cell predicted
-by BASAL context and SUPPORTED by APICAL wins over a basal-only cell (tiebreak), and apical alone can pre-bias. Isolated
-test: apical feedback disambiguates an otherwise-ambiguous continuation. LOW risk (extends M5, touches nothing live).
+**Stage 1 — the apical channel on the HTM TM. ✅ DONE (2026-07-06).** Extended `SequenceMemory` with an apical top-down
+input as a pure TIEBREAK: among a column's BASALLY-predicted cells, narrow to the apically-supported subset if any exist,
+else keep ALL of them; apical never fires a cell and never causes/prevents a burst; apical learning is downstream of the
+basal winner. Isolated test (`test_apical_is_a_pure_tiebreak_on_basal_predictions`): a column with two basally-predicted
+cells tagged with distinct feedback resolves the SAME basal prediction differently by the top-down input, falls back to
+all-basal on mismatch, and never bursts; `apical=None` is exactly the basal TM. **Correction landed here:** the initial
+"apical gates / disambiguates objects" plan was wrong (an active apical segment alone can't predict a cell — Hawkins &
+Ahmad 2016), so object disambiguation moved to Stage 3 (the L2/3 pooler). LOW risk (extended M5, touched nothing live).
 
 **Stage 2 — L4 as the sensorimotor feature-at-location layer (isolated prototype — the load-bearing new capability).**
 The new L4: columns = content-SDR features; basal = L6 location ⊕ L5 efference; apical = object SDR. Isolated tests on a
