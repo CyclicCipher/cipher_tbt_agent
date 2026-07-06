@@ -85,18 +85,61 @@ def test_multi_encode_decode_roundtrip():
     assert out["colour"] == "blue" and out["loc"] == (10, 20)
 
 
-# ── SpatialPooler (the learned general SENSORY encoder) ──────────────────────────────────────────────────────
+# ── SpatialPooler (the learned general SENSORY encoder; MICROCIRCUIT §7 — the canonical HTM spatial pooler) ────
 def test_spatial_pooler_rules():
+    """The three SDR rules on the LEARNED encoder: FIXED SPARSITY regardless of input density (the point of the SP —
+    notes 99), DETERMINISM with learn=False (duty frozen → boost frozen), and OVERLAP=similarity (near inputs → near
+    codes)."""
     import numpy as np
     sp = SpatialPooler(n_inputs=200, n_cols=512, w=20, seed=0)
+    dense = (np.random.default_rng(1).random(200) < 0.4).astype(float)   # 40% of the input on
+    sparse = np.zeros(200); sparse[np.random.default_rng(2).integers(0, 200, 6)] = 1   # a handful on
+    assert sp.encode(dense, learn=False).w == 20                     # SPARSITY: fixed w no matter the input density
+    assert sp.encode(sparse, learn=False).w == 20
     x = (np.random.default_rng(1).random(200) < 0.1).astype(float)
     assert sp.encode(x, learn=False) == sp.encode(x, learn=False)     # DETERMINISM (no learning)
-    assert sp.encode(x, learn=False).w <= 20                          # SPARSITY
     y = x.copy(); flip = np.flatnonzero(x)[:2]; y[flip] = 0           # a SIMILAR input (2 bits off)
     z = np.zeros(200); z[:20] = 1                                     # a DISSIMILAR input
     sim = sp.encode(x, learn=False).overlap(sp.encode(y, learn=False))
     dis = sp.encode(x, learn=False).overlap(sp.encode(z, learn=False))
     assert sim > dis                                                  # OVERLAP=similarity
+
+
+def test_spatial_pooler_learns_a_stable_code():
+    """LEARNING: the Hebbian carve converges — after training on a small set of inputs, each input's code STABILISES
+    (barely moves under more learning) and DISTINCT inputs get well-SEPARATED codes. The SP has learned a representation
+    of its input space (notes 105/107)."""
+    import numpy as np
+    rng = np.random.default_rng(0)
+    sp = SpatialPooler(n_inputs=200, n_cols=512, w=20, seed=0)
+    inputs = [(rng.random(200) < 0.1).astype(float) for _ in range(4)]   # 4 distinct inputs, round-robin (no duty blowup)
+    for _ in range(40):
+        for xi in inputs:
+            sp.encode(xi, learn=True)
+    before = [sp.encode(xi, learn=False) for xi in inputs]
+    for _ in range(5):                                               # a little MORE learning...
+        for xi in inputs:
+            sp.encode(xi, learn=True)
+    after = [sp.encode(xi, learn=False) for xi in inputs]
+    for b, a in zip(before, after):
+        assert b.overlap(a) >= 0.7 * sp.w                           # CONVERGED: the code barely moves under more learning
+    for i in range(len(inputs)):                                    # DISTINCT inputs → well-separated codes
+        for j in range(i + 1, len(inputs)):
+            assert after[i].overlap(after[j]) <= 0.5 * sp.w
+
+
+def test_spatial_pooler_homeostasis_no_dead_columns():
+    """HOMEOSTASIS: boosting + dead-column revival spread the code across the WHOLE population — over a stream of random
+    inputs (almost) every minicolumn gets used, so no small clique hogs the representation (notes 108/112). This is the
+    property a plain top-k WITHOUT boosting lacks."""
+    import numpy as np
+    rng = np.random.default_rng(0)
+    sp = SpatialPooler(n_inputs=200, n_cols=256, w=20, seed=0)
+    ever = set()
+    for _ in range(300):
+        ever |= sp.encode((rng.random(200) < 0.1).astype(float), learn=True).active
+    assert len(ever) >= 0.8 * sp.n                                  # ≥80% of columns were used at least once
+    assert sp.overlap_duty.min() >= sp.min_overlap_duty            # no column is stuck below the revival floor
 
 
 # ── ConjunctiveEncoder (the tensor-product / SE(2) representation space) ─────────────────────────────────────

@@ -299,29 +299,66 @@ class ConjunctiveEncoder(Encoder):
 
 
 class SpatialPooler:
-    """The LEARNED general encoder (HTM spatial pooler): a raw input (binary vector / SDR) -> a stable output SDR with
-    semantic overlap, learned online. k-winners-take-all over random potential synapses + Hebbian permanence + boosting
-    of under-used columns. Use when no analytic encoder fits (ARCHITECTURE §P5). Deterministic with `learn=False`.
-    NB its inverse is a learned classifier, not an analytic decode -> it is a SENSORY encoder; MOTOR decoding uses the
-    analytic (invertible) encoders above."""
+    """The LEARNED general encoder (HTM spatial pooler): a raw input (binary vector / SDR) -> a fixed-sparsity output SDR
+    of active MINICOLUMNS that preserves semantic overlap, learned online. Use when no analytic encoder fits
+    (ARCHITECTURE §P5); it is also the FEED-FORWARD PROXIMAL stage the L2/3 column pooler reuses (MICROCIRCUIT §7 —
+    ONE spatial pooler, rule 1). Deterministic with `learn=False` (duty cycles frozen → boosting frozen). Its inverse is
+    a learned classifier, not an analytic decode → it is a SENSORY encoder; MOTOR decoding uses the analytic encoders above.
 
-    def __init__(self, n_inputs: int, n_cols: int = 1024, w: int = 40, potential: float = 0.5, lr: float = 0.05,
-                 seed: int = 0) -> None:
+    **The canonical HTM SP (Cui, Ahmad & Hawkins 2017, *The HTM Spatial Pooler*; `notes/htm notes.txt` 97–119). Per step,
+    the order is BOOST → INHIBIT → LEARN:**
+      1. **overlap** — each column's connected synapses to the active input: `overlap = ((perm ≥ connected) & potential) @ x`;
+      2. **stimulus threshold** — a column needs `overlap ≥ stimulus_threshold` connected active inputs to be eligible
+         (below it contributes nothing — noise rejection);
+      3. **boosting** (homeostasis, BEFORE inhibition) — scale the eligible overlaps by `exp(boost·(target_density −
+         active_duty))`, so UNDER-used columns are favoured and no clique hogs the code (notes 108/112);
+      4. **inhibition** — k-winners-take-all: the top `w` boosted-overlap columns fire (global inhibition = one
+         neighbourhood; topological receptive fields are a deferred refinement);
+      5. **learning** (Hebbian, winners only) — on each winner's POTENTIAL synapses: `+syn_inc` where the input bit is 1,
+         `−syn_dec` where it is 0 (SEPARATE rates), clipped to [0,1]; the pattern is gradually carved into the permanences;
+      6. **duty cycles + dead-column revival** — track `active_duty` (drives boosting) and `overlap_duty` (fraction of
+         steps a column cleared the stimulus threshold); any column whose `overlap_duty` falls below `min_overlap_duty`
+         has ALL its potential permanences bumped up, so a permanently-silent column re-connects and joins the code
+         (notes 112 — required, else only a few columns ever contribute).
+
+    **Data types:** `potential` bool `[n_cols × n_inputs]` (the fixed potential pool — which inputs a column MAY see);
+    `perm` float `[n_cols × n_inputs]` ∈ [0,1] (a synapse is CONNECTED iff `perm ≥ connected` AND in the pool);
+    `active_duty`/`overlap_duty` float `[n_cols]` (EMA homeostatic traces); output = an `SDR(n_cols, winners)` of fixed
+    sparsity `w`. It pools over SPACE (input bits at ONE instant) → the complement of the column pooler's pooling over
+    TIME (MICROCIRCUIT §7)."""
+
+    def __init__(self, n_inputs: int, n_cols: int = 1024, w: int = 40, potential: float = 0.5,
+                 connected: float = 0.5, syn_inc: float = 0.03, syn_dec: float = 0.015,
+                 stimulus_threshold: int = 1, boost: float = 2.0, duty_alpha: float = 0.01,
+                 min_overlap_duty: float = 0.01, seed: int = 0) -> None:
         rng = np.random.default_rng(seed)
-        self.n, self.w, self.lr = int(n_cols), int(w), float(lr)
-        self.conn = rng.random((n_cols, n_inputs)) < potential           # each column's potential synapse mask
-        self.perm = rng.random((n_cols, n_inputs)) * self.conn           # permanences (connected when > 0.5)
-        self.duty = np.zeros(n_cols)                                      # active-duty cycle (drives boosting)
+        self.n, self.w = int(n_cols), int(w)
+        self.connected, self.syn_inc, self.syn_dec = float(connected), float(syn_inc), float(syn_dec)
+        self.stimulus_threshold, self.boost, self.duty_alpha = int(stimulus_threshold), float(boost), float(duty_alpha)
+        self.min_overlap_duty = float(min_overlap_duty)
+        self.target = self.w / self.n                                    # target active-duty (fair share of the code)
+        self.pool = rng.random((n_cols, n_inputs)) < potential           # POTENTIAL pool (fixed): inputs a column may see
+        self.perm = rng.random((n_cols, n_inputs)) * self.pool           # permanences (connected when ≥ `connected`)
+        self.active_duty = np.full(n_cols, self.target)                  # start fair → no initial boost bias
+        self.overlap_duty = np.ones(n_cols)                             # start "alive" (revival only fires on real silence)
 
     def encode(self, x, learn: bool = True) -> SDR:
         x = (np.asarray(x, dtype=float) > 0).astype(float)
-        boost = np.exp(0.1 * (self.duty.mean() - self.duty))
-        overlap = ((self.perm > 0.5) & self.conn) @ x * boost
-        winners = np.argpartition(overlap, -self.w)[-self.w:]
-        winners = winners[overlap[winners] > 0]
-        if learn and len(winners):
-            self.perm[winners] += self.lr * (2 * x - 1) * self.conn[winners]     # Hebbian: reward connected active inputs
-            np.clip(self.perm, 0.0, 1.0, out=self.perm)
-            self.duty *= 0.99
-            self.duty[winners] += 0.01
+        overlap = ((self.perm >= self.connected) & self.pool) @ x        # (1) connected synapses to the active input
+        eligible = overlap >= self.stimulus_threshold                   # (2) stimulus threshold
+        score = overlap * np.exp(self.boost * (self.target - self.active_duty)) * eligible   # (3) boosting, before inhibition
+        winners = np.argpartition(score, -self.w)[-self.w:]             # (4) k-winners-take-all inhibition
+        winners = winners[score[winners] > 0]
+        if learn:
+            if len(winners):                                            # (5) Hebbian on winners' potential synapses
+                self.perm[winners] += (self.syn_inc * x - self.syn_dec * (1 - x)) * self.pool[winners]
+                np.clip(self.perm, 0.0, 1.0, out=self.perm)
+            a = self.duty_alpha                                         # (6) duty cycles (EMA) + dead-column revival
+            fired = np.zeros(self.n); fired[winners] = 1.0
+            self.active_duty = (1 - a) * self.active_duty + a * fired
+            self.overlap_duty = (1 - a) * self.overlap_duty + a * eligible.astype(float)
+            weak = self.overlap_duty < self.min_overlap_duty            # columns that never clear the stimulus threshold
+            if weak.any():
+                self.perm[weak] += 0.1 * self.connected * self.pool[weak]
+                np.clip(self.perm, 0.0, 1.0, out=self.perm)
         return SDR(self.n, winners)

@@ -34,13 +34,15 @@ class HTMLayer:
     def _potential_match(self, seg, cells) -> int:
         return sum(1 for c in seg if c in cells)
 
-    def _learn_segment(self, seg, active, grow) -> None:
+    def _learn_segment(self, seg, active, grow, punish: bool = True) -> None:
         """HEBBIAN: reinforce synapses onto cells that WERE active (+inc), weaken the rest (−dec, pruned at 0), and GROW
-        new synapses onto the `grow` cells the segment does not yet cover (up to `max_syn`)."""
+        new synapses onto the `grow` cells the segment does not yet cover (up to `max_syn`). `punish=False` is the
+        GROW-ONLY variant (no −dec): the L2/3 proximal pooler accumulates the UNION of an object's feature-locations, all
+        of which are positive evidence, so punishing the currently-inactive ones would erode the object's own union."""
         for c in list(seg):
             if c in active:
                 seg[c] = min(1.0, seg[c] + self.perm_inc)
-            else:
+            elif punish:
                 seg[c] -= self.perm_dec
                 if seg[c] <= 0.0:
                     del seg[c]

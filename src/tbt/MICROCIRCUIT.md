@@ -115,8 +115,9 @@ two-layer circuit is exactly this; the location-invariant object + location-vari
   (Numenta htmresearch). The one new primitive. **BUILT 2026-07-06.**
 - **L4** (rewrite `l4_feature_location` → the sensorimotor input layer): a minicolumn TM, proximal = content SDR, basal =
   L6 location ⊕ L5 efference, apical = L2/3 object; predicts feature-at-location; queryable at unvisited locations.
-- **L2/3** (evolve `l23_object` → add the column pooler): pool L4 → a stable location-invariant object SDR; recognition by
-  overlap vs the library union; feed back to L4 (apical); keep `vote`. Pose read from L6.
+- **L2/3** (evolve `l23_object` → add the column pooler): pool L4 → a stable location-invariant object SDR via the
+  canonical `encoders.SpatialPooler` over the L4 cells (§7a) + temporal persistence (§7b); recognition by overlap vs the
+  library union; feed back to L4 (apical); keep `vote`. Pose read from L6.
 - **`column.py`**: rewire `perceive`/`forward` to run the microcircuit loop; keep the L6/hippocampus/navigation
   localization loop intact.
 - **Retire** the subsumed machinery once green: the L4 int codebook; M4's evidence/virtual-rotation pose solve *if* the
@@ -147,9 +148,29 @@ wired into the live loop. NB per the Stage-1 correction, MULTI-object feature di
 tiebreak can't suppress a different-object feature at the same location) — it is L2/3's (Stage 3); the prototype is
 single-object. `basal = L6 location ⊕ L5 efference ⊕ history` (dynamics) is the next enrichment, at wiring time.
 
-**Stage 3 — L2/3 as the column pooler (isolated prototype).** Pool L4 cells → a stable, location-invariant object SDR;
-recognise by overlap vs the library; read pose from L6. Isolated test: recognise the tetromino library at unseen poses
-(subsume `test_l23_object`), location-invariant identity, pose from L6.
+**Stage 2.5 — the canonical HTM spatial pooler. ✅ DONE (2026-07-06).** Before the column pooler, made the ONE spatial
+pooler (`encoders.SpatialPooler`) HTM-faithful — the feed-forward proximal primitive L4 and L2/3 both stand on (§7a). It
+was a reasonable SP but missing three pieces the notes require: **separate `syn_inc`/`syn_dec`**, a **stimulus threshold**,
+and **dead-column revival** (overlap-duty-cycle permanence bump — "boosting is required… without it only a tiny number of
+minicolumns contribute", notes 112). Reused, not duplicated (rule 1). `test_encoders.py`: fixed sparsity across input
+density, determinism, overlap=similarity, learning-converges-to-a-stable-code, homeostasis (≥80% of columns used, no dead
+columns). Suite 74 passed / 6 xfailed / 1 xpassed. LOW risk (only `test_encoders` + docs referenced the SP).
+
+**Stage 3 — L2/3 as the column pooler. ✅ DONE (2026-07-06).** Rewrote `l23_pooler` from the union-only prototype (built on
+a MISREADING of the pooler — it only captured the temporal-union half) to the faithful Numenta **ColumnPooler** on
+`htm.HTMLayer` (§7b): objects as ASSIGNED stable SDRs, proximal synapses grown one-shot from each object's cells to its L4
+feature-at-location cells (GROW-ONLY — a new `punish=False` on the shared `_learn_segment`, since every feature-location of
+an object is positive evidence; punishing the inactive ones would erode the object's own union), inference =
+UNION-then-NARROW. `test_l23_pooler.py` drives it through the REAL front-end `GridEncoder` (L6) → `L4Layer` → pooler, and it
+(a) RECOGNISES each object of a small shape library, (b) is LOCATION/ORDER-INVARIANT — the same identity from any order of
+its feature-locations, and (c) NARROWS — I and T sharing a bar stay a tie until the distinguishing cell, and distinct
+objects get well-separated SDRs (no false merge). **Discovery (why the real L4 is load-bearing, not bypassable):** feeding
+the pooler the raw FACTORED grid bits FAILS — an object with cells in column 1 AND row 0 falsely "covers" location (1,0);
+L4's CONJUNCTIVE binding (a distinct cell per feature-at-location) is exactly the fix, so the pooler must union L4 CELLS,
+not grid bits. **Scope split (correction to the earlier wording):** Stage 3 subsumes M4's *identity/recognition* machinery
+(union + associative recall + narrowing); M4's *pose* machinery (virtual rotation) becomes the L6 **anchoring search** at
+wiring — so "recognise at an unseen POSE" is a **Stage 4** item (§6 Risk 2), not Stage 3. `test_l23_object` (the M4
+recogniser) stays GREEN — the live recogniser until Stage 5 retires it. Suite 77 passed / 6 xfailed / 1 xpassed.
 
 **Stage 4 — wire the microcircuit in the column.** Rewire `column.perceive`/`forward` to the §2 loop; keep the
 hippocampus localization loop + navigation. Verify: the games (MockLive, sokoban, collectall) + recognition tests stay
@@ -177,3 +198,74 @@ object behavior (open/close via the L2/3 sequence), config-dependence (Sokoban p
   tests where the mechanism is faithful but slow (documented, not gamed).
 - **Non-goal (this phase)**: the multi-column SHEET + full heterarchy (§3b C–E) and the higher-region apical hierarchy —
   the microcircuit is ONE column's loop; the sheet reuses it later.
+
+## 7. The pooler family — spatial pooling (SPACE) vs. the column pooler (TIME)
+
+Both L4 and L2/3 have a feed-forward **proximal** stage, and both are, at bottom, **spatial poolers** over their input —
+so before building the L2/3 column pooler (Stage 3) we first made the ONE canonical spatial pooler HTM-faithful
+(`encoders.SpatialPooler`, 2026-07-06; validated in `test_encoders.py`). The two "poolers" pool along DIFFERENT axes, and
+the column pooler *contains* a spatial pooler as its first stage — that is the whole relationship. (Sources:
+`notes/htm notes.txt` 97–151; Numenta *Overview of the Temporal Pooler*, htmresearch wiki; Cui, Ahmad & Hawkins 2017
+*The HTM Spatial Pooler*; Hawkins, Ahmad & Cui 2017 *A Theory of How Columns…*.)
+
+### 7a. The spatial pooler (SP) — pools over SPACE (one instant)
+
+- **What it does.** A raw input SDR of ANY density → a **fixed-sparsity** SDR of active **minicolumns** that preserves
+  semantic overlap (near inputs → near codes). It normalises sparsity and learns, online, a stable representation of its
+  input space. This is HTM's general learned SENSORY encoder (`ARCHITECTURE §P5`) — used where no analytic encoder fits.
+- **How it works — the algorithm** (order is **BOOST → INHIBIT → LEARN**, notes 110):
+  1. **overlap** — each column's connected synapses onto the active input: `overlap = ((perm ≥ connected) & potential) @ x`;
+  2. **stimulus threshold** — a column needs `overlap ≥ stimulus_threshold` connected active inputs to be *eligible*
+     (noise rejection);
+  3. **boosting** (homeostasis, *before* inhibition) — scale eligible overlaps by `exp(boost·(target_density −
+     active_duty))` so **under-used columns are favoured** and no clique hogs the code (notes 108/112 — "boosting is
+     required… without it only a tiny number of minicolumns contribute");
+  4. **inhibition** — **k-winners-take-all**: the top `w` boosted-overlap columns fire (global inhibition = one
+     neighbourhood; topological receptive fields are a deferred refinement, notes 117–119);
+  5. **learning** (Hebbian, winners only) — on each winner's *potential* synapses: `+syn_inc` where the input bit is 1,
+     `−syn_dec` where 0 (**separate rates**, notes 105); clip [0,1] — the pattern is carved into the permanences;
+  6. **duty cycles + dead-column revival** — track `active_duty` (drives boosting) and `overlap_duty`; any column whose
+     `overlap_duty` falls below `min_overlap_duty` has **all** its potential permanences bumped up, so a permanently-silent
+     column re-connects and joins the code (notes 112).
+- **Data types.** `potential` bool `[n_cols × n_inputs]` (the fixed potential pool — which inputs a column MAY see);
+  `perm` float `[n_cols × n_inputs]` ∈ [0,1] (connected iff `perm ≥ connected` AND in the pool); `active_duty` /
+  `overlap_duty` float `[n_cols]` (EMA homeostatic traces); output = `SDR(n_cols, winners)` at fixed sparsity `w`.
+- **Where.** `encoders.SpatialPooler` — the ONE spatial pooler (rule 1); it is BOTH the general sensory encoder AND the
+  feed-forward proximal stage of the column pooler (7b). Validated: fixed sparsity across input density, determinism
+  (`learn=False`), overlap=similarity, learning-converges-to-a-stable-code, and homeostasis (≥80% of columns used, no
+  dead columns).
+
+### 7b. The column pooler (L2/3 object layer) — pools over TIME (a sequence)
+
+- **What it does.** A **sequence** of L4 feature-at-location patterns (as the sensor moves over ONE object) → **ONE
+  stable, location-INVARIANT** object SDR. The object code stays put while the L4 input changes; recognition = which
+  learned object the active SDR matches (associative recall / overlap — the M4 primitive, now over the L4 representation).
+- **How it works — the algorithm (Numenta ColumnPooler; Hawkins, Ahmad & Cui 2017, "Columns"):**
+  1. **assigned object SDRs** — each object is a fixed sparse set of L2/3 cells, chosen once and HELD active while the
+     object is explored (this held-stable activity is what makes the code location-invariant);
+  2. **proximal growth** (the feed-forward stage — a spatial-pooling overlap over L4, §7a) — the held object cells grow
+     proximal synapses to the L4 cells of every feature-at-location sensed, FAST (one-shot: `init_perm ≥ connected`), so
+     afterwards ANY of the object's feature-locations drives (part of) its SDR;
+  3. **union-then-narrow inference** — the FIRST sensation activates *every* object with enough proximal support (a UNION
+     of candidates); each further sensation INTERSECTS the active set with the still-supported cells, so the representation
+     **narrows** to the one object consistent with ALL sensed features (a contradiction / new object re-unions);
+  4. **lateral** — the within-session narrowing IS one column's temporal stability; inter-column **voting** (the M4 `vote`)
+     is the *sheet* (§3b; deferred). *(Alternative realization — the union temporal pooler: let the object SDR EMERGE from
+     a persistence-held SP + Hebbian instead of assigning it — same location-invariance, but slow-converging; we build the
+     assigned-SDR ColumnPooler for reliable FEW-SHOT online learning, no tiny-SDR convergence tail.)*
+- **Data types.** `objects` = `name → frozenset` of L2/3 cell ids (the assigned stable SDR); per object cell ONE proximal
+  segment `{L4 cell: permanence}` (reusing `htm.HTMLayer`'s ONE segment machinery — the same `_learn_segment` /
+  `_connected_match` as L4 and the TM, rule 1); `active` = the currently narrowing object-cell set.
+- **Where.** L2/3 (Stage 3): `l23_pooler` REWRITTEN on `htm.HTMLayer` — objects as assigned SDRs, proximal from L4,
+  union-then-narrow. The proximal overlap step IS the spatial-pooling of §7a (differing only in learning regime:
+  one-shot object-assigned growth vs the SP's competitive Hebbian).
+
+### 7c. The relationship (the answer to "is the column pooler just spatial pooling?")
+
+**No, and yes.** The column pooler is NOT a separate mechanism from spatial pooling — it **uses a (modified) spatial
+pooler as its feed-forward first stage**, then adds temporal/union pooling + lateral voting for stability *over time*.
+Same word "pool," **orthogonal axes**: the SP pools over the input SPACE at one instant (→ fixed-sparsity minicolumns);
+the column pooler pools a temporal SEQUENCE into one stable object. This is also why **L4 and L2/3 both have a proximal
+stage** — both are spatial poolers over their feed-forward input, differentiated by their *context*: L4's basal context is
+the L6 **location** (feature-at-location); L2/3's is **temporal persistence + lateral voting** (a location-invariant
+object). One primitive (the SP), two axes, three layers.
