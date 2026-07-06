@@ -26,6 +26,11 @@ prediction, different driver. "Planning over the map" is the value read off the 
 
 ## 2. The layers
 
+*NEXT PHASE: the layers below (L4/L2/3/L5) are being redesigned as ONE minicolumn substrate wired into the canonical
+cortical microcircuit (proximal/basal/apical channels, top-down feedback), so the column runs the full localization AND
+content-prediction loop — spec + staged plan in the companion **`MICROCIRCUIT.md`** (2026-07-05). Today only the
+localization loop is wired (L4 is a vestige; see that doc's diagnosis).*
+
 **L6 — LOCATION (where).**
 - *Structure:* an online, TD-learned **successor representation** over discovered states; its eigenvectors are the
   multi-scale, periodic **grid cells** (Stachenfeld 2017). One frame, learned; the innate hex grid is only an
