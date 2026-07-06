@@ -135,11 +135,17 @@ all-basal on mismatch, and never bursts; `apical=None` is exactly the basal TM. 
 "apical gates / disambiguates objects" plan was wrong (an active apical segment alone can't predict a cell — Hawkins &
 Ahmad 2016), so object disambiguation moved to Stage 3 (the L2/3 pooler). LOW risk (extended M5, touched nothing live).
 
-**Stage 2 — L4 as the sensorimotor feature-at-location layer (isolated prototype — the load-bearing new capability).**
-The new L4: columns = content-SDR features; basal = L6 location ⊕ L5 efference; apical = object SDR. Isolated tests on a
-synthetic object (a feature-at-location map): (a) learns the map; (b) predicts the feature at a VISITED location; (c)
-predicts the feature at an UNVISITED location (**imagination**); (d) BURSTS for the wrong object. Do NOT touch the live
-loop yet — prove the primitive first (the M4/M5 lesson: prototype in isolation, tune at small scale).
+**Stage 2 — L4 as the sensorimotor feature-at-location layer (isolated prototype). ✅ DONE (2026-07-06).** First factored
+the shared HTM cell/segment mechanism into `htm.HTMLayer` (minicolumns × cells, distal basal+apical segments, the Hebbian
+rule, the connected/potential match, the basal-determined winner, the apical tiebreak) and re-seated `SequenceMemory` on
+it (behaviour-preserving, M5 tests unchanged) — so there is ONE mechanism, not a parallel copy (rule 1). Then built
+`l4.L4Layer` on it: minicolumns = feature-SDR bits, basal = the L6 grid-SDR of the LOCATION, apical = the object (tiebreak).
+`test_l4.py` (1 test): learns a synthetic object's map, RECALLS the feature at each mapped location as a pure query
+(**imagination** — predict what is there before sensing it), predicts (near) nothing at a far/unmapped location, and
+BURSTS when a feature is sensed where a different one was learned (surprise / object-mismatch), not when it matches. NOT
+wired into the live loop. NB per the Stage-1 correction, MULTI-object feature disambiguation is NOT L4's job (the apical
+tiebreak can't suppress a different-object feature at the same location) — it is L2/3's (Stage 3); the prototype is
+single-object. `basal = L6 location ⊕ L5 efference ⊕ history` (dynamics) is the next enrichment, at wiring time.
 
 **Stage 3 — L2/3 as the column pooler (isolated prototype).** Pool L4 cells → a stable, location-invariant object SDR;
 recognise by overlap vs the library; read pose from L6. Isolated test: recognise the tetromino library at unseen poses

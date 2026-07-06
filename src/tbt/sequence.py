@@ -17,8 +17,10 @@ from __future__ import annotations
 
 import numpy as np
 
+from .htm import HTMLayer
 
-class SequenceMemory:
+
+class SequenceMemory(HTMLayer):
     """HTM TEMPORAL MEMORY (Hawkins & Ahmad 2016) — predictive cells in an SDR, learned online. Each element activates a
     set of COLUMNS (a hashable symbol → a disjoint column block, grown online; a real content SDR's active bits ARE the
     columns). Each column holds `M` CELLS; a cell fires ALONE when a distal SEGMENT (synapses onto prior-active cells)
@@ -39,16 +41,12 @@ class SequenceMemory:
     def __init__(self, order: int = 2, cells_per_column: int = 8, w: int = 8, activation_threshold: int = 4,
                  min_threshold: int = 2, connected: float = 0.5, init_perm: float = 0.40, perm_inc: float = 0.15,
                  perm_dec: float = 0.05, predicted_dec: float = 0.01, max_syn: int = 24):
-        self.M = 1 if order <= 1 else int(cells_per_column)      # cells/column = the high-order capacity (1 = first-order)
+        super().__init__(cells_per_column=(1 if order <= 1 else cells_per_column),   # order<=1 → first-order (1 cell/column)
+                         activation_threshold=activation_threshold, min_threshold=min_threshold, connected=connected,
+                         init_perm=init_perm, perm_inc=perm_inc, perm_dec=perm_dec, max_syn=max_syn)
         self.w = int(w)                                          # active columns per symbolic element
-        self.activation_threshold = int(activation_threshold)   # connected synapses onto active cells to make a cell PREDICTIVE
-        self.min_threshold = int(min_threshold)                 # potential synapses onto the context to count a segment as MATCHING (winner pick)
-        self.connected, self.init_perm = float(connected), float(init_perm)
-        self.perm_inc, self.perm_dec, self.predicted_dec = float(perm_inc), float(perm_dec), float(predicted_dec)
-        self.max_syn = int(max_syn)
+        self.predicted_dec = float(predicted_dec)               # punishment on a basal segment that predicted a column that did not activate
         self._enc: dict = {}                                     # element → its column block (grown online; the CategoryEncoder)
-        self.seg: dict = {}                                     # cell (col, cell) → list of BASAL segments (lateral context; predicts NEXT); a segment = {presyn cell: permanence}
-        self.apical_seg: dict = {}                             # cell → list of APICAL segments (top-down feedback bits; MODULATE the current activation)
         self._active: set = set()                              # active cells this step (the PHASE)
         self._winners: set = set()                            # winner cells this step (presynaptic candidates for growth)
         self._predictive: set = set()                         # cells in the PREDICTIVE state (for next step)
@@ -62,27 +60,6 @@ class SequenceMemory:
             base = len(self._enc) * self.w
             block = self._enc[element] = set(range(base, base + self.w))
         return block
-
-    # ---- segment matches --------------------------------------------------------------------------------------
-    def _connected_match(self, seg, cells) -> int:
-        return sum(1 for c, p in seg.items() if p >= self.connected and c in cells)
-
-    def _potential_match(self, seg, cells) -> int:
-        return sum(1 for c in seg if c in cells)
-
-    def _learn_segment(self, seg, prev_active, prev_winners) -> None:
-        """HEBBIAN: reinforce synapses onto cells that WERE active (+inc), weaken the rest (−dec, pruned at 0), and GROW
-        new synapses onto the prior WINNER cells the segment does not yet cover (up to `max_syn`)."""
-        for c in list(seg):
-            if c in prev_active:
-                seg[c] = min(1.0, seg[c] + self.perm_inc)
-            else:
-                seg[c] -= self.perm_dec
-                if seg[c] <= 0.0:
-                    del seg[c]
-        for c in prev_winners:
-            if c not in seg and len(seg) < self.max_syn:
-                seg[c] = self.init_perm
 
     def observe(self, element, apical=None) -> None:
         """One element arrived (§5). ACTIVATE cells: a column with basally-predicted cells fires them — and if the top-down
@@ -137,52 +114,10 @@ class SequenceMemory:
         self._active, self._winners = active, winners
         self._recompute_predictive()
 
-    def _winner(self, col, prev_active):
-        """The winner cell of a bursting column, BASAL-determined (apical learning is downstream, never biases this): the
-        cell whose best segment MATCHES the context (prior-active cells) most, if ≥ `min_threshold`; else the DETERMINISTIC
-        least-used cell (fewest segments, lowest index) — determinism keeps a sequence-START's winner stable across
-        repetitions so its downstream segments accumulate."""
-        best_cell, best_seg, best_score = None, None, self.min_threshold - 1
-        for c in range(self.M):
-            for s in self.seg.get((col, c), []):
-                m = self._potential_match(s, prev_active)
-                if m > best_score:
-                    best_cell, best_seg, best_score = (col, c), s, m
-        if best_cell is not None:
-            return best_cell, best_seg
-        least = min(range(self.M), key=lambda c: (len(self.seg.get((col, c), [])), c))
-        return (col, least), None
-
-    def _apical_predicted(self, apical) -> set:
-        """The cells CONNECTED-supported by the top-down feedback (an active apical segment) — the tiebreak set that
-        narrows a basal prediction (the analogue of `_recompute_predictive`, for the apical channel)."""
-        return {cell for cell, segs in self.apical_seg.items()
-                if any(self._connected_match(s, apical) >= self.activation_threshold for s in segs)}
-
-    def _learn_apical(self, cell, apical) -> None:
-        """Reinforce/grow the cell's best-matching APICAL segment onto the current top-down feedback bits (so this cell
-        becomes the one that feedback selects); grow a NEW apical segment if none matches yet. Reuses the one Hebbian rule
-        (`_learn_segment`) — the feedback bits are both the reinforce-set and the grow-set."""
-        segs = self.apical_seg.setdefault(cell, [])
-        best, best_m = None, self.min_threshold - 1
-        for s in segs:
-            m = self._potential_match(s, apical)
-            if m > best_m:
-                best, best_m = s, m
-        if best is None:
-            best = {}
-            segs.append(best)
-        self._learn_segment(best, apical, apical)
-
     def _recompute_predictive(self) -> None:
-        """A cell is PREDICTIVE (depolarised) for next step iff one of its segments has ≥ `activation_threshold`
-        CONNECTED synapses onto the now-active cells. Track those segments (for reinforce/punish next step)."""
-        self._predictive, self._active_segs = set(), {}
-        for cell, segs in self.seg.items():
-            for s in segs:
-                if self._connected_match(s, self._active) >= self.activation_threshold:
-                    self._predictive.add(cell)
-                    self._active_segs.setdefault(cell, []).append(s)
+        """A cell is PREDICTIVE (depolarised) for next step iff a basal segment connected-matches the now-active cells (the
+        base's `_predicted`, driven by the recurrent PHASE = `self._active`); track those segments for reinforce/punish."""
+        self._predictive, self._active_segs = self._predicted(self._active)
 
     # ---- read-outs: decode the predictive cells' columns back to an element -----------------------------------
     def predicted_columns(self) -> set:
