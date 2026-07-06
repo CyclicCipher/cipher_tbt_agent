@@ -30,33 +30,36 @@ def test_sequence_memory_is_high_order():
     sm.reset(); sm.observe("D"); sm.observe("B")
     assert sm.predict() == "E" and sm.confident()             # D..B -> E (the SAME B, different context)
 
-    # a FIRST-order memory (context = only the last element) CONFLATES B's successors -- the high-order gain
+    # a FIRST-order memory (1 cell/column) CONFLATES B's successors -- the high-order gain
     sm1 = SequenceMemory(order=1)
     for _ in range(3):
         sm1.reset(); [sm1.observe(e) for e in ("A", "B", "C")]
         sm1.reset(); [sm1.observe(e) for e in ("D", "B", "E")]
     sm1.reset(); sm1.observe("A"); sm1.observe("B")
-    assert not sm1.confident() and set(sm1.table[("B",)]) == {"C", "E"}   # (B,) -> {C, E}: ambiguous without context
+    assert not sm1.confident() and sm1.candidates() == {"C", "E"}   # B (one cell) predicts BOTH C and E: ambiguous without context
 
 
 def test_sequence_memory_predicts_a_cyclic_behavior():
-    """A behavior is a repeating sequence of elements (a patrol / toggle): once learned, the memory predicts the next
-    element of the cycle from the phase, and a sequence boundary (`reset`) drops the phase without forgetting the table."""
+    """A behavior is a repeating sequence (a patrol): once learned, the memory predicts the next element from the PHASE
+    (the active-cell SDR), and a sequence boundary (`reset`) clears the phase without forgetting the learned segments.
+    The REPEATED-element disambiguation (up,up -> right, but up-alone -> up) is the high-order property, emergent from the
+    context-specific cells. NB at this tiny SDR scale (8 columns x 8 cells) the repeated-element case needs more exposure
+    to converge than a wide biological SDR would — a small-scale convergence cost (cf. M4's quantisation)."""
     sm = SequenceMemory(order=2)
     cycle = ("up", "up", "right", "down", "down", "left")     # a patrol behavior
-    for _ in range(4):
+    for _ in range(12):
         for e in cycle:
             sm.observe(e)
     # replay the phase and check the next step is predicted along the cycle
     sm.reset()
     sm.observe("up"); sm.observe("up")
-    assert sm.predict() == "right"                            # up,up -> right
+    assert sm.predict() == "right"                            # up,up -> right (the high-order disambiguation)
     sm.observe("right"); sm.observe("down")
     assert sm.predict() == "down"                            # right,down -> down
     sm.reset()
-    assert sm.phase == () and sm.table                       # the boundary CLEARED the phase without forgetting the behavior
-    sm.observe("left"); sm.observe("left")                   # a context never seen in the cycle -> a BURST (no prediction)
-    assert sm.predict() is None
+    assert not sm._active and sm.seg                          # the boundary CLEARED the phase (active cells) without forgetting the segments
+    sm.observe("left"); sm.observe("left")                   # a context never seen in the cycle (left->left never occurs)
+    assert sm._burst                                          # -> the second `left` BURSTS: the unpredicted-context / novelty signal (§6)
 
 
 def test_behavior_forward_models_an_object_toggle():
@@ -88,8 +91,9 @@ def test_behavior_learns_a_high_order_patrol():
         m = np.eye(3); m[0, 2] = float(x); return m
 
     b = Behavior(order=2)
-    for x in [0, 1, 2, 1] * 4:                                    # the patrol: 0->1->2->1->0->1->2->1 ...
-        b.observe(pose(x))
+    for _ in range(12):                                           # the patrol 0->1->2->1 (tiny-scale HTM needs more exposure, cf. M4)
+        for x in [0, 1, 2, 1]:
+            b.observe(pose(x))
     b.reset()
     b.observe(pose(0)); b.observe(pose(1)); b.observe(pose(2))   # phase = (+1, +1): two rights
     d = b.predict()                                               # the patrol turns back -> -1

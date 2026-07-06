@@ -15,41 +15,161 @@ the contextual input sent to the active dendrites."
 
 from __future__ import annotations
 
-from collections import Counter
-
 import numpy as np
 
 
 class SequenceMemory:
-    """Predict the next element of a sequence from the recent CONTEXT (the PHASE), learned online. `order` = how much
-    context makes the representation context-specific (the high-order depth): the same element in a different last-`order`
-    context predicts a different successor. The PHASE is the ONE recurrence — a recurrent state advanced each `observe`;
-    a `behavior` is a path traced through the learned transitions, `predict` its next step."""
+    """HTM TEMPORAL MEMORY (Hawkins & Ahmad 2016) — predictive cells in an SDR, learned online. Each element activates a
+    set of COLUMNS (a hashable symbol → a disjoint column block, grown online; a real content SDR's active bits ARE the
+    columns). Each column holds `M` CELLS; a cell fires ALONE when a distal SEGMENT (synapses onto prior-active cells)
+    put it in the PREDICTIVE state, so the SAME column fires a DIFFERENT cell in a different context → HIGH-ORDER
+    sequences emerge (no fixed `order` tuple). An unpredicted column BURSTS (all cells fire) — the LITERAL surprise /
+    novelty. The active-CELL SDR is the PHASE (§5's one recurrence); the predictive cells' columns ARE the next-element
+    prediction. `order` (back-compat) selects the high-order depth: `order<=1` → 1 cell/column (first-order), else `M`."""
 
-    def __init__(self, order: int = 2):
-        self.order = order
-        self.phase: tuple = ()                                   # the recurrent PHASE = the last `order` elements (the context)
-        self.table: dict = {}                                    # context -> Counter(next element): the learned high-order transitions
+    def __init__(self, order: int = 2, cells_per_column: int = 8, w: int = 8, activation_threshold: int = 4,
+                 min_threshold: int = 2, connected: float = 0.5, init_perm: float = 0.40, perm_inc: float = 0.15,
+                 perm_dec: float = 0.05, predicted_dec: float = 0.01, max_syn: int = 24):
+        self.M = 1 if order <= 1 else int(cells_per_column)      # cells/column = the high-order capacity (1 = first-order)
+        self.w = int(w)                                          # active columns per symbolic element
+        self.activation_threshold = int(activation_threshold)   # connected synapses onto active cells to make a cell PREDICTIVE
+        self.min_threshold = int(min_threshold)                 # potential synapses onto the context to count a segment as MATCHING (winner pick)
+        self.connected, self.init_perm = float(connected), float(init_perm)
+        self.perm_inc, self.perm_dec, self.predicted_dec = float(perm_inc), float(perm_dec), float(predicted_dec)
+        self.max_syn = int(max_syn)
+        self._enc: dict = {}                                     # element → its column block (grown online; the CategoryEncoder)
+        self.seg: dict = {}                                     # cell (col, cell) → list of segments; a segment = {presyn cell: permanence}
+        self._active: set = set()                              # active cells this step (the PHASE)
+        self._winners: set = set()                            # winner cells this step (presynaptic candidates for growth)
+        self._predictive: set = set()                         # cells in the PREDICTIVE state (for next step)
+        self._active_segs: dict = {}                          # cell → the segment(s) that made it predictive (for reinforce/punish)
+        self._burst = False
+
+    # ---- the symbol → columns encoder (disjoint block per element; a real SDR passes its active bits as columns) ----
+    def _cols(self, element):
+        block = self._enc.get(element)
+        if block is None:
+            base = len(self._enc) * self.w
+            block = self._enc[element] = set(range(base, base + self.w))
+        return block
+
+    # ---- segment matches --------------------------------------------------------------------------------------
+    def _connected_match(self, seg, cells) -> int:
+        return sum(1 for c, p in seg.items() if p >= self.connected and c in cells)
+
+    def _potential_match(self, seg, cells) -> int:
+        return sum(1 for c in seg if c in cells)
+
+    def _learn_segment(self, seg, prev_active, prev_winners) -> None:
+        """HEBBIAN: reinforce synapses onto cells that WERE active (+inc), weaken the rest (−dec, pruned at 0), and GROW
+        new synapses onto the prior WINNER cells the segment does not yet cover (up to `max_syn`)."""
+        for c in list(seg):
+            if c in prev_active:
+                seg[c] = min(1.0, seg[c] + self.perm_inc)
+            else:
+                seg[c] -= self.perm_dec
+                if seg[c] <= 0.0:
+                    del seg[c]
+        for c in prev_winners:
+            if c not in seg and len(seg) < self.max_syn:
+                seg[c] = self.init_perm
 
     def observe(self, element) -> None:
-        """One element arrived: LEARN (the current phase/context → this element), then ADVANCE the phase (the recurrence)."""
-        self.table.setdefault(self.phase, Counter())[element] += 1
-        self.phase = (self.phase + (element,))[-self.order:]
+        """One element arrived (§5). ACTIVATE cells: a column with a predicted cell fires it alone (reinforce its
+        segment); an unpredicted column BURSTS (all cells) and its WINNER (best-matching segment, else the deterministic
+        least-used cell) grows/reinforces a segment onto the prior winners. PUNISH segments that predicted a column that
+        did not activate. Then recompute the PREDICTIVE cells for the next step. The learned segments persist across `reset`."""
+        cols = self._cols(element)
+        prev_active, prev_winners = self._active, self._winners
+        active, winners = set(), set()
+        self._burst = False
+        for col in cols:
+            pred = [(col, c) for c in range(self.M) if (col, c) in self._predictive]
+            if pred:                                            # PREDICTED: the depolarised cell(s) fire alone (context-specific)
+                for cell in pred:
+                    active.add(cell)
+                    winners.add(cell)
+                    for s in self._active_segs.get(cell, []):   # reinforce the segment(s) that correctly predicted this cell
+                        self._learn_segment(s, prev_active, prev_winners)
+            else:                                               # BURST: no prediction (surprise) → all cells fire, pick a winner
+                self._burst = True
+                for c in range(self.M):
+                    active.add((col, c))
+                wcell, best = self._winner(col, prev_active)
+                winners.add(wcell)
+                if prev_winners:                                # (a sequence start has no context to learn)
+                    if best is None:
+                        best = {}
+                        self.seg.setdefault(wcell, []).append(best)
+                    self._learn_segment(best, prev_active, prev_winners)
+        for cell in self._predictive:                           # PUNISH: predicted a column that did NOT activate → weaken it
+            if cell[0] not in cols:
+                for s in self._active_segs.get(cell, []):
+                    for c in list(s):
+                        if c in prev_active:
+                            s[c] -= self.predicted_dec
+                            if s[c] <= 0.0:
+                                del s[c]
+        self._active, self._winners = active, winners
+        self._recompute_predictive()
+
+    def _winner(self, col, prev_active):
+        """The winner cell of a bursting column: the cell whose best segment MATCHES the context (prior-active cells)
+        most, if ≥ `min_threshold`; else the DETERMINISTIC least-used cell (fewest segments, lowest index) — determinism
+        keeps a sequence-START's winner stable across repetitions so its downstream segments accumulate."""
+        best_cell, best_seg, best_score = None, None, self.min_threshold - 1
+        for c in range(self.M):
+            for s in self.seg.get((col, c), []):
+                m = self._potential_match(s, prev_active)
+                if m > best_score:
+                    best_cell, best_seg, best_score = (col, c), s, m
+        if best_cell is not None:
+            return best_cell, best_seg
+        least = min(range(self.M), key=lambda c: (len(self.seg.get((col, c), [])), c))
+        return (col, least), None
+
+    def _recompute_predictive(self) -> None:
+        """A cell is PREDICTIVE (depolarised) for next step iff one of its segments has ≥ `activation_threshold`
+        CONNECTED synapses onto the now-active cells. Track those segments (for reinforce/punish next step)."""
+        self._predictive, self._active_segs = set(), {}
+        for cell, segs in self.seg.items():
+            for s in segs:
+                if self._connected_match(s, self._active) >= self.activation_threshold:
+                    self._predictive.add(cell)
+                    self._active_segs.setdefault(cell, []).append(s)
+
+    # ---- read-outs: decode the predictive cells' columns back to an element -----------------------------------
+    def predicted_columns(self) -> set:
+        return {col for (col, _c) in self._predictive}
+
+    def candidates(self) -> set:
+        """The elements whose column block overlaps the predicted columns — the competing next-element hypotheses (one =
+        confident, several = an ambiguous/branching context, none = a burst)."""
+        pc = self.predicted_columns()
+        return {e for e, block in self._enc.items() if block & pc}
 
     def predict(self):
-        """The predicted next element given the current phase (the predictive state) — the most-supported successor of
-        this context, or None when the context has not been seen (no prediction, a burst)."""
-        c = self.table.get(self.phase)
-        return c.most_common(1)[0][0] if c else None
+        """The predicted next element = the one whose block the predictive cells most cover, or None (a burst: nothing
+        predicted). The predictive cells ARE the prediction (HTM); this decodes them back to an element."""
+        pc = self.predicted_columns()
+        best, best_ov = None, 0
+        for e, block in self._enc.items():
+            ov = len(block & pc)
+            if ov > best_ov:
+                best, best_ov = e, ov
+        return best
 
     def confident(self) -> bool:
-        """Is the current context UNAMBIGUOUS (one learned successor)? — mastered vs still-branching (a learning signal)."""
-        c = self.table.get(self.phase)
-        return c is not None and len(c) == 1
+        """Is the prediction UNAMBIGUOUS? — exactly one element is predicted and its FULL block is covered (mastered vs a
+        still-branching context; the learning signal that was the symbolic `len(Counter)==1`)."""
+        cands = self.candidates()
+        return len(cands) == 1 and self._enc[next(iter(cands))] <= self.predicted_columns()
 
     def reset(self) -> None:
-        """A sequence boundary: clear the phase (do not carry context across it). The learned `table` persists."""
-        self.phase = ()
+        """A sequence boundary: clear the active/winner/predictive state (the PHASE) so context is not carried across it.
+        The learned segments + the encoder PERSIST."""
+        self._active, self._winners, self._predictive, self._active_segs = set(), set(), set(), {}
+        self._burst = False
 
 
 def inverse(displacement):

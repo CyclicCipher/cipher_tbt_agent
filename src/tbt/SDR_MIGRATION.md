@@ -148,8 +148,60 @@ the multi-column sheet's router + a core layer, unwired but documented). Suite 7
      localist board-map, and the `atan2`-on-a-degenerate-flat-ring leaking a garbage angle into efference LEARNING.
 2. content SDR (M3) — the overlapping encoder feeding L4/L2/3.
 3. recognition as overlap + the L2/3 identity SDR (M4) — over the content SDR, folding in A/B.
-- **M5 — HTM temporal memory (follow-on).** Replace the symbolic `SequenceMemory` dict with predictive cells in an SDR
-  (distal-context → predictive state → bursting), so "predictive state / bursting / non-convergence" are literal.
+- **M5 — HTM temporal memory (predictive cells in an SDR).** Replace the symbolic `SequenceMemory` dict with predictive
+  cells in an SDR (distal-context → predictive state → bursting), so "predictive state / bursting / non-convergence" are
+  literal.
+  - **Deep TBT-accuracy check (2026-07-05) — the actual mechanism (Hawkins & Ahmad 2016, *Why Neurons Have Thousands of
+    Synapses*; Numenta BAMI *Temporal Memory Algorithm Details*).** The layer is **minicolumns × M cells** (M≈32 gives the
+    high-order capacity). A feed-forward SDR activates a set of **columns**. Each cell has **distal dendrite segments**;
+    each segment is a set of synapses (permanence 0..1, *connected* ≥ `connectedPermanence`≈0.5) onto OTHER cells. Per step:
+    (1) **activate cells** — for each active column: if it holds a cell in the **predictive** state (a distal segment
+    matched last step's active cells), that cell fires and INHIBITS its column siblings → a **context-specific** code; if
+    NO cell was predicted the column **BURSTS** (all M cells fire) and a **winner** cell is chosen (best-matching segment,
+    else least-used). (2) **activate segments** — a segment whose connected synapses onto the now-active cells exceed
+    `activationThreshold`(≈13) makes its cell **predictive** for next step; these predictive cells' columns ARE the
+    predicted next input. (3) **learn** — reinforce the segment that correctly predicted (+`permanenceIncrement`≈0.1 to
+    synapses onto prior-active cells, −`permanenceDecrement` to the rest), **punish** a segment that predicted a column
+    that did NOT activate (−`predictedSegmentDecrement`), and in a bursting column GROW a segment on the winner onto the
+    prior **winner** cells (up to `maxNewSynapseCount`≈20). Defaults: cellsPerColumn 32, activationThreshold 13,
+    minThreshold 10, initialPermanence 0.21, permInc/Dec 0.1.
+  - **Why the current `SequenceMemory` is the symbolic caricature to remove.** It keys a dict on a FIXED-order tuple of the
+    last `order` elements (exact-match → a near-miss context is ORTHOGONAL, no generalisation), and "predictive state /
+    bursting" are faked by dict hit/miss (`predict()→None`). HTM instead learns a **variable-order** context (a segment
+    grows only as much context as needed to disambiguate) over **overlap-bearing** cell SDRs, and bursting is the LITERAL
+    all-cells-fire surprise. The **high-order** property is emergent, not a hyperparameter: the same column fires a
+    different CELL after A vs after D (ABC vs DBE), so C-after-(A·B) predicts C while B-after-D predicts E — first-order
+    over the context-specific cells.
+  - **Mapping onto our model.** (a) The **phase** (§5, "the ONE recurrence") = the **active-cell SDR** (which cell per
+    column) — the distal segments read it; there is no separate `order` counter. (b) One mechanism, per-layer by the
+    CONTEXT + element (§5): L4 next-**feature** (context = the previous cells + the L6 **location** — the sensorimotor-HTM
+    apical/basal input, Numenta "Columns" 2017), L2/3 next-**displacement** (context = the object phase), L5 next-**action**
+    (context = the program phase). (c) The **element ↔ SDR**: the TM operates over active **columns**; a symbolic/abstract
+    element encodes via a `CategoryEncoder` (disjoint block per symbol — the tests + abstract tokens), while real content is
+    ALREADY an SDR (`view_sdr` / a displacement SDR) whose active bits ARE the columns; `predict()` decodes the predictive
+    columns back (overlap decode). (d) **L6 stays the SR, NOT this** (§5): the *Distributed Hebbian Temporal Memory* result
+    (arXiv 2310.13391) shows HTM sequence memory ≈ learning a successor representation by Hebbian rules, confirming they are
+    the SAME family but DIFFERENT grains — the SR is the multi-step discounted map for PLANNING (§8), the TM is the one-step
+    high-order dynamics for perception; L6 keeps the SR, L4/L2/3/L5 get the TM. (e) **Backward modelling** (`inverse`) is
+    unchanged — the operator inverse, not the table.
+  - **Honest scaling deviation (to verify in the build).** Full-scale HTM (2048 cols, 32 cells, threshold 13) needs wide
+    SDRs + many repetitions for permanences to cross `connectedPermanence`. The symbolic tests use tiny elements + 3–4
+    reps, so the params scale DOWN (fewer cells/column, a lower threshold tied to the SDR sparsity, a higher initial
+    permanence/increment so a segment connects in ~2 reps) — a scaling choice, not a mechanism change. Test-semantics that
+    peek at the symbolic `table` dict relax to the HTM-native equivalents (predicted-columns unambiguous = `confident`;
+    no-predicted-column = burst), analogous to M4's quantised-pose relaxations.
+  - **BUILT 2026-07-05 (`sequence.py`, `test_sequence` 6/6).** `SequenceMemory` is now the HTM TM: `M=8` cells/column
+    (`order<=1`→1 = first-order), a symbol→disjoint-column-block encoder (`w=8`; a real content SDR's active bits are the
+    columns), distal `seg[cell] = {presyn_cell: permanence}`; `observe` activates cells (predicted → fire alone + reinforce;
+    unpredicted → BURST, deterministic least-used winner grows/reinforces a segment onto prior winners), PUNISHES false
+    predictions, then recomputes predictive cells (`connected_match ≥ activation_threshold`). Read-outs: `predict`/
+    `candidates`/`confident` decode the predictive columns; `_burst` is the surprise. VERIFIED: the SAME element B fires
+    DIFFERENT context-specific cells after A vs D (cell 0 vs 1 → predict C vs E) — literal high-order; novel input bursts.
+    `Behavior` + `inverse` unchanged. **Deviations (research-consistent, documented in the tests):** (i) the repeated-
+    element high-order case (up,up→right; +1,+1→−1) converges more slowly at the tiny 8×8 SDR scale than a wide biological
+    SDR, so those tests use more exposure (12 reps); (ii) HTM predicts a first-order FALLBACK where the symbolic dict
+    returned `None` for an unseen tuple (graceful degradation — the burst is the unseen-context signal). NB `SequenceMemory`
+    is built + tested but NOT yet wired into the live loop (per §5 it lands in L4/L2/3/L5 when the forward model needs it).
 
 **Prerequisite surfaced by the M1 attempt: cue commitment.** The point-pose exposed that the agent DROPS a cued target
 when its salience flickers (e.g. the marker's pop-out vanishes when the body is adjacent) → a 2-cycle one step from the
