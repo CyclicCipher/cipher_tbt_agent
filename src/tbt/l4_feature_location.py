@@ -7,9 +7,9 @@ content VOCABULARY (the codebook: a raw patch, or the rotation-invariant shape s
 its own: the location comes from L6 (modulatory/predictive), the feature confirms which cell wins — so the
 predict-then-compare (`predict_feature`) is seated HERE, given where I am (place) + the active object (S).
 
-Dorsal/ventral, one column: L5's `local_disps` is the EQUIVARIANT local geometry (the 'where/how'); L4's
-`invariant_sig` is the rotation-INVARIANT signature of that geometry (the 'what'/content) — the same shape at
-any orientation yields the same feature, so content recurs across pose.
+Dorsal/ventral, one column: L5's `local_disps` is the EQUIVARIANT local geometry (the 'where/how'); the rotation-INVARIANT
+'what' of that geometry is now an OVERLAP-BEARING descriptor SDR (`l23_object._desc_sdr`, SDR_MIGRATION.md M4) — the
+exact-match `invariant_sig` tuple was retired with the classical-geometry cleanup.
 
 The codebook uses SPARSE high-dimensional codes — the cortical capacity trick (dentate-gyrus / cerebellar /
 mushroom-body expansion + sparsification). DENSE orthonormal codes cap HARD at feat_dim; random k-sparse codes
@@ -20,16 +20,8 @@ cleaned up by the argmax readout (Kanerva's Sparse Distributed Memory / hyperdim
 
 from __future__ import annotations
 
-import numpy as np
 import torch
 import torch.nn as nn
-
-
-def invariant_sig(disps):
-    """The rotation-INVARIANT feature descriptor of a local patch (sorted neighbour distances) — the 'what'
-    (content / ventral), complementary to L5's equivariant `local_disps` (the 'where/how' / dorsal). The same
-    shape at any orientation yields the same signature, so content recurs across pose."""
-    return tuple(sorted(round(float(np.linalg.norm(v)), 3) for v in disps))
 
 
 class L4_FeatureLocation(nn.Module):
@@ -59,8 +51,6 @@ class L4_FeatureLocation(nn.Module):
         row = torch.zeros(1, self.feat_dim)
         row[0, torch.randperm(self.feat_dim, generator=self.gen)[:self.k]] = 1.0
         return torch.nn.functional.normalize(row, dim=1)
-
-    invariant_sig = staticmethod(invariant_sig)                       # the rotation-invariant feature descriptor (L4's 'what')
 
     # ---- feature ⊗ location: bind, read back, and PREDICT (predict-then-compare seated in L4) -------------
     def bind(self, label: int, place: torch.Tensor) -> torch.Tensor:

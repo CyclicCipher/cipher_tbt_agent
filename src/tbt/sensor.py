@@ -10,7 +10,7 @@ salience peaks a coordinate (click) action can address. Pure stdlib + the retina
 
 from __future__ import annotations
 
-from .retina import background, salient_cells, salient_targets, view_signature   # retina primitives (adaptation, change, pop-out, content)
+from .retina import background, salient_cells, salient_targets, view_sdr   # retina primitives (adaptation, change, pop-out, content)
 
 
 class Sensor:
@@ -19,14 +19,13 @@ class Sensor:
     allocentric position. Without a column (standalone) it returns the whole-frame content signature. `salient_target()`
     / `objects()` are the retina's bottom-up salience peaks (the self is excluded via the column's tracked body)."""
 
-    def __init__(self, local: bool = False, window: int = 7, integrate: bool = False, pos_bin: int = 4, encode=None):
+    def __init__(self, local: bool = False, window: int = 7, integrate: bool = False, pos_bin: int = 4):
         self._prev = None
         self.local = local
         self.window = window
         self.integrate = integrate
         self.pos_bin = pos_bin
         self.column = None                                   # the column that OWNS perception + path integration (wired by arc_sdk)
-        self.encode = encode if encode is not None else (lambda patch: patch)   # kept for the sensory contract (unused in the factored path)
 
     def reset(self):
         self._prev = None
@@ -48,7 +47,7 @@ class Sensor:
             here = self.column.here_position()
             state = (content, here)
         else:
-            state = view_signature(coloured)                 # standalone / no column: the whole-frame content id
+            state = view_sdr(coloured)                       # standalone / no column: the whole-frame content SDR
         self._prev = frame
         return state, change
 

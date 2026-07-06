@@ -69,7 +69,7 @@ class OrientationGame:
     (non-abelian) -- the env the pose machinery (`track_pose`/`pose_state`) targets and the abelian `move_delta` cannot."""
 
     N = 24
-    STEP = 2
+    STEP = 1                                                        # the body moves ONE tile per FORWARD (hard rule; ARC-AGI-3 movers step 1 cell)
     GOAL = (12, 12)
     SHAPE = [(0, 0), (1, 0), (0, 1)]                                # an ASYMMETRIC L-tromino -> its 4 rotations are DISTINCT,
     #                                                                so a turn is VISIBLE and heading is READABLE from the shape
@@ -143,12 +143,12 @@ def test_orientation_game_is_a_valid_non_abelian_frame():
     a = OrientationGame(); a.step("RESET"); a.step("FORWARD")
     b = OrientationGame(); b.step("RESET"); b.step("TURN_L"); b.step("FORWARD")
     assert (a.mx, a.my) != (b.mx, b.my) and a.mx > 2 and b.my > 2
-    # SOLVABLE: face E, advance to x=12; face N, advance to y=12 -> goal
+    # SOLVABLE: face E, advance to x=12; face N, advance to y=12 -> goal (STEP=1 → 10 forwards per leg)
     g = OrientationGame(levels=1); g.step("RESET")
-    for _ in range(5):
+    for _ in range(10):
         g.step("FORWARD")                                                    # E: x 2->12
     g.step("TURN_L")
-    for _ in range(5):
+    for _ in range(10):
         g.step("FORWARD")                                                    # N: y 2->12
     assert g.levels_completed == 1
 

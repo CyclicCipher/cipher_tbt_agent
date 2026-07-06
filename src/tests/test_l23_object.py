@@ -44,10 +44,16 @@ def _walk(l23, cloud, order):
 
 
 def test_recognises_object_at_unseen_continuous_pose():
-    """A known object presented at a random continuous angle + translation it never saw: identify it AND recover the
-    pose (the operator reproduces the cloud). 100% — pose is SOLVED, not memorised per orientation."""
+    """A known object presented at a random continuous angle + translation it never saw: identify it (100%) AND recover
+    the pose to within the ORIENTATION-BIN resolution. FULLY SDR-native (SDR_MIGRATION.md M4): pose is a DISCRETE
+    orientation hypothesis (Lewis 2022's circular buffer of grid-cell orientation modules; Monty's rotation-hypothesis
+    set), inferred by VIRTUAL ROTATION — NOT an analytic angle. So a random continuous θ is recovered as the NEAREST bin
+    (2π/N ≈ 15°), and the reconstruction matches the cloud within that quantisation (the cortex does not claim exact
+    continuous pose from a glance)."""
     l23 = _lib()
     rng = np.random.default_rng(0)
+    from tbt.l23_object import N_BINS
+    tol = 4.0 * np.sin(np.pi / N_BINS) + 0.05                  # max cell offset from snapping a tetromino (radius ~<4) to the nearest bin
     n = ok = pose_ok = 0
     for name, base in TETROMINOES.items():
         model = next(m for m in l23.objects if m.name == name)
@@ -58,11 +64,12 @@ def test_recognises_object_at_unseen_continuous_pose():
             n += 1
             if res and res[0] == name:
                 ok += 1
-                pred = {tuple(np.round(p, 2)) for p in model.cells_at(res[1], res[2])}
-                true = {tuple(np.round(p, 2)) for p in cloud}
-                pose_ok += (pred == true)
+                pred = [np.asarray(p, float) for p in model.cells_at(res[1], res[2])]   # reconstructed at the recovered BIN
+                true = [np.asarray(p, float) for p in cloud]
+                near = all(min(float(np.hypot(*(p - q))) for q in pred) <= tol for p in true)   # every cell explained within a bin
+                pose_ok += near
     assert ok == n, f"identification {ok}/{n}"
-    assert pose_ok == n, f"pose recovery {pose_ok}/{n}"
+    assert pose_ok == n, f"pose recovery (to the nearest orientation bin) {pose_ok}/{n}"
 
 
 def test_chiral_pairs_not_confused():
@@ -80,7 +87,10 @@ def test_chiral_pairs_not_confused():
 
 def test_partial_observation_accumulates_evidence():
     """A single glance at a local patch is often ambiguous; movement RESOLVES it — the sensorimotor claim. Accuracy
-    must rise with the number of fixations and reach 100% well before the whole object is seen."""
+    must RISE with the number of fixations and reach 100% once enough of the object is seen. FULLY SDR-native (M4): pose
+    is quantised (virtual rotation over orientation bins), so a glance is slightly noisier than the retired analytic
+    solve — two fixations reach HIGH accuracy and full sensing reaches 100% (the accumulation is the claim, not
+    single-glance perfection)."""
     l23 = _lib()
     rng = np.random.default_rng(1)
     acc = {}
@@ -95,7 +105,8 @@ def test_partial_observation_accumulates_evidence():
                 ok += (res is not None and res[0] == name)
         acc[k] = ok / n
     assert acc[1] < acc[2], f"evidence did not accumulate: {acc}"
-    assert acc[2] == 1.0, f"two fixations should suffice: {acc}"
+    assert acc[2] >= 0.9, f"two fixations should give high accuracy: {acc}"
+    assert acc[4] == 1.0, f"full sensing should identify every object: {acc}"
 
 
 def test_learns_object_set_online_label_free():

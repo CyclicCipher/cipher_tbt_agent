@@ -24,7 +24,7 @@ from .l5_displacement import L5_Displacement
 from .l6_sr import SuccessorFeatures
 from .l23_object import L23_Object, ObjectGraph, _canonical
 from .hippocampus import Hippocampus
-from .retina import connected_figure, view_signature
+from .retina import connected_figure, view_sdr
 
 
 class CorticalColumn(nn.Module):
@@ -32,7 +32,7 @@ class CorticalColumn(nn.Module):
         super().__init__()
         self.L5 = L5_Displacement()
         self.L4 = L4_FeatureLocation(n_entities, feat_dim=feat_dim, seed=seed)
-        self.L23 = L23_Object(feat_dim=feat_dim, d_mem=d_mem)
+        self.L23 = L23_Object()
         self.board = int(board)
         self.hip = Hippocampus(self.L5, board=board)         # the allocentric map + head-direction gain field (reads L5's efference copy)
         self.sf = SuccessorFeatures(d=self.hip.grid.n)       # value over the allocentric position SDR (the grid-cell code)
@@ -52,11 +52,10 @@ class CorticalColumn(nn.Module):
         `coloured_cells` = the frame's non-background cells `[(x, y, colour), ...]`, ungrouped."""
         self_cells = self._attend_self(action, coloured_cells)     # COMMON FATE: the cells whose motion the efference explains
         cells = [(float(x), float(y)) for (x, y, _c) in self_cells]
-        content = view_signature(self_cells)                        # the peripheral's opaque content id (colour signature)
+        feat = view_sdr(self_cells)                                # the peripheral's OVERLAP-BEARING content SDR (M3; similar views share bits)
         field = self._sense_field(cells)                           # L2/3 recognition → the sensory EVIDENCE FIELD (a population)
         self._pred_error = self._residual(action, field)          # the forward-model residual (§4c) BEFORE the update
         self.hip.observe(action, field)                            # PATH-INTEGRATE the prior + SUPERIMPOSE the likelihood (no gain/conf)
-        feat = self.L4.encode(content)                             # the opaque content → an L4 feature id (SDR)
         p = self.hip.here()
         x, y = p if p is not None else (0.0, 0.0)
         return feat, (float(x), float(y), float(self.hip.head))

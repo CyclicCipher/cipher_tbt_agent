@@ -60,14 +60,92 @@ is SDR + population from the first commit; the operator, content, and recognitio
 **Content SDR + recognition as overlap (M3 ⊕ M4).**
 - Content = an **overlapping SDR** (a spatial pooler over the view) so similar views share bits (retire `view_signature`
   exact-match / `L4.encode` integer ids).
+  - **BUILT 2026-07-05 (`retina.view_sdr`, `test_retina`).** The overlapping content SDR = the UNION of two analytic-encoder
+    fields — colour composition (a `CategoryEncoder` block per present colour: disjoint, no false colour-nearness) ⊕
+    pairwise-DISTANCE geometry (a `ScalarEncoder` bump per pair: nearby distances overlap, rotation/translation
+    invariant). **Deviation from the "spatial pooler" wording (analogous to M1's gain-field note):** the analytic
+    encoders are used, NOT a learned `SpatialPooler` — the view has explicit structure (colours + a distance metric), so
+    the analytic encoders give the same overlap graded-ness *deterministically* (no Hebbian drift → the same view is the
+    same SDR every frame, which the persistent-recognition session and `test_perceive_unifies` need). The `SpatialPooler`
+    stays the fallback "when no analytic encoder fits" (`encoders.py`). Measured: overlap(L, L)=15, (L, L+1cell)=15,
+    (L, same-shape-other-colour)=10, (L, a line)=6 — graded similarity where `view_signature` gave 0 for every non-identity.
+    Wired into `column.perceive` (`feat = view_sdr(self_cells)`, no `L4.encode` int id) and the standalone `sensor.read`;
+    `view_signature` is deleted. (`L4.encode`'s int codebook + `L4.E` remain for the thalamus binding — out of the
+    perceive path, a later cleanup.)
 - The object identity is a **stable L2/3 SDR** = the temporal-pooler union of predicted content SDRs over the sensorimotor
   sequence (folds in plan step A's persistent session — convergence is now SDR settling).
 - **Recognition = SDR overlap/union** against the library (θ-thresholded, ~O(1) — folds in plan step B, associative
   recall); pose inferred via the displacement-cell SDRs / the operator. Retire Euclidean `nearest` + `atan2` pose-solve.
+  - **DECISION 2026-07-05 (user): go FULLY SDR-native — pose quantized too**, grounded in TBT/HTM research (below), NOT
+    the identity-only half-measure. The `atan2` in `l5_displacement.pose_between` (the analytic continuous-angle solve)
+    IS retired here, replaced by the mechanism the research actually uses.
+  - **Research grounding (Lewis et al., *Orientation-Invariant Sensorimotor Object Recognition Using Cortical Grid Cells*,
+    Front. Comput. Neurosci. 2022, PMC8825787; Monty / TBP, arXiv 2412.18354).** Both represent pose as a **DISCRETE set of
+    orientation hypotheses**, never an analytic angle: Lewis uses a **circular buffer of N grid-cell modules** (25 baseline)
+    → N orientation bins over 360°, and recognises a rotated object by **VIRTUAL ROTATION** ("similar to mental rotations")
+    — replay the sensorimotor sequence across all N orientations and pick the one with the **highest firing rate / lowest
+    location-layer ambiguity**, keeping the learned feature-location associations intact (a circular shift of the ordered
+    modules, no retraining). Monty generates a discrete rotation set from sensed pose features and accumulates **evidence**
+    over `(object, rotation, location)` tuples (evidence weighted by the *continuous* angular difference, but the
+    hypotheses are discrete), path-integrating each hypothesis forward by the (rotated) displacement. So a quantized pose
+    is not a compromise — it is how the cortex does it; the recovered pose is the **best-matching discrete hypothesis**.
+  - **Concrete SDR-native design (M4).**
+    1. **Identity = a stable L2/3 SDR** — each object stores a content-union SDR (over `view_sdr`/local-descriptor SDRs).
+    2. **Associative recall** — a sensed content SDR is matched by **overlap against the library** (θ-thresholded), ~O(1)
+       in library size, shortlisting candidate objects (retires the serial scan over every object×node).
+    3. **Pose by virtual rotation over N orientation bins** — precompute the N rotation operators `R_r = rot(r·2π/N)`
+       (the group-representation operator, `operator.py`/`l5_displacement.rot`). Recognition seeds a hypothesis per
+       `(object, bin r)` whose *rotated* local descriptor matches the sensed one (an SDR/set match under `R_r`), and
+       accumulates evidence as the sensor moves (the displacement is rotated by `R_r`, path-integrating the hypothesis).
+       The winning bin is the inferred orientation. **This retires `align_rotations`/`pose_between` (the `atan2` solve) and
+       the Euclidean `nearest` node scan** — matching is overlap under the discrete `R_r`.
+    4. `cells_at(bin_center, t)` reconstructs the object at the bin's rotation (exact at the bin, quantised by 2π/N).
+  - **Test-semantics change (justified by the research, not a hack):** `test_l23_object`'s exact-continuous-pose assertion
+    (`cells_at(θ,t)==cloud` for a random θ) relaxes to **nearest-bin recovery** (the rotated model matches the cloud within
+    the bin resolution). Identification stays 100%; only the analytic exact-angle claim — which the research says the cortex
+    does NOT make — is relaxed. `N` chosen divisible by 4 so the 90°/180°/270° cases (the online-label-free test) are exact.
+  - **BUILT 2026-07-05 (`l23_object.py`, `test_l23_object` 8/8).** `N_BINS=24` (15° quantum). New machinery: `_desc_sdr`
+    (rotation-invariant local descriptor as an overlap-bearing `ScalarEncoder` union — retires `invariant_sig ==`);
+    `ObjectGraph.identity` (the union of node descriptors = the stable identity SDR); `_bins_matching` (virtual rotation:
+    the LOWEST-residual orientation bin(s) + genuine symmetric ties, NOT every bin within tol — Lewis's lowest-ambiguity
+    orientation); `sense` INIT = associative-recall shortlist (`O.identity.overlap(sensed) ≥ θ`) → per-node `_desc_match`
+    → virtual-rotation bin seed (no atan2); UPDATE path-integrates each hypothesis by the bin-rotated displacement and
+    re-verifies the descriptor + committed bin. `vote` pools by `(object, bin, coarse-position)` — quantised pose gives a
+    node-dependent single-glance `t` (~1-cell scatter), so the position is pooled at `_VOTE_POS_TOL=2.0`, not the exact
+    `t`. **Retired from the recognition path:** `align_rotations`/`pose_between` (the atan2 solve) and the exact-match
+    `invariant_sig` gate. **Kept:** `pose_between`/`pose_operator` still live in `l5_displacement` as the operator
+    group-representation (Gao 2021), tested by `test_operator`/`test_l5` — out of the recognition path, not deleted.
+    Costs (research-consistent, all documented in the tests): 2 fixations → ~97% (a glance is noisier than the analytic
+    solve), full sensing → 100%; single-glance localisation is coarse; suite l23 time ~2× (the N-bin residual sweep).
+    Games unregressed (MockLive 60/60, sokoban ~2.2s); suite 76 passed / 6 xfailed.
+
+**Classical-geometry CLEANUP (2026-07-05, after M1–M4).** With the SDR-native loop in place, the superseded classical
+machinery was deleted so only SDR geometry remains. Removed: `pose_between`/`align_rotations` (the atan2 SE(2) angle solve)
++ `_sets_match` + the `math` import (`l5_displacement`); `invariant_sig` (the exact-match descriptor tuple, `l4`); the
+`Retina` RF-sweep patch codebook + `dominant_region` (exact-match/connected-component, `retina`); the l23 legacy VSA store
+(`S`/`pool`/`revise`); the dead `sensor.encode`/`L4.encode` wiring — plus their now-dead tests + unused imports. **Kept**
+the SDR-native operator/displacement geometry these read through (`rot`, `pose_operator`, `apply_pose`, `local_disps`,
+`Operator`/`OnlineOperator` — the Gao-2021 group representation) and the forward-looking `thalamus` + `L4` layer (§3/§2,
+the multi-column sheet's router + a core layer, unwired but documented). Suite 70 passed / 6 xfailed; games unregressed.
 
 **Build order WITHIN the combined change (each keeps the suite green + the population intact):**
-1. φ + the operator-on-SDR for the self pose (M1⊕M2 core) — replace `hip._P`/`_Q`/`R(head)·v` with `φ` + `M_a·φ`, keeping
-   the superposition correction. Un-xfails `test_forward` WITHOUT the point-pose regression (population retained).
+1. φ + the operator-on-SDR for the self pose (M1⊕M2 core) — replace the dense localist `hip._P` board-map with the
+   **modular grid-cell SDR population** (a bump per `GridEncoder` module ring; the belief now lives in the SAME grid code
+   `SuccessorFeatures` values), and path integration `_shift2d(_P, world)` with the **per-module grid phase shift**
+   (`φ ← M(v_world)·φ`, the continuous-attractor operator — Burak & Fiete). Keep the head ring `_Q` (already a population)
+   and the superposition correction (per module). Un-xfails `test_forward` WITHOUT the point-pose regression (population
+   retained).
+   - **TBT-accuracy correction (2026-07-05, found at the §11.3 check).** "Retire `R(head)·v`" does NOT mean replace the
+     gain field with a *marginalisation/mixture over the head population* (`Σ_h Q[h]·shift(R(θ_h)·ego)`). That mixture is a
+     DRIFT that breaks the abelian case: a world-frame body (NavGame's symmetric 2×2 mover, ACTION1-4) has a genuinely
+     FLAT head ring (symmetry → unobservable heading, correctly `θ=None`), and a mixture over a flat `Q` smears the
+     world-frame move across all four rotations → the position bump disintegrates → NavGame 8/8→0/8. The gain field must
+     read the head as a **population VECTOR** (the circular-mean read-out = the standard HD population decode) to produce
+     ONE world velocity `v_world = R(head)·ego`, then drive the operator `φ ← M(v_world)·φ`. For an abelian body this is
+     `R(0)=identity` (correct, no smear); for a sharp SE(2) head it is the true rotation. This is still a **population op**
+     (the head is read as a population, not a hand-kept scalar register) and reliability weighting stays **emergent in the
+     bump widths** (the superposition), not a scalar `conf`. What is actually retired: the dense-Euclidean `_shift2d` of a
+     localist board-map, and the `atan2`-on-a-degenerate-flat-ring leaking a garbage angle into efference LEARNING.
 2. content SDR (M3) — the overlapping encoder feeding L4/L2/3.
 3. recognition as overlap + the L2/3 identity SDR (M4) — over the content SDR, folding in A/B.
 - **M5 — HTM temporal memory (follow-on).** Replace the symbolic `SequenceMemory` dict with predictive cells in an SDR

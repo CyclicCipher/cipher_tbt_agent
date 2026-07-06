@@ -1,22 +1,20 @@
 """Layer 4 — feature-at-location. The label-free content codebook (absorbing the retina's patch vocabulary, grown
-online with no hard wall), the rotation-INVARIANT feature descriptor (the ventral 'what', complementary to L5's
-equivariant displacements), and predict_feature -- the PREDICT half of predict-then-compare seated where the
-feature lives (L4 inherits L6's location, forms none of its own)."""
+online with no hard wall) and predict_feature -- the PREDICT half of predict-then-compare seated where the feature
+lives (L4 inherits L6's location, forms none of its own). The rotation-invariant descriptor moved to an overlap-bearing
+SDR (`l23_object._desc_sdr`, SDR_MIGRATION.md M4); the exact-match `invariant_sig` was retired."""
 
 from __future__ import annotations
 
 import os
 import sys
 
-import numpy as np
 import torch
 
 _PKG_PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
-from tbt.l4_feature_location import L4_FeatureLocation, invariant_sig  # noqa: E402
-from tbt.l5_displacement import apply_pose, local_disps               # noqa: E402
+from tbt.l4_feature_location import L4_FeatureLocation  # noqa: E402
 
 
 def test_codebook_is_label_free_and_recurs():
@@ -62,19 +60,5 @@ def test_predict_feature_reads_the_object():
     assert l4.predict_feature(S, p1) == 6
 
 
-def test_invariant_sig_is_rotation_invariant():
-    """L4's feature descriptor is the rotation-INVARIANT 'what' (complementary to L5's equivariant local_disps):
-    the same shape at any orientation yields the same feature, so content recurs across pose."""
-    cloud = [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0), (2.0, 1.0)]
-    base = [np.asarray(c, float) for c in cloud]
-    sig0 = invariant_sig(local_disps(base, 0, radius=3.0))
-    for theta in (0.5, np.pi / 2, 2.0):
-        rotated = [np.asarray(p, float) for p in apply_pose(cloud, theta, (4.0, -3.0))]
-        assert invariant_sig(local_disps(rotated, 0, radius=3.0)) == sig0
-
-
-def test_invariant_sig_exposed_on_the_layer():
-    """L4 the LAYER exposes the feature descriptor (the column reads the 'what' through it)."""
-    assert L4_FeatureLocation.invariant_sig is invariant_sig
 
 

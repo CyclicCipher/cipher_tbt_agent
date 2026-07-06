@@ -31,9 +31,9 @@ def _obs(hip, action, w):
 
 
 class _Body:
-    """A heading-carrying body (SE(2)): action 0 = FORWARD (2 cells in the current heading), 1 = TURN_L, 2 = TURN_R."""
+    """A heading-carrying body (SE(2)): action 0 = FORWARD (1 cell in the current heading), 1 = TURN_L, 2 = TURN_R."""
 
-    STEP = 2.0
+    STEP = 1.0
 
     def __init__(self, x=2.0, y=2.0, bound=22):
         self.x, self.y, self.th, self.bound = x, y, 0.0, bound
@@ -55,9 +55,9 @@ class _Body:
 
 
 class _GridBody:
-    """A translation-only (abelian) body: 4 WORLD-frame moves, no heading (ARC-style ACTION1-4)."""
+    """A translation-only (abelian) body: 4 WORLD-frame moves of ONE cell, no heading (ARC-style ACTION1-4)."""
 
-    MOVES = {0: (0, -2), 1: (0, 2), 2: (-2, 0), 3: (2, 0)}
+    MOVES = {0: (0, -1), 1: (0, 1), 2: (-1, 0), 3: (1, 0)}
 
     def __init__(self, bound=22):
         self.x, self.y, self.bound = 0.0, 0.0, bound
@@ -81,8 +81,8 @@ def test_gain_field_one_observation_generalizes_to_all_headings():
     _obs(hip, None, w)                       # cold: set the belief
     w.step(0); _obs(hip, 0, w)               # a SINGLE forward at heading 0
     ego = np.array(hip.l5.efference(0)[0])                     # L5 owns the efference copy (body-frame displacement)
-    assert np.allclose(ego, [2.0, 0.0], atol=0.3), ego
-    truth = {0: (2, 0), 1: (0, 2), 2: (-2, 0), 3: (0, -2)}     # E/N/W/S
+    assert np.allclose(ego, [1.0, 0.0], atol=0.3), ego         # ONE tile per FORWARD
+    truth = {0: (1, 0), 1: (0, 1), 2: (-1, 0), 3: (0, -1)}     # E/N/W/S
     for h, t in truth.items():
         pred = _rot(h * np.pi / 2) @ ego                       # world Δ = R(head)·ego — derived, not re-learned
         assert np.allclose(pred, t, atol=0.3), (h, pred, t)

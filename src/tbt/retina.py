@@ -20,7 +20,15 @@ test venv. RF size / stride are ARC-calibrated hyperparameters (5x5-8x8 measured
 from __future__ import annotations
 
 from collections import Counter, deque
-from typing import Optional
+
+from .encoders import SDR, CategoryEncoder, ScalarEncoder   # the SDR encoder library — the content SDR's substrate (M3)
+
+# The content SDR's fixed sub-encoders (SDR_MIGRATION.md M3). Pre-populated + never grown, so `view_sdr` is a pure,
+# deterministic function (no shared mutable state): ARC's 16-colour palette is UNORDERED (a CategoryEncoder — disjoint
+# blocks, no false colour-nearness, the bitter lesson) and pairwise DISTANCE is a metric quantity (a ScalarEncoder —
+# nearby distances OVERLAP). The two fields are concatenated into one content SDR.
+_COLOUR_ENC = CategoryEncoder(categories=range(16), w=5, capacity=16)   # colour presence (composition)
+_DIST_ENC = ScalarEncoder(0.0, 24.0, n=60, w=7, clip=True)             # pairwise distance -> an overlapping bump
 
 
 def background(frame):
@@ -81,39 +89,6 @@ def salient_targets(frame, exclude=(), k: int = 1, bg=None, suppress: float = 2.
     return peaks
 
 
-class Retina:
-    """A tiling of narrow receptive fields with one shared, online-grown patch vocabulary. `rf` = the RF edge,
-    `stride` = the step between RFs (stride < rf overlaps; default tiles without overlap). The codebook is
-    label-free: a never-seen patch gets the next id, so the local alphabet is discovered by watching, never
-    injected ([[feedback_bitter_lesson]])."""
-
-    def __init__(self, rf: int = 5, stride: Optional[int] = None):
-        self.rf = rf
-        self.stride = stride if stride is not None else rf
-        self.codebook: dict = {}                              # canonical patch -> feature id (grows online)
-
-    def _patch(self, frame, x, y):
-        return tuple(tuple(frame[y + i][x:x + self.rf]) for i in range(self.rf))
-
-    def feature(self, patch) -> int:
-        """The patch's feature id, adding it to the vocabulary if novel (label-free online discovery)."""
-        fid = self.codebook.get(patch)
-        if fid is None:
-            fid = self.codebook[patch] = len(self.codebook)
-        return fid
-
-    def sense(self, frame, x, y):
-        """One RF observation at top-left (x, y): (feature_id, pose=(x, y))."""
-        return self.feature(self._patch(frame, x, y)), (x, y)
-
-    def perceive(self, frame):
-        """Sweep the retina over the frame -> [(feature_id, pose), ...] for the RF tiling."""
-        H, W = len(frame), len(frame[0])
-        return [self.sense(frame, x, y)
-                for y in range(0, H - self.rf + 1, self.stride)
-                for x in range(0, W - self.rf + 1, self.stride)]
-
-
 def salient_cells(prev, cur):
     """Exogenous attention: the cells that CHANGED between two frames -- the dynamic residual the saccade motor is
     drawn to (the live games show this is a small, coherent, controllable object on a mostly-static layout). The
@@ -121,49 +96,29 @@ def salient_cells(prev, cur):
     return {(x, y) for y in range(len(cur)) for x in range(len(cur[0])) if prev[y][x] != cur[y][x]}
 
 
-def view_signature(cloud, ndigits: int = 3):
-    """The retina's CONTENT ENCODER (P1 slice 3): the rotation+translation-invariant, colour-aware descriptor of a local
-    VIEW -- raw coloured cells -> an OPAQUE key the column encodes to an L4 feature id (an SDR). It pairs the sorted
-    COLOUR multiset (composition; also covers a single cell) with the sorted multiset of `(colour-pair, pairwise distance)`
-    over all cell pairs (the invariant GEOMETRY): pairwise distances are preserved by any rotation/translation, so the
-    SAME shape+colours at any pose/position -> the SAME descriptor, while a different colouring or shape differs. This is
-    MODALITY-SPECIFIC extraction and lives in the PERIPHERAL (reference_tbt_feature_definition); the column stays
-    content-opaque. NB an EXACT-MATCH encoder: a truly general one would map SIMILAR views to OVERLAPPING SDRs (deferred).
-    `cloud` = `[(x, y, colour), ...]`."""
-    cells = [(float(x), float(y), c) for (x, y, c) in cloud]
-    colours = tuple(sorted(c for _x, _y, c in cells))
-    pairs = []
-    for i in range(len(cells)):
-        xi, yi, ci = cells[i]
+def view_sdr(cloud) -> SDR:
+    """The retina's CONTENT ENCODER (SDR_MIGRATION.md M3): a local VIEW's raw coloured cells -> an OVERLAP-BEARING
+    content SDR (retiring the exact-match `view_signature` key). Its point is that SIMILAR views share bits — the three
+    SDR rules (Ahmad & Hawkins): overlap = similarity, determinism, fixed length + sparsity. It is the UNION of two
+    fields, each an SDR that already has the right overlap structure:
+      * COLOUR composition — each present colour's `CategoryEncoder` block (disjoint per colour: no false colour-nearness,
+        the bitter lesson; ARC's 16-colour palette is UNORDERED). Views sharing a colour share those bits.
+      * GEOMETRY — each pairwise DISTANCE's `ScalarEncoder` bump (nearby distances OVERLAP). Distances are preserved by
+        any rotation/translation, so the SAME shape at ANY pose -> the SAME geometry bits (pose-invariant), and a SIMILAR
+        shape (a cell moved / added) -> a HIGH-overlap code, where the exact-match key was orthogonal.
+    So a different colouring differs only in the colour bits (geometry still overlaps), a different shape only in the
+    geometry bits (colour still overlaps), and the same shape+colours at any pose is IDENTICAL. MODALITY-SPECIFIC
+    extraction, in the PERIPHERAL (reference_tbt_feature_definition); the column stays content-opaque. `cloud` =
+    `[(x, y, colour), ...]`; deterministic (the sub-encoders are fixed)."""
+    cells = [(float(x), float(y), int(c)) for (x, y, c) in cloud]
+    active = set()
+    for _x, _y, c in cells:                                        # COLOUR composition: union of present-colour blocks
+        active |= _COLOUR_ENC.encode(c).active
+    off = _COLOUR_ENC.n
+    for i in range(len(cells)):                                   # GEOMETRY: union of pairwise-distance bumps (invariant)
+        xi, yi, _ci = cells[i]
         for j in range(i + 1, len(cells)):
-            xj, yj, cj = cells[j]
-            d = round(((xi - xj) ** 2 + (yi - yj) ** 2) ** 0.5, ndigits)
-            pairs.append((min(ci, cj), max(ci, cj), d))
-    return colours, tuple(sorted(pairs))
-
-
-def dominant_region(cells):
-    """The largest 4-connected component of `cells` and its centroid -- where exogenous attention foveates (the
-    primary moving object). Returns (component, (cx, cy)), or (set(), None) if there was no change."""
-    cells = set(cells)
-    seen, best = set(), set()
-    for s in cells:
-        if s in seen:
-            continue
-        comp, q = set(), deque([s])
-        seen.add(s)
-        while q:
-            x, y = q.popleft()
-            comp.add((x, y))
-            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
-                p = (x + dx, y + dy)
-                if p in cells and p not in seen:
-                    seen.add(p)
-                    q.append(p)
-        if len(comp) > len(best):
-            best = comp
-    if not best:
-        return set(), None
-    cx = sum(x for x, _ in best) / len(best)
-    cy = sum(y for _, y in best) / len(best)
-    return best, (cx, cy)
+            xj, yj, _cj = cells[j]
+            d = ((xi - xj) ** 2 + (yi - yj) ** 2) ** 0.5
+            active |= {off + b for b in _DIST_ENC.encode(d).active}
+    return SDR(_COLOUR_ENC.n + _DIST_ENC.n, active)

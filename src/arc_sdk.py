@@ -162,10 +162,9 @@ class TbtPolicy:
             self.sensor.reset()
             self.prev_level = obs.level
             self._last_a = None
-        if self.agent is None:                              # first playable frame: build the agent + wire the L4 encode
+        if self.agent is None:                              # first playable frame: build the agent + wire the column
             self.sensor._prev = obs.grid                    # seed the retina so objects() can size the click-slots (salience peaks)
             self._init_actions(latest_frame)
-            self.sensor.encode = self.agent.col.L4.encode   # the sensor emits FEATURE-at-location via the column's L4
             self.sensor.column = self.agent.col             # the column OWNS perception + path integration
             self.sensor._prev = None                        # the real read starts clean (first-frame change = none)
         state, _change = self.sensor.read(obs.grid, action=self._last_a)   # efference = last action (path integration)

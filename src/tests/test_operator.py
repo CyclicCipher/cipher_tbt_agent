@@ -134,21 +134,20 @@ def test_ONLINE_operator_learns_from_a_stream__COVERAGE_not_constraint_is_the_bo
 
 def test_L2_3_pose_machinery_is_ONE_operator_machinery():
     """L6_NONABELIAN Stage 1d (the cross-layer FOLD): L2/3's SO(2)+translation pose machinery is ONE instance of the
-    operator machinery. (i) pose INFERENCE (`pose_between`) = `Operator.fit` (Procrustes IS the pose solve); (ii) pose
+    operator machinery. (i) pose INFERENCE = `Operator.fit` (Procrustes IS the pose solve, group-general — the analytic
+    atan2 `pose_between` it replaced was retired with the SDR-native migration, SDR_MIGRATION.md M4); (ii) pose
     APPLICATION (`apply_pose`) = the SE(2) `pose_operator` acting; (iii) poses COMPOSE non-abelianly (SE(2)); (iv) the
     CONTINUOUS rotation family = `power` (learn the step, read any pose) -- so the hand-coded `rot(θ)` becomes replaceable
     by the learned Operator, general for an abstract column whose group isn't SO(2)."""
-    from tbt.l5_displacement import apply_pose, pose_between, pose_operator, rot
+    from tbt.l5_displacement import apply_pose, pose_operator, rot
     rng = np.random.default_rng(0)
     model = rng.standard_normal((6, 2))
     theta = 0.7
     sensed = (rot(theta) @ model.T).T                                          # the patch rotated by theta
 
-    # (i) INFERENCE: pose_between's angle and Operator.fit's rotation agree
-    th = pose_between(list(model), list(sensed))[0]
-    assert abs(((th - theta + np.pi) % (2 * np.pi)) - np.pi) < 1e-6            # pose_between recovers theta
-    learned = Operator.fit(model, sensed, orthogonal=True)                     # Procrustes = the pose solve, group-general
-    assert np.allclose(learned.M, rot(theta), atol=1e-6)                       # ... the SAME rotation
+    # (i) INFERENCE: Operator.fit (Procrustes) IS the pose solve — it recovers the rotation, group-general
+    learned = Operator.fit(model, sensed, orthogonal=True)
+    assert np.allclose(learned.M, rot(theta), atol=1e-6)                       # recovers the SAME rotation as ground truth
 
     # (ii) APPLICATION: apply_pose == the SE(2) pose_operator acting on homogeneous points
     cloud = rng.standard_normal((5, 2))

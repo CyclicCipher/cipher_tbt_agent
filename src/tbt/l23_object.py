@@ -18,18 +18,104 @@ in a side faculty.
     object metric frame (Monty's assumption); voting across DIFFERENT learned SR navigational frames needs
     cross-frame registration and is the deferred hard case (TARGET_ARCHITECTURE; reference_tbt_frames_and_hippocampus).
 
-The legacy VSA content store S (`pool` / `revise`) is kept as the WITHIN-object feature-at-location
-superposition (read back by L4.readout); its global-blob use retires with the offline VSA path (Phase 5).
 """
 
 from __future__ import annotations
 
 import numpy as np
-import torch
 import torch.nn as nn
 
-from .l4_feature_location import invariant_sig
-from .l5_displacement import align_rotations, apply_pose, local_disps, rot
+from .encoders import SDR, ScalarEncoder
+from .l5_displacement import apply_pose, local_disps, rot
+
+# ---- FULLY SDR-NATIVE pose: N discrete ORIENTATION BINS + VIRTUAL ROTATION (SDR_MIGRATION.md M4) --------------
+# Grounded in Lewis et al. 2022 (grid-cell object recognition: a CIRCULAR BUFFER of N grid-cell orientation modules ->
+# N discrete orientations; recognise a rotated object by "mental rotation" -- replay across all N orientations, pick the
+# lowest-ambiguity one) and Monty (a discrete rotation-hypothesis set, evidence accumulated). Pose is QUANTISED to 2*pi/N,
+# not an analytic angle: this RETIRES `align_rotations`/`pose_between` (the atan2 solve). N is divisible by 4 so the
+# 90/180/270-degree cases are exact bins.
+N_BINS = 24
+_BIN_ANG = np.array([r * 2 * np.pi / N_BINS for r in range(N_BINS)])   # each bin's orientation
+_BIN_ROT = [rot(a) for a in _BIN_ANG]                                  # precomputed rotation operators R_r (the virtual-rotation buffer)
+_BIN_TOL = 0.35                                                        # set-match tolerance (>= the residual a random angle leaves after snapping to the nearest bin)
+
+# the local patch's rotation-INVARIANT descriptor as an OVERLAP-BEARING SDR (retires the exact-match `invariant_sig` tuple)
+_PATCH_DIST_ENC = ScalarEncoder(0.0, 8.0, n=48, w=7, clip=True)       # a neighbour distance -> an overlapping bump
+
+
+def _desc_sdr(disps) -> SDR:
+    """The rotation-INVARIANT local descriptor as an SDR (the 'what'): the union of the neighbour DISTANCES' overlapping
+    bumps (distances are rotation/translation invariant). Similar patches -> overlapping SDRs, so a near-miss is SIMILAR,
+    not orthogonal (the exact-match `invariant_sig` key retired). A point (no neighbours) -> the empty SDR."""
+    active = set()
+    for v in disps:
+        active |= _PATCH_DIST_ENC.encode((float(v[0]) ** 2 + float(v[1]) ** 2) ** 0.5).active
+    return SDR(_PATCH_DIST_ENC.n, active)
+
+
+def _bin_residual(model_disps, sensed_disps, r: int) -> float:
+    """The alignment RESIDUAL of orientation bin `r`: rotate `model_disps` by `R_r` and greedily match each to its
+    nearest sensed disp — the mean matched distance (the bin's "ambiguity"; Lewis's inverse firing rate). 0 = a perfect
+    orientation match. Length-mismatched patches -> infinite (they cannot be the same local structure)."""
+    if len(model_disps) != len(sensed_disps):
+        return float("inf")
+    rotated = [_BIN_ROT[r] @ v for v in model_disps]
+    pool = [np.asarray(b, float) for b in sensed_disps]
+    total = 0.0
+    for a in rotated:
+        if not pool:
+            return float("inf")
+        k = int(np.argmin([(a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 for b in pool]))
+        total += float(((a[0] - pool[k][0]) ** 2 + (a[1] - pool[k][1]) ** 2) ** 0.5)
+        pool.pop(k)
+    return total / len(rotated)
+
+
+def _bins_matching(model_disps, sensed_disps, tol: float = _BIN_TOL, eps: float = 0.15):
+    """VIRTUAL ROTATION (retires the atan2 `align_rotations`): the BEST orientation bin(s) — those whose rotation `R_r`
+    aligns `model_disps` onto `sensed_disps` with the LOWEST residual (Lewis's "lowest-ambiguity / highest-firing-rate"
+    orientation), swept over the N precomputed rotations ("mental rotation") instead of solving the angle. Returns the
+    argmin bin PLUS any genuine ties within `eps` (a symmetric object's stabiliser orbit — several exact orientations),
+    but NOT the loose halo of near-bins (which spread evidence + translation). A POINT (no local structure) is
+    orientation-free -> bin 0. Returns the list of best-bin indices (empty if none is within `tol`)."""
+    if len(model_disps) != len(sensed_disps):
+        return []
+    if len(model_disps) == 0:                                # a point: orientation-free -> canonical bin 0 (as the old θ=0)
+        return [0]
+    res = [_bin_residual(model_disps, sensed_disps, r) for r in range(N_BINS)]
+    m = min(res)
+    if m > tol:
+        return []
+    return [r for r in range(N_BINS) if res[r] <= m + eps]
+
+
+def _bin_matches(model_disps, sensed_disps, r: int, tol: float = _BIN_TOL) -> bool:
+    """Does the SINGLE orientation bin `r` still align `model_disps` onto `sensed_disps`? (the UPDATE check — verify the
+    hypothesis's committed orientation holds, without re-sweeping every bin)."""
+    if len(model_disps) != len(sensed_disps):
+        return False
+    if len(model_disps) == 0:
+        return r == 0
+    return _bin_residual(model_disps, sensed_disps, r) <= tol
+
+
+def _desc_match(a: SDR, b: SDR) -> bool:
+    """Do two local-descriptor SDRs denote the SAME local structure? Overlap-θ (retires the exact-match `invariant_sig ==`):
+    the descriptor is rotation-INVARIANT (distances), so a true match at ANY orientation is (near-)IDENTICAL -> full
+    overlap; a near-miss is SIMILAR (high overlap), not orthogonal. A point matches only a point (both empty)."""
+    if a.w == 0 or b.w == 0:
+        return a.w == b.w
+    return a.overlap(b) >= max(a.w, b.w) - 2                  # near-identical distance sets (small slack for float bucket edges)
+
+
+def _union(sdrs) -> SDR:
+    """The union (bitwise OR) of a list of SDRs — the object's IDENTITY SDR = the pool of its node descriptors (the
+    associative-recall target; a sensed node overlapping it means the object HAS such a node)."""
+    n = sdrs[0].n if sdrs else _PATCH_DIST_ENC.n
+    active = set()
+    for s in sdrs:
+        active |= s.active
+    return SDR(n, active)
 
 
 def _local_disps_all(locs, radius):
@@ -58,8 +144,8 @@ def _local_disps_all(locs, radius):
 
 class ObjectGraph:
     """One object in the graph-memory, stored ONCE in its own reference frame: node LOCATIONS (L6) + each node's
-    local DISPLACEMENTS (L5) + its rotation-invariant FEATURE signature (L4). `cells_at` = L5's pose operator —
-    the object reconstituted at any continuous pose (correct by construction, no per-orientation entry)."""
+    local DISPLACEMENTS (L5) + its rotation-invariant descriptor SDR (L4) + the object IDENTITY SDR. `cells_at` = L5's
+    pose operator — the object reconstituted at a bin orientation (quantised by 2π/N; SDR_MIGRATION.md M4)."""
 
     def __init__(self, name, cloud, radius):
         self.name = name
@@ -67,7 +153,8 @@ class ObjectGraph:
         self.locs = [np.asarray(c, float) for c in cloud]
         self.locs_arr = np.asarray(self.locs, float) if self.locs else np.empty((0, 2))   # (N,2) for a VECTORISED nearest (no per-node np.linalg.norm)
         self.disps = _local_disps_all(self.locs, radius)                                  # L5: equivariant geometry (O(n))
-        self.sig = [invariant_sig(d) for d in self.disps]                                 # L4: invariant 'what'
+        self.desc = [_desc_sdr(d) for d in self.disps]                                    # L4: per-node rotation-invariant descriptor SDR (overlap-bearing)
+        self.identity = _union(self.desc)                                                # the object's stable IDENTITY SDR (associative recall)
 
     def nearest(self, loc):
         d2 = ((self.locs_arr - loc) ** 2).sum(axis=1)                                     # squared distances, one vectorised op — sqrt only the winner
@@ -94,25 +181,15 @@ def _canonical(cloud):
 
 
 class L23_Object(nn.Module):
-    """The object/identity layer. Recognition needs no VSA params (it is the graph + evidence loop), so `feat_dim`
-    / `d_mem` default for standalone use; the column passes its own. `radius` = the local-patch radius, `keep` =
-    prune hypotheses more than `keep` evidence below the top."""
+    """The object/identity layer — the graph-memory + evidence recognition loop (no VSA params). `radius` = the
+    local-patch radius, `keep` = prune hypotheses more than `keep` evidence below the top."""
 
-    def __init__(self, feat_dim: int = 256, d_mem: int = 512, radius: float = 1.5, keep: float = 3.0):
+    def __init__(self, radius: float = 1.5, keep: float = 3.0):
         super().__init__()
-        self.register_buffer("S", torch.zeros(feat_dim, d_mem))     # legacy within-object content superposition
         self.radius = radius
         self.keep = keep
         self.objects: list[ObjectGraph] = []                        # the graph-memory (was recognize.Recognizer.models)
         self.start()
-
-    # ---- the legacy VSA content store (within-object feature-at-location; read back by L4.readout) --------
-    def pool(self, binding: torch.Tensor) -> None:
-        self.S = self.S + binding
-
-    def revise(self, place: torch.Tensor, target_value: torch.Tensor) -> None:
-        """Delta-rule overwrite: drive the stored value at `place` to target_value, leaving the rest intact."""
-        self.S = self.S + torch.outer(target_value - self.S @ place, place)
 
     # ---- the object library (graph-memory; learned online, label-free) -----------------------------------
     def learn(self, cloud, name=None):
@@ -144,32 +221,36 @@ class L23_Object(nn.Module):
         self.prev = None
 
     def sense(self, loc, disps, only=None):
-        """One sensation (location + local displacements) — accumulate evidence over the (object, pose) hypotheses.
-        INIT (first sensation): for each model node whose LOCAL structure matches, SOLVE the pose(s) (L5) aligning
-        it onto the sensed patch; seed evidence. UPDATE: project each hypothesis by the (rotated) displacement,
-        find the nearest node, compare — match adds evidence, a morphology mismatch subtracts it; prune. Persistent
-        across calls (never recomputed). `only` restricts the INIT seed to a given object list (TRACKING one identity
-        without scanning the whole library)."""
+        """One sensation (location + local displacements) — accumulate evidence over the (object, ORIENTATION-BIN)
+        hypotheses, FULLY SDR-native (SDR_MIGRATION.md M4). INIT: ASSOCIATIVE RECALL shortlists objects whose IDENTITY
+        SDR overlaps the sensed descriptor (skip the rest, ~O(1) in library size); for each node with a matching
+        descriptor SDR, VIRTUAL ROTATION seeds one hypothesis per orientation bin `r` whose `R_r` aligns the model patch
+        onto the sensed one (no atan2 solve — mental rotation over the N bins). UPDATE: path-integrate each hypothesis by
+        the bin-rotated displacement, re-verify the descriptor overlap + the committed bin — match adds evidence, a
+        mismatch subtracts it; prune. Persistent across calls. `only` restricts the seed to a given object list (TRACKING
+        one identity)."""
         loc = np.asarray(loc, float)
-        sig = invariant_sig(disps)
-        if not self.hyps:                                   # INIT: solve pose from the first sensation
+        sensed = _desc_sdr(disps)
+        if not self.hyps:                                   # INIT: virtual-rotation seed (no atan2), associative-recall shortlisted
             for O in (self.objects if only is None else only):
+                if sensed.w and O.identity.overlap(sensed) < sensed.w - 2:   # ASSOCIATIVE RECALL: this object has no such node → skip
+                    continue
                 for i in range(len(O.locs)):
-                    if O.sig[i] != sig:
+                    if not _desc_match(sensed, O.desc[i]):
                         continue
-                    for theta in align_rotations(O.disps[i], disps):
-                        self.hyps.append(_Hyp(O, theta, loc - rot(theta) @ O.locs[i], O.locs[i], 1.0))
-        else:                                               # UPDATE: displacement under the hypothesised rotation
+                    for r in _bins_matching(O.disps[i], disps):
+                        self.hyps.append(_Hyp(O, float(_BIN_ANG[r]), loc - _BIN_ROT[r] @ O.locs[i], O.locs[i], 1.0))
+        else:                                               # UPDATE: displacement under the hypothesised bin rotation
             d = loc - self.prev
             for h in self.hyps:
-                pred = h.loc + rot(-h.theta) @ d
+                r = int(round(h.theta / (2 * np.pi / N_BINS))) % N_BINS   # the hypothesis's committed orientation bin
+                pred = h.loc + _BIN_ROT[(-r) % N_BINS] @ d                 # rot(-θ)·d = R_{-r}·d (path-integrate into the object frame)
                 i, dist = h.obj.nearest(pred)
-                cands = align_rotations(h.obj.disps[i], disps) if (dist < 0.4 and h.obj.sig[i] == sig) else []
-                if any(abs((th - h.theta + np.pi) % (2 * np.pi) - np.pi) < 0.05 for th in cands):
-                    h.ev += 1.0                             # location + local structure + rotation all agree
+                if dist < 0.4 and _desc_match(sensed, h.obj.desc[i]) and _bin_matches(h.obj.disps[i], disps, r):
+                    h.ev += 1.0                             # location + local structure + orientation all agree
                     h.loc = h.obj.locs[i]
                 else:
-                    h.ev -= 1.0                             # morphology mismatch
+                    h.ev -= 1.0                             # morphology / orientation mismatch
             if self.hyps:
                 top = max(h.ev for h in self.hyps)
                 self.hyps = [h for h in self.hyps if h.ev > top - self.keep]
@@ -284,19 +365,27 @@ class L23_Object(nn.Module):
         return vote([self, *others])
 
 
+_VOTE_POS_TOL = 2.0        # the world-position pooling resolution (cells) — coarse enough for the QUANTISED-pose t scatter
+
+
 def vote(columns):
-    """Pose-aware lateral VOTING across L2/3 columns (the CMP channel): pool every column's (object, pose)
-    hypotheses by their WORLD pose and sum the evidence. An object's world pose (theta, t) is SHARED — columns
-    sensing different parts independently solve the SAME (object, theta, t), so agreement on the world pose IS the
-    consensus; the truth accumulates support and wins even when each column alone is ambiguous (a single glance).
-    Returns (name, theta, t, ev) or None. NB assumes a SHARED metric frame across voters (Monty's assumption);
-    voting across DIFFERENT learned SR-frames needs learned cross-frame registration — deferred."""
-    pooled: dict = {}
+    """Pose-aware lateral VOTING across L2/3 columns (the CMP channel): pool every column's (object, ORIENTATION-BIN,
+    world-position) hypotheses and sum the evidence. Columns sensing different parts independently infer the SAME
+    (object, orientation, position), so agreement IS the consensus; the truth accumulates support and wins even when
+    each column alone is ambiguous. With the FULLY SDR-native quantised pose (M4), a single glance localises the origin
+    only COARSELY (the translation `t` inherits the bin-quantisation scatter, ~1 cell — it is node-dependent under a
+    non-exact bin), so the world position is pooled at `_VOTE_POS_TOL` resolution, NOT the exact `t` (which would split
+    the vote across the scatter). Returns (name, theta, t, ev) or None. NB assumes a SHARED metric frame across voters
+    (Monty's assumption); voting across DIFFERENT learned SR-frames needs learned cross-frame registration — deferred."""
+    pooled: dict = {}                                          # key -> [summed ev, representative (theta, t)]
     for col in columns:
         for h in col.hyps:
-            key = (h.obj.name, round(h.theta, 3), round(float(h.t[0]), 2), round(float(h.t[1]), 2))
-            pooled[key] = pooled.get(key, 0.0) + h.ev
+            gx = round(float(h.t[0]) / _VOTE_POS_TOL) * _VOTE_POS_TOL
+            gy = round(float(h.t[1]) / _VOTE_POS_TOL) * _VOTE_POS_TOL
+            key = (h.obj.name, round(h.theta, 3), gx, gy)      # (object, orientation bin, coarse world position)
+            slot = pooled.setdefault(key, [0.0, (h.theta, h.t)])
+            slot[0] += h.ev
     if not pooled:
         return None
-    (name, th, tx, ty), ev = max(pooled.items(), key=lambda kv: kv[1])
-    return name, th, (tx, ty), ev
+    (name, th, _gx, _gy), (ev, (theta, t)) = max(pooled.items(), key=lambda kv: kv[1][0])
+    return name, theta, t, ev

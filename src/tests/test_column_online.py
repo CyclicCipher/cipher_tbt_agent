@@ -1,6 +1,6 @@
 """The column's PERCEPTION + forward model: `perceive` unifies recognize -> predict -> correct -> learn over the pose
 belief, and `forward` is the one pure prediction over the factored (pose, content) rep. Driven from a coloured cloud
-through the peripheral split (cells -> pose; view_signature -> the opaque content id). The tabular/SR/cost/Euclidean
+through the peripheral split (cells -> pose; `view_sdr` -> the overlap-bearing content SDR). The tabular/SR/cost/Euclidean
 stack these once tested retired with the SDR re-seat (ARCHITECTURE.md §10 P4a)."""
 
 from __future__ import annotations
@@ -8,26 +8,16 @@ from __future__ import annotations
 import os
 import sys
 
-import pytest
-
 _PKG_PARENT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG_PARENT not in sys.path:
     sys.path.insert(0, _PKG_PARENT)
 
 from tbt.column import CorticalColumn  # noqa: E402
-from tbt.retina import view_signature  # noqa: E402
-
-# The self's ORIENTATION is encoded three ways (recognized pose theta, efference dtheta, the head ring's circular mean)
-# and kept consistent by hand; a cold-start FLAT head ring reads atan2(≈0,≈0) = a garbage angle that de-rotates a spurious
-# ~0.06 into a translation-only efference — so `forward`'s predicted y near the board edge near-misses the 0.6 tolerance
-# (0.657). The real fix is the efference→Operator unification that collapses the three encodings (SDR_MIGRATION.md, M1),
-# after which this un-xfails. Not a persistent-session regression (the position tracks; only the heading read-out is off).
-_ORIENTATION_REDUNDANCY = "forward-prediction y near-miss from the 3-way orientation redundancy — fixed by M1 (SDR_MIGRATION.md)"
 
 
 def _perceive(col, action, cloud):
     """Drive `column.perceive` from a coloured cloud `[(x, y, colour), ...]`. The column does the PERIPHERAL split
-    itself (common-fate attention → cells for the pose; `view_signature` → the opaque L4 content id), staying
+    itself (common-fate attention → cells for the pose; `view_sdr` → the overlap-bearing content SDR), staying
     content-opaque; the caller just hands it the frame's coloured cells."""
     return col.perceive(action, cloud)
 
@@ -35,8 +25,8 @@ def _perceive(col, action, cloud):
 def test_perceive_unifies_recognize_predict_correct_learn():
     """`column.perceive` unifies recognize -> PREDICT -> CORRECT -> LEARN -> content, one path for abelian + non-abelian.
     A shape TRANSLATING by a consistent per-action delta is recognized each step; the pose is path-integrated +
-    snap-corrected, the operator is LEARNED (a ~(2,0) translation), and content (`view_signature`) is invariant to the
-    mover's position (same shape -> one content id)."""
+    snap-corrected, the operator is LEARNED (a ~(2,0) translation), and content (`view_sdr`) is invariant to the
+    mover's position (same shape -> one content SDR)."""
     col = CorticalColumn(n_entities=16, seed=0)
     shape = [(0, 0), (1, 0), (2, 0), (2, 1)]                       # an asymmetric L-tromino (unique pose)
 
@@ -56,11 +46,12 @@ def test_perceive_unifies_recognize_predict_correct_learn():
     assert pred is not None and abs(pred[0] - (here[0] + 2.0)) < 0.6 and abs(pred[1] - here[1]) < 0.6, (here, pred)
 
 
-@pytest.mark.xfail(reason=_ORIENTATION_REDUNDANCY, strict=False)
 def test_forward_predicts_self_motion_over_the_factored_rep():
     """The ONE forward prediction over the factored (pose, content) rep -- apply the operator to the LOCATION, read the
     CONTENT. Self-motion: once the operator is learned, `forward` PREDICTS the next pose and the content is INVARIANT
-    (reafference); it is a PURE query (does not mutate the belief). An unlearned action predicts NO movement."""
+    (reafference); it is a PURE query (does not mutate the belief). An unlearned action predicts NO movement. Un-xfailed
+    by M1 (SDR_MIGRATION.md): the SDR-native grid-cell belief + population-vector gain field collapse the three-way
+    orientation redundancy, so a flat cold-start head ring no longer leaks a garbage angle into efference learning."""
     col = CorticalColumn(n_entities=16, seed=0)
     shape = [(0, 0), (1, 0), (2, 0), (2, 1)]                       # asymmetric (unique pose)
 

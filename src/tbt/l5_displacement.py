@@ -10,13 +10,12 @@ increment), never assigned. Two live uses of the one displacement: the MOTOR com
 OTHER-object DRIVER + the config-state/tabular operator were retired with the symbolic path (only the SDR/bump/recognition
 loop remains).
 
-The continuous-pose geometry (`rot`/`pose_between`/`pose_operator`/`apply_pose`) is the displacement-cell group action L2/3
-recognition reads through — its ONE home is here, not a side library. Rotation of the efference (theta) is a deferred
-extension (one more delta dimension, fed by the recogniser's inferred angle)."""
+The continuous-pose geometry (`rot`/`pose_operator`/`apply_pose`) is the displacement-cell group action L2/3 recognition
+reads through — its ONE home is here, not a side library. The ANALYTIC pose SOLVE (`pose_between`, an atan2 angle read-off)
+was RETIRED with the SDR-native migration (SDR_MIGRATION.md M4): L2/3 now infers orientation by VIRTUAL ROTATION over
+discrete bins (`l23_object`), reading through these rotation OPERATORS, not solving an angle."""
 
 from __future__ import annotations
-
-import math                                                     # cheap 2-vector magnitude (np.linalg.norm has crippling per-call overhead)
 
 import numpy as np                                              # the pose operators act on small point clouds
 import torch.nn as nn
@@ -48,42 +47,6 @@ def local_disps(locs, i, radius):
                      if j != i and (locs[j][0] - p[0]) ** 2 + (locs[j][1] - p[1]) ** 2 <= r2])
 
 
-def _sets_match(A, B, tol):
-    """Do point sets A, B coincide (each a in A matched to a distinct b in B within tol)?"""
-    B = list(B)
-    t2 = tol * tol
-    for a in A:
-        for k, b in enumerate(B):
-            if (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 <= t2:
-                B.pop(k)
-                break
-        else:
-            return False
-    return True
-
-
-def pose_between(model_disps, sensed_disps, tol=0.05):
-    """SOLVE the group element(s) g with g.model_disps ~= sensed_disps (as sets) -- 'which transform re-expresses
-    these displacements as those'. Spatial instance: g = a rotation, returned as theta in [0, 2pi); continuous, and
-    a symmetric patch yields several (Monty's multiple pose hypotheses). Reads the pose off the local geometry
-    rather than searching angles. (For an abstract column this becomes a solve over the learned group.)"""
-    if len(model_disps) != len(sensed_disps):
-        return []
-    if len(model_disps) == 0:                                # a POINT (no local structure): orientation-free -> canonical θ=0
-        return [0.0]
-    out: list[float] = []
-    v0 = model_disps[0]
-    n0 = math.hypot(v0[0], v0[1])
-    for w in sensed_disps:                                   # pair v0 with each equal-length sensed vector -> a candidate
-        if abs(math.hypot(w[0], w[1]) - n0) > tol:
-            continue
-        theta = float(np.arctan2(w[1], w[0]) - np.arctan2(v0[1], v0[0]))
-        if _sets_match([rot(theta) @ v for v in model_disps], sensed_disps, tol) and \
-                all(abs((theta - o + np.pi) % (2 * np.pi) - np.pi) > 1e-2 for o in out):
-            out.append(theta % (2 * np.pi))
-    return out
-
-
 def pose_operator(theta, t=(0.0, 0.0)) -> Operator:
     """A pose (SE(2) group element) as an `Operator` (L6_NONABELIAN unification): the 3x3 HOMOGENEOUS rotation-θ +
     translation-t. This makes L2/3's pose ONE instance of the ONE operator machinery (L5/L6), not a separate SO(2)
@@ -99,9 +62,6 @@ def apply_pose(cloud, theta, t):
     (homogeneous) point -- `R(theta)·loc + t`. ONE operator machinery (L6_NONABELIAN); correct by construction."""
     P = pose_operator(theta, t)
     return [P.apply((float(loc[0]), float(loc[1]), 1.0))[:2] for loc in cloud]
-
-
-align_rotations = pose_between                                  # the spatial-instance name (kept for callers)
 
 
 class L5_Displacement(nn.Module):
@@ -148,5 +108,4 @@ class L5_Displacement(nn.Module):
     # + translation; abstract columns: a learned group -- reference_tbt_frames_and_hippocampus). Recognition
     # (L2/3) reads its (object, pose) hypotheses through these; the module-level functions are the shared home.
     local_disps = staticmethod(local_disps)                  # a patch's neighbour-displacement vectors (the feature pose)
-    pose_between = staticmethod(pose_between)                # SOLVE the group element(s) aligning model -> sensed
     apply_pose = staticmethod(apply_pose)                   # APPLY a (group element, translation) to a point cloud

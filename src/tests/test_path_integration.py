@@ -41,7 +41,7 @@ class NavGame:
     sensing of the out-of-bounds edge alone -- the interior placement is what forces real coverage.)"""
 
     N = 24
-    STEP = 2
+    STEP = 1                                                  # the body moves ONE tile per action (hard rule; ARC-AGI-3 movers step 1 cell)
     GOAL = (12, 12)
     GOAL_COLOR = 3                                            # the goal cell is PERCEPTUALLY DISTINCT (a salience cue), not background
     MOVES = {"ACTION1": (0, -1), "ACTION2": (0, 1), "ACTION3": (-1, 0), "ACTION4": (1, 0)}
