@@ -23,11 +23,13 @@ class L4Layer(HTMLayer):
         self._active: set = set()                              # the cells active after the last observe
         self._burst = False                                   # did the last observe burst (a feature unpredicted at its location)?
 
-    def observe(self, feature_cols, location, obj=None) -> None:
+    def observe(self, feature_cols, location, obj=None, learn: bool = True) -> None:
         """Sense `feature_cols` (the active feature minicolumns) at `location` (the L6 grid-SDR bits). For each feature
         column: if the location DEPOLARISED a cell there (this feature was expected at this location), fire it (apical
         tiebreak by `obj`) and reinforce its basal segment onto the location; else BURST — grow a segment binding this
-        feature TO this location (its winner basal-determined). Firing/winner cells learn their apical segment onto `obj`."""
+        feature TO this location (its winner basal-determined). Firing/winner cells learn their apical segment onto `obj`.
+        `learn=False` = pure INFERENCE (the recognition / anchoring search): predicted cells FIRE but nothing is reinforced
+        or grown, and a burst adds NO cell (an unrecognised feature-at-location contributes no evidence)."""
         location = set(location)
         obj = set(obj) if obj else None
         basal_pred, basal_segs = self._predicted(location)      # cells this LOCATION depolarises
@@ -39,11 +41,12 @@ class L4Layer(HTMLayer):
             if basal:                                           # PREDICTED: the feature was expected at this location
                 for cell in self._apical_narrow(basal, apic_pred):
                     active.add(cell)
-                    for s in basal_segs.get(cell, []):
-                        self._learn_segment(s, location, location)   # reinforce this cell's basal onto the location
-                    if obj is not None:
-                        self._learn_apical(cell, obj)
-            else:                                               # BURST: this feature was NOT predicted here → bind it to the location
+                    if learn:
+                        for s in basal_segs.get(cell, []):
+                            self._learn_segment(s, location, location)   # reinforce this cell's basal onto the location
+                        if obj is not None:
+                            self._learn_apical(cell, obj)
+            elif learn:                                         # BURST: this feature was NOT predicted here → bind it to the location
                 self._burst = True
                 wcell, best = self._winner(col, location)
                 if best is None:
@@ -53,6 +56,8 @@ class L4Layer(HTMLayer):
                 active.add(wcell)
                 if obj is not None:
                     self._learn_apical(wcell, obj)
+            else:                                               # INFERENCE: an unpredicted feature is just a burst signal (no cell)
+                self._burst = True
         self._active = active
 
     def predict_feature(self, location, obj=None) -> set:

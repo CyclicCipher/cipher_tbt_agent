@@ -1,11 +1,14 @@
 # MICROCIRCUIT — the minicolumn-native cortical loop (L4 · L2/3 · L5)
 
-*Companion to `ARCHITECTURE.md` (the single source of truth). The plan to redesign **L4, L2/3, L5** as ONE minicolumn
-substrate wired into the canonical cortical microcircuit, so the column runs the **full TBT loop** — localization AND
-content-prediction — not just the localization half it runs today (`column.py` audit, 2026-07-05). Grounded in the M5 HTM
-temporal memory (`sequence.py`) + the minicolumn structure: Hawkins & Ahmad 2016 (*Why Neurons Have Thousands of
-Synapses*); Numenta "Columns" papers (Hawkins, Ahmad & Cui 2017, *A Theory of How Columns…*; Lewis et al. 2019,
-*Locations in the Neocortex*). Obeys the five dev rules (ARCHITECTURE §7). It COMPLETES `ARCHITECTURE §10` P2 (the one
+*Companion to `ARCHITECTURE.md` (the single source of truth). The plan to build the canonical cortical microcircuit so the
+column runs the **full TBT loop** — localization AND content-prediction — not just the localization half it runs today
+(`column.py` audit, 2026-07-05). The **minicolumns×cells HTM temporal memory is L4 and L2/3** (the input + object layers);
+**L5 is NOT that substrate** — it is the **displacement-cell / motor-output / thalamus-driver** layer (see §2; verified
+against Hawkins et al. 2019). So "minicolumn-native" names the L4/L2-3 redesign; L5 stays the displacement/motor layer and
+L6 the grid-cell location. Grounded in the M5 HTM temporal memory (`sequence.py`) + the minicolumn structure: Hawkins &
+Ahmad 2016 (*Why Neurons Have Thousands of Synapses*); Numenta "Columns" papers (Hawkins, Ahmad & Cui 2017, *A Theory of How
+Columns…*; Lewis et al. 2019, *Locations in the Neocortex*); the layer roles from Hawkins et al. 2019 (*A Framework for
+Intelligence and Cortical Function Based on Grid Cells*). Obeys the five dev rules (ARCHITECTURE §7). It COMPLETES `ARCHITECTURE §10` P2 (the one
 prediction, in its full content form) + wires P3 (sequence memory) into the layers + adds the inter-layer feedback P4
 implies.*
 
@@ -32,6 +35,13 @@ NOT the **content/prediction** loop:
    (M5) exists — because it is a bolt-on, not the object layer's native operation.
 6. **Recognition is not prediction.** L2/3 recognises via a separate evidence mechanism over a raw cloud, not by
    pooling a *predictive* L4 — so recognition and prediction are two systems, not one.
+7. **The self / figure-ground is a connectivity HARNESS.** `column._attend_self` + `retina.connected_figure` group the
+   self by a hand-coded **4-connected flood-fill** of the cells that moved — a hard-coded proxy for objectness (rule 4
+   violation). It is NOT defensible as a "cohesion prior": in TBT motion-gated cohesion is EMERGENT, not a primitive.
+   Monty (verified, arXiv 2507.04494) determines object membership by **reference-frame consistency, not
+   connected-components** — "features that cohere under a single reference-frame transformation and consistent movement
+   vectors belong together"; a new object "initializes a new reference frame." So the flood-fill must dissolve into the
+   recognition loop (Stage 5d). It fails the moment objects aren't solid blobs (diagonal/dashed/occluded/touching).
 
 ## 2. The mechanism (TBT-accuracy check — verify before building, §11.3)
 
@@ -57,9 +67,19 @@ Layer roles (Numenta "Columns"; Lewis grid-cell framework):
   M4 primitive, now over the L4 representation). It feeds **back to L4 (apical)** to bias/confirm L4's predictions — but
   the OBJECT is SELECTED HERE (this pooling + lateral voting), NOT by the apical channel. **THIS is where frame selection
   lives** (correction below).
-- **L5 — motor / output.** The efference copy (per-action displacement → L6) — **already built** (M1). Plus a minicolumn
-  TM over ACTIONS (motor skills / sequences), basal context = the program phase. (The efference is load-bearing; the
-  action-sequence memory is a lower-priority add.)
+- **L5 — displacement cells + motor output + thalamus driver.** Verified against Hawkins et al. 2019 (*A Framework for
+  Intelligence…*, Frontiers): L5 (specifically the **thick-tufted / L5b** neurons) are **displacement cells** — the **vector
+  difference between two location representations** ("what pose-delta gets from A to B"), used for BOTH movement (the self's
+  per-action displacement) AND **object COMPOSITION / relations** (relating two objects' reference frames). It is a
+  grid-cell-like MODULE/population code — **NOT** an L4-style feature-minicolumn sequence memory (a correction: the HTM
+  minicolumns×cells temporal memory is L4 and L2/3, not L5). The same L5b neuron's axon SPLITS → subcortical **motor
+  output** + the **thalamus DRIVER** (the transthalamic route by which L5 drives the higher region's L4 — how much of the
+  hierarchy is actually built, not the pure L2/3 apical the rest of this doc assumes). **Partly built** (M1): our
+  `l5_displacement.py` `self.eff` is the minimal displacement cell — the SELF's per-action pose-delta (`(dx, dy, dθ)`), read
+  by L6 for path integration. **Gaps (not an HTMLayer rebuild):** (a) the displacement-cell GENERALITY — displacements
+  between ARBITRARY locations/objects for composition/relations (retired with the symbolic path), as a module code; (b) the
+  thalamus-driver route. Behaviors / config-dependence do NOT live here — they are **sequence memory** (basal context on the
+  L4/L2-3 TM); L5 supplies the displacement, not the sequence.
 
 **The loop, per sensorimotor step:**
 ```
@@ -94,9 +114,11 @@ two-layer circuit is exactly this; the location-invariant object + location-vari
 
 ## 3. What it unlocks (why, beyond biological accuracy)
 
-1. **Context-dependence at every layer → modeling CHANGE, not just static structure** (the big one): L4 content dynamics
-   (a toggling/cycling feature), L2/3 object **behaviors** (open/close, a machine cycle, a patrol), L5 motor skills, and
-   **order/config-dependence** (Sokoban: config as basal context) — the mechanics most ARC-AGI-3 games actually are.
+1. **Context-dependence via SEQUENCE MEMORY → modeling CHANGE, not just static structure** (the big one): L4 content
+   dynamics (a toggling/cycling feature), L2/3 object **behaviors** (open/close, a machine cycle, a patrol), motor skills as
+   action SEQUENCES over L5's displacement primitives, and **order/config-dependence** (Sokoban: config as basal context) —
+   all one mechanism, the HTM temporal memory with the right basal context (L4/L2-3), NOT a per-layer rebuild; the mechanics
+   most ARC-AGI-3 games actually are.
 2. **A top-down (apical) channel** we currently lack entirely: **confirm/bias toward an expected sequence + detect
    mismatch** (a tiebreak — the frame itself is SELECTED by the L2/3 pooler, not the apical), **hierarchy / "which
    behavior" modes** (Jiang & Rao, via the higher-region apical), **top-down attention / active sensing**.
@@ -186,12 +208,71 @@ colours at its cells from the learned map, and the content burst RISES when a ce
 one `perceive` call on any regression (M1 lesson). Suite 79 passed / 6 xfailed / 1 xpassed — games (MockLive/sokoban/
 collectall/NavGame) + the pose tests all green.
 
-**Stage 5 — the pose→L6 migration: the L2/3 pooler becomes the live recogniser, retiring M4.** The risky half. Infer pose
-as the **L6 anchoring that makes L4's predictions match** (the virtual-rotation search migrated from M4 onto the grid
-modules — §6 Risk 2), so the Stage-3 `L23Pooler` (SP-over-L4 + union-then-narrow) becomes the column's live recogniser and
-`_sense_field`/`L23_Object` (M4) is retired. Then retire the old L4 int codebook + `content_code`. Cleanup + delete the dead
-tests; suite green. (Until here M4 stays the live pose/recogniser — the pooler is redundant with it, so wiring the pooler
-LIVE only earns its place once it also owns pose.)
+**Stage 5 — the pose→L6 migration + the COMPLETE L6/hippocampus modernization + dissolve the segmentation harness.** The
+risky half: promote the pooler to the live recogniser (5a mechanism → 5b live swap, retiring M4), finish modernising the
+hippocampus itself (5c), and dissolve the figure-ground flood-fill into the recognition loop (5d). Motivation for 5c:
+M1⊕M2 modernised the localization BELIEF (population bumps, `_ring_shift` path integration, the superposition update) but
+left the OPERATOR hard-coded, the pure-query path classical, navigation a greedy heuristic, and the SR value WRITE-ONLY —
+the classical-geometry / hand-tuned layer the SDR-native + operator-as-group-representation + SR-value targets were always
+headed for (`hippocampus.py` audit, 2026-07-06). Motivation for 5d: §1.7 — the self/figure-ground is a hand-coded
+connectivity flood-fill, but TBT motion-gated cohesion is EMERGENT (reference-frame consistency; Monty).
+
+**Stage 5a — the L6-anchoring pose SOLVE, isolated. ✅ DONE (2026-07-06).** Pose is inferred as the **L6 anchoring that
+makes L4's predictions match** — the virtual-rotation search (Lewis 2022; the SDR-native replacement for M4's
+displacement-residual solve) migrated onto the grid substrate. `column.recognize_pose(cloud)`: for each candidate
+orientation, `_canonical_cells` brings the cloud into the object frame (rotate by −θ, bbox-min-normalise — lattice-EXACT at
+90° multiples, no pose scatter), each cell's L4 is read by pure INFERENCE (`l4.observe(learn=False)` — new: fires predicted
+cells, no mutation, a burst adds no cell), and the explained cells are pooled; the orientation that EXPLAINS the most cells
+(all landing on ONE object's map) wins, tie-broken by pooled overlap. `learn_pose_object` learns an object canonical.
+`test_pose_recognition.py` (3): recognises {I,T,S,L} at their canonical pose, at ANY 90° rotation + translation, and
+recovers the orientation of the asymmetric L. Isolated — `recognize_pose` is NOT wired into `perceive` yet, so zero
+regression (suite 82 passed / 6 xfailed / 1 xpassed). **Scope note:** handles the 90° lattice-preserving bins (which is
+what grid-cell virtual rotation gives, and what ARC objects mostly do); arbitrary angles need the pose-scatter tolerance
+(M4's nearest-bin relaxation) — deferred with §6 Risk 3.
+
+**Stage 5b — the live swap + retire M4.** Wire `recognize_pose` into `perceive` to drive the hippocampus (an evidence FIELD
+from the pooled identity + anchoring, replacing `_sense_field`'s M4 field), meeting M4's acceptance bar (the games +
+recognition tests) BEFORE deleting `L23_Object`/`_sense_field`. Then retire the old L4 int codebook + `content_code`.
+This is the genuinely risky integration (it changes what drives localization) — not a one-line swap: it needs the
+population field + the tracked/candidate persistence M4's `_sense_field` provides. Revert-and-instrument on any regression.
+
+**Stage 5c — complete the L6/hippocampus modernization (retire the classical-geometry + write-only-value remnants).** With
+recognition SDR-native, dissolve the four remnants the audit found (do them one at a time, suite-green each — the operator
+and navigation are load-bearing for EVERY game; behind the method signatures, revert-and-instrument):
+1. **Learn the gain-field operator, don't hard-code it.** Replace `_rot(head)·ego` (a fixed SO(2) matrix —
+   `hippocampus.py:213/245/268/315`, the sole non-learned step: only the ego displacement + dθ are learned, the rotation
+   composing them is hand-coded) with a LEARNED group-representation operator `M(action)` on the location SDR (Gao 2021,
+   `reference_operator_as_group_representation`) — emergent from the action-orbit, dimension-general (SO(2)→SO(3) the same
+   learning problem), unifying with L5's operator (the L6_NONABELIAN strand). This is the deepest one (it's what
+   "operator = learned group representation" was always for) and it un-bakes the 2-D assumption.
+2. **One operator, one code path.** Make `predict()` (the pure forward query, `:244`) apply the SAME SDR operator as
+   `path_integrate`, not the classical `decode → point + R·ego → point` arithmetic — kill the duplicate implementation
+   of "where will I be" (rule 1).
+3. **SR-value navigation (the navigation ⊕ value overhaul).** Replace the greedy `atan2`-cone reorient-then-advance
+   heuristic (`navigate`, `:299` — hand-tuned forward cone, no obstacles, the harness-y twin of `connected_figure`) with
+   the **SR/value POTENTIAL FIELD**: greedy-on-`V` over the grid SDR using the learned `sf` value — which is currently
+   **write-only** (trained by `learn_location_value`, never READ by navigation) — with obstacles as SR-warped reachability
+   (`reference_vector_navigation` / `reference_obstacle_as_transition_cost` / `reference_eigenoptions_subgoals`). Closes
+   the ~10×-oracle efficiency gap + the parked NavGame issue.
+4. **Vestige cleanup.** The unused dual head-resolution (`hd`/`head_sdr` vs the live `_Q` ring); the fixed `board`-sized
+   dense `_decode`. Delete or generalise.
+Risk: HIGH — (1) and (3) touch every game. Acceptance: the games + recognition tests stay green at M4's bar throughout.
+
+**Stage 5d — dissolve the segmentation HARNESS into the recognition loop (retire `connected_figure` + `_attend_self`).**
+The §1.7 fix: motion-gated cohesion is EMERGENT in TBT, not a flood-fill. Object membership = **reference-frame
+consistency** (Monty, arXiv 2507.04494) — a cell belongs to the object whose reference-frame TRANSFORMATION (L5
+displacement) explains it, so the grouping is *the recognition loop*, not a separate connected-components step:
+- **The self** falls out by **reafference** (von Holst) — the cells whose observed motion matches the efference-PREDICTED
+  displacement (already the stated principle in `l5_displacement.py`; make it the actual selector, not the flood-fill).
+- **Other objects** = cells sharing a consistent (non-self) displacement / one reference-frame transformation; a cell the
+  current object's model can't place is a **boundary** (an L4 prediction **burst**, §3.4) → a different object.
+- **A new object** = observations no existing reference frame explains → instantiate a new frame (the unsupervised
+  recognise-or-create the `L23Pooler` / `add_if_novel` already does).
+Depends on L5 displacement + L2/3 recognition being LIVE (Stage 5b) — it's why we did NOT retire `connected_figure` earlier.
+**Honest scope:** Monty largely *dissolves* bottom-up segmentation (it senses one patch on a surface); our WHOLE-FRAME
+input still needs grouping-by-shared-displacement, but the CRITERION is the displacement-cell/reference-frame consistency
+above, never connectivity. Acceptance: the self + movers are grouped with no `connected_figure`, incl. a non-solid
+(diagonal / occluded / touching) object where the flood-fill fails; games stay green.
 
 **Stage 6 — validate the NEW capabilities (the payoff).** New tests + wiring: content dynamics (a toggling feature),
 object behavior (open/close via the L2/3 sequence), config-dependence (Sokoban push as basal context), imagination
@@ -211,6 +292,11 @@ object behavior (open/close via the L2/3 sequence), config-dependence (Sokoban p
   tests where the mechanism is faithful but slow (documented, not gamed).
 - **Non-goal (this phase)**: the multi-column SHEET + full heterarchy (§3b C–E) and the higher-region apical hierarchy —
   the microcircuit is ONE column's loop; the sheet reuses it later.
+- **Parked L5 strands (deferred, not forgotten — §2 L5):** (a) the **displacement-cell GENERALITY** — displacements
+  between ARBITRARY locations/objects (object composition + relations), retired with the symbolic path, to return as a
+  module code (ARCHITECTURE P3 relations); (b) the **L5b thalamus-DRIVER route** — the transthalamic path by which L5
+  drives the higher region's L4 (how the cortical hierarchy is actually built, vs the pure-apical hierarchy this doc
+  assumes). Both fold into the hierarchy/heterarchy phase, not this one.
 
 ## 7. The pooler family — spatial pooling (SPACE) vs. the column pooler (TIME)
 
