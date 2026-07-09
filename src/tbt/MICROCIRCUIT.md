@@ -258,27 +258,27 @@ content-map prediction reinforces the hypothesis; a burst weakens it). If ever p
 and only if it earns its place. **Lesson recorded:** don't discard validated machinery for a re-derivation that "gets the
 same result" — study the theory the machinery already implements first.
 
-**Stage 5c — complete the L6/hippocampus modernization (retire the classical-geometry + write-only-value remnants).** With
-recognition SDR-native, dissolve the four remnants the audit found (do them one at a time, suite-green each — the operator
-and navigation are load-bearing for EVERY game; behind the method signatures, revert-and-instrument):
-1. **Learn the gain-field operator, don't hard-code it.** Replace `_rot(head)·ego` (a fixed SO(2) matrix —
-   `hippocampus.py:213/245/268/315`, the sole non-learned step: only the ego displacement + dθ are learned, the rotation
-   composing them is hand-coded) with a LEARNED group-representation operator `M(action)` on the location SDR (Gao 2021,
-   `reference_operator_as_group_representation`) — emergent from the action-orbit, dimension-general (SO(2)→SO(3) the same
-   learning problem), unifying with L5's operator (the L6_NONABELIAN strand). This is the deepest one (it's what
-   "operator = learned group representation" was always for) and it un-bakes the 2-D assumption.
-2. **One operator, one code path.** Make `predict()` (the pure forward query, `:244`) apply the SAME SDR operator as
-   `path_integrate`, not the classical `decode → point + R·ego → point` arithmetic — kill the duplicate implementation
-   of "where will I be" (rule 1).
-3. **SR-value navigation (the navigation ⊕ value overhaul).** Replace the greedy `atan2`-cone reorient-then-advance
-   heuristic (`navigate`, `:299` — hand-tuned forward cone, no obstacles, the harness-y twin of `connected_figure`) with
-   the **SR/value POTENTIAL FIELD**: greedy-on-`V` over the grid SDR using the learned `sf` value — which is currently
-   **write-only** (trained by `learn_location_value`, never READ by navigation) — with obstacles as SR-warped reachability
-   (`reference_vector_navigation` / `reference_obstacle_as_transition_cost` / `reference_eigenoptions_subgoals`). Closes
-   the ~10×-oracle efficiency gap + the parked NavGame issue.
-4. **Vestige cleanup.** The unused dual head-resolution (`hd`/`head_sdr` vs the live `_Q` ring); the fixed `board`-sized
-   dense `_decode`. Delete or generalise.
-Risk: HIGH — (1) and (3) touch every game. Acceptance: the games + recognition tests stay green at M4's bar throughout.
+**Stage 5c — the L6/hippocampus remnants, RE-SCOPED (2026-07-09) through the "don't reinvent working machinery" lens.** The
+audit found four; two of them are the same reinvention trap as the recognizer swap and are DEFERRED:
+1. **Learn the gain-field operator** (`_rot(head)·ego` → learned `M(action)`). **DEFERRED — reinvention trap.** `_rot(head)`
+   is the *correct* SO(2) rotation; learning it just re-derives a known-correct matrix. The only payoff is future
+   SO(3)/non-abelian (the L6_NONABELIAN strand), which is NOT a current-game need. Do it only when a non-abelian/3-D domain
+   actually demands it, not for faithfulness alone.
+2. **One operator, one code path** (`predict()`'s point-arithmetic → the SDR operator). **DEFERRED — marginal churn.**
+   `predict()`'s cheap point read-out already AGREES with `path_integrate`; "unifying" makes a working query slower for the
+   same result. A cheap correct read-out is defensible; leave it (revisit only if it ever disagrees).
+3. **SR-value navigation (the navigation ⊕ value overhaul) — THE REAL WORK.** `navigate` (`:299`) is a greedy `atan2`-cone
+   heuristic with **no obstacle handling** and it never READS the `sf` value (trained by `learn_location_value`,
+   write-only). The SR/value POTENTIAL FIELD (greedy-on-`V` over the grid SDR, obstacles as SR-warped reachability —
+   `reference_vector_navigation` / `reference_obstacle_as_transition_cost` / `reference_eigenoptions_subgoals`) ADDS a
+   capability (a *better* result, not the same one) → not reinvention. Closes the ~10×-oracle efficiency gap + the parked
+   NavGame issue. HIGH risk (load-bearing for every game) — study the vector-nav/SR theory FIRST, build behind `navigate`'s
+   signature, judge on the games; `navigate` currently WORKS (solves, just inefficiently), so this is an efficiency add,
+   not a bug fix.
+4. **Vestige cleanup. ✅ DONE (2026-07-09).** Removed the dead dual head-resolution (`hd`/`head_sdr` + the `n_head` param +
+   the orphaned `ScalarEncoder` import); the belief head ring is `_Q` alone. (The `board`-sized `_decode` is NOT a deletable
+   vestige — it is the live position read-out; generalising its fixed board is a separate, non-urgent item.) Suite 76
+   passed / 6 xfailed / 1 xpassed.
 
 **Stage 5d — dissolve the segmentation HARNESS into the recognition loop (retire `connected_figure` + `_attend_self`).**
 The §1.7 fix: motion-gated cohesion is EMERGENT in TBT, not a flood-fill. Object membership = **reference-frame

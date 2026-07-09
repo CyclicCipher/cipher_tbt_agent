@@ -77,7 +77,7 @@ class _GridBody:
 def test_gain_field_one_observation_generalizes_to_all_headings():
     """The crux: ONE FORWARD sighting (at heading 0) pins the egocentric displacement, and rotating it by head-direction
     gives the correct world move for EVERY heading — no per-heading learning (the coverage sweep is dissolved)."""
-    hip, w = _hip(board=32, n_head=4), _Body()
+    hip, w = _hip(board=32), _Body()
     _obs(hip, None, w)                       # cold: set the belief
     w.step(0); _obs(hip, 0, w)               # a SINGLE forward at heading 0
     ego = np.array(hip.l5.efference(0)[0])                     # L5 owns the efference copy (body-frame displacement)
@@ -91,7 +91,7 @@ def test_gain_field_one_observation_generalizes_to_all_headings():
 def test_reorient_then_advance_reaches_goal_nonabelian():
     """A non-abelian body (FORWARD + turns) reaches an interior goal: after ONE observation of each action, the inverse
     gain field turns to face the goal then advances (SE(2), the order-dependent case)."""
-    hip, w, goal = _hip(board=32, n_head=4), _Body(), (12.0, 12.0)
+    hip, w, goal = _hip(board=32), _Body(), (12.0, 12.0)
     _obs(hip, None, w)
     for a in (1, 0, 2, 0):                                     # warm-up: one of each action to learn its effect
         w.step(a); _obs(hip, a, w)
@@ -107,7 +107,7 @@ def test_reorient_then_advance_reaches_goal_nonabelian():
 def test_abelian_navigation_reaches_goal_translations():
     """A translation-only (abelian) body reaches the goal by the aligned move — the degenerate one-heading case of the
     same navigator (NavGame's ACTION1-4)."""
-    hip, w, goal = _hip(board=32, n_head=4), _GridBody(), (12.0, 12.0)
+    hip, w, goal = _hip(board=32), _GridBody(), (12.0, 12.0)
     _obs(hip, None, w)
     for a in (0, 1, 2, 3):                                     # learn each move once
         w.step(a); _obs(hip, a, w)

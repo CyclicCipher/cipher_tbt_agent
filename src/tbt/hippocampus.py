@@ -1,7 +1,7 @@
 """The hippocampal formation — the allocentric map + the head-direction GAIN FIELD (HIPPOCAMPUS.md).
 
 Assembled from the SAME mechanisms the cortical column already has ("evolution in reverse"): allocentric position = the
-column's grid cells (`encoders.GridEncoder`); the head-direction ring = a periodic `encoders.ScalarEncoder`; value =
+column's grid cells (`encoders.GridEncoder`); the head-direction ring = a periodic ring-attractor bump (`_Q`); value =
 `l6_sr.SuccessorFeatures` (added when wired); loop closure = L2/3 recognition (the sensed pose). The per-action
 **efference copy** (the body-frame displacement + turn) is NOT owned here — it is **L5's** (`l5.efference`, the TBT motor/
 efference layer); L6 READS it and applies the head-direction gain field. The ONE mechanism this module adds is the **gain
@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from .encoders import GridEncoder, ScalarEncoder
+from .encoders import GridEncoder
 
 
 def _rot(theta: float) -> np.ndarray:
@@ -85,13 +85,12 @@ class Hippocampus:
     LEARNS each action's effect and combines the populations; `path_integrate(action)` dead-reckons; `navigate(goal,
     actions)` reorients-then-advances. `pos`/`head` are READ-OUTS of the bumps; there is no scalar-confidence register."""
 
-    def __init__(self, l5, board: int = 64, scales=(7, 11, 13, 17), n_head: int = 8, gain: float = 0.3,
+    def __init__(self, l5, board: int = 64, scales=(7, 11, 13, 17), gain: float = 0.3,
                  n_ring: int = 36, sig_pos: float = 1.2, sig_head: float = np.pi / 8):
         self.l5 = l5                                        # the EFFERENCE-COPY source (L5); L6 keeps NO copy of the operator
         self.board = int(board)
         self.grid = GridEncoder(scales=scales, dims=2, mw=3, bounds=[(0, board - 1)] * 2)   # allocentric position (grid cells)
-        self.hd = ScalarEncoder(0.0, 2 * np.pi, n=int(n_head), w=1, periodic=True)          # head-direction ring (SDR readout)
-        self.n_ring = int(n_ring)                            # the head-direction BELIEF ring resolution (finer than the SDR)
+        self.n_ring = int(n_ring)                            # the head-direction BELIEF ring resolution
         self.sig_pos = float(sig_pos)                        # place-field / sensory-bump width (cells) — the tuning width, NOT a per-frame conf
         self.sig_head = float(sig_head)                      # head-direction tuning width (radians)
         self._ring_ang = -np.pi + (np.arange(self.n_ring) + 0.5) * 2 * np.pi / self.n_ring
@@ -290,10 +289,6 @@ class Hippocampus:
     def location_sdr(self, pos):
         """The allocentric position as a grid-cell SDR (the code `SuccessorFeatures` values / the thalamus broadcasts)."""
         return self.grid.encode((float(pos[0]), float(pos[1]))).dense()
-
-    def head_sdr(self, theta):
-        """The head-direction as a ring SDR (the head-direction bump)."""
-        return self.hd.encode(float(theta)).dense()
 
     # ----- OUT: reorient-then-advance via the inverse gain field ------------------------------------------------
     def navigate(self, goal, actions):
