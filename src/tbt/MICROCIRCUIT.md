@@ -208,33 +208,53 @@ colours at its cells from the learned map, and the content burst RISES when a ce
 one `perceive` call on any regression (M1 lesson). Suite 79 passed / 6 xfailed / 1 xpassed — games (MockLive/sokoban/
 collectall/NavGame) + the pose tests all green.
 
-**Stage 5 — the pose→L6 migration + the COMPLETE L6/hippocampus modernization + dissolve the segmentation harness.** The
-risky half: promote the pooler to the live recogniser (5a mechanism → 5b live swap, retiring M4), finish modernising the
-hippocampus itself (5c), and dissolve the figure-ground flood-fill into the recognition loop (5d). Motivation for 5c:
-M1⊕M2 modernised the localization BELIEF (population bumps, `_ring_shift` path integration, the superposition update) but
-left the OPERATOR hard-coded, the pure-query path classical, navigation a greedy heuristic, and the SR value WRITE-ONLY —
-the classical-geometry / hand-tuned layer the SDR-native + operator-as-group-representation + SR-value targets were always
-headed for (`hippocampus.py` audit, 2026-07-06). Motivation for 5d: §1.7 — the self/figure-ground is a hand-coded
-connectivity flood-fill, but TBT motion-gated cohesion is EMERGENT (reference-frame consistency; Monty).
+**Stage 5 — CORRECTED: no recognizer swap. `L23_Object` stays; the L6/hippocampus modernization (5c) + the segmentation
+dissolve (5d) remain.** The original framing ("promote the pooler to the live recogniser, retire M4") was **wrong and is
+abandoned** — `L23_Object` already IS the faithful TBT recognizer (5b, below). What remains valid under Stage 5: **5c** —
+finish modernising the hippocampus itself (M1⊕M2 modernised the localization BELIEF — population bumps, `_ring_shift` path
+integration, the superposition update — but left the OPERATOR hard-coded, the pure-query path classical, navigation a greedy
+heuristic, and the SR value WRITE-ONLY; `hippocampus.py` audit, 2026-07-06); and **5d** — dissolve the self/figure-ground
+flood-fill (§1.7) into the recognition loop (TBT motion-gated cohesion is EMERGENT — reference-frame consistency). Neither
+5c nor 5d touches the recognizer.
 
-**Stage 5a — the L6-anchoring pose SOLVE, isolated. ✅ DONE (2026-07-06).** Pose is inferred as the **L6 anchoring that
-makes L4's predictions match** — the virtual-rotation search (Lewis 2022; the SDR-native replacement for M4's
-displacement-residual solve) migrated onto the grid substrate. `column.recognize_pose(cloud)`: for each candidate
-orientation, `_canonical_cells` brings the cloud into the object frame (rotate by −θ, bbox-min-normalise — lattice-EXACT at
-90° multiples, no pose scatter), each cell's L4 is read by pure INFERENCE (`l4.observe(learn=False)` — new: fires predicted
-cells, no mutation, a burst adds no cell), and the explained cells are pooled; the orientation that EXPLAINS the most cells
-(all landing on ONE object's map) wins, tie-broken by pooled overlap. `learn_pose_object` learns an object canonical.
-`test_pose_recognition.py` (3): recognises {I,T,S,L} at their canonical pose, at ANY 90° rotation + translation, and
-recovers the orientation of the asymmetric L. Isolated — `recognize_pose` is NOT wired into `perceive` yet, so zero
-regression (suite 82 passed / 6 xfailed / 1 xpassed). **Scope note:** handles the 90° lattice-preserving bins (which is
-what grid-cell virtual rotation gives, and what ARC objects mostly do); arbitrary angles need the pose-scatter tolerance
-(M4's nearest-bin relaxation) — deferred with §6 Risk 3.
+**Stage 5a — isolated pooler pose-recognition experiment. ✅ built (2026-07-06), now ORPHANED by the 5b abandonment.**
+`column.recognize_pose(cloud)` infers pose by a virtual-rotation search over the grid substrate (Lewis 2022): for each
+candidate orientation, `_canonical_cells` brings the cloud into the object frame (rotate by −θ, bbox-min-normalise —
+lattice-EXACT at 90° multiples), each cell's L4 is read by pure INFERENCE (`l4.observe(learn=False)`), and the orientation
+that EXPLAINS the most cells wins. `test_pose_recognition.py` (3): recognises {I,T,S,L} at their canonical pose, at any 90°
+rotation + translation, and recovers the asymmetric L's orientation. It works — but it was built to feed the recognizer
+SWAP, which is abandoned (5b), so it is not wired into `perceive` and `L23_Object` already does pose-invariant recognition
+(virtual rotation) FAITHFULLY. **`recognize_pose`/`pool`/`test_pose_recognition` are a candidate for deletion.** (Committed
+at `16dac1a`; suite there = 82 passed / 6 xfailed / 1 xpassed.)
 
-**Stage 5b — the live swap + retire M4.** Wire `recognize_pose` into `perceive` to drive the hippocampus (an evidence FIELD
-from the pooled identity + anchoring, replacing `_sense_field`'s M4 field), meeting M4's acceptance bar (the games +
-recognition tests) BEFORE deleting `L23_Object`/`_sense_field`. Then retire the old L4 int codebook + `content_code`.
-This is the genuinely risky integration (it changes what drives localization) — not a one-line swap: it needs the
-population field + the tracked/candidate persistence M4's `_sense_field` provides. Revert-and-instrument on any regression.
+**Stage 5b — ABANDONED: there was never a recognizer to replace (2026-07-09).** The premise "retire `L23_Object`, swap in
+pooler recognition" was WRONG. Studying the TBT **theory** (Hawkins, Ahmad & Cui 2017, *A Theory of How Columns of Neurons
+Enable Learning the Structure of the World* — the sensorimotor inference model) shows what recognition in a column actually
+IS: the **output layer** holds a stable object population that persists over movements; the first feature-at-location invokes
+a **UNION** of every object consistent with it; each **movement** senses a new feature-at-location and **NARROWS** the union
+(the cube/wedge example); evidence **accumulates persistently across movements and never restarts**; location predicts the
+next feature (output→input feedback); orientation is inferred over grid-cell modules (Lewis 2019, virtual rotation).
+**`L23_Object` (`l23_object.py`) is a direct, faithful implementation of exactly this** — a persistent evidence session over
+(object, orientation-bin) hypotheses, UNION (associative-recall shortlist) → NARROW (path-integrate + re-verify + prune),
+pose by virtual rotation, cross-frame tracked/candidate persistence. It is not a rough approximation to improve on; it IS the
+model. (So the recurring name "M4" just means `L23_Object`, the recogniser from the M4 SDR-migration step — stop calling it
+"M4".)
+
+The Stage-5a pooler pose-recognition (`recognize_pose`/`pool`) and `L23_Object` are **two implementations of the same
+output-layer theory**, not a bad-vs-good pair to swap between. Every swap attempt wired recognition as **single-frame,
+from-scratch** classification (reset the pool + re-search all orientations every frame), which discards the two things the
+theory says recognition IS — **persistent accumulation** and **movement-driven prediction**. That is why it both regressed
+the games AND blew up on cost (a full search × ~3/frame × ~1500 frames × a bloating pool —
+[[feedback_slow_run_means_catastrophic_failure]]). **Reverted to `16dac1a`; `L23_Object` remains the live recognizer.** The
+Stage-5a `recognize_pose`/`pool` + `test_pose_recognition` are now ORPHANED — a candidate for deletion (they existed only to
+feed the abandoned swap).
+
+**The one valid kernel that survives (§1.6 "recognition is not prediction"):** *recognition should BE prediction* — the 2017
+output→input feedback, where the column recognises BY predicting the next feature-at-location correctly (a matched L4
+content-map prediction reinforces the hypothesis; a burst weakens it). If ever pursued, that is an **ADDITION** to
+`L23_Object`'s evidence structure (feed the L4 prediction into its evidence update), **NOT** a replacement of it. Deferred,
+and only if it earns its place. **Lesson recorded:** don't discard validated machinery for a re-derivation that "gets the
+same result" — study the theory the machinery already implements first.
 
 **Stage 5c — complete the L6/hippocampus modernization (retire the classical-geometry + write-only-value remnants).** With
 recognition SDR-native, dissolve the four remnants the audit found (do them one at a time, suite-green each — the operator
