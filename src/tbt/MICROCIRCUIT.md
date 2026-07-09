@@ -178,8 +178,9 @@ minicolumns contribute", notes 112). Reused, not duplicated (rule 1). `test_enco
 density, determinism, overlap=similarity, learning-converges-to-a-stable-code, homeostasis (≥80% of columns used, no dead
 columns). Suite 74 passed / 6 xfailed / 1 xpassed. LOW risk (only `test_encoders` + docs referenced the SP).
 
-**Stage 3 — L2/3 as the column pooler. ✅ DONE (2026-07-06).** Rewrote `l23_pooler` from the union-only prototype (built on
-a MISREADING of the pooler — it only captured the temporal-union half) to the faithful Numenta **ColumnPooler** on
+**Stage 3 — L2/3 as the column pooler. ✅ built 2026-07-06, ❌ DELETED 2026-07-09** (it was the recogniser for the abandoned
+swap — see 5b; `L23_Object` is the recogniser). Historical record: rewrote `l23_pooler` from the union-only prototype (built
+on a MISREADING of the pooler — it only captured the temporal-union half) to the faithful Numenta **ColumnPooler** on
 `htm.HTMLayer` (§7b): objects as ASSIGNED stable SDRs, proximal synapses grown one-shot from each object's cells to its L4
 feature-at-location cells (GROW-ONLY — a new `punish=False` on the shared `_learn_segment`, since every feature-location of
 an object is positive evidence; punishing the inactive ones would erode the object's own union), inference =
@@ -222,10 +223,11 @@ flood-fill (§1.7) into the recognition loop (TBT motion-gated cohesion is EMERG
 candidate orientation, `_canonical_cells` brings the cloud into the object frame (rotate by −θ, bbox-min-normalise —
 lattice-EXACT at 90° multiples), each cell's L4 is read by pure INFERENCE (`l4.observe(learn=False)`), and the orientation
 that EXPLAINS the most cells wins. `test_pose_recognition.py` (3): recognises {I,T,S,L} at their canonical pose, at any 90°
-rotation + translation, and recovers the asymmetric L's orientation. It works — but it was built to feed the recognizer
-SWAP, which is abandoned (5b), so it is not wired into `perceive` and `L23_Object` already does pose-invariant recognition
-(virtual rotation) FAITHFULLY. **`recognize_pose`/`pool`/`test_pose_recognition` are a candidate for deletion.** (Committed
-at `16dac1a`; suite there = 82 passed / 6 xfailed / 1 xpassed.)
+rotation + translation, and recovers the asymmetric L's orientation. It worked — but it was built to feed the recognizer
+SWAP, which is abandoned (5b), and `L23_Object` already does pose-invariant recognition (virtual rotation) FAITHFULLY. **So
+`recognize_pose`/`learn_pose_object`/`_canonical_cells`/`self.pool` + `l23_pooler.py` + `test_pose_recognition.py` were
+DELETED (2026-07-09), and `htm._learn_segment`'s `punish` flag (added for the pooler) reverted.** (The Stage-4 L4 content
+map — `L4map`/`_bind_content`/`predict_content_at_world` — STAYS; it is live in `perceive`, not pooler code.)
 
 **Stage 5b — ABANDONED: there was never a recognizer to replace (2026-07-09).** The premise "retire `L23_Object`, swap in
 pooler recognition" was WRONG. Studying the TBT **theory** (Hawkins, Ahmad & Cui 2017, *A Theory of How Columns of Neurons
@@ -246,8 +248,8 @@ from-scratch** classification (reset the pool + re-search all orientations every
 theory says recognition IS — **persistent accumulation** and **movement-driven prediction**. That is why it both regressed
 the games AND blew up on cost (a full search × ~3/frame × ~1500 frames × a bloating pool —
 [[feedback_slow_run_means_catastrophic_failure]]). **Reverted to `16dac1a`; `L23_Object` remains the live recognizer.** The
-Stage-5a `recognize_pose`/`pool` + `test_pose_recognition` are now ORPHANED — a candidate for deletion (they existed only to
-feed the abandoned swap).
+Stage-5a `recognize_pose`/`pool` + `l23_pooler.py` + `test_pose_recognition.py` (+ the pooler test) were **DELETED** — they
+existed only to feed the abandoned swap.
 
 **The one valid kernel that survives (§1.6 "recognition is not prediction"):** *recognition should BE prediction* — the 2017
 output→input feedback, where the column recognises BY predicting the next feature-at-location correctly (a matched L4
@@ -287,8 +289,8 @@ displacement) explains it, so the grouping is *the recognition loop*, not a sepa
 - **Other objects** = cells sharing a consistent (non-self) displacement / one reference-frame transformation; a cell the
   current object's model can't place is a **boundary** (an L4 prediction **burst**, §3.4) → a different object.
 - **A new object** = observations no existing reference frame explains → instantiate a new frame (the unsupervised
-  recognise-or-create the `L23Pooler` / `add_if_novel` already does).
-Depends on L5 displacement + L2/3 recognition being LIVE (Stage 5b) — it's why we did NOT retire `connected_figure` earlier.
+  recognise-or-create `L23_Object.add_if_novel` already does).
+Depends on L5 displacement + L2/3 recognition (`L23_Object`) being LIVE — it's why we did NOT retire `connected_figure` earlier.
 **Honest scope:** Monty largely *dissolves* bottom-up segmentation (it senses one patch on a surface); our WHOLE-FRAME
 input still needs grouping-by-shared-displacement, but the CRITERION is the displacement-cell/reference-frame consistency
 above, never connectivity. Acceptance: the self + movers are grouped with no `connected_figure`, incl. a non-solid
@@ -375,9 +377,10 @@ the column pooler *contains* a spatial pooler as its first stage — that is the
 - **Data types.** `objects` = `name → frozenset` of L2/3 cell ids (the assigned stable SDR); per object cell ONE proximal
   segment `{L4 cell: permanence}` (reusing `htm.HTMLayer`'s ONE segment machinery — the same `_learn_segment` /
   `_connected_match` as L4 and the TM, rule 1); `active` = the currently narrowing object-cell set.
-- **Where.** L2/3 (Stage 3): `l23_pooler` REWRITTEN on `htm.HTMLayer` — objects as assigned SDRs, proximal from L4,
-  union-then-narrow. The proximal overlap step IS the spatial-pooling of §7a (differing only in learning regime:
-  one-shot object-assigned growth vs the SP's competitive Hebbian).
+- **Where.** This §7 is retained as reference *theory* (SP vs column pooler); the concrete `l23_pooler` implementation was
+  built (Stage 3) then **DELETED** (2026-07-09) with the abandoned swap — `L23_Object` is the recogniser. The proximal
+  overlap step IS the spatial-pooling of §7a (differing only in learning regime: one-shot object-assigned growth vs the SP's
+  competitive Hebbian).
 
 ### 7c. The relationship (the answer to "is the column pooler just spatial pooling?")
 

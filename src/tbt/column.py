@@ -24,7 +24,6 @@ from .l4 import L4Layer
 from .l5_displacement import L5_Displacement
 from .l6_sr import SuccessorFeatures
 from .l23_object import L23_Object, ObjectGraph, _canonical
-from .l23_pooler import L23Pooler
 from .hippocampus import Hippocampus, _rot
 from .encoders import SDR, CategoryEncoder, GridEncoder
 from .retina import connected_figure, view_sdr
@@ -38,8 +37,6 @@ class CorticalColumn(nn.Module):
         self.L4map = L4Layer(cells_per_column=8, activation_threshold=6, min_threshold=4, init_perm=0.55)   # the feature-at-location content map (MICROCIRCUIT Stage 4)
         self._feat_enc = CategoryEncoder(range(16), w=8, capacity=16)                                       # colour → feature minicolumns
         self._objloc_enc = GridEncoder(scales=(5, 7, 11), dims=2, mw=1, bounds=[(-24, 24), (-24, 24)])      # the OBJECT-FRAME location code (crisp: exact under translation)
-        self.pool = L23Pooler(n_cells=1024, sdr_size=24, activation_threshold=4, seed=seed)                 # the SDR-native object recogniser (MICROCIRCUIT Stage 5)
-        self._orient = [0.0, np.pi / 2, np.pi, 3 * np.pi / 2]                                               # the anchoring-search orientations (Lewis virtual rotation; 90° = the ARC lattice-preserving bins)
         self.L23 = L23_Object()
         self.board = int(board)
         self.hip = Hippocampus(self.L5, board=board)         # the allocentric map + head-direction gain field (reads L5's efference copy)
@@ -105,50 +102,6 @@ class CorticalColumn(nn.Module):
             return None
         cols = self.L4map.predict_feature(self._objloc_enc.encode(self._obj_frame(wx, wy, pose)).active)
         return self._feat_enc.decode(SDR(self._feat_enc.n, cols)) if cols else None
-
-    # ----- L6-anchoring POSE-INVARIANT recognition (MICROCIRCUIT Stage 5): the SDR-native pose solve ---------------
-    def _canonical_cells(self, cloud, theta):
-        """Bring `cloud` into the object's CANONICAL frame ASSUMING orientation `theta`: rotate by −θ, then normalise the
-        bbox-min to the origin (translation-invariant). Integer/lattice-EXACT at 90° multiples (no pose scatter). Returns
-        `[(colour, (ox, oy)), ...]` — the feature-at-object-frame-locations that drive L4/L2/3."""
-        R = _rot(-float(theta))
-        ic = []
-        for (x, y, c) in cloud:
-            p = R @ np.array([float(x), float(y)])
-            ic.append((int(round(float(p[0]))), int(round(float(p[1]))), int(c)))
-        mnx = min(x for x, _y, _c in ic)
-        mny = min(y for _x, y, _c in ic)
-        return [(c, (x - mnx, y - mny)) for (x, y, c) in ic]
-
-    def learn_pose_object(self, cloud, name):
-        """Learn object `name` into the microcircuit recogniser at its CANONICAL orientation: bind each (colour, object-
-        frame location) in L4 and pool the resulting L4 cells into the object's identity SDR (L2/3). Recognised later at
-        ANY 90° pose by `recognize_pose`. `cloud` = `[(x, y, colour), ...]`."""
-        for (colour, loc) in self._canonical_cells(cloud, 0.0):
-            self.L4map.observe(self._feat_enc.encode(colour).active, self._objloc_enc.encode(loc).active)
-            self.pool.learn(name, set(self.L4map._active))
-
-    def recognize_pose(self, cloud):
-        """Recognise `cloud`'s object + orientation by the L6-ANCHORING SEARCH (Lewis virtual rotation — the SDR-native
-        replacement for M4's displacement-residual solve): for each candidate orientation, bring the cloud into the object
-        frame and read each cell's L4 by pure INFERENCE (`learn=False` — no mutation); a cell landing on a LEARNED
-        object-frame location fires cells (real evidence, pooled), one landing on an unlearned location BURSTS (fires
-        nothing, skipped — it does not wipe the accumulated identity). The winning orientation EXPLAINS the most cells (all
-        of them land on ONE object's map), tie-broken by the pooled overlap. Returns `(name, theta)` or None."""
-        best = None                                             # (name, (explained, overlap), theta)
-        for theta in self._orient:
-            self.pool.reset()
-            explained = 0
-            for (colour, loc) in self._canonical_cells(cloud, theta):
-                self.L4map.observe(self._feat_enc.encode(colour).active, self._objloc_enc.encode(loc).active, learn=False)
-                if self.L4map._active:                          # landed on a LEARNED location → real evidence (else a burst, skipped)
-                    self.pool.sense(set(self.L4map._active))
-                    explained += 1
-            ident = self.pool.best()
-            score = (explained, max(self.pool.scores().values(), default=0))
-            if ident is not None and (best is None or score > best[1]):
-                best = (ident, score, float(theta))
-        return (best[0], best[2]) if best is not None else None
 
     def _attend_self(self, action, coloured_cells, tol: float = 1.6):
         """Group the frame's feature-at-locations into the SELF by TOP-DOWN FIGURE-GROUND (reference_tbt_segmentation_and_
