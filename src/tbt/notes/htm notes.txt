@@ -1,0 +1,246 @@
+Since I'll have to manually code the TBT architecture, planning for the architecture goes here.
+
+								TBT Section
+
+**The minicolumn**
+In every cortical column there are 6 layers:
+
+Layer 1: Irrelevant for computational purposes (has an auxiliary role in biology). Question for further research: Is it actually irrelevant, or does it play an indispensable role?
+
+Layer 2/3: Object layer. Collects all observed features and their locations.
+
+Layer 4: Place cell/feature layer. Sensory input enters this layer, before it has been bound to a location. 
+
+Layer 5: Motor output layer. 
+
+Layer 6: Grid cell/reference frame layer. The reference frame tracks the location of the sensor relative to the object model.
+
+Note that must be resolved later: What is the role of displacement cells, and where are they?
+
+**Group theory uses**
+Some research indicates human minicolumns build group-theoretic representations/models. But what does that mean?
+
+**Video notes**
+- The neocortex runs process steps of about 5ms each.
+- Each column is engaged in its own independent sensorimotor loop. The main difference is in what the sensor is, for instance a column that senses the thalamus is probably a PFC column that learned to control attention, but a column that receives input from a section of the retina is probably in layer V1 of the visual cortex.
+- The neocortex's first and foremost goal is to learn a model of the world and the behaviors of things within it, use it to plan how to achieve goals (with goals set by the reptilian brain), and execute those plans.
+- Prediction is the primary training signal. You ONLY learn by making a prediction, and that prediction being WRONG.
+- The brain has 150,000 columns, judging by the diameter of each column (about 1mm). A column is defined by the patch of sensory data it attends to, for instance a column for touch responds to touch signals on specific patch of skin and ONLY that patch of skin, similarly for the retina. These patches are receptive fields, and each column is assigned to only one. A column is 2.5mm thick.
+- Most connections between neurons in a cortical column go up and down between layers. A column has about 100,000 neurons, 500 million synapses (5000 synapses per neuron), dozens of cell types, and hundreds of minicolumns (canonical microcircuits). The total number of neurons in the neocortex therefore is about 15 billion, with about 75 trillion synapses. 
+- All columns, no matter their purpose, have a motor output, all share the same 6-layer structure, and all perform the same computational process no matter the modality or domain.
+- The columns processing information from the eye are also processing how the eye should move. The columns processing information from the ear also direct how to move the head (to rotate the ears).
+- A column learns a predictive model of what it will observe on its receptive field next. It learns to anticipate the next sensory input by making predictions and then correcting those predictions when they turn out to be wrong.
+- When you touch a cup, each patch of skin has a cortical column which makes a prediction about what that patch of skin will feel next. This requires, strictly speaking, that the neocortex knows the location of each patch of skin relative to the cup. To know the location of the receptive field, a cortical column must have a reference frame. The reference frame is relative to the CUP, not the patch of skin.
+- A cortical column learns complete models of objects by integrating features and locations over time. 
+- But what happens if 3 fingers are touching the cup? Assuming 3 columns. Every one of these 3 columns has a separate model of the cup, and of other objects. Because each column has a separate model of the cup, and of other objects, they can vote with each other to resolve the identity of the object the fingers are touching in a single sensation. If the sensory input they receive is consistent with a cup, then they can reach consensus that the fingers are touching a cup.
+- Voting between columns happens at layers 2/3, where the object/location bindings are stored. 
+- Columns whose receptive fields on the body are near each other, for instance two neighboring spots on the retina or neighboring patches of skin, are similarly close to each other in the neocortex. They vote with each other as neighbors.
+- Neurons are able to represent reference frames as grid cells and place cells in the entorhinal cortex and hippocampus respectively. Grid cells form reference frames for environments, while place cells represent where the animal is based on sensory input. Place cells have the behavior of remapping, where changing the sensory details of the environment changes how they activate in response to stimuli. Grid cells don't remap.
+- In the entorhinal cortex, grid cells might represent the location of the body in a reference frame relative to a room. In the neocortex, grid cells represent the location of a sensor in a reference frame relative to an object.
+- Experiments have empirically confirmed the existence of grid cells in the neocortex.
+- Most views of the brain, and most AI systems, are hierarchical. But TBT shows that most connections in the neocortex are not hierarchical. More than 40% of all possible connections between regions exist. Primary and secondary regions are the largest, and primary sensory regions have multimodal responses, meaning they are influenced by sound and touch information (among other things).
+- Hierarchy within the neocortex does NOT extract features at different scales. It extracts MODELS at different scales.
+
+								HTM Section
+
+Hierarchical Temporal Memory is an older theory from the Numenta team which was incomplete without Thousand Brains Theory, but is nonetheless relevant.
+
+**Video notes**
+- The neocortex evolved in mammals over the past 100-200 million years. It is the wrinkly outer layer of the brain. Reptiles and birds do not have a neocortex. The neocortex is wrinkly to increase its surface area.
+- The reptilian brain is responsible for the basic functioning of the brain, including metabolic functions, emotions and drives. This is where the reward functions come from, and creates some autonomic behavior. 
+- Every part of the neocortex is identical. It is composed of repeating circuits that solve every problem, no matter the domain, in the same way. 
+- The neocortex is divided into several dozen regions, which are connected together by nerve fibers going through the white matter. It was previously thought that they were linked in a hierarchical structure, though this turned out to be partially wrong later.
+- Where there is hierarchy in the neocortex, the higher level regions handle more abstract and permanent domains and predictions. Lower levels in the hierarchy might determine edges, above that would be layers detecting shape, above that would be layers detecting the object identity, above that would be layers containing the meaning of those objects.
+- Neurons are sparsely activated. Only a small fraction are active at a time. In the neocortex, only 2% of neurons are active at any given time.
+- The state of a region of the neocortex at any given time can be represented by an array of bits representing each neuron's state, each a 1 or a 0 depending on whether they are active. This is a sparse distributed representation. SDRs can be processed with hyperdimensional computing.
+- This is an extremely important part: There are TWO basic inputs to the neocortex: One is a copy of the motor commands coming out of the old brain and commanding your muscles, this copy is going back to the neocortex. Two is a copy of the sensory input, coming from all of the senses, the copy is sent to the neocortex.
+- The reason this is done is because every time your eyes move, the eyes capture a completely different picture. If the neocortex isn't told how the eyes moved, it would not understand why the eyes are now producing different images.
+- Every sensory organ must have an encoder, which converts sensory data into SDRs. An encoder takes a data type and then converts it into an SDR that the brain can read.
+- Temporal memory in HTM is the theory that every excitatory neuron in the neocortex learns transitions of patterns. A temporal pattern is a pattern of neuron activations over time. Temporal memory operates on both motor commands and sensory input. Temporal patterns are used to make predictions.
+- HTM systems learn continuously. As the data changes, the model updates. 
+- HTM is building a predictive model of the world. Given input of sensory data and current motor commands, the system tries to predict what will happen next. It makes the prediction, and then only corrects that prediction when the next batch of sensory data comes in.
+- Bit arrays are an array of bits. They can be on or off, 1 or 0. The number of different values a bit array can represent is 2^n where n is the length of the array. This number is called the array's capacity.
+- In the binary number system, every place represents a different power of 2. Related is how in denary (base 10), every place represents a different power of 10.
+- ASCII is a character format where each character is represented by an 8-bit bit array.
+- OR operation: Takes 2 input bit arrays to make an output. Take each place in 2 bit arrays. If either place is 1, then in the output bit array that place will be a 1, or else it will be a zero. This is a bitwise operation.
+- AND operation: A bitwise operation where the 2 values must both be 1 for the output to be 1, or else the output is 0.
+- XOR operation: A bitwise operation where exactly one value must be a 1 for the output to be 1, or else the output is 0. XOR is not linearly separable.
+- NOT operation: A bitwise operation taking only 1 input bit array, where the output's ones and zeroes are the opposite of the input's.
+- Population: How many 1's are in a bit array. This is also called the Hamming weight, at least for bit arrays.
+- The capacity of a 256-bit dense bit array is 2^256. But the capacity of a sparse array, with array length n and population w, is given by (n!)/(w!(n-w)!). For length 256 and population 4, the capacity is about 8.8 billion.
+- In an SDR in an HTM system, an active bit can represent a trait that some object has.
+- You cannot compress an SDR where 50% of the bits are active and the active bits are distributed randomly. You can however compress an SDR where only a small percentage of bits are active, by storing only the index of the active bits.
+- SDRs are the data structure of the brain. To explain why, consider music. When you hear music, the neurons in your brain which fire for a specific sound frequency fire depending on which frequencies are present. Some neurons fire, others do not. This creates a sparse neural activity pattern. The same thing goes for planning music in the frontal lobe, and for moving muscles. There is a neuron for each muscle movement, which fires in sequence according to the plan SDR. (This is a drastic oversimplification.)
+- The smallest SDRs used in HTM systems have length 2048 and population 40. The highest length ever used in HTM systems is 65536.
+- SDR operations between two SDRs can be Overlap (AND) or Union (OR).
+- The overlap score is how many bits two SDRs have in common.
+- Because we can take the overlap score of two SDRs, SDRs are extremely noise-resistant. Even if multiple bits are flipped, we don't need an exact match between two SDRs to decide whether they are a match. The value theta is the threshold we set for the minimum overlap score required to declare an SDR a match. Theta is a hyperparameter.
+- The neat property of SDRs is that even very high noise tolerances have almost 0 chance of a false positive. So small that it's a rounding error.
+- A pyramidal neuron is a complex pattern recognition system. It receives feedback SDRs from apical dendrites, sent by neurons higher up in the hierarchy, and contextual SDRs from basal dendrites sent by laterally connected neurons. Finally, it receives input SDRs from proximal dendrites, sent by neurons from lower levels in the hierarchy or from sensory input.
+- Apical = feedback (higher level predictions). Basal = context (same-level context). Proximal = input (sensory or lower level observations).
+- The pyramidal neuron's challenge is deciding when it will fire. When it fires, it flips its bit on in the thousands of SDRs where it is represented.
+- Overlap sets: The number of SDRs of the same length and population with b bits of overlap. Overlap sets allow you to calculate the probability of a false positive match. The chance of a false positive is given by the cardinality of the overlap set divided by the uniqueness of the original SDR. (What does uniqueness mean?)
+- Subsampling: You don't necessarily need to save every index of every active bit when compressing an SDR. Because a match will almost never be a false positive, you can take only a fraction of the bits and save those. Larger SDRs have lower probabilities of a false positive, given the same parameters for subsampling.
+- SDR classification: If we have a set of SDRs, and we want to determine which SDRs represent the same thing, first we need to calculate their overlap scores. If we compare one SDR with a set, as the set grows in number of SDRs, the probability of false positive matches goes up. But at high SDR lengths, the probability is still low even with significant noise. But this type of SDR classification is extremely slow, being O(n^2).
+- To fix the O(n^2) bottleneck of SDR classification, we must turn to unions. If we add each SDR in the set to a union, we can approximate the probability of a false positive. This approximation gets worse as the union SDR gets denser/more saturated.
+- In practice, you should always use SDR unions to check if an SDR matches with any in a set of other SDRs. While a union can saturate, directly calculating false positives is O(n^2) and will burn your PC.
+- Scalar Encoding: This is critical information for making encoders. Every sensory in the human body takes continuous information from the world and converts it into a stream of SDRs. If we want to encode a scalar value like loudness or brightness, we need scalar encoding. 
+- SDR Scalar encoding requires an SDR length n, a width value w which is the number of bits that are set to encode a single value (can be used to configure how much overlap two values have), and a minimum and maximum scalar value of the input (inclusive). It creates a consecutive bucket of on-bits.
+- The SDRs of the scalar values 429 and 430 are semantically similar because their active bits are close by and have overlap.
+- Periodic encoding: With periodic encoding, when we hit the max value, instead of clipping, the result wraps back to the minimum. This is useful for cyclic or periodic data, and makes the max and min values semantically similar (11PM and 1 AM are semantically similar, both being at night).
+- SDR Random Distributed Scalar Encoding: Instead of creating buckets of consecutive on-bits, the bucket is randomly scattered throughout the SDR. But between the SDR for 499 and for 500, although the outputs appear random, there is only 1 bit of difference between the two SDRs, assuming the resolution is 1. The resolution value determines how many consecutive scalar values are represented by the same SDR. If resolution = 5, the scalar value has to increase by 5 to get 1 bit of difference in the output SDR.
+- Random distributed scalar encoding requires state, which is inconvenient for data oriented design. 
+- If you were making a blood pressure encoder, you'd have to encode the systolic and diastolic pressure. But in reality, these two quantities are not independent of each other. You can't interpret blood pressure with only one of these numbers. If you take the range between the two numbers you get the pulse pressure, you might need an encoder for that to make clear the semantic relationship between the two pressure values.
+- The rule is that semantically similar data must have a high fraction of overlapping bits with other semantically similar data, the same input into an encoder must always have the same output, and the SDR length of the output must have the same length and roughly the same sparsity.
+- Example: Datetime encoder, how do you semantically encode the time into an SDR? You would take the date and time and use it to make a single output SDR. Sub-encoders for the day of the week, the weekends, the time of day, and the season could be used. The encodings are then concatenated into a single output (the sum of the lengths of the SDRs of the sub-encoder adds to the length of thee SDR of the datetime encoder).
+- Input space: Regions of the brain are connected via nerve fibers in white matter. Each region is getting countless inputs from countless nerve axons. Input could be sensory data, or input from other regions of the brain. You could compare the input space to a fiber optic cable, where each fiber represents a nerve axon and whether it's on or off. The region has no idea what these nerve axon signals mean or where they come from. Additionally, the size of the input might vary.
+- The Spatial Pooling algorithm solves these problems by taking an input vector (your fiber optic cable) and translating it into an output vector of a different size with a sparse number of active bits.
+- The output vector of a spatial pooler, in HTM, represents a minicolumn. Minicolumns in HTM are believed to be important for sequence learning.
+- The spatial pooler must maintain a fixed sparsity in the output, no matter how many bits are on in the input space while maintaining as much semantic meaning from the input (overlap properties of the input data) as possible.
+- Suppose our spatial pooler's input space is an SDR of the power consumption over time of a gym given time of day, created by a scalar encoder. Every minicolumn in our spatial pooler has a potential pool of bits in the input space it might be connected to. It has a permanence value for every potential connection it has to an input space bit. If the permanence value is above the connection threshold, that bit will be connected to the minicolumn. By default, a spatial pooler tries to give a normal distribution of permanence values around the connection threshold. The initial minicolumn-bit connections are random.
+- Question: What hyperparameters are needed for spatial pooling in HTM?
+- Minicolumns are activated by calculating its overlap with the input representation in the input space.
+- How would the minicolumns learn to represent what the input from the input space represents? First we start by ranking every minicolumn's overlap score with a particular input pattern. Then the top k minicolumns are considered the active columns. A tiebreaker is needed. The number of active columns per inhibition area is a hyperparameter.
+- Global inhibition - every column is a neighbor of every other column if global inhibition is true.
+- Over a timestep, for active minicolumns, all of the permanence values of connections to a bit in the input space which is a 1 will be increased, and for the connections to a bit in the input space which is 0 they will be decreased. This is a Hebbian learning system. The increase and decrease rates are (separate) hyperparameters. Inactive minicolumns can also learn by the same rules, but they have separate increase and decrease hyperparameters usually set to 0 or near 0.
+- Each connection a minicolumn has with a bit in the input space represents a synapse.
+- Question: Is there a better, faster way for the spatial pooler to teach minicolumns how to represent the input space than gradually carving the pattern out through countless iterations of Hebbian learning? Maybe image rescaling would offer a clue?
+- Neurons change their excitability to maintain homeostasis. We call this "boosting" in HTM. Boosting changes a minicolumn's overlap scores before inhibition occurs. This allows less active columns a chance to learn, and stops overactive columns from hogging all the learning.
+- Inhibition: Above in the notes when we mentioned inactive minicolumn's learning rates being 0, that is an example of inhibition.
+- The order: Boosting -> Inhibition -> Learning
+- We need to find the boost factor calculation algorithm for a minicolumn.
+- Boosting is required for spatial pooling to learn a representation of the input. Without boosting, only a tiny number of minicolumns contribute to the representation, and the representation can't be fine-grained or highly accurate.
+- Active Duty Cycle: How active is a column over time?
+- Topology: Neurons have spatial positions. Some are closer than others, and neurons prefer to connect more often and more strongly to neurons close to them. Lateral inhibitory connections create local groups of cells that affect each other, effectively separating circuits/making them local.
+- For making local groupings in HTM, we need a Euclidean distance calculation for bit locations in different representations. 
+- Note: NuPIC is Numenta's HTM platform, a key reference for the code we need.
+- In order to make Euclidean distance meaningful, we have to give our input space and spatial pooler a shape. For example, we can define the input space as 2D, and the spatial pooler as 3D (in this case, a 2D surface of columns, and 4 cells per column giving the spatial pooler a depth of 4). Without topology in the spatial pooler, the output representation will be more or less random.
+- In global inhibition, there is no topology, and every bit in the input space could be in the potential pool of a minicolumn in the spatial pooler. However, with topology, we narrow which input bits can be in a minicolumn's potential pool. This gives each minicolumn a receptive field, which is a window/section of the input space it can attend to. (Receptive fields are expected to overlap.)
+- Using receptive fields and topology, the representation learned by the spatial pooler can physically resemble the representation in the input space.
+- Topology is only sometimes useful. Its effects get more useful the larger the input space is. It is analogous to convolutions in CNNs, and is very important for vision and other sensory data.
+- Temporal memory: The spatial pooler can represent spatial representations, but we also need temporal patterns to recognize sequences of spatial patterns over time. 
+- The temporal memory algorithm does two things: Learn the sequences of active columns in the spatial pooler over time, and make predictions about what spatial pattern is next based on the temporal context of each input. It does this by activating individual cells within minicolumns.
+- Recall from earlier notes: Each column has connections to the input space within a receptive field. These are PROXIMAL dendritic connections, giving FEEDFORWARD input. Every cell in the column shares this proximal input.
+- Lateral connections exist between cells in a layer of minicolumns. Any cell in the layer could theoretically connect to any other cell in the layer. These are APICAL/DISTAL dendritic connections, and they provide context.
+- There are two phases of the temporal memory algorithm: 1) Identify which cells within active columns will become active this timestep. 2) Once those activations have been identified, choose the set of cells to put into a predictive state. A cell in a predictive state is primed to fire on the next timestep.
+- Bursting: If within an active column, no cell is in a predictive state, we activate every cell in the column. This typically happens when the model has never seen the current input in this context before.
+- The prediction is validated if on the timestep where a cell in a predictive state activates, the column is activated, allowing the cell to fire.
+- After the cells in a predictive state have fired and become active, we must decide which cells to put into a predictive state. When a cell decides to go into a predictive state or not, it can look at the activities of all its distal/basal segments and synapses, which provide temporal context (which cells were active in the previous timestep). Every basal synapse has a permanence value, where the connection only exists if the value is above the threshold.
+- If at a given time step, the number of active presynaptic cells connected to a SINGLE dendritic segment exceeds the activation threshold, the SEGMENT becomes active. This depolarizes the cell's soma, but does not immediately cause it to fire. It causes the cell to enter a predictive state. This is how the brain attempts to predict the future.
+- When a cell is in a predictive state, it expects to be active in the NEXT input representation. The prediction error is whether this actually happened or not.
+- Include a hyperparameter for synapse decay (forgetting).
+- If there was only one cell per column, a column could predict only one thing, so temporal memory could store one sequence. Rather than being like a tree that branches with different contexts, temporal memory would be like a chain, where elements are connected as couples. It would accurately predict a pattern but when there comes an unexpected input, the chain would be broken. This would be first order memory, and it cannot use temporal context, which is why you need many cells per minicolumn.
+- When a column bursts, how is a cell within that column chosen to represent that sequence in the future? There were no cells in a predictive state in the column, so the column bursts and activates every cell. Then, a winner cell is selected to represent the latest step in the sequence.
+- To do this, first we check all the cells in the column to see if any cell ALMOST predicted the last input. This means they have distal segments which match the previously active cells, but their permanence values are not high enough to form a connection. If the connection existed, this cell would have been in a predictive state, and the column would not have burst.
+- But if there were no matching segments at all, we must first find the cell with the fewest number of segments and make it the winner cell. This ensures we use as many cells as possible and do not overuse any cell, and break any random ties. Then next timestep we must either create segments or grow synapses from all the active cells in the bursting column to cells representing the previous state. We do this by increasing the distal permanence values between the active cells and the winner cells of the last timestep.
+- Every active column has a winner cell, bursting or not. The winner cells of a non-bursting column are the active cells.
+- A primer on dendrites before covering cortical circuitry: Proximal dendrites provide feedforward input from the layer below, causing cell action potentials. Distal/basal dendrites are modulatory dendrites that affect how the neuron responds to proximal input under different contexts, with cells within the same layer providing the modulation. Apical dendrites provide feedback signals from higher layers, also modulating the neuron's response to proximal input like basal dendrites. By integrating these three types of signal, the cell can become active or predictive.
+- Basal/distal dendrites can be considered an output to the same layer of neurons.
+- The cortical circuitry of layers and columns: The neocortex is a homogenous sheet of 150,000 cortical columns, each 1mm in diameter and 2.5mm deep. 
+- All cortical columns have a laminar structure of 6 layers of neurons. Each layer of a column has thousands of pyramidal neurons, receiving feedforward input from proximal dendrites in the previous layer, possessing basal dendrites to neurons in the same layer of the same column, and projecting feedforward input to the next layer with apical dendrites.
+- The neocortex is divided into regions, whose cortical columns are dedicated to processing the same modality. Every cortical column in your brain contributes to object representations. As your brain processes sensory signals over time, objects are defined feature-by-feature in space. As an object moves across your visual field or rotates, MANY columns processing sensory input represent the entire object from different perspective. 
+- When you think of a coffee cup, neurons representing the idea activate, and each cortical column specific to that column's sensory experience with past coffee cups do too. Each column has a different representation of coffee cups, but they all work together to make a general representation. 
+- Object representations are allocentric, meaning defined only with respect to themselves. Humans learn object representations with movement and sensory information over time.
+- All layer input and output can be defined in terms of SDRs. 
+- Merging and splitting of axon bundles is okay because of the semantic and noise resistance properties of SDRs, so the data flows between layers can break apart and join together.
+- How does this connect to spatial pooling and temporal memory? 
+- A layer in the cortical column taps into the cortical column's feedforward stream to get proximal input, and the basal/distal signals from previously active cells in the same layer provide temporal context. Modulatory distal/basal input can come from elsewhere as well.
+- The proximal input is the input space, which is processed by spatial pooling with the addition of the basal dendritic context for temporal memory. It merges sensory information with temporal context/modulation.
+- The layer's output is the proximal input of the next layer of the cortical column. In this case, to a pooling layer, which creates a stable representation of something projected from the input sensory layer over time.
+- A location on an object can be represented by a distal input signal in an SDR, which could come from another layer of the cortical column. 
+- The pooling layer's representation can be split and projected to adjacent layers in neighboring columns, as well as itself. This layer uses neighboring layers' cortical columns' object representations as context for its own representation, sharing perception across cortical columns. This is part of how cortical column voting is done.
+- Grid cells are pyramidal neurons which create cognitive maps of space. In the hippocampus, a grid cell fires when the animal is in a specific location in the room. The grid cell represents a location by firing whenever the animal is in that location. They are in both the entorhinal cortex in the hippocampus, and in the neocortex.
+- The locations each grid cell responds to are spread out in a hexagonal lattice, because if you pack circles as close together as possible, their centers become hexagonal patterns. This is also why bee hives are made of repeating hexagonal lattices.
+- A grid cell has a firing field, or a location (or multiple locations) where if the organism gets close to it, the grid cell will fire.
+- In a grid cell module, the grid cells project onto a space in the same way. The grid cells themselves are not arranged in any way in the brain, but they tile across a 2D space. Because it tiles, the representation is ambiguous, the organism could be in one of many locations in the space. The reason it tiles is because there are only so many different unique states a grid cell module can represent. 
+- When we change the grid cell module's orientation or scale, nothing about the functionality of the grid cells or how the modules interact.
+- To get a unique representation of a location, we need many grid cell modules working together to represent a space. If we have two different grid cell modules, the organism could be in any of the locations where the firing fields of the active grid cells of both modules overlap. This reduces the number of possible positions the organism can be in, given the currently active grid cells. 
+- It helps to have different scales and orientations of firing fields/grid cell projections for each grid cell module.
+- More modules allows you to represent more unique spaces, and disambiguated spatial locations better. This technique works in any number of dimensions or in any metric, you just have to define how the grid cells project onto that space/metric.
+- More than one cell within each grid cell module can be active at once if you choose.
+- By using multiple grid cell modules to disambiguate spatial positions, we can create an SDR of a spatial location by concatenating the SDRs of each of the grid cell modules. This allows us to make neural representations of positions in any space.
+- If we move the organism from one room to another, or to a new environment, its grid cell modules will project onto that space in the exact same way. Turning off the lights does not stop the grid cells from firing, allowing the animal to navigate in the darkness, using path integration to predict the organism's position.
+- Experimental evidence has proven that grid cells can learn/create an abstract space.
+- A peculiar fact is that human metaphors represent non-spatial states in spatial terms.
+- Recap: Grid cells represent a location in a (tiled) space, given a grid projection for that space. When the organism (or sensor) is in that position, the cell fires. To disambiguate the organism's position, multiple scales and orientations of grid cell projections are needed, so multiple grid cell modules with different projections are needed. By combining the SDRs of each of the grid cell modules, you get an SDR of the position of the organism or sensor in that space. 
+- Grid cells in the entorhinal cortex form a reference frame of your environment. Every object in your environment has a location. (They are like features of your environment.) 
+- By exploring a room and classifying its features and where they are located, you can filter out the possibilities of which room you're in. A bed, a lamp, and a bedside cabinet indicate a bedroom, and if that bedroom has an object specific to a specific bedroom you've seen, you know which bedroom it is.
+- Now, if there were many copies of you, each exploring only one feature of the room, you would be able to identify the room in one timestep.
+- Grid cells in the neocortex map the reference frame of an object, which contains features (like a handle on a cup), and fire when a specific patch of a sensor (such as a patch of skin) is in the location the grid cell corresponds to. This patch is a receptive field. (Is this true?). 
+- A column for a sensor tracks the location in its space of its associated sensory patch, and processes the feedforward sensory input of that patch.
+- As we attend to an object, all cortical columns receiving sensory input model the same object, each with a different position and sensory experience. 
+- A note on the eye: A visual sensory patch is NOT a section of the retina. It attempts to project a sensory patch across space, with the sensors at the origin. This requires depth perception. (In a 2D space like a computer screen you wouldn't need depth).
+- Every column has a unique representation of objects because they each get different sensory input through movement.
+- A grid cell layer consists of multiple grid cell modules with different orientations and scales.
+- When learning a new object, you might choose a point within a grid cell layer's reference frame to be the origin of that object. Then, you move your sensors through the object space to learn the object's features. Since the number of unique locations within this space is so vast, it is unlikely that the randomly selected position will be nearby or overlap with another object. Therefore, even though the cortical column only has one reference frame, we can treat the object models within as if they have their own reference frames.
+- As the sensor location updates, the grid cell layer's activations update. 
+- Because locations in the reference frame are represented by SDRs, we can perform binary operations on locations, allowing us to say that SDR A + Displacement = SDR B and that Displacement = SDR B - SDR A.
+- If you have a displacement, you can add it to the current position to get the new position, and change the activations of the grid cell layer.
+- Displacements are believed to be stored somewhere else in the cortical column. This is a topic for future research. (Displacement cells?)
+- Displacement cells represent a MOVEMENT through space, and when applied to the grid cell module activations, changes their activations to represent the new locations.
+- Displacement cells allow you to move through an object's reference frame and associate sensory features with locations, allowing you to learn new objects and recognize objects you already learned. 
+- Displacement cells ALSO allow you to associate objects with each other, allowing you to compose objects together and represent their behavior.
+- Displacement between objects in a cortical column is much greater than displacement between the features of an object. Thus they should be interpreted as the displacement between one object's reference frame and another's, allowing the brain to create representations where objects are placed inside other objects, composing the objects.
+- Moving between object reference frames is just as efficient as moving within an object's reference frame.
+- If a displacement can place sub-objects in another object's reference frame, a sequence of displacements can represent an object's behavior using the temporal memory algorithm.
+- Thousand Brains Theory: Some of the information we learned in Hierarchical Temporal Memory is not true. One of those details is hierarchy. 
+- In the classical model of hierarchy, input comes from the senses and flows strictly from one layer in the hierarchy upwards to the next. Lower levels are thought to extract low-level features, and input them to the next level of the hierarchy, which composes them into larger objects. This is how Deep Learning works, Deep Learning is dependent on the classical view of hierarchy.
+- The brain, however, does not use the classical view of hierarchy. It does not have a deep, strict hierarchy. It was a very wide, messily entangled hierarchy, more like a heterarchy.
+- Eye movements called saccades move your entire field of view.
+- Every cortical column in the brain is modelling objects. Although some connections between columns are hierarchical, the vast majority are not. This allows a local clue to be spread anywhere laterally or through the hierarchy. Any level of the hierarchy can inform any other level.
+- Suppose you are looking at a horse in the distance. A higher level cortical column sees the ground, but not the horse or the details. A medium level column can make out the horse, but not the ground or the details. A low level column can make out the hair on the horse, but does not know what animal the hair belongs to. By combining these clues together, we know that the animal is a horse, the hair is horse hair, and that the horse is on the ground. 
+- We are only consciously aware of the consensus.
+
+Problems that need to be resolved in future notes:
+- How do grid cells decide how to project themselves onto a space? How do they select a metric and dimensionality? 
+- Confusion and mistakes about columns vs. minicolumns needs to be resolved.
+- How does the motor layer, layer 5, work?
+- Where are displacement cells in the cortical column?
+- How does layer 2-3 work?
+- How is each layer in a cortical column connected to other layers, and if to other columns, then which layers in other columns?
+- How does the system create and send out motor commands? How are they converted into signals that the muscles can read? Are decoders required?
+- How does path integration work?
+- How does voting between neighboring columns work? Between distant columns? (Could it have anything to do with what we learned about SDR classification?)
+- What does layer 1 do?
+- Some research indicates human minicolumns build **group-theoretic representations**. What does that mean computationally, and how should it inform the architecture?
+
+New notes:
+- placeholder
+
+Logarithmic brain notes:
+- The notes for this video came from Artem Kirsanov.
+- On a graph where the x axis is the neuron firing rate in hertz, and the y axis is the number of neurons with a given firing rate, the distribution is log-normal.
+- The gaussian/normal distribution/bell curve arises from the summation of independent random variables.
+- But what happens when instead of summing independent random variables, we multiply them?
+- How do you move from multiplication to addition? Logarithms. If the graph were represented logarithmically, the log-normal distribution would look like a normal distribution.
+- A logarithm of a product is equal to the sum of the logarithms. log(ab) = log(a) + log(b). Thus, the logarithm of a product of many independent variables is normally distributed.
+- Log-normal distributions are common in the brain in more than just cell firing rates.
+- A log-normal distribution has a prominent heavy tail. It means the majority of neurons have a slow firing rate, average 1 Hz, but there is still a large minority number of fast-firing neurons around 10 Hz.
+- Neurons are connected through synapses, with strengths determined by a weight. Synaptic weights are log-normally distributed. Most are weak, but some are strong and form a highway for reliable transmission of signal. High-firing-rate neurons make strong connections with each other and have thicker axons which insulate better and transmit signals faster.
+- This gives the brain a division of labor. Fast-firing neurons are connected to each other, and account for 50% of the information being sent through fast conduction axons and computed via strong synapses. But the remaining 90% of neurons form a larger, looser network forming the other half of the information. 
+- The fast-firing minority does general tasks and recognition, but the slow-firing majority are specialists that resolve exact features.
+- Generalizer vs. specialist neurons are NOT a binary. It is a continuous spectrum.
+- The log-normal distributions in the neurons' weights are suspected to come from the fact that the strength of a synapse is proportional to the size of its spine, the enlargement of the neuron's membrane on the receiving end. Spine sizes are plastic and change all the time. The change in size of a spine is proportional to the size of the spine, so it is not linear. It is the source of multiplication and therefore log-normality in the brain. This explains the log-normality of neuron weights, but not of firing rates, or neuron densities within the cortex, the strength of perception (Weber-Fechner law), or other quantities in the brain which are log-normally distributed.
+- Related article: "The log-dynamic brain: How skewed distributions affect network operation".
+
+Reservoir computing:
+- The notes for this video came from Artem Kirsanov, who explicitly cited Jeff Hawkins' book "A Thousand Brains Theory" in his video.
+- Autonomous pattern generation is one of the fundamental tasks a brain must perform. An example is recreating the experience of a song you heard in your mind. 
+- Autonomous pattern generation is the production of precise sequences of neural activity.
+- Suppose we have a reservoir of N neurons connected randomly. The connections have different weights and some are negative.
+- At any given moment the state of a neuron in the reservoir is determine by its state one moment ago plus the incoming signals from all connected neurons. 
+- Friction is required to cancel out noise. We engineer the system to have an echo-state property, which means every input leaves a temporary trace which echoes throughout the network activity, but which gradually fades over time. 
+- But to generate a pattern such as a song over a longer time, we need a driver input to keep the activity from dying out. As an example, let's use a simple sine wave signal z(t). It acts like a background clock. Critically, **in the brain, these signals would be brainwaves alpha, beta, gamma, delta, and theta.**
+- In our reservoir, each neuron receives the driver signal multiplied by a weight mu, which is unique to that neuron. The challenge is to take this simple driver signal z(t) and convert it into an interesting signal y(t) which is the pattern, like a song, we want to generate.
+- Traditional machine learning tries to micromanage every single weight in the network. It is extremely difficult to do this for recurrent neural networks because the interactions between neurons become entangled through time, and a nudge in a weight now can have unexpected consequences later.
+- It was noted in this video that in "A Thousand Brains Theory", the neocortex is stated as being a reservoir of independent cortical columns. 
+- Reservoir computing: Do not attempt to micromanage the weights. Leave the connections in each bucket or reservoir random, and get the correct answer from the random noise of the neurons. 
+- First we add one final neuron called the readout. It listens to the activity of all the other neurons but does not talk back. Its state is a weighted sum of all neurons' states. The only thing in this network we can modify are the weights which go to the readout neuron. 
+- This is a useful analogy: If every neuron in the reservoir were a random sound, then to create our song, we simply control the volume of each random sound until the collective hum sounds like our song. 
+- Mathematically, we are looking for a set of coefficients (weights) such that when we add up all our random signals, we get our target pattern y(t). This is mathematically equivalent to linear regression. Therefore, and this is incredibly helpful, we can obtain a closed-form solution for the optimal readout weights in a single step analytically, and don't need gradient descent. 
+- Once we lock in the ideal readout weights, we feed the reservoir the driver signal z(t) which is a simple sine wave, and the readout reads the resulting state of the network to get the complex pattern y(t), such as a song.
+- An example of how effective this same kind of mathematical "magic" works is when Joseph Fourier was trying to invent an equation for how heat spreads through a solid object over time. If the initial heat profile was jagged or complicated, he could not solve the differential equations for it. 
+- But he found a loophole. If the initial temperature looked like a perfect sine wave, the solution was easy. A sign wave doesn't change shape when it cools down, it just gets flatter. So he reduced the complicated and jagged heat profile down to a collection of sine waves added up. It allowed him to convert the hard task of solving the differential equations of a jagged or complicated heat profile, into a set of easy problems of solving them for simple sine waves of different phases and amplitudes and adding them up. It worked.
+- Enough sine and cosine waves, mixed in the right proportions, can be used to build any curve you want. In mathematics, sine and cosine form a **basis**. They are important building blocks. They are not the only basis. Another example is the Taylor basis x^n. 
+- Our reservoir acts as a random basis, or a giant library of random temporal shapes. A linear combination of these shapes can form a precise temporal pattern such as a song.
+- The key insights of reservoir computing: A brain, or a recurrent neural network, is a dynamical system. We cannot easily micromanage every weight to learn precisely the pattern we need. So we leave the random weights untouched, input a simple driver signal z(t), and train a simple linear readout to get the pattern y(t) we want. It works because a large enough collection of random temporal patterns forms a rich basis from which virtually any temporal signal or pattern can be reconstructed. Therefore, biological neural networks do not have to be precisely engineered to produce complex behavior. The messy, entangled connections and flawed behavior is a feature and not a bug. 

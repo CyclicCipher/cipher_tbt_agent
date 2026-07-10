@@ -1,763 +1,308 @@
-"""The cortical column — a CONTAINER for the four layers and a COORDINATOR of information flow between them and
-out to the thalamus / other columns. It holds no layer functionality of its own (the coordinator principle,
-REFACTOR_PLAN): math + state live in the layers; the column only routes.
+"""column.py — THE CORTICAL COLUMN: a composition of `HTMLayer`s wired as the real microcircuit (not a feedforward stack).
 
-  L6  the LOCATION frame — ONE script (`l6_sr`). The online TD successor representation (`OnlineSR`,
-      eigendecomposition-free — Stachenfeld 2017: grid cells ARE the SR eigenvectors, topology-general) is the
-      navigational / relational frame; a frame whose geometry is known a-priori (the hex metric prior) is an
-      initial-state descriptor within it (`l6_sr.hex_code`), not a parallel class. Path integration = the pose belief
-      + the ONE per-action `operator` (SE(2) non-abelian, translation abelian special case).
-  L5  the DISPLACEMENT / operator / motor / thalamus-driver layer. The per-action operator (observed edges +
-      the position-invariant generalizing delta) AND the continuous-pose group operators recognition reads.
-  L4  FEATURE-at-location. The label-free content codebook (`encode`), the rotation-invariant feature
-      descriptor, feature ⊗ location bind/readout, and `predict_feature`.
-  L23 the OBJECT / identity layer. The graph-memory of objects + evidence-based recognition (pose inferred) +
-      lateral CMP voting; plus the within-object content store S.
+This module is written PLAN-FIRST per the user's directive ("make the whole column at once; lay out the research and the
+plan in the comments"). PART A is an exhaustive, cited synthesis of the layers + sublaminae the typical TBT explanation
+smooths over (from a six-thread primary-source review, 2026-07-09). PART B is the build plan for the whole column. The code
+below PART B is a structural scaffold that encodes the plan; the per-timestep dynamics await the §15 decisions.
 
-The object MODEL is DISTRIBUTED across the layers (L6 locations + L4 features + L5 displacements + L23 identity)
-— there is no separate object library (the dissolved `recognize.py`). The column's methods are thin routing:
-`observe` feeds L6 + L5; `predict`/`motor`/`driver` delegate to L5; `learn_object`/`recognize_object` route to
-L23; `content_code`/`place_code` expose the thalamus interface; `refresh` builds L6 place codes from the online
-SR; `loc_*` coordinate L6's belief with L5's operator (path integration).
+STATUS: STANDALONE / under construction (allow-listed in test_reachability). NOT wired into agent.py, NOT exercised
+end-to-end yet — so by RULES.md #3 it is explicitly NOT "done." It exists so the whole-column structure + research are
+captured in code before we implement the dynamics.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+PART A — RESEARCH: the layers & sublaminae, and what the popular TBT account smooths over
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+§0. THE HEADLINE (the "smoothed over" summary)
+The popular TBT column — L4 (feature input) ⇄ L2/3 (object output), location from L6a, L5 = motor, grid cells in L6 — is a
+DELIBERATE, HEAVY simplification. Numenta say so: their 2017 simulation implements only TWO pyramidal layers, folds all
+inhibition into activation rules (no interneurons as cells), omits L1 / sublaminae / the L2-vs-L3 distinction, admits
+"cells we describe as residing in separate layers may actually intermingle," and flags grid-cell + displacement-cell
+placement as PREDICTIONS, not facts (Hawkins, Ahmad & Cui 2017; Hawkins et al. 2019 "Framework"; TBP 2024). Monty (the
+software) drops layers, spikes, grid cells and the thalamus entirely. The six corrections the real anatomy forces:
+  (1) A "layer" is really defined by PROJECTION CLASS (IT / PT / CT), not by laminar number (Harris & Shepherd 2015).
+  (2) L2/3, L5, and L6 are each really TWO classes doing different jobs.
+  (3) The circuit is RECURRENT, not a relay: thalamus is only ~5% of L4's excitatory synapses; local recurrence (~34%)
+      exceeds the feedforward interlaminar loop (~21%). Cortex AMPLIFIES a weak thalamic drive (Binzegger/Douglas/Martin
+      2004; Douglas & Martin 2004).
+  (4) It is NOT a serial L4→L2/3→L5→L6 stack: thalamus drives L5/L6 DIRECTLY, in parallel with L4 — L4 is not an
+      obligatory first relay (Constantinople & Bruno 2013).
+  (5) There are TWO COUNTERSTREAMS: feedforward from SUPRAGRANULAR (L2/3, → higher L4, driving) carrying prediction
+      ERRORS up; feedback from INFRAGRANULAR (L5/L6, → lower L1, modulatory) carrying PREDICTIONS down (Markov 2014;
+      Bastos 2012; Shipp 2007).
+  (6) L1 is the top-down/feedback LANDING PAD (not "irrelevant"), and inhibition (PV/SST/VIP/NGF) does structured control
+      our single kWTA does not capture.
+
+§1. L4 — the INPUT layer (granular)
+  • SUBLAMINAE: in primate V1, L4 is 4A / 4B / 4Cα / 4Cβ carrying THREE segregated thalamic streams — magno→4Cα,
+    parvo→4Cβ, konio→4A — with divergent upper-layer targets (4Cα→4B→MT/motion; 4Cβ→3B/4A→form/colour) (Callaway 1998;
+    Yabuta & Callaway 1998; Hendry & Reid 2000). Rodent barrel cortex sublaminates TANGENTIALLY instead: one barrel per
+    whisker (Petersen 2007).
+  • CELL TYPES: spiny stellate (no apical dendrite, star-shaped, LOCAL) vs star pyramid vs pyramid; ~80% stellate in
+    barrel L4; all REGULAR-SPIKING; L4 excitatory cells are LOCAL/non-projecting (an intracortical amplifier stage), not
+    an output class (Feldmeyer 2012).
+  • THE THALAMIC MINORITY: thalamus is only ~5–20% of L4 excitatory synapses; the LARGEST source is L6 feedback (~45%),
+    then recurrent L4→L4 (~28%) (Ahmed 1994; Binzegger 2004). Thalamus drives anyway because its synapses are weak but
+    NUMEROUS + SYNCHRONOUS (Bruno & Sakmann 2006). L4→L2/3 is the strong, ~unidirectional feedforward step.
+  • AGRANULAR CORTEX: motor + much of prefrontal cortex have NO granular L4. M1 has a cryptic L4-equivalent at the L3/5A
+    border (all pyramidal, weaker/diffuse thalamic input) (Yamawaki et al. 2014). So a "uniform L4-input" column is closest
+    to primary SENSORY cortex; the honest defense is serial homology (the input STAGE is conserved even where the granular
+    layer is not — Harris & Shepherd 2015).
+  • TBT SMOOTHS: the M/P/K sublaminar streams; spiny-stellate vs pyramid; agranular cortex; that thalamus is a minority
+    input and L6 the majority; that deep layers are driven by thalamus in parallel (not strictly via L4).
+
+§2. L2/3 — NOT one layer
+  • WHY LUMPED: a rodent architectonic convenience (in rodent L2/3 is a smooth depth-CONTINUUM — Weiler 2023). In
+    PRIMATE/HUMAN it is distinct: L2 vs L3 differ physiologically (L2 sparser, smaller spikes; L3 sharper RFs, direction-
+    selective — Economides/Gur/Snodderly 2008); L3 is sublaminated 3A/3B/3C; human deep-L3 has distinctive long-range
+    (SMI-32) cells (Berg 2021).
+  • THE FUNCTIONAL SPLIT (Barone 2000): DEEP L3 (bordering L4) = FEEDFORWARD output → higher-area L4. L2 + UPPER L3 =
+    FEEDBACK-biased (matrix-thalamic POm + top-down apical input) → lower-area L1/L2. L3 is more core-thalamic-coupled; L2
+    more matrix/feedback.
+  • CLASS + OUTPUTS: both are IT (cortico-cortical + striatum). Outputs: → L5 (the strong, conserved L2/3→L5 within-column
+    descending path); → higher cortex (deep-L3 feedforward); → lower cortex (L2/upper-L3 feedback); dense horizontal
+    L2/3↔L2/3 = the substrate TBT calls VOTING.
+  • COMPETING STORY: a large literature makes superficial pyramids PREDICTION-ERROR units (Bastos 2012), not (only) object
+    pools — a different computation for the same layer, and one the apical/feedback wiring of L2 seems built for.
+  • TBT SMOOTHS: L2 vs L3; that "the output layer" is really TWO different outputs (deep-L3 FF-export vs L2/upper-L3 FB) at
+    different depths; the sublaminae; primate double-bouquet minicolumn inhibition; the error-coding role.
+
+§3. L5 — TWO classes (IT vs PT)
+  • IT (intratelencephalic; slender-tufted; upper L5/L5A; REGULAR-SPIKING) → cortico-cortical + BILATERAL striatum;
+    telencephalic-only; NOT a direct motor output. PT (pyramidal-tract / extratelencephalic; THICK-TUFTED; lower L5/L5B;
+    INTRINSIC-BURSTING) → subcortical (brainstem, spinal cord, tectum, pons) AND higher-order thalamus as a DRIVER
+    (Harris & Shepherd 2015; Frontiers 2022; Shepherd 2013).
+  • IT→PT is UNIDIRECTIONAL: IT integrates local computation and gates it into PT, which broadcasts. Effective chain:
+    L4 → L2/3 → L5-IT → L5-PT → subcortical/thalamic.
+  • PT IS THE TRUE "MOTOR OUTPUT" — and more: a SINGLE PT axon BRANCHES to a subcortical motor target AND to higher-order
+    thalamus, which relays to the next cortical area. So PT emits a motor command AND a COPY of it up the hierarchy (a
+    built-in EFFERENCE COPY / transthalamic feedforward) (Frontiers 2021; Sherman & Guillery 2024).
+  • LARKUM (the apical mechanism): the thick-tufted L5 cell is a TWO-COMPARTMENT coincidence detector — basal (feedforward)
+    × apical-tuft-in-L1 (feedback), within a ~5–30 ms NMDA window, triggers a Ca²⁺ BAC spike → a BURST. This is the
+    BIOLOGICAL ARCHETYPE of HTM's apical tiebreak — but it is a MULTIPLICATIVE gain/burst, whereas HTM approximates it as a
+    subthreshold depolarization + earlier-firing + WTA (same computation, different currency) (Larkum 2013).
+  • DISPLACEMENT CELLS (object composition; behavior = a sequence of displacement vectors) are HYPOTHESIZED in L5
+    thick-tufted — a TBT PREDICTION, unconfirmed, and in tension with grid cells being placed in L6a (Framework 2019).
+  • TBT SMOOTHS: IT vs PT (calls all of L5 "motor"); the HO-thalamus DRIVER / transthalamic hierarchy role (L5's arguably
+    most important job); the multiplicative Larkum gate (→ scalar depolarization); that displacement-cell placement is a
+    bare hypothesis.
+
+§4. L6 — TWO classes (CT vs CC) + L6b
+  • CT (corticothalamic; upright; 30–50% of L6) → thalamus + the reticular nucleus (nRT, the attentional gate);
+    MODULATORY. CC (corticocortical; inverted/horizontal) → lateral cortex. Plus L6b (a SUBPLATE remnant; distinct
+    markers; orexin/arousal-sensitive; → higher-order thalamus) (Thomson 2010; Marx & Feldmeyer 2017).
+  • THE L6→L4 LOOP: numerically LARGE (~45% of L4 synapses) but individually WEAK & MODULATORY (facilitating, mGluR, onto
+    DISTAL dendrites) = GAIN CONTROL, not drive; reciprocal and topographically narrow (Binzegger 2004; Briggs 2010). This
+    is the anatomical hook TBT hangs "L6a location drives L4" on — and TBT is honest the connection is weak/distal.
+  • L6-CT → thalamus is a MODULATOR (vs L5-PT = driver); core vs matrix; L6 uniquely reaches nRT.
+  • GRID CELLS IN L6 = a TBT PREDICTION. Grid cells are established in ENTORHINAL cortex, NOT observed in sensory-cortex L6
+    ("our prediction is they will be in L6"; the evidence "is mute on what layers contain grid cells" — Framework 2019).
+  • TBT SMOOTHS: CT vs CC (it uses the CC/L6a cell for the L4 loop and sets aside CT→thalamus gain control — L6's defining
+    job); L6a vs L6b; that the L6→L4 signal is physiologically GAIN CONTROL (relabeled "location"); the unobserved
+    grid-cell claim.
+
+§5. L1 — the FEEDBACK LANDING PAD (not irrelevant; our old notes were wrong to call it so)
+  • CONTAINS: the apical TUFTS of L2/3 + L5 pyramids; long-range cortico-cortical FEEDBACK axons; thalamic MATRIX axons;
+    L1 interneurons (neurogliaform → slow GABA_B, canopy, VIP, α7); dense cholinergic/neuromodulatory input (brain-state).
+    Cajal-Retzius cells are developmental/transient (Schuman et al. 2021).
+  • ROLE: the substrate for top-down × bottom-up COINCIDENCE (Larkum apical amplification) and for DISINHIBITORY gating of
+    when that amplification is allowed. HTM's apical dendrite ("predict, don't fire") IS this — what HTM omits is the L1
+    INTERNEURON control of the apical channel.
+
+§6. INHIBITION — three groups ≈ 100% of interneurons
+  • PV (~40%; perisomatic basket + axo-axonic chandelier) = gain / spike-timing / gamma + output veto at the AIS ≈ what
+    our kWTA already does. SST (~30%; Martinotti, axon ascends to L1) = DENDRITIC inhibition = the knob on the apical /
+    PREDICTION channel. VIP (disinhibition: VIP→SST→pyramid) = the CONTEXT / attention / plasticity GATE that transiently
+    unlocks apical amplification. NGF (L1; slow GABA_B volume transmission) = diffuse blanket (Tremblay/Lee/Rudy 2016;
+    Pfeffer 2013; Pi 2013).
+  • OUR kWTA ≈ PV PERISOMATIC ONLY. Missing: SST (dynamic dendritic gate on the prediction channel) and VIP (context-gated
+    unlock of the top-down channel + learning). Matters once the column must LEARN dynamic control of its feedback.
+
+§7. THE REAL WIRING — recurrent + two counterstreams (NOT a stack)
+  • RECURRENCE DOMINATES: thalamus ~5% of L4 synapses; intralaminar self-connection ~34% > feedforward interlaminar ~21%
+    (Binzegger 2004). Deep layers driven directly by thalamus IN PARALLEL with L4 (Constantinople & Bruno 2013).
+  • DIRECTED EXCITATORY CONNECTIONS (rough): thalamic-core → L4 (+ direct to L5B/L6); L4 → L2/3 (strong FF, ~one-way);
+    L2/3 → L5 (strong, conserved); L5 → L2/3 (WEAK); L6 → L4 (numerous, weak, modulatory); L5-IT → L5-PT (one-way);
+    L5 ↔ L6; local recurrence everywhere.
+  • TWO COUNTERSTREAMS: FEEDFORWARD from SUPRAGRANULAR (L2/3) → higher-area L4 — driving, gamma, = prediction ERRORS up.
+    FEEDBACK from INFRAGRANULAR (L5/L6) → lower-area L1 (AVOIDS L4) — modulatory, alpha/beta, = PREDICTIONS down (Markov
+    2014; Bastos 2012). Superficial = error units; deep = expectation/prediction units.
+  • THREE OUTPUT "MOUTHS": L2/3-IT → cortico-cortical; L5B-PT → subcortical motor (+ HO thalamus); L6-CT → thalamus.
+
+§8. THALAMUS — core vs matrix; driver vs modulator
+  • CORE (parvalbumin⁺; → L4 focal, topographic; DRIVER; feedforward; specific content) vs MATRIX (calbindin⁺; → L1 + L5a,
+    diffuse; MODULATOR; feedback/synchronizing) (Jones 2001). Matrix→L1 converges with cortical feedback on the SAME apical
+    tufts. Core ≈ feedforward-drive, matrix ≈ feedback-context.
+  • DRIVER vs MODULATOR (Sherman & Guillery) is the more robust axis: L5-PT → HO thalamus = DRIVER (the transthalamic route
+    that builds the next cortical level); L6-CT → thalamus = MODULATOR. Core/matrix as a hard partition is contested (2024
+    reappraisal) — hold it loosely.
+
+§9. TBT's OWN mapping + what Numenta explicitly admit
+  • Input = L4; Output = L2/3; Location = L6a; grid cells PREDICTED in L6. "Possibly TWICE": the same input/output motif in
+    L4↔L2/3 AND in L6a↔L5. L5 = displacement cells (thick-tufted), TIME-MULTIPLEXING movement (sent subcortically) and the
+    compositional object (sent via HO thalamus to higher regions). Hierarchy = columnar + transthalamic + lateral VOTING.
+  • ADMITTED SIMPLIFICATIONS: 2 pyramidal layers simulated; inhibition = activation rules, not cells; L1 / sublaminae /
+    L2-vs-L3 omitted; grid + displacement placement = predictions; Monty drops layers, spikes, grid cells, and the thalamus.
+  • BIGGEST DIVERGENCE from the mainstream canonical microcircuit: TBT turns the L6a→L4 MODULATORY/gain-control feedback
+    into an active GRID-CELL LOCATION code, and claims grid cells exist in EVERY column.
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+PART B — THE PLAN: how we build the whole column
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+§10. DESIGN PRINCIPLES
+  P1. PROJECT BY CLASS, NOT LAMINAR NUMBER (Harris & Shepherd). A layer = ONE `HTMLayer` + a declared
+      (proximal-in, context-in, apical-in, target-out); `target-out` IS the projection class (IT / PT / CT / local /
+      FF-export / FB). This is exactly the htm.py wiring framing.
+  P2. TWO COUNTERSTREAMS = PREDICTION vs ERROR. Deep (L5/L6) output = the PREDICTION / feedback-down (+ subcortical /
+      thalamic). Superficial (L2/3) feedforward-up = the prediction ERROR (our HTM burst / anomaly). This ALIGNS HTM's own
+      predictive-cells (prediction) + burst (error) with the anatomy and with predictive coding (Bastos 2012).
+  P3. STRUCTURE IS SUPPLIED, NOT DISCOVERED (ARCHITECTURE §7/§8; the credit-assignment finding). Each layer's role is its
+      WIRING, asserted by hand; the location code (L6a) and any task-state channel are GIVEN, not learned.
+  P4. UNIFORM MECHANISM. Every layer is the ONE `HTMLayer`. Proximal is column-level (an upstream `SpatialPooler` only at a
+      raw front-end; otherwise a lower layer's output SDR taken directly). We do NOT add proximal dendrites to `HTMLayer`.
+  P5. HONEST ABSTRACTION (RULES: no silent omissions). We model the FUNCTIONAL skeleton and NOTE every sublamina /
+      inhibitory / thalamic detail we abstract, so it can be added when a task needs it. Nothing is silently dropped.
+
+§11. THE LAYERS WE MODEL (and the sublaminae we abstract, noted)
+  L4    — granular INPUT (spiny-stellate feature-at-location).        model: YES. abstract: M/P/K streams (one channel),
+          star-pyramid, agranular L4-equivalent.
+  L23   — supragranular IT OUTPUT/object + lateral VOTING.            model: YES, as one layer with TWO output wires
+          (deep-L3 → FF-export; L2/upper-L3 → FB). abstract: L2-vs-L3 as separate cell pops, 3A/3B/3C, double-bouquet.
+  L5IT  — slender-tufted associative INTEGRATOR.                      model: YES (recommended) or fold into one L5 first.
+  L5PT  — thick-tufted DRIVER/EFFECTOR = motor + efference-copy-to-  model: YES. abstract: intrinsic bursting; the Larkum
+          hierarchy + displacement cells.                             multiplicative gate (approximated by apical tiebreak).
+  L6a   — corticocortical LOCATION (grid cells) + the L4 gain loop.   model: YES. abstract: L6b; L6-CT thalamic gain control.
+  L1    — the apical/FEEDBACK landing (NOT a cell layer).             model: as the apical-IN channel. abstract: SST/VIP.
+  Inhibition: kWTA (≈ PV) via the SpatialPooler / HTMLayer WTA. SST/VIP dynamics DEFERRED (§14).
+  Thalamus: partly EXTERNAL (the input source) + the L6-CT / L5-PT outputs. core/matrix + full transthalamic relay
+  DEFERRED (§14) — the L5-PT→HO-thalamus→higher-region hop is approximated as a direct cross-region wire for now.
+
+§12. THE WIRING TABLE  (per layer:  proximal-in │ context-in (basal) │ apical-in (feedback) │ target-out)
+  L4   │ thalamic/sensory core via SP, OR a lower region's output │ L6a LOCATION │ L2/3 object feedback │ → L2/3 (local FF)
+  L23  │ L4                                                       │ own recurrence (object pooling) + lateral VOTING (peer
+         columns) │ L1 top-down feedback │ → {deep-L3: higher-region L4 (FF/error-up); L2: lower-region L1 (FB); → L5}
+  L5IT │ L2/3                                                     │ recurrence + direct thalamus │ L1 │ → cortico-cortical
+         + striatum (→ basal ganglia)
+  L5PT │ L5IT (IT→PT)                                             │ sensorimotor state + top-down GOAL │ L1 (the Larkum
+         coincidence = the apical tiebreak/gate) │ → {subcortical MOTOR; HO thalamus → higher region = EFFERENCE COPY};
+         these ARE the displacement cells
+  L6a  │ L5 movement/efference (path integration) + thalamus      │ own recurrence (the grid path-integration operator) │
+         (apical: t.b.d.) │ → L4 (LOCATION, modulatory) + thalamus (CT gain)
+  Note the two load-bearing loops: L6a↔L4 (location predicts the next feature) and L5PT→L6a (the efference copy
+  path-integrates the location for the next step).
+
+§13. STEP ORDER + COUNTERSTREAM DATAFLOW (per timestep = one "movement")
+  1. FEEDBACK/prediction settles first (deep→superficial): the efference copy from L5PT path-integrates L6a → L6a location
+     becomes L4's basal context; L2/3 object → L4 apical; higher-region feedback → L1.
+  2. FEEDFORWARD/drive: new sensory input → L4 proximal; L4's predicted-vs-actual mismatch = the burst/ERROR; L4 → L2/3
+     (pool + vote); L2/3 → L5IT → L5PT.
+  3. OUTPUT: L5PT emits the motor command (subcortical) + the efference copy (→ L6a next step, + HO thalamus → higher
+     region); deep-L3 → higher-region L4 (FF/error-up); L6-CT → thalamus (gain).
+  Recurrence: each layer's basal context defaults to its own previous active cells (temporal memory), EXCEPT where an
+  external context is wired (L4←L6a; L5PT←goal). NOT a serial stack: L6a/L5 (deep) may update in parallel with L4.
+
+§14. WHAT WE DEFER (with reasons — noted, never silently dropped)
+  • SST/VIP inhibitory DYNAMICS (learned dendritic gating of the prediction channel + plasticity control) — kWTA(PV)
+    suffices for a first column; add when a task needs learned top-down control.
+  • FULL THALAMUS (core/matrix as stages; nRT attention; transthalamic relay as its own node) — approximated by direct
+    cross-region wires + the L6-CT/L5-PT outputs.
+  • L4 M/P/K streams; agranular L4-equivalent; L6b; primate double-bouquet minicolumn inhibition — single-channel
+    abstractions.
+  • The Larkum MULTIPLICATIVE burst — approximated by HTM's apical tiebreak (depolarize + earlier-fire + WTA); it is a gain
+    approximation, flagged.
+  • L2-vs-L3 as separate cell populations — modeled as ONE L2/3 with two OUTPUT wires (deep-L3 FF, L2 FB) first.
+
+§15. OPEN DECISIONS (for the user, before we implement the dynamics)
+  D1. Split L5 into IT + PT from the start, or one L5 (motor) first?  → recommend SPLIT (PT's dual motor + efference-copy-
+      to-hierarchy role is exactly what the sensorimotor loop needs).
+  D2. L2/3 as one object layer with two output wires, or two cell populations (deep-L3 FF, L2 FB)?  → recommend ONE + two
+      wires first.
+  D3. First RUNNABLE task: exercise ALL layers, or build the full structure but drive a SUBSET first (arithmetic ⇒ L4 +
+      L6a-as-place + L5PT-state; spatial ⇒ the full L4↔L6a loop)?  → recommend full structure, subset-driven, rest wired +
+      tested-for-wiring.
+  D4. Adopt P2 (superficial = error, deep = prediction) as the organizing principle?  → recommend YES.
+
+FULL RESEARCH (unabridged, every citation + URL + uncertainty flag): `src/tbt/notes/cortical_layers_and_sublaminae_research.md`.
+Sources (compact): Harris & Shepherd 2015 Nat Neurosci; Douglas & Martin 2004
+Annu Rev Neurosci; Binzegger/Douglas/Martin 2004 J Neurosci; Thomson & Lamy 2007 Front Neurosci; Bastos et al. 2012 Neuron;
+Markov et al. 2014 J Comp Neurol; Constantinople & Bruno 2013 Science; Bruno & Sakmann 2006 Science; Callaway 1998 & Yabuta
+& Callaway 1998 (V1 sublaminae); Feldmeyer 2012 Front Neuroanat (barrel L4); Yamawaki et al. 2014 eLife (M1 "L4");
+Economides/Gur/Snodderly 2008 & Berg et al. 2021 Nature (L2/3); Larkum 2013 Trends Neurosci; Frontiers 2022 (L5 IT/PT);
+Sherman & Guillery 2024 J Neurosci (transthalamic); Thomson 2010 & Briggs 2010 & Marx & Feldmeyer 2017 (L6/L6b); Schuman et
+al. 2021 Annu Rev Neurosci (L1); Tremblay/Lee/Rudy 2016 Neuron (interneurons); Jones 2001 Trends Neurosci (core/matrix);
+Hawkins/Ahmad/Cui 2017, Hawkins et al. 2019 "Framework", Lewis et al. 2019, TBP 2024 (the TBT mapping + admissions).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-import numpy as np
-import torch
-import torch.nn as nn
-
-from .l4_feature_location import L4_FeatureLocation
-from .l5_displacement import L5_Displacement
-from .l6_sr import OnlineSR                            # the online TD successor representation (eigendecomposition-free L6)
-from .l23_object import L23_Object                     # the object/identity layer: graph-memory + recognition + voting
-from .operator import Operator                        # L6_NONABELIAN: the per-action operator (composable; learned online)
-
-IMPASSABLE = 1e6                                       # the COST-FIELD limit: cost >= this = a WALL (you cannot occupy it) -> hard-excluded
-
-
-@dataclass(frozen=True)
-class GoalState:
-    """A CMP-style goal-state MESSAGE -- active inference: L5 emits the desired OUTCOME, not a command
-    ('predictions not commands'; reference_gsg_goal_generation). `target` = the location/pose to bring about (here,
-    to go SENSE); `kind` = the uncertainty it resolves ('disambiguate' now; 'explore'/'reward' later); `source` =
-    the originating column (None = self). Shaped so a column can SELF-generate it OR RECEIVE it from a connected
-    column -- the heterarchy scale-up is just WHERE the message comes from, not a different mechanism."""
-    target: tuple
-    kind: str = "disambiguate"
-    source: object = None
-
-
-class CorticalColumn(nn.Module):
-    def __init__(self, n_entities, feat_dim=256, d_mem=512, torus_size=12, scales=(11, 13, 17),
-                 place_k=1, seed=0):
-        super().__init__()
-        self.L5 = L5_Displacement()                                       # displacement / operator / motor / driver
-        self.L4 = L4_FeatureLocation(n_entities, feat_dim=feat_dim, seed=seed)  # feature-at-location + content codebook
-        self.L23 = L23_Object(feat_dim=feat_dim, d_mem=d_mem)             # object/identity: graph-memory + recognition + content store
-        self.d_mem = d_mem
-        self.sr = OnlineSR(gamma=0.95, alpha=0.3)             # L6: the location frame, learned ONLINE by TD (no batch eigh)
-        self.loc, self.rel = {}, {}                           # symbol→frame index; relation→operator key (the EDGES live in L5)
-        self.place = None                                     # (n, d_mem) per-node SR-frame place codes (set by refresh)
-        self._cur = None                                      # the current node -- discrete path integration over the graph
-        self._fovea = None                                    # P1: the CONTINUOUS metric location belief (pixel), path-integrated by L5's translation
-        self._map = torch.zeros(feat_dim, d_mem)             # M5/L7-A: the online allocentric MAP (Σ feature ⊗ place), read by feature_at
-        self._changed: dict = {}                             # C4: L2/3 object STATE -- {location: feature} where a known feature CHANGED
-        self.cost: dict = {}                                 # the COST FIELD: location -> expected interaction cost (ONE currency for walls/hazards/slow/risky)
-        self._pose = None                                    # L6_NONABELIAN S1e: the POSE belief (SE(2) matrix) path-integrated by COMPOSING operators (non-abelian)
-        self.pose_ops: dict = {}                             # L6_NONABELIAN S1e: per-action body-frame SE(2) operator (learned) -- the pose-aware achiever composes these
-
-    # ----- routing: learn the transition structure online (L6 + L5) ---------------------------------
-    @property
-    def graph(self):
-        """A read view of the per-action operator's edges -- they live in L5 (the operator layer), not a bare dict."""
-        return self.L5.edges
-
-    def observe(self, s, a, s2):
-        """Record one observed transition: it feeds L6 (the ONLINE SR location frame, TD every step -- no batch eigh) AND
-        L5 (the per-action operator -- the edges; a blocked move is a state-dependent exception with no edge). The
-        geometry -- line, ring, 2-D grid, tree -- falls out of the SR; no metric-vs-non-metric switch."""
-        self.sr.observe(s, s2)                                       # L6: online location learning (incl. blocked moves)
-        self.L5.observe(s, a, s2)                                    # L5: the per-action operator (edges)
-
-    def refresh(self):
-        """ONLINE, eigendecomposition-free consolidation: take the online SR (L6, TD-learned by `observe`) rows as place
-        codes (padded into d_mem), then learn the L5 operators + pool L4/L23 content from them with cheap outer products
-        (no `eigh`). Builds the place codes the thalamus interface (`place_code`) reads. (Up to d_mem states are padded
-        in; beyond d_mem a random projection is needed -- deferred.)"""
-        syms = sorted(self.sr.idx, key=lambda s: self.sr.idx[s])
-        if not syms:
-            return
-        self.loc = dict(self.sr.idx)
-        codes = torch.zeros(len(syms), self.d_mem)
-        for s in syms:                                               # SR row -> place code (padded into d_mem)
-            row = torch.as_tensor(self.sr.code(s), dtype=torch.float32)
-            codes[self.loc[s], :row.shape[0]] = row[:self.d_mem]
-        self.place = torch.nn.functional.normalize(codes, dim=1)
-        relations: dict = {}
-        for s, e in self.graph.items():
-            for a, s2 in e.items():
-                if s in self.loc and s2 in self.loc:
-                    relations.setdefault(a, []).append((self.loc[s], self.loc[s2]))
-        self.rel = {}
-        for a, edges in relations.items():                          # operators from the current codes (outer products; no eigh)
-            self.L5.learn(("rel", a), self.place, edges)
-            self.rel[a] = ("rel", a)
-        for s, i in self.loc.items():                              # content bound at the online place codes (L4 -> L23 store)
-            self.L23.pool(self.L4.bind(s, self.place[i]))
-
-    # ----- routing: the SR value / reachability read (L6, the deep-planning substrate) --------------
-    def value(self, s, reward_map):
-        """The SR VALUE V(s) = M[s]·R over the (sparse) rewarding states -- the expected discounted future reward as a
-        few cached lookups, the deep multi-step propagation precomputed into the SR row (no rollout; reference_brain_
-        planning). Routes to L6's online SR; an unknown state -> 0."""
-        return self.sr.value(s, reward_map)
-
-    def reachable(self, s, reward_map) -> bool:
-        """Whether any REWARD state is reachable from `s` via the learned transitions -- read NATIVELY from the SR
-        (M[s,g] > 0 iff g is reachable = nonzero discounted future-occupancy), no graph BFS. The per-level dead-zone
-        signal: a fresh level whose states have no SR path to a reward is a fresh dead-zone, not a global 'reward-ever'
-        flag (the bug the oracle/human/agent trace exposed)."""
-        return self.value(s, reward_map) > 1e-9
-
-    def learn_cost(self, loc, c, rate=0.5):
-        """ASSIGN/update the COST of interacting with `loc` -- the ONE repulsion currency (walls/hazards/slow/risky). A
-        running MEAN, so a STOCHASTIC outcome (touch it -> some fraction of the time something bad) converges to its
-        EXPECTATION `p·penalty` for free (risky = a fractional cost, no special case); a deterministic hazard converges
-        to its penalty; a slow tile to its extra step-cost; a WALL is the `cost=IMPASSABLE` limit. Fed by the SAME
-        signals the value model sees -- a bad score (AVERSION) and a no-progress BUMP -- so repulsion is LEARNED, not a
-        hand-coded map. (The agent wires the calls in V4; here is the mechanism.)"""
-        if c >= IMPASSABLE:                                  # a wall is absorbing, not averaged (you never occupy it)
-            self.cost[loc] = float(c)
-        else:
-            self.cost[loc] = (1.0 - rate) * self.cost.get(loc, 0.0) + rate * float(c)
-
-    def _cost(self, loc):
-        """The learned expected cost of occupying `loc` (0 if unknown) -- the cost field read by the potential field + SR."""
-        return self.cost.get(loc, 0.0)
-
-    def navigate_to(self, state, reward_map, actions, blocked=()):
-        """SR SHORTEST-PATH navigation: the action whose OUTCOME has the highest SR VALUE `V(next) = M[next]·R`. Because
-        the SR occupancy `M[s,g] ~ γ^(distance to g)`, greedy on it steps along the SHORTEST path to the reward structure
-        `reward_map`, read DIRECTLY from the SR (no rollout / no per-step sweep -- reference_brain_planning). Unlike the
-        swept value it carries NO frontier optimism, so near a KNOWN goal it does not wander -- the efficiency lever. The
-        SR WARPS around barriers (a bumped move records a self-loop), so this is the GEODESIC (obstacle-aware) path = the
-        VECTOR_NAV V3 DETOUR when the potential field is stuck. COST-AWARE on the ONE currency: the caller folds FINITE
-        costs into `reward_map` as NEGATIVE reward, so `V = M·(reward − cost)` routes around costly REGIONS globally (the
-        cost's own self-occupancy penalises stepping onto it too); `blocked` and `cost>=IMPASSABLE` cells (WALLS -- which
-        the SR also never routes through) are hard-excluded. Returns the best action, or `None` when no reward is reachable."""
-        best_a, best_v = None, 1e-9
-        for a in actions:
-            if a in blocked:                                 # V3: an obstacle in that direction (border cell) -> excluded
-                continue
-            nxt = self.predict(state, a)
-            if self._cost(nxt) >= IMPASSABLE:                # a wall cell -> cannot occupy it
-                continue
-            v = self.value(nxt, reward_map)
-            if v > best_v:
-                best_v, best_a = v, a
-        return best_a
-
-    def vector_action(self, here, goal, actions, blocked=(), cost_weight=1.0):
-        """VECTOR_NAV: one step of the POTENTIAL FIELD toward `goal`, realised by L5's INVERSE operator.
-        V1 -- ATTRACTION: the UNIT goal vector `v̂ = (goal − here)/|·|` pulls; each action's score is the alignment of its
-        learned displacement `move_delta[a]` (P1) with `v̂` (∈[−1,1]) -- straight toward the goal, incl. novel SHORTCUTS.
-        V2 -- REPULSION (the COST FIELD): each action is penalised by `cost_weight · cost(dest)` where `dest = here +
-        move_delta[a]` -- the ONE currency for walls/hazards/slow/risky. `cost >= IMPASSABLE` (a wall) or `a in blocked` ->
-        EXCLUDED (the ∞ limit, recovering binary border cells); a big finite cost (hazard) is avoided unless nothing else
-        makes net progress; a small cost (slow) is crossed only when a detour would be longer. The field thus curves AROUND
-        obstacles while keeping goal-ward progress, graded by how costly they are.
-        Returns the best-scoring action with POSITIVE net progress, or `None` (at the goal, or a local minimum where the
-        vector is fully blocked/repelled -> the caller's V3 detour).
-        L6_NONABELIAN S1e: when the dynamics are HEADING-DEPENDENT (non-abelian) the fixed-displacement assumption fails --
-        no single action moves in an arbitrary direction -- so delegate to the POSE-AWARE achiever (align-then-advance)."""
-        if self.L5.heading_dependent() and self._pose is not None and self.pose_ops:
-            return self._pose_vector_action(goal, actions, cost_weight=cost_weight)
-        vx, vy = goal[0] - here[0], goal[1] - here[1]
-        norm = (vx * vx + vy * vy) ** 0.5 or 1.0             # UNIT goal vector -> attraction commensurate with the cost penalty
-        ux, uy = vx / norm, vy / norm
-        best_a, best_score = None, 1e-9
-        for a in actions:
-            if a in blocked:                                 # V2: a border cell in that direction -> excluded (cost=inf limit)
-                continue
-            dx, dy = self.L5.move(a)                          # L5's learned per-action displacement ((0,0) if unlearned)
-            dest = (here[0] + dx, here[1] + dy)
-            c = self._cost(dest)
-            if c >= IMPASSABLE:                              # a wall cell -> excluded
-                continue
-            score = (dx * ux + dy * uy) - cost_weight * c    # attraction − repulsion (the potential field)
-            if score > best_score:
-                best_score, best_a = score, a
-        return best_a
-
-    def _pose_vector_action(self, goal, actions, lam: float = 1.0, cost_weight: float = 1.0):
-        """L6_NONABELIAN S1e -- POSE-AWARE vector navigation (the NON-ABELIAN achiever). The actions TRANSFORM the pose, so
-        no fixed per-action displacement exists; instead descend a POTENTIAL over the pose after each action's learned
-        body-frame operator (`pose_ops`): `Φ(P) = distance(P.pos, goal) + λ·heading_error(P → goal)`. This yields
-        ALIGN-THEN-ADVANCE emergently -- a TURN cuts the heading-error term, a FORWARD cuts the distance term -- the
-        non-abelian generalisation of `vector_action` (the abelian fixed-displacement case is its degenerate limit).
-        Like abelian `vector_action` it is a FULL vector-nav citizen on the ONE cost currency (V2): a step onto `cost>=IMPASSABLE`
-        (a wall) is EXCLUDED, and a finite `cost(dest)` is ADDED to Φ (repulsion) -- so it curves AROUND learned hazards/walls,
-        no stripped parallel achiever. Returns the action that most reduces Φ+cost, or None (already at the goal / no improving move)."""
-        if self._pose is None:
-            return None
-        gx, gy = float(goal[0]), float(goal[1])
-
-        def potential(P):
-            x, y = P[0, 2], P[1, 2]
-            dist = ((gx - x) ** 2 + (gy - y) ** 2) ** 0.5
-            if dist < 1e-9:
-                return 0.0
-            th = np.arctan2(P[1, 0], P[0, 0])
-            err = abs((np.arctan2(gy - y, gx - x) - th + np.pi) % (2 * np.pi) - np.pi)   # heading error in [0, π]
-            return dist + lam * err
-
-        best_a, best = None, potential(self._pose)
-        for a in actions:
-            G = self.pose_ops.get(a)
-            if G is None:
-                continue
-            P = self._pose @ np.asarray(G.M, dtype=float)                # the pose after applying a's operator (dead-reckon)
-            dest = (int(round(P[0, 2])), int(round(P[1, 2])))
-            c = self._cost(dest)
-            if c >= IMPASSABLE:                                          # V2: a wall cell -> excluded (the cost=∞ limit)
-                continue
-            cand = potential(P) + cost_weight * c                       # V1+heading attraction + V2 cost repulsion (ONE currency)
-            if cand < best - 1e-9:
-                best, best_a = cand, a
-        return best_a
-
-    def achieve(self, state, goal, actions, blocked=(), cost_weight=1.0):
-        """VECTOR_NAV V3 -- the ACHIEVER cascade (navigate `state` -> `goal`): the POTENTIAL FIELD (`vector_action`: V1
-        attraction + V2 cost-field repulsion) by DEFAULT, and when it is STUCK (a local minimum -- fully blocked/repelled
-        toward the goal -> `vector_action` returns None) fall back to the SR-GEODESIC DETOUR (`navigate_to`). The detour is
-        cost-aware GLOBALLY: finite costs are folded into the reward_map (negative) so `V = M·(reward − cost)` routes
-        around costly REGIONS, not just the next cell (walls fall out of the SR structure -- never routed through).
-        `state`/`goal` are positions in the L6 frame (= the graph states). Returns the action, or None if no progress is
-        possible. The GENERAL goal-navigation primitive -- the goal may be a known reward (exploit) OR a GSG hypothesis
-        (goal-directed exploration); see VECTOR_NAV_PLAN + reference_vector_navigation."""
-        a = self.vector_action(state, goal, actions, blocked, cost_weight)   # V1+V2: the potential field toward the goal
-        if a is None:                                           # V3: local minimum / fully blocked -> SR geodesic detour
-            rmap = {goal: 1.0}                                  # fold FINITE costs in as negative reward -> the geodesic warps around costly regions
-            for loc, c in self.cost.items():
-                if c < IMPASSABLE:
-                    rmap[loc] = rmap.get(loc, 0.0) - cost_weight * c
-            a = self.navigate_to(state, rmap, actions, blocked)
-        return a
-
-    def locate(self, state):
-        """C1 (COLUMN_AUDIT) — the column's WHERE: L6 READ as the location substrate. Returns `state`'s L6
-        SR-eigenframe place code (in the d_mem binding space) -- the location L4 binds a feature to (C2) and L5
-        path-integrates (C3). Topology-encoding (nearby-in-graph states get similar locations); `None` for a state the
-        L6 frame has not seen. Closes the doc's 'L6 is updated but not READ' loose thread."""
-        if state not in self.sr.idx:
-            return None
-        return self._place_code(state)
-
-    # ----- routing: the feature-at-location MAP (M5 / L7-A: L4 feature ⊗ L6 location) ----------------
-    def _place_code(self, loc):
-        """The L6 place code for `loc` -- its online SR row, DG-SPARSIFIED (top-k active units) and padded into d_mem
-        (the binding space). The raw SR row at gamma~0.95 is too DIFFUSE for binding (all states ~0.98 similar -> the
-        feature-at-location map degenerates to a global bag); sparse pattern separation makes distant locations
-        near-ORTHOGONAL (their top-k units are disjoint) while nearby ones still OVERLAP (topology kept) -- the
-        dentate-gyrus orthogonalisation (reference_brain_reference_frames_orthogonalization)."""
-        code = torch.as_tensor(self.sr.code(loc), dtype=torch.float32)    # the L6 place code (normalized SR row)
-        n = code.shape[0]
-        k = max(2, n // 4)                                               # DG sparsity: keep the top-k magnitudes
-        if k < n:
-            keep = torch.zeros_like(code)
-            idx = torch.topk(code.abs(), k).indices
-            keep[idx] = code[idx]
-            nrm = float(keep.norm())
-            code = keep / nrm if nrm > 0 else keep
-        p = torch.zeros(self.d_mem)
-        m = min(n, self.d_mem)
-        p[:m] = code[:m]
-        return p
-
-    def bind_at(self, loc, feature_id: int) -> None:
-        """M5/L7-A: bind a SENSED feature at a LOCATION into the online allocentric MAP (L4 feature ⊗ L6 place code),
-        accumulated across the sensorimotor sequence -- 'features at locations' (Monty). The map the agent reads to
-        REMEMBER the layout (an object seen then left is still mapped) -- the substrate the §3 mechanic library needs."""
-        if loc in self.sr.idx:
-            self._map = self._map + self.L4.bind(feature_id, self._place_code(loc))
-
-    def feature_at(self, loc):
-        """Read the MAP: the feature predicted at `loc` (L4 readout over the accumulated map) -- the predict half of
-        predict-then-compare, seated in L4. `None` for a location unknown to the L6 frame OR one where nothing is
-        CONFIDENTLY bound yet (a near-zero readout -> no prediction, so a fresh location is not a false surprise)."""
-        if loc not in self.sr.idx:
-            return None
-        scores = self.L4.readout(self._map, self._place_code(loc))
-        return int(scores.argmax()) if float(scores.max()) > 0.5 else None
-
-    def sense_at(self, location, sensed_feature: int) -> bool:
-        """C2 (COLUMN_AUDIT) -- the TBT cycle step, L4 over L6: PREDICT the feature at the L6 `location` (from the map),
-        COMPARE to the `sensed_feature`, then LEARN by binding the sensed feature there. Returns True if SURPRISED (a
-        confident prediction MISSED) -- the single predict-then-compare learning signal (HTM burst). The object EMERGES
-        as the accumulated feature-at-location map; a persistent mismatch is a boundary (a different object)."""
-        predicted = self.feature_at(location)
-        surprised = predicted is not None and predicted != sensed_feature
-        if surprised:
-            self._changed[location] = sensed_feature                      # C4: a KNOWN feature changed here -> the object's dynamic state
-        self.bind_at(location, sensed_feature)                            # learn: bind the sensed feature at the location
-        return surprised
-
-    def predict_gx(self, g, action, content=None, shape=None):
-        """L6_NONABELIAN Stage 2 step (c) -- the `g × x` FORWARD prediction (the TBT/TEM generative model): predict the next
-        observation given position + action by COMPOSING the two learned operators the fragmented FM kept apart. STRUCTURE:
-        `g'` = `predict(g, action)` (L5's operator / edge = the *where* transition). CONTENT `x'` = the *what*:
-          • an IN-PLACE content transform -- the CONTENT OPERATOR (`L5.recolor` for `(shape, action)`) applied to `content`,
-            when that factor is PREDICTIVELY SUFFICIENT (a learned recolor that GENERALISES to `content` values / positions
-            never seen with it -- the TEM win) -- returned as `(g', x')` with the transformed content;
-          • else the content BOUND at `g'` (`feature_at`, the L4-over-L6 map = 'what's there when I move').
-        Composing structure × content generalises to (g, content) combinations never seen together -- which the conjunctive
-        graph and the LOCAL-CONTEXT `field_rule` CA (kept as the complement for context-dependent propagation) cannot.
-        `content`/`shape` optional (a pure-movement prediction omits them). Returns `(g', x')`."""
-        g2 = self.predict(g, action)
-        if content is not None and shape is not None:
-            nxt = self.L5.recolor.get((shape, action), {}).get(content)
-            if nxt is not None:
-                return g2, nxt                                             # content OPERATOR (predictively sufficient -> generalises over g)
-        x2 = self.feature_at(g2)
-        return g2, (x2 if x2 is not None else content)                     # else the content bound at g' (or unchanged)
-
-    def sense_object(self, cloud, location):
-        """C4 (COLUMN_AUDIT): L2/3 RECOGNITION wired into the feature-at-location cycle. RECOGNISE the sensed object
-        (pose-INVARIANT identity via L2/3's evidence loop, learned online) and bind THAT identity at the L6 `location`
-        (`sense_at`), so the map is over RECOGNISED objects -- permanent across rotation/translation -- not raw patches.
-        This is 'the object SETTLED by recognition' + 'L2/3 over L4⊗L6'. Returns `(identity, surprised)`."""
-        name, _theta, _t, _ev = self.recognize_object(cloud)             # L2/3: pose-invariant identity (learn if novel)
-        fid = self.L4.encode(("obj", name))                             # the recognised identity -> an L4 feature id
-        return name, self.sense_at(location, fid)
-
-    def object_state(self):
-        """C4 (COLUMN_AUDIT): L2/3's OBJECT STATE -- the compact summary of the DYNAMIC scene: the frozenset of
-        (location, feature) where a known feature has CHANGED (emergent from sense_at's predict-then-compare surprise --
-        a key collected, a block moved). This is Monty's object 'state' (open/closed). NOT config_state: layer-derived,
-        metric-anchored, and only the DYNAMIC part (the static scene is not in it). The planner reads (position,
-        object_state) so it distinguishes board-states (which keys are collected) -- the C2<->C4 coupling."""
-        return frozenset(self._changed.items())
-
-    def reset_object_state(self):
-        """Clear the dynamic object state (a level boundary: the board resets)."""
-        self._changed = {}
-
-    # ----- routing: the L5 operator (predict / motor / driver) --------------------------------------
-    def predict(self, symbol, action):
-        """Where `action` leads from `symbol` -- the L5 operator (the efference copy). L5 owns the per-action operator:
-        the observed EDGES are the state-dependent exceptions (each (s,a) its own next state; a wall/door is a blocked
-        self-edge), and the position-invariant DISPLACEMENT GENERALIZES the operator to UNVISITED (s,a). The online SR
-        (L6) carries value/topology; recognition carries continuous pose. Edge first, else displacement, else stay."""
-        return self.L5.predict(symbol, action)
-
-    def motor(self, action):
-        """The MOTOR output -- the enacted action (L5 is the cortex's output layer; the name->GameAction mapping is the
-        motor organ in arc_sdk). The chosen displacement IS the motor command, the efference copy, and the driver."""
-        return self.L5.motor(action)
-
-    def driver(self, symbol, action):
-        """The feed-forward DRIVER message to other columns (via the higher-order thalamus): the displacements `action`
-        causes among the features in `symbol` -- L5's trans-thalamic output (Sherman & Guillery)."""
-        return self.L5.driver(symbol, action)
-
-    # ----- the generative forward model (FM1): L5's operator at LOCATION grain over L4's field ----------
-    # The column reads L4 (feature-at-location) and indexes by L6 (the frame); L5 owns the per-location operator.
-    # This is the TEM objective -- predict the next sensory observation (L4 content) at each position (L6) given the
-    # action -- seated as a COLUMN capability, never a raw-pixel buffer (reference_brain_generative_model). The
-    # whole-object disp/recolor stay the coarser form of the SAME operator.
-    def feature_field(self, frame):
-        """L4's feature-at-location field for a frame: each location's L4 feature id (cell grain: the colour is the
-        descriptor `(v,)` -> `L4.encode`, growing the content vocabulary online). The field the forward model predicts
-        IN -- content x bound to location g, the TEM canvas at cell grain."""
-        return [[self.L4.encode((v,)) for v in row] for row in frame]
-
-    def observe_field(self, field, action, next_field):
-        """Learn one feature-field transition (route to L5's per-location operator)."""
-        self.L5.observe_field(field, action, next_field)
-
-    def predict_field(self, field, action):
-        """Predict the next feature-field via L5's per-location operator -- the field-grain efference copy."""
-        return self.L5.predict_field(field, action)
-
-    def act(self, state, actions, value, explore, tried, rng, bonus=None):
-        """The MOTOR as an INVERSE MODEL (the action-selection seat -- in the COLUMN, not the agent script). Choose the
-        action whose predicted effect (L5's forward operator, via the learned graph) is most VALUABLE -- i.e. INVERT
-        the operator against `value` to find the action that best achieves the highest-value next-state (the implicit
-        goal-state of active inference: act to bring about the preferred prediction). An UNTRIED (state, a) takes the
-        frontier `explore` optimism (its outcome is uncertain -> resolving T(s,a) is epistemically valued). This
-        GENERALISES: a continuous effector inverts the SAME operator against the SAME value -- only the organ (discrete
-        action here) differs. `value(s)` is the planned EFE value of state `s` (supplied by the agent's reward model).
-        `bonus` is the forward model's per-action value (pragmatic + epistemic). The ONE-MODEL arbitration is the
-        CALLER's: it supplies `bonus` ONLY when the tabular value is INDIFFERENT (no spread across actions) -- so a
-        converged tabular decision is never disturbed, and on a dynamics game (flat tabular value) the forward model
-        fills the vacuum and decides. Here `bonus` is simply added (it is None / absent when the tabular value leads)."""
-        vals = []
-        for a in actions:
-            nxt = self.graph.get(state, {}).get(a, state)
-            if (state, a) not in tried:
-                v = explore                                     # untried -> bounded, decaying frontier optimism
-            else:
-                v = value(nxt)                                  # tried -> the value of its outcome
-            vals.append(v + (bonus.get(a, 0.0) if bonus is not None else 0.0))   # + the forward-model value (when tabular is indifferent)
-        best = max(vals)
-        return rng.choice([a for a in actions if vals[a] == best])
-
-    # ----- routing: the "what + pose" recognition faculty -> L2/3 (the object/identity layer) --------
-    # Complementary to L6 (the "where"): L6 recognises navigable locations in a fixed frame; L2/3 SOLVES an object's
-    # pose (via L5's pose operators) so a known object is recognised at an orientation never seen. The column merely
-    # routes the call to the layer that owns the graph-memory -- the object library is NOT a column faculty.
-    def learn_object(self, cloud, name=None):
-        """Add an object to L2/3's graph-memory. `name` given → store under it; else learn ONLINE + label-free
-        (recognise-or-add). Returns the ObjectGraph (named) or (name, is_new) (online)."""
-        return self.L23.learn(cloud, name=name)
-
-    def recognize_object(self, cloud):
-        """Identify a sensed point cloud's (name, theta, t, evidence) at a pose never seen, learning it online if
-        novel — pose-invariant recognition (object permanence under rotation)."""
-        return self.L23.recognize(cloud)
-
-    def identify_object(self, cloud):
-        """Recognise a sensed shape against L2/3's library WITHOUT adding a new one — the name, or None."""
-        return self.L23.identify(cloud)
-
-    # ----- the GOAL STATE GENERATOR (per-column GSG; the column proposes, L5 emits) -------------------
-    def propose_goal(self):
-        """The column's Goal State Generator. TBT-faithful: its CORE is UNCERTAINTY-RESOLUTION -- when L2/3's top
-        (object, pose) hypotheses still compete, propose a hypothesis-TEST goal (the graph-mismatch sample point
-        that most discriminates them) as a message-shaped `GoalState`; None when there is nothing to resolve. The
-        value / transition-`lp` goal candidates + the basal-ganglia arbitration among them are the next build
-        steps; the heterarchy adds RECEIVED goal-messages to the same competition (reference_gsg_goal_generation)."""
-        target = self.L23.disambiguation_goal()
-        return GoalState(target=target, kind="disambiguate") if target is not None else None
-
-    def examine(self, sense_at, first, max_samples: int = 12, confident: float = 2.0):
-        """ACTIVE recognition -- the GSG DIRECTING the motor, in Monty's order: PASSIVE-narrow then hypothesis-TEST.
-        Begin a session with `first` (loc, disps). Each step: if the GSG fires (the field has NARROWED -- the
-        graph-mismatch on the top-2 is now worthwhile), COVERTLY pick the disambiguating point and OVERTLY sample it;
-        ELSE (not yet narrowed) PASSIVELY sample the leading hypothesis's nearest UNSENSED predicted cell to gather
-        evidence. The motor sample is `sense_at(target) -> (loc, disps)` for a cell there, or `None` for empty
-        (present -> `sense` confirms a predictor; absent -> `sense_absent` falsifies them). Stop when one hypothesis
-        leads by `confident` (or budget). Returns `(best, n_overt_samples)`. The GSG spends each ACTIVE sample where
-        it resolves the most uncertainty (think, then act); the live loop arbitrates this against value/explore goals
-        via the basal ganglia."""
-        import numpy as np
-
-        def _key(p):
-            return (round(float(p[0]), 1), round(float(p[1]), 1))
-
-        self.L23.start()
-        self.L23.sense(*first)
-        sensed = {_key(first[0])}
-        n = 1
-        while n < max_samples:
-            hyps = self.L23.hyps
-            if len(hyps) < 2:
-                break
-            ev = sorted((h.ev for h in hyps), reverse=True)
-            if ev[0] - ev[1] >= confident:                  # a hypothesis leads clearly -> resolved
-                break
-            goal = self.propose_goal()                      # the GSG fires only once narrowed
-            if goal is not None:
-                target = goal.target                        # ACTIVE: the graph-mismatch discriminating point
-            else:                                           # PASSIVE: narrow via the leading hypothesis's next cell
-                top = max(hyps, key=lambda h: h.ev)
-                cands = [p for p in top.obj.cells_at(top.theta, top.t) if _key(p) not in sensed]
-                if not cands:
-                    break
-                ref = self.L23.prev if self.L23.prev is not None else np.zeros(2)
-                target = tuple(round(float(x), 3) for x in min(cands, key=lambda p: np.linalg.norm(np.asarray(p, float) - ref)))
-            obs = sense_at(target)                          # OVERT: the motor samples at the target
-            n += 1
-            if obs is None:
-                self.L23.sense_absent(target)               # empty -> falsify the predictors
-            else:
-                self.L23.sense(*obs)                        # a cell there -> confirm
-                sensed.add(_key(obs[0]))
-        return self.L23.best(), n
-
-    def propose_goals(self, act_value, g_value=0.0, effort=0.0):
-        """The candidate goals the BASAL GANGLIA arbitrates (Cisek's affordance competition): ALWAYS the ACT goal
-        (pursue the value/explore policy via the inverse-model motor; value = `act_value` = the best action's EFE
-        value), PLUS the DISAMBIGUATION goal when L2/3's hypotheses still compete (value = `g_value` = the epistemic
-        value of resolving the identity, supplied on the same EFE scale by the caller). `effort` is the per-distance
-        cost the EFFICIENCY tie-breaker charges the disambiguation goal for the trip to its target (from the current
-        sensor locus) -- so a FAR test is less attractive than acting, but a uniquely-worth-it test still wins
-        (g_value >> effort*dist). Returns [(GoalState, value), ...]; the BG selects one. The heterarchy adds
-        RECEIVED goal-messages to this same list -- the competition is the only mechanism, wherever a candidate came from."""
-        goals = [(GoalState(target=None, kind="act"), float(act_value))]
-        dg = self.propose_goal()
-        if dg is not None:
-            v = float(g_value)
-            if effort > 0.0 and self.L23.prev is not None:          # the goal-distance tie-breaker (efficiency)
-                dx, dy = dg.target[0] - float(self.L23.prev[0]), dg.target[1] - float(self.L23.prev[1])
-                v -= effort * (dx * dx + dy * dy) ** 0.5
-            goals.append((dg, v))
-        return goals
-
-    # ----- the inter-column interface (the thalamus binds content ⊗ location) -----------------------
-    def content_code(self, label):
-        """This column's content (What / L4) code for an entity label."""
-        return self.L4.E[label]
-
-    def place_code(self, node):
-        """This column's location (Where / SR-frame) place code for a node — built by `refresh` from the online SR."""
-        return self.place[self.loc[node]]
-
-    # ----- routing: path integration as DISCRETE graph tracking (L6 belief ⊕ L5 operator) ----------
-    # NOT a matrix operator over codes: the brain path-integrates by a continuous-attractor bump shifted by velocity,
-    # with discrete-attractor SNAPPING on a clear sighting (reference_brain_reference_frames_orthogonalization). Here
-    # that is exact + online -- PREDICT the next node by the learned edge (L5; the efference copy, so it survives
-    # PARTIAL observability), CORRECT by snapping to a sensed node. The column coordinates L6's location belief with
-    # L5's operator; the online SR carries value/topology, recognition carries continuous pose.
-    def loc_reset(self, node):
-        """Begin dead reckoning at a known node."""
-        self._cur = node
-        return node
-
-    def loc_move(self, action):
-        """PREDICT: path-integrate by the L5 operator (the efference copy) -- no observation needed. An unobserved or
-        blocked move stays put."""
-        self._cur = self.L5.predict(self._cur, action)
-        return self._cur
-
-    def loc_sense(self, node):
-        """CORRECT: snap the belief to an observed node (the discrete-attractor sighting). Call only when a node is
-        actually sensed; otherwise keep dead-reckoning via loc_move."""
-        self._cur = node
-        return self._cur
-
-    def loc_where(self):
-        """The current node."""
-        return self._cur
-
-    # ----- CONTINUOUS-metric path integration: the SPATIAL location belief (L6 ⊕ L5 translation) -----------
-    # P1 (GROUNDING_PLAN): the column OWNS the allocentric position (was the sensor's `_coarse_pos`). Given the
-    # residual CANDIDATES the sensor detects, the column DISAMBIGUATES the controllable one (nearest the efference
-    # prediction fovea+L5.move -- animation rejection), path-integrates the belief, LEARNS the per-action translation
-    # (L5.observe_move), and coarsens to a recurring state node -- gated by L5.controllable so a state-change scene
-    # keeps a constant position. The continuous sibling of the discrete `loc_*` (P1c reconciles them). The column
-    # imports no perception: the sensor passes pre-extracted centroids and reads back the chosen sighting.
-    def track_reset(self):
-        """A level boundary: drop the location belief -- BOTH the fovea (position) and the POSE belief (they are the ONE
-        belief; `state_node` reads the pose, so a stale pose across a reset would corrupt every transfer level). The board
-        resets; do not path-integrate across it."""
-        self._fovea = None
-        self._pose = None
-
-    def track(self, action, appeared, dominant, cold=None, shape=None):
-        """Path-integrate one step. `appeared` = candidate centroids (arrived controllable cells), `dominant` = the
-        fallback dominant-residual centroid (or None), `cold` = the cold-start centroid (largest object / frame centre).
-        DISAMBIGUATE via the efference (L5.move) when the action's translation is known, else take the dominant; on a
-        real sighting LEARN the translation (L5.observe_move) and snap. Returns the chosen sighting (pixel) so the
-        sensor extracts the feature there; keeps the belief put when nothing was sensed.
-
-        L6_NONABELIAN S1e ROUTE-1 (`shape` given -> the mover's FULL cloud, only once the non-abelian gate has tripped):
-        pose tracking from the SHAPE -- see `_track_pose`. `shape=None` (all abelian games) is byte-identical to before."""
-        if shape:
-            return self._track_pose(action, shape, cold)
-        chosen = self._locate_candidate(action, appeared, dominant)
-        if chosen is not None:
-            if action is not None and self._fovea is not None:            # learn the per-action translation (the efference)
-                delta = (chosen[0] - self._fovea[0], chosen[1] - self._fovea[1])
-                self.L5.observe_move(action, delta)
-                self.track_heading(delta)                                 # ROUTE-2: perceive heading from the movement direction
-            self._fovea = chosen                                          # correct: snap to the sighting
-            self.sense_pose(chosen[0], chosen[1], getattr(self, "_heading", 0.0))   # S1e: maintain the pose belief (position + perceived heading)
-        if self._fovea is None:
-            self._fovea = cold
-        return self._fovea
-
-    def _track_pose(self, action, shape, cold):
-        """L6_NONABELIAN S1e ROUTE-1: track the POSE from the mover's SHAPE. Update the belief + LEARN the body-frame SE(2)
-        operator ONLY from a FULL, reliably-recognised view (`sense_heading` sets `_heading_reliable` -- a PARTIAL/clipped
-        view at a border teaches a wrong pose, so it must not poison the operator). On a full view: perceive heading, snap
-        position to the shape centroid, learn `pose_ops`. On a partial view: DEAD-RECKON with the learned operator (or hold
-        if none yet). Position + `pose_ops` feed the pose-aware achiever (`_pose_vector_action`)."""
-        self.sense_heading(shape)                                          # sets self._heading + self._sensed_pos + self._heading_reliable
-        moved = action is not None and self._fovea is not None
-        if self._heading_reliable:
-            chosen = self._sensed_pos                                      # the orientation-invariant anchor (no turn jitter)
-            pose_before = self._pose.copy() if self._pose is not None else None
-            self._fovea = chosen
-            self.sense_pose(chosen[0], chosen[1], self._heading)
-            if pose_before is not None and moved:
-                self.learn_pose_op(action, pose_before, self._pose)       # LEARN the body-frame operator (clean view only)
-        elif moved and self._pose is not None and action in self.pose_ops:  # partial view -> dead-reckon with the learned op
-            self._pose = self._pose @ np.asarray(self.pose_ops[action].M, dtype=float)
-            self._fovea = (float(self._pose[0, 2]), float(self._pose[1, 2]))
-        if self._fovea is None:
-            self._fovea = cold
-        return self._fovea
-
-    @staticmethod
-    def _shape_centroid(shape):
-        return (sum(p[0] for p in shape) / len(shape), sum(p[1] for p in shape) / len(shape))
-
-    def operator(self, action) -> Operator:
-        """The ONE per-action OPERATOR (L6_NONABELIAN — axis 2 unified). The SE(2) POSE operator (`pose_ops`) when the
-        dynamics are heading-dependent (non-abelian), else the abelian TRANSLATION (`L5.operator` = `move_delta` as a
-        homogeneous matrix) — the commuting SPECIAL CASE, same 3×3 interface. No separate grid-code learner: the abelian
-        grid's role was only to give operator learning a code space, and that is now the pose/position the operator already
-        acts on. Identity if the (heading-dependent) action has no learned pose op yet."""
-        if self.pose_ops and self.L5.heading_dependent():
-            return self.pose_ops.get(action, Operator.identity(3))
-        return self.L5.operator(action)
-
-    def _operator_gens(self):
-        """The learned per-action operators as a generator list (for `discover_relations` / `factor_dynamics`): the SE(2)
-        pose ops when heading-dependent, else the abelian translations. ONE source (`self.operator`)."""
-        keys = sorted(self.pose_ops) if (self.pose_ops and self.L5.heading_dependent()) else sorted(self.L5.move_delta)
-        return [self.operator(a) for a in keys]
-
-    def _locate_candidate(self, action, appeared, dominant):
-        """Which residual is the controllable object. Once the action's translation is known, the arrived candidate
-        nearest the EFFERENCE prediction (fovea + L5.move) -- clean tracking that ignores autonomous animation; until
-        then (cold start / unlearned action), the dominant residual."""
-        d = self.L5.move(action)
-        if self._fovea is not None and (d[0] * d[0] + d[1] * d[1]) > 0.25 and appeared:
-            pred = (self._fovea[0] + d[0], self._fovea[1] + d[1])
-            return min(appeared, key=lambda c: (c[0] - pred[0]) ** 2 + (c[1] - pred[1]) ** 2)
-        return dominant
-
-    def track_pos(self):
-        """The continuous location belief (pixel) -- where the sensor foveates to extract the feature."""
-        return self._fovea
-
-    def here_position(self):
-        """The RAW metric position of the current belief -- the POSE position when the dynamics are heading-dependent
-        (non-abelian), else the tracked fovea. The ACHIEVER's coordinate frame (raw pixels), distinct from the binned
-        tabular state node -- so pose-aware `distance`-to-goal is measured in the same units as the goal."""
-        if self._pose is not None and self.L5.heading_dependent():
-            return (float(self._pose[0, 2]), float(self._pose[1, 2]))
-        return self._fovea
-
-    def state_node(self, pos_bin: int = 4):
-        """The ONE coarse allocentric STATE node for the SR/graph (L6_NONABELIAN — axis 2 unified; replaces the
-        track_state/pose_state sensor gate). The belief binned so aliased views separate and positions RECUR, GATED by
-        controllability (a non-controllable state-change scene keeps the constant (0,0), preserving its recurring local
-        view). The node is the full POSE `(x, y, heading)` when the dynamics are heading-dependent (non-abelian), else
-        position-only `(x, y)` — the abelian SPECIAL CASE (no heading factor). Position/heading come from the ONE pose
-        belief (`pose_state`), so there is no parallel abelian tracker."""
-        # controllable = the object responds to actions: abelian via a non-zero `move_delta`, OR non-abelian via
-        # `heading_dependent` (a heading-dependent mover whose per-action `move_delta` averages to ~0 is STILL controllable).
-        if self._pose is None or not (self.L5.controllable() or self.L5.heading_dependent()):
-            return (0, 0)
-        node = self.pose_state(pos_bin)
-        return node if self.L5.heading_dependent() else node[:2]
-
-    # ----- L6_NONABELIAN S1e: path-integrate a POSE by COMPOSING operators (the non-abelian generalisation of track) ----
-    def track_pose_reset(self):
-        """Reset the POSE belief (an SE(2) matrix) to the identity (origin, heading 0)."""
-        self._pose = np.eye(3)
-
-    def track_pose(self, op: Operator):
-        """Path-integrate the POSE by RIGHT-composing the body-frame action operator: `P ← P·G` (L6_NONABELIAN S1e).
-        Because composition is NON-COMMUTATIVE, the pose distinguishes HEADINGS -- so a non-abelian env's dynamics (e.g.
-        FORWARD, whose effect depends on heading) become DETERMINISTIC over the pose, which the additive `_fovea` position
-        CANNOT. `op` = the per-action operator (an `Operator`, the learned body-frame increment). Returns (x, y, theta).
-        NB the abelian case (a pure translation op) reproduces `_fovea`; this is `track` generalised from position to pose.
-        Live-wiring into the agent's state awaits HEADING PERCEPTION (the agent perceives position, not orientation)."""
-        if self._pose is None:
-            self._pose = np.eye(3)
-        self._pose = self._pose @ np.asarray(op.M, dtype=float)
-        return (float(self._pose[0, 2]), float(self._pose[1, 2]),
-                float(np.arctan2(self._pose[1, 0], self._pose[0, 0]) % (2 * np.pi)))
-
-    def learn_pose_op(self, action, pose_before, pose_after, rate: float = 0.4):
-        """L6_NONABELIAN S1e -- LEARN the per-action body-frame SE(2) operator ONLINE (feeds the pose-aware achiever's
-        `pose_ops`). The body-frame increment `G = pose_before⁻¹·pose_after` is CONSTANT per action, so EWMA it and
-        RE-PROJECT to SE(2) (orthogonalise the 2x2 rotation block; keep the translation) so it stays a proper operator."""
-        before = np.asarray(pose_before, dtype=float)
-        after = np.asarray(pose_after, dtype=float)
-        g = np.linalg.inv(before) @ after
-        cur = self.pose_ops.get(action)
-        m = g if cur is None else (1.0 - rate) * cur.M + rate * g
-        u, _, vt = np.linalg.svd(m[:2, :2])                  # re-project the rotation block to O(2) (Procrustes)
-        m = m.copy()
-        m[:2, :2] = u @ vt
-        m[2] = [0.0, 0.0, 1.0]
-        self.pose_ops[action] = Operator(m)
-        return self.pose_ops[action]
-
-    def discover_relations(self, tol: float = 1e-6, max_elements: int = 64):
-        """L6_NONABELIAN Stage 2 -- DISCOVER the RELATIONS among this column's LEARNED per-action operators (the QUOTIENT of
-        the free monoid on them) by loop closure under predictive sufficiency (`operator.discover_group`). Uses the SE(2)
-        POSE operators when the dynamics are heading-dependent (non-abelian), else the grid-code action operators. Turns the
-        free tree of action-words into the finite Cayley graph a geodesic planner (S3) searches. Returns (elements, relations)."""
-        from .operator import discover_group
-        gens = self._operator_gens()
-        if not gens:
-            return [], []
-        return discover_group(gens, tol=tol, max_elements=max_elements)
-
-    def factor_dynamics(self, tol: float = 1e-6, max_elements: int = 256):
-        """L6_NONABELIAN Stage 2 (wired into the COLUMN) -- factor the column's LEARNED dynamics into a DIRECT PRODUCT of
-        cyclic factors (`operator.factor_group` over the learned operators: pose_ops when heading-dependent, else the grid-code
-        action_ops). The product-of-cycles map of the agent's OWN experience -- counters/toggles/patrols as cycles rather than
-        an ever-growing tree. Returns the [(generator_index, period)] factors, or None if the dynamics are not a finite direct
-        product (e.g. SE(2), whose FORWARD is an unbounded translation -- honestly not a product of cycles)."""
-        from .operator import factor_group
-        gens = self._operator_gens()
-        return factor_group(gens, tol=tol, max_elements=max_elements) if gens else None
-
-    def content_operator(self, shape, action):
-        """L6_NONABELIAN Stage 2 step (c) -- the CONTENT operator for `(shape, action)`: L5's `recolor` transition map
-        `{old -> new}` (the *what changed* half) as a permutation `Operator` (`operator.permutation_operator`), so content
-        dynamics are a first-class, FACTORABLE part of the `g × x` model -- a TOGGLE is a 2-cycle, a counter a longer cycle,
-        readable by `discover_periods`. This is the `x` half's operator, learned the SAME way as `g`. Returns `(Operator,
-        alphabet)`, or None if no content transition is learned for `(shape, action)`."""
-        from .operator import permutation_operator
-        mapping = self.L5.recolor.get((shape, action))
-        return permutation_operator(mapping) if mapping else None
-
-    def pose_state(self, pos_bin: int = 1, ang_bins: int = 4):
-        """The POSE belief binned -> the discrete state key `(x, y, heading-bucket)`. Includes HEADING, so a non-abelian
-        env's dynamics are DETERMINISTIC over it (unlike position-only `track_state`). `ang_bins` buckets over [0, 2pi)."""
-        if self._pose is None:
-            return (0, 0, 0)
-        th = float(np.arctan2(self._pose[1, 0], self._pose[0, 0]) % (2 * np.pi))
-        return (int(round(self._pose[0, 2])) // pos_bin, int(round(self._pose[1, 2])) // pos_bin,
-                int(round(th / (2 * np.pi) * ang_bins)) % ang_bins)
-
-    def track_heading(self, pos_delta, thresh: float = 0.25):
-        """PERCEIVE the heading from the MOVEMENT DIRECTION (L6_NONABELIAN S1e heading perception): a move that changes
-        position (a forward) reveals `heading = atan2(delta)` -- the agent perceives its orientation by HOW IT MOVES, no
-        shape-orientation machinery needed, reusing the position observation it already has. A ~zero delta (a turn) leaves
-        the heading STALE (to be re-perceived on the next forward -- the honest limitation; robust heading via shape
-        recognition or turn dead-reckoning is a follow-up). Returns the current heading belief."""
-        dx, dy = float(pos_delta[0]), float(pos_delta[1])
-        if dx * dx + dy * dy > thresh:                       # a real move -> its direction IS the heading
-            self._heading = float(np.arctan2(dy, dx))
-        return getattr(self, "_heading", 0.0)
-
-    def sense_heading(self, cloud):
-        """PERCEIVE heading from the mover's SHAPE (L6_NONABELIAN S1e ROUTE-1 -- the UNIFIED recognition path): L2/3
-        recognises the object and SOLVES its pose theta -- the orientation IS the heading, clean EVERY frame incl. after a
-        turn (no route-2 staleness), dissolving the movement-direction heading into the object-recognition machinery.
-        Learns the shape online on first sight. A PARTIAL view (fewer cells than the full shape ever seen -- clipped at a
-        border) is UNRELIABLE: hold the heading and flag it (`_heading_reliable=False`) so the caller does not learn from it.
-        Returns the heading belief (unchanged if the cloud is empty/partial/unrecognised)."""
-        if not cloud:
-            self._heading_reliable = False
-            return getattr(self, "_heading", 0.0)
-        self._obj_size = max(getattr(self, "_obj_size", 0), len(cloud))    # the full shape = the most cells ever seen
-        res = self.recognize_object(list(cloud)) if len(cloud) >= self._obj_size else None
-        if res is None:                                                    # a partial / degenerate cloud -> orientation not reliably perceivable; hold
-            self._heading_reliable = False
-            return getattr(self, "_heading", 0.0)
-        _name, theta, t, _ev = res
-        self._heading = float(theta)
-        self._sensed_pos = (float(t[0]), float(t[1]))                      # the recognizer's ANCHOR -- orientation-invariant (no centroid jitter on a turn)
-        self._heading_reliable = True
-        return self._heading
-
-    def sense_pose(self, x, y, theta):
-        """CORRECT the pose belief to an OBSERVED pose (L6_NONABELIAN S1e): snap `_pose` to the perceived (x, y, heading)
-        -- the pose analogue of `track`'s snap-to-sighting (position from the tracked centroid, heading from
-        `track_heading`). Complements `track_pose` (dead-reckon from efference) as predict+correct. Returns `pose_state`."""
-        c, s = np.cos(theta), np.sin(theta)
-        self._pose = np.array([[c, -s, float(x)], [s, c, float(y)], [0.0, 0.0, 1.0]])
-        return self.pose_state()
+from dataclasses import dataclass, field
+from typing import Optional
+
+from tbt.encoders import SDR, SpatialPooler
+from tbt.htm import HTMLayer
+
+# ── projection classes (the target-out half of a layer's wiring; §10 P1) ───────────────────────────────────────────
+IT = "IT"            # intratelencephalic  — cortico-cortical + striatum (L2/3, L5a)
+PT = "PT"            # pyramidal-tract     — subcortical MOTOR + higher-order thalamus DRIVER (L5b) = efference copy
+CT = "CT"            # corticothalamic     — thalamus MODULATOR + nRT (L6)
+LOCAL = "local"      # non-projecting local amplifier (L4)
+FF_EXPORT = "ff"     # feedforward corticocortical → higher region's L4 (deep L3) — carries prediction ERROR (§10 P2)
+FB = "fb"            # feedback corticocortical → lower region's L1 (L2/upper-L3, L5/L6) — carries PREDICTION
+
+
+@dataclass
+class Layer:
+    """ONE cortical layer = one HTMLayer + its declared wiring (§10 P1, htm.py docstring). A layer is NOT a subclass; the
+    mechanism is uniform and the differentiation is entirely in these fields. `sp` is present ONLY at a raw front-end
+    (proximal = column-level SpatialPooler); elsewhere proximal-in is another layer's output SDR taken directly (§10 P4)."""
+    name: str
+    htm: HTMLayer
+    target_out: tuple                       # projection class(es): which of IT/PT/CT/LOCAL/FF_EXPORT/FB this layer drives
+    sp: Optional[SpatialPooler] = None      # proximal front-end (raw input → columns); None = takes an SDR directly
+    proximal_from: Optional[str] = None     # source of the feedforward drive (a layer name, "sensory", or "efference")
+    context_from: Optional[str] = None      # basal context source ("recurrence" | "location" | "goal" | a layer name)
+    apical_from: Optional[str] = None       # apical feedback source ("L1" | a higher-region signal)
+
+
+class Column:
+    """A cortical column: L4, L2/3, L5(IT,PT), L6a as ONE HTMLayer each, wired per the §12 table. Composition + wiring are
+    real here; the per-timestep counterstream dynamics (§13) are the next step, gated on the §15 decisions.
+
+    ALWAYS-multi-column note (ARCHITECTURE §5.1): a Column is instantiated at least twice (a SENSORY column on physical
+    space and a PFC/TASK column on an abstract space) — same class, different reference frame. The task column's output is
+    wired into the sensory column's basal `context` (the factored-state mechanism from
+    project_place_invariance_needs_factored_state)."""
+
+    def __init__(self, sensory_n: int, n_cols: int = 1024, seed: int = 0) -> None:
+        # Proximal front-end: only L4 turns a RAW input space into columns (§10 P4, §12). All other layers take SDRs.
+        l4_sp = SpatialPooler(n_inputs=sensory_n, n_cols=n_cols, seed=seed)
+        self.layers: dict[str, Layer] = {
+            # feature-at-location: proximal sensory (via SP), basal context = L6a location, apical = L2/3 object feedback.
+            "L4":   Layer("L4", HTMLayer(order=2), target_out=(LOCAL,), sp=l4_sp,
+                          proximal_from="sensory", context_from="location", apical_from="L23"),
+            # object / output + voting: proximal L4, basal = own recurrence + peer-column votes, apical = L1 top-down.
+            "L23":  Layer("L23", HTMLayer(order=2), target_out=(FF_EXPORT, FB, IT),
+                          proximal_from="L4", context_from="recurrence", apical_from="L1"),
+            # associative integrator: proximal L2/3, → cortico-cortical + striatum(→BG).  (D1: split kept.)
+            "L5IT": Layer("L5IT", HTMLayer(order=2), target_out=(IT,),
+                          proximal_from="L23", context_from="recurrence", apical_from="L1"),
+            # driver/effector = displacement cells: proximal L5IT (IT→PT), basal = state+goal, apical = Larkum gate;
+            # → subcortical MOTOR + HO-thalamus efference copy.
+            "L5PT": Layer("L5PT", HTMLayer(order=2), target_out=(PT,),
+                          proximal_from="L5IT", context_from="goal", apical_from="L1"),
+            # location / grid: proximal = L5 efference (path integration) + thalamus, basal = grid recurrence,
+            # → L4 (location, modulatory) + thalamus (CT gain).
+            "L6a":  Layer("L6a", HTMLayer(order=2), target_out=(CT, LOCAL),
+                          proximal_from="efference", context_from="recurrence", apical_from=None),
+        }
+
+    def step(self, sensory: SDR, efference: Optional[SDR] = None, feedback: Optional[SDR] = None):
+        """One movement/timestep, running the two-counterstream dataflow of §13.
+
+        NOT IMPLEMENTED YET — the wiring (structure) above is real, but the dynamics are gated on the §15 decisions
+        (D1–D4) and must be built against a runnable task with an end-to-end test (RULES.md #3/#4). Implementing this is
+        the next step after the plan is signed off."""
+        raise NotImplementedError(
+            "column.step: scaffold only — see PART B §13 (dataflow) and §15 (open decisions D1–D4) in this module's "
+            "docstring; to be implemented against a runnable task, wired from agent.py, with an end-to-end test.")
