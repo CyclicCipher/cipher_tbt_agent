@@ -1,5 +1,4 @@
-"""SDR encoders/decoders — the PERIPHERAL's transduction library. Salvaged 2026-07-09, unchanged; see `ARCHITECTURE.md`
-(the boundary where data becomes SDRs) / `STATUS.md`. (Docstrings below reference the legacy plan doc-sections — historical.)
+"""SDR encoders/decoders — the PERIPHERAL's transduction library (ARCHITECTURE.md §4 peripherals, §P5).
 
 The ONE place a raw value becomes the model's currency, the **SDR**, and the ONE place a motor "thought" (an SDR
 emitted by L5) becomes an effector command. Everything in the cortex is an SDR (HTM); the boundary to the world is

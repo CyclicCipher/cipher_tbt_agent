@@ -1,30 +1,6 @@
-"""TBT — the thalamo-cortical architecture package (see THALAMO_CORTICAL_ARCHITECTURE.md).
+"""TBT — the Thousand-Brains agent package. STARTING OVER (2026-07-09); see STATUS.md + RULES.md.
 
-The reusable machinery: the Column (a TEM module — L6 grid, L5 displacement, L4 content, L23 object),
-the RewardModel (domain-agnostic critic/planner), and — as they are built — the thalamus, basal ganglia,
-eigenoptions, and the agentic wrapper.
-
-Exports are LAZY (PEP 562): importing a pure-stdlib component (RewardModel) does not pull in torch; the
-torch-backed components load only when first referenced.
+Deliberately empty: no lazy exports of the old modules (they are archived under `Legacy - DO NOT USE OR IMPORT!/`,
+reference only). Import concrete modules directly (e.g. `from tbt.agent import Agent`) as the new system is built up
+vertical-slice-first — and every module must be reachable from `agent.py`, or the reachability test goes red (RULES.md #2).
 """
-
-import importlib
-
-# public name -> submodule that defines it
-_EXPORTS = {
-    "CorticalColumn": ".column",
-    "SuccessorFeatures": ".l6_sr",                # L6 — successor features over the SDR location code (the ONE value/predictive map)
-    "L5_Displacement": ".l5_displacement",
-    "L4_FeatureLocation": ".l4_feature_location",
-    "L23_Object": ".l23_object",
-    "Thalamus": ".thalamus",                      # inter-column routing / conjunction (torch)
-    "BasalGanglia": ".basal_ganglia",             # the gate selector / emergent allocator (pure stdlib)
-}
-
-__all__ = list(_EXPORTS)
-
-
-def __getattr__(name):
-    if name in _EXPORTS:
-        return getattr(importlib.import_module(_EXPORTS[name], __name__), name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

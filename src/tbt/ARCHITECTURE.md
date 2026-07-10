@@ -1,609 +1,177 @@
-# ARCHITECTURE — the one model, the rules, the plan
+# ARCHITECTURE.md — the brain we are building (design + rationale)
 
-*The single source of truth for the TBT agent. If the code and this document disagree, one of them is a bug. This
-document must remain explainable, in full, to anyone fluent in the domain jargon — if it cannot, the architecture is
-wrong, and the architecture is what changes. It supersedes the older plan web (`L6_NONABELIAN.md`, `MATH_PHASE.md`,
-`VECTOR_NAV_PLAN.md`, `FORWARD_MODEL_PLAN.md`, `COLUMN_AUDIT.md`, `GROUNDING_PLAN.md`, …), demoted to background
-references. There is one plan, here.*
+**This doc is the stable DESIGN and its neuroscience grounding. It contains NO status or progress claims** — those rotted
+the previous ARCHITECTURE.md ("P3 done / 137 passed" while the branch was at 80). Current build state lives ONLY in
+`STATUS.md` (derived from the code). The build discipline lives in `RULES.md`. This doc says *what* the brain is and *why*.
 
 ---
 
-## 1. The one mechanism
+## 1. The core claim
 
-A single reusable **cortical column** learns the structure of any domain as a navigable **reference frame** and predicts
-within it. It holds one **current location**, moves it by learned **operators** (each a *displacement*), binds **content**
-to locations, recognises **objects**, and learns their **behaviors** (how they move and change). It **predicts the next
-observation given the current location and a displacement** — that is the column's nature, not a bolt-on. Many identical
-columns, bound and voting through the thalamus, are the Thousand-Brains consensus. A value critic and the basal ganglia
-turn prediction into goal-directed action. No hand-coded rules, no domain priors: structure, content, value, and goals
-are learned online from the sparse signal.
+**The neocortex is a value-free sensorimotor WORLD-MODEL.** It predicts the consequences of movement and proposes actions
+(via L5), but it has no goals and no value of its own — it models *structure*, not *worth* (Hawkins's "old brain / new
+brain": the neocortex learns the model; the old/subcortical brain holds the goals, drives, and value).
 
-**Forward modelling is not a separate system** (§5). A column predicts one step by construction (apply a displacement to
-the location, read the content there). Forward modelling is that prediction *run forward*; the next displacement is
-supplied by your own **efference** (self-motion) or by a learned **behavior** (another object's dynamics) — the same
-prediction, different driver. "Planning over the map" is the value read off the learned frame (§8). There is no
-`forward_model` object.
+Therefore **planning is not something the cortex does. Planning is what a LOOP does *with* the cortical model.** We do not
+build "a planner module." We build the cortical model and wire it into the cortico-basal-ganglia-thalamo-hippocampal loop
+that plans. This is why the previous codebase — which built the cortex and left the loop's other arms orphaned (basal
+ganglia un-wired in a "collapse", thalamus and forward model never wired) — could perceive but never plan.
 
-## 2. The layers
+## 2. ONE reusable column, used TWICE (TBT's uniform cortex)
 
-*NEXT PHASE: the layers below (L4/L2/3/L5) are being redesigned as ONE minicolumn substrate wired into the canonical
-cortical microcircuit (proximal/basal/apical channels, top-down feedback), so the column runs the full localization AND
-content-prediction loop — spec + staged plan in the companion **`MICROCIRCUIT.md`** (2026-07-05). Today only the
-localization loop is wired (L4 is a vestige; see that doc's diagnosis).*
+Every cortical region runs the *same* column algorithm — learn a model in a reference frame by sensorimotor prediction;
+regions differ only in what they connect to and what they model. So the same column is instantiated on two kinds of space:
 
-**L6 — LOCATION (where).**
-- *Structure:* an online, TD-learned **successor representation** over discovered states; its eigenvectors are the
-  multi-scale, periodic **grid cells** (Stachenfeld 2017). One frame, learned; the innate hex grid is only an
-  initial-state prior expressible within it, never a parallel code. **The location is an SDR** — a sparse, distributed
-  grid-cell population whose defining property is *semantic overlap* (nearby locations share active bits → they
-  generalise; distant ones are near-orthogonal), NOT a localist symbol (HTM: "each grid cell is a bit in an SDR"; Lewis
-  et al. 2019). The SR must therefore be learned **over the SDR encoding** (successor *features*), not over localist
-  state symbols; today's symbol-indexed `OnlineSR` (and the `state_node` bin) is scaffolding to retire — the SDR test
-  (2026-07-03) showed it carries no a-priori metric overlap (§10 P4a/P5).
-- *Function:* holds the **current location** (one code) **and a head-direction**. **Path integration = reading L5's
-  efference and applying the head-direction GAIN FIELD** (`position ← position + R(head-direction)·(L5's body-frame
-  displacement)`; the head advances by the turn). So a body-frame action (FORWARD) is learned once and rotated to every
-  heading; the abelian phase-advance (no rotation) is the special case. L6 keeps **no copy** of the operator — it reads
-  L5's (§HIPPOCAMPUS.md; the head-direction gain field is a hippocampal/retrosplenial function, not the column's). The **SR
-  is also L6's temporal structure** — a *predictive map* of future occupancy (Stachenfeld's predictive map), used for
-  planning (§8). Note: this is L6's *only* temporal structure — L6 does **not** hold sequence memory (§5).
+- **SENSORY columns** — model **physical / object space** (feature-at-location, forward prediction, recognition).
+- **PFC columns** — model **abstract TASK / GOAL space** (the goal-state, the plan hierarchy). *Same algorithm*, an
+  abstract reference frame instead of a sensory one. The PFC is **not** a separate module — it is the column on a
+  task-space. (Grounded: grid-like reference-frame codes for abstract/conceptual spaces are found in entorhinal cortex and
+  medial PFC, the same machinery as for physical space — Constantinescu/O'Reilly/Behrens 2016; Bellmund et al. 2018.)
 
-**L5 — OPERATOR / motor / displacement / EFFERENCE COPY (how it changes; what to do).**
-- *Structure:* one learned **operator per action** — the action's **body-frame displacement** (a translation + a turn;
-  `L5.eff`). This is L5a's **efference copy** (TBP, Hawkins 2019): the predicted effect of the motor command, the SOLE home
-  of the self's per-action displacement. Translation (abelian) is the special case; the non-abelian general case is a turn
-  composed with a translation (the head-direction gain field, applied by L6, rotates the body displacement to the world).
-  Between two OTHER objects, the operator is the **relative-position displacement** relating their frames (Numenta's
-  *displacement cells*) — the basis of composition and of where *other* objects are.
-- *Function:* provides the **efference copy** L6 path-integrates by (L6, not L5, applies the gain field); **predicts** by
-  carrying the location forward; is the **motor** — emits the action that brings about the predicted/desired state
-  (predictions, not commands); is the **driver** — the inter-column message a higher-order thalamus relays (an *other*
-  object's dynamics; §5 self-vs-other). The **controllable body is not selected anywhere — it FALLS OUT** as the sensory
-  change consistent with this efference (reafference, §4c). Holds **temporal sequence memory over actions** (§5): a motor
-  skill/habit is a learned sequence of operators (the production side of a behavior).
+The goal-state and the plan hierarchy are therefore just "stable objects in L2/3" — the same recognition/pooling mechanism
+as a sensory object, but the object is a goal/plan and the frame is abstract.
 
-**L4 — CONTENT / feature-at-location (what is here).**
-- *Structure:* a **content codebook** learned online (label-free) + the **feature ⊗ location** binding; a
-  pose/rotation-invariant feature descriptor.
-- *Function:* bind the sensed content to the current L6 location; **read out** the predicted content at a location — the
-  "what will I see" half of the column's prediction. Holds **temporal sequence memory over content** (§5): predicts the
-  next feature when content evolves in place (a cell toggling, a colour cycling).
+## 3. The planning loop (each piece, its role, and where it comes from)
 
-**L2/3 — OBJECT / identity (which object this is, and how it behaves).**
-- *Structure:* a **graph-memory of objects**, each an arrangement of content-at-displacements in its own frame, **and its
-  behaviors** — each behavior a learned temporal sequence of displacements (how the object moves/transforms).
-- *Function:* **recognise** the object and **infer its pose** by incremental evidence voting; **group by structure**
-  (boundaries from prediction mismatch, never a colour/connected-component heuristic); vote laterally and across columns.
-  Holds **temporal sequence memory over displacements** (§5): recognise the object's **phase** in its behavior and predict
-  the next displacement.
-- *Learn a new object (CONVERGENCE-or-not, no novelty detector).* Recognition is a **settling process over a PERSISTENT
-  session** — evidence accumulates across the moving sensor (the session is NOT restarted each frame; hypotheses are
-  path-integrated by the efference between sensations) + lateral voting. If the feedforward keeps supporting one object as
-  the sensor moves, it **converges** → recognised. If **none** converges (sustained non-convergence — the predictions keep
-  bursting), the unexplained observations **seed a NEW frame**, populated by continued sensorimotor exploration (each
-  `(content, displacement)` node added if unpredicted). There is NO explicit novelty test / threshold / shape-hash (Hawkins
-  2017): the same settling that recognises also allocates — a new object is just what wins when nothing existing does. The
-  same column machinery — path integration + prediction error — that recognises also learns; never a segmentation heuristic
-  (rule 5). The object's **form** (this static graph) is learned first; its **behaviors** (§5)
-  are the temporal-sequence layer on top. (Numenta grid-cell framework, Hawkins et al. 2019; Monty / Thousand Brains
-  Project 2024: "no match during recognition → add a new graph"; novelty-gated node addition.)
-- *Temporal pooling — the identity is STABLE and PERSISTENT (not recomputed each step).* L4 runs the transition memory
-  (predict the next sensation, §5); a subpopulation in L2/3 **pools** the succession of predicted L4 SDRs — a slowly-decaying
-  **union** — into ONE stable object SDR that stays fixed as the sensor moves over the object, and is **re-pooled only when
-  L4's prediction ERRORS** (surprise). So recognition is *tracked*, not re-solved from scratch every step; this is the
-  temporal-pooler circuit (L4 transition memory → L2/3 union pooling, Numenta) and the fix for both the per-step
-  re-recognition cost and the per-step spurious re-learning (a new object is allocated only when the pooled SDR is
-  confidently novel).
-- *Associative recall, not a serial scan.* Matching the pooled SDR against the object library is an **SDR overlap** against
-  a library **UNION** (θ-thresholded), ~independent of library size — never a nearest-neighbour scan over every stored node
-  (the O(n²) trap the notes call out). This needs the content/location as **overlap-bearing SDRs** (P5), not exact-match
-  keys; capacity is not the constraint (sparse codes don't interfere) — recall *speed* is, and the union solves it.
+```
+   env frame                                                            action
+      │                                                                    ▲
+      ▼   (agent.py = pure plumbing: NO decisions)                         │
+ ┌────────────────── NEOCORTEX — the value-free model ──────────────────┐  │
+ │  SENSORY columns  ──►  world-model (predict, propose moves)          │  │
+ │  PFC/TASK columns ──►  goal-state + plan hierarchy                    │  │
+ └───────┬───────────────────────────────────────┬─────────────────────┘  │
+         │ forward model                          │ the held goal          │
+         ▼                                        ▼                        │
+ ┌──────────────────────── HIPPOCAMPUS — ROLLOUT ───────────────────────┐  │
+ │  sweeps candidate future trajectories (preplay/VTE) by querying the   │  │
+ │  cortical forward model step by step, toward the goal                 │  │
+ └───────────────────────────────┬──────────────────────────────────────┘  │
+                                  │ candidate trajectories                   │
+                                  ▼                                          │
+ ┌──────────────────── BASAL GANGLIA — VALUE + SELECT ──────────────────┐   │
+ │  score by reinforcement (dopamine RPE) → SELECT by disinhibition      │   │
+ └───────────────────────────────┬──────────────────────────────────────┘   │
+                                  │ the winner                               │
+                                  ▼                                          │
+ ┌──────────────────────── THALAMUS — GATE / RELAY ─────────────────────┐   │
+ │  gate the selection back to cortex; drive the motor output ───────────┼───┘
+ └───────────────────────────────────────────────────────────────────────┘
+```
 
-**Temporal sequence memory is one mechanism, instantiated per layer** — L4 (features), L2/3 (displacements), L5 (actions)
-— differing only in the context that drives the prediction; L6's temporal structure is the SR, not this. See §5.
+| loop element | role | legacy source (reuse via RULES.md #5, re-wire, re-test end-to-end) |
+|---|---|---|
+| sensory column | physical world-model + recognition | `l4*`, `l5_displacement`+`operator`, `l23_object`, `sequence` (forward model), `encoders`, `retina` |
+| PFC / task column | goal-state + plan hierarchy (same column, abstract frame) | the SAME column, instantiated on a task/goal space (`reference_hierarchy_substrate`) |
+| hippocampus | ROLLOUT: prospective sweep over the model + episodic binding | `hippocampus` (repurpose from localization-only) |
+| basal ganglia | VALUE (RPE) + action SELECTION (disinhibition) | `basal_ganglia` (`BasalGanglia`, `OpponentActor`) — orphaned, resurrect |
+| thalamus | GATE / route the selection; L5's driver target | `thalamus` — underdeveloped, needs real work |
+| value-at-leaf | the SR as a rollout leaf bootstrap (NOT the whole value) | `l6_sr.SuccessorFeatures` |
 
-## 3. The subsystems
+The computational spec of the loop is EfficientZero-V2 (learned model = cortex, value = BG/dopamine, policy/select = BG,
+search/rollout = hippocampal preplay) — the SAME loop from the algorithm side. We take EZ-V2's *algorithm*, not its
+gradient-trained nets.
 
-**Thalamus.** The inter-column router: it **binds content ⊗ location** into the conjunctive representation and relays L5's
-driver messages, so columns modelling the same world **vote** toward a consensus (the higher-order thalamic loop of the
-Thousand-Brains theory). It is how "many columns" becomes "one percept."
+## 4. One decision, end to end
+Perceive → sensory columns update the world-model; the PFC column holds/updates the goal-state → the hippocampus rolls out
+candidate trajectories over the world-model toward the goal → the basal ganglia score by value and SELECT one by
+disinhibition → the thalamus gates the selected action back and drives the motor output → `agent.py` enacts it in the
+environment → repeat.
 
-**Basal ganglia.** The **selector**. Given the candidate goal-states / actions and their values, it disinhibits the one to
-pursue (default-closed Go/NoGo, dopamine-RPE-trained), with STN "hold-your-horses" commitment under conflict. It is the
-*only* place arbitration between competing options is allowed, because it is the brain's arbitration organ (rule 4).
+## 5. Hard rules (founding constraints — beyond `RULES.md`)
 
-**Hippocampus.** Not a separate algorithm — **the same column mechanism applied to the global, allocentric frame** (the
-whole world, not one object): grid × content bound across columns and episodes (TEM). Built once as the column algorithm,
-it is inherited for allocentric world-modelling and cross-frame/episodic binding; a plain single-column task needs it only
-when episodic memory or multi-frame binding does.
+1. **MULTI-COLUMN ALWAYS.** No experiment, and no slice, runs without BOTH a sensory column AND a PFC/task column. Never
+   single-column, no exceptions. (A single column can only ever be perception — the exact rabbit-hole that consumed the
+   last codebase. The planning loop is only meaningful with both a world-model and a goal-model.)
+2. **NO DECISION LOGIC OUTSIDE THE LOOP.** `agent.py` and every script NEVER select an action, compute a value, or pick a
+   goal. Selection is the basal ganglia; `agent.py` is environment plumbing only (frame in → enact the loop's output → step).
+3. **THE MODEL STAYS IN THE COLUMN.** The hippocampus *orchestrates* the rollout by querying the column's forward model; it
+   never holds a copy of the model. (A migrated model = the parallel-copy mistake.)
+4. Everything in `RULES.md` still holds: unwired is a bug (reachability test), integration is done, build vertical,
+   check-before-building, tests monotonic.
 
-**Value / reward — appetitive and aversive.** The domain-agnostic **critic**: expected future reward, learned online from
-the sparse score. **Cost is the AVERSIVE component of this one signed value**, not a separate currency — a wall, a hazard,
-a slow tile, a risky tile are points on the same scalar (walls the `−∞` limit), so obstacles are *not* special objects.
-Two things make this work and must be preserved:
-- *Cost is LEARNED as an EXPECTATION* (a running-mean / TD estimate), so a **stochastic** ("risky") location converges to
-  `p·penalty` with no special case — the property that makes the cost field robust obstacle-avoidance in abstract and
-  stochastic domains. A crude last-write of the aversive score is the wrong representation; the expectation is the right
-  one. This is the empirically strongest obstacle mechanism and is not to be discarded.
-- *The brain represents cost through a partly SEPARATE circuit from reward* — an appetitive/aversive **asymmetry** (Go/
-  reward vs NoGo/cost), not one homogeneous signal: reward via dopamine / D1-Go; **cost via the anterior cingulate**
-  (integrating effort / pain / risk into an *expected-cost* signal), the **lateral habenula** (negative reward-prediction
-  error / aversive *expectation* value), the **D2-NoGo** striatal pathway (avoidance value), and serotonin (active-
-  avoidance expectation). So a first-class cost representation is biologically grounded, not a rule-1 parallel system —
-  provided there is ONE aversive-value learner, not two.
+## 6. Honest caveats (do not overclaim)
+- PFC being neocortex does not mean it plans alone — it sits in its own cortico-BG-thalamic loop; "same column algorithm" is
+  a claim about the *column*, not that PFC does planning solo.
+- The abstract task/goal map is *shared* between PFC and the entorhinal-hippocampal system (grid codes appear in entorhinal
+  too), which is consistent with the hippocampus rolling out *over* it.
+- That hippocampal preplay implements a *specific* search algorithm (MCTS-like) is an active modelling area, not settled
+  mechanism — treat the EZ-V2 ↔ brain-loop map as a strong, useful correspondence, not a proven identity.
 
-Spatially, obstacle-avoidance **emerges** from this signed value read over the learned frame, whose SR/grid map **warps
-around barriers** (boundary-vector-cell → SR): `V = M·(reward − cost)` gives the geodesic detour (§8), a wall being the
-`−∞` / transition-dead-end limit. The two axes of the one value — pragmatic (reward − cost) + epistemic — are what make
-explore vs exploit, and approach vs avoid, *emerge* rather than switch. (ACC expected-cost: Kennerley & Walton; LHb
-aversive value: Matsumoto & Hikosaka 2007; barrier-warping BVC-SR: de Cothi & Barry 2020.)
+## 7. Why the column factors the world — the place-invariance lesson (plain English)
 
-## 3b. The heterarchy — receptive fields, the column sheet, and communication
+Everything above says the column keeps *content*, *location*, and *state* as separate pieces and reuses **one** model
+across locations. This section says, in plain terms, *why that is not optional* — the concrete failure that forces it.
+(This is design rationale; the experiments and numbers that motivate it live in `STATUS.md` and the memory
+`project_place_invariance_needs_factored_state`, not here.)
 
-The rest of this doc says "columns vote" (§3) and "many columns become one percept" but never specifies the **multi-column
-substrate**: how a column gets its slice of the world, how a region is built from columns, and how they talk. That substrate
-is here. One column models a *whole* object through its own small window; a **region is a sheet of such columns**; the
-percept is their consensus (Numenta TBT). Today we run **one column on the whole frame** — the single-object bottleneck that
-makes a multi-object scene thrash (re-segmenting a different blob each step). The sheet is what fixes that.
+**The problem.** Take something a person finds trivial: add 1 to a number, one digit at a time, carrying when a digit
+rolls over from 9. Build the obvious thing — show the whole number at once and learn "this pattern → that pattern" — and
+the model learns the units column, the tens column, and so on **as unrelated facts**. It never notices they are the *same*
+operation in different places. The moment it meets a digit position it was never trained on (say the hundreds), it is
+helpless, even though the rule there is identical: it scores **zero** on the new position while being perfect on the old
+ones.
 
-**Receptive field.** A column attends to exactly ONE overlapping **window of the input** — its "straw." Every column runs
-the identical algorithm; a column *is* its RF plus what it has learned to model there (a retinal patch → a V1 column; a
-patch of the thalamus → a PFC attention column). RFs **overlap** and tile the input. On ARC's 2-D screen a visual patch simply
-*is* a frame window — the notes' "project a patch across space" caveat needs depth only in 3-D. The RF is the source of L4's
-**proximal (feedforward)** input, and it is **fixed transduction geometry** (like the retina's sampling), *not* a learned or
-per-task heuristic (rule 4): what is learned is the MODEL in the window, never the window itself.
+**Why it happens.** A plain sequence memory (and a plain HTM) has **no weight-sharing across positions** — knowledge
+learned at one spot simply does not exist at another spot. This is a documented limitation, not a bug we introduced.
+Convolutional nets paper over it by copying one filter everywhere, but that is a spatial hack the brain doesn't use.
 
-**The column sheet (a region — our "visual cortex").** A region = a sheet of the identical column, each on one overlapping
-RF, each **independently** modelling the scene from its patch — thousands of models in parallel (Hawkins 2019). This is MANY
-INSTANCES of the ONE column, not a parallel *system* (rule 1): the mechanism is replicated, not forked. It is the substrate
-for parallel/robust recognition and (later) voting; a single column cannot vote with itself.
+**The brain's fix, and ours.** Don't look at the whole thing at once. **Move a sensor over it, one location at a time, and
+apply the *same* small model at every location.** The digit becomes *content* (a "5" looks the same wherever it sits); the
+position becomes a *location* signal (a separate "where am I" code, used only for addressing, kept out of the content);
+anything that has to travel between positions — the carry — becomes a small piece of *state* handed from one fixation to
+the next. Because it is literally the same model reused at each location, a brand-new position just works: it inherits the
+rule for free. In our tests the monolithic way scores 0% on the unseen position and the sensorimotor way scores 100%.
 
-**RF creation + assignment.** Topology assigns each column its window: in HTM the spatial pooler's *potential pool* is
-restricted to a local neighbourhood, which *is* the column's RF; neighbouring RFs map to neighbouring columns (topographic),
-so neighbours vote as neighbours. For us the tiling is a **fixed peripheral choice** — overlapping windows over the frame,
-one column each, calibrated like RF size/stride — anatomy, not a learned rule.
+**The consequences for this design:**
+- **This is why a column has more than one layer.** Content, location, and state are different jobs and must be kept
+  apart so each can be *reused*; one blob that mixes them cannot generalize across positions.
+- **This is why we are always multi-column (§5.1).** The state that travels between locations naturally lives in a
+  *second* column (a task/PFC column) whose output becomes the *context* for the sensory column. A single layer's activity
+  is pinned to its own content, so it cannot hold that travelling state by itself.
+- **The state must be *supplied*, not wished into existence.** This substrate learns transitions online; it does not, on
+  its own, invent a hidden variable and discover that remembering it pays off later. So the architecture has to *give* the
+  state its own slot — which is exactly what reference frames and a task column are for. We keep that slot **general** (it
+  carries whatever a task needs), never a hand-wired "carry bit" — that would be the bitter-lesson trap. **This is TBT's
+  actual stance on learning, not a workaround:** credit assignment is solved *structurally, not algorithmically* — a
+  reference frame anchors every prediction to a (feature, location), so a mismatch is attributable *locally and immediately*
+  and no error is propagated back through time (no backprop; learning is local, associative, unsupervised). The one thing
+  that *does* need long-range credit — reward — is the **basal ganglia's** job (dopamine RPE), never the cortex's. So "the
+  architecture supplies the factored state" and "TBT provides structure via reference frames instead of discovering it" are
+  the same sentence.
 
-**Communication — three dendrite channels + the thalamus.** **Proximal** = feedforward (the RF / the layer below drives
-firing); **basal/distal** = lateral, same-level (context + the **voting** channel between columns, at L2/3); **apical** =
-feedback (top-down predictions from a higher region). Cross-region routing is the **thalamus** (§3). Axon bundles may merge
-and split freely — SDRs are overlap/noise-robust — so a local clue in one column spreads laterally or up/down to *any* level
-(the horse-in-the-distance: an edge column, a shape column, and a ground column combine into one answer).
+## 8. What makes a layer a layer — role = (context-in, target-out), both wired by hand
 
-**Heterarchy, not hierarchy.** More than 40% of possible inter-region connections exist; *any* level can inform any other. A
-higher region models the SAME objects at a **larger scale / a more abstract, more permanent domain** — it extracts MODELS at
-different scales, NOT bigger features (the deep-learning error). Object **composition** is the displacement mechanism at a
-bigger grain: a LARGE inter-object displacement places one object's frame inside another's (objects-in-objects), so a
-multi-object **scene** is ONE composed model and a *sequence* of such displacements is the scene's behavior (§5). Abstract /
-task levels reuse the same grid machinery on a task-space map (PFC/OFC — `reference_hierarchy_substrate`).
+§2's claim ("one column algorithm; regions differ only in what they connect to") is right, but coding it needs one
+refinement that biology makes explicit: a layer's role has **two** determinants from **two different sources**, and only
+one of them is "input."
 
-**Where voting sits.** Voting is the **last** step (§3, at L2/3): columns sensing different patches independently solve the
-SAME world pose and pool their evidence by it, so the truth wins in a single glance (Numenta CMP; `tbt/l23_object.vote`). It
-presupposes the sheet + per-column pooled identities (§2 L2/3) — so it comes *after* the sheet and the pooler, not before.
+- **What a layer computes** is set by its **input wiring** — which signal drives its basal context (a thalamic location, its
+  own recurrence, a top-down goal, another column). The microcircuit itself is *uniform* across all of cortex (Mountcastle);
+  thalamic input is only ~10% of the synapses in its target layer, so a region's specialization is almost entirely a matter
+  of *what it is wired to* (Douglas & Martin). This is the knob our `HTMLayer` already exposes as `context=`.
+- **Where a layer's output goes** is set by **cell-type identity**, fixed in development by birth-order (inside-out) + a
+  transcription-factor code (Fezf2/Ctip2 → L5b subcortical **motor**; Tbr1 → L6 cortico**thalamic**; Satb2 → cortico-cortical).
+  "L5 is the motor output" and "L6 drives the thalamus" are **not** derivable from what feeds a layer — they are intrinsic
+  projection identities.
 
-## 4. The sensorimotor loop — how the model touches the world
+**So in code a layer is not a subclass — it is one `HTMLayer` instance plus a declared `(context-in, target-out)` pair,
+both asserted when we compose the column.** The mechanism stays uniform; the differentiation is entirely the wiring, and the
+output half we assert by hand exactly as development asserts it genetically. This is also *why* we never expect a layer's job
+to *emerge*: like the reference frame in §7, it is **given, not learned**.
 
-The model is sensorimotor at its core: it **acts to sense and senses to act**. One cycle:
-
-**(a) Sensory input.** The world emits a **sensory field** — in ARC-AGI-3, a 64×64 grid of up-to-16 colours — plus a
-sparse scalar **score**, a terminal signal (WIN / GAME_OVER), and the set of currently available actions. No explicit
-goal is given; the reward must be learned from the score.
-
-**(b) Transduction (the retina).** A thin **peripheral** converts the raw field into the model's currency —
-**feature-at-location**: the content (an L4 feature) present at a location (an L6 code). This is transduction only, like a
-retina: it holds NO segmentation, NO object heuristic, NO domain logic (rules 4–5). It does not decide *what* an object is
-or *where* to look — it only makes the raw field readable as features-at-locations.
-
-**(c) What receives it, and what is done.** **L4** binds the feature at **L6**'s current location; **L2/3** accumulates
-recognition evidence (object, pose, and behavior phase); **L6** corrects its current-location belief against what was
-sensed. That belief is a **POPULATION**, not a point: a place-cell activity **bump** over the location SDR (+ a
-head-direction ring). Correction is the **superposition** of the path-integrated prior bump with the sensory likelihood —
-the L2/3 evidence field, one bump per near-top (object, pose) hypothesis. Reliability weighting is **emergent** (there is
-NO scalar `conf`/Kalman-gain register — that is not how the brain codes certainty; probabilistic population codes, Ma/Beck/
-Pouget 2006): a sharp unimodal sighting dominates the posterior, a flat/split/orientation-less one barely moves the prior
-and path integration carries through. A symmetric object is thus a sharp *position* bump and a flat *heading* bump — no
-special case. The **critic** turns the score into value. The column had already *predicted* the feature it would sense
-(§5) — the **prediction error** is the learning signal. The model identifies the **controllable** part of the field by
-**reafference** (von Holst): the change consistent with **L5's efference copy** is controllable; a differently-placed
-object is off the model's predicted footprint (top-down figure-ground) and excluded. This is **not a selected "self"** —
-there is NO "which object is me" code (rule 5); the controllable **falls out** of the efference (`column._attend_self`:
-common-fate bootstrap → top-down footprint), and controllability is *learned*, never a size / fovea-on-residual heuristic.
-
-**(d) Choosing to move.** The **motor (L5)** selects the action that best brings about the goal-state under the one EFE
-value (§8) — pragmatic toward reward, epistemic toward what most resolves uncertainty; the **basal ganglia** select among
-the candidate goals. This is **one mechanism for covert and overt movement**: shifting attention to sample more (a saccade
-— active recognition) and taking a world action (move, click) are both **operators applied to the location**.
-
-**(e) Acting (the effector).** L5 emits the chosen action; a thin **motor organ** (another peripheral, at the SDK
-boundary) maps the action name to the world's effector API — a movement, or a click whose `(x, y)` is read from the
-goal-state's target location. The world returns the next field, and the cycle repeats.
-
-**The body vs the brain.** The retina (b) and the motor organ (e) are **peripherals** — transduction and effection —
-thin, at the SDK boundary, holding no cognition. A peripheral that began deciding what an object is, or which cell is "the
-agent," would be a load-bearing harness (rules 4–5); that decision is the column's, made by recognition and reafference.
-
-## 5. Prediction — forward and backward modelling
-
-**Forward modelling is emergent, and it is one thing: predicting the next displacement in a learned sequence.**
-- The primitive is **displacement**: grid cells give your location (a displacement from an object); displacement cells
-  give the relative position between two frames (Numenta). An operator *is* a displacement.
-- **Dynamics — how objects move, transform, and how features evolve — are learned as *behaviors*: temporal sequences of
-  displacements** (Numenta's stapler: closed = displacement A → open = E; the conformation change *is* the sequence). The
-  **next** displacement is predicted by temporal sequence memory (below).
-- **Self and other are the same mechanism, differing only in the driver of the next displacement:** your **efference**
-  (self-motion; the change is reafferent, predicted) vs the object's **learned behavior-sequence** (another object;
-  autonomous). There is no separate forward model — it is the column's prediction, driven by efference or by a behavior.
-- (Dynamic predictive coding, Jiang & Rao) a *higher* level can select **which** behavior/dynamics is active, modulating
-  the lower level's content — "which behavior" is a higher-level state.
-
-**Temporal sequence memory — one mechanism, instantiated per layer.**
-- *Mechanism* (HTM neuron, Hawkins & Ahmad 2016): a cell's **context** (distal-dendrite input) puts it in a **predictive**
-  (depolarised) state; when input arrives, predicted cells fire and inhibit their siblings → a **context-specific** sparse
-  representation, so the *same element in a different context is a different state* → **high-order** sequences. The
-  predictive cells *are* the next-element prediction. "Same code, different context" — it is the same mechanism as
-  sensorimotor prediction, differing only in the context input.
-- *Where it lives:* **L4** → next **feature** (content dynamics), context = location + efference + history; **L2/3** →
-  next **displacement** (object behaviors), context = the object's **phase**; **L5** → next **action** (motor skills),
-  context = the program's phase. **L6 is the exception** — its temporal structure is the SR (predictive map, for planning
-  §8), not this; a sequence memory in L6 would be a parallel system.
-- *The phase* (position in a behavior — the high-order context) is a recurrent state. There is **one** recurrence, reused
-  wherever a phase is advanced (never two). The learned relations among operators (the loop-closure structure) are the
-  *structure* of these sequences — a behavior is a path through them.
-
-**Backward modelling — the same machinery run in reverse.**
-- Operators are **invertible group elements**, so a behavior run backward = applying the **inverse operators** (the
-  stapler: closing *is* opening reversed).
-- *Uses:* **retrodiction** (infer the past / what preceded a state) and **reverse-replay credit assignment** (propagate
-  reward backward along the sequence — which earlier states/actions led to reward). Predictive coding's top-down
-  generative direction is also inherently "backward" down the hierarchy.
-- It is **not** a separate mechanism — it is the forward sequence memory with inverse operators.
-
-## 6. Glossary — one definition each (a second meaning is a bug)
-
-- **location** `g` — the current point in the learned frame = the L6 SR/grid code, **an SDR** (sparse, distributed,
-  overlap = similarity), NOT a localist symbol or a dense pose matrix. The ONLY location representation.
-- **operator / displacement** — the learned per-action transition on the location code (L5), a group-representation
-  matrix, invertible. The ONLY transition and path-integrator; translation is its special case; between two objects it is
-  the relative-position displacement relating their frames.
-- **content** `x` — the feature at a location (L4). Location-invariant.
-- **feature-at-location** — the binding `g ⊗ x` (L4). The ONLY map.
-- **prediction** — the column applying an operator to the location and reading the content there. Forward modelling is
-  this run forward; backward modelling is this with inverse operators. There is no separate forward-model module.
-- **behavior** — an object's motion/transformation = a learned temporal *sequence of operators* (displacements), held by
-  L2/3, indexed by phase.
-- **temporal sequence memory** — the one mechanism predicting the next element of a sequence via context-specific
-  (high-order) representations; instantiated in L4 (features), L2/3 (displacements), L5 (actions). L6's is the SR.
-- **phase** — the current position in a behavior/sequence = the temporal context; a recurrent state.
-- **object** — a learned frame of content-at-displacements (with behaviors), recognised by voting; pose and phase
-  inferred; boundaries from prediction mismatch; **learned by CONVERGENCE-or-not** (see *novelty*), NOT a segment, a
-  change-log, or a tracked mover.
-- **predictive state** — a cell/hypothesis primed by context (distal/apical) to fire next; the model's PREDICTION of the
-  next sensation. A hypothesis in good standing during recognition is one. (HTM temporal memory; `SequenceMemory`'s
-  predicted next element.)
-- **bursting / prediction error / surprise** — the input was NOT predicted (no primed cell / all hypotheses mismatch). The
-  ONLY "something changed" signal and the ONLY learn-trigger ("you only learn when a prediction is wrong"); no stored
-  change-log, no threshold — it is the discrete predict-vs-sense mismatch (sensor tolerance, not a novelty knob).
-- **novelty** — NOT a detected score (like *confidence*, it is not a scalar). Novelty is the **absence of CONVERGENCE**:
-  recognition is a settling process (persistent evidence over a moving sensor + lateral voting); if the feedforward keeps
-  supporting one object across sensations it CONVERGES → recognised; if NONE converges, the unexplained observations seed a
-  new object → allocation. No explicit novelty detector (Hawkins 2017); "sustained novelty" = sustained non-convergence.
-- **value** — expected future reward incl. cost, one currency (the critic). The ONLY value.
-- **goal** — a target-state to bring about; the motor acts to fulfil it.
-- **selection** — the basal ganglia choosing among goals/actions.
-- **peripheral** — the retina (raw field → feature-at-location) and the motor organ (action → effector API); transduction
-  and effection only, no cognition.
-
-## 7. The five rules (development law; a violation is reverted, not documented around)
-
-1. **No parallel systems — ever, including for experiments.** Exactly one way to path-integrate, one way to predict, one
-   feature-at-location, one grid-module learning rule, one recogniser, one temporal-sequence-memory mechanism (reused
-   across L4/L5/L2-3), one recurrence, one value, one selector. Manage comparison and risk with **git branches**, never by
-   keeping two mechanisms in the tree. Two "complementary" mechanisms plus an **arbiter** (tabular-vs-forward,
-   explore-vs-exploit as a hard switch, CA-vs-g×x) is a parallel system in disguise — collapse it into the one mechanism
-   whose behaviour subsumes both cases.
-2. **One definition per concept.** See §6. A new meaning for an existing word is a bug to fix.
-3. **The column and the agent are thin coordinators.** They hold references + routing — never math or state. Every belief,
-   map, operator, behavior, and value lives in a layer/module.
-4. **No load-bearing harness, no domain-specific code, no special-casing, no ungrounded arbitration.** Nothing branches on
-   which game/domain it is; the peripherals transduce only. Every arbitration must name the brain mechanism it implements
-   (basal-ganglia selection, tonic-dopamine gain, STN commitment) or it is removed. Selection lives in the basal ganglia.
-5. **No symbolic estimators, object heuristics, or change logs.** No hand-coded "what is an object / how to split it,"
-   no Kalman-style tracker banks (fovea centroids, pose matrices, binned nodes in parallel), no dicts of "what changed."
-   Structure is learned; change is carried by prediction error; the object is a recognition construct.
-
-## 8. Planning — how the model decides (explore, exploit, act)
-
-**What planning is in real brains.** Routine planning is *not* rollout. The **successor representation** already stores
-the discounted future occupancy of the learned map, so value is a cheap read — `V = M·R`, a dot product over the frame —
-and greedy-on-`V` follows the shortest path, warping around barriers (the geodesic). Deliberative rollout (vicarious
-trial-and-error, hippocampal replay) is **sparing**, for the novel/hard case; prioritised replay schedules the value
-updates by gain × need (Mattar & Daw). (`reference_brain_planning`, `reference_exploration_replay`.)
-
-**What planning is in our model.** The same: the column's learned frame (L6 SR) *is* the map; planning is the value read
-off it. **One planner, one value.** The geodesic to a goal falls out of the SR; rollout is only the column's own
-prediction (§5) iterated, used sparingly — never a second, parallel planner.
-
-**There is no planner *module*.** Vector navigation is a read over the spatial cells: **grid cells** (L6) give the goal
-*vector* — direction + distance to a set target (Bush, Barry & Burgess 2015); place-cell populations carry
-**goal-oriented vector fields that converge on the goal** (the "potential field" itself — Ormond & O'Keefe 2022); the
-**SR warps around barriers** for the detour (de Cothi & Barry 2020). One object, not a Euclidean field plus a geodesic
-fallback. The action falls out by **inverting the operator (L5)** against that value; the **basal ganglia** select. So a
-Euclidean potential-field navigator with an SR-geodesic *fallback arbiter* is a rule-1 parallel system — deleted; the SR
-goal-oriented vector field is the one navigator.
-
-**How the navigator reads the map — corrected by experiment (2026-07-03).** Greedy ascent on a scalar value is the
-*tabular* idealisation; over the grid **SDR** with a linear value (successor features) it FAILS — the value is accurate
-only LOCALLY and the periodic grid wraps, so greedy-on-V has spurious local maxima and gets stuck (probed: a 2-D point
-goal is never reached, V(dist-20) > V(dist-10)). The TBT-real primitive is the **grid-cell goal VECTOR** — the
-displacement from the current location code to the goal's, read off the grid phases (Bush, Barry & Burgess 2015;
-decodable via `GridEncoder`), moved along by the operator. The successor-feature **value MODULATES** this vector —
-reward attraction, cost/barrier repulsion (§3, de Cothi & Barry) — it does not replace it. So the one navigator is
-**the vector to the goal, warped by the SF value**, not value-gradient-ascent. (Finding `project_sf_value_not_greedy_navigable`.)
-
-**From the vector to the action — the egocentric↔allocentric GAIN-FIELD transform (2026-07-03 neuroscience pass).** The
-goal vector is **allocentric** (world-frame); the body acts **egocentrically** (FORWARD is "ahead of *me*"; a TURN rotates
-"me"). Converting between them is a coordinate transform **gain-modulated by head-direction** — a retrosplenial gain field
-(Bicanski & Burgess 2018; Byrne, Becker & Burgess 2007; Hasselmo et al. 2023). It runs **both ways with one machinery**:
-- **Perception / path integration** rotates the **one** egocentric self-motion displacement **by** the current
-  head-direction before it updates allocentric position — so FORWARD is a *single* displacement rotated, **not a separate
-  operator per heading**.
-- **Action** rotates the allocentric goal vector **by −(head-direction)** into the egocentric frame; the motor then picks a
-  **TURN** (if the goal is not yet ahead) or **FORWARD** (if it is) — reorient-then-advance falls out of the transform.
-This is a **hippocampal-formation** function (a head-direction ring attractor, updated by the turn's efference/angular
-velocity, coupled to the allocentric grid by the gain field), and it belongs in the **hippocampus module (§10 P4)** — **not**
-baked into the column as a per-heading conjunctive operator. Baking it in forces relearning FORWARD in every heading (a
-self-inflicted coverage cost the gain field removes) and makes navigation myopic on a turning body; a depth-N reorienting
-**rollout is a brute-force STAND-IN** for this transform, not the mechanism. It is **dimension-general**: an SO(3)
-head-direction rotates a 3-D displacement — no centre of rotation (`reference_operator_as_group_representation`).
-
-**How it knows to explore vs exploit — one value, not a switch.** The critic's value is **Expected Free Energy**:
-pragmatic (expected reward toward the goal) + epistemic (expected information gain, grounded by **epiplexity** =
-learning-*progress*, so it → 0 for both irreducible noise *and* mastered structure). The policy maximises the one value:
-**exploit emerges** where pragmatic dominates, **explore emerges** where epistemic dominates. There is no `g`-gate and no
-`V`/`V_exploit` split (those were a two-mechanism arbitration, a P0 target).
-
-*On the eigenpurpose — a reassessment (do not treat as a first-class mechanism).* Eigenpurposes (Machado et al. 2017/2018)
-were built as **task-agnostic** intrinsic rewards along the SR/Laplacian eigenvectors, to discover reusable exploration
-*options* that traverse the state-space geometry to bottlenecks. We adopted one as the directed explorer for the flat
-dead-zone. On reflection it is **redundant and costly**: (a) it *duplicates* the epistemic term — reaching unexplored
-regions is what a learning-progress / info-gain explorer already does; (b) being reward-blind it covers geometry
-**uniformly**, wasting actions under the RHAE budget (the value-aware-eigenoptions critique, arXiv 2507.09127); (c) it needs
-an **O(n³) eigendecomposition** of the SR — prohibitive on 64×64 frames (the code band-aids it with a throttle, itself a
-smell); (d) in the code it is a **separate `g`-gated salience** — exactly the parallel-explorer-plus-arbiter rule 1 forbids.
-**Decision:** the primary — and only — explorer is the one **epistemic term** (learning-progress + novelty); the SR
-**geodesic** (a cheap dot-product read, `V = M·R`, *not* its eigendecomposition) does the reaching once a target exists.
-Eigenpurpose is dropped — or at most a cheap geometry prior folded *inside* the epistemic term for the flat case, never a
-separate gated term. (`reference_efe_and_epiplexity`, `reference_eigenoptions_subgoals`.)
-
-**Acting = testing a hypothesis.** A goal-state is a hypothesis "bring about X." The agent plans to X, the motor achieves
-it, and the **outcome** (reward = pragmatic, prediction-error = epistemic) confirms or refutes; the basal ganglia commit
-through the maneuver and switch on repeated refutation. Testing a hypothesis *is* planning.
-
-## 9. Hypothesis generation — how the model proposes what to try (the frontier)
-
-Testing is §8; **generation** — where a candidate target-state comes from — is the genuinely open problem. The full
-research + staged plan for *all* forms of discovery (model-acquisition babbling, cued/uncued exploration, hypothesis
-generation & testing, up to Sokoban) lives in the companion **`DISCOVERY.md`**; this section is the load-bearing summary.
-The proposal, from the research and the number-domain probes (`MATH_PHASE.md`):
-
-- **Not enumeration.** The mind **samples a few candidates from memory**, cued by context and biased by priors:
-  **salience × controllability × ambiguity** (Dasgupta, Schulz & Gershman 2017; more samples when more uncertain).
-  Controllability = "it moved when I acted" (the reafference of §4c); salience = novelty / prediction-error; both learned.
-- **Where the candidate comes from — the priority map (what *sets* the goal).** A goal is a *target-state*, and the
-  target is set by a **priority map** that fuses **bottom-up salience** (feature-contrast + prediction-error surprise —
-  superior colliculus; NOT motion alone, a live gap) with **top-down value / memory** (reward- and goal-tagged
-  locations — Gauthier & Tank 2018); the **basal ganglia** select its peak (Fecteau & Munoz 2006). The winner is held as
-  a **goal vector** — goal-direction + goal-distance cells, memory-based even for an *occluded* goal (Sarel et al. 2017,
-  bat CA1) — which is exactly the vector the grid cells compute toward (§8). This IS `salience × controllability ×
-  ambiguity` in neural form: controllability = reafference (§4c), salience = feature-contrast + prediction-error.
-- **Testing is simulated, then enacted.** Before committing, the hippocampus **preplays** candidate trajectories
-  (vicarious trial-and-error), the critic scores them (pragmatic + epistemic), and the **BG/STN** commit and switch on
-  repeated refutation (hippocampal–prefrontal replay selecting the path) — §8's "acting = testing a hypothesis" made
-  concrete.
-- **A hypothesis is a short composition of learned operators toward a cued target** — geodesic-finding in the learned
-  structure. The **master boundary** predicts its cost: where the structure is **free/abelian**, the hypothesis is
-  **READ OFF** (a homomorphism is fixed by its action on generators — cheap); where it is **relational / quotient**
-  (non-commuting, constrained — Sokoban, carry), it must be **SEARCHED**.
-- **Open (honestly):** (a) learning the priors that cue *which* targets to sample (learned, not hand-coded); (b) whether
-  the relational **search** is tractable at scale. The `MATH_PHASE` microworlds exist to probe these; no code commits to a
-  solution until they answer.
-
-## 10. The plan — one dependency-ordered spine
-
-- **P0 — Converge the code to this document (mostly DELETION).** Collapse every parallel system, estimator, and arbiter
-  into the one mechanism: one prediction (delete the location-blind CA); one location = the L6 code path-integrated by the
-  operator — vetted 2026-07-02: the fovea / pose-matrix / `state_node` tracker is the LIVE perception→location bridge
-  (sensor → `track` → `state_node` = the agent's state), while the doc-target mechanism (a node path-integrated by the
-  operator, cf. `loc_*`) is LATENT and needs perception to feed it a location; so this fork — and the `heading_dependent`
-  fork, which needs the learned-group operator (abelian = the commuting special case) before it can go, else abelian games
-  gain a spurious heading — is REPLACED-then-deleted in P1/P2, not cut here; one value (fold
-  `V`/`V_exploit` + the `g`-gate + the `_tab_spread` tabular/forward arbiter into the single EFE value; **drop the
-  eigenpurpose SR-eigendecomposition explorer** in favour of the one epistemic term — §8; **unify the cost field as the ONE
-  value's AVERSIVE component** — keep its learned-expectation (the running-mean → `p·penalty`; make the critic's crude
-  last-write aversion use the same expectation so there is ONE aversive-value learner), obstacle-avoidance emerging from
-  `V = M·(reward − cost)` over the barrier-warping SR (§3); the cost field is NOT deleted. ⚠ "one aversive-value learner"
-  does NOT mean collapsing cost into a homogeneous reward channel: PRESERVE the appetitive/aversive ASYMMETRY of §3 (the
-  brain uses a partly SEPARATE circuit — it may need its own learning rate, Go/NoGo opponency, or consumers; do not flatten
-  it away)); object = recognition construct
-  (delete the `object_state`/`_changed` change-log — DONE; the segmentation heuristic is LOAD-BEARING as the live
-  perception front-end, so it is REPLACED-then-deleted in P1, not cut here); thin column
-  + agent (subsystems → layers); retina/motor-organ reduced to transduction/effection. Suite-green throughout; git
-  branches for risk. **This is the bulk of the work.**
-- **P1 — Factored perception.** Deliver a factored `(location, content)` from the live field — the prerequisite prediction
-  always assumed and never had. **TBT-accurate sourcing (do not drift):** **location = the L6 code path-integrated by the
-  operator** (grid-cell dead-reckoning by efference — `loc_move`; anchored/corrected by sensing — `loc_sense`), NOT
-  re-derived from recognition each step (in TBT, movement path-integrates location and recognition *consumes* it — the
-  `loc_*` skeleton is the canonical one, the fovea tracker its continuous form + estimator binning). **content = L4**'s
-  rotation-invariant descriptor (the same local shape at any pose → the same `x`). **L2/3 recognition** consumes the
-  `(location, content)` stream to infer the object + its reference frame and supplies the anchor that corrects L6 — a
-  *consumer* of location, not its source. This replaces the estimator-stack halves (the fovea/`state_node` location; the
-  raw-patch content). Slices: (1) content = the invariant descriptor; (2) location = operator-path-integrated L6,
-  recognition-corrected — where #1's fork deletion lands; (3) retina reduced to pure transduction.
-- **P2 — The one prediction over the factored representation.** The column's §5 prediction with clean content: apply the
-  operator to the location, read the content. **Self-motion** works here (the next displacement = your efference).
-- **P3 — Temporal sequence memory & behaviors.** The one sequence-memory mechanism (§5) in L4 (features), L2/3
-  (displacements/behaviors), L5 (actions), with the **phase** as one recurrence and the learned **relations** (loop
-  closure — already built) as the sequence structure. This is where **other objects' dynamics** are forward-modelled (the
-  next displacement = the object's learned behavior), and **backward modelling** (inverse operators — retrodiction,
-  reverse-replay credit assignment) lands. The **order/config-dependent case (Sokoban)** is the SAME context-conditioned
-  mechanism — **order**-dependence is the non-commuting Cayley graph (`discover_relations`, built), **config**-dependence
-  is the sequence memory with the *config* in the context (the spatial twin of the temporal phase); the **general
-  relational RULE** (generalising the config-rule to unseen configs) is the open MATH_PHASE search (§9), not committed to.
-  *Status: the mechanisms — `SequenceMemory`, `Behavior` (other-object dynamics), `inverse` (backward), config-as-context —
-  are built + tested; the multi-object self/other LOOP wiring is loop-coupled (P4-adjacent).*
-- **P4 — The convergence: collapse the leaked parallels, then the goal loop.** Re-vetted 2026-07-03 (the coloured-marker
-  probe + a neuroscience pass): the *bulk* of P4 is **finishing P0's parallel-system collapse, which leaked into
-  `column.py`** (a 707-line god-object — `project_column_godobject_diagnosis`), NOT new machinery. Most of the column is a
-  *second copy* of a layer mechanism; collapse each into the ONE (rule 1), do not relocate:
-  (a) **one location** = the allocentric SR/grid code path-integrated by self-motion (§2; grid cells = the SR's
-  eigenvectors, one frame — Stachenfeld 2017), with a **separate head-direction ring** coupled to it by a **head-direction
-  gain field** (retrosplenial — Bicanski & Burgess 2018), **NOT** one conjunctive per-heading operator: self-motion is
-  **one egocentric displacement rotated by head-direction**, so FORWARD is learned once, not per heading (the 2026-07-03
-  finding — §8 "from the vector to the action"). This allocentric machinery is the **hippocampus module**, extracted from
-  the column (it is *not* a cortical-column function — a column's frames are egocentric/object-centred). Retire the parallel
-  `_pose` SE(2) integrator, the lossy `state_node` binning, and the leaked conjunctive-pose operator built this session
-  (**this requires P5** — the SDR test showed the SR-over-localist-symbols has NO a-priori metric overlap, so the location
-  SDR needs the encoder; P5 is pulled forward as a prerequisite);
-  (b) **one operator** per action in L5 (retire the column `pose_ops` store); (c) **one navigator** = the SR
-  goal-oriented vector field `V=M·(reward−cost)` (delete the Euclidean `vector_action`/`_pose_vector_action`/`achieve` +
-  its SR-fallback arbiter — §8); (d) **one aversive value** (fold the column `cost` field into the value module's aversive
-  component, appetitive/aversive asymmetry preserved — §3); (e) **one allo map** in L4⊗L6 (retire the column `_map` AND
-  the parallel, unwired `hippocampus.py`); (f) **one planner** = the SR value read (collapse reward.py's parallel
-  prioritized-sweeping into it; rollout = the sparing fallback — §8). Remove the non-TBT proto-object **segmentation
-  heuristic** (`ObjectField`/`segment`/`_mover_cloud`); TBT creates objects by allocate-on-mismatch (§2). THEN the **goal
-  loop**: the priority map proposes cued target-states (§9), the BG select, the operator-inversion motor achieves, value
-  confirms. The **hippocampus** is where (a)'s allocentric machinery lives — its concrete parts (2026-07-03 research,
-  `HIPPOCAMPUS.md`): a **head-direction ring attractor** updated by the turn's efference/angular velocity; the
-  **allocentric grid/place** code path-integrated by self-motion and reset by sensing (loop closure); the **gain-field
-  coupling** that rotates self-motion by head-direction on the way in and the goal vector by −head-direction on the way out
-  (§8); and the **reafference self/world-motion split** (the same efference-copy comparison — cancel self-induced flow, the
-  residual is world-motion; today only a largest-component heuristic exists — §4c). It is a PREREQUISITE for salience-cued
-  nav — a static distinct object is invisible to motion-only salience (`project_marker_exposes_hippocampus_prereq`), not a
-  late add-on; the heterarchy scales the same loop.
-- **P5 — The semantic SDR encoder (a PREREQUISITE for P4a — re-assessed 2026-07-03, not post-P4).** The general data
-  type — for **content** (`L4.E`, `reference_tbt_feature_definition`) AND for **location** — is an **SDR**, whose point is
-  semantic OVERLAP (similarity), determinism, fixed length + sparsity. Today BOTH are EXACT-MATCH / LOCALIST (similar
-  inputs → orthogonal codes; `OnlineSR` indexed by localist `state_node` symbols), so nothing generalises across
-  similar-but-unseen inputs. The **SDR test** made this concrete: `hex_code` has graded a-priori metric overlap (cos
-  +1→0.94, +4→0.28, far→−0.39) while `state_node` is aliased-or-orthogonal and the SR relates only VISITED states (an
-  unvisited neighbour has no row). Fix: an HTM-style encoder obeying the three rules — hand-designed sub-encoders
-  (scalar/periodic/category; the hex grid is the periodic *location* prior) or a LEARNED **spatial pooler** — so the
-  location/content SDR has overlap; and the SR becomes **successor *features*** over that SDR encoding (Barreto et al.
-  2017; *Neurobiological successor features for spatial navigation*, Hippocampus 2021), retiring the symbol-indexed
-  tabular `OnlineSR`. This is what makes P4a's "location is an SDR" real — the linchpin, pulled forward. (Purdy, *Encoding
-  Data for HTM Systems*; NuPIC spatial pooling.) **BUILT 2026-07-03 (`tbt/encoders.py`, `test_encoders.py` 10/10):** the
-  bidirectional library — `SDR` + `Scalar`(+periodic)/`Category`/`Grid`/`Multi` encoders + a `SpatialPooler`; each
-  encoder IS its decoder (the inverse), so a motor SDR "thought" is read back by the same encoder that senses it (§4 — no
-  parallel motor-decoder can fester). **Successor features BUILT 2026-07-03 (`l6_sr.SuccessorFeatures`,
-  `test_successor_features.py`):** `ψ=W·φ`, `V=w·ψ` learned by TD over the SDR φ — value GENERALISES to UNVISITED states
-  graded by overlap (V(29)=9.4 vs V(21)=6.8 on a corridor where only even cells were visited), where `OnlineSR` gives a
-  flat 0. NEXT: re-seat the loop off `state_node` onto (`GridEncoder` φ + `SuccessorFeatures`), retiring `OnlineSR`.
-
-Status (2026-07-02, P0–P3 mechanisms DONE — next is P4): **P0** collapsed the parallel systems (one prediction, one value,
-no change-log; cost = the kept aversive value). **P1** made perception factored and live — `perceive` delivers
-`(location, content)` through recognize→predict→correct→learn; the old fovea/`track`/pose dispatch is DELETED and the
-column is content-opaque (colour confined to the peripheral `retina.view_signature`). **P2** built the one forward
-prediction over that rep (`col.forward` + the `_pred_error` residual). **P3** built the temporal sequence memory
-(`sequence.SequenceMemory`), behaviors (`sequence.Behavior` — other objects' dynamics), backward modelling
-(`sequence.inverse`), and the order/config-dependent case (context-conditioning). Suite: **137 passed, 4 xfailed**
-(the xfailed = end-to-end SOLVING, P0-dip casualties re-earned at P4).
-
-Re-vetted what P1/P2 was thought to unblock (the estimator stack): P1 DID unblock the location-dispatch deletion (done).
-But the rest was mis-attributed — it is **the PLANNING system, gated on P4**, not P1/P2: `move_delta` / `heading_dependent`
-/ `here_position` / the cost-bump / the achiever (`vector_action`/`navigate_to`/`achieve`/`_pose_vector_action`) are all
-read by the **reward-goal beeline in `_choose`**; they retire/unify *together* onto the one value + SR geodesic at **P4**
-(with `state_node`'s binning and the tabular `col.predict`). And the **segmentation heuristic** was not eliminated by P1 —
-`perceive` swapped `ObjectField` for `_mover_cloud`'s own connected-component heuristic; true elimination = recognition-
-proposed boundaries from prediction mismatch (§2 L2/3), a **P3+ figure-ground** build, not a deletion. So the remaining
-"estimator stack" is really *planning + figure-ground*, not P1/P2 leftovers. The **operator** primitive + relation/factor
-discovery are tested; the SR is the one L6.
-
-**Next: P4 — the convergence (in progress, 2026-07-03).** Re-vetted against the coloured-marker probe and a neuroscience
-pass (goal-vector cells, the priority map, preplay/VTE, grid = SR eigenvectors — §8/§9): P4's bulk is **finishing P0's
-parallel-system collapse that leaked into `column.py`**, NOT new machinery — most of the column is a *second copy* of a
-layer mechanism (a second location code, operator store, navigator, aversive signal, allo map; reward.py a second
-planner). Collapse each into the ONE (§10 P4 (a)–(f), rule 1), remove the non-TBT proto-object segmentation heuristic,
-THEN build the **hippocampus** (allo frame + self/world-motion split via reafference), which the marker probe showed is
-the PREREQUISITE for salience-cued nav (`project_marker_exposes_hippocampus_prereq`), THEN the priority-map goal loop
-(§9 — where the target comes from is now specified: salience ⊕ value → priority map → goal-vector cells; test by
-preplay/VTE). **NB the ordering shifted (2026-07-03): (a) the location collapse now depends on P5** (the SDR encoder /
-successor features), pulled forward — the SDR test showed the SR-over-localist-symbols gives no a-priori metric overlap,
-so "location is an SDR" needs the encoder first (`project_location_is_an_sdr`). Open each slice with the TBT-accuracy
-check + a consumer map before cutting; suite-green throughout; git branches for risk. Empirical anchor: suite 132 passed
-/ 4 xfailed (hippocampus.py parallel removed); NavGame (now colour-cued) 0/8.
-
-**Gain-field finding (2026-07-03, branch `p4-collapse`).** Building the location collapse (a) inside the column exposed
-the architectural error directly. The circulant-shift operator (`ModularOperator`, no SVD) restored NavGame 8/8 fast and,
-with a per-heading-conditioned shift on a conjunctive `pos⊗head` code, made the non-abelian **OrientationGame reach 4/8** —
-proving the SE(2) mechanism works on the SDR. **But** it forced (i) a directed explorer to cover FORWARD in *every* heading
-and (ii) a depth-2 rollout to reorient — both fragile, both symptoms of a missing gain field. The neuroscience pass (§8
-"from the vector to the action") named it: FORWARD is **one** egocentric displacement **rotated by head-direction**, and
-that transform is a **hippocampal** gain field, not a per-heading column operator. So the conjunctive-per-heading operator
-is itself a leaked parallel system to retire; the location collapse (a) proceeds as the **hippocampus module** (HD ring +
-allocentric grid + gain-field coupling), which dissolves both the coverage and the myopic-navigation problems. The
-session's operator/agent changes are a validated stepping-stone, not the destination.
-
-**Hippocampus + L5 efference (2026-07-03/04, branch `p4-collapse`).** The location collapse (a) landed as a **hippocampus
-module** (`hippocampus.py`): a head-direction ring + allocentric grid + the **gain field** (one body-frame displacement
-rotated by head-direction — HIPPOCAMPUS.md), with a **reliability-weighted (Kalman) correction** replacing the hard snap.
-The conjunctive per-heading operator + directed-coverage explorer + depth-2 rollout are deleted. **L5 is now the efference-
-copy seat** (TBP): it owns the one per-action body-frame displacement (`eff`); **L6 reads it and applies the gain field —
-no duplicate** (the hippocampus's `ego`/`dtheta` copy is erased, as is L5's legacy `move_delta`). The **controllable body
-is no longer selected** — no "which is me" code — it **falls out** of L5's efference by reafference (`sensor._reafferent`;
-§4c). Results: **NavGame 8/8 (~119 actions, near-oracle)**, MockLiveGame 60/60, OrientationGame 4/8 (capped by L23's
-heading-dependent recognised anchor — the deferred §5 L23 canonical-origin fix), suite 82 passed / 7 xfailed. **The
-hippocampus is COMPLETE for its scope (self-localisation, 2026-07-04):** H1–H4 done, **H5 subsumed** (world-anchored
-top-down frame → no unbounded drift), **H6 (the object map) deferred** until a multi-object game drives it (the bitter
-lesson). The two open game gaps are **L2/3 RECOGNITION**, not the hippocampus — OrientationGame's rotating-anchor and
-MockLiveGame's featureless 1-cell mover (no shape → no pose) — the next debug targets. Also open (test-only): retiring L5's
-config-state symbolic operator (`disp`/`edges`) with the tabular path.
-
-**Population belief + the retina-only front-end (2026-07-04, branch `p4-collapse`).** Two collapses landed together.
-(1) **The location belief is a POPULATION, not a point + scalar gain.** The hippocampus belief is a place-cell activity
-**bump** over the location SDR (+ a head-direction ring); perception UPDATES it by **superimposing** the sensory likelihood
-(the L2/3 evidence field — one bump per near-top hypothesis) on the path-integrated prior bump. The scalar `conf`/Kalman
-gain is **deleted** — reliability weighting is emergent from the bump widths (probabilistic population codes; a sharp
-sighting dominates, a flat/split/orientation-less one is carried by path integration). A symmetric object → sharp position
-bump + flat heading bump, no special case; a <2-cell view emits a flat head population (no false θ=0 spike). `_attend_self`
-is now **top-down figure-ground** (the recognized model predicts its own rigid footprint; reafference) with a **common-fate
-+ cohesion** bootstrap (Spelke). (2) **`perceive.py` is DELETED** — the proto-object segmentation harness (`ObjectField`/
-`segment`/`config_state`/`canonicalize`/`components`) violated rule 4 (a retina delivers raw feature-at-locations, it does
-not segment). The front-end is now **retina-only** (`retina.py`): background adaptation, raw non-background cells, and
-**center-surround salience** (`salient_targets` — SC pop-out, replacing the ObjectField marker cue); all grouping is the
-column's. The **L5 config-state/tabular operator** (`observe`/`predict`/`edges`/`disp`/`recolor`/`driver`) is retired with
-it — L5 is now just the efference copy + motor + pose geometry. Results: **NavGame 8/8**, MockLiveGame solves, suite 76
-passed / 7 xfailed. OrientationGame is discovery-limited (its goal is invisible → babble lottery, not perception). Open:
-the retina salience cue is less efficient than the old proto-object centroid on MockLive; the P4 goal loop (§9) for
-invisible-goal discovery.
-
-**Perception scaling + the multi-column substrate (PLAN, 2026-07-04).** Profiling the retired-tabular games exposed a
-**catastrophe**: recognition is re-run FROM SCRATCH every frame (`_sense_shape → start()`) as a serial nearest-neighbour
-scan over the whole object library, and on a multi-object scene the single-self grouping is unstable, so a **new object is
-learned almost every frame** (→52 on Sokoban) and per-frame cost grows O(library). TBT/HTM (notes + the Numenta temporal
-pooler) say the perf problem and the duplication problem are ONE disease with one cure. Dependency-ordered next steps:
-- **A — persistent recognition session (settling → convergence-or-not) (immediate).** Stop restarting recognition each
-  frame (`_sense_shape → start()`); keep ONE session, path-integrating hypotheses by the efference between frames, so
-  evidence accumulates across the moving sensor (temporal integration; L4 `SequenceMemory` feeds the next-feature
-  prediction). Recognition is *tracked*, not recomputed. Novelty = **non-convergence** (no explicit detector/threshold — §2
-  L2/3, glossary): recognised = a hypothesis converges; novel = none converges → seed a new object. Delete the scalar/
-  heuristic proxies (`_shape_key`/`_novel_key`/`best_ev<1.0`, dead `agent.surprised`). Kills the per-step from-scratch scan
-  + the duplication → the unsupported games fail FAST.
-- **B — associative recall (SDR union + overlap-θ).** Replace the serial library scan with overlap against a library union,
-  ~O(1) in library size. Needs overlap-bearing content/location SDRs (P5) — pulled forward for perception, not just location.
-- **C — receptive fields + the column sheet (§3b).** Tile the frame with overlapping RF windows, one ONE-column instance
-  each — the multi-object substrate (retire the single-whole-frame column). Needed regardless; the fix to multi-object.
-- **D — communication + heterarchy (§3b).** Proximal/basal/apical channels + thalamus routing; object composition by large
-  inter-object displacements.
-- **E — voting (last).** Pool (object, pose) across the sheet by world pose (`vote()` exists); presupposes C+A.
-
-## 11. Acceptance test for every change (the paper test)
-
-All must hold, or the change does not land:
-1. **Explainable** in one sentence that fits §1–§6 (no new term, no second meaning, no "well, in this mode…").
-2. **Obeys the five rules** (no parallel system, no second definition, no coordinator bloat, no harness/special-case/
-   ungrounded arbitration, no symbolic estimator/heuristic/change-log).
-3. **TBT-accurate mechanism.** Before a step begins, verify its mechanism against real TBT / neuroscience — *not* just
-   this doc's wording, which can drift (P1's "location from the recognized pose" was such a drift). State the mechanism in
-   one sentence, ask "is this how a real cortical column does it?" (which layer, what drives it, does the research back
-   it), and research when unsure. If the doc's wording is wrong, **fix the doc first**, then build.
-
-If a change cannot pass all three, the design is wrong — fix the design, not the change.
+## Sources
+- Hawkins, *A Thousand Brains* — cortex = model, old brain = goals/value; uniform cortical algorithm.
+- Redgrave/Gurney/Prescott — basal ganglia as the vertebrate solution to the selection problem; cortico-BG-thalamo-cortical
+  loop, selection by disinhibition.
+- Miller/Botvinick/Brody 2017, *Nat. Neurosci.* — dorsal hippocampus is causally necessary for model-based planning.
+- Hippocampal preplay / vicarious trial-and-error / SWR — prospective simulation of candidate futures.
+- Constantinescu, O'Reilly & Behrens 2016, *Science*; Bellmund et al. 2018, *Science* — grid-like reference-frame codes for
+  abstract/conceptual spaces in entorhinal + medial PFC.
+- Mountcastle 1978 — the uniform cortical column: one repeated circuit across all neocortex (§2, §8 premise).
+- Douglas & Martin 2004, *Annu. Rev. Neurosci.* — the canonical cortical microcircuit; thalamic input is ~10% of synapses,
+  so a region's function comes from its CONNECTIVITY, not a different circuit (§8, the context-in half).
+- Molyneaux/Arlotta/Macklis (projection-neuron fate); Fezf2/Ctip2 → L5b subcerebral, Tbr1 → L6 corticothalamic, Satb2 →
+  callosal — birth-order (inside-out) + a transcription-factor code fixes laminar/projection IDENTITY (§8, the target-out half).
+- Thousand Brains Project 2024 (arXiv 2412.18354) — learning is local, associative, unsupervised; credit assignment is solved
+  STRUCTURALLY by reference frames (error localized to a feature-at-location), not by backprop (§7).
