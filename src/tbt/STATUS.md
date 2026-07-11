@@ -21,18 +21,17 @@ The system is **ALWAYS MULTI-COLUMN** — at least one sensory column *and* one 
 exceptions (`ARCHITECTURE.md` §5.1). **First concrete target:** win one trivial replica level end-to-end through that loop.
 
 ## What is BUILT + WIRED in the new system
-The rule-enforcing skeleton + the first two salvaged devices (2026-07-09).
+FIRST VERTICAL SLICE DONE (2026-07-10): everything is now reachable from the live entry point — STANDALONE is empty, the
+RULES.md #2 goal.
 
 | module | one-line job | wired? | its test |
 |--------|--------------|--------|----------|
-| `agent.py` | the live entry point / root of the loop — a `step(obs)→action` stub (raises until the first slice) | ROOT | `test_reachability` |
-| `htm.py` | the ONE cortical-layer mechanism — HTM sequence memory (proximal SDR-in, pluggable basal context, apical, learn/predict/burst); every layer is an instance, distinguished by its basal context (L4/L2·3/L5/L6 map + BUILT-vs-NOT in the docstring). `sequence.py` MERGED in | STANDALONE¹ | `test_htm` |
-| `encoders.py` | SDR transduction library (`SDR` + Scalar/Category/Grid/Multi/Conjunctive/SpatialPooler) — data ↔ overlap-bearing SDR — salvaged, unchanged | STANDALONE¹ | `test_encoders` |
+| `agent.py` | live entry point / ROOT — composes a SENSORY + a TASK `Column` and runs the sensorimotor SCAN (a factored STATE carried between fixations conditions the next-content prediction); the `step(obs)→action` game loop is still a stub | ROOT | `test_column_arithmetic` |
+| `column.py` | the cortical COLUMN — 5 layers (L4, L2/3, L5IT, L5PT, L6a) as one `HTMLayer` each, wired per its §12 table (+ the full layer/sublamina research + whole-column plan in its docstring); `observe` drives L4 (the first slice), the full §13 `step` counterstream is the target | WIRED | `test_column_arithmetic` |
+| `htm.py` | the ONE cortical-layer mechanism — HTM sequence memory (proximal SDR-in via SP, basal context, apical, learn/predict/burst); a layer = one instance + a declared (proximal-in, context-in, apical-in, target-out) wiring | WIRED | `test_htm` |
+| `encoders.py` | SDR transduction library (`SDR` + Scalar/Category/Grid/Multi/Conjunctive/SpatialPooler) — data ↔ overlap-bearing SDR | WIRED | `test_encoders` |
 
-¹ STANDALONE = allowlisted in `test_reachability` with a reason; salvaged devices under development, to be wired into a
-column once generalization is solved. NOT "done" (RULE 3) — a component passing its own test is a half-step, not integration.
-
-**Generalization investigation — RESOLVED 2026-07-09 (scratch experiments; devices still STANDALONE).** Two durable results,
+**Generalization investigation — RESOLVED 2026-07-09 (now wired into the column, above).** Two durable results,
 full detail in memory `project_place_invariance_needs_factored_state` + `reference_htm_canonical_pipeline`, plain-English
 writeup in `ARCHITECTURE.md` §7:
 1. **The substrate is VALIDATED.** The canonical HTM pipeline **encoder → SpatialPooler → HTMLayer → SDRClassifier** reaches
@@ -47,17 +46,22 @@ writeup in `ARCHITECTURE.md` §7:
    A FACTORED recurrent state channel closes it (100%) where PURE temporal memory can't (37%). ReSU investigated + DROPPED
    (temporal encoder, not spatial invariance).
 
-Suite: **27 passed.** Run `python src/tests/test_reachability.py` for the wired map; the 20 legacy test files are archived
-under `Legacy - DO NOT USE OR IMPORT!/tests/`.
+Suite: **26 passed** (~21s; `test_column_arithmetic` is the ~20s end-to-end column test). Run
+`python src/tests/test_reachability.py` for the wired map; the 20 legacy test files are archived under
+`Legacy - DO NOT USE OR IMPORT!/tests/`.
 
 ## Next
-**The TWO-COLUMN slice** (the generalization investigation above showed WHY: place-invariance needs a factored state carried
-by a second column — `ARCHITECTURE.md` §7). Build the thinnest **MULTI-COLUMN** unit that turns the arithmetic demonstration
-into real architecture: a **sensory column** (reads the feature at each location) ⊕ a **task/PFC column** (maintains the
-travelling STATE, feeding the sensory column's basal `context=`), one shared operator walked across locations. Then thicken
-toward the closed loop (RULES.md #4 + ARCHITECTURE.md §3/§5.1) — **hippocampal rollout** + **BG select** + **thalamus gate**,
-driven by `agent.py` (plumbing only). Reuse legacy via RULES.md #5, wired end-to-end; nothing counts until imported from
-`agent.py` AND the agent plays more than before (RULES.md #3). No single-column experiments, ever.
+The TWO-COLUMN slice is **DONE**: `agent.Agent` (sensory ⊕ task `Column`) reproduces the place-invariance win through the
+real composition — the successor of a place NEVER trained (hundreds 3-9) ≈ **100%** (`test_column_arithmetic`). Thicken from
+here (RULES.md #4 — always keep it runnable, ARCHITECTURE.md §3/§5.1):
+1. **A SPATIAL task** to exercise the sensory column's L4↔L6a feature-at-location loop (arithmetic under-exercises it — the
+   digit is place-invariant content, so the "location" was addressing, not predictive). This drives L6a (grid location) +
+   L5 (operator/path-integration) for real, and is closer to the ARC north star.
+2. **The factored state via the basal `context=` channel** (the first slice folds it into the proximal path — §15 note),
+   which really wants the task column's output driving L4's basal dendrites (the column-faithful realization).
+3. Then the closed loop — **L2/3 recognition/voting**, **L5 motor**, **hippocampal rollout** + **BG select** + **thalamus
+   gate** — each added as a task exercises it, driven by `agent.py`. Nothing counts until imported from `agent.py` AND the
+   agent plays more than before (RULES.md #3). No single-column experiments, ever (ARCHITECTURE.md §5.1).
 
 ## How to answer "where are we?"
 Run the reachability test (once it exists); it reports the wired module map. Keep this table equal to that output.

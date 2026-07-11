@@ -17,9 +17,9 @@ _ENTRY = "agent"
 
 # Modules legitimately NOT reachable from the live loop. Each MUST carry a written reason. The goal is that this is empty.
 STANDALONE: dict = {
-    "htm": "the ONE cortical-layer mechanism (HTM sequence memory; was htm+sequence, merged); validated via the canonical pipeline; wired when the column dynamics are built.",
-    "encoders": "salvaged SDR transduction library (data → overlap-bearing SDR); wired at the peripheral when a column is built.",
-    "column": "the cortical-column composition — research + whole-column PLAN + wiring scaffold (PART A/B in its docstring); step() dynamics NOT built yet, so not wired into agent.py. Under construction, not 'done' (RULES #3).",
+    # EMPTY (2026-07-10): the first slice wired everything — agent → column → {htm, encoders}. htm/encoders/column are now
+    # reachable from the live entry point; the RULES.md #2 goal (this dict empty) is met. Add an entry ONLY with a written
+    # reason if a module is legitimately built-but-not-yet-wired again.
 }
 
 

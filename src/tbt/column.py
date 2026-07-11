@@ -213,15 +213,19 @@ PART B — THE PLAN: how we build the whole column
     approximation, flagged.
   • L2-vs-L3 as separate cell populations — modeled as ONE L2/3 with two OUTPUT wires (deep-L3 FF, L2 FB) first.
 
-§15. OPEN DECISIONS (for the user, before we implement the dynamics)
-  D1. Split L5 into IT + PT from the start, or one L5 (motor) first?  → recommend SPLIT (PT's dual motor + efference-copy-
-      to-hierarchy role is exactly what the sensorimotor loop needs).
-  D2. L2/3 as one object layer with two output wires, or two cell populations (deep-L3 FF, L2 FB)?  → recommend ONE + two
-      wires first.
-  D3. First RUNNABLE task: exercise ALL layers, or build the full structure but drive a SUBSET first (arithmetic ⇒ L4 +
-      L6a-as-place + L5PT-state; spatial ⇒ the full L4↔L6a loop)?  → recommend full structure, subset-driven, rest wired +
-      tested-for-wiring.
-  D4. Adopt P2 (superficial = error, deep = prediction) as the organizing principle?  → recommend YES.
+§15. DECISIONS (LOCKED 2026-07-10 — the user took the recommendations; first slice = the sensorimotor increment)
+  D1 → SPLIT L5 into IT + PT (kept in the composition below).
+  D2 → L2/3 = ONE layer with two OUTPUT wires (FF_EXPORT + FB), not two cell populations.
+  D3 → FULL structure, SUBSET-driven first: the first runnable slice drives L4 (feature) conditioned on a factored STATE
+       carried by a second (TASK) column (project_place_invariance_needs_factored_state); L2/3, L5IT, L5PT, L6a are present
+       and wired but not yet driven.
+  D4 → adopt "superficial = prediction ERROR / feedforward-up; deep = PREDICTION / feedback-down" as the organizing principle.
+  FIRST SLICE (wired 2026-07-10): `Column.observe` (below) drives L4; `agent.Agent` composes a SENSORY + a TASK column and
+  runs the sensorimotor increment; `test_column_arithmetic` reproduces the place-invariance win (a place never trained ≈100%)
+  through the real column composition — turning option2.py's validated mechanism into wired architecture. SIMPLIFICATIONS
+  (honest, per RULES): the factored state enters L4 via the PROXIMAL path (concatenated, then SP), not the basal `context=`
+  channel — a single HTMLayer's active cells are content-determined, so proximal is what reaches a cell-readout (htm.py
+  §PROXIMAL); order=1 (the successor is a first-order map). Basal-context + high-order are refinements for a spatial task.
 
 FULL RESEARCH (unabridged, every citation + URL + uncertainty flag): `src/tbt/notes/cortical_layers_and_sublaminae_research.md`.
 Sources (compact): Harris & Shepherd 2015 Nat Neurosci; Douglas & Martin 2004
@@ -267,42 +271,55 @@ class Layer:
 
 class Column:
     """A cortical column: L4, L2/3, L5(IT,PT), L6a as ONE HTMLayer each, wired per the §12 table. Composition + wiring are
-    real here; the per-timestep counterstream dynamics (§13) are the next step, gated on the §15 decisions.
+    real here; the full counterstream `step` (§13) is the target — the FIRST SLICE (§15 D3) drives L4 only, via `observe`.
 
     ALWAYS-multi-column note (ARCHITECTURE §5.1): a Column is instantiated at least twice (a SENSORY column on physical
-    space and a PFC/TASK column on an abstract space) — same class, different reference frame. The task column's output is
-    wired into the sensory column's basal `context` (the factored-state mechanism from
-    project_place_invariance_needs_factored_state)."""
+    space and a PFC/TASK column on an abstract space) — same class, different reference frame. The task column's output
+    conditions the sensory column's L4 (the factored-state mechanism from project_place_invariance_needs_factored_state).
+    `order` sets every layer's HTM order — 2+ (high-order, real sensorimotor sequences) by default; 1 for the first-order
+    arithmetic first slice."""
 
-    def __init__(self, sensory_n: int, n_cols: int = 1024, seed: int = 0) -> None:
+    def __init__(self, sensory_n: int, n_cols: int = 1024, order: int = 2, seed: int = 0) -> None:
         # Proximal front-end: only L4 turns a RAW input space into columns (§10 P4, §12). All other layers take SDRs.
+        self.n_cols = int(n_cols)
         l4_sp = SpatialPooler(n_inputs=sensory_n, n_cols=n_cols, seed=seed)
         self.layers: dict[str, Layer] = {
             # feature-at-location: proximal sensory (via SP), basal context = L6a location, apical = L2/3 object feedback.
-            "L4":   Layer("L4", HTMLayer(order=2), target_out=(LOCAL,), sp=l4_sp,
+            "L4":   Layer("L4", HTMLayer(order=order), target_out=(LOCAL,), sp=l4_sp,
                           proximal_from="sensory", context_from="location", apical_from="L23"),
             # object / output + voting: proximal L4, basal = own recurrence + peer-column votes, apical = L1 top-down.
-            "L23":  Layer("L23", HTMLayer(order=2), target_out=(FF_EXPORT, FB, IT),
+            "L23":  Layer("L23", HTMLayer(order=order), target_out=(FF_EXPORT, FB, IT),
                           proximal_from="L4", context_from="recurrence", apical_from="L1"),
             # associative integrator: proximal L2/3, → cortico-cortical + striatum(→BG).  (D1: split kept.)
-            "L5IT": Layer("L5IT", HTMLayer(order=2), target_out=(IT,),
+            "L5IT": Layer("L5IT", HTMLayer(order=order), target_out=(IT,),
                           proximal_from="L23", context_from="recurrence", apical_from="L1"),
             # driver/effector = displacement cells: proximal L5IT (IT→PT), basal = state+goal, apical = Larkum gate;
             # → subcortical MOTOR + HO-thalamus efference copy.
-            "L5PT": Layer("L5PT", HTMLayer(order=2), target_out=(PT,),
+            "L5PT": Layer("L5PT", HTMLayer(order=order), target_out=(PT,),
                           proximal_from="L5IT", context_from="goal", apical_from="L1"),
             # location / grid: proximal = L5 efference (path integration) + thalamus, basal = grid recurrence,
             # → L4 (location, modulatory) + thalamus (CT gain).
-            "L6a":  Layer("L6a", HTMLayer(order=2), target_out=(CT, LOCAL),
+            "L6a":  Layer("L6a", HTMLayer(order=order), target_out=(CT, LOCAL),
                           proximal_from="efference", context_from="recurrence", apical_from=None),
         }
 
-    def step(self, sensory: SDR, efference: Optional[SDR] = None, feedback: Optional[SDR] = None):
-        """One movement/timestep, running the two-counterstream dataflow of §13.
+    # ── the FIRST-SLICE drive (§15 D3): sense a feature at L4, conditioned on a factored state ──────────────────────
+    def observe(self, feature: SDR, context: Optional[SDR] = None, learn: bool = True) -> list:
+        """Drive L4: sense a FEATURE (proximal), optionally conditioned on a factored CONTEXT/state (the task column's
+        output — project_place_invariance_needs_factored_state). Return L4's ACTIVE CELLS (flat indices) for a downstream
+        readout. SIMPLIFICATION (noted, §15): the context enters via the PROXIMAL path (concatenated → SP), not L4's basal
+        `context=` — a single HTMLayer's active cells are content-determined, so proximal is what a cell-readout sees. The
+        other layers (L2/3, L5, L6a) exist and are wired but are not driven by this slice (D3)."""
+        l4 = self.layers["L4"]
+        inp = feature if context is None else SDR.concat([feature, context])
+        cols = l4.sp.encode(inp.dense(), learn=learn)
+        l4.htm.observe(cols.active, learn=learn)
+        return [c * l4.htm.M + cell for (c, cell) in l4.htm._active]
 
-        NOT IMPLEMENTED YET — the wiring (structure) above is real, but the dynamics are gated on the §15 decisions
-        (D1–D4) and must be built against a runnable task with an end-to-end test (RULES.md #3/#4). Implementing this is
-        the next step after the plan is signed off."""
+    def step(self, sensory: SDR, efference: Optional[SDR] = None, feedback: Optional[SDR] = None):
+        """The FULL two-counterstream dataflow of §13 (all layers). TARGET, not yet built — the first slice drives L4 via
+        `observe`; the deep layers (L5/L6) + the feedback stream come as tasks exercise them (D3). Raises so a half-built
+        loop fails loudly (RULES #3)."""
         raise NotImplementedError(
-            "column.step: scaffold only — see PART B §13 (dataflow) and §15 (open decisions D1–D4) in this module's "
-            "docstring; to be implemented against a runnable task, wired from agent.py, with an end-to-end test.")
+            "column.step: the full §13 counterstream is the target; the wired first slice uses `Column.observe` (L4 only, "
+            "§15 D3). Build the deep-layer + feedback dynamics against a task that exercises them.")
