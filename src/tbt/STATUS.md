@@ -26,8 +26,10 @@ RULES.md #2 goal.
 
 | module | one-line job | wired? | its test |
 |--------|--------------|--------|----------|
-| `agent.py` | live entry point / ROOT — composes a SENSORY + a TASK `Column` and runs the sensorimotor SCAN (a factored STATE carried between fixations conditions the next-content prediction); the `step(obs)→action` game loop is still a stub | ROOT | `test_column_arithmetic` |
+| `agent.py` | live entry point / ROOT — composes a SENSORY + a TASK `Column` (the sensorimotor SCAN) AND a DECISION loop (`decide`: perceive→relay→select→gate→act; `reward`: RPE-train); the `step(obs)→action` game loop is still a stub | ROOT | `test_column_arithmetic`, `test_bg_thalamus` |
 | `column.py` | the cortical COLUMN — 5 layers (L4, L2/3, L5IT, L5PT, L6a) as one `HTMLayer` each, wired per its §12 table (+ the full layer/sublamina research + whole-column plan in its docstring); `observe` drives L4 (the first slice), the full §13 `step` counterstream is the target | WIRED | `test_column_arithmetic` |
+| `basal_ganglia.py` | the value-driven SELECTOR — OpAL Go/NoGo + dopamine-RPE + STN commitment (reference_basal_ganglia); the ONE place competing options are arbitrated (rule 4). MoE column-allocation deferred | WIRED | `test_bg_thalamus` |
+| `thalamus.py` | the inter-column ROUTER/GATE — relays a column's percept to the selector + gates the BG's winner to the motor; content⊗location binding (place-value / voting) deferred | WIRED | `test_bg_thalamus` |
 | `htm.py` | the ONE cortical-layer mechanism — HTM sequence memory (proximal SDR-in via SP, basal context, apical, learn/predict/burst); a layer = one instance + a declared (proximal-in, context-in, apical-in, target-out) wiring | WIRED | `test_htm` |
 | `encoders.py` | SDR transduction library (`SDR` + Scalar/Category/Grid/Multi/Conjunctive/SpatialPooler) — data ↔ overlap-bearing SDR | WIRED | `test_encoders` |
 
@@ -46,22 +48,24 @@ writeup in `ARCHITECTURE.md` §7:
    A FACTORED recurrent state channel closes it (100%) where PURE temporal memory can't (37%). ReSU investigated + DROPPED
    (temporal encoder, not spatial invariance).
 
-Suite: **26 passed** (~21s; `test_column_arithmetic` is the ~20s end-to-end column test). Run
+Suite: **27 passed** (~20s; `test_column_arithmetic` is the ~20s end-to-end column test, `test_bg_thalamus` is fast). Run
 `python src/tests/test_reachability.py` for the wired map; the 20 legacy test files are archived under
 `Legacy - DO NOT USE OR IMPORT!/tests/`.
 
 ## Next
-The TWO-COLUMN slice is **DONE**: `agent.Agent` (sensory ⊕ task `Column`) reproduces the place-invariance win through the
-real composition — the successor of a place NEVER trained (hundreds 3-9) ≈ **100%** (`test_column_arithmetic`). Thicken from
-here (RULES.md #4 — always keep it runnable, ARCHITECTURE.md §3/§5.1):
-1. **A SPATIAL task** to exercise the sensory column's L4↔L6a feature-at-location loop (arithmetic under-exercises it — the
-   digit is place-invariant content, so the "location" was addressing, not predictive). This drives L6a (grid location) +
-   L5 (operator/path-integration) for real, and is closer to the ARC north star.
-2. **The factored state via the basal `context=` channel** (the first slice folds it into the proximal path — §15 note),
-   which really wants the task column's output driving L4's basal dendrites (the column-faithful realization).
-3. Then the closed loop — **L2/3 recognition/voting**, **L5 motor**, **hippocampal rollout** + **BG select** + **thalamus
-   gate** — each added as a task exercises it, driven by `agent.py`. Nothing counts until imported from `agent.py` AND the
-   agent plays more than before (RULES.md #3). No single-column experiments, ever (ARCHITECTURE.md §5.1).
+Wired so far: the **forward-model** slice (sensory ⊕ task `Column`, place-invariance win ≈ **100%** on a place never trained,
+`test_column_arithmetic`) and the **decision** slice (basal-ganglia value SELECTION + thalamus relay/gate, learns a
+context→action map from reward, `test_bg_thalamus`). Both are minimal-but-real; each subsystem's RICHER role is deferred to a
+task that needs it. Thicken from here (RULES.md #4 — always keep it runnable, ARCHITECTURE.md §3/§5.1):
+1. **Join the two slices into one loop on a small GAME** — perceive (column) → predict / roll out → SELECT (BG) → GATE
+   (thalamus) → act → reward. This needs a **TD value critic** (`reward.py` — multi-step value; the RPE the BG currently
+   fakes as a centered immediate reward) + a tiny nav/decision env, and is where the BG + thalamus earn their full keep.
+2. **A SPATIAL task** for the sensory column's L4↔L6a feature-at-location loop (arithmetic under-exercises it — the digit is
+   place-invariant content, so "location" was addressing). Drives L6a (grid location) + L5 (operator/path-integration).
+3. **The thalamus's binding role** (content ⊗ location across two columns → place-value / cross-column VOTING) + the factored
+   state via L4's basal `context=` channel; then **L2/3 recognition/voting**, **L5 motor**, **hippocampal rollout**. Each
+   added as a task exercises it, driven by `agent.py`. Nothing counts until imported from `agent.py` AND the agent plays more
+   than before (RULES.md #3). No single-column experiments, ever (ARCHITECTURE.md §5.1).
 
 ## How to answer "where are we?"
 Run the reachability test (once it exists); it reports the wired module map. Keep this table equal to that output.

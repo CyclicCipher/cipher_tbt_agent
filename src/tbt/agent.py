@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import numpy as np
 
+from .basal_ganglia import BasalGanglia
 from .column import Column
 from .encoders import SDR, CategoryEncoder
+from .thalamus import Thalamus
 
 
 class _Readout:
@@ -57,6 +59,15 @@ class Agent:
         self.task = Column(sensory_n=sensory_n, n_cols=n_cols, order=1, seed=seed + 1)     # carries/predicts the STATE
         self.read_content = _Readout(n_cols, n_content)      # order=1 → M=1 → n_cells == n_cols
         self.read_state = _Readout(n_cols, n_state)
+        # decision loop (ARCHITECTURE §3): the BASAL GANGLIA selects an action by value; the THALAMUS relays the percept
+        # in + gates the winner out to the motor. The decision column is created lazily (its input size = the context's).
+        # Exercised by a reward-driven task; the arithmetic scan does not use it.
+        self.thalamus = Thalamus()
+        self.bg = BasalGanglia(seed=seed)
+        self._decision_col = None
+        self._pending = None
+        self._n_cols = int(n_cols)
+        self._seed = int(seed)
 
     # ----- one fixation: sense the feature in the current state, read content + next state -----------------------------
     def _sense(self, feature: SDR, state: int, learn: bool):
@@ -82,7 +93,30 @@ class Agent:
             state = self.read_state.pred(t_cells)
         return out
 
+    # ----- the decision loop: perceive → relay → SELECT (BG) → gate → act; then reward() trains it ---------------------
+    def decide(self, context: SDR, n_actions: int, explore: float = 0.0) -> int:
+        """Perceive a CONTEXT (a decision column), RELAY the percept (thalamus), SELECT an action by value (basal ganglia),
+        GATE the winner to the motor (thalamus). Call `reward(r)` afterwards to train the choice by RPE. The decision column
+        is created lazily on the first call (its input size = the context SDR's) and read frozen (a deterministic percept)."""
+        if self._decision_col is None:
+            self._decision_col = Column(sensory_n=context.n, n_cols=self._n_cols, order=1, seed=self._seed + 2)
+        cells = self._decision_col.observe(context, learn=False)                      # perceive (frozen → stable percept)
+        ctx = self.thalamus.relay(cells)                                              # cortex → BG relay
+        action = self.thalamus.gate(self.bg.select(ctx, n_actions, explore=explore))  # select by value, gate to the motor
+        self._pending = (ctx, action)
+        return action
+
+    def reward(self, r: float) -> None:
+        """Train the last `decide` by reward-prediction error. For an immediate reward r∈{0,1}, the centered RPE is 2r−1
+        (rewarded → Go, unrewarded → NoGo). A proper TD critic (`reward.py`) comes with a multi-step-value task."""
+        if self._pending is None:
+            return
+        ctx, action = self._pending
+        self.bg.learn(ctx, action, rpe=2.0 * float(r) - 1.0)
+        self._pending = None
+
     def step(self, observation):
-        """The generic game interface (observation → action) — still a STUB. The wired slice is `scan`; the game loop
-        (perceive → plan → act → win) is built next (STATUS.md 'Next'). Raises rather than a silent no-op (RULES.md #3)."""
-        raise NotImplementedError("Agent.step: game loop not built yet — the wired slice is Agent.scan (STATUS.md 'Next').")
+        """The generic game interface (observation → action) — still a STUB. The wired slices are `scan` (forward model)
+        and `decide`/`reward` (selection); the full game loop (perceive → plan → act → win) composes them (STATUS.md
+        'Next'). Raises rather than a silent no-op (RULES.md #3)."""
+        raise NotImplementedError("Agent.step: full game loop not built — wired slices are Agent.scan + Agent.decide.")
