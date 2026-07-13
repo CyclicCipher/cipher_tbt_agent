@@ -31,52 +31,78 @@ regions differ only in what they connect to and what they model. So the same col
 The goal-state and the plan hierarchy are therefore just "stable objects in L2/3" — the same recognition/pooling mechanism
 as a sensory object, but the object is a goal/plan and the frame is abstract.
 
-## 3. The planning loop (each piece, its role, and where it comes from)
+## 3. The planning loop — the regions, their substrate, and their contracts
 
 ```
-   env frame                                                            action
-      │                                                                    ▲
-      ▼   (agent.py = pure plumbing: NO decisions)                         │
- ┌────────────────── NEOCORTEX — the value-free model ──────────────────┐  │
- │  SENSORY columns  ──►  world-model (predict, propose moves)          │  │
- │  PFC/TASK columns ──►  goal-state + plan hierarchy                    │  │
- └───────┬───────────────────────────────────────┬─────────────────────┘  │
-         │ forward model                          │ the held goal          │
-         ▼                                        ▼                        │
- ┌──────────────────────── HIPPOCAMPUS — ROLLOUT ───────────────────────┐  │
- │  sweeps candidate future trajectories (preplay/VTE) by querying the   │  │
- │  cortical forward model step by step, toward the goal                 │  │
- └───────────────────────────────┬──────────────────────────────────────┘  │
-                                  │ candidate trajectories                   │
-                                  ▼                                          │
- ┌──────────────────── BASAL GANGLIA — VALUE + SELECT ──────────────────┐   │
- │  score by reinforcement (dopamine RPE) → SELECT by disinhibition      │   │
- └───────────────────────────────┬──────────────────────────────────────┘   │
-                                  │ the winner                               │
-                                  ▼                                          │
- ┌──────────────────────── THALAMUS — GATE / RELAY ─────────────────────┐   │
- │  gate the selection back to cortex; drive the motor output ───────────┼───┘
- └───────────────────────────────────────────────────────────────────────┘
+   env frame                                                        action
+      │                                                                ▲
+      ▼   (agent.py = pure plumbing: NO decisions / value / senses)    │
+ ┌────────────── NEOCORTEX — the value-free world-model ───────────┐   │
+ │  SENSORY columns  → predict feature-at-location, propose L5 move│   │
+ │  PFC / TASK columns → the goal-state + plan hierarchy           │   │
+ └──────┬───────────────────────────────────┬─────────────────────┘   │
+        │ forward model                     │ the held goal           │
+        ▼                                   ▼                         │
+ ┌────────────── HIPPOCAMPUS — ROLLOUT ────────────────────────────┐   │
+ │  sweep candidate futures (preplay/VTE) over the cortical model, │   │
+ │  toward the goal  →  candidate trajectories                     │   │
+ └───────────────────────────┬─────────────────────────────────────┘   │
+                             ▼                                         │
+ ┌────────── VALUE / DOPAMINE — the CRITIC (old brain) ────────────┐   │
+ │  expected reward, learned by TD as the SR read-off V = w·(M·R); │   │
+ │  scores the candidates, emits the scalar RPE δ + tonic ρ        │   │
+ └───────────────────────────┬─────────────────────────────────────┘   │
+                             │ values + δ                              │
+                             ▼                                         │
+ ┌────────────── BASAL GANGLIA — SELECT ───────────────────────────┐   │
+ │  SELECT the best candidate by disinhibition; δ trains Go/NoGo   │   │
+ └───────────────────────────┬─────────────────────────────────────┘   │
+                             │ the winner                              │
+                             ▼                                         │
+ ┌────────────── THALAMUS — GATE / ROUTE ──────────────────────────┐   │
+ │  default-off; DISINHIBIT the selected channel to the motor;     │   │
+ │  route + bind content⊗location across columns for voting ───────┼───┘
+ └──────────────────────────────────────────────────────────────────┘
 ```
 
-| loop element | role | legacy source (reuse via RULES.md #5, re-wire, re-test end-to-end) |
-|---|---|---|
-| sensory column | physical world-model + recognition | `l4*`, `l5_displacement`+`operator`, `l23_object`, `sequence` (forward model), `encoders`, `retina` |
-| PFC / task column | goal-state + plan hierarchy (same column, abstract frame) | the SAME column, instantiated on a task/goal space (`reference_hierarchy_substrate`) |
-| hippocampus | ROLLOUT: prospective sweep over the model + episodic binding | `hippocampus` (repurpose from localization-only) |
-| basal ganglia | VALUE (RPE) + action SELECTION (disinhibition) | `basal_ganglia` (`BasalGanglia`, `OpponentActor`) — orphaned, resurrect |
-| thalamus | GATE / route the selection; L5's driver target | `thalamus` — underdeveloped, needs real work |
-| value-at-leaf | the SR as a rollout leaf bootstrap (NOT the whole value) | `l6_sr.SuccessorFeatures` |
+**The regions — role · substrate · reuse-source.** *How each region learns* is a design commitment (from the 2026-07-10
+study, `notes/bg_thalamus_value_research.md`): **no region uses backprop / an ANN** — the substrate is the whole point.
 
-The computational spec of the loop is EfficientZero-V2 (learned model = cortex, value = BG/dopamine, policy/select = BG,
-search/rollout = hippocampal preplay) — the SAME loop from the algorithm side. We take EZ-V2's *algorithm*, not its
-gradient-trained nets.
+| region | role | substrate (how it learns) | reuse-from (RULES #5) |
+|---|---|---|---|
+| sensory column | physical world-model + recognition | modified-HTM/SDR — LOCAL, self-supervised prediction error | `l4*`, `l5_displacement`+`operator`, `l23_object`, `encoders`, `retina` |
+| PFC / task column | goal-state + plan hierarchy (same column, abstract frame) | same as the column | the SAME column on a task frame (`reference_hierarchy_substrate`) |
+| **value / dopamine critic** | expected reward → the scalar RPE δ + tonic ρ | SDR-linear TD = the **successor-representation** read-off | `l6_sr.SuccessorFeatures` |
+| basal ganglia | SELECT by value (disinhibition) — the Go/NoGo ACTOR | modified-HTM/SDR — LOCAL **dopamine-gated three-factor Hebbian**, D1/D2 opponent (OpAL) | `basal_ganglia` (`BasalGanglia`, `OpponentActor`) |
+| thalamus | route + gate the selection (disinhibition) + bind content⊗location for voting | **DETERMINISTIC** — no learner inside; only optional slow gain | `thalamus` |
+| hippocampus | ROLLOUT — prospective sweep over the model — + episodic binding | orchestration over the column's model (holds NO model of its own) | `hippocampus` |
+
+**The value critic, precisely.** Value is not a separate network: it is a **read-off of L6's predictive map** (the
+successor representation), `V = w·(M·R)` — routine value is one cheap dot product, rollout is the sparing fallback. The
+critic emits **two distinct errors from one update** (Gardner/Gershman 2018): a *vector* SF-Bellman error that trains the SR
+MAP — this runs even at **zero reward**, it is the epistemic / structure-learning signal the cortex owns — and a *scalar*
+`δ = r + γV(s′) − V(s)`, the **dopamine** the basal ganglia consumes. A ceiling we have PROVEN
+(`project_linear_value_cannot_hold_sokoban`): a linear value cannot represent relational V*; for those, `value` shrinks to
+**scoring rollout leaves** and the plan comes from the hippocampal sweep, not the read-off.
+
+**The contracts (who speaks what — the interface each region exposes).**
+- **peripheral (retina/effectors):** `transduce(field) → [(feature, location)]` · `decode(motor_sdr) → command`
+- **cortical column:** `observe(feature, location)` · `predict()` · `recognise() → (object, pose)` · `motor() → SDR` · `goal`
+- **value critic:** `value(φ) → v` · `dopamine(φ, r, φ′) → δ` · `rho() → ρ`
+- **basal ganglia:** `select(candidates) → winner` · `learn(δ)`
+- **thalamus:** `bind(cols) → R` · `read(R, query)` · `gate(winner) → motor`
+- **hippocampus:** `rollout(goal, cortex) → trajectories`
+- **agent:** `step(obs) → action` — plumbing ONLY: `transduce → cortex.observe → «loop» → thalamus.gate → decode`; and `reward → critic → δ → bg.learn`.
+
+The computational spec of the loop is EfficientZero-V2 (learned model = cortex; **value = the critic (SR/dopamine)**;
+**policy/select = the basal ganglia**; search/rollout = hippocampal preplay) — the SAME loop from the algorithm side. We
+take EZ-V2's *algorithm*, not its gradient-trained nets.
 
 ## 4. One decision, end to end
 Perceive → sensory columns update the world-model; the PFC column holds/updates the goal-state → the hippocampus rolls out
-candidate trajectories over the world-model toward the goal → the basal ganglia score by value and SELECT one by
-disinhibition → the thalamus gates the selected action back and drives the motor output → `agent.py` enacts it in the
-environment → repeat.
+candidate trajectories over the world-model toward the goal → the **value critic** scores them (the SR read-off, plus the
+dopamine δ that trains the selector) → the **basal ganglia** SELECT one by disinhibition → the thalamus gates the selected
+action to the motor output → `agent.py` enacts it in the environment → repeat.
 
 ## 5. Hard rules (founding constraints — beyond `RULES.md`)
 
@@ -175,3 +201,6 @@ to *emerge*: like the reference frame in §7, it is **given, not learned**.
   callosal — birth-order (inside-out) + a transcription-factor code fixes laminar/projection IDENTITY (§8, the target-out half).
 - Thousand Brains Project 2024 (arXiv 2412.18354) — learning is local, associative, unsupervised; credit assignment is solved
   STRUCTURALLY by reference frames (error localized to a feature-at-location), not by backprop (§7).
+- §3 loop grounding (dopamine = RPE — Schultz; SR value read-off — Dayan/Stachenfeld/Gershman; OpAL Go/NoGo — Collins & Frank;
+  driver/modulator + core/matrix — Sherman & Guillery / Jones; generalized PE — Gardner/Gershman 2018): full cited review in
+  `notes/bg_thalamus_value_research.md`; the region decomposition + build plan in `ROADMAP.md`.
