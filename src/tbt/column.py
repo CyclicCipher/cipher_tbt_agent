@@ -190,7 +190,9 @@ PART B — THE PLAN: how we build the whole column
   L6a  │ L5 movement/efference (path integration) + thalamus      │ own recurrence (the grid path-integration operator) │
          (apical: t.b.d.) │ → L4 (LOCATION, modulatory) + thalamus (CT gain)
   Note the two load-bearing loops: L6a↔L4 (location predicts the next feature) and L5PT→L6a (the efference copy
-  path-integrates the location for the next step).
+  path-integrates the location for the next step). The path-integration ITSELF is the TRANSFORM primitive
+  (`operator.ModularOperator`), NOT the L6a HTMLayer's sequence memory — ARCHITECTURE §8 (a memorised per-position
+  transition fails place-invariance); the L6a HTMLayer remains for L6a's ASSOCIATE roles.
 
 §13. STEP ORDER + COUNTERSTREAM DATAFLOW (per timestep = one "movement")
   1. FEEDBACK/prediction settles first (deep→superficial): the efference copy from L5PT path-integrates L6a → L6a location
@@ -243,8 +245,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from tbt.encoders import SDR, SpatialPooler
+from tbt.encoders import SDR, GridEncoder, SpatialPooler
 from tbt.htm import HTMLayer
+from tbt.operator import ModularOperator
 
 # ── projection classes (the target-out half of a layer's wiring; §10 P1) ───────────────────────────────────────────
 IT = "IT"            # intratelencephalic  — cortico-cortical + striatum (L2/3, L5a)
@@ -277,9 +280,11 @@ class Column:
     space and a PFC/TASK column on an abstract space) — same class, different reference frame. The task column's output
     conditions the sensory column's L4 (the factored-state mechanism from project_place_invariance_needs_factored_state).
     `order` sets every layer's HTM order — 2+ (high-order, real sensorimotor sequences) by default; 1 for the first-order
-    arithmetic first slice."""
+    arithmetic first slice. Pass `location=GridEncoder(...)` for a SPATIAL column: L6a then gains the TRANSFORM primitive
+    (`operator.ModularOperator`) and the path-integration API (`locate`/`learn_move`/`path_integrate`/`where`, ARCHITECTURE §8)."""
 
-    def __init__(self, sensory_n: int, n_cols: int = 1024, order: int = 2, seed: int = 0) -> None:
+    def __init__(self, sensory_n: int, n_cols: int = 1024, order: int = 2, seed: int = 0,
+                 location: Optional[GridEncoder] = None) -> None:
         # Proximal front-end: only L4 turns a RAW input space into columns (§10 P4, §12). All other layers take SDRs.
         self.n_cols = int(n_cols)
         l4_sp = SpatialPooler(n_inputs=sensory_n, n_cols=n_cols, seed=seed)
@@ -302,6 +307,44 @@ class Column:
             "L6a":  Layer("L6a", HTMLayer(order=order), target_out=(CT, LOCAL),
                           proximal_from="efference", context_from="recurrence", apical_from=None),
         }
+        # L6a's TRANSFORM engine (ARCHITECTURE §8): when a location frame is given (a SPATIAL column), path integration is
+        # the learned OPERATOR over the grid code — the "grid path-integration operator" §12 names — NOT the L6a HTMLayer's
+        # sequence memory (which would fail place-invariance). `self._loc` = L6a's dynamic location state (the bump we move).
+        self.location = location
+        self.operator = ModularOperator(location) if location is not None else None
+        self._loc: Optional[SDR] = None
+
+    # ── L6a path integration (the TRANSFORM primitive; ARCHITECTURE §8) — a SPATIAL column only ─────────────────────
+    def _require_location(self) -> None:
+        if self.operator is None:
+            raise ValueError("this Column has no location frame — pass location=GridEncoder(...) to enable L6a path integration.")
+
+    def locate(self, coord) -> SDR:
+        """Fix L6a's location state to a coordinate (a sensory anchor / reset of the path integrator)."""
+        self._require_location()
+        self._loc = self.location.encode(coord)
+        return self._loc
+
+    def learn_move(self, action, before_coord, after_coord) -> None:
+        """L6a/L5 TRANSFORM learning (ARCHITECTURE §8): learn `action`'s effect on the location code from one observed
+        (before → after) coordinate move (per-module phase-delta voting). Position-invariant by construction — the same
+        shift is read at every position, so it generalises to positions never visited."""
+        self._require_location()
+        self.operator.learn(self.location.encode(before_coord), action, self.location.encode(after_coord))
+
+    def path_integrate(self, action) -> SDR:
+        """Dead-reckon: apply the learned operator to the current location state, no sensory input (an unlearned action is
+        the identity). Returns the new location code. Composes over a sequence (abelian group)."""
+        self._require_location()
+        if self._loc is None:
+            raise ValueError("path_integrate before locate(): L6a has no location state yet.")
+        self._loc = self.operator.apply(self._loc, action)
+        return self._loc
+
+    def where(self):
+        """Decode L6a's current location state to a coordinate (the peripheral read of the bump); None before locate()."""
+        self._require_location()
+        return None if self._loc is None else self.location.decode(self._loc)
 
     # ── the FIRST-SLICE drive (§15 D3): sense a feature at L4, conditioned on a factored state ──────────────────────
     def observe(self, feature: SDR, context: Optional[SDR] = None, learn: bool = True) -> list:

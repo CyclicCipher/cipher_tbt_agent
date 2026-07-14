@@ -18,7 +18,7 @@ import numpy as np
 
 from .basal_ganglia import BasalGanglia
 from .column import Column
-from .encoders import SDR, CategoryEncoder
+from .encoders import SDR, CategoryEncoder, GridEncoder
 from .thalamus import Thalamus
 
 
@@ -66,6 +66,7 @@ class Agent:
         self.bg = BasalGanglia(seed=seed)
         self._decision_col = None
         self._pending = None
+        self._nav = None
         self._n_cols = int(n_cols)
         self._seed = int(seed)
 
@@ -114,6 +115,33 @@ class Agent:
         ctx, action = self._pending
         self.bg.learn(ctx, action, rpe=2.0 * float(r) - 1.0)
         self._pending = None
+
+    # ----- the SPATIAL slice: L6a path integration via the TRANSFORM operator (ARCHITECTURE §8) ----------------------
+    def _nav_col(self) -> Column:
+        """The lazily-built SPATIAL column: a location frame → L6a's `ModularOperator` (the TRANSFORM primitive). Kept lazy
+        like the decision column; the first thing to drive L6a path integration. The column's L4/L2·3/L5 are present but
+        undriven here (this slice exercises L6a only), exactly as the arithmetic slice leaves the deep layers undriven."""
+        if self._nav is None:
+            grid = GridEncoder(scales=(7, 11, 13, 17), dims=2, mw=3, bounds=[(0, 63), (0, 63)])
+            self._nav = Column(sensory_n=1, n_cols=self._n_cols, order=1, seed=self._seed + 3, location=grid)
+        return self._nav
+
+    def learn_move(self, action, before, after) -> None:
+        """Learn what `action` does to the body's location (the L6a operator; ARCHITECTURE §8), from an observed move
+        `before → after` (coordinates). Position-invariant: learned at some places, it holds everywhere."""
+        self._nav_col().learn_move(action, before, after)
+
+    def locate(self, coord) -> SDR:
+        """Anchor the body's location to a sensed coordinate (reset the path integrator)."""
+        return self._nav_col().locate(coord)
+
+    def path_integrate(self, action) -> SDR:
+        """Dead-reckon the body forward by `action`, no sensory input — the learned operator applied to the location code."""
+        return self._nav_col().path_integrate(action)
+
+    def where(self):
+        """The body's current dead-reckoned coordinate (decode L6a's location state)."""
+        return self._nav_col().where()
 
     def step(self, observation):
         """The generic game interface (observation → action) — still a STUB. The wired slices are `scan` (forward model)

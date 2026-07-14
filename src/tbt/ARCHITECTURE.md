@@ -166,7 +166,60 @@ rule for free. In our tests the monolithic way scores 0% on the unseen position 
   architecture supplies the factored state" and "TBT provides structure via reference frames instead of discovering it" are
   the same sentence.
 
-## 8. What makes a layer a layer — role = (context-in, target-out), both wired by hand
+## 8. The two primitives — ASSOCIATE and TRANSFORM (and why they are not one)
+
+§7 says the column factors content, location, and state and reuses **one** model across locations. Implementing that reuse
+needs **two different primitives**, and the load-bearing design decision here is to keep them **separate** — trying to make
+one do both jobs is exactly the §7 failure. (This does *not* contradict §2's "one column algorithm" or `htm.py`'s "one
+sequence-memory mechanism": those are about the ASSOCIATE machinery being uniform across layers and regions. TRANSFORM is
+the *second* primitive that composes with it.)
+
+- **ASSOCIATE — the `HTMLayer`.** Bind content to a context and recall it: "at *this* location/context, *that* feature."
+  Learned by growing dendrite segments; per-instance, tabular. This is L4 (feature-at-location), L2/3 (object), and the
+  sequence memories. **It does not generalize a transition across positions** — a fact learned at one place is a different
+  segment from the same fact at another (§7's 0%-on-a-novel-place). That is not a defect to fix in the HTMLayer; it is the
+  wrong tool for that job.
+- **TRANSFORM — the operator.** Apply an action's effect as a **learned, group-structured permutation of a code**: "action
+  A shifts the location code *this* way." It generalizes across every position **by construction** — a shift is the same
+  operation everywhere, including places never visited. This is L6a (path integration) and L5 (displacement).
+
+**They compose — that composition *is* the TBT forward model.** Predict the next feature from the next *movement*, not from
+the previous feature (`htm.py`): the operator moves the location (TRANSFORM, generalizes), then the HTMLayer reads the
+feature at the new location (ASSOCIATE, binds): `loc' = M(action)·loc ; feat' = recall_at(loc')`. That ordering is what
+makes the model order-invariant.
+
+**The operator, on our substrate — no matrix, no gradient, no ANN.** The location is a `GridEncoder` SDR: a bump per
+`(scale, axis)` module, each module a ring of `scale` cells. `M(action)` is a **cyclic shift per module** (a
+block-structured permutation; `GridEncoder.modules()` are the blocks), so the whole operator for one action is a vector of
+per-module integer shifts. It is *discovered* by reading the per-module phase delta of an observed `(loc, action, loc')` and
+voting — a genuine translation gives a constant shift across all positions. This is the entorhinal path-integration
+mechanism (`φ ← φ + Δ mod scale`) with `Δ` **learned per action** instead of hard-coded (we do not get to assume
+"ACTION1 = north" — that would be the bitter-lesson trap).
+
+**One mechanism, generality dialed by the code it acts on.** A heading-dependent action ("FORWARD") shifts location by an
+amount that *depends on* heading — not expressible as a constant per-module shift. So the operator instead acts on the
+**conjunctive** code `location × heading` (`ConjunctiveEncoder`, `module_grids()`): a base-phase shift that is a *function
+of* the heading phase (the non-abelian SE(2) case). Same mechanism — a permutation discovered by phase-delta voting — with
+the abelian (heading-independent) case as its degenerate special case. The *kind* of an action (move vs turn) emerges from
+which modules its learned shift touches; nothing per-action is coded.
+
+**Two apparent tensions, both resolved by the composition:**
+- *Operator (group representation) vs. discrete graph / SR.* The operator is the **regular, free kernel** — self-motion in
+  empty space, true everywhere. **Irregularity (a wall, a push, a toggle) is not in the operator** — it is a *context-gated
+  override*: the operator predicts the shift; a *local relational context* predicts the exception (blocked/pushed), and that
+  override, being local, still generalizes across position (via the HTMLayer context) and warps the reachability graph the
+  SR reads (a wall = reshaped reachability). One operator applies to every object incl. self; *whether* it applies is read
+  from context — emergent, never coded.
+- *Operator vs. the successor representation.* Same object, two timescales: `M(action)` is the **one-step transition
+  generator**; the SR is `Σₖ γᵏ (policy-averaged M)ᵏ`, its discounted **resolvent** (grid cells diagonalize both). So the
+  operator is **logically prior to the SR** — learn the one-step transform first, then accumulate it into the SR for value.
+  (This is why `ROADMAP.md` Phase 3a builds the operator and Phase 3b's SR reads off it.)
+
+**Where it lives.** A new `operator.py` (one file, one concept), owned by L6a (path integration) and L5 (the displacement
+content it stores) per the §9 wiring table. It is **not** a parallel system — it is the missing owner of "the grid
+path-integration operator" the column already names but never built; the `HTMLayer` stays the ASSOCIATE primitive, unchanged.
+
+## 9. What makes a layer a layer — role = (context-in, target-out), both wired by hand
 
 §2's claim ("one column algorithm; regions differ only in what they connect to") is right, but coding it needs one
 refinement that biology makes explicit: a layer's role has **two** determinants from **two different sources**, and only
@@ -194,11 +247,11 @@ to *emerge*: like the reference frame in §7, it is **given, not learned**.
 - Hippocampal preplay / vicarious trial-and-error / SWR — prospective simulation of candidate futures.
 - Constantinescu, O'Reilly & Behrens 2016, *Science*; Bellmund et al. 2018, *Science* — grid-like reference-frame codes for
   abstract/conceptual spaces in entorhinal + medial PFC.
-- Mountcastle 1978 — the uniform cortical column: one repeated circuit across all neocortex (§2, §8 premise).
+- Mountcastle 1978 — the uniform cortical column: one repeated circuit across all neocortex (§2, §9 premise).
 - Douglas & Martin 2004, *Annu. Rev. Neurosci.* — the canonical cortical microcircuit; thalamic input is ~10% of synapses,
-  so a region's function comes from its CONNECTIVITY, not a different circuit (§8, the context-in half).
+  so a region's function comes from its CONNECTIVITY, not a different circuit (§9, the context-in half).
 - Molyneaux/Arlotta/Macklis (projection-neuron fate); Fezf2/Ctip2 → L5b subcerebral, Tbr1 → L6 corticothalamic, Satb2 →
-  callosal — birth-order (inside-out) + a transcription-factor code fixes laminar/projection IDENTITY (§8, the target-out half).
+  callosal — birth-order (inside-out) + a transcription-factor code fixes laminar/projection IDENTITY (§9, the target-out half).
 - Thousand Brains Project 2024 (arXiv 2412.18354) — learning is local, associative, unsupervised; credit assignment is solved
   STRUCTURALLY by reference frames (error localized to a feature-at-location), not by backprop (§7).
 - §3 loop grounding (dopamine = RPE — Schultz; SR value read-off — Dayan/Stachenfeld/Gershman; OpAL Go/NoGo — Collins & Frank;

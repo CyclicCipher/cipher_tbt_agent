@@ -57,8 +57,10 @@ the agent NEVER decides/values/looks — it only moves frames and rewards across
   across overlapping percepts), adds an eligibility trace + tonic ρ. An EXTENSION, not a rewrite.
 - **Value critic (`reward.py`) → SDR-linear TD = the successor representation.** Value = `w·(W·φ)`, a read-off of a learned
   predictive map; the scalar δ = `r + γV(s′) − V(s)` is what the BG consumes; ρ = tracked average reward. REUSE the
-  validated legacy `SuccessorFeatures` (`l6_sr.py`). PROVEN CEILING (`project_linear_value_cannot_hold_sokoban`): linear
-  value cannot hold relational V* → `value(φ)` must double as a ROLLOUT-leaf evaluator for those tasks.
+  validated legacy `SuccessorFeatures` (`l6_sr.py`). The SR is the discounted RESOLVENT of the one-step path-integration
+  OPERATOR (Phase 3a; ARCHITECTURE §8) — it READS OFF that transition, so the operator is the prerequisite, not a separate
+  "SR wired into L6a." PROVEN CEILING (`project_linear_value_cannot_hold_sokoban`): linear value cannot hold relational V* →
+  `value(φ)` must double as a ROLLOUT-leaf evaluator for those tasks.
 - **Thalamus → DETERMINISTIC.** It mostly does NOT learn (fixed routing/gate; only slow modulatory-gain plasticity,
   decisions learned upstream). Route + **default-off disinhibition gate** (mirror GPi/SNr; disinhibit the BG winner) + a
   fixed **VSA content ⊗ location bind** for voting. No ANN/HTM inside; if gain-plasticity is ever needed, one learned scalar
@@ -68,10 +70,17 @@ the agent NEVER decides/values/looks — it only moves frames and rewards across
 
 - **Phase 1 — DEEP STUDY.** ✅ DONE (`notes/bg_thalamus_value_research.md`; verdicts in §4).
 - **Phase 2 — CONTRACTS.** Firm the region interfaces (§2) into ARCHITECTURE.md, informed by the study.
-- **Phase 3a — SR INTO L6a (prerequisite for the critic).** L6a is a plain `HTMLayer` now; wire the online SR
-  (`SuccessorFeatures`, reused from `l6_sr.py`) in so the location frame is a predictive map — the substrate `value(φ)` reads.
-- **Phase 3b — VALUE CRITIC (`reward.py`).** The SR read-off critic: `value(φ)`, `dopamine(φ,r,φ′,done)→δ`, `rho()`. Rewire
-  the bandit's RPE to come from it (replace the faked `2r−1`). Test: the bandit still learns, now with a real critic.
+- **Phase 3a — THE PATH-INTEGRATION OPERATOR INTO L6a (the TRANSFORM primitive; ARCHITECTURE §8).** L6a is a plain
+  `HTMLayer` now — but path integration is NOT sequence memory (a memorized per-position transition fails place-invariance,
+  §7). Build `operator.py`, one concept: `ModularOperator.learn(loc, action, loc')` (per-module phase-delta voting) +
+  `apply(loc, action)` (block-structured cyclic shift on the `GridEncoder` code, using `encoders.modules()`), wired into L6a
+  so location is path-integrated by the efference copy. ABELIAN (translation) first; the conjunctive/non-abelian
+  (heading-dependent) case + the context-gated obstacle override are noted-DEFERRED. Test: an action's effect learned at some
+  positions generalises to a NOVEL position (the operator analogue of the place-invariance win) + dead-reckoning matches
+  ground truth. This is the transition the SR (3b) accumulates — logically prior to it.
+- **Phase 3b — VALUE CRITIC (`reward.py`).** The SR read-off critic (the SR = the discounted resolvent of the 3a operator,
+  ARCHITECTURE §8): `value(φ)`, `dopamine(φ,r,φ′,done)→δ`, `rho()`. Rewire the bandit's RPE to come from it (replace the faked
+  `2r−1`). Test: the bandit still learns, now with a real critic.
 - **Phase 4 — REDESIGN THE BASAL GANGLIA.** Widen `OpponentActor` from exact-match keying to a per-bit SDR read-off
   (`W_G[a]`, `W_N[a]` over the percept SDR) + eligibility trace + ρ from the critic. Test: bandit + a harder selection task
   where SDR-overlap generalisation across contexts is required.
