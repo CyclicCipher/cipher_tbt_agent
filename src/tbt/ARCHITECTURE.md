@@ -196,12 +196,18 @@ voting — a genuine translation gives a constant shift across all positions. Th
 mechanism (`φ ← φ + Δ mod scale`) with `Δ` **learned per action** instead of hard-coded (we do not get to assume
 "ACTION1 = north" — that would be the bitter-lesson trap).
 
-**One mechanism, generality dialed by the code it acts on.** A heading-dependent action ("FORWARD") shifts location by an
-amount that *depends on* heading — not expressible as a constant per-module shift. So the operator instead acts on the
-**conjunctive** code `location × heading` (`ConjunctiveEncoder`, `module_grids()`): a base-phase shift that is a *function
-of* the heading phase (the non-abelian SE(2) case). Same mechanism — a permutation discovered by phase-delta voting — with
-the abelian (heading-independent) case as its degenerate special case. The *kind* of an action (move vs turn) emerges from
-which modules its learned shift touches; nothing per-action is coded.
+**One mechanism, generality dialed by conditioning (the non-abelian SE(2) case — BUILT).** A heading-dependent action
+("FORWARD") shifts location by an amount that *depends on* heading — not a constant per-module shift, and (the reference's
+warning) not expressible by a naive concatenation with one shared shift. SE(2) is the **semidirect product R²⋊SO(2)**: the
+translation transforms under a representation that depends on the rotation (biologically the conjunctive grid × head-direction
+cells, Sargolini 2006). We implement this by **conditioning**, reusing the abelian operator: the LOCATION `ModularOperator`
+keyed by `(action, heading)` (so its shift is a *function of* heading), plus a second `ModularOperator` on the HEADING ring
+(TURN). Same mechanism — a permutation discovered by phase-delta voting — with the abelian (heading-independent) case as the
+degenerate special case; the *kind* of action (move vs turn) emerges from which modules its learned shift touches, nothing
+per-action is coded. It is **non-commutative by construction** (FORWARD's location shift is keyed on a heading that TURN
+changes) and generalises per `(action, heading)` across the whole space (`column.py` `learn_pose_move`/`path_integrate_pose`).
+The `ConjunctiveEncoder` *tensor* `location × heading` remains the route to a CONTINUOUS-heading, fully-linear group
+representation — deferred; keying is the discrete, minimal form that reuses the canonical operator.
 
 **Two apparent tensions, both resolved by the composition:**
 - *Operator (group representation) vs. discrete graph / SR.* The operator is the **regular, free kernel** — self-motion in

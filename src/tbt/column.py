@@ -285,7 +285,7 @@ class Column:
     (`operator.ModularOperator`) and the path-integration API (`locate`/`learn_move`/`path_integrate`/`where`, ARCHITECTURE §8)."""
 
     def __init__(self, sensory_n: int, n_cols: int = 1024, order: int = 2, seed: int = 0,
-                 location: Optional[GridEncoder] = None) -> None:
+                 location: Optional[GridEncoder] = None, heading: Optional[GridEncoder] = None) -> None:
         # Proximal front-end: only L4 turns a RAW input space into columns (§10 P4, §12). All other layers take SDRs.
         self.n_cols = int(n_cols)
         l4_sp = SpatialPooler(n_inputs=sensory_n, n_cols=n_cols, seed=seed)
@@ -324,6 +324,12 @@ class Column:
         self.location = location
         self.operator = ModularOperator(location) if location is not None else None
         self._loc: Optional[SDR] = None
+        # SE(2) NON-ABELIAN path integration (ARCHITECTURE §8): an optional HEADING ring + its own operator. The LOCATION
+        # operator above is reused, keyed by (action, heading), so its shift DEPENDS on heading (the semidirect product
+        # R²⋊SO(2)); `head_op` shifts the heading ring (abelian). No tensor code — the conditioning is the key.
+        self.heading = heading
+        self.head_op = ModularOperator(heading) if heading is not None else None
+        self._head: Optional[SDR] = None
         # L2/3's POOLING engine (ARCHITECTURE §8): the stable object-IDENTITY that pools the L4 feature-at-location stream
         # (`pooler.ColumnPooler`) — a decoupled stable output + persistence, which the L2/3 HTMLayer (associate) cannot do.
         self.pooler = ColumnPooler(seed=seed + 4) if location is not None else None
@@ -359,6 +365,48 @@ class Column:
         """Decode L6a's current location state to a coordinate (the peripheral read of the bump); None before locate()."""
         self._require_location()
         return None if self._loc is None else self.location.decode(self._loc)
+
+    # ── SE(2) NON-ABELIAN path integration (ARCHITECTURE §8): heading-conditioned location shift + heading shift ──────
+    def _require_heading(self) -> None:
+        if self.head_op is None:
+            raise ValueError("this Column has no heading frame — pass heading=GridEncoder(...) for SE(2) path integration.")
+
+    def set_pose(self, coord, heading) -> None:
+        """Fix the full SE(2) pose: location `coord` + `heading` (a sensory anchor / reset of the pose integrator)."""
+        self._require_location()
+        self._require_heading()
+        self._loc = self.location.encode(coord)
+        self._head = self.heading.encode(heading)
+
+    def learn_pose_move(self, action, before_pose, after_pose) -> None:
+        """SE(2) TRANSFORM learning (ARCHITECTURE §8): from an observed pose move `*_pose = ((x, y), heading)`, learn (i) the
+        LOCATION shift keyed by (action, heading) — the heading-CONDITIONED, non-abelian part — and (ii) the HEADING shift
+        keyed by action. Both are position-invariant per (action, heading), so they generalise across the whole space."""
+        self._require_location()
+        self._require_heading()
+        (bloc, bh), (aloc, ah) = before_pose, after_pose
+        self.operator.learn(self.location.encode(bloc), (action, bh), self.location.encode(aloc))
+        self.head_op.learn(self.heading.encode(bh), action, self.heading.encode(ah))
+
+    def path_integrate_pose(self, action):
+        """Dead-reckon the SE(2) pose: decode the CURRENT heading, apply the heading-conditioned LOCATION operator, then the
+        HEADING operator. Non-commutative (FORWARD;TURN ≠ TURN;FORWARD) — FORWARD's location shift is keyed on heading."""
+        self._require_location()
+        self._require_heading()
+        if self._loc is None or self._head is None:
+            raise ValueError("path_integrate_pose before set_pose(): the pose has no state yet.")
+        h = self.heading.decode(self._head)[0]      # the heading ring is 1-D → the scalar heading (matches the learn key)
+        self._loc = self.operator.apply(self._loc, (action, h))
+        self._head = self.head_op.apply(self._head, action)
+        return self._loc, self._head
+
+    def pose(self):
+        """Decode the current SE(2) pose to ((x, y), heading); None before set_pose()."""
+        self._require_location()
+        self._require_heading()
+        if self._loc is None or self._head is None:
+            return None
+        return self.location.decode(self._loc), self.heading.decode(self._head)[0]
 
     # ── the L4↔L6a loop (ARCHITECTURE §8): predict the FEATURE at the path-integrated LOCATION (order-invariant) ──────
     def sense_at(self, feature: SDR, learn: bool = True) -> None:

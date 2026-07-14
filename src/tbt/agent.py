@@ -125,9 +125,10 @@ class Agent:
             # mw=1: a SHARP place code — crisp addressing for feature-at-location binding (the bump's graded overlap, mw>1,
             # buys path-integration noise-robustness, deferred to real frames). bounds = a 64×64 ARC frame.
             grid = GridEncoder(scales=(7, 11, 13, 17), dims=2, mw=1, bounds=[(0, 63), (0, 63)])
+            head = GridEncoder(scales=(4,), dims=1, mw=1, bounds=[(0, 3)])   # a 4-cell head-direction ring (for SE(2))
             # order=2: L4's OUTPUT (active cells) must encode feature-AT-location (a location-specific cell per feature
             # column) so L2/3 pools features-at-locations, not bare features — order=1 would collapse the location.
-            self._nav = Column(sensory_n=1, n_cols=self._n_cols, order=2, seed=self._seed + 3, location=grid)
+            self._nav = Column(sensory_n=1, n_cols=self._n_cols, order=2, seed=self._seed + 3, location=grid, heading=head)
             self._feat_enc = CategoryEncoder(range(16), w=8, capacity=16)   # the feature (ARC 16-colour palette) transducer
         return self._nav
 
@@ -147,6 +148,25 @@ class Agent:
     def where(self):
         """The body's current dead-reckoned coordinate (decode L6a's location state)."""
         return self._nav_col().where()
+
+    # ----- SE(2) non-abelian path integration (ARCHITECTURE §8): heading-dependent motion -----------------------------
+    def set_pose(self, coord, heading) -> None:
+        """Anchor the full SE(2) pose (location + heading) from a sensory fix."""
+        self._nav_col().set_pose(coord, heading)
+
+    def learn_pose_move(self, action, before_pose, after_pose) -> None:
+        """Learn an action's SE(2) effect: the heading-CONDITIONED location shift + the heading shift, from an observed pose
+        move `*_pose = ((x, y), heading)`. FORWARD's location shift depends on heading (non-abelian); TURN shifts heading."""
+        self._nav_col().learn_pose_move(action, before_pose, after_pose)
+
+    def path_integrate_pose(self, action):
+        """Dead-reckon the body's SE(2) pose forward by `action`, no sensory input — non-commutative (FORWARD;TURN ≠
+        TURN;FORWARD) because FORWARD's effect is keyed on the current heading."""
+        return self._nav_col().path_integrate_pose(action)
+
+    def pose(self):
+        """The body's current dead-reckoned SE(2) pose ((x, y), heading)."""
+        return self._nav_col().pose()
 
     def sense_at(self, feature, learn: bool = True) -> None:
         """Bind the FEATURE sensed at the body's current location (the L4↔L6a loop; ARCHITECTURE §8). Order-invariant: what

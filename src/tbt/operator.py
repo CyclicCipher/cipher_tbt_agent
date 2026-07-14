@@ -24,10 +24,11 @@ a **cyclic shift per module** — a block-structured PERMUTATION, fully describe
     discounted resolvent — ARCHITECTURE §8, ROADMAP Phase 3b); logically prior to the SR.
 
 SCOPE (honest, per RULES — noted, not silently dropped):
-  * ABELIAN only. A heading-DEPENDENT action ("FORWARD" shifts x or y depending on heading) is NOT a constant per-module
-    shift; it needs the operator to act on the CONJUNCTIVE code `location × heading` (`ConjunctiveEncoder.module_grids()`),
-    a base-phase shift that is a FUNCTION of the heading phase (the non-abelian SE(2) case). Same mechanism (a permutation
-    discovered by phase-delta voting), dialed by the code it acts on — a future variant over `module_grids()`. DEFERRED.
+  * ABELIAN core; the NON-ABELIAN SE(2) case is BUILT by CONDITIONING (not deferred): reuse THIS operator for the LOCATION
+    keyed by (action, heading) — so its shift is a FUNCTION of heading (the semidirect product R²⋊SO(2)) — plus a second
+    `ModularOperator` on the HEADING ring for TURN (see `column.py` `learn_pose_move`/`path_integrate_pose`). Non-commutative
+    by construction. The `ConjunctiveEncoder` TENSOR (`module_grids()`) remains the route to a CONTINUOUS-heading fully-linear
+    form — DEFERRED; keying is the discrete, minimal form that reuses this operator with zero changes.
   * The REGULAR free kernel only. Irregularity (a wall blocks the move, a box gets pushed) is NOT in the operator — it is a
     context-gated OVERRIDE read from the local relational context (which warps the reachability graph / SR), emergent, never
     coded (ARCHITECTURE §8; `reference_obstacle_as_transition_cost`, `reference_l5_operator_kinds`). DEFERRED.
