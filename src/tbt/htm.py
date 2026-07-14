@@ -42,7 +42,9 @@ differentiation is entirely the wiring. BUILT/NOT markers refer to that LAYER WI
     SUPPORTS it via `observe(x, context=location)` / `predict_at(location)`; the L4↔L6 loop itself is NOT BUILT.]
   * L2/3 — OUTPUT / object (supragranular). NB **two anatomical layers (L2 + L3)**. Basal context = its own recurrence;
     POOLS the L4 feature-at-location stream into the STABLE OBJECT (larger than L4's receptive field) and L3 adds LATERAL
-    VOTING across columns. [NOT BUILT: the temporal pooling + the voting.]
+    VOTING across columns. [The temporal POOLING is BUILT as `pooler.ColumnPooler` — the pooler's decoupled stable output is
+    ASSOCIATE-in-a-pooling-regime, not this HTMLayer (ARCHITECTURE §8); L3 lateral VOTING (cross-column) is NOT BUILT — the
+    thalamus's job.]
   * L5 — OUTPUT / MOTOR (infragranular). NB **sublayers with DIFFERENT jobs**: L5a slender-tufted / IT (intratelencephalic)
     = cortico-cortical association; L5b thick-tufted / PT (pyramidal tract) = the SUBCORTICAL MOTOR OUTPUT — projects to
     brainstem/spinal cord/tectum (this is where BEHAVIOUR is enacted) and drives the thalamus. Content = sequences of MOTOR

@@ -219,6 +219,16 @@ which modules its learned shift touches; nothing per-action is coded.
 content it stores) per the §9 wiring table. It is **not** a parallel system — it is the missing owner of "the grid
 path-integration operator" the column already names but never built; the `HTMLayer` stays the ASSOCIATE primitive, unchanged.
 
+**A note on L2/3 pooling — the ASSOCIATE primitive in a POOLING regime, not a third primitive.** L2/3 recognition — pooling
+the L4 feature-at-location stream into a **stable object IDENTITY** that persists as the sensor moves and is re-pooled only
+on a prediction error — is still associative (Hebbian feedforward L4→identity), *not* a new kind of computation like
+TRANSFORM. What it adds is a **stable output decoupled from the instantaneous input**, which the `HTMLayer` cannot express
+(its active cells ARE its proximal input); so L2/3 gets its own small engine (`pooler.ColumnPooler`), exactly as L6a gets
+`operator.ModularOperator`. The two primitives above are unchanged. Crucially, **L2/3 holds the IDENTITY only** — the
+object's structure (which feature at which location, the displacements between them) stays DISTRIBUTED across L4 (features),
+L6a (locations), L5 (displacements); the object model is not one layer's data structure (`reference_tbt_layers_4_23`).
+Cross-column VOTING over these identities is the THALAMUS's job (§3), a multi-column slice, not the single column's.
+
 ## 9. What makes a layer a layer — role = (context-in, target-out), both wired by hand
 
 §2's claim ("one column algorithm; regions differ only in what they connect to") is right, but coding it needs one

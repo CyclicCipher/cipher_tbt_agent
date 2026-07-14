@@ -248,6 +248,7 @@ from typing import Optional
 from tbt.encoders import SDR, GridEncoder, SpatialPooler
 from tbt.htm import HTMLayer
 from tbt.operator import ModularOperator
+from tbt.pooler import ColumnPooler
 
 # ── projection classes (the target-out half of a layer's wiring; §10 P1) ───────────────────────────────────────────
 IT = "IT"            # intratelencephalic  — cortico-cortical + striatum (L2/3, L5a)
@@ -288,11 +289,21 @@ class Column:
         # Proximal front-end: only L4 turns a RAW input space into columns (§10 P4, §12). All other layers take SDRs.
         self.n_cols = int(n_cols)
         l4_sp = SpatialPooler(n_inputs=sensory_n, n_cols=n_cols, seed=seed)
+        # L4's basal threshold: for a SPATIAL column the L6a location drives L4's context, and a SHARP place field is needed
+        # (adjacent grid codes overlap heavily) — require most of the location's active bits to match (ARCHITECTURE §8). A
+        # plain (non-spatial) column keeps the HTMLayer default.
+        if location is not None:
+            loc_w = location.mw * len(location.modules())            # the location code's active-bit count
+            l4_htm = HTMLayer(order=order, activation_threshold=max(2, round(0.75 * loc_w)))
+        else:
+            l4_htm = HTMLayer(order=order)
         self.layers: dict[str, Layer] = {
             # feature-at-location: proximal sensory (via SP), basal context = L6a location, apical = L2/3 object feedback.
-            "L4":   Layer("L4", HTMLayer(order=order), target_out=(LOCAL,), sp=l4_sp,
+            "L4":   Layer("L4", l4_htm, target_out=(LOCAL,), sp=l4_sp,
                           proximal_from="sensory", context_from="location", apical_from="L23"),
-            # object / output + voting: proximal L4, basal = own recurrence + peer-column votes, apical = L1 top-down.
+            # object / output + voting: proximal L4, basal = own recurrence + peer-column votes, apical = L1 top-down. The
+            # temporal POOLING that forms the stable object IDENTITY is `self.pooler` (a spatial column), ARCHITECTURE §8 —
+            # a decoupled stable output this HTMLayer can't express; this HTMLayer entry is reserved for L2/3's other roles.
             "L23":  Layer("L23", HTMLayer(order=order), target_out=(FF_EXPORT, FB, IT),
                           proximal_from="L4", context_from="recurrence", apical_from="L1"),
             # associative integrator: proximal L2/3, → cortico-cortical + striatum(→BG).  (D1: split kept.)
@@ -313,6 +324,9 @@ class Column:
         self.location = location
         self.operator = ModularOperator(location) if location is not None else None
         self._loc: Optional[SDR] = None
+        # L2/3's POOLING engine (ARCHITECTURE §8): the stable object-IDENTITY that pools the L4 feature-at-location stream
+        # (`pooler.ColumnPooler`) — a decoupled stable output + persistence, which the L2/3 HTMLayer (associate) cannot do.
+        self.pooler = ColumnPooler(seed=seed + 4) if location is not None else None
 
     # ── L6a path integration (the TRANSFORM primitive; ARCHITECTURE §8) — a SPATIAL column only ─────────────────────
     def _require_location(self) -> None:
@@ -345,6 +359,42 @@ class Column:
         """Decode L6a's current location state to a coordinate (the peripheral read of the bump); None before locate()."""
         self._require_location()
         return None if self._loc is None else self.location.decode(self._loc)
+
+    # ── the L4↔L6a loop (ARCHITECTURE §8): predict the FEATURE at the path-integrated LOCATION (order-invariant) ──────
+    def sense_at(self, feature: SDR, learn: bool = True) -> None:
+        """L4 FEATURE-AT-LOCATION binding — the real §12 wiring: drive L4 with the FEATURE (its SDR bits ARE the active
+        columns; a pre-transduced feature needs no SP), basal context = L6a's CURRENT location code. Binds the feature to
+        WHERE it is sensed, so prediction later comes from the LOCATION, not the previous feature (order-invariant)."""
+        self._require_location()
+        if self._loc is None:
+            raise ValueError("sense_at before locate()/path_integrate(): L6a has no location yet.")
+        self.layers["L4"].htm.observe(feature.active, context=self._loc.active, learn=learn)
+
+    def predict_feature(self) -> set:
+        """Predict the FEATURE columns at L6a's current location BEFORE sensing — the feature-at-location read
+        (`HTMLayer.predict_at`). Empty at an unbound location. Decode 'which feature' by overlap against the known feature
+        codes (the peripheral's job — the encoder's inverse)."""
+        self._require_location()
+        if self._loc is None:
+            raise ValueError("predict_feature before locate()/path_integrate(): L6a has no location yet.")
+        return self.layers["L4"].htm.predict_at(self._loc.active)
+
+    # ── L2/3 temporal pooling (ARCHITECTURE §8): pool the L4 stream into a STABLE object IDENTITY ────────────────────
+    def reset_object(self) -> None:
+        """An object BOUNDARY for L2/3 — start recognising/learning a fresh object (drops the current identity)."""
+        self._require_location()
+        self.pooler.reset()
+
+    def pool(self, learn: bool = True) -> frozenset:
+        """Pool L4's CURRENT feature-at-location code (its active cells, set by the last `sense_at`) into the L2/3 identity —
+        STABLE across fixations, recognised incrementally. Returns the object-identity SDR (empty if unrecognised in infer)."""
+        self._require_location()
+        return self.pooler.pool(self.layers["L4"].htm._active, learn=learn)
+
+    def object_id(self) -> int:
+        """A stable integer label for the currently-recognised object (−1 if none) — the L2/3 identity decoded."""
+        self._require_location()
+        return self.pooler.which()
 
     # ── the FIRST-SLICE drive (§15 D3): sense a feature at L4, conditioned on a factored state ──────────────────────
     def observe(self, feature: SDR, context: Optional[SDR] = None, learn: bool = True) -> list:

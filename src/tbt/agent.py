@@ -122,8 +122,13 @@ class Agent:
         like the decision column; the first thing to drive L6a path integration. The column's L4/L2·3/L5 are present but
         undriven here (this slice exercises L6a only), exactly as the arithmetic slice leaves the deep layers undriven."""
         if self._nav is None:
-            grid = GridEncoder(scales=(7, 11, 13, 17), dims=2, mw=3, bounds=[(0, 63), (0, 63)])
-            self._nav = Column(sensory_n=1, n_cols=self._n_cols, order=1, seed=self._seed + 3, location=grid)
+            # mw=1: a SHARP place code — crisp addressing for feature-at-location binding (the bump's graded overlap, mw>1,
+            # buys path-integration noise-robustness, deferred to real frames). bounds = a 64×64 ARC frame.
+            grid = GridEncoder(scales=(7, 11, 13, 17), dims=2, mw=1, bounds=[(0, 63), (0, 63)])
+            # order=2: L4's OUTPUT (active cells) must encode feature-AT-location (a location-specific cell per feature
+            # column) so L2/3 pools features-at-locations, not bare features — order=1 would collapse the location.
+            self._nav = Column(sensory_n=1, n_cols=self._n_cols, order=2, seed=self._seed + 3, location=grid)
+            self._feat_enc = CategoryEncoder(range(16), w=8, capacity=16)   # the feature (ARC 16-colour palette) transducer
         return self._nav
 
     def learn_move(self, action, before, after) -> None:
@@ -142,6 +147,27 @@ class Agent:
     def where(self):
         """The body's current dead-reckoned coordinate (decode L6a's location state)."""
         return self._nav_col().where()
+
+    def sense_at(self, feature, learn: bool = True) -> None:
+        """Bind the FEATURE sensed at the body's current location (the L4↔L6a loop; ARCHITECTURE §8). Order-invariant: what
+        is learned here is later predicted from the LOCATION, in any traversal order."""
+        self._nav_col().sense_at(self._feat_enc.encode(feature), learn=learn)
+
+    def predict_feature(self):
+        """Predict the feature at the body's current (dead-reckoned) location, decoded to a feature value; None if unbound.
+        Composes the two primitives: the operator supplies WHERE (path integration), L4 supplies WHAT (feature-at-location)."""
+        cols = self._nav_col().predict_feature()
+        return self._feat_enc.decode(SDR(self._feat_enc.n, cols)) if cols else None
+
+    def reset_object(self) -> None:
+        """L2/3 object boundary: start recognising/learning a fresh object (the sensor has moved onto a new one)."""
+        self._nav_col().reset_object()
+
+    def perceive_object(self, learn: bool = True) -> int:
+        """Pool the CURRENT L4 feature-at-location code (from the last `sense_at`) into the stable L2/3 object IDENTITY, and
+        return its integer label (−1 if unrecognised). Across a traversal the label is STABLE — the object, not the fixation."""
+        self._nav_col().pool(learn=learn)
+        return self._nav_col().object_id()
 
     def step(self, observation):
         """The generic game interface (observation → action) — still a STUB. The wired slices are `scan` (forward model)
