@@ -88,26 +88,29 @@ class ColumnPooler:
                 syn[l23] = min(1.0, syn.get(l23, self.init_perm) + self.perm_inc)
 
     # ---- pool one fixation: persist / recognise / mint, then bind ---------------------------------------------
-    def pool(self, l4_active, learn: bool = True) -> frozenset:
+    def pool(self, l4_active, learn: bool = True, bursting: bool = False) -> frozenset:
         """Pool one L4 feature-at-location code into the identity. If an identity is already active and still consistent
-        (or we are LEARNING one object across its fixations), PERSIST it; else RECOGNISE the best-supported known object, or
-        MINT a new one (learning) / return empty (inference, unrecognised). Returns the current identity SDR."""
-        l4_active = frozenset(l4_active)
+        (or we are LEARNING one object across its fixations), PERSIST it. Otherwise: a `bursting` fixation (L4 predicted
+        NOTHING here — a novel feature-at-location, a location-agnostic code) must NOT be used to RECOGNISE a different known
+        object (that is the feature-only-recognition trap); it is the NOVELTY signal → mint (learning) / nothing (inference).
+        A SETTLED (predicted, non-burst) code is reliable → recognise the best-supported known object, else mint / nothing.
+        Pooling the PREDICTED stream, treating the burst as novelty, is the theory (`reference_htm_pooling_recall_heterarchy`)."""
+        if bursting:
+            # L4 predicted NOTHING here — this feature-at-location is not (yet) learned, so the code is a location-agnostic
+            # BURST, unreliable for recognition. LEARNING: still learning the current object → PERSIST, pool nothing (let L4
+            # train first). INFERENCE: the current object does not predict here → recognition FAILURE (the boundary signal).
+            return self.active if learn else frozenset()
+        l4_active = frozenset(l4_active)                            # a SETTLED (predicted, location-specific) code — reliable
         sup = self._supported(l4_active)
         if self.active and (learn or self._match(self.active, sup) >= self.persist_frac):
-            identity = self.active                                   # PERSIST (recurrent self-support / one object per episode)
+            identity = self.active                                   # PERSIST (one object per episode / still supported)
         else:
             best, best_m = None, 0.0
             for obj in self.objects:                                # RECOGNISE by overlap-recall (O(library), not a scan)
                 m = self._match(obj, sup)
                 if m > best_m:
                     best, best_m = obj, m
-            if best is not None and best_m >= self.recognize_frac:
-                identity = best
-            elif learn:
-                identity = self._mint()                             # novel → MINT one identity for this object
-            else:
-                identity = frozenset()                              # unrecognised, no learning
+            identity = best if (best is not None and best_m >= self.recognize_frac) else (self._mint() if learn else frozenset())
         self.active = identity
         if learn and identity:
             self._reinforce(l4_active, identity)

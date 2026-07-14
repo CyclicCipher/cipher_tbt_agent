@@ -189,6 +189,20 @@ class Agent:
         self._nav_col().pool(learn=learn)
         return self._nav_col().object_id()
 
+    # ----- OBJECT-CENTRIC recognition (ARCHITECTURE §8): re-anchor the frame per object; emergent boundary ------------
+    def start_object(self) -> None:
+        """Object ONSET — the coupled event: re-anchor the L6a frame to its origin (so sensing is OBJECT-RELATIVE =
+        translation-invariant) AND start a fresh L2/3 identity. Call at a learning-time boundary; `perceive` fires it
+        emergently on recognition failure at inference."""
+        self._nav_col().start_object()
+
+    def perceive(self, feature, learn: bool = True) -> int:
+        """Sense a feature at the body's current object-relative location and pool it into the object IDENTITY; on a
+        recognition FAILURE this fires the coupled onset (re-anchor + fresh identity) — the emergent object boundary.
+        Returns the object's integer label (−1 if none)."""
+        self._nav_col().perceive(self._feat_enc.encode(feature), learn=learn)
+        return self._nav_col().object_id()
+
     def step(self, observation):
         """The generic game interface (observation → action) — still a STUB. The wired slices are `scan` (forward model)
         and `decide`/`reward` (selection); the full game loop (perceive → plan → act → win) composes them (STATUS.md

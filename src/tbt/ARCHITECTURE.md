@@ -235,6 +235,20 @@ object's structure (which feature at which location, the displacements between t
 L6a (locations), L5 (displacements); the object model is not one layer's data structure (`reference_tbt_layers_4_23`).
 Cross-column VOTING over these identities is the THALAMUS's job (§3), a multi-column slice, not the single column's.
 
+**Object-centric frame + the emergent boundary — ONE event does both.** Recognition must be TRANSLATION-invariant: an object
+is the same wherever it sits. Per Lewis et al. 2019, allocating a fresh grid-frame origin for an object is the *same act* as
+individuating it (grid frames have no origin — the arbitrary origin gives translation invariance, and the fresh location
+space IS the object's uniqueness). On our substrate that unification is: a single **recognition-failure** event both
+(a) re-anchors the L6a frame (`start_object` re-origins the grid → sensing becomes OBJECT-RELATIVE) and (b) starts a fresh
+L2/3 identity. The trigger is emergent, not a symbolic segmenter: **L4's burst is the signal.** The pooler pools only the
+PREDICTED (non-burst) L4 stream — a burst means "this feature-at-location is not yet learned," so during LEARNING it persists
+(let L4 train; the honest learning-time boundary stays a minimal episode cue, as TBT itself uses) and during INFERENCE a
+burst that no known object explains IS the boundary → `perceive` fires the coupled onset (re-anchor + fresh identity) and
+recognises the next object in its own frame. Verified: same features in a swapped arrangement get DIFFERENT identities
+(the frame is load-bearing), and a continuous two-object sweep is segmented with no explicit reset
+(`column.py` `start_object`/`perceive`; research in `notes/tbt_object_frame_and_bootstrap_research.md`). Object-ROTATION
+invariance (recognising a rotated object) is a separate, harder problem — the pose-hypothesis machinery — DEFERRED.
+
 ## 9. What makes a layer a layer — role = (context-in, target-out), both wired by hand
 
 §2's claim ("one column algorithm; regions differ only in what they connect to") is right, but coding it needs one

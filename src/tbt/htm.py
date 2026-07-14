@@ -217,6 +217,13 @@ class HTMLayer:
         self._active, self._winners = new_active, new_winners
         self._predictive, self._active_segs = self._predicted(self._active)
 
+    def depolarize(self, context) -> None:
+        """Set the predictive state from an EXTERNAL context (e.g. the L6a LOCATION driving L4) BEFORE the proximal input
+        arrives — the sensorimotor prediction. The next `observe` then fires the context-predicted cell in each active column
+        (feature-AT-location) or BURSTS if this feature-at-location is novel. Without this, `observe` fires from its own
+        recurrent (previous-input) prediction and the location only shapes LEARNING, not which cell fires."""
+        self._predictive, self._active_segs = self._predicted(set(context))
+
     def predict(self) -> set:
         """The predicted next SDR = the columns of the cells predictive for next step (empty on a burst). Decode 'which
         content' by OVERLAP against known SDRs externally (the encoder's job) — there is no symbol table here."""

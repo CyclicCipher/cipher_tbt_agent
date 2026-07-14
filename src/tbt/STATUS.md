@@ -26,13 +26,13 @@ RULES.md #2 goal.
 
 | module | one-line job | wired? | its test |
 |--------|--------------|--------|----------|
-| `agent.py` | live entry point / ROOT — composes a SENSORY + a TASK `Column` (the sensorimotor SCAN), a DECISION loop (`decide`/`reward`), a SPATIAL nav slice (`learn_move`/`locate`/`path_integrate`/`where`), the L4↔L6a loop (`sense_at`/`predict_feature`: feature at location — order-invariant), L2/3 pooling (`reset_object`/`perceive_object`: L4 stream → stable object identity), AND SE(2) NON-ABELIAN path integration (`set_pose`/`learn_pose_move`/`path_integrate_pose`/`pose`: heading-dependent motion, non-commutative; ARCHITECTURE §8); the `step(obs)→action` game loop is still a stub | ROOT | `test_column_arithmetic`, `test_bg_thalamus`, `test_operator_path_integration`, `test_feature_at_location`, `test_l23_pooling`, `test_operator_se2` |
-| `column.py` | the cortical COLUMN — 5 layers (L4, L2/3, L5IT, L5PT, L6a) as one `HTMLayer` each, wired per its §12 table; `observe` drives L4 (arithmetic); a SPATIAL column (`location=GridEncoder`, opt. `heading=GridEncoder`) also gains L6a's TRANSFORM engine (`ModularOperator`) + the L4↔L6a feature-at-location loop + L2/3's POOLING engine (`ColumnPooler`) + SE(2) pose integration (`set_pose`/`learn_pose_move`/`path_integrate_pose`/`pose`, heading-conditioned); the full §13 `step` counterstream is the target | WIRED | `test_column_arithmetic`, `test_operator_path_integration`, `test_feature_at_location`, `test_l23_pooling`, `test_operator_se2` |
+| `agent.py` | live entry point / ROOT — composes a SENSORY + a TASK `Column` (the sensorimotor SCAN), a DECISION loop (`decide`/`reward`), a SPATIAL nav slice (`learn_move`/`locate`/`path_integrate`/`where`), the L4↔L6a loop (`sense_at`/`predict_feature`: feature at location — order-invariant), L2/3 pooling (`reset_object`/`perceive_object`), OBJECT-CENTRIC recognition (`start_object`/`perceive`: re-anchor per object → translation-invariant; emergent boundary), AND SE(2) NON-ABELIAN path integration (`set_pose`/`learn_pose_move`/`path_integrate_pose`/`pose`, non-commutative; ARCHITECTURE §8); the `step(obs)→action` game loop is still a stub | ROOT | `test_column_arithmetic`, `test_bg_thalamus`, `test_operator_path_integration`, `test_feature_at_location`, `test_l23_pooling`, `test_operator_se2`, `test_object_centric` |
+| `column.py` | the cortical COLUMN — 5 layers (L4, L2/3, L5IT, L5PT, L6a) as one `HTMLayer` each, wired per its §12 table; `observe` drives L4 (arithmetic); a SPATIAL column (`location=GridEncoder`, opt. `heading=GridEncoder`) also gains L6a's TRANSFORM engine (`ModularOperator`), the L4↔L6a feature-at-location loop (`sense_at` depolarises L4 by the location → location-specific firing), L2/3's `ColumnPooler`, OBJECT-CENTRIC recognition (`start_object`/`perceive` — one recognition-failure event re-anchors the frame AND mints the identity), + SE(2) pose integration; the full §13 `step` counterstream is the target | WIRED | `test_column_arithmetic`, `test_operator_path_integration`, `test_feature_at_location`, `test_l23_pooling`, `test_operator_se2`, `test_object_centric` |
 | `operator.py` | the TRANSFORM primitive (ARCHITECTURE §8) — path integration as a learned, module-structured group PERMUTATION of the `GridEncoder` code (`ModularOperator`: per-module phase-delta voting → `apply`); position-invariant by construction, the second primitive alongside `htm.py`'s ASSOCIATE. Abelian core + NON-ABELIAN SE(2) (heading-conditioned by keying on (action, heading) + a heading-ring operator, non-commutative — `column.py` pose API); obstacle override + continuous-heading tensor deferred | WIRED | `test_operator_path_integration`, `test_operator_se2` |
-| `pooler.py` | L2/3 TEMPORAL POOLING (ARCHITECTURE §8) — the STABLE object-IDENTITY that pools the L4 feature-at-location stream (`ColumnPooler`: Hebbian feedforward L4→identity + persistence, re-pool only on error, overlap-recall); ASSOCIATE in a pooling regime (decoupled stable output the `HTMLayer` can't do), NOT a third primitive. Identity ONLY (structure stays in L4/L6/L5). Unsupervised boundary + cross-column VOTING (thalamus) deferred | WIRED | `test_l23_pooling` |
+| `pooler.py` | L2/3 TEMPORAL POOLING (ARCHITECTURE §8) — the STABLE object-IDENTITY that pools ONLY the PREDICTED (non-burst) L4 stream (`ColumnPooler`: Hebbian feedforward L4→identity + persistence + overlap-recall); a BURST = novelty → persist while learning / the boundary signal at inference. ASSOCIATE in a pooling regime (decoupled stable output the `HTMLayer` can't do), NOT a third primitive. Identity ONLY (structure in L4/L6/L5). Cross-column VOTING (thalamus) deferred | WIRED | `test_l23_pooling`, `test_object_centric` |
 | `basal_ganglia.py` | the value-driven SELECTOR — OpAL Go/NoGo + dopamine-RPE + STN commitment (reference_basal_ganglia); the ONE place competing options are arbitrated (rule 4). MoE column-allocation deferred | WIRED | `test_bg_thalamus` |
 | `thalamus.py` | the inter-column ROUTER/GATE — relays a column's percept to the selector + gates the BG's winner to the motor; content⊗location binding (place-value / voting) deferred | WIRED | `test_bg_thalamus` |
-| `htm.py` | the ONE cortical-layer mechanism — HTM sequence memory (proximal SDR-in via SP, basal context, apical, learn/predict/burst); a layer = one instance + a declared (proximal-in, context-in, apical-in, target-out) wiring | WIRED | `test_htm` |
+| `htm.py` | the ONE cortical-layer mechanism — HTM sequence memory (proximal SDR-in via SP, basal context, apical, learn/predict/burst); a layer = one instance + a declared (proximal-in, context-in, apical-in, target-out) wiring; `depolarize(context)` lets an EXTERNAL context (L6a location) drive which cell fires (sensorimotor feature-at-location), not just the recurrent sequence | WIRED | `test_htm` |
 | `encoders.py` | SDR transduction library (`SDR` + Scalar/Category/Grid/Multi/Conjunctive/SpatialPooler) — data ↔ overlap-bearing SDR | WIRED | `test_encoders` |
 
 **Generalization investigation — RESOLVED 2026-07-09 (now wired into the column, above).** Two durable results,
@@ -50,8 +50,8 @@ writeup in `ARCHITECTURE.md` §7:
    A FACTORED recurrent state channel closes it (100%) where PURE temporal memory can't (37%). ReSU investigated + DROPPED
    (temporal encoder, not spatial invariance).
 
-Suite: **38 passed** (~20s; `test_column_arithmetic` is the ~20s end-to-end column test, `test_bg_thalamus` +
-`test_operator_path_integration` + `test_feature_at_location` + `test_l23_pooling` + `test_operator_se2` are fast). Run
+Suite: **41 passed** (~20s; `test_column_arithmetic` is the ~20s end-to-end column test, the rest — `test_bg_thalamus`,
+`test_operator_path_integration`, `test_feature_at_location`, `test_l23_pooling`, `test_operator_se2`, `test_object_centric` — are fast). Run
 `python src/tests/test_reachability.py` for the wired map; the 20 legacy test files are archived under
 `Legacy - DO NOT USE OR IMPORT!/tests/`.
 
@@ -70,13 +70,14 @@ deferred to a task that needs it. Thicken from here (RULES.md #4 — always keep
    (thalamus) → act → reward. This needs a **TD value critic** (`reward.py` — multi-step value; the RPE the BG currently
    fakes as a centered immediate reward) + a tiny nav/decision env, and is where the BG + thalamus earn their full keep.
 2. **The spatial column's remaining frontier.** DONE on this thread: L6a path integration (the operator), the L4↔L6a
-   feature-at-location loop, L2/3 pooling into a stable object identity, and the NON-ABELIAN SE(2) operator (heading-dependent
-   motion). What remains: the context-gated obstacle OVERRIDE (a wall blocks the move — read from local context; `operator.py`)
-   + the continuous-heading TENSOR form (`ConjunctiveEncoder`, vs the discrete keying built now); an OBJECT-CENTRIC frame
-   (reset the location origin per object → translation-invariant recognition) + the UNSUPERVISED object boundary (mint on an
-   L4 prediction error, not a `reset` — `pooler.py`); the harder pooling test (objects that SHARE feature-at-location codes →
-   genuine INCREMENTAL disambiguation); and the SR (ROADMAP 3b) accumulating the operator into value. Cross-column VOTING over
-   these identities is the thalamus's job (#3), not the column's.
+   feature-at-location loop, L2/3 pooling, the NON-ABELIAN SE(2) operator, and the OBJECT-CENTRIC frame + emergent boundary
+   (one recognition-failure event re-anchors the frame + mints the identity; translation-invariant, arrangement-sensitive).
+   What remains: the context-gated obstacle OVERRIDE (a wall blocks the move — read from local context; `operator.py`) + the
+   continuous-heading TENSOR form (`ConjunctiveEncoder`, vs the discrete keying); object-ROTATION-invariant recognition (the
+   pose-hypothesis machinery — Lewis 2019 lacks it too); the fully-unsupervised LEARNING-time boundary (TBT itself leaves it
+   open — currently a minimal episode cue); the harder pooling test (objects that SHARE feature-at-location codes → genuine
+   INCREMENTAL disambiguation via the union); and the SR (ROADMAP 3b) accumulating the operator into value. Cross-column
+   VOTING over these identities is the thalamus's job (#3), not the column's.
 3. **The thalamus's binding role** (content ⊗ location across two columns → place-value / cross-column VOTING) + the factored
    state via L4's basal `context=` channel; then **L2/3 recognition/voting**, **L5 motor**, **hippocampal rollout**. Each
    added as a task exercises it, driven by `agent.py`. Nothing counts until imported from `agent.py` AND the agent plays more

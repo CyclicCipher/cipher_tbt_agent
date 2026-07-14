@@ -294,8 +294,9 @@ class Column:
         # plain (non-spatial) column keeps the HTMLayer default.
         if location is not None:
             loc_w = location.mw * len(location.modules())            # the location code's active-bit count
-            l4_htm = HTMLayer(order=order, activation_threshold=max(2, round(0.75 * loc_w)))
-        else:
+            thr = max(2, round(0.75 * loc_w))                        # a sharp place field: predict AND pick a winner cell only
+            l4_htm = HTMLayer(order=order, activation_threshold=thr, min_threshold=thr)   # at a near-exact location match, so
+        else:                                                        # a feature at (0,0) vs (1,0) uses DIFFERENT cells
             l4_htm = HTMLayer(order=order)
         self.layers: dict[str, Layer] = {
             # feature-at-location: proximal sensory (via SP), basal context = L6a location, apical = L2/3 object feedback.
@@ -333,6 +334,10 @@ class Column:
         # L2/3's POOLING engine (ARCHITECTURE §8): the stable object-IDENTITY that pools the L4 feature-at-location stream
         # (`pooler.ColumnPooler`) — a decoupled stable output + persistence, which the L2/3 HTMLayer (associate) cannot do.
         self.pooler = ColumnPooler(seed=seed + 4) if location is not None else None
+        # The OBJECT-CENTRIC frame anchor: a canonical origin the L6a frame is RE-ORIGINED to at each object onset, so a
+        # location is measured RELATIVE to the object (grid frames have no origin — Lewis 2019; the arbitrary origin gives
+        # translation invariance). One shared origin suffices because the L2/3 pooler individuates objects, not the phase.
+        self._anchor = tuple(0 for _ in range(location.dims)) if location is not None else None
 
     # ── L6a path integration (the TRANSFORM primitive; ARCHITECTURE §8) — a SPATIAL column only ─────────────────────
     def _require_location(self) -> None:
@@ -416,7 +421,9 @@ class Column:
         self._require_location()
         if self._loc is None:
             raise ValueError("sense_at before locate()/path_integrate(): L6a has no location yet.")
-        self.layers["L4"].htm.observe(feature.active, context=self._loc.active, learn=learn)
+        l4 = self.layers["L4"].htm
+        l4.depolarize(self._loc.active)      # the LOCATION predicts the feature-at-location FIRST (so firing is
+        l4.observe(feature.active, context=self._loc.active, learn=learn)   # location-specific, not recurrent-sequence)
 
     def predict_feature(self) -> set:
         """Predict the FEATURE columns at L6a's current location BEFORE sensing — the feature-at-location read
@@ -435,14 +442,44 @@ class Column:
 
     def pool(self, learn: bool = True) -> frozenset:
         """Pool L4's CURRENT feature-at-location code (its active cells, set by the last `sense_at`) into the L2/3 identity —
-        STABLE across fixations, recognised incrementally. Returns the object-identity SDR (empty if unrecognised in infer)."""
+        STABLE across fixations, recognised incrementally. Passes L4's BURST (was the last sensation unpredicted?) so the
+        pooler treats a surprising fixation as NOVELTY, not as recognition of a different object (feature-only trap). Returns
+        the object-identity SDR (empty if unrecognised in infer)."""
         self._require_location()
-        return self.pooler.pool(self.layers["L4"].htm._active, learn=learn)
+        l4 = self.layers["L4"].htm
+        return self.pooler.pool(l4._active, learn=learn, bursting=l4.bursting())
 
     def object_id(self) -> int:
         """A stable integer label for the currently-recognised object (−1 if none) — the L2/3 identity decoded."""
         self._require_location()
         return self.pooler.which()
+
+    # ── OBJECT-CENTRIC frame + the emergent boundary (ARCHITECTURE §8): one event anchors the frame AND the identity ───
+    def start_object(self) -> None:
+        """An object ONSET — the ONE coupled event (Lewis 2019: a fresh grid phase is BOTH the frame origin AND the object's
+        unique location space). Re-ANCHOR the L6a frame to the canonical origin (so subsequent path integration is
+        object-relative → translation-invariant) AND reset L2/3 to start a fresh identity. Called explicitly at a
+        learning-time boundary (the honest minimal episode cue), and fired EMERGENTLY by `perceive` on recognition failure."""
+        self._require_location()
+        self.locate(self._anchor)
+        self.pooler.reset()
+
+    def perceive(self, feature: SDR, learn: bool = True):
+        """Sense a feature at the current OBJECT-RELATIVE location and pool it into the L2/3 identity — and, if this is a
+        RECOGNITION FAILURE (an active object hypothesis that no longer holds, with nothing else recognised), fire the coupled
+        object-onset here: re-anchor the frame + start a fresh identity, then bind this feature as the new object's first
+        (origin) feature. That single non-recognition event does both — no symbolic segmenter. During LEARNING the pooler
+        persists (never 'fails' mid-object), so the boundary only fires at INFERENCE, exactly as the theory supports.
+        Returns the object-identity SDR."""
+        self._require_location()
+        had_object = bool(self.pooler.active)
+        self.sense_at(feature, learn)
+        identity = self.pool(learn)
+        if had_object and not identity:                 # recognition FAILURE ⇒ a new object begins HERE
+            self.start_object()                         # ONE event: re-anchor frame + reset identity
+            self.sense_at(feature, learn)               # bind this feature at the new object's origin
+            identity = self.pool(learn)
+        return identity
 
     # ── the FIRST-SLICE drive (§15 D3): sense a feature at L4, conditioned on a factored state ──────────────────────
     def observe(self, feature: SDR, context: Optional[SDR] = None, learn: bool = True) -> list:
