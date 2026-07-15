@@ -235,11 +235,112 @@ precision ≈ (grid resolution / object radius) — **measured: radius 2 → ±1
 This is the law any real sensor obeys, and it is the *opposite* of the retired design's failure mode: here a bigger object
 resolves pose BETTER, where the module-count wall got worse with radius and no object size could widen it.
 
+## R4 — evidence-based recognition over a hypothesis population (the pose is SOLVED, not scanned)
+
+**MECHANISM CHECK FIRST (2026-07-15, [[feedback_check_tbt_accuracy_per_step]]) — and the plan HAD drifted.** This doc has
+said "R4 = the union/evidence pooler" since R1, and the cut-over section above still describes recognition as a *scan over
+candidate poses*. Re-reading the primary mechanism ([[reference_tbt_pose_invariant_recognition]],
+[[reference_tbt_layers_4_23]]) says something stronger, in Numenta's own words:
+
+> Recognition = INCREMENTAL evidence accumulation, NEVER recomputed: INIT **solves** pose from the first sensation … each
+> later step computes the displacement, **rotates it by the hypothesised rotation**, predicts the next location, compares
+> features, ADDS evidence; terminate when one hypothesis dominates.
+
+> You recognize an unseen orientation because you **SOLVE** for the rotation; you don't recall it.
+
+**So the scan is not a simplification of the mechanism — it is a different (worse) mechanism.** Monty never samples angles.
+R3's scan was the faithful implementation of the *2021 orientation paper*, which is discrete-by-construction; Monty is the
+part of TBT that actually solves continuous pose, and R4 is where we adopt it. Correcting the doc before building, as the rule
+requires.
+
+**Why solving is possible with our (non-morphological) features.** Monty solves rotation from a **single** sensation because
+its features carry a local frame (surface normal + principal curvatures) — align sensed frame to stored frame, read off the
+rotation. Our features are colour-at-location: *non-morphological*, no intrinsic orientation
+([[reference_tbt_feature_definition]]). The general substitute is the one this doc already identified: *"for polyominoes the
+orienting cue is the inter-cell **displacement geometry**"*. Two sensed points suffice — a rotation is fixed by one
+corresponding displacement pair:
+- the object is presented at `(ω, t)` ⇒ every model point ℓ appears at `p = R(ω)·ℓ + t`;
+- so for two fixations, `p₁ − p₀ = R(ω)·(ℓ₁ − ℓ₀)` — the translation cancels;
+- ⇒ **ω = angle(p₁ − p₀) − angle(ℓ₁ − ℓ₀)**, exact, closed-form; then **t = p₀ − R(ω)·ℓ₀**.
+
+The correspondence `(ℓ₀, ℓ₁)` is what is *hypothesised*; the pose is *derived* from it and then *verified* by prediction.
+Nothing samples, nothing is tabulated. Two honest prunes come free from the geometry (a rotation is an **isometry**, which is
+the group structure we already committed to in ARCHITECTURE §8 — not a domain prior): `|ℓ₁ − ℓ₀|` must equal `|p₁ − p₀|`, and
+a zero displacement leaves ω genuinely undetermined.
+
+**The hypothesis population = the union, narrowed.** This is the 2017/Lewis-2019 union under a different name: a sensed
+feature activates *the union of locations where it occurs*, movement path-integrates the whole union by the ONE operator, and
+each new sensation prunes what it fails to predict. A hypothesis is `(object, ω, t)` — Monty's **(object ID, pose)**, pose =
+location + orientation, continuous. Evidence per fixation = the model's own prediction fit (L4 predicts the feature at the
+hypothesised object-frame location) graded by L2/3's identity support — *feature match adds, mismatch subtracts*.
+
+**What R4 delivers that R3 cannot:**
+| | R3 (scan) | R4 (solve + evidence) |
+|---|---|---|
+| entry point | must share the object's anchor | **anywhere** — `t` is solved too |
+| pose values | only the sampled ones | **exact**, closed-form |
+| cost in SO(2) | O(samples) | O(&#124;corresponding pairs&#124;), distance-pruned |
+| cost in SO(3) | **cubic in resolution** — the blocker | 3 non-collinear points solve it; **no resolution axis at all** |
+| ambiguity/symmetry | a tie list over sampled angles | the surviving **population** |
+
+**Ownership (`reference_model_ownership_map` — extend the owner, never build beside it).** The object model is DISTRIBUTED,
+never one layer's data structure: L4 = features, L6a = locations, L2/3 = identity. So: the **L4→L6a associative link**
+(feature → the union of (identity, location) where it was sensed) is the piece Lewis 2019 requires and we have never built —
+it lives in the `Column`, learned Hebbian-style in `perceive`. Identity support is the **pooler**'s (`ColumnPooler.support`).
+Path integration is the **operator**'s, unchanged. **NB — this is emphatically NOT the retired rotation table** (`shape →
+next_shape` per orientation), which memorised the *answer* per pose; this stores the *object* (learned online, once, in its
+own frame) and *derives* the pose. The distinction is the whole point of the pivot.
+
+**Scope + the deletion (per [[feedback_decisive_full_cutover]]).** R4 SUBSUMES R3 (a shared anchor is the special case `t=0`),
+so `recognize_rotated` + the `candidates` sampling are DELETED in the same move — no two-stack.
+
+**Consequence to accept honestly:** the lever-arm resolution law measured above bounded the *scan's* discrimination. With the
+pose solved from continuous positions there is no sampling to bound, so that test goes with the scan. The law itself is not
+repealed — it re-appears as **pose error ≈ position noise / lever arm** the moment sensing is noisy. Deferred with sensor
+noise, not silently dropped.
+
+### R4 — **BUILT 2026-07-15. Suite 48 green.**
+`Column.recognize` (+ `Hypothesis`, `_solve`, `_evidence`, the `_link` L4→L6a union, `ColumnPooler.support`); `recognize_rotated`
+and the `candidates` sampling DELETED in the same move. All six properties tested end-to-end through `agent.py`:
+novel orientation → pose solved exactly; **arbitrary off-grid angles exact** (37°, 113.5°, 244.25°, 359.9°); **the crown —
+rotated AND translated far from the learned frame, entered on a different feature each time, recovering ω *and* the object's
+origin** (the retired scan could not do this at all); an **ambiguous seed narrowed by evidence** (two objects sharing two
+features at the same separation are indistinguishable for two fixations — neither the seed nor the isometry prune separates
+them; the third fixation's burst refutes the wrong one); symmetry → the exact 4-fold orbit; one fixation → no hypothesis.
+
+### The defect R4 EXPOSED (measured, not suspected) — L2/3 never revises at LEARNING time
+Writing the ambiguity test the obvious way — two objects sharing feature 1 **at the same location** — failed, and the cause is
+a real bug, not a test artifact. Measured: learning two such objects mints **ONE** identity, a chimera holding all six
+features; both objects then "recognise" as object 0 with full evidence. R4 is faithfully reporting a corrupted model.
+
+**Root cause** (`pooler.py`): `if self.active and (learn or self._match(...) >= self.persist_frac)` — during learning,
+persistence is **unconditional**. L2/3 commits to an identity at the first fixation and never revises, so every later fixation
+of the second object is reinforced into the first object's identity. At fixation 1 the two ARE indistinguishable, so
+recognising A is *correct inference*; the bug is the absence of **revision** when fixation 2 contradicts it.
+
+**Why the obvious patches fail** (worked through, so the next attempt does not re-derive them):
+- *Make persistence conditional on support.* A code never yet bound to anything supports nothing, so `match = 0` for every
+  object — but that is **ignorance, not refutation** (absence of evidence ≠ evidence of absence). Treating it as refutation
+  mints a new object per fixation: duplication, the very bug the pooler was built to fix.
+- *Refute on an L4 burst.* L4 is **object-agnostic** — shared across every object in one frame — so it cannot refute an object
+  hypothesis. It bursts iff *no* object has a feature there.
+- *Mint on the burst instead of deferring.* Breaks the current two-phase structure (pass 1 trains L4 while everything bursts;
+  the pooler only learns from pass 2), and duplicates.
+
+**The fix — the same evidence machinery R4 just built, applied at learning time.** Refutation needs the object's **extent**,
+which the column now has in `_link`: under hypothesis A this fixation lands at (3,0), A has nothing at (3,0) ⇒ A is refuted.
+That is exactly `_evidence`. So **learning = recognise, then bind**: buffer the episode (Monty's Buffer), ask `recognize()`
+whether a known object explains it, reinforce that identity if so, else mint and bind the sweep to the new one. One mechanism,
+no parallel path — and it makes L2/3 hold a genuine **union** that narrows, which is what the theory says it does. Cost: the
+learning API moves from per-fixation `perceive` to episode-level commitment; `test_l23_pooling` + `test_object_centric` are the
+guard rails.
+
 ## NEXT (in order)
-1. **R4 — the union/evidence pooler** on the continuous substrate: general rotation ("entered anywhere" — the replay currently
-   assumes the sweep shares an anchor with the learned object), ambiguity, and symmetry-as-POPULATION rather than a tie list.
-2. **SO(3).** The state generalises unchanged (a 3-DOF rotation is still just state), but a naive scan goes **cubic** — so R4's
-   evidence path is the prerequisite, exactly as the bake-off predicted.
+1. **R5 — L2/3 revision at learning time** (the defect above). Recognition is only ever as good as the model it reads, and
+   real ARC objects will share feature-at-location codes constantly, so this is load-bearing, not cosmetic.
+2. **SO(3).** The state already generalises (a 3-DOF rotation is just state). R4 removes the cubic scan rather than paying it:
+   the pose is solved from corresponding points, so there is no angular-resolution axis to cube. Needs 3 non-collinear points
+   (or 2 + a normal) instead of 2 — the same `_solve`/`_evidence` shape.
 
 ## Deferred (noted, not invented)
 - **The LOCATION UNION for GENERAL rotation.** R3's crown test uses CONTROLLED entry (a consistent anchor point), which needs

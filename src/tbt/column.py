@@ -242,15 +242,33 @@ Hawkins/Ahmad/Cui 2017, Hawkins et al. 2019 "Framework", Lewis et al. 2019, TBP 
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Optional
 
 from tbt.encoders import SDR, GridEncoder, SpatialPooler
 from tbt.htm import HTMLayer
-from tbt.operator import MotionOperator, rotate
+from tbt.operator import MotionOperator, rotate, wrap
 from tbt.pooler import ColumnPooler
 
 # ── projection classes (the target-out half of a layer's wiring; §10 P1) ───────────────────────────────────────────
+_TOL = 1e-6          # geometric slack: distances/angles are exact floats here, so this only absorbs round-off
+
+
+@dataclass(frozen=True)
+class Hypothesis:
+    """ONE (object, pose) hypothesis with its accumulated EVIDENCE — Monty's unit of recognition
+    (`reference_tbt_pose_invariant_recognition`): the object's IDENTITY plus its pose, `pose = orientation + location`, both
+    CONTINUOUS (never discretised). `omega` = the object's rotation in degrees; `origin` = where the object's frame origin
+    sits in the sensor's frame, so a model point ℓ is sensed at `rotate(ℓ, omega) + origin`. The identity SDR is L2/3's;
+    `label` is its library index (the read-out)."""
+    identity: frozenset
+    label: int
+    omega: float
+    origin: tuple
+    evidence: float
+
+
 IT = "IT"            # intratelencephalic  — cortico-cortical + striatum (L2/3, L5a)
 PT = "PT"            # pyramidal-tract     — subcortical MOTOR + higher-order thalamus DRIVER (L5b) = efference copy
 CT = "CT"            # corticothalamic     — thalamus MODULATOR + nRT (L6)
@@ -336,9 +354,15 @@ class Column:
         # is measured RELATIVE to the object (grid frames have no origin — Lewis 2019; an arbitrary origin gives translation
         # invariance). One shared origin suffices because the L2/3 pooler individuates objects, not the phase.
         self._anchor = tuple(0.0 for _ in range(location.dims)) if location is not None else None
-        # `_sweep` = the episode BUFFER of sensed fixations that `recognize_rotated` REPLAYS once per candidate pose
-        # ("sequentially evaluating each possible object orientation", Numenta 2021) — now at ANY angle, not a discrete set.
+        # `_sweep` = the episode BUFFER of sensed fixations (Monty's Buffer) that `recognize` REPLAYS per hypothesis.
         self._sweep: list = []
+        # The **L4 → L6a associative link** (Lewis 2019): a sensed feature activates the UNION OF LOCATIONS where it occurs,
+        # which is what seeds recognition when we do NOT know where on the object we are. Learned in `perceive`. The object
+        # model is DISTRIBUTED, never one layer's data structure (`reference_tbt_layers_4_23`): the FEATURE is the key (L4),
+        # the LOCATION is in L6a's object-centric frame, the IDENTITY is L2/3's — this dict is only the L4→L6a *link* between
+        # them. It is NOT the retired rotation table: that memorised the ANSWER per orientation; this stores the object ONCE
+        # in its own frame and the pose is SOLVED from it (`notes/rotation_invariance_plan.md` R4).
+        self._link: dict = {}                                   # feature key -> [(identity, location in the object frame)]
 
     # ── L6a path integration (the TRANSFORM primitive; ARCHITECTURE §8) — a SPATIAL column only ─────────────────────
     def _require_location(self) -> None:
@@ -465,58 +489,120 @@ class Column:
             self.start_object()                         # ONE event: re-anchor frame + reset identity
             self.sense_at(feature, learn)               # bind this feature at the new object's origin
             identity = self.pool(learn)
+        if learn and identity:
+            self._link_feature(feature, identity)       # L4→L6a: this feature occurs HERE, on THIS object
         return identity
 
-    # ── ROTATION: buffer a sweep, then SCAN orientations (plan R3; Numenta 2021) ────────────────────────────────────
+    def _link_feature(self, feature: SDR, identity: frozenset) -> None:
+        """Learn the L4→L6a link for one fixation: remember that this FEATURE occurs at this OBJECT-FRAME LOCATION on this
+        OBJECT. Re-sensing the same feature-at-location on the same object is the SAME fact, not a new one (idempotent, so
+        repeated learning passes do not inflate the union)."""
+        entry = (identity, self._pose[0])
+        union = self._link.setdefault(self._key(feature), [])
+        if entry not in union:
+            union.append(entry)
+
+    @staticmethod
+    def _key(feature: SDR):
+        """The associative key for a feature. EXACT-match on the feature's active bits — honest scope (RULES): a NOISY or
+        partial feature would need overlap recall (the union of everything sufficiently similar). Our features come from a
+        clean categorical transducer, so exact match is the whole story here; overlap recall is the refinement."""
+        return frozenset(feature.active)
+
+    def _union_for(self, feature: SDR) -> list:
+        """The L4→L6a recall: the UNION of (identity, object-frame location) where this feature has been sensed — across
+        every object (Lewis 2019: "the sensory input activates the union of locations"). This is the hypothesis SEED; it is
+        the model talking, not a lookup of the answer."""
+        return self._link.get(self._key(feature), [])
+
+    # ── RECOGNITION by EVIDENCE over a hypothesis POPULATION; the pose is SOLVED (plan R4; Monty) ───────────────────
     def sense_sweep(self, feature: SDR) -> None:
-        """Sense a feature at the current location and BUFFER the fixation (Monty's Buffer) for a later orientation SCAN.
-        Used when the object may be ROTATED: online pooling cannot recognise it until the rotation is undone, so we record
-        the sweep and replay it per candidate orientation. (`perceive` is the online, unrotated path.)"""
+        """Sense a feature at the current location and BUFFER the fixation (Monty's Buffer) for `recognize`. Used when the
+        object's pose is UNKNOWN: online pooling cannot recognise it until the pose is undone, so we record the sweep — the
+        CONTINUOUS sensed position and the feature — and let `recognize` solve the pose. (`perceive` is the online path, for
+        an object already in its canonical pose.)"""
         self._require_location()
         if self._pose is None:
             raise ValueError("sense_sweep before locate(): L6a has no location yet.")
-        self._sweep.append((self._pose[0], feature))     # buffer the CONTINUOUS position, so any angle can be undone later
+        self._sweep.append((self._pose[0], feature))
 
-    def recognize_rotated(self, candidates=None):
-        """SCAN candidate POSES: for each angle ω, REPLAY the buffered sweep with every sensed location UN-rotated by ω, and
-        score how well the model EXPLAINS it — the count of fixations L4 PREDICTS (does not burst). Prediction accuracy ranks
-        the hypothesis (Numenta 2021: the pose leaving least ambiguity wins); the best ω is the inferred POSE and the pooler's
-        identity there is the recognition.
+    def recognize(self) -> list:
+        """Recognise the buffered sweep's object AND its pose, at ANY rotation, ENTERED ANYWHERE. Returns the surviving
+        hypothesis POPULATION (the best-evidence `Hypothesis` objects, tied); the pooler is left settled on the winner.
 
-        `candidates` is any iterable of angles in DEGREES (default: every 15°). Because the state is continuous the scan is no
-        longer tied to a module count — the sampling is a free choice, not a property of the code, so coarse-to-fine
-        refinement is possible without touching the substrate.
+        THE MECHANISM (`reference_tbt_pose_invariant_recognition`; `notes/rotation_invariance_plan.md` R4) — the pose is
+        **SOLVED, never scanned**: "you recognize an unseen orientation because you SOLVE for the rotation; you don't recall
+        it." Monty solves it from ONE sensation because its features carry a local frame (surface normal + curvature). Ours
+        are colour-at-location — NON-morphological, no intrinsic orientation — so the orienting cue is the inter-fixation
+        DISPLACEMENT geometry, and two points suffice:
+          • the object at pose (ω, t) puts every model point ℓ at  p = rotate(ℓ, ω) + t;
+          • two fixations ⇒  p₁ − p₀ = rotate(ℓ₁ − ℓ₀, ω)   — the translation CANCELS;
+          • ⇒  ω = angle(p₁ − p₀) − angle(ℓ₁ − ℓ₀),  then  t = p₀ − rotate(ℓ₀, ω).   Exact, closed-form, any angle.
+        What is HYPOTHESISED is the correspondence (which model point each fixation touched) — seeded by the L4→L6a union
+        (`_union_for`) — and the pose is DERIVED from it, then VERIFIED by the model's own prediction (`_evidence`).
 
-        TIES are returned, not broken: they are the poses this evidence cannot SEPARATE, for either of two reasons.
-        (1) SYMMETRY — an EXACT tie: a 4-fold object genuinely has no single pose; forcing one angle would be a lie.
-        (2) ANGULAR RESOLUTION — separating ω from ω+δ needs the read-out to resolve the arc a feature travels, ≈ r·δ, so
-            precision ≈ (grid resolution / object radius): a BIGGER object pins its pose more finely (measured: radius 2 →
-            ±14°, radius 8 → ±3°). That is the geometry any real sensor obeys, and it bounds useful sampling — NOT the
-            module-count wall of the retired discrete code, which object size could not have widened.
-        The caller sees both as "these poses are indistinguishable", which is the honest report. Returns `(label, ω, ties)`;
-        the pooler is left settled on the winning hypothesis."""
+        The two prunes are the GROUP structure we already committed to (ARCHITECTURE §8), not domain priors: a rotation is an
+        ISOMETRY so |ℓ₁ − ℓ₀| must equal |p₁ − p₀|, and a zero displacement leaves ω genuinely undetermined.
+
+        THE POPULATION IS THE ANSWER (`reference_population_code_belief`): several tied hypotheses mean the evidence does not
+        separate them — a 4-fold object returns its whole symmetry ORBIT, which is correct because it genuinely has no single
+        pose. Returning one angle there would be a lie. An empty list = nothing recognised."""
         self._require_location()
-        cands = list(candidates) if candidates is not None else [float(a) for a in range(0, 360, 15)]
-        scored = []
-        for w in cands:
-            label, hits = self._replay(w)
-            scored.append((hits, w, label))
-        top = max(h for h, _, _ in scored)
-        ties = [w for h, w, _ in scored if h == top]
-        label, _ = self._replay(ties[0])                      # leave the pooler settled on the winner
-        return label, ties[0], ties
+        if len(self._sweep) < 2:
+            return []                                    # one point fixes no rotation — the honest answer, not a guess
+        (p0, f0), (p1, f1) = self._sweep[0], self._sweep[1]
+        seen, scored = set(), []
+        for ident0, l0 in self._union_for(f0):
+            for ident1, l1 in self._union_for(f1):
+                if ident0 != ident1:
+                    continue                             # a correspondence must be within ONE object
+                pose = self._solve(p0, p1, l0, l1)
+                if pose is None:
+                    continue                             # not a rigid motion (or ω undetermined) — pruned by geometry
+                omega, origin = pose
+                key = (id(ident0), round(omega, 6), tuple(round(c, 6) for c in origin))
+                if key in seen:
+                    continue                             # different correspondences, same pose = the same hypothesis
+                seen.add(key)
+                scored.append(Hypothesis(ident0, self.pooler.objects.index(ident0), omega, origin,
+                                         self._evidence(ident0, omega, origin)))
+        if not scored:
+            return []
+        top = max(h.evidence for h in scored)
+        best = [h for h in scored if h.evidence >= top]
+        self._evidence(best[0].identity, best[0].omega, best[0].origin)   # leave the pooler settled on the winner
+        return best
 
-    def _replay(self, deg: float):
-        """Replay the buffered sweep with each location un-rotated by `deg`; return (identity label, #fixations L4 predicted)."""
+    def _solve(self, p0, p1, l0, l1):
+        """SOLVE the pose (ω, origin) from one hypothesised correspondence: fixations `p0,p1` touched model points `l0,l1`.
+        Returns None if the correspondence is not a rigid motion (distance is not preserved) or leaves ω undetermined (the
+        two fixations coincide)."""
+        d_sensed = (p1[0] - p0[0], p1[1] - p0[1])
+        d_model = (l1[0] - l0[0], l1[1] - l0[1])
+        n_sensed, n_model = math.hypot(*d_sensed), math.hypot(*d_model)
+        if n_sensed < _TOL or n_model < _TOL:
+            return None                                  # no displacement ⇒ no orienting cue
+        if abs(n_sensed - n_model) > _TOL:
+            return None                                  # a rotation is an ISOMETRY — this correspondence cannot be rigid
+        omega = wrap(math.degrees(math.atan2(d_sensed[1], d_sensed[0]))
+                     - math.degrees(math.atan2(d_model[1], d_model[0]))) % 360.0
+        rl0 = rotate(l0, omega)
+        return omega, (p0[0] - rl0[0], p0[1] - rl0[1])
+
+    def _evidence(self, identity: frozenset, omega: float, origin: tuple) -> float:
+        """Score one (object, pose) hypothesis by replaying the sweep under it: map each sensed position back into the
+        object's frame, sense there, and ask THE MODEL whether it expected this. Monty's update — a feature match ADDS, a
+        mismatch SUBTRACTS: L4 predicting the feature-at-location (no burst) is the gate, and L2/3's support for THIS named
+        identity is the graded weight, so a hypothesis is not rewarded for a location some OTHER object explains."""
         self.pooler.reset()
-        l4, hits = self.layers["L4"].htm, 0
+        l4, total = self.layers["L4"].htm, 0.0
         for pos, feature in self._sweep:
-            self._pose = (rotate(pos, -deg), 0.0)             # undo the hypothesised rotation (ANY angle), then sense as usual
+            local = (pos[0] - origin[0], pos[1] - origin[1])
+            self._pose = (rotate(local, -omega), 0.0)    # where this fixation lands in the object's own frame
             self.sense_at(feature, learn=False)
-            if not l4.bursting():
-                hits += 1                                     # the model PREDICTED this feature-at-location under this pose
+            total += -1.0 if l4.bursting() else self.pooler.support(l4._active, identity)
             self.pool(learn=False)
-        return self.pooler.which(), hits
+        return total
 
     # ── the FIRST-SLICE drive (§15 D3): sense a feature at L4, conditioned on a factored state ──────────────────────
     def observe(self, feature: SDR, context: Optional[SDR] = None, learn: bool = True) -> list:

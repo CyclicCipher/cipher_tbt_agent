@@ -74,6 +74,12 @@ class ColumnPooler:
         """Fraction of an object's identity cells that the current L4 code supports (the recall score)."""
         return len(obj & sup) / self.w if self.w else 0.0
 
+    def support(self, l4_active, identity: frozenset) -> float:
+        """How strongly the current L4 code supports ONE NAMED identity, in [0, 1] — the graded evidence a caller needs when
+        it is testing a specific object HYPOTHESIS rather than asking "which object is this?" (`pool`'s job). L2/3 owns
+        identity matching, so recognition-by-evidence reads it from here instead of re-deriving it (RULES #5)."""
+        return self._match(identity, self._supported(frozenset(l4_active)))
+
     def _mint(self) -> frozenset:
         """A NEW object: a fresh random sparse identity SDR (sparse → negligible overlap with existing objects)."""
         obj = frozenset(self.rng.sample(range(self.n), self.w))

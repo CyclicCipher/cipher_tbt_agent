@@ -201,17 +201,18 @@ class Agent:
         self._nav_col().perceive(self._feat_enc.encode(feature), learn=learn)
         return self._nav_col().object_id()
 
-    # ----- ROTATION-aware recognition (plan R3, on the SAME column — the two-frame seam is gone) ---------------------
+    # ----- POSE-INVARIANT recognition (plan R4, on the SAME column — the two-frame seam is gone) ---------------------
     def sense_sweep(self, feature) -> None:
-        """Sense + BUFFER a fixation of a possibly-rotated object, for the pose scan (the online `perceive` cannot recognise
-        it until the rotation is undone, so the sweep is recorded and replayed per candidate pose)."""
+        """Sense + BUFFER a fixation of an object whose POSE is unknown (the online `perceive` cannot recognise it until the
+        pose is undone, so the sweep is recorded and `recognize` solves the pose from it)."""
         self._nav_col().sense_sweep(self._feat_enc.encode(feature))
 
-    def recognize_rotated(self, candidates=None):
-        """SCAN candidate poses over the buffered sweep → `(object label, pose° , tied poses)`. Ties = the symmetry orbit.
-        `candidates` = any iterable of angles in degrees (default every 15°) — resolution is a free choice of the sampling,
-        not a property of the code."""
-        return self._nav_col().recognize_rotated(candidates)
+    def recognize(self) -> list:
+        """Recognise the buffered sweep → the surviving `Hypothesis` POPULATION (object + pose + evidence), best-first. The
+        pose is SOLVED from the inter-fixation displacement geometry, so it is exact at ANY rotation and the object may be
+        ENTERED ANYWHERE. Several tied hypotheses = the evidence genuinely does not separate them (a symmetry orbit, or an
+        ambiguous object); an empty list = nothing recognised."""
+        return self._nav_col().recognize()
 
     def step(self, observation):
         """The generic game interface (observation → action) — still a STUB. The wired slices are `scan` (forward model)

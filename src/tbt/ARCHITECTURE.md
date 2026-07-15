@@ -224,19 +224,30 @@ the keyed design it replaced, which needed a sample per `(action, heading)` and 
 deferred `ConjunctiveEncoder` *tensor* is now **moot** — heading is simply a float. The *kind* of action (move vs turn) emerges
 from which components of the learned delta are non-zero; nothing per-action is coded.
 
-**Rotation-invariant recognition (SO(2), BUILT).** Recognising a known object at a novel orientation is *inference over pose*,
-not a stored table: buffer the sweep (`sense_sweep`), then for each candidate angle ω replay it with every sensed location
-**un-rotated by ω** and score how well the model explains it — the count of fixations L4 predicts rather than bursts
-(`recognize_rotated`; "sequentially evaluating each possible object orientation", Numenta 2021). The best ω *is* the inferred
-pose. Because the state is continuous, ω may be **any** angle: sampling is a free choice, so coarse-to-fine refinement needs no
-substrate change. **Ties are reported, not broken**, and they carry real information of two kinds: an **exact** tie is the
-object's symmetry orbit (a 4-fold object genuinely has no single pose — forcing one would be a lie), while a **resolution** tie
-reflects that separating ω from ω+δ requires resolving the arc a feature travels (≈ r·δ), so pose precision ≈ (grid resolution
-/ object radius) — a bigger object pins its pose more finely (measured: radius 2 → ±14°, radius 8 → ±3°). That is the geometry
-any real sensor obeys, and unlike the old module-count wall, object size widens it. *Open (R4):* the replay assumes the sweep
-shares an anchor with the learned object; an evidence/union pooler would let recognition start anywhere and express pose as a
-**population** rather than a tie list — which is also the prerequisite for **SO(3)**, where the state generalises unchanged but
-a naive scan goes cubic.
+**Pose-invariant recognition (SO(2), BUILT — the pose is SOLVED, not scanned).** Recognising a known object at a novel pose is
+*inference*, not a stored table — and Monty's mechanism is stronger than a search: *"you recognize an unseen orientation
+because you **SOLVE** for the rotation; you don't recall it"* (`reference_tbt_pose_invariant_recognition`). Monty solves it
+from a single sensation because its features carry a local frame (surface normal + curvature). Ours are colour-at-location —
+**non-morphological**, no intrinsic orientation — so the orienting cue is the inter-fixation **displacement geometry**, and two
+points suffice: an object at `(ω, t)` puts model point ℓ at `rotate(ℓ,ω) + t`, so `p₁ − p₀ = rotate(ℓ₁ − ℓ₀, ω)` — the
+translation cancels — giving **ω in closed form**, then `t = p₀ − rotate(ℓ₀, ω)`. What is *hypothesised* is the correspondence
+(which model point each fixation touched); the pose is *derived* and then *verified* by the model's own prediction. Two prunes
+come free from the group structure (not from any domain prior): a rotation is an **isometry**, so `|ℓ₁ − ℓ₀|` must equal
+`|p₁ − p₀|`; and a zero displacement leaves ω genuinely undetermined.
+
+The pieces, each in its owning layer: the **L4→L6a associative link** (`Column._link`) is Lewis 2019's *"the sensory input
+activates the union of locations"* — a sensed feature recalls the union of `(identity, location)` where it occurs, which seeds
+the hypotheses; **L2/3** grades identity support (`ColumnPooler.support`); the **operator** is untouched. A hypothesis is
+`(object, ω, t)` = Monty's **(object ID, pose)**, continuous; evidence per fixation is the model's own prediction fit — *match
+adds, mismatch subtracts*. This **subsumes** the retired scan (a shared anchor is just `t = 0`) and removes the SO(3) blocker:
+solving from corresponding points has **no angular-resolution axis to cube**.
+
+**The population is the answer** (`reference_population_code_belief`). Tied hypotheses mean the evidence does not separate
+them, and that is information: a 4-fold object returns its whole **symmetry orbit**, because it genuinely has no single pose —
+reporting one angle would be a lie. A single fixation returns *nothing*, because one point fixes no rotation. *Open:* L2/3's
+**learning-time** commitment is not yet a union — it settles on an identity at the first fixation and never revises, so two
+objects sharing a feature-at-location silently MERGE (measured: two objects → one chimeric identity). Recognition is only ever
+as good as the model it reads, so this is the next slice, not a cosmetic one.
 
 **Two apparent tensions, both resolved by the composition:**
 - *Operator (group representation) vs. discrete graph / SR.* The operator is the **regular, free kernel** — self-motion in

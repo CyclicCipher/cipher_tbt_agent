@@ -1,21 +1,18 @@
-"""End-to-end test of ROTATION-INVARIANT recognition (ARCHITECTURE.md §8; plan `notes/rotation_invariance_plan.md`).
+"""End-to-end test of POSE-INVARIANT recognition (ARCHITECTURE.md §8; plan `notes/rotation_invariance_plan.md` R4).
 
-THE CROWN PROPERTY: learn an object at its canonical orientation, present it at a NOVEL orientation, and the agent both
-recognises it AND reports the rotation. Mechanism: for each candidate pose ω, REPLAY the buffered sweep with every sensed
-location UN-rotated by ω, and score how well the model EXPLAINS it — the count of fixations L4 predicts (does not burst).
-Prediction accuracy ranks the hypothesis; no free pose search, no particle filter.
+THE CROWN PROPERTY: learn an object once, in its own frame; then present it ROTATED to any angle AND TRANSLATED anywhere,
+sweep it starting from ANY point, and the agent recovers the object, its rotation, and where it is — from a model that never
+saw it that way.
 
-AFTER THE CUT-OVER the location state is CONTINUOUS, so a candidate pose can be ANY angle — the sampling is a free choice,
-not a property of the code. The old discrete design could only test multiples of 360/N, and preserving the code under an
-off-grid rotation cost N > 2π·radius modules (measured). Hence the off-grid test below, which the old design could not pass
-at any sane module count.
+THE MECHANISM — the pose is **SOLVED, not scanned** (Monty; `reference_tbt_pose_invariant_recognition`: "you recognize an
+unseen orientation because you SOLVE for the rotation; you don't recall it"). Our features are colour-at-location, carrying
+no intrinsic orientation, so the orienting cue is the inter-fixation DISPLACEMENT geometry: an object at (ω, t) puts model
+point ℓ at rotate(ℓ,ω)+t, so two fixations give p₁−p₀ = rotate(ℓ₁−ℓ₀, ω) — translation cancels — and ω falls out in closed
+form. What is HYPOTHESISED is the correspondence (which model point each fixation touched, seeded by the L4→L6a union); the
+pose is DERIVED and then VERIFIED by the model's own prediction. Nothing samples angles.
 
-TIES are the poses the evidence cannot SEPARATE, and there are two distinct reasons for that — both tested here:
-  • SYMMETRY — an exact tie: a 4-fold object genuinely has no single pose, so the orbit is returned, never a forced angle.
-  • ANGULAR RESOLUTION — a physical limit: distinguishing ω from ω+δ needs the sensor to resolve the arc it moves, ≈ r·δ.
-    So pose precision ≈ (spatial resolution / object radius) — a BIGGER object pins its pose more finely (measured: a
-    radius-2 object resolves to ±14°, radius-8 to ±3°). This is geometry, not a substrate limit: it is exactly the law a
-    real sensor obeys, and it is why the scan samples above the resolution rather than chasing arbitrary precision.
+THE POPULATION IS THE ANSWER. `recognize` returns the tied-best hypotheses, and a tie is information, not a failure: a 4-fold
+object returns its whole symmetry ORBIT because it genuinely has no single pose. Reporting one angle there would be a lie.
 """
 
 from __future__ import annotations
@@ -32,11 +29,13 @@ from tbt.agent import Agent  # noqa: E402
 
 # An ASYMMETRIC object: three distinct features in an L — its pose is unambiguous.
 OBJ = {(0.0, 0.0): 1, (2.0, 0.0): 2, (0.0, 2.0): 3}
-# The SAME shape at 4x the radius — a longer lever arm, so its pose is resolved more finely (the resolution law).
-BIG = {(0.0, 0.0): 1, (8.0, 0.0): 2, (0.0, 8.0): 3}
+# A SECOND object built to be INDISTINGUISHABLE FROM OBJ FOR THE FIRST TWO FIXATIONS: same features 1 and 2, separated by the
+# same displacement (2,0). So the seed CANNOT tell them apart (same solved ω, different origin) and neither can the isometry
+# prune — only the THIRD fixation's evidence can. That is the union narrowing (Lewis 2019), and it is what makes the seed a
+# hypothesis rather than an answer. Its features sit at different LOCATIONS than OBJ's, so the two are separable at learning.
+OTHER = {(1.0, 0.0): 1, (3.0, 0.0): 2, (1.0, -2.0): 6}
 # A 4-fold SYMMETRIC object: the SAME feature at four 90°-rotations → pose determined only up to 90°.
 SYM = {(2.0, 0.0): 5, (0.0, 2.0): 5, (-2.0, 0.0): 5, (0.0, -2.0): 5}
-GRID15 = [float(a) for a in range(0, 360, 15)]
 
 
 def _fresh() -> Agent:
@@ -49,90 +48,127 @@ def _rotate(p, deg: float):
     return (x * math.cos(r) - y * math.sin(r), x * math.sin(r) + y * math.cos(r))
 
 
-def _learn(agent: Agent, obj: dict, passes: int = 6) -> None:
-    """Learn the object at its canonical orientation (ω = 0)."""
+def _learn(agent: Agent, *objects: dict, passes: int = 6) -> None:
+    """Learn each object at its canonical pose, in its OWN frame (start_object re-anchors + mints the identity)."""
     for _ in range(passes):
-        agent.start_object()
-        for coord, feature in obj.items():
-            agent.locate(coord)
-            agent.perceive(feature, learn=True)
+        for obj in objects:
+            agent.start_object()
+            for coord, feature in obj.items():
+                agent.locate(coord)
+                agent.perceive(feature, learn=True)
 
 
-def _fresh_learned(obj: dict) -> Agent:
-    agent = _fresh()
-    _learn(agent, obj)
-    return agent
-
-
-def _present(agent: Agent, obj: dict, omega: float, candidates=None):
-    """Sweep the object PRESENTED rotated by ω, buffering the sweep; then scan candidate poses."""
+def _present(agent: Agent, obj: dict, omega: float = 0.0, shift=(0.0, 0.0), order=None):
+    """Sweep the object as PRESENTED — rotated by ω, translated by `shift`, visited in `order` (default: as stored). The
+    agent is told only where IT is and what it senses; nothing tells it the object's pose or which point it started on."""
     agent.start_object()
-    for coord, feature in obj.items():
-        agent.locate(_rotate(coord, omega))
-        agent.sense_sweep(feature)
-    return agent.recognize_rotated(candidates)
+    coords = list(obj) if order is None else [list(obj)[i] for i in order]
+    for coord in coords:
+        p = _rotate(coord, omega)
+        agent.locate((p[0] + shift[0], p[1] + shift[1]))
+        agent.sense_sweep(obj[coord])
+    return agent.recognize()
 
 
-def test_recognises_an_object_at_a_novel_orientation_and_reports_the_pose():
+def _close(a, b, tol=1e-6) -> bool:
+    return abs(a - b) < tol
+
+
+def test_recognises_an_object_at_a_novel_orientation_and_solves_the_pose():
     agent = _fresh()
     _learn(agent, OBJ)
-    canonical, _, _ = _present(agent, OBJ, 0.0, GRID15)
+    canonical = _present(agent, OBJ)[0].label
     for omega in (15.0, 45.0, 90.0, 180.0, 285.0):
-        label, pose, ties = _present(agent, OBJ, omega, GRID15)
-        assert label == canonical, f"rotated {omega}°: recognised {label}, expected {canonical}"
-        assert abs(pose - omega) < 1e-6, f"rotated {omega}°: inferred pose {pose}"
-        assert ties == [omega], f"an ASYMMETRIC object must have ONE best pose, got {ties}"
+        pop = _present(agent, OBJ, omega)
+        assert len(pop) == 1, f"rotated {omega}°: an ASYMMETRIC object must yield ONE hypothesis, got {len(pop)}"
+        assert pop[0].label == canonical, f"rotated {omega}°: recognised {pop[0].label}, expected {canonical}"
+        assert _close(pop[0].omega, omega), f"rotated {omega}°: solved pose {pop[0].omega}"
 
 
-def test_recognises_at_an_ARBITRARY_off_grid_angle():
-    """The payoff of the continuous state: a pose is not confined to a module count. 37° / 113.5° / 244.25° lie off ANY
-    coarse grid, and the scan simply samples them — the retired discrete design could not represent these without
-    N > 2*pi*radius modules. Candidates are spaced 30° apart, i.e. above the radius-2 object's ±14° resolution, so the true
-    angle must win OUTRIGHT."""
+def test_solves_an_ARBITRARY_off_grid_angle_exactly():
+    """The pose is derived from continuous geometry, so there is no sampling to land on: 37° / 113.5° / 244.25° come out
+    EXACT. The retired scan could only ever report an angle it was handed, and the discrete code before it could not
+    represent these without N > 2*pi*radius modules."""
     agent = _fresh()
     _learn(agent, OBJ)
-    for omega in (37.0, 113.5, 244.25):
-        cands = [omega - 60.0, omega - 30.0, omega, omega + 30.0, omega + 60.0]
-        label, pose, ties = _present(agent, OBJ, omega, cands)
-        assert label == 0, f"off-grid {omega}°: recognised {label}"
-        assert ties == [omega], f"off-grid {omega}°: expected the true angle to win outright, tied {ties}"
-        assert abs(pose - omega) < 1e-6, f"off-grid {omega}°: inferred pose {pose}"
+    for omega in (37.0, 113.5, 244.25, 359.9):
+        pop = _present(agent, OBJ, omega)
+        assert len(pop) == 1 and pop[0].label == 0, f"off-grid {omega}°: got {pop}"
+        assert _close(pop[0].omega, omega), f"off-grid {omega}°: solved pose {pop[0].omega}"
 
 
-def test_pose_resolution_is_set_by_the_lever_arm_not_the_substrate():
-    """Distinguishing ω from ω+δ requires resolving the arc a feature travels, ≈ r·δ — so pose precision ≈ (spatial
-    resolution / object radius). The SAME shape at 4x the radius must therefore resolve its pose several times more finely.
-    This is the honest limit on the scan: geometry, obeyed by any real sensor — NOT the module-count wall of the retired
-    discrete code, which no amount of object size could have widened."""
-    fine = [37.0 + k for k in range(-25, 26)]
-    _, _, small_ties = _present(_fresh_learned(OBJ), OBJ, 37.0, fine)
-    _, _, big_ties = _present(_fresh_learned(BIG), BIG, 37.0, fine)
-    small, big = len(small_ties), len(big_ties)
-    assert 37.0 in small_ties and 37.0 in big_ties, "the TRUE pose must always be among the indistinguishable set"
-    assert big < small, f"a 4x-larger object must resolve pose more finely, got {big}° vs {small}° of tied angles"
+def test_ENTERED_ANYWHERE_on_an_object_placed_anywhere():
+    """THE R4 CROWN. The object is rotated AND translated far from its learned frame, and the sweep starts on a DIFFERENT
+    feature each time — so no anchor is shared with the model and the agent cannot assume where on the object it landed.
+    Solving the pose recovers the rotation AND the object's origin. The retired scan could not do this at all: it assumed
+    the sweep and the model shared an anchor."""
+    agent = _fresh()
+    _learn(agent, OBJ)
+    for omega, shift, order in ((37.0, (20.0, -13.0), (2, 0, 1)),
+                                (150.0, (-8.0, 41.0), (1, 2, 0)),
+                                (270.0, (33.5, 33.5), (2, 1, 0))):
+        pop = _present(agent, OBJ, omega, shift, order)
+        assert len(pop) == 1, f"ω={omega} t={shift}: expected ONE hypothesis, got {[(h.omega, h.origin) for h in pop]}"
+        h = pop[0]
+        assert h.label == 0, f"ω={omega} t={shift}: recognised {h.label}"
+        assert _close(h.omega, omega), f"ω={omega} t={shift}: solved rotation {h.omega}"
+        assert _close(h.origin[0], shift[0]) and _close(h.origin[1], shift[1]), \
+            f"ω={omega} t={shift}: solved origin {h.origin}"
 
 
-def test_symmetry_yields_the_symmetry_orbit_not_a_forced_angle():
-    """A 4-fold symmetric object: identity is still recognised, but pose is undetermined up to 90° — the scan must return the
-    TIED orbit, not invent a single angle. Unlike the resolution ties above, this tie is EXACT and no sensor improvement
-    would break it: the object really is the same at all four angles."""
+def test_an_AMBIGUOUS_seed_is_narrowed_by_evidence_not_by_the_seed():
+    """OBJ and OTHER share features 1 and 2 at the same separation, so after two fixations they are genuinely
+    indistinguishable: the union seeds a hypothesis on EACH, both solving the SAME ω, and the isometry prune cannot separate
+    them either (the displacement is identical by construction). Only the third fixation's evidence can — under the wrong
+    object's pose it lands where that object has nothing, L4 bursts, and the hypothesis is refuted. This is the union
+    narrowing to one object (Lewis 2019): the seed proposes, the model's own prediction disposes."""
+    agent = _fresh()
+    _learn(agent, OBJ, OTHER)
+    union = agent._nav_col()._union_for(agent._feat_enc.encode(1))
+    assert len(union) == 2, f"feature 1 occurs on BOTH objects — the union must carry both, got {len(union)}"
+    seen = {}
+    for obj, name in ((OBJ, "OBJ"), (OTHER, "OTHER")):
+        for omega in (41.0, 200.0):
+            pop = _present(agent, obj, omega, shift=(11.0, 7.0))
+            assert len(pop) == 1, f"{name} @{omega}°: evidence must leave ONE hypothesis, got {[h.label for h in pop]}"
+            assert _close(pop[0].omega, omega), f"{name} @{omega}°: solved {pop[0].omega}"
+            seen.setdefault(name, set()).add(pop[0].label)
+    assert all(len(v) == 1 for v in seen.values()), f"each object must recognise consistently, got {seen}"
+    assert seen["OBJ"] != seen["OTHER"], f"the two objects must be DIFFERENT identities, got {seen}"
+
+
+def test_symmetry_yields_the_symmetry_orbit_not_a_forced_pose():
+    """A 4-fold symmetric object: identity is recognised, but the pose is undetermined up to 90°. The population must carry
+    the whole orbit — an EXACT tie no amount of evidence could break, because the object really is the same at all four."""
     agent = _fresh()
     _learn(agent, SYM)
-    label, _, ties = _present(agent, SYM, 0.0, GRID15)
-    assert label == 0, "a symmetric object is still RECOGNISED (symmetry affects pose, not identity)"
-    assert sorted(ties) == [0.0, 90.0, 180.0, 270.0], f"4-fold symmetry → the orbit every 90°, got {ties}"
+    pop = _present(agent, SYM, 0.0)
+    assert {h.label for h in pop} == {0}, "a symmetric object is still RECOGNISED (symmetry affects pose, not identity)"
+    assert sorted(h.omega for h in pop) == [0.0, 90.0, 180.0, 270.0], \
+        f"4-fold symmetry → the orbit every 90°, got {sorted(h.omega for h in pop)}"
+
+
+def test_a_single_fixation_fixes_no_rotation():
+    """One point cannot determine a rotation — that is geometry, not a shortcoming. The honest answer is no hypothesis, not
+    a guessed angle."""
+    agent = _fresh()
+    _learn(agent, OBJ)
+    agent.start_object()
+    agent.locate((5.0, 5.0))
+    agent.sense_sweep(1)
+    assert agent.recognize() == [], "a single fixation must yield NO pose hypothesis"
 
 
 if __name__ == "__main__":
     ag = _fresh()
-    _learn(ag, OBJ)
-    for w in (0.0, 15.0, 90.0, 285.0):
-        print(f"presented at {w:6.1f}° → {_present(ag, OBJ, w, GRID15)}")
-    for w in (37.0, 113.5, 244.25):
-        print(f"OFF-GRID   {w:6.2f}° → {_present(ag, OBJ, w, [w - 60.0, w - 30.0, w, w + 30.0, w + 60.0])}")
-    fine = [37.0 + k for k in range(-25, 26)]
-    print(f"resolution, radius 2 → +/-{(len(_present(_fresh_learned(OBJ), OBJ, 37.0, fine)[2]) - 1) // 2}°")
-    print(f"resolution, radius 8 → +/-{(len(_present(_fresh_learned(BIG), BIG, 37.0, fine)[2]) - 1) // 2}°")
+    _learn(ag, OBJ, OTHER)
+    for w in (0.0, 37.0, 244.25):
+        h = _present(ag, OBJ, w)[0]
+        print(f"OBJ at {w:7.2f}°           → object {h.label}, solved ω={h.omega:7.2f}, origin={h.origin}")
+    h = _present(ag, OBJ, 150.0, (-8.0, 41.0), (1, 2, 0))[0]
+    print(f"OBJ rotated+moved, entered mid → object {h.label}, solved ω={h.omega:7.2f}, origin=({h.origin[0]:.1f}, {h.origin[1]:.1f})")
+    h = _present(ag, OTHER, 41.0, (11.0, 7.0))[0]
+    print(f"OTHER (shares feature 1)       → object {h.label}, solved ω={h.omega:7.2f}")
     sym = _fresh()
     _learn(sym, SYM)
-    print(f"4-fold symmetric → {_present(sym, SYM, 0.0, GRID15)}  (an EXACT tie = the symmetry orbit)")
+    print(f"4-fold symmetric               → orbit {sorted(h.omega for h in _present(sym, SYM, 0.0))} (an EXACT tie)")
