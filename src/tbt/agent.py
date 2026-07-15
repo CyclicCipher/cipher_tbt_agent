@@ -67,6 +67,9 @@ class Agent:
         self._decision_col = None
         self._pending = None
         self._nav = None
+        self._rot = None
+        self._feat_enc = CategoryEncoder(range(16), w=8, capacity=16)   # the feature (ARC 16-colour palette) transducer —
+        #                                                                 shared by every spatial column (the peripheral)
         self._n_cols = int(n_cols)
         self._seed = int(seed)
 
@@ -129,7 +132,6 @@ class Agent:
             # order=2: L4's OUTPUT (active cells) must encode feature-AT-location (a location-specific cell per feature
             # column) so L2/3 pools features-at-locations, not bare features — order=1 would collapse the location.
             self._nav = Column(sensory_n=1, n_cols=self._n_cols, order=2, seed=self._seed + 3, location=grid, heading=head)
-            self._feat_enc = CategoryEncoder(range(16), w=8, capacity=16)   # the feature (ARC 16-colour palette) transducer
         return self._nav
 
     def learn_move(self, action, before, after) -> None:
@@ -202,6 +204,38 @@ class Agent:
         Returns the object's integer label (−1 if none)."""
         self._nav_col().perceive(self._feat_enc.encode(feature), learn=learn)
         return self._nav_col().object_id()
+
+    # ----- ROTATION-aware recognition (plan R3): an ORIENTED column + the orientation SCAN ---------------------------
+    def _rot_col(self) -> Column:
+        """The lazily-built ROTATION-capable column: an ORIENTED location grid (modules spread over 360°), so rotation is a
+        circular-buffer shift. It is a SEPARATE frame from the nav column deliberately — the oriented grid makes ROTATION
+        exact but TRANSLATION path-integration inexact (a unit move shifts module i's phase by cos θ_i, not an integer), so
+        this column takes its location by sensory fix (`locate_rotated`) and the axis-aligned nav column keeps dead-reckoning."""
+        if self._rot is None:
+            grid = GridEncoder(scales=(7, 11, 13, 17), dims=2, mw=1, bounds=[(0, 15), (0, 15)], orientations=8)
+            self._rot = Column(sensory_n=1, n_cols=self._n_cols, order=2, seed=self._seed + 5, location=grid)
+        return self._rot
+
+    def start_rotated_object(self) -> None:
+        """Object onset for the rotation column (re-anchor the frame, fresh identity, clear the sweep buffer)."""
+        self._rot_col().start_object()
+
+    def locate_rotated(self, coord) -> None:
+        """Fix the rotation column's location to a sensed coordinate."""
+        self._rot_col().locate(coord)
+
+    def perceive_rotated(self, feature, learn: bool = True) -> int:
+        """Online sense+pool on the rotation column (used to LEARN an object at its canonical orientation)."""
+        self._rot_col().perceive(self._feat_enc.encode(feature), learn=learn)
+        return self._rot_col().object_id()
+
+    def sense_sweep_rotated(self, feature) -> None:
+        """Sense + BUFFER a fixation of a possibly-rotated object, for the orientation scan."""
+        self._rot_col().sense_sweep(self._feat_enc.encode(feature))
+
+    def recognize_rotated(self):
+        """SCAN orientations over the buffered sweep → `(object label, pose k, tied poses)`. Ties = the symmetry orbit."""
+        return self._rot_col().recognize_rotated()
 
     def step(self, observation):
         """The generic game interface (observation → action) — still a STUB. The wired slices are `scan` (forward model)

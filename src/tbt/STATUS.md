@@ -50,9 +50,9 @@ writeup in `ARCHITECTURE.md` §7:
    A FACTORED recurrent state channel closes it (100%) where PURE temporal memory can't (37%). ReSU investigated + DROPPED
    (temporal encoder, not spatial invariance).
 
-Suite: **51 passed** (~19s; `test_column_arithmetic` is the ~19s end-to-end column test, the rest — `test_bg_thalamus`,
+Suite: **54 passed** (~21s; `test_column_arithmetic` is the ~19s end-to-end column test, the rest — `test_bg_thalamus`,
 `test_operator_path_integration`, `test_feature_at_location`, `test_l23_pooling`, `test_operator_se2`, `test_object_centric`,
-`test_oriented_grid`, `test_rotation_operator` — are fast). Run
+`test_oriented_grid`, `test_rotation_operator`, `test_rotation_recognition` — are fast). Run
 `python src/tests/test_reachability.py` for the wired map; the 20 legacy test files are archived under
 `Legacy - DO NOT USE OR IMPORT!/tests/`.
 

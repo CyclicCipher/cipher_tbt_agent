@@ -247,7 +247,7 @@ from typing import Optional
 
 from tbt.encoders import SDR, GridEncoder, SpatialPooler
 from tbt.htm import HTMLayer
-from tbt.operator import ModularOperator
+from tbt.operator import ModularOperator, RotationOperator
 from tbt.pooler import ColumnPooler
 
 # ── projection classes (the target-out half of a layer's wiring; §10 P1) ───────────────────────────────────────────
@@ -338,6 +338,11 @@ class Column:
         # location is measured RELATIVE to the object (grid frames have no origin — Lewis 2019; the arbitrary origin gives
         # translation invariance). One shared origin suffices because the L2/3 pooler individuates objects, not the phase.
         self._anchor = tuple(0 for _ in range(location.dims)) if location is not None else None
+        # ROTATION (plan R3): on an ORIENTED location grid, rotation is a circular-buffer shift of the orientation-module
+        # index (`RotationOperator`), and `_sweep` is the episode BUFFER of sensed fixations that `recognize_rotated` REPLAYS
+        # once per candidate orientation ("sequentially evaluating each possible object orientation", Numenta 2021).
+        self.rot_op = RotationOperator(location) if (location is not None and not location._axis_aligned) else None
+        self._sweep: list = []
 
     # ── L6a path integration (the TRANSFORM primitive; ARCHITECTURE §8) — a SPATIAL column only ─────────────────────
     def _require_location(self) -> None:
@@ -463,6 +468,7 @@ class Column:
         self._require_location()
         self.locate(self._anchor)
         self.pooler.reset()
+        self._sweep = []
 
     def perceive(self, feature: SDR, learn: bool = True):
         """Sense a feature at the current OBJECT-RELATIVE location and pool it into the L2/3 identity — and, if this is a
@@ -480,6 +486,48 @@ class Column:
             self.sense_at(feature, learn)               # bind this feature at the new object's origin
             identity = self.pool(learn)
         return identity
+
+    # ── ROTATION: buffer a sweep, then SCAN orientations (plan R3; Numenta 2021) ────────────────────────────────────
+    def sense_sweep(self, feature: SDR) -> None:
+        """Sense a feature at the current location and BUFFER the fixation (Monty's Buffer) for a later orientation SCAN.
+        Used when the object may be ROTATED: online pooling cannot recognise it until the rotation is undone, so we record
+        the sweep and replay it per candidate orientation. (`perceive` is the online, unrotated path.)"""
+        self._require_location()
+        if self._loc is None:
+            raise ValueError("sense_sweep before locate(): L6a has no location yet.")
+        self._sweep.append((self._loc, feature))
+
+    def recognize_rotated(self):
+        """SCAN the orientation buffer: for each candidate rotation k, REPLAY the buffered sweep with every sensed location
+        UN-rotated by k (the rotation operator), and score how well the model EXPLAINS it — the count of fixations L4
+        PREDICTS (does not burst). Prediction accuracy ranks the hypothesis (Numenta 2021: the orientation leaving least
+        ambiguity wins); the best k is the inferred POSE and the pooler's identity there is the recognition.
+
+        TIES are returned, not broken: equal-scoring k's are the object's SYMMETRY orbit — the pose is genuinely
+        undetermined up to that symmetry, and forcing one angle would be a lie. Returns `(label, k, ties)`; the pooler is
+        left settled on the winning hypothesis."""
+        self._require_location()
+        assert self.rot_op is not None, "recognize_rotated needs an ORIENTED location grid — GridEncoder(orientations=N)"
+        scored = []
+        for k in range(self.rot_op.steps):
+            label, hits = self._replay(k)
+            scored.append((hits, k, label))
+        top = max(h for h, _, _ in scored)
+        ties = [k for h, k, _ in scored if h == top]
+        label, _ = self._replay(ties[0])                      # leave the pooler settled on the winner
+        return label, ties[0], ties
+
+    def _replay(self, k: int):
+        """Replay the buffered sweep with each location un-rotated by k; return (identity label, #fixations L4 predicted)."""
+        self.pooler.reset()
+        l4, hits = self.layers["L4"].htm, 0
+        for loc, feature in self._sweep:
+            self._loc = self.rot_op.apply(loc, -k)            # undo the hypothesised rotation, then sense as usual
+            self.sense_at(feature, learn=False)
+            if not l4.bursting():
+                hits += 1                                     # the model PREDICTED this feature-at-location under k
+            self.pool(learn=False)
+        return self.pooler.which(), hits
 
     # ── the FIRST-SLICE drive (§15 D3): sense a feature at L4, conditioned on a factored state ──────────────────────
     def observe(self, feature: SDR, context: Optional[SDR] = None, learn: bool = True) -> list:
