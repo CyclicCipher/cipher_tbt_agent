@@ -118,3 +118,59 @@ class ModularOperator:
     def shift_of(self, action: Hashable):
         """The learned per-module shift vector for an action (for inspection/tests); None if unlearned."""
         return self.shifts.get(action)
+
+
+class RotationOperator:
+    """ROTATION as a CIRCULAR-BUFFER shift of the orientation-module index (Numenta 2021; rotation plan R2). On a
+    multi-orientation `GridEncoder` (modules spread over 360°, ORDERED by orientation), rotating a location by ω = k·(360/N)
+    moves each module's phase k steps around its scale's orientation ring, CELL UNCHANGED — the equivariance R2 pins:
+
+        apply(encode(loc), k) == encode(R_ω · loc)          for ω = k·(360/N)
+
+    So rotation is a PERMUTATION of the location code: the SAME TRANSFORM primitive as translation (`ModularOperator`), but
+    shifting ACROSS modules (the orientation buffer) instead of WITHIN one (the phase). It is exact, invertible, and composes
+    (k1 then k2 == k1+k2) — a group action, not a search.
+
+    CONSTRUCTED, not learned — deliberately. `ModularOperator` LEARNS what an ACTION does (the agent cannot know what ACTION1
+    means). A rotation here is not an action to discover but a HYPOTHESIS to test (R3 scans k and ranks by fit), and the shift
+    follows from the grid's SUPPLIED orientation geometry (ARCHITECTURE §10 P3: the location code's structure is given, not
+    learned — as the grid's scales are). If rotation ever becomes an action the body takes, `ModularOperator` learns it keyed
+    on that action; nothing here needs to change.
+    """
+
+    def __init__(self, grid) -> None:
+        assert not grid._axis_aligned, (
+            "RotationOperator needs an ORIENTED grid — GridEncoder(orientations=N) spread over 360°. An axis-aligned "
+            "(0°,90°) set is NOT closed under rotation (rotating by 90° needs the 270° direction), so the shift would not "
+            "equal the rotation.")
+        self.grid = grid
+        self.n_orient = int(grid.n_orient)
+        mods = grid.modules()
+        self.bases = [int(m[0]) for m in mods]                 # first bit of each module (module index = scale*N + orient)
+        self._bit_module = [0] * int(grid.n)                   # bit -> module index
+        for mi, m in enumerate(mods):
+            for b in m:
+                self._bit_module[int(b)] = mi
+
+    @property
+    def steps(self) -> int:
+        """The number of distinct rotation steps = the orientation-buffer size N (ω = k·360/N). R3 scans `range(steps)`."""
+        return self.n_orient
+
+    def angle(self, k: int) -> float:
+        """The rotation angle in degrees of `k` buffer steps — how an inferred pose is reported."""
+        return (int(k) % self.n_orient) * 360.0 / self.n_orient
+
+    def apply(self, loc: SDR, k: int) -> SDR:
+        """Rotate the location code by `k` steps: move every active bit from its orientation-module j to module j+k within
+        the SAME scale's ring, keeping the cell. k=0 is the identity."""
+        k = int(k) % self.n_orient
+        if k == 0:
+            return loc
+        out = set()
+        for b in loc.active:
+            mi = self._bit_module[b]
+            scale, i = divmod(mi, self.n_orient)               # modules are ordered scale-major, orientation-minor
+            j = scale * self.n_orient + (i + k) % self.n_orient
+            out.add(self.bases[j] + (b - self.bases[mi]))      # same cell, rotated module (same scale ⇒ same ring size)
+        return SDR(loc.n, out)

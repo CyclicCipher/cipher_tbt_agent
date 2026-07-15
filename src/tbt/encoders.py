@@ -176,17 +176,40 @@ class GridEncoder(Encoder):
     scales -> a unique position within lcm(scales), read per axis by argmax overlap). The sparse, decodable form of
     the `hex_code` prior; the a-priori metric overlap the localist `state_node` lacks (§10 P4a, the SDR test)."""
 
-    def __init__(self, scales=(7, 11, 13, 17), dims: int = 2, mw: int = 3, bounds=None) -> None:
+    def __init__(self, scales=(7, 11, 13, 17), dims: int = 2, mw: int = 3, bounds=None, orientations=None) -> None:
         self.scales = tuple(int(s) for s in scales)
         assert mw < min(self.scales), "the window must be smaller than the smallest ring"
         self.dims, self.mw = int(dims), int(mw)
         self.bounds = bounds                                    # per-dim (lo, hi) for decode; default 0..lcm-1
-        self._off = np.cumsum([0] + [s for s in self.scales for _ in range(self.dims)])   # bit offset per module
+        # ORIENTATIONS (rotation plan R1). Default None = AXIS-ALIGNED: one module per (scale, axis) reading the coordinate
+        # directly — byte-for-byte the original behaviour. `orientations=N` (or a tuple of angles in degrees) instead spreads
+        # N modules uniformly over 360° per scale, ORDERED by orientation; a module at θ reads the location PROJECTED onto θ.
+        # That ordering IS the CIRCULAR BUFFER a rotation acts on: rotating by k·(360/N) moves module j's phase to module j+k
+        # (same cell), so rotation is a PERMUTATION — the TRANSFORM primitive (notes/rotation_invariance_plan.md). 2-D only.
+        self._axis_aligned = orientations is None
+        if self._axis_aligned:
+            self.angles = tuple(90.0 * a for a in range(self.dims))
+        else:
+            assert self.dims == 2, "oriented modules are 2-D (each reads a projection onto a direction)"
+            self.angles = (tuple(360.0 * i / int(orientations) for i in range(int(orientations)))
+                           if isinstance(orientations, int) else tuple(float(a) for a in orientations))
+        self.n_orient = len(self.angles)
+        self._u = [(float(np.cos(np.radians(a))), float(np.sin(np.radians(a)))) for a in self.angles]
+        self._off = np.cumsum([0] + [s for s in self.scales for _ in range(self.n_orient)])   # bit offset per module
         self.n = int(self._off[-1])
 
-    def _module(self, k: int, axis: int) -> int:
-        """Bit offset of the module for the k-th scale, given axis."""
-        return int(self._off[k * self.dims + axis])
+    def _module(self, k: int, i: int) -> int:
+        """Bit offset of the module for the k-th scale and the i-th axis (default) / orientation (oriented)."""
+        return int(self._off[k * self.n_orient + i])
+
+    def _proj(self, c, i: int) -> float:
+        """The scalar module i reads: the coordinate on axis i (axis-aligned default — exact, no trig), or the location
+        PROJECTED onto direction θ_i. The rotation identity: `proj_i(R_ω·loc) == proj_(i−ω/Δ)(loc)` — which is exactly why a
+        rotation shows up as a cyclic shift of the module index."""
+        if self._axis_aligned:
+            return float(c[i])
+        ux, uy = self._u[i]
+        return float(c[0]) * ux + float(c[1]) * uy
 
     def _window(self, base: int, coord_axis: float, s: int):
         """The active ring cells (the bump) for a coordinate on one (scale, axis) module."""
@@ -197,28 +220,46 @@ class GridEncoder(Encoder):
         c = np.atleast_1d(np.asarray(coord, dtype=float))
         active = set()
         for k, s in enumerate(self.scales):
-            for axis in range(self.dims):
-                active |= self._window(self._module(k, axis), c[axis], s)
+            for i in range(self.n_orient):
+                active |= self._window(self._module(k, i), self._proj(c, i), s)
         return SDR(self.n, active)
 
     def modules(self):
-        """The index groups of the independent MODULES (each (scale, axis) ring) — the block structure a block-diagonal
-        operator learns over (each small ring is a continuous-attractor; Burak & Fiete). A partition of `0..n`."""
+        """The index groups of the independent MODULES (each (scale, axis-or-orientation) ring) — the block structure a
+        block-diagonal operator learns over (each small ring is a continuous-attractor; Burak & Fiete). Ordered scale-major,
+        orientation-minor: module index = `k_scale * n_orient + i`. A partition of `0..n`."""
         return [list(range(int(self._off[k]), int(self._off[k + 1]))) for k in range(len(self._off) - 1)]
+
+    def orientation_buffer(self):
+        """Per SCALE, the module indices ORDERED by orientation — the CIRCULAR BUFFER a rotation shifts (Numenta 2021):
+        rotating the location by `k·(360/N)` moves module j's phase to module `j+k` (mod N) within the scale's ring, cell
+        unchanged. Indices index `modules()`. Only meaningful for an oriented grid (`orientations=`)."""
+        return [[k * self.n_orient + i for i in range(self.n_orient)] for k in range(len(self.scales))]
 
     def decode(self, sdr: SDR, bounds=None):
         bounds = bounds or self.bounds or [(0, int(np.lcm.reduce(self.scales)) - 1)] * self.dims
-        out = []
-        for axis in range(self.dims):
-            lo, hi = bounds[axis]
-            best, best_ov = int(lo), -1
-            for x in range(int(lo), int(hi) + 1):
-                ov = sum(len(self._window(self._module(k, axis), x, s) & sdr.active)
-                         for k, s in enumerate(self.scales))
+        if self._axis_aligned:
+            out = []                                            # axes are SEPARABLE → one cheap scan per axis
+            for axis in range(self.dims):
+                lo, hi = bounds[axis]
+                best, best_ov = int(lo), -1
+                for x in range(int(lo), int(hi) + 1):
+                    ov = sum(len(self._window(self._module(k, axis), x, s) & sdr.active)
+                             for k, s in enumerate(self.scales))
+                    if ov > best_ov:
+                        best, best_ov = x, ov
+                out.append(best)
+            return tuple(out)
+        # ORIENTED: every module mixes both axes, so they are NOT separable → joint scan over the coordinate grid. Cost is
+        # O(|bounds_x| · |bounds_y| · modules); keep `bounds` tight (it is a readout/test path, not a hot loop).
+        best, best_ov = (int(bounds[0][0]), int(bounds[1][0])), -1
+        for x in range(int(bounds[0][0]), int(bounds[0][1]) + 1):
+            for y in range(int(bounds[1][0]), int(bounds[1][1]) + 1):
+                ov = sum(len(self._window(self._module(k, i), self._proj((x, y), i), s) & sdr.active)
+                         for k, s in enumerate(self.scales) for i in range(self.n_orient))
                 if ov > best_ov:
-                    best, best_ov = x, ov
-            out.append(best)
-        return tuple(out)
+                    best, best_ov = (x, y), ov
+        return best
 
 
 class MultiEncoder(Encoder):
