@@ -179,35 +179,64 @@ the *second* primitive that composes with it.)
   sequence memories. **It does not generalize a transition across positions** — a fact learned at one place is a different
   segment from the same fact at another (§7's 0%-on-a-novel-place). That is not a defect to fix in the HTMLayer; it is the
   wrong tool for that job.
-- **TRANSFORM — the operator.** Apply an action's effect as a **learned, group-structured permutation of a code**: "action
-  A shifts the location code *this* way." It generalizes across every position **by construction** — a shift is the same
-  operation everywhere, including places never visited. This is L6a (path integration) and L5 (displacement).
+- **TRANSFORM — the operator.** Apply an action's effect as a **learned group action on the location state**: "action A
+  displaces me *this* way." It generalizes across every position **by construction** — the same displacement everywhere,
+  including places never visited. This is L6a (path integration) and L5 (displacement).
 
 **They compose — that composition *is* the TBT forward model.** Predict the next feature from the next *movement*, not from
 the previous feature (`htm.py`): the operator moves the location (TRANSFORM, generalizes), then the HTMLayer reads the
 feature at the new location (ASSOCIATE, binds): `loc' = M(action)·loc ; feat' = recall_at(loc')`. That ordering is what
 makes the model order-invariant.
 
-**The operator, on our substrate — no matrix, no gradient, no ANN.** The location is a `GridEncoder` SDR: a bump per
-`(scale, axis)` module, each module a ring of `scale` cells. `M(action)` is a **cyclic shift per module** (a
-block-structured permutation; `GridEncoder.modules()` are the blocks), so the whole operator for one action is a vector of
-per-module integer shifts. It is *discovered* by reading the per-module phase delta of an observed `(loc, action, loc')` and
-voting — a genuine translation gives a constant shift across all positions. This is the entorhinal path-integration
-mechanism (`φ ← φ + Δ mod scale`) with `Δ` **learned per action** instead of hard-coded (we do not get to assume
-"ACTION1 = north" — that would be the bitter-lesson trap).
+**The operator, on our substrate — no matrix, no gradient, no ANN.** L6a's state is a **continuous pose** `((x, y), heading°)`
+(`column.py` `_pose`), and the `GridEncoder` SDR is a **read-out** of it (`_code`), re-encoded fresh at every fixation. The
+operator (`operator.MotionOperator`) learns, per action, the **body-frame displacement + heading change**, as a running mean
+over observed `(pose, action, pose')` triples; `apply` maps that body-frame delta through the *current* heading and adds it.
+`Δ` is **learned per action**, never hard-coded — we do not get to assume "ACTION1 = north" (the bitter-lesson trap). This is
+the entorhinal mechanism `φ ← (φ + M·d) mod 1` with the phases **continuous**, as Lewis 2019 states them.
 
-**One mechanism, generality dialed by conditioning (the non-abelian SE(2) case — BUILT).** A heading-dependent action
-("FORWARD") shifts location by an amount that *depends on* heading — not a constant per-module shift, and (the reference's
-warning) not expressible by a naive concatenation with one shared shift. SE(2) is the **semidirect product R²⋊SO(2)**: the
-translation transforms under a representation that depends on the rotation (biologically the conjunctive grid × head-direction
-cells, Sargolini 2006). We implement this by **conditioning**, reusing the abelian operator: the LOCATION `ModularOperator`
-keyed by `(action, heading)` (so its shift is a *function of* heading), plus a second `ModularOperator` on the HEADING ring
-(TURN). Same mechanism — a permutation discovered by phase-delta voting — with the abelian (heading-independent) case as the
-degenerate special case; the *kind* of action (move vs turn) emerges from which modules its learned shift touches, nothing
-per-action is coded. It is **non-commutative by construction** (FORWARD's location shift is keyed on a heading that TURN
-changes) and generalises per `(action, heading)` across the whole space (`column.py` `learn_pose_move`/`path_integrate_pose`).
-The `ConjunctiveEncoder` *tensor* `location × heading` remains the route to a CONTINUOUS-heading, fully-linear group
-representation — deferred; keying is the discrete, minimal form that reuses the canonical operator.
+**Why the state is continuous and the code is a read-out (the 2026-07-15 CUT-OVER — this replaced a discrete design).** The
+operator used to be a **permutation** of the grid SDR (a cyclic shift per module). That is the natural move on a discrete
+code, and it is a real constraint, not an implementation detail: *a permutation can only represent group elements that map the
+code's lattice onto itself.* Translation is then exact only axis-aligned, and rotation only at the lattice's point group — the
+**crystallographic restriction** (2/3/4/6-fold). Two measurements settled it:
+- **The drift falsifier.** Quantised phases under an off-lattice rotation drift **linearly** with path length (overlap fell to
+  0.50 by step 2; the decode was off by 13 cells at step 30). The drift is *systematic*, so multi-scale error correction — which
+  only fixes *independent* errors — cannot remove it. Exact sub-cases (N=4) passed, which is the signature of a lattice
+  constraint rather than a bug.
+- **The bake-off.** Against a continuous-phase variant, exact off-grid rotation needed **N > 2π·radius** modules (confirmed
+  exactly: r=1→8, r=2→16, r=4→32, r=8→64, r=16→128) — cost unbounded in object radius, and *quadratic* for SO(3). The
+  continuous state matched at 1.00 with 0.00 error at every radius.
+
+So: **continuous state, discrete read-out.** Translation and rotation are exact at any vector and any angle; the read-out's
+quantisation is bounded and **never accumulates**, because each fixation re-encodes from the state rather than composing
+rounded shifts. The binary SDR keeps the job it is right for — **identity**, where overlap means similarity — and stops doing
+the job it is wrong for: carrying a **metric**. (`GridEncoder(orientations=)` and `RotationOperator` were deleted in the same
+move, per the no-parallel-systems rule.)
+
+**Non-abelian SE(2) falls out for free.** A heading-dependent action ("FORWARD") displaces by an amount that *depends on*
+heading. SE(2) is the **semidirect product R²⋊SO(2)**: the translation transforms under a representation that depends on the
+rotation (biologically, conjunctive grid × head-direction cells, Sargolini 2006). Because the operator stores the delta in the
+**body frame** and `apply` maps it through the current heading, non-commutativity is **structural** — FORWARD;TURN ≠
+TURN;FORWARD — with *no keying, no heading ring, and no discretisation*. One observation generalises to every position **and
+every heading**, including headings never observed (tested at 37° after learning only at 0°/90°). This is strictly better than
+the keyed design it replaced, which needed a sample per `(action, heading)` and could only key on headings it had seen; the
+deferred `ConjunctiveEncoder` *tensor* is now **moot** — heading is simply a float. The *kind* of action (move vs turn) emerges
+from which components of the learned delta are non-zero; nothing per-action is coded.
+
+**Rotation-invariant recognition (SO(2), BUILT).** Recognising a known object at a novel orientation is *inference over pose*,
+not a stored table: buffer the sweep (`sense_sweep`), then for each candidate angle ω replay it with every sensed location
+**un-rotated by ω** and score how well the model explains it — the count of fixations L4 predicts rather than bursts
+(`recognize_rotated`; "sequentially evaluating each possible object orientation", Numenta 2021). The best ω *is* the inferred
+pose. Because the state is continuous, ω may be **any** angle: sampling is a free choice, so coarse-to-fine refinement needs no
+substrate change. **Ties are reported, not broken**, and they carry real information of two kinds: an **exact** tie is the
+object's symmetry orbit (a 4-fold object genuinely has no single pose — forcing one would be a lie), while a **resolution** tie
+reflects that separating ω from ω+δ requires resolving the arc a feature travels (≈ r·δ), so pose precision ≈ (grid resolution
+/ object radius) — a bigger object pins its pose more finely (measured: radius 2 → ±14°, radius 8 → ±3°). That is the geometry
+any real sensor obeys, and unlike the old module-count wall, object size widens it. *Open (R4):* the replay assumes the sweep
+shares an anchor with the learned object; an evidence/union pooler would let recognition start anywhere and express pose as a
+**population** rather than a tie list — which is also the prerequisite for **SO(3)**, where the state generalises unchanged but
+a naive scan goes cubic.
 
 **Two apparent tensions, both resolved by the composition:**
 - *Operator (group representation) vs. discrete graph / SR.* The operator is the **regular, free kernel** — self-motion in
@@ -230,7 +259,7 @@ the L4 feature-at-location stream into a **stable object IDENTITY** that persist
 on a prediction error — is still associative (Hebbian feedforward L4→identity), *not* a new kind of computation like
 TRANSFORM. What it adds is a **stable output decoupled from the instantaneous input**, which the `HTMLayer` cannot express
 (its active cells ARE its proximal input); so L2/3 gets its own small engine (`pooler.ColumnPooler`), exactly as L6a gets
-`operator.ModularOperator`. The two primitives above are unchanged. Crucially, **L2/3 holds the IDENTITY only** — the
+`operator.MotionOperator`. The two primitives above are unchanged. Crucially, **L2/3 holds the IDENTITY only** — the
 object's structure (which feature at which location, the displacements between them) stays DISTRIBUTED across L4 (features),
 L6a (locations), L5 (displacements); the object model is not one layer's data structure (`reference_tbt_layers_4_23`).
 Cross-column VOTING over these identities is the THALAMUS's job (§3), a multi-column slice, not the single column's.

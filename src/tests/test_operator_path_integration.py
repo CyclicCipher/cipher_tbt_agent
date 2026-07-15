@@ -1,11 +1,12 @@
 """End-to-end test of the TRANSFORM primitive (ARCHITECTURE.md §8, ROADMAP Phase 3a): L6a path integration by the learned
-`operator.ModularOperator`, wired into a SPATIAL `Column` and driven from `agent.py`.
+`operator.MotionOperator`, wired into a SPATIAL `Column` and driven from `agent.py`. This file covers the PURE-TRANSLATION
+case; `test_operator_se2` covers heading-dependent (non-abelian) motion with the same operator.
 
 The point of the primitive is POSITION-INVARIANT generalization, which a plain sequence memory (the ASSOCIATE primitive)
 cannot do — a transition learned at one place is a separate fact from the same transition elsewhere (the place-invariance
 failure, ARCHITECTURE §7). So the crown test learns each action's effect in a SMALL region and then dead-reckons correctly
-into positions NEVER visited during learning — the operator analogue of the place-invariance win. It also checks the
-abelian group property (a sequence dead-reckons without drift) and the identity prior (an unlearned action = staying put).
+into positions NEVER visited during learning — the operator analogue of the place-invariance win. It also checks composition
+over a path (dead-reckoning without drift) and the identity prior (an unlearned action = staying put).
 
 RULES #3 acceptance: the agent path-integrates its location (dead-reckons), which it could not do before.
 """
@@ -80,13 +81,17 @@ def test_operator_composes_over_a_sequence():
     assert ok == n, f"dead-reckoning drifted ({ok}/{n} steps correct) — the abelian operator must compose over a path"
 
 
-def test_learned_per_module_shift():
-    """White-box: a +1 coordinate step is +1 phase in every module of that axis (module order = x,y,x,y,... over 4 scales)."""
+def test_learned_displacement():
+    """White-box: the operator learns each action's BODY-frame displacement — ONE vector per action, position-invariant BY
+    CONSTRUCTION (the same delta everywhere), which is why it generalises to positions never visited. A pure translation
+    must learn zero heading change."""
     agent = _fresh_agent()
     _train(agent)
     op = agent._nav_col().operator
-    assert op.shift_of("E") == [1, 0, 1, 0, 1, 0, 1, 0], f"E should be +1 on x-modules only, got {op.shift_of('E')}"
-    assert op.shift_of("N") == [0, 1, 0, 1, 0, 1, 0, 1], f"N should be +1 on y-modules only, got {op.shift_of('N')}"
+    for a, (dx, dy) in ACTIONS.items():
+        (bdx, bdy), dth = op.move_of(a)
+        assert abs(bdx - dx) < 1e-9 and abs(bdy - dy) < 1e-9, f"{a}: learned ({bdx:.3f}, {bdy:.3f}), expected ({dx}, {dy})"
+        assert abs(dth) < 1e-9, f"{a}: a pure translation must learn zero heading change, got {dth}"
 
 
 def test_unlearned_action_is_identity():
@@ -103,4 +108,4 @@ if __name__ == "__main__":
     sok, sn = _sequence(ag)
     print(f"novel-position single-step accuracy: {ok}/{tot}")
     print(f"sequence dead-reckoning: {sok}/{sn} steps correct")
-    print(f"learned shift  E={ag._nav_col().operator.shift_of('E')}  N={ag._nav_col().operator.shift_of('N')}")
+    print(f"learned body-frame move  E={ag._nav_col().operator.move_of('E')}  N={ag._nav_col().operator.move_of('N')}")

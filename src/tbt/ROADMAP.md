@@ -70,14 +70,16 @@ the agent NEVER decides/values/looks — it only moves frames and rewards across
 
 - **Phase 1 — DEEP STUDY.** ✅ DONE (`notes/bg_thalamus_value_research.md`; verdicts in §4).
 - **Phase 2 — CONTRACTS.** Firm the region interfaces (§2) into ARCHITECTURE.md, informed by the study.
-- **Phase 3a — THE PATH-INTEGRATION OPERATOR INTO L6a (the TRANSFORM primitive; ARCHITECTURE §8).** L6a is a plain
-  `HTMLayer` now — but path integration is NOT sequence memory (a memorized per-position transition fails place-invariance,
-  §7). Build `operator.py`, one concept: `ModularOperator.learn(loc, action, loc')` (per-module phase-delta voting) +
-  `apply(loc, action)` (block-structured cyclic shift on the `GridEncoder` code, using `encoders.modules()`), wired into L6a
-  so location is path-integrated by the efference copy. ABELIAN (translation) first; the conjunctive/non-abelian
-  (heading-dependent) case + the context-gated obstacle override are noted-DEFERRED. Test: an action's effect learned at some
-  positions generalises to a NOVEL position (the operator analogue of the place-invariance win) + dead-reckoning matches
-  ground truth. This is the transition the SR (3b) accumulates — logically prior to it.
+- **Phase 3a — THE PATH-INTEGRATION OPERATOR INTO L6a (the TRANSFORM primitive; ARCHITECTURE §8).** ✅ DONE (2026-07-14/15).
+  L6a was a plain `HTMLayer` — but path integration is NOT sequence memory (a memorized per-position transition fails
+  place-invariance, §7). `operator.py`, one concept: `MotionOperator.learn(pose, action, pose')` (the body-frame delta, as a
+  running mean) + `apply(pose, action)` (map that delta through the current heading), wired into L6a so location is
+  path-integrated by the efference copy. Delivered: the abelian core, the L4↔L6a feature-at-location loop, L2/3 pooling, the
+  OBJECT-CENTRIC frame + emergent boundary, non-abelian SE(2), and SO(2) rotation-invariant recognition. **The design changed
+  under measurement:** the operator was first a per-module cyclic shift on the `GridEncoder` code (a permutation), which the
+  drift falsifier + bake-off refuted for anything off the lattice — so the 2026-07-15 cut-over made L6a's STATE continuous and
+  the grid code a READ-OUT of it (ARCHITECTURE §8; `notes/rotation_invariance_plan.md`). Still deferred: the context-gated
+  obstacle override; the R4 union/evidence pooler; SO(3). This is the transition the SR (3b) accumulates — logically prior.
 - **Phase 3b — VALUE CRITIC (`reward.py`).** The SR read-off critic (the SR = the discounted resolvent of the 3a operator,
   ARCHITECTURE §8): `value(φ)`, `dopamine(φ,r,φ′,done)→δ`, `rho()`. Rewire the bandit's RPE to come from it (replace the faked
   `2r−1`). Test: the bandit still learns, now with a real critic.

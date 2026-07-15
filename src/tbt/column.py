@@ -247,7 +247,7 @@ from typing import Optional
 
 from tbt.encoders import SDR, GridEncoder, SpatialPooler
 from tbt.htm import HTMLayer
-from tbt.operator import ModularOperator, RotationOperator
+from tbt.operator import MotionOperator, rotate
 from tbt.pooler import ColumnPooler
 
 # ── projection classes (the target-out half of a layer's wiring; §10 P1) ───────────────────────────────────────────
@@ -285,7 +285,7 @@ class Column:
     (`operator.ModularOperator`) and the path-integration API (`locate`/`learn_move`/`path_integrate`/`where`, ARCHITECTURE §8)."""
 
     def __init__(self, sensory_n: int, n_cols: int = 1024, order: int = 2, seed: int = 0,
-                 location: Optional[GridEncoder] = None, heading: Optional[GridEncoder] = None) -> None:
+                 location: Optional[GridEncoder] = None) -> None:
         # Proximal front-end: only L4 turns a RAW input space into columns (§10 P4, §12). All other layers take SDRs.
         self.n_cols = int(n_cols)
         l4_sp = SpatialPooler(n_inputs=sensory_n, n_cols=n_cols, seed=seed)
@@ -319,29 +319,25 @@ class Column:
             "L6a":  Layer("L6a", HTMLayer(order=order), target_out=(CT, LOCAL),
                           proximal_from="efference", context_from="recurrence", apical_from=None),
         }
-        # L6a's TRANSFORM engine (ARCHITECTURE §8): when a location frame is given (a SPATIAL column), path integration is
-        # the learned OPERATOR over the grid code — the "grid path-integration operator" §12 names — NOT the L6a HTMLayer's
-        # sequence memory (which would fail place-invariance). `self._loc` = L6a's dynamic location state (the bump we move).
-        self.location = location
-        self.operator = ModularOperator(location) if location is not None else None
-        self._loc: Optional[SDR] = None
-        # SE(2) NON-ABELIAN path integration (ARCHITECTURE §8): an optional HEADING ring + its own operator. The LOCATION
-        # operator above is reused, keyed by (action, heading), so its shift DEPENDS on heading (the semidirect product
-        # R²⋊SO(2)); `head_op` shifts the heading ring (abelian). No tensor code — the conditioning is the key.
-        self.heading = heading
-        self.head_op = ModularOperator(heading) if heading is not None else None
-        self._head: Optional[SDR] = None
+        # L6a — the TRANSFORM engine (ARCHITECTURE §8). The location STATE is CONTINUOUS (`_pose` = ((x, y), heading°)) and
+        # the grid code is a per-fixation READ-OUT of it (`_code`). That split is the 2026-07-14 cut-over: a discrete SDR
+        # state made each action a PERMUTATION, which only represents group elements that map the code's lattice onto itself
+        # — exact translation only axis-aligned, exact rotation only at 360/N (measured: quantised phases drift linearly;
+        # continuous modular phases need N > 2π·radius modules). Continuous state ⇒ translation AND rotation exact at ANY
+        # vector/angle, and the read-out's quantisation is bounded and NEVER accumulates (a fresh encode each fixation).
+        # `MotionOperator` LEARNS what each action does (body-frame Δ + Δheading); rotation is geometry the pose scan applies.
+        self.location = location                                # the READ-OUT encoder (what L4 binds to), not the state
+        self.operator = MotionOperator() if location is not None else None
+        self._pose = None                                       # ((x, y), heading°) — continuous; None until located
         # L2/3's POOLING engine (ARCHITECTURE §8): the stable object-IDENTITY that pools the L4 feature-at-location stream
         # (`pooler.ColumnPooler`) — a decoupled stable output + persistence, which the L2/3 HTMLayer (associate) cannot do.
         self.pooler = ColumnPooler(seed=seed + 4) if location is not None else None
-        # The OBJECT-CENTRIC frame anchor: a canonical origin the L6a frame is RE-ORIGINED to at each object onset, so a
-        # location is measured RELATIVE to the object (grid frames have no origin — Lewis 2019; the arbitrary origin gives
-        # translation invariance). One shared origin suffices because the L2/3 pooler individuates objects, not the phase.
-        self._anchor = tuple(0 for _ in range(location.dims)) if location is not None else None
-        # ROTATION (plan R3): on an ORIENTED location grid, rotation is a circular-buffer shift of the orientation-module
-        # index (`RotationOperator`), and `_sweep` is the episode BUFFER of sensed fixations that `recognize_rotated` REPLAYS
-        # once per candidate orientation ("sequentially evaluating each possible object orientation", Numenta 2021).
-        self.rot_op = RotationOperator(location) if (location is not None and not location._axis_aligned) else None
+        # The OBJECT-CENTRIC frame anchor: a canonical origin the frame is RE-ORIGINED to at each object onset, so a location
+        # is measured RELATIVE to the object (grid frames have no origin — Lewis 2019; an arbitrary origin gives translation
+        # invariance). One shared origin suffices because the L2/3 pooler individuates objects, not the phase.
+        self._anchor = tuple(0.0 for _ in range(location.dims)) if location is not None else None
+        # `_sweep` = the episode BUFFER of sensed fixations that `recognize_rotated` REPLAYS once per candidate pose
+        # ("sequentially evaluating each possible object orientation", Numenta 2021) — now at ANY angle, not a discrete set.
         self._sweep: list = []
 
     # ── L6a path integration (the TRANSFORM primitive; ARCHITECTURE §8) — a SPATIAL column only ─────────────────────
@@ -349,74 +345,57 @@ class Column:
         if self.operator is None:
             raise ValueError("this Column has no location frame — pass location=GridEncoder(...) to enable L6a path integration.")
 
-    def locate(self, coord) -> SDR:
-        """Fix L6a's location state to a coordinate (a sensory anchor / reset of the path integrator)."""
-        self._require_location()
-        self._loc = self.location.encode(coord)
-        return self._loc
+    def _code(self) -> SDR:
+        """The grid-code READ-OUT of the continuous state — what L4 binds to. A FRESH encode each fixation, so its
+        quantisation is bounded and never accumulates (unlike repeatedly applying a rounded shift)."""
+        return self.location.encode(self._pose[0])
 
-    def learn_move(self, action, before_coord, after_coord) -> None:
-        """L6a/L5 TRANSFORM learning (ARCHITECTURE §8): learn `action`'s effect on the location code from one observed
-        (before → after) coordinate move (per-module phase-delta voting). Position-invariant by construction — the same
-        shift is read at every position, so it generalises to positions never visited."""
+    def locate(self, coord) -> None:
+        """Fix the location by sensory anchor (heading 0). The state is the CONTINUOUS coordinate; the code is derived."""
         self._require_location()
-        self.operator.learn(self.location.encode(before_coord), action, self.location.encode(after_coord))
-
-    def path_integrate(self, action) -> SDR:
-        """Dead-reckon: apply the learned operator to the current location state, no sensory input (an unlearned action is
-        the identity). Returns the new location code. Composes over a sequence (abelian group)."""
-        self._require_location()
-        if self._loc is None:
-            raise ValueError("path_integrate before locate(): L6a has no location state yet.")
-        self._loc = self.operator.apply(self._loc, action)
-        return self._loc
-
-    def where(self):
-        """Decode L6a's current location state to a coordinate (the peripheral read of the bump); None before locate()."""
-        self._require_location()
-        return None if self._loc is None else self.location.decode(self._loc)
-
-    # ── SE(2) NON-ABELIAN path integration (ARCHITECTURE §8): heading-conditioned location shift + heading shift ──────
-    def _require_heading(self) -> None:
-        if self.head_op is None:
-            raise ValueError("this Column has no heading frame — pass heading=GridEncoder(...) for SE(2) path integration.")
+        self._pose = (tuple(float(c) for c in coord), 0.0)
 
     def set_pose(self, coord, heading) -> None:
-        """Fix the full SE(2) pose: location `coord` + `heading` (a sensory anchor / reset of the pose integrator)."""
+        """Fix the full SE(2) pose: location + heading in DEGREES (continuous — no ring, no discretisation)."""
         self._require_location()
-        self._require_heading()
-        self._loc = self.location.encode(coord)
-        self._head = self.heading.encode(heading)
+        self._pose = (tuple(float(c) for c in coord), float(heading) % 360.0)
+
+    def learn_move(self, action, before_coord, after_coord) -> None:
+        """Learn `action`'s effect from one observed coordinate move (the heading-free case: pure translation)."""
+        self._require_location()
+        self.operator.learn(action, (tuple(map(float, before_coord)), 0.0), (tuple(map(float, after_coord)), 0.0))
 
     def learn_pose_move(self, action, before_pose, after_pose) -> None:
-        """SE(2) TRANSFORM learning (ARCHITECTURE §8): from an observed pose move `*_pose = ((x, y), heading)`, learn (i) the
-        LOCATION shift keyed by (action, heading) — the heading-CONDITIONED, non-abelian part — and (ii) the HEADING shift
-        keyed by action. Both are position-invariant per (action, heading), so they generalise across the whole space."""
+        """Learn `action`'s effect from one observed SE(2) pose move `((x, y), heading°)`. The operator stores the BODY-frame
+        displacement + heading change, so one observation generalises to every position AND every heading."""
         self._require_location()
-        self._require_heading()
-        (bloc, bh), (aloc, ah) = before_pose, after_pose
-        self.operator.learn(self.location.encode(bloc), (action, bh), self.location.encode(aloc))
-        self.head_op.learn(self.heading.encode(bh), action, self.heading.encode(ah))
+        self.operator.learn(action, before_pose, after_pose)
 
-    def path_integrate_pose(self, action):
-        """Dead-reckon the SE(2) pose: decode the CURRENT heading, apply the heading-conditioned LOCATION operator, then the
-        HEADING operator. Non-commutative (FORWARD;TURN ≠ TURN;FORWARD) — FORWARD's location shift is keyed on heading."""
+    def path_integrate(self, action):
+        """Dead-reckon: apply the learned action to the continuous pose — exact, nothing rounds, so nothing drifts. The
+        body-frame displacement is mapped through the CURRENT heading, so heading-dependent motion is non-commutative
+        (FORWARD;TURN ≠ TURN;FORWARD) with no keying and no ring. An unlearned action is the identity. Returns the new pose."""
         self._require_location()
-        self._require_heading()
-        if self._loc is None or self._head is None:
-            raise ValueError("path_integrate_pose before set_pose(): the pose has no state yet.")
-        h = self.heading.decode(self._head)[0]      # the heading ring is 1-D → the scalar heading (matches the learn key)
-        self._loc = self.operator.apply(self._loc, (action, h))
-        self._head = self.head_op.apply(self._head, action)
-        return self._loc, self._head
+        if self._pose is None:
+            raise ValueError("path_integrate before locate()/set_pose(): L6a has no state yet.")
+        self._pose = self.operator.apply(self._pose, action)
+        return self._pose
+
+    def where(self):
+        """The current location — the state itself; no decode needed. None before locate()."""
+        self._require_location()
+        return None if self._pose is None else self._pose[0]
 
     def pose(self):
-        """Decode the current SE(2) pose to ((x, y), heading); None before set_pose()."""
+        """The current SE(2) pose ((x, y), heading°); None before locate()/set_pose()."""
         self._require_location()
-        self._require_heading()
-        if self._loc is None or self._head is None:
-            return None
-        return self.location.decode(self._loc), self.heading.decode(self._head)[0]
+        return self._pose
+
+    def rotate_state(self, deg: float) -> None:
+        """Rotate the current location about the frame origin by ANY angle (exact) — the group action the pose scan applies."""
+        self._require_location()
+        (p, h) = self._pose
+        self._pose = (rotate(p, deg), (h + deg) % 360.0)
 
     # ── the L4↔L6a loop (ARCHITECTURE §8): predict the FEATURE at the path-integrated LOCATION (order-invariant) ──────
     def sense_at(self, feature: SDR, learn: bool = True) -> None:
@@ -424,20 +403,21 @@ class Column:
         columns; a pre-transduced feature needs no SP), basal context = L6a's CURRENT location code. Binds the feature to
         WHERE it is sensed, so prediction later comes from the LOCATION, not the previous feature (order-invariant)."""
         self._require_location()
-        if self._loc is None:
+        if self._pose is None:
             raise ValueError("sense_at before locate()/path_integrate(): L6a has no location yet.")
+        code = self._code().active           # the grid READ-OUT of the continuous state
         l4 = self.layers["L4"].htm
-        l4.depolarize(self._loc.active)      # the LOCATION predicts the feature-at-location FIRST (so firing is
-        l4.observe(feature.active, context=self._loc.active, learn=learn)   # location-specific, not recurrent-sequence)
+        l4.depolarize(code)                  # the LOCATION predicts the feature-at-location FIRST (so firing is
+        l4.observe(feature.active, context=code, learn=learn)               # location-specific, not recurrent-sequence)
 
     def predict_feature(self) -> set:
         """Predict the FEATURE columns at L6a's current location BEFORE sensing — the feature-at-location read
         (`HTMLayer.predict_at`). Empty at an unbound location. Decode 'which feature' by overlap against the known feature
         codes (the peripheral's job — the encoder's inverse)."""
         self._require_location()
-        if self._loc is None:
+        if self._pose is None:
             raise ValueError("predict_feature before locate()/path_integrate(): L6a has no location yet.")
-        return self.layers["L4"].htm.predict_at(self._loc.active)
+        return self.layers["L4"].htm.predict_at(self._code().active)
 
     # ── L2/3 temporal pooling (ARCHITECTURE §8): pool the L4 stream into a STABLE object IDENTITY ────────────────────
     def reset_object(self) -> None:
@@ -493,39 +473,48 @@ class Column:
         Used when the object may be ROTATED: online pooling cannot recognise it until the rotation is undone, so we record
         the sweep and replay it per candidate orientation. (`perceive` is the online, unrotated path.)"""
         self._require_location()
-        if self._loc is None:
+        if self._pose is None:
             raise ValueError("sense_sweep before locate(): L6a has no location yet.")
-        self._sweep.append((self._loc, feature))
+        self._sweep.append((self._pose[0], feature))     # buffer the CONTINUOUS position, so any angle can be undone later
 
-    def recognize_rotated(self):
-        """SCAN the orientation buffer: for each candidate rotation k, REPLAY the buffered sweep with every sensed location
-        UN-rotated by k (the rotation operator), and score how well the model EXPLAINS it — the count of fixations L4
-        PREDICTS (does not burst). Prediction accuracy ranks the hypothesis (Numenta 2021: the orientation leaving least
-        ambiguity wins); the best k is the inferred POSE and the pooler's identity there is the recognition.
+    def recognize_rotated(self, candidates=None):
+        """SCAN candidate POSES: for each angle ω, REPLAY the buffered sweep with every sensed location UN-rotated by ω, and
+        score how well the model EXPLAINS it — the count of fixations L4 PREDICTS (does not burst). Prediction accuracy ranks
+        the hypothesis (Numenta 2021: the pose leaving least ambiguity wins); the best ω is the inferred POSE and the pooler's
+        identity there is the recognition.
 
-        TIES are returned, not broken: equal-scoring k's are the object's SYMMETRY orbit — the pose is genuinely
-        undetermined up to that symmetry, and forcing one angle would be a lie. Returns `(label, k, ties)`; the pooler is
-        left settled on the winning hypothesis."""
+        `candidates` is any iterable of angles in DEGREES (default: every 15°). Because the state is continuous the scan is no
+        longer tied to a module count — the sampling is a free choice, not a property of the code, so coarse-to-fine
+        refinement is possible without touching the substrate.
+
+        TIES are returned, not broken: they are the poses this evidence cannot SEPARATE, for either of two reasons.
+        (1) SYMMETRY — an EXACT tie: a 4-fold object genuinely has no single pose; forcing one angle would be a lie.
+        (2) ANGULAR RESOLUTION — separating ω from ω+δ needs the read-out to resolve the arc a feature travels, ≈ r·δ, so
+            precision ≈ (grid resolution / object radius): a BIGGER object pins its pose more finely (measured: radius 2 →
+            ±14°, radius 8 → ±3°). That is the geometry any real sensor obeys, and it bounds useful sampling — NOT the
+            module-count wall of the retired discrete code, which object size could not have widened.
+        The caller sees both as "these poses are indistinguishable", which is the honest report. Returns `(label, ω, ties)`;
+        the pooler is left settled on the winning hypothesis."""
         self._require_location()
-        assert self.rot_op is not None, "recognize_rotated needs an ORIENTED location grid — GridEncoder(orientations=N)"
+        cands = list(candidates) if candidates is not None else [float(a) for a in range(0, 360, 15)]
         scored = []
-        for k in range(self.rot_op.steps):
-            label, hits = self._replay(k)
-            scored.append((hits, k, label))
+        for w in cands:
+            label, hits = self._replay(w)
+            scored.append((hits, w, label))
         top = max(h for h, _, _ in scored)
-        ties = [k for h, k, _ in scored if h == top]
+        ties = [w for h, w, _ in scored if h == top]
         label, _ = self._replay(ties[0])                      # leave the pooler settled on the winner
         return label, ties[0], ties
 
-    def _replay(self, k: int):
-        """Replay the buffered sweep with each location un-rotated by k; return (identity label, #fixations L4 predicted)."""
+    def _replay(self, deg: float):
+        """Replay the buffered sweep with each location un-rotated by `deg`; return (identity label, #fixations L4 predicted)."""
         self.pooler.reset()
         l4, hits = self.layers["L4"].htm, 0
-        for loc, feature in self._sweep:
-            self._loc = self.rot_op.apply(loc, -k)            # undo the hypothesised rotation, then sense as usual
+        for pos, feature in self._sweep:
+            self._pose = (rotate(pos, -deg), 0.0)             # undo the hypothesised rotation (ANY angle), then sense as usual
             self.sense_at(feature, learn=False)
             if not l4.bursting():
-                hits += 1                                     # the model PREDICTED this feature-at-location under k
+                hits += 1                                     # the model PREDICTED this feature-at-location under this pose
             self.pool(learn=False)
         return self.pooler.which(), hits
 
