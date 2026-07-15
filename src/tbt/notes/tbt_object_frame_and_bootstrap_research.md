@@ -90,3 +90,28 @@ fully-unsupervised learning boundary is NOT cleanly solved; it is hand-coded/sup
    during learning). So: implement the emergent core (fresh-phase anchor coupled to mint-on-recognition-failure); keep the
    learning-time boundary minimal/honest rather than hand-coding a symbolic segmenter; and treat Monty's tuned thresholds as
    the heuristics they are, not something to port.
+
+## D — Object-ROTATION invariance (added 2026-07-14; Numenta SOLVED this — do not reinvent)
+Source: "**Orientation Invariant Sensorimotor Object Recognition Using Cortical Grid Cells**" (Frontiers
+in Neural Circuits 2021, PMC8825787; the direct follow-up to Lewis 2019, reviewed by Hawkins). Lewis 2019 explicitly lacked
+orientation; this paper adds it. Findings (fetched, quoted):
+- **Plain SDR overlap alone does NOT recognise a rotated object.** Location disambiguation uses the UNION property (candidate
+  locations path-integrate + narrow), but ORIENTATION needs an explicit shift-and-rank: *"The most plausible orientation for
+  an arbitrary sensorimotor sequence is chosen after sequentially evaluating each possible object orientation."*
+- **The mechanism = a CIRCULAR BUFFER over orientation-ordered grid modules (a "mental rotation"), NOT a 3D pose particle
+  filter.** Grid modules are pre-tuned to orientations spread over 360° and ORDERED; shifting which modules connect
+  downstream rotates how movement maps to bump shifts: *"By ordering the modules according to their orientations beforehand,
+  a simple circular buffer can be used to constrain the connections to grid cell modules."* This "effectively rotates how
+  movement displacements transform into grid-cell representations" = a mental rotation of the representation.
+- **Recognition = a bounded SCAN over candidate orientations, ranked by fit.** For each orientation, replay the movement
+  through that buffer configuration; the winner has the LEAST location-layer ambiguity (fewest simultaneously-active bump
+  cells) / highest firing rate. A cross-correlation over the orientation ring, NOT a search over free hypotheses.
+- **This VALIDATES the equivariance/shift route** (rotation = a cyclic shift = the operator; pose = a bounded scan; location
+  = the union) and REFUTES the framing that rotation needs a bolted-on particle filter. It reuses grid + operator + union.
+- Caveats it does NOT remove: needs the rotation CENTRE (our object-centric anchor supplies it); is clean in 2D (SO(2), one
+  ring) — 3D (SO(3)) is where Monty's multi-hypothesis earns its keep; discrete orientation resolution (N buffer positions).
+
+**Corrected implication for our build:** object-rotation is NOT "hard/deferred forever" — it is **multi-orientation grid
+modules + a circular-buffer rotation operator + an orientation scan**, reusing our `GridEncoder` (extended to orientation-
+spread modules), the `ModularOperator`/SE(2) machinery (rotation = a shift over the orientation buffer), and the pooler's
+union (location). Plan: `notes/rotation_invariance_plan.md`.
