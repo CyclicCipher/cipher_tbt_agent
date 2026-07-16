@@ -177,28 +177,27 @@ class Agent:
         cols = self._nav_col().predict_feature()
         return self._feat_enc.decode(SDR(self._feat_enc.n, cols)) if cols else None
 
-    def reset_object(self) -> None:
-        """L2/3 object boundary: start recognising/learning a fresh object (the sensor has moved onto a new one)."""
-        self._nav_col().reset_object()
-
-    def perceive_object(self, learn: bool = True) -> int:
-        """Pool the CURRENT L4 feature-at-location code (from the last `sense_at`) into the stable L2/3 object IDENTITY, and
-        return its integer label (−1 if unrecognised). Across a traversal the label is STABLE — the object, not the fixation."""
-        self._nav_col().pool(learn=learn)
-        return self._nav_col().object_id()
-
     # ----- OBJECT-CENTRIC recognition (ARCHITECTURE §8): re-anchor the frame per object; emergent boundary ------------
     def start_object(self) -> None:
         """Object ONSET — the coupled event: re-anchor the L6a frame to its origin (so sensing is OBJECT-RELATIVE =
-        translation-invariant) AND start a fresh L2/3 identity. Call at a learning-time boundary; `perceive` fires it
-        emergently on recognition failure at inference."""
+        translation-invariant), start a fresh L2/3 identity, and clear the sweep buffer. Call at a learning-time boundary;
+        `perceive` fires it emergently on recognition failure at inference."""
         self._nav_col().start_object()
 
-    def perceive(self, feature, learn: bool = True) -> int:
-        """Sense a feature at the body's current object-relative location and pool it into the object IDENTITY; on a
+    def perceive(self, feature) -> int:
+        """INFER: sense a feature at the body's current object-relative location and pool it into the object IDENTITY; on a
         recognition FAILURE this fires the coupled onset (re-anchor + fresh identity) — the emergent object boundary.
-        Returns the object's integer label (−1 if none)."""
-        self._nav_col().perceive(self._feat_enc.encode(feature), learn=learn)
+        Returns the object's integer label (−1 if none). LEARNING is `sense_sweep` × n → `commit`."""
+        self._nav_col().perceive(self._feat_enc.encode(feature))
+        return self._nav_col().object_id()
+
+    def commit(self) -> int:
+        """LEARN the buffered sweep (`start_object` → `sense_sweep` × n → `commit`) — the end-of-episode step: does a known
+        object, at ANY pose, explain this sweep? If so reinforce it; else mint a new identity and bind the sweep to it.
+        Returns the committed object's label (−1 if deferred because L4 has not learned the features yet — look again).
+        Committing per EPISODE rather than per fixation is what lets L2/3 revise, and is why objects that share a
+        feature-at-location no longer merge."""
+        self._nav_col().commit()
         return self._nav_col().object_id()
 
     # ----- POSE-INVARIANT recognition (plan R4, on the SAME column — the two-frame seam is gone) ---------------------

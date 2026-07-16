@@ -49,13 +49,14 @@ def _rotate(p, deg: float):
 
 
 def _learn(agent: Agent, *objects: dict, passes: int = 6) -> None:
-    """Learn each object at its canonical pose, in its OWN frame (start_object re-anchors + mints the identity)."""
+    """Learn each object at its canonical pose, in its OWN frame: an EPISODE — onset, buffer the sweep, then commit."""
     for _ in range(passes):
         for obj in objects:
             agent.start_object()
             for coord, feature in obj.items():
                 agent.locate(coord)
-                agent.perceive(feature, learn=True)
+                agent.sense_sweep(feature)
+            agent.commit()
 
 
 def _present(agent: Agent, obj: dict, omega: float = 0.0, shift=(0.0, 0.0), order=None):
@@ -146,6 +147,29 @@ def test_symmetry_yields_the_symmetry_orbit_not_a_forced_pose():
     assert {h.label for h in pop} == {0}, "a symmetric object is still RECOGNISED (symmetry affects pose, not identity)"
     assert sorted(h.omega for h in pop) == [0.0, 90.0, 180.0, 270.0], \
         f"4-fold symmetry → the orbit every 90°, got {sorted(h.omega for h in pop)}"
+
+
+def test_studying_a_ROTATED_known_object_reinforces_it_rather_than_duplicating():
+    """LEARNING goes through the same pose-invariant recognition, so meeting a known object at a novel pose adds no duplicate
+    — identity and pose stay FACTORED. This is only possible because `commit` decides per EPISODE: the rotation is not
+    apparent from any single fixation. It also has to bind in the object's OWN frame (the replay un-rotates), or the model
+    would be corrupted by rotated coordinates — so the test re-checks recognition afterwards."""
+    agent = _fresh()
+    _learn(agent, OBJ)
+    before = len(agent._nav_col().pooler.objects)
+    for omega in (90.0, 217.0):
+        agent.start_object()
+        for coord, feature in OBJ.items():
+            p = _rotate(coord, omega)
+            agent.locate(p)
+            agent.sense_sweep(feature)
+        label = agent.commit()
+        assert label == 0, f"studying OBJ at {omega}° must recognise it, got {label}"
+        assert len(agent._nav_col().pooler.objects) == before, \
+            f"studying OBJ at {omega}° minted a DUPLICATE — a known object at a novel pose is the same object"
+    pop = _present(agent, OBJ, 45.0)
+    assert len(pop) == 1 and pop[0].label == 0 and _close(pop[0].omega, 45.0), \
+        f"the model must be unharmed by learning at a rotated pose (bind in the OBJECT's frame), got {pop}"
 
 
 def test_a_single_fixation_fixes_no_rotation():

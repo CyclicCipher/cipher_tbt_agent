@@ -244,10 +244,26 @@ solving from corresponding points has **no angular-resolution axis to cube**.
 
 **The population is the answer** (`reference_population_code_belief`). Tied hypotheses mean the evidence does not separate
 them, and that is information: a 4-fold object returns its whole **symmetry orbit**, because it genuinely has no single pose —
-reporting one angle would be a lie. A single fixation returns *nothing*, because one point fixes no rotation. *Open:* L2/3's
-**learning-time** commitment is not yet a union — it settles on an identity at the first fixation and never revises, so two
-objects sharing a feature-at-location silently MERGE (measured: two objects → one chimeric identity). Recognition is only ever
-as good as the model it reads, so this is the next slice, not a cosmetic one.
+reporting one angle would be a lie. A single fixation returns *nothing*, because one point fixes no rotation.
+
+**Learning is an EPISODE, not a fixation** (BUILT — this is the same evidence machinery, turned on the model itself).
+Recognition is only ever as good as the model it reads, and L2/3 used to corrupt that model: it committed to an identity at
+the *first* fixation of a learning sweep and persisted unconditionally, so two objects sharing a feature-at-location **merged**
+into one chimeric identity (measured: two objects → one). The subtlety worth keeping: at fixation 1 those objects are
+genuinely **indistinguishable**, so recognising the first is *correct inference* — the defect was the absence of **revision**,
+and a per-fixation loop structurally cannot revise, because by the time a later fixation contradicts the choice the earlier
+ones are already bound to the wrong identity. Refutation needs the object's **extent**, which only the whole sweep carries.
+
+So learning is `start_object` → `sense_sweep` × n → **`commit`**: buffer the episode, ask `recognize` whether a known object
+explains it, then reinforce that object or mint a new identity and bind the sweep to it. This is Monty's structure exactly
+(Buffer → update an existing graph, or build a new one), and it leaves each layer one job: **`pool` INFERS and never mints;
+`mint`/`bind` LEARN, at the episode boundary.** Scoring and binding are the *same* traversal (`Column._replay`), which is what
+lets learning inherit pose-invariance: meeting a known object at a **novel pose reinforces it instead of duplicating it**, and
+binds in the object's *own* frame so rotated coordinates never enter the model. Two prunes keep it honest — a *partial* sweep
+of a known object is all match and no contradiction, so it recognises rather than fragmenting; and an all-**burst** sweep is
+*unlearned*, not *new*, so minting waits for L4 to predict something (a burst code is location-agnostic and would teach
+"feature → object", the feature-only trap). *Open:* the fully-unsupervised learning-time boundary — the caller still supplies
+the episode, as TBT itself does.
 
 **Two apparent tensions, both resolved by the composition:**
 - *Operator (group representation) vs. discrete graph / SR.* The operator is the **regular, free kernel** — self-motion in

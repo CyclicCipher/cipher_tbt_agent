@@ -41,28 +41,38 @@ def _teach_operator(agent: Agent) -> None:
         agent.learn_move("E", (x, 0), (x + 1, 0))
 
 
-def _sweep(agent: Agent, feats, learn: bool):
-    """One OBJECT-CENTRIC sweep: onset (re-anchor to the origin), then step +E sensing each feature object-relative."""
+def _sweep(agent: Agent, feats):
+    """INFER: one OBJECT-CENTRIC sweep — onset (re-anchor to the origin), then step +E reading L2/3 object-relative."""
     agent.start_object()
-    ids = [agent.perceive(feats[0], learn)]
+    ids = [agent.perceive(feats[0])]
     for f in feats[1:]:
         agent.path_integrate("E")
-        ids.append(agent.perceive(f, learn))
+        ids.append(agent.perceive(f))
     return ids
 
 
-def _learn(agent: Agent, passes: int = 6) -> None:
+def _study(agent: Agent, feats) -> int:
+    """LEARN: the same object-centric sweep, buffered, then COMMITTED as one episode (the R5 learning path)."""
+    agent.start_object()
+    agent.sense_sweep(feats[0])
+    for f in feats[1:]:
+        agent.path_integrate("E")
+        agent.sense_sweep(f)
+    return agent.commit()
+
+
+def _learn(agent: Agent, *objects, passes: int = 6) -> None:
     for _ in range(passes):
-        _sweep(agent, A_FEATS, learn=True)
-        _sweep(agent, B_FEATS, learn=True)
+        for feats in (objects or (A_FEATS, B_FEATS)):
+            _study(agent, feats)
 
 
 def test_object_centric_is_translation_invariant():
     agent = _fresh()
     _teach_operator(agent)
     _learn(agent)
-    a = _sweep(agent, A_FEATS, learn=False)           # re-present A (placement-independent — the frame is relative)
-    b = _sweep(agent, B_FEATS, learn=False)
+    a = _sweep(agent, A_FEATS)                        # re-present A (placement-independent — the frame is relative)
+    b = _sweep(agent, B_FEATS)
     assert set(a) == {0}, f"object A must be recognised as ONE identity regardless of placement, got {a}"
     assert set(b) == {1}, f"object B must be recognised as identity 1, got {b}"
     assert len(agent._nav_col().pooler.objects) == 2, "re-presenting a known object must NOT mint a new one"
@@ -73,37 +83,43 @@ def test_emergent_boundary_segments_a_continuous_scene():
     _teach_operator(agent)
     _learn(agent)
     agent.start_object()                              # ONE onset for the whole scene
-    ids = [agent.perceive(A_FEATS[0], learn=False)]   # at the origin → recognise A
+    ids = [agent.perceive(A_FEATS[0])]                # at the origin → recognise A
     for f in A_FEATS[1:]:
         agent.path_integrate("E")
-        ids.append(agent.perceive(f, learn=False))
+        ids.append(agent.perceive(f))
     for f in B_FEATS:                                 # keep moving INTO B — NO explicit boundary
         agent.path_integrate("E")
-        ids.append(agent.perceive(f, learn=False))
+        ids.append(agent.perceive(f))
     assert ids[:3] == [0, 0, 0], f"first object should read as identity 0 throughout, got {ids[:3]}"
     assert ids[3:] == [1, 1, 1], f"the boundary must be found emergently → identity 1, got {ids[3:]}"
     assert len(agent._nav_col().pooler.objects) == 2, "the emergent boundary must not mint spurious objects"
 
 
 def test_relative_arrangement_is_load_bearing():
-    """The object-centric LOCATION must do real work: two objects with the SAME features in a DIFFERENT relative arrangement
-    (P = 7-then-8, Q = 8-then-7) must get DIFFERENT identities. Feature-only recognition could not tell {7,8} from {7,8};
-    only feature-AT-relative-location can — so this proves the re-anchored frame is load-bearing, not incidental."""
+    """The object-centric LOCATION must do real work: two objects with the SAME features in a DIFFERENT relative ARRANGEMENT
+    must get DIFFERENT identities. Feature-only recognition cannot tell {7,8,9} from {7,8,9}; only feature-AT-relative-location
+    can — so this proves the re-anchored frame is load-bearing, not incidental.
+
+    NB the arrangements must not be related by a ROTATION. The original pair here was P=[7,8] / Q=[8,7], which R4 exposed as
+    DEGENERATE: on a line, 8-then-7 is literally 7-then-8 rotated 180°, so a pose-invariant recogniser is RIGHT to call them
+    one object at two poses — identity and pose are factored, and the orientation is not lost, it is reported. Three cells
+    make the pair genuinely distinct: [7,8,9] rotated 180° reads 9-then-8-then-7, which is neither arrangement below. They
+    still SHARE 9 at the far end, so the shared-feature machinery is exercised; they differ from the first fixation, which
+    is what keeps the ONLINE reading stable (objects sharing a first fixation are indistinguishable there and correctly
+    revise a step later — `test_l23_pooling.test_shared_features_do_not_merge` covers that case)."""
     agent = _fresh()
     _teach_operator(agent)
-    P, Q = [7, 8], [8, 7]                             # same features, swapped arrangement
-    for _ in range(8):
-        _sweep(agent, P, learn=True)
-        _sweep(agent, Q, learn=True)
-    p = _sweep(agent, P, learn=False)
-    q = _sweep(agent, Q, learn=False)
+    P, Q = [7, 8, 9], [8, 7, 9]                       # same features; NOT rotations of each other
+    _learn(agent, P, Q, passes=8)
+    p = _sweep(agent, P)
+    q = _sweep(agent, Q)
     assert len(set(p)) == 1 and len(set(q)) == 1, f"each arrangement must read as ONE stable identity, got {p} / {q}"
-    assert p[0] != q[0], f"same features, swapped arrangement → DIFFERENT identities (frame load-bearing), got {p[0]}=={q[0]}"
+    assert p[0] != q[0], f"same features, different arrangement → DIFFERENT identities (frame load-bearing), got {p} / {q}"
 
 
 if __name__ == "__main__":
     ag = _fresh()
     _teach_operator(ag)
     _learn(ag)
-    print(f"object-centric re-present A: {_sweep(ag, A_FEATS, False)}  B: {_sweep(ag, B_FEATS, False)}  "
+    print(f"object-centric re-present A: {_sweep(ag, A_FEATS)}  B: {_sweep(ag, B_FEATS)}  "
           f"(objects: {len(ag._nav_col().pooler.objects)})")

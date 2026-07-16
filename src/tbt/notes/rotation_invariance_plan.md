@@ -329,18 +329,46 @@ recognising A is *correct inference*; the bug is the absence of **revision** whe
 
 **The fix — the same evidence machinery R4 just built, applied at learning time.** Refutation needs the object's **extent**,
 which the column now has in `_link`: under hypothesis A this fixation lands at (3,0), A has nothing at (3,0) ⇒ A is refuted.
-That is exactly `_evidence`. So **learning = recognise, then bind**: buffer the episode (Monty's Buffer), ask `recognize()`
+That is exactly the replay. So **learning = recognise, then bind**: buffer the episode (Monty's Buffer), ask `recognize()`
 whether a known object explains it, reinforce that identity if so, else mint and bind the sweep to the new one. One mechanism,
 no parallel path — and it makes L2/3 hold a genuine **union** that narrows, which is what the theory says it does. Cost: the
 learning API moves from per-fixation `perceive` to episode-level commitment; `test_l23_pooling` + `test_object_centric` are the
 guard rails.
 
+### R5 — **BUILT 2026-07-15. Suite 51 green. The merge is gone (2 objects → 2).**
+`Column.commit` (buffer → `recognize` → reinforce-or-mint-and-bind), `ColumnPooler.mint`/`bind` public, and `pool` reduced to
+pure INFERENCE — the `learn or …` branch that caused the merge is DELETED, not patched around. `_evidence` folded into
+`_replay(identity, ω, origin, learn)`, which now SCORES and BINDS in one traversal.
+
+**The API collapsed rather than grew**, which is the sign the decomposition was right:
+- **LEARN** = `start_object` → `sense_sweep` × n → `commit`
+- **INFER** (canonical pose, online) = `start_object` → `perceive` per fixation
+- **RECOGNISE** (unknown pose) = `start_object` → `sense_sweep` × n → `recognize`
+
+`perceive` lost its `learn` flag (it is inference, full stop) and `reset_object`/`perceive_object` were DELETED as superseded.
+One traversal (`_replay`) serves scoring and binding, so **learning inherits pose-invariance for free**: studying a known
+object at a novel pose reinforces it instead of minting a duplicate, and binds in the object's OWN frame so rotated
+coordinates never enter the model (tested at 90° and 217°, then re-recognised at 45° to prove the model is unharmed).
+
+Two guards keep the refutation honest, and both are tested:
+- a **PARTIAL** sweep of a known object is all match, no contradiction ⇒ recognise + reinforce, never fragment. (A rule of
+  "anything not fully explained is new" would shatter every object ever seen partially.)
+- an **all-BURST** sweep is *unlearned*, not *new* ⇒ defer minting until L4 predicts something. A burst code is
+  location-agnostic; binding it would teach "feature → object" (the feature-only trap) — the pooler's burst rule at episode scale.
+
+**A degenerate test R4/R5 exposed.** `test_relative_arrangement_is_load_bearing` used P=[7,8] vs Q=[8,7] to prove the frame is
+load-bearing. On a line, **Q is literally P rotated 180°** — so a pose-invariant recogniser is RIGHT to call them one object at
+two poses, and the old test was asserting a *feature* of the pre-R4 code. The intent was sound, the example was degenerate:
+fixed to P=[7,8,9] / Q=[8,7,9], which are genuinely unrelated by any rotation (P rotated 180° reads 9,8,7). The orientation is
+not lost when identity and pose factor — it is *reported*, which is strictly more information than two identities.
+
 ## NEXT (in order)
-1. **R5 — L2/3 revision at learning time** (the defect above). Recognition is only ever as good as the model it reads, and
-   real ARC objects will share feature-at-location codes constantly, so this is load-bearing, not cosmetic.
-2. **SO(3).** The state already generalises (a 3-DOF rotation is just state). R4 removes the cubic scan rather than paying it:
+1. **SO(3).** The state already generalises (a 3-DOF rotation is just state). R4 removed the cubic scan rather than paying it:
    the pose is solved from corresponding points, so there is no angular-resolution axis to cube. Needs 3 non-collinear points
-   (or 2 + a normal) instead of 2 — the same `_solve`/`_evidence` shape.
+   (or 2 + a normal) instead of 2 — the same `_solve`/`_replay` shape.
+2. **The fully-unsupervised learning-time boundary** — the caller still supplies the episode (`start_object`), as TBT itself
+   does. The emergent INFERENCE boundary already exists (`perceive` fires the onset on recognition failure); the open question
+   is whether that same event should close a learning episode and call `commit`.
 
 ## Deferred (noted, not invented)
 - **The LOCATION UNION for GENERAL rotation.** R3's crown test uses CONTROLLED entry (a consistent anchor point), which needs

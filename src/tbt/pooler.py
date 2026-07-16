@@ -11,27 +11,32 @@ STRUCTURE (which feature at which location, and the displacements between them) 
 L6a (locations), L5 (displacements). So this pooler does NOT store a graph of features-at-locations (that was the legacy
 `L23_Object`, explicitly retired); it stores L4-stream → identity associations and a small object library.
 
+THE MECHANISM:
+  * an OBJECT = a fixed sparse identity SDR (`w` of `n` cells), minted once on first encounter.
+  * INFER (`pool`): the identity whose cells are best SUPPORTED (connected feedforward) by the current L4 code; once
+    settled it PERSISTS while still supported, and re-pools on a mismatch. Overlap-recall, O(library), not a scan.
+  * LEARN (`mint` + `bind`): reinforce FEEDFORWARD synapses from the active L4 cells → an identity's cells (Hebbian).
+    Both are called by `Column.commit` — an EPISODE-level act, never per fixation. See below.
+
+WHY LEARNING IS NOT PER-FIXATION (the 2026-07-15 fix; `notes/rotation_invariance_plan.md` R5). This layer used to commit an
+identity at the FIRST fixation of a learning sweep and persist it unconditionally to the end. Measured consequence: two
+objects sharing their first feature-at-location MERGED into one chimeric identity holding both their features. At fixation 1
+the two objects are genuinely INDISTINGUISHABLE, so recognising the first is correct INFERENCE — the bug was the absence of
+REVISION once a later fixation contradicted it, and a per-fixation loop cannot revise, because by the time the contradiction
+arrives the earlier fixations have already been bound to the wrong identity. Refutation needs the object's EXTENT, which
+arrives only with the whole sweep. So the commitment moved to the episode end (`Column.commit`: buffer → recognise → bind),
+which is Monty's structure (Buffer → the end-of-episode learning step) and leaves this layer with a clean split:
+**`pool` INFERS (and never mints); `mint`/`bind` LEARN, at the caller's episode boundary.**
+
 WHY IT IS NOT AN HTMLayer (and not a third primitive). Pooling is the ASSOCIATE primitive (Hebbian feedforward binding,
 like L4's) in a POOLING regime: the OUTPUT (the identity SDR) is DECOUPLED from the instantaneous input and PERSISTS by
 recurrent self-support — which an `HTMLayer` cannot do (its active cells ARE its proximal input). So L2/3 gets this small
-dedicated engine, exactly as L6a gets `operator.ModularOperator` for the TRANSFORM it cannot do as sequence memory. The two
-column primitives (ASSOCIATE + TRANSFORM, ARCHITECTURE §8) are unchanged; this is a specialised associative recognition
-layer, not a new primitive.
+dedicated engine, exactly as L6a gets `operator.MotionOperator` for the TRANSFORM it cannot do as sequence memory.
 
-THE MECHANISM:
-  * an OBJECT = a fixed sparse identity SDR (`w` of `n` cells), minted once on first encounter.
-  * LEARN: for each fixation, reinforce FEEDFORWARD synapses from the active L4 cells → the active identity's cells (Hebbian).
-    The identity is minted at an object's ONSET (a `reset` boundary) and KEPT across the object's fixations (persistence) —
-    so one object → one identity, not one-per-fixation. Re-encountering a known object RECOGNISES + reinforces it (no
-    duplicate).
-  * RECOGNISE (infer): the identity whose cells are best SUPPORTED (connected feedforward) by the current L4 code; once
-    settled it PERSISTS while still supported, and re-pools on a mismatch. Overlap-recall, O(library), not a scan.
-
-SCOPE (honest, per RULES): object BOUNDARIES during learning are given by `reset` (one object per learning episode); the
-unsupervised boundary (mint only on an L4 prediction ERROR / burst) is the refinement. Recognition here is ~one-shot for
-objects with DISTINCT feature-at-location codes; genuine INCREMENTAL disambiguation shows up only when objects SHARE codes
-(ambiguity) — a harder test, deferred. Cross-column VOTING over identities is the THALAMUS's job (a multi-column slice),
-not this single column's. Pure stdlib. Sources: Hawkins/Ahmad/Cui 2017 (columns); TBP/Monty 2024; Numenta temporal pooler.
+SCOPE (honest, per RULES): object BOUNDARIES during learning are given by the caller's episode (`Column.start_object`); the
+fully-unsupervised boundary is the refinement (TBT leaves it open too). Cross-column VOTING over identities is the THALAMUS's
+job (a multi-column slice), not this single column's. Pure stdlib. Sources: Hawkins/Ahmad/Cui 2017 (columns); TBP/Monty 2024
+(arXiv:2412.18354); Numenta temporal pooler.
 """
 
 from __future__ import annotations
@@ -80,46 +85,49 @@ class ColumnPooler:
         identity matching, so recognition-by-evidence reads it from here instead of re-deriving it (RULES #5)."""
         return self._match(identity, self._supported(frozenset(l4_active)))
 
-    def _mint(self) -> frozenset:
-        """A NEW object: a fresh random sparse identity SDR (sparse → negligible overlap with existing objects)."""
+    # ---- LEARN: the two acts, both driven by `Column.commit` at an EPISODE boundary ---------------------------
+    def mint(self) -> frozenset:
+        """A NEW object: a fresh random sparse identity SDR (sparse → negligible overlap with existing objects), added to the
+        library. Minting is a LEARNING act, taken once a whole swept episode is not explained by any known object — never
+        per fixation, and never at inference (see the module docstring)."""
         obj = frozenset(self.rng.sample(range(self.n), self.w))
         self.objects.append(obj)
         return obj
 
-    def _reinforce(self, l4_active, identity: frozenset) -> None:
-        """Hebbian: strengthen feedforward from the active L4 cells onto the active identity's cells (grown CONNECTED)."""
+    def bind(self, l4_active, identity: frozenset) -> None:
+        """LEARN one fixation onto an identity — Hebbian: strengthen feedforward from the active L4 cells onto the identity's
+        cells (grown CONNECTED, so one clean pass suffices). The caller MUST pass a PREDICTED (non-burst) L4 code: a burst
+        code is location-agnostic, so binding it would teach "feature → object" (feature-only recognition) rather than
+        "feature-at-LOCATION → object", and the arrangement would stop being load-bearing."""
         for c in l4_active:
             syn = self.ff.setdefault(c, {})
             for l23 in identity:
                 syn[l23] = min(1.0, syn.get(l23, self.init_perm) + self.perm_inc)
 
-    # ---- pool one fixation: persist / recognise / mint, then bind ---------------------------------------------
-    def pool(self, l4_active, learn: bool = True, bursting: bool = False) -> frozenset:
-        """Pool one L4 feature-at-location code into the identity. If an identity is already active and still consistent
-        (or we are LEARNING one object across its fixations), PERSIST it. Otherwise: a `bursting` fixation (L4 predicted
-        NOTHING here — a novel feature-at-location, a location-agnostic code) must NOT be used to RECOGNISE a different known
-        object (that is the feature-only-recognition trap); it is the NOVELTY signal → mint (learning) / nothing (inference).
-        A SETTLED (predicted, non-burst) code is reliable → recognise the best-supported known object, else mint / nothing.
-        Pooling the PREDICTED stream, treating the burst as novelty, is the theory (`reference_htm_pooling_recall_heterarchy`)."""
+    # ---- INFER: pool one fixation — persist / recognise / nothing (never mints) -------------------------------
+    def pool(self, l4_active, bursting: bool = False) -> frozenset:
+        """INFER the object from one L4 feature-at-location code. A settled identity PERSISTS while the code still supports
+        it; otherwise RECOGNISE the best-supported known object by overlap-recall (O(library), not a scan); otherwise
+        nothing. This never mints — an unexplained sweep is LEARNING's business (`Column.commit`), and minting here is what
+        produced "a new object almost every frame" (`reference_htm_pooling_recall_heterarchy`).
+
+        A `bursting` fixation is L4 predicting NOTHING here: the code is a location-agnostic burst and unreliable for
+        recognition (the feature-only trap), so it yields nothing — which IS the object-boundary signal that
+        `Column.perceive` acts on. Pooling only the PREDICTED stream is the theory."""
         if bursting:
-            # L4 predicted NOTHING here — this feature-at-location is not (yet) learned, so the code is a location-agnostic
-            # BURST, unreliable for recognition. LEARNING: still learning the current object → PERSIST, pool nothing (let L4
-            # train first). INFERENCE: the current object does not predict here → recognition FAILURE (the boundary signal).
-            return self.active if learn else frozenset()
+            return frozenset()
         l4_active = frozenset(l4_active)                            # a SETTLED (predicted, location-specific) code — reliable
         sup = self._supported(l4_active)
-        if self.active and (learn or self._match(self.active, sup) >= self.persist_frac):
-            identity = self.active                                   # PERSIST (one object per episode / still supported)
+        if self.active and self._match(self.active, sup) >= self.persist_frac:
+            identity = self.active                                   # PERSIST — still supported by this fixation
         else:
             best, best_m = None, 0.0
-            for obj in self.objects:                                # RECOGNISE by overlap-recall (O(library), not a scan)
+            for obj in self.objects:                                # RECOGNISE by overlap-recall
                 m = self._match(obj, sup)
                 if m > best_m:
                     best, best_m = obj, m
-            identity = best if (best is not None and best_m >= self.recognize_frac) else (self._mint() if learn else frozenset())
+            identity = best if (best is not None and best_m >= self.recognize_frac) else frozenset()
         self.active = identity
-        if learn and identity:
-            self._reinforce(l4_active, identity)
         return identity
 
     def which(self) -> int:
