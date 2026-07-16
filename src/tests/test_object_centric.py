@@ -95,6 +95,55 @@ def test_emergent_boundary_segments_a_continuous_scene():
     assert len(agent._nav_col().pooler.objects) == 2, "the emergent boundary must not mint spurious objects"
 
 
+def test_a_continuous_LEARNING_sweep_splits_itself_at_the_boundary():
+    """THE R7 CROWN: the caller no longer has to say where one object ends. Sweep A and B as ONE continuous episode — one
+    onset, no boundary cue — and `commit` splits it: A is reinforced, B is reinforced, and no spurious A+B blob is minted.
+
+    The signal is REFUTATION, which recognition already produced (`reference_tbt_segmentation_and_grouping`: "it relies on
+    feature and morphology mismatch to implicitly detect boundaries"). The judgement is `_exhausts`: the prefix covered ALL
+    of A's model, so A ENDED there — as opposed to a sweep that merely SHARES a prefix with A, which is one different object
+    (`test_l23_pooling.test_shared_features_do_not_merge` — the same evidence, the opposite reading, told apart by whether
+    the prefix reached the object's edge)."""
+    agent = _fresh()
+    _teach_operator(agent)
+    _learn(agent)                                     # A and B learned as separate episodes
+    before = len(agent._nav_col().pooler.objects)
+    for _ in range(3):
+        agent.start_object()                          # ONE onset for BOTH objects — no boundary cue anywhere
+        agent.sense_sweep(A_FEATS[0])
+        for f in A_FEATS[1:] + B_FEATS:               # sweep straight through A and on into B
+            agent.path_integrate("E")
+            agent.sense_sweep(f)
+        agent.commit()
+    assert len(agent._nav_col().pooler.objects) == before, (
+        f"a continuous sweep over two KNOWN objects must split at the boundary and reinforce both, not mint a blob — "
+        f"library went {before} → {len(agent._nav_col().pooler.objects)}")
+    assert set(_sweep(agent, A_FEATS)) == {0} and set(_sweep(agent, B_FEATS)) == {1}, \
+        "both objects must survive the continuous sweep intact"
+
+
+def test_a_NOVEL_object_after_a_known_one_is_minted_not_absorbed():
+    """The same split, but the remainder is UNKNOWN. Having exhausted A, the sweep has left it, so what follows is a new
+    object — minted in ITS OWN frame (the origin is where the sweep first touched it, not the episode's anchor), which is
+    what makes it recognisable later on its own."""
+    agent = _fresh()
+    _teach_operator(agent)
+    _learn(agent, A_FEATS)                            # ONLY A is known
+    for _ in range(4):
+        agent.start_object()
+        agent.sense_sweep(A_FEATS[0])
+        for f in A_FEATS[1:] + B_FEATS:               # A, then straight into a NOVEL object
+            agent.path_integrate("E")
+            agent.sense_sweep(f)
+        agent.commit()
+    assert len(agent._nav_col().pooler.objects) == 2, (
+        f"A was exhausted, so the novel remainder must become its OWN object, got "
+        f"{len(agent._nav_col().pooler.objects)} identities")
+    a, b = _sweep(agent, A_FEATS), _sweep(agent, B_FEATS)
+    assert set(a) == {0}, f"A must still read as itself, got {a}"
+    assert set(b) == {1}, f"the object learned WITHOUT ever being marked must be recognisable alone, got {b}"
+
+
 def test_relative_arrangement_is_load_bearing():
     """The object-centric LOCATION must do real work: two objects with the SAME features in a DIFFERENT relative ARRANGEMENT
     must get DIFFERENT identities. Feature-only recognition cannot tell {7,8,9} from {7,8,9}; only feature-AT-relative-location

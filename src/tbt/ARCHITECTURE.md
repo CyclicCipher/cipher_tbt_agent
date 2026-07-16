@@ -286,8 +286,28 @@ which is how the merge happened in the first place. (A `evidence ≥ ½·fixatio
 3 matches − 1 refutation = 2 = the bar. Its tolerance was arbitrary — it depended on how many *other* fixations agreed.)
 Tolerating k contradictions is a question for a sensor-**noise** model, deferred with noise itself. One more prune keeps
 minting honest: an all-**burst** sweep is *unlearned*, not *new*, so minting waits for L4 to predict something (a burst code is
-location-agnostic and would teach "feature → object", the feature-only trap). *Open:* the fully-unsupervised learning-time
-boundary — the caller still supplies the episode, as TBT itself does.
+location-agnostic and would teach "feature → object", the feature-only trap).
+
+**The sweep splits itself at an object boundary** (BUILT — no boundary cue from the caller). `reference_tbt_segmentation_and_grouping`
+is unambiguous that this is the same signal: *"it relies on feature and morphology mismatch to implicitly detect boundaries"*,
+and *"'two proto-things are really one' / 'one is really two' is just what the EVIDENCE concludes — not a re-run of a
+segmenter."* So detection is free — R4's refutation *is* the boundary. The hard part is **interpretation**: a prefix match plus
+a contradiction reads either as *(a)* a boundary (the sweep covered A and entered B) or *(b)* one different object that merely
+shares a prefix with A, and both fit the same evidence. This is the segmentation problem itself, and the two readings are in
+direct tension — the merge fix above *depends* on (b).
+
+**The model breaks the tie: did the prefix EXHAUST the object?** You leave an object when you reach its **edge**. If the prefix
+visited every location in A's model (the extent is already in `_link`), A ended there and a new object begins — reading (a);
+if it covered only part of A, the sweep never reached an edge and (b) is the better parse. The remainder is then just a fresh
+episode — the same `commit`, recursively — and a new object anchors its frame at **its own first fixation**, which is what
+makes it recognisable alone later (Lewis 2019: a fresh grid phase *is* the object's origin). Measured: a known object followed
+by a **novel** one is split, and the novel one becomes independently recognisable **without ever being marked**.
+
+*The honest limit, and it is one thread with dynamics:* a **partial** sweep of A that wanders into a novel B is absorbed as one
+blob (the prefix never exhausted A, so nothing licenses a split), and a wholly novel scene mints **one blob** — correctly, since
+*"the object is a recognition construct"*: with no model there is no object. Splitting a blob needs a second signal, and the
+same source names it — *"the best grouping cue we already have: COMMON FATE (what moves together)"*. That is the **dynamics**
+slice (the operator over object poses), so cold-start segmentation and "any unsupported object falls" are the same problem.
 
 **Two apparent tensions, both resolved by the composition:**
 - *Operator (group representation) vs. discrete graph / SR.* The operator is the **regular, free kernel** — self-motion in

@@ -6,9 +6,12 @@ stays the SAME — one sparse identity per object, persisting across the travers
 and minted ONCE (not a new object every frame — the duplication bug the pooler fixes). Recognition is associative recall
 over the object library, not a from-scratch recompute.
 
-Two distinct objects (distinct colours, distinct places). Locations are anchored with `locate` (a sensory fix) to isolate
-the pooler; the operator ⊕ L4 composition is already covered by `test_feature_at_location`. RULES #3 acceptance: the agent
-now recognises WHICH object it is sensing, stable across the sweep — something it could not do before.
+Two objects with the same SHAPE and different colours — identity is the features AT the locations, so this isolates the
+pooler; the operator ⊕ L4 composition is covered by `test_feature_at_location`, and placement-independence by
+`test_object_centric`. Fixations are placed with `locate` (a sensory fix) rather than path integration, in the object's OWN
+frame: an object's frame origin is the first fixation of the episode that learned it (`reference_tbt_object_frame_bootstrap`),
+so a sweep must be presented in object-relative coordinates — absolute ones would learn a model no later sweep could match.
+RULES #3 acceptance: the agent recognises WHICH object it is sensing, stable across the sweep.
 
 LEARNING is an EPISODE (`start_object` → `sense_sweep` × n → `commit`), not a per-fixation act: L2/3 commits once the whole
 sweep is in, because at the first fixation two objects that share a feature are indistinguishable and committing there
@@ -26,11 +29,11 @@ if _PKG not in sys.path:
 
 from tbt.agent import Agent  # noqa: E402
 
-OBJ_A = {(x, y): 1 + (x - 10) + 2 * (y - 10) for x in range(10, 12) for y in range(10, 12)}   # colours 1..4 near (10,10)
-OBJ_B = {(x, y): 5 + (x - 20) + 2 * (y - 20) for x in range(20, 22) for y in range(20, 22)}   # colours 5..8 near (20,20)
-# Two objects that SHARE a feature-at-location (colour 9 at (30,30)) and differ elsewhere — the case that used to merge.
-SHARE_P = {(30, 30): 9, (31, 30): 1, (30, 31): 2}
-SHARE_Q = {(30, 30): 9, (31, 30): 1, (30, 29): 3}     # same FIRST TWO fixations as P, then diverges
+OBJ_A = {(0, 0): 1, (1, 0): 2, (0, 1): 3, (1, 1): 4}   # colours 1..4
+OBJ_B = {(0, 0): 5, (1, 0): 6, (0, 1): 7, (1, 1): 8}   # colours 5..8, the same shape — identity is the FEATURES at them
+# Two objects that SHARE their first two feature-at-locations and diverge at the third — the case that used to merge.
+SHARE_P = {(0, 0): 9, (1, 0): 1, (0, 1): 2}
+SHARE_Q = {(0, 0): 9, (1, 0): 1, (0, -1): 3}           # same FIRST TWO fixations as P, then diverges
 PASSES = 6
 
 

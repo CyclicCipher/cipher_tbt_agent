@@ -433,13 +433,69 @@ contradiction ⇒ still recognises; one genuine contradiction ⇒ a different ob
 contradictions is a question for a sensor-NOISE model, deferred with noise itself — with an exact sensor a contradiction is
 decisive. NB this made the ORIGINAL chiral pair pass; the fix was in the mechanism, not in choosing a friendlier object.
 
+## R7 — the EMERGENT learning-time boundary (a sweep that crosses objects splits itself)
+
+**MECHANISM CHECK ([[feedback_check_tbt_accuracy_per_step]]).** [[reference_tbt_segmentation_and_grouping]] is unambiguous:
+*"the module doesn't explicitly segment objects… it relies on feature and morphology mismatch to implicitly detect
+boundaries"*, and *"'two proto-things are really one' / 'one is really two' is just what the EVIDENCE concludes — not a re-run
+of a segmenter."* So the boundary signal is **refutation**, which R4–R6 already built (`Hypothesis.refuted`). Nothing new is
+needed to *detect* it. What is new is the **interpretation**.
+
+**THE REAL DIFFICULTY (why TBT leaves this open).** Drop the caller's "this episode is one object" cue and a prefix match plus
+a contradiction becomes genuinely AMBIGUOUS:
+  (a) a **boundary** — the sweep covered object A and then entered B; or
+  (b) a **different object** — the whole sweep is one object that merely SHARES a prefix with A.
+Both are consistent with the same evidence. This is not a gap in our code — it is the segmentation problem itself, and R5
+depends on reading (b) (`test_shared_features_do_not_merge`) while R7 wants to read (a). Committing to either blindly breaks
+the other: always-split turns the R5 pair into "P plus a 1-cell blob" and re-mints that blob every pass; never-split is the
+status quo.
+
+**THE MODEL ITSELF DISAMBIGUATES — did the prefix EXHAUST the object?** You leave an object when you reach its EDGE. If the
+prefix visited every location in A's model, then A *ended* and what follows is something else → boundary (a). If the prefix
+covered only PART of A, the sweep never reached A's edge, so "A then something" is a worse parse than "one object that shares
+A's prefix" → different object (b). The extent is already in the column — `_link` holds every (identity, object-frame
+location) — so this is the model answering, not a prior. Checked against every case: the R5 shared pair (prefix = 2 of P's 3 →
+no split ✓), a known object followed by another known one (✓ split), a known object followed by a NOVEL one (✓ split, then
+mint), and cold start (no hypothesis → mint the whole sweep ✓).
+
+**THE HONEST LIMIT, and it is the same thread as gravity.** A PARTIAL sweep of A that then wanders into a novel B is absorbed
+as one blob: the prefix never exhausted A, so nothing licenses the split. And a wholly novel scene mints one blob — correctly,
+since *"the object is a RECOGNITION construct"*: with no model there is no object. Splitting a blob needs a second signal, and
+the same memory names it: *"Best grouping cue we already have: COMMON FATE (what moves together)"*. That is the DYNAMICS slice
+(the operator over object poses) — so cold-start segmentation and "any unsupported object falls" are one thread, not two.
+
+### R7 — **BUILT 2026-07-16. Suite 59 green.**
+`Hypothesis.refuted` → `refuted_at` (the FIRST refuted index — one field answering both "is it refuted?" and "where?");
+`Column._extent`/`_exhausts`; `commit` splits and recurses. Measured (all three cases):
+- **A known + a NOVEL B, swept continuously with ONE onset** → the boundary is found, A is reinforced, B is minted, and B is
+  then recognisable ALONE (`[1,1,1]`) **despite never having been marked as an object**.
+- **both known, swept continuously** → library stays at 2; no spurious blob.
+- **cold start (nothing known)** → one blob. The honest limit, exactly as the theory predicts.
+
+**A contract violation this exposed.** A minted object now anchors its frame at **its own first fixation** (not `_anchor`) —
+required, or a split remainder would be modelled at coordinates no later sweep could match. `test_l23_pooling` had been
+`locate()`-ing at ABSOLUTE coordinates, which the old anchor silently made equivalent; under the correct rule its learning
+(object-relative) and its inference (absolute) no longer agreed. The test was relying on a contract violation the old code
+masked, so it now presents its objects in object-relative coordinates — which is what every other caller already did.
+
 ## NEXT (in order)
-1. **The fully-unsupervised learning-time boundary** — the caller still supplies the episode (`start_object`), as TBT itself
-   does. The emergent INFERENCE boundary already exists (`perceive` fires the onset on recognition failure); the open question
-   is whether that same event should close a learning episode and call `commit`.
-2. **Morphological features** — a feature carrying its own local frame would seed the pose from ONE fixation (Monty's actual
+1. **OBJECT DYNAMICS — the operator over object poses (`notes/` TBD; answers the gravity question).** `recognize` already
+   returns `(object, pose)` and `MotionOperator.learn(key, before_pose, after_pose)` already has the right shape, so: track a
+   recognised object's pose across frames and learn its transition. This buys three things at once — (i) **common fate**,
+   which is the missing cold-start segmentation cue above; (ii) ARC's "what does this action do to that block"; (iii) the
+   groundwork for **gravity**. The generalization "ANY object, ANYWHERE" is already free — TRANSFORM is position-invariant by
+   construction (learned in a 5×5 region, exact at (45,50)), which is the place-invariance lesson again: the FRAME generalizes,
+   not the data. What is genuinely open is the operator's **KEY** — today the caller supplies an action; gravity's key is a
+   discovered CONDITION, not an action ([[feedback_subgoal_types_from_dynamics]], [[reference_l5_operator_kinds]]).
+2. **L5 DISPLACEMENT CELLS — relations between objects.** TBT is explicit ([[reference_tbt_layers_4_23]]): grid =
+   `location + movement → location`; displacement = `location + location → the relation`. "Resting on" is a displacement
+   between two object frames. Needed for compositional objects AND for the support relation below.
+3. **The CONTEXT-GATED OVERRIDE = gravity AND walls, one slice** (ARCHITECTURE §8 already frames it): the operator is the
+   regular FREE KERNEL (everything falls; the push moves), and a LOCAL RELATIONAL CONTEXT predicts the exception (supported;
+   blocked). A table stopping a fall and a wall stopping a push are the SAME mechanism — which is why this is one slice, not two.
+4. **Morphological features** — a feature carrying its own local frame would seed the pose from ONE fixation (Monty's actual
    path), instead of needing n. Not a prerequisite; a strict improvement in fixations-to-recognition.
-3. **Sensor noise** — the deferred home for: tolerating k contradictions (a likelihood model), the Karcher/SVD rotation mean
+5. **Sensor noise** — the deferred home for: tolerating k contradictions (a likelihood model), the Karcher/SVD rotation mean
    (vs today's chordal Gram-Schmidt projection), and the lever-arm precision law (pose error ≈ position noise / object radius).
 
 ## Deferred (noted, not invented)

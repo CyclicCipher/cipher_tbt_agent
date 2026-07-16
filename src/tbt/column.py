@@ -261,15 +261,16 @@ class Hypothesis:
     CONTINUOUS (never discretised). `rotation` = the object's orientation as an n×n ROTATION MATRIX (Monty's "three
     orthonormal vectors"; `operator.to_angle` reads it as degrees in 2-D, and SO(3) has no such scalar). `origin` = where the
     object's frame origin sits in the sensor's frame, so a model point ℓ is sensed at `rotate(rotation, ℓ) + origin`. The
-    identity SDR is L2/3's; `label` is its library index (the read-out). `evidence` RANKS rival hypotheses; `refuted` counts
-    the fixations this hypothesis FAILS to explain (the model has something else there, or nothing) — a sharper question than
-    the score, and the one learning asks (`Column.commit`)."""
+    identity SDR is L2/3's; `label` is its library index (the read-out). `evidence` RANKS rival hypotheses; `refuted_at` is the
+    INDEX of the first fixation this hypothesis fails to explain (the model has something else there, or nothing), or None if
+    it explains the whole sweep. That index answers two questions at once — *is* it refuted (the bar learning uses) and
+    *where* (the object BOUNDARY, `Column.commit`)."""
     identity: frozenset
     label: int
     rotation: tuple
     origin: tuple
     evidence: float
-    refuted: int = 0
+    refuted_at: Optional[int] = None
 
 
 # ── projection classes (the target-out half of a layer's wiring; §10 P1) ───────────────────────────────────────────
@@ -570,8 +571,8 @@ class Column:
             if key in seen:
                 continue                                 # different correspondences, same pose = the same hypothesis
             seen.add(key)
-            evidence, _, refuted = self._replay(identity, R, origin)
-            scored.append(Hypothesis(identity, self.pooler.objects.index(identity), R, origin, evidence, refuted))
+            evidence, _, refuted_at = self._replay(identity, R, origin)
+            scored.append(Hypothesis(identity, self.pooler.objects.index(identity), R, origin, evidence, refuted_at))
         if not scored:
             return []
         top = max(h.evidence for h in scored)
@@ -614,8 +615,8 @@ class Column:
 
     def _replay(self, identity, rotation: tuple, origin: tuple, learn: bool = False):
         """Replay the buffered sweep under ONE (object, pose) hypothesis: map each sensed position back into the object's own
-        frame and sense it there. Returns `(evidence, predicted, refuted)` — the evidence for `identity`, how many fixations
-        L4 PREDICTED (did not burst), and how many REFUTED the hypothesis.
+        frame and sense it there. Returns `(evidence, predicted, refuted_at)` — the evidence for `identity`, how many fixations
+        L4 PREDICTED (did not burst), and the INDEX of the FIRST fixation that refuted the hypothesis (None if none did).
 
         SCORING (`learn=False`) asks THE MODEL whether it expected each fixation. Monty's update — a match ADDS [0,+1], a
         mismatch SUBTRACTS [−1] — with two distinct mismatches, both object-SPECIFIC:
@@ -623,7 +624,8 @@ class Column:
           • L4 predicts but L2/3's support for THIS identity is ~0 ⇒ something is here and it is SOMEONE ELSE's.
             (Support is the graded weight, so a hypothesis is never rewarded for a location another object explains. This
             is what refutes a merely feature-SHARING object, which a support-blind score would happily absorb.)
-        `evidence` RANKS rival hypotheses; `refuted` is the sharper question `commit` asks — see `commit`.
+        `evidence` RANKS rival hypotheses; WHERE the first refutation falls is the sharper thing `commit` asks for — it is
+        both the bar (any refutation ⇒ not this object) and, when the prefix exhausted the model, the object BOUNDARY.
 
         BINDING (`learn=True`) walks the SAME traversal and commits it: L4 learns the feature-at-location, and each PREDICTED
         code is bound to `identity` in L2/3 + the L4→L6a link. Learning and scoring being one traversal is what makes an
@@ -632,27 +634,27 @@ class Column:
         self.pooler.reset()
         l4, thr = self.layers["L4"].htm, self.pooler.recognize_frac
         undo, canonical = invert(rotation), eye(self.location.dims)
-        evidence, predicted, refuted = 0.0, 0, 0
-        for pos, feature in self._sweep:
+        evidence, predicted, refuted_at = 0.0, 0, None
+        for i, (pos, feature) in enumerate(self._sweep):
             self._pose = (rotate(undo, sub(pos, origin)), canonical)   # this fixation, in the object's OWN frame
             self.sense_at(feature, learn=learn)
             if l4.bursting():
                 evidence -= 1.0                          # nothing known is here ⇒ this object is not here either
-                refuted += 1
+                refuted_at = i if refuted_at is None else refuted_at
             else:
                 predicted += 1
-                support = 0.0 if identity is None else self.pooler.support(l4._active, identity)
                 if identity is not None:
+                    support = self.pooler.support(l4._active, identity)
                     if support >= thr:
                         evidence += support
                     else:
                         evidence -= 1.0                  # ~0 support ⇒ this is someone ELSE's feature here
-                        refuted += 1
+                        refuted_at = i if refuted_at is None else refuted_at
                     if learn:
                         self.pooler.bind(l4._active, identity)        # only PREDICTED codes (a burst is location-agnostic)
                         self._link_feature(feature, identity)
             self.pool()                                  # L2/3 settles on the identity this sweep supports (its output)
-        return evidence, predicted, refuted
+        return evidence, predicted, refuted_at
 
     # ── LEARNING: the end-of-episode commitment (plan R5) ───────────────────────────────────────────────────────────
     def commit(self) -> frozenset:
@@ -678,27 +680,63 @@ class Column:
         `evidence ≥ ½·fixations` bar merged a CHIRAL pair by a single hair: 3 matches − 1 refutation = 2 = the bar. Its
         tolerance was arbitrary — it depended on how many OTHER fixations agreed — and it was corrupting.) Tolerating k
         contradictions is a question for a sensor-NOISE model, deferred with noise itself; with an exact sensor a
-        contradiction is decisive."""
+        contradiction is decisive.
+
+        THE SWEEP SPLITS ITSELF AT AN OBJECT BOUNDARY (R7). A contradiction has two readings — the sweep LEFT this object
+        (a boundary), or the sweep is one DIFFERENT object that merely shares a prefix — and both fit the same evidence.
+        `_exhausts` is the model answering: you leave an object when you reach its EDGE, so if the prefix visited EVERY
+        location in the object's model it ended there and a new object begins; if the prefix covered only part of it, the
+        sweep never reached an edge and "one object sharing a prefix" is the better parse. Then the remainder is simply a
+        fresh episode — the same `commit`, recursively — so a continuous sweep over several objects needs NO boundary cue
+        from the caller."""
         self._require_location()
         if not self._sweep:
             return frozenset()
         best = self.recognize()
-        if best and not best[0].refuted:
+        if best and best[0].refuted_at is None:
             h = best[0]                                  # a KNOWN object (possibly at a novel pose) — reinforce it
             self._replay(h.identity, h.rotation, h.origin, learn=True)
             return h.identity
+        if best and self._exhausts(best[0]):
+            h, cut = best[0], best[0].refuted_at         # a BOUNDARY: this object ENDED here, and the rest is another
+            whole = self._sweep
+            self._sweep = whole[:cut]
+            self._replay(h.identity, h.rotation, h.origin, learn=True)    # reinforce the object we just left
+            self._sweep = whole[cut:]
+            self.pooler.reset()
+            return self.commit()                         # the remainder is its own episode — recognise it, or mint it
         # Nothing known explains this sweep. "NEW" and "not yet LEARNED" are different, and L4 tells them apart: until L4
         # predicts a fixation, its code is a location-agnostic BURST that supports every object carrying that feature
         # ANYWHERE (the feature-only trap), so there is nothing reliable to ground an identity on. Sense the sweep (training
         # L4) and mint only once L4 predicts some of it — the pooler's burst rule, at episode scale.
-        canonical = eye(self.location.dims)              # a NEW object defines its own frame: pose = identity at the anchor
-        _, predicted, _ = self._replay(None, canonical, self._anchor, learn=True)
+        # A NEW object DEFINES its own frame at the onset — the first fixation is its origin (Lewis 2019: a fresh grid phase
+        # IS the object's origin; `reference_tbt_object_frame_bootstrap`). For a caller-started episode that first fixation
+        # is `_anchor`; for the REMAINDER of a split it is wherever the previous object ended — the same rule, no special case.
+        canonical, origin = eye(self.location.dims), self._sweep[0][0]
+        _, predicted, _ = self._replay(None, canonical, origin, learn=True)
         if not predicted:
             self.pooler.reset()                          # nothing committed ⇒ L2/3 holds no object
             return frozenset()                           # deferred: another look will mint, once L4 has learned the features
         identity = self.pooler.mint()
-        self._replay(identity, canonical, self._anchor, learn=True)
+        self._replay(identity, canonical, origin, learn=True)
         return identity
+
+    def _extent(self, identity: frozenset) -> set:
+        """Every OBJECT-FRAME location this identity's model holds — the object's EXTENT, read off the L4→L6a link. Rounded,
+        because a location recovered through a solved rotation carries float round-off the stored one does not."""
+        return {tuple(round(c, 6) for c in loc)
+                for union in self._link.values() for ident, loc in union if ident == identity}
+
+    def _exhausts(self, h: Hypothesis) -> bool:
+        """Did the sweep's PREFIX (up to `h.refuted_at`) cover the WHOLE of `h`'s model? That is what tells a boundary from a
+        merely-shares-a-prefix object: you leave an object when you reach its EDGE. False if the object has no extent yet."""
+        extent = self._extent(h.identity)
+        if not extent:
+            return False
+        undo = invert(h.rotation)
+        seen = {tuple(round(c, 6) for c in rotate(undo, sub(pos, h.origin)))
+                for pos, _f in self._sweep[:h.refuted_at]}
+        return extent <= seen
 
     # ── the FIRST-SLICE drive (§15 D3): sense a feature at L4, conditioned on a factored state ──────────────────────
     def observe(self, feature: SDR, context: Optional[SDR] = None, learn: bool = True) -> list:
