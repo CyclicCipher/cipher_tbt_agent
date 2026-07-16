@@ -52,7 +52,8 @@ class Agent:
     on the current state (fed via the proximal path — Column.observe §15). Generic over content/state cardinality; it does
     not know 'digit' or 'arithmetic' (that is the task/test)."""
 
-    def __init__(self, feat_n: int, n_content: int, n_state: int, n_cols: int = 256, seed: int = 0) -> None:
+    def __init__(self, feat_n: int, n_content: int, n_state: int, n_cols: int = 256, seed: int = 0,
+                 dims: int = 2) -> None:
         self.state_enc = CategoryEncoder(range(n_state), w=8, capacity=n_state)   # the factored-state code (generic)
         sensory_n = feat_n + self.state_enc.n                                     # L4 proximal = feature ⊕ state (§15)
         self.sensory = Column(sensory_n=sensory_n, n_cols=n_cols, order=1, seed=seed)      # predicts next CONTENT
@@ -71,6 +72,8 @@ class Agent:
         #                                                                 shared by every spatial column (the peripheral)
         self._n_cols = int(n_cols)
         self._seed = int(seed)
+        self._dims = int(dims)    # the SPACE the body moves in — 2 for an ARC frame, 3 for a 3-D environment. A property of
+        #                           the ENVIRONMENT, so it is given here; the column's mechanism is identical either way.
 
     # ----- one fixation: sense the feature in the current state, read content + next state -----------------------------
     def _sense(self, feature: SDR, state: int, learn: bool):
@@ -120,15 +123,16 @@ class Agent:
 
     # ----- the SPATIAL slice: L6a path integration via the TRANSFORM operator (ARCHITECTURE §8) ----------------------
     def _nav_col(self) -> Column:
-        """The lazily-built SPATIAL column: a location frame → L6a's `ModularOperator` (the TRANSFORM primitive). Kept lazy
+        """The lazily-built SPATIAL column: a location frame → L6a's `MotionOperator` (the TRANSFORM primitive). Kept lazy
         like the decision column; the first thing to drive L6a path integration. The column's L4/L2·3/L5 are present but
         undriven here (this slice exercises L6a only), exactly as the arithmetic slice leaves the deep layers undriven."""
         if self._nav is None:
             # mw=1: a SHARP place code — crisp addressing for feature-at-location binding (the bump's graded overlap, mw>1,
-            # buys path-integration noise-robustness, deferred to real frames). bounds = a 64×64 ARC frame.
-            # The grid is the READ-OUT (what L4 binds to); the location STATE is continuous inside the column, so heading needs
-            # no ring and rotation needs no orientation modules — ONE column dead-reckons AND rotates, exactly.
-            grid = GridEncoder(scales=(7, 11, 13, 17), dims=2, mw=1, bounds=[(0, 63), (0, 63)])
+            # buys path-integration noise-robustness, deferred to real frames). bounds = a 64-cell ARC frame per axis.
+            # The grid is the READ-OUT (what L4 binds to); the location STATE is continuous inside the column, so orientation
+            # needs no ring and rotation needs no orientation modules — ONE column dead-reckons AND rotates, exactly, in ANY
+            # dimension (`dims`): the orientation is a rotation MATRIX, so SO(3) is the same code path as SO(2).
+            grid = GridEncoder(scales=(7, 11, 13, 17), dims=self._dims, mw=1, bounds=[(0, 63)] * self._dims)
             # order=2: L4's OUTPUT (active cells) must encode feature-AT-location (a location-specific cell per feature
             # column) so L2/3 pools features-at-locations, not bare features — order=1 would collapse the location.
             self._nav = Column(sensory_n=1, n_cols=self._n_cols, order=2, seed=self._seed + 3, location=grid)
@@ -151,19 +155,20 @@ class Agent:
         """The body's current dead-reckoned coordinate (decode L6a's location state)."""
         return self._nav_col().where()
 
-    # ----- SE(2) path integration (ARCHITECTURE §8): heading-dependent motion, CONTINUOUS heading ---------------------
-    def set_pose(self, coord, heading) -> None:
-        """Anchor the full SE(2) pose (location + heading in DEGREES, continuous) from a sensory fix."""
-        self._nav_col().set_pose(coord, heading)
+    # ----- SE(n) path integration (ARCHITECTURE §8): orientation-dependent motion, CONTINUOUS orientation -------------
+    def set_pose(self, coord, rotation) -> None:
+        """Anchor the full pose (location + ORIENTATION as an n×n rotation matrix — `operator.from_angle(deg)` builds one in
+        2-D) from a sensory fix."""
+        self._nav_col().set_pose(coord, rotation)
 
     def learn_pose_move(self, action, before_pose, after_pose) -> None:
-        """Learn an action's SE(2) effect from an observed pose move `*_pose = ((x, y), heading°)`. The operator stores the
-        BODY-frame displacement + heading change, so ONE observation generalises to every position AND every heading —
-        FORWARD's world effect then depends on the current heading (non-abelian), with no keying and no ring."""
+        """Learn an action's effect from an observed pose move `*_pose = (position, R)`. The operator stores the BODY-frame
+        displacement + body-frame rotation, so ONE observation generalises to every position AND every orientation —
+        FORWARD's world effect then depends on which way the body faces (non-abelian), with no keying and no ring."""
         self._nav_col().learn_pose_move(action, before_pose, after_pose)
 
     def pose(self):
-        """The body's current dead-reckoned SE(2) pose ((x, y), heading°)."""
+        """The body's current dead-reckoned pose `(position, R)`."""
         return self._nav_col().pose()
 
     def sense_at(self, feature, learn: bool = True) -> None:

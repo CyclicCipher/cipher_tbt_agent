@@ -142,9 +142,11 @@ def test_spatial_pooler_homeostasis_no_dead_columns():
     assert sp.overlap_duty.min() >= sp.min_overlap_duty            # no column is stuck below the revival floor
 
 
-# ── ConjunctiveEncoder (the tensor-product / SE(2) representation space) ─────────────────────────────────────
+# ── ConjunctiveEncoder (the tensor product — a general transduction, no longer the SE(2) story) ──────────────
 def test_conjunctive_encoder_tensor_product_roundtrip():
-    """The TENSOR product of position ⊗ heading — a cell active iff both fields are; n = ∏ n, decode projects back."""
+    """The TENSOR product of position ⊗ heading — a cell active iff both fields are; n = ∏ n, decode projects back. NB this
+    encoder was once the planned home for a heading-dependent OPERATOR; that role is moot (the pose's orientation is a
+    rotation matrix now — ARCHITECTURE §8), so what remains under test is the general tensor transduction."""
     import numpy as np
     c = ConjunctiveEncoder([("pos", GridEncoder(scales=(5, 7, 9), dims=2, mw=1, bounds=[(0, 20), (0, 20)])),
                             ("head", ScalarEncoder(0.0, 2 * np.pi, n=4, w=1, periodic=True))])

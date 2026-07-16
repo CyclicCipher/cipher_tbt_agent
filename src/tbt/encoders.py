@@ -247,11 +247,17 @@ class MultiEncoder(Encoder):
 
 
 class ConjunctiveEncoder(Encoder):
-    """The TENSOR-PRODUCT (conjunctive) of sub-encoders — e.g. grid × head-direction cells, the SE(2) representation
-    space (`reference_operator_as_group_representation`). `encode` = the OUTER PRODUCT of the sub-SDRs, flattened: a cell
-    is active iff EVERY field is active there (mixed-radix index). This is the code a heading-DEPENDENT action (FORWARD)
-    acts on LINEARLY (an orthogonal permutation), so a learned operator `M(action)` can represent the non-abelian group —
-    which a `MultiEncoder` concatenation CANNOT. `n` = ∏ fields' n; `w` = ∏ fields' w. `decode` projects back per field."""
+    """The TENSOR-PRODUCT (conjunctive) of sub-encoders — e.g. grid × head-direction cells. `encode` = the OUTER PRODUCT of
+    the sub-SDRs, flattened: a cell is active iff EVERY field is active there (mixed-radix index), so a conjunction is
+    representable where a `MultiEncoder` concatenation could only superpose. `n` = ∏ fields' n; `w` = ∏ fields' w; `decode`
+    projects back per field.
+
+    NB this was once billed as "the SE(2) representation space" — the code a heading-dependent action would act on as an
+    orthogonal PERMUTATION. That role is **moot** since the 2026-07-15 cut-overs: the location state is continuous and the
+    orientation is a rotation MATRIX, so `operator.MotionOperator` handles the non-abelian group directly with no tensor code
+    and no permutation (ARCHITECTURE §8). Its block-structure helpers (`modules`/`module_grids`), which existed only to give
+    that permutation a block-diagonal shape, are deleted with it. The encoder itself stays: a tensor product is a general
+    transduction the library should offer (`reference_sdr_encoder_library`)."""
 
     def __init__(self, fields) -> None:
         self.fields = list(fields)                             # [(name, encoder), ...]
@@ -265,26 +271,6 @@ class ConjunctiveEncoder(Encoder):
             acts = e.encode(values[name]).active
             combos = [c * e.n + a for c in combos for a in acts]
         return SDR(self.n, combos)
-
-    def modules(self):
-        """The block structure for a block-diagonal operator on the tensor code: each module of the FIRST (base) field
-        crossed with ALL of the coupled factors — so a base-shift CONDITIONED on the others (e.g. heading-dependent
-        FORWARD) stays within one block. A partition of the code indices."""
-        _name0, e0 = self.fields[0]
-        rest_n = self.n // e0.n
-        base = e0.modules() if hasattr(e0, "modules") else [list(range(e0.n))]
-        return [[p * rest_n + r for p in mod for r in range(rest_n)] for mod in base]
-
-    def module_grids(self):
-        """Each base module as a 2-TORUS index grid `(s_base × rest_n)`: `grid[i, j]` = the flat conjunctive index of the
-        i-th base-ring cell crossed with rest-index j. Axis 0 = the base (location) phase (cyclic within the ring); axis
-        1 = the coupled rest phase (e.g. heading, cyclic). This is the structure the `ModularOperator` learns a
-        heading-conditioned shift over — a base shift that MAY DEPEND on the rest coordinate (the semidirect / non-abelian
-        coupling), which the flat `modules()` block cannot express. A partition of the code indices (as 2-D grids)."""
-        _name0, e0 = self.fields[0]
-        rest_n = self.n // e0.n
-        base = e0.modules() if hasattr(e0, "modules") else [list(range(e0.n))]
-        return [np.array([[p * rest_n + r for r in range(rest_n)] for p in mod]) for mod in base]
 
     def decode(self, sdr: SDR) -> dict:
         ns = [e.n for _, e in self.fields]

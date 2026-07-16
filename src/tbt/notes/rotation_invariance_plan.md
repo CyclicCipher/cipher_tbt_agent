@@ -362,13 +362,85 @@ two poses, and the old test was asserting a *feature* of the pre-R4 code. The in
 fixed to P=[7,8,9] / Q=[8,7,9], which are genuinely unrelated by any rotation (P rotated 180° reads 9,8,7). The orientation is
 not lost when identity and pose factor — it is *reported*, which is strictly more information than two identities.
 
+## R6 — SO(3): the orientation is a MATRIX, and 2-D was the special case
+
+**MECHANISM CHECK FIRST ([[feedback_check_tbt_accuracy_per_step]]) — and the sources are more specific than this plan was.**
+Two independent memories name the representation outright:
+- [[reference_tbt_pose_invariant_recognition]]: *"pose = location + orientation (**three orthonormal vectors**), CONTINUOUS
+  (rotation matrices/quaternions, never discretized)"* — Monty's pose is **3-D-native and matrix-valued**.
+- [[reference_operator_as_group_representation]] (Gao 2021): motion = *"a learned **group-representation matrix** acting on the
+  location CODE"*.
+
+So SO(3) is **not** "add a dimension to a 2-D mechanism." Our scalar `heading°` was an SO(2)-only encoding of a thing both
+sources say is a matrix — the same category of shortcut as the discrete grid code the last cut-over removed, and it fails the
+same way: a scalar angle simply cannot name a 3-D rotation (SO(3) is 3-DOF and non-abelian). The honest move is to **stop
+special-casing the representation**: orientation becomes an n×n rotation matrix, and *degrees* become a 2-D READ-OUT
+(`to_angle`), exactly as the grid SDR became a read-out of the continuous pose. One code path serves n=2 (ARC) and n=3
+(Danganronpa-class), which is the generality the whole rotation thread was for.
+
+**The pose solve generalises without changing shape.** Monty solves rotation by ALIGNING FRAMES (sensed local frame → stored
+local frame). We have no morphological features, so we build the frame from **displacement geometry** — the same substitution
+R4 already made, just with more vectors:
+- an object at `(R, t)` puts model point ℓ at `p = R·ℓ + t`; differences cancel `t`, giving `R·(ℓᵢ−ℓ₀) = pᵢ−p₀`;
+- **n−1 independent displacements determine R**: Gram-Schmidt them into an orthonormal frame on each side (`U` sensed, `V`
+  model), completing the last axis by the generalized cross product so both frames are right-handed, then **R = Uᵀ·V**. This
+  is the TRIAD method — 2-D needs 1 displacement (2 fixations, R4's `atan2` difference is exactly this at n=2), 3-D needs 2
+  (3 fixations, non-collinear).
+- **No angular-resolution axis, so nothing cubes.** This is precisely what design A bought and the bake-off predicted.
+
+**What the generalization gives for free (the sign that it is right, not a port):**
+- **Rigidity pruning gets STRONGER and simpler.** R4 pruned on one distance; the general form requires EVERY pairwise distance
+  to be preserved, which subsumes the distance check *and* the angle-between-displacements check in one rule. Still the group
+  structure (an isometry), still not a domain prior.
+- **CHIRALITY falls out.** `R = Uᵀ·V` is always a proper rotation (det +1), so a MIRRORED object cannot be explained by any
+  hypothesis — the evidence refutes it. Reflections are not in SO(3), and a chiral object's mirror is a genuinely different
+  object. No special case: the existing evidence rule does it.
+- **Non-commutativity becomes REAL.** In SO(2) rotations commute, so `test_operator_se2`'s non-abelian claim rests on
+  translation-vs-rotation. In SO(3) the rotations themselves do not commute (yaw∘pitch ≠ pitch∘yaw) — a property SE(2) could
+  not exhibit, and the operator gets it from `R' = R·ΔR` with no new code.
+- **`wrap` disappears.** Angle wrap-around was an artifact of the scalar encoding; matrices compose without it.
+
+**Honest approximations, noted not hidden:** averaging rotation matrices entrywise and re-orthonormalizing (Gram-Schmidt) is
+the CHORDAL projection onto SO(n), biased toward the first axis — exact when observations agree (our case) and fine for tight
+clusters; the Karcher/Fréchet mean (or an SVD polar projection) is the refinement if sensor noise ever makes it matter. And
+`_solve` uses the first n fixations whose displacements are independent; a DEGENERATE sample (all collinear in 3-D) genuinely
+leaves a 1-parameter family of poses, which a discrete population cannot express — so we return nothing rather than invent an
+angle, the same honesty as the single-fixation case (the continuum is the circle-symmetry case this doc already flagged).
+
+### R6 — **BUILT 2026-07-15. Suite 57 green.**
+`operator.py` is now dimension-generic: the pose is `(position, R)` with an n×n rotation MATRIX, and the module carries the
+rotation algebra the solve needs (`eye`/`rotate`/`compose`/`invert`/`from_angle`/`to_angle`/`cross`/`gram_schmidt`/
+`frame_from`/`solve_rotation`/`orthonormalize`). `Column._pin_rotation` picks the `dims` fixations that pin R down;
+`_solve` is the TRIAD method at any n. The scalar `heading°` and `wrap` are DELETED; `Agent(dims=2|3)` picks the space.
+`test_operator_se2` → `test_operator_non_abelian` (it covers SE(2) AND SE(3) now).
+
+Proven end-to-end: an object learned ONCE in its own frame, recognised at arbitrary 3-D orientations (about z, y, x, and a
+**tilted** yaw∘pitch∘roll axis) AND translated, entered on a different feature each time, rotation recovered EXACT;
+**chirality** (a mirrored object is its own identity — no rotation relates them); the **collinear limit** (returns nothing, as
+it must); and SE(3) **rotations that do not commute** (YAW;PITCH faces (0,0,−1), PITCH;YAW faces (0,1,0)) — the property SE(2)
+structurally cannot show.
+
+**A REAL BUG the chirality test caught — the learning bar was arbitrary AND corrupting.** `commit` used
+`evidence ≥ ½·fixations`. A 4-point chiral pair scored 3 matches − 1 refutation = **2**, and the bar was 0.5×4 = **2** — it
+merged *by a hair*. Two things were wrong, and the fix is one rule:
+- the tolerance was **arbitrary**: whether a contradiction was forgiven depended on how many OTHER fixations happened to
+  agree, so a 3-point pair differing in one point stayed distinct while a 4-point pair differing in one point merged;
+- worse, the tolerance was **corrupting**: `_replay(learn=True)` binds every predicted fixation, so "recognise despite a
+  contradiction" BINDS the contradicting fixation into the object — which is precisely how R5's merge happened. Tolerance here
+  does not degrade gracefully, it silently rewrites the model.
+So the bar is now **"nothing REFUTES it"** (`Hypothesis.refuted`): threshold-free, and safe. A PARTIAL view is all match and no
+contradiction ⇒ still recognises; one genuine contradiction ⇒ a different object, however much else agrees. Tolerating k
+contradictions is a question for a sensor-NOISE model, deferred with noise itself — with an exact sensor a contradiction is
+decisive. NB this made the ORIGINAL chiral pair pass; the fix was in the mechanism, not in choosing a friendlier object.
+
 ## NEXT (in order)
-1. **SO(3).** The state already generalises (a 3-DOF rotation is just state). R4 removed the cubic scan rather than paying it:
-   the pose is solved from corresponding points, so there is no angular-resolution axis to cube. Needs 3 non-collinear points
-   (or 2 + a normal) instead of 2 — the same `_solve`/`_replay` shape.
-2. **The fully-unsupervised learning-time boundary** — the caller still supplies the episode (`start_object`), as TBT itself
+1. **The fully-unsupervised learning-time boundary** — the caller still supplies the episode (`start_object`), as TBT itself
    does. The emergent INFERENCE boundary already exists (`perceive` fires the onset on recognition failure); the open question
    is whether that same event should close a learning episode and call `commit`.
+2. **Morphological features** — a feature carrying its own local frame would seed the pose from ONE fixation (Monty's actual
+   path), instead of needing n. Not a prerequisite; a strict improvement in fixations-to-recognition.
+3. **Sensor noise** — the deferred home for: tolerating k contradictions (a likelihood model), the Karcher/SVD rotation mean
+   (vs today's chordal Gram-Schmidt projection), and the lever-arm precision law (pose error ≈ position noise / object radius).
 
 ## Deferred (noted, not invented)
 - **The LOCATION UNION for GENERAL rotation.** R3's crown test uses CONTROLLED entry (a consistent anchor point), which needs

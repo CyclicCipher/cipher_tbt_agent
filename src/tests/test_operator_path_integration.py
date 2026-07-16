@@ -1,6 +1,6 @@
 """End-to-end test of the TRANSFORM primitive (ARCHITECTURE.md §8, ROADMAP Phase 3a): L6a path integration by the learned
 `operator.MotionOperator`, wired into a SPATIAL `Column` and driven from `agent.py`. This file covers the PURE-TRANSLATION
-case; `test_operator_se2` covers heading-dependent (non-abelian) motion with the same operator.
+case; `test_operator_non_abelian` covers orientation-dependent motion (SE(2) and SE(3)) with the same operator.
 
 The point of the primitive is POSITION-INVARIANT generalization, which a plain sequence memory (the ASSOCIATE primitive)
 cannot do — a transition learned at one place is a separate fact from the same transition elsewhere (the place-invariance
@@ -20,7 +20,8 @@ _PKG = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG not in sys.path:
     sys.path.insert(0, _PKG)
 
-from tbt.agent import Agent  # noqa: E402
+from tbt.agent import Agent    # noqa: E402
+from tbt.operator import eye   # noqa: E402
 
 ACTIONS = {"N": (0, 1), "S": (0, -1), "E": (1, 0), "W": (-1, 0)}      # the world's true (unknown-to-agent) action effects
 TRAIN = [(x, y) for x in range(10, 15) for y in range(10, 15)]        # a small 5x5 LEARNING region
@@ -83,15 +84,16 @@ def test_operator_composes_over_a_sequence():
 
 def test_learned_displacement():
     """White-box: the operator learns each action's BODY-frame displacement — ONE vector per action, position-invariant BY
-    CONSTRUCTION (the same delta everywhere), which is why it generalises to positions never visited. A pure translation
-    must learn zero heading change."""
+    CONSTRUCTION (the same delta everywhere), which is why it generalises to positions never visited. A pure translation must
+    learn the IDENTITY rotation (these actions never turn the body)."""
     agent = _fresh_agent()
     _train(agent)
     op = agent._nav_col().operator
     for a, (dx, dy) in ACTIONS.items():
-        (bdx, bdy), dth = op.move_of(a)
+        (bdx, bdy), dR = op.move_of(a)
         assert abs(bdx - dx) < 1e-9 and abs(bdy - dy) < 1e-9, f"{a}: learned ({bdx:.3f}, {bdy:.3f}), expected ({dx}, {dy})"
-        assert abs(dth) < 1e-9, f"{a}: a pure translation must learn zero heading change, got {dth}"
+        assert all(abs(x - y) < 1e-9 for ra, rb in zip(dR, eye(2)) for x, y in zip(ra, rb)), \
+            f"{a}: a pure translation must learn the IDENTITY rotation, got {dR}"
 
 
 def test_unlearned_action_is_identity():

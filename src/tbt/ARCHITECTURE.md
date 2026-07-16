@@ -188,12 +188,21 @@ the previous feature (`htm.py`): the operator moves the location (TRANSFORM, gen
 feature at the new location (ASSOCIATE, binds): `loc' = M(action)·loc ; feat' = recall_at(loc')`. That ordering is what
 makes the model order-invariant.
 
-**The operator, on our substrate — no matrix, no gradient, no ANN.** L6a's state is a **continuous pose** `((x, y), heading°)`
-(`column.py` `_pose`), and the `GridEncoder` SDR is a **read-out** of it (`_code`), re-encoded fresh at every fixation. The
-operator (`operator.MotionOperator`) learns, per action, the **body-frame displacement + heading change**, as a running mean
-over observed `(pose, action, pose')` triples; `apply` maps that body-frame delta through the *current* heading and adds it.
-`Δ` is **learned per action**, never hard-coded — we do not get to assume "ACTION1 = north" (the bitter-lesson trap). This is
-the entorhinal mechanism `φ ← (φ + M·d) mod 1` with the phases **continuous**, as Lewis 2019 states them.
+**The operator, on our substrate — no gradient, no ANN.** L6a's state is a **continuous pose** `(position, R)` — an n-vector
+and an n×n **rotation matrix** (`column.py` `_pose`) — and the `GridEncoder` SDR is a **read-out** of it (`_code`), re-encoded
+fresh at every fixation. The operator (`operator.MotionOperator`) learns, per action, the **body-frame displacement + body-frame
+rotation**, as a running mean over observed `(pose, action, pose')` triples; `apply` maps that body-frame delta through the
+*current* orientation: `p' = p + R·d`, `R' = R·ΔR`. `Δ` is **learned per action**, never hard-coded — we do not get to assume
+"ACTION1 = north" (the bitter-lesson trap). This is the entorhinal mechanism `φ ← (φ + M·d) mod 1` with the phases
+**continuous**, as Lewis 2019 states them.
+
+**Why orientation is a matrix, not an angle** (cut-over 2026-07-15 — the same lesson as the continuous state, one level up). A
+scalar `heading°` is an **SO(2)-only encoding**: SO(3) is 3-DOF and non-abelian, so no scalar can name it. Both primary
+sources say matrix outright — Monty's pose is "location + orientation (**three orthonormal vectors**), continuous, never
+discretized" (`reference_tbt_pose_invariant_recognition`), and Gao 2021 has motion as "a learned **group-representation
+matrix** acting on the location code" (`reference_operator_as_group_representation`). So 2-D was the special case, and
+**degrees are now a read-out** (`to_angle`/`from_angle`), exactly as the grid SDR is a read-out of the pose. One code path
+serves n=2 (ARC frames) and n=3 (3-D environments); `wrap` is gone, because angle wrap-around was an artifact of the scalar.
 
 **Why the state is continuous and the code is a read-out (the 2026-07-15 CUT-OVER — this replaced a discrete design).** The
 operator used to be a **permutation** of the grid SDR (a cyclic shift per module). That is the natural move on a discrete
@@ -214,33 +223,41 @@ rounded shifts. The binary SDR keeps the job it is right for — **identity**, w
 the job it is wrong for: carrying a **metric**. (`GridEncoder(orientations=)` and `RotationOperator` were deleted in the same
 move, per the no-parallel-systems rule.)
 
-**Non-abelian SE(2) falls out for free.** A heading-dependent action ("FORWARD") displaces by an amount that *depends on*
-heading. SE(2) is the **semidirect product R²⋊SO(2)**: the translation transforms under a representation that depends on the
-rotation (biologically, conjunctive grid × head-direction cells, Sargolini 2006). Because the operator stores the delta in the
-**body frame** and `apply` maps it through the current heading, non-commutativity is **structural** — FORWARD;TURN ≠
-TURN;FORWARD — with *no keying, no heading ring, and no discretisation*. One observation generalises to every position **and
-every heading**, including headings never observed (tested at 37° after learning only at 0°/90°). This is strictly better than
-the keyed design it replaced, which needed a sample per `(action, heading)` and could only key on headings it had seen; the
-deferred `ConjunctiveEncoder` *tensor* is now **moot** — heading is simply a float. The *kind* of action (move vs turn) emerges
-from which components of the learned delta are non-zero; nothing per-action is coded.
+**Non-abelian motion falls out for free.** An orientation-dependent action ("FORWARD") displaces by an amount that *depends
+on* which way the body faces. SE(n) is the **semidirect product Rⁿ⋊SO(n)**: the translation transforms under a representation
+that depends on the rotation (biologically, conjunctive grid × head-direction cells, Sargolini 2006). Because the operator
+stores the delta in the **body frame** and `apply` maps it through the current orientation, non-commutativity is
+**structural** — FORWARD;TURN ≠ TURN;FORWARD — with *no keying, no ring, and no discretisation*. One observation generalises
+to every position **and every orientation**, including orientations never observed (tested at 37° after learning only at
+0°/90°). This is strictly better than the keyed design it replaced, which needed a sample per `(action, heading)` and could
+only key on headings it had seen; the deferred `ConjunctiveEncoder` *tensor* is now **moot**. In **3-D the rotations
+themselves stop commuting** (yaw∘pitch ≠ pitch∘yaw) — a property SE(2) structurally cannot exhibit, and `R' = R·ΔR` delivers
+it with no new code. The *kind* of action (move vs turn) emerges from which components of the learned delta are non-zero;
+nothing per-action is coded.
 
-**Pose-invariant recognition (SO(2), BUILT — the pose is SOLVED, not scanned).** Recognising a known object at a novel pose is
-*inference*, not a stored table — and Monty's mechanism is stronger than a search: *"you recognize an unseen orientation
-because you **SOLVE** for the rotation; you don't recall it"* (`reference_tbt_pose_invariant_recognition`). Monty solves it
-from a single sensation because its features carry a local frame (surface normal + curvature). Ours are colour-at-location —
-**non-morphological**, no intrinsic orientation — so the orienting cue is the inter-fixation **displacement geometry**, and two
-points suffice: an object at `(ω, t)` puts model point ℓ at `rotate(ℓ,ω) + t`, so `p₁ − p₀ = rotate(ℓ₁ − ℓ₀, ω)` — the
-translation cancels — giving **ω in closed form**, then `t = p₀ − rotate(ℓ₀, ω)`. What is *hypothesised* is the correspondence
-(which model point each fixation touched); the pose is *derived* and then *verified* by the model's own prediction. Two prunes
-come free from the group structure (not from any domain prior): a rotation is an **isometry**, so `|ℓ₁ − ℓ₀|` must equal
-`|p₁ − p₀|`; and a zero displacement leaves ω genuinely undetermined.
+**Pose-invariant recognition (SO(2) *and* SO(3), BUILT — the pose is SOLVED, not scanned).** Recognising a known object at a
+novel pose is *inference*, not a stored table — and Monty's mechanism is stronger than a search: *"you recognize an unseen
+orientation because you **SOLVE** for the rotation; you don't recall it"* (`reference_tbt_pose_invariant_recognition`). Monty
+solves it by **aligning frames**, because its features carry a local frame (surface normal + curvature). Ours are
+colour-at-location — **non-morphological**, no intrinsic orientation — so we build the frame from the inter-fixation
+**displacement geometry** instead: an object at `(R, t)` puts model point ℓ at `rotate(R, ℓ) + t`, so differences cancel `t`,
+giving `R·(ℓᵢ − ℓ₀) = pᵢ − p₀`. **n−1 independent displacements determine R** (`operator.solve_rotation`, the TRIAD method:
+orthonormalize each side into a right-handed frame, `R = Uᵀ·V`), then `t = p₀ − rotate(R, ℓ₀)`. So 2-D needs 2 fixations and
+3-D needs 3 — and there is **no angular resolution to sample, so SO(3) costs no more than SO(2)**, which is exactly what
+design A bought. What is *hypothesised* is the correspondence (which model point each fixation touched); the pose is *derived*
+and then *verified* by the model's own prediction.
+
+Three things fall out of the group structure rather than being coded: a rotation is an **isometry**, so every pairwise
+distance must be preserved (one rule subsuming the old distance *and* angle checks); **degenerate** fixations (coincident in
+2-D, collinear in 3-D) leave R genuinely undetermined, so we return nothing rather than invent one; and `R = Uᵀ·V` is always a
+**proper** rotation, so a **mirrored** object is refuted by the evidence — reflections are not in SO(n), and a chiral object's
+mirror is a different object.
 
 The pieces, each in its owning layer: the **L4→L6a associative link** (`Column._link`) is Lewis 2019's *"the sensory input
 activates the union of locations"* — a sensed feature recalls the union of `(identity, location)` where it occurs, which seeds
 the hypotheses; **L2/3** grades identity support (`ColumnPooler.support`); the **operator** is untouched. A hypothesis is
-`(object, ω, t)` = Monty's **(object ID, pose)**, continuous; evidence per fixation is the model's own prediction fit — *match
-adds, mismatch subtracts*. This **subsumes** the retired scan (a shared anchor is just `t = 0`) and removes the SO(3) blocker:
-solving from corresponding points has **no angular-resolution axis to cube**.
+`(object, R, t)` = Monty's **(object ID, pose)**, continuous; evidence per fixation is the model's own prediction fit — *match
+adds, mismatch subtracts*. This **subsumes** the retired scan (a shared anchor is just `t = 0`).
 
 **The population is the answer** (`reference_population_code_belief`). Tied hypotheses mean the evidence does not separate
 them, and that is information: a 4-fold object returns its whole **symmetry orbit**, because it genuinely has no single pose —
@@ -259,11 +276,18 @@ explains it, then reinforce that object or mint a new identity and bind the swee
 (Buffer → update an existing graph, or build a new one), and it leaves each layer one job: **`pool` INFERS and never mints;
 `mint`/`bind` LEARN, at the episode boundary.** Scoring and binding are the *same* traversal (`Column._replay`), which is what
 lets learning inherit pose-invariance: meeting a known object at a **novel pose reinforces it instead of duplicating it**, and
-binds in the object's *own* frame so rotated coordinates never enter the model. Two prunes keep it honest — a *partial* sweep
-of a known object is all match and no contradiction, so it recognises rather than fragmenting; and an all-**burst** sweep is
-*unlearned*, not *new*, so minting waits for L4 to predict something (a burst code is location-agnostic and would teach
-"feature → object", the feature-only trap). *Open:* the fully-unsupervised learning-time boundary — the caller still supplies
-the episode, as TBT itself does.
+binds in the object's *own* frame so rotated coordinates never enter the model.
+
+**The bar is "nothing refutes it", not a score.** A known object explains the sweep iff **no fixation contradicts** it: a
+*partial* view is all match and no contradiction (so it reinforces rather than fragmenting), while one genuine contradiction
+means a different object however much else agrees. This is threshold-free *and* it is the safe rule — `_replay(learn=True)`
+binds every predicted fixation, so tolerating a contradiction would **bind** it, i.e. tolerance silently corrupts the model,
+which is how the merge happened in the first place. (A `evidence ≥ ½·fixations` bar merged a **chiral pair** by a single hair:
+3 matches − 1 refutation = 2 = the bar. Its tolerance was arbitrary — it depended on how many *other* fixations agreed.)
+Tolerating k contradictions is a question for a sensor-**noise** model, deferred with noise itself. One more prune keeps
+minting honest: an all-**burst** sweep is *unlearned*, not *new*, so minting waits for L4 to predict something (a burst code is
+location-agnostic and would teach "feature → object", the feature-only trap). *Open:* the fully-unsupervised learning-time
+boundary — the caller still supplies the episode, as TBT itself does.
 
 **Two apparent tensions, both resolved by the composition:**
 - *Operator (group representation) vs. discrete graph / SR.* The operator is the **regular, free kernel** — self-motion in
