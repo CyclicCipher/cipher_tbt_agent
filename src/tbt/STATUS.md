@@ -94,20 +94,22 @@ ARCHITECTURE.md §3/§5.1):
    out of the group structure — and no angular resolution to sample, so SO(3) costs no more than SO(2)), and **R7 the EMERGENT
    LEARNING BOUNDARY** (a continuous sweep SPLITS ITSELF: a known object is reinforced and a novel neighbour is minted and
    becomes recognisable alone, WITHOUT the caller marking anything — the boundary is refutation, and `_exhausts` reads it).
-   What remains, in order — **(a)–(c) are ONE thread, and it is the object-dynamics thread**:
-   (a) **OBJECT DYNAMICS: the operator over object POSES.** `recognize` already returns (object, pose) and
-   `MotionOperator.learn(key, before, after)` already has the shape; track a recognised object across frames and learn its
-   transition. Buys COMMON FATE (the cold-start segmentation cue R7 lacks), ARC's "what does this action do to that block",
-   and the base for gravity. The "any object, anywhere" generalization is ALREADY free (TRANSFORM is position-invariant by
-   construction); what is open is the operator's KEY — gravity's key is a discovered CONDITION, not an action;
-   (b) **L5 DISPLACEMENT CELLS** — object↔object RELATIONS (`location + location → the relation`; "resting on"). Compositional
-   objects need the same thing;
-   (c) **the context-gated OVERRIDE = gravity AND walls, ONE slice** (ARCHITECTURE §8): the operator is the free kernel
-   (everything falls / the push moves); a local relational context predicts the exception (supported / blocked);
-   (d) MORPHOLOGICAL features (a feature carrying its own local frame seeds the pose from ONE fixation — Monty's actual path
-   — instead of needing n; a strict improvement in fixations-to-recognition, not a prerequisite);
-   (e) the SR (ROADMAP 3b) accumulating the operator into value. Cross-column VOTING over these identities is the thalamus (#3).
-   NB I'd run (a) BEFORE the ROADMAP's 3b/4 value+BG rework: a critic with no forward model of objects has nothing to plan over.
+   What remains = **ROADMAP Phase 3b, OBJECT DYNAMICS + RELATIONS (ARCHITECTURE §9)** — inserted BEFORE the value/BG rework,
+   because a critic with no forward model of OBJECTS has nothing to plan over. Its three steps, in order:
+   (a) **ONLINE POSE-SOLVING — the next slice.** MEASURED asymmetry: `perceive` ASSUMES its place on the object (the same
+   object shifted to (7,3) reads `[-1,-1,-1]`; entered mid-object, `[-1,-1]`), while `sense_sweep`+`recognize` SOLVES it
+   (`origin=(7.0, 3.0)`). Make the online path solve too — a hypothesis population narrowed per fixation (Monty's
+   evidence-based LM). Kills the two-path split, ends the caller's coordinate frame as a SILENT contract, and emits the
+   `(object, pose)` stream (b) needs;
+   (b) **the operator over OBJECT POSES** — track a recognised object across frames, learn `pose_t → pose_t+1`. Buys COMMON
+   FATE (the cold-start segmentation cue R7 lacks) + ARC's "what does this action do to that block". The "any object,
+   anywhere" generalization is ALREADY free (TRANSFORM is position-invariant by construction — the §7 lesson); what is open
+   is the operator's KEY — gravity's key is a discovered CONDITION, not an action;
+   (c) **L5 DISPLACEMENT CELLS + the context-gated OVERRIDE = gravity AND walls, ONE slice** (§9): displacement is
+   `location + location → the relation` ("resting on"; also compositional objects); then the operator is the free kernel and
+   a local relational context predicts the exception. A table stopping a fall and a wall stopping a push are ONE mechanism.
+   Then: MORPHOLOGICAL features (seed the pose from ONE fixation — Monty's path — instead of needing n; an improvement, not a
+   prerequisite); the SR (ROADMAP 3c) accumulating the operator into value; cross-column VOTING = the thalamus (#3).
 3. **The thalamus's binding role** (content ⊗ location across two columns → place-value / cross-column VOTING) + the factored
    state via L4's basal `context=` channel; then **L2/3 recognition/voting**, **L5 motor**, **hippocampal rollout**. Each
    added as a task exercises it, driven by `agent.py`. Nothing counts until imported from `agent.py` AND the agent plays more

@@ -78,9 +78,26 @@ the agent NEVER decides/values/looks — it only moves frames and rewards across
   OBJECT-CENTRIC frame + emergent boundary, non-abelian SE(2), and SO(2) rotation-invariant recognition. **The design changed
   under measurement:** the operator was first a per-module cyclic shift on the `GridEncoder` code (a permutation), which the
   drift falsifier + bake-off refuted for anything off the lattice — so the 2026-07-15 cut-over made L6a's STATE continuous and
-  the grid code a READ-OUT of it (ARCHITECTURE §8; `notes/rotation_invariance_plan.md`). Still deferred: the context-gated
-  obstacle override; the R4 union/evidence pooler; SO(3). This is the transition the SR (3b) accumulates — logically prior.
-- **Phase 3b — VALUE CRITIC (`reward.py`).** The SR read-off critic (the SR = the discounted resolvent of the 3a operator,
+  the grid code a READ-OUT of it (ARCHITECTURE §8; `notes/rotation_invariance_plan.md`). Delivered beyond the original scope:
+  pose-invariant recognition (the pose SOLVED, R4), episode-level learning (R5), SO(3) — the orientation is a MATRIX, so 2-D
+  was the special case (R6), and the emergent learning boundary (R7). This is the transition the SR (3c) accumulates.
+- **Phase 3b — OBJECT DYNAMICS + RELATIONS (ARCHITECTURE §9).** *Inserted 2026-07-16, BEFORE the value/BG rework: a critic
+  with no forward model of OBJECTS has nothing to plan over, and this is also what ARC actually needs ("what does this action
+  do to that block"). Three steps, in order:*
+  1. **Online pose-solving** — close the measured asymmetry (§8): `perceive` ASSUMES its place on the object (a shifted
+     object reads `[-1,-1,-1]`), while `sense_sweep`+`recognize` SOLVES it. Make the online path solve too — a hypothesis
+     population narrowed per fixation (Monty's evidence-based LM). Kills the two-path split, makes the caller's coordinate
+     frame stop being a silent contract, and EMITS the `(object, pose)` stream step 2 needs. Test: online recognition of an
+     object entered anywhere, at any pose.
+  2. **The operator over OBJECT poses** — track a recognised object across frames and learn `pose_t → pose_t+1`.
+     `MotionOperator.learn(key, before, after)` already has the signature. Buys **common fate** (what moves together is one
+     thing) — the cold-start segmentation cue R7 lacks, so "what IS an object" and "what does an object DO" resolve together.
+     Test: an action's effect on an object generalises to a position/orientation never demonstrated (the §7 lesson, on objects).
+  3. **L5 DISPLACEMENT CELLS + the context-gated override** — `location + location → the relation` (the inverse of the grid;
+     also compositional objects). Then the override: the operator is the free kernel, a local relational context predicts the
+     exception. **A table stopping a fall and a wall stopping a push are ONE mechanism** — so gravity and obstacles are one
+     slice, not two. Open within it: the operator's KEY must be DISCOVERED (gravity's key is a condition, not an action).
+- **Phase 3c — VALUE CRITIC (`reward.py`).** The SR read-off critic (the SR = the discounted resolvent of the 3a operator,
   ARCHITECTURE §8): `value(φ)`, `dopamine(φ,r,φ′,done)→δ`, `rho()`. Rewire the bandit's RPE to come from it (replace the faked
   `2r−1`). Test: the bandit still learns, now with a real critic.
 - **Phase 4 — REDESIGN THE BASAL GANGLIA.** Widen `OpponentActor` from exact-match keying to a per-bit SDR read-off

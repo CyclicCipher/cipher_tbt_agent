@@ -319,10 +319,10 @@ slice (the operator over object poses), so cold-start segmentation and "any unsu
 - *Operator vs. the successor representation.* Same object, two timescales: `M(action)` is the **one-step transition
   generator**; the SR is `Σₖ γᵏ (policy-averaged M)ᵏ`, its discounted **resolvent** (grid cells diagonalize both). So the
   operator is **logically prior to the SR** — learn the one-step transform first, then accumulate it into the SR for value.
-  (This is why `ROADMAP.md` Phase 3a builds the operator and Phase 3b's SR reads off it.)
+  (This is why `ROADMAP.md` Phase 3a builds the operator and Phase 3c's SR reads off it.)
 
 **Where it lives.** A new `operator.py` (one file, one concept), owned by L6a (path integration) and L5 (the displacement
-content it stores) per the §9 wiring table. It is **not** a parallel system — it is the missing owner of "the grid
+content it stores) per the §10 wiring table. It is **not** a parallel system — it is the missing owner of "the grid
 path-integration operator" the column already names but never built; the `HTMLayer` stays the ASSOCIATE primitive, unchanged.
 
 **A note on L2/3 pooling — the ASSOCIATE primitive in a POOLING regime, not a third primitive.** L2/3 recognition — pooling
@@ -342,14 +342,60 @@ space IS the object's uniqueness). On our substrate that unification is: a singl
 (a) re-anchors the L6a frame (`start_object` re-origins the grid → sensing becomes OBJECT-RELATIVE) and (b) starts a fresh
 L2/3 identity. The trigger is emergent, not a symbolic segmenter: **L4's burst is the signal.** The pooler pools only the
 PREDICTED (non-burst) L4 stream — a burst means "this feature-at-location is not yet learned," so during LEARNING it persists
-(let L4 train; the honest learning-time boundary stays a minimal episode cue, as TBT itself uses) and during INFERENCE a
-burst that no known object explains IS the boundary → `perceive` fires the coupled onset (re-anchor + fresh identity) and
-recognises the next object in its own frame. Verified: same features in a swapped arrangement get DIFFERENT identities
-(the frame is load-bearing), and a continuous two-object sweep is segmented with no explicit reset
-(`column.py` `start_object`/`perceive`; research in `notes/tbt_object_frame_and_bootstrap_research.md`). Object-ROTATION
-invariance (recognising a rotated object) is a separate, harder problem — the pose-hypothesis machinery — DEFERRED.
+(let L4 train) and at either phase a contradiction no known object explains IS the boundary. Verified: same features in a
+swapped arrangement get DIFFERENT identities (the frame is load-bearing); a continuous two-object sweep is segmented with no
+explicit reset; and at learning the sweep splits itself, so the caller marks nothing (`column.py` `start_object`/`perceive`/
+`commit`; research in `notes/tbt_object_frame_and_bootstrap_research.md`).
 
-## 9. What makes a layer a layer — role = (context-in, target-out), both wired by hand
+**KNOWN ASYMMETRY — the online path ASSUMES its place on the object; the buffered path SOLVES it.** `perceive` binds and
+recognises at whatever coordinate the caller supplies, so it only recognises an object entered **at its learned origin**;
+`sense_sweep` + `recognize` solves `(R, t)` and enters anywhere. Measured on the same object: online, shifted to (7,3) →
+`[-1,-1,-1]` (not recognised); online, entered mid-object → `[-1,-1]`; buffered, same presentation → recognised with
+`origin=(7.0, 3.0)`. Two consequences, and they are the next slice: the caller's coordinate frame is a **silent contract**
+(a test violated it and passed for weeks, because nothing checks — the online path just trusts the numbers), and there is no
+online `(object, pose)` stream for **dynamics** to track. The fix is to make the online path solve too — an incrementally
+narrowed hypothesis population, which is Monty's evidence-based LM and the target anyway (§10).
+
+## 9. Relations between objects — L5 displacement, and where physical law lives
+
+§8's operator is about ONE frame: self-motion and object pose. A *relation* — "the block is resting on the table", "the key
+is in the lock" — is between **two object frames**, and TBT is explicit that this is a different cell type with a
+complementary job (`reference_tbt_layers_4_23`, Hawkins 2019 "Framework"):
+
+- **Grid cells (L6a):** `location + movement → location`. BUILT (§8).
+- **Displacement cells (L5, thick-tufted):** `location + location → the movement/relation`. **The inverse.** Modular like
+  grid cells, but coding a RELATIVE vector between frames. NOT BUILT. The same cells carry compositional objects (a thing
+  made of sub-things at relative displacements) and the motor output — Hawkins: they "alternately represent movements sent
+  subcortically, and compositional objects sent up".
+
+So "resting on" is a displacement between two object frames, and object COMPOSITION and object RELATIONS are the same
+machinery — which is why they are one slice, not two.
+
+**Physical law = the operator's free kernel + a context-gated override.** §8 already states the shape: the operator is the
+**regular, free kernel**, true everywhere; irregularity is a *context-gated override* where a **local relational context**
+predicts the exception. Read that with gravity in place of a wall and it is the same sentence: the free kernel is *everything
+falls*; "supported" is the override. **A table stopping a fall and a wall stopping a push are ONE mechanism** — which is why
+gravity is not a physics module, and never will be one here.
+
+**How one demonstration generalises to every object — the answer is architectural, not statistical.** This is §7's lesson
+again. TRANSFORM is position- and orientation-invariant *by construction*: an action's effect learned in a 5×5 region
+dead-reckons exactly at (45,50), and a body-frame delta learned at 0°/90° holds at 37°. You do not generalise gravity by
+watching a thousand falls; you generalise because the operator is defined **over a reference frame** and therefore applies
+everywhere. The frame generalises, not the data. Two thirds of the machinery is already here: `recognize` returns
+`(object, pose)`, and `MotionOperator.learn(key, before_pose, after_pose)` already has exactly the right signature.
+
+**What is genuinely missing, in dependency order:**
+1. **The operator over OBJECT poses, tracked across time** — today it learns the *body's* motion. `recognize` gives the
+   object's pose; tracking it frame-to-frame gives `(pose_t → pose_t+1)`. This also yields **common fate** (what moves
+   together is one thing), which is the cold-start segmentation cue §8's boundary lacks — so *"what is an object"* and
+   *"what does an object do"* are the same question, answered together.
+2. **The operator's KEY, discovered rather than given.** Today the caller says `learn("FORWARD", …)`. Gravity's key is not an
+   action — it is a learned CONDITION. Discovering *what the delta depends on* is the open problem
+   (`feedback_subgoal_types_from_dynamics`, `reference_l5_operator_kinds`), and whether the law is object-independent is
+   itself a hypothesis (feathers).
+3. **L5 displacement** — the relation the override reads.
+
+## 10. What makes a layer a layer — role = (context-in, target-out), both wired by hand
 
 §2's claim ("one column algorithm; regions differ only in what they connect to") is right, but coding it needs one
 refinement that biology makes explicit: a layer's role has **two** determinants from **two different sources**, and only
@@ -377,11 +423,11 @@ to *emerge*: like the reference frame in §7, it is **given, not learned**.
 - Hippocampal preplay / vicarious trial-and-error / SWR — prospective simulation of candidate futures.
 - Constantinescu, O'Reilly & Behrens 2016, *Science*; Bellmund et al. 2018, *Science* — grid-like reference-frame codes for
   abstract/conceptual spaces in entorhinal + medial PFC.
-- Mountcastle 1978 — the uniform cortical column: one repeated circuit across all neocortex (§2, §9 premise).
+- Mountcastle 1978 — the uniform cortical column: one repeated circuit across all neocortex (§2, §10 premise).
 - Douglas & Martin 2004, *Annu. Rev. Neurosci.* — the canonical cortical microcircuit; thalamic input is ~10% of synapses,
-  so a region's function comes from its CONNECTIVITY, not a different circuit (§9, the context-in half).
+  so a region's function comes from its CONNECTIVITY, not a different circuit (§10, the context-in half).
 - Molyneaux/Arlotta/Macklis (projection-neuron fate); Fezf2/Ctip2 → L5b subcerebral, Tbr1 → L6 corticothalamic, Satb2 →
-  callosal — birth-order (inside-out) + a transcription-factor code fixes laminar/projection IDENTITY (§9, the target-out half).
+  callosal — birth-order (inside-out) + a transcription-factor code fixes laminar/projection IDENTITY (§10, the target-out half).
 - Thousand Brains Project 2024 (arXiv 2412.18354) — learning is local, associative, unsupervised; credit assignment is solved
   STRUCTURALLY by reference frames (error localized to a feature-at-location), not by backprop (§7).
 - §3 loop grounding (dopamine = RPE — Schultz; SR value read-off — Dayan/Stachenfeld/Gershman; OpAL Go/NoGo — Collins & Frank;
