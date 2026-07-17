@@ -181,33 +181,50 @@ class MotionOperator:
     """The TRANSFORM primitive: learn what each ACTION does to the continuous pose, then apply it.
 
     A pose is `(position, R)` — an n-vector and an n×n rotation matrix (`reference_tbt_pose_invariant_recognition`: Monty's
-    orientation is three orthonormal vectors). For each action the operator learns the mean **body-frame** displacement and
-    the mean **body-frame rotation**, from observed `(before, action, after)` transitions. Body-frame is what makes it
-    general: the same learned delta applies at EVERY position and EVERY orientation, and mapping it to the world through the
-    current orientation is exactly the Rⁿ⋊SO(n) semidirect product — so orientation-dependent motion is non-commutative by
-    construction, with no keying, no ring, and no discretisation. An unlearned action is the identity (predict staying put —
-    the correct prior, and a large prediction error until it is learned)."""
+    orientation is three orthonormal vectors). For each action the operator learns a mean displacement + rotation from
+    observed `(before, action, after)` transitions, and the delta is stored in a frame that makes it INVARIANT — so the same
+    learned delta applies at every position and every orientation. An unlearned action is the identity (predict staying put —
+    the correct prior, and a large prediction error until it is learned).
 
-    def __init__(self) -> None:
-        self._acc: dict = {}                      # action -> [count, Σ body displacement, Σ body rotation]
+    INTRINSIC vs EXTRINSIC — the two ways the group acts, and it is an empirical fact about the action, not a style choice:
+      * `ego=True` (default) — the action acts on the RIGHT: `p' = p + R·d`, `R' = R·ΔR`. The delta lives in the MOVING
+        thing's OWN frame, so "FORWARD" means *forward from where I face*. Right for a body's own locomotion, and what makes
+        Rⁿ⋊SO(n) non-commutative by construction.
+      * `ego=False` — the action acts on the LEFT: `p' = p + d`, `R' = ΔR·R`. The delta lives in the frame the poses are
+        OBSERVED in and does NOT care which way the thing faces. Right for an OBJECT's motion: a block shoved east goes east
+        whether or not the block is rotated, and a rock falls down whatever its orientation. Getting this wrong is not
+        subtle — an intrinsic push would send a 90°-rotated block off at 90° to the demonstrated direction.
+    Which one an action obeys is a fact to be DISCOVERED (a self-propelled object is intrinsic; gravity is extrinsic); for
+    now it is declared per operator, and discovering it is the same open problem as discovering the operator's KEY
+    (`feedback_subgoal_types_from_dynamics`). NB the extrinsic frame must be ALLOCENTRIC for a law like gravity to be
+    invariant; with a STATIC observer the observation frame already is one, and a moving observer needs the ego→allo
+    transform — which is the hippocampus's job, not a column's (`reference_tbt_frames_and_hippocampus`), and is deferred."""
+
+    def __init__(self, ego: bool = True) -> None:
+        self.ego = bool(ego)
+        self._acc: dict = {}                      # action -> [count, Σ displacement, Σ rotation] (in the invariant frame)
 
     def learn(self, action: Hashable, before, after) -> None:
-        """Observe one transition; `before`/`after` are poses `(position, R)`. The world displacement is un-rotated by the
-        orientation it was made AT, giving a body-frame delta invariant to where the body was and which way it faced;
-        likewise the rotation is expressed in the body's own frame (`ΔR = Rᵀ·R'`)."""
+        """Observe one transition; `before`/`after` are poses `(position, R)`. The delta is expressed in whichever frame this
+        operator holds invariant (see the class docstring): INTRINSIC un-rotates it by the orientation it was made AT
+        (`d = Rᵀ·Δp`, `ΔR = Rᵀ·R'`); EXTRINSIC takes it as observed (`d = Δp`, `ΔR = R'·Rᵀ`)."""
         (bp, bR), (ap, aR) = before, after
-        d_body = rotate(invert(bR), sub(ap, bp))
-        dR = compose(invert(bR), aR)
+        if self.ego:
+            d = rotate(invert(bR), sub(ap, bp))
+            dR = compose(invert(bR), aR)
+        else:
+            d = sub(ap, bp)
+            dR = compose(aR, invert(bR))
         acc = self._acc.get(action)
         if acc is None:
             n = len(bp)
             acc = self._acc[action] = [0, tuple(0.0 for _ in range(n)), tuple(tuple(0.0 for _ in range(n)) for _ in range(n))]
         acc[0] += 1
-        acc[1] = add(acc[1], d_body)
+        acc[1] = add(acc[1], d)
         acc[2] = tuple(tuple(a + b for a, b in zip(ra, rb)) for ra, rb in zip(acc[2], dR))
 
     def move_of(self, action: Hashable):
-        """The learned `(body displacement, body rotation)` for an action; None if unlearned."""
+        """The learned `(displacement, rotation)` for an action, in this operator's invariant frame; None if unlearned."""
         acc = self._acc.get(action)
         if not acc or acc[0] == 0:
             return None
@@ -218,12 +235,14 @@ class MotionOperator:
         return action in self._acc
 
     def apply(self, pose, action: Hashable):
-        """Dead-reckon: apply the learned action to a pose. The body-frame displacement is mapped to the world through the
-        CURRENT orientation (hence non-commutative), then the body turns in its own frame. Exact — no rounding, so nothing
+        """Dead-reckon: apply the learned action to a pose — INTRINSICALLY (through the pose's own orientation, hence
+        non-commutative) or EXTRINSICALLY (in the observation frame, orientation-blind). Exact: no rounding, so nothing
         accumulates."""
         m = self.move_of(action)
         if m is None:
             return pose
-        d_body, dR = m
+        d, dR = m
         p, R = pose
-        return add(p, rotate(R, d_body)), compose(R, dR)
+        if self.ego:
+            return add(p, rotate(R, d)), compose(R, dR)
+        return add(p, d), compose(dR, R)

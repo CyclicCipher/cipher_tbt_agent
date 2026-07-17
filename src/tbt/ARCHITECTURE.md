@@ -397,16 +397,32 @@ watching a thousand falls; you generalise because the operator is defined **over
 everywhere. The frame generalises, not the data. Two thirds of the machinery is already here: `recognize` returns
 `(object, pose)`, and `MotionOperator.learn(key, before_pose, after_pose)` already has exactly the right signature.
 
-**What is genuinely missing, in dependency order:**
-1. **The operator over OBJECT poses, tracked across time** — today it learns the *body's* motion. `recognize` gives the
-   object's pose; tracking it frame-to-frame gives `(pose_t → pose_t+1)`. This also yields **common fate** (what moves
-   together is one thing), which is the cold-start segmentation cue §8's boundary lacks — so *"what is an object"* and
-   *"what does an object do"* are the same question, answered together.
-2. **The operator's KEY, discovered rather than given.** Today the caller says `learn("FORWARD", …)`. Gravity's key is not an
+**The operator over OBJECT poses — BUILT** (`Column.dynamics`, an L5 engine: L6a's operator path-integrates where the
+*sensor* is; this one learns what an action does to a *thing out there*). Its input is the model's own output — the poses
+`recognize`/`perceive` **solve** — so perception feeds dynamics end to end. Measured from **one** demonstration of a shove,
+at one place, on one object: correct at positions never demonstrated, on the same object **rotated** to 90° and 217°, and on
+a **different object never once seen to move**. That is the claim above, tested.
+
+**INTRINSIC vs EXTRINSIC — the two ways the group acts, and an empirical fact about the action.** A *body's* motion is
+intrinsic (`p' = p + R·d`): "FORWARD" means forward *from where I face*, which is what makes SE(n) non-commutative. An
+*object's* motion is **extrinsic** (`p' = p + d`): a shoved block goes where it was shoved and a rock falls down, whatever
+way they happen to be turned. This is not a style choice — measured on the identical demonstration, an intrinsic operator
+sends a 90°-turned block to (20,23), **90° off** the shove it was shown, where extrinsic gives (23,20). Which one an action
+obeys is itself discoverable (a self-propelled object is intrinsic); for now it is declared per operator, and discovering it
+is the same open problem as the KEY below. *NB the extrinsic frame must be **allocentric** for a law like gravity to be
+invariant. With a static observer the observation frame already is one; a moving observer needs the ego→allo transform —
+which is the **hippocampus's** job, not a column's (`reference_tbt_frames_and_hippocampus`: HPC = one global allocentric
+map, cortex = many local object-centric frames), and is deferred until the sensor moves.*
+
+**What is still missing, in dependency order:**
+1. **Tracking across time → COMMON FATE.** The operator now learns `pose_t → pose_t+1` when handed the two poses; the
+   remaining step is the column noticing *by itself*, frame to frame, which poses moved together. That is the cold-start
+   segmentation cue §8's boundary lacks — so *"what is an object"* and *"what does an object do"* are one question.
+2. **The operator's KEY, discovered rather than given.** Today the caller says `learn("PUSH", …)`. Gravity's key is not an
    action — it is a learned CONDITION. Discovering *what the delta depends on* is the open problem
-   (`feedback_subgoal_types_from_dynamics`, `reference_l5_operator_kinds`), and whether the law is object-independent is
-   itself a hypothesis (feathers).
-3. **L5 displacement** — the relation the override reads.
+   (`feedback_subgoal_types_from_dynamics`, `reference_l5_operator_kinds`), and "every object falls alike" is itself a
+   hypothesis the world can refute (feathers) — which today's operator states by keying on nothing.
+3. **L5 displacement cells** — the relation the override reads.
 
 ## 10. What makes a layer a layer — role = (context-in, target-out), both wired by hand
 

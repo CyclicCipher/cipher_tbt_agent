@@ -212,6 +212,17 @@ class Agent:
         pose is undone, so the sweep is recorded and `recognize` solves the pose from it)."""
         self._nav_col().sense_sweep(self._feat_enc.encode(feature))
 
+    # ----- OBJECT DYNAMICS (ARCHITECTURE §9): what an action does to a THING ------------------------------------------
+    def learn_object_move(self, action, before_pose, after_pose) -> None:
+        """Learn what `action` does to an OBJECT, from an observed `(pose → pose)` move — the poses being what `recognize`
+        SOLVED. Generalises to every position and orientation BY CONSTRUCTION (the frame does it, not the data), and to every
+        OBJECT because nothing is keyed on which one — the base for physical law (ARCHITECTURE §9)."""
+        self._nav_col().learn_object_move(action, before_pose, after_pose)
+
+    def predict_object_move(self, pose, action):
+        """Predict where `action` puts an object now at `pose` — the forward model over objects."""
+        return self._nav_col().predict_object_move(pose, action)
+
     def recognize(self) -> list:
         """Recognise the buffered sweep → the surviving `Hypothesis` POPULATION (object + pose + evidence), best-first. The
         pose is SOLVED from the inter-fixation displacement geometry, so it is exact at ANY rotation and the object may be

@@ -357,6 +357,12 @@ class Column:
         self.location = location                                # the READ-OUT encoder (what L4 binds to), not the state
         self.operator = MotionOperator() if location is not None else None
         self._pose = None                                       # (position, R) — continuous; None until located
+        # L5 — OBJECT DYNAMICS (ARCHITECTURE §9). The SAME TRANSFORM primitive, applied to an OBJECT's pose instead of the
+        # sensor's: L6a's operator path-integrates where the SENSOR is; this one learns how an ACTION moves a THING out
+        # there. It is L5's because L5 owns displacement/behaviour ("grid: location + movement → location; displacement:
+        # location + location → the relation" — `reference_tbt_layers_4_23`), and it is EXTRINSIC because an object's motion
+        # does not care which way the object faces (a shoved block goes where it was shoved; a rock falls down).
+        self.dynamics = MotionOperator(ego=False) if location is not None else None
         # L2/3's POOLING engine (ARCHITECTURE §8): the stable object-IDENTITY that pools the L4 feature-at-location stream
         # (`pooler.ColumnPooler`) — a decoupled stable output + persistence, which the L2/3 HTMLayer (associate) cannot do.
         self.pooler = ColumnPooler(seed=seed + 4) if location is not None else None
@@ -695,6 +701,25 @@ class Column:
             return support, False, True
         finally:
             self._pose = real
+
+    # ── L5 OBJECT DYNAMICS (ARCHITECTURE §9): what an ACTION does to a THING, not to the sensor ─────────────────────
+    def learn_object_move(self, action, before_pose, after_pose) -> None:
+        """Learn what `action` does to an OBJECT, from ONE observed `(pose → pose)` transition. The poses are what
+        `recognize`/`perceive` SOLVE — so the input is the model's own output, not a hand-fed coordinate.
+
+        WHY ONE DEMONSTRATION IS ENOUGH FOR EVERY OBJECT, EVERYWHERE — and it is the §7 lesson, not statistics. The delta is
+        stored in the frame that holds it INVARIANT, so it applies at every position and every orientation BY CONSTRUCTION;
+        the FRAME generalizes, not the data (exactly as an action's effect learned in a 5×5 region dead-reckons at (45,50)).
+        Nothing is keyed on WHICH object, so it is `any object` for free — and that is a HYPOTHESIS the world can refute
+        (feathers do not fall like stones), which is the operator's KEY problem, still open (ARCHITECTURE §9)."""
+        self._require_location()
+        self.dynamics.learn(action, before_pose, after_pose)
+
+    def predict_object_move(self, pose, action):
+        """Predict where `action` puts an object now at `pose` — the FORWARD MODEL over objects, which is what a value critic
+        would need to plan over. An unlearned action predicts no change (the honest prior)."""
+        self._require_location()
+        return self.dynamics.apply(pose, action)
 
     # ── LEARNING: the end-of-episode commitment (plan R5) ───────────────────────────────────────────────────────────
     def commit(self) -> frozenset:

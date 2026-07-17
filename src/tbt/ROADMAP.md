@@ -89,10 +89,13 @@ the agent NEVER decides/values/looks — it only moves frames and rewards across
      measured asymmetry is closed: the same object shifted to (7,3) went `[-1,-1,-1]` → `[0,0,0]`, entered mid-object
      `[-1,-1]` → `[0,0]`. One scoring rule (`_fit`) now serves both the batch and online paths; L2/3's support-only `pool()`
      and the boundary's re-anchoring are DELETED as superseded. The `(object, pose)` stream step 2 needs now exists.
-  2. **The operator over OBJECT poses** — track a recognised object across frames and learn `pose_t → pose_t+1`.
-     `MotionOperator.learn(key, before, after)` already has the signature. Buys **common fate** (what moves together is one
-     thing) — the cold-start segmentation cue R7 lacks, so "what IS an object" and "what does an object DO" resolve together.
-     Test: an action's effect on an object generalises to a position/orientation never demonstrated (the §7 lesson, on objects).
+  2. **The operator over OBJECT poses — ✅ DONE (2026-07-16).** `Column.dynamics` (an L5 engine — L6a path-integrates the
+     SENSOR, this learns what an action does to a THING) + `learn_object_move`/`predict_object_move`. Fed by the poses
+     `recognize` SOLVES, so perception → dynamics is end-to-end. From ONE demonstration: correct at positions never
+     demonstrated, on the same object ROTATED (90°, 217°), and on a DIFFERENT object never seen to move — the §7 lesson on
+     objects. Forced one real design fact: an object's motion is EXTRINSIC, not intrinsic (measured — an intrinsic operator
+     sends a 90°-turned block 90° off the demonstrated shove). REMAINS: the column noticing frame-to-frame which poses moved
+     together, by itself = **common fate** (the cold-start segmentation cue R7 lacks).
   3. **L5 DISPLACEMENT CELLS + the context-gated override** — `location + location → the relation` (the inverse of the grid;
      also compositional objects). Then the override: the operator is the free kernel, a local relational context predicts the
      exception. **A table stopping a fall and a wall stopping a push are ONE mechanism** — so gravity and obstacles are one
