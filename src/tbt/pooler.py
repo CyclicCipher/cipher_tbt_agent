@@ -53,11 +53,16 @@ class ColumnPooler:
     (`init_perm ≥ connected`) so one clean pass suffices to learn an object."""
 
     def __init__(self, n_cells: int = 2048, w: int = 40, connected: float = 0.5, init_perm: float = 0.55,
-                 perm_inc: float = 0.1, perm_dec: float = 0.02, recognize_frac: float = 0.5, seed: int = 0) -> None:
+                 perm_inc: float = 0.1, perm_dec: float = 0.02, recognize_frac: float = 0.5,
+                 alpha: float = 0.01, rho: float = 1.0, seed: int = 0) -> None:
         self.n, self.w = int(n_cells), int(w)
         self.connected, self.init_perm = float(connected), float(init_perm)
         self.perm_inc, self.perm_dec = float(perm_inc), float(perm_dec)
         self.recognize_frac = float(recognize_frac)     # the support a fixation needs to COUNT as matching an identity
+        self.alpha = float(alpha)                       # ART's CHOICE parameter — small = the conservative limit (prefer
+        #                                                 the smallest category that explains the input)
+        self.rho = float(rho)                           # ART's VIGILANCE — 1.0 = "nothing may go unexplained"; < 1 tolerates
+        #                                                 contradictions, which is the deferred sensor-NOISE knob
         self.rng = random.Random(seed)
         self.ff: dict = {}                 # L4 cell -> {l23 identity cell: permanence}  (feedforward)
         self.objects: list = []            # the library: each object = a frozenset of `w` identity cells
@@ -81,10 +86,43 @@ class ColumnPooler:
         return len(obj & sup) / self.w if self.w else 0.0
 
     def support(self, l4_active, identity: frozenset) -> float:
-        """How strongly the current L4 code supports ONE NAMED identity, in [0, 1] — the graded evidence a caller needs when
-        it is testing a specific object HYPOTHESIS rather than asking "which object is this?" (`pool`'s job). L2/3 owns
-        identity matching, so recognition-by-evidence reads it from here instead of re-deriving it (RULES #5)."""
+        """How strongly ONE L4 code supports ONE NAMED identity, in [0, 1] — the graded evidence a caller needs when it is
+        testing a specific object HYPOTHESIS. Per-FIXATION; the two ART functions below judge a whole EPISODE."""
         return self._match(identity, self._supported(frozenset(l4_active)))
+
+    # ---- ART: the TWO normalisations, doing two different jobs (Carpenter & Grossberg) -----------------------
+    def receptive_field(self, identity: frozenset) -> frozenset:
+        """ART's weight vector `w_j` for one category: the L4 feature-at-location cells this identity is CONNECTED to —
+        i.e. the object's model, as L2/3 holds it."""
+        return frozenset(c for c, syn in self.ff.items()
+                         if any(syn.get(l23, 0.0) >= self.connected for l23 in identity))
+
+    def choice(self, l4_union, identity: frozenset) -> float:
+        """ART's CHOICE function `T_j = |I ∧ w_j| / (α + |w_j|)` — normalised by the **CATEGORY**. This RANKS rivals, and the
+        normalisation is the entire point: in the conservative limit (α → 0) the SMALLEST category that explains the input
+        wins. That is Grossberg's mechanism and Tenenbaum's SIZE PRINCIPLE in one expression — a small model seen whole beats
+        a big model seen partly, because seeing only the small model's cells would be a *suspicious coincidence* if the thing
+        were really the big one.
+
+        We had NO such term: ranking was raw accumulated evidence, a SUM, so an over-merged blob `AB` explaining 2 of its 4
+        cells TIED an object `A` explaining 2 of 2 — and measured, that let the blob ABSORB A forever (six passes studying A
+        alone never individuated it). It looked like L2/3 needed to un-bind. It did not; it needed this."""
+        w = self.receptive_field(identity)
+        return len(frozenset(l4_union) & w) / (self.alpha + len(w))
+
+    def match(self, l4_union, identity: frozenset) -> float:
+        """ART's MATCH function `M_j = |I ∧ w_j| / |I|` — normalised by the **INPUT**. This is VIGILANCE: how much of what I
+        am seeing does this category account for? Compared against `rho` it decides RESONANCE (learn) vs RESET (recruit a new
+        category rather than erode this one).
+
+        NB our "nothing REFUTES it" bar already WAS this, hand-rolled, at `rho = 1.0`: a partial view of a known object is
+        all-match (`M = 1`, accept — it never fragments), while a sweep carrying anything the category cannot explain drops
+        `M` below 1 (reset — it is a different object). Naming it gives the noise knob we deferred: `rho < 1` tolerates k
+        contradictions, and lower rho = coarser categories, higher = finer."""
+        codes = frozenset(l4_union)
+        if not codes:
+            return 0.0
+        return len(codes & self.receptive_field(identity)) / len(codes)
 
     # ---- LEARN: the two acts, both driven by `Column.commit` at an EPISODE boundary ---------------------------
     def mint(self) -> frozenset:

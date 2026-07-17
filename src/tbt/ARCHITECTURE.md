@@ -432,6 +432,19 @@ both is the one `_key` needs anyway: motion should **narrow a population of corr
 *What is NOT built:* turning a grouping into persistent objects. The moved part lands where L4 has never sensed it, so its
 mint defers, and the next static look groups the scene as one again.
 
+**THE ART CUT-OVER (2026-07-16) — two normalisations, doing two different jobs.** L2/3 now carries Carpenter & Grossberg's
+two functions instead of one hand-rolled number:
+- **CHOICE** `T_j = |I ∧ w_j| / (α + |w_j|)`, normalised by the **CATEGORY** — this RANKS rivals, and in the conservative
+  limit (α→0) the *smallest* model that explains the sweep wins. Grossberg's mechanism and Tenenbaum's **size principle** in
+  one expression. **We had no such term**: ranking was raw accumulated evidence, a SUM, which is why a blob explaining 2 of
+  its 4 cells *tied* an object explaining 2 of 2.
+- **MATCH / VIGILANCE** `M_j = |I ∧ w_j| / |I|`, normalised by the **INPUT** — resonance (learn) vs reset (recruit). Our
+  "nothing REFUTES it" bar already *was* this, hand-rolled, at **ρ = 1.0**; naming it hands us the deferred noise knob
+  (ρ<1 tolerates k contradictions; lower ρ = coarser categories).
+One number was being asked to do both jobs, which is why it kept failing at one of them — the tell being that we
+independently re-derived the choice function by hand, badly, over three iterations. The cure for hand-coded dynamics is to
+*use the settled mechanism*, not to re-derive it (`RULES` #5).
+
 **THE UN-BINDING QUESTION — measured 2026-07-16, and the answer is now clear even though the build is not done.**
 An over-merged blob is far worse than a competing hypothesis. Measured: with a blob `AB` learned, studying `A` **alone for six
 passes** leaves the library at **1** — `A` is never individuated at all. Every sweep of `A` is a *partial view* of `AB`:
@@ -445,12 +458,17 @@ a re-run of a segmenter", with "**REVISABILITY** is the safety invariant". **Com
 identity whose model spans **two motion groups** is refuted *as an object* — its parts demonstrably move apart, so it never
 was one thing. That is what licenses un-binding; nothing else does, and a generic decay would be a heuristic.
 
-And the mechanism is *half-present already*: `ColumnPooler.perm_dec` exists and is **dead code** — `bind` only strengthens,
-so L2/3 has LTP and no LTD, where `htm.py`'s `_learn_segment` has both (reinforce active, decrement inactive, prune at 0).
-So `unbind` **completes an incomplete Hebbian rule** using the parameter already written for it, rather than adding
-machinery. Two things must be settled when building it: `_link` stores a feature *key*, not the SDR, so a model's own
-feature-at-locations cannot currently be re-sensed to un-bind them (store the SDR, or key differently); and a retired
-identity's fate — un-bound-but-present leaves a dead shell in the library and inflates its labels.
+**And the answer turned out to be: DON'T un-bind.** Four literatures converge — ART **recruits** a new category on mismatch
+rather than eroding the old (that *is* the stability–plasticity answer); latent-cause inference **creates a new state** when
+prediction error demands it; Xu & Carey show **spatiotemporal** individuation precedes featural by ~10 months, so motion is
+the primary cue; and the size principle says a small model seen whole should beat a big one seen half. So the blob is never
+erased — it simply **stops winning** (CHOICE) once a rival exists, and dies of disuse. `ColumnPooler.perm_dec` stays dead
+code, correctly: L2/3 needs no LTD for this.
+
+*What remains, and it is narrow:* CHOICE is **built and unit-exercised** (`test_l23_pooling`), but its end-to-end payoff is
+**unreachable** until common fate's minting half works — with no rival, the blob wins unopposed and is reinforced, so the
+term has nothing to rank against. The blocking step is therefore still "make a grouping persist as objects", not un-binding.
+(The label-shift worry was misconceived: a "label" is just a list index; a mint-time counter settles it.)
 2. **The operator's KEY, discovered rather than given.** Today the caller says `learn("PUSH", …)`. Gravity's key is not an
    action — it is a learned CONDITION. Discovering *what the delta depends on* is the open problem
    (`feedback_subgoal_types_from_dynamics`, `reference_l5_operator_kinds`), and "every object falls alike" is itself a

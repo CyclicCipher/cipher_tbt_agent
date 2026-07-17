@@ -263,14 +263,20 @@ class Hypothesis:
     object's frame origin sits in the sensor's frame, so a model point ℓ is sensed at `rotate(rotation, ℓ) + origin`. The
     identity SDR is L2/3's; `label` is its library index (the read-out). `evidence` RANKS rival hypotheses; `refuted_at` is the
     INDEX of the first fixation this hypothesis fails to explain (the model has something else there, or nothing), or None if
-    it explains the whole sweep. That index answers two questions at once — *is* it refuted (the bar learning uses) and
-    *where* (the object BOUNDARY, `Column.commit`)."""
+    it explains the whole sweep. That index answers two questions at once — *is* it refuted (which is ART's VIGILANCE at
+    ρ=1: nothing may go unexplained) and *where* (the object BOUNDARY, `Column.commit`).
+
+    **`choice` is what RANKS rivals** — ART's `T_j = |I ∧ w_j| / (α + |w_j|)`, normalised by the CATEGORY, so the smallest
+    model that explains the sweep wins (`ColumnPooler.choice`). `evidence` is the raw accumulated support, kept because it
+    breaks exact ties and reads well in a trace — but it must NOT rank, since a sum lets a big model seen partly tie a small
+    model seen whole."""
     identity: frozenset
     label: int
     rotation: tuple
     origin: tuple
     evidence: float
     refuted_at: Optional[int] = None
+    choice: float = 0.0
 
 
 # ── projection classes (the target-out half of a layer's wiring; §10 P1) ───────────────────────────────────────────
@@ -617,12 +623,15 @@ class Column:
             if key in seen:
                 continue                                 # different correspondences, same pose = the same hypothesis
             seen.add(key)
-            evidence, _, refuted_at = self._replay(identity, R, origin)
-            scored.append(Hypothesis(identity, self.pooler.objects.index(identity), R, origin, evidence, refuted_at))
+            evidence, _, refuted_at, codes = self._replay(identity, R, origin)
+            scored.append(Hypothesis(identity, self.label_of(identity), R, origin, evidence, refuted_at,
+                                     self.pooler.choice(codes, identity)))
         if not scored:
             return []
-        top = max(h.evidence for h in scored)
-        best = [h for h in scored if h.evidence >= top]
+        # RANK BY ART's CHOICE (the size principle), evidence only to break exact ties. Ranking by evidence alone was the
+        # bug: a SUM lets a big model explaining part of itself tie a small model explaining all of itself.
+        top = max((h.choice, h.evidence) for h in scored)
+        best = [h for h in scored if (h.choice, h.evidence) >= top]
         self.pooler.settle(best[0].identity)             # L2/3 holds what the population concluded
         return best
 
@@ -677,14 +686,15 @@ class Column:
         code is bound to `identity` in L2/3 + the L4→L6a link. Learning and scoring being one traversal is what makes an
         object get learned in exactly the frame it was recognised in — so re-sweeping a known object at a NOVEL pose
         reinforces it rather than corrupting it with rotated coordinates. `identity=None` trains L4 only (the probe below)."""
-        evidence, predicted, refuted_at = 0.0, 0, None
+        evidence, predicted, refuted_at, seen = 0.0, 0, None, set()
         for i, (pos, feature) in enumerate(self._sweep):
             delta, refuted, was_predicted = self._fit(identity, rotation, origin, pos, feature, learn=learn)
             evidence += delta
             predicted += 1 if was_predicted else 0
+            seen |= set(self.layers["L4"].htm._active)    # the episode's INPUT `I` — what ART's two functions judge
             if refuted and refuted_at is None:
                 refuted_at = i
-        return evidence, predicted, refuted_at
+        return evidence, predicted, refuted_at, frozenset(seen)
 
     def _fit(self, identity, rotation: tuple, origin: tuple, pos, feature: SDR, learn: bool = False):
         """THE scoring atom — ONE fixation against ONE (object, pose) hypothesis. Returns `(evidence, refuted, predicted)`.
@@ -799,7 +809,7 @@ class Column:
         # IS the object's origin; `reference_tbt_object_frame_bootstrap`). For a caller-started episode that first fixation
         # is `_anchor`; for the REMAINDER of a split it is wherever the previous object ended — the same rule, no special case.
         canonical, origin = eye(self.location.dims), self._sweep[0][0]
-        _, predicted, _ = self._replay(None, canonical, origin, learn=True)
+        _, predicted, _, _ = self._replay(None, canonical, origin, learn=True)
         if not predicted:
             self.pooler.reset()                          # nothing committed ⇒ L2/3 holds no object
             return frozenset()                           # deferred: another look will mint, once L4 has learned the features
