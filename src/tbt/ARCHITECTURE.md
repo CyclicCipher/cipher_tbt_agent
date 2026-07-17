@@ -430,8 +430,27 @@ and auto-rolling the buffer invented motion between two unrelated objects, fragm
 both is the one `_key` needs anyway: motion should **narrow a population of correspondences**, not be read off a dict.
 
 *What is NOT built:* turning a grouping into persistent objects. The moved part lands where L4 has never sensed it, so its
-mint defers; the next static look groups the scene as one again; and splitting a blob **already learned** would need
-**un-binding** a model, which the pooler cannot do (bind only strengthens). That is the honest remaining half.
+mint defers, and the next static look groups the scene as one again.
+
+**THE UN-BINDING QUESTION — measured 2026-07-16, and the answer is now clear even though the build is not done.**
+An over-merged blob is far worse than a competing hypothesis. Measured: with a blob `AB` learned, studying `A` **alone for six
+passes** leaves the library at **1** — `A` is never individuated at all. Every sweep of `A` is a *partial view* of `AB`:
+all match, no contradiction, so `commit` recognises `AB` and reinforces it, forever. The blob is not merely un-killable, it is
+**absorbing**.
+
+The cause is a rule we chose deliberately: **a partial view must not fragment a known object** (R5/R6). That rule and
+splitting are in direct tension — the same shape as R5-vs-R7 — and the tie-breaker must be *evidence*, because
+`reference_tbt_segmentation_and_grouping` is explicit that "one is really two" is "just what the **EVIDENCE** concludes — not
+a re-run of a segmenter", with "**REVISABILITY** is the safety invariant". **Common fate is exactly that evidence:** an
+identity whose model spans **two motion groups** is refuted *as an object* — its parts demonstrably move apart, so it never
+was one thing. That is what licenses un-binding; nothing else does, and a generic decay would be a heuristic.
+
+And the mechanism is *half-present already*: `ColumnPooler.perm_dec` exists and is **dead code** — `bind` only strengthens,
+so L2/3 has LTP and no LTD, where `htm.py`'s `_learn_segment` has both (reinforce active, decrement inactive, prune at 0).
+So `unbind` **completes an incomplete Hebbian rule** using the parameter already written for it, rather than adding
+machinery. Two things must be settled when building it: `_link` stores a feature *key*, not the SDR, so a model's own
+feature-at-locations cannot currently be re-sensed to un-bind them (store the SDR, or key differently); and a retired
+identity's fate — un-bound-but-present leaves a dead shell in the library and inflates its labels.
 2. **The operator's KEY, discovered rather than given.** Today the caller says `learn("PUSH", …)`. Gravity's key is not an
    action — it is a learned CONDITION. Discovering *what the delta depends on* is the open problem
    (`feedback_subgoal_types_from_dynamics`, `reference_l5_operator_kinds`), and "every object falls alike" is itself a
