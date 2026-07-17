@@ -130,6 +130,69 @@ def test_two_actions_stay_distinct_and_an_unknown_one_predicts_no_change():
     assert _close(agent.predict_object_move(pose, "NEVER_SEEN")[0], (25.0, 25.0)), "an unlearned action must be the identity"
 
 
+# ── COMMON FATE: what moves together is one thing (ROADMAP 3b; ARCHITECTURE §9) ────────────────────────────────────
+# A scene of two things that are ALWAYS SEEN TOGETHER. With no model, nothing can say they are two — until one moves.
+SCENE_LEFT = {(0.0, 0.0): 1, (2.0, 0.0): 2}            # the part that will move
+SCENE_RIGHT = {(8.0, 0.0): 4, (10.0, 0.0): 5}          # the part that stays
+
+
+def _sweep_scene(agent: Agent, *parts: dict, shift=(0.0, 0.0)):
+    """Sweep a whole SCENE as ONE episode — one onset, no boundary cue, the parts' cells interleaved as the sensor finds
+    them. `shift` moves the FIRST part only (the world's doing; the agent is told nothing)."""
+    agent.start_object()
+    for i, part in enumerate(parts):
+        for coord, feature in part.items():
+            off = shift if i == 0 else (0.0, 0.0)
+            agent.locate((coord[0] + off[0], coord[1] + off[1]))
+            agent.sense_sweep(feature)
+    return agent.commit()
+
+
+def _groups(agent: Agent, *parts: dict, shift=(0.0, 0.0)):
+    """Sweep the scene, then ask the column how it groups the look by MOTION — before any of it is committed. `look_again`
+    declares "the same scene, later", which only the caller can know: the previous EPISODE is not the previous LOOK."""
+    agent._nav_col().look_again()
+    agent.start_object()
+    for i, part in enumerate(parts):
+        for coord, feature in part.items():
+            off = shift if i == 0 else (0.0, 0.0)
+            agent.locate((coord[0] + off[0], coord[1] + off[1]))
+            agent.sense_sweep(feature)
+    return agent._nav_col()._common_fate_groups()
+
+
+def test_COMMON_FATE_groups_a_scene_NO_MODEL_could():
+    """THE COLD-START CUE. Everywhere else the boundary is a prediction MISMATCH against a model, which is why a wholly novel
+    scene can only mint one blob — "the object is a RECOGNITION construct", and with no model there is no object. Motion needs
+    no model. Two things always seen together are grouped as one (correctly — nothing yet says otherwise); the moment one of
+    them MOVES they are grouped as TWO, by motion alone.
+
+    The scene is swept as ONE episode with ONE onset: the agent is never told there are two things, which cells belong to
+    which, or that anything moved."""
+    agent = _fresh()
+    assert _groups(agent, SCENE_LEFT, SCENE_RIGHT) == [[0, 1, 2, 3]], "nothing has moved yet — one group is correct"
+    assert _groups(agent, SCENE_LEFT, SCENE_RIGHT) == [[0, 1, 2, 3]], "still nothing moving"
+    assert _groups(agent, SCENE_LEFT, SCENE_RIGHT, shift=(5.0, 0.0)) == [[0, 1], [2, 3]], (
+        "the LEFT part moved and the right did not, so the scene is TWO things — grouped by motion, with no model at all")
+
+
+def test_a_scene_that_moves_TOGETHER_is_ONE_group():
+    """The other half, and what stops the cue from shattering everything: parts that move as ONE are ONE. Shift the WHOLE
+    scene — every fixation shares a displacement — and it must stay one group, which is exactly right for a rigid object
+    seen from a new place."""
+    agent = _fresh()
+    _groups(agent, SCENE_LEFT, SCENE_RIGHT)
+    assert _groups(agent, SCENE_LEFT, SCENE_RIGHT, shift=(0.0, 0.0)) == [[0, 1, 2, 3]], "static scene"
+    agent._nav_col().look_again()
+    agent.start_object()                                               # the WHOLE scene, moved rigidly
+    for part in (SCENE_LEFT, SCENE_RIGHT):
+        for coord, feature in part.items():
+            agent.locate((coord[0] + 5.0, coord[1]))
+            agent.sense_sweep(feature)
+    assert agent._nav_col()._common_fate_groups() == [[0, 1, 2, 3]], (
+        "a scene that moves as ONE must stay ONE group — common fate groups by SHARED motion, it does not just detect change")
+
+
 if __name__ == "__main__":
     ag = _fresh()
     _learn_objects(ag, BLOCK, BALL)

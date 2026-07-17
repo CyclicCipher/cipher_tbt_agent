@@ -50,7 +50,7 @@ writeup in `ARCHITECTURE.md` §7:
    A FACTORED recurrent state channel closes it (100%) where PURE temporal memory can't (37%). ReSU investigated + DROPPED
    (temporal encoder, not spatial invariance).
 
-Suite: **64 passed** (~18s; `test_column_arithmetic` is the ~16s end-to-end column test, the rest — `test_bg_thalamus`,
+Suite: **66 passed** (~18s; `test_column_arithmetic` is the ~16s end-to-end column test, the rest — `test_bg_thalamus`,
 `test_operator_path_integration`, `test_feature_at_location`, `test_l23_pooling`, `test_operator_non_abelian`,
 `test_object_centric`, `test_rotation_recognition`, `test_object_dynamics` — are fast). Count history, 2026-07-15: 54 → **46** at the continuous
 cut-over (`test_oriented_grid` + `test_rotation_operator` deleted with the discrete-rotation code they covered) → **48** with
@@ -106,9 +106,15 @@ ARCHITECTURE.md §3/§5.1):
    EXTRINSIC, measured: an intrinsic operator sends a 90°-turned block 90° off the shove it was shown).
    What remains = the rest of **ROADMAP Phase 3b, OBJECT DYNAMICS + RELATIONS (ARCHITECTURE §9)** — inserted BEFORE the
    value/BG rework, because a critic with no forward model of OBJECTS has nothing to plan over:
-   (a) **COMMON FATE — the next slice.** The operator learns `pose_t → pose_t+1` when HANDED both poses; the column must now
-   notice frame-to-frame, BY ITSELF, which poses moved together. That is the cold-start segmentation cue R7 lacks (a wholly
-   novel scene still mints one blob), so "what IS an object" and "what does an object DO" resolve together;
+   (a) **COMMON FATE — HALF BUILT (2026-07-16), and the half that is missing is named.** BUILT: `_common_fate_groups`
+   (+ `look_again`) groups a look by MOTION with NO model — a scene swept as one episode, never told there are two things,
+   groups `[[0,1,2,3]]` while static and `[[0,1],[2,3]]` the moment one part moves; a rigidly-moved scene stays ONE group.
+   Its two REFUSALS were forced by measurement (unguarded it shattered a symmetric object, and auto-rolling the buffer
+   fragmented a chiral pair): it refuses when a feature REPEATS in a look, and it must be TOLD the scene is the same one —
+   "the previous EPISODE" is not "the previous LOOK". NOT BUILT: making a grouping PERSIST as objects — the moved part lands
+   where L4 never sensed it (its mint defers), the next static look re-groups as one, and splitting an ALREADY-LEARNED blob
+   needs UN-BINDING, which the pooler cannot do (bind only strengthens). The general fix for the refusals is the one `_key`
+   needs anyway: motion should NARROW A POPULATION of correspondences, not be read off a dict;
    (b) **the operator's KEY, DISCOVERED not given** — today the caller names an action; gravity's key is a CONDITION. "Every
    object falls alike" is a hypothesis the world can refute (feathers), which today's operator states by keying on nothing;
    (c) **L5 DISPLACEMENT CELLS + the context-gated OVERRIDE = gravity AND walls, ONE slice** (§9): displacement is

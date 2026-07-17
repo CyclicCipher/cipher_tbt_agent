@@ -371,8 +371,10 @@ class Column:
         # invariance). One shared origin suffices because the L2/3 pooler individuates objects, not the phase.
         self._anchor = tuple(0.0 for _ in range(location.dims)) if location is not None else None
         # `_sweep` = the episode BUFFER of sensed fixations (Monty's Buffer) that `recognize` REPLAYS per hypothesis;
-        # `_pop` = the LIVE (object, pose) hypothesis population the online `perceive` narrows per fixation.
+        # `_prev_sweep` = the one before it, kept ONLY so `commit` can see what MOVED (common fate — the sole cue that can
+        # segment a scene no model explains yet); `_pop` = the LIVE (object, pose) population `perceive` narrows per fixation.
         self._sweep: list = []
+        self._prev_sweep: list = []
         self._pop: list = []
         # The **L4 → L6a associative link** (Lewis 2019): a sensed feature activates the UNION OF LOCATIONS where it occurs,
         # which is what seeds recognition when we do NOT know where on the object we are. Learned in `perceive`. The object
@@ -467,6 +469,16 @@ class Column:
         return self.pooler.objects.index(identity) if identity in self.pooler.objects else -1
 
     # ── OBJECT-CENTRIC frame + the emergent boundary (ARCHITECTURE §8): one event anchors the frame AND the identity ───
+    def look_again(self) -> None:
+        """Declare that the NEXT sweep is THE SAME SCENE, LATER — so `commit` may group it by COMMON FATE (what moved
+        together is one thing). This is explicit, and that is the point: "the previous EPISODE" is NOT "the same scene, a
+        moment later" — objects are routinely studied one after another, and treating the last object's sweep as this
+        scene's past invents motion between two unrelated things. Measured: rolling the buffer automatically at every onset
+        split a chiral pair into fragments, because the two forms were learned back-to-back and differ in one cell. Only the
+        caller knows the scene is the same one; the column will not assume it."""
+        self._require_location()
+        self._prev_sweep = self._sweep
+
     def start_object(self) -> None:
         """An object ONSET — the ONE coupled event (Lewis 2019: a fresh grid phase is BOTH the frame origin AND the object's
         unique location space). Re-ANCHOR the L6a frame to the canonical origin (so subsequent path integration is
@@ -774,6 +786,15 @@ class Column:
         # predicts a fixation, its code is a location-agnostic BURST that supports every object carrying that feature
         # ANYWHERE (the feature-only trap), so there is nothing reliable to ground an identity on. Sense the sweep (training
         # L4) and mint only once L4 predicts some of it — the pooler's burst rule, at episode scale.
+        groups = self._common_fate_groups()
+        if len(groups) > 1:                              # the scene's parts moved DIFFERENTLY ⇒ it was never one object
+            whole, last = self._sweep, frozenset()
+            for g in groups:
+                self._sweep = [whole[i] for i in g]
+                self.pooler.reset()
+                last = self.commit()                     # each group is its own episode — recognise it, or mint it
+            self._sweep = whole
+            return last
         # A NEW object DEFINES its own frame at the onset — the first fixation is its origin (Lewis 2019: a fresh grid phase
         # IS the object's origin; `reference_tbt_object_frame_bootstrap`). For a caller-started episode that first fixation
         # is `_anchor`; for the REMAINDER of a split it is wherever the previous object ended — the same rule, no special case.
@@ -785,6 +806,46 @@ class Column:
         identity = self.pooler.mint()
         self._replay(identity, canonical, origin, learn=True)
         return self.pooler.settle(identity)
+
+    def _common_fate_groups(self) -> list:
+        """Group the buffered fixations by HOW THEY MOVED since the previous look — the Gestalt cue, and the only one that can
+        segment a scene NO MODEL EXPLAINS YET. Returns groups of sweep indices (one group = no split).
+
+        WHY THIS IS THE MISSING CUE. Everywhere else the boundary is a PREDICTION MISMATCH against a model
+        (`reference_tbt_segmentation_and_grouping`: "it relies on feature and morphology mismatch to implicitly detect
+        boundaries"), which is why a wholly novel scene could only ever mint ONE blob — with no model there is no object.
+        Motion needs no model: a feature seen at `p` last look and at `p'` now moved by `d = p' − p`, and fixations sharing
+        `d` moved TOGETHER, so they are one thing. Same principle as everywhere else — the mismatch is just against the
+        scene's own motion instead of against a stored model. It is also why "what IS an object" and "what does an object DO"
+        are one question (ARCHITECTURE §9).
+
+        WHAT IT REFUSES TO DO, and why the refusals are the load-bearing part. Motion tells you nothing unless you can say
+        WHICH thing was where, and correspondence here is by EXACT feature match — so the cue is only trustworthy when every
+        feature occurs ONCE in each look. A REPEATED feature (a 4-fold symmetric object senses the same feature at four
+        places) would silently pair the wrong ones and invent four different displacements, shattering the object; a feature
+        with no counterpart leaves nothing to compare. In both cases this reports ONE group rather than guess. Measured: without
+        that guard it splits a symmetric object into its four cells and a chiral pair into fragments. The general fix is the
+        same one `_key` needs — overlap recall over a POPULATION of correspondences, i.e. motion should narrow hypotheses
+        rather than be read off a dict.
+
+        SCOPE: this GROUPS a look; making the grouping PERSIST as objects is the other half and is not built — the moved part
+        lands where L4 has never sensed it (so its mint defers), and the next static look groups the scene as one again. A
+        blob already learned would need UN-BINDING to split. Noted, not hidden (ARCHITECTURE §9)."""
+        n = len(self._sweep)
+        if not self._prev_sweep or not n:
+            return [list(range(n))]
+        keys = [self._key(f) for _p, f in self._sweep]
+        prev_keys = [self._key(f) for _p, f in self._prev_sweep]
+        if len(set(keys)) != len(keys) or len(set(prev_keys)) != len(prev_keys):
+            return [list(range(n))]                      # a REPEATED feature ⇒ correspondence is a guess ⇒ refuse
+        was = dict(zip(prev_keys, (p for p, _f in self._prev_sweep)))
+        groups: dict = {}
+        for i, (pos, _feature) in enumerate(self._sweep):
+            before = was.get(keys[i])
+            if before is None:
+                return [list(range(n))]                  # no counterpart ⇒ nothing to compare ⇒ do not guess
+            groups.setdefault(tuple(round(c, 6) for c in sub(pos, before)), []).append(i)
+        return list(groups.values())
 
     def _extent(self, identity: frozenset) -> set:
         """Every OBJECT-FRAME location this identity's model holds — the object's EXTENT, read off the L4→L6a link. Rounded,

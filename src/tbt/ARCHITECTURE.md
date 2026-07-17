@@ -414,10 +414,24 @@ invariant. With a static observer the observation frame already is one; a moving
 which is the **hippocampus's** job, not a column's (`reference_tbt_frames_and_hippocampus`: HPC = one global allocentric
 map, cortex = many local object-centric frames), and is deferred until the sensor moves.*
 
-**What is still missing, in dependency order:**
-1. **Tracking across time → COMMON FATE.** The operator now learns `pose_t → pose_t+1` when handed the two poses; the
-   remaining step is the column noticing *by itself*, frame to frame, which poses moved together. That is the cold-start
-   segmentation cue §8's boundary lacks — so *"what is an object"* and *"what does an object do"* are one question.
+**COMMON FATE — the grouping is BUILT; making it PERSIST is not** (`Column._common_fate_groups`, gated by `look_again`).
+Everywhere else the boundary is a prediction mismatch *against a model*, which is exactly why a wholly novel scene can only
+mint one blob: with no model there is no object. **Motion needs no model** — a feature at `p` last look and `p'` now moved by
+`d`, and fixations sharing `d` moved together. Measured on a scene swept as ONE episode, never told there are two things:
+static → `[[0,1,2,3]]` (one group — correct, nothing yet says otherwise), then one part moves → `[[0,1],[2,3]]`, **two things
+found by motion alone**; and a scene moved *rigidly* stays one group, so the cue groups by *shared* motion rather than merely
+detecting change.
+
+*Its refusals are the load-bearing part, and both were forced by measurement.* Correspondence is exact-feature-match, so it
+**refuses** when a feature repeats in a look (a 4-fold object senses one feature at four places; pairing them is a guess —
+unguarded, it shattered a symmetric object into its cells) or has no counterpart. And it must be told the scene is the same
+one (`look_again`): "the previous **episode**" is not "the previous **look**" — objects are routinely studied back-to-back,
+and auto-rolling the buffer invented motion between two unrelated objects, fragmenting a chiral pair. The general fix for
+both is the one `_key` needs anyway: motion should **narrow a population of correspondences**, not be read off a dict.
+
+*What is NOT built:* turning a grouping into persistent objects. The moved part lands where L4 has never sensed it, so its
+mint defers; the next static look groups the scene as one again; and splitting a blob **already learned** would need
+**un-binding** a model, which the pooler cannot do (bind only strengthens). That is the honest remaining half.
 2. **The operator's KEY, discovered rather than given.** Today the caller says `learn("PUSH", …)`. Gravity's key is not an
    action — it is a learned CONDITION. Discovering *what the delta depends on* is the open problem
    (`feedback_subgoal_types_from_dynamics`, `reference_l5_operator_kinds`), and "every object falls alike" is itself a
