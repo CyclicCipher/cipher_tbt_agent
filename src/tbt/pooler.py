@@ -13,8 +13,10 @@ L6a (locations), L5 (displacements). So this pooler does NOT store a graph of fe
 
 THE MECHANISM:
   * an OBJECT = a fixed sparse identity SDR (`w` of `n` cells), minted once on first encounter.
-  * INFER (`pool`): the identity whose cells are best SUPPORTED (connected feedforward) by the current L4 code; once
-    settled it PERSISTS while still supported, and re-pools on a mismatch. Overlap-recall, O(library), not a scan.
+  * `support(l4_code, identity)`: how strongly one L4 feature-at-location code backs ONE named identity (connected
+    feedforward overlap). This is L2/3's associative recall, and it is the WEIGHT the column's (object, pose) hypothesis
+    population is scored with — the column decides WHICH object, this layer says how well each fits.
+  * `settle(identity)`: hold the identity the column concluded — L2/3's stable output.
   * LEARN (`mint` + `bind`): reinforce FEEDFORWARD synapses from the active L4 cells → an identity's cells (Hebbian).
     Both are called by `Column.commit` — an EPISODE-level act, never per fixation. See below.
 
@@ -51,12 +53,11 @@ class ColumnPooler:
     (`init_perm ≥ connected`) so one clean pass suffices to learn an object."""
 
     def __init__(self, n_cells: int = 2048, w: int = 40, connected: float = 0.5, init_perm: float = 0.55,
-                 perm_inc: float = 0.1, perm_dec: float = 0.02, recognize_frac: float = 0.5, persist_frac: float = 0.5,
-                 seed: int = 0) -> None:
+                 perm_inc: float = 0.1, perm_dec: float = 0.02, recognize_frac: float = 0.5, seed: int = 0) -> None:
         self.n, self.w = int(n_cells), int(w)
         self.connected, self.init_perm = float(connected), float(init_perm)
         self.perm_inc, self.perm_dec = float(perm_inc), float(perm_dec)
-        self.recognize_frac, self.persist_frac = float(recognize_frac), float(persist_frac)
+        self.recognize_frac = float(recognize_frac)     # the support a fixation needs to COUNT as matching an identity
         self.rng = random.Random(seed)
         self.ff: dict = {}                 # L4 cell -> {l23 identity cell: permanence}  (feedforward)
         self.objects: list = []            # the library: each object = a frozenset of `w` identity cells
@@ -104,32 +105,14 @@ class ColumnPooler:
             for l23 in identity:
                 syn[l23] = min(1.0, syn.get(l23, self.init_perm) + self.perm_inc)
 
-    # ---- INFER: pool one fixation — persist / recognise / nothing (never mints) -------------------------------
-    def pool(self, l4_active, bursting: bool = False) -> frozenset:
-        """INFER the object from one L4 feature-at-location code. A settled identity PERSISTS while the code still supports
-        it; otherwise RECOGNISE the best-supported known object by overlap-recall (O(library), not a scan); otherwise
-        nothing. This never mints — an unexplained sweep is LEARNING's business (`Column.commit`), and minting here is what
-        produced "a new object almost every frame" (`reference_htm_pooling_recall_heterarchy`).
-
-        A `bursting` fixation is L4 predicting NOTHING here: the code is a location-agnostic burst and unreliable for
-        recognition (the feature-only trap), so it yields nothing — which IS the object-boundary signal that
-        `Column.perceive` acts on. Pooling only the PREDICTED stream is the theory."""
-        if bursting:
-            return frozenset()
-        l4_active = frozenset(l4_active)                            # a SETTLED (predicted, location-specific) code — reliable
-        sup = self._supported(l4_active)
-        if self.active and self._match(self.active, sup) >= self.persist_frac:
-            identity = self.active                                   # PERSIST — still supported by this fixation
-        else:
-            best, best_m = None, 0.0
-            for obj in self.objects:                                # RECOGNISE by overlap-recall
-                m = self._match(obj, sup)
-                if m > best_m:
-                    best, best_m = obj, m
-            identity = best if (best is not None and best_m >= self.recognize_frac) else frozenset()
+    # ---- INFER: hold the identity the column concluded --------------------------------------------------------
+    def settle(self, identity: frozenset) -> frozenset:
+        """L2/3's OUTPUT: hold the identity the column has concluded (empty = nothing recognised). The conclusion is the
+        COLUMN's — a narrowed population of (object, pose) hypotheses (`Column.perceive`/`recognize`), which subsumes the
+        support-only recall this layer used to do alone: that could only answer "which object does this code support?",
+        never "…and where am I on it?", so it silently required the sensor to already be at the object's learned origin
+        (measured: an object shifted by (7,3) read as UNRECOGNISED). `support` below is still this layer's — the population
+        weighs each hypothesis with it."""
         self.active = identity
         return identity
 
-    def which(self) -> int:
-        """The index of the current identity in the library (a stable integer label), or -1 if none/unrecognised."""
-        return self.objects.index(self.active) if self.active in self.objects else -1

@@ -347,14 +347,27 @@ swapped arrangement get DIFFERENT identities (the frame is load-bearing); a cont
 explicit reset; and at learning the sweep splits itself, so the caller marks nothing (`column.py` `start_object`/`perceive`/
 `commit`; research in `notes/tbt_object_frame_and_bootstrap_research.md`).
 
-**KNOWN ASYMMETRY — the online path ASSUMES its place on the object; the buffered path SOLVES it.** `perceive` binds and
-recognises at whatever coordinate the caller supplies, so it only recognises an object entered **at its learned origin**;
-`sense_sweep` + `recognize` solves `(R, t)` and enters anywhere. Measured on the same object: online, shifted to (7,3) →
-`[-1,-1,-1]` (not recognised); online, entered mid-object → `[-1,-1]`; buffered, same presentation → recognised with
-`origin=(7.0, 3.0)`. Two consequences, and they are the next slice: the caller's coordinate frame is a **silent contract**
-(a test violated it and passed for weeks, because nothing checks — the online path just trusts the numbers), and there is no
-online `(object, pose)` stream for **dynamics** to track. The fix is to make the online path solve too — an incrementally
-narrowed hypothesis population, which is Monty's evidence-based LM and the target anyway (§10).
+**The ONLINE path solves its place too** (BUILT — this closed a measured asymmetry). `perceive` used to bind and recall at
+whatever coordinate the caller supplied, so it only recognised an object entered **at its learned origin**: measured, the same
+object shifted to (7,3) read `[-1,-1,-1]` and entered mid-object `[-1,-1]`, while `sense_sweep`+`recognize` solved the
+identical presentation. That asymmetry was doing two kinds of damage — the caller's coordinate frame was a **silent contract**
+(a test violated it and passed for weeks, because nothing checked; the online path just trusted the numbers), and there was no
+online `(object, pose)` stream for **dynamics** to track.
+
+Now the online path is Monty's **evidence-based LM**: a live population of `(object, pose)` hypotheses that each fixation
+**narrows**, never recomputed (`reference_tbt_layers_4_23`: "recognition is INCREMENTAL evidence accumulation, NEVER
+recomputed"). One scoring rule serves both paths (`_fit` — `_replay` loops it over a buffer, `_narrow` calls it per live
+hypothesis), so there is no second mechanism. Seeding needs `dims` fixations (n−1 displacements determine a rotation), and
+before that the only evidence is the **L4→L6a union** — Lewis 2019's "the sensory input activates the union of locations": a
+feature only one object carries names it outright; a shared feature is honestly ambiguous. Same object, after: shifted →
+`[0,0,0]`, entered mid-object → `[0,0]`.
+
+Two things this **removed**, both of which had been quietly hiding the assumption: L2/3's support-only `pool()` (it could
+answer "which object does this code support?" but never "…and where am I on it?", so it *required* the origin — the column's
+population subsumes it, and `support` remains as the population's weight), and the boundary's **re-anchoring** (`perceive` no
+longer teleports the frame on recognition failure; the next object's pose is solved). A hypothesis population also reports
+ambiguity honestly: agreeing on the object while differing on the pose is a symmetry orbit → the object; disagreeing on the
+object → nothing, rather than a forced guess.
 
 ## 9. Relations between objects — L5 displacement, and where physical law lives
 

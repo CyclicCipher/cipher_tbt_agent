@@ -243,7 +243,7 @@ Hawkins/Ahmad/Cui 2017, Hawkins et al. 2019 "Framework", Lewis et al. 2019, TBP 
 from __future__ import annotations
 
 import itertools
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
 from tbt.encoders import SDR, GridEncoder, SpatialPooler
@@ -364,8 +364,10 @@ class Column:
         # is measured RELATIVE to the object (grid frames have no origin — Lewis 2019; an arbitrary origin gives translation
         # invariance). One shared origin suffices because the L2/3 pooler individuates objects, not the phase.
         self._anchor = tuple(0.0 for _ in range(location.dims)) if location is not None else None
-        # `_sweep` = the episode BUFFER of sensed fixations (Monty's Buffer) that `recognize` REPLAYS per hypothesis.
+        # `_sweep` = the episode BUFFER of sensed fixations (Monty's Buffer) that `recognize` REPLAYS per hypothesis;
+        # `_pop` = the LIVE (object, pose) hypothesis population the online `perceive` narrows per fixation.
         self._sweep: list = []
+        self._pop: list = []
         # The **L4 → L6a associative link** (Lewis 2019): a sensed feature activates the UNION OF LOCATIONS where it occurs,
         # which is what seeds recognition when we do NOT know where on the object we are. Learned in `perceive`. The object
         # model is DISTRIBUTED, never one layer's data structure (`reference_tbt_layers_4_23`): the FEATURE is the key (L4),
@@ -451,20 +453,12 @@ class Column:
             raise ValueError("predict_feature before locate()/path_integrate(): L6a has no location yet.")
         return self.layers["L4"].htm.predict_at(self._code().active)
 
-    # ── L2/3 temporal pooling (ARCHITECTURE §8): pool the L4 stream into a STABLE object IDENTITY ────────────────────
-    def pool(self) -> frozenset:
-        """INFER the object from L4's CURRENT feature-at-location code (its active cells, set by the last `sense_at`) — the
-        L2/3 identity, STABLE across fixations. Passes L4's BURST (was the last sensation unpredicted?) so the pooler treats
-        a surprising fixation as NOVELTY, not as recognition of a different object (the feature-only trap). Returns the
-        object-identity SDR (empty if unrecognised). LEARNING is `commit`, an episode-level act."""
-        self._require_location()
-        l4 = self.layers["L4"].htm
-        return self.pooler.pool(l4._active, bursting=l4.bursting())
-
-    def object_id(self) -> int:
-        """A stable integer label for the currently-recognised object (−1 if none) — the L2/3 identity decoded."""
-        self._require_location()
-        return self.pooler.which()
+    # ── L2/3 (ARCHITECTURE §8): the STABLE object IDENTITY ───────────────────────────────────────────────────────────
+    def label_of(self, identity) -> int:
+        """The stable integer label of an identity SDR (−1 if unknown/empty) — L2/3's identity decoded for a caller. Takes
+        the identity rather than reading L2/3's settled state, because `perceive`/`commit` already RETURN what they concluded
+        — asking the layer again afterwards was a second route to the same answer."""
+        return self.pooler.objects.index(identity) if identity in self.pooler.objects else -1
 
     # ── OBJECT-CENTRIC frame + the emergent boundary (ARCHITECTURE §8): one event anchors the frame AND the identity ───
     def start_object(self) -> None:
@@ -473,26 +467,60 @@ class Column:
         object-relative → translation-invariant) AND reset L2/3 to start a fresh identity. Called explicitly at a
         learning-time boundary (the honest minimal episode cue), and fired EMERGENTLY by `perceive` on recognition failure."""
         self._require_location()
-        self.locate(self._anchor)
-        self.pooler.reset()
+        self.locate(self._anchor)                       # a place to START — NOT the object's origin: that is SOLVED
+        self.pooler.reset()                             # (`perceive`) or minted from the sweep's first fixation (`commit`)
         self._sweep = []
+        self._pop = []
 
     def perceive(self, feature: SDR):
-        """INFER: sense a feature at the current OBJECT-RELATIVE location and pool it into the L2/3 identity — and, if this is
-        a RECOGNITION FAILURE (an active object hypothesis that no longer holds, with nothing else recognised), fire the
-        coupled object-onset here: re-anchor the frame + start a fresh identity, then read this feature as the new object's
-        first (origin) feature. That single non-recognition event does both — no symbolic segmenter. Returns the
-        object-identity SDR. This is the ONLINE path, for an object at its canonical pose; `sense_sweep` + `recognize` is the
-        unknown-pose path, and `sense_sweep` + `commit` is LEARNING."""
+        """INFER, online: sense a feature wherever the sensor actually is, and SOLVE which object this is — and where on it
+        we are. Returns the L2/3 identity SDR (empty = nothing recognised, or genuinely ambiguous).
+
+        THE POPULATION IS THE STATE (Monty's evidence-based LM). Each fixation NARROWS a live set of (object, pose)
+        hypotheses; nothing is recomputed from scratch. Seeding needs `dims` fixations (n−1 displacements determine a
+        rotation), so before that the only evidence is the L4→L6a UNION — "the sensory input activates the union of
+        locations" (Lewis 2019): sensing a feature that only ONE object carries identifies it outright, and a feature two
+        objects share leaves it honestly ambiguous. That is inference, not an assumption.
+
+        THIS REPLACED AN ASSUMPTION. `perceive` used to bind and recall at whatever coordinate the caller supplied, so it
+        only ever recognised an object entered AT ITS LEARNED ORIGIN — measured: the same object shifted to (7,3) read
+        `[-1,-1,-1]`, entered mid-object `[-1,-1]`, while the buffered path solved the identical presentation. Two things
+        followed: the caller's coordinate frame was a SILENT contract (nothing checked it), and there was no online
+        `(object, pose)` stream for dynamics to track. Solving both is one change — this one (ARCHITECTURE §8/§9).
+
+        THE BOUNDARY IS STILL EMERGENT, and now needs no re-anchoring: when every hypothesis is refuted we have LEFT the
+        object, so the episode restarts HERE and the next object's pose is SOLVED rather than assumed."""
         self._require_location()
-        had_object = bool(self.pooler.active)
-        self.sense_at(feature, learn=False)
-        identity = self.pool()
-        if had_object and not identity:                 # recognition FAILURE ⇒ a new object begins HERE
-            self.start_object()                         # ONE event: re-anchor frame + reset identity
-            self.sense_at(feature, learn=False)
-            identity = self.pool()
-        return identity
+        if self._pose is None:
+            raise ValueError("perceive before locate()/set_pose(): L6a has no location yet.")
+        pos = self._pose[0]
+        self._sweep.append((pos, feature))
+        if self._pop:
+            self._pop = self._narrow(pos, feature)       # incremental: every live hypothesis meets the new fixation
+        if not self._pop:
+            self._pop = [h for h in self.recognize() if h.refuted_at is None]      # (re)seed by SOLVING from the buffer
+        if not self._pop and len(self._sweep) > 1:
+            self._sweep = [(pos, feature)]               # every hypothesis died ⇒ a BOUNDARY: the episode starts HERE
+        candidates = {h.identity for h in self._pop} or self._union_identities(feature)
+        return self.pooler.settle(next(iter(candidates)) if len(candidates) == 1 else frozenset())
+
+    def _narrow(self, pos, feature: SDR) -> list:
+        """One fixation, every live hypothesis: does it still explain me? Refuted hypotheses are DROPPED (a contradiction is
+        decisive — `commit`), the rest accumulate evidence. Several survivors is not a failure: agreeing on the OBJECT while
+        differing on the pose is a symmetry orbit, which `perceive` reports as the object; disagreeing on the object is
+        genuine ambiguity, which it reports as nothing rather than forcing a choice."""
+        out = []
+        for h in self._pop:
+            delta, refuted, _predicted = self._fit(h.identity, h.rotation, h.origin, pos, feature)
+            if not refuted:
+                out.append(replace(h, evidence=h.evidence + delta))
+        return out
+
+    def _union_identities(self, feature: SDR) -> set:
+        """The objects a sensed feature could belong to — the L4→L6a union read as identities. Before `dims` fixations no
+        rotation is determined, so this is ALL the evidence there is; it is still real inference (a feature unique to one
+        object names it), and it is what Monty gets from ONE sensation only because its features carry a local frame."""
+        return {ident for ident, _loc in self._union_for(feature)}
 
     def _link_feature(self, feature: SDR, identity: frozenset) -> None:
         """Learn the L4→L6a link for one fixation: remember that this FEATURE occurs at this OBJECT-FRAME LOCATION on this
@@ -577,7 +605,7 @@ class Column:
             return []
         top = max(h.evidence for h in scored)
         best = [h for h in scored if h.evidence >= top]
-        self._replay(best[0].identity, best[0].rotation, best[0].origin)  # leave the pooler settled on the winner
+        self.pooler.settle(best[0].identity)             # L2/3 holds what the population concluded
         return best
 
     def _pin_rotation(self):
@@ -631,30 +659,42 @@ class Column:
         code is bound to `identity` in L2/3 + the L4→L6a link. Learning and scoring being one traversal is what makes an
         object get learned in exactly the frame it was recognised in — so re-sweeping a known object at a NOVEL pose
         reinforces it rather than corrupting it with rotated coordinates. `identity=None` trains L4 only (the probe below)."""
-        self.pooler.reset()
-        l4, thr = self.layers["L4"].htm, self.pooler.recognize_frac
-        undo, canonical = invert(rotation), eye(self.location.dims)
         evidence, predicted, refuted_at = 0.0, 0, None
         for i, (pos, feature) in enumerate(self._sweep):
-            self._pose = (rotate(undo, sub(pos, origin)), canonical)   # this fixation, in the object's OWN frame
-            self.sense_at(feature, learn=learn)
-            if l4.bursting():
-                evidence -= 1.0                          # nothing known is here ⇒ this object is not here either
-                refuted_at = i if refuted_at is None else refuted_at
-            else:
-                predicted += 1
-                if identity is not None:
-                    support = self.pooler.support(l4._active, identity)
-                    if support >= thr:
-                        evidence += support
-                    else:
-                        evidence -= 1.0                  # ~0 support ⇒ this is someone ELSE's feature here
-                        refuted_at = i if refuted_at is None else refuted_at
-                    if learn:
-                        self.pooler.bind(l4._active, identity)        # only PREDICTED codes (a burst is location-agnostic)
-                        self._link_feature(feature, identity)
-            self.pool()                                  # L2/3 settles on the identity this sweep supports (its output)
+            delta, refuted, was_predicted = self._fit(identity, rotation, origin, pos, feature, learn=learn)
+            evidence += delta
+            predicted += 1 if was_predicted else 0
+            if refuted and refuted_at is None:
+                refuted_at = i
         return evidence, predicted, refuted_at
+
+    def _fit(self, identity, rotation: tuple, origin: tuple, pos, feature: SDR, learn: bool = False):
+        """THE scoring atom — ONE fixation against ONE (object, pose) hypothesis. Returns `(evidence, refuted, predicted)`.
+        Both callers use it, so there is ONE rule and not two: `_replay` loops it over a whole buffer (batch), `_narrow`
+        calls it once per live hypothesis as each new fixation arrives (online, incremental — "recognition is INCREMENTAL
+        evidence accumulation, NEVER recomputed", `reference_tbt_layers_4_23`).
+
+        IMAGINATION, NOT MOVEMENT: this senses the fixation where the HYPOTHESIS says it falls on the object, so it must not
+        disturb where the sensor actually is — hence the save/restore. That the sensor's pose was ever scratch space for a
+        replay is exactly why the online path could not solve while the buffered one could."""
+        real = self._pose
+        try:
+            self._pose = (rotate(invert(rotation), sub(pos, origin)), eye(self.location.dims))   # in the object's OWN frame
+            self.sense_at(feature, learn=learn)
+            l4 = self.layers["L4"].htm
+            if l4.bursting():
+                return -1.0, True, False                 # nothing known is here ⇒ this object is not here either
+            if identity is None:
+                return 0.0, False, True                  # the L4-training probe (`commit`): no identity to score against
+            support = self.pooler.support(l4._active, identity)
+            if learn:                                    # BIND before scoring: a freshly minted identity supports nothing
+                self.pooler.bind(l4._active, identity)   # yet, so scoring first would refuse to ever bind it. Only
+                self._link_feature(feature, identity)    # PREDICTED codes reach here (a burst is location-agnostic).
+            if support < self.pooler.recognize_frac:
+                return -1.0, True, True                  # ~0 support ⇒ this is someone ELSE's feature here
+            return support, False, True
+        finally:
+            self._pose = real
 
     # ── LEARNING: the end-of-episode commitment (plan R5) ───────────────────────────────────────────────────────────
     def commit(self) -> frozenset:
@@ -696,7 +736,7 @@ class Column:
         if best and best[0].refuted_at is None:
             h = best[0]                                  # a KNOWN object (possibly at a novel pose) — reinforce it
             self._replay(h.identity, h.rotation, h.origin, learn=True)
-            return h.identity
+            return self.pooler.settle(h.identity)
         if best and self._exhausts(best[0]):
             h, cut = best[0], best[0].refuted_at         # a BOUNDARY: this object ENDED here, and the rest is another
             whole = self._sweep
@@ -719,7 +759,7 @@ class Column:
             return frozenset()                           # deferred: another look will mint, once L4 has learned the features
         identity = self.pooler.mint()
         self._replay(identity, canonical, origin, learn=True)
-        return identity
+        return self.pooler.settle(identity)
 
     def _extent(self, identity: frozenset) -> set:
         """Every OBJECT-FRAME location this identity's model holds — the object's EXTENT, read off the L4→L6a link. Rounded,

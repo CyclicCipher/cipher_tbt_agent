@@ -478,10 +478,40 @@ required, or a split remainder would be modelled at coordinates no later sweep c
 (object-relative) and its inference (absolute) no longer agreed. The test was relying on a contract violation the old code
 masked, so it now presents its objects in object-relative coordinates — which is what every other caller already did.
 
+### R8 — ONLINE POSE-SOLVING. **BUILT 2026-07-16. Suite 60 green.**
+The fourth time a representation shortcut failed at the same seam, and the prediction in memory was right: *"expect the next
+one at the online path assuming its place on an object."* MEASURED before: online, the same object shifted to (7,3) read
+`[-1,-1,-1]` and entered mid-object `[-1,-1]`, while the buffered path solved the identical presentation. AFTER: `[0,0,0]`
+and `[0,0]`.
+
+`perceive` now narrows a live `(object, pose)` population per fixation (`_pop`/`_narrow`) — Monty's evidence-based LM, never
+recomputed. `_fit` is the ONE scoring rule; `_replay` loops it over a buffer, `_narrow` calls it per live hypothesis, so
+batch and online are not two mechanisms. Seeding needs `dims` fixations, and before that the L4→L6a UNION is the evidence
+(Lewis 2019) — a feature only one object carries names it; a shared feature is honestly ambiguous.
+
+**Three things DELETED as superseded** (the shortcut was load-bearing in more places than it looked):
+- L2/3's support-only `pool()` + `persist_frac` + `which()`. It could answer "which object does this code support?" but never
+  "…and where am I on it?", so it *required* the sensor to already sit at the object's origin. The population subsumes it;
+  `support` survives as the population's weight.
+- the boundary's **re-anchoring** — `perceive` no longer teleports the frame on recognition failure; the next object's pose
+  is solved. The re-anchor existed only to make the assumption true.
+- `Column.object_id` — asking L2/3 for its settled state after `perceive`/`commit` already RETURNED what they concluded was a
+  second route to one answer (`label_of`).
+
+**A bug this surfaced in review, worth recording:** `_fit` first scored support and returned early on a low score, which meant
+a freshly MINTED identity (support 0 by definition) could never be bound — learning silently produced nothing. Binding must
+precede scoring. Caught by the suite going 18-red, not by inspection.
+
+**An honest change to what a test may claim.** `test_relative_arrangement_is_load_bearing` (P=[7,8,9] / Q=[8,7,9]) now reads
+`[-1,-1,0]` / `[-1,-1,1]` where it once read `[0,0,0]`. That is the improvement, not a regression: feature 7 belongs to both
+objects and after two fixations [7,8] is still explained by P at 0° AND Q at 180°, so only the third fixation separates them —
+which is exactly the test's claim (features can never tell them apart; the arrangement does). The old `[0,0,0]` came from the
+ASSUMPTION breaking the tie, not from evidence.
+
 ## NEXT (in order)
 1. **OBJECT DYNAMICS — the operator over object poses (`notes/` TBD; answers the gravity question).** `recognize` already
-   returns `(object, pose)` and `MotionOperator.learn(key, before_pose, after_pose)` already has the right shape, so: track a
-   recognised object's pose across frames and learn its transition. This buys three things at once — (i) **common fate**,
+   returns `(object, pose)`, `perceive` now emits that stream ONLINE, and `MotionOperator.learn(key, before_pose, after_pose)`
+   already has the right shape, so: track a recognised object's pose across frames and learn its transition. This buys three things at once — (i) **common fate**,
    which is the missing cold-start segmentation cue above; (ii) ARC's "what does this action do to that block"; (iii) the
    groundwork for **gravity**. The generalization "ANY object, ANYWHERE" is already free — TRANSFORM is position-invariant by
    construction (learned in a 5×5 region, exact at (45,50)), which is the place-invariance lesson again: the FRAME generalizes,

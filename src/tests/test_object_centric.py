@@ -95,6 +95,37 @@ def test_emergent_boundary_segments_a_continuous_scene():
     assert len(agent._nav_col().pooler.objects) == 2, "the emergent boundary must not mint spurious objects"
 
 
+def test_ONLINE_recognition_SOLVES_its_place_on_the_object():
+    """THE CROWN of the online pose-solving slice. `perceive` used to bind and recall at whatever coordinate the caller
+    supplied, so it only recognised an object entered AT ITS LEARNED ORIGIN: measured, the same object shifted to (7,3) read
+    `[-1,-1,-1]` and entered mid-object `[-1,-1]`, while the buffered path solved the identical presentation. Now the online
+    path narrows a population of (object, pose) hypotheses, so it recognises the object ENTERED ANYWHERE and PLACED
+    anywhere — no assumption, and the caller's coordinate frame stops being a silent contract."""
+    agent = _fresh()
+    _teach_operator(agent)
+    _learn(agent)
+
+    def read(feats, start):                           # sweep from an arbitrary world position
+        agent.start_object()
+        agent.locate(start)
+        ids = [agent.perceive(feats[0])]
+        for f in feats[1:]:
+            agent.path_integrate("E")
+            ids.append(agent.perceive(f))
+        return ids
+
+    assert read(A_FEATS, (0.0, 0.0)) == [0, 0, 0], "at the learned origin (the case that always worked)"
+    assert read(A_FEATS, (7.0, 3.0)) == [0, 0, 0], "the SAME object placed elsewhere — was [-1,-1,-1] when the pose was assumed"
+    assert read(B_FEATS, (-4.0, 9.0)) == [1, 1, 1], "and the other object, somewhere else again"
+    # ENTERED MID-OBJECT: the sweep starts on A's SECOND feature, so the caller cannot be at the origin even by luck.
+    agent.start_object()
+    agent.locate((5.0, 5.0))
+    mid = [agent.perceive(A_FEATS[1])]
+    agent.path_integrate("E")
+    mid.append(agent.perceive(A_FEATS[2]))
+    assert mid == [0, 0], f"entered mid-object, origin unknowable — was [-1,-1] when the pose was assumed, got {mid}"
+
+
 def test_a_continuous_LEARNING_sweep_splits_itself_at_the_boundary():
     """THE R7 CROWN: the caller no longer has to say where one object ends. Sweep A and B as ONE continuous episode — one
     onset, no boundary cue — and `commit` splits it: A is reinforced, B is reinforced, and no spurious A+B blob is minted.
@@ -152,18 +183,25 @@ def test_relative_arrangement_is_load_bearing():
     NB the arrangements must not be related by a ROTATION. The original pair here was P=[7,8] / Q=[8,7], which R4 exposed as
     DEGENERATE: on a line, 8-then-7 is literally 7-then-8 rotated 180°, so a pose-invariant recogniser is RIGHT to call them
     one object at two poses — identity and pose are factored, and the orientation is not lost, it is reported. Three cells
-    make the pair genuinely distinct: [7,8,9] rotated 180° reads 9-then-8-then-7, which is neither arrangement below. They
-    still SHARE 9 at the far end, so the shared-feature machinery is exercised; they differ from the first fixation, which
-    is what keeps the ONLINE reading stable (objects sharing a first fixation are indistinguishable there and correctly
-    revise a step later — `test_l23_pooling.test_shared_features_do_not_merge` covers that case)."""
+    make the pair genuinely distinct: [7,8,9] rotated 180° reads 9-then-8-then-7, which is neither arrangement below.
+
+    Since the online path SOLVES its place rather than assuming it, this now also shows the ARRANGEMENT doing the work in
+    real time: the two read `[-1, -1, 0]` and `[-1, -1, 1]`. The leading -1s are not a failure, they are the honest answer.
+    Feature 7 belongs to BOTH objects, and after two fixations [7,8] is still explained by P at 0° AND by Q at 180° (on a
+    line, one IS the other rotated) — so only the third fixation separates them, and that is precisely the claim: features
+    alone can NEVER tell these apart, the relative arrangement is what does it. Under the retired code this read `[0,0,0]`
+    from the first fixation, but only because it ASSUMED the sensor sat on the object's origin: the assumption, not the
+    evidence, was breaking the tie."""
     agent = _fresh()
     _teach_operator(agent)
     P, Q = [7, 8, 9], [8, 7, 9]                       # same features; NOT rotations of each other
     _learn(agent, P, Q, passes=8)
     p = _sweep(agent, P)
     q = _sweep(agent, Q)
-    assert len(set(p)) == 1 and len(set(q)) == 1, f"each arrangement must read as ONE stable identity, got {p} / {q}"
-    assert p[0] != q[0], f"same features, different arrangement → DIFFERENT identities (frame load-bearing), got {p} / {q}"
+    assert p[-1] != -1 and q[-1] != -1, f"the full arrangement must settle each object, got {p} / {q}"
+    assert p[-1] != q[-1], f"same features, different arrangement → DIFFERENT identities (frame load-bearing), got {p} / {q}"
+    assert p[0] == -1 and q[0] == -1, (
+        f"a SHARED first feature cannot name the object — reporting one would be a guess, not inference; got {p} / {q}")
 
 
 if __name__ == "__main__":

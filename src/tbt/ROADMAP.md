@@ -84,11 +84,11 @@ the agent NEVER decides/values/looks — it only moves frames and rewards across
 - **Phase 3b — OBJECT DYNAMICS + RELATIONS (ARCHITECTURE §9).** *Inserted 2026-07-16, BEFORE the value/BG rework: a critic
   with no forward model of OBJECTS has nothing to plan over, and this is also what ARC actually needs ("what does this action
   do to that block"). Three steps, in order:*
-  1. **Online pose-solving** — close the measured asymmetry (§8): `perceive` ASSUMES its place on the object (a shifted
-     object reads `[-1,-1,-1]`), while `sense_sweep`+`recognize` SOLVES it. Make the online path solve too — a hypothesis
-     population narrowed per fixation (Monty's evidence-based LM). Kills the two-path split, makes the caller's coordinate
-     frame stop being a silent contract, and EMITS the `(object, pose)` stream step 2 needs. Test: online recognition of an
-     object entered anywhere, at any pose.
+  1. **Online pose-solving — ✅ DONE (2026-07-16).** `perceive` now narrows a live (object, pose) population per fixation
+     (Monty's evidence-based LM), seeded by SOLVING and, before a pose is solvable, by the L4→L6a union (Lewis 2019). The
+     measured asymmetry is closed: the same object shifted to (7,3) went `[-1,-1,-1]` → `[0,0,0]`, entered mid-object
+     `[-1,-1]` → `[0,0]`. One scoring rule (`_fit`) now serves both the batch and online paths; L2/3's support-only `pool()`
+     and the boundary's re-anchoring are DELETED as superseded. The `(object, pose)` stream step 2 needs now exists.
   2. **The operator over OBJECT poses** — track a recognised object across frames and learn `pose_t → pose_t+1`.
      `MotionOperator.learn(key, before, after)` already has the signature. Buys **common fate** (what moves together is one
      thing) — the cold-start segmentation cue R7 lacks, so "what IS an object" and "what does an object DO" resolve together.

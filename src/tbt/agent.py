@@ -190,11 +190,12 @@ class Agent:
         self._nav_col().start_object()
 
     def perceive(self, feature) -> int:
-        """INFER: sense a feature at the body's current object-relative location and pool it into the object IDENTITY; on a
-        recognition FAILURE this fires the coupled onset (re-anchor + fresh identity) — the emergent object boundary.
-        Returns the object's integer label (−1 if none). LEARNING is `sense_sweep` × n → `commit`."""
-        self._nav_col().perceive(self._feat_enc.encode(feature))
-        return self._nav_col().object_id()
+        """INFER, online: sense a feature wherever the body actually is, and SOLVE which object it is and where on it we are
+        — a hypothesis population narrowed per fixation. Returns the object's integer label (−1 = nothing recognised, or
+        genuinely ambiguous: too few fixations to fix a pose AND the feature is shared). Recognises an object entered
+        ANYWHERE, at ANY pose; the object boundary is still emergent. LEARNING is `sense_sweep` × n → `commit`."""
+        col = self._nav_col()
+        return col.label_of(col.perceive(self._feat_enc.encode(feature)))
 
     def commit(self) -> int:
         """LEARN the buffered sweep (`start_object` → `sense_sweep` × n → `commit`) — the end-of-episode step: does a known
@@ -202,8 +203,8 @@ class Agent:
         Returns the committed object's label (−1 if deferred because L4 has not learned the features yet — look again).
         Committing per EPISODE rather than per fixation is what lets L2/3 revise, and is why objects that share a
         feature-at-location no longer merge."""
-        self._nav_col().commit()
-        return self._nav_col().object_id()
+        col = self._nav_col()
+        return col.label_of(col.commit())
 
     # ----- POSE-INVARIANT recognition (plan R4, on the SAME column — the two-frame seam is gone) ---------------------
     def sense_sweep(self, feature) -> None:
