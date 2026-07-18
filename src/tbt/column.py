@@ -460,6 +460,40 @@ class Column:
         self._require_location()
         return self._pose
 
+    # ── L5PT: the EFFERENCE COPY + flow parsing (moving-sensor fix; notes/l5_efference_broadcast_design.md) ────────────
+    def efference(self, action):
+        """L5PT's EFFERENCE COPY: the WORLD-frame self-motion this column would undergo for `action` — `(Δposition, ΔR)`. It is
+        the displacement L5PT emits, which is ALSO the motor command and the message broadcast to peer columns via the
+        higher-order thalamus (`reference_layer5_role`: one object, three roles). Computed from the SAME operator that
+        path-integrates the self, so the efference IS the predicted self-move. None if the action is unlearned or the pose is
+        unset (no prediction)."""
+        self._require_location()
+        if self._pose is None or self.operator is None or not self.operator.known(action):
+            return None
+        (bp, bR), (ap, aR) = self._pose, self.operator.apply(self._pose, action)
+        return sub(ap, bp), compose(aR, invert(bR))          # world-frame (Δposition, ΔR)
+
+    def apply_efference(self, motion) -> None:
+        """FLOW PARSING at a PEER column: path-integrate this column's OWN L6a by a broadcast self-motion `(Δposition, ΔR)`, so
+        when the body moves the peer knows it was SELF-motion. After it, `to_world` maps this column's egocentric observations
+        into the stable world frame — a STATIC thing nets to zero motion, only WORLD-motion remains. Without it the peer reads
+        the −Δ self-induced shift as the object having MOVED (`reference_hippocampus`). A no-op if unlocated."""
+        self._require_location()
+        if self._pose is None or motion is None:
+            return
+        dp, dR = motion
+        p, R = self._pose
+        self._pose = (add(p, dp), compose(dR, R))
+
+    def to_world(self, ego):
+        """Express an EGOCENTRIC observation `(position, R)` (sensed relative to this column's sensor) in the WORLD frame, by
+        composing it with the current (efference-corrected) sensor pose. The flow-parsing OUTPUT: with the sensor pose tracked
+        via `apply_efference`, self-motion cancels and the recovered world pose is stable."""
+        self._require_location()
+        p, R = self._pose
+        ep, eR = ego
+        return add(p, rotate(R, ep)), compose(R, eR)
+
     # ── the L4↔L6a loop (ARCHITECTURE §8): predict the FEATURE at the path-integrated LOCATION (order-invariant) ──────
     def sense_at(self, feature: SDR, learn: bool = True) -> None:
         """L4 FEATURE-AT-LOCATION binding — the real §12 wiring: drive L4 with the FEATURE (its SDR bits ARE the active

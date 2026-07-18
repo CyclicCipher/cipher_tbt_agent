@@ -184,6 +184,27 @@ class Agent:
         """The body's current dead-reckoned pose `(position, R)`."""
         return self._nav_col().pose()
 
+    def broadcast_efference(self, action):
+        """L5PT's EFFERENCE COPY broadcast — the moving-sensor fix (`notes/l5_efference_broadcast_design.md`). The SELF column
+        (the body's spatial column, `_nav`) emits its efference — the world-frame self-motion for `action` — and the agent,
+        the thalamic relay (ARCHITECTURE: 'agent = plumbing'), routes it to every PEER spatial column, which path-integrates
+        its OWN L6a by it (`apply_efference`, flow parsing). So the WHOLE agent knows the body moved and no column mistakes
+        SELF-motion for the world moving ('one column had the efference, the others did not', `reference_hippocampus`;
+        `reference_layer5_role`: L5PT's displacement IS the motor command + efference copy + inter-column message). Returns the
+        broadcast motion, or None if the action is unlearned."""
+        motion = self._nav_col().efference(action)
+        if motion is None:
+            return None
+        for col in self._peer_spatial_columns():
+            col.apply_efference(motion)
+        return motion
+
+    def _peer_spatial_columns(self):
+        """The spatial columns OTHER than the self/body column (`_nav`) that track the sensor and must be told the body moved —
+        the compositional column when present; the set grows as the agent gains more spatial columns (multi-column voting, a
+        moving sensor)."""
+        return [c for c in (self._scene,) if c is not None]
+
     def sense_at(self, feature, learn: bool = True) -> None:
         """Bind the FEATURE sensed at the body's current location (the L4↔L6a loop; ARCHITECTURE §8). Order-invariant: what
         is learned here is later predicted from the LOCATION, in any traversal order."""
