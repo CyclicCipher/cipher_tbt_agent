@@ -376,13 +376,18 @@ is in the lock" — is between **two object frames**, and TBT is explicit that t
 complementary job (`reference_tbt_layers_4_23`, Hawkins 2019 "Framework"):
 
 - **Grid cells (L6a):** `location + movement → location`. BUILT (§8).
-- **Displacement cells (L5, thick-tufted):** `location + location → the movement/relation`. **The inverse.** Modular like
-  grid cells, but coding a RELATIVE vector between frames. NOT BUILT. The same cells carry compositional objects (a thing
-  made of sub-things at relative displacements) and the motor output — Hawkins: they "alternately represent movements sent
-  subcortically, and compositional objects sent up".
+- **Displacement cells (L5PT, thick-tufted):** `location + location → the relation`. **The inverse. BUILT** (`Column.relate`
+  → the relative pose of one object in another's frame, position- AND orientation-invariant BY CONSTRUCTION). The same cells
+  carry compositional objects (a thing made of sub-things at relative displacements) and the motor output — Hawkins: they
+  "alternately represent movements sent subcortically, and compositional objects sent up". *NB L5 = IT + PT (§10, §15 D1):
+  this is the PT displacement role; the L5IT associative integrator that gates into it is deferred.*
 
 So "resting on" is a displacement between two object frames, and object COMPOSITION and object RELATIONS are the same
-machinery — which is why they are one slice, not two.
+machinery. **A relation is a displacement that stays STABLE as the pair moves** (`observe_relation`/`relation_of`): assumed
+fixed from the first view, dissolved the moment the two move independently (`feedback_prefer_generalize_then_correct`).
+Measured: the relative pose of a rigid pair is invariant across every position and shared orientation, confirms as a relation,
+and breaks when one object moves alone. This extends common fate — "moves together → one thing" — to "fixed relative pose →
+a relation", the substrate the support-override below reads.
 
 **Physical law = the operator's free kernel + a context-gated override.** §8 already states the shape: the operator is the
 **regular, free kernel**, true everywhere; irregularity is a *context-gated override* where a **local relational context**
@@ -461,11 +466,15 @@ motion has individuated the parts, perception should track them separately, whic
 label (a stable counter) makes a retired blob a harmless dead shell, not a label-shifting hazard.
 
 **What is still missing, in dependency order:**
-1. **The operator's KEY, discovered rather than given.** Today the caller says `learn("PUSH", …)`. Gravity's key is not an
-   action — it is a learned CONDITION. Discovering *what the delta depends on* is the open problem
-   (`feedback_subgoal_types_from_dynamics`, `reference_l5_operator_kinds`), and "every object falls alike" is itself a
-   hypothesis the world can refute (feathers) — which today's operator states by keying on nothing.
-2. **L5 displacement cells** — the relation the override reads.
+1. **The context-gated OVERRIDE — gravity AND walls, one slice.** The operator is the free kernel (everything falls / the
+   push moves); a **local relational context** predicts the exception (supported / blocked). The relational context now
+   exists (`relate`/`relation_of` — "supported" is a stable vertical displacement), so the remaining work is the GATING:
+   when the context holds, suppress the kernel's prediction. A table stopping a fall and a wall stopping a push are the same
+   mechanism.
+2. **The operator's KEY, discovered rather than given.** Today the caller says `learn("PUSH", …)`, and the override's gate is
+   read by hand. Gravity's key is not an action but a learned CONDITION, and *which* relation gates *which* delta is the
+   discovery problem (`feedback_subgoal_types_from_dynamics`, `reference_l5_operator_kinds`); "every object falls alike" is
+   itself a hypothesis the world can refute (feathers) — which today's operator states by keying on nothing.
 
 ## 10. What makes a layer a layer — role = (context-in, target-out), both wired by hand
 

@@ -248,7 +248,7 @@ from typing import Optional
 
 from tbt.encoders import SDR, GridEncoder, SpatialPooler
 from tbt.htm import HTMLayer
-from tbt.operator import MotionOperator, dist, eye, gram_schmidt, invert, rotate, solve_rotation, sub
+from tbt.operator import MotionOperator, compose, dist, eye, gram_schmidt, invert, rotate, solve_rotation, sub
 from tbt.pooler import ColumnPooler
 
 _TOL = 1e-6          # geometric slack: distances are exact floats here, so this only absorbs round-off
@@ -369,6 +369,11 @@ class Column:
         # location + location → the relation" — `reference_tbt_layers_4_23`), and it is EXTRINSIC because an object's motion
         # does not care which way the object faces (a shoved block goes where it was shoved; a rock falls down).
         self.dynamics = MotionOperator(ego=False) if location is not None else None
+        # L5PT — DISPLACEMENT cells (ARCHITECTURE §9): the RELATION between two object frames (`location + location → the
+        # relation`, the INVERSE of L6a's `location + movement → location`; `reference_tbt_layers_4_23`). A relation is a
+        # relative pose that stays STABLE as the pair moves — "resting on" / "part of" / "attached". NB L5 = IT + PT (§15 D1):
+        # this is the PT thick-tufted displacement role; the L5IT associative integrator that gates into it is deferred.
+        self._relations: dict = {}                              # (id_a, id_b) -> [relative pose, count, still-consistent]
         # L2/3's POOLING engine (ARCHITECTURE §8): the stable object-IDENTITY that pools the L4 feature-at-location stream
         # (`pooler.ColumnPooler`) — a decoupled stable output + persistence, which the L2/3 HTMLayer (associate) cannot do.
         self.pooler = ColumnPooler(seed=seed + 4) if location is not None else None
@@ -755,6 +760,44 @@ class Column:
         would need to plan over. An unlearned action predicts no change (the honest prior)."""
         self._require_location()
         return self.dynamics.apply(pose, action)
+
+    # ── L5PT DISPLACEMENT cells (ARCHITECTURE §9): the RELATION between two objects ─────────────────────────────────
+    def relate(self, pose_a, pose_b):
+        """The DISPLACEMENT cell's output: the pose of object B expressed in object A's frame — `location + location → the
+        relation` (the inverse of L6a's operator; `reference_tbt_layers_4_23`). Position- AND orientation-invariant BY
+        CONSTRUCTION: if the whole pair translates or turns RIGIDLY, this is unchanged, because it is B *relative to* A. That
+        invariance is the whole point — a relation does not depend on WHERE the pair sits, only on how the two are arranged."""
+        (pa, ra), (pb, rb) = pose_a, pose_b
+        return rotate(invert(ra), sub(pb, pa)), compose(invert(ra), rb)
+
+    def observe_relation(self, id_a, pose_a, id_b, pose_b):
+        """Observe two recognised objects together and update their RELATION — a relation is a displacement that PERSISTS as
+        the pair moves ([[feedback_prefer_generalize_then_correct]]: ASSUMED fixed from the first view, then DISSOLVED the
+        moment the two move independently). 'Resting on', 'part of', 'attached' are exactly this; a compositional object is
+        sub-objects at fixed relative displacements (Hawkins 2019). Returns the current relative pose."""
+        self._require_location()
+        rel = self.relate(pose_a, pose_b)
+        rec = self._relations.get((id_a, id_b))
+        if rec is None:
+            self._relations[(id_a, id_b)] = [rel, 1, True]      # first view — assume it is a fixed relation
+        elif rec[2] and self._pose_close(rec[0], rel):
+            rec[1] += 1                                          # still consistent — the assumption holds, reinforce it
+        else:
+            rec[2] = False                                      # they moved apart ⇒ NOT a fixed relation (corrected)
+        return rel
+
+    def relation_of(self, id_a, id_b, min_count: int = 2):
+        """The STABLE relative pose of the pair, or None if they have no fixed relation (never confirmed, or broken by
+        independent motion). `min_count` = how many consistent views make it a relation rather than a coincidence."""
+        rec = self._relations.get((id_a, id_b))
+        return rec[0] if rec and rec[2] and rec[1] >= min_count else None
+
+    @staticmethod
+    def _pose_close(a, b, tol: float = 1e-6) -> bool:
+        """Two relative poses equal within tolerance (position + rotation)."""
+        (pa, ra), (pb, rb) = a, b
+        return (all(abs(x - y) < tol for x, y in zip(pa, pb))
+                and all(abs(x - y) < tol for rowa, rowb in zip(ra, rb) for x, y in zip(rowa, rowb)))
 
     # ── LEARNING: the end-of-episode commitment (plan R5) ───────────────────────────────────────────────────────────
     def commit(self) -> frozenset:

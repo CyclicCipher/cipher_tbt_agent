@@ -223,6 +223,21 @@ class Agent:
         """Predict where `action` puts an object now at `pose` — the forward model over objects."""
         return self._nav_col().predict_object_move(pose, action)
 
+    # ----- L5 DISPLACEMENT / RELATIONS (ARCHITECTURE §9): location + location → the relation -------------------------
+    def relate(self, pose_a, pose_b):
+        """The relative pose of object B in object A's frame — the displacement cell's output, position/orientation-invariant.
+        Poses are what `recognize` SOLVES."""
+        return self._nav_col().relate(pose_a, pose_b)
+
+    def observe_relation(self, id_a, pose_a, id_b, pose_b):
+        """Update the RELATION between two recognised objects — a displacement that PERSISTS as the pair moves ("resting on",
+        "part of"). Returns the current relative pose."""
+        return self._nav_col().observe_relation(id_a, pose_a, id_b, pose_b)
+
+    def relation_of(self, id_a, id_b, min_count: int = 2):
+        """The STABLE relative pose of the pair, or None if they have no fixed relation."""
+        return self._nav_col().relation_of(id_a, id_b, min_count)
+
     def recognize(self) -> list:
         """Recognise the buffered sweep → the surviving `Hypothesis` POPULATION (object + pose + evidence), best-first. The
         pose is SOLVED from the inter-fixation displacement geometry, so it is exact at ANY rotation and the object may be

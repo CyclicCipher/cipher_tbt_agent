@@ -526,19 +526,27 @@ ASSUMPTION breaking the tie, not from evidence.
 - **Still open** (unchanged): the operator's KEY (discovered condition, not a named action); and re-committing a fused,
   now-static multi-object scene is not handled (the game-loop should track individuated parts separately, not re-fuse them).
 
+### R10 — L5PT DISPLACEMENT / relations. **BUILT 2026-07-16. Suite 71 green.**
+`Column.relate` (the relative pose of B in A's frame — `location+location→the relation`, the inverse of the operator;
+position- AND orientation-invariant by construction) + `observe_relation`/`relation_of` (a relation is a displacement that
+stays STABLE as the pair moves — assumed fixed from the first view, DISSOLVED on independent motion; the assume-then-correct
+philosophy, [[feedback_prefer_generalize_then_correct]]). Fed by the poses `recognize` SOLVES, so perception → relations is
+end to end. Measured: the relative pose of a rigid pair is invariant across every position and shared orientation, confirms as
+a relation, and breaks when one object moves alone. This EXTENDS common fate ("moves together → one thing") to "fixed relative
+pose → a relation", and is the substrate the support-override reads. NB L5 = IT + PT (user reminder 2026-07-16): this is the
+PT thick-tufted displacement role; the L5IT associative integrator is deferred.
+
 ## NEXT (in order)
-1. **The operator's KEY, discovered rather than given.** Gravity's key is a CONDITION, not an action
-   ([[feedback_subgoal_types_from_dynamics]], [[reference_l5_operator_kinds]]); "every object falls alike" is a hypothesis the
-   world can refute (feathers), which today's operator states by keying on nothing.
-2. **L5 DISPLACEMENT CELLS — relations between objects.** TBT is explicit ([[reference_tbt_layers_4_23]]): grid =
-   `location + movement → location`; displacement = `location + location → the relation`. "Resting on" is a displacement
-   between two object frames. Needed for compositional objects AND for the support relation below.
-3. **The CONTEXT-GATED OVERRIDE = gravity AND walls, one slice** (ARCHITECTURE §8 already frames it): the operator is the
-   regular FREE KERNEL (everything falls; the push moves), and a LOCAL RELATIONAL CONTEXT predicts the exception (supported;
-   blocked). A table stopping a fall and a wall stopping a push are the SAME mechanism — which is why this is one slice, not two.
-4. **Morphological features** — a feature carrying its own local frame would seed the pose from ONE fixation (Monty's actual
+1. **The context-gated OVERRIDE = gravity AND walls, one slice** (ARCHITECTURE §8/§9): the operator is the regular FREE KERNEL
+   (everything falls; the push moves), and a LOCAL RELATIONAL CONTEXT predicts the exception (supported; blocked). The context
+   now EXISTS (`relate`/`relation_of`); the remaining work is the GATING — when the relation holds, suppress the kernel's
+   prediction. A table stopping a fall and a wall stopping a push are the SAME mechanism.
+2. **The operator's KEY, discovered rather than given.** Gravity's key is a CONDITION, not an action; and WHICH relation gates
+   WHICH delta is the discovery problem ([[feedback_subgoal_types_from_dynamics]], [[reference_l5_operator_kinds]]). "Every
+   object falls alike" is a hypothesis the world can refute (feathers), which today's operator states by keying on nothing.
+3. **Morphological features** — a feature carrying its own local frame would seed the pose from ONE fixation (Monty's actual
    path), instead of needing n. Not a prerequisite; a strict improvement in fixations-to-recognition.
-5. **Sensor noise** — the deferred home for: tolerating k contradictions (a likelihood model), the Karcher/SVD rotation mean
+4. **Sensor noise** — the deferred home for: tolerating k contradictions (a likelihood model), the Karcher/SVD rotation mean
    (vs today's chordal Gram-Schmidt projection), and the lever-arm precision law (pose error ≈ position noise / object radius).
 
 ## Deferred (noted, not invented)
