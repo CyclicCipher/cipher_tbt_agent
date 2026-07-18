@@ -536,11 +536,36 @@ a relation, and breaks when one object moves alone. This EXTENDS common fate ("m
 pose → a relation", and is the substrate the support-override reads. NB L5 = IT + PT (user reminder 2026-07-16): this is the
 PT thick-tufted displacement role; the L5IT associative integrator is deferred.
 
+### R11 — mechanism check for the context-gated override (2026-07-16, `reference_tbt_object_behaviors`). Design, no build yet.
+Verified the override design against the TBP *Object Behaviors* doc + HTM before building. Result: CONFIRMED core, three
+refinements. TBP says a behaviour is a **separate reference frame**, **object-independent** (transfers across objects — direct
+confirmation of one-demo generalisation), and **state-conditioned** (`predict(action, STATE)→effect`; STATE = temporal /
+morphological / relational). Refinements folded into the plan: (i) condition on a **general STATE SDR** (relations are one
+supplier), not an HTMLayer hard-wired to relations; (ii) the relational/compositional context lives at a **HIGHER region**, so
+the faithful override is **MULTI-COLUMN** — a compositional column over the sensory one (routed by the thalamus), NOT a gate on
+the single spatial column; (iii) prediction-error behaviour learning is TBP's **open territory**, which our burst-binds-state
+discovery (core HTM) fills. Open architecture decision (raised by the user): build the override as the first real COMPOSITIONAL
+(2-column) slice — which also finally exercises the thalamus's deferred binding role and honours ARCHITECTURE §5.1.
+
+### R12 — the CONTEXT-GATED OVERRIDE (gravity + support), MULTI-COLUMN. **BUILT 2026-07-16. Suite 75 green.**
+The first COMPOSITIONAL slice. A second `Column` (`Agent._scene`) is fed recognised `(object-id, pose)` from the sensory column
+via `Thalamus.project` (the content⊗location binding deferred "until a multi-object scene" — this was that task). The dynamics
+effect is keyed on `(action, STATE)` (`Column.learn_object_move`/`predict_object_move` extended with a `state` arg); `state=∅`
+is the FREE KERNEL, a supported object's non-null relational state (`state_of`, geometry-keyed) gets its own keyed effect, and
+an unlearned state FALLS BACK to the kernel (specific-overrides-default; no `if supported`). Measured end to end: supported
+STAYS, free FALLS, a NEW object never demonstrated STAYS when supported (object-independent — TBP's behaviour frame), support
+removed → FALLS again (assume-then-correct). Honours §5.1 (genuinely multi-column) and exercises the thalamus binding role.
+Honest scope: the state generalises across the SAME quantised geometry (`_quantise`), not yet geometry variants; and the
+override LEARNS which state gates which effect but does not yet DISCOVER the true condition vs a spurious correlate — that is
+the KEY slice.
+
 ## NEXT (in order)
-1. **The context-gated OVERRIDE = gravity AND walls, one slice** (ARCHITECTURE §8/§9): the operator is the regular FREE KERNEL
-   (everything falls; the push moves), and a LOCAL RELATIONAL CONTEXT predicts the exception (supported; blocked). The context
-   now EXISTS (`relate`/`relation_of`); the remaining work is the GATING — when the relation holds, suppress the kernel's
-   prediction. A table stopping a fall and a wall stopping a push are the SAME mechanism.
+1. **The operator's KEY, discovered rather than given.** The override learns which state gates which effect, but doesn't yet
+   DISCOVER which relational feature is the true CONDITION vs a spurious correlate (supported vs blue) — which needs CONTRAST
+   (a blue unsupported thing that falls). Gravity's key is a CONDITION, not an action ([[feedback_subgoal_types_from_dynamics]],
+   [[reference_l5_operator_kinds]]); "every object falls alike" is a hypothesis the world refutes (feathers). Also: abstract the
+   state across geometry variants (a bigger table at a different offset), and a WALL (partial-effect state) = the same
+   mechanism as support (null→zero).
 2. **The operator's KEY, discovered rather than given.** Gravity's key is a CONDITION, not an action; and WHICH relation gates
    WHICH delta is the discovery problem ([[feedback_subgoal_types_from_dynamics]], [[reference_l5_operator_kinds]]). "Every
    object falls alike" is a hypothesis the world can refute (feathers), which today's operator states by keying on nothing.

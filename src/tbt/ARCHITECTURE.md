@@ -465,16 +465,38 @@ the settled mechanism (`RULES` #5), not re-derive it.
 motion has individuated the parts, perception should track them separately, which is the game-loop's job. And the mint-time
 label (a stable counter) makes a retired blob a harmless dead shell, not a label-shifting hazard.
 
+**Mechanism check before building the override (2026-07-16, `reference_tbt_object_behaviors`).** The TBP *Object Behaviors*
+doc reframes and confirms the plan: a behaviour is a **separate reference frame** from static morphology, **object-independent**
+so it *transfers* across objects (direct confirmation of "one demo → every object" — their independent frame is our
+geometry-keyed generalisation), and **state-conditioned** — `predict(action, STATE) → effect`, where STATE is temporal,
+morphological (open/closed), or relational. So the override is the *null-state-default* special case of state-conditioning, and
+"everything falls" being the default (vs learning both states) is our deliberate aggressive prior
+(`feedback_prefer_generalize_then_correct`). Two consequences: **(i)** condition on a *general STATE SDR*, with relations as one
+supplier, not an HTMLayer hard-wired to relations; **(ii)** TBP puts the relational/compositional context at a **HIGHER region**
+(a behaviour bound as a feature of a *scene* object), so the faithful override is **multi-column** — a compositional column over
+the sensory one, not a gate on the single column (see §5.1). Prediction-error-driven behaviour learning is TBP's stated *open
+territory*; our burst-binds-the-present-state discovery (core HTM) fills it — grounded, but the part most worth validating.
+
+**The context-gated OVERRIDE — gravity + support, BUILT, and MULTI-COLUMN.** The operator is the free kernel (everything falls),
+and a recognised STATE predicts the exception (supported ⇒ stays). It lives in a **second, compositional column** (`Agent._scene`),
+whose features-at-locations are recognised `(object-id, pose)` routed up from the sensory column by the **thalamus**
+(`Thalamus.project` — the content⊗location binding deferred until "a multi-object scene"; this is that task). The dynamics
+effect is keyed on `(action, STATE)` where STATE is the object's relational geometry (`state_of`, geometry- not identity-keyed);
+`state=∅` is the free-kernel default, a supported object is a non-null state with its own keyed effect, and an unlearned state
+**falls back** to the free kernel (specific-overrides-default, the HTM high-order-over-first-order structure — no `if supported`).
+Measured end to end: a supported object stays, a free one falls, a **new object never demonstrated** stays when supported
+(TBP's object-independent behaviour frame — the state is geometry-keyed, so the behaviour transfers), and **removing the support
+returns the state to null so it falls again** (assume, then correct). This is the first compositional slice: "one column, used
+thrice" (sensory ⊕ task ⊕ compositional), honouring §5.1, and it finally exercises the thalamus's binding role. *A wall stopping
+a push is the same mechanism with a partial-effect state instead of a null one — a follow-up, not a new idea.*
+
 **What is still missing, in dependency order:**
-1. **The context-gated OVERRIDE — gravity AND walls, one slice.** The operator is the free kernel (everything falls / the
-   push moves); a **local relational context** predicts the exception (supported / blocked). The relational context now
-   exists (`relate`/`relation_of` — "supported" is a stable vertical displacement), so the remaining work is the GATING:
-   when the context holds, suppress the kernel's prediction. A table stopping a fall and a wall stopping a push are the same
-   mechanism.
-2. **The operator's KEY, discovered rather than given.** Today the caller says `learn("PUSH", …)`, and the override's gate is
-   read by hand. Gravity's key is not an action but a learned CONDITION, and *which* relation gates *which* delta is the
-   discovery problem (`feedback_subgoal_types_from_dynamics`, `reference_l5_operator_kinds`); "every object falls alike" is
-   itself a hypothesis the world can refute (feathers) — which today's operator states by keying on nothing.
+1. **The operator's KEY, discovered rather than given.** The override *learns* which state gates which effect, but it does not
+   yet DISCOVER *which* relational feature is the true condition versus a spurious correlate — if every supported block seen
+   was also blue, geometry-keyed state can't yet tell "supported" from "blue" without CONTRAST (a blue unsupported thing that
+   falls). Prediction-error-driven disambiguation is that slice (`feedback_subgoal_types_from_dynamics`,
+   `reference_l5_operator_kinds`); "every object falls alike" is a hypothesis the world refutes (feathers), and today the state
+   also generalises only across the SAME quantised geometry (`_quantise`), not yet across geometry variants.
 
 ## 10. What makes a layer a layer — role = (context-in, target-out), both wired by hand
 

@@ -68,6 +68,7 @@ class Agent:
         self._decision_col = None
         self._pending = None
         self._nav = None
+        self._scene = None      # the COMPOSITIONAL column (lazy) — the SCENE one level up, fed by the sensory column
         self._feat_enc = CategoryEncoder(range(16), w=8, capacity=16)   # the feature (ARC 16-colour palette) transducer —
         #                                                                 shared by every spatial column (the peripheral)
         self._n_cols = int(n_cols)
@@ -222,6 +223,41 @@ class Agent:
     def predict_object_move(self, pose, action):
         """Predict where `action` puts an object now at `pose` — the forward model over objects."""
         return self._nav_col().predict_object_move(pose, action)
+
+    # ----- THE COMPOSITIONAL COLUMN (ARCHITECTURE §9): the SCENE + state-conditioned behaviour = the override ---------
+    def _scene_col(self) -> Column:
+        """The lazily-built COMPOSITIONAL column — the SCENE, one level up. Its features-at-locations are recognised objects
+        (object-id at pose), routed from the sensory column by the thalamus. It represents relations + STATE-CONDITIONED
+        behaviour (the context-gated override: everything falls, but a supported object stays). The SAME `Column` class as the
+        sensory one — "one column, used thrice" (sensory ⊕ task ⊕ compositional), honouring §5.1: the override is genuinely
+        multi-column, not a gate bolted onto the single spatial column (`reference_tbt_object_behaviors`)."""
+        if self._scene is None:
+            grid = GridEncoder(scales=(7, 11, 13, 17), dims=self._dims, mw=1, bounds=[(0, 63)] * self._dims)
+            self._scene = Column(sensory_n=1, n_cols=self._n_cols, order=2, seed=self._seed + 5, location=grid)
+        return self._scene
+
+    def place_object(self, object_id, pose) -> None:
+        """Route a recognised `(object-id, pose)` from the sensory column UP to the compositional column via the thalamus —
+        the first real cross-column binding (content ⊗ location)."""
+        content, location = self.thalamus.project(object_id, pose)
+        self._scene_col().place_object(content, location)
+
+    def clear_scene(self) -> None:
+        """Start a fresh scene configuration in the compositional column."""
+        self._scene_col().clear_scene()
+
+    def object_state(self, object_id) -> frozenset:
+        """The relational STATE of a scene object (the geometry of its relations) — what the behaviour is conditioned on."""
+        return self._scene_col().state_of(object_id)
+
+    def learn_behavior(self, action, object_id, after_pose) -> None:
+        """Learn what `action` does to a scene object, CONDITIONED on its relational state — the override, learned not coded
+        (a supported object staying is just the effect keyed on the support state)."""
+        self._scene_col().learn_behavior(action, object_id, after_pose)
+
+    def predict_behavior(self, action, object_id):
+        """Predict a scene object's next pose under `action`, gated by its relational state — supported stays, free falls."""
+        return self._scene_col().predict_behavior(action, object_id)
 
     # ----- L5 DISPLACEMENT / RELATIONS (ARCHITECTURE §9): location + location → the relation -------------------------
     def relate(self, pose_a, pose_b):

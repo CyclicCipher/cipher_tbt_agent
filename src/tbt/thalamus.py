@@ -28,3 +28,11 @@ class Thalamus:
         action is enacted, the competitors suppressed. (In this discrete agent the gate is the identity relay of the
         winner; the suppression is implicit in 'only the winner is enacted'.)"""
         return selection
+
+    def project(self, content, location):
+        """The transthalamic RELAY of a recognised object to a HIGHER region: carry its CONTENT (object-id) bound with its
+        LOCATION (pose) upward, so a compositional column can treat the pair as one feature-at-location (Sherman & Guillery;
+        `reference_tbt_layers_4_23`: "object id as a FEATURE → compositional objects"). This is the content ⊗ location binding
+        the first slice deferred "until a task needs it (a multi-object scene)" — the context-gated override is that task.
+        Stateless: the binding is the pairing itself, and the higher column does the modelling."""
+        return content, location

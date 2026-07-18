@@ -374,6 +374,10 @@ class Column:
         # relative pose that stays STABLE as the pair moves — "resting on" / "part of" / "attached". NB L5 = IT + PT (§15 D1):
         # this is the PT thick-tufted displacement role; the L5IT associative integrator that gates into it is deferred.
         self._relations: dict = {}                              # (id_a, id_b) -> [relative pose, count, still-consistent]
+        # COMPOSITIONAL column (ARCHITECTURE §9): the SCENE — recognised objects (object-id → pose) treated as this column's
+        # own features-at-locations ("object id as a FEATURE → compositional objects", `reference_tbt_layers_4_23`), the same
+        # Column one level up. Fed from the sensory column via the thalamus. Only the scene column uses it.
+        self._scene_objects: dict = {}                          # object_id -> pose
         # L2/3's POOLING engine (ARCHITECTURE §8): the stable object-IDENTITY that pools the L4 feature-at-location stream
         # (`pooler.ColumnPooler`) — a decoupled stable output + persistence, which the L2/3 HTMLayer (associate) cannot do.
         self.pooler = ColumnPooler(seed=seed + 4) if location is not None else None
@@ -742,24 +746,79 @@ class Column:
         finally:
             self._pose = real
 
-    # ── L5 OBJECT DYNAMICS (ARCHITECTURE §9): what an ACTION does to a THING, not to the sensor ─────────────────────
-    def learn_object_move(self, action, before_pose, after_pose) -> None:
-        """Learn what `action` does to an OBJECT, from ONE observed `(pose → pose)` transition. The poses are what
-        `recognize`/`perceive` SOLVE — so the input is the model's own output, not a hand-fed coordinate.
+    # ── L5 OBJECT DYNAMICS (ARCHITECTURE §9): what an ACTION does to a THING, STATE-CONDITIONED ─────────────────────
+    def learn_object_move(self, action, before_pose, after_pose, state=frozenset()) -> None:
+        """Learn what `action` does to an OBJECT, from ONE observed `(pose → pose)` transition, CONDITIONED on the object's
+        STATE. The poses are what `recognize`/`perceive` SOLVE — the model's own output, not a hand-fed coordinate.
 
-        WHY ONE DEMONSTRATION IS ENOUGH FOR EVERY OBJECT, EVERYWHERE — and it is the §7 lesson, not statistics. The delta is
-        stored in the frame that holds it INVARIANT, so it applies at every position and every orientation BY CONSTRUCTION;
-        the FRAME generalizes, not the data (exactly as an action's effect learned in a 5×5 region dead-reckons at (45,50)).
-        Nothing is keyed on WHICH object, so it is `any object` for free — and that is a HYPOTHESIS the world can refute
-        (feathers do not fall like stones), which is the operator's KEY problem, still open (ARCHITECTURE §9)."""
-        self._require_location()
-        self.dynamics.learn(action, before_pose, after_pose)
+        WHY ONE DEMONSTRATION IS ENOUGH FOR EVERY OBJECT, EVERYWHERE — the §7 lesson, not statistics. The delta is stored in
+        the frame that holds it INVARIANT, so it applies at every position and orientation BY CONSTRUCTION; the FRAME
+        generalizes, not the data. Nothing is keyed on WHICH object.
 
-    def predict_object_move(self, pose, action):
-        """Predict where `action` puts an object now at `pose` — the FORWARD MODEL over objects, which is what a value critic
-        would need to plan over. An unlearned action predicts no change (the honest prior)."""
+        STATE-CONDITIONING (`reference_tbt_object_behaviors`): the effect is keyed on `(action, STATE)`, so the SAME action has
+        DIFFERENT effects in different states — STEP drops a FREE object but not a SUPPORTED one. `state=∅` is the free kernel,
+        the null-state default (the aggressive "everything falls" prior, `feedback_prefer_generalize_then_correct`). The state
+        is GEOMETRY-keyed (`state_of`), so the effect learned in a state transfers to any object in that state — TBP's
+        object-independent behaviour frame. "Which state feature is the TRUE condition vs a spurious correlate" is the KEY
+        problem, still open."""
         self._require_location()
-        return self.dynamics.apply(pose, action)
+        self.dynamics.learn((action, state), before_pose, after_pose)
+
+    def predict_object_move(self, pose, action, state=frozenset()):
+        """Predict where `action` puts an object at `pose` in `state` — the FORWARD MODEL over objects. Uses the state-specific
+        effect where one is learned, else FALLS BACK to the free kernel (`state=∅`): "a specific context overrides the
+        default", the HTM high-order-over-first-order structure — NOT a hand-coded `if supported`."""
+        self._require_location()
+        key = (action, state)
+        return self.dynamics.apply(pose, key if self.dynamics.known(key) else (action, frozenset()))
+
+    # ── COMPOSITIONAL column (ARCHITECTURE §9): the SCENE, object STATES, and STATE-CONDITIONED behaviour ──────────────
+    def place_object(self, object_id, pose) -> None:
+        """Put a recognised object into this column's SCENE at a pose — the compositional column's features-at-locations are
+        whole objects (fed from the sensory column via the thalamus)."""
+        self._require_location()
+        self._scene_objects[object_id] = pose
+
+    def clear_scene(self) -> None:
+        """Start a fresh scene configuration."""
+        self._scene_objects = {}
+
+    def state_of(self, object_id) -> frozenset:
+        """The object's relational STATE: the set of (quantised) relative poses to the OTHER objects in the scene
+        (`reference_tbt_object_behaviors`: behaviour is STATE-CONDITIONED). GEOMETRY-keyed, not identity-keyed, so the SAME
+        state arises whichever objects realise it — which is why a behaviour learned in one state transfers to any object in
+        that state. The EMPTY state (an object alone, or with only never-learned relations → the free-kernel fallback) is the
+        null default."""
+        self._require_location()
+        me = self._scene_objects[object_id]
+        return frozenset(self._quantise(self.relate(me, other))
+                         for oid, other in self._scene_objects.items() if oid != object_id)
+
+    @staticmethod
+    def _quantise(rel) -> tuple:
+        """Bucket a relative pose so the SAME geometric relation is ONE key (position to the nearest unit, rotation to 3 dp).
+        Honest scope: exact-match on the bucket — two support configs generalise only if they share the bucket, so it
+        transfers across objects of the SAME relative geometry, not yet across geometry variants (a bigger table at a
+        different offset). Overlap recall over relation SDRs is the refinement — the same note as `_key`, and part of the KEY
+        problem."""
+        dp, dr = rel
+        return (tuple(round(c) for c in dp), tuple(round(x, 3) for row in dr for x in row))
+
+    def learn_behavior(self, action, object_id, after_pose) -> None:
+        """Observe `object_id` (at its current SCENE pose) move to `after_pose` under `action`, and learn the effect
+        CONDITIONED on its current relational STATE; then update the scene. This is where "supported objects don't fall" is
+        LEARNED, not coded: whatever state happens to hold (support) gets its own keyed effect (stay), the null state keeps
+        the free kernel (fall). No `if supported` anywhere — the state-keying does it."""
+        self._require_location()
+        before = self._scene_objects[object_id]
+        self.learn_object_move(action, before, after_pose, self.state_of(object_id))
+        self._scene_objects[object_id] = after_pose
+
+    def predict_behavior(self, action, object_id):
+        """Predict `object_id`'s next pose under `action`, gated by its current relational state — the free kernel by default,
+        the state-specific effect where the scene puts it in a learned state."""
+        self._require_location()
+        return self.predict_object_move(self._scene_objects[object_id], action, self.state_of(object_id))
 
     # ── L5PT DISPLACEMENT cells (ARCHITECTURE §9): the RELATION between two objects ─────────────────────────────────
     def relate(self, pose_a, pose_b):
