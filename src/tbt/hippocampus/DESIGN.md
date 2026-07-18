@@ -40,8 +40,13 @@ environments → distinct charts) and **REPLAY** (forward sweeps = the rollout).
 
 **Episodic = CA3, not a 5th module.** An episode = a scene's `(object ⊗ location)` bindings (`thalamus.bind`/`bundle`) →
 a sparse code → `ca3.store` one-shot → `ca3.complete` from a cue. So episodic REUSES the Phase-5 thalamus VSA + CA3.
-**Remapping = DG + CA3.** DG → chart key; `ca3.complete` on the key → a stored chart (recall its map) or, on CA1 mismatch,
-mint a NEW chart. The map is per-chart.
+**Remapping = CA3 (recall) + CA1 (compare), with DG separating distinct charts.** On entering an environment, CA3 completes
+the observed CONTENT to a stored chart and CA1 compares recall vs observation: MATCH (recall its map) or MISMATCH → mint a NEW
+chart. The map is per-chart. **Refinement found at the slice-5 mechanism check (2026-07-18):** the CA1 partial-vs-contradiction
+comparison runs on CONTENT tokens, NOT DG keys — the §3½ rule needs the SUBSET relation (observed ⊆ recalled), and DG's k-WTA
+is nonlinear so a partial signature does NOT give a subset key. So DG's job is separating distinct FULL signatures at the
+chart-INDEX layer (slice 4, shown); CA3 content-completion + CA1 do the recall/match/remap (slice 5). The two layers compose in
+the orchestrator (slice 6).
 
 ## §3 BUILD ORDER (each: mechanism-check → build → WIRE from agent.py → test; nothing counts until wired + exercised)
 1. **`map.py`** — the world-state + agent path-integration + snapshot. Unblocks everything. Test: hold a multi-object scene +

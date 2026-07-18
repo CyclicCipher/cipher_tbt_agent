@@ -39,6 +39,7 @@ RULES.md #2 goal.
 | `hippocampus/replay.py` | the ROLLOUT — model-based planning IN the world-map (DESIGN §2/§3, slice 2). `WorldModel` = the learned forward model over a world-state, COMPOSING the agent's path-integration (map operator) with each object's STATE-CONDITIONED dynamics (the compositional column's RW cue competition — the agent included as a relatum, so a PUSH reads the agent's pre-move position); `step` unrolls one action, `learn` folds one observed transition in. `Rollout` = value-guided BFS over world-states with VISITED-PRUNING (O(states), not the 2^K flat-action product) — shortest goal-reaching path, else toward the best-VALUE leaf (critic as heuristic); `greedy` = the 1-step baseline it beats. Wired via `Agent.world_model`/`Agent.plan`. Measured: a learned PUSH (Sokoban) solved by going AROUND to the far side (`S,W,E,E`) where a greedy step can't; the EZ-V2 sampled search is the branching scale-up | WIRED | `test_replay` |
 | `hippocampus/ca3.py` | the CA3 autoassociative ATTRACTOR (DESIGN §2/§3, slice 3) — ONE recurrent structure doing BOTH the one-shot EPISODIC store AND pattern COMPLETION (Rolls/Treves). `store` = one-shot Hebbian (co-active bits strengthen the recurrent weight); `complete` settles from a PARTIAL/NOISY cue to the whole stored pattern (binary co-occurrence overlap ≥ `theta`·\|active\|, bounded iters). Carries §3½ one region up: partial cue COMPLETES, noise DROPS, an AMBIGUOUS cue stays ambiguous (the UNION, no confabulation), a NOVEL cue recalls nothing. Sparse Hopfield/SDM over hashable bits (ints or (object,cell) episode tokens). Wired via `Agent.remember_scene`/`recall_scene` (a glimpse of one object recalls the whole scene — the maze-wall case). Heavy pattern OVERLAP cross-talks — that is DG's job (slice 4), not a flaw | WIRED | `test_ca3` |
 | `hippocampus/dg.py` | the dentate gyrus — PATTERN SEPARATION → chart keys (DESIGN §2/§3, slice 4). `separate(signature)` maps an environment signature (set of input bits) to a sparse, orthogonalized CHART KEY, REUSING the k-WTA `SpatialPooler` (a fixed sparse projection + winner-take-all IS separation). DETERMINISTIC (`learn=False`) so the same environment returns the same key; DECORRELATES (distinct envs → near-disjoint keys, measured 0/24 overlap; a similar view keeps 11/24 — graded). Closes CA3's overlap seam: overlapping raw signatures cross-talk in CA3, their DG keys are recalled cleanly. Wired via `Agent.chart_key`; the base for multi-chart REMAPPING (slice 5) | WIRED | `test_dg` |
+| `hippocampus/ca1.py` | the CA1 COMPARATOR + multi-chart REMAPPING (DESIGN §2/§3, slice 5). `CA1.compare(observed, recalled)` = the match/novelty detector (Lisman/Hasselmo): MATCH iff the recall explains every observed bit (observed ⊆ recalled) — the §3½ rule one region up, so a PARTIAL view matches (absence) and a CONTRADICTED bit mismatches (novelty). `Remapper` composes CA3 (recall) + CA1 (compare): revisit → RECALL the chart, a novel/CHANGED environment → MINT a new one. Comparison runs on CONTENT tokens (subset-preserving), NOT DG keys (k-WTA breaks the subset relation) — DG separates full signatures at the index layer, composed in slice 6. Wired via `Agent.visit_environment`. Measured: glimpse recalls chart 0, `A`+contradicting-`X` remaps (novelty 0.25) | WIRED | `test_ca1` |
 
 **Generalization investigation — RESOLVED 2026-07-09 (now wired into the column, above).** Two durable results,
 full detail in memory `project_place_invariance_needs_factored_state` + `reference_htm_canonical_pipeline`, plain-English
@@ -55,7 +56,7 @@ writeup in `ARCHITECTURE.md` §7:
    A FACTORED recurrent state channel closes it (100%) where PURE temporal memory can't (37%). ReSU investigated + DROPPED
    (temporal encoder, not spatial invariance).
 
-Suite: **108 passed** (~26s; `test_column_arithmetic` is the ~16s end-to-end column test, the rest — `test_bg_thalamus`,
+Suite: **115 passed** (~26s; `test_column_arithmetic` is the ~16s end-to-end column test, the rest — `test_bg_thalamus`,
 `test_operator_path_integration`, `test_feature_at_location`, `test_l23_pooling`, `test_operator_non_abelian`,
 `test_object_centric`, `test_rotation_recognition`, `test_object_dynamics` — are fast). Count history, 2026-07-15: 54 → **46** at the continuous
 cut-over (`test_oriented_grid` + `test_rotation_operator` deleted with the discrete-rotation code they covered) → **48** with
@@ -169,10 +170,15 @@ ARCHITECTURE.md §3/§5.1):
    cue completion; ambiguous→union, novel→nothing), wired via `Agent.remember_scene`/`recall_scene`. Falsifier first-class (`test_ca3`).
    **Slice 4 (`hippocampus/dg.py`) ✅ DONE (2026-07-18)** — dentate gyrus pattern SEPARATION → chart keys (reuses the k-WTA
    `SpatialPooler`): deterministic, decorrelates (distinct envs → 0/24 key overlap, similar view → 11/24 — graded), and closes
-   CA3's overlap seam (DG keys recalled cleanly where raw overlapping signatures cross-talk). Wired via `Agent.chart_key`.
-   NEXT: `ca1.py` + remapping (slice 5 — the comparator: DG key → CA3 chart recall → CA1 decides MATCH (recall the chart) vs
-   MISMATCH (mint a new chart); a PARTIAL view MATCHES, a CONTRADICTED view MISMATCHES — the §3½ absence-vs-contradiction
-   falsifier at the scene level).
+   CA3's overlap seam. Wired via `Agent.chart_key`.
+   **Slice 5 (`hippocampus/ca1.py`) ✅ DONE (2026-07-18)** — the CA1 comparator (`compare` = MATCH iff observed ⊆ recalled) +
+   `Remapper` (CA3 recall + CA1 compare → recall a known chart or mint a new one). The §3½ absence-vs-contradiction falsifier
+   is now first-class at the scene level (`test_ca1`): a partial view RECALLS, a contradicted view REMAPS. Mechanism refinement
+   recorded (DESIGN §2): the comparison runs on CONTENT tokens, not DG keys (k-WTA breaks the subset relation). Wired via
+   `Agent.visit_environment`.
+   NEXT: `hippocampus/__init__.py` — the `Hippocampus` ORCHESTRATOR (slice 6, the LAST): compose map ⊕ replay ⊕ CA3 ⊕ DG ⊕ CA1
+   into one region + WIRE it as the agent's single hippocampus handle; end-to-end test (perceive → map → plan-by-replay; remap
+   across two environments; one-shot episodic recall), and move the per-region agent fields behind it.
    Still after the hippocampus: the MOTOR region (L5 emit + decode; move the readout OUT of the agent); the loop/brain object
    (move `decide`/`scan` OUT of the agent); the THIN agent; the `step(obs)→action` game loop. Plus a full multi-sensory-column
    recognition-BY-VOTING task consuming the Phase-5 register.

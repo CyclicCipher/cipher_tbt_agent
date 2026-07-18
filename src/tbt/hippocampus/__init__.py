@@ -10,9 +10,10 @@ with the final slice (DESIGN §3.6); for now this package re-exports the pieces 
 
 from __future__ import annotations
 
+from .ca1 import CA1, Remapper
 from .ca3 import CA3
 from .dg import DG
 from .map import WorldMap
 from .replay import Rollout, WorldModel
 
-__all__ = ["WorldMap", "Rollout", "WorldModel", "CA3", "DG"]
+__all__ = ["WorldMap", "Rollout", "WorldModel", "CA3", "DG", "CA1", "Remapper"]

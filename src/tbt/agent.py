@@ -19,6 +19,7 @@ import numpy as np
 from .basal_ganglia import BasalGanglia
 from .column import Column
 from .encoders import SDR, CategoryEncoder, GridEncoder
+from .hippocampus.ca1 import Remapper
 from .hippocampus.ca3 import CA3
 from .hippocampus.dg import DG
 from .hippocampus.map import WorldMap
@@ -73,6 +74,7 @@ class Agent:
         self.critic = ValueCritic()      # the TD value critic (ROADMAP 3c) — its δ replaces the faked 2r−1 RPE
         self.ca3 = CA3()                 # the hippocampal CA3 attractor — one-shot EPISODIC store + pattern completion
         self.dg = DG(n_inputs=512, seed=seed)   # dentate gyrus — environment signature → separated CHART KEY
+        self.remapper = Remapper()       # multi-chart REMAPPING — recall a known environment's chart or mint a new one
         self._decision_col = None
         self._pending = None
         self._nav = None
@@ -320,6 +322,12 @@ class Agent:
         well-separated keys, the same one returns the same key (DESIGN §2, slice 4). The base for multi-chart REMAPPING
         (slice 5): DG separates, CA3 stores/recognises the chart, CA1 decides match-vs-new."""
         return self.dg.separate(signature)
+
+    def visit_environment(self, observed):
+        """Enter an environment described by `observed` content tokens (its landmarks): RECALL its chart if a stored one
+        explains the observation, else MINT a new one (DESIGN §2, slice 5). Returns `(chart_id, CA1Result)`. A PARTIAL view
+        still recalls the chart (absence ≠ novelty); a CONTRADICTED view (a landmark the chart lacks) mismatches and remaps."""
+        return self.remapper.visit(observed)
 
     # ----- CROSS-COLUMN VOTING via the thalamus content⊗location register (ARCHITECTURE §3; Phase 5) -----------------
     def vote_consensus(self, votes, location, min_support: int = 1):
