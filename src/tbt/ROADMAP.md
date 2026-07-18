@@ -120,8 +120,15 @@ the agent NEVER decides/values/looks — it only moves frames and rewards across
   is wired (`Agent.decide` passes `critic.rho()` as the OpAL tonic-DA explore/exploit gain). DEFERRED: the eligibility trace
   (TD(λ) credit assignment) — the critic's bootstrapping already carries delayed reward (the corridor is solved without it);
   add when a task needs faster credit propagation.
-- **Phase 5 — REDESIGN THE THALAMUS.** Keep it deterministic: add the VSA content ⊗ location `bind`/`read` + make `gate` a
-  real default-off disinhibition of the BG winner. Test: a place-value / cross-column-voting task.
+- **Phase 5 — REDESIGN THE THALAMUS. ✅ DONE (2026-07-18).** Deterministic (no learner inside). Added the VSA content ⊗
+  location register: `bind` (the Smolensky tensor product — every `(content_bit, location_bit)` conjunction, structure-
+  preserving), `bundle` (a support Counter — overlap = agreement), `read` (unbind: the content at a location with support ≥
+  `min_support`). Wired via `Agent.vote_consensus`. Measured: PLACE-VALUE roundtrip (a number's digits bound to places, each
+  read back exactly, structure-preserving — no leak between places), and CROSS-COLUMN VOTING (min_support=k keeps only the
+  content ≥ k columns agree on, filtering a lone distractor; a split vote → no consensus). `gate` is now a real DEFAULT-OFF
+  disinhibition (resting state all-inhibited; `None` selection ⇒ nothing enacted; only the winner's channel opens). DEFERRED:
+  a full multi-sensory-column recognition-by-voting task consuming this (the substrate is built + exercised; the two-column
+  recognition integration is a Phase 6+ consumer).
 - **Phase 6+ — THE BIGGER LOOP.** The motor region (L5 emit + decode; move the readout OUT of the agent); the hippocampus
   (rollout over the model, using `value` as the leaf); the loop/brain object (move `decide`/`scan` OUT of the agent); the
   THIN agent. Each a vertical slice, driven by `agent.py`, exercised end-to-end.

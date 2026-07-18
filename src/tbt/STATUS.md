@@ -32,7 +32,7 @@ RULES.md #2 goal.
 | `pooler.py` | L2/3 — the STABLE object-IDENTITY (ARCHITECTURE §8). Three jobs: **`support(l4, identity)`** grades ONE named identity (associative recall, per fixation — the burst-INDEPENDENT quantity ART's choice/vigilance are counted from in `Column._replay`); **`settle(identity)`** holds what the column concluded; **`mint`+`bind`** LEARN, driven by `Column.commit` at an EPISODE boundary (the fix for the measured MERGE). Config for ART: `alpha` (choice, the size-principle bias toward the smallest model — read by `Column._choice`) + `rho` (vigilance, the deferred sensor-noise knob; ρ=1 today = the `refuted_at` bar). DELETED: the support-only `pool()`/`persist_frac`/`which()` (2026-07-16 — silently required the sensor at the object's origin; the pose-solving population subsumes them), and the L4-CELL `choice`/`match`/`receptive_field` (wrong granularity — burst-binding inflated the receptive field; ART is counted at the feature-at-location level instead). ASSOCIATE in a pooling regime, NOT a third primitive. Identity ONLY. Cross-column VOTING (thalamus) deferred | WIRED | `test_l23_pooling`, `test_object_centric`, `test_object_dynamics`, `test_rotation_recognition` |
 | `basal_ganglia.py` | the value-driven SELECTOR — OpAL Go/NoGo + dopamine-RPE + STN commitment (reference_basal_ganglia); the ONE place competing options are arbitrated (rule 4); the actor learns from the CRITIC's δ, with tonic-DA `ρ`=`critic.rho()` gating explore/exploit. **Phase 4: DISTRIBUTED per-bit read-off** — `WG`/`WN` keyed on `(bit, action)`, `Go=Σ` over active bits, so SDR OVERLAP generalises value across contexts (measured: generalises to an unseen colour via shared shape bits; the old exact-key could not). Eligibility trace + MoE column-allocation deferred | WIRED | `test_bg_thalamus`, `test_value_critic` |
 | `reward.py` | the VALUE CRITIC (ARCHITECTURE §3; ROADMAP 3c) — a linear TEMPORAL-DIFFERENCE value over the state SDR (`ValueCritic`: `value`/`learn`→δ = `r+γV(s′)−V(s)`/`rho`). Its δ is the dopamine-RPE the basal-ganglia actor trains on — the SAME delta rule as Rescorla-Wagner cue competition, `_Readout`, and the BG (reuse, not new machinery). Buys a real BASELINE (`δ=r−V`) + BOOTSTRAPPING (delayed reward propagates backward). Linear = the ROUTINE/leaf critic (a relational V* needs the ROLLOUT, which uses this at the leaf); the SR form (`V=M·R`, fast re-tuning) deferred. TD step normalised by \|active bits\| or it diverges | WIRED | `test_value_critic`, `test_bg_thalamus` |
-| `thalamus.py` | the inter-column ROUTER/GATE — `relay` (percept→BG context) + `gate` (BG winner→motor) + **`project`** (the transthalamic relay of a recognised (object-id, pose) UP to the compositional column — the content⊗location binding, first used by the override slice). Broader place-value/voting binding still deferred | WIRED | `test_bg_thalamus`, `test_override`, `test_key_discovery` |
+| `thalamus.py` | the inter-column ROUTER/GATE/REGISTER (deterministic — no learner) — `relay` (percept→BG context), `gate` (real DEFAULT-OFF disinhibition of the BG winner; None ⇒ nothing enacted), `project` (transthalamic relay of a recognised (object-id, pose) UP to the compositional column), and **Phase 5 the content⊗location BINDING**: `bind` (Smolensky tensor product), `bundle` (support Counter, overlap=agreement), `read` (unbind at a location, support ≥ min_support). Serves PLACE-VALUE (exact roundtrip) + cross-column CMP VOTING (min_support=k = k columns agree) | WIRED | `test_bg_thalamus`, `test_override`, `test_key_discovery`, `test_thalamus_binding` |
 | `htm.py` | the ONE cortical-layer mechanism — HTM sequence memory (proximal SDR-in via SP, basal context, apical, learn/predict/burst); a layer = one instance + a declared (proximal-in, context-in, apical-in, target-out) wiring; `depolarize(context)` lets an EXTERNAL context (L6a location) drive which cell fires (sensorimotor feature-at-location), not just the recurrent sequence | WIRED | `test_htm` |
 | `encoders.py` | SDR transduction library (`SDR` + Scalar/Category/Grid/Multi/Conjunctive/SpatialPooler) — data ↔ overlap-bearing SDR. `GridEncoder` is axis-aligned modular phases, and after the cut-over is a pure READ-OUT of L6a's continuous pose (encode-per-fixation ⇒ its quantisation is bounded and NEVER accumulates). The `orientations=N` multi-orientation variant was REMOVED with `RotationOperator` (see `operator.py`) | WIRED | `test_encoders` |
 
@@ -51,7 +51,7 @@ writeup in `ARCHITECTURE.md` §7:
    A FACTORED recurrent state channel closes it (100%) where PURE temporal memory can't (37%). ReSU investigated + DROPPED
    (temporal encoder, not spatial invariance).
 
-Suite: **82 passed** (~18s; `test_column_arithmetic` is the ~16s end-to-end column test, the rest — `test_bg_thalamus`,
+Suite: **86 passed** (~18s; `test_column_arithmetic` is the ~16s end-to-end column test, the rest — `test_bg_thalamus`,
 `test_operator_path_integration`, `test_feature_at_location`, `test_l23_pooling`, `test_operator_non_abelian`,
 `test_object_centric`, `test_rotation_recognition`, `test_object_dynamics` — are fast). Count history, 2026-07-15: 54 → **46** at the continuous
 cut-over (`test_oriented_grid` + `test_rotation_operator` deleted with the discrete-rotation code they covered) → **48** with
@@ -139,13 +139,17 @@ ARCHITECTURE.md §3/§5.1):
    **Then Phase 4 — the BASAL GANGLIA redesign ✅ DONE (2026-07-18):** the OpAL actor now reads value off the ACTIVE BITS
    (`WG`/`WN` per `(bit,action)`), so value GENERALISES across overlapping contexts (measured: transfers to an unseen colour
    via shared shape bits, which the exact-key actor could not); ρ from the critic wired. Eligibility trace deferred.
+   **Then Phase 5 — the THALAMUS redesign ✅ DONE (2026-07-18):** the content⊗location VSA register (`bind`/`bundle`/`read`,
+   wired via `Agent.vote_consensus`) — place-value roundtrip + cross-column CMP voting (min_support=k); `gate` is now a real
+   default-off disinhibition. The decision loop is now a full ACTOR-CRITIC (critic δ → generalising per-bit actor → default-off gate).
    What remains, in order:
-   (a) **Phase 5 — REDESIGN THE THALAMUS**: keep it deterministic; add the VSA content⊗location `bind`/`read` for place-value /
-   cross-column VOTING, and make `gate` a real default-off disinhibition. (`project` is the first binding; the fuller
-   bind/read is next.)
+   (a) **Phase 6+ — THE BIGGER LOOP**: the MOTOR region (L5 emit + decode; move the readout OUT of the agent); the HIPPOCAMPUS
+   (ROLLOUT over the model, value critic at the leaf — the substrate for the imagined-future widget, `project_hippocampus_imagination_and_widget`);
+   the loop/brain object (move `decide`/`scan` OUT of the agent); the THIN agent; the `step(obs)→action` game loop. Plus a full
+   multi-sensory-column recognition-BY-VOTING task consuming the Phase-5 register.
    (b) **object-dynamics refinements** (not blocking): abstraction across GEOMETRY VARIANTS (overlap recall over relation SDRs,
    the `_key` refinement everywhere) + intrinsic-feature cues; a WALL (partial-effect cue) = the same RW mechanism; the SR
-   form of the critic (`V=M·R`, fast reward-re-tuning) for a task that needs it; MORPHOLOGICAL features.
+   form of the critic (`V=M·R`, fast reward-re-tuning) for a task that needs it; MORPHOLOGICAL features; the eligibility trace.
    DEFERRED to a MOVING sensor: the ego→allo transform ([[reference_tbt_frames_and_hippocampus]]); ARC's static frame needs none.
    DEFERRED to a MOVING sensor: the ego→allo transform, so an extrinsic law stays invariant when the observer moves — the
    HIPPOCAMPUS's job, not a column's ([[reference_tbt_frames_and_hippocampus]]); ARC's static frame does not need it.

@@ -95,7 +95,7 @@ and the `_Readout` — one rule, three places, reused.*
 - **cortical column:** `observe(feature, location)` · `predict()` · `recognise() → (object, pose)` · `motor() → SDR` · `goal`
 - **value critic:** `value(φ) → v` · `dopamine(φ, r, φ′) → δ` · `rho() → ρ`
 - **basal ganglia:** `select(candidates) → winner` · `learn(δ)`
-- **thalamus:** `bind(cols) → R` · `read(R, query)` · `gate(winner) → motor`
+- **thalamus:** `bind(content, location) → R` · `bundle(*R)` · `read(R, location, min_support)` · `gate(winner) → motor` — BUILT (Phase 5: the content⊗location register for place-value + voting; `gate` a real default-off disinhibition)
 - **hippocampus:** `rollout(goal, cortex) → trajectories`
 - **agent:** `step(obs) → action` — plumbing ONLY: `transduce → cortex.observe → «loop» → thalamus.gate → decode`; and `reward → critic → δ → bg.learn`.
 

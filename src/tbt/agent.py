@@ -269,6 +269,16 @@ class Agent:
         """Predict a scene object's next pose under `action`, gated by its relational state — supported stays, free falls."""
         return self._scene_col().predict_behavior(action, object_id)
 
+    # ----- CROSS-COLUMN VOTING via the thalamus content⊗location register (ARCHITECTURE §3; Phase 5) -----------------
+    def vote_consensus(self, votes, location, min_support: int = 1):
+        """Reach a CONSENSUS across columns' votes through the thalamus's content⊗location register. Each vote is a
+        `(content_bits, location_bits)` pair a column casts — content BOUND to location (the structure-preserving CMP vote:
+        an object bound to a pose, a digit bound to a place). Bind + bundle them, then read the content at `location` that
+        at least `min_support` columns agree on (`min_support=k` filters a single column's distractor; `=1` is exact recall,
+        i.e. place-value). Returns the consensus content bits. The thalamus is the shared register; the columns do the voting."""
+        register = self.thalamus.bundle(*(self.thalamus.bind(c, l) for c, l in votes))
+        return self.thalamus.read(register, location, min_support)
+
     # ----- L5 DISPLACEMENT / RELATIONS (ARCHITECTURE §9): location + location → the relation -------------------------
     def relate(self, pose_a, pose_b):
         """The relative pose of object B in object A's frame — the displacement cell's output, position/orientation-invariant.
