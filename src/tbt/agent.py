@@ -104,14 +104,16 @@ class Agent:
 
     # ----- the decision loop: perceive → relay → SELECT (BG) → gate → act; then reward() trains it ---------------------
     def decide(self, context: SDR, n_actions: int, explore: float = 0.0) -> int:
-        """Perceive a CONTEXT (a decision column), RELAY the percept (thalamus), SELECT an action by value (basal ganglia),
-        GATE the winner to the motor (thalamus). Call `reward(r)` afterwards to train the choice by RPE. The decision column
-        is created lazily on the first call (its input size = the context SDR's) and read frozen (a deterministic percept)."""
+        """Perceive a CONTEXT (a decision column), RELAY the percept (thalamus), SELECT an action by value (basal ganglia,
+        with the critic's tonic dopamine `ρ` setting explore/exploit), GATE the winner to the motor (thalamus). Call `reward(r)`
+        afterwards to train the choice by RPE. The decision column is created lazily on the first call (its input size = the
+        context SDR's) and read frozen (a deterministic percept)."""
         if self._decision_col is None:
             self._decision_col = Column(sensory_n=context.n, n_cols=self._n_cols, order=1, seed=self._seed + 2)
         cells = self._decision_col.observe(context, learn=False)                      # perceive (frozen → stable percept)
         ctx = self.thalamus.relay(cells)                                              # cortex → BG relay
-        action = self.thalamus.gate(self.bg.select(ctx, n_actions, explore=explore))  # select by value, gate to the motor
+        rho = self.critic.rho()                                                       # tonic DA from the critic (rich→exploit)
+        action = self.thalamus.gate(self.bg.select(ctx, n_actions, rho=rho, explore=explore))   # select by value, gate to motor
         self._pending = (ctx, action)
         return action
 

@@ -111,9 +111,15 @@ the agent NEVER decides/values/looks — it only moves frames and rewards across
   refinements: the SUCCESSOR-REPRESENTATION form (`V=M·R`, fast reward-re-tuning + cheap planning; grid cells = SR eigenvectors)
   — a linear value cannot hold relational V* (`project_linear_value_cannot_hold_sokoban`), so relational tasks need the ROLLOUT
   (Phase 6+), which uses THIS critic at the leaf. That is why 3c precedes the rollout.
-- **Phase 4 — REDESIGN THE BASAL GANGLIA.** Widen `OpponentActor` from exact-match keying to a per-bit SDR read-off
-  (`W_G[a]`, `W_N[a]` over the percept SDR) + eligibility trace + ρ from the critic. Test: bandit + a harder selection task
-  where SDR-overlap generalisation across contexts is required.
+- **Phase 4 — REDESIGN THE BASAL GANGLIA. ✅ DONE (2026-07-18).** `OpponentActor` widened from exact-frozenset keying to a
+  **per-bit SDR read-off**: `WG[(bit,a)]`/`WN[(bit,a)]`, and `Go(s,a) = Σ_{bit∈s} WG[bit,a]` — so SDR OVERLAP = value
+  SIMILARITY and value TRANSFERS across contexts sharing bits. The three-factor OpAL specialization is preserved per bit, the
+  update normalised by |active bits| (the same stability fix as the critic). Measured: the bandit still learns (≥99%), AND
+  the actor GENERALISES — trained on shape×{colour 1,2}, it picks the shape's action at a NOVEL colour (2/2, sharing only the
+  shape bits), which the old exact-key actor could not (a novel context = a fresh key → a coin flip). **ρ from the critic**
+  is wired (`Agent.decide` passes `critic.rho()` as the OpAL tonic-DA explore/exploit gain). DEFERRED: the eligibility trace
+  (TD(λ) credit assignment) — the critic's bootstrapping already carries delayed reward (the corridor is solved without it);
+  add when a task needs faster credit propagation.
 - **Phase 5 — REDESIGN THE THALAMUS.** Keep it deterministic: add the VSA content ⊗ location `bind`/`read` + make `gate` a
   real default-off disinhibition of the BG winner. Test: a place-value / cross-column-voting task.
 - **Phase 6+ — THE BIGGER LOOP.** The motor region (L5 emit + decode; move the readout OUT of the agent); the hippocampus
