@@ -19,6 +19,10 @@ import numpy as np
 from .basal_ganglia import BasalGanglia
 from .column import Column
 from .encoders import SDR, CategoryEncoder, GridEncoder
+from .hippocampus.ca3 import CA3
+from .hippocampus.dg import DG
+from .hippocampus.map import WorldMap
+from .hippocampus.replay import Rollout, WorldModel
 from .reward import ValueCritic
 from .thalamus import Thalamus
 
@@ -67,6 +71,8 @@ class Agent:
         self.thalamus = Thalamus()
         self.bg = BasalGanglia(seed=seed)
         self.critic = ValueCritic()      # the TD value critic (ROADMAP 3c) — its δ replaces the faked 2r−1 RPE
+        self.ca3 = CA3()                 # the hippocampal CA3 attractor — one-shot EPISODIC store + pattern completion
+        self.dg = DG(n_inputs=512, seed=seed)   # dentate gyrus — environment signature → separated CHART KEY
         self._decision_col = None
         self._pending = None
         self._nav = None
@@ -268,6 +274,52 @@ class Agent:
     def predict_behavior(self, action, object_id):
         """Predict a scene object's next pose under `action`, gated by its relational state — supported stays, free falls."""
         return self._scene_col().predict_behavior(action, object_id)
+
+    # ----- THE HIPPOCAMPAL WORLD-MAP (DESIGN §2): the forkable allocentric STATE the rollout simulates in -------------
+    def world_state(self) -> WorldMap:
+        """Assemble the current allocentric WORLD-STATE (`hippocampus/map.py`) from the live columns: the agent's
+        path-integrated pose (L6a self-location) + the scene's objects at world poses + the frame extent. The forkable
+        state a ROLLOUT simulates in — DERIVED on demand from the columns, not a parallel persistent store (DESIGN §5):
+        the columns hold the slow learned model, the returned map is the fast forkable state. The map borrows the nav
+        column's learned body operator BY REFERENCE, so a fork path-integrates the agent under the one shared model.
+        ARC's board is world-anchored, so the nav pose and the scene objects already share one world frame (DESIGN §4)."""
+        objects = self._scene_col().scene_snapshot() if self._scene is not None else {}
+        bounds = [(0, 63)] * self._dims
+        return WorldMap(self.pose(), objects, bounds, body=self._nav_col().operator)
+
+    def world_model(self) -> WorldModel:
+        """The learned FORWARD MODEL over the world-state (`hippocampus/replay.py`) — composes the agent's path-integration
+        (nav operator, via the map) with the compositional column's STATE-CONDITIONED object dynamics. Used to LEARN the
+        model from observed transitions (`WorldModel.learn`) and to ROLL it forward in planning."""
+        return WorldModel(self._scene_col())
+
+    def plan(self, reward, actions, horizon: int = 12, value=None) -> list:
+        """Plan by hippocampal ROLLOUT (`hippocampus/replay.py`): fork the current world-state and search the learned model
+        forward for the shortest action sequence reaching the goal (`reward(world) > 0`), the value critic scoring leaves
+        when the goal is beyond the horizon. Returns the action sequence (empty = already satisfied). The GOAL is a reward
+        predicate over world-states — selected elsewhere, never hand-coded into the planner (`feedback_bitter_lesson`)."""
+        return Rollout(self.world_model(), reward, actions, horizon, value).plan(self.world_state())
+
+    # ----- HIPPOCAMPAL EPISODIC MEMORY (DESIGN §2, slice 3): one-shot store + partial-cue completion via CA3 -----------
+    def scene_tokens(self) -> frozenset:
+        """The current scene as an EPISODE — a set of `(object_id, quantised-cell)` tokens, content-at-place. This is the
+        pattern CA3 stores and completes: a glimpse of some objects recalls the whole configuration (the maze-wall case)."""
+        return frozenset((oid, tuple(round(c) for c in pose[0])) for oid, pose in self.world_state().objects.items())
+
+    def remember_scene(self) -> None:
+        """Store the current scene as an EPISODE in CA3 (one-shot Hebbian write — the fast hippocampal memory)."""
+        self.ca3.store(self.scene_tokens())
+
+    def recall_scene(self, glimpse) -> set:
+        """Complete the whole remembered scene from a PARTIAL glimpse (some of its `(object, cell)` tokens) — CA3 pattern
+        completion. An ambiguous glimpse recalls the union of the scenes it fits; a novel one recalls nothing (DESIGN §3½)."""
+        return self.ca3.complete(set(glimpse))
+
+    def chart_key(self, signature) -> frozenset:
+        """The DG-separated CHART KEY of an environment `signature` (a set of active input bits) — distinct environments get
+        well-separated keys, the same one returns the same key (DESIGN §2, slice 4). The base for multi-chart REMAPPING
+        (slice 5): DG separates, CA3 stores/recognises the chart, CA1 decides match-vs-new."""
+        return self.dg.separate(signature)
 
     # ----- CROSS-COLUMN VOTING via the thalamus content⊗location register (ARCHITECTURE §3; Phase 5) -----------------
     def vote_consensus(self, votes, location, min_support: int = 1):

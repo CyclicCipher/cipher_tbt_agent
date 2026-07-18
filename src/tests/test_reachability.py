@@ -24,29 +24,73 @@ STANDALONE: dict = {
 
 
 def _modules() -> set:
-    """Every top-level .py module in src/tbt/ — NOT the Legacy archive (a subdir), NOT __init__, NOT __pycache__."""
-    return {f[:-3] for f in os.listdir(_TBT)
-            if f.endswith(".py") and f != "__init__.py" and os.path.isfile(os.path.join(_TBT, f))}
+    """Every .py module under src/tbt/ as a dotted name — top-level files AND one level of SUBPACKAGE ('hippocampus' for its
+    __init__, 'hippocampus.map' for a submodule). NOT the Legacy archive, NOT __pycache__, NOT the top-level __init__."""
+    mods: set = set()
+    for f in os.listdir(_TBT):
+        p = os.path.join(_TBT, f)
+        if f.endswith(".py") and f != "__init__.py" and os.path.isfile(p):
+            mods.add(f[:-3])
+        elif os.path.isdir(p) and "Legacy" not in f and os.path.isfile(os.path.join(p, "__init__.py")):
+            mods.add(f)                                               # the subpackage itself (its __init__)
+            for g in os.listdir(p):
+                if g.endswith(".py") and g != "__init__.py" and os.path.isfile(os.path.join(p, g)):
+                    mods.add(f + "." + g[:-3])                        # a submodule, dotted
+    return mods
+
+
+def _path(module: str) -> str:
+    """The file backing a (possibly dotted) module: 'agent' → agent.py; 'hippocampus' → hippocampus/__init__.py;
+    'hippocampus.map' → hippocampus/map.py."""
+    if "." in module:
+        pkg, sub = module.split(".", 1)
+        return os.path.join(_TBT, pkg, sub + ".py")
+    d = os.path.join(_TBT, module)
+    return os.path.join(d, "__init__.py") if os.path.isdir(d) else os.path.join(_TBT, module + ".py")
+
+
+def _pkg_parts(module: str) -> list:
+    """The subpackage path (under tbt) that `module`'s relative imports are relative to: a top-level file 'agent' → [];
+    a submodule 'hippocampus.map' → ['hippocampus']; a package init 'hippocampus' → ['hippocampus'] (the __init__ IS the
+    package). Level-1 `from .X` resolves inside this path; each extra level pops one off."""
+    if "." in module:
+        return module.split(".")[:-1]
+    return [module] if os.path.isdir(os.path.join(_TBT, module)) else []
 
 
 def _imports(module: str, known: set) -> set:
-    """The tbt modules `module` imports (`from .X`, `from . import X`, `from tbt.X`, `import tbt.X`), restricted to `known`."""
-    with open(os.path.join(_TBT, module + ".py"), encoding="utf-8") as f:
+    """The tbt modules `module` imports — relative (`from .X`, `from . import X`, `from ..X`) or absolute (`from tbt.X`,
+    `import tbt.X`), resolved to dotted `known` names. A dotted target pulls in its PACKAGE too (Python loads the __init__)."""
+    with open(_path(module), encoding="utf-8") as f:
         tree = ast.parse(f.read())
+    parts = _pkg_parts(module)
     out: set = set()
+
+    def _emit(target: list) -> None:
+        if not target:
+            return
+        name = ".".join(target)
+        if name in known:
+            out.add(name)
+        if len(target) > 1 and target[0] in known:                    # the package __init__ loads with a submodule
+            out.add(target[0])
+
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
-            if node.level == 1 and node.module:                       # from .X import ...
-                out.add(node.module.split(".")[0])
-            elif node.level == 1 and node.module is None:             # from . import X, Y
-                out |= {a.name for a in node.names}
-            elif node.module and node.module.startswith("tbt."):      # from tbt.X import ...
-                out.add(node.module.split(".")[1])
+            if node.level:                                            # relative: from (dots)module import names
+                base = parts[: len(parts) - (node.level - 1)]
+                if node.module:                                       # from .pkg.sub import ...
+                    _emit(base + node.module.split("."))
+                else:                                                 # from . import X, Y  → each name a submodule
+                    for a in node.names:
+                        _emit(base + [a.name])
+            elif node.module and node.module.startswith("tbt."):      # from tbt.X.Y import ...
+                _emit(node.module.split(".")[1:])
         elif isinstance(node, ast.Import):
             for a in node.names:
-                if a.name.startswith("tbt."):                         # import tbt.X
-                    out.add(a.name.split(".")[1])
-    return out & known
+                if a.name.startswith("tbt."):                         # import tbt.X.Y
+                    _emit(a.name.split(".")[1:])
+    return out
 
 
 def _reachable(entry: str, graph: dict) -> set:

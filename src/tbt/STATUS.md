@@ -35,6 +35,10 @@ RULES.md #2 goal.
 | `thalamus.py` | the inter-column ROUTER/GATE/REGISTER (deterministic — no learner) — `relay` (percept→BG context), `gate` (real DEFAULT-OFF disinhibition of the BG winner; None ⇒ nothing enacted), `project` (transthalamic relay of a recognised (object-id, pose) UP to the compositional column), and **Phase 5 the content⊗location BINDING**: `bind` (Smolensky tensor product), `bundle` (support Counter, overlap=agreement), `read` (unbind at a location, support ≥ min_support). Serves PLACE-VALUE (exact roundtrip) + cross-column CMP VOTING (min_support=k = k columns agree) | WIRED | `test_bg_thalamus`, `test_override`, `test_key_discovery`, `test_thalamus_binding` |
 | `htm.py` | the ONE cortical-layer mechanism — HTM sequence memory (proximal SDR-in via SP, basal context, apical, learn/predict/burst); a layer = one instance + a declared (proximal-in, context-in, apical-in, target-out) wiring; `depolarize(context)` lets an EXTERNAL context (L6a location) drive which cell fires (sensorimotor feature-at-location), not just the recurrent sequence | WIRED | `test_htm` |
 | `encoders.py` | SDR transduction library (`SDR` + Scalar/Category/Grid/Multi/Conjunctive/SpatialPooler) — data ↔ overlap-bearing SDR. `GridEncoder` is axis-aligned modular phases, and after the cut-over is a pure READ-OUT of L6a's continuous pose (encode-per-fixation ⇒ its quantisation is bounded and NEVER accumulates). The `orientations=N` multi-orientation variant was REMOVED with `RotationOperator` (see `operator.py`) | WIRED | `test_encoders` |
+| `hippocampus/map.py` | the HIPPOCAMPUS's EC/place core — `WorldMap`, the forkable allocentric world-STATE the rollout simulates in (DESIGN §2, slice 1 of the four-part build). Binds the agent's self-location (nav L6a pose) + objects at world poses (scene column) + the frame boundary into ONE state; `snapshot`/`move_agent` fork it and path-integrate the agent under the column's SHARED learned operator (borrowed by reference — the fast-forkable-state / slow-shared-model split, `reference_hippocampus`); `place`/`remove`/`anchor` (loop closure) mutate a fork; `key` = the visited-pruning signature. Assembled by `Agent.world_state`; DERIVED from the columns, not a parallel store | WIRED | `test_world_map` |
+| `hippocampus/replay.py` | the ROLLOUT — model-based planning IN the world-map (DESIGN §2/§3, slice 2). `WorldModel` = the learned forward model over a world-state, COMPOSING the agent's path-integration (map operator) with each object's STATE-CONDITIONED dynamics (the compositional column's RW cue competition — the agent included as a relatum, so a PUSH reads the agent's pre-move position); `step` unrolls one action, `learn` folds one observed transition in. `Rollout` = value-guided BFS over world-states with VISITED-PRUNING (O(states), not the 2^K flat-action product) — shortest goal-reaching path, else toward the best-VALUE leaf (critic as heuristic); `greedy` = the 1-step baseline it beats. Wired via `Agent.world_model`/`Agent.plan`. Measured: a learned PUSH (Sokoban) solved by going AROUND to the far side (`S,W,E,E`) where a greedy step can't; the EZ-V2 sampled search is the branching scale-up | WIRED | `test_replay` |
+| `hippocampus/ca3.py` | the CA3 autoassociative ATTRACTOR (DESIGN §2/§3, slice 3) — ONE recurrent structure doing BOTH the one-shot EPISODIC store AND pattern COMPLETION (Rolls/Treves). `store` = one-shot Hebbian (co-active bits strengthen the recurrent weight); `complete` settles from a PARTIAL/NOISY cue to the whole stored pattern (binary co-occurrence overlap ≥ `theta`·\|active\|, bounded iters). Carries §3½ one region up: partial cue COMPLETES, noise DROPS, an AMBIGUOUS cue stays ambiguous (the UNION, no confabulation), a NOVEL cue recalls nothing. Sparse Hopfield/SDM over hashable bits (ints or (object,cell) episode tokens). Wired via `Agent.remember_scene`/`recall_scene` (a glimpse of one object recalls the whole scene — the maze-wall case). Heavy pattern OVERLAP cross-talks — that is DG's job (slice 4), not a flaw | WIRED | `test_ca3` |
+| `hippocampus/dg.py` | the dentate gyrus — PATTERN SEPARATION → chart keys (DESIGN §2/§3, slice 4). `separate(signature)` maps an environment signature (set of input bits) to a sparse, orthogonalized CHART KEY, REUSING the k-WTA `SpatialPooler` (a fixed sparse projection + winner-take-all IS separation). DETERMINISTIC (`learn=False`) so the same environment returns the same key; DECORRELATES (distinct envs → near-disjoint keys, measured 0/24 overlap; a similar view keeps 11/24 — graded). Closes CA3's overlap seam: overlapping raw signatures cross-talk in CA3, their DG keys are recalled cleanly. Wired via `Agent.chart_key`; the base for multi-chart REMAPPING (slice 5) | WIRED | `test_dg` |
 
 **Generalization investigation — RESOLVED 2026-07-09 (now wired into the column, above).** Two durable results,
 full detail in memory `project_place_invariance_needs_factored_state` + `reference_htm_canonical_pipeline`, plain-English
@@ -51,7 +55,7 @@ writeup in `ARCHITECTURE.md` §7:
    A FACTORED recurrent state channel closes it (100%) where PURE temporal memory can't (37%). ReSU investigated + DROPPED
    (temporal encoder, not spatial invariance).
 
-Suite: **86 passed** (~18s; `test_column_arithmetic` is the ~16s end-to-end column test, the rest — `test_bg_thalamus`,
+Suite: **108 passed** (~26s; `test_column_arithmetic` is the ~16s end-to-end column test, the rest — `test_bg_thalamus`,
 `test_operator_path_integration`, `test_feature_at_location`, `test_l23_pooling`, `test_operator_non_abelian`,
 `test_object_centric`, `test_rotation_recognition`, `test_object_dynamics` — are fast). Count history, 2026-07-15: 54 → **46** at the continuous
 cut-over (`test_oriented_grid` + `test_rotation_operator` deleted with the discrete-rotation code they covered) → **48** with
@@ -143,10 +147,35 @@ ARCHITECTURE.md §3/§5.1):
    wired via `Agent.vote_consensus`) — place-value roundtrip + cross-column CMP voting (min_support=k); `gate` is now a real
    default-off disinhibition. The decision loop is now a full ACTOR-CRITIC (critic δ → generalising per-bit actor → default-off gate).
    What remains, in order:
-   (a) **Phase 6+ — THE BIGGER LOOP**: the MOTOR region (L5 emit + decode; move the readout OUT of the agent); the HIPPOCAMPUS
-   (ROLLOUT over the model, value critic at the leaf — the substrate for the imagined-future widget, `project_hippocampus_imagination_and_widget`);
-   the loop/brain object (move `decide`/`scan` OUT of the agent); the THIN agent; the `step(obs)→action` game loop. Plus a full
-   multi-sensory-column recognition-BY-VOTING task consuming the Phase-5 register.
+   (a) **Phase 6 — THE FULL FOUR-PART HIPPOCAMPUS (IN PROGRESS, plan: `hippocampus/DESIGN.md`).** Decided up front (not the
+   single-chart rollout alone): the EC-map / DG / CA3 / CA1 subfields + replay, in the `hippocampus/` subpackage. Build order
+   map → replay → CA3 → DG → CA1+remapping → orchestrator; each wired from `agent.py` + exercised.
+   **Slice 1 (`hippocampus/map.py`) ✅ DONE (2026-07-18)** — `WorldMap`, the forkable allocentric world-STATE, path-integrated
+   under the shared operator; `Agent.world_state` assembles it. Removes the rollout block: nothing before held a coherent,
+   forkable "world right now, including me".
+   **Slice 2 (`hippocampus/replay.py`) ✅ DONE (2026-07-18)** — the ROLLOUT (`WorldModel` forward+learn, `Rollout` BFS with
+   visited-pruning + best-value-leaf fallback + `greedy` baseline), wired via `Agent.world_model`/`Agent.plan`. Solves a
+   delayed goal where a 1-step greedy can't, incl. a LEARNED push (Sokoban) solved by going around (`S,W,E,E`) — object
+   dynamics driven INSIDE the rollout, no hand-coded physics. The critic-as-leaf-heuristic hook is present (`value=`); training
+   it on world-state SDRs (a world→SDR featuriser) is folded into the full loop. This is the imagined-future widget's substrate.
+   **§3½ occlusion/partial-view invariant (DESIGN §3½, `reference_recognition_under_occlusion`): mint on REFUTATION, never on
+   incompleteness. Column STRICT-SUBSET falsifier ✅ DONE (2026-07-18, `test_partial_recognition`):** a partial view (even
+   rotated/translated) recognises as the WHOLE and does not mint; a CONTRADICTING feature is refuted + mints. It caught a real
+   gap — `recognize` computed vigilance (`refuted_at`) but never applied it, so a contradicting view survived when it was the
+   sole hypothesis; fixed by filtering the population to `refuted_at is None or _exhausts(h)` (refuted-within-extent = a
+   contradiction, excluded; refuted-after-exhausting = a boundary, kept, which `commit` needs). CA1 absence-vs-contradiction
+   is built with slice 5.
+   **Slice 3 (`hippocampus/ca3.py`) ✅ DONE (2026-07-18)** — the CA3 autoassociative attractor (one-shot store + partial/noisy
+   cue completion; ambiguous→union, novel→nothing), wired via `Agent.remember_scene`/`recall_scene`. Falsifier first-class (`test_ca3`).
+   **Slice 4 (`hippocampus/dg.py`) ✅ DONE (2026-07-18)** — dentate gyrus pattern SEPARATION → chart keys (reuses the k-WTA
+   `SpatialPooler`): deterministic, decorrelates (distinct envs → 0/24 key overlap, similar view → 11/24 — graded), and closes
+   CA3's overlap seam (DG keys recalled cleanly where raw overlapping signatures cross-talk). Wired via `Agent.chart_key`.
+   NEXT: `ca1.py` + remapping (slice 5 — the comparator: DG key → CA3 chart recall → CA1 decides MATCH (recall the chart) vs
+   MISMATCH (mint a new chart); a PARTIAL view MATCHES, a CONTRADICTED view MISMATCHES — the §3½ absence-vs-contradiction
+   falsifier at the scene level).
+   Still after the hippocampus: the MOTOR region (L5 emit + decode; move the readout OUT of the agent); the loop/brain object
+   (move `decide`/`scan` OUT of the agent); the THIN agent; the `step(obs)→action` game loop. Plus a full multi-sensory-column
+   recognition-BY-VOTING task consuming the Phase-5 register.
    (b) **object-dynamics refinements** (not blocking): abstraction across GEOMETRY VARIANTS (overlap recall over relation SDRs,
    the `_key` refinement everywhere) + intrinsic-feature cues; a WALL (partial-effect cue) = the same RW mechanism; the SR
    form of the critic (`V=M·R`, fast reward-re-tuning) for a task that needs it; MORPHOLOGICAL features; the eligibility trace.

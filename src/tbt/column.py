@@ -643,10 +643,20 @@ class Column:
                                      self._choice(matched, identity)))
         if not scored:
             return []
+        # ART VIGILANCE at ρ=1 (the falsifier `reference_recognition_under_occlusion`): a hypothesis REFUTED WITHIN its own
+        # extent is CONTRADICTED — a feature where the model has a different one — so it is NOT this object and must not enter
+        # the recognised population (a wrong 3rd feature must not still read as the whole). A refutation that occurs only AFTER
+        # the prefix EXHAUSTED the model is a BOUNDARY, not a contradiction: that hypothesis DID recognise its (prefix) object,
+        # and `commit` relies on it (refuted_at + `_exhausts`) to split a continuous sweep — so it survives. ABSENCE (a model
+        # location simply unvisited) never refutes, so a PARTIAL view (`refuted_at is None`) always survives. Mint on
+        # REFUTATION, never on INCOMPLETENESS — enforced here, not only in `commit`.
+        survivors = [h for h in scored if h.refuted_at is None or self._exhausts(h)]
+        if not survivors:
+            return []
         # RANK BY ART's CHOICE (the size principle), evidence only to break exact ties. Ranking by evidence alone was the
         # bug: a SUM lets a big model explaining part of itself tie a small model explaining all of itself.
-        top = max((h.choice, h.evidence) for h in scored)
-        best = [h for h in scored if (h.choice, h.evidence) >= top]
+        top = max((h.choice, h.evidence) for h in survivors)
+        best = [h for h in survivors if (h.choice, h.evidence) >= top]
         self.pooler.settle(best[0].identity)             # L2/3 holds what the population concluded
         return best
 
@@ -809,6 +819,11 @@ class Column:
         """Start a fresh scene configuration."""
         self._scene_objects = {}
 
+    def scene_snapshot(self) -> dict:
+        """A COPY of the scene's `{object_id: pose}` — the raw geometry the hippocampal world-map assembles a forkable
+        state from (`hippocampus/map.py`). A copy, so the map fork never aliases the live scene."""
+        return dict(self._scene_objects)
+
     def state_of(self, object_id) -> frozenset:
         """The object's relational STATE: the set of (quantised) relative poses to the OTHER objects in the scene
         (`reference_tbt_object_behaviors`: behaviour is STATE-CONDITIONED). GEOMETRY-keyed, not identity-keyed, so the SAME
@@ -816,9 +831,16 @@ class Column:
         that state. The EMPTY state (an object alone, or with only never-learned relations → the free-kernel fallback) is the
         null default."""
         self._require_location()
-        me = self._scene_objects[object_id]
+        return self.state_in(self._scene_objects, object_id)
+
+    def state_in(self, objects, object_id) -> frozenset:
+        """The relational state of `object_id` computed from an ARBITRARY object configuration `{id: pose}`, not necessarily
+        the live scene — so a hippocampal ROLLOUT can evaluate the state-conditioned dynamics on a FORKED world-state (with
+        the agent included as a relatum). `state_of` is this over the live scene. Same quantisation ⇒ a state learned live is
+        the same key a fork produces."""
+        me = objects[object_id]
         return frozenset(self._quantise(self.relate(me, other))
-                         for oid, other in self._scene_objects.items() if oid != object_id)
+                         for oid, other in objects.items() if oid != object_id)
 
     @staticmethod
     def _quantise(rel) -> tuple:
