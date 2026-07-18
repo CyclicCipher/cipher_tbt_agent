@@ -559,13 +559,41 @@ Honest scope: the state generalises across the SAME quantised geometry (`_quanti
 override LEARNS which state gates which effect but does not yet DISCOVER the true condition vs a spurious correlate — that is
 the KEY slice.
 
+### R13 — mechanism check for the operator's KEY discovery (2026-07-18). Design, no build yet.
+The problem: the override keys the effect on the WHOLE geometry-state, so it cannot tell the TRUE condition (support) from a
+spurious CORRELATE co-present in the state (a neighbour object, or — with intrinsic features — colour). Research verdict: this
+is **cue competition**, and it is the same mechanism from two settled sources. **Rescorla-Wagner + the BLOCKING effect** (Kamin;
+the canonical model of conditioning, and dopamine-RPE): a cue gains associative strength ∝ PREDICTION ERROR, so a cue is
+learned about only to the extent it predicts the outcome ABOVE what the other present cues already predict — a redundant cue
+(blue, once support predicts "stays") arrives when the error is ~0 and is BLOCKED. And the **size principle** (our ART work):
+the condition is the SMALLEST sub-state consistent with the effect; contrast prunes non-discriminative features. Both say: the
+true condition is the minimal cue that predicts; spurious correlates are eliminated by contrast, not by fiat.
+
+Crucially this is ALREADY in our DNA — Rescorla-Wagner IS the delta rule, which `_Readout` (SDRClassifier) and the basal
+ganglia's dopamine-RPE (`reference_basal_ganglia`) both already run. So key-discovery is REUSE, not new machinery
+([[feedback_reuse_canonical_components]]), and it is EMERGENT/error-driven, not a symbolic rule engine (respects "no symbolic
+machinery"). It also fills TBP's stated "open territory" (prediction-error-driven behaviour learning) with the canonical rule.
+
+DESIGN: decompose the state into per-feature CUES; learn each cue's contribution to the effect (the residual beyond the free
+kernel) by prediction error; the free kernel is the always-present background. Blocking ⇒ a spurious cue converges to ~0
+weight. **BUILT (user chose RW over the set-intersection option).**
+
+### R13 — the operator's KEY, DISCOVERED (Rescorla-Wagner cue competition). **BUILT 2026-07-18. Suite 78 green.**
+`Column._cue_weights`/`_cue_prediction`: the override now keys the effect not on the whole exact state but per CUE (each state
+feature), each learning its correction to the effect (the residual beyond the free kernel) by PREDICTION ERROR — the delta
+rule the `_Readout`/BG-RPE already run (reuse). Measured: with support taught first and a spurious neighbour then always
+co-present, `w(support)=0.998`, `w(neighbour)=0.002` (Kamin BLOCKING); a neighbour-only block FALLS (rejected as a condition);
+and CONTRAST (a neighbour that sometimes appears without support, falling) zeroes it even when it always co-occurs. Emergent,
+error-driven, no `if supported`. Fills TBP's "open territory" (prediction-error behaviour learning) with the canonical rule.
+Cost: RW is INCREMENTAL, so `test_override`'s exact assertions relaxed to "converges to" (`_approx`) — the honest reality of
+conditioning (you learn gravity over many falls). `test_object_dynamics` (state=∅) unaffected.
+
 ## NEXT (in order)
-1. **The operator's KEY, discovered rather than given.** The override learns which state gates which effect, but doesn't yet
-   DISCOVER which relational feature is the true CONDITION vs a spurious correlate (supported vs blue) — which needs CONTRAST
-   (a blue unsupported thing that falls). Gravity's key is a CONDITION, not an action ([[feedback_subgoal_types_from_dynamics]],
-   [[reference_l5_operator_kinds]]); "every object falls alike" is a hypothesis the world refutes (feathers). Also: abstract the
-   state across geometry variants (a bigger table at a different offset), and a WALL (partial-effect state) = the same
-   mechanism as support (null→zero).
+1. **Abstraction across GEOMETRY VARIANTS + intrinsic-feature cues.** The state is still exact-geometry-keyed (`_quantise`),
+   so the discovered condition transfers only across the SAME relative geometry (not a bigger table lower down); the fix is
+   overlap recall over relation SDRs — "supported" as a region of geometry, not a point (the `_key` refinement everywhere).
+   And intrinsic features (colour/shape) are not yet cues, so the correlate demonstrated is RELATIONAL (a neighbour), not
+   intrinsic. A WALL (partial-effect cue) is the same RW mechanism as support (null→zero).
 2. **The operator's KEY, discovered rather than given.** Gravity's key is a CONDITION, not an action; and WHICH relation gates
    WHICH delta is the discovery problem ([[feedback_subgoal_types_from_dynamics]], [[reference_l5_operator_kinds]]). "Every
    object falls alike" is a hypothesis the world can refute (feathers), which today's operator states by keying on nothing.

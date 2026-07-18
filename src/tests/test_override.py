@@ -69,16 +69,25 @@ def _P(x, y):
     return ((float(x), float(y)), eye(2))
 
 
-def _teach_gravity_and_support(agent: Agent):
-    """Two demonstrations: a FREE block falls one unit; a block resting on a table (2 below) stays. Returns the labels."""
+def _approx(pos, expected, tol=0.05) -> bool:
+    """Position within tolerance. The FREE kernel is one-shot exact, but the support CORRECTION is learned by Rescorla-Wagner
+    and CONVERGES over repeated views (you learn gravity over many falls, not one) — so 'stays' is approached, not hit."""
+    return all(abs(a - b) < tol for a, b in zip(pos, expected))
+
+
+def _teach_gravity_and_support(agent: Agent, passes: int = 8):
+    """A FREE block falls one unit (the one-shot kernel); a block resting on a table (2 below) stays — taught `passes` times
+    so the Rescorla-Wagner support cue converges. Returns the labels."""
     agent.clear_scene()
     b = _place(agent, BLOCK, (5.0, 5.0))                  # a FREE block (null state)...
-    agent.learn_behavior(STEP, b, _P(5, 4))              # ...falls one unit  → learns (STEP, ∅) = down
+    agent.learn_behavior(STEP, b, _P(5, 4))              # ...falls one unit  → the FREE KERNEL (STEP, ∅) = down
 
-    agent.clear_scene()
-    t = _place(agent, TABLE, (0.0, 0.0))
-    b = _place(agent, BLOCK, (0.0, 2.0))                  # a block ON the table (supported state)...
-    agent.learn_behavior(STEP, b, _P(0, 2))             # ...stays  → learns (STEP, {support}) = no change
+    t = None
+    for _ in range(passes):
+        agent.clear_scene()
+        t = _place(agent, TABLE, (0.0, 0.0))
+        b = _place(agent, BLOCK, (0.0, 2.0))             # a block ON the table (supported)...
+        agent.learn_behavior(STEP, b, _P(0, 2))         # ...stays  → the support CUE learns to cancel the fall
     return b, t
 
 
@@ -105,11 +114,11 @@ def test_a_SUPPORTED_object_stays_but_a_FREE_one_falls():
     agent.clear_scene()                                  # a supported block
     _place(agent, TABLE, (0.0, 0.0))
     b = _place(agent, BLOCK, (0.0, 2.0))
-    assert agent.predict_behavior(STEP, b)[0] == (0.0, 2.0), "a SUPPORTED object must STAY"
+    assert _approx(agent.predict_behavior(STEP, b)[0], (0.0, 2.0)), "a SUPPORTED object must STAY"
 
     agent.clear_scene()                                  # a free block
     b = _place(agent, BLOCK, (9.0, 9.0))
-    assert agent.predict_behavior(STEP, b)[0] == (9.0, 8.0), "a FREE object must FALL (the free kernel)"
+    assert _approx(agent.predict_behavior(STEP, b)[0], (9.0, 8.0)), "a FREE object must FALL (the free kernel)"
 
 
 def test_it_GENERALISES_to_an_object_never_demonstrated():
@@ -122,7 +131,7 @@ def test_it_GENERALISES_to_an_object_never_demonstrated():
     agent.clear_scene()
     _place(agent, TABLE, (30.0, 30.0))
     o = _place(agent, OTHER, (30.0, 32.0))               # OTHER, never once demonstrated, supported by the table
-    assert agent.predict_behavior(STEP, o)[0] == (30.0, 32.0), "a NEW supported object must also STAY (object-independent)"
+    assert _approx(agent.predict_behavior(STEP, o)[0], (30.0, 32.0)), "a NEW supported object must also STAY (object-independent)"
 
 
 def test_REMOVING_the_support_restores_the_fall():
@@ -135,11 +144,11 @@ def test_REMOVING_the_support_restores_the_fall():
     agent.clear_scene()
     _place(agent, TABLE, (0.0, 0.0))
     b = _place(agent, BLOCK, (0.0, 2.0))
-    assert agent.predict_behavior(STEP, b)[0] == (0.0, 2.0), "supported ⇒ stays (baseline)"
+    assert _approx(agent.predict_behavior(STEP, b)[0], (0.0, 2.0)), "supported ⇒ stays (baseline)"
 
     agent.clear_scene()                                  # same block, table GONE
     b = _place(agent, BLOCK, (0.0, 2.0))
-    assert agent.predict_behavior(STEP, b)[0] == (0.0, 1.0), "support removed ⇒ the free kernel resumes ⇒ it FALLS"
+    assert _approx(agent.predict_behavior(STEP, b)[0], (0.0, 1.0)), "support removed ⇒ the free kernel resumes ⇒ it FALLS"
 
 
 if __name__ == "__main__":

@@ -490,13 +490,25 @@ returns the state to null so it falls again** (assume, then correct). This is th
 thrice" (sensory ⊕ task ⊕ compositional), honouring §5.1, and it finally exercises the thalamus's binding role. *A wall stopping
 a push is the same mechanism with a partial-effect state instead of a null one — a follow-up, not a new idea.*
 
+**The operator's KEY, DISCOVERED — Rescorla-Wagner cue competition (BUILT).** The override no longer keys the effect on the
+whole exact state; each state feature is a **cue**, and each learns its correction to the effect (the residual beyond the free
+kernel) by **prediction error** — Rescorla-Wagner, which *is* the delta rule the `_Readout`/basal-ganglia dopamine-RPE already
+run (reuse, not new machinery). The **BLOCKING** effect (Kamin) tells the true condition from a spurious correlate: once support
+predicts "stays", a co-present neighbour arrives at ~0 prediction error and gains ~0 weight (measured: `w(support)=0.998`,
+`w(neighbour)=0.002`); and **contingency** drives a correlate that sometimes appears without the effect (a neighbour with no
+support, which falls) to zero even when it always co-occurs. So the neighbour is *rejected as a condition* — a neighbour-only
+block falls — with no `if supported` and no symbolic rule; it is emergent, error-driven discovery. This fills TBP's stated
+"open territory" (prediction-error-driven behaviour learning) with the canonical rule. The one cost is that RW is INCREMENTAL
+(the support correction converges over repeated views rather than one-shot) — which is the honest reality of conditioning.
+
 **What is still missing, in dependency order:**
-1. **The operator's KEY, discovered rather than given.** The override *learns* which state gates which effect, but it does not
-   yet DISCOVER *which* relational feature is the true condition versus a spurious correlate — if every supported block seen
-   was also blue, geometry-keyed state can't yet tell "supported" from "blue" without CONTRAST (a blue unsupported thing that
-   falls). Prediction-error-driven disambiguation is that slice (`feedback_subgoal_types_from_dynamics`,
-   `reference_l5_operator_kinds`); "every object falls alike" is a hypothesis the world refutes (feathers), and today the state
-   also generalises only across the SAME quantised geometry (`_quantise`), not yet across geometry variants.
+1. **Abstraction across geometry variants.** The state is still exact-geometry-keyed (`_quantise`), so the discovered condition
+   transfers only across the SAME relative geometry (a table at the same offset), not yet across variants (a bigger table
+   lower down). The general fix is the one `_key` needs everywhere — overlap recall over relation SDRs, so "supported" is a
+   region of geometry, not a point. And intrinsic features (colour/shape) are not yet cues, so the blue-vs-support
+   disambiguation is currently demonstrated with a spurious *relational* correlate (a neighbour), not an intrinsic one.
+2. **Walls = the same mechanism.** A wall is a state whose cue correction is a *partial* effect (move up to the wall) rather
+   than the null→zero of support — the same Rescorla-Wagner machinery, a follow-up not a new idea.
 
 ## 10. What makes a layer a layer — role = (context-in, target-out), both wired by hand
 

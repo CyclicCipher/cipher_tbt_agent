@@ -248,7 +248,7 @@ from typing import Optional
 
 from tbt.encoders import SDR, GridEncoder, SpatialPooler
 from tbt.htm import HTMLayer
-from tbt.operator import MotionOperator, compose, dist, eye, gram_schmidt, invert, rotate, solve_rotation, sub
+from tbt.operator import MotionOperator, add, compose, dist, eye, gram_schmidt, invert, rotate, scale, solve_rotation, sub
 from tbt.pooler import ColumnPooler
 
 _TOL = 1e-6          # geometric slack: distances are exact floats here, so this only absorbs round-off
@@ -378,6 +378,12 @@ class Column:
         # own features-at-locations ("object id as a FEATURE → compositional objects", `reference_tbt_layers_4_23`), the same
         # Column one level up. Fed from the sensory column via the thalamus. Only the scene column uses it.
         self._scene_objects: dict = {}                          # object_id -> pose
+        # KEY DISCOVERY (ARCHITECTURE §9): Rescorla-Wagner cue competition over the state's features. The free kernel is the
+        # background (always present); each state CUE learns its correction to the effect by PREDICTION ERROR (the delta rule).
+        # A spurious cue (a neighbour co-present with support) is BLOCKED — it arrives when the error is already ~0, so it
+        # gains ~0 weight (Kamin blocking). This is how the TRUE condition is discovered from a correlate, learned not coded.
+        self._cue_weights: dict = {}                            # (action, cue) -> position-correction vector
+        self._cue_lr = 0.5                                      # Rescorla-Wagner rate (α·β)
         # L2/3's POOLING engine (ARCHITECTURE §8): the stable object-IDENTITY that pools the L4 feature-at-location stream
         # (`pooler.ColumnPooler`) — a decoupled stable output + persistence, which the L2/3 HTMLayer (associate) cannot do.
         self.pooler = ColumnPooler(seed=seed + 4) if location is not None else None
@@ -755,22 +761,42 @@ class Column:
         the frame that holds it INVARIANT, so it applies at every position and orientation BY CONSTRUCTION; the FRAME
         generalizes, not the data. Nothing is keyed on WHICH object.
 
-        STATE-CONDITIONING (`reference_tbt_object_behaviors`): the effect is keyed on `(action, STATE)`, so the SAME action has
-        DIFFERENT effects in different states — STEP drops a FREE object but not a SUPPORTED one. `state=∅` is the free kernel,
-        the null-state default (the aggressive "everything falls" prior, `feedback_prefer_generalize_then_correct`). The state
-        is GEOMETRY-keyed (`state_of`), so the effect learned in a state transfers to any object in that state — TBP's
-        object-independent behaviour frame. "Which state feature is the TRUE condition vs a spurious correlate" is the KEY
-        problem, still open."""
+        STATE-CONDITIONING by CUE COMPETITION (`reference_tbt_object_behaviors`; Rescorla-Wagner). The FREE KERNEL is the
+        `state=∅` effect (the aggressive "everything falls" default, `feedback_prefer_generalize_then_correct`), learned only
+        from free observations. Each state CUE (a geometry-keyed relation, from `state_of`) then learns its CORRECTION to the
+        effect — the RESIDUAL beyond the free kernel — by PREDICTION ERROR (the delta rule, the same `_Readout`/BG-RPE runs).
+        The correction is world-frame, so it generalises across positions and objects (TBP's object-independent behaviour
+        frame). BLOCKING (Kamin) is how the TRUE condition is told from a CORRELATE: once support predicts "stays", a
+        co-present neighbour arrives when the error is already ~0 and gains ~0 weight — discovered, not coded (no `if
+        supported`). Rotation stays the free kernel's; cue corrections to rotation are deferred."""
         self._require_location()
-        self.dynamics.learn((action, state), before_pose, after_pose)
+        if not state:
+            self.dynamics.learn((action, frozenset()), before_pose, after_pose)     # the FREE KERNEL (background)
+            return
+        free_after = self.dynamics.apply(before_pose, (action, frozenset()))
+        residual = sub(after_pose[0], free_after[0])            # the world-frame move the CUES must explain beyond the kernel
+        error = sub(residual, self._cue_prediction(action, state))              # Rescorla-Wagner: US − Σ present cues
+        for cue in state:                                      # every present cue updates by the SAME error — cue competition
+            w = self._cue_weights.get((action, cue), tuple(0.0 for _ in residual))
+            self._cue_weights[(action, cue)] = add(w, scale(error, self._cue_lr))
 
     def predict_object_move(self, pose, action, state=frozenset()):
-        """Predict where `action` puts an object at `pose` in `state` — the FORWARD MODEL over objects. Uses the state-specific
-        effect where one is learned, else FALLS BACK to the free kernel (`state=∅`): "a specific context overrides the
-        default", the HTM high-order-over-first-order structure — NOT a hand-coded `if supported`."""
+        """Predict where `action` puts an object at `pose` in `state` — the FORWARD MODEL over objects: the FREE KERNEL plus
+        the summed corrections of the present cues (Rescorla-Wagner). A free object gets the kernel (falls); a supported one
+        gets the kernel plus the learned support correction (stays); a spurious cue contributes ~0 (blocked)."""
         self._require_location()
-        key = (action, state)
-        return self.dynamics.apply(pose, key if self.dynamics.known(key) else (action, frozenset()))
+        free_after = self.dynamics.apply(pose, (action, frozenset()))
+        return add(free_after[0], self._cue_prediction(action, state)), free_after[1]
+
+    def _cue_prediction(self, action, state) -> tuple:
+        """The summed correction the present cues predict beyond the free kernel — Σ of the learned cue weights (a cue with no
+        weight yet contributes zero)."""
+        total = tuple(0.0 for _ in range(self.location.dims))
+        for cue in state:
+            w = self._cue_weights.get((action, cue))
+            if w is not None:
+                total = add(total, w)
+        return total
 
     # ── COMPOSITIONAL column (ARCHITECTURE §9): the SCENE, object STATES, and STATE-CONDITIONED behaviour ──────────────
     def place_object(self, object_id, pose) -> None:
