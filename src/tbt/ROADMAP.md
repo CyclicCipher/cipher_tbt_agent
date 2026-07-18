@@ -100,9 +100,17 @@ the agent NEVER decides/values/looks — it only moves frames and rewards across
      also compositional objects). Then the override: the operator is the free kernel, a local relational context predicts the
      exception. **A table stopping a fall and a wall stopping a push are ONE mechanism** — so gravity and obstacles are one
      slice, not two. Open within it: the operator's KEY must be DISCOVERED (gravity's key is a condition, not an action).
-- **Phase 3c — VALUE CRITIC (`reward.py`).** The SR read-off critic (the SR = the discounted resolvent of the 3a operator,
-  ARCHITECTURE §8): `value(φ)`, `dopamine(φ,r,φ′,done)→δ`, `rho()`. Rewire the bandit's RPE to come from it (replace the faked
-  `2r−1`). Test: the bandit still learns, now with a real critic.
+- **Phase 3c — VALUE CRITIC (`reward.py`). ✅ DONE (2026-07-18).** A linear TEMPORAL-DIFFERENCE value over the state SDR
+  (`ValueCritic`: `value(state)`, `learn(state,r,next,done)→δ`, `rho()` = running-avg reward). Its δ = `r + γV(s′) − V(s)`
+  replaces the faked `2r−1` in `Agent.reward` (now `reward(r, next_context, done)`); the basal-ganglia actor learns from δ.
+  Measured: the immediate-reward bandit still learns (≥99%, now with a real baseline `δ = r − V`), AND a DELAYED-reward
+  corridor is solved — value propagates backward as a γ-gradient (`V(s0..s3)=0.46,0.52,0.67,0.93`), which the faked RPE cannot
+  do (it scores every non-terminal advance as −1). THE UNIFICATION: this δ is the SAME delta rule as Rescorla-Wagner cue
+  competition (the operator's KEY), `_Readout`, and dopamine-RPE — one rule, reused (`reference_cue_competition_key_discovery`).
+  One fix worth noting: the TD step is normalised by |active bits| or it diverges (effective rate = |state|·lr). DEFERRED
+  refinements: the SUCCESSOR-REPRESENTATION form (`V=M·R`, fast reward-re-tuning + cheap planning; grid cells = SR eigenvectors)
+  — a linear value cannot hold relational V* (`project_linear_value_cannot_hold_sokoban`), so relational tasks need the ROLLOUT
+  (Phase 6+), which uses THIS critic at the leaf. That is why 3c precedes the rollout.
 - **Phase 4 — REDESIGN THE BASAL GANGLIA.** Widen `OpponentActor` from exact-match keying to a per-bit SDR read-off
   (`W_G[a]`, `W_N[a]` over the percept SDR) + eligibility trace + ρ from the critic. Test: bandit + a harder selection task
   where SDR-overlap generalisation across contexts is required.

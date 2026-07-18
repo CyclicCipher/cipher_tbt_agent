@@ -19,6 +19,7 @@ import numpy as np
 from .basal_ganglia import BasalGanglia
 from .column import Column
 from .encoders import SDR, CategoryEncoder, GridEncoder
+from .reward import ValueCritic
 from .thalamus import Thalamus
 
 
@@ -65,6 +66,7 @@ class Agent:
         # Exercised by a reward-driven task; the arithmetic scan does not use it.
         self.thalamus = Thalamus()
         self.bg = BasalGanglia(seed=seed)
+        self.critic = ValueCritic()      # the TD value critic (ROADMAP 3c) — its δ replaces the faked 2r−1 RPE
         self._decision_col = None
         self._pending = None
         self._nav = None
@@ -113,13 +115,19 @@ class Agent:
         self._pending = (ctx, action)
         return action
 
-    def reward(self, r: float) -> None:
-        """Train the last `decide` by reward-prediction error. For an immediate reward r∈{0,1}, the centered RPE is 2r−1
-        (rewarded → Go, unrewarded → NoGo). A proper TD critic (`reward.py`) comes with a multi-step-value task."""
+    def reward(self, r: float, next_context: SDR = None, done: bool = True) -> None:
+        """Train the last `decide` by the VALUE CRITIC's dopamine-RPE (ROADMAP 3c) — the δ replaces the faked `2r−1`. Pass
+        `next_context` (the SDR of the state the action led to) + `done=False` for a MULTI-STEP transition, so the critic
+        BOOTSTRAPS value backward (`δ = r + γ·V(next) − V(now)`); omit them for an IMMEDIATE-reward step (`δ = r − V(now)`,
+        a real prediction error with a learned baseline). The critic learns V; the basal ganglia's actor learns from δ."""
         if self._pending is None:
             return
         ctx, action = self._pending
-        self.bg.learn(ctx, action, rpe=2.0 * float(r) - 1.0)
+        next_ctx = None
+        if next_context is not None and not done:                       # relay the next state exactly as `decide` would
+            next_ctx = self.thalamus.relay(self._decision_col.observe(next_context, learn=False))
+        delta = self.critic.learn(ctx, r, next_ctx, done)               # TD update + the dopamine-RPE
+        self.bg.learn(ctx, action, delta)                              # the actor learns from δ, not from raw reward
         self._pending = None
 
     # ----- the SPATIAL slice: L6a path integration via the TRANSFORM operator (ARCHITECTURE §8) ----------------------

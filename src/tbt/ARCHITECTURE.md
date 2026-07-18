@@ -72,7 +72,7 @@ study, `notes/bg_thalamus_value_research.md`): **no region uses backprop / an AN
 |---|---|---|---|
 | sensory column | physical world-model + recognition | modified-HTM/SDR — LOCAL, self-supervised prediction error | `l4*`, `l5_displacement`+`operator`, `l23_object`, `encoders`, `retina` |
 | PFC / task column | goal-state + plan hierarchy (same column, abstract frame) | same as the column | the SAME column on a task frame (`reference_hierarchy_substrate`) |
-| **value / dopamine critic** | expected reward → the scalar RPE δ + tonic ρ | SDR-linear TD = the **successor-representation** read-off | `l6_sr.SuccessorFeatures` |
+| **value / dopamine critic** | expected reward → the scalar RPE δ + tonic ρ | SDR-linear TD = the **successor-representation** read-off | `reward.ValueCritic` (BUILT — linear TD `δ=r+γV(s′)−V(s)`; the SR read-off `V=M·R` is the deferred refinement) |
 | basal ganglia | SELECT by value (disinhibition) — the Go/NoGo ACTOR | modified-HTM/SDR — LOCAL **dopamine-gated three-factor Hebbian**, D1/D2 opponent (OpAL) | `basal_ganglia` (`BasalGanglia`, `OpponentActor`) |
 | thalamus | route + gate the selection (disinhibition) + bind content⊗location for voting | **DETERMINISTIC** — no learner inside; only optional slow gain | `thalamus` |
 | hippocampus | ROLLOUT — prospective sweep over the model — + episodic binding | orchestration over the column's model (holds NO model of its own) | `hippocampus` |
@@ -83,7 +83,12 @@ critic emits **two distinct errors from one update** (Gardner/Gershman 2018): a 
 MAP — this runs even at **zero reward**, it is the epistemic / structure-learning signal the cortex owns — and a *scalar*
 `δ = r + γV(s′) − V(s)`, the **dopamine** the basal ganglia consumes. A ceiling we have PROVEN
 (`project_linear_value_cannot_hold_sokoban`): a linear value cannot represent relational V*; for those, `value` shrinks to
-**scoring rollout leaves** and the plan comes from the hippocampal sweep, not the read-off.
+**scoring rollout leaves** and the plan comes from the hippocampal sweep, not the read-off. *BUILT (ROADMAP 3c, `reward.py`):
+the **scalar** `δ = r + γV(s′) − V(s)` over the state SDR, wired into `Agent.reward` so the basal-ganglia actor learns from it
+(a bandit still learns with a real baseline; a delayed-reward corridor is solved by backward value propagation — measured).
+The **vector** SF-Bellman error that trains the SR map (`V = M·R`, the zero-reward structure signal) is the deferred SR form —
+this first critic is the scalar dopamine half. NB this δ is the SAME delta rule as the Rescorla-Wagner cue competition in §9
+and the `_Readout` — one rule, three places, reused.*
 
 **The contracts (who speaks what — the interface each region exposes).**
 - **peripheral (retina/effectors):** `transduce(field) → [(feature, location)]` · `decode(motor_sdr) → command`
