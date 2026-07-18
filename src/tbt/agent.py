@@ -68,7 +68,7 @@ class Agent:
         self.thalamus = Thalamus()
         self.bg = BasalGanglia(seed=seed)
         self.critic = ValueCritic()      # the TD value critic (ROADMAP 3c) — its δ replaces the faked 2r−1 RPE
-        self.hippocampus = Hippocampus(n_inputs=512, seed=seed)   # the composed hippocampus: map⊕replay⊕CA3⊕DG⊕CA1 (one handle)
+        self.hippocampus = Hippocampus(n_inputs=512, dims=dims, seed=seed)   # the composed hippocampus: map⊕replay⊕CA3⊕DG⊕CA1 (one handle)
         self._decision_col = None
         self._pending = None
         self._nav = None
@@ -293,8 +293,25 @@ class Agent:
         """Plan by hippocampal ROLLOUT (`hippocampus/replay.py`): fork the current world-state and search the learned model
         forward for the shortest action sequence reaching the goal (`reward(world) > 0`), the value critic scoring leaves
         when the goal is beyond the horizon. Returns the action sequence (empty = already satisfied). The GOAL is a reward
-        predicate over world-states — selected elsewhere, never hand-coded into the planner (`feedback_bitter_lesson`)."""
+        predicate over world-states — selected elsewhere, never hand-coded into the planner (`feedback_bitter_lesson`). The
+        leaf value defaults to the trained VALUE CRITIC over the featurised world (`value_of`) — 0 for an untrained critic
+        (so goal-reward still drives), meaningful once `learn_value` has taught it which world-states pay off."""
+        if value is None:
+            value = self.value_of
         return self.hippocampus.plan(self.world_state(), self.world_model(), reward, actions, horizon, value)
+
+    def value_of(self, world) -> float:
+        """The learned value of a world-STATE — the `ValueCritic` scoring the featurised world (`Hippocampus.featurize`, the
+        overlap-bearing world→SDR). This is the rollout's leaf heuristic; it replaces `replay.py`'s stand-in with the real
+        critic. Returns 0 until the critic is trained (the honest prior)."""
+        return self.critic.value(self.hippocampus.featurize(world))
+
+    def learn_value(self, before, reward: float, after=None, done: bool = True) -> float:
+        """Train the value critic on a world-state TRANSITION by TD (`δ = r + γ·V(after) − V(before)`), over the featurised
+        worlds — so the rollout's leaf heuristic learns which world-states pay off from reward. Returns δ. Pass `after` +
+        `done=False` for a multi-step transition (value bootstraps backward); omit for an immediate/terminal reward."""
+        nxt = self.hippocampus.featurize(after) if (after is not None and not done) else None
+        return self.critic.learn(self.hippocampus.featurize(before), reward, nxt, done)
 
     # ----- HIPPOCAMPAL EPISODIC MEMORY (DESIGN §2, slice 3): one-shot store + partial-cue completion via CA3 -----------
     def scene_tokens(self) -> frozenset:

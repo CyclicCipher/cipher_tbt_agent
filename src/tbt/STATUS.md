@@ -40,6 +40,7 @@ RULES.md #2 goal.
 | `hippocampus/ca3.py` | the CA3 autoassociative ATTRACTOR (DESIGN §2/§3, slice 3) — ONE recurrent structure doing BOTH the one-shot EPISODIC store AND pattern COMPLETION (Rolls/Treves). `store` = one-shot Hebbian (co-active bits strengthen the recurrent weight); `complete` settles from a PARTIAL/NOISY cue to the whole stored pattern by GROW-then-PRUNE (monotonically add bits co-occurring with ≥ `theta`·\|active\|, then one prune) — so even a 1-bit cue / 2-token pattern recovers where a strict recompute would OSCILLATE (found by the slice-6 orchestrator test); noise still drops in the prune. Carries §3½ one region up: partial cue COMPLETES, noise DROPS, an AMBIGUOUS cue stays ambiguous (the UNION, no confabulation), a NOVEL cue recalls nothing. Sparse Hopfield/SDM over hashable bits (ints or (object,cell) episode tokens). Wired via `Agent.remember_scene`/`recall_scene` (a glimpse of one object recalls the whole scene — the maze-wall case). Heavy pattern OVERLAP cross-talks — that is DG's job (slice 4), not a flaw | WIRED | `test_ca3` |
 | `hippocampus/dg.py` | the dentate gyrus — PATTERN SEPARATION → chart keys (DESIGN §2/§3, slice 4). `separate(signature)` maps an environment signature (set of input bits) to a sparse, orthogonalized CHART KEY, REUSING the k-WTA `SpatialPooler` (a fixed sparse projection + winner-take-all IS separation). DETERMINISTIC (`learn=False`) so the same environment returns the same key; DECORRELATES (distinct envs → near-disjoint keys, measured 0/24 overlap; a similar view keeps 11/24 — graded). Closes CA3's overlap seam: overlapping raw signatures cross-talk in CA3, their DG keys are recalled cleanly. Wired via `Agent.chart_key`; the base for multi-chart REMAPPING (slice 5) | WIRED | `test_dg` |
 | `hippocampus/__init__.py` | the `Hippocampus` ORCHESTRATOR (DESIGN §2/§3, slice 6, the LAST) — composes the subfields into ONE region behind a single agent handle: EPISODIC (`remember`/`recall` = CA3), REMAPPING (`chart_key`/`visit` = DG+CA3+CA1), PLANNING (`plan` = replay over a cortex-assembled world+model). Holds the stateful memory; the world-state assembly (nav pose + scene objects) is the cortex→hippocampus bridge kept on the agent. `Agent.__init__` now holds ONE `self.hippocampus` (the per-region `ca3`/`dg`/`remapper` fields folded behind it — clean cutover); `remember_scene`/`recall_scene`/`chart_key`/`visit_environment`/`plan` all delegate | WIRED | `test_hippocampus` |
+| `hippocampus/featurize.py` | the world-state → SDR FEATURISER for the value critic — `WorldFeaturizer.encode(world)` maps a `WorldMap` (agent self-location + objects at places) to an OVERLAP-BEARING SDR of `(entity, axis-bit)` bits. Position is a per-axis METRIC `ScalarEncoder` (overlap decreases monotonically with distance), NOT the modular `GridEncoder` — the grid ALIASES over distance and would break value smoothness (`reference_sdr_regime_and_phase_codes`: SDR great for IDENTITY, breaks for METRIC). Closes replay.py's leaf-value seam: `Agent.value_of` = the `ValueCritic` scoring the featurised world (the rollout leaf, defaulted in `plan`); `Agent.learn_value` trains it on world-state transitions by TD. Measured: adjacent states share 17/18 place-bits, far states 0; a trained critic pulls the rollout toward a goal beyond the horizon where an untrained one gives no plan | WIRED | `test_featurize` |
 | `hippocampus/ca1.py` | the CA1 COMPARATOR + multi-chart REMAPPING (DESIGN §2/§3, slice 5). `CA1.compare(observed, recalled)` = the match/novelty detector (Lisman/Hasselmo): MATCH iff the recall explains every observed bit (observed ⊆ recalled) — the §3½ rule one region up, so a PARTIAL view matches (absence) and a CONTRADICTED bit mismatches (novelty). `Remapper` composes CA3 (recall) + CA1 (compare): revisit → RECALL the chart, a novel/CHANGED environment → MINT a new one. Comparison runs on CONTENT tokens (subset-preserving), NOT DG keys (k-WTA breaks the subset relation) — DG separates full signatures at the index layer, composed in slice 6. Wired via `Agent.visit_environment`. Measured: glimpse recalls chart 0, `A`+contradicting-`X` remaps (novelty 0.25) | WIRED | `test_ca1` |
 
 **Generalization investigation — RESOLVED 2026-07-09 (now wired into the column, above).** Two durable results,
@@ -57,7 +58,7 @@ writeup in `ARCHITECTURE.md` §7:
    A FACTORED recurrent state channel closes it (100%) where PURE temporal memory can't (37%). ReSU investigated + DROPPED
    (temporal encoder, not spatial invariance).
 
-Suite: **117 passed** (~27s; `test_column_arithmetic` is the ~16s end-to-end column test, the rest — `test_bg_thalamus`,
+Suite: **120 passed** (~27s; `test_column_arithmetic` is the ~16s end-to-end column test, the rest — `test_bg_thalamus`,
 `test_operator_path_integration`, `test_feature_at_location`, `test_l23_pooling`, `test_operator_non_abelian`,
 `test_object_centric`, `test_rotation_recognition`, `test_object_dynamics` — are fast). Count history, 2026-07-15: 54 → **46** at the continuous
 cut-over (`test_oriented_grid` + `test_rotation_operator` deleted with the discrete-rotation code they covered) → **48** with
@@ -182,10 +183,21 @@ ARCHITECTURE.md §3/§5.1):
    `ca3`/`dg`/`remapper` fields folded behind it (clean cutover, existing tests validated the delegation). End-to-end
    (`test_hippocampus`): one agent routes PLANNING (replay to a goal) + EPISODIC recall (glimpse → whole scene) + REMAPPING
    through the single handle. The orchestrator test also caught + fixed a CA3 2-token oscillation (grow-then-prune completion).
-   NEXT (post-hippocampus): the MOTOR region (L5 emit + decode — move the readout OUT of the agent); the loop/brain object
-   (move `decide`/`scan` OUT of the agent) → the THIN agent; the `step(obs)→action` game loop; the world→SDR featuriser so the
-   ValueCritic scores world-states at the rollout leaf. Deferred within the hippocampus (DESIGN §4): the ego→allo transform
-   (moving sensor), theta/replay timing, graded remap (update-vs-mint over `CA1Result.novelty`).
+   **The world→SDR value FEATURISER ✅ DONE (2026-07-18, `hippocampus/featurize.py`, `test_featurize`)** — closed replay.py's
+   leaf-value seam: `Agent.value_of`/`learn_value` let the `ValueCritic` score + learn world-STATES (metric `ScalarEncoder`
+   place code, not the aliasing grid), and `plan`'s leaf now defaults to the trained critic.
+   **NEXT (user plan 2026-07-18): finish L5IT/PT — the moving-sensor / efference-broadcast fix.** `column.py`'s `layers["L5IT"]`
+   /`layers["L5PT"]` are DECLARED (L5PT `context_from="goal"` → PT motor + HO-thalamus efference copy) but UNDRIVEN; the
+   displacement FUNCTION is substituted by the `MotionOperator` engines + `relate` + cue weights, but L5's MOTOR OUTPUT (the
+   agent `_Readout` substitutes, outside the column) and its HO-thalamus FEED-FORWARD-to-other-columns (the efference broadcast
+   — "one column had the efference, the others did not") are not built. Fix = drive L5IT→L5PT + route the efference through the
+   thalamus register (REUSE Phase-5 `bind`/`bundle`) into the now-built world-map. Grounded by [[reference_layer5_role]] (one
+   object: displacement = motor = efference copy = inter-column feed-forward), [[reference_hippocampus]] (the world-map is the
+   allocentric destination, now BUILT), [[reference_l5_operator_kinds]] (no self-vs-other split; self = controllable ROOT).
+   NB DEFERRED, not breaking: ARC + offline replicas are FULL-OBSERVATION (world-anchored), so the sensor does not move; the
+   ego→allo transform bites only for a moving-camera game.
+   Then: the loop/brain object (move `decide`/`scan` OUT of the agent) → the THIN agent; the `step(obs)→action` game loop; the
+   two-pane imagined-future WIDGET. Deferred within the hippocampus (DESIGN §4): theta/replay timing, graded remap.
    Still after the hippocampus: the MOTOR region (L5 emit + decode; move the readout OUT of the agent); the loop/brain object
    (move `decide`/`scan` OUT of the agent); the THIN agent; the `step(obs)→action` game loop. Plus a full multi-sensory-column
    recognition-BY-VOTING task consuming the Phase-5 register.

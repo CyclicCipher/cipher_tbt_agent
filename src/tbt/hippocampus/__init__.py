@@ -12,10 +12,11 @@ from __future__ import annotations
 from .ca1 import CA1, Remapper
 from .ca3 import CA3
 from .dg import DG
+from .featurize import WorldFeaturizer
 from .map import WorldMap
 from .replay import Rollout, WorldModel
 
-__all__ = ["WorldMap", "Rollout", "WorldModel", "CA3", "DG", "CA1", "Remapper", "Hippocampus"]
+__all__ = ["WorldMap", "Rollout", "WorldModel", "CA3", "DG", "CA1", "Remapper", "WorldFeaturizer", "Hippocampus"]
 
 
 class Hippocampus:
@@ -35,10 +36,11 @@ class Hippocampus:
       • PLANNING — `plan`: fork the assembled world-state and roll the cortex's forward model forward to a goal (the rollout;
         the imagined-future widget's substrate)."""
 
-    def __init__(self, n_inputs: int = 512, seed: int = 0) -> None:
+    def __init__(self, n_inputs: int = 512, dims: int = 2, bounds=None, seed: int = 0) -> None:
         self.episodic = CA3()                            # one-shot scene/episode memory (store + partial-cue completion)
         self.dg = DG(n_inputs=n_inputs, seed=seed)       # environment signature → separated chart key
         self.remapper = Remapper()                       # multi-chart remapping (its own CA3 + CA1 comparator)
+        self.featurizer = WorldFeaturizer(dims=dims, bounds=bounds)   # world-state → SDR for the value critic (rollout leaf)
 
     # ── EPISODIC memory (CA3) ──────────────────────────────────────────────────────────────────────────────────────
     def remember(self, episode) -> None:
@@ -64,3 +66,7 @@ class Hippocampus:
         reaching the goal (`reward(world) > 0`), the value critic scoring leaves beyond the horizon. Returns the action
         sequence (empty = already satisfied). `world`/`model` come from the cortex (`Agent.world_state`/`world_model`)."""
         return Rollout(model, reward, actions, horizon, value).plan(world)
+
+    def featurize(self, world) -> frozenset:
+        """A world-state → the overlap-bearing SDR the value critic scores at the rollout leaf (`featurize.py`)."""
+        return self.featurizer.encode(world)
