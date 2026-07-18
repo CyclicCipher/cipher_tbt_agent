@@ -414,66 +414,58 @@ invariant. With a static observer the observation frame already is one; a moving
 which is the **hippocampus's** job, not a column's (`reference_tbt_frames_and_hippocampus`: HPC = one global allocentric
 map, cortex = many local object-centric frames), and is deferred until the sensor moves.*
 
-**COMMON FATE — the grouping is BUILT; making it PERSIST is not** (`Column._common_fate_groups`, gated by `look_again`).
-Everywhere else the boundary is a prediction mismatch *against a model*, which is exactly why a wholly novel scene can only
-mint one blob: with no model there is no object. **Motion needs no model** — a feature at `p` last look and `p'` now moved by
-`d`, and fixations sharing `d` moved together. Measured on a scene swept as ONE episode, never told there are two things:
-static → `[[0,1,2,3]]` (one group — correct, nothing yet says otherwise), then one part moves → `[[0,1],[2,3]]`, **two things
-found by motion alone**; and a scene moved *rigidly* stays one group, so the cue groups by *shared* motion rather than merely
-detecting change.
+**COMMON FATE — what moves together is one thing (BUILT, and it closes R7's cold-start blob).** Everywhere else the boundary
+is a prediction mismatch *against a model*, which is exactly why a wholly novel scene can only mint one blob: with no model
+there is no object. **Motion needs no model** — a feature at `p` last look and `p'` now moved by `d`, and fixations sharing `d`
+moved together (`Column._common_fate_groups`, gated by `look_again`). Measured on a scene swept as ONE episode, never told
+there are two things: static → `[[0,1,2,3]]` (one group — correct), one part moves → `[[0,1],[2,3]]`, **two things found by
+motion alone**; a scene moved *rigidly* stays one group, so the cue groups by *shared* motion, not mere change.
 
-*Its refusals are the load-bearing part, and both were forced by measurement.* Correspondence is exact-feature-match, so it
-**refuses** when a feature repeats in a look (a 4-fold object senses one feature at four places; pairing them is a guess —
-unguarded, it shattered a symmetric object into its cells) or has no counterpart. And it must be told the scene is the same
-one (`look_again`): "the previous **episode**" is not "the previous **look**" — objects are routinely studied back-to-back,
-and auto-rolling the buffer invented motion between two unrelated objects, fragmenting a chiral pair. The general fix for
-both is the one `_key` needs anyway: motion should **narrow a population of correspondences**, not be read off a dict.
+*Its refusals are load-bearing, and both were forced by measurement.* Correspondence is exact-feature-match, so it **refuses**
+when a feature repeats in a look (a 4-fold object senses one feature at four places; unguarded it shattered a symmetric object
+into its cells) or has no counterpart. And it must be told the scene is the same one (`look_again`): "the previous **episode**"
+is not "the previous **look**" — objects are studied back-to-back, and auto-rolling the buffer invented motion between two
+unrelated objects, fragmenting a chiral pair. The general fix for both is the one `_key` needs anyway: motion should **narrow
+a population of correspondences**, not be read off a dict.
 
-*What is NOT built:* turning a grouping into persistent objects. The moved part lands where L4 has never sensed it, so its
-mint defers, and the next static look groups the scene as one again.
+**The grouping now PERSISTS — the ART orienting reset** (`Column._commit_split`). `commit` checks common fate *before*
+recognition, because motion refutes a single-object hypothesis that recognition would otherwise accept: if the scene split
+into >1 motion group, no single object may claim more than one group (one object cannot be in two places), so each group is
+committed on its own and a known identity is admitted **only if its whole model fits within the group** — else a fresh
+identity is **recruited** (Grossberg's mismatch reset). This is what *creates the rival* the size principle then needs.
+Measured: a blob learned from two things always seen together, then one part set in motion, **tears into its two parts** —
+each becomes its own object, recognisable alone, and the library stays bounded (blob shell + two parts) under continuous
+motion rather than exploding.
 
-**THE ART CUT-OVER (2026-07-16) — two normalisations, doing two different jobs.** L2/3 now carries Carpenter & Grossberg's
-two functions instead of one hand-rolled number:
-- **CHOICE** `T_j = |I ∧ w_j| / (α + |w_j|)`, normalised by the **CATEGORY** — this RANKS rivals, and in the conservative
-  limit (α→0) the *smallest* model that explains the sweep wins. Grossberg's mechanism and Tenenbaum's **size principle** in
-  one expression. **We had no such term**: ranking was raw accumulated evidence, a SUM, which is why a blob explaining 2 of
-  its 4 cells *tied* an object explaining 2 of 2.
-- **MATCH / VIGILANCE** `M_j = |I ∧ w_j| / |I|`, normalised by the **INPUT** — resonance (learn) vs reset (recruit). Our
-  "nothing REFUTES it" bar already *was* this, hand-rolled, at **ρ = 1.0**; naming it hands us the deferred noise knob
-  (ρ<1 tolerates k contradictions; lower ρ = coarser categories).
-One number was being asked to do both jobs, which is why it kept failing at one of them — the tell being that we
-independently re-derived the choice function by hand, badly, over three iterations. The cure for hand-coded dynamics is to
-*use the settled mechanism*, not to re-derive it (`RULES` #5).
+**The answer to the un-binding question is: DON'T — recruit, and let ART CHOICE retire the blob.** Four literatures converge:
+ART **recruits** a new category on mismatch rather than eroding the old (the stability–plasticity answer); latent-cause
+inference **creates a new state** on prediction error; Xu & Carey show **spatiotemporal** individuation precedes featural by
+~10 months (motion is the primary cue); and the size principle says a small model seen whole beats a big one seen half. So
+the blob is never erased — once its parts exist as rivals, **CHOICE** (`Column._choice` = `T_j = |I∧w_j|/(α+|w_j|)`,
+normalised by the CATEGORY) keeps them winning and the blob simply stops being chosen, dying of disuse. `ColumnPooler.perm_dec`
+stays dead code, correctly: L2/3 needs no LTD.
 
-**THE UN-BINDING QUESTION — measured 2026-07-16, and the answer is now clear even though the build is not done.**
-An over-merged blob is far worse than a competing hypothesis. Measured: with a blob `AB` learned, studying `A` **alone for six
-passes** leaves the library at **1** — `A` is never individuated at all. Every sweep of `A` is a *partial view* of `AB`:
-all match, no contradiction, so `commit` recognises `AB` and reinforces it, forever. The blob is not merely un-killable, it is
-**absorbing**.
+*One subtlety the build exposed:* the ART **choice** and **vigilance** functions must be counted at the **feature-at-location**
+granularity (matched fixations over model size — `Column._replay`'s `matched` count, which uses L2/3 `support`), not at raw
+L4-cell level. Minting binds *burst* cells (~M per column) while recognition fires the *predicted* ~1, so an L4-cell choice
+made a torn-off piece overlap only `1/M` of its own inflated receptive field and **tie its parent blob** — the pooler's
+`support` is the burst-independent level, and choice/vigilance are counted from it. (The two ART normalisations, restated at
+this level: **CHOICE** = matched/(α+|model|), the size principle that ranks rivals; **VIGILANCE** = the `refuted_at` bar at
+ρ=1, "nothing may go unexplained", whose ρ<1 relaxation is the deferred sensor-noise knob.) The tell that we had the level
+wrong: we independently re-derived choice by hand, badly, over three iterations — the cure for hand-coded dynamics is to *use*
+the settled mechanism (`RULES` #5), not re-derive it.
 
-The cause is a rule we chose deliberately: **a partial view must not fragment a known object** (R5/R6). That rule and
-splitting are in direct tension — the same shape as R5-vs-R7 — and the tie-breaker must be *evidence*, because
-`reference_tbt_segmentation_and_grouping` is explicit that "one is really two" is "just what the **EVIDENCE** concludes — not
-a re-run of a segmenter", with "**REVISABILITY** is the safety invariant". **Common fate is exactly that evidence:** an
-identity whose model spans **two motion groups** is refuted *as an object* — its parts demonstrably move apart, so it never
-was one thing. That is what licenses un-binding; nothing else does, and a generic decay would be a heuristic.
+*Honest scope:* the tear is demonstrated under **continuous** motion (each look adds a fresh displacement). Re-committing a
+*fused, now-static* multi-object scene as one episode is not something a correct agent loop does, and is not handled — once
+motion has individuated the parts, perception should track them separately, which is the game-loop's job. And the mint-time
+label (a stable counter) makes a retired blob a harmless dead shell, not a label-shifting hazard.
 
-**And the answer turned out to be: DON'T un-bind.** Four literatures converge — ART **recruits** a new category on mismatch
-rather than eroding the old (that *is* the stability–plasticity answer); latent-cause inference **creates a new state** when
-prediction error demands it; Xu & Carey show **spatiotemporal** individuation precedes featural by ~10 months, so motion is
-the primary cue; and the size principle says a small model seen whole should beat a big one seen half. So the blob is never
-erased — it simply **stops winning** (CHOICE) once a rival exists, and dies of disuse. `ColumnPooler.perm_dec` stays dead
-code, correctly: L2/3 needs no LTD for this.
-
-*What remains, and it is narrow:* CHOICE is **built and unit-exercised** (`test_l23_pooling`), but its end-to-end payoff is
-**unreachable** until common fate's minting half works — with no rival, the blob wins unopposed and is reinforced, so the
-term has nothing to rank against. The blocking step is therefore still "make a grouping persist as objects", not un-binding.
-(The label-shift worry was misconceived: a "label" is just a list index; a mint-time counter settles it.)
-2. **The operator's KEY, discovered rather than given.** Today the caller says `learn("PUSH", …)`. Gravity's key is not an
+**What is still missing, in dependency order:**
+1. **The operator's KEY, discovered rather than given.** Today the caller says `learn("PUSH", …)`. Gravity's key is not an
    action — it is a learned CONDITION. Discovering *what the delta depends on* is the open problem
    (`feedback_subgoal_types_from_dynamics`, `reference_l5_operator_kinds`), and "every object falls alike" is itself a
    hypothesis the world can refute (feathers) — which today's operator states by keying on nothing.
-3. **L5 displacement cells** — the relation the override reads.
+2. **L5 displacement cells** — the relation the override reads.
 
 ## 10. What makes a layer a layer — role = (context-in, target-out), both wired by hand
 

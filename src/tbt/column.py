@@ -623,9 +623,9 @@ class Column:
             if key in seen:
                 continue                                 # different correspondences, same pose = the same hypothesis
             seen.add(key)
-            evidence, _, refuted_at, codes = self._replay(identity, R, origin)
+            evidence, _, refuted_at, matched = self._replay(identity, R, origin)
             scored.append(Hypothesis(identity, self.label_of(identity), R, origin, evidence, refuted_at,
-                                     self.pooler.choice(codes, identity)))
+                                     self._choice(matched, identity)))
         if not scored:
             return []
         # RANK BY ART's CHOICE (the size principle), evidence only to break exact ties. Ranking by evidence alone was the
@@ -634,6 +634,15 @@ class Column:
         best = [h for h in scored if (h.choice, h.evidence) >= top]
         self.pooler.settle(best[0].identity)             # L2/3 holds what the population concluded
         return best
+
+    def _choice(self, matched: int, identity: frozenset) -> float:
+        """ART's CHOICE function `T_j = |I ∧ w_j| / (α + |w_j|)`, at the FEATURE-AT-LOCATION granularity: `matched` fixations
+        over model size (`α + |extent|`). Normalised by the CATEGORY, so in the conservative limit (small α) the SMALLEST
+        model that explains the sweep wins — Grossberg's mechanism and Tenenbaum's SIZE PRINCIPLE in one expression (seeing
+        exactly a small model's cells and none of a bigger one's others is a *suspicious coincidence*). This is what lets a
+        torn-off PIECE beat its parent BLOB (matched 2 / extent 2 = 0.99 vs 2 / 4 = 0.50) and is why the blob need never be
+        un-bound — it simply stops being chosen (ARCHITECTURE §9)."""
+        return matched / (self.pooler.alpha + max(1, len(self._extent(identity))))
 
     def _pin_rotation(self):
         """Pick the `dims` buffered fixations that PIN A ROTATION DOWN: the first, plus each next one whose displacement from
@@ -670,31 +679,35 @@ class Column:
 
     def _replay(self, identity, rotation: tuple, origin: tuple, learn: bool = False):
         """Replay the buffered sweep under ONE (object, pose) hypothesis: map each sensed position back into the object's own
-        frame and sense it there. Returns `(evidence, predicted, refuted_at)` — the evidence for `identity`, how many fixations
-        L4 PREDICTED (did not burst), and the INDEX of the FIRST fixation that refuted the hypothesis (None if none did).
+        frame and sense it there. Returns `(evidence, predicted, refuted_at, matched)` — the evidence for `identity`, how many
+        fixations L4 PREDICTED (did not burst), the INDEX of the FIRST fixation that refuted the hypothesis (None if none did),
+        and how many fixations MATCHED it (predicted AND supported by this identity).
 
         SCORING (`learn=False`) asks THE MODEL whether it expected each fixation. Monty's update — a match ADDS [0,+1], a
         mismatch SUBTRACTS [−1] — with two distinct mismatches, both object-SPECIFIC:
           • L4 BURSTS ⇒ nothing known is here at all, so this object is not here either;
           • L4 predicts but L2/3's support for THIS identity is ~0 ⇒ something is here and it is SOMEONE ELSE's.
-            (Support is the graded weight, so a hypothesis is never rewarded for a location another object explains. This
-            is what refutes a merely feature-SHARING object, which a support-blind score would happily absorb.)
-        `evidence` RANKS rival hypotheses; WHERE the first refutation falls is the sharper thing `commit` asks for — it is
-        both the bar (any refutation ⇒ not this object) and, when the prefix exhausted the model, the object BOUNDARY.
+            (Support is the graded weight, so a hypothesis is never rewarded for a location another object explains.)
+        `refuted_at` is ART's VIGILANCE at ρ=1 (any refutation ⇒ not this object) and, when the prefix exhausted the model,
+        the object BOUNDARY. `matched` is what ranks rivals via ART's CHOICE (`recognize`), NOT raw `evidence`: choice counts
+        at the FEATURE-AT-LOCATION granularity (matched fixations over model size), which is burst-independent — the reason
+        an earlier L4-CELL choice tied a piece with its parent blob (minting binds burst cells, ~M per column; recognition
+        fires ~1, so a piece overlapped only 1/M of its own inflated receptive field).
 
         BINDING (`learn=True`) walks the SAME traversal and commits it: L4 learns the feature-at-location, and each PREDICTED
         code is bound to `identity` in L2/3 + the L4→L6a link. Learning and scoring being one traversal is what makes an
         object get learned in exactly the frame it was recognised in — so re-sweeping a known object at a NOVEL pose
         reinforces it rather than corrupting it with rotated coordinates. `identity=None` trains L4 only (the probe below)."""
-        evidence, predicted, refuted_at, seen = 0.0, 0, None, set()
+        evidence, predicted, refuted_at = 0.0, 0, None
+        matched = 0
         for i, (pos, feature) in enumerate(self._sweep):
             delta, refuted, was_predicted = self._fit(identity, rotation, origin, pos, feature, learn=learn)
             evidence += delta
             predicted += 1 if was_predicted else 0
-            seen |= set(self.layers["L4"].htm._active)    # the episode's INPUT `I` — what ART's two functions judge
+            matched += 1 if (was_predicted and not refuted and identity is not None) else 0
             if refuted and refuted_at is None:
                 refuted_at = i
-        return evidence, predicted, refuted_at, frozenset(seen)
+        return evidence, predicted, refuted_at, matched
 
     def _fit(self, identity, rotation: tuple, origin: tuple, pos, feature: SDR, learn: bool = False):
         """THE scoring atom — ONE fixation against ONE (object, pose) hypothesis. Returns `(evidence, refuted, predicted)`.
@@ -775,10 +788,20 @@ class Column:
         location in the object's model it ended there and a new object begins; if the prefix covered only part of it, the
         sweep never reached an edge and "one object sharing a prefix" is the better parse. Then the remainder is simply a
         fresh episode — the same `commit`, recursively — so a continuous sweep over several objects needs NO boundary cue
-        from the caller."""
+        from the caller.
+
+        COMMON FATE OVERRIDES RECOGNITION (R7's cold-start blob, closed). Checked FIRST, above recognition, because motion
+        can refute a single-object hypothesis that recognition would otherwise accept: if the buffered scene split into >1
+        MOTION group, its parts moved apart, so it is not one object — even if a known blob explains every fixation as a
+        partial view (vigilance passes). Motion carries evidence a static match cannot (`reference_tbt_segmentation_and_grouping`;
+        Xu & Carey: spatiotemporal individuation precedes featural). `_commit_split` is then the ART orienting RESET — recruit
+        fresh categories for the parts rather than reinforce the over-spanning whole (Grossberg)."""
         self._require_location()
         if not self._sweep:
             return frozenset()
+        groups = self._common_fate_groups()
+        if len(groups) > 1:                              # motion split the scene ⇒ it was never one object (checked FIRST)
+            return self._commit_split(groups)
         best = self.recognize()
         if best and best[0].refuted_at is None:
             h = best[0]                                  # a KNOWN object (possibly at a novel pose) — reinforce it
@@ -792,22 +815,42 @@ class Column:
             self._sweep = whole[cut:]
             self.pooler.reset()
             return self.commit()                         # the remainder is its own episode — recognise it, or mint it
-        # Nothing known explains this sweep. "NEW" and "not yet LEARNED" are different, and L4 tells them apart: until L4
-        # predicts a fixation, its code is a location-agnostic BURST that supports every object carrying that feature
-        # ANYWHERE (the feature-only trap), so there is nothing reliable to ground an identity on. Sense the sweep (training
-        # L4) and mint only once L4 predicts some of it — the pooler's burst rule, at episode scale.
-        groups = self._common_fate_groups()
-        if len(groups) > 1:                              # the scene's parts moved DIFFERENTLY ⇒ it was never one object
-            whole, last = self._sweep, frozenset()
-            for g in groups:
-                self._sweep = [whole[i] for i in g]
-                self.pooler.reset()
-                last = self.commit()                     # each group is its own episode — recognise it, or mint it
-            self._sweep = whole
-            return last
-        # A NEW object DEFINES its own frame at the onset — the first fixation is its origin (Lewis 2019: a fresh grid phase
-        # IS the object's origin; `reference_tbt_object_frame_bootstrap`). For a caller-started episode that first fixation
-        # is `_anchor`; for the REMAINDER of a split it is wherever the previous object ended — the same rule, no special case.
+        return self._mint_sweep()
+
+    def _commit_split(self, groups: list) -> frozenset:
+        """The buffered scene split into >1 MOTION group (common fate) — so it is >1 object, and the ART orienting RESET
+        fires: NO single object may claim more than one group, because one object cannot be in two places at once. Commit
+        each group as its own episode, admitting a known identity ONLY IF its whole model fits WITHIN the group's features —
+        an object that reaches OUTSIDE the group would have to be partly elsewhere, which motion has just shown it is. When
+        nothing fits, RECRUIT a fresh identity (mint) — never erode the over-spanning whole; it is simply not chosen, and
+        dies of disuse (Grossberg; the un-binding answer, ARCHITECTURE §9).
+
+        This is what CREATES the rival the size principle then needs. Before it, a piece of a learned blob was only ever a
+        partial view (vigilance 1.0), so recognition reinforced the blob and the piece was never individuated (measured: six
+        passes studying a part alone left the library at 1). The containment veto is the motion evidence recognition lacks;
+        once a piece exists, ART CHOICE keeps it winning over the blob (a small model seen whole beats a big one seen half),
+        so no duplicate is minted on later looks."""
+        whole, last = self._sweep, frozenset()
+        for g in groups:
+            self._sweep = [whole[i] for i in g]
+            here = {self._key(f) for _p, f in self._sweep}
+            best = self.recognize()
+            self.pooler.reset()
+            if best and best[0].refuted_at is None and self._model_keys(best[0].identity) <= here:
+                h = best[0]                              # a known object that fits WITHIN this group — reinforce it
+                self._replay(h.identity, h.rotation, h.origin, learn=True)
+                last = self.pooler.settle(h.identity)
+            else:
+                last = self._mint_sweep()                # over-spanning or unknown ⇒ recruit (ART reset)
+        self._sweep = whole
+        return last
+
+    def _mint_sweep(self) -> frozenset:
+        """Recruit a NEW identity for the buffered sweep. A NEW object DEFINES its own frame at the onset — the first
+        fixation is its origin (Lewis 2019: a fresh grid phase IS the object's origin; `reference_tbt_object_frame_bootstrap`).
+        "NEW" and "not yet LEARNED" differ, and L4 tells them apart: until L4 predicts a fixation its code is a
+        location-agnostic BURST supporting every object carrying that feature ANYWHERE (the feature-only trap), so there is
+        nothing to ground an identity on — sense the sweep (training L4) and mint only once L4 predicts some of it."""
         canonical, origin = eye(self.location.dims), self._sweep[0][0]
         _, predicted, _, _ = self._replay(None, canonical, origin, learn=True)
         if not predicted:
@@ -816,6 +859,12 @@ class Column:
         identity = self.pooler.mint()
         self._replay(identity, canonical, origin, learn=True)
         return self.pooler.settle(identity)
+
+    def _model_keys(self, identity: frozenset) -> set:
+        """The feature-KEYS this identity's model uses — enough to ask "does the whole model fit within a group's features?".
+        The stored key suffices here because RECRUITING (not un-binding) never re-senses a model; the SDR would only be
+        needed to replay a model's own features, which this path does not do."""
+        return {k for k, entries in self._link.items() if any(i == identity for i, _loc in entries)}
 
     def _common_fate_groups(self) -> list:
         """Group the buffered fixations by HOW THEY MOVED since the previous look — the Gestalt cue, and the only one that can

@@ -508,15 +508,28 @@ objects and after two fixations [7,8] is still explained by P at 0° AND Q at 18
 which is exactly the test's claim (features can never tell them apart; the arrangement does). The old `[0,0,0]` came from the
 ASSUMPTION breaking the tie, not from evidence.
 
+### R9 — OBJECT DYNAMICS + COMMON FATE + the ART cut-over. **BUILT 2026-07-16. Suite 67 green.**
+- **The operator over OBJECT poses** (`Column.dynamics`, an L5 engine): from ONE demonstration of a shove it predicts at
+  positions never demonstrated, on the same object ROTATED, and on a DIFFERENT object never seen to move — fed by the poses
+  `recognize` SOLVES, so perception → dynamics is end-to-end. Object motion is EXTRINSIC (measured: an intrinsic operator
+  sends a 90°-turned block 90° off the shove).
+- **Common fate** (`_common_fate_groups` + `look_again`) groups a look by MOTION with no model, and `_commit_split` makes the
+  grouping PERSIST — the ART orienting RESET: a scene split by motion is >1 object, no identity may claim two groups, so parts
+  are RECRUITED fresh. This CLOSES R7's cold-start blob: a blob learned from two things always seen together TEARS into its
+  parts once one moves (measured, under continuous motion; library stays bounded, each part recognisable alone).
+- **The un-binding answer is DON'T** (four literatures converge — ART recruit, latent-cause new-state, Xu&Carey motion-first,
+  the size principle): ART **CHOICE** (`_choice` = matched/(α+|model|)) keeps a torn-off part winning over the blob, which
+  dies of disuse; `perm_dec` stays dead. **The one subtlety the build exposed:** choice/vigilance must be counted at the
+  FEATURE-AT-LOCATION level (`_replay`'s `matched`, via L2/3 `support`), NOT raw L4 cells — burst-binding inflated an L4-cell
+  receptive field so a piece tied its parent blob at 0.5. The pooler's L4-cell `choice`/`match`/`receptive_field` were built
+  (ART cut-over) then DELETED one commit later as the wrong granularity — honest thrash, recorded.
+- **Still open** (unchanged): the operator's KEY (discovered condition, not a named action); and re-committing a fused,
+  now-static multi-object scene is not handled (the game-loop should track individuated parts separately, not re-fuse them).
+
 ## NEXT (in order)
-1. **OBJECT DYNAMICS — the operator over object poses (`notes/` TBD; answers the gravity question).** `recognize` already
-   returns `(object, pose)`, `perceive` now emits that stream ONLINE, and `MotionOperator.learn(key, before_pose, after_pose)`
-   already has the right shape, so: track a recognised object's pose across frames and learn its transition. This buys three things at once — (i) **common fate**,
-   which is the missing cold-start segmentation cue above; (ii) ARC's "what does this action do to that block"; (iii) the
-   groundwork for **gravity**. The generalization "ANY object, ANYWHERE" is already free — TRANSFORM is position-invariant by
-   construction (learned in a 5×5 region, exact at (45,50)), which is the place-invariance lesson again: the FRAME generalizes,
-   not the data. What is genuinely open is the operator's **KEY** — today the caller supplies an action; gravity's key is a
-   discovered CONDITION, not an action ([[feedback_subgoal_types_from_dynamics]], [[reference_l5_operator_kinds]]).
+1. **The operator's KEY, discovered rather than given.** Gravity's key is a CONDITION, not an action
+   ([[feedback_subgoal_types_from_dynamics]], [[reference_l5_operator_kinds]]); "every object falls alike" is a hypothesis the
+   world can refute (feathers), which today's operator states by keying on nothing.
 2. **L5 DISPLACEMENT CELLS — relations between objects.** TBT is explicit ([[reference_tbt_layers_4_23]]): grid =
    `location + movement → location`; displacement = `location + location → the relation`. "Resting on" is a displacement
    between two object frames. Needed for compositional objects AND for the support relation below.

@@ -176,6 +176,47 @@ def test_COMMON_FATE_groups_a_scene_NO_MODEL_could():
         "the LEFT part moved and the right did not, so the scene is TWO things — grouped by motion, with no model at all")
 
 
+def test_COMMON_FATE_TEARS_an_over_merged_blob_into_its_parts():
+    """THE R7 CLOSURE, end to end. Two things always seen together are learned as ONE blob — correct, since with no model
+    there is no object. Then one part MOVES: common fate splits the look, and because a single object cannot be in two places
+    at once, the ART orienting RESET recruits fresh identities for the parts (it does NOT erode the blob — Grossberg; the
+    un-binding answer). Once a part exists, ART CHOICE (the size principle) keeps it winning over the blob — a small model
+    seen whole beats a big one seen half — so no duplicates accrue and the blob simply stops being chosen.
+
+    Measured before this slice: a part swept alone was only ever a PARTIAL view of the blob (vigilance 1.0, not refuted), so
+    recognition reinforced the blob and the part was NEVER individuated (six passes left the library at 1). Motion is the
+    evidence static matching lacks (Xu & Carey: spatiotemporal individuation precedes featural)."""
+    agent = _fresh()
+    col = agent._nav_col()
+    for _ in range(6):
+        _sweep_scene(agent, SCENE_LEFT, SCENE_RIGHT)                   # always together ⇒ ONE blob
+    assert len(col.pooler.objects) == 1 and len(col._extent(col.pooler.objects[0])) == 4, \
+        "the two things must first be learned as one 4-cell blob (the cold-start case)"
+
+    for k in range(1, 7):                                              # the LEFT part now moves CONTINUOUSLY
+        col.look_again()
+        _sweep_scene(agent, SCENE_LEFT, SCENE_RIGHT, shift=(3.0 * k, 0.0))
+    lib = len(col.pooler.objects)
+    assert 3 <= lib <= 4, f"the blob must TEAR into its two parts (+ the dead blob shell), not explode; library={lib}"
+
+    def read(part, shift):
+        agent.start_object()
+        for coord, feature in part.items():
+            agent.locate((coord[0] + shift[0], coord[1] + shift[1]))
+            agent.sense_sweep(feature)
+        return agent.recognize()
+
+    a = read(SCENE_LEFT, (18.0, 0.0))                                  # each part, ALONE, at its moved place
+    b = read(SCENE_RIGHT, (0.0, 0.0))
+    assert a and b, "both parts must be recognised alone"
+    assert len(col._extent(a[0].identity)) == 2, f"the moved part is its OWN 2-cell object, not the blob ({a[0].label})"
+    assert len(col._extent(b[0].identity)) == 2, f"the stationary part is its own 2-cell object ({b[0].label})"
+    assert a[0].identity != b[0].identity, "the two parts are DIFFERENT objects"
+    blob = col.pooler.objects[0]
+    assert a[0].identity != blob and b[0].identity != blob, \
+        "the parts must WIN over the blob (ART choice: small-seen-whole beats big-seen-half), not be re-absorbed by it"
+
+
 def test_a_scene_that_moves_TOGETHER_is_ONE_group():
     """The other half, and what stops the cue from shattering everything: parts that move as ONE are ONE. Shift the WHOLE
     scene — every fixation shares a displacement — and it must stay one group, which is exactly right for a rigid object

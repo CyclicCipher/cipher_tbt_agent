@@ -27,8 +27,7 @@ _PKG = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG not in sys.path:
     sys.path.insert(0, _PKG)
 
-from tbt.agent import Agent          # noqa: E402
-from tbt.pooler import ColumnPooler  # noqa: E402
+from tbt.agent import Agent  # noqa: E402
 
 OBJ_A = {(0, 0): 1, (1, 0): 2, (0, 1): 3, (1, 1): 4}   # colours 1..4
 OBJ_B = {(0, 0): 5, (1, 0): 6, (0, 1): 7, (1, 1): 8}   # colours 5..8, the same shape — identity is the FEATURES at them
@@ -114,32 +113,6 @@ def test_a_partial_view_of_a_known_object_is_not_a_new_object():
     label = _study(agent, OBJ_A, order=list(OBJ_A)[:2])          # only 2 of A's 4 features
     assert len(agent._nav_col().pooler.objects) == before, "a PARTIAL sweep of a known object must not mint a duplicate"
     assert label == 0, f"a partial sweep of A must recognise A, got {label}"
-
-
-def test_ART_the_two_normalisations_do_two_DIFFERENT_jobs():
-    """The ART cut-over, tested where the mechanism lives. Two categories both explain the input PERFECTLY and neither is
-    refuted: a SMALL model whose every cell is present, and a BIG one of which only half is present.
-
-    * **VIGILANCE** `M_j = |I ∧ w_j| / |I|` is normalised by the **INPUT** — "how much of what I am seeing does this account
-      for?" Both score 1.0. It CANNOT tell them apart, and that is correct: a partial view of a known object must not
-      fragment it (`test_a_partial_view_of_a_known_object_is_not_a_new_object`). Our "nothing REFUTES it" bar IS this, at
-      ρ=1.0; `rho < 1` is the deferred sensor-noise knob.
-    * **CHOICE** `T_j = |I ∧ w_j| / (α + |w_j|)` is normalised by the **CATEGORY** — it prefers the SMALLEST model that
-      explains the input (Grossberg's conservative limit = Tenenbaum's size principle: seeing exactly the small model's cells
-      and none of the big one's others is a *suspicious coincidence*).
-
-    We had only one number (raw accumulated evidence, a SUM) and were making it do both jobs — which is why a blob explaining
-    2 of its 4 cells TIED an object explaining 2 of 2, and measurably absorbed it forever. Two jobs need two normalisations."""
-    pooler = ColumnPooler(seed=0)
-    small, big = pooler.mint(), pooler.mint()
-    seen = frozenset(range(16))                       # the input I: the cells this sweep actually activated
-    pooler.bind(seen, small)                          # the SMALL model is exactly the input
-    pooler.bind(seen | frozenset(range(16, 32)), big)  # the BIG model is the input PLUS as much again, unseen
-    assert pooler.match(seen, small) == 1.0 and pooler.match(seen, big) == 1.0, \
-        "VIGILANCE must NOT separate them — both explain every cell of what is being seen (that is the partial-view rule)"
-    assert pooler.choice(seen, small) > pooler.choice(seen, big), (
-        f"CHOICE must prefer the SMALLER model: {pooler.choice(seen, small):.3f} vs {pooler.choice(seen, big):.3f} — "
-        f"this is the term we lacked, and its absence is what let a blob absorb its own parts")
 
 
 if __name__ == "__main__":
