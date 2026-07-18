@@ -19,11 +19,7 @@ import numpy as np
 from .basal_ganglia import BasalGanglia
 from .column import Column
 from .encoders import SDR, CategoryEncoder, GridEncoder
-from .hippocampus.ca1 import Remapper
-from .hippocampus.ca3 import CA3
-from .hippocampus.dg import DG
-from .hippocampus.map import WorldMap
-from .hippocampus.replay import Rollout, WorldModel
+from .hippocampus import Hippocampus, WorldMap, WorldModel
 from .reward import ValueCritic
 from .thalamus import Thalamus
 
@@ -72,9 +68,7 @@ class Agent:
         self.thalamus = Thalamus()
         self.bg = BasalGanglia(seed=seed)
         self.critic = ValueCritic()      # the TD value critic (ROADMAP 3c) — its δ replaces the faked 2r−1 RPE
-        self.ca3 = CA3()                 # the hippocampal CA3 attractor — one-shot EPISODIC store + pattern completion
-        self.dg = DG(n_inputs=512, seed=seed)   # dentate gyrus — environment signature → separated CHART KEY
-        self.remapper = Remapper()       # multi-chart REMAPPING — recall a known environment's chart or mint a new one
+        self.hippocampus = Hippocampus(n_inputs=512, seed=seed)   # the composed hippocampus: map⊕replay⊕CA3⊕DG⊕CA1 (one handle)
         self._decision_col = None
         self._pending = None
         self._nav = None
@@ -300,7 +294,7 @@ class Agent:
         forward for the shortest action sequence reaching the goal (`reward(world) > 0`), the value critic scoring leaves
         when the goal is beyond the horizon. Returns the action sequence (empty = already satisfied). The GOAL is a reward
         predicate over world-states — selected elsewhere, never hand-coded into the planner (`feedback_bitter_lesson`)."""
-        return Rollout(self.world_model(), reward, actions, horizon, value).plan(self.world_state())
+        return self.hippocampus.plan(self.world_state(), self.world_model(), reward, actions, horizon, value)
 
     # ----- HIPPOCAMPAL EPISODIC MEMORY (DESIGN §2, slice 3): one-shot store + partial-cue completion via CA3 -----------
     def scene_tokens(self) -> frozenset:
@@ -309,25 +303,25 @@ class Agent:
         return frozenset((oid, tuple(round(c) for c in pose[0])) for oid, pose in self.world_state().objects.items())
 
     def remember_scene(self) -> None:
-        """Store the current scene as an EPISODE in CA3 (one-shot Hebbian write — the fast hippocampal memory)."""
-        self.ca3.store(self.scene_tokens())
+        """Store the current scene as an EPISODE (one-shot) — routed through the hippocampus (`Hippocampus.remember`)."""
+        self.hippocampus.remember(self.scene_tokens())
 
     def recall_scene(self, glimpse) -> set:
         """Complete the whole remembered scene from a PARTIAL glimpse (some of its `(object, cell)` tokens) — CA3 pattern
-        completion. An ambiguous glimpse recalls the union of the scenes it fits; a novel one recalls nothing (DESIGN §3½)."""
-        return self.ca3.complete(set(glimpse))
+        completion via the hippocampus. An ambiguous glimpse recalls the union of the scenes it fits; a novel one recalls
+        nothing (DESIGN §3½)."""
+        return self.hippocampus.recall(glimpse)
 
     def chart_key(self, signature) -> frozenset:
         """The DG-separated CHART KEY of an environment `signature` (a set of active input bits) — distinct environments get
-        well-separated keys, the same one returns the same key (DESIGN §2, slice 4). The base for multi-chart REMAPPING
-        (slice 5): DG separates, CA3 stores/recognises the chart, CA1 decides match-vs-new."""
-        return self.dg.separate(signature)
+        well-separated keys, the same one returns the same key (DESIGN §2, slice 4). Routed through the hippocampus."""
+        return self.hippocampus.chart_key(signature)
 
     def visit_environment(self, observed):
         """Enter an environment described by `observed` content tokens (its landmarks): RECALL its chart if a stored one
         explains the observation, else MINT a new one (DESIGN §2, slice 5). Returns `(chart_id, CA1Result)`. A PARTIAL view
         still recalls the chart (absence ≠ novelty); a CONTRADICTED view (a landmark the chart lacks) mismatches and remaps."""
-        return self.remapper.visit(observed)
+        return self.hippocampus.visit(observed)
 
     # ----- CROSS-COLUMN VOTING via the thalamus content⊗location register (ARCHITECTURE §3; Phase 5) -----------------
     def vote_consensus(self, votes, location, min_support: int = 1):

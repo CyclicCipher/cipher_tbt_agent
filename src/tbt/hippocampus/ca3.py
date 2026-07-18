@@ -44,19 +44,31 @@ class CA3:
         self.n_stored += 1
 
     def complete(self, cue):
-        """Pattern-complete from a partial/noisy `cue`: settle the recurrent dynamics to a fixed point — the nearest stored
-        pattern. A SUBSET cue fills in (the attractor pulls back even bits the cue omitted); NOISE (bits that co-occur with
-        nothing active) drops out; an AMBIGUOUS cue settles to the UNION of the patterns it fits (no confabulation); a wholly
-        NOVEL cue collapses to nothing. Returns the settled bit set. Settling is bounded by `iters` (no unbounded loop)."""
+        """Pattern-complete from a partial/noisy `cue`: GROW the active set by repeatedly adding bits that co-occurred with at
+        least `theta` of it, then PRUNE bits the settled set does not support. A SUBSET cue fills in (even a 1-bit cue recovers
+        the whole — a strict recompute would OSCILLATE on a 2-bit pattern, each bit pulling the other but dropping itself);
+        NOISE drops out (a cue bit that belongs to no stored pattern fails the final prune); an AMBIGUOUS cue settles to the
+        UNION of the patterns it fits (no confabulation); a wholly NOVEL cue collapses to nothing. Bounded by `iters`.
+
+        The GROW pass is monotonic (never removes mid-settle), which is what makes it converge for small patterns; the single
+        PRUNE at the end applies the settled-set threshold once, so noise and stray cue bits are removed without re-opening
+        the oscillation."""
         active = set(cue)
         for _ in range(self.iters):
-            count: Counter = Counter()
-            for i in active:
-                for j in self.co.get(i, ()):
-                    count[j] += 1
+            count = self._support(active)
             thresh = self.theta * len(active) if active else 0.0
-            nxt = {j for j, c in count.items() if c >= thresh}
-            if nxt == active:
-                break
-            active = nxt
-        return active
+            add = {j for j, c in count.items() if c >= thresh}
+            if add <= active:
+                break                                        # nothing new co-occurs strongly enough — settled
+            active |= add                                    # GROW (monotonic): recover the whole pattern from any cue
+        count = self._support(active)                        # PRUNE once: keep only what the settled set supports (drops noise)
+        thresh = self.theta * len(active) if active else 0.0
+        return {j for j in active if count.get(j, 0) >= thresh}
+
+    def _support(self, active) -> Counter:
+        """For each bit, the number of ACTIVE bits it co-occurred with in storage (binary overlap) — the recurrent drive."""
+        count: Counter = Counter()
+        for i in active:
+            for j in self.co.get(i, ()):
+                count[j] += 1
+        return count

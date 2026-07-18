@@ -59,8 +59,9 @@ the orchestrator (slice 6).
 5. **`ca1.py`** + **remapping** — the comparator + chart select/create. Test: revisiting an environment RECALLS its chart;
    a novel one MINTS a new chart; the wrong chart is a CA1 mismatch; a PARTIAL view MATCHES but a CONTRADICTED view
    MISMATCHES (§3½ — absence ≠ novelty).
-6. **`__init__.py`** (`Hippocampus`) — compose + WIRE into `agent.py`. Test end-to-end: perceive → map → plan-by-replay; and
-   remapping across two environments; and one-shot episodic recall of a past layout.
+6. **`__init__.py`** (`Hippocampus`) ✅ DONE — composes the subfields behind ONE agent handle (`self.hippocampus`), the
+   per-region fields folded behind it; `test_hippocampus` routes planning + episodic recall + remapping through the single
+   handle end to end. **THE FULL FOUR-PART HIPPOCAMPUS IS COMPLETE (2026-07-18); all six slices done, suite 117 green.**
 
 ## §3½ RECOGNITION UNDER MISSING INFORMATION — the partial-view / occlusion invariant (a FIRST-CLASS tested guard)
 The hazard, in our OWN minting logic: an apple seen from one angle, the visible part of a maze wall, a half-occluded tiger
