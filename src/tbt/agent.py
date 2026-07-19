@@ -14,11 +14,14 @@ thalamus gate come as tasks exercise them (STATUS.md 'Next'). The generic game i
 
 from __future__ import annotations
 
+import random
+
 import numpy as np
 
 from .basal_ganglia import BasalGanglia
 from .column import Column
 from .encoders import SDR, CategoryEncoder, GridEncoder
+from .operator import eye
 from .hippocampus import Hippocampus, WorldMap, WorldModel
 from .perceive import SelfTracker, segment
 from .reward import ValueCritic
@@ -71,6 +74,10 @@ class Agent:
         self.critic = ValueCritic()      # the TD value critic (ROADMAP 3c) — its δ replaces the faked 2r−1 RPE
         self.hippocampus = Hippocampus(n_inputs=512, dims=dims, seed=seed)   # the composed hippocampus: map⊕replay⊕CA3⊕DG⊕CA1 (one handle)
         self.self_tracker = SelfTracker()   # discover the controllable ROOT (the 'self') from motion — not colour (bitter lesson)
+        self._rng = random.Random(seed)     # exploration randomness (bootstrap + tie-break), seeded
+        self._visited: set = set()          # cells the self has occupied (novelty target = the UNvisited frontier)
+        self._blocked: set = set()          # cells a move was blocked into = LEARNED obstacles (walls); the rollout avoids them
+        self._last = None                   # (objects, action, self-cell) of the previous frame — for online learning
         self._decision_col = None
         self._pending = None
         self._nav = None
@@ -304,7 +311,7 @@ class Agent:
         ARC's board is world-anchored, so the nav pose and the scene objects already share one world frame (DESIGN §4)."""
         objects = self._scene_col().scene_snapshot() if self._scene is not None else {}
         bounds = [(0, 63)] * self._dims
-        return WorldMap(self.pose(), objects, bounds, body=self._nav_col().operator)
+        return WorldMap(self.pose(), objects, bounds, body=self._nav_col().operator, blocked=self._blocked)
 
     def world_model(self) -> WorldModel:
         """The learned FORWARD MODEL over the world-state (`hippocampus/replay.py`) — composes the agent's path-integration
@@ -411,8 +418,63 @@ class Agent:
         """The colour of the discovered controllable root (the 'self'), or None until it has been seen to move under action."""
         return self.self_tracker.root()
 
-    def step(self, observation):
-        """The generic game interface (observation → action) — still a STUB. The perception RETINA (`transduce`) + the
-        DISCOVERED self (`observe_self`) are the first wired pieces; the full loop (perceive → world-state → plan → act → learn)
-        composes them with the hippocampus rollout (STATUS.md 'Next'). Raises rather than a silent no-op (RULES.md #3)."""
-        raise NotImplementedError("Agent.step: full game loop not built — the perception bridge (transduce/observe_self) is wired.")
+    def new_level(self) -> None:
+        """A LEVEL boundary — a fresh environment: drop the per-level exploration state (visited/blocked/last). The learned
+        MODEL (operator, dynamics, critic) persists across levels (cross-level transfer); only the map memory resets."""
+        self._visited, self._blocked, self._last = set(), set(), None
+
+    def step(self, fd):
+        """The thin-agent GAME LOOP (one interaction): PERCEIVE the frame → discover the self + LEARN its dynamics from the last
+        transition → PLAN by novelty (explore, since the goal is hidden) → ACT. Returns `(action, coords)`. Composes the built
+        regions: the retina (`transduce`), the discovered self (`self_tracker`), the L6a operator (`learn_pose_move`), and the
+        hippocampal rollout (`plan`). No game semantics are read (`feedback_bitter_lesson`); walls are LEARNED by bumping."""
+        objs = self.transduce(fd.grid)
+        cur = self._self_pos(objs)                                    # the self's cell this frame (via the discovered root)
+        if self._last is not None:                                   # LEARN from the previous transition
+            prev_objs, action, prev_cur = self._last
+            self.observe_self(prev_objs, objs, action)               # keep discovering / confirming the controllable root
+            if prev_cur is not None and cur is not None and getattr(action, "is_movement", False):
+                if cur != prev_cur:                                  # the self MOVED → the operator learns this action's Δ
+                    self.learn_pose_move(action, (self._as_pose(prev_cur)), (self._as_pose(cur)))
+                elif self._nav_col().operator.known(action):         # tried but did NOT move → the target cell is an obstacle
+                    tgt = self._nav_col().operator.apply(self._as_pose(prev_cur), action)
+                    cell = tuple(round(c) for c in tgt[0])
+                    if cell != prev_cur:
+                        self._blocked.add(cell)
+        if cur is not None:
+            self._visited.add(cur)
+        action = self._explore_action(cur, fd.available_actions)
+        self._last = (objs, action, cur)
+        return action, None
+
+    def _as_pose(self, cell):
+        """A grid cell → a continuous pose `(position, R=identity)` in the nav frame."""
+        return (tuple(float(c) for c in cell), eye(self._dims))
+
+    def _self_pos(self, objs):
+        """The self's cell this frame — the anchor of the object whose colour is the discovered controllable root; None until
+        the root is discovered, or if it is ambiguous (more than one object of that colour)."""
+        c = self.self_color()
+        if c is None:
+            return None
+        selves = [o for o in objs if o.color == c]
+        return selves[0].anchor if len(selves) == 1 else None
+
+    def _explore_action(self, cur, available):
+        """NOVELTY-directed exploration (the goal is hidden, so explore): bootstrap the operator by trying UNLEARNED actions,
+        then PLAN (hippocampal rollout) the shortest path to the nearest UNVISITED reachable cell (the frontier), avoiding
+        learned obstacles. Random when the self is unknown or nothing new is reachable. `reference_goal_babbling_discovery`."""
+        movement = [a for a in available if getattr(a, "is_movement", False)]
+        if not movement:
+            return self._rng.choice(available)
+        if cur is None:                                              # self not discovered yet → move to generate the evidence
+            return self._rng.choice(movement)
+        op = self._nav_col().operator
+        unlearned = [a for a in movement if not op.known(a)]
+        if unlearned:                                               # bootstrap: learn each action's displacement
+            return self._rng.choice(unlearned)
+        self.set_pose(self._as_pose(cur)[0], eye(self._dims))       # anchor the nav pose to the perceived self
+        visited = set(self._visited)
+        reward = lambda w: 1.0 if (w.agent is not None and tuple(round(c) for c in w.agent[0]) not in visited) else 0.0
+        plan = self.plan(reward, movement, horizon=32)
+        return plan[0] if plan else self._rng.choice(movement)

@@ -36,16 +36,18 @@ class WorldMap:
     (returns a NEW map) so a rollout branches without disturbing its parent; `place`/`remove`/`anchor` mutate the fork you
     hold, which is what an in-progress simulation does to its own copy."""
 
-    def __init__(self, agent, objects=None, bounds=None, body=None) -> None:
+    def __init__(self, agent, objects=None, bounds=None, body=None, blocked=None) -> None:
         self.agent = agent                                   # (position, R) — self-location (place cells); may be None pre-localize
         self.objects = dict(objects) if objects else {}      # object_id -> (position, R) — objects at world poses
         self.bounds = tuple(bounds) if bounds else None      # per-axis (lo, hi) extent (boundary cells); None = unbounded
         self.body = body                                     # the SHARED, learned body operator (ego); referenced, not owned
+        self.blocked = frozenset(blocked) if blocked else frozenset()   # cells the agent cannot enter — LEARNED obstacles
+        #                                                       (a wall reshapes reachability, `reference_obstacle_as_transition_cost`)
 
     def snapshot(self) -> "WorldMap":
         """A forked copy for a hypothetical branch: the poses (immutable tuples) and the object dict are copied, the learned
-        `body` operator is shared. Cheap — the cost is O(objects), which is why the state is data, not a re-run column."""
-        return WorldMap(self.agent, self.objects, self.bounds, self.body)
+        `body` operator + `blocked` set are shared. Cheap — the cost is O(objects), which is why the state is data, not a re-run column."""
+        return WorldMap(self.agent, self.objects, self.bounds, self.body, self.blocked)
 
     def place(self, obj_id, pose) -> None:
         """Put/replace an object at a world pose (mutates this fork)."""
@@ -58,10 +60,13 @@ class WorldMap:
     def move_agent(self, action) -> "WorldMap":
         """Path-integrate the agent by `action` in the WORLD frame, reusing the shared learned body operator — returns a NEW
         map (functional, so a rollout tree branches cleanly). An unlearned action is the identity (the operator's own correct
-        prior: predict staying put), so this is always safe to call."""
+        prior: predict staying put). A move into a LEARNED obstacle (`blocked`) is CANCELLED (the agent stays) — a wall
+        reshapes reachability, so the rollout never plans a path through one."""
         m = self.snapshot()
         if self.body is not None:
-            m.agent = self.body.apply(self.agent, action)
+            nxt = self.body.apply(self.agent, action)
+            if not self.blocked or tuple(round(c) for c in nxt[0]) not in self.blocked:
+                m.agent = nxt
         return m
 
     def anchor(self, position) -> None:
