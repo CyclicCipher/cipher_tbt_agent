@@ -196,10 +196,16 @@ ARCHITECTURE.md §3/§5.1):
    WITHOUT; a moving object nets to its true world-motion. The moving-sensor fix's substrate — grounded by [[reference_layer5_role]]
    (displacement = motor = efference copy = inter-column message), [[reference_hippocampus]] (the world-map is the allocentric
    destination, now BUILT).
-   **NEXT — Step 2 (L5PT MOTOR):** fold the agent's `_Readout` decode INTO the column as L5PT's motor output (L5 IS the cortex's
-   motor output; the decode belongs there, not outside). Then **Step 3 (L5IT → BG):** the column projects its object-state to
-   the basal ganglia, retiring the ad-hoc `_decision_col`. Then **Step 4 (CLEANUP):** no inert `layers[...]` remains (each driven
-   or deleted); reconcile ARCHITECTURE §9/§12/§15. See [[reference_l5_operator_kinds]] (no self-vs-other split; self = controllable ROOT).
+   **Step 2 (L5IT → BG) ✅ DONE (2026-07-18)** — mechanism check REVISED the plan (the old "L5PT motor / fold the `_Readout`" was
+   wrong: the `_Readout` is peripheral BY DESIGN — value-readout, value-free cortex; L5PT's motor is already operator+efference+BG).
+   The real scattered-L5 was L5IT: `Column.striatum` DRIVES `layers["L5IT"]` so `decide`/`reward` route the BG's cortical input
+   through a column's L5IT (the striatal projection), not a raw-L4 relay. **HONEST caveat:** a single-stimulus decision makes the
+   frozen L5IT projection TRANSPARENT (bursts the same cells L4 would) — the correct anatomical path + a driven L5IT, not new
+   behaviour; genuine L5IT POOLING bites only for a multi-fixation object identity → BG (the OPEN increment).
+   **L5PT placeholder ✅ DELETED (2026-07-18)** — the inert `layers["L5PT"]` HTMLayer is gone; the `MotionOperator`/`dynamics`/
+   `relate`/`efference` ARE L5PT's mechanism (an HTMLayer is the wrong tool for continuous displacement), stated at the dict.
+   **OPEN:** the genuine multi-fixation L5IT integration (object identity → BG, an object-based decision task) is the real
+   exercise of L5IT, not yet demonstrated. **Step 4:** reconcile ARCHITECTURE §9/§12/§15. See [[reference_l5_operator_kinds]].
    After L5: the loop/brain object (move `decide`/`scan` OUT of the agent) → the THIN agent; the `step(obs)→action` game loop; the
    two-pane imagined-future WIDGET. Deferred within the hippocampus (DESIGN §4): theta/replay timing, graded remap.
    Still after the hippocampus: the MOTOR region (L5 emit + decode; move the readout OUT of the agent); the loop/brain object

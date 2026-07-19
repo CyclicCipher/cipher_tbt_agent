@@ -51,13 +51,17 @@ to make L5's REAL mechanism explicit + complete and DELETE the inert placeholder
     applies); broadcast via the Phase-5 thalamus register to peer columns; `Column.apply_efference(Δ)` = a peer path-integrates
     its OWN L6a by the self-motion (flow parsing). An object's world-motion = egocentric shift + efference: a STATIC object nets
     to 0 (no false dynamics), a MOVING one nets to its real motion. [the moving-sensor fix]
-  - **MOTOR** — fold the agent's `_Readout` decode INTO the column: L5 IS the cortex's motor output, so the displacement→action
-    decode belongs in L5PT, not outside it.
-  - the `layers["L5PT"]` HTMLayer earns its keep as the discrete goal-gated motor/affordance SELECTION (object+goal → the action
-    to enact), the operator supplying that action's geometry — OR it is removed. Nothing inert.
-- **L5IT** (slender, IT — the INTEGRATOR). BUILD it (not deferred): observe L2/3's object identity → project it to the BASAL
-  GANGLIA as the selection context (which the ad-hoc `_decision_col` in `agent.py` currently FAKES) + gate L5PT. This retires
-  the decision-column hack: the sensory/task columns feed the BG through their OWN L5IT, as the cortex does.
+  - **MOTOR** — already substantially present: the operator gives the displacement, step 1 gives the efference, and the
+    ENACTED action is the BG-selected + thalamus-gated one (the loop). **CORRECTION (mechanism check, 2026-07-18):** do NOT fold
+    the agent's `_Readout` into the column — its docstring is explicit that it "lives at the motor periphery (the agent), NOT
+    inside the value-free column"; it is the VALUE-readout the cortex deliberately cannot do (ARCHITECTURE §1, value-free
+    cortex). Folding it in would break that invariant. So L5PT's motor stays as-is; the dead thing is the inert `layers["L5PT"]`
+    HTMLayer, which is REMOVED (an HTMLayer is the wrong tool for continuous displacement — the operator IS L5PT's engine) or
+    given a genuine discrete affordance/motor-selection job. Nothing inert.
+- **L5IT** (slender, IT — the INTEGRATOR). This is the REAL scattered-L5. BUILD it (not deferred): observe L2/3's object
+  identity → project it to the BASAL GANGLIA as the selection context — exactly what the ad-hoc `_decision_col` in `agent.py`
+  FAKES (a throwaway column that turns a context SDR into BG input). Retire the decision-column hack: the sensory/task columns
+  feed the BG through their OWN L5IT, as the cortex does. Driving `layers["L5IT"]` makes it a real layer doing its advertised job.
 
 Result: no undriven placeholders, no L5 function scattered OUTSIDE the column (`_Readout`, `_decision_col`), no deferral. The
 self = the discovered controllable ROOT (`reference_l5_operator_kinds`); the efference is the action on the root, read by all.
@@ -85,9 +89,14 @@ learns "the static object moved by −Δ"; WITH it, the static object is correct
    thalamic relay — the efference is a motor message, not a content⊗location binding, so it is routed by the plumbing, not
    forced through `bind`/`bundle`). Falsifier passes both sides: a static object stays static WITH the efference (20,10) and is
    misread as moved WITHOUT (19,10); a moving object nets to its true world-motion. [the moving-sensor fix substrate]
-2. **L5PT MOTOR** — fold the `_Readout` decode INTO the column as L5PT's motor output (the displacement/action enacted); the
-   agent stops owning the readout. Falsifier: the column emits the action; the decision test still passes.
-3. **L5IT → BG** — the column's L5IT projects its object-state to the basal ganglia (retire `_decision_col`); the decision loop
-   runs cortex(L5IT)→BG→thalamus→L5PT(motor). Falsifier: the BG selection test passes driven by a real column's L5IT.
-4. **CLEANUP** — no inert `layers[...]` entry remains (each driven or deleted); reconcile ARCHITECTURE §9/§12/§15 + STATUS so
-   the docs = the code. L5 is whole: every declared part does its advertised job.
+2. **L5IT → BG ✅ DONE (2026-07-18, chose (a) the tractable seat)** — `Column.striatum(percept)` DRIVES `layers["L5IT"]` (the
+   intratelencephalic layer that projects to the striatum): `decide`/`reward` now route the BG's cortical input through a
+   column's L5IT, not a raw-L4 relay. Suite unchanged (125). **HONEST caveat:** for a single-stimulus decision the FROZEN L5IT
+   projection is TRANSPARENT (it bursts the same cells L4 would), so this is the correct anatomical PATH + a genuinely driven
+   L5IT, not new behaviour. L5IT's real POOLING work bites only when the decision depends on a MULTI-FIXATION object identity
+   fed through a sensory column's L5IT — the natural next increment (build it against an object-based decision task).
+3. **L5PT placeholder ✅ DONE (2026-07-18)** — the inert `layers["L5PT"]` HTMLayer is DELETED (an HTMLayer is the wrong tool for
+   continuous displacement; the `MotionOperator`/`dynamics`/`relate`/`efference` ARE L5PT's mechanism, now stated at the dict).
+   The `_Readout` STAYS peripheral (value-free cortex, §4 — do NOT fold it in).
+4. **DOCS** — reconcile ARCHITECTURE §9/§12/§15 + STATUS so the docs = the code. No inert `layers[...]` entry remains. OPEN: the
+   genuine multi-fixation L5IT integration (object identity → BG) is the real exercise of L5IT and is not yet demonstrated.
