@@ -20,6 +20,7 @@ from .basal_ganglia import BasalGanglia
 from .column import Column
 from .encoders import SDR, CategoryEncoder, GridEncoder
 from .hippocampus import Hippocampus, WorldMap, WorldModel
+from .perceive import SelfTracker, segment
 from .reward import ValueCritic
 from .thalamus import Thalamus
 
@@ -69,6 +70,7 @@ class Agent:
         self.bg = BasalGanglia(seed=seed)
         self.critic = ValueCritic()      # the TD value critic (ROADMAP 3c) — its δ replaces the faked 2r−1 RPE
         self.hippocampus = Hippocampus(n_inputs=512, dims=dims, seed=seed)   # the composed hippocampus: map⊕replay⊕CA3⊕DG⊕CA1 (one handle)
+        self.self_tracker = SelfTracker()   # discover the controllable ROOT (the 'self') from motion — not colour (bitter lesson)
         self._decision_col = None
         self._pending = None
         self._nav = None
@@ -393,8 +395,24 @@ class Agent:
         ambiguous object); an empty list = nothing recognised."""
         return self._nav_col().recognize()
 
+    # ----- PERCEPTION: the peripheral RETINA (perceive.py) — a game frame → OBJECTS, and the DISCOVERED self ------------
+    def transduce(self, grid) -> list:
+        """The peripheral RETINA: segment a game frame (a colour grid) into OBJECTS (colour ⊕ 4-connected cells) — the agent's
+        front-end for a raw frame. Core-Knowledge OBJECTNESS, NO semantics (the mechanic is inferred from colour + score); the
+        deeper common-fate/recognition grouping refines it (`perceive.segment`)."""
+        return segment(grid)
+
+    def observe_self(self, before, after, action) -> None:
+        """Update the discovered controllable ROOT (the 'self') from one transition — which object moved when acted. The self
+        is LEARNED from motion, never colour-coded (`feedback_bitter_lesson`; `reference_l5_operator_kinds`)."""
+        self.self_tracker.observe(before, after, action)
+
+    def self_color(self):
+        """The colour of the discovered controllable root (the 'self'), or None until it has been seen to move under action."""
+        return self.self_tracker.root()
+
     def step(self, observation):
-        """The generic game interface (observation → action) — still a STUB. The wired slices are `scan` (forward model)
-        and `decide`/`reward` (selection); the full game loop (perceive → plan → act → win) composes them (STATUS.md
-        'Next'). Raises rather than a silent no-op (RULES.md #3)."""
-        raise NotImplementedError("Agent.step: full game loop not built — wired slices are Agent.scan + Agent.decide.")
+        """The generic game interface (observation → action) — still a STUB. The perception RETINA (`transduce`) + the
+        DISCOVERED self (`observe_self`) are the first wired pieces; the full loop (perceive → world-state → plan → act → learn)
+        composes them with the hippocampus rollout (STATUS.md 'Next'). Raises rather than a silent no-op (RULES.md #3)."""
+        raise NotImplementedError("Agent.step: full game loop not built — the perception bridge (transduce/observe_self) is wired.")
