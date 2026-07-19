@@ -57,3 +57,39 @@ class ValueCritic:
     def rho(self) -> float:
         """The running-average reward — tonic dopamine, the OpAL explore/exploit + vigor gain (rich → exploit, lean → avoid)."""
         return self._rho
+
+
+class GoalMemory:
+    """The discovered GOAL: WHICH perceptual feature the reward is contingent on. It is the SAME delta rule as the critic above
+    — Rescorla-Wagner cue competition (`reference_cue_competition_key_discovery`) applied to reward CONTINGENCY, feeding the
+    priority map that sets the goal (`reference_goal_setting_priority_map`: reward → a valued feature → the goal-vector). On
+    every step the feature the self REACHED is credited with the step's reward (Δscore): the goal feature (reached AT reward)
+    climbs toward 1 while features the self reaches WITHOUT reward (a key, a pad) decay toward 0 — competition washes out the
+    spurious co-occurrences that a single-trial memory would enshrine.
+
+    WHY A FEATURE, NOT A PLACE. The credited thing is an OBJECT PROPERTY (colour for a single-cell object; a recognised identity
+    once shape matters), so the goal is invariant to WHERE it sits. That is exactly what the absolute-position `ValueCritic`
+    cannot give: the critic's value learned at one level's goal cell is worthless at the next level's different cell, but the
+    goal FEATURE names the goal wherever it appears — so it transfers across levels. Pure stdlib."""
+
+    def __init__(self, lr: float = 0.5, eps: float = 0.1) -> None:
+        self.w: dict = {}                                     # feature -> reward contingency (the delta-rule weight)
+        self.lr, self.eps = float(lr), float(eps)
+
+    def credit(self, features, r: float) -> None:
+        """One delta-rule trial: the PRESENT features share the prediction error `r − Σ w[present]` (so co-present cues compete),
+        each moving toward the reward `r`. Call every step with the feature(s) the self reached and that step's reward (Δscore)."""
+        present = list(features)
+        if not present:
+            return
+        err = float(r) - sum(self.w.get(f, 0.0) for f in present)
+        for f in present:
+            self.w[f] = self.w.get(f, 0.0) + self.lr * err
+
+    def goal(self):
+        """The most reward-contingent feature (argmax weight, if it clears `eps`) — the discovered goal, or None until a reward
+        has credited one. Feature-based, so it names the goal object wherever on the board it sits (the transfer lever)."""
+        if not self.w:
+            return None
+        f, v = max(self.w.items(), key=lambda kv: kv[1])
+        return f if v >= self.eps else None
