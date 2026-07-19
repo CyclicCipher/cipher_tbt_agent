@@ -30,10 +30,18 @@ _SELF = object()   # the agent as a relatum in an object's relational state; a t
 
 class WorldModel:
     """The learned forward model over a world-state. `step` advances one imagined action; `learn` folds one observed
-    transition into the column. Stateless over the map — it holds only the (shared, learned) compositional column."""
+    transition into the column. Stateless over the map — it holds only the (shared, learned) compositional column.
 
-    def __init__(self, scene) -> None:
+    `snap` (optional) quantises a predicted object pose to the environment's cells — a READ-OUT, injected by the caller so
+    the model stays domain-agnostic. On a GRID it snaps to the nearest integer cell (round-half-up), which does two jobs at
+    once: it makes the state space DISCRETE (so a rollout's visited-pruning bounds it — a continuous object position would
+    proliferate forever), and it lets a half-learned push (`+0.5` after one Rescorla-Wagner step) read out as the FULL cell
+    step it really is, so ONE observation suffices and multi-push plans don't drift (`reference_l5_operator_kinds`: the pose is
+    a continuous state with a quantised read-out, exactly as the nav operator uses `round`)."""
+
+    def __init__(self, scene, snap=None) -> None:
         self.scene = scene    # the compositional Column: state_in / predict_object_move / learn_object_move (object dynamics)
+        self.snap = snap or (lambda pose: pose)
 
     def step(self, world, action):
         """One imagined step: the agent path-integrates (`map.move_agent`, the borrowed operator), and every object moves
@@ -43,8 +51,20 @@ class WorldModel:
         nxt = world.move_agent(action)
         if world.objects:
             relata = dict(world.objects); relata[_SELF] = world.agent
-            nxt.objects = {oid: self.scene.predict_object_move(pose, action, self.scene.state_in(relata, oid))
-                           for oid, pose in world.objects.items()}
+            moved = {oid: self.snap(self.scene.predict_object_move(pose, action, self.scene.state_in(relata, oid)))
+                     for oid, pose in world.objects.items()}
+            # RIGID-BODY COUPLING: an object is SOLID — the agent cannot occupy its cell. If the agent's move lands on an
+            # object that did NOT move out of the way (an unlearned / blocked push), the agent is BLOCKED (both stay). So a box
+            # is an obstacle to navigate AROUND, and only a LEARNED push (object vacates, agent follows) lets the agent advance —
+            # which is what stops the rollout from imagining a walk-through and then shoving the box the wrong way in reality.
+            if nxt.agent is not None:
+                acell = tuple(round(c) for c in nxt.agent[0])
+                for oid, pose in world.objects.items():
+                    ocell = tuple(round(c) for c in pose[0])
+                    if acell == ocell and tuple(round(c) for c in moved[oid][0]) == ocell:
+                        nxt.agent = world.agent                # walked into a non-moving object → blocked (stay put)
+                        break
+            nxt.objects = moved
         return nxt
 
     def learn(self, action, before, after) -> None:

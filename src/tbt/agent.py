@@ -14,6 +14,7 @@ thalamus gate come as tasks exercise them (STATUS.md 'Next'). The generic game i
 
 from __future__ import annotations
 
+import math
 import random
 
 import numpy as np
@@ -78,7 +79,12 @@ class Agent:
         self._rng = random.Random(seed)     # exploration randomness (bootstrap + tie-break), seeded
         self._visited: set = set()          # cells the self has occupied (novelty target = the UNvisited frontier)
         self._blocked: set = set()          # cells a move was blocked into = LEARNED obstacles (walls); the rollout avoids them
-        self._last = None                   # (objects, action, self-cell, score) of the previous frame — for online learning
+        self._movers: set = set()           # non-self object features observed to MOVE = pushable objects (routed to the scene)
+        self._tried: set = set()            # (cell, action) already attempted in bootstrap — so an always-blocked action here
+        #                                     is tried once, then the agent moves on (learns it wherever it first succeeds)
+        self._last = None                   # (objects, action, self-cell, score, positions) of the previous frame — online learning
+        self._last_plan: list = []          # the action sequence the last decision committed to — the agent's current INTENT
+        #                                     (introspectable for the two-pane imagination widget: imagined future vs reality)
         self._decision_col = None
         self._pending = None
         self._nav = None
@@ -317,8 +323,16 @@ class Agent:
     def world_model(self) -> WorldModel:
         """The learned FORWARD MODEL over the world-state (`hippocampus/replay.py`) — composes the agent's path-integration
         (nav operator, via the map) with the compositional column's STATE-CONDITIONED object dynamics. Used to LEARN the
-        model from observed transitions (`WorldModel.learn`) and to ROLL it forward in planning."""
-        return WorldModel(self._scene_col())
+        model from observed transitions (`WorldModel.learn`) and to ROLL it forward in planning. Object predictions are
+        SNAPPED to the frame's integer cells (`_snap_pose`) — the grid read-out that discretises the rollout and makes a
+        one-observation push read out as a full cell step."""
+        return WorldModel(self._scene_col(), snap=self._snap_pose)
+
+    def _snap_pose(self, pose):
+        """Quantise a pose's POSITION to the nearest integer cell (round-half-up, so a half-learned `+0.5` push reads out as a
+        full step and never lands on the banker's-rounding tie); the orientation is unchanged."""
+        p, R = pose
+        return (tuple(float(math.floor(x + 0.5)) for x in p), R)
 
     def plan(self, reward, actions, horizon: int = 12, value=None) -> list:
         """Plan by hippocampal ROLLOUT (`hippocampus/replay.py`): fork the current world-state and search the learned model
@@ -420,47 +434,102 @@ class Agent:
         return self.self_tracker.root()
 
     def new_level(self) -> None:
-        """A LEVEL boundary — a fresh environment: drop the per-level exploration state (visited/blocked/last). The learned
-        MODEL (operator, dynamics, critic) AND the discovered GOAL (`goal_mem`) persist across levels — that persistence IS the
-        cross-level transfer; only the map memory resets."""
-        self._visited, self._blocked, self._last = set(), set(), None
+        """A LEVEL boundary — a fresh environment: drop the per-level exploration state (visited/blocked/last + the scene's
+        object placements). The learned MODEL (operator, object dynamics, critic), the discovered GOAL (`goal_mem`), and which
+        features are MOVERS all persist across levels — that persistence IS the cross-level transfer; only the map memory resets."""
+        self._visited, self._blocked, self._tried, self._last = set(), set(), set(), None
+        if self._scene is not None:
+            self.clear_scene()
 
     def step(self, fd):
-        """The thin-agent GAME LOOP (one interaction): PERCEIVE the frame → CREDIT the reached feature by the reward (discover
-        the goal) + LEARN the self's dynamics from the last transition → PLAN (pragmatic to a known goal, else epistemic novelty)
-        → ACT. Returns `(action, coords)`. Composes the built regions: the retina (`transduce`), the discovered self
-        (`self_tracker`), the goal-feature learner (`goal_mem`), the L6a operator (`learn_pose_move`), and the hippocampal
-        rollout (`plan`). No game semantics are read (`feedback_bitter_lesson`): walls are LEARNED by bumping, the goal by reward."""
+        """The thin-agent GAME LOOP (one interaction): PERCEIVE the frame → discover MOVERS + LEARN the self's motion AND the
+        movers' push dynamics from the last transition → CREDIT the reward to discover the goal → ROUTE movers to the scene →
+        PLAN (pragmatic to the discovered goal, else epistemic novelty) → ACT. Returns `(action, coords)`. Composes the built
+        regions: the retina (`transduce`), the discovered self + movers (from motion), the goal learner (`goal_mem`), the L6a
+        operator (`learn_pose_move`), the scene column's object dynamics, and the hippocampal rollout (`plan`). No game semantics
+        are read (`feedback_bitter_lesson`): walls learned by bumping, movers by motion, the goal by reward."""
         objs = self.transduce(fd.grid)
-        cur = self._self_pos(objs)                                    # the self's cell this frame (via the discovered root)
-        if self._last is not None:                                   # LEARN from the previous transition
-            prev_objs, action, prev_cur, prev_score = self._last
+        pos = self._positions(objs)                                   # {feature: cell} for the unambiguous single-instance objects
+        if self._last is not None:
+            prev_objs, action, prev_cur, prev_score, prev_pos = self._last
             reward = float(fd.score - prev_score)                    # the sparse score's delta = this step's reward
+            if reward == 0:                                          # a within-level transition: confirm the self FIRST, so `sc`
+                self.observe_self(prev_objs, objs, action)           #   below reflects this move (else the first push is missed)
+        sc = self.self_color()
+        cur = self._self_pos(objs)                                    # the self's cell this frame (via the discovered root)
+        if self._last is not None:                                    # LEARN from the previous transition
             moved = prev_cur is not None and getattr(action, "is_movement", False)
-            if moved:                                                # CREDIT the feature the self REACHED (cue competition:
-                reached = self._feature_at(prev_objs, self._target_cell(prev_cur, action))   # r=0 washes out non-goals)
-                if reached is not None:
-                    self.goal_mem.credit({reached}, reward)
+            if reward == 0:                                          # (frames across a level boundary don't correspond)
+                self._track_movers(prev_pos, pos, sc)               # a non-self object that MOVED is a pushable mover
+                self._learn_dynamics(action, prev_pos, pos, prev_cur, cur)   # fold each mover's move into the scene forward model
+            if moved:
+                self._credit_goal(prev_objs, prev_pos, action, prev_cur, reward, sc)   # discover the goal by the delta rule
             if reward > 0:                                           # a LEVEL boundary (the board just advanced): fresh map,
-                self.new_level()                                     # but the learned model + the discovered goal PERSIST
-            else:
-                self.observe_self(prev_objs, objs, action)           # keep discovering / confirming the controllable root
-                if moved and cur is not None:
-                    if cur != prev_cur:                              # the self MOVED → the operator learns this action's Δ
-                        self.learn_pose_move(action, self._as_pose(prev_cur), self._as_pose(cur))
-                    elif self._nav_col().operator.known(action):     # tried but did NOT move → the target cell is an obstacle
-                        cell = self._target_cell(prev_cur, action)
-                        if cell is not None and cell != prev_cur:
-                            self._blocked.add(cell)
+                self.new_level()                                     # but the learned model + goal + movers PERSIST
+            elif moved and cur is not None:
+                if cur != prev_cur:                                 # the self MOVED → the operator learns this action's Δ
+                    self.learn_pose_move(action, self._as_pose(prev_cur), self._as_pose(cur))
+                elif not self._pushed(prev_pos, pos) and self._nav_col().operator.known(action):
+                    cell = self._target_cell(prev_cur, action)      # tried, did NOT move, and did NOT push → the target is an obstacle
+                    if cell is not None and cell != prev_cur:
+                        self._blocked.add(cell)
         if cur is not None:
-            self._visited.add(cur)
-        action = self._act(objs, cur, fd.available_actions)
-        self._last = (objs, action, cur, fd.score)
+            self._visited.add(self._perceived_world(cur, pos).key())   # novelty is over the WHOLE world-state (agent + movers)
+        self._route_movers(pos)                                      # place visible movers into the scene column (world_state/rollout)
+        action = self._act(objs, cur, pos, fd.available_actions)
+        self._last = (objs, action, cur, fd.score, pos)
         return action, None
 
     def _as_pose(self, cell):
         """A grid cell → a continuous pose `(position, R=identity)` in the nav frame."""
         return (tuple(float(c) for c in cell), eye(self._dims))
+
+    def _positions(self, objs) -> dict:
+        """`{feature: anchor}` for each feature realised by EXACTLY ONE object this frame — the single-cell tracking key that
+        lets a mover be followed across frames (recognition disambiguates same-feature objects later; deferred)."""
+        by_color: dict = {}
+        for o in objs:
+            by_color.setdefault(o.color, []).append(o)
+        return {c: os[0].anchor for c, os in by_color.items() if len(os) == 1}
+
+    def _track_movers(self, prev_pos, pos, sc) -> None:
+        """A NON-self object whose cell changed between frames is a controllable MOVER — discovered from motion (like the self),
+        never from colour semantics. Movers are the objects a rollout must simulate as pushable (routed to the scene column).
+        Gated on the self being KNOWN, or the self (which moves every step) would be mislabelled a mover before it is identified."""
+        if sc is None:
+            return
+        for c, cell in pos.items():
+            if c != sc and c in prev_pos and prev_pos[c] != cell:
+                self._movers.add(c)
+
+    def _pushed(self, prev_pos, pos) -> bool:
+        """Did any known mover change cell in this transition? (So a self non-move that PUSHED a box is not mislabelled a wall bump.)"""
+        return any(c in prev_pos and c in pos and prev_pos[c] != pos[c] for c in self._movers)
+
+    def _learn_dynamics(self, action, prev_pos, pos, prev_cur, cur) -> None:
+        """Fold one observed transition of each visible known MOVER into the scene column's forward model (`WorldModel.learn`),
+        conditioned on its relational state with the AGENT included as a relatum — so 'the box moves when the agent is behind it'
+        is DISCOVERED by the column's Rescorla-Wagner cue competition, not coded. Learned every step (a mover that did NOT move
+        teaches 'stay'); the agent's own move is learned separately by the nav operator."""
+        if prev_cur is None or cur is None or not getattr(action, "is_movement", False):
+            return
+        movers = [c for c in self._movers if c in prev_pos and c in pos]
+        if not movers:
+            return
+        before = WorldMap(self._as_pose(prev_cur), {c: self._as_pose(prev_pos[c]) for c in movers})
+        after = WorldMap(self._as_pose(cur), {c: self._as_pose(pos[c]) for c in movers})
+        self.world_model().learn(action, before, after)
+
+    def _route_movers(self, pos) -> None:
+        """Place every currently-visible known mover into the SCENE column, so `world_state()` (hence the rollout) includes it.
+        STATIC features (pads, goals, walls — never seen to move) are NOT routed: they are landmarks for the goal predicate, not
+        simulated bodies."""
+        if not self._movers:
+            return
+        self.clear_scene()
+        for c in self._movers:
+            if c in pos:
+                self.place_object(c, self._as_pose(pos[c]))
 
     def _target_cell(self, cell, action):
         """The cell `action` moves the self INTO from `cell`, via the LEARNED operator (not the action's declared delta — the
@@ -471,25 +540,40 @@ class Agent:
         tgt = op.apply(self._as_pose(cell), action)
         return tuple(round(c) for c in tgt[0])
 
-    def _feature_at(self, objs, cell):
-        """The feature (colour) of the object occupying `cell`, or None if the cell is empty — the pre-move content of the cell
-        the self reached, which is what the goal credit attaches to (the self's own colour never appears here: it is read from
-        the frame BEFORE the self arrives)."""
+    def _static_feature_at(self, objs, cell, sc):
+        """The STATIC feature at a cell — the colour of a non-self, non-mover object there (a landmark: pad, goal tile) — or None
+        if the cell is empty or occupied by the self / a mover. What a discovered GOAL attaches to (a place-to-reach, not a body)."""
         if cell is None:
             return None
         for o in objs:
             if cell in o.cells:
-                return o.color
+                return o.color if (o.color != sc and o.color not in self._movers) else None
         return None
 
-    def _goal_cell(self, objs):
-        """The cell of the visible object whose feature is the discovered goal — the pragmatic planner's target. None if no goal
-        has been discovered yet, or it is not (unambiguously) on the board this frame."""
-        g = self.goal_mem.goal()
-        if g is None:
-            return None
-        goals = [o for o in objs if o.color == g]
-        return goals[0].anchor if len(goals) == 1 else None
+    def _credit_goal(self, prev_objs, prev_pos, action, prev_cur, reward, sc) -> None:
+        """Discover the goal by the delta rule (`goal_mem`), REACHER-typed so the two credit paths never confound. The SELF
+        reaching a static landmark credits the bare feature (a NAV goal — LockPath). A MOVER the self PUSHES onto a static
+        landmark credits the PAIR `(mover, landmark)` (a RELATIONAL goal — 'put the box on the pad'). The self reaching a mover is
+        the PUSH itself, never a goal (the dynamics own it), so it is never credited — which keeps 'reach the box' from
+        masquerading as the goal. Both landings are INFERRED from the pre-move frame + the action (the winning frame is never
+        returned — the board advances on completion), so the credit is boundary-safe."""
+        self_target = self._target_cell(prev_cur, action)
+        reached = self._static_feature_at(prev_objs, self_target, sc)      # the static landmark the SELF stepped onto
+        if reached is not None:
+            self.goal_mem.credit({reached}, reward)
+        for c in self._movers:                                            # a mover the self PUSHED (stepped into its cell)
+            if c in prev_pos and self_target == prev_pos[c]:
+                landing = self._target_cell(prev_pos[c], action)          # the pushed mover advances one cell along the push
+                landmark = self._static_feature_at(prev_objs, landing, sc)
+                if landmark is not None:
+                    self.goal_mem.credit({(c, landmark)}, reward)
+
+    def _perceived_world(self, cur, pos):
+        """The PERCEIVED world-state as a `WorldMap` (self-location + visible movers at their cells) — its `key()` is the novelty
+        signature, so exploration is driven over the whole CONFIGURATION (agent + boxes), not just the self's cell. For a pure-nav
+        game (no movers) this collapses to the self's pose, so nav novelty is unchanged."""
+        objects = {c: self._as_pose(pos[c]) for c in self._movers if c in pos}
+        return WorldMap(self._as_pose(cur) if cur is not None else None, objects)
 
     def _self_pos(self, objs):
         """The self's cell this frame — the anchor of the object whose colour is the discovered controllable root; None until
@@ -500,28 +584,70 @@ class Agent:
         selves = [o for o in objs if o.color == c]
         return selves[0].anchor if len(selves) == 1 else None
 
-    def _act(self, objs, cur, available):
-        """The one EFE planner (`reference_efe_and_epiplexity`, `feedback_epistemic_value_is_prediction_error`): PRAGMATIC when a
-        goal is known — rollout the shortest path to the visible goal-featured object — and EPISTEMIC otherwise — rollout to the
-        nearest UNVISITED reachable cell (novelty). Bootstraps the operator first by trying UNLEARNED actions; random when the
-        self is unknown or nothing is reachable. Walls are avoided via the LEARNED `_blocked` set. `reference_goal_setting_priority_map`."""
+    def _act(self, objs, cur, pos, available):
+        """The one EFE planner (`reference_efe_and_epiplexity`, `feedback_epistemic_value_is_prediction_error`): PRAGMATIC toward
+        the discovered goal (a NAV goal — self to a landmark; or a RELATIONAL goal — the rollout PUSHES a mover onto a landmark),
+        else EPISTEMIC toward the nearest UNVISITED cell (novelty). Bootstraps the operator by trying UNLEARNED actions first;
+        random when the self is unknown or nothing is reachable. `reference_goal_setting_priority_map`."""
         movement = [a for a in available if getattr(a, "is_movement", False)]
         if not movement:
             return self._rng.choice(available)
         if cur is None:                                              # self not discovered yet → move to generate the evidence
             return self._rng.choice(movement)
         op = self._nav_col().operator
-        unlearned = [a for a in movement if not op.known(a)]
-        if unlearned:                                               # bootstrap: learn each action's displacement
-            return self._rng.choice(unlearned)
+        unlearned = [a for a in movement if not op.known(a) and (cur, a) not in self._tried]
+        if unlearned:                                               # bootstrap: try an unlearned action HERE (once per cell, so an
+            a = self._rng.choice(unlearned)                        #   always-blocked one doesn't loop — it's learned wherever it works)
+            self._tried.add((cur, a))
+            return a
         self.set_pose(self._as_pose(cur)[0], eye(self._dims))       # anchor the nav pose to the perceived self
-        goal_cell = self._goal_cell(objs)
-        if goal_cell is not None and goal_cell != cur:              # PRAGMATIC: a known goal is on the board → plan straight to it
-            at_goal = lambda w: 1.0 if (w.agent is not None and tuple(round(c) for c in w.agent[0]) == goal_cell) else 0.0
-            plan = self.plan(at_goal, movement, horizon=64)
-            if plan:
-                return plan[0]                                     # (empty ⇒ the goal is unreachable given learned walls: explore)
-        visited = set(self._visited)                               # EPISTEMIC: explore toward the unvisited frontier
-        novel = lambda w: 1.0 if (w.agent is not None and tuple(round(c) for c in w.agent[0]) not in visited) else 0.0
+        plan = self._goal_plan(objs, cur, pos, movement)           # PRAGMATIC: the discovered goal (nav or relational push)
+        if plan:
+            self._last_plan = plan
+            return plan[0]
+        visited = set(self._visited)                               # EPISTEMIC: reach an unvisited world CONFIGURATION (agent+movers)
+        novel = lambda w: 1.0 if w.key() not in visited else 0.0   #   — so exploration reconfigures the boxes, not just the self
         plan = self.plan(novel, movement, horizon=32)
+        self._last_plan = plan or []
         return plan[0] if plan else self._rng.choice(movement)
+
+    def imagine(self, actions=None):
+        """The agent's IMAGINED future: unroll a plan (default: the last committed one) through the LEARNED forward model from the
+        current world-state, returning the sequence of imagined world CELLS `[{'agent': cell, 'objects': {id: cell}}, ...]`. This
+        is the substrate for the two-pane imagination widget (`project_hippocampus_imagination_and_widget`): laid beside the real
+        frames, the imagined trajectory either tracks reality or visibly DIVERGES — and a divergence localises the model's error."""
+        actions = self._last_plan if actions is None else actions
+        world, model = self.world_state(), self.world_model()
+        traj = [self._world_cells(world)]
+        for a in actions:
+            world = model.step(world, a)
+            traj.append(self._world_cells(world))
+        return traj
+
+    @staticmethod
+    def _world_cells(world) -> dict:
+        """A world-state's occupied CELLS (integer positions) — the agent and each object — for rendering / comparison."""
+        agent = tuple(round(c) for c in world.agent[0]) if world.agent is not None else None
+        return {"agent": agent, "objects": {oid: tuple(round(c) for c in p[0]) for oid, p in world.objects.items()}}
+
+    def _goal_plan(self, objs, cur, pos, movement):
+        """Plan toward the discovered goal (empty ⇒ none / already satisfied / unreachable, so the caller explores). A bare-feature
+        goal = navigate the SELF to that feature's cell (the rollout over agent moves). A `(mover, landmark)` goal = rollout the
+        MOVER onto the landmark's cell — the PUSH, where the rollout beats a one-step value (`project_linear_value_cannot_hold_sokoban`)."""
+        g = self.goal_mem.goal()
+        if g is None:
+            return None
+        if isinstance(g, tuple):                                    # RELATIONAL: put mover g[0] onto a g[1] landmark cell
+            mover_c, landmark_c = g
+            if mover_c not in pos or landmark_c not in pos:
+                return None
+            target = pos[landmark_c]
+            on_target = lambda w: 1.0 if (mover_c in w.objects
+                                          and tuple(round(c) for c in w.objects[mover_c][0]) == target) else 0.0
+            return self.plan(on_target, movement, horizon=48)
+        goals = [o for o in objs if o.color == g]                   # NAV: navigate the self to the landmark
+        if len(goals) != 1 or goals[0].anchor == cur:
+            return None
+        goal_cell = goals[0].anchor
+        at_goal = lambda w: 1.0 if (w.agent is not None and tuple(round(c) for c in w.agent[0]) == goal_cell) else 0.0
+        return self.plan(at_goal, movement, horizon=64)
