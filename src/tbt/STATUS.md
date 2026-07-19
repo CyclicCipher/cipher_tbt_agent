@@ -198,14 +198,17 @@ ARCHITECTURE.md §3/§5.1):
    destination, now BUILT).
    **Step 2 (L5IT → BG) ✅ DONE (2026-07-18)** — mechanism check REVISED the plan (the old "L5PT motor / fold the `_Readout`" was
    wrong: the `_Readout` is peripheral BY DESIGN — value-readout, value-free cortex; L5PT's motor is already operator+efference+BG).
-   The real scattered-L5 was L5IT: `Column.striatum` DRIVES `layers["L5IT"]` so `decide`/`reward` route the BG's cortical input
-   through a column's L5IT (the striatal projection), not a raw-L4 relay. **HONEST caveat:** a single-stimulus decision makes the
-   frozen L5IT projection TRANSPARENT (bursts the same cells L4 would) — the correct anatomical path + a driven L5IT, not new
-   behaviour; genuine L5IT POOLING bites only for a multi-fixation object identity → BG (the OPEN increment).
-   **L5PT placeholder ✅ DELETED (2026-07-18)** — the inert `layers["L5PT"]` HTMLayer is gone; the `MotionOperator`/`dynamics`/
-   `relate`/`efference` ARE L5PT's mechanism (an HTMLayer is the wrong tool for continuous displacement), stated at the dict.
-   **OPEN:** the genuine multi-fixation L5IT integration (object identity → BG, an object-based decision task) is the real
-   exercise of L5IT, not yet demonstrated. **Step 4:** reconcile ARCHITECTURE §9/§12/§15. See [[reference_l5_operator_kinds]].
+   The real scattered-L5 was L5IT: `Column.striatum` is the column's cortex→BG projection, so `decide`/`reward` route the BG's
+   cortical input through L5IT, not a raw-L4 relay. **BOTH inert L5 HTMLayer placeholders (`L5IT`, `L5PT`) DELETED from the dict:**
+   both are PROJECTIONS / engines (IT/PT are projection-neuron classes), not HTMLayers — L5IT = `striatum` (relay the
+   representation), L5PT = the `MotionOperator`/`dynamics`/`relate`/`efference` engines. No dead layer advertising a role it can't do.
+   **HONEST caveat:** for a single-stimulus decision the L5IT projection is TRANSPARENT (relays the L4 percept); it does NOT
+   integrate — the INTEGRATION is L2/3's pooler (validated in `test_object_centric`/`test_rotation_recognition`).
+   **Object→action decision DROPPED as a detour (2026-07-18):** L5IT is a projection, so the object-based decision is a valid
+   COMPOSITION of (validated pooling) + (this projection) + (validated BG), not a new L5 mechanism. Building it surfaced that
+   recognition is STABLE (verified: `A→B→A` gives the SAME identity, 40/40) — the apparent "instability" was a pytest/numpy
+   k-WTA tie-break artifact (byte-identity test, not a recognition bug). Needs a stable object LABEL as the BG context; parked.
+   **Step 4 (docs):** reconcile ARCHITECTURE §9/§12/§15 with L5-as-projection. See [[reference_l5_operator_kinds]].
    After L5: the loop/brain object (move `decide`/`scan` OUT of the agent) → the THIN agent; the `step(obs)→action` game loop; the
    two-pane imagined-future WIDGET. Deferred within the hippocampus (DESIGN §4): theta/replay timing, graded remap.
    Still after the hippocampus: the MOTOR region (L5 emit + decode; move the readout OUT of the agent); the loop/brain object

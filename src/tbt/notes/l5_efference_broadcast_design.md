@@ -89,14 +89,15 @@ learns "the static object moved by −Δ"; WITH it, the static object is correct
    thalamic relay — the efference is a motor message, not a content⊗location binding, so it is routed by the plumbing, not
    forced through `bind`/`bundle`). Falsifier passes both sides: a static object stays static WITH the efference (20,10) and is
    misread as moved WITHOUT (19,10); a moving object nets to its true world-motion. [the moving-sensor fix substrate]
-2. **L5IT → BG ✅ DONE (2026-07-18, chose (a) the tractable seat)** — `Column.striatum(percept)` DRIVES `layers["L5IT"]` (the
-   intratelencephalic layer that projects to the striatum): `decide`/`reward` now route the BG's cortical input through a
-   column's L5IT, not a raw-L4 relay. Suite unchanged (125). **HONEST caveat:** for a single-stimulus decision the FROZEN L5IT
-   projection is TRANSPARENT (it bursts the same cells L4 would), so this is the correct anatomical PATH + a genuinely driven
-   L5IT, not new behaviour. L5IT's real POOLING work bites only when the decision depends on a MULTI-FIXATION object identity
-   fed through a sensory column's L5IT — the natural next increment (build it against an object-based decision task).
-3. **L5PT placeholder ✅ DONE (2026-07-18)** — the inert `layers["L5PT"]` HTMLayer is DELETED (an HTMLayer is the wrong tool for
-   continuous displacement; the `MotionOperator`/`dynamics`/`relate`/`efference` ARE L5PT's mechanism, now stated at the dict).
-   The `_Readout` STAYS peripheral (value-free cortex, §4 — do NOT fold it in).
-4. **DOCS** — reconcile ARCHITECTURE §9/§12/§15 + STATUS so the docs = the code. No inert `layers[...]` entry remains. OPEN: the
-   genuine multi-fixation L5IT integration (object identity → BG) is the real exercise of L5IT and is not yet demonstrated.
+2. **L5IT → BG ✅ DONE (2026-07-18)** — `Column.striatum(percept)` is the column's cortex→BG projection; `decide`/`reward` route
+   the BG's cortical input through L5IT, not a raw-L4 relay. **L5IT is a PROJECTION, not an HTMLayer** (IT is a projection-neuron
+   class), so the inert `layers["L5IT"]` HTMLayer is DELETED too — matching L5PT. Suite unchanged (125). **Caveat, honest:** for
+   a single-stimulus decision the projection is TRANSPARENT (relays the L4 percept) and does NOT integrate — the INTEGRATION is
+   L2/3's pooler (validated in `test_object_centric`/`test_rotation_recognition`).
+3. **L5PT placeholder ✅ DONE (2026-07-18)** — inert `layers["L5PT"]` HTMLayer DELETED; `MotionOperator`/`dynamics`/`relate`/
+   `efference` ARE L5PT's mechanism. `_Readout` STAYS peripheral (value-free cortex, §4).
+4. **DOCS** — no inert `layers[...]` entry remains (both L5 classes are projections/engines); reconcile ARCHITECTURE §9/§12/§15.
+   **Object→action decision DROPPED as a detour:** L5IT is a projection, so it is a COMPOSITION of validated pooling + this
+   projection + the BG, not a new L5 mechanism. It surfaced that recognition is STABLE (`A→B→A` → same identity, 40/40); the
+   apparent "instability" was a pytest/numpy k-WTA tie-break artifact, not a recognition bug. Parked: needs a stable object
+   LABEL as the BG context. **The genuine composition is better tested by the real GAME LOOP than a synthetic byte-identity test.**

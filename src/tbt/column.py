@@ -338,15 +338,13 @@ class Column:
             # a decoupled stable output this HTMLayer can't express; this HTMLayer entry is reserved for L2/3's other roles.
             "L23":  Layer("L23", HTMLayer(order=order), target_out=(FF_EXPORT, FB, IT),
                           proximal_from="L4", context_from="recurrence", apical_from="L1"),
-            # L5IT — the INTRATELENCEPHALIC integrator: proximal L2/3, → cortico-cortical + striatum(→BG). DRIVEN by
-            # `Column.striatum` — the column's REAL projection to the basal ganglia (it replaced the ad-hoc decision-column
-            # that relayed raw L4; `reference_cortical_layers_research`: L5IT projects to the striatum).
-            "L5IT": Layer("L5IT", HTMLayer(order=order), target_out=(IT,),
-                          proximal_from="L23", context_from="recurrence", apical_from="L1"),
-            # L5PT — the displacement / MOTOR / efference layer — is deliberately NOT an HTMLayer: continuous pose geometry is
-            # the wrong shape for a discrete SDR sequence memory, so its mechanism IS the `MotionOperator` engines
-            # (`self.operator`/`self.dynamics`/`relate`) + `efference` (reference_layer5_role; the inert placeholder that used to
-            # sit here was DELETED — notes/l5_efference_broadcast_design.md §4). No dead layer that does not do its advertised job.
+            # L5 — BOTH projection classes are PROJECTIONS / engines, NOT HTMLayers (an SDR sequence memory is the wrong tool
+            # for either; `reference_cortical_layers_research`: IT/PT are projection-neuron classes). Their inert HTMLayer
+            # placeholders were DELETED — no dead layer advertising a role it can't do (notes/l5_efference_broadcast_design.md §4):
+            #   • L5IT (intratelencephalic): `Column.striatum` relays the column's pooled representation to the STRIATUM / basal
+            #     ganglia — the L2/3 identity for a recognised OBJECT (the genuine multi-fixation integration), else the L4 percept.
+            #   • L5PT (pyramidal-tract): the `MotionOperator`/`dynamics`/`relate`/`efference` engines ARE the displacement /
+            #     motor / efference-copy mechanism (reference_layer5_role). Continuous pose geometry, not a sequence memory.
             # location / grid: proximal = L5 efference (path integration) + thalamus, basal = grid recurrence,
             # → L4 (location, modulatory) + thalamus (CT gain).
             "L6a":  Layer("L6a", HTMLayer(order=order), target_out=(CT, LOCAL),
@@ -1122,20 +1120,20 @@ class Column:
         l4.htm.observe(cols.active, learn=learn)
         return [c * l4.htm.M + cell for (c, cell) in l4.htm._active]
 
-    def striatum(self, percept: SDR) -> list:
-        """L5IT — the INTRATELENCEPHALIC integrator: the column's projection to the STRIATUM / basal ganglia. Perceive `percept`
-        at L4 (a frozen, stable percept) and drive L5IT to integrate it into the selection context the BG reads. This is the
-        column's REAL cortex→BG path — L5IT is the layer that projects to the striatum (`reference_cortical_layers_research`) —
-        replacing the ad-hoc decision-column that relayed raw L4. Returns L5IT's active cells (the striatal projection).
+    def striatum(self, percept: SDR) -> frozenset:
+        """L5IT — the INTRATELENCEPHALIC PROJECTION to the STRIATUM / basal ganglia: perceive `percept` at L4 and relay the
+        column's feature code as the BG's selection context. This is the column's real cortex→BG path (L5IT is a
+        projection-neuron class, `reference_cortical_layers_research`), replacing the ad-hoc decision-column that relayed raw L4.
 
-        Frozen (learn=False) so the same stimulus always projects the same context (a stable target for the BG to learn). For a
-        single-stimulus decision the integration reduces to the percept; L5IT's genuine POOLING role activates when the decision
-        depends on a multi-fixation OBJECT identity, driven through this same layer."""
-        l4, l5it = self.layers["L4"], self.layers["L5IT"].htm
+        L5IT is a PROJECTION, NOT an HTMLayer (an SDR sequence memory is the wrong tool), and it does NOT integrate — the
+        INTEGRATION belongs to L2/3's pooler (a recognised OBJECT's identity is the pooled multi-fixation code, `pooler.active`).
+        L5IT relays the representation to the selector, exactly as L5PT relays the operator's displacement to the motor. Driving
+        the BG off a pooled object identity (object→action) is a valid composition of the recognition + this projection + the BG,
+        deferred: it needs a stable object label as the context (`notes/l5_efference_broadcast_design.md`)."""
+        l4 = self.layers["L4"]
         cols = l4.sp.encode(percept.dense(), learn=False)
-        l4.htm.observe(cols.active, learn=False)                 # L4: the frozen percept
-        l5it.observe(cols.active, learn=False)                   # L5IT: integrate → the striatal projection
-        return [c * l5it.M + cell for (c, cell) in l5it._active]
+        l4.htm.observe(cols.active, learn=False)
+        return frozenset(c * l4.htm.M + cell for (c, cell) in l4.htm._active)
 
     def step(self, sensory: SDR, efference: Optional[SDR] = None, feedback: Optional[SDR] = None):
         """The FULL two-counterstream dataflow of §13 (all layers). TARGET, not yet built — the first slice drives L4 via
