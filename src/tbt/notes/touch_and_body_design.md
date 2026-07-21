@@ -72,3 +72,31 @@ is not another predicate — it is a modality.
 3. **Contact-dynamics** — condition the object forward model on FELT contact at the leading face; yield-`T` / resist / pass
    learned per object; delete the `snap` and the hand-coded coupling. Re-run Push: kills #3/#4/#5/#9.
 Later: recognise-by-touch (the column's `recognize`); multi-cell body; object-object contact (a box pushed by a box).
+
+## 7. The contact-dynamics MECHANISM (investigation of record, 2026-07-21)
+
+Grounded in the TBP "Object Behaviors" doc (https://docs.thousandbrains.org/docs/object-behaviors) + active-touch
+neuroscience. **What TBP gives:** object dynamics = a **behavior model storing "changes@locations"** (vs the structural
+model's features@locations), same column mechanism fed MOTION input, in an **object-INDEPENDENT reference frame** (a behavior is
+"recognized in any location, orientation, and scale by transforming the physical movement vector into the behavior's reference
+frame" — our LID/operator win; the efference-parameterised `T` IS that transformed change), and **state-conditioned**. **What
+TBP leaves OPEN (verbatim frontier):** contact/agent-object interaction is *not addressed*, efference copy is *not discussed*,
+and using behaviors to inform actions "still ha[s] many unresolved questions." So we FILL the interaction gap — legitimately,
+not by invention — with general sensorimotor neuroscience.
+
+**The mechanism (TBP frame ⊕ active-touch forward model):**
+- **Representation** — the object dynamics is a behavior model: the change (a displacement) keyed on the FELT object, stored as
+  the efference-parameterised `T` (object-independent frame ⇒ direction-general; validated one-shot, LMS `T += (d−Te)⊗e/|e|²`).
+- **Condition = FELT CONTACT (touch)**, part of the behavior's conditioning state — the leading-face contact from the touch
+  column. Grounds the interaction TBP leaves open; replaces the RW-over-relative-poses push condition (contact is SENSED, not
+  inferred — one rule any direction). RW stays only for NON-contact state conditions (gravity/support).
+- **Yield / resist / pass by PREDICTION ERROR** (active touch: movability is inferred from the discrepancy between the
+  efference-predicted outcome and the actual tactile+proprioceptive feedback; weight ← force PE). The operator (forward model)
+  predicts the body moves by `e`; observe the actual outcome: object moved ⇒ **YIELD** (learn `T`); body BLOCKED while
+  contacting ⇒ **RESIST** (solidity LEARNED, deletes #5); body advanced THROUGH + object unmoved ⇒ **PASS** (passable). Learned
+  per felt object.
+- **Rollout** has no skin ⇒ it predicts contact GEOMETRICALLY from imagined positions and applies the LEARNED behavior. Live
+  touch grounds the LEARNING; the behavior model does the IMAGINING.
+
+Sources: TBP Object Behaviors (above); Thousand-Brains Systems arXiv:2507.04494; active perceptual learning PMC10753069;
+touch-as-proprioceptive-cue (Science Advances, sciadv.aaw3121).

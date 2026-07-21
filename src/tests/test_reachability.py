@@ -25,6 +25,8 @@ STANDALONE: dict = {
     # these entries are DELETED then. Design: notes/touch_and_body_design.md.
     "touch": "the SKIN peripheral + BODY surface (test_touch, green). Wiring = the contact-dynamics slice.",
     "modality": "the sensory-modality factory + vision/touch specs (test_modality, green). Wiring = the same slice.",
+    "behavior": "the object BEHAVIOR model -- changes@locations, touch-conditioned, yield/resist/pass by prediction error "
+                "(test_behavior, green). Wiring = the same slice (it re-seats the scene column's object dynamics).",
 }
 
 
