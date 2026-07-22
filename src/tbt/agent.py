@@ -24,9 +24,13 @@ from .column import Column
 from .encoders import SDR, CategoryEncoder, GridEncoder
 from .operator import eye
 from .hippocampus import Hippocampus, WorldMap, WorldModel
+from .behavior import ContactDynamics
+from .modality import touch, vision
+from .operator import sub
 from .perceive import SelfTracker, segment
 from .reward import GoalMemory, ValueCritic
 from .thalamus import Thalamus
+from .touch import contact_toward
 
 
 class _Readout:
@@ -60,7 +64,7 @@ class Agent:
     not know 'digit' or 'arithmetic' (that is the task/test)."""
 
     def __init__(self, feat_n: int, n_content: int, n_state: int, n_cols: int = 256, seed: int = 0,
-                 dims: int = 2) -> None:
+                 dims: int = 2, modalities=None) -> None:
         self.state_enc = CategoryEncoder(range(n_state), w=8, capacity=n_state)   # the factored-state code (generic)
         sensory_n = feat_n + self.state_enc.n                                     # L4 proximal = feature ⊕ state (§15)
         self.sensory = Column(sensory_n=sensory_n, n_cols=n_cols, order=1, seed=seed)      # predicts next CONTENT
@@ -76,6 +80,12 @@ class Agent:
         self.hippocampus = Hippocampus(n_inputs=512, dims=dims, seed=seed)   # the composed hippocampus: map⊕replay⊕CA3⊕DG⊕CA1 (one handle)
         self.self_tracker = SelfTracker()   # discover the controllable ROOT (the 'self') from motion — not colour (bitter lesson)
         self.goal_mem = GoalMemory()        # discover WHICH feature the reward is contingent on (the goal), by the delta rule
+        # SENSORY MODALITIES (modality.py): a sense = (transduce, feature, location, pose_source); the column + connections are
+        # modality-INVARIANT, so this list is all it takes. VISION (segment) + TOUCH (the skin) ship by default; touch's skin is
+        # the AGENCY signal (self-caused contact), so ContactDynamics learns object push behaviour only from motions the self
+        # actually CAUSED (`notes/touch_and_body_design.md`). The recognising columns (Gap-3 vision, recognise-by-touch) defer.
+        self._modalities = {m.name: m for m in (modalities if modalities is not None else [vision(), touch()])}
+        self._contact = ContactDynamics(dims)   # the touch-conditioned object BEHAVIOR model (changes@locations; behavior.py)
         self._rng = random.Random(seed)     # exploration randomness (bootstrap + tie-break), seeded
         self._visited: set = set()          # cells the self has occupied (novelty target = the UNvisited frontier)
         self._blocked: set = set()          # cells a move was blocked into = LEARNED obstacles (walls); the rollout avoids them
@@ -321,18 +331,11 @@ class Agent:
         return WorldMap(self.pose(), objects, bounds, body=self._nav_col().operator, blocked=self._blocked)
 
     def world_model(self) -> WorldModel:
-        """The learned FORWARD MODEL over the world-state (`hippocampus/replay.py`) — composes the agent's path-integration
-        (nav operator, via the map) with the compositional column's STATE-CONDITIONED object dynamics. Used to LEARN the
-        model from observed transitions (`WorldModel.learn`) and to ROLL it forward in planning. Object predictions are
-        SNAPPED to the frame's integer cells (`_snap_pose`) — the grid read-out that discretises the rollout and makes a
-        one-observation push read out as a full cell step."""
-        return WorldModel(self._scene_col(), snap=self._snap_pose)
-
-    def _snap_pose(self, pose):
-        """Quantise a pose's POSITION to the nearest integer cell (round-half-up, so a half-learned `+0.5` push reads out as a
-        full step and never lands on the banker's-rounding tie); the orientation is unchanged."""
-        p, R = pose
-        return (tuple(float(math.floor(x + 0.5)) for x in p), R)
+        """The learned FORWARD MODEL over the world-state (`hippocampus/replay.py`), CONTACT-conditioned: the rollout advances the
+        agent and, where its move lands on an object (contact, geometric in imagination), applies that object's LEARNED behavior
+        (`ContactDynamics`: yield with the change `T`, resist/block, or pass). No snap and no hard-coded solidity — the change is
+        exact one-shot (LMS) and solidity is the learned RESIST (`notes/touch_and_body_design.md` §7)."""
+        return WorldModel(contact=self._contact)
 
     def plan(self, reward, actions, horizon: int = 12, value=None) -> list:
         """Plan by hippocampal ROLLOUT (`hippocampus/replay.py`): fork the current world-state and search the learned model
@@ -419,10 +422,10 @@ class Agent:
 
     # ----- PERCEPTION: the peripheral RETINA (perceive.py) — a game frame → OBJECTS, and the DISCOVERED self ------------
     def transduce(self, grid) -> list:
-        """The peripheral RETINA: segment a game frame (a colour grid) into OBJECTS (colour ⊕ 4-connected cells) — the agent's
-        front-end for a raw frame. Core-Knowledge OBJECTNESS, NO semantics (the mechanic is inferred from colour + score); the
-        deeper common-fate/recognition grouping refines it (`perceive.segment`)."""
-        return segment(grid)
+        """The peripheral RETINA — the VISION modality's transducer (`modality.vision`): segment a game frame (a colour grid)
+        into OBJECTS (colour ⊕ 4-connected cells). Core-Knowledge OBJECTNESS, NO semantics (the mechanic is inferred from colour
+        + score); the deeper common-fate/recognition grouping refines it (`perceive.segment`)."""
+        return self._modalities["vision"].transduce(grid, None)
 
     def observe_self(self, before, after, action) -> None:
         """Update the discovered controllable ROOT (the 'self') from one transition — which object moved when acted. The self
@@ -451,7 +454,7 @@ class Agent:
         objs = self.transduce(fd.grid)
         pos = self._positions(objs)                                   # {feature: cell} for the unambiguous single-instance objects
         if self._last is not None:
-            prev_objs, action, prev_cur, prev_score, prev_pos = self._last
+            prev_objs, action, prev_cur, prev_score, prev_pos, prev_skin = self._last
             reward = float(fd.score - prev_score)                    # the sparse score's delta = this step's reward
             if reward == 0:                                          # a within-level transition: confirm the self FIRST, so `sc`
                 self.observe_self(prev_objs, objs, action)           #   below reflects this move (else the first push is missed)
@@ -461,7 +464,7 @@ class Agent:
             moved = prev_cur is not None and getattr(action, "is_movement", False)
             if reward == 0:                                          # (frames across a level boundary don't correspond)
                 self._track_movers(prev_pos, pos, sc)               # a non-self object that MOVED is a pushable mover
-                self._learn_dynamics(action, prev_pos, pos, prev_cur, cur)   # fold each mover's move into the scene forward model
+                self._learn_contact(action, prev_skin, prev_pos, pos, prev_cur, cur, sc)   # learn its behaviour from FELT contact
             if moved:
                 self._credit_goal(prev_objs, prev_pos, action, prev_cur, reward, sc)   # discover the goal by the delta rule
             if reward > 0:                                           # a LEVEL boundary (the board just advanced): fresh map,
@@ -476,8 +479,9 @@ class Agent:
         if cur is not None:
             self._visited.add(self._perceived_world(cur, pos).key())   # novelty is over the WHOLE world-state (agent + movers)
         self._route_movers(pos)                                      # place visible movers into the scene column (world_state/rollout)
+        skin = self._skin(fd.grid, objs, cur)                       # what the body FEELS now — the agency signal for next step
         action = self._act(objs, cur, pos, fd.available_actions)
-        self._last = (objs, action, cur, fd.score, pos)
+        self._last = (objs, action, cur, fd.score, pos, skin)
         return action, None
 
     def _as_pose(self, cell):
@@ -506,19 +510,49 @@ class Agent:
         """Did any known mover change cell in this transition? (So a self non-move that PUSHED a box is not mislabelled a wall bump.)"""
         return any(c in prev_pos and c in pos and prev_pos[c] != pos[c] for c in self._movers)
 
-    def _learn_dynamics(self, action, prev_pos, pos, prev_cur, cur) -> None:
-        """Fold one observed transition of each visible known MOVER into the scene column's forward model (`WorldModel.learn`),
-        conditioned on its relational state with the AGENT included as a relatum — so 'the box moves when the agent is behind it'
-        is DISCOVERED by the column's Rescorla-Wagner cue competition, not coded. Learned every step (a mover that did NOT move
-        teaches 'stay'); the agent's own move is learned separately by the nav operator."""
-        if prev_cur is None or cur is None or not getattr(action, "is_movement", False):
+    def _skin(self, grid, objs, cur) -> dict:
+        """The SKIN sense over the body surface (the TOUCH modality's transducer) — what is pressed against each face of the
+        self's body right now. The AGENCY signal: an object the body FELT (here) that then moves was moved by the SELF, not by a
+        collision between other objects. `{}` until the self is localised."""
+        body = self._body_cells(objs, cur)
+        return self._modalities["touch"].transduce(grid, body) if body else {}
+
+    def _body_cells(self, objs, cur) -> set:
+        """The self's BODY — the cells of the discovered controllable object (single-cell = `{its cell}`); empty until localised."""
+        c = self.self_color()
+        if c is None or cur is None:
+            return set()
+        for o in objs:
+            if o.color == c and o.anchor == cur:
+                return set(o.cells)
+        return {cur}
+
+    def _learn_contact(self, action, prev_skin, prev_pos, pos, prev_cur, cur, sc) -> None:
+        """Re-seat the object dynamics on TOUCH + prediction error (`behavior.py`, `notes/touch_and_body_design.md` §7). The self
+        FELT an object at its leading face (AGENCY — the skin, in the efference direction); the object's behaviour is DISCRIMINATED
+        by the prediction error between the operator-predicted body motion (the efference) and the actual outcome — YIELD (learn
+        the change `T`), RESIST (body blocked), or PASS. Only SELF-CAUSED motions teach: an object that moved without being felt
+        (a box shoved by another box) is never attributed to the agent -- which is why touch, not geometry, grounds this."""
+        if prev_cur is None or not getattr(action, "is_movement", False) or not prev_skin:
             return
-        movers = [c for c in self._movers if c in prev_pos and c in pos]
-        if not movers:
+        # the direction the body PRESSED: its ACTUAL displacement if it advanced (a yield/pass — no operator needed, which is
+        # what lets the FIRST move in a direction, even if it is the push, be learned), else the operator's PREDICTED move (a
+        # blocked press = resist, whose direction the body did not actually take).
+        if cur is not None and cur != prev_cur:
+            eff = sub(tuple(float(c) for c in cur), tuple(float(c) for c in prev_cur))
+        else:
+            op = self._nav_col().operator
+            if not op.known(action):
+                return
+            eff = sub(op.apply(self._as_pose(prev_cur), action)[0], tuple(float(c) for c in prev_cur))
+        felt = contact_toward(prev_skin, eff)                                   # the object the body pressed into (agency)
+        if felt is None or felt == sc:
             return
-        before = WorldMap(self._as_pose(prev_cur), {c: self._as_pose(prev_pos[c]) for c in movers})
-        after = WorldMap(self._as_pose(cur), {c: self._as_pose(pos[c]) for c in movers})
-        self.world_model().learn(action, before, after)
+        z = tuple(0.0 for _ in range(self._dims))
+        body_disp = sub(tuple(float(c) for c in cur), tuple(float(c) for c in prev_cur)) if cur is not None else z
+        obj_disp = (sub(tuple(float(c) for c in pos[felt]), tuple(float(c) for c in prev_pos[felt]))
+                    if felt in pos and felt in prev_pos else z)
+        self._contact.observe(felt, eff, body_disp, obj_disp)
 
     def _route_movers(self, pos) -> None:
         """Place every currently-visible known mover into the SCENE column, so `world_state()` (hence the rollout) includes it.

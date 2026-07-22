@@ -19,14 +19,8 @@ _ENTRY = "agent"
 STANDALONE: dict = {
     # 2026-07-10: the first slice wired everything — agent → column → {htm, encoders}. Add an entry ONLY with a written reason
     # if a module is legitimately built-but-not-yet-wired again.
-    #
-    # 2026-07-21 — the TOUCH modality, built + validated in isolation, wiring PENDING (the active next slice). Both go reachable
-    # when `Agent` construction moves to `modalities=[vision(), touch()]` and the object model is conditioned on FELT contact;
-    # these entries are DELETED then. Design: notes/touch_and_body_design.md.
-    "touch": "the SKIN peripheral + BODY surface (test_touch, green). Wiring = the contact-dynamics slice.",
-    "modality": "the sensory-modality factory + vision/touch specs (test_modality, green). Wiring = the same slice.",
-    "behavior": "the object BEHAVIOR model -- changes@locations, touch-conditioned, yield/resist/pass by prediction error "
-                "(test_behavior, green). Wiring = the same slice (it re-seats the scene column's object dynamics).",
+    # 2026-07-21: the TOUCH modality (touch/modality/behavior) was built pending; the contact-dynamics slice WIRED it into
+    # agent.py (Agent(modalities=[...]) + ContactDynamics re-seats the object model on FELT contact), so it left this list.
 }
 
 

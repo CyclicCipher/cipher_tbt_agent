@@ -59,7 +59,7 @@ writeup in `ARCHITECTURE.md` §7:
    A FACTORED recurrent state channel closes it (100%) where PURE temporal memory can't (37%). ReSU investigated + DROPPED
    (temporal encoder, not spatial invariance).
 
-Suite: **133 passed** (~28s; `test_column_arithmetic` is the ~16s end-to-end column test, the rest — `test_bg_thalamus`,
+Suite: **146 passed** (~28s; `test_column_arithmetic` is the ~16s end-to-end column test, the rest — `test_bg_thalamus`,
 `test_operator_path_integration`, `test_feature_at_location`, `test_l23_pooling`, `test_operator_non_abelian`,
 `test_object_centric`, `test_rotation_recognition`, `test_object_dynamics` — are fast). Count history, 2026-07-15: 54 → **46** at the continuous
 cut-over (`test_oriented_grid` + `test_rotation_operator` deleted with the discrete-rotation code they covered) → **48** with
@@ -231,22 +231,29 @@ ARCHITECTURE.md §3/§5.1):
    visible goal-featured object) when the goal is known, EPISTEMIC (novelty) when it isn't. Measured on two nav levels with goals
    at DIFFERENT cells: L0 explore 42 actions (discovers the goal) → L1 goal-directed **8 = oracle-optimal** (nothing positional
    carried; the discovered feature did) → WIN.
-   **Sokoban Slice A (the PUSH) ✅ DONE (2026-07-18, `tasks/games/push.py`, `test_push`, `demos/imagination_widget.py`)** — the
-   loop drives the SCENE column: a non-self object seen to MOVE is discovered as a MOVER (`_track_movers`, from motion), routed
-   up (`_route_movers`/`place_object`), and its PUSH dynamics learned online (`_learn_dynamics`→`WorldModel.learn`; 'the box moves
-   when the agent is behind it' DISCOVERED by cue competition). The goal generalised to RELATIONAL: `GoalMemory` credits `(mover,
-   landmark)` when the self pushes a mover onto a static landmark, and `_goal_plan` rolls the mover onto the landmark's cell — the
-   go-around PUSH a one-step value can't find (`project_linear_value_cannot_hold_sokoban`). Needed three supporting fixes: the
-   rollout SNAP (grid read-out), the RIGID-BODY COUPLING (agent blocked by a non-moving box → navigates around), and a
-   `(cell,action)` bootstrap guard (an always-blocked action is tried once, not looped). Measured on the pure-push fixture: L0
-   solved cold by exploration (discovers the mover + the `(6,7)` relation), L1's go-around solved GOAL-DIRECTED at **6 =
-   oracle-optimal, 12/12 seeds**. `Agent.imagine` + `demos/imagination_widget.py` render the two-pane REALITY-vs-imagined-rollout
-   widget (verified; artifact publish is auth-gated in-session).
-   NEXT: **the EPISTEMIC drive** (`feedback_epistemic_value_is_prediction_error`) — cold-start discovery on an UNCONSTRAINED push
-   needs valuing 'try the push whose outcome is unknown' (info gain), the general exploration mechanism the constrained L0 sidesteps;
-   then **Sokoban Slice B** (the CONJUNCTIVE win `box-on-pad AND agent-on-goal` — the relational-goal V\* at the goal level), then
-   **Tetris** (multi-cell + rotation + the click action), then the real ARC-AGI-3 SDK. Moving `decide`/`scan` OUT of the agent →
-   the THIN agent is part of this. Deferred within the hippocampus (DESIGN §4): theta/replay timing.
+   **Sokoban Slice A (the PUSH) ✅ GROUNDED (2026-07-21, `touch.py`+`modality.py`+`behavior.py`, `test_push`/`test_behavior`/
+   `test_touch`/`test_modality`)** — the DEGENERATE scaffolding of commit `bf04c9e` (scene-column RW push + a rollout SNAP + a
+   hand-coded rigid-body coupling, crutches #3/#4/#5/#9) is DELETED and re-seated on TOUCH + a learned BEHAVIOR model:
+   - **Touch modality** — `Agent(modalities=[vision(), touch()])` via the `modality.py` factory (a sense = `(transduce, feature,
+     location, pose_source)`; the column + connections are modality-INVARIANT). The SKIN (`touch.py`, body surface + per-face
+     contact) is the AGENCY signal: only motions the self FELT itself cause teach the dynamics (REAFFERENCE — a box shoved by
+     another box is never mis-attributed to the agent).
+   - **`behavior.ContactDynamics`** (changes@locations; TBP Object Behaviors ⊕ active-touch, `notes/touch_and_body_design.md`
+     §7) — pressing an object is DISCRIMINATED by the prediction error between the operator's predicted body motion and the
+     actual outcome: YIELD (learn the change `T`, efference-parameterised, LMS ⇒ ONE observation is exact AND direction-general),
+     RESIST (body blocked ⇒ solidity LEARNED, not assumed), PASS. YIELD is STICKY (a proven-movable object is not downgraded by
+     an obstructed push).
+   - **`WorldModel` is CONTACT-conditioned** (contact geometric in imagination + the learned behavior) — no snap, no coupling.
+   - Measured: **12/12 seeds** solve the pure-push fixture, L1 go-around GOAL-DIRECTED at **6 = oracle-optimal**. Block LEARNED to
+     YIELD, wall to RESIST; goal = the `(6,7)` relation, transferred. `Agent.imagine`+`demos/imagination_widget.py` = the widget.
+   The touch COLUMN (recognise-BY-touch, for OCCLUSION) is DEFERRED; the fully-observed push needs only the skin (agency) + the
+   behavior model. In full observation contact is geometric; touch earns its place as the agency/reafference signal.
+   NEXT: **the INVERSE-MODEL planner** ([[reference_gcml_inverse_model_planning]], `notes/gcml_neural_sampling_cognitive_maps.md`)
+   — a learned `W` (state-diff→action, one Hebbian rule) to replace the BFS rollout with a cheap goal-directed sense-of-direction:
+   the candidate fix for the rollout's cost + compositional generalisation, and TBP's own unsolved "use behaviors to inform
+   actions". Then **the EPISTEMIC drive** (`feedback_epistemic_value_is_prediction_error`, cold-start on an UNCONSTRAINED push);
+   **Slice B** (the CONJUNCTIVE win `box-on-pad AND agent-on-goal`); **Tetris** (multi-cell + rotation + click); the real SDK.
+   Deferred within the hippocampus (DESIGN §4): theta/replay timing.
    Still after the hippocampus: the MOTOR region (L5 emit + decode; move the readout OUT of the agent); the loop/brain object
    (move `decide`/`scan` OUT of the agent); the THIN agent; the `step(obs)→action` game loop. Plus a full multi-sensory-column
    recognition-BY-VOTING task consuming the Phase-5 register.

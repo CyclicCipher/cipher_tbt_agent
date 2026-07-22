@@ -57,3 +57,26 @@ def test_resist_blocks_and_unknown_is_the_honest_prior():
     assert cd.predict("never_felt", RIGHT) == (ZERO, False) and cd.kind_of("never_felt") == UNKNOWN
     cd.observe("wall", RIGHT, body_disp=ZERO, obj_disp=ZERO)
     assert cd.predict("wall", DOWN) == (ZERO, True), "a resisting object blocks the body in any direction"
+
+
+def test_worldmodel_contact_path_steps_yield_and_resist():
+    """The rollout's contact path (`WorldModel(contact=...)`): pressing a YIELD object moves it and advances the body; pressing a
+    RESIST object blocks the body. Contact is geometric in imagination; the OUTCOME is the learned behavior."""
+    from tbt.behavior import ContactDynamics as CD
+    from tbt.hippocampus import WorldMap, WorldModel
+    from tbt.operator import MotionOperator, eye
+    from tasks.core import GameAction
+    R = GameAction.ACTION4
+    body = MotionOperator(ego=True); body.learn(R, ((0.0, 0.0), eye(2)), ((1.0, 0.0), eye(2)))   # RIGHT = +x
+    cd = CD()
+    cd.observe(6, RIGHT, body_disp=RIGHT, obj_disp=RIGHT)     # box (6) yields, co-moves
+    cd.observe(1, RIGHT, body_disp=ZERO, obj_disp=ZERO)       # wall (1) resists
+    wm = WorldModel(contact=cd)
+
+    yld = wm.step(WorldMap(((1.0, 0.0), eye(2)), {6: ((2.0, 0.0), eye(2))}, bounds=[(0, 9), (0, 9)], body=body), R)
+    assert tuple(round(c) for c in yld.objects[6][0]) == (3, 0), "the yielding box advances one cell"
+    assert tuple(round(c) for c in yld.agent[0]) == (2, 0), "the body advances into the box's old cell"
+
+    res = wm.step(WorldMap(((1.0, 0.0), eye(2)), {1: ((2.0, 0.0), eye(2))}, bounds=[(0, 9), (0, 9)], body=body), R)
+    assert tuple(round(c) for c in res.agent[0]) == (1, 0), "the body is blocked by the resisting object"
+    assert tuple(round(c) for c in res.objects[1][0]) == (2, 0), "the resisting object stays put"

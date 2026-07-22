@@ -65,17 +65,12 @@ def test_rollout_reaches_a_delayed_goal_a_greedy_step_cannot():
 
 
 def test_rollout_pushes_a_box_onto_a_target_via_learned_dynamics():
-    """Sokoban in miniature, no hand-coded physics: the PUSH is LEARNED (the box moves east under 'E' only when the agent is
-    immediately west of it — Rescorla-Wagner cue competition), and the rollout drives that learned dynamics inside the
-    forward model. The agent starts NORTH of the box, so it must first go AROUND to the west side (a detour a greedy step
-    would never take) before pushing twice."""
+    """Sokoban in miniature, no hand-coded physics: the PUSH is a LEARNED BEHAVIOR (`ContactDynamics` — the box YIELDS, moving
+    by the learned change `T` when the agent presses into it; one clean observation is exact and direction-general), and the
+    rollout's contact path drives that learned dynamics inside the forward model. The agent starts NORTH of the box, so it must
+    go AROUND to the west side (a detour a greedy step would never take) before pushing twice."""
     a = _agent_at((5, 6))
-    wm = a.world_model()                                   # builds the scene column that holds the object dynamics
-    for _ in range(12):                                    # RW converges the push magnitude to ~1 cell over repeats
-        before = WorldMap(((3.0, 5.0), eye(2)), {1: ((4.0, 5.0), eye(2))})
-        after = WorldMap(((4.0, 5.0), eye(2)), {1: ((5.0, 5.0), eye(2))})
-        wm.learn("E", before, after)                       # agent west-adjacent + E ⇒ box moves east
-
+    a._contact.observe(1, (1.0, 0.0), body_disp=(1.0, 0.0), obj_disp=(1.0, 0.0))   # box (id 1) YIELDS: one felt push east
     a.place_object(1, ((5.0, 5.0), eye(2)))                # the scene: box at (5,5), agent at (5,6)
     target = (7.0, 5.0)
     reward = lambda w: 1.0 if _dist(w.objects[1][0], target) < 0.5 else 0.0
@@ -108,10 +103,7 @@ def test_value_critic_guides_the_leaf_when_the_goal_is_beyond_the_horizon():
 
 if __name__ == "__main__":
     ag = _agent_at((5, 6))
-    m = ag.world_model()
-    for _ in range(12):
-        m.learn("E", WorldMap(((3.0, 5.0), eye(2)), {1: ((4.0, 5.0), eye(2))}),
-                WorldMap(((4.0, 5.0), eye(2)), {1: ((5.0, 5.0), eye(2))}))
+    ag._contact.observe(1, (1.0, 0.0), body_disp=(1.0, 0.0), obj_disp=(1.0, 0.0))
     ag.place_object(1, ((5.0, 5.0), eye(2)))
     tgt = (7.0, 5.0)
     p = ag.plan(lambda w: 1.0 if _dist(w.objects[1][0], tgt) < 0.5 else 0.0, ACTIONS, horizon=10)

@@ -41,11 +41,15 @@ class ObjectBehavior:
 
     def observe(self, efference, body_disp, obj_disp, tol: float = 1e-6) -> None:
         """One felt interaction: the body pressed with `efference` (its forward-model-PREDICTED displacement) and ACTUALLY moved
-        `body_disp` while the felt object moved `obj_disp`. Discriminate by the prediction error and update."""
+        `body_disp` while the felt object moved `obj_disp`. Discriminate by the prediction error and update. YIELD is STICKY --
+        once an object has been seen to move, it IS movable, and a later non-move is OBSTRUCTION (something behind it), not
+        inherent resistance; so a proven-yielding object is never downgraded (only its change `T` keeps refining)."""
         if norm(obj_disp) > tol:                 # the object gave -> YIELD; fit the change from obj_disp = T·efference
             self.kind = YIELD
             self._fit(efference, obj_disp)
-        elif norm(body_disp) <= tol:             # pressed, neither moved -> RESIST (the body did not advance as predicted)
+        elif self.kind == YIELD:                 # already proven movable -> this non-move is obstruction, not resistance
+            return
+        elif norm(body_disp) <= tol:             # pressed, neither moved, never yielded -> RESIST (the body could not advance)
             self.kind = RESIST
         elif norm(sub(body_disp, efference)) <= tol:   # body advanced through, object unmoved -> PASS (non-solid)
             self.kind = PASS

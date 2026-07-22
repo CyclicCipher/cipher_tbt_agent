@@ -25,56 +25,42 @@ from __future__ import annotations
 
 from collections import deque
 
-_SELF = object()   # the agent as a relatum in an object's relational state; a transient key, never stored in the map's objects
+from ..operator import add, norm, sub
+
+_TOL = 1e-9
 
 
 class WorldModel:
-    """The learned forward model over a world-state. `step` advances one imagined action; `learn` folds one observed
-    transition into the column. Stateless over the map — it holds only the (shared, learned) compositional column.
+    """The learned forward model over a world-state — CONTACT-conditioned (`behavior.ContactDynamics`, the touch-grounded object
+    behavior model; `notes/touch_and_body_design.md` §7). `step` advances one imagined action. Stateless over the map: it holds
+    only the (shared, learned) behavior model, so a rollout forks the state and re-uses the one learned dynamics."""
 
-    `snap` (optional) quantises a predicted object pose to the environment's cells — a READ-OUT, injected by the caller so
-    the model stays domain-agnostic. On a GRID it snaps to the nearest integer cell (round-half-up), which does two jobs at
-    once: it makes the state space DISCRETE (so a rollout's visited-pruning bounds it — a continuous object position would
-    proliferate forever), and it lets a half-learned push (`+0.5` after one Rescorla-Wagner step) read out as the FULL cell
-    step it really is, so ONE observation suffices and multi-push plans don't drift (`reference_l5_operator_kinds`: the pose is
-    a continuous state with a quantised read-out, exactly as the nav operator uses `round`)."""
-
-    def __init__(self, scene, snap=None) -> None:
-        self.scene = scene    # the compositional Column: state_in / predict_object_move / learn_object_move (object dynamics)
-        self.snap = snap or (lambda pose: pose)
+    def __init__(self, contact) -> None:
+        self.contact = contact  # a `behavior.ContactDynamics`: yield/resist/pass + the change T per object, learned from touch
 
     def step(self, world, action):
-        """One imagined step: the agent path-integrates (`map.move_agent`, the borrowed operator), and every object moves
-        under `action` gated by its relational state IN THIS FORK — with the agent included as a relatum, so a push reads the
-        agent's PRE-move position. All objects update from the SAME pre-action configuration (simultaneous), which is the
-        physics a rollout needs. Returns a NEW world (functional — the caller's node is untouched)."""
-        nxt = world.move_agent(action)
-        if world.objects:
-            relata = dict(world.objects); relata[_SELF] = world.agent
-            moved = {oid: self.snap(self.scene.predict_object_move(pose, action, self.scene.state_in(relata, oid)))
-                     for oid, pose in world.objects.items()}
-            # RIGID-BODY COUPLING: an object is SOLID — the agent cannot occupy its cell. If the agent's move lands on an
-            # object that did NOT move out of the way (an unlearned / blocked push), the agent is BLOCKED (both stay). So a box
-            # is an obstacle to navigate AROUND, and only a LEARNED push (object vacates, agent follows) lets the agent advance —
-            # which is what stops the rollout from imagining a walk-through and then shoving the box the wrong way in reality.
-            if nxt.agent is not None:
-                acell = tuple(round(c) for c in nxt.agent[0])
-                for oid, pose in world.objects.items():
-                    ocell = tuple(round(c) for c in pose[0])
-                    if acell == ocell and tuple(round(c) for c in moved[oid][0]) == ocell:
-                        nxt.agent = world.agent                # walked into a non-moving object → blocked (stay put)
-                        break
-            nxt.objects = moved
-        return nxt
-
-    def learn(self, action, before, after) -> None:
-        """Fold one observed transition into the model: each object's move under `action`, CONDITIONED on its pre-action
-        relational state (agent as a relatum). A push is thereby learned as "the box moves when the agent is behind it" —
-        the true condition DISCOVERED and spurious relata BLOCKED by the column's Rescorla-Wagner cue competition
-        (`reference_cue_competition_key_discovery`). The agent's OWN move is learned by the nav column (`Agent.learn_pose_move`)."""
-        relata = dict(before.objects); relata[_SELF] = before.agent
-        for oid in before.objects:
-            self.scene.learn_object_move(action, before.objects[oid], after.objects[oid], self.scene.state_in(relata, oid))
+        """One imagined step (functional — returns a NEW world). The agent path-integrates; where its move lands ON an object
+        (contact — computed GEOMETRICALLY here, since imagination has no skin), that object's LEARNED behavior fires: RESIST
+        blocks the body (both stay), YIELD/PASS moves the object by the learned change (0 for pass) and the body advances.
+        Solidity is the learned RESIST, not an assumption; the change T is exact one-shot, so there is no snap and no
+        per-direction key (`behavior.py`)."""
+        tentative = world.move_agent(action)
+        if tentative.agent is None or not world.objects:
+            return tentative
+        eff = sub(tentative.agent[0], world.agent[0])          # the body's displacement for this action (0 if a wall blocked it)
+        if norm(eff) <= _TOL:
+            return tentative                                   # already wall-blocked → no forward contact
+        acell = tuple(round(c) for c in tentative.agent[0])
+        agent, objects = tentative.agent, dict(world.objects)
+        for oid, pose in world.objects.items():
+            if tuple(round(c) for c in pose[0]) == acell:      # the body presses into this object
+                obj_disp, blocked = self.contact.predict(oid, eff)
+                if blocked:
+                    agent = world.agent                        # RESIST: the body cannot advance
+                else:
+                    objects[oid] = (add(pose[0], obj_disp), pose[1])   # YIELD/PASS: the object takes the learned change
+        out = world.snapshot(); out.agent = agent; out.objects = objects
+        return out
 
 
 class Rollout:

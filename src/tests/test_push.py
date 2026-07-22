@@ -1,13 +1,14 @@
 """test_push.py — the PUSH: the agent learns an object's dynamics online and plans a go-around with the hippocampal rollout.
 
 Slice A of Sokoban, on the pure-push fixture (win = block-on-pad, no agent-goal conjunct). It exercises the pieces a nav level
-cannot: (1) a MOVER — an object whose motion the agent does NOT directly control, discovered from motion and routed to the scene
-column, whose push dynamics ('the block moves when the agent is behind it') are learned online by the column's cue competition;
-(2) a RELATIONAL goal — 'block on pad', a relation between two object features, discovered from the sparse score and
-position-invariant so it transfers; (3) the ROLLOUT planning a GO-AROUND (navigate to the block's far side, then push) that a
-one-step value cannot find (`project_linear_value_cannot_hold_sokoban`). Level 0 is a constrained slot solved by exploration
-(which learns the push + the goal); level 1 is an open board where the block must be approached from the far side — solved
-GOAL-DIRECTED at oracle cost, purely from the transferred relation.
+cannot: (1) a MOVER — an object whose motion the agent does NOT directly control, discovered from motion; (2) its push DYNAMICS
+learned as a touch-grounded BEHAVIOR (`behavior.ContactDynamics`): the block YIELDS (moves by the learned change `T`) when the
+body presses into it, discriminated from RESIST/PASS by the prediction error between the operator's predicted body motion and the
+actual outcome, with the SKIN grounding AGENCY (only self-caused motions teach) — no snap, solidity learned not assumed; (3) a
+RELATIONAL goal — 'block on pad', discovered from the sparse score and position-invariant so it transfers; (4) the ROLLOUT
+planning a GO-AROUND (navigate to the block's far side, then push) that a one-step value cannot find
+(`project_linear_value_cannot_hold_sokoban`). Level 0 is a constrained slot solved by exploration (which learns the push + the
+goal); level 1 is an open board — solved GOAL-DIRECTED at oracle cost, purely from the transferred relation + learned behavior.
 """
 
 from __future__ import annotations
@@ -44,11 +45,14 @@ def _play(seed: int, budget: int = 400):
 
 
 def test_agent_solves_push_and_discovers_the_relational_goal():
-    """Cold start: the agent solves the constrained push level 0 by exploration, and in doing so discovers the block is a MOVER
-    and that the goal is the RELATION (block-colour on pad-colour) — learned from the score, never coded."""
+    """Cold start: the agent solves the constrained push level 0 by exploration, and in doing so discovers the block is a MOVER,
+    LEARNS its behaviour by felt contact (block YIELDS, wall RESISTS — never coded), and discovers the goal is the RELATION
+    (block-colour on pad-colour) — all from motion + the sparse score."""
     fd, per_level, agent = _play(seed=0)
     assert len(per_level) >= 1, "the agent must solve at least the first push level by exploration"
     assert 6 in agent._movers, "the block (colour 6) must be discovered as a mover from its motion"
+    assert agent._contact.kind_of(6) == "yield", "the block must be LEARNED to yield when pressed (behaviour, not coded)"
+    assert agent._contact.kind_of(1) == "resist", "the wall must be LEARNED to resist (solidity discovered, not assumed)"
     assert agent.goal_mem.goal() == (6, 7), f"the goal must be the relation (block 6 on pad 7), got {agent.goal_mem.goal()}"
 
 
@@ -58,7 +62,7 @@ def test_go_around_push_transfers_at_oracle_cost():
     cost. Checked across seeds so it is the mechanism, not a lucky start."""
     probe = Push(); probe.load_level(1)
     oracle = len(solve_level(probe))                          # shortest level-1 solution (the go-around push)
-    for seed in range(4):
+    for seed in range(8):
         fd, per_level, agent = _play(seed=seed)
         assert fd.is_win(), f"seed {seed}: both push levels must be solved (WIN); ended {fd.state}, per_level={per_level}"
         assert per_level[1] == oracle, (
