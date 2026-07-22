@@ -421,8 +421,11 @@ sends a 90°-turned block to (20,23), **90° off** the shove it was shown, where
 obeys is itself discoverable (a self-propelled object is intrinsic); for now it is declared per operator, and discovering it
 is the same open problem as the KEY below. *NB the extrinsic frame must be **allocentric** for a law like gravity to be
 invariant. With a static observer the observation frame already is one; a moving observer needs the ego→allo transform —
-which is the **hippocampus's** job, not a column's (`reference_tbt_frames_and_hippocampus`: HPC = one global allocentric
-map, cortex = many local object-centric frames), and is deferred until the sensor moves.*
+which is the **THALAMUS's** job (LOCUS CORRECTED 2026-07-22): TBP's long-range-connections paper (arXiv:2507.05888) states the
+ego-centric→allo-centric transformation of incoming sensory and motor data "occurs in the thalamus, and is a primary function
+of thalamic relay cells." This text previously assigned it to the hippocampus (`reference_tbt_frames_and_hippocampus`) — that
+memory is corrected too. The HPC/cortex split it cited (one global allocentric map vs many local object-centric frames) still
+stands; what was wrong is WHO performs the transform. Deferred until the sensor moves.*
 
 **COMMON FATE — what moves together is one thing (BUILT, and it closes R7's cold-start blob).** Everywhere else the boundary
 is a prediction mismatch *against a model*, which is exactly why a wholly novel scene can only mint one blob: with no model
