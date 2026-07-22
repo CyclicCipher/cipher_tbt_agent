@@ -3,68 +3,85 @@
 TBP (https://docs.thousandbrains.org/docs/object-behaviors): object dynamics is a behavior model storing CHANGES@locations (vs
 the structural model's features@locations), in an object-INDEPENDENT reference frame, state-conditioned. TBP leaves the
 INTERACTION open (contact, efference, action-from-behavior are "unresolved"); we fill it with the active-touch forward model
-(notes/touch_and_body_design.md §7): the CONDITION is felt contact, the CHANGE is efference-parameterised, and YIELD / RESIST /
-PASS is discriminated by the PREDICTION ERROR between the operator's predicted body motion (the efference) and the actual
-outcome. Learned per felt object; the change is direction-GENERAL because it lives in the invariant frame (the LID win).
+(notes/touch_and_body_design.md §7): the CONDITION is felt contact and the CHANGE is efference-parameterised.
+
+The change is learned by the L5 `Transform` below -- ONE cortical layer plus its population read-out, no kinds and no branches.
 """
 
 from __future__ import annotations
 
+from .htm import HTMLayer, PopulationReadout
 from .operator import add, eye, norm, rotate, sub   # rotate(M, v) IS the matrix-vector product; reuse the algebra
 
 YIELD, RESIST, PASS, UNKNOWN = "yield", "resist", "pass", "unknown"
 
 
 class Transform:
-    """The L5 TRANSFORM — one mechanism, no kinds, no branches (`notes/l5_unified_transform_design.md`).
+    """The L5 TRANSFORM -- an ordinary cortical layer read out as a metric quantity. NO bespoke machinery: it is exactly
 
-        delta  =  Σ_{cue ∈ context}  W[cue] · x,      x = [param ; 1]
+        cells  =  HTMLayer(proximal = the CUES present, basal = the interaction PARAMETER)
+        delta  =  PopulationReadout(cells)
 
-    A body's change is an affine function of a context-supplied PARAMETER, summed over the CUES that are present. Cues are
-    opaque hashable keys the caller supplies; this class never interprets them, so nothing here is specific to contact, support,
-    or any other niche. Because `x` carries a constant 1 alongside the parameter, ONE form expresses both shapes we need: a
-    FIXED delta (the parameter contributes nothing — the bias column is the whole effect, which is the per-action operator case)
-    and an INTERACTION-parameterised delta (the effect scales with the parameter — the push, where the parameter is the pusher's
-    displacement). No enumeration of outcomes: "moves", "does not move", "blocks" are simply different learned deltas.
+    i.e. the canonical pipeline (`reference_htm_canonical_pipeline`) run to its VECTOR read-out. The two dendrite zones carry
+    the two halves of the old hand-written form `delta = SUM_cue W[cue].[param;1]`, and carry them for the RIGHT reason:
 
-    LEARNING is the delta rule (Widrow-Hoff): the prediction error is shared by every present cue, normalised by their count
-    (the same guard the value critic uses, or the effective rate diverges). That sharing IS cue competition — a spurious cue
-    co-occurring with the true one is driven toward zero once the true one already explains the delta (Kamin blocking,
-    `reference_cue_competition_key_discovery`).
+    * PROXIMAL = the cues. Each cue drives its own minicolumns, so a set of cues drives the UNION of their assemblies and the
+      population vector SUMS their contributions. Additivity over cues is a property of the code; there is no summation to
+      write. (Putting cues in the basal zone instead does not work, and the reason is instructive: HTM only mints a new
+      representation on a BURST, and a superset context always matches the subset's segment -- so {support, neighbour} could
+      never acquire an assembly distinct from {neighbour}. Cues must DRIVE, not contextualise.)
+    * BASAL = the parameter. The context selects WHICH cell fires inside each driven column, so the same cue under a different
+      parameter is a different assembly and decodes to a different delta. That is the interaction term, formed for free
+      (`htm.py`: "what drives the basal context is the ONLY thing that distinguishes the layers").
+    * CUE COMPETITION -- the read-out's delta rule shares the error over the active cells, so a cue that merely co-occurs is
+      blocked once the cells that really predict the delta explain it (`reference_cue_competition_key_discovery`).
 
-    PRIORS: none. Weights start at zero — "no evidence, no effect" — so an unobserved cue predicts nothing and an unobserved
-    parameter direction is NOT extrapolated. Any generalisation must come from the CONTEXT the caller supplies (e.g. expressing
-    cues and deltas in the frame the action defines), never from a prior baked in here."""
+    THE ASSEMBLY WE READ is the DEPOLARISED one -- the cells this parameter predicts inside the cue-driven columns -- never a
+    burst. A burst means "no prediction", and every cell in a column firing is the layer's ambiguity signal, not a delta:
+    decoding it would make an unlearned situation read out the average of everything ever seen. Reading the depolarised set
+    makes "no evidence, no effect" automatic and leaves `layer.bursting()` free to be what it is everywhere else -- novelty.
 
-    def __init__(self, dims: int = 2, lr: float = 1.0) -> None:
+    ONE-SHOT: `init_perm > connected`, so a segment grown in a single burst is connected immediately and one clean observation
+    is exact. That is a per-layer permanence setting, the same knob that separates fast episodic binding from slow cortical
+    statistics -- not a mechanism change.
+
+    PRIORS: none. Weights start at zero and an unlearned cell contributes nothing, so an unseen cue predicts no change and an
+    unseen parameter is not extrapolated. HONEST LIMIT: generalisation across parameters is what the parameter's ENCODING
+    grants -- a bump-coded parameter shares bits with its neighbours, so a small change decodes the same delta and a large one
+    decodes nothing. Plateau then cliff, not a smooth slope; anything smoother has to come from the code, never from here.
+
+    RESOLUTION: `activation_threshold` and the caller's parameter ENCODER are ONE design decision, as they are for every HTM
+    layer -- the threshold has to sit above the overlap between parameter values that must stay DISTINCT and below the overlap
+    between values that should share a delta. The defaults here are set against a 24-bit grid-coded 2-D parameter, where unit
+    directions overlap 16/24 and adjacent magnitudes 20/24. `min_threshold` matters just as much and for a subtler reason: it
+    is the bar for REUSING an existing segment on a burst, so leaving it low lets a novel parameter hijack a neighbouring
+    parameter's segment and drag it across instead of recruiting its own cell -- distinct parameters then silently share one
+    delta. Holding it at the activation threshold means a burst always recruits, which is what a conjunction wants."""
+
+    def __init__(self, dims: int = 2, cells_per_column: int = 16, lr: float = 1.0, activation_threshold: int = 18,
+                 min_threshold: int = 18, init_perm: float = 0.60) -> None:
         self.dims = int(dims)
-        self.lr = float(lr)
-        self.W: dict = {}                    # cue -> a dims x (dims+1) matrix acting on [param ; 1]
+        self.layer = HTMLayer(cells_per_column=cells_per_column, activation_threshold=activation_threshold,
+                              min_threshold=min_threshold, init_perm=init_perm)
+        self.readout = PopulationReadout(dims, lr)
 
-    def _x(self, param):
-        return (tuple(param) if param is not None else tuple(0.0 for _ in range(self.dims))) + (1.0,)
+    def _assembly(self, cues, param):
+        """The cells this basal `param` DEPOLARISES inside the proximally cue-driven columns -- the sensorimotor conjunction.
+        Empty for a cue or a parameter the layer has not learned."""
+        cols = set(cues)
+        self.layer.depolarize(param)
+        return frozenset(c for c in self.layer._predictive if c[0] in cols)
 
-    def predict(self, cues, param=None):
-        """The predicted delta: the summed affine contribution of every present cue. An unseen cue contributes nothing."""
-        out = tuple(0.0 for _ in range(self.dims))
-        x = self._x(param)
-        for c in cues:
-            W = self.W.get(c)
-            if W is not None:
-                out = add(out, rotate(W, x))
-        return out
+    def predict(self, cues, param):
+        """The predicted delta: the population vector of the assembly these cues-under-this-parameter drive."""
+        return self.readout.decode(self._assembly(cues, param))
 
     def learn(self, cues, param, observed) -> None:
-        """One observation: fold the prediction error into every present cue by the delta rule, sharing it between them."""
-        cues = list(cues)
-        if not cues:
-            return
-        x = self._x(param)
-        err = sub(observed, self.predict(cues, param))
-        k = self.lr / (len(cues) * sum(v * v for v in x))
-        for c in cues:
-            W = self.W.get(c) or tuple(tuple(0.0 for _ in x) for _ in range(self.dims))
-            self.W[c] = _madd(W, _outer(err, x), k)
+        """One observation: run the layer (a novel conjunction bursts and grows its segment), then fold the read-out's error
+        into the assembly that conjunction has settled on -- the same one `predict` decodes."""
+        self.layer.depolarize(param)
+        self.layer.observe(cues, context=param, learn=True)
+        self.readout.learn(self._assembly(cues, param), observed)
 
 
 def _outer(u, v):

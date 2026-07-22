@@ -253,3 +253,49 @@ class HTMLayer:
         """A sequence boundary: clear the phase (active/winner/predictive); the learned segments PERSIST."""
         self._active, self._winners, self._predictive, self._active_segs = set(), set(), set(), {}
         self._burst = False
+
+
+class PopulationReadout:
+    """The canonical pipeline's THIRD stage, vector-valued (`reference_htm_canonical_pipeline`: encoder → SP → TM → read-out).
+    We had only ever built the discrete variant (a softmax over cells → one bucket); this is the CONTINUOUS one.
+
+    It is a POPULATION VECTOR: every active cell contributes its own learned preferred vector, and their SUM is the decoded
+    quantity — the construction motor cortex uses to encode movement direction from broadly-tuned cells (Georgopoulos), and
+    the same one grid/place/head-direction populations use for position and heading. So a cell assembly is BOTH codes at once:
+    identity is WHICH cells fire, metric is WHAT they decode to. There is no identity-vs-metric dichotomy to work around, and
+    SDR OVERLAP makes the decode generalise smoothly — similar assemblies decode to similar vectors, for free.
+
+    Learned by the delta rule, the error shared across the active cells and normalised by their count (or the effective rate
+    scales with sparsity and diverges — the same guard the value critic needs). That sharing is cue competition at CELL
+    granularity: a cell that is merely along for the ride stops accruing once the cells that predict the quantity explain it.
+
+    NB this decodes a SINGLE-STEP quantity. It is not an accumulator: nothing here is applied repeatedly, so the quantisation
+    of the code never compounds into drift (which is the regime where a discrete code genuinely does fail — see
+    `operator.py`'s continuous pose, and why L6a keeps its state continuous)."""
+
+    def __init__(self, dims: int, lr: float = 1.0) -> None:
+        self.dims = int(dims)
+        self.lr = float(lr)
+        self.w: dict = {}                      # cell -> its preferred vector (the cell's contribution to the population sum)
+
+    def decode(self, cells):
+        """The population vector: the sum of the preferred vectors of the active cells. An unseen cell contributes nothing."""
+        out = [0.0] * self.dims
+        for c in cells:
+            v = self.w.get(c)
+            if v is not None:
+                for i in range(self.dims):
+                    out[i] += v[i]
+        return tuple(out)
+
+    def learn(self, cells, target) -> None:
+        """One observation: share the decode error over the active cells (delta rule). With `lr=1` a single clean assembly is
+        exact, and an assembly that OVERLAPS a learned one inherits its decode in proportion to the overlap."""
+        cells = list(cells)
+        if not cells:
+            return
+        got = self.decode(cells)
+        step = [self.lr * (target[i] - got[i]) / len(cells) for i in range(self.dims)]
+        for c in cells:
+            v = self.w.get(c) or tuple(0.0 for _ in range(self.dims))
+            self.w[c] = tuple(v[i] + step[i] for i in range(self.dims))

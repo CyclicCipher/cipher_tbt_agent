@@ -15,6 +15,7 @@ if _PKG not in sys.path:
     sys.path.insert(0, _PKG)
 
 from tbt.behavior import PASS, RESIST, UNKNOWN, YIELD, ContactDynamics, Transform   # noqa: E402
+from tbt.encoders import GridEncoder                                                # noqa: E402
 
 RIGHT, DOWN = (1.0, 0.0), (0.0, 1.0)
 ZERO = (0.0, 0.0)
@@ -82,46 +83,83 @@ def test_worldmodel_contact_path_steps_yield_and_resist():
     assert tuple(round(c) for c in res.objects[1][0]) == (2, 0), "the resisting object stays put"
 
 
-# ── the UNIFIED L5 TRANSFORM (notes/l5_unified_transform_design.md) ────────────────────────────────────────────────────
-# ONE mechanism — delta = Σ_cue W[cue]·[param;1] — with no kinds, no branches and NO priors. These pin the three properties
-# the bespoke machinery it replaces was carrying, and record the one property that is genuinely LOST without a prior.
+# ── the L5 TRANSFORM (notes/l5_unified_transform_design.md) ────────────────────────────────────────────────────────────
+# ONE cortical layer read out as a metric quantity — `HTMLayer(proximal=cues, basal=parameter)` → `PopulationReadout`. No
+# kinds, no branches, no priors, and nothing written that the substrate does not already do. These pin the properties the
+# bespoke machinery it replaces was carrying, plus the two the substrate adds for free.
+
+_GRID = GridEncoder(scales=(7, 11, 13, 17), dims=2, mw=3)
+LEFT, UP = (-1.0, 0.0), (0.0, -1.0)
+
+
+def _param(v):
+    """The interaction parameter as a basal context SDR — the encoder is UPSTREAM of the layer, as it is everywhere."""
+    return {("g", b) for b in _GRID.encode(v).active}
+
+
+def _cues(*names):
+    """Each cue drives its own disjoint block of minicolumns (the proximal drive)."""
+    return {(nm, i) for nm in names for i in range(8)}
+
 
 def _close(a, b, tol=1e-6):
     return all(abs(x - y) <= tol for x, y in zip(a, b))
 
 
 def test_transform_learns_a_fixed_delta_per_cue_one_shot():
-    """The per-action OPERATOR case: with no parameter, the bias column IS the whole effect, so one clean observation is
-    exact — the property `MotionOperator`'s running mean gave, reproduced by the generic form."""
+    """The per-action OPERATOR case: with the parameter held constant the cue IS the whole effect, and ONE observation is
+    exact — the property `MotionOperator`'s running mean gave, now falling out of a layer whose grown segment is connected
+    immediately. An unlearned cue drives only bursting columns, which are not read, so it contributes nothing."""
     t = Transform()
-    t.learn({"act_E"}, None, RIGHT)
-    assert _close(t.predict({"act_E"}), RIGHT), t.predict({"act_E"})
-    assert _close(t.predict({"never_seen"}), ZERO), "an unseen cue contributes nothing — no evidence, no effect"
+    t.learn(_cues("act_E"), _param(ZERO), RIGHT)
+    assert _close(t.predict(_cues("act_E"), _param(ZERO)), RIGHT), t.predict(_cues("act_E"), _param(ZERO))
+    assert _close(t.predict(_cues("never_seen"), _param(ZERO)), ZERO), "no evidence, no effect"
 
 
 def test_transform_learns_an_interaction_parameterised_delta():
-    """The PUSH case: the effect scales with a context parameter (the pusher's displacement), exact in the direction observed."""
+    """The PUSH case: the SAME cue under four different parameters decodes four different deltas, because the basal context
+    selects a different cell within the cue's columns each time. That conjunction is the interaction term, formed by the
+    substrate rather than by an affine formula."""
     t = Transform()
-    t.learn({"contact"}, RIGHT, RIGHT)
-    assert _close(t.predict({"contact"}, RIGHT), RIGHT), t.predict({"contact"}, RIGHT)
+    for p, d in [(RIGHT, RIGHT), (DOWN, DOWN), (LEFT, LEFT), (UP, UP)]:
+        t.learn(_cues("contact"), _param(p), d)
+    for p, d in [(RIGHT, RIGHT), (DOWN, DOWN), (LEFT, LEFT), (UP, UP)]:
+        assert _close(t.predict(_cues("contact"), _param(p)), d), (p, t.predict(_cues("contact"), _param(p)))
 
 
-def test_transform_does_not_extrapolate_an_unobserved_parameter_direction():
-    """HONEST LIMIT, recorded deliberately: with no identity prior the transform does NOT generalise a push to an unseen
-    direction. Any such generalisation must come from the CONTEXT the caller supplies (expressing cues and deltas in the frame
-    the action defines), never from a prior baked into the mechanism."""
+def test_transform_learns_the_magnitude_not_just_the_direction():
+    """An 'ice' box that slides two cells per push: the delta is whatever was OBSERVED, so a scaled response needs no extra
+    machinery and no notion of 'co-motion'."""
     t = Transform()
-    t.learn({"contact"}, RIGHT, RIGHT)
-    assert not _close(t.predict({"contact"}, DOWN), DOWN), "a prior would be needed to co-move in an unseen direction"
+    t.learn(_cues("box"), _param(RIGHT), (2.0, 0.0))
+    assert _close(t.predict(_cues("box"), _param(RIGHT)), (2.0, 0.0))
+
+
+def test_transform_superposes_independently_learned_cues():
+    """SUPERPOSITION, free: two cues learned apart drive the union of their assemblies when present together, and the
+    population vector SUMS them. There is no summation over cues written anywhere — it is a property of the code."""
+    t = Transform()
+    t.learn(_cues("a"), _param(ZERO), (1.0, 0.0))
+    t.learn(_cues("b"), _param(ZERO), (0.0, 2.0))
+    assert _close(t.predict(_cues("a", "b"), _param(ZERO)), (1.0, 2.0)), t.predict(_cues("a", "b"), _param(ZERO))
+
+
+def test_transform_does_not_extrapolate_an_unobserved_parameter():
+    """HONEST LIMIT, recorded deliberately: with no prior the transform does not invent a delta for a parameter it has never
+    seen. Any such generalisation must come from the parameter's ENCODING or from the frame the caller supplies, never from
+    a prior baked into the mechanism."""
+    t = Transform()
+    t.learn(_cues("contact"), _param(RIGHT), RIGHT)
+    assert _close(t.predict(_cues("contact"), _param((5.0, 5.0))), ZERO), "an unseen parameter predicts nothing"
 
 
 def test_transform_cue_competition_rejects_the_spurious_cue():
-    """The KEY-DISCOVERY property survives the generic form: sharing the error across present cues is cue competition, so a
-    neighbour that merely co-occurs is driven to zero once SUPPORT explains 'stays' (Kamin blocking) — while the neighbour
-    alone still predicts the fall it really does explain."""
+    """The KEY-DISCOVERY property survives: the read-out's delta rule shares the error over the ACTIVE CELLS, so a neighbour
+    that merely co-occurs is blocked once SUPPORT explains 'stays' (Kamin blocking) — while the neighbour alone still
+    predicts the fall it really does explain."""
     t = Transform(lr=0.5)
     for _ in range(30):
-        t.learn({"support", "neighbour"}, None, ZERO)      # supported ⇒ stays
-        t.learn({"neighbour"}, None, DOWN)                 # neighbour alone ⇒ falls
-    assert _close(t.predict({"support", "neighbour"}), ZERO, tol=0.05), t.predict({"support", "neighbour"})
-    assert _close(t.predict({"neighbour"}), DOWN, tol=0.05), t.predict({"neighbour"})
+        t.learn(_cues("support", "neighbour"), _param(ZERO), ZERO)      # supported ⇒ stays
+        t.learn(_cues("neighbour"), _param(ZERO), DOWN)                 # neighbour alone ⇒ falls
+    assert _close(t.predict(_cues("support", "neighbour"), _param(ZERO)), ZERO, tol=0.05)
+    assert _close(t.predict(_cues("neighbour"), _param(ZERO)), DOWN, tol=0.05)

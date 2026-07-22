@@ -15,7 +15,7 @@ _PKG = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG not in sys.path:
     sys.path.insert(0, _PKG)
 
-from tbt.htm import HTMLayer  # noqa: E402
+from tbt.htm import HTMLayer, PopulationReadout  # noqa: E402
 
 
 # ---- (1) the dendrite substrate -------------------------------------------------------------------------------
@@ -124,3 +124,45 @@ def test_pluggable_context_binds_feature_at_location():
         h.observe(feat, context=loc)
     assert len(h.predict_at(loc) & feat) >= 6
     assert len(h.predict_at(set(range(70, 80))) & feat) == 0
+
+
+# ── the POPULATION READ-OUT ─────────────────────────────────────────────────────────────────────────────────────────────
+# The canonical pipeline's third stage, VECTOR-valued: encoder → SP → TM → read-out. We had only ever built the discrete
+# variant (a softmax over cells → one bucket); this is the continuous one, and it is the mechanism that lets a cell assembly
+# be an IDENTITY code and a METRIC code at once — which cells fire, and what they decode to.
+
+def test_population_readout_decodes_a_vector_one_shot():
+    """A population vector: the summed preferred vectors of the active cells, exact after one observation at lr=1."""
+    r = PopulationReadout(2)
+    r.learn({1, 2, 3, 4}, (1.0, 0.0))
+    assert all(abs(a - b) < 1e-9 for a, b in zip(r.decode({1, 2, 3, 4}), (1.0, 0.0)))
+
+
+def test_population_readout_generalises_by_overlap():
+    """SDR overlap makes the decode metric: a half-overlapping assembly inherits half the learned vector, and a disjoint one
+    inherits nothing (an unlearned cell contributes zero — no evidence, no effect). Smooth generalisation for free."""
+    r = PopulationReadout(2)
+    r.learn({1, 2, 3, 4}, (1.0, 0.0))
+    assert abs(r.decode({1, 2, 9, 10})[0] - 0.5) < 1e-9, "half the cells ⇒ half the vector"
+    assert all(abs(v) < 1e-9 for v in r.decode({7, 8})), "no learned cell ⇒ no decode"
+
+
+def test_population_readout_separates_contexts():
+    """Different assemblies decode to different vectors — so the SAME quantity read under two contexts is two values, which
+    is what makes the conjunction an HTM layer forms usable as a transform."""
+    r = PopulationReadout(2)
+    r.learn({1, 2, 3, 4}, (1.0, 0.0))
+    r.learn({5, 6, 7, 8}, (0.0, 1.0))
+    assert all(abs(a - b) < 1e-9 for a, b in zip(r.decode({1, 2, 3, 4}), (1.0, 0.0)))
+    assert all(abs(a - b) < 1e-9 for a, b in zip(r.decode({5, 6, 7, 8}), (0.0, 1.0)))
+
+
+def test_population_readout_shares_error_across_cells():
+    """The delta rule normalised by the active count — which is cue competition at CELL granularity, and the reason a
+    spurious cue is blocked once the predictive cells explain the quantity."""
+    r = PopulationReadout(2, lr=0.5)
+    for _ in range(40):
+        r.learn({1, 2, 3}, (0.0, 0.0))       # cells 1-3 together ⇒ nothing
+        r.learn({2, 3}, (0.0, 1.0))          # 2-3 alone ⇒ down
+    assert all(abs(v) < 0.05 for v in r.decode({1, 2, 3}))
+    assert abs(r.decode({2, 3})[1] - 1.0) < 0.05
