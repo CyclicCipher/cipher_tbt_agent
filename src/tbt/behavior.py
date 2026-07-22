@@ -10,9 +10,61 @@ outcome. Learned per felt object; the change is direction-GENERAL because it liv
 
 from __future__ import annotations
 
-from .operator import eye, norm, rotate, sub   # rotate(M, v) IS the matrix-vector product; reuse the algebra
+from .operator import add, eye, norm, rotate, sub   # rotate(M, v) IS the matrix-vector product; reuse the algebra
 
 YIELD, RESIST, PASS, UNKNOWN = "yield", "resist", "pass", "unknown"
+
+
+class Transform:
+    """The L5 TRANSFORM — one mechanism, no kinds, no branches (`notes/l5_unified_transform_design.md`).
+
+        delta  =  Σ_{cue ∈ context}  W[cue] · x,      x = [param ; 1]
+
+    A body's change is an affine function of a context-supplied PARAMETER, summed over the CUES that are present. Cues are
+    opaque hashable keys the caller supplies; this class never interprets them, so nothing here is specific to contact, support,
+    or any other niche. Because `x` carries a constant 1 alongside the parameter, ONE form expresses both shapes we need: a
+    FIXED delta (the parameter contributes nothing — the bias column is the whole effect, which is the per-action operator case)
+    and an INTERACTION-parameterised delta (the effect scales with the parameter — the push, where the parameter is the pusher's
+    displacement). No enumeration of outcomes: "moves", "does not move", "blocks" are simply different learned deltas.
+
+    LEARNING is the delta rule (Widrow-Hoff): the prediction error is shared by every present cue, normalised by their count
+    (the same guard the value critic uses, or the effective rate diverges). That sharing IS cue competition — a spurious cue
+    co-occurring with the true one is driven toward zero once the true one already explains the delta (Kamin blocking,
+    `reference_cue_competition_key_discovery`).
+
+    PRIORS: none. Weights start at zero — "no evidence, no effect" — so an unobserved cue predicts nothing and an unobserved
+    parameter direction is NOT extrapolated. Any generalisation must come from the CONTEXT the caller supplies (e.g. expressing
+    cues and deltas in the frame the action defines), never from a prior baked in here."""
+
+    def __init__(self, dims: int = 2, lr: float = 1.0) -> None:
+        self.dims = int(dims)
+        self.lr = float(lr)
+        self.W: dict = {}                    # cue -> a dims x (dims+1) matrix acting on [param ; 1]
+
+    def _x(self, param):
+        return (tuple(param) if param is not None else tuple(0.0 for _ in range(self.dims))) + (1.0,)
+
+    def predict(self, cues, param=None):
+        """The predicted delta: the summed affine contribution of every present cue. An unseen cue contributes nothing."""
+        out = tuple(0.0 for _ in range(self.dims))
+        x = self._x(param)
+        for c in cues:
+            W = self.W.get(c)
+            if W is not None:
+                out = add(out, rotate(W, x))
+        return out
+
+    def learn(self, cues, param, observed) -> None:
+        """One observation: fold the prediction error into every present cue by the delta rule, sharing it between them."""
+        cues = list(cues)
+        if not cues:
+            return
+        x = self._x(param)
+        err = sub(observed, self.predict(cues, param))
+        k = self.lr / (len(cues) * sum(v * v for v in x))
+        for c in cues:
+            W = self.W.get(c) or tuple(tuple(0.0 for _ in x) for _ in range(self.dims))
+            self.W[c] = _madd(W, _outer(err, x), k)
 
 
 def _outer(u, v):
