@@ -249,12 +249,13 @@ ARCHITECTURE.md §3/§5.1):
    The touch COLUMN (recognise-BY-touch, for OCCLUSION) is DEFERRED; the fully-observed push needs only the skin (agency) + the
    behavior model. In full observation contact is geometric; touch earns its place as the agency/reafference signal.
    **INVERSE-MODEL planner, step 1 (NAV) ✅ DONE (2026-07-21, `operator.utilities`, `BasalGanglia.select(salience=)`,
-   `Agent._nav_inverse`, `test_inverse_model`)** — forward and inverse are the TWO DIRECTIONS of the L5↔L6a loop
+   `Column.striatum_proposal`, `Agent._nav_inverse`, `test_inverse_model`)** — forward and inverse are the TWO DIRECTIONS of the L5↔L6a loop
    (`notes/inverse_model_featurization_design.md`): `apply` turns an action into a displacement (L5→L6a); `utilities` turns a
    desired displacement back into the actions that produce it (L6a→L5), the SAME learned table read backwards — which is why the
    GCML's Hebbian `W` converges to exactly these action effects, so we READ ours off instead of associating a second copy. The
-   goal VECTOR comes from the world-map, learned obstacles VETO, and the **BG** selects (priority = salience ⊕ value — the cortex
-   proposes, the BG gates; `reference_goal_setting_priority_map`). Measured: LockPath L1 goal-directed nav solved at **8 =
+   goal VECTOR comes from the world-map, the column's **L5IT** projection (`striatum_proposal`) emits `(per-action drive,
+   context)`, learned obstacles VETO, and the **BG** selects (priority = salience ⊕ value — the cortex proposes, the BG gates;
+   `reference_goal_setting_priority_map`). The agent only ROUTES (`feedback_thin_shell_agent`). Measured: LockPath L1 goal-directed nav solved at **8 =
    oracle with the read-out handling ALL 8 actions** — the nav BFS is gone for goal-directed nav; exploration (novelty) and the
    RELATIONAL push still deliberate, which is what step 2 targets. O(actions)/step vs a search that grows with the space (the
    real win on 64×64 frames). Featurization settled: the code for `W` is per-entity COORDINATES (linear ⇒ additive, eq 11); the

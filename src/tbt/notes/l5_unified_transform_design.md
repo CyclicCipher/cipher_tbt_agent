@@ -68,10 +68,14 @@ are OUTPUT PATHS of the single transform above, not separate transforms:
 (action → displacement, enacted/broadcast) leaves via **L5PT**; inverse (goal-vector → per-action drive, proposed for
 selection) leaves via **L5IT**. That is why the anatomy has two classes, and it is the structure the planner should follow.
 
-### Defect this exposes in the shipped step 1
-`Agent._nav_inverse` ends with `self.bg.select((), len(movement), salience=salience)` — an **empty cortical context**, and the
-per-action drive computed **in the agent**, bypassing L5IT entirely. Both belong in the column's L5IT projection (context AND
-per-channel drive). It also violates `feedback_thin_shell_agent`. Fix as part of this work, before building step 2 on it.
+### Defect this exposed in step 1 — ✅ FIXED (2026-07-22)
+`Agent._nav_inverse` used to end with `self.bg.select((), len(movement), salience=salience)` — an **empty cortical context**,
+with the per-action drive computed **in the agent**, bypassing L5IT (and violating `feedback_thin_shell_agent`). Now
+`Column.striatum_proposal(actions, delta)` is the L5IT projection: it returns `(per-action drive, context)` by reading the
+column's OWN L5 transform backwards and relaying its location code, and the agent merely ROUTES the goal vector in and the
+veto+selection out. **No new machinery** — it wires two pieces that already existed (`operator.utilities`, `_code`) to the
+projection class that already existed (`striatum`). Behaviour preserved exactly: LockPath L1 at oracle 8 with the proposal
+handling all 8 actions, Push at oracle 6.
 
 ## 5. The priors are load-bearing — state them, do not smuggle them
 

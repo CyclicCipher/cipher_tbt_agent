@@ -690,21 +690,21 @@ class Agent:
         return self.plan(at_goal, movement, horizon=64)            # SPARING fallback: deliberate when the read-out stalls
 
     def _nav_inverse(self, cur, target, movement):
-        """The NAV INVERSE MODEL — L6a → L5 (`notes/inverse_model_featurization_design.md`). Read the goal VECTOR (target − here;
-        the hippocampal goal-vector) back through the operator's LEARNED displacements into per-action utilities
-        (`MotionOperator.utilities`), VETO actions that would enter a learned obstacle, and let the BASAL GANGLIA select —
-        priority = salience ⊕ value, the cortex proposing and the BG gating (`reference_goal_setting_priority_map`). O(actions),
-        no search. Returns None when nothing reduces the goal vector (a concave obstacle), so the caller DELIBERATES instead
-        (`reference_brain_planning`: cheap read-off by default, rollout sparingly)."""
-        util = self._nav_col().operator.utilities(self._as_pose(cur), movement,
-                                                  sub(tuple(float(c) for c in target), tuple(float(c) for c in cur)))
-        if not util:
+        """The NAV INVERSE MODEL, routed through its real anatomy (`notes/l5_unified_transform_design.md` §4). The agent only
+        ROUTES (`feedback_thin_shell_agent`): it hands the nav column the goal VECTOR (target − here — the hippocampal
+        goal-vector), the column's **L5IT** projection proposes `(per-action drive, context)` by reading its own L5 transform
+        backwards, learned obstacles VETO infeasible channels, and the **basal ganglia** selects on salience ⊕ its own value.
+        O(actions), no search. Returns None when nothing reduces the goal vector (a concave obstacle), so the caller
+        DELIBERATES instead (`reference_brain_planning`: cheap read-off by default, rollout sparingly)."""
+        drive, context = self._nav_col().striatum_proposal(
+            movement, sub(tuple(float(c) for c in target), tuple(float(c) for c in cur)))
+        if not drive:
             return None
         salience = []
         for a in movement:
             cell = self._target_cell(cur, a)
             blocked = cell is not None and cell in self._blocked
-            salience.append(float("-inf") if (a not in util or blocked) else util[a])
+            salience.append(float("-inf") if (a not in drive or blocked) else drive[a])
         if max(salience) <= 0.0:
             return None                                            # no action closes the gap → hand over to the rollout
-        return movement[self.bg.select((), len(movement), salience=salience)]
+        return movement[self.bg.select(context, len(movement), salience=salience)]

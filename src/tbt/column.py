@@ -1135,6 +1135,19 @@ class Column:
         l4.htm.observe(cols.active, learn=False)
         return frozenset(c * l4.htm.M + cell for (c, cell) in l4.htm._active)
 
+    def striatum_proposal(self, actions, delta):
+        """L5IT — this column's PROPOSAL to the striatum for a requested state change `delta`. Returns `(drive, context)`:
+        the per-ACTION drive, read off this column's own L5 transform BACKWARDS (`operator.utilities`) — L5IT neurons for an
+        action project to that action's striatal channel, and the STRENGTH of that drive IS the salience the selector competes
+        on — together with the column's location code relayed as the BG's selection CONTEXT.
+
+        The same projection class as `striatum` (which relays an L4 percept instead); this is the INVERSE direction leaving the
+        column, exactly as L5PT relays the operator's displacement to the motor in the FORWARD direction. The cortex PROPOSES,
+        the basal ganglia DISPOSES — selection is salience ⊕ the BG's own learned value (`reference_goal_setting_priority_map`),
+        so the choosing does NOT happen here."""
+        self._require_location()
+        return self.operator.utilities(self._pose, actions, delta), frozenset(self._code().active)
+
     def step(self, sensory: SDR, efference: Optional[SDR] = None, feedback: Optional[SDR] = None):
         """The FULL two-counterstream dataflow of §13 (all layers). TARGET, not yet built — the first slice drives L4 via
         `observe`; the deep layers (L5/L6) + the feedback stream come as tasks exercise them (D3). Raises so a half-built
