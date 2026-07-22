@@ -234,6 +234,20 @@ class MotionOperator:
     def known(self, action: Hashable) -> bool:
         return action in self._acc
 
+    def utilities(self, pose, actions, delta) -> dict:
+        """The INVERSE read-out — L6a → L5 (`notes/inverse_model_featurization_design.md` §3). `apply` turns an ACTION into a
+        displacement; this turns a DESIRED displacement back into the actions that produce it, by scoring each learned action on
+        how far it carries the pose ALONG `delta`: `u(a) = delta · d_a`. It is the SAME learned table read backwards — which is
+        exactly why the GCML's Hebbian `W` converges to the action effects (its rows ARE the `d_a`), so we read ours off instead
+        of associating a second copy. Pose-aware, so an EGO operator's body-frame delta is compared in the WORLD frame; unlearned
+        actions are omitted (no evidence, no vote). The winner is chosen downstream by the BG, not here."""
+        out = {}
+        for a in actions:
+            if not self.known(a):
+                continue
+            out[a] = dot(delta, sub(self.apply(pose, a)[0], pose[0]))
+        return out
+
     def apply(self, pose, action: Hashable):
         """Dead-reckon: apply the learned action to a pose — INTRINSICALLY (through the pose's own orientation, hence
         non-commutative) or EXTRINSICALLY (in the observation frame, orientation-blind). Exact: no rounding, so nothing

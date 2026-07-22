@@ -59,7 +59,7 @@ writeup in `ARCHITECTURE.md` §7:
    A FACTORED recurrent state channel closes it (100%) where PURE temporal memory can't (37%). ReSU investigated + DROPPED
    (temporal encoder, not spatial invariance).
 
-Suite: **146 passed** (~28s; `test_column_arithmetic` is the ~16s end-to-end column test, the rest — `test_bg_thalamus`,
+Suite: **150 passed** (~28s; `test_column_arithmetic` is the ~16s end-to-end column test, the rest — `test_bg_thalamus`,
 `test_operator_path_integration`, `test_feature_at_location`, `test_l23_pooling`, `test_operator_non_abelian`,
 `test_object_centric`, `test_rotation_recognition`, `test_object_dynamics` — are fast). Count history, 2026-07-15: 54 → **46** at the continuous
 cut-over (`test_oriented_grid` + `test_rotation_operator` deleted with the discrete-rotation code they covered) → **48** with
@@ -248,10 +248,20 @@ ARCHITECTURE.md §3/§5.1):
      YIELD, wall to RESIST; goal = the `(6,7)` relation, transferred. `Agent.imagine`+`demos/imagination_widget.py` = the widget.
    The touch COLUMN (recognise-BY-touch, for OCCLUSION) is DEFERRED; the fully-observed push needs only the skin (agency) + the
    behavior model. In full observation contact is geometric; touch earns its place as the agency/reafference signal.
-   NEXT: **the INVERSE-MODEL planner** ([[reference_gcml_inverse_model_planning]], `notes/gcml_neural_sampling_cognitive_maps.md`)
-   — a learned `W` (state-diff→action, one Hebbian rule) to replace the BFS rollout with a cheap goal-directed sense-of-direction:
-   the candidate fix for the rollout's cost + compositional generalisation, and TBP's own unsolved "use behaviors to inform
-   actions". Then **the EPISTEMIC drive** (`feedback_epistemic_value_is_prediction_error`, cold-start on an UNCONSTRAINED push);
+   **INVERSE-MODEL planner, step 1 (NAV) ✅ DONE (2026-07-21, `operator.utilities`, `BasalGanglia.select(salience=)`,
+   `Agent._nav_inverse`, `test_inverse_model`)** — forward and inverse are the TWO DIRECTIONS of the L5↔L6a loop
+   (`notes/inverse_model_featurization_design.md`): `apply` turns an action into a displacement (L5→L6a); `utilities` turns a
+   desired displacement back into the actions that produce it (L6a→L5), the SAME learned table read backwards — which is why the
+   GCML's Hebbian `W` converges to exactly these action effects, so we READ ours off instead of associating a second copy. The
+   goal VECTOR comes from the world-map, learned obstacles VETO, and the **BG** selects (priority = salience ⊕ value — the cortex
+   proposes, the BG gates; `reference_goal_setting_priority_map`). Measured: LockPath L1 goal-directed nav solved at **8 =
+   oracle with the read-out handling ALL 8 actions** — the nav BFS is gone for goal-directed nav; exploration (novelty) and the
+   RELATIONAL push still deliberate, which is what step 2 targets. O(actions)/step vs a search that grows with the space (the
+   real win on 64×64 frames). Featurization settled: the code for `W` is per-entity COORDINATES (linear ⇒ additive, eq 11); the
+   `WorldFeaturizer` bump code FAILS additivity and stays where it belongs (the value critic).
+   NEXT: **inverse-model step 2 (OBJECTS)** — `T⁻¹·δ_obj` on `ObjectBehavior` → press direction → press position (the contact
+   condition) → hand to the nav read-out, turning the relational push into a search-free plan. This is the step that EARNS or
+   BREAKS the design; measure against the Push result we already hold (L1 at oracle 6, 12/12). Then **the EPISTEMIC drive** (`feedback_epistemic_value_is_prediction_error`, cold-start on an UNCONSTRAINED push);
    **Slice B** (the CONJUNCTIVE win `box-on-pad AND agent-on-goal`); **Tetris** (multi-cell + rotation + click); the real SDK.
    Deferred within the hippocampus (DESIGN §4): theta/replay timing.
    Still after the hippocampus: the MOTOR region (L5 emit + decode; move the readout OUT of the agent); the loop/brain object

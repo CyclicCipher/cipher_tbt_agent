@@ -71,13 +71,16 @@ class BasalGanglia:
         self.commit_frac = float(commit_frac)               # STN margin (0 = pure argmax; >0 = hysteresis for sequences)
         self._rng = random.Random(seed)
 
-    def select(self, context, n_actions: int, rho: float = 0.0, current=None, explore: float = 0.0) -> int:
-        """Disinhibit the highest OpAL-value action for this context (Go − NoGo). `explore` = ε random (for training an
-        immediate-reward task, so every action is sampled). `current` + `commit_frac` = the STN 'hold your horses' brake
-        for sequential decisions (hold the current action unless a competitor wins by a margin; off by default)."""
+    def select(self, context, n_actions: int, rho: float = 0.0, current=None, explore: float = 0.0, salience=None) -> int:
+        """Disinhibit the highest-priority action for this context. Priority = **salience ⊕ value**
+        (`reference_goal_setting_priority_map`): the learned OpAL value (Go − NoGo) PLUS an optional `salience` — a per-action
+        cortical proposal, e.g. the L5 inverse model's "how well does this action close the goal vector" (`MotionOperator.utilities`).
+        The cortex proposes, the BG selects; a `-inf` salience vetoes an infeasible action. `explore` = ε random (for training an
+        immediate-reward task). `current` + `commit_frac` = the STN 'hold your horses' brake (off by default)."""
         if explore > 0.0 and self._rng.random() < explore:
             return self._rng.randrange(n_actions)
-        vals = [self.actor.act_value(context, a, rho) for a in range(n_actions)]
+        vals = [self.actor.act_value(context, a, rho) + (0.0 if salience is None else salience[a])
+                for a in range(n_actions)]
         m = max(vals)
         ties = [a for a in range(n_actions) if vals[a] == m]
         best = self._rng.choice(ties) if len(ties) > 1 else ties[0]
