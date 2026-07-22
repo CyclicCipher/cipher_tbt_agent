@@ -36,18 +36,19 @@ class WorldMap:
     (returns a NEW map) so a rollout branches without disturbing its parent; `place`/`remove`/`anchor` mutate the fork you
     hold, which is what an in-progress simulation does to its own copy."""
 
-    def __init__(self, agent, objects=None, bounds=None, body=None, blocked=None) -> None:
+    def __init__(self, agent, objects=None, bounds=None, body=None, static=None) -> None:
         self.agent = agent                                   # (position, R) — self-location (place cells); may be None pre-localize
         self.objects = dict(objects) if objects else {}      # object_id -> (position, R) — objects at world poses
         self.bounds = tuple(bounds) if bounds else None      # per-axis (lo, hi) extent (boundary cells); None = unbounded
         self.body = body                                     # the SHARED, learned body operator (ego); referenced, not owned
-        self.blocked = frozenset(blocked) if blocked else frozenset()   # cells the agent cannot enter — LEARNED obstacles
-        #                                                       (a wall reshapes reachability, `reference_obstacle_as_transition_cost`)
+        self.static = dict(static) if static else {}         # {cell: feature} — what is PERCEIVED at each untracked cell. Raw
+        #                                                       sensory occupancy, NOT a verdict: whether pressing into a feature
+        #                                                       goes anywhere is the forward model's prediction, never stored here.
 
     def snapshot(self) -> "WorldMap":
         """A forked copy for a hypothetical branch: the poses (immutable tuples) and the object dict are copied, the learned
-        `body` operator + `blocked` set are shared. Cheap — the cost is O(objects), which is why the state is data, not a re-run column."""
-        return WorldMap(self.agent, self.objects, self.bounds, self.body, self.blocked)
+        `body` operator + `static` occupancy are shared. Cheap — O(objects), which is why the state is data, not a re-run column."""
+        return WorldMap(self.agent, self.objects, self.bounds, self.body, self.static)
 
     def place(self, obj_id, pose) -> None:
         """Put/replace an object at a world pose (mutates this fork)."""
@@ -59,15 +60,21 @@ class WorldMap:
 
     def move_agent(self, action) -> "WorldMap":
         """Path-integrate the agent by `action` in the WORLD frame, reusing the shared learned body operator — returns a NEW
-        map (functional, so a rollout tree branches cleanly). An unlearned action is the identity (the operator's own correct
-        prior: predict staying put). A move into a LEARNED obstacle (`blocked`) is CANCELLED (the agent stays) — a wall
-        reshapes reachability, so the rollout never plans a path through one."""
+        map (functional, so a rollout tree branches cleanly). This is FREE motion, the efference copy: it knows nothing about
+        obstacles, because whether a press goes anywhere is a PREDICTION the forward model makes from what is felt, not a fact
+        the map stores. An unlearned action is the identity (the operator's own correct prior: predict staying put)."""
         m = self.snapshot()
         if self.body is not None:
-            nxt = self.body.apply(self.agent, action)
-            if not self.blocked or tuple(round(c) for c in nxt[0]) not in self.blocked:
-                m.agent = nxt
+            m.agent = self.body.apply(self.agent, action)
         return m
+
+    def occupant(self, cell):
+        """What is at `cell`: a TRACKED object's id if one is there, else the PERCEIVED static feature, else None. The two are
+        one question — the forward model asks "what am I pressing into", and whether that thing is tracked is a separate matter."""
+        for oid, pose in self.objects.items():
+            if tuple(round(c) for c in pose[0]) == cell:
+                return oid
+        return self.static.get(cell)
 
     def anchor(self, position) -> None:
         """LOOP CLOSURE: reset the agent's POSITION to a sensed landmark coordinate, keeping its orientation — re-seeing a
@@ -87,14 +94,20 @@ class WorldMap:
         return all(lo <= x <= hi for x, (lo, hi) in zip(position, self.bounds))
 
     def key(self):
-        """A hashable signature of the state (poses rounded) for VISITED-PRUNING in a rollout search — two states with the
-        same rounded agent + object poses are the same search node, so a graph search over world-states stays O(states) and
-        never re-expands, avoiding the 2^K flat-action blow-up. Position + orientation both rounded (orientation matters for
-        an object that turns)."""
+        """A hashable signature of the state for VISITED-PRUNING in a rollout search — two states with the same agent + object
+        CELLS are the same search node, so a graph search over world-states stays O(states) and never re-expands, avoiding the
+        2^K flat-action blow-up. Orientation is included too (it matters for an object that turns).
+
+        Position collapses to the CELL, not to three decimals, and that granularity is load-bearing rather than cosmetic. A
+        model still converging predicts fractional deltas — a wall whose blocking correction has reached −0.94 leaves the body
+        0.06 of a cell inside it — and at three decimals every one of those near-identical states is a distinct node, so
+        pruning stops working and the search explodes. The board is cells; every other predicate here already rounds to one;
+        the search's notion of "the same state" has to agree with them. Nothing about the model's PREDICTIONS is rounded — only
+        which nodes count as the same node."""
         def _sig(pose):
             if pose is None:
                 return None
             p, R = pose
-            return (tuple(round(c, 3) for c in p),
+            return (tuple(round(c) for c in p),
                     tuple(round(x, 3) for row in R for x in row) if R is not None else None)
         return (_sig(self.agent), tuple(sorted((oid, _sig(p)) for oid, p in self.objects.items())))

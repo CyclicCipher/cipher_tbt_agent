@@ -66,12 +66,15 @@ def test_basal_ganglia_selects_on_salience_the_cortex_proposes():
 
 
 def test_agent_navigates_by_the_inverse_model_and_defers_when_it_stalls():
-    """The agent reads the goal vector through the operator and moves toward the target with NO rollout; an action into a
-    LEARNED obstacle is vetoed; and when nothing reduces the gap it returns None so the caller falls back to deliberation."""
+    """The agent reads the goal vector through the operator and moves toward the target with NO rollout; an action the learned
+    FORWARD MODEL says goes nowhere is vetoed; and when nothing reduces the gap it returns None so the caller falls back to
+    deliberation. The veto is a prediction, not a remembered list of impassable cells -- so it GENERALISES: one press taught the
+    model what feature 9 does, and every OTHER cell holding feature 9 is vetoed without ever being touched."""
     a = _agent_at((5, 5))
     assert a._nav_inverse((5, 5), (8, 5), list(_D)) is E, "should step EAST toward a target three east"
 
-    a._blocked.add((6, 5))                                             # the east step now enters a learned obstacle
-    assert a._nav_inverse((5, 5), (8, 5), list(_D)) is not E, "an action into a learned obstacle must be vetoed"
+    a._static = {(6, 5): 9, (5, 4): 9}                                  # feature 9 now sits east of here -- and north of here
+    a._dynamics.learn(a._contact_cues("into", 9, None), a._param((1.0, 0.0)), (-1.0, 0.0))   # ONE press east into a 9: it gave nothing
+    assert a._nav_inverse((5, 5), (8, 5), list(_D)) is not E, "an action the model predicts goes nowhere must be vetoed"
 
     assert a._nav_inverse((5, 5), (5, 5), list(_D)) is None, "already there ⇒ nothing closes the gap ⇒ defer to the rollout"

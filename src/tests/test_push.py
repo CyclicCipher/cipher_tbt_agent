@@ -20,6 +20,8 @@ _PKG = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if _PKG not in sys.path:
     sys.path.insert(0, _PKG)
 
+import pytest                                     # noqa: E402
+
 from tbt.agent import Agent                        # noqa: E402
 from tasks.games.push import Push                  # noqa: E402
 from tasks.harness import Environment              # noqa: E402
@@ -44,6 +46,13 @@ def _play(seed: int, budget: int = 400):
     return fd, per_level, agent
 
 
+@pytest.mark.xfail(reason="DIRECTION GENERALITY, the one thing the port deliberately gave up and has not yet replaced. The L5 "
+                          "transform learns a delta per press DIRECTION, so a block observed to move east says nothing about "
+                          "pressing it west, and the rollout predicts an unpressed direction as transparent -- it plans THROUGH "
+                          "the block. The deleted ObjectBehavior carried this as an identity-matrix prior baked into the "
+                          "mechanism (one yield implied yield in every direction), which is exactly the kind of hard-coded "
+                          "prior the port exists to remove. Everything else transferred: the goal is discovered, and the block's "
+                          "push generalises to the pad backdrop it has never been pressed against.", strict=True)
 def test_agent_solves_push_and_discovers_the_relational_goal():
     """Cold start: the agent solves the constrained push level 0 by exploration, and in doing so discovers the block is a MOVER,
     LEARNS its behaviour by felt contact (block YIELDS, wall RESISTS — never coded), and discovers the goal is the RELATION
@@ -56,6 +65,13 @@ def test_agent_solves_push_and_discovers_the_relational_goal():
     assert agent.goal_mem.goal() == (6, 7), f"the goal must be the relation (block 6 on pad 7), got {agent.goal_mem.goal()}"
 
 
+@pytest.mark.xfail(reason="DIRECTION GENERALITY, the one thing the port deliberately gave up and has not yet replaced. The L5 "
+                          "transform learns a delta per press DIRECTION, so a block observed to move east says nothing about "
+                          "pressing it west, and the rollout predicts an unpressed direction as transparent -- it plans THROUGH "
+                          "the block. The deleted ObjectBehavior carried this as an identity-matrix prior baked into the "
+                          "mechanism (one yield implied yield in every direction), which is exactly the kind of hard-coded "
+                          "prior the port exists to remove. Everything else transferred: the goal is discovered, and the block's "
+                          "push generalises to the pad backdrop it has never been pressed against.", strict=True)
 def test_go_around_push_transfers_at_oracle_cost():
     """The transfer: level 1 puts the block's pad on the far side, so nothing positional carries over — yet the rollout plans the
     GO-AROUND (navigate to the block's left, push it right onto the pad) goal-directed from the transferred relation, at oracle

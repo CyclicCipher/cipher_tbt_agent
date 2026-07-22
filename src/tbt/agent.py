@@ -24,9 +24,9 @@ from .column import Column
 from .encoders import SDR, CategoryEncoder, GridEncoder
 from .operator import eye
 from .hippocampus import Hippocampus, WorldMap, WorldModel
-from .behavior import ContactDynamics
+from .behavior import Transform
 from .modality import touch, vision
-from .operator import sub
+from .operator import norm, sub
 from .perceive import SelfTracker, segment
 from .reward import GoalMemory, ValueCritic
 from .thalamus import Thalamus
@@ -85,10 +85,11 @@ class Agent:
         # the AGENCY signal (self-caused contact), so ContactDynamics learns object push behaviour only from motions the self
         # actually CAUSED (`notes/touch_and_body_design.md`). The recognising columns (Gap-3 vision, recognise-by-touch) defer.
         self._modalities = {m.name: m for m in (modalities if modalities is not None else [vision(), touch()])}
-        self._contact = ContactDynamics(dims)   # the touch-conditioned object BEHAVIOR model (changes@locations; behavior.py)
+        self._dynamics = Transform(dims)        # the L5 TRANSFORM: one cortical layer + its population read-out (behavior.py)
+        self._param_enc = GridEncoder(scales=(7, 11, 13, 17), dims=dims, mw=3)   # the press's free displacement (its SITUATION)
+        self._static: dict = {}                 # {cell: feature} — what PERCEPTION sees at each non-self, non-mover cell
         self._rng = random.Random(seed)     # exploration randomness (bootstrap + tie-break), seeded
         self._visited: set = set()          # cells the self has occupied (novelty target = the UNvisited frontier)
-        self._blocked: set = set()          # cells a move was blocked into = LEARNED obstacles (walls); the rollout avoids them
         self._movers: set = set()           # non-self object features observed to MOVE = pushable objects (routed to the scene)
         self._tried: set = set()            # (cell, action) already attempted in bootstrap — so an always-blocked action here
         #                                     is tried once, then the agent moves on (learns it wherever it first succeeds)
@@ -328,14 +329,14 @@ class Agent:
         ARC's board is world-anchored, so the nav pose and the scene objects already share one world frame (DESIGN §4)."""
         objects = self._scene_col().scene_snapshot() if self._scene is not None else {}
         bounds = [(0, 63)] * self._dims
-        return WorldMap(self.pose(), objects, bounds, body=self._nav_col().operator, blocked=self._blocked)
+        return WorldMap(self.pose(), objects, bounds, body=self._nav_col().operator, static=self._static)
 
     def world_model(self) -> WorldModel:
-        """The learned FORWARD MODEL over the world-state (`hippocampus/replay.py`), CONTACT-conditioned: the rollout advances the
-        agent and, where its move lands on an object (contact, geometric in imagination), applies that object's LEARNED behavior
-        (`ContactDynamics`: yield with the change `T`, resist/block, or pass). No snap and no hard-coded solidity — the change is
-        exact one-shot (LMS) and solidity is the learned RESIST (`notes/touch_and_body_design.md` §7)."""
-        return WorldModel(contact=self._contact)
+        """The learned FORWARD MODEL over the world-state (`hippocampus/replay.py`), driven by the ONE L5 transform: the rollout
+        path-integrates the agent freely and, where its move lands on something (contact, geometric in imagination), the transform
+        supplies the CORRECTION to that free motion and the felt thing's own delta. Nothing is enumerated — "blocks", "gets pushed"
+        and "is walked through" are just different learned corrections, and solidity is one of them (`behavior.py`)."""
+        return WorldModel(self._dynamics, self._param, self._contact_cues)
 
     def plan(self, reward, actions, horizon: int = 12, value=None) -> list:
         """Plan by hippocampal ROLLOUT (`hippocampus/replay.py`): fork the current world-state and search the learned model
@@ -440,7 +441,7 @@ class Agent:
         """A LEVEL boundary — a fresh environment: drop the per-level exploration state (visited/blocked/last + the scene's
         object placements). The learned MODEL (operator, object dynamics, critic), the discovered GOAL (`goal_mem`), and which
         features are MOVERS all persist across levels — that persistence IS the cross-level transfer; only the map memory resets."""
-        self._visited, self._blocked, self._tried, self._last = set(), set(), set(), None
+        self._visited, self._static, self._tried, self._last = set(), {}, set(), None
         if self._scene is not None:
             self.clear_scene()
 
@@ -464,25 +465,66 @@ class Agent:
             moved = prev_cur is not None and getattr(action, "is_movement", False)
             if reward == 0:                                          # (frames across a level boundary don't correspond)
                 self._track_movers(prev_pos, pos, sc)               # a non-self object that MOVED is a pushable mover
-                self._learn_contact(action, prev_skin, prev_pos, pos, prev_cur, cur, sc)   # learn its behaviour from FELT contact
+                self._learn_dynamics(action, prev_objs, prev_skin, prev_pos, pos, prev_cur, cur, sc)  # learn the change from FELT contact
             if moved:
                 self._credit_goal(prev_objs, prev_pos, action, prev_cur, reward, sc)   # discover the goal by the delta rule
             if reward > 0:                                           # a LEVEL boundary (the board just advanced): fresh map,
                 self.new_level()                                     # but the learned model + goal + movers PERSIST
-            elif moved and cur is not None:
-                if cur != prev_cur:                                 # the self MOVED → the operator learns this action's Δ
-                    self.learn_pose_move(action, self._as_pose(prev_cur), self._as_pose(cur))
-                elif not self._pushed(prev_pos, pos) and self._nav_col().operator.known(action):
-                    cell = self._target_cell(prev_cur, action)      # tried, did NOT move, and did NOT push → the target is an obstacle
-                    if cell is not None and cell != prev_cur:
-                        self._blocked.add(cell)
+            elif moved and cur is not None and cur != prev_cur:      # the self MOVED → the operator learns this action's Δ
+                self.learn_pose_move(action, self._as_pose(prev_cur), self._as_pose(cur))
         if cur is not None:
             self._visited.add(self._perceived_world(cur, pos).key())   # novelty is over the WHOLE world-state (agent + movers)
         self._route_movers(pos)                                      # place visible movers into the scene column (world_state/rollout)
+        self._static = self._static_cells(objs, sc)                  # what is SEEN at every other cell — the model decides the rest
         skin = self._skin(fd.grid, objs, cur)                       # what the body FEELS now — the agency signal for next step
         action = self._act(objs, cur, pos, fd.available_actions)
         self._last = (objs, action, cur, fd.score, pos, skin)
         return action, None
+
+    def _param(self, displacement):
+        """The interaction's basal SITUATION as a context SDR -- the press's free displacement. Grid-coded, so nearby presses
+        share bits and the layer's conjunction over them is metric rather than a lookup table."""
+        return {("p", b) for b in self._param_enc.encode(displacement).active}
+
+    @staticmethod
+    def _contact_cues(tag, felt, beyond):
+        """The cues for one contact: the thing being pressed, PLUS what backs it when anything does.
+
+        Beyond is a CUE -- it sums -- and is omitted entirely when the far side is empty. That placement is the whole decision.
+        Put it in the basal SITUATION instead and every backdrop becomes its own case that has to be individually experienced,
+        which is enumeration: the model then cannot predict a push against a backdrop it has never pressed, and the one backdrop
+        that decides a level is UNOBSERVABLE by construction -- the push that lands a block on its pad ENDS the level, so its
+        outcome frame never arrives and no amount of play can supply it. As a cue with no learned weight it contributes nothing,
+        so an unseen backdrop simply inherits the object's known behaviour: generalise by default, and let the delta rule carve
+        out the backdrops that really do change the outcome (`feedback_prefer_generalize_then_correct`).
+
+        The cost is real and accepted: a genuine exception is learned by SPLITTING the error with the base cue, so it settles
+        over a few alternations instead of in one shot. Doing better wants a hippocampal GATE over a context-free cortical
+        association -- occasion setting, which dissociates from simple conditioning anatomically -- which we do not have and
+        will not fake with a rule.
+
+        There is no 'obstructed' concept here and no branch: an exception is just a second cue with a learned delta."""
+        return {(tag, felt)} | ({("beyond", beyond)} if beyond is not None else set())
+
+    def _feature_at(self, objs, cell):
+        """The feature occupying `cell` in a perceived frame, or None if it is empty — the plain perceptual question the
+        contact's cue set is built from."""
+        for o in objs:
+            if cell in o.cells:
+                return o.color
+        return None
+
+    def _static_cells(self, objs, sc) -> dict:
+        """`{cell: feature}` for every cell holding a non-self, non-mover object — RAW PERCEPTION, not a conclusion. This is what
+        replaced the hand-maintained obstacle set: we no longer record "the agent bumped here so this cell is impassable"; we
+        record what is SEEN, and L5 predicts what pressing into that feature does. The payoff is generalisation — bump one wall
+        cell and every other cell of that feature is predicted impassable without ever being touched."""
+        out = {}
+        for o in objs:
+            if o.color != sc and o.color not in self._movers:
+                for cell in o.cells:
+                    out[cell] = o.color
+        return out
 
     def _as_pose(self, cell):
         """A grid cell → a continuous pose `(position, R=identity)` in the nav frame."""
@@ -527,17 +569,23 @@ class Agent:
                 return set(o.cells)
         return {cur}
 
-    def _learn_contact(self, action, prev_skin, prev_pos, pos, prev_cur, cur, sc) -> None:
-        """Re-seat the object dynamics on TOUCH + prediction error (`behavior.py`, `notes/touch_and_body_design.md` §7). The self
-        FELT an object at its leading face (AGENCY — the skin, in the efference direction); the object's behaviour is DISCRIMINATED
-        by the prediction error between the operator-predicted body motion (the efference) and the actual outcome — YIELD (learn
-        the change `T`), RESIST (body blocked), or PASS. Only SELF-CAUSED motions teach: an object that moved without being felt
-        (a box shoved by another box) is never attributed to the agent -- which is why touch, not geometry, grounds this."""
+    def _learn_dynamics(self, action, prev_objs, prev_skin, prev_pos, pos, prev_cur, cur, sc) -> None:
+        """Teach the L5 TRANSFORM from one felt interaction (`behavior.py`, `notes/touch_and_body_design.md` §7). The self FELT
+        something at its leading face (AGENCY — the skin, in the efference direction), so this transition is SELF-CAUSED and may
+        be attributed; an object that moved without being felt (a box shoved by another box) teaches nothing here, which is why
+        touch and not geometry grounds it. Two facts, both plain deltas, neither of them a category:
+
+        * ("into", felt) — the CORRECTION to the body's own free motion when pressing into `felt`. Zero when it gave way, −eff
+          when it did not. Solidity is that correction, learned; there is no "resist".
+        * ("of", felt)   — the FELT thing's own displacement under this press. Zero when it stayed. There is no "yield" either.
+
+        The body gets a correction and the felt thing an absolute delta because only the body has a free-motion baseline to
+        correct — the efference copy. That asymmetry is the anatomy, not a special case."""
         if prev_cur is None or not getattr(action, "is_movement", False) or not prev_skin:
             return
-        # the direction the body PRESSED: its ACTUAL displacement if it advanced (a yield/pass — no operator needed, which is
-        # what lets the FIRST move in a direction, even if it is the push, be learned), else the operator's PREDICTED move (a
-        # blocked press = resist, whose direction the body did not actually take).
+        # the direction the body PRESSED: its ACTUAL displacement if it advanced (no operator needed, which is what lets the
+        # FIRST move in a direction, even if it is the push, be learned), else the operator's PREDICTED free move (a press that
+        # went nowhere, whose direction the body never actually took).
         if cur is not None and cur != prev_cur:
             eff = sub(tuple(float(c) for c in cur), tuple(float(c) for c in prev_cur))
         else:
@@ -545,14 +593,18 @@ class Agent:
             if not op.known(action):
                 return
             eff = sub(op.apply(self._as_pose(prev_cur), action)[0], tuple(float(c) for c in prev_cur))
-        felt = contact_toward(prev_skin, eff)                                   # the object the body pressed into (agency)
+        felt = contact_toward(prev_skin, eff)                                   # the thing the body pressed into (agency)
         if felt is None or felt == sc:
             return
         z = tuple(0.0 for _ in range(self._dims))
         body_disp = sub(tuple(float(c) for c in cur), tuple(float(c) for c in prev_cur)) if cur is not None else z
         obj_disp = (sub(tuple(float(c) for c in pos[felt]), tuple(float(c) for c in prev_pos[felt]))
                     if felt in pos and felt in prev_pos else z)
-        self._contact.observe(felt, eff, body_disp, obj_disp)
+        contact = tuple(int(round(c + d)) for c, d in zip(prev_cur, eff))       # the cell the body pressed into
+        beyond = self._feature_at(prev_objs, tuple(int(round(c + d)) for c, d in zip(contact, eff)))
+        param = self._param(eff)
+        self._dynamics.learn(self._contact_cues("into", felt, beyond), param, sub(body_disp, eff))
+        self._dynamics.learn(self._contact_cues("of", felt, beyond), param, obj_disp)
 
     def _route_movers(self, pos) -> None:
         """Place every currently-visible known mover into the SCENE column, so `world_state()` (hence the rollout) includes it.
@@ -693,18 +745,19 @@ class Agent:
         """The NAV INVERSE MODEL, routed through its real anatomy (`notes/l5_unified_transform_design.md` §4). The agent only
         ROUTES (`feedback_thin_shell_agent`): it hands the nav column the goal VECTOR (target − here — the hippocampal
         goal-vector), the column's **L5IT** projection proposes `(per-action drive, context)` by reading its own L5 transform
-        backwards, learned obstacles VETO infeasible channels, and the **basal ganglia** selects on salience ⊕ its own value.
+        backwards, the learned FORWARD MODEL vetoes channels it predicts go nowhere, and the **basal ganglia** selects on
+        salience ⊕ its own value.
         O(actions), no search. Returns None when nothing reduces the goal vector (a concave obstacle), so the caller
         DELIBERATES instead (`reference_brain_planning`: cheap read-off by default, rollout sparingly)."""
         drive, context = self._nav_col().striatum_proposal(
             movement, sub(tuple(float(c) for c in target), tuple(float(c) for c in cur)))
         if not drive:
             return None
+        world, model = self.world_state(), self.world_model()      # the veto: one imagined step per action, O(actions), no search
         salience = []
         for a in movement:
-            cell = self._target_cell(cur, a)
-            blocked = cell is not None and cell in self._blocked
-            salience.append(float("-inf") if (a not in drive or blocked) else drive[a])
+            stuck = norm(sub(model.step(world, a).agent[0], world.agent[0])) <= 1e-9
+            salience.append(float("-inf") if (a not in drive or stuck) else drive[a])
         if max(salience) <= 0.0:
             return None                                            # no action closes the gap → hand over to the rollout
         return movement[self.bg.select(context, len(movement), salience=salience)]

@@ -31,35 +31,42 @@ _TOL = 1e-9
 
 
 class WorldModel:
-    """The learned forward model over a world-state — CONTACT-conditioned (`behavior.ContactDynamics`, the touch-grounded object
-    behavior model; `notes/touch_and_body_design.md` §7). `step` advances one imagined action. Stateless over the map: it holds
-    only the (shared, learned) behavior model, so a rollout forks the state and re-uses the one learned dynamics."""
+    """The learned forward model over a world-state, driven by the ONE L5 transform (`behavior.Transform`). `step` advances one
+    imagined action. Stateless over the map: it holds only the shared learned transform, so a rollout forks the state and re-uses
+    the one dynamics. It re-derives no physics -- there is no solidity, no push and no obstacle anywhere in this file, only a
+    free motion and the corrections the cortex has learned for it."""
 
-    def __init__(self, contact) -> None:
-        self.contact = contact  # a `behavior.ContactDynamics`: yield/resist/pass + the change T per object, learned from touch
+    def __init__(self, dynamics, param, cues) -> None:
+        self.dynamics = dynamics     # the L5 `Transform`: cues -> delta, conditioned on the interaction's situation
+        self.param = param           # (displacement) -> the basal situation SDR (the caller's encoder, kept upstream)
+        self.cues = cues             # (tag, felt, beyond) -> the proximal cue set for one contact (the caller's convention)
 
     def step(self, world, action):
-        """One imagined step (functional — returns a NEW world). The agent path-integrates; where its move lands ON an object
-        (contact — computed GEOMETRICALLY here, since imagination has no skin), that object's LEARNED behavior fires: RESIST
-        blocks the body (both stay), YIELD/PASS moves the object by the learned change (0 for pass) and the body advances.
-        Solidity is the learned RESIST, not an assumption; the change T is exact one-shot, so there is no snap and no
-        per-direction key (`behavior.py`)."""
+        """One imagined step (functional -- returns a NEW world). The agent path-integrates FREELY (the efference copy); where
+        that lands on something, the transform supplies the CORRECTION to the body's motion and the felt thing's own delta.
+        Contact is geometric here because imagination has no skin; everything that follows from it is learned. An unlearned
+        contact corrects nothing, so the body walks through -- the bold generalisation, retracted by the first press that says
+        otherwise (`feedback_prefer_generalize_then_correct`)."""
         tentative = world.move_agent(action)
-        if tentative.agent is None or not world.objects:
+        if tentative.agent is None:
             return tentative
-        eff = sub(tentative.agent[0], world.agent[0])          # the body's displacement for this action (0 if a wall blocked it)
+        eff = sub(tentative.agent[0], world.agent[0])          # the body's FREE displacement for this action
         if norm(eff) <= _TOL:
-            return tentative                                   # already wall-blocked → no forward contact
-        acell = tuple(round(c) for c in tentative.agent[0])
-        agent, objects = tentative.agent, dict(world.objects)
-        for oid, pose in world.objects.items():
-            if tuple(round(c) for c in pose[0]) == acell:      # the body presses into this object
-                obj_disp, blocked = self.contact.predict(oid, eff)
-                if blocked:
-                    agent = world.agent                        # RESIST: the body cannot advance
-                else:
-                    objects[oid] = (add(pose[0], obj_disp), pose[1])   # YIELD/PASS: the object takes the learned change
-        out = world.snapshot(); out.agent = agent; out.objects = objects
+            return tentative
+        contact = tuple(round(c) for c in tentative.agent[0])
+        felt = world.occupant(contact)
+        if felt is None:
+            return tentative
+        beyond = world.occupant(tuple(int(round(c + d)) for c, d in zip(contact, eff)))
+        param = self.param(eff)
+        body = add(eff, self.dynamics.predict(self.cues("into", felt, beyond), param))   # free motion + learned correction
+        out = world.snapshot()
+        out.agent = (add(world.agent[0], body), world.agent[1]) if norm(body) > _TOL else world.agent
+        pose = world.objects.get(felt)
+        if pose is not None:                                                  # a TRACKED thing also takes its own learned delta
+            delta = self.dynamics.predict(self.cues("of", felt, beyond), param)
+            out.objects = dict(world.objects)
+            out.objects[felt] = (add(pose[0], delta), pose[1])
         return out
 
 

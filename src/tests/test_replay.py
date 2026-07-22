@@ -65,12 +65,13 @@ def test_rollout_reaches_a_delayed_goal_a_greedy_step_cannot():
 
 
 def test_rollout_pushes_a_box_onto_a_target_via_learned_dynamics():
-    """Sokoban in miniature, no hand-coded physics: the PUSH is a LEARNED BEHAVIOR (`ContactDynamics` — the box YIELDS, moving
-    by the learned change `T` when the agent presses into it; one clean observation is exact and direction-general), and the
-    rollout's contact path drives that learned dynamics inside the forward model. The agent starts NORTH of the box, so it must
-    go AROUND to the west side (a detour a greedy step would never take) before pushing twice."""
+    """Sokoban in miniature, no hand-coded physics: the PUSH is a delta LEARNED BY THE L5 TRANSFORM (one clean observation is
+    exact), and the rollout's contact path drives that one transform inside the forward model. The agent starts NORTH of the
+    box, so it must go AROUND to the west side (a detour a greedy step would never take) before pushing twice."""
     a = _agent_at((5, 6))
-    a._contact.observe(1, (1.0, 0.0), body_disp=(1.0, 0.0), obj_disp=(1.0, 0.0))   # box (id 1) YIELDS: one felt push east
+    east = a._param((1.0, 0.0))                                        # ONE felt push east: the box moves with the body...
+    a._dynamics.learn(a._contact_cues("of", 1, None), east, (1.0, 0.0))
+    a._dynamics.learn(a._contact_cues("into", 1, None), east, (0.0, 0.0))   # ...and the body is not held up by it
     a.place_object(1, ((5.0, 5.0), eye(2)))                # the scene: box at (5,5), agent at (5,6)
     target = (7.0, 5.0)
     reward = lambda w: 1.0 if _dist(w.objects[1][0], target) < 0.5 else 0.0
