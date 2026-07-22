@@ -246,9 +246,10 @@ import itertools
 from dataclasses import dataclass, field, replace
 from typing import Optional
 
-from tbt.encoders import SDR, GridEncoder, SpatialPooler
+from tbt.behavior import Transform
+from tbt.encoders import SDR, CategoryEncoder, GridEncoder, SpatialPooler
 from tbt.htm import HTMLayer
-from tbt.operator import MotionOperator, add, compose, dist, eye, gram_schmidt, invert, rotate, scale, solve_rotation, sub
+from tbt.operator import MotionOperator, add, compose, dist, eye, gram_schmidt, invert, rotate, solve_rotation, sub
 from tbt.pooler import ColumnPooler
 
 _TOL = 1e-6          # geometric slack: distances are exact floats here, so this only absorbs round-off
@@ -382,8 +383,11 @@ class Column:
         # background (always present); each state CUE learns its correction to the effect by PREDICTION ERROR (the delta rule).
         # A spurious cue (a neighbour co-present with support) is BLOCKED — it arrives when the error is already ~0, so it
         # gains ~0 weight (Kamin blocking). This is how the TRUE condition is discovered from a correlate, learned not coded.
-        self._cue_weights: dict = {}                            # (action, cue) -> position-correction vector
-        self._cue_lr = 0.5                                      # Rescorla-Wagner rate (α·β)
+        # It runs on the ONE L5 `Transform` (`behavior.py`), not on a second copy of the rule: the present state cues are its
+        # PROXIMAL drive (so they sum) and the action its BASAL situation (so the correction is per-action). Identical
+        # semantics to the dict of (action, cue) -> vector this replaces, minus the duplicated learning rule.
+        self._cues = Transform(self.location.dims if location is not None else 2, lr=0.5)
+        self._act_enc = CategoryEncoder(w=24)                   # the action as the cue transform's basal situation
         # L2/3's POOLING engine (ARCHITECTURE §8): the stable object-IDENTITY that pools the L4 feature-at-location stream
         # (`pooler.ColumnPooler`) — a decoupled stable output + persistence, which the L2/3 HTMLayer (associate) cannot do.
         self.pooler = ColumnPooler(seed=seed + 4) if location is not None else None
@@ -808,7 +812,8 @@ class Column:
         STATE-CONDITIONING by CUE COMPETITION (`reference_tbt_object_behaviors`; Rescorla-Wagner). The FREE KERNEL is the
         `state=∅` effect (the aggressive "everything falls" default, `feedback_prefer_generalize_then_correct`), learned only
         from free observations. Each state CUE (a geometry-keyed relation, from `state_of`) then learns its CORRECTION to the
-        effect — the RESIDUAL beyond the free kernel — by PREDICTION ERROR (the delta rule, the same `_Readout`/BG-RPE runs).
+        effect — the RESIDUAL beyond the free kernel — through the ONE L5 `Transform`, whose read-out shares the error across
+        the cues present. That sharing IS the delta rule, so this is Rescorla-Wagner with no second implementation of it.
         The correction is world-frame, so it generalises across positions and objects (TBP's object-independent behaviour
         frame). BLOCKING (Kamin) is how the TRUE condition is told from a CORRELATE: once support predicts "stays", a
         co-present neighbour arrives when the error is already ~0 and gains ~0 weight — discovered, not coded (no `if
@@ -819,10 +824,7 @@ class Column:
             return
         free_after = self.dynamics.apply(before_pose, (action, frozenset()))
         residual = sub(after_pose[0], free_after[0])            # the world-frame move the CUES must explain beyond the kernel
-        error = sub(residual, self._cue_prediction(action, state))              # Rescorla-Wagner: US − Σ present cues
-        for cue in state:                                      # every present cue updates by the SAME error — cue competition
-            w = self._cue_weights.get((action, cue), tuple(0.0 for _ in residual))
-            self._cue_weights[(action, cue)] = add(w, scale(error, self._cue_lr))
+        self._cues.learn(set(state), self._act_sdr(action), residual)   # the read-out's delta rule IS Rescorla-Wagner
 
     def predict_object_move(self, pose, action, state=frozenset()):
         """Predict where `action` puts an object at `pose` in `state` — the FORWARD MODEL over objects: the FREE KERNEL plus
@@ -832,15 +834,17 @@ class Column:
         free_after = self.dynamics.apply(pose, (action, frozenset()))
         return add(free_after[0], self._cue_prediction(action, state)), free_after[1]
 
+    def _act_sdr(self, action):
+        """The action as a basal situation for the cue transform — a category code, since actions have no metric relation to
+        one another (`encoders.CategoryEncoder`: assuming they did would inject a false prior)."""
+        return {("a", b) for b in self._act_enc.encode(action).active}
+
     def _cue_prediction(self, action, state) -> tuple:
-        """The summed correction the present cues predict beyond the free kernel — Σ of the learned cue weights (a cue with no
-        weight yet contributes zero)."""
-        total = tuple(0.0 for _ in range(self.location.dims))
-        for cue in state:
-            w = self._cue_weights.get((action, cue))
-            if w is not None:
-                total = add(total, w)
-        return total
+        """The summed correction the present cues predict beyond the free kernel — the L5 transform's population vector over
+        the cues present (a cue with nothing learned contributes zero)."""
+        if not state:
+            return tuple(0.0 for _ in range(self.location.dims))
+        return self._cues.predict(set(state), self._act_sdr(action))
 
     # ── COMPOSITIONAL column (ARCHITECTURE §9): the SCENE, object STATES, and STATE-CONDITIONED behaviour ──────────────
     def place_object(self, object_id, pose) -> None:

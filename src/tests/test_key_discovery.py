@@ -63,11 +63,11 @@ def _approx(pos, expected, tol=0.06) -> bool:
 
 
 def _cue_weight(agent: Agent, a_id, b_id):
-    """The learned Rescorla-Wagner weight of the cue = the relation from object `a_id` to object `b_id`, read from the current
-    scene. ~0 means the cue predicts nothing (blocked / rejected); a large value means it carries the effect."""
+    """What the cue = the relation from object `a_id` to object `b_id` predicts ON ITS OWN, read out of the L5 transform.
+    ~0 means the cue predicts nothing (blocked / rejected); a large value means it carries the effect."""
     col = agent._scene_col()
     cue = col._quantise(col.relate(col._scene_objects[a_id], col._scene_objects[b_id]))
-    return col._cue_weights.get((STEP, cue), (0.0,) * agent._dims)
+    return col._cues.predict({cue}, col._act_sdr(STEP))
 
 
 def _teach_free_kernel(agent: Agent, b_id):
