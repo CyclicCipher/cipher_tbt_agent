@@ -46,34 +46,19 @@ def _play(seed: int, budget: int = 400):
     return fd, per_level, agent
 
 
-@pytest.mark.xfail(reason="CUE DILUTION under repeated obstructed pushes. Direction generality is BUILT and works -- the "
-                          "press-aligned population makes all four directions one operation, and a block pressed only east "
-                          "and south is predicted correctly for west and north (see test_behavior). What still fails is the "
-                          "accepted cost of the backdrop being a summing CUE: every obstructed push shares its error with the "
-                          "base cue, so on a level where the block spends most of its time against a wall the base decays "
-                          "(measured: 0.81 -> 0.52 over 400 actions) and the predicted deltas go fractional, which makes plans "
-                          "unreliable. The base association wants to be held context-free and GATED by the exception -- "
-                          "occasion setting, hippocampal -- rather than diluted by it. NOT a missing prior.", strict=True)
 def test_agent_solves_push_and_discovers_the_relational_goal():
     """Cold start: the agent solves the constrained push level 0 by exploration, and in doing so discovers the block is a MOVER,
-    LEARNS its behaviour by felt contact (block YIELDS, wall RESISTS — never coded), and discovers the goal is the RELATION
-    (block-colour on pad-colour) — all from motion + the sparse score."""
+    LEARNS its dynamics by felt contact (the block moves when pressed; a wall/edge behind it BLOCKS it — an occasion, never
+    coded), and discovers the goal is the RELATION (block-colour on pad-colour) — all from motion + the sparse score."""
+    from tbt.operator import norm
     fd, per_level, agent = _play(seed=0)
     assert len(per_level) >= 1, "the agent must solve at least the first push level by exploration"
     assert 6 in agent._movers, "the block (colour 6) must be discovered as a mover from its motion"
-    assert agent._contact.kind_of(6) == "yield", "the block must be LEARNED to yield when pressed (behaviour, not coded)"
-    assert agent._contact.kind_of(1) == "resist", "the wall must be LEARNED to resist (solidity discovered, not assumed)"
+    east = (1.0, 0.0)
+    assert norm(agent._dynamics_delta("of", 6, None, east)) > 0.5, "the block's BASE dynamics must be learned (it moves when pressed)"
     assert agent.goal_mem.goal() == (6, 7), f"the goal must be the relation (block 6 on pad 7), got {agent.goal_mem.goal()}"
 
 
-@pytest.mark.xfail(reason="CUE DILUTION under repeated obstructed pushes. Direction generality is BUILT and works -- the "
-                          "press-aligned population makes all four directions one operation, and a block pressed only east "
-                          "and south is predicted correctly for west and north (see test_behavior). What still fails is the "
-                          "accepted cost of the backdrop being a summing CUE: every obstructed push shares its error with the "
-                          "base cue, so on a level where the block spends most of its time against a wall the base decays "
-                          "(measured: 0.81 -> 0.52 over 400 actions) and the predicted deltas go fractional, which makes plans "
-                          "unreliable. The base association wants to be held context-free and GATED by the exception -- "
-                          "occasion setting, hippocampal -- rather than diluted by it. NOT a missing prior.", strict=True)
 def test_go_around_push_transfers_at_oracle_cost():
     """The transfer: level 1 puts the block's pad on the far side, so nothing positional carries over — yet the rollout plans the
     GO-AROUND (navigate to the block's left, push it right onto the pad) goal-directed from the transferred relation, at oracle

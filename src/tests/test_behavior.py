@@ -157,15 +157,18 @@ def test_direction_generality_comes_from_the_press_frame_not_a_prior():
         assert _close(a._dynamics_delta("of", 6, None, v), v, tol=0.05), (name, a._dynamics_delta("of", 6, None, v))
 
 
-def test_a_single_observation_is_honestly_ambiguous():
-    """From ONE east push that moves a block east you cannot tell "it moves with a push" from "it always moves east": both fit
-    perfectly. The model says so — it splits its credit, so pressing SOUTH predicts half a cell south and half a cell east —
-    rather than committing to either. Being exact here would mean having assumed the answer."""
+def test_press_following_is_assumed_boldly_then_revised_on_refutation():
+    """Generalize-then-correct (`feedback_prefer_generalize_then_correct`): from ONE free push the model BOLDLY assumes
+    press-following and predicts every direction exactly -- not a hedged half-and-half split. The boldness is the point; the
+    safety is that it is REVISABLE. A world-anchored object looks press-following at first, and only a second, refuting free
+    push in a new direction reveals it and mints the world override."""
     a = _agent()
     a._learn_delta("of", 6, None, RIGHT, RIGHT)
-    assert _close(a._dynamics_delta("of", 6, None, RIGHT), RIGHT), "the observed press is exact"
-    south = a._dynamics_delta("of", 6, None, DOWN)
-    assert 0.4 < south[0] < 0.6 and 0.4 < south[1] < 0.6, f"an unpressed direction must be undecided, got {south}"
+    assert _close(a._dynamics_delta("of", 6, None, DOWN), DOWN), "bold: one push assumes press-following in every direction"
+    b = _agent()
+    b._learn_delta("of", 5, None, RIGHT, UP)                     # pushed east, it rises -- still consistent with press-following
+    b._learn_delta("of", 5, None, DOWN, UP)                      # pushed south, still rises -- REFUTES press-following
+    assert _close(b._dynamics_delta("of", 5, None, LEFT), UP, tol=0.3), "revised: world-anchored, rises however pushed"
 
 
 def test_world_anchored_behaviour_is_learnable_and_beats_the_press_frame():

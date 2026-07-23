@@ -89,6 +89,15 @@ class Transform:
         d = self.readout.decode(self._assembly(cues, param))
         return d if frame is None else rotate(frame, d)
 
+    def confident(self, cues, param) -> bool:
+        """Is this cue-under-this-situation LEARNED -- does a CONNECTED segment already predict it? This is the epiplexity
+        gate read as a LEVEL (has reusable structure been committed here yet?), and it is HTM's own connected-segment test:
+        `_assembly` is the depolarised set, which is non-empty exactly when a segment has reached threshold at connected
+        permanence. An occasion that has never been felt, or a one-off that never recurred to connect, is not confident, so
+        the caller falls through to the context-free default. No new machinery -- the guard the occasion-setting gate needed
+        is the substrate's own notion of 'a prediction has been learned' (`reference_recognition_under_occlusion`)."""
+        return bool(self._assembly(cues, param))
+
     def learn(self, cues, param, observed, frame=None) -> None:
         """One observation: run the layer (a novel conjunction bursts and grows its segment), then fold the read-out's error
         into the assembly that conjunction has settled on -- the same one `predict` decodes. `observed` arrives in the caller's

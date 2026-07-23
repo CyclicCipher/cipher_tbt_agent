@@ -26,7 +26,7 @@ from .operator import eye
 from .hippocampus import Hippocampus, WorldMap, WorldModel
 from .behavior import Transform
 from .modality import touch, vision
-from .operator import add, norm, scale, solve_rotation, sub
+from .operator import add, norm, solve_rotation, sub
 from .perceive import SelfTracker, segment
 from .reward import GoalMemory, ValueCritic
 from .thalamus import Thalamus
@@ -329,7 +329,7 @@ class Agent:
         column's learned body operator BY REFERENCE, so a fork path-integrates the agent under the one shared model.
         ARC's board is world-anchored, so the nav pose and the scene objects already share one world frame (DESIGN §4)."""
         objects = self._scene_col().scene_snapshot() if self._scene is not None else {}
-        bounds = [(0, 63)] * self._dims
+        bounds = getattr(self, "_extent", None) or [(0, 63)] * self._dims
         return WorldMap(self.pose(), objects, bounds, body=self._nav_col().operator, static=self._static)
 
     def world_model(self) -> WorldModel:
@@ -454,6 +454,7 @@ class Agent:
         operator (`learn_pose_move`), the scene column's object dynamics, and the hippocampal rollout (`plan`). No game semantics
         are read (`feedback_bitter_lesson`): walls learned by bumping, movers by motion, the goal by reward."""
         objs = self.transduce(fd.grid)
+        self._extent = [(0, len(fd.grid[0]) - 1), (0, len(fd.grid) - 1)] if fd.grid else None
         pos = self._positions(objs)                                   # {feature: cell} for the unambiguous single-instance objects
         if self._last is not None:
             prev_objs, action, prev_cur, prev_score, prev_pos, prev_skin = self._last
@@ -488,24 +489,13 @@ class Agent:
         return {("p", b) for b in self._param_enc.encode(displacement).active}
 
     @staticmethod
-    def _contact_cues(frame, tag, felt, beyond):
-        """The cues for one contact in one reference frame: the thing being pressed, PLUS what backs it when anything does.
-
-        Beyond is a CUE -- it sums -- and is omitted entirely when the far side is empty. That placement is a decision. Put it
-        in the basal SITUATION instead and every backdrop becomes its own case that has to be individually experienced, which
-        is enumeration: the model then cannot predict a push against a backdrop it has never pressed, and the one backdrop that
-        decides a level is UNOBSERVABLE by construction -- the push that lands a block on its pad ENDS the level, so its
-        outcome frame never arrives and no amount of play supplies it. As a cue with no learned weight it contributes nothing,
-        so an unseen backdrop simply inherits the object's known behaviour: generalise by default, and let the delta rule carve
-        out the backdrops that really do change the outcome (`feedback_prefer_generalize_then_correct`).
-
-        The cost is real and accepted: a genuine exception is learned by SPLITTING the error with the base cue, so it settles
-        over a few alternations instead of in one shot. Doing better wants a hippocampal GATE over a context-free cortical
-        association -- occasion setting, which dissociates from simple conditioning anatomically -- which we do not have and
-        will not fake with a rule.
-
-        There is no 'obstructed' concept here and no branch: an exception is just a second cue with a learned delta."""
-        return {(frame, tag, felt)} | ({(frame, "beyond", beyond)} if beyond is not None else set())
+    def _cue(frame, tag, felt, beyond):
+        """The single proximal cue naming this contact in one reference frame. Beyond is absent for the context-free BASE
+        (`beyond=None`) and present for an OCCASION-specific exception, and the two are DIFFERENT cues -- so they drive
+        different columns and are combined by SELECT (override), never by SUM. That is the whole fix for the dilution the
+        summing form had: an obstructed push no longer shares its error with the free push, because it teaches a different
+        cue entirely."""
+        return (frame, tag, felt) if beyond is None else (frame, tag, felt, "on", beyond)
 
     def _press_frame(self, eff):
         """The rotation carrying the canonical press axis onto THIS press direction -- SOLVED from the displacement, not
@@ -518,48 +508,88 @@ class Agent:
         press, which is exactly what makes one observation cover all of them."""
         return tuple(norm(eff) if i == 0 else 0.0 for i in range(self._dims))
 
+    def _press(self, tag, felt, beyond, eff):
+        """The PRESS-ALIGNED prediction for a cue: tuned in the frame the press itself defines, so east/west/north/south are
+        literally the same local operation and ONE observation covers all of them (`reference_lid_locally_in_distribution`;
+        `project_representation_shortcut_lesson`). Direction generality comes from the FRAME, not a prior -- the deleted
+        `ObjectBehavior` asserted it by initialising a change matrix to the identity, a claim about physics welded in."""
+        R, cp = self._press_frame(eff), self._param(self._canon(eff))
+        return self._dynamics.predict({self._cue("press", tag, felt, beyond)}, cp, frame=R)
+
+    def _learn_press(self, tag, felt, beyond, eff, target) -> None:
+        R, cp = self._press_frame(eff), self._param(self._canon(eff))
+        self._dynamics.learn({self._cue("press", tag, felt, beyond)}, cp, target, frame=R)
+
+    def _world(self, tag, felt):
+        """The WORLD-ALIGNED prediction for the OBJECT: tuned in the world frame and independent of the press, so it can hold
+        behaviour anchored to the world rather than to whoever pushed -- a balloon rising however it is shoved. Its situation
+        is constant for that reason."""
+        return self._dynamics.predict({self._cue("world", tag, felt, None)}, self._param_const)
+
+    def _learn_world(self, tag, felt, target) -> None:
+        self._dynamics.learn({self._cue("world", tag, felt, None)}, self._param_const, target)
+
+    def _confident(self, cue, eff) -> bool:
+        """Has a CONNECTED segment been learned for this cue -- epiplexity read as a LEVEL (is reusable structure committed
+        here yet)? Keyed on the canonical press, so an occasion learned in one direction is confident in all."""
+        return self._dynamics.confident({cue}, self._param(self._canon(eff)))
+
     def _dynamics_delta(self, tag, felt, beyond, eff):
-        """L5's predicted change for one contact, as the sum of TWO populations tuned in TWO reference frames.
+        """L5's predicted change for one contact -- a press-following BASE plus OCCASION overrides minted on refutation
+        (`reference_recognition_under_occlusion`; occasion setting). The default is press-following, bold and direction-general
+        from one observation (our generalize-then-correct thesis, `feedback_prefer_generalize_then_correct`). Two confident
+        occasions can override it, each a separate cue so the base is never diluted:
 
-        PRESS-ALIGNED -- tuned in the frame the press itself defines, so east, west, north and south are literally the same
-        local operation and one observation covers all of them BY CONSTRUCTION (`reference_lid_locally_in_distribution`;
-        `project_representation_shortcut_lesson`). This is where direction generality comes from, and the point is that it
-        comes from the FRAME rather than from a prior: the deleted `ObjectBehavior` asserted the same generality by
-        initialising its change matrix to the identity, which is a claim about physics welded into the mechanism with no way
-        to find out it is wrong.
+          * a WORLD occasion on the OBJECT -- minted when press-following is refuted with nothing behind the object, i.e. the
+            thing moves in a world-fixed direction however it is pushed (the balloon). It overrides, because the press frame is
+            simply the wrong frame for that object.
+          * a BACKDROP occasion -- minted when press-following is refuted with something behind the object (a wall ⇒ blocked).
+            It overrides for that backdrop only, so an UNSEEN backdrop (the pad the winning push lands on, unobservable because
+            that push ends the level) falls through to the base and inherits the object's general behaviour."""
+        if self._confident(self._cue("world", tag, felt, None), eff):
+            return self._world(tag, felt)
+        if beyond is not None and self._confident(self._cue("press", tag, felt, beyond), eff):
+            return self._press(tag, felt, beyond, eff)
+        return self._press(tag, felt, None, eff)
 
-        WORLD-ALIGNED -- tuned in the world frame and independent of the press, so it can hold behaviour that is anchored to
-        the world rather than to whoever did the pushing. Its situation is constant for that reason.
+    def _learn_delta(self, tag, felt, beyond, eff, observed, impeded=False) -> None:
+        """Teach the model from one felt interaction. The routing turns on ONE physical fact -- was the body IMPEDED (it did
+        not advance by its full efference)? -- which cleanly separates the two ways press-following can be wrong:
 
-        Nothing declares which frame an object belongs to. The delta rule apportions them from the object's own data, so a
-        rigid block loads the press-aligned population and leaves the world one at zero; a balloon loads the world one with an
-        upward vector, going up no matter which way it is pushed; and a feather loads both -- it goes where you push it AND
-        drifts down regardless. The world population reads zero for everything that does not need it, which is what makes
-        assuming direction generality safe rather than a bet."""
-        return add(self._dynamics.predict(self._contact_cues("press", tag, felt, beyond),
-                                          self._param(self._canon(eff)), frame=self._press_frame(eff)),
-                   self._dynamics.predict(self._contact_cues("world", tag, felt, beyond), self._param_const))
+          * IMPEDED -- something STOPPED the contact (a wall, the edge, a mover behind). That is a BACKDROP occasion, keyed on
+            what is behind, ALWAYS -- even on the very first contact, so an obstructed push never teaches the base "it stays".
+            This is the fix for the bootstrap poisoning: blocking is never mistaken for the object's free behaviour.
+          * FREE but REFUTED -- the body advanced yet the object did NOT move the press-following way. Nothing stopped it, so
+            the press frame is simply the wrong frame for it: it is WORLD-anchored (a balloon), and a world occasion is minted.
 
-    def _learn_delta(self, tag, felt, beyond, eff, observed) -> None:
-        """Teach both frames from one observation, by SHARING the error between them -- the delta rule over the union, which is
-        the same cue competition that decides everything else here. Each population is handed its own current prediction plus
-        its share, so `learn` sees exactly that share as its error and then splits it again across its own cues.
+        A confident occasion OWNS its contact and SHIELDS the base (so every later obstructed push refines the wall-occasion
+        and never dilutes the free-push base). A free, unrefuted contact teaches the base -- press-following, bold, one-shot."""
+        if self._confident(self._cue("world", tag, felt, None), eff):
+            self._learn_world(tag, felt, observed)
+            return
+        if beyond is not None and self._confident(self._cue("press", tag, felt, beyond), eff):
+            self._learn_press(tag, felt, beyond, eff, observed)
+            return
+        if impeded and beyond is not None:                         # STOPPED by something → a backdrop occasion, always
+            self._learn_press(tag, felt, beyond, eff, observed)
+            return
+        base = self._press(tag, felt, None, eff)
+        if (not impeded and self._confident(self._cue("press", tag, felt, None), eff)
+                and norm(sub(observed, base)) > 1e-9):             # free yet refuted → the object is WORLD-anchored
+            self._learn_world(tag, felt, observed)
+            return
+        self._learn_press(tag, felt, None, eff, observed)          # a free contact → the base learns it
 
-        Sharing, not "the residual the other leaves". Handing each the full residual double-counts while both are naive: the
-        first wall bump had press and world each absorb the whole -eff, the two summed to -2.eff, and the agent believed a
-        wall threw it backwards.
-
-        A consequence worth stating plainly, because it looks like a regression and is not: this is NO LONGER one-shot. From a
-        single push east that moves a thing east you genuinely cannot tell "it moves with a push" from "it always moves east" —
-        the two hypotheses fit that observation equally, and the model splits its credit between them until a push in a second
-        direction separates them. Being exact after one observation would mean having assumed the answer, which is what the
-        deleted identity-matrix prior did."""
-        pc, pp, R = self._contact_cues("press", tag, felt, beyond), self._param(self._canon(eff)), self._press_frame(eff)
-        wc, wp = self._contact_cues("world", tag, felt, beyond), self._param_const
-        press, world = self._dynamics.predict(pc, pp, frame=R), self._dynamics.predict(wc, wp)
-        share = scale(sub(observed, add(press, world)), 0.5)
-        self._dynamics.learn(pc, pp, add(press, share), frame=R)
-        self._dynamics.learn(wc, wp, add(world, share))
+    def _beyond(self, objs, cell):
+        """What backs a contact: the feature at `cell`, or the "edge" beyond the board, or None (in-bounds and empty). The
+        boundary is a perceived backdrop like any other, so an object pressed against the edge mints an EDGE occasion rather
+        than being mistaken either for an open-space push (which would wrongly teach the base "it stays") or for a world-
+        anchored object (which would wrongly mint a world override). Matches `WorldMap.occupant`, so learning and the rollout
+        see the same backdrop."""
+        ext = getattr(self, "_extent", None)
+        if ext is not None and any(not (lo <= c <= hi) for c, (lo, hi) in zip(cell, ext)):
+            return "edge"
+        return self._feature_at(objs, cell)
 
     def _feature_at(self, objs, cell):
         """The feature occupying `cell` in a perceived frame, or None if it is empty — the plain perceptual question the
@@ -656,9 +686,10 @@ class Agent:
         obj_disp = (sub(tuple(float(c) for c in pos[felt]), tuple(float(c) for c in prev_pos[felt]))
                     if felt in pos and felt in prev_pos else z)
         contact = tuple(int(round(c + d)) for c, d in zip(prev_cur, eff))       # the cell the body pressed into
-        beyond = self._feature_at(prev_objs, tuple(int(round(c + d)) for c, d in zip(contact, eff)))
-        self._learn_delta("into", felt, beyond, eff, sub(body_disp, eff))
-        self._learn_delta("of", felt, beyond, eff, obj_disp)
+        beyond = self._beyond(prev_objs, tuple(int(round(c + d)) for c, d in zip(contact, eff)))
+        impeded = norm(sub(body_disp, eff)) > 1e-9                               # the body did NOT advance by its full efference
+        self._learn_delta("into", felt, beyond, eff, sub(body_disp, eff), impeded)
+        self._learn_delta("of", felt, beyond, eff, obj_disp, impeded)
 
     def _route_movers(self, pos) -> None:
         """Place every currently-visible known mover into the SCENE column, so `world_state()` (hence the rollout) includes it.

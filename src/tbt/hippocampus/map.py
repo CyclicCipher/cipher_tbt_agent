@@ -69,11 +69,15 @@ class WorldMap:
         return m
 
     def occupant(self, cell):
-        """What is at `cell`: a TRACKED object's id if one is there, else the PERCEIVED static feature, else None. The two are
-        one question — the forward model asks "what am I pressing into", and whether that thing is tracked is a separate matter."""
+        """What is at `cell`: a TRACKED object's id if one is there, else the PERCEIVED static feature, else the "edge" beyond
+        the board, else None (in-bounds and empty). The forward model asks "what am I pressing into", and the boundary is a
+        real answer to that — an object pressed against the edge is backed by the edge, a perceived backdrop like any other,
+        so the occasion-setting gate treats it as one instead of confusing "edge behind" with "open space behind"."""
         for oid, pose in self.objects.items():
             if tuple(round(c) for c in pose[0]) == cell:
                 return oid
+        if not self.in_bounds(cell):
+            return "edge"
         return self.static.get(cell)
 
     def anchor(self, position) -> None:
