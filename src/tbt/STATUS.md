@@ -254,12 +254,27 @@ ARCHITECTURE.md §3/§5.1):
      −1.0) instead of one shot. Better wants a hippocampal GATE over a context-free cortical association (occasion setting) —
      NOT BUILT, and deliberately not faked with a rule.
    - **`WorldModel` contains no physics**: free path integration + the corrections the cortex has learned.
-   - ⚠ **REGRESSION, one named cause: DIRECTION GENERALITY.** Push was 12/12 seeds (L1 at oracle 6); it is now L0-only and the
-     two `test_push` cases are **xfail(strict)**. The transform learns a delta per press DIRECTION, so a block seen to move
-     east says nothing about pressing it west, and the rollout predicts an unpressed direction as transparent — it plans
-     straight THROUGH the block. The deleted `ObjectBehavior` carried this as an identity matrix baked into the mechanism,
-     which is exactly the hard-coded prior the port exists to remove. Everything else survived the port: the goal is still
-     discovered and still transfers. **This is the next thing to solve, on its own terms.**
+   - **TWO REFERENCE FRAMES ✅ BUILT (2026-07-22)** — L5 reads one contact as the SUM of two populations, one tuned in the
+     frame the PRESS defines and one tuned in the WORLD (`Transform.predict/learn(frame=)`, `Agent._press_frame`/`_canon`/
+     `_dynamics_delta`/`_learn_delta`). DIRECTION GENERALITY now comes from the FRAME, not from a prior: in press-aligned
+     coordinates all four directions are the SAME local operation, so a block pressed only east and south is predicted
+     correctly for west and north (measured exact). The deleted `ObjectBehavior` got the same answer by initialising its
+     change matrix to the identity — a claim about physics welded into the mechanism with no way to discover it was wrong.
+     The WORLD-aligned population is what retracts it: a thing that rises however it is pushed (buoyancy beating the push)
+     loads that population instead and is predicted to rise in directions it was never pressed. Nothing declares which frame
+     an object belongs to — the delta rule apportions from the object's own data, and the world population reads ~0 for
+     everything that does not need it. Also NO LONGER one-shot, correctly: from one east push you cannot tell "moves with a
+     push" from "always moves east", and the model splits its credit (0.5/0.5) until a second direction separates them.
+     Two wiring settings this forced, both per-layer and both documented in `behavior.py`: `predicted_dec=0` (the proximal
+     drive is a QUERY, so other columns being silent is not evidence — with punishment on, teaching the agent about a wall
+     silently ERASED what it knew about a block) and the error SHARED between frames rather than each taking the full
+     residual (which double-counted while both were naive: a first wall bump predicted −2·eff, "the wall threw me backwards").
+   - ⚠ **Push is still L0-only; both `test_push` cases are xfail(strict).** The cause is no longer a missing prior — it is CUE
+     DILUTION: the backdrop is a summing cue, so every obstructed push shares its error with the base cue, and on a level
+     where the block sits against a wall most of the time the base decays (0.81 → 0.52 over 400 actions) and the deltas go
+     fractional, making plans unreliable. The base association wants to be held context-free and GATED by the exception —
+     occasion setting, hippocampal, dissociable from simple conditioning — rather than diluted by it. **That gate is the next
+     thing to build, and it is the same open item the backdrop decision already pointed at.**
    The touch COLUMN (recognise-BY-touch, for OCCLUSION) is DEFERRED; the fully-observed push needs only the skin (agency) + the
    behavior model. In full observation contact is geometric; touch earns its place as the agency/reafference signal.
    **INVERSE-MODEL planner, step 1 (NAV) ✅ DONE (2026-07-21, `operator.utilities`, `BasalGanglia.select(salience=)`,

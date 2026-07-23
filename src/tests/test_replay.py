@@ -69,9 +69,10 @@ def test_rollout_pushes_a_box_onto_a_target_via_learned_dynamics():
     exact), and the rollout's contact path drives that one transform inside the forward model. The agent starts NORTH of the
     box, so it must go AROUND to the west side (a detour a greedy step would never take) before pushing twice."""
     a = _agent_at((5, 6))
-    east = a._param((1.0, 0.0))                                        # ONE felt push east: the box moves with the body...
-    a._dynamics.learn(a._contact_cues("of", 1, None), east, (1.0, 0.0))
-    a._dynamics.learn(a._contact_cues("into", 1, None), east, (0.0, 0.0))   # ...and the body is not held up by it
+    for _ in range(8):                                                 # felt pushes: the box moves with the body, whichever
+        for v in ((1.0, 0.0), (0.0, 1.0)):                             # way it is pushed, and does not hold the body up
+            a._learn_delta("of", 1, None, v, v)
+            a._learn_delta("into", 1, None, v, (0.0, 0.0))
     a.place_object(1, ((5.0, 5.0), eye(2)))                # the scene: box at (5,5), agent at (5,6)
     target = (7.0, 5.0)
     reward = lambda w: 1.0 if _dist(w.objects[1][0], target) < 0.5 else 0.0

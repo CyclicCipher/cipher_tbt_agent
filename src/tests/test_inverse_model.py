@@ -74,7 +74,7 @@ def test_agent_navigates_by_the_inverse_model_and_defers_when_it_stalls():
     assert a._nav_inverse((5, 5), (8, 5), list(_D)) is E, "should step EAST toward a target three east"
 
     a._static = {(6, 5): 9, (5, 4): 9}                                  # feature 9 now sits east of here -- and north of here
-    a._dynamics.learn(a._contact_cues("into", 9, None), a._param((1.0, 0.0)), (-1.0, 0.0))   # ONE press east into a 9: it gave nothing
+    a._learn_delta("into", 9, None, (1.0, 0.0), (-1.0, 0.0))            # ONE press east into a 9: it gave nothing
     assert a._nav_inverse((5, 5), (8, 5), list(_D)) is not E, "an action the model predicts goes nowhere must be vetoed"
 
     assert a._nav_inverse((5, 5), (5, 5), list(_D)) is None, "already there ⇒ nothing closes the gap ⇒ defer to the rollout"

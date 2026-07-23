@@ -36,10 +36,9 @@ class WorldModel:
     the one dynamics. It re-derives no physics -- there is no solidity, no push and no obstacle anywhere in this file, only a
     free motion and the corrections the cortex has learned for it."""
 
-    def __init__(self, dynamics, param, cues) -> None:
-        self.dynamics = dynamics     # the L5 `Transform`: cues -> delta, conditioned on the interaction's situation
-        self.param = param           # (displacement) -> the basal situation SDR (the caller's encoder, kept upstream)
-        self.cues = cues             # (tag, felt, beyond) -> the proximal cue set for one contact (the caller's convention)
+    def __init__(self, delta) -> None:
+        self.delta = delta           # (tag, felt, beyond, press) -> L5's predicted change. The cortex owns the cues, the
+        #                              situation's encoding and the reference frames; the hippocampus just asks.
 
     def step(self, world, action):
         """One imagined step (functional -- returns a NEW world). The agent path-integrates FREELY (the efference copy); where
@@ -58,15 +57,13 @@ class WorldModel:
         if felt is None:
             return tentative
         beyond = world.occupant(tuple(int(round(c + d)) for c, d in zip(contact, eff)))
-        param = self.param(eff)
-        body = add(eff, self.dynamics.predict(self.cues("into", felt, beyond), param))   # free motion + learned correction
+        body = add(eff, self.delta("into", felt, beyond, eff))                # free motion + the learned correction
         out = world.snapshot()
         out.agent = (add(world.agent[0], body), world.agent[1]) if norm(body) > _TOL else world.agent
         pose = world.objects.get(felt)
         if pose is not None:                                                  # a TRACKED thing also takes its own learned delta
-            delta = self.dynamics.predict(self.cues("of", felt, beyond), param)
             out.objects = dict(world.objects)
-            out.objects[felt] = (add(pose[0], delta), pose[1])
+            out.objects[felt] = (add(pose[0], self.delta("of", felt, beyond, eff)), pose[1])
         return out
 
 

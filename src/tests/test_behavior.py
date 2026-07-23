@@ -25,21 +25,22 @@ _GRID = GridEncoder(scales=(7, 11, 13, 17), dims=2, mw=3)
 def test_worldmodel_contact_path_runs_on_the_one_transform():
     """The rollout's contact path (`WorldModel`): pressing something the transform says moves, moves it and lets the body
     advance; pressing something whose learned correction cancels the body's own motion leaves both where they were. There is no
-    yield and no resist in the model -- only two learned deltas -- and the world model contains no physics at all."""
+    yield and no resist in the model -- only two learned deltas -- and the world model holds no physics at all: it asks the
+    cortex for a change and applies it."""
     from tbt.hippocampus import WorldMap, WorldModel
     from tbt.operator import MotionOperator, eye
     from tasks.core import GameAction
     R = GameAction.ACTION4
     body = MotionOperator(ego=True)
     body.learn(R, ((0.0, 0.0), eye(2)), ((1.0, 0.0), eye(2)))          # RIGHT = +x
-    t = Transform()
-    cues = lambda tag, felt, beyond: {(tag, felt)} | ({("beyond", beyond)} if beyond is not None else set())
-    param = lambda v: {("g", b) for b in _GRID.encode(v).active}
-    t.learn(cues("of", 6, None), param(RIGHT), RIGHT)                  # 6 takes the press and moves with it
-    t.learn(cues("into", 6, None), param(RIGHT), ZERO)                 # ...and does not hold the body up
-    t.learn(cues("into", 1, None), param(RIGHT), (-1.0, 0.0))          # 1 cancels the body's own motion exactly
-    t.learn(cues("of", 1, None), param(RIGHT), ZERO)
-    wm = WorldModel(t, param, cues)
+    a = _agent()
+    for _ in range(8):                                                 # 6 takes a press and moves with it, in any direction
+        for v in (RIGHT, DOWN):
+            a._learn_delta("of", 6, None, v, v)
+            a._learn_delta("into", 6, None, v, ZERO)                   # ...and does not hold the body up
+            a._learn_delta("into", 1, None, v, tuple(-x for x in v))   # 1 cancels the body's own motion exactly
+            a._learn_delta("of", 1, None, v, ZERO)
+    wm = WorldModel(a._dynamics_delta)
 
     box = wm.step(WorldMap(((1.0, 0.0), eye(2)), {6: ((2.0, 0.0), eye(2))}, bounds=[(0, 9), (0, 9)], body=body), R)
     assert tuple(round(c) for c in box.objects[6][0]) == (3, 0), "the pressed thing advances one cell"
@@ -129,3 +130,52 @@ def test_transform_cue_competition_rejects_the_spurious_cue():
         t.learn(_cues("neighbour"), _param(ZERO), DOWN)                 # neighbour alone ⇒ falls
     assert _close(t.predict(_cues("support", "neighbour"), _param(ZERO)), ZERO, tol=0.05)
     assert _close(t.predict(_cues("neighbour"), _param(ZERO)), DOWN, tol=0.05)
+
+
+# ── TWO REFERENCE FRAMES: where direction generality comes from, and what retracts it ──────────────────────────────────
+# L5 reads one contact as the sum of two populations — one tuned in the frame the PRESS defines, one tuned in the WORLD.
+# Nothing declares which frame an object belongs to; the delta rule apportions them from the object's own data.
+
+_ISO = {"E": RIGHT, "W": LEFT, "S": DOWN, "N": UP}
+
+
+def _agent():
+    from tbt.agent import Agent
+    return Agent(feat_n=8, n_content=2, n_state=2, n_cols=64, seed=0)
+
+
+def test_direction_generality_comes_from_the_press_frame_not_a_prior():
+    """A block pressed only EAST and SOUTH ends up predicted correctly for WEST and NORTH, which it was never pressed in. The
+    generality comes from the FRAME — in press-aligned coordinates all four are the same local operation, so there is only one
+    thing to learn — and not from an identity matrix asserted in the mechanism, which is how the deleted ObjectBehavior got
+    the same answer with no way to find out it was wrong."""
+    a = _agent()
+    for _ in range(8):
+        a._learn_delta("of", 6, None, RIGHT, RIGHT)
+        a._learn_delta("of", 6, None, DOWN, DOWN)
+    for name, v in _ISO.items():
+        assert _close(a._dynamics_delta("of", 6, None, v), v, tol=0.05), (name, a._dynamics_delta("of", 6, None, v))
+
+
+def test_a_single_observation_is_honestly_ambiguous():
+    """From ONE east push that moves a block east you cannot tell "it moves with a push" from "it always moves east": both fit
+    perfectly. The model says so — it splits its credit, so pressing SOUTH predicts half a cell south and half a cell east —
+    rather than committing to either. Being exact here would mean having assumed the answer."""
+    a = _agent()
+    a._learn_delta("of", 6, None, RIGHT, RIGHT)
+    assert _close(a._dynamics_delta("of", 6, None, RIGHT), RIGHT), "the observed press is exact"
+    south = a._dynamics_delta("of", 6, None, DOWN)
+    assert 0.4 < south[0] < 0.6 and 0.4 < south[1] < 0.6, f"an unpressed direction must be undecided, got {south}"
+
+
+def test_world_anchored_behaviour_is_learnable_and_beats_the_press_frame():
+    """The case direction generality would be WRONG for, and the reason both frames exist. A thing that goes UP however it is
+    pushed — a balloon, buoyancy beating the push — loads the WORLD-aligned population instead, and is then predicted to go up
+    in directions it was never pressed in. No rule distinguishes it from the block above; only its own data does."""
+    a = _agent()
+    for _ in range(3):
+        a._learn_delta("of", 5, None, RIGHT, UP)      # pressed east -> it rises
+        a._learn_delta("of", 5, None, DOWN, UP)       # pressed south -> it still rises
+    for name in ("W", "N"):
+        got = a._dynamics_delta("of", 5, None, _ISO[name])
+        assert _close(got, UP, tol=0.25), f"pressed {name} it must still rise, got {got}"

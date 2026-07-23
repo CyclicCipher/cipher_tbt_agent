@@ -13,6 +13,7 @@ are just three learned deltas, and the enum, the per-object dispatch and the "st
 from __future__ import annotations
 
 from .htm import HTMLayer, PopulationReadout
+from .operator import invert, rotate   # rotate(M, v) IS the matrix-vector product; reuse the algebra
 
 
 class Transform:
@@ -57,13 +58,20 @@ class Transform:
     matters just as much and for a subtler reason: it
     is the bar for REUSING an existing segment on a burst, so leaving it low lets a novel parameter hijack a neighbouring
     parameter's segment and drag it across instead of recruiting its own cell -- distinct parameters then silently share one
-    delta. Holding it at the activation threshold means a burst always recruits, which is what a conjunction wants."""
+    delta. Holding it at the activation threshold means a burst always recruits, which is what a conjunction wants.
+
+    NO PREDICTED-COLUMN PUNISHMENT (`predicted_dec=0`). In sequence memory a column that was predicted and did not activate is
+    a genuine error and its segment should be weakened. Here the proximal drive is a QUERY -- the cues that happen to be
+    present in this one interaction -- so the other columns being silent says nothing at all. With punishment on, learning
+    about one thing silently erases what was learned about another whenever they share a situation: teaching the agent what a
+    wall does wiped out what it knew about a block, because both were queried under the same press and each query punished the
+    other's cell. The layer is an association store read by subset, not a stream in which absence is evidence."""
 
     def __init__(self, dims: int = 2, cells_per_column: int = 16, lr: float = 1.0, activation_threshold: int = 18,
                  min_threshold: int = 18, init_perm: float = 0.60, max_syn: int = 64) -> None:
         self.dims = int(dims)
         self.layer = HTMLayer(cells_per_column=cells_per_column, activation_threshold=activation_threshold,
-                              min_threshold=min_threshold, init_perm=init_perm, max_syn=max_syn)
+                              min_threshold=min_threshold, init_perm=init_perm, max_syn=max_syn, predicted_dec=0.0)
         self.readout = PopulationReadout(dims, lr)
 
     def _assembly(self, cues, param):
@@ -73,13 +81,20 @@ class Transform:
         self.layer.depolarize(param)
         return frozenset(c for c in self.layer._predictive if c[0] in cols)
 
-    def predict(self, cues, param):
-        """The predicted delta: the population vector of the assembly these cues-under-this-parameter drive."""
-        return self.readout.decode(self._assembly(cues, param))
+    def predict(self, cues, param, frame=None):
+        """The predicted delta: the population vector of the assembly these cues-under-this-parameter drive, expressed in the
+        caller's frame. `frame` is a rotation this population is tuned in -- the decode happens in that frame and is rotated
+        back out. A cell population tuned in some frame other than the world's is ordinary cortex (egocentric, head-centred,
+        object-centred populations all exist); this is a coordinate statement about the read-out, not a second mechanism."""
+        d = self.readout.decode(self._assembly(cues, param))
+        return d if frame is None else rotate(frame, d)
 
-    def learn(self, cues, param, observed) -> None:
+    def learn(self, cues, param, observed, frame=None) -> None:
         """One observation: run the layer (a novel conjunction bursts and grows its segment), then fold the read-out's error
-        into the assembly that conjunction has settled on -- the same one `predict` decodes."""
+        into the assembly that conjunction has settled on -- the same one `predict` decodes. `observed` arrives in the caller's
+        frame and is carried into this population's own frame first, so what is stored is frame-invariant."""
+        if frame is not None:
+            observed = rotate(invert(frame), observed)
         self.layer.depolarize(param)
         self.layer.observe(cues, context=param, learn=True)
         self.readout.learn(self._assembly(cues, param), observed)
