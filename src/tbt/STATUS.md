@@ -266,18 +266,28 @@ ARCHITECTURE.md §3/§5.1):
      corrupts neither the base nor a different backdrop; a balloon rises in directions it was never pushed. The run is ~60×
      faster (0.5s vs 32s) — the model no longer emits fractional deltas that blew up the rollout's visited-pruning (which is
      now cell-granular in `WorldMap.key`).
-   - **Epiplexity as a DERIVATIVE (exploration to replace `_visited`) — NOT YET BUILT; a first attempt was WRONG and reverted.**
-     (Two earlier notes here were retracted: a "deterministic no-op" claim, AND a "frozen-reservoir estimator built + validated"
-     claim.) Having read the ORIGINAL source (`reference_learnable_novelty`; Finzi 2026 arXiv:2601.03220), epiplexity is
-     `S_T := |P*|`, the PROGRAM LENGTH of the best compute-bounded model, estimated CANONICALLY by the area under a *learning*
-     model's PREQUENTIAL loss curve above its floor — LOW for random AND simple, HIGH only for complex-and-slowly-learnable, and
-     a MULTI-STEP property. My first attempt (a frozen-reservoir spectral-determinant of `|W|` at one-step) was the wrong method
-     and miscalibrated (it scored a simple smooth map and chaos HIGH — both must be ~0), so it was deleted.
-     THE CANONICAL, MINIMAL-MACHINERY VERSION (to build): read epiplexity off the agent's OWN model's prequential prediction-error
-     REDUCTION — the burst→predicted drop the HTM columns already produce — NO separate reservoir. Per-step epistemic reward =
-     that reduction (→ 0 for noise, → 0 for mastered, > 0 only for sustained-learnable). Then TEST empirically whether it drives
-     the fixtures; do not prejudge (an earlier "epiplexity can't do coverage" conclusion was reasoned from the broken estimator).
-     The BG needs no mechanism change: epiplexity FEEDS it reward (`r = r_task + β·ΔS`).
+   - **LEARNABLE NOVELTY ✅ BUILT on the agent's OWN model (2026-07-22) — `_visited` is DELETED.**
+     (Retracted en route, recorded so it is not re-tried: a "deterministic no-op" claim; a frozen-reservoir spectral-determinant
+     estimator; and a shadow frame-model `epiplexity.py` — all WRONG, all deleted. See `reference_learnable_novelty`.)
+     Epiplexity is `S_T := |P*|`, the program length of the best compute-bounded model, estimated by the AREA under a *learning*
+     model's PREQUENTIAL loss curve (Finzi 2026 eq 8): LOW for random AND simple, HIGH only for complex-and-slowly-learnable.
+     * **`reward.LearningProgress`** — fed by `Agent._model_loss`, which scores what the agent's OWN `WorldModel` predicted
+       (L6a operator ⊕ L5 `Transform` ⊕ occasions) against what happened, BEFORE it learns from it. NO second model: a shadow
+       predictor re-learns what this one knows and its errors are not the errors that make plans fail. Colour intact.
+       `total()` = the eq-8 area `Σloss − N·floor` — NOT a rectified running sum, which turns EMA jitter into reward and
+       re-admits the noisy TV (measured 5.09 on pure noise). Synthetic ordering: dark room 0.0 < noise 2.4 < instantly-mastered
+       19 < learning 141 < slow/complex 201. Real fixture: the agent's model loss falls 0.175 → 0.0 on LockPath.
+     * **Exploration = `Agent._unlearned_cells`** — go where the MODEL cannot yet predict, via the SAME `Transform.confident`
+       primitive the occasion gate uses (zero new machinery). Epiplexity read as a LEVEL, prospectively. Unlike visitation
+       (geometric bookkeeping outside the model, which keeps paying on an understood world) confidence GENERALISES — a
+       never-visited cell whose features are all modelled pays nothing — and dies at mastery. It is also how a hidden goal is
+       found: the goal is a perceptible FEATURE never interacted with, hence exactly what is not-yet-confident (verified on
+       LockPath L0: wall confident=True, goal feature confident=False).
+     * MEASURED: Push 8/8 at oracle-6 with its exploratory L0 FASTER than under `_visited` (mean ~18.3 → ~15.0 actions);
+       LockPath L0 solved cold at mean 15.9 (oracle 8) over 8 seeds, range 15–19. Fewer actions is directly RHAE `(human/agent)²`.
+     * OPEN: `progress()` (the DERIVATIVE face — the RATE of learning) is measured and exposed but drives no decision yet. The
+       natural consumer is TONIC DOPAMINE (explore/exploit) in the BG (`OpponentActor.act_value(rho=)`), which needs no mechanism
+       change — only measurement. Not wired until measured.
    The touch COLUMN (recognise-BY-touch, for OCCLUSION) is DEFERRED; the fully-observed push needs only the skin (agency) + the
    behavior model. In full observation contact is geometric; touch earns its place as the agency/reafference signal.
    **INVERSE-MODEL planner, step 1 (NAV) ✅ DONE (2026-07-21, `operator.utilities`, `BasalGanglia.select(salience=)`,
