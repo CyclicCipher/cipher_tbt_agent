@@ -59,6 +59,62 @@ class ValueCritic:
         return self._rho
 
 
+class LearningProgress:
+    """LEARNABLE NOVELTY — the EPISTEMIC reward, read off the agent's OWN forward model (`reference_learnable_novelty`;
+    Finzi 2026 arXiv:2601.03220 Def 8/eq 8, Zhang & Levin 2026). Epiplexity is the structure a COMPUTE-BOUNDED observer can
+    actually extract, estimated PREQUENTIALLY: score each observation with the model BEFORE learning it, and watch the loss
+    curve. "For random data the loss NEVER decreases; for simple data it drops FAST and stabilises" — both yield ~0; only
+    sustained, slow reduction is real learnable structure.
+
+    The bounded observer is THE AGENT'S OWN MODEL (the L6a operator ⊕ the L5 `Transform` ⊕ its occasions, as composed by
+    `hippocampus.WorldModel`) — never a second shadow model. `observe(loss)` takes that model's prequential error on the
+    transition just seen; `progress()` is the intrinsic reward:
+
+        progress  =  max(0,  slow_EMA(loss) − fast_EMA(loss))          # prediction-error REDUCTION, not raw error
+
+    NOISE → both EMAs sit high together, gap ~0 (the noisy-TV pathology, dissolved: raw error would be MAXIMAL there).
+    MASTERED → both sit low together, gap ~0 (a solved mechanic stops paying, so the drive moves on).
+    LEARNING → the fast EMA falls below the slow one, gap > 0 — the learnable frontier, and only there.
+    A DARK ROOM is the mastered case (loss ~0 immediately), so it pays nothing either.
+
+    This is `reference_animal_exploration`'s "intrinsic reward = prediction-error REDUCTION" and
+    `feedback_epistemic_value_is_prediction_error`, with the error taken from the model whose improvement actually matters
+    for planning. `total()` accumulates it — the epiplexity extracted so far."""
+
+    def __init__(self, fast: float = 0.15, slow: float = 0.01) -> None:
+        self.fast, self.slow = float(fast), float(slow)
+        self._fast_l = None                                   # fast EMA of the model's prequential loss (recent competence)
+        self._slow_l = None                                   # slow EMA — the SETTLED loss, i.e. the current floor estimate
+        self._sum, self._n = 0.0, 0                           # Σloss and N, for the eq-8 area
+
+    def observe(self, loss: float) -> float:
+        """One prequential score of the agent's own model (0 = predicted it exactly, 1 = wholly surprised). Returns the
+        resulting `progress()` — the intrinsic reward for this step."""
+        loss = float(loss)
+        self._fast_l = loss if self._fast_l is None else self._fast_l + self.fast * (loss - self._fast_l)
+        self._slow_l = loss if self._slow_l is None else self._slow_l + self.slow * (loss - self._slow_l)
+        self._sum += loss
+        self._n += 1
+        return self.progress()
+
+    def progress(self) -> float:
+        """The intrinsic REWARD: the rate at which the model is currently learning — how far recent competence has pulled
+        ahead of older competence. Rectified, because a model transiently getting WORSE is not somewhere to be drawn to."""
+        if self._fast_l is None:
+            return 0.0
+        return max(0.0, self._slow_l - self._fast_l)
+
+    def total(self) -> float:
+        """EPIPLEXITY (eq 8): the AREA under the prequential loss curve above its settled floor, `Σloss − N·floor`. The
+        fluctuations of an unlearnable stream CANCEL in that sum (they are signed), which is what makes noise score ~0 — a
+        rectified running total would instead accumulate its jitter and quietly re-admit the noisy TV. Measured on synthetic
+        loss curves: dark room 0.0 < noise 2.4 < instantly-mastered 19 < learning 141 < slow/complex 201, which is the
+        canonical ordering (`reference_learnable_novelty`: random and simple both ~0, only complex-and-learnable is high)."""
+        if self._n == 0:
+            return 0.0
+        return max(0.0, self._sum - self._n * self._slow_l)
+
+
 class GoalMemory:
     """The discovered GOAL: WHICH perceptual feature the reward is contingent on. It is the SAME delta rule as the critic above
     — Rescorla-Wagner cue competition (`reference_cue_competition_key_discovery`) applied to reward CONTINGENCY, feeding the

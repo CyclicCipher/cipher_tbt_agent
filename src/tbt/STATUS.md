@@ -245,36 +245,39 @@ ARCHITECTURE.md §3/§5.1):
      mechanism. Two facts per felt interaction: `("into", felt)` = the CORRECTION to the body's own free motion (solidity is
      that correction) and `("of", felt)` = the felt thing's own delta. The body is corrected and the felt thing absolute
      because only the body has an efference-copy baseline.
-   - **The BACKDROP is a CUE, not part of the situation**, present only when the far side is occupied. In the situation it
-     would be exact but would make every backdrop its own case to experience — enumeration — and the backdrop that decides a
-     level is UNOBSERVABLE by construction (the push that lands a block on its pad ENDS the level, so its outcome frame never
-     arrives). As a cue it contributes nothing until learned, so an unseen backdrop inherits the object's known behaviour.
-     VERIFIED: the block's east push, learned only against empty space, transfers to the pad it has never been pressed against.
-     Cost: a genuine exception splits the error with the base cue and settles over a few alternations (−0.75, −0.94, −0.98,
-     −1.0) instead of one shot. Better wants a hippocampal GATE over a context-free cortical association (occasion setting) —
-     NOT BUILT, and deliberately not faked with a rule.
+   - **OCCASION-SETTING GATE ✅ BUILT (2026-07-22)** — the dynamics is a press-following BASE plus OCCASION overrides,
+     combined by SELECT not SUM (`Agent._dynamics_delta`/`_learn_delta`/`_press`/`_world`/`_confident`/`_cue`/`_beyond`).
+     This REPLACED the two-frame CO-SUM (deleted) and folds in the learnable-novelty paper (`reference_learnable_novelty`):
+     the split criterion is epiplexity read as a LEVEL — `behavior.Transform.confident(cues, param)`, HTM's own
+     connected-segment test = "has reusable structure been committed for this cue yet". No new module, no invented threshold,
+     no few-states prior; the guard the gate needed IS the substrate's notion of a learned prediction.
+       * BASE — press-frame, one-shot, direction-general (bold press-following, `feedback_prefer_generalize_then_correct`).
+         Learned only from FREE contacts. From one east push it predicts all four directions exactly (the two-frame co-sum
+         hedged 0.5/0.5, which is what regressed Push — not-generalizing is the thing the thesis warns against).
+       * BACKDROP occasion — minted when the body is IMPEDED (did not advance by its full efference: wall/edge/mover behind),
+         keyed on what is behind, ALWAYS (even the first contact), so an obstructed push never poisons the base "it stays".
+         Once confident it SHIELDS the base ⇒ no dilution. The board EDGE is a real backdrop (`_beyond`, `WorldMap.occupant`
+         return "edge" off-board), so edge-obstruction can't masquerade as open space.
+       * WORLD occasion on the object — minted when a FREE contact refutes press-following (moves world-fixed however pushed:
+         a balloon). The `IMPEDED` fact cleanly separates "a wall stopped it" (backdrop) from "wrong frame" (world).
    - **`WorldModel` contains no physics**: free path integration + the corrections the cortex has learned.
-   - **TWO REFERENCE FRAMES ✅ BUILT (2026-07-22)** — L5 reads one contact as the SUM of two populations, one tuned in the
-     frame the PRESS defines and one tuned in the WORLD (`Transform.predict/learn(frame=)`, `Agent._press_frame`/`_canon`/
-     `_dynamics_delta`/`_learn_delta`). DIRECTION GENERALITY now comes from the FRAME, not from a prior: in press-aligned
-     coordinates all four directions are the SAME local operation, so a block pressed only east and south is predicted
-     correctly for west and north (measured exact). The deleted `ObjectBehavior` got the same answer by initialising its
-     change matrix to the identity — a claim about physics welded into the mechanism with no way to discover it was wrong.
-     The WORLD-aligned population is what retracts it: a thing that rises however it is pushed (buoyancy beating the push)
-     loads that population instead and is predicted to rise in directions it was never pressed. Nothing declares which frame
-     an object belongs to — the delta rule apportions from the object's own data, and the world population reads ~0 for
-     everything that does not need it. Also NO LONGER one-shot, correctly: from one east push you cannot tell "moves with a
-     push" from "always moves east", and the model splits its credit (0.5/0.5) until a second direction separates them.
-     Two wiring settings this forced, both per-layer and both documented in `behavior.py`: `predicted_dec=0` (the proximal
-     drive is a QUERY, so other columns being silent is not evidence — with punishment on, teaching the agent about a wall
-     silently ERASED what it knew about a block) and the error SHARED between frames rather than each taking the full
-     residual (which double-counted while both were naive: a first wall bump predicted −2·eff, "the wall threw me backwards").
-   - ⚠ **Push is still L0-only; both `test_push` cases are xfail(strict).** The cause is no longer a missing prior — it is CUE
-     DILUTION: the backdrop is a summing cue, so every obstructed push shares its error with the base cue, and on a level
-     where the block sits against a wall most of the time the base decays (0.81 → 0.52 over 400 actions) and the deltas go
-     fractional, making plans unreliable. The base association wants to be held context-free and GATED by the exception —
-     occasion setting, hippocampal, dissociable from simple conditioning — rather than diluted by it. **That gate is the next
-     thing to build, and it is the same open item the backdrop decision already pointed at.**
+   - **Push ✅ 8/8 at oracle-6** (was L0-only; both former `test_push` xfails now pass). VERIFIED offline: base one-shot in all
+     4 directions; no dilution over 20 obstructed pushes; unseen backdrop (the pad) inherits the base; a one-off backdrop
+     corrupts neither the base nor a different backdrop; a balloon rises in directions it was never pushed. The run is ~60×
+     faster (0.5s vs 32s) — the model no longer emits fractional deltas that blew up the rollout's visited-pruning (which is
+     now cell-granular in `WorldMap.key`).
+   - **Epiplexity as a DERIVATIVE (exploration to replace `_visited`) — NOT YET BUILT; a first attempt was WRONG and reverted.**
+     (Two earlier notes here were retracted: a "deterministic no-op" claim, AND a "frozen-reservoir estimator built + validated"
+     claim.) Having read the ORIGINAL source (`reference_learnable_novelty`; Finzi 2026 arXiv:2601.03220), epiplexity is
+     `S_T := |P*|`, the PROGRAM LENGTH of the best compute-bounded model, estimated CANONICALLY by the area under a *learning*
+     model's PREQUENTIAL loss curve above its floor — LOW for random AND simple, HIGH only for complex-and-slowly-learnable, and
+     a MULTI-STEP property. My first attempt (a frozen-reservoir spectral-determinant of `|W|` at one-step) was the wrong method
+     and miscalibrated (it scored a simple smooth map and chaos HIGH — both must be ~0), so it was deleted.
+     THE CANONICAL, MINIMAL-MACHINERY VERSION (to build): read epiplexity off the agent's OWN model's prequential prediction-error
+     REDUCTION — the burst→predicted drop the HTM columns already produce — NO separate reservoir. Per-step epistemic reward =
+     that reduction (→ 0 for noise, → 0 for mastered, > 0 only for sustained-learnable). Then TEST empirically whether it drives
+     the fixtures; do not prejudge (an earlier "epiplexity can't do coverage" conclusion was reasoned from the broken estimator).
+     The BG needs no mechanism change: epiplexity FEEDS it reward (`r = r_task + β·ΔS`).
    The touch COLUMN (recognise-BY-touch, for OCCLUSION) is DEFERRED; the fully-observed push needs only the skin (agency) + the
    behavior model. In full observation contact is geometric; touch earns its place as the agency/reafference signal.
    **INVERSE-MODEL planner, step 1 (NAV) ✅ DONE (2026-07-21, `operator.utilities`, `BasalGanglia.select(salience=)`,

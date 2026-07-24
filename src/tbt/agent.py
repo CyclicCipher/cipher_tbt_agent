@@ -28,7 +28,7 @@ from .behavior import Transform
 from .modality import touch, vision
 from .operator import add, norm, solve_rotation, sub
 from .perceive import SelfTracker, segment
-from .reward import GoalMemory, ValueCritic
+from .reward import GoalMemory, LearningProgress, ValueCritic
 from .thalamus import Thalamus
 from .touch import contact_toward
 
@@ -80,6 +80,8 @@ class Agent:
         self.hippocampus = Hippocampus(n_inputs=512, dims=dims, seed=seed)   # the composed hippocampus: map⊕replay⊕CA3⊕DG⊕CA1 (one handle)
         self.self_tracker = SelfTracker()   # discover the controllable ROOT (the 'self') from motion — not colour (bitter lesson)
         self.goal_mem = GoalMemory()        # discover WHICH feature the reward is contingent on (the goal), by the delta rule
+        self.progress = LearningProgress()  # LEARNABLE NOVELTY: the epistemic reward = how fast the agent's OWN forward model
+        #                                     is learning (prediction-error REDUCTION, prequential — `reward.py`). No shadow model.
         # SENSORY MODALITIES (modality.py): a sense = (transduce, feature, location, pose_source); the column + connections are
         # modality-INVARIANT, so this list is all it takes. VISION (segment) + TOUCH (the skin) ship by default; touch's skin is
         # the AGENCY signal (self-caused contact), so ContactDynamics learns object push behaviour only from motions the self
@@ -90,7 +92,6 @@ class Agent:
         self._param_const = self._param(tuple(0.0 for _ in range(dims)))         # the constant situation of a press-free frame
         self._static: dict = {}                 # {cell: feature} — what PERCEPTION sees at each non-self, non-mover cell
         self._rng = random.Random(seed)     # exploration randomness (bootstrap + tie-break), seeded
-        self._visited: set = set()          # cells the self has occupied (novelty target = the UNvisited frontier)
         self._movers: set = set()           # non-self object features observed to MOVE = pushable objects (routed to the scene)
         self._tried: set = set()            # (cell, action) already attempted in bootstrap — so an always-blocked action here
         #                                     is tried once, then the agent moves on (learns it wherever it first succeeds)
@@ -442,7 +443,7 @@ class Agent:
         """A LEVEL boundary — a fresh environment: drop the per-level exploration state (visited/blocked/last + the scene's
         object placements). The learned MODEL (operator, object dynamics, critic), the discovered GOAL (`goal_mem`), and which
         features are MOVERS all persist across levels — that persistence IS the cross-level transfer; only the map memory resets."""
-        self._visited, self._static, self._tried, self._last = set(), {}, set(), None
+        self._static, self._tried, self._last = {}, set(), None
         if self._scene is not None:
             self.clear_scene()
 
@@ -466,7 +467,8 @@ class Agent:
         if self._last is not None:                                    # LEARN from the previous transition
             moved = prev_cur is not None and getattr(action, "is_movement", False)
             if reward == 0:                                          # (frames across a level boundary don't correspond)
-                self._track_movers(prev_pos, pos, sc)               # a non-self object that MOVED is a pushable mover
+                self.progress.observe(self._model_loss(prev_cur, action, prev_pos, cur, pos))   # SCORE the model BEFORE it
+                self._track_movers(prev_pos, pos, sc)               # learns this transition — the PREQUENTIAL loss (epiplexity)
                 self._learn_dynamics(action, prev_objs, prev_skin, prev_pos, pos, prev_cur, cur, sc)  # learn the change from FELT contact
             if moved:
                 self._credit_goal(prev_objs, prev_pos, action, prev_cur, reward, sc)   # discover the goal by the delta rule
@@ -474,14 +476,56 @@ class Agent:
                 self.new_level()                                     # but the learned model + goal + movers PERSIST
             elif moved and cur is not None and cur != prev_cur:      # the self MOVED → the operator learns this action's Δ
                 self.learn_pose_move(action, self._as_pose(prev_cur), self._as_pose(cur))
-        if cur is not None:
-            self._visited.add(self._perceived_world(cur, pos).key())   # novelty is over the WHOLE world-state (agent + movers)
         self._route_movers(pos)                                      # place visible movers into the scene column (world_state/rollout)
         self._static = self._static_cells(objs, sc)                  # what is SEEN at every other cell — the model decides the rest
         skin = self._skin(fd.grid, objs, cur)                       # what the body FEELS now — the agency signal for next step
         action = self._act(objs, cur, pos, fd.available_actions)
         self._last = (objs, action, cur, fd.score, pos, skin)
         return action, None
+
+    def _unlearned_cells(self, pos) -> set:
+        """The cells holding something the MODEL cannot yet predict — LEARNABLE NOVELTY read as a LEVEL, prospectively
+        (`reference_learnable_novelty`; the same `Transform.confident` primitive the occasion gate uses, so no new machinery).
+
+        This is what replaced the hand-maintained `_visited` set, and the difference is the whole point. Visitation paid for any
+        cell the body had not occupied — geometric bookkeeping OUTSIDE the model, which keeps paying on a world the agent
+        understands perfectly and is blind to whether anything is left to learn. Confidence is a read of the MODEL'S OWN state:
+        it GENERALISES (a feature learned anywhere is confident everywhere, so a never-visited cell whose features are all
+        modelled pays NOTHING) and it goes to zero at mastery, so the drive dies exactly when there is nothing more to extract.
+
+        It also explains why this finds a hidden goal: a goal is a perceptible FEATURE the model has never interacted with, so
+        it is precisely what is not-yet-confident, and the epistemic pull points at it until it has been touched."""
+        unit = tuple(1.0 if i == 0 else 0.0 for i in range(self._dims))
+        seen = dict(self._static)                                   # statics (walls, pads, landmarks) …
+        for c in self._movers:                                      # … and any visible mover, whose dynamics also want learning
+            if c in pos:
+                seen[pos[c]] = c
+        return {cell for cell, feat in seen.items()
+                if not self._confident(self._cue("press", "into", feat, None), unit)}
+
+    def _model_loss(self, prev_cur, action, prev_pos, cur, pos) -> float:
+        """The agent's OWN forward model's PREQUENTIAL loss on the transition just observed: it predicted where the body and
+        each tracked mover would end up, reality arrived, and this is the fraction it got WRONG — scored BEFORE the model
+        learns from it, which is what makes the loss curve prequential (`reward.LearningProgress`).
+
+        The model is the one that already exists and already matters for planning — the L6a operator path-integrating the body
+        ⊕ the L5 `Transform`'s contact deltas ⊕ its occasions, composed by `hippocampus.WorldModel`. Nothing here is a second
+        model of the frames: a shadow predictor would have to re-learn what this one already knows, and its errors would not be
+        the errors that make plans fail. Features (colour) are intact — movers are keyed by feature and the statics the model
+        presses into are the perceived features themselves."""
+        if prev_cur is None or cur is None or not getattr(action, "is_movement", False):
+            return 0.0
+        world = WorldMap(self._as_pose(prev_cur),
+                         {c: self._as_pose(prev_pos[c]) for c in self._movers if c in prev_pos},
+                         bounds=self._extent, body=self._nav_col().operator, static=self._static)
+        nxt = self.world_model().step(world, action)
+        wrong = 0.0 if nxt.agent is not None and tuple(round(x) for x in nxt.agent[0]) == tuple(cur) else 1.0
+        n = 1
+        for c, pose in nxt.objects.items():                          # each tracked mover the model also had to predict
+            if c in pos:
+                n += 1
+                wrong += 0.0 if tuple(round(x) for x in pose[0]) == tuple(pos[c]) else 1.0
+        return wrong / n
 
     def _param(self, displacement):
         """The interaction's basal SITUATION as a context SDR -- the press's free displacement. Grid-coded, so nearby presses
@@ -739,13 +783,6 @@ class Agent:
                 if landmark is not None:
                     self.goal_mem.credit({(c, landmark)}, reward)
 
-    def _perceived_world(self, cur, pos):
-        """The PERCEIVED world-state as a `WorldMap` (self-location + visible movers at their cells) — its `key()` is the novelty
-        signature, so exploration is driven over the whole CONFIGURATION (agent + boxes), not just the self's cell. For a pure-nav
-        game (no movers) this collapses to the self's pose, so nav novelty is unchanged."""
-        objects = {c: self._as_pose(pos[c]) for c in self._movers if c in pos}
-        return WorldMap(self._as_pose(cur) if cur is not None else None, objects)
-
     def _self_pos(self, objs):
         """The self's cell this frame — the anchor of the object whose colour is the discovered controllable root; None until
         the root is discovered, or if it is ambiguous (more than one object of that colour)."""
@@ -758,8 +795,8 @@ class Agent:
     def _act(self, objs, cur, pos, available):
         """The one EFE planner (`reference_efe_and_epiplexity`, `feedback_epistemic_value_is_prediction_error`): PRAGMATIC toward
         the discovered goal (a NAV goal — self to a landmark; or a RELATIONAL goal — the rollout PUSHES a mover onto a landmark),
-        else EPISTEMIC toward the nearest UNVISITED cell (novelty). Bootstraps the operator by trying UNLEARNED actions first;
-        random when the self is unknown or nothing is reachable. `reference_goal_setting_priority_map`."""
+        else EPISTEMIC toward the nearest thing the MODEL HAS NOT YET LEARNED (`_unlearned_cells`). Bootstraps the operator by
+        trying UNLEARNED actions first; random when the self is unknown or nothing is reachable."""
         movement = [a for a in available if getattr(a, "is_movement", False)]
         if not movement:
             return self._rng.choice(available)
@@ -776,11 +813,15 @@ class Agent:
         if plan:
             self._last_plan = plan
             return plan[0]
-        visited = set(self._visited)                               # EPISTEMIC: reach an unvisited world CONFIGURATION (agent+movers)
-        novel = lambda w: 1.0 if w.key() not in visited else 0.0   #   — so exploration reconfigures the boxes, not just the self
-        plan = self.plan(novel, movement, horizon=32)
-        self._last_plan = plan or []
-        return plan[0] if plan else self._rng.choice(movement)
+        targets = self._unlearned_cells(pos)                       # EPISTEMIC: reach something the model cannot yet predict
+        if targets:
+            reach = lambda w: 1.0 if (w.agent is not None and tuple(round(c) for c in w.agent[0]) in targets) else 0.0
+            plan = self.plan(reach, movement, horizon=32)
+            self._last_plan = plan or []
+            if plan:
+                return plan[0]
+        self._last_plan = []
+        return self._rng.choice(movement)                          # nothing left to learn here → no epistemic pull
 
     def imagine(self, actions=None):
         """The agent's IMAGINED future: unroll a plan (default: the last committed one) through the LEARNED forward model from the
