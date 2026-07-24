@@ -54,8 +54,19 @@ class ValueCritic:
         self._rho += self.rho_lr * (float(r) - self._rho)
         return delta
 
+    def tonic(self, r: float) -> float:
+        """Fold a reward into the running average WITHOUT a TD value update — for an INTRINSIC reward (`LearningProgress`)
+        that must set the explore/exploit gain but has no state-value of its own to bootstrap from.
+
+        Tonic dopamine tracks the average PAYOFF RATE (`reference_basal_ganglia`; Niv/Daw/Dayan's opportunity-cost account),
+        and the payoff an agent actually lives on is BOTH the extrinsic reward and the structure it is managing to extract.
+        A rich rate says the current regime is paying — commit and exploit; a rate that has collapsed says this patch is spent
+        — go and seek, which is the marginal-value theorem and the same thing OpAL's `ρ` expresses as a Go/NoGo gain."""
+        self._rho += self.rho_lr * (float(r) - self._rho)
+        return self._rho
+
     def rho(self) -> float:
-        """The running-average reward — tonic dopamine, the OpAL explore/exploit + vigor gain (rich → exploit, lean → avoid)."""
+        """The running-average reward — tonic dopamine, the OpAL explore/exploit + vigor gain (rich → exploit, lean → seek)."""
         return self._rho
 
 

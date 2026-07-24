@@ -82,6 +82,8 @@ class Agent:
         self.goal_mem = GoalMemory()        # discover WHICH feature the reward is contingent on (the goal), by the delta rule
         self.progress = LearningProgress()  # LEARNABLE NOVELTY: the epistemic reward = how fast the agent's OWN forward model
         #                                     is learning (prediction-error REDUCTION, prequential — `reward.py`). No shadow model.
+        self._MODE_CTX = frozenset({("drive",)})   # the striatal context the BG arbitrates the two DRIVES in (goal vs seek)
+        self._last_mode = None                     # the drive the BG last selected — trained by the payoff RPE next step
         # SENSORY MODALITIES (modality.py): a sense = (transduce, feature, location, pose_source); the column + connections are
         # modality-INVARIANT, so this list is all it takes. VISION (segment) + TOUCH (the skin) ship by default; touch's skin is
         # the AGENCY signal (self-caused contact), so ContactDynamics learns object push behaviour only from motions the self
@@ -466,10 +468,14 @@ class Agent:
         cur = self._self_pos(objs)                                    # the self's cell this frame (via the discovered root)
         if self._last is not None:                                    # LEARN from the previous transition
             moved = prev_cur is not None and getattr(action, "is_movement", False)
+            payoff = float(reward)
             if reward == 0:                                          # (frames across a level boundary don't correspond)
-                self.progress.observe(self._model_loss(prev_cur, action, prev_pos, cur, pos))   # SCORE the model BEFORE it
-                self._track_movers(prev_pos, pos, sc)               # learns this transition — the PREQUENTIAL loss (epiplexity)
+                payoff += self.progress.observe(self._model_loss(prev_cur, action, prev_pos, cur, pos))   # SCORE the model
+                self._track_movers(prev_pos, pos, sc)               # BEFORE it learns — the PREQUENTIAL loss (epiplexity)
                 self._learn_dynamics(action, prev_objs, prev_skin, prev_pos, pos, prev_cur, cur, sc)  # learn the change from FELT contact
+            if self._last_mode is not None:                          # TONIC DOPAMINE = the average PAYOFF rate, extrinsic ⊕
+                self.bg.learn(self._MODE_CTX, self._last_mode, payoff - self.critic.rho())   # epistemic; the BG's drive choice
+            self.critic.tonic(payoff)                                # is trained by that payoff's RPE against the rate
             if moved:
                 self._credit_goal(prev_objs, prev_pos, action, prev_cur, reward, sc)   # discover the goal by the delta rule
             if reward > 0:                                           # a LEVEL boundary (the board just advanced): fresh map,
@@ -809,19 +815,40 @@ class Agent:
             self._tried.add((cur, a))
             return a
         self.set_pose(self._as_pose(cur)[0], eye(self._dims))       # anchor the nav pose to the perceived self
-        plan = self._goal_plan(objs, cur, pos, movement)           # PRAGMATIC: the discovered goal (nav or relational push)
-        if plan:
-            self._last_plan = plan
-            return plan[0]
-        targets = self._unlearned_cells(pos)                       # EPISTEMIC: reach something the model cannot yet predict
-        if targets:
-            reach = lambda w: 1.0 if (w.agent is not None and tuple(round(c) for c in w.agent[0]) in targets) else 0.0
-            plan = self.plan(reach, movement, horizon=32)
-            self._last_plan = plan or []
+        # ARBITRATE the two drives IN THE BASAL GANGLIA — the one organ allowed to arbitrate (ARCHITECTURE rule 4; this was a
+        # hard if/else ladder, i.e. arbitration outside the BG). Priority = salience ⊕ the learned Go/NoGo value, with TONIC
+        # DOPAMINE as the gain: what each drive OFFERS right now is its salience (the goal's learned reward contingency; the
+        # rate the model is currently learning), the BG learns which drive pays in THIS game, and ρ shifts the balance —
+        # rich rate ⇒ commit and exploit, collapsed rate ⇒ the patch is spent, go and seek.
+        # The cortex proposes what each drive OFFERS (the goal's learned reward contingency; the rate the model is learning);
+        # the BG selects on that salience ⊕ its own learned Go/NoGo value, with tonic DA as the gain.
+        # KNOWN LIMIT (measured, `STATUS.md`): the goal's contingency is a constant that cannot FALL, so a pragmatic drive that
+        # has stopped paying still wins — which is why LockPath stalls on L1. Affordance-only salience fixes that (2 levels) but
+        # costs Push its oracle (6 → 10), because the BG's drive value is dominated by whichever drive was active when the
+        # first reward landed — always exploration. The fix both need is a per-drive payoff RATE (marginal value theorem).
+        g = self.goal_mem.goal()
+        targets = self._unlearned_cells(pos)
+        salience = [self.goal_mem.w.get(g, 0.0) if g is not None else float("-inf"),
+                    self.progress.progress() if targets else float("-inf")]
+        if max(salience) > float("-inf"):
+            mode = self.bg.select(self._MODE_CTX, 2, rho=self.critic.rho(), salience=salience)
+            self._last_mode = mode
+            plan = self._goal_plan(objs, cur, pos, movement) if mode == 0 else self._seek_plan(targets, movement)
+            if not plan:                                           # the selected drive had nothing reachable → try the other
+                plan = self._seek_plan(targets, movement) if mode == 0 else self._goal_plan(objs, cur, pos, movement)
             if plan:
+                self._last_plan = plan
                 return plan[0]
         self._last_plan = []
-        return self._rng.choice(movement)                          # nothing left to learn here → no epistemic pull
+        return self._rng.choice(movement)                          # nothing to pursue and nothing left to learn
+
+    def _seek_plan(self, targets, movement):
+        """The EPISTEMIC drive's plan: reach something the model cannot yet predict (None if there is nothing, or nothing
+        reachable). The pragmatic drive's counterpart is `_goal_plan`; the BG chooses between them."""
+        if not targets:
+            return None
+        reach = lambda w: 1.0 if (w.agent is not None and tuple(round(c) for c in w.agent[0]) in targets) else 0.0
+        return self.plan(reach, movement, horizon=32)
 
     def imagine(self, actions=None):
         """The agent's IMAGINED future: unroll a plan (default: the last committed one) through the LEARNED forward model from the
