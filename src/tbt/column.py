@@ -249,7 +249,7 @@ from typing import Optional
 from tbt.behavior import Transform
 from tbt.encoders import SDR, CategoryEncoder, GridEncoder, SpatialPooler
 from tbt.htm import HTMLayer
-from tbt.operator import MotionOperator, add, compose, dist, eye, gram_schmidt, invert, rotate, solve_rotation, sub
+from tbt.operator import MotionOperator, add, compose, dist, eye, gram_schmidt, invert, norm, rotate, solve_rotation, sub
 from tbt.pooler import ColumnPooler
 
 _TOL = 1e-6          # geometric slack: distances are exact floats here, so this only absorbs round-off
@@ -388,6 +388,13 @@ class Column:
         # semantics to the dict of (action, cue) -> vector this replaces, minus the duplicated learning rule.
         self._cues = Transform(self.location.dims if location is not None else 2, lr=0.5)
         self._act_enc = CategoryEncoder(w=24)                   # the action as the cue transform's basal situation
+        # L5 CONTACT DYNAMICS — the change model for what pressing INTO a thing does. This is L5's OWN work (a cortical layer
+        # read out as a metric quantity) and it belongs HERE, in the column, driven by L6a's efference — the L6a<->L5 loop.
+        # It lived on the AGENT until 2026-07-23, which had the agent doing the cortex's job (STATUS.md, the inversion).
+        self._l5_dims = self.location.dims if location is not None else 2
+        self.l5 = Transform(self._l5_dims)                      # the L5 transform (press-frame base + occasion overrides)
+        self._l5_enc = GridEncoder(scales=(7, 11, 13, 17), dims=self._l5_dims, mw=3)   # the press's SITUATION code
+        self._l5_const = {("p", b) for b in self._l5_enc.encode(tuple(0.0 for _ in range(self._l5_dims))).active}
         # L2/3's POOLING engine (ARCHITECTURE §8): the stable object-IDENTITY that pools the L4 feature-at-location stream
         # (`pooler.ColumnPooler`) — a decoupled stable output + persistence, which the L2/3 HTMLayer (associate) cannot do.
         self.pooler = ColumnPooler(seed=seed + 4) if location is not None else None
@@ -799,6 +806,99 @@ class Column:
             return support, False, True
         finally:
             self._pose = real
+
+    # -- L5 CONTACT DYNAMICS: what pressing INTO a thing does -- a press-frame BASE + OCCASION overrides ---------------
+    def _l5_param(self, displacement):
+        """The interaction's basal SITUATION as a context SDR - the press's free displacement, grid-coded so nearby presses
+        share bits and the layer's conjunction over them is metric rather than a lookup table."""
+        return {("p", b) for b in self._l5_enc.encode(displacement).active}
+
+    @staticmethod
+    def _l5_cue(frame, tag, felt, beyond):
+        """The single proximal cue naming this contact in one reference frame. `beyond` is absent for the context-free BASE
+        and present for an OCCASION-specific exception, and the two are DIFFERENT cues - so they drive different columns and
+        are combined by SELECT (override), never by SUM. That is the fix for dilution: an obstructed press no longer shares
+        its error with the free one, because it teaches a different cue entirely."""
+        return (frame, tag, felt) if beyond is None else (frame, tag, felt, "on", beyond)
+
+    def _l5_frame(self, press):
+        """The rotation carrying the canonical press axis onto THIS press - SOLVED from the displacement, not constructed
+        (`solve_rotation`, the same closed form recognition uses)."""
+        e1 = tuple(1.0 if i == 0 else 0.0 for i in range(self._l5_dims))
+        return solve_rotation([press], [e1]) or eye(self._l5_dims)
+
+    def _l5_canon(self, press):
+        """The press expressed in its own frame: all of it along the canonical axis, so every direction has the SAME canonical
+        press - which is exactly what makes ONE observation cover all of them."""
+        return tuple(norm(press) if i == 0 else 0.0 for i in range(self._l5_dims))
+
+    def _l5_press(self, tag, felt, beyond, press):
+        """The PRESS-ALIGNED prediction: tuned in the frame the press defines, so all directions are the same local operation
+        (`reference_lid_locally_in_distribution`). Direction generality comes from the FRAME, never from a prior - the deleted
+        `ObjectBehavior` asserted it by initialising a change matrix to the identity, a claim about physics welded in."""
+        R, cp = self._l5_frame(press), self._l5_param(self._l5_canon(press))
+        return self.l5.predict({self._l5_cue("press", tag, felt, beyond)}, cp, frame=R)
+
+    def _l5_learn_press(self, tag, felt, beyond, press, target) -> None:
+        R, cp = self._l5_frame(press), self._l5_param(self._l5_canon(press))
+        self.l5.learn({self._l5_cue("press", tag, felt, beyond)}, cp, target, frame=R)
+
+    def _l5_world(self, tag, felt):
+        """The WORLD-ALIGNED prediction: tuned in the world frame and independent of the press, so it can hold behaviour
+        anchored to the world rather than to whoever pushed (a balloon rising however it is shoved)."""
+        return self.l5.predict({self._l5_cue("world", tag, felt, None)}, self._l5_const)
+
+    def _l5_learn_world(self, tag, felt, target) -> None:
+        self.l5.learn({self._l5_cue("world", tag, felt, None)}, self._l5_const, target)
+
+    def change_known(self, tag, felt, beyond, press) -> bool:
+        """Is the press-frame change for this contact LEARNED - does a CONNECTED segment already predict it? Epiplexity read
+        as a LEVEL (is reusable structure committed here yet). Keyed on the canonical press, so what is learned in one
+        direction is known in all. The agent's epistemic drive uses this to find what it has NOT yet modelled."""
+        return self.l5.confident({self._l5_cue("press", tag, felt, beyond)}, self._l5_param(self._l5_canon(press)))
+
+    def predict_change(self, tag, felt, beyond, press):
+        """L5's predicted change for one contact - a press-following BASE plus OCCASION overrides minted on refutation
+        (`reference_recognition_under_occlusion`; occasion setting). The default is press-following, bold and direction-general
+        from one observation (`feedback_prefer_generalize_then_correct`). Two confident occasions can override it, each a
+        separate cue so the base is never diluted:
+          * a WORLD occasion on the OBJECT - the thing moves world-fixed however pushed (the balloon); the press frame is
+            simply the wrong frame for it.
+          * a BACKDROP occasion - keyed on what is behind (a wall => blocked). It overrides for that backdrop ONLY, so an
+            UNSEEN backdrop (the pad a winning push lands on, unobservable because that push ends the level) falls through to
+            the base and inherits the object's general behaviour."""
+        cp = self._l5_param(self._l5_canon(press))
+        if self.l5.confident({self._l5_cue("world", tag, felt, None)}, cp):
+            return self._l5_world(tag, felt)
+        if beyond is not None and self.l5.confident({self._l5_cue("press", tag, felt, beyond)}, cp):
+            return self._l5_press(tag, felt, beyond, press)
+        return self._l5_press(tag, felt, None, press)
+
+    def learn_change(self, tag, felt, beyond, press, observed, impeded: bool = False) -> None:
+        """Teach L5 from one felt interaction. The routing turns on ONE physical fact - was the body IMPEDED (it did not
+        advance by its full press)? - which cleanly separates the two ways press-following can be wrong:
+          * IMPEDED - something STOPPED the contact. That is a BACKDROP occasion, keyed on what is behind, ALWAYS (even on the
+            first contact), so an obstructed press never teaches the base "it stays" - the bootstrap-poisoning fix.
+          * FREE but REFUTED - the body advanced yet the thing did not move the press-following way. Nothing stopped it, so the
+            press frame is the wrong frame: it is WORLD-anchored, and a world occasion is minted.
+        A confident occasion OWNS its contact and SHIELDS the base, so repeated obstruction refines the occasion and never
+        dilutes the free-press base."""
+        cp = self._l5_param(self._l5_canon(press))
+        if self.l5.confident({self._l5_cue("world", tag, felt, None)}, cp):
+            self._l5_learn_world(tag, felt, observed)
+            return
+        if beyond is not None and self.l5.confident({self._l5_cue("press", tag, felt, beyond)}, cp):
+            self._l5_learn_press(tag, felt, beyond, press, observed)
+            return
+        if impeded and beyond is not None:                          # STOPPED by something -> a backdrop occasion, always
+            self._l5_learn_press(tag, felt, beyond, press, observed)
+            return
+        base = self._l5_press(tag, felt, None, press)
+        if (not impeded and self.l5.confident({self._l5_cue("press", tag, felt, None)}, cp)
+                and norm(sub(observed, base)) > 1e-9):              # free yet refuted -> the thing is WORLD-anchored
+            self._l5_learn_world(tag, felt, observed)
+            return
+        self._l5_learn_press(tag, felt, None, press, observed)      # a free contact -> the base learns it
 
     # ── L5 OBJECT DYNAMICS (ARCHITECTURE §9): what an ACTION does to a THING, STATE-CONDITIONED ─────────────────────
     def learn_object_move(self, action, before_pose, after_pose, state=frozenset()) -> None:
