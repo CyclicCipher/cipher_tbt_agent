@@ -285,9 +285,20 @@ ARCHITECTURE.md §3/§5.1):
        LockPath L0: wall confident=True, goal feature confident=False).
      * MEASURED: Push 8/8 at oracle-6 with its exploratory L0 FASTER than under `_visited` (mean ~18.3 → ~15.0 actions);
        LockPath L0 solved cold at mean 15.9 (oracle 8) over 8 seeds, range 15–19. Fewer actions is directly RHAE `(human/agent)²`.
-     * OPEN: `progress()` (the DERIVATIVE face — the RATE of learning) is measured and exposed but drives no decision yet. The
-       natural consumer is TONIC DOPAMINE (explore/exploit) in the BG (`OpponentActor.act_value(rho=)`), which needs no mechanism
-       change — only measurement. Not wired until measured.
+     * **TONIC DOPAMINE ✅ WIRED (2026-07-22)** — `progress()` feeds `ValueCritic.tonic()`, so ρ tracks the average PAYOFF rate
+       (extrinsic ⊕ epistemic), and the pragmatic-vs-epistemic choice MOVED INTO THE BG (`_act` proposes both drives; the BG
+       selects on salience ⊕ learned Go/NoGo with ρ as the gain; the choice is trained by its payoff RPE). It had been an
+       if/else ladder — arbitration outside the BG, violating ARCHITECTURE rule 4. Results preserved exactly (LockPath L0 15.9,
+       Push 8/8 at oracle-6). HONEST: ρ has ~no leverage yet — its differential effect is ρ·[(Go+NoGo)_a − (Go+NoGo)_b] and both
+       drives sit at ≈2.0 (1.998 vs 2.000), so it is ~0.002·ρ against a salience gap of ~1. Live but inert.
+     * ⚠ **KNOWN, MEASURED: LockPath stalls after L0 (1 of 4 levels)** — pre-existing, verified against the prior commit. L1 is
+       key+door: the goal is visible but a door blocks it, and `_goal_plan`'s cheap `_nav_inverse` read-out always returns a step
+       toward it, so the pragmatic drive looks permanently available and walks into the door. Affordance-only salience fixes it
+       (2 levels, L1 in 12) but costs Push its oracle (6 → 10), because the BG's drive value is dominated by whichever drive was
+       active when the first reward landed — always exploration. **The fix both need: a per-drive payoff RATE (marginal value
+       theorem) instead of a contingency that cannot fall.** Not shipped — a design step, not a knob.
+     * NEXT after that: L2 is the block+pad Sokoban, needing a RELATIONAL goal discovered while a bare-feature goal is already
+       believed.
    The touch COLUMN (recognise-BY-touch, for OCCLUSION) is DEFERRED; the fully-observed push needs only the skin (agency) + the
    behavior model. In full observation contact is geometric; touch earns its place as the agency/reafference signal.
    **INVERSE-MODEL planner, step 1 (NAV) ✅ DONE (2026-07-21, `operator.utilities`, `BasalGanglia.select(salience=)`,
