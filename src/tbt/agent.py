@@ -28,6 +28,7 @@ from .hippocampus import Hippocampus, WorldMap, WorldModel
 from .modality import touch, vision
 from .operator import add, norm, sub
 from .perceive import SelfTracker, segment
+from .region import Hierarchy, Region
 from .reward import GoalMemory, LearningProgress, ValueCritic
 from .thalamus import Thalamus
 from .touch import contact_toward
@@ -108,6 +109,18 @@ class Agent:
         self._scene = None      # the COMPOSITIONAL column (lazy) — the SCENE one level up, fed by the sensory column
         self._feat_enc = CategoryEncoder(range(16), w=8, capacity=16)   # the feature (ARC 16-colour palette) transducer —
         #                                                                 shared by every spatial column (the peripheral)
+        # The COMPOSITIONAL region has its own feature space: its features are object IDENTITIES, not colours. A region's
+        # feature space is part of its wiring, so a higher region does not inherit the periphery's alphabet.
+        self._ident_enc = CategoryEncoder(w=8, capacity=256)
+        # The declared HETERARCHY (`region.py`): which column is fed by what. Peripheral regions are fed by a modality's
+        # transducer; higher ones by another region's output — which is the only structural difference between them.
+        # EVERY region here is still declared `proximal="vision"`, so `hierarchy.edges()` is EMPTY and says so: the
+        # compositional column's L4 is genuinely driven (objects-at-poses, learned and predicted), but what drives it is a
+        # TRANSDUCED colour, not a lower region's settled output. Making it cortico-cortical needs the sensory region to
+        # HAVE an output to send — an L2/3 identity — and it has no pooler, because it was built without a frame.
+        self.hierarchy = Hierarchy()
+        self.hierarchy.add(Region("sensory", self.sensory, proximal="vision", frame=None, target="task"))
+        self.hierarchy.add(Region("task", self.task, proximal="vision", frame=None, target="striatum"))
         self._n_cols = int(n_cols)
         self._seed = int(seed)
         self._dims = int(dims)    # the SPACE the body moves in — 2 for an ARC frame, 3 for a 3-D environment. A property of
@@ -182,6 +195,7 @@ class Agent:
             # order=2: L4's OUTPUT (active cells) must encode feature-AT-location (a location-specific cell per feature
             # column) so L2/3 pools features-at-locations, not bare features — order=1 would collapse the location.
             self._nav = Column(sensory_n=1, n_cols=self._n_cols, order=2, seed=self._seed + 3, location=grid)
+            self.hierarchy.add(Region("nav", self._nav, proximal="vision", frame="body", target="scene"))
         return self._nav
 
     def learn_move(self, action, before, after) -> None:
@@ -300,13 +314,15 @@ class Agent:
         if self._scene is None:
             grid = GridEncoder(scales=(7, 11, 13, 17), dims=self._dims, mw=1, bounds=[(0, 63)] * self._dims)
             self._scene = Column(sensory_n=1, n_cols=self._n_cols, order=2, seed=self._seed + 5, location=grid)
+            self.hierarchy.add(Region("scene", self._scene, proximal="vision", frame="nav", target="striatum"))
         return self._scene
 
     def place_object(self, object_id, pose) -> None:
-        """Route a recognised `(object-id, pose)` from the sensory column UP to the compositional column via the thalamus —
-        the first real cross-column binding (content ⊗ location)."""
+        """Route a recognised `(object-id, pose)` from the sensory region UP to the compositional region via the thalamus —
+        the first real HIERARCHY EDGE. The object's identity becomes the higher region's L4 FEATURE and its pose the L6a
+        LOCATION, so the compositional column learns objects-at-poses the way the sensory one learns colours-at-cells."""
         content, location = self.thalamus.project(object_id, pose)
-        self._scene_col().place_object(content, location)
+        self._scene_col().place_object(content, location, identity=self._ident_enc.encode(object_id))
 
     def clear_scene(self) -> None:
         """Start a fresh scene configuration in the compositional column."""

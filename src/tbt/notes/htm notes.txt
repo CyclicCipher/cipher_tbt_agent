@@ -244,3 +244,20 @@ Reservoir computing:
 - Enough sine and cosine waves, mixed in the right proportions, can be used to build any curve you want. In mathematics, sine and cosine form a **basis**. They are important building blocks. They are not the only basis. Another example is the Taylor basis x^n. 
 - Our reservoir acts as a random basis, or a giant library of random temporal shapes. A linear combination of these shapes can form a precise temporal pattern such as a song.
 - The key insights of reservoir computing: A brain, or a recurrent neural network, is a dynamical system. We cannot easily micromanage every weight to learn precisely the pattern we need. So we leave the random weights untouched, input a simple driver signal z(t), and train a simple linear readout to get the pattern y(t) we want. It works because a large enough collection of random temporal patterns forms a rich basis from which virtually any temporal signal or pattern can be reconstructed. Therefore, biological neural networks do not have to be precisely engineered to produce complex behavior. The messy, entangled connections and flawed behavior is a feature and not a bug. 
+=== SP LOCAL INHIBITION + RECEPTIVE FIELDS (Numenta), looked up 2026-07-23 ===
+Our `encoders.SpatialPooler` uses GLOBAL inhibition ("one neighbourhood"), which is why a layered SENSORY hierarchy is not
+buildable yet: local receptive fields are what make a visual hierarchy, since the RF-size gradient up the stream comes from
+convergence. With global inhibition every column sees the whole input, so stacking gives depth without what depth is for.
+The Numenta recipe (nupic-legacy spatial_pooler.py; Cui/Ahmad/Hawkins 2017 "The HTM Spatial Pooler"):
+  * COLUMNS ARE ARRANGED TOPOLOGICALLY, in the same dimensional space as the input, so each column has a natural CENTRE in
+    input space (its position maps onto an input coordinate).
+  * POTENTIAL POOL, per column: drawn from a hypercube of radius `potentialRadius` about that centre — the pool is
+    `((2*potentialRadius + 1)^inputDimensions) * potentialPct` input bits. This is the RECEPTIVE FIELD, and neighbouring
+    columns' fields OVERLAP.
+  * INHIBITION RADIUS is not a free parameter: it is computed from the AVERAGE SIZE OF THE CONNECTED potential pools across
+    columns, so it tracks how far a column's influence actually reaches and adapts as permanences change.
+  * LOCAL INHIBITION: k-winners-take-all within that radius rather than globally, so a fixed sparsity holds LOCALLY —
+    every part of the input space gets representation instead of a few globally-dominant columns.
+  * `wrapAround` decides whether the input space is treated as toroidal at the edges.
+Order is unchanged: boost -> inhibit -> learn. Topology only pays on large inputs (it is the analogue of convolution) and is
+NOT needed for a compositional region, whose inputs are already sparse identities rather than a retina.

@@ -126,3 +126,43 @@ if __name__ == "__main__":
     sh = _fresh()
     _learn(sh, SHARE_P, SHARE_Q)
     print(f"P/Q share 2 of 3 feature-at-locations → {len(sh._nav_col().pooler.objects)} identities (must be 2, was 1)")
+
+
+# ── the COMPOSITIONAL region: feature-at-location one level up ─────────────────────────────────────────────────────────
+# `Column.place_object(..., identity=)` drives the higher region's L4 with an OBJECT's identity at its POSE — the same
+# L4↔L6a loop a sensory column runs on colours-at-cells. Until 2026-07-23 this method only wrote a dict entry, so the
+# compositional column had no cortical input at all and the "hierarchy" was sibling columns calling each other.
+
+def test_the_compositional_region_learns_objects_at_poses():
+    """Objects are the higher region's FEATURES and their poses its LOCATIONS. After seeing two objects at two poses the
+    column predicts which object belongs where — and does NOT predict one at the other's pose, so the code is genuinely
+    location-specific rather than a bag of identities."""
+    from tbt.agent import Agent
+    from tbt.operator import eye
+    a = Agent(feat_n=8, n_content=2, n_state=2, n_cols=64, seed=0)
+    pose = lambda c: (tuple(float(x) for x in c), eye(2))
+    for _ in range(4):
+        a.place_object(6, pose((3, 2)))
+        a.place_object(7, pose((6, 4)))
+    col = a._scene_col()
+
+    def predicts(cell, oid):
+        col.set_pose(tuple(float(x) for x in cell), eye(2))
+        return len(set(col.predict_feature()) & a._ident_enc.encode(oid).active)
+
+    assert predicts((3, 2), 6) == 8, "the object learned at this pose must be predicted there"
+    assert predicts((6, 4), 7) == 8, "and likewise the other"
+    assert predicts((6, 4), 6) == 0, "but not an object that was never at this pose"
+
+
+def test_the_heterarchy_is_declared_and_reports_no_cortical_edge_yet():
+    """HONEST STATE, asserted so it cannot quietly drift. `region.py` declares each column's wiring, and `edges()` counts
+    only edges where a region's proximal drive is ANOTHER REGION's output. It is empty: the compositional column is driven,
+    but by a transduced colour, not by a lower region's settled identity. Closing that needs the sensory region to have an
+    L2/3 output to send — it has no pooler, having been built without a frame."""
+    from tbt.agent import Agent
+    a = Agent(feat_n=8, n_content=2, n_state=2, n_cols=64, seed=0)
+    a._scene_col()
+    assert {"sensory", "task", "scene"} <= set(a.hierarchy.regions), "the regions must be declared, not implicit"
+    assert a.hierarchy.edges() == [], "no region is yet fed by another region's OUTPUT"
+    assert a.sensory.pooler is None, "and the sensory region has no L2/3 output to send"

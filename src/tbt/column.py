@@ -947,11 +947,24 @@ class Column:
         return self._cues.predict(set(state), self._act_sdr(action))
 
     # ── COMPOSITIONAL column (ARCHITECTURE §9): the SCENE, object STATES, and STATE-CONDITIONED behaviour ──────────────
-    def place_object(self, object_id, pose) -> None:
-        """Put a recognised object into this column's SCENE at a pose — the compositional column's features-at-locations are
-        whole objects (fed from the sensory column via the thalamus)."""
+    def place_object(self, object_id, pose, identity=None) -> None:
+        """Put a recognised object into this column's SCENE at a pose, and DRIVE L4 with it.
+
+        This is the compositional region's feature-at-location: the FEATURE is a whole object's identity, arriving from the
+        region below, and the LOCATION is its pose in this column's frame. Exactly the L4↔L6a loop a sensory column runs on
+        colours-at-cells, one level up on objects-at-poses — which is the point of the cortical algorithm being the same at
+        every level (`reference_tbt_layers_4_23`: "object id as a FEATURE → compositional objects").
+
+        `identity` is that incoming code. Without it this only records the pose, which is all this method did until
+        2026-07-23 — a dict write whose docstring claimed a cross-column projection that was not happening, so the
+        compositional column had no cortical input at all and the "hierarchy" was Python calls between sibling columns."""
         self._require_location()
         self._scene_objects[object_id] = pose
+        if identity is not None:
+            saved = self._pose
+            self.set_pose(pose[0], pose[1])
+            self.sense_at(identity, learn=True)     # L4 of the HIGHER region, driven by the LOWER region's output
+            self._pose = saved
 
     def clear_scene(self) -> None:
         """Start a fresh scene configuration."""
