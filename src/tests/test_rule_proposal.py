@@ -58,28 +58,26 @@ def test_a_game_that_never_pays_still_yields_a_moment():
     assert not shot["agent"]._unlearned_cells(_context(shot)[2]), "and there was nothing left to learn"
 
 
-def test_the_proposer_is_silent_exactly_when_it_is_needed():
-    """THE FINDING THE FIXTURE WAS BUILT FOR. At LockPath's refutation the agent has not yet seen the block move, so
-    `_movers` is empty — and the proposer iterates movers. It produces NOTHING at the one instant a hypothesis is called for,
-    and could only ever speak after exploration had already discovered the mover, which is after the damage is done."""
+def test_nothing_the_agent_knows_yet_identifies_the_missing_conjunct():
+    """WHY THE DELETED PROPOSER WAS SILENT, kept because the constraint outlives it. At LockPath's refutation the agent has
+    not yet seen the block move — `_movers` is empty — so any generator keyed on discovered movers has nothing to say at the
+    one instant a hypothesis is called for, and could only speak after exploration had already found the mover, which is
+    after the damage. Whatever proposes rules must be able to hypothesise about a thing it has never seen move."""
     shot = capture(_agent, LockPath, budget=400)
     a, objs, pos, sc = _context(shot)
     assert not a._movers, "at refutation the block has not been seen to move"
-    assert a._propose_rule(objs, pos, sc) == [], "so the proposer, keyed on movers, has nothing to say"
+    assert 6 in {o.color for o in objs}, "though the block is plainly PERCEIVED — it is only its dynamics that are unknown"
 
 
-def test_the_pair_grammar_cannot_state_a_tour():
-    """THE SCHEMA, showing through — and the reason a proposer that scores perfectly on LockPath has not generalised.
-    CollectAll's win is `not items`: EVERY item visited, each consumed on contact. That is a property of a SET, with no
-    target for anything to be placed on, whereas every proposal this proposer can emit is an `(a, b)` co-location. No
-    ranking rescues a grammar that cannot express the rule."""
+def test_the_win_here_is_not_an_arrangement_of_two_objects():
+    """WHY A PAIR GRAMMAR WAS THE WRONG SHAPE, and the standard any replacement must meet. CollectAll's win is `not items`:
+    EVERY item visited, each consumed on contact — a property of a SET, with no target for anything to be placed on. A
+    proposer emitting `(a, b)` co-locations cannot state it however it ranks them, which is what a hand-chosen rule grammar
+    buys you. The same objection scales: no enumeration of grid relations reaches "this testimony contradicts that report"."""
     shot = capture(_agent, CollectAll, budget=400)
-    a, objs, pos, sc = _context(shot)
     game = shot["game"]
     assert hasattr(game, "items") and isinstance(game.items, (set, frozenset)), (
         "the win is a property of a SET of cells — `not items` — not an arrangement of two objects")
-    assert all(isinstance(c, tuple) and len(c) == 2 for c in a._propose_rule(objs, pos, sc)), (
-        "yet every proposal is ONE relation between TWO features, which cannot say 'all of them'")
 
 
 def test_toggle_needs_no_hypothesis_because_the_agent_simply_wins_it():

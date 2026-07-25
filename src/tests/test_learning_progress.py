@@ -127,33 +127,6 @@ def test_a_conjunction_is_learned_and_the_misleading_element_is_demoted():
     assert gm.w[3] < gm.w[frozenset({3, pair})], "the misleading element must rank below the configural cue"
 
 
-# ── the RULE PROPOSER (`Agent._propose_rule`) ───────────────────────────────────────────────────────────────────────────
-# A candidate win condition is goal-SHAPED — the same `(mover, landmark)` key a learned goal uses — so proposing one costs no
-# new representation and it is pursued by the same planner. What the proposer supplies is candidates BEFORE any evidence.
-
-def test_the_proposer_offers_achievable_untrue_arrangements():
-    """It enumerates relations between things PERCEPTION distinguishes — what moves and what does not — never game concepts.
-    A candidate must be movable by the agent's own dynamics (a discovered mover) and must not ALREADY hold, since an
-    arrangement that is already true explains nothing about a reward that has not arrived."""
-    from tbt.agent import Agent
-    a = Agent(feat_n=8, n_content=2, n_state=2, n_cols=64, seed=0)
-    a._movers.add(6)
-    pos = {2: (1, 1), 6: (3, 2), 7: (6, 4), 1: (0, 0)}        # self, mover, pad, wall
-    cands = a._propose_rule([], pos, 2)
-    assert (6, 7) in cands, f"the mover-onto-landmark arrangement must be proposed, got {cands}"
-    assert all(m == 6 for m, _ in cands), "only a thing the agent can move is worth proposing"
-    assert all(f != 2 for _, f in cands), "the self is not a landmark to arrange things on"
-
-
-def test_an_arrangement_that_already_holds_is_not_proposed():
-    """Nothing to test about a configuration the world is already in."""
-    from tbt.agent import Agent
-    a = Agent(feat_n=8, n_content=2, n_state=2, n_cols=64, seed=0)
-    a._movers.add(6)
-    pos = {2: (1, 1), 6: (6, 4), 7: (6, 4)}                    # the mover is ALREADY on the landmark
-    assert (6, 7) not in a._propose_rule([], pos, 2)
-
-
 # ── the REVERSIBILITY filter (`Agent._reversible`) ──────────────────────────────────────────────────────────────────────
 # Imagine the action, then ask the same forward model for a route home. It gates the EPISTEMIC drive only: in a pushing world
 # the WINNING move is itself irreversible, so applying this to goal pursuit would forbid winning.

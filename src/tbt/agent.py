@@ -997,19 +997,16 @@ class Agent:
         # costs Push its oracle (6 → 10), because the BG's drive value is dominated by whichever drive was active when the
         # first reward landed — always exploration. The fix both need is a per-drive payoff RATE (marginal value theorem).
         g = self.goal_mem.goal()
-        conds, proposed = self.goal_mem.goals(), False
-        if not conds:                                              # nothing learned yet — HOLD a proposed rule and TEST it.
-            for cand in self._propose_rule(objs, pos, self.self_color()):   # the plan IS the test: pursue it and see whether
-                if self._goal_plan(objs, cur, pos, movement, {cand}):        # reward follows, which `_credit_goal` then turns
-                    conds, g, proposed = {cand}, cand, True                  # into learned contingency (or does not)
-                    break
+        conds = self.goal_mem.goals()
         targets = self._unlearned_cells(pos)
-        # A PROPOSAL cannot be valued by its contingency: it has none, that is what makes it a hypothesis, and reading its
-        # weight (0.0) means exploration always outbids it and the rule is never tested. Value it OPTIMISTICALLY instead —
-        # at what a win is worth — which is optimism-under-uncertainty and is self-correcting: if the test fails, the delta
-        # rule drives the candidate down and the next one is proposed.
-        pragmatic = 1.0 if proposed else (self.goal_mem.w.get(g, 0.0) if g is not None else float("-inf"))
-        salience = [pragmatic, self.progress.progress() if targets else float("-inf")]
+        # NO RULE PROPOSER here. One was built and deleted (2026-07-23): a generator of `(mover, landmark)` candidates,
+        # sitting on the AGENT rather than in any column, which is the same inversion L5 had. Worse, its filters refined a
+        # rule GRAMMAR nobody justified — "a rule is two objects co-located" — which cannot state CollectAll's tour, let
+        # alone a contradiction between a testimony and an autopsy report. Proposing hypotheses is cortical work, and it
+        # belongs where objects are already recognised, ranked and refuted (`Column.Hypothesis`), not in a hand-written
+        # generator out here. `src/tests/test_rule_proposal.py` keeps the fixture that disproved it.
+        salience = [self.goal_mem.w.get(g, 0.0) if g is not None else float("-inf"),
+                    self.progress.progress() if targets else float("-inf")]
         if max(salience) > float("-inf"):
             mode = self.bg.select(self._MODE_CTX, 2, rho=self.critic.rho(), salience=salience)
             self._last_mode = mode
@@ -1043,25 +1040,6 @@ class Agent:
         home = world.key()
         return bool(self.hippocampus.plan(nxt, model, lambda w: 1.0 if w.key() == home else 0.0,
                                           movement, horizon=budget))
-
-    def _propose_rule(self, objs, pos, sc):
-        """CANDIDATE win conditions, for when nothing has been learned yet — the smallest rule PROPOSER.
-
-        A candidate is an arrangement the scene affords: a MOVER resting on a static landmark, expressed in exactly the
-        vocabulary a learned goal already uses, so a proposal costs no new representation and is pursued by the same planner.
-        Three filters, none of them about this game:
-          * ACHIEVABLE — the thing must be one the agent's own dynamics can move (a discovered mover), so the test is
-            locally in-distribution for the operators it actually has (`reference_lid_locally_in_distribution`).
-          * NOT ALREADY TRUE — an arrangement that already holds explains nothing about a reward that has not arrived.
-          * UNTESTED FIRST — ranked by how little contingency evidence the pair carries, so the agent tries what it does not
-            yet know rather than re-running a settled question (the epistemic ordering).
-
-        Nothing here names a pad, a block or a door: it enumerates relations between things PERCEPTION distinguishes — what
-        moves and what does not — which is what keeps it domain-free (`feedback_bitter_lesson`)."""
-        landmarks = [f for f in pos if f != sc and f not in self._movers]
-        cands = [(m, f) for m in self._movers if m in pos for f in landmarks if pos[m] != pos[f]]
-        cands.sort(key=lambda c: (self.goal_mem.w.get(c, 0.0), self.goal_mem.w.get(frozenset({c}), 0.0)))
-        return cands
 
     def _seek_plan(self, targets, movement):
         """The EPISTEMIC drive's plan: reach something the model cannot yet predict (None if there is nothing, or nothing
