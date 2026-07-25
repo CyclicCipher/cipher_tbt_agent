@@ -588,8 +588,9 @@ class Agent:
 
         Cached on the object's cell-set: re-sweeping an unchanged object would re-run recognition to reach the same answer.
         `commit` is pose-invariant, so the same shape seen elsewhere reinforces the identity instead of minting a duplicate."""
-        key = (obj.color, obj.cells)
-        got = self._identities.get(key)
+        ax, ay = obj.anchor                       # keyed on the SHAPE, not where it happens to be: the identity is
+        key = (obj.color, frozenset((x - ax, y - ay) for x, y in obj.cells))   # pose-invariant, so a moved object is a
+        got = self._identities.get(key)            # cache HIT rather than a fresh sweep every step
         if got:
             return got
         col = self.sensory
@@ -663,12 +664,34 @@ class Agent:
         return (tuple(float(c) for c in cell), eye(self._dims))
 
     def _positions(self, objs) -> dict:
-        """`{feature: anchor}` for each feature realised by EXACTLY ONE object this frame — the single-cell tracking key that
-        lets a mover be followed across frames (recognition disambiguates same-feature objects later; deferred)."""
+        """`{handle: anchor}` for every object this frame can be told apart from its same-coloured neighbours.
+
+        A colour realised by ONE object keys on the colour, exactly as before. A colour realised by SEVERAL keys each on
+        `(colour, identity)` — the identity the SENSORY region settled from a sweep of its cells, which differs when the
+        SHAPES differ. So a domino and an L-tromino of the same colour are two tracked things rather than none: this used to
+        return nothing at all for a repeated colour, losing BOTH objects, and its docstring deferred the fix to recognition.
+        Recognition is now wired, so it does it.
+
+        HONEST LIMIT: two objects of the same colour AND the same shape settle the same identity — correctly, since they are
+        the same object TYPE — and are still not separated here. Telling those tokens apart needs spatiotemporal continuity
+        (which one was nearest last frame), not shape, and that is a different mechanism."""
         by_color: dict = {}
         for o in objs:
             by_color.setdefault(o.color, []).append(o)
-        return {c: os[0].anchor for c, os in by_color.items() if len(os) == 1}
+        out: dict = {}
+        for c, group in by_color.items():
+            if len(group) == 1:
+                out[c] = group[0].anchor
+                continue
+            seen: dict = {}
+            for o in group:                                    # several of one colour — separate them by SHAPE
+                ident = self._object_identity(o)
+                if ident:
+                    seen.setdefault(ident, []).append(o)
+            for ident, same in seen.items():
+                if len(same) == 1:                             # a shape unique within its colour is a usable handle
+                    out[(c, ident)] = same[0].anchor
+        return out
 
     def _track_movers(self, prev_pos, pos, sc) -> None:
         """A NON-self object whose cell changed between frames is a controllable MOVER — discovered from motion (like the self),
@@ -870,12 +893,34 @@ class Agent:
         return (tuple(float(c) for c in cell), eye(self._dims))
 
     def _positions(self, objs) -> dict:
-        """`{feature: anchor}` for each feature realised by EXACTLY ONE object this frame — the single-cell tracking key that
-        lets a mover be followed across frames (recognition disambiguates same-feature objects later; deferred)."""
+        """`{handle: anchor}` for every object this frame can be told apart from its same-coloured neighbours.
+
+        A colour realised by ONE object keys on the colour, exactly as before. A colour realised by SEVERAL keys each on
+        `(colour, identity)` — the identity the SENSORY region settled from a sweep of its cells, which differs when the
+        SHAPES differ. So a domino and an L-tromino of the same colour are two tracked things rather than none: this used to
+        return nothing at all for a repeated colour, losing BOTH objects, and its docstring deferred the fix to recognition.
+        Recognition is now wired, so it does it.
+
+        HONEST LIMIT: two objects of the same colour AND the same shape settle the same identity — correctly, since they are
+        the same object TYPE — and are still not separated here. Telling those tokens apart needs spatiotemporal continuity
+        (which one was nearest last frame), not shape, and that is a different mechanism."""
         by_color: dict = {}
         for o in objs:
             by_color.setdefault(o.color, []).append(o)
-        return {c: os[0].anchor for c, os in by_color.items() if len(os) == 1}
+        out: dict = {}
+        for c, group in by_color.items():
+            if len(group) == 1:
+                out[c] = group[0].anchor
+                continue
+            seen: dict = {}
+            for o in group:                                    # several of one colour — separate them by SHAPE
+                ident = self._object_identity(o)
+                if ident:
+                    seen.setdefault(ident, []).append(o)
+            for ident, same in seen.items():
+                if len(same) == 1:                             # a shape unique within its colour is a usable handle
+                    out[(c, ident)] = same[0].anchor
+        return out
 
     def _track_movers(self, prev_pos, pos, sc) -> None:
         """A NON-self object whose cell changed between frames is a controllable MOVER — discovered from motion (like the self),

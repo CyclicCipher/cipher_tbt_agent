@@ -188,3 +188,33 @@ def test_a_settled_identity_is_pose_invariant():
     g2 = np.zeros((6, 8), dtype=int); g2[4, 1] = 6; g2[4, 2] = 6
     moved = [o for o in segment(g2.tolist()) if o.color == 6][0]
     assert a._object_identity(moved) == here, "the same shape elsewhere is the SAME object, not a new one"
+
+
+def test_same_coloured_objects_are_told_apart_by_shape():
+    """`_positions` used to return NOTHING for a repeated colour — it keyed on "exactly one object of this colour", so two
+    same-coloured objects lost BOTH, and its docstring deferred the fix to recognition. Recognition is wired now: each is
+    swept, L2/3 settles an identity, and the differing SHAPES give differing identities, so both are tracked."""
+    import numpy as np
+    from tbt.agent import Agent
+    from tbt.perceive import segment
+    a = Agent(feat_n=8, n_content=2, n_state=2, n_cols=64, seed=0)
+    g = np.zeros((8, 10), dtype=int)
+    g[1, 1] = 6; g[1, 2] = 6                          # a domino …
+    g[5, 5] = 6; g[5, 6] = 6; g[6, 5] = 6             # … and an L-tromino, SAME colour
+    objs = segment(g.tolist())
+    for _ in range(4):                                 # `commit` defers on early looks while L4 learns
+        pos = a._positions(objs)
+    assert len(pos) == 2, f"both same-coloured objects must be tracked, got {pos}"
+    assert {v for v in pos.values()} == {(1, 1), (5, 5)}, "and at their own anchors"
+
+
+def test_one_object_per_colour_still_keys_on_the_colour():
+    """The common case is untouched: a colour realised once keys on the colour itself, so nothing that depended on plain
+    feature handles changes."""
+    import numpy as np
+    from tbt.agent import Agent
+    from tbt.perceive import segment
+    a = Agent(feat_n=8, n_content=2, n_state=2, n_cols=64, seed=0)
+    g = np.zeros((6, 8), dtype=int); g[2, 3] = 6; g[4, 6] = 7
+    pos = a._positions(segment(g.tolist()))
+    assert pos == {6: (3, 2), 7: (6, 4)}, f"unique colours key on the colour, got {pos}"
