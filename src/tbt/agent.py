@@ -30,6 +30,7 @@ from .operator import add, norm, sub
 from .perceive import SelfTracker, segment
 from .region import Hierarchy, Region
 from .reward import GoalMemory, LearningProgress, ValueCritic
+from .successor import SuccessorFrame
 from .thalamus import Thalamus
 from .touch import contact_toward
 
@@ -125,6 +126,12 @@ class Agent:
         # compositional column's L4 is genuinely driven (objects-at-poses, learned and predicted), but what drives it is a
         # TRANSDUCED colour, not a lower region's settled output. Making it cortico-cortical needs the sensory region to
         # HAVE an output to send — an L2/3 identity — and it has no pooler, because it was built without a frame.
+        # The TASK frame: a LEARNED L6a for structure that has no metric to hand it (`successor.py`). The spatial frame
+        # stays a GridEncoder — physical space IS metric and the grid's vector-navigation is worth keeping — while this
+        # learns the configuration graph the agent actually moves through. It is fed the JOINT world state deliberately,
+        # which is the decision experiment the legacy HETERARCHY_PLAN's H0 asks for: feed one frame the joint transitions
+        # and find out whether position and task-state separate inside it before allocating a second column for them.
+        self.task_frame = SuccessorFrame()
         self.hierarchy = Hierarchy()
         self.hierarchy.add(Region("sensory", self.sensory, proximal="vision", frame=None, target="task"))
         self.hierarchy.add(Region("task", self.task, proximal="vision", frame=None, target="striatum"))
@@ -498,6 +505,8 @@ class Agent:
                 payoff += self.progress.observe(self._model_loss(prev_cur, action, prev_pos, cur, pos))   # SCORE the model
                 self._track_movers(prev_pos, pos, sc)               # BEFORE it learns — the PREQUENTIAL loss (epiplexity)
                 self._learn_dynamics(action, prev_objs, prev_skin, prev_pos, pos, prev_cur, cur, sc)  # learn the change from FELT contact
+            if prev_cur is not None and cur is not None:          # the TASK frame learns the configuration transition
+                self.task_frame.observe(self._world_key(prev_cur, prev_pos), action, self._world_key(cur, pos))
             if self._last_mode is not None:                          # TONIC DOPAMINE = the average PAYOFF rate, extrinsic ⊕
                 self.bg.learn(self._MODE_CTX, self._last_mode, payoff - self.critic.rho())   # epistemic; the BG's drive choice
             self.critic.tonic(payoff)                                # is trained by that payoff's RPE against the rate
@@ -569,6 +578,12 @@ class Agent:
     def _learn_delta(self, tag, felt, beyond, eff, observed, impeded=False) -> None:
         """Teach the column's L5 from one felt interaction."""
         self._nav_col().learn_change(tag, felt, beyond, eff, observed, impeded)
+
+    def _world_key(self, cur, pos):
+        """The world CONFIGURATION as one hashable state — the agent's cell plus where every tracked mover is. This is what
+        the task frame's transitions are over: not a coordinate, just a state that either follows from another or does not,
+        which is all an SR needs."""
+        return (cur, frozenset((c, pos[c]) for c in self._movers if c in pos))
 
     def _beyond(self, objs, cell):
         """What backs a contact: the feature at `cell`, or the "edge" beyond the board, or None (in-bounds and empty). The
@@ -821,6 +836,12 @@ class Agent:
             if landmark is not None:
                 out.add((c, landmark))
         return out
+
+    def _world_key(self, cur, pos):
+        """The world CONFIGURATION as one hashable state — the agent's cell plus where every tracked mover is. This is what
+        the task frame's transitions are over: not a coordinate, just a state that either follows from another or does not,
+        which is all an SR needs."""
+        return (cur, frozenset((c, pos[c]) for c in self._movers if c in pos))
 
     def _beyond(self, objs, cell):
         """What backs a contact: the feature at `cell`, or the "edge" beyond the board, or None (in-bounds and empty). The
