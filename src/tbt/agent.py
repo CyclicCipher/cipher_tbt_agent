@@ -68,7 +68,13 @@ class Agent:
                  dims: int = 2, modalities=None) -> None:
         self.state_enc = CategoryEncoder(range(n_state), w=8, capacity=n_state)   # the factored-state code (generic)
         sensory_n = feat_n + self.state_enc.n                                     # L4 proximal = feature ⊕ state (§15)
-        self.sensory = Column(sensory_n=sensory_n, n_cols=n_cols, order=1, seed=seed)      # predicts next CONTENT
+        # The SENSORY region gets a FRAME, which is what gives it an L2/3 pooler and therefore an OUTPUT another region can
+        # be driven by. Without one it had no pooler, so there was nothing for a cortico-cortical edge to carry. It is a
+        # SEPARATE region from `nav` on purpose: `start_object` re-anchors L6a to sweep an object, which would wreck the
+        # body pose nav is path-integrating — the same reason cortex runs a "what" stream apart from a "where" stream.
+        self.sensory = Column(sensory_n=sensory_n, n_cols=n_cols, order=1, seed=seed,
+                              location=GridEncoder(scales=(7, 11, 13, 17), dims=dims, mw=1,
+                                                   bounds=[(0, 63)] * dims))      # predicts next CONTENT
         self.task = Column(sensory_n=sensory_n, n_cols=n_cols, order=1, seed=seed + 1)     # carries/predicts the STATE
         self.read_content = _Readout(n_cols, n_content)      # order=1 → M=1 → n_cells == n_cols
         self.read_state = _Readout(n_cols, n_state)
@@ -90,6 +96,7 @@ class Agent:
         # the AGENCY signal (self-caused contact), so ContactDynamics learns object push behaviour only from motions the self
         # actually CAUSED (`notes/touch_and_body_design.md`). The recognising columns (Gap-3 vision, recognise-by-touch) defer.
         self._modalities = {m.name: m for m in (modalities if modalities is not None else [vision(), touch()])}
+        self._identities: dict = {}         # (colour, cells) -> the identity the SENSORY region's L2/3 settled on
         self._surface: dict = {}            # {cell: feature} RECALLED from the cortex (L4 ⊗ thalamic register), not a
         #                                     hand-built dict — see `_sense_frame`
         self._register = Counter()          # the thalamic content⊗location register (the cross-column voting channel)
@@ -314,15 +321,15 @@ class Agent:
         if self._scene is None:
             grid = GridEncoder(scales=(7, 11, 13, 17), dims=self._dims, mw=1, bounds=[(0, 63)] * self._dims)
             self._scene = Column(sensory_n=1, n_cols=self._n_cols, order=2, seed=self._seed + 5, location=grid)
-            self.hierarchy.add(Region("scene", self._scene, proximal="vision", frame="nav", target="striatum"))
+            self.hierarchy.add(Region("scene", self._scene, proximal="sensory", frame="nav", target="striatum"))
         return self._scene
 
-    def place_object(self, object_id, pose) -> None:
+    def place_object(self, object_id, pose, identity=None) -> None:
         """Route a recognised `(object-id, pose)` from the sensory region UP to the compositional region via the thalamus —
         the first real HIERARCHY EDGE. The object's identity becomes the higher region's L4 FEATURE and its pose the L6a
         LOCATION, so the compositional column learns objects-at-poses the way the sensory one learns colours-at-cells."""
         content, location = self.thalamus.project(object_id, pose)
-        self._scene_col().place_object(content, location, identity=self._ident_enc.encode(object_id))
+        self._scene_col().place_object(content, location, identity=identity)
 
     def clear_scene(self) -> None:
         """Start a fresh scene configuration in the compositional column."""
@@ -500,7 +507,7 @@ class Agent:
                 self.new_level()                                     # but the learned model + goal + movers PERSIST
             elif moved and cur is not None and cur != prev_cur:      # the self MOVED → the operator learns this action's Δ
                 self.learn_pose_move(action, self._as_pose(prev_cur), self._as_pose(cur))
-        self._route_movers(pos)                                      # place visible movers into the scene column (world_state/rollout)
+        self._route_movers(objs, pos)                                      # place visible movers into the scene column (world_state/rollout)
         self._surface, self._l4_surprise = self._sense_frame(objs, sc)   # L4 ⊗ thalamus: sense, bind, recall the surface
         skin = self._skin(fd.grid, objs, cur)                       # what the body FEELS now — the agency signal for next step
         action = self._act(objs, cur, pos, fd.available_actions)
@@ -573,6 +580,28 @@ class Agent:
         if ext is not None and any(not (lo <= c <= hi) for c, (lo, hi) in zip(cell, ext)):
             return "edge"
         return self._feature_at(objs, cell)
+
+    def _object_identity(self, obj):
+        """The sensory region's OUTPUT for one object: sweep its cells and let L2/3 settle an identity (`start_object` →
+        `sense_sweep` → `commit`). That identity — not the transduced colour — is what a higher region should be driven by,
+        because it is the lower region's CONCLUSION rather than its input.
+
+        Cached on the object's cell-set: re-sweeping an unchanged object would re-run recognition to reach the same answer.
+        `commit` is pose-invariant, so the same shape seen elsewhere reinforces the identity instead of minting a duplicate."""
+        key = (obj.color, obj.cells)
+        got = self._identities.get(key)
+        if got:
+            return got
+        col = self.sensory
+        col.start_object()
+        feat = self._feat_enc.encode(obj.color)
+        for cell in sorted(obj.cells):
+            col.set_pose(tuple(float(c) for c in cell), eye(self._dims))
+            col.sense_sweep(feat)
+        identity = col.commit()
+        if identity:                              # `commit` DEFERS on a first look — until L4 predicts part of the sweep
+            self._identities[key] = identity      # there is nothing to ground an identity on, so it trains L4 and returns
+        return identity                           # empty. Caching that would freeze the deferral; a second look mints.
 
     def _feature_at(self, objs, cell):
         """The feature occupying `cell` in a perceived frame, or None if it is empty — the plain perceptual question the
@@ -708,17 +737,6 @@ class Agent:
         impeded = norm(sub(body_disp, eff)) > 1e-9                               # the body did NOT advance by its full efference
         self._learn_delta("into", felt, beyond, eff, sub(body_disp, eff), impeded)
         self._learn_delta("of", felt, beyond, eff, obj_disp, impeded)
-
-    def _route_movers(self, pos) -> None:
-        """Place every currently-visible known mover into the SCENE column, so `world_state()` (hence the rollout) includes it.
-        STATIC features (pads, goals, walls — never seen to move) are NOT routed: they are landmarks for the goal predicate, not
-        simulated bodies."""
-        if not self._movers:
-            return
-        self.clear_scene()
-        for c in self._movers:
-            if c in pos:
-                self.place_object(c, self._as_pose(pos[c]))
 
     def _target_cell(self, cell, action):
         """The cell `action` moves the self INTO from `cell`, via the LEARNED operator (not the action's declared delta — the
@@ -927,16 +945,25 @@ class Agent:
         self._learn_delta("into", felt, beyond, eff, sub(body_disp, eff), impeded)
         self._learn_delta("of", felt, beyond, eff, obj_disp, impeded)
 
-    def _route_movers(self, pos) -> None:
-        """Place every currently-visible known mover into the SCENE column, so `world_state()` (hence the rollout) includes it.
-        STATIC features (pads, goals, walls — never seen to move) are NOT routed: they are landmarks for the goal predicate, not
-        simulated bodies."""
+    def _route_movers(self, objs, pos) -> None:
+        """Place every currently-visible known mover into the SCENE region, so `world_state()` (hence the rollout) includes it,
+        and DRIVE that region's L4 with the mover's settled IDENTITY — the sensory region's conclusion, not its input. That is
+        what makes this a cortico-cortical edge rather than a transducer reaching two levels up.
+
+        An identity is skipped while `commit` is still deferring (L4 has not yet learned enough of the object to ground one);
+        the pose is recorded regardless, so the rollout never loses a mover waiting on recognition. STATIC features are not
+        routed: they are landmarks for the goal predicate, not simulated bodies."""
         if not self._movers:
             return
         self.clear_scene()
+        by_colour = {o.color: o for o in objs}
         for c in self._movers:
-            if c in pos:
-                self.place_object(c, self._as_pose(pos[c]))
+            if c not in pos:
+                continue
+            obj = by_colour.get(c)
+            identity = self._object_identity(obj) if obj is not None else None
+            self.place_object(c, self._as_pose(pos[c]),
+                              identity=SDR(self.sensory.pooler.n, identity) if identity else None)
 
     def _target_cell(self, cell, action):
         """The cell `action` moves the self INTO from `cell`, via the LEARNED operator (not the action's declared delta — the

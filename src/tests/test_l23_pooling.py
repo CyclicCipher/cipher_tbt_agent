@@ -140,29 +140,51 @@ def test_the_compositional_region_learns_objects_at_poses():
     from tbt.agent import Agent
     from tbt.operator import eye
     a = Agent(feat_n=8, n_content=2, n_state=2, n_cols=64, seed=0)
+    from tbt.encoders import SDR
     pose = lambda c: (tuple(float(x) for x in c), eye(2))
+    ident = lambda k: SDR(64, range(k * 8, k * 8 + 8))      # stand-in for a lower region's settled identity
     for _ in range(4):
-        a.place_object(6, pose((3, 2)))
-        a.place_object(7, pose((6, 4)))
+        a.place_object(6, pose((3, 2)), identity=ident(0))
+        a.place_object(7, pose((6, 4)), identity=ident(1))
     col = a._scene_col()
 
-    def predicts(cell, oid):
+    def predicts(cell, k):
         col.set_pose(tuple(float(x) for x in cell), eye(2))
-        return len(set(col.predict_feature()) & a._ident_enc.encode(oid).active)
+        return len(set(col.predict_feature()) & ident(k).active)
 
-    assert predicts((3, 2), 6) == 8, "the object learned at this pose must be predicted there"
-    assert predicts((6, 4), 7) == 8, "and likewise the other"
-    assert predicts((6, 4), 6) == 0, "but not an object that was never at this pose"
+    assert predicts((3, 2), 0) == 8, "the object learned at this pose must be predicted there"
+    assert predicts((6, 4), 1) == 8, "and likewise the other"
+    assert predicts((6, 4), 0) == 0, "but not an object that was never at this pose"
 
 
-def test_the_heterarchy_is_declared_and_reports_no_cortical_edge_yet():
-    """HONEST STATE, asserted so it cannot quietly drift. `region.py` declares each column's wiring, and `edges()` counts
-    only edges where a region's proximal drive is ANOTHER REGION's output. It is empty: the compositional column is driven,
-    but by a transduced colour, not by a lower region's settled identity. Closing that needs the sensory region to have an
-    L2/3 output to send — it has no pooler, having been built without a frame."""
+def test_the_sensory_region_has_an_output_and_the_edge_is_cortical():
+    """THE EDGE, closed. The sensory region was built WITHOUT a frame, so it had no pooler and therefore nothing to send —
+    `edges()` was empty and the compositional column was driven by a transduced colour reaching two levels up. Giving it a
+    frame gives it an L2/3 pooler, its settled identity is what now drives the higher region, and the heterarchy reports a
+    real region → region edge. It is a SEPARATE region from `nav` on purpose: sweeping an object re-anchors L6a, which would
+    wreck the body pose nav path-integrates."""
     from tbt.agent import Agent
     a = Agent(feat_n=8, n_content=2, n_state=2, n_cols=64, seed=0)
     a._scene_col()
-    assert {"sensory", "task", "scene"} <= set(a.hierarchy.regions), "the regions must be declared, not implicit"
-    assert a.hierarchy.edges() == [], "no region is yet fed by another region's OUTPUT"
-    assert a.sensory.pooler is None, "and the sensory region has no L2/3 output to send"
+    assert a.sensory.pooler is not None, "the sensory region must have an L2/3 output to send"
+    assert a.sensory is not a._nav_col(), "and be distinct from the region path-integrating the body"
+    assert ("sensory", "scene") in a.hierarchy.edges(), f"a cortical edge must be declared, got {a.hierarchy.edges()}"
+
+
+def test_a_settled_identity_is_pose_invariant():
+    """What makes the identity worth sending: the same shape seen somewhere else settles on the SAME identity, so what
+    travels up the hierarchy is the region's CONCLUSION about what a thing is, factored from where it is. `commit` defers
+    on early looks — until L4 predicts part of the sweep there is nothing to ground an identity on — so this takes a few."""
+    import numpy as np
+    from tbt.agent import Agent
+    from tbt.perceive import segment
+    a = Agent(feat_n=8, n_content=2, n_state=2, n_cols=64, seed=0)
+    g = np.zeros((6, 8), dtype=int); g[2, 3] = 6; g[2, 4] = 6
+    obj = [o for o in segment(g.tolist()) if o.color == 6][0]
+    for _ in range(3):
+        here = a._object_identity(obj)
+    assert here, "a repeated look must eventually mint an identity"
+
+    g2 = np.zeros((6, 8), dtype=int); g2[4, 1] = 6; g2[4, 2] = 6
+    moved = [o for o in segment(g2.tolist()) if o.color == 6][0]
+    assert a._object_identity(moved) == here, "the same shape elsewhere is the SAME object, not a new one"
