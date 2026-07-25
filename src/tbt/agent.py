@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 import random
+from collections import Counter
 
 import numpy as np
 
@@ -88,7 +89,12 @@ class Agent:
         # the AGENCY signal (self-caused contact), so ContactDynamics learns object push behaviour only from motions the self
         # actually CAUSED (`notes/touch_and_body_design.md`). The recognising columns (Gap-3 vision, recognise-by-touch) defer.
         self._modalities = {m.name: m for m in (modalities if modalities is not None else [vision(), touch()])}
-        self._static: dict = {}                 # {cell: feature} — what PERCEPTION sees at each non-self, non-mover cell
+        self._surface: dict = {}            # {cell: feature} RECALLED from the cortex (L4 ⊗ thalamic register), not a
+        #                                     hand-built dict — see `_sense_frame`
+        self._register = Counter()          # the thalamic content⊗location register (the cross-column voting channel)
+        self._bound: set = set()            # every cell L4 has been driven at — rescanned so an EMPTIED cell is still checked
+        self._background = 0                # the ARC frame's empty colour
+        self._l4_surprise = 0.0             # fraction of already-bound cells whose feature L4 MISpredicted this frame
         self._rng = random.Random(seed)     # exploration randomness (bootstrap + tie-break), seeded
         self._movers: set = set()           # non-self object features observed to MOVE = pushable objects (routed to the scene)
         self._tried: set = set()            # (cell, action) already attempted in bootstrap — so an always-blocked action here
@@ -329,7 +335,7 @@ class Agent:
         ARC's board is world-anchored, so the nav pose and the scene objects already share one world frame (DESIGN §4)."""
         objects = self._scene_col().scene_snapshot() if self._scene is not None else {}
         bounds = getattr(self, "_extent", None) or [(0, 63)] * self._dims
-        return WorldMap(self.pose(), objects, bounds, body=self._nav_col().operator, static=self._static)
+        return WorldMap(self.pose(), objects, bounds, body=self._nav_col().operator, static=self._surface)
 
     def world_model(self) -> WorldModel:
         """The learned FORWARD MODEL over the world-state (`hippocampus/replay.py`), driven by the ONE L5 transform: the rollout
@@ -441,7 +447,7 @@ class Agent:
         """A LEVEL boundary — a fresh environment: drop the per-level exploration state (visited/blocked/last + the scene's
         object placements). The learned MODEL (operator, object dynamics, critic), the discovered GOAL (`goal_mem`), and which
         features are MOVERS all persist across levels — that persistence IS the cross-level transfer; only the map memory resets."""
-        self._static, self._tried, self._last = {}, set(), None
+        self._surface, self._register, self._bound, self._tried, self._last = {}, Counter(), set(), set(), None
         if self._scene is not None:
             self.clear_scene()
 
@@ -479,7 +485,7 @@ class Agent:
             elif moved and cur is not None and cur != prev_cur:      # the self MOVED → the operator learns this action's Δ
                 self.learn_pose_move(action, self._as_pose(prev_cur), self._as_pose(cur))
         self._route_movers(pos)                                      # place visible movers into the scene column (world_state/rollout)
-        self._static = self._static_cells(objs, sc)                  # what is SEEN at every other cell — the model decides the rest
+        self._surface, self._l4_surprise = self._sense_frame(objs, sc)   # L4 ⊗ thalamus: sense, bind, recall the surface
         skin = self._skin(fd.grid, objs, cur)                       # what the body FEELS now — the agency signal for next step
         action = self._act(objs, cur, pos, fd.available_actions)
         self._last = (objs, action, cur, fd.score, pos, skin)
@@ -498,7 +504,7 @@ class Agent:
         It also explains why this finds a hidden goal: a goal is a perceptible FEATURE the model has never interacted with, so
         it is precisely what is not-yet-confident, and the epistemic pull points at it until it has been touched."""
         unit = tuple(1.0 if i == 0 else 0.0 for i in range(self._dims))
-        seen = dict(self._static)                                   # statics (walls, pads, landmarks) …
+        seen = dict(self._surface)                                  # the recalled surface (walls, pads, landmarks) …
         for c in self._movers:                                      # … and any visible mover, whose dynamics also want learning
             if c in pos:
                 seen[pos[c]] = c
@@ -519,7 +525,7 @@ class Agent:
             return 0.0
         world = WorldMap(self._as_pose(prev_cur),
                          {c: self._as_pose(prev_pos[c]) for c in self._movers if c in prev_pos},
-                         bounds=self._extent, body=self._nav_col().operator, static=self._static)
+                         bounds=self._extent, body=self._nav_col().operator, static=self._surface)
         nxt = self.world_model().step(world, action)
         wrong = 0.0 if nxt.agent is not None and tuple(round(x) for x in nxt.agent[0]) == tuple(cur) else 1.0
         n = 1
@@ -560,17 +566,52 @@ class Agent:
                 return o.color
         return None
 
-    def _static_cells(self, objs, sc) -> dict:
-        """`{cell: feature}` for every cell holding a non-self, non-mover object — RAW PERCEPTION, not a conclusion. This is what
-        replaced the hand-maintained obstacle set: we no longer record "the agent bumped here so this cell is impassable"; we
-        record what is SEEN, and L5 predicts what pressing into that feature does. The payoff is generalisation — bump one wall
-        cell and every other cell of that feature is predicted impassable without ever being touched."""
-        out = {}
-        for o in objs:
-            if o.color != sc and o.color not in self._movers:
-                for cell in o.cells:
-                    out[cell] = o.color
-        return out
+    def _sense_frame(self, objs, sc):
+        """The sensorimotor SCAN — L4 feature-at-location ⊗ the THALAMIC binding register. This replaced `_static_cells`,
+        which re-segmented the whole frame each step into a hand-built `{cell: feature}` dict: a map the agent maintained
+        in Python, outside any column, that could not predict and did not transfer.
+
+        At every perceived non-self cell the body's L6a location is placed there, L4 is asked what it EXPECTS
+        (`predict_feature`), then driven with what is actually there (`sense_at`), and the (feature ⊗ location) conjunction
+        is written into the thalamus's register (`bind`/`bundle`). The surface the planner uses is then READ BACK OUT of that
+        register by location (`read`), so the map is served by the cortex and the thalamus rather than by a dict.
+
+        What this buys that the dict could not. L4 now holds a LEARNED, order-invariant model of what belongs where, so the
+        agent has a map that PREDICTS and that survives a location being out of view — the thing a re-segmentation each step
+        can never give. And the mismatch between what L4 expected and what arrived is a real PERCEPTUAL PREDICTION ERROR:
+        when a door opens somewhere the agent never touched, that is a measured surprise rather than a silently-different
+        dict entry. Returns `(surface, surprise)`.
+
+        HONEST SCOPE. Under FULL observability the surface handed to the planner is still the percept, because the percept is
+        simply what is there — reading it back out of L4 would return the same answer at extra cost, and pretending otherwise
+        would be theatre. L4's model earns its place through the PREDICTION (the surprise here now, partial observability and
+        recall-when-unseen next), not by relaying what is already in view. The thalamic register is likewise the cross-column
+        VOTING channel (`Thalamus.read`'s `min_support`), not a map store: measured, superposing ~25 cells into 8-bit location
+        codes crosstalks badly enough that a frequent feature reads back at every location."""
+        col = self._nav_col()
+        saved = col.pose()
+        here = {cell: o.color for o in objs if o.color != sc for cell in o.cells}
+        # SCAN the union of what is perceived NOW and every location L4 has already BOUND. The union is the point: a cell that
+        # goes EMPTY is invisible to a scan of occupied cells alone — and a door opening is exactly a cell going empty — so
+        # restricting the scan to what is currently there makes the one event this is for undetectable by construction.
+        bounds, surface, miss, seen = [], {}, 0, 0
+        for cell in set(here) | self._bound:
+            feature = here.get(cell, self._background)          # what is there now; BACKGROUND if it has emptied
+            feat = self._feat_enc.encode(feature)
+            col.set_pose(tuple(float(c) for c in cell), eye(self._dims))
+            expected = col.predict_feature()                    # what L4 believes belongs HERE, before sensing
+            if expected:
+                seen += 1
+                miss += 0 if (expected & feat.active) else 1
+            col.sense_at(feat, learn=True)                      # L4 learns the feature AT this location — ALL of it:
+            bounds.append(self.thalamus.bind(feat.active, col._code().active))   # perception is complete, movers included
+            self._bound.add(cell)
+            if feature != self._background and feature not in self._movers:      # the SURFACE is the static, occupied part;
+                surface[cell] = feature                                          # movers are tracked as objects in their own right
+        self._register = self.thalamus.bundle(*bounds)
+        if saved is not None:
+            col.set_pose(saved[0], saved[1])
+        return surface, (miss / seen if seen else 0.0)
 
     def _as_pose(self, cell):
         """A grid cell → a continuous pose `(position, R=identity)` in the nav frame."""
