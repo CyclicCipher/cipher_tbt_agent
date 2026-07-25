@@ -100,3 +100,30 @@ if __name__ == "__main__":
     probe = LockPath(levels=_NAV_TWO); probe.load_level(1); oracle = len(solve_level(probe))
     print(f"NAV transfer: L0 (explore) {per_level[0]} actions -> L1 (goal-directed) {per_level[1]} actions "
           f"(oracle {oracle}); WIN={fd.is_win()}")
+
+
+def test_solves_the_key_and_door_level():
+    """LockPath L1 — key + door — which the agent could not solve at all until 2026-07-23. The goal is VISIBLE but a door
+    blocks it, and the mechanic (step on the key, all doors open) is never stated.
+
+    What had to be true for this to work. The epistemic drive has to reach the key, which it does because the key is a feature
+    the model has never interacted with (`_unlearned_cells`) — measured, the door opens ~9 steps into the level. And the
+    PRAGMATIC drive has to be honest about being stuck: the goal sits behind the door, so the rollout must report it
+    UNREACHABLE and hand over. A locally-greedy read-out cannot report that — it happily proposes a step that shrinks the goal
+    vector while the goal is walled off — and the agent oscillated between two cells forever, pragmatic at one and epistemic
+    at its neighbour."""
+    game = LockPath()
+    env = Environment(game)
+    fd = env.reset()
+    agent = Agent(feat_n=8, n_content=2, n_state=2, n_cols=64, seed=0)
+    per_level, base = [], 0
+    for _ in range(400):
+        action, coords = agent.step(fd)
+        fd = env.step(action, coords)
+        if fd.score > len(per_level):
+            per_level.append(fd.action_counter - base)
+            base = fd.action_counter
+        if fd.score >= 2:
+            break
+    assert len(per_level) >= 2, f"the agent must clear L0 AND the key+door level L1, got {per_level}"
+    assert per_level[1] < 60, f"and clear L1 without flailing (oracle 12), took {per_level[1]}"

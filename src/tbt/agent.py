@@ -840,11 +840,19 @@ class Agent:
         if len(goals) != 1 or goals[0].anchor == cur:
             return None
         goal_cell = goals[0].anchor
-        act = self._nav_inverse(cur, goal_cell, movement)          # CHEAP default: the L6a→L5 inverse read-out, BG-selected
-        if act is not None:
-            return [act]
         at_goal = lambda w: 1.0 if (w.agent is not None and tuple(round(c) for c in w.agent[0]) == goal_cell) else 0.0
-        return self.plan(at_goal, movement, horizon=64)            # SPARING fallback: deliberate when the read-out stalls
+        plan = self.plan(at_goal, movement, horizon=64)            # AUTHORITATIVE: can the learned model reach it AT ALL?
+        if not plan:
+            return None                                            # genuinely UNREACHABLE ⇒ this drive is not available, and
+        #                                                            saying so is what lets the BG hand over to the other one.
+        #   The read-out cannot answer that question: it is LOCALLY greedy, so it happily proposes a step that shrinks the
+        #   goal vector while the goal sits behind a door. That is precisely how the agent came to oscillate on LockPath L1 —
+        #   pragmatic at one cell, epistemic at its neighbour, forever. Reachability is the rollout's to decide.
+        return plan                                                # and the plan it found IS the route: the read-out is a
+        #   LOCAL gradient, so on a board with a wall column it stalls in a corner while reachability still says yes, and the
+        #   agent creeps (measured: 332 steps to walk a ~10-step path). Since reachability already cost a rollout, the plan is
+        #   free and correct. `_nav_inverse` stays the cheap default for the day reachability is CACHED — that caching, not
+        #   the read-out, is what would make `reference_brain_planning`'s "rollout sparingly" true here.
 
     def _nav_inverse(self, cur, target, movement):
         """The NAV INVERSE MODEL, routed through its real anatomy (`notes/l5_unified_transform_design.md` §4). The agent only
