@@ -152,3 +152,54 @@ def test_an_arrangement_that_already_holds_is_not_proposed():
     a._movers.add(6)
     pos = {2: (1, 1), 6: (6, 4), 7: (6, 4)}                    # the mover is ALREADY on the landmark
     assert (6, 7) not in a._propose_rule([], pos, 2)
+
+
+# ── the REVERSIBILITY filter (`Agent._reversible`) ──────────────────────────────────────────────────────────────────────
+# Imagine the action, then ask the same forward model for a route home. It gates the EPISTEMIC drive only: in a pushing world
+# the WINNING move is itself irreversible, so applying this to goal pursuit would forbid winning.
+
+def _pusher(taught: bool):
+    from tbt.agent import Agent
+    from tasks.core import GameAction
+    D = {GameAction.ACTION1: (0., -1.), GameAction.ACTION2: (0., 1.),
+         GameAction.ACTION3: (-1., 0.), GameAction.ACTION4: (1., 0.)}
+    a = Agent(feat_n=8, n_content=2, n_state=2, n_cols=64, seed=0)
+    a._movers.add(6)
+    for act, d in D.items():
+        a.learn_pose_move(act, a._as_pose((4, 3)), a._as_pose((4 + int(d[0]), 3 + int(d[1]))))
+    a._learn_delta("into", 1, None, (1., 0.), (-1., 0.), impeded=True)      # walls block
+    if taught:
+        a._learn_delta("of", 6, None, (1., 0.), (1., 0.))                   # a press moves the block
+        a._learn_delta("into", 6, None, (1., 0.), (0., 0.))
+    return a, D
+
+
+def _world(a):
+    from tbt.hippocampus import WorldMap
+    surface = {(x, 0): 1 for x in range(10)}                                # a wall along the top row
+    a._surface = surface
+    return WorldMap(a._as_pose((4, 3)), {6: a._as_pose((4, 2))},
+                    bounds=[(0, 9), (0, 6)], body=a._nav_col().operator, static=surface), surface
+
+
+def test_a_stranding_action_is_refused_once_the_model_can_foresee_it():
+    """Pushing the block NORTH puts it against the top wall, where it can never be pushed back — undoing a push means
+    walking round to the far side and against a wall there is none. With the push in its model the agent sees that and
+    refuses; the sideways push, which IS undoable, is allowed."""
+    a, D = _pusher(taught=True)
+    w, _ = _world(a)
+    north = [k for k, v in D.items() if v == (0., -1.)][0]
+    east = [k for k, v in D.items() if v == (1., 0.)][0]
+    assert a._reversible(w, a.world_model(), east, list(D)), "an undoable push must be allowed"
+    assert not a._reversible(w, a.world_model(), north, list(D)), "a stranding push must be refused"
+
+
+def test_it_is_blind_to_a_consequence_the_model_does_not_yet_predict():
+    """THE HONEST LIMIT, and the reason this does not rescue L2. Before the push is learned the imagined block does not move
+    at all, so the stranding action looks perfectly undoable and passes. You cannot avoid the mistake you cannot predict —
+    and the damage is done precisely while the model is still ignorant, which is exactly when the epistemic drive is most
+    active. The filter constrains an informed searcher; it cannot protect an ignorant one."""
+    a, D = _pusher(taught=False)
+    w, _ = _world(a)
+    north = [k for k, v in D.items() if v == (0., -1.)][0]
+    assert a._reversible(w, a.world_model(), north, list(D)), "with no push model the consequence is invisible"

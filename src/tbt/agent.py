@@ -1022,6 +1022,28 @@ class Agent:
         self._last_plan = []
         return self._rng.choice(movement)                          # nothing to pursue and nothing left to learn
 
+    def _reversible(self, world, model, action, movement, budget: int = 8) -> bool:
+        """Could the agent get BACK? Imagine `action`, then ask the same forward model for a route home from where it lands.
+        No route within `budget` ⇒ the action removes states from the reachable set, and taking it while still ignorant can
+        cost the level outright.
+
+        This is the filter the L2 measurement asked for. A block pushed against a wall can never be pushed back — undoing a
+        push means walking round to its far side, and against a wall there is no far side — so the world silently becomes
+        unsolvable about ten steps into exploration, long before any rule could be formed or tested.
+
+        It gates the EPISTEMIC drive ONLY, and that restriction is not a detail: in a pushing world the WINNING move is itself
+        irreversible (a block on its pad cannot be taken off it), so a filter applied to goal pursuit would forbid winning.
+        Curiosity should be careful; commitment to a known goal should not be.
+
+        Nothing here knows what a block or a wall is. It asks the agent's own model whether the door it is about to walk
+        through swings both ways."""
+        nxt = model.step(world, action)
+        if nxt.key() == world.key():
+            return True                                            # nothing changed — trivially undoable
+        home = world.key()
+        return bool(self.hippocampus.plan(nxt, model, lambda w: 1.0 if w.key() == home else 0.0,
+                                          movement, horizon=budget))
+
     def _propose_rule(self, objs, pos, sc):
         """CANDIDATE win conditions, for when nothing has been learned yet — the smallest rule PROPOSER.
 
