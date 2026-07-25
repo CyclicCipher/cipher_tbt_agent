@@ -997,20 +997,49 @@ class Agent:
         # costs Push its oracle (6 → 10), because the BG's drive value is dominated by whichever drive was active when the
         # first reward landed — always exploration. The fix both need is a per-drive payoff RATE (marginal value theorem).
         g = self.goal_mem.goal()
+        conds, proposed = self.goal_mem.goals(), False
+        if not conds:                                              # nothing learned yet — HOLD a proposed rule and TEST it.
+            for cand in self._propose_rule(objs, pos, self.self_color()):   # the plan IS the test: pursue it and see whether
+                if self._goal_plan(objs, cur, pos, movement, {cand}):        # reward follows, which `_credit_goal` then turns
+                    conds, g, proposed = {cand}, cand, True                  # into learned contingency (or does not)
+                    break
         targets = self._unlearned_cells(pos)
-        salience = [self.goal_mem.w.get(g, 0.0) if g is not None else float("-inf"),
-                    self.progress.progress() if targets else float("-inf")]
+        # A PROPOSAL cannot be valued by its contingency: it has none, that is what makes it a hypothesis, and reading its
+        # weight (0.0) means exploration always outbids it and the rule is never tested. Value it OPTIMISTICALLY instead —
+        # at what a win is worth — which is optimism-under-uncertainty and is self-correcting: if the test fails, the delta
+        # rule drives the candidate down and the next one is proposed.
+        pragmatic = 1.0 if proposed else (self.goal_mem.w.get(g, 0.0) if g is not None else float("-inf"))
+        salience = [pragmatic, self.progress.progress() if targets else float("-inf")]
         if max(salience) > float("-inf"):
             mode = self.bg.select(self._MODE_CTX, 2, rho=self.critic.rho(), salience=salience)
             self._last_mode = mode
-            plan = self._goal_plan(objs, cur, pos, movement) if mode == 0 else self._seek_plan(targets, movement)
+            plan = self._goal_plan(objs, cur, pos, movement, conds) if mode == 0 else self._seek_plan(targets, movement)
             if not plan:                                           # the selected drive had nothing reachable → try the other
-                plan = self._seek_plan(targets, movement) if mode == 0 else self._goal_plan(objs, cur, pos, movement)
+                plan = self._seek_plan(targets, movement) if mode == 0 else self._goal_plan(objs, cur, pos, movement, conds)
             if plan:
                 self._last_plan = plan
                 return plan[0]
         self._last_plan = []
         return self._rng.choice(movement)                          # nothing to pursue and nothing left to learn
+
+    def _propose_rule(self, objs, pos, sc):
+        """CANDIDATE win conditions, for when nothing has been learned yet — the smallest rule PROPOSER.
+
+        A candidate is an arrangement the scene affords: a MOVER resting on a static landmark, expressed in exactly the
+        vocabulary a learned goal already uses, so a proposal costs no new representation and is pursued by the same planner.
+        Three filters, none of them about this game:
+          * ACHIEVABLE — the thing must be one the agent's own dynamics can move (a discovered mover), so the test is
+            locally in-distribution for the operators it actually has (`reference_lid_locally_in_distribution`).
+          * NOT ALREADY TRUE — an arrangement that already holds explains nothing about a reward that has not arrived.
+          * UNTESTED FIRST — ranked by how little contingency evidence the pair carries, so the agent tries what it does not
+            yet know rather than re-running a settled question (the epistemic ordering).
+
+        Nothing here names a pad, a block or a door: it enumerates relations between things PERCEPTION distinguishes — what
+        moves and what does not — which is what keeps it domain-free (`feedback_bitter_lesson`)."""
+        landmarks = [f for f in pos if f != sc and f not in self._movers]
+        cands = [(m, f) for m in self._movers if m in pos for f in landmarks if pos[m] != pos[f]]
+        cands.sort(key=lambda c: (self.goal_mem.w.get(c, 0.0), self.goal_mem.w.get(frozenset({c}), 0.0)))
+        return cands
 
     def _seek_plan(self, targets, movement):
         """The EPISTEMIC drive's plan: reach something the model cannot yet predict (None if there is nothing, or nothing
@@ -1039,14 +1068,14 @@ class Agent:
         agent = tuple(round(c) for c in world.agent[0]) if world.agent is not None else None
         return {"agent": agent, "objects": {oid: tuple(round(c) for c in p[0]) for oid, p in world.objects.items()}}
 
-    def _goal_plan(self, objs, cur, pos, movement):
+    def _goal_plan(self, objs, cur, pos, movement, conds=None):
         """Plan toward the discovered win condition — a CONJUNCTION in general (`goal_mem.goals()`). Each condition becomes a
         predicate over world-states and the rollout searches for a state satisfying ALL of them at once, so the ordering
         (push the block onto the pad, then walk to the goal) falls out of the search rather than being sequenced by hand.
 
         None ⇒ nothing discovered yet, or the conjunction is UNREACHABLE under the learned model — and saying so honestly is
         what lets the basal ganglia hand over to the epistemic drive instead of the agent grinding at a goal it cannot get to."""
-        conds = self.goal_mem.goals()
+        conds = self.goal_mem.goals() if conds is None else conds
         if not conds:
             return None
         tests = []
@@ -1096,7 +1125,7 @@ class Agent:
         agent = tuple(round(c) for c in world.agent[0]) if world.agent is not None else None
         return {"agent": agent, "objects": {oid: tuple(round(c) for c in p[0]) for oid, p in world.objects.items()}}
 
-    def _goal_plan(self, objs, cur, pos, movement):
+    def _goal_plan(self, objs, cur, pos, movement, conds=None):
         """Plan toward the discovered goal (empty ⇒ none / already satisfied / unreachable, so the caller explores). A bare-feature
         goal = navigate the SELF to that feature's cell (the rollout over agent moves). A `(mover, landmark)` goal = rollout the
         MOVER onto the landmark's cell — the PUSH, where the rollout beats a one-step value (`project_linear_value_cannot_hold_sokoban`)."""
