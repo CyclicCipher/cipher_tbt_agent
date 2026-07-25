@@ -98,3 +98,30 @@ def test_the_agents_own_model_shows_a_prequential_learning_curve():
     assert early > 0.0, "the model must start out surprised by the world"
     assert late < early, f"the agent's OWN model must learn (loss {early:.3f} → {late:.3f})"
     assert agent.progress.total() > 0.0, "learning must accumulate epistemic reward"
+
+
+# ── the CONJUNCTIVE win condition (`GoalMemory.goals`) ──────────────────────────────────────────────────────────────────
+# LockPath L2's win is "the block is on the pad AND the agent is on the goal". A linear delta rule cannot represent an AND
+# (the XOR problem), so the conjunction is offered as a CONFIGURAL cue alongside the elements and they compete.
+
+def test_an_element_that_pays_alone_is_learned_alone():
+    """The easy case must not regress: where one condition IS the win condition, it is what `goals()` reports."""
+    from tbt.reward import GoalMemory
+    gm = GoalMemory()
+    for _ in range(5):
+        gm.credit({3}, 1.0)
+    assert gm.goals() == {3}
+
+
+def test_a_conjunction_is_learned_and_the_misleading_element_is_demoted():
+    """The L2 shape. Reaching the goal ALONE pays nothing and happens often; reaching it with the block on the pad pays. The
+    elemental "on the goal" is driven down by the unpaid visits, while the configural cue — present only when the reward
+    arrives — keeps its weight, so `goals()` reports BOTH conjuncts and a planner can satisfy them together."""
+    from tbt.reward import GoalMemory
+    gm = GoalMemory()
+    pair = (6, 7)                                             # block 6 resting on pad 7
+    for _ in range(12):
+        gm.credit({3}, 0.0)                                   # on the goal, pad uncovered ⇒ nothing
+        gm.credit({3, pair, frozenset({3, pair})}, 1.0)       # both hold ⇒ the win
+    assert gm.goals() == {3, pair}, f"the conjunction must be discovered, got {gm.goals()}"
+    assert gm.w[3] < gm.w[frozenset({3, pair})], "the misleading element must rank below the configural cue"

@@ -724,6 +724,224 @@ class Agent:
         return None
 
     def _credit_goal(self, prev_objs, prev_pos, action, prev_cur, reward, sc) -> None:
+        """Discover the win condition by the delta rule (`goal_mem`) from the state the reward was paid IN — not from the last
+        transition alone.
+
+        That distinction is what L2 turns on. Its win is "the block is on the pad AND the agent is on the goal", and only ONE
+        of those can be the move that happens to complete it; crediting just that move teaches half a win condition, and an
+        agent that has learned half of it stalls having satisfied its half. So every condition HOLDING in the winning state is
+        credited together and they compete: conditions that are merely incidental wash out over the trials where they hold and
+        nothing is paid, and a genuinely necessary conjunct keeps its weight.
+
+        The winning frame is never returned (the board advances on completion), so the state is INFERRED from the pre-move
+        frame plus the action — which is also what keeps the credit boundary-safe."""
+        conds = self._winning_conditions(prev_objs, prev_pos, action, prev_cur, sc)
+        if not conds:
+            return
+        cues = set(conds)                                              # the ELEMENTAL conditions …
+        if len(conds) > 1:
+            cues.add(frozenset(conds))                                 # … and the CONJUNCTION itself as a configural cue,
+        self.goal_mem.credit(cues, reward)                             # because a linear rule cannot represent an AND
+
+    def _winning_conditions(self, prev_objs, prev_pos, action, prev_cur, sc) -> set:
+        """The conditions TRUE in the state this action leads to: the static landmark the SELF is standing on, and every MOVER
+        resting on a static landmark — whether this action put it there or it has been sitting there for twenty steps. The
+        latter is the point: a conjunct satisfied earlier is still part of why the reward arrived.
+
+        The self reaching a MOVER is never a condition (that is the push itself, which the dynamics own), which keeps "reach
+        the box" from masquerading as a goal."""
+        out, self_target = set(), self._target_cell(prev_cur, action)
+        reached = self._static_feature_at(prev_objs, self_target, sc)
+        if reached is not None:
+            out.add(reached)
+        for c in self._movers:
+            if c not in prev_pos:
+                continue
+            cell = prev_pos[c]
+            if self_target == cell:                                    # this action pushed it — it advances one along the push
+                cell = self._target_cell(cell, action)
+            landmark = self._static_feature_at(prev_objs, cell, sc)
+            if landmark is not None:
+                out.add((c, landmark))
+        return out
+
+    def _beyond(self, objs, cell):
+        """What backs a contact: the feature at `cell`, or the "edge" beyond the board, or None (in-bounds and empty). The
+        boundary is a perceived backdrop like any other, so an object pressed against the edge mints an EDGE occasion rather
+        than being mistaken either for an open-space push (which would wrongly teach the base "it stays") or for a world-
+        anchored object (which would wrongly mint a world override). Matches `WorldMap.occupant`, so learning and the rollout
+        see the same backdrop."""
+        ext = getattr(self, "_extent", None)
+        if ext is not None and any(not (lo <= c <= hi) for c, (lo, hi) in zip(cell, ext)):
+            return "edge"
+        return self._feature_at(objs, cell)
+
+    def _feature_at(self, objs, cell):
+        """The feature occupying `cell` in a perceived frame, or None if it is empty — the plain perceptual question the
+        contact's cue set is built from."""
+        for o in objs:
+            if cell in o.cells:
+                return o.color
+        return None
+
+    def _sense_frame(self, objs, sc):
+        """The sensorimotor SCAN — L4 feature-at-location ⊗ the THALAMIC binding register. This replaced `_static_cells`,
+        which re-segmented the whole frame each step into a hand-built `{cell: feature}` dict: a map the agent maintained
+        in Python, outside any column, that could not predict and did not transfer.
+
+        At every perceived non-self cell the body's L6a location is placed there, L4 is asked what it EXPECTS
+        (`predict_feature`), then driven with what is actually there (`sense_at`), and the (feature ⊗ location) conjunction
+        is written into the thalamus's register (`bind`/`bundle`). The surface the planner uses is then READ BACK OUT of that
+        register by location (`read`), so the map is served by the cortex and the thalamus rather than by a dict.
+
+        What this buys that the dict could not. L4 now holds a LEARNED, order-invariant model of what belongs where, so the
+        agent has a map that PREDICTS and that survives a location being out of view — the thing a re-segmentation each step
+        can never give. And the mismatch between what L4 expected and what arrived is a real PERCEPTUAL PREDICTION ERROR:
+        when a door opens somewhere the agent never touched, that is a measured surprise rather than a silently-different
+        dict entry. Returns `(surface, surprise)`.
+
+        HONEST SCOPE. Under FULL observability the surface handed to the planner is still the percept, because the percept is
+        simply what is there — reading it back out of L4 would return the same answer at extra cost, and pretending otherwise
+        would be theatre. L4's model earns its place through the PREDICTION (the surprise here now, partial observability and
+        recall-when-unseen next), not by relaying what is already in view. The thalamic register is likewise the cross-column
+        VOTING channel (`Thalamus.read`'s `min_support`), not a map store: measured, superposing ~25 cells into 8-bit location
+        codes crosstalks badly enough that a frequent feature reads back at every location."""
+        col = self._nav_col()
+        saved = col.pose()
+        here = {cell: o.color for o in objs if o.color != sc for cell in o.cells}
+        # SCAN the union of what is perceived NOW and every location L4 has already BOUND. The union is the point: a cell that
+        # goes EMPTY is invisible to a scan of occupied cells alone — and a door opening is exactly a cell going empty — so
+        # restricting the scan to what is currently there makes the one event this is for undetectable by construction.
+        bounds, surface, miss, seen = [], {}, 0, 0
+        for cell in set(here) | self._bound:
+            feature = here.get(cell, self._background)          # what is there now; BACKGROUND if it has emptied
+            feat = self._feat_enc.encode(feature)
+            col.set_pose(tuple(float(c) for c in cell), eye(self._dims))
+            expected = col.predict_feature()                    # what L4 believes belongs HERE, before sensing
+            if expected:
+                seen += 1
+                miss += 0 if (expected & feat.active) else 1
+            col.sense_at(feat, learn=True)                      # L4 learns the feature AT this location — ALL of it:
+            bounds.append(self.thalamus.bind(feat.active, col._code().active))   # perception is complete, movers included
+            self._bound.add(cell)
+            if feature != self._background and feature not in self._movers:      # the SURFACE is the static, occupied part;
+                surface[cell] = feature                                          # movers are tracked as objects in their own right
+        self._register = self.thalamus.bundle(*bounds)
+        if saved is not None:
+            col.set_pose(saved[0], saved[1])
+        return surface, (miss / seen if seen else 0.0)
+
+    def _as_pose(self, cell):
+        """A grid cell → a continuous pose `(position, R=identity)` in the nav frame."""
+        return (tuple(float(c) for c in cell), eye(self._dims))
+
+    def _positions(self, objs) -> dict:
+        """`{feature: anchor}` for each feature realised by EXACTLY ONE object this frame — the single-cell tracking key that
+        lets a mover be followed across frames (recognition disambiguates same-feature objects later; deferred)."""
+        by_color: dict = {}
+        for o in objs:
+            by_color.setdefault(o.color, []).append(o)
+        return {c: os[0].anchor for c, os in by_color.items() if len(os) == 1}
+
+    def _track_movers(self, prev_pos, pos, sc) -> None:
+        """A NON-self object whose cell changed between frames is a controllable MOVER — discovered from motion (like the self),
+        never from colour semantics. Movers are the objects a rollout must simulate as pushable (routed to the scene column).
+        Gated on the self being KNOWN, or the self (which moves every step) would be mislabelled a mover before it is identified."""
+        if sc is None:
+            return
+        for c, cell in pos.items():
+            if c != sc and c in prev_pos and prev_pos[c] != cell:
+                self._movers.add(c)
+
+    def _pushed(self, prev_pos, pos) -> bool:
+        """Did any known mover change cell in this transition? (So a self non-move that PUSHED a box is not mislabelled a wall bump.)"""
+        return any(c in prev_pos and c in pos and prev_pos[c] != pos[c] for c in self._movers)
+
+    def _skin(self, grid, objs, cur) -> dict:
+        """The SKIN sense over the body surface (the TOUCH modality's transducer) — what is pressed against each face of the
+        self's body right now. The AGENCY signal: an object the body FELT (here) that then moves was moved by the SELF, not by a
+        collision between other objects. `{}` until the self is localised."""
+        body = self._body_cells(objs, cur)
+        return self._modalities["touch"].transduce(grid, body) if body else {}
+
+    def _body_cells(self, objs, cur) -> set:
+        """The self's BODY — the cells of the discovered controllable object (single-cell = `{its cell}`); empty until localised."""
+        c = self.self_color()
+        if c is None or cur is None:
+            return set()
+        for o in objs:
+            if o.color == c and o.anchor == cur:
+                return set(o.cells)
+        return {cur}
+
+    def _learn_dynamics(self, action, prev_objs, prev_skin, prev_pos, pos, prev_cur, cur, sc) -> None:
+        """Teach the L5 TRANSFORM from one felt interaction (`behavior.py`, `notes/touch_and_body_design.md` §7). The self FELT
+        something at its leading face (AGENCY — the skin, in the efference direction), so this transition is SELF-CAUSED and may
+        be attributed; an object that moved without being felt (a box shoved by another box) teaches nothing here, which is why
+        touch and not geometry grounds it. Two facts, both plain deltas, neither of them a category:
+
+        * ("into", felt) — the CORRECTION to the body's own free motion when pressing into `felt`. Zero when it gave way, −eff
+          when it did not. Solidity is that correction, learned; there is no "resist".
+        * ("of", felt)   — the FELT thing's own displacement under this press. Zero when it stayed. There is no "yield" either.
+
+        The body gets a correction and the felt thing an absolute delta because only the body has a free-motion baseline to
+        correct — the efference copy. That asymmetry is the anatomy, not a special case."""
+        if prev_cur is None or not getattr(action, "is_movement", False) or not prev_skin:
+            return
+        # the direction the body PRESSED: its ACTUAL displacement if it advanced (no operator needed, which is what lets the
+        # FIRST move in a direction, even if it is the push, be learned), else the operator's PREDICTED free move (a press that
+        # went nowhere, whose direction the body never actually took).
+        if cur is not None and cur != prev_cur:
+            eff = sub(tuple(float(c) for c in cur), tuple(float(c) for c in prev_cur))
+        else:
+            op = self._nav_col().operator
+            if not op.known(action):
+                return
+            eff = sub(op.apply(self._as_pose(prev_cur), action)[0], tuple(float(c) for c in prev_cur))
+        felt = contact_toward(prev_skin, eff)                                   # the thing the body pressed into (agency)
+        if felt is None or felt == sc:
+            return
+        z = tuple(0.0 for _ in range(self._dims))
+        body_disp = sub(tuple(float(c) for c in cur), tuple(float(c) for c in prev_cur)) if cur is not None else z
+        obj_disp = (sub(tuple(float(c) for c in pos[felt]), tuple(float(c) for c in prev_pos[felt]))
+                    if felt in pos and felt in prev_pos else z)
+        contact = tuple(int(round(c + d)) for c, d in zip(prev_cur, eff))       # the cell the body pressed into
+        beyond = self._beyond(prev_objs, tuple(int(round(c + d)) for c, d in zip(contact, eff)))
+        impeded = norm(sub(body_disp, eff)) > 1e-9                               # the body did NOT advance by its full efference
+        self._learn_delta("into", felt, beyond, eff, sub(body_disp, eff), impeded)
+        self._learn_delta("of", felt, beyond, eff, obj_disp, impeded)
+
+    def _route_movers(self, pos) -> None:
+        """Place every currently-visible known mover into the SCENE column, so `world_state()` (hence the rollout) includes it.
+        STATIC features (pads, goals, walls — never seen to move) are NOT routed: they are landmarks for the goal predicate, not
+        simulated bodies."""
+        if not self._movers:
+            return
+        self.clear_scene()
+        for c in self._movers:
+            if c in pos:
+                self.place_object(c, self._as_pose(pos[c]))
+
+    def _target_cell(self, cell, action):
+        """The cell `action` moves the self INTO from `cell`, via the LEARNED operator (not the action's declared delta — the
+        effect is discovered, `reference_l5_operator_kinds`). None until the operator has learned this action."""
+        op = self._nav_col().operator
+        if not op.known(action):
+            return None
+        tgt = op.apply(self._as_pose(cell), action)
+        return tuple(round(c) for c in tgt[0])
+
+    def _static_feature_at(self, objs, cell, sc):
+        """The STATIC feature at a cell — the colour of a non-self, non-mover object there (a landmark: pad, goal tile) — or None
+        if the cell is empty or occupied by the self / a mover. What a discovered GOAL attaches to (a place-to-reach, not a body)."""
+        if cell is None:
+            return None
+        for o in objs:
+            if cell in o.cells:
+                return o.color if (o.color != sc and o.color not in self._movers) else None
+        return None
+
+    def _credit_goal(self, prev_objs, prev_pos, action, prev_cur, reward, sc) -> None:
         """Discover the goal by the delta rule (`goal_mem`), REACHER-typed so the two credit paths never confound. The SELF
         reaching a static landmark credits the bare feature (a NAV goal — LockPath). A MOVER the self PUSHES onto a static
         landmark credits the PAIR `(mover, landmark)` (a RELATIONAL goal — 'put the box on the pad'). The self reaching a mover is
@@ -793,6 +1011,63 @@ class Agent:
                 return plan[0]
         self._last_plan = []
         return self._rng.choice(movement)                          # nothing to pursue and nothing left to learn
+
+    def _seek_plan(self, targets, movement):
+        """The EPISTEMIC drive's plan: reach something the model cannot yet predict (None if there is nothing, or nothing
+        reachable). The pragmatic drive's counterpart is `_goal_plan`; the BG chooses between them."""
+        if not targets:
+            return None
+        reach = lambda w: 1.0 if (w.agent is not None and tuple(round(c) for c in w.agent[0]) in targets) else 0.0
+        return self.plan(reach, movement, horizon=32)
+
+    def imagine(self, actions=None):
+        """The agent's IMAGINED future: unroll a plan (default: the last committed one) through the LEARNED forward model from the
+        current world-state, returning the sequence of imagined world CELLS `[{'agent': cell, 'objects': {id: cell}}, ...]`. This
+        is the substrate for the two-pane imagination widget (`project_hippocampus_imagination_and_widget`): laid beside the real
+        frames, the imagined trajectory either tracks reality or visibly DIVERGES — and a divergence localises the model's error."""
+        actions = self._last_plan if actions is None else actions
+        world, model = self.world_state(), self.world_model()
+        traj = [self._world_cells(world)]
+        for a in actions:
+            world = model.step(world, a)
+            traj.append(self._world_cells(world))
+        return traj
+
+    @staticmethod
+    def _world_cells(world) -> dict:
+        """A world-state's occupied CELLS (integer positions) — the agent and each object — for rendering / comparison."""
+        agent = tuple(round(c) for c in world.agent[0]) if world.agent is not None else None
+        return {"agent": agent, "objects": {oid: tuple(round(c) for c in p[0]) for oid, p in world.objects.items()}}
+
+    def _goal_plan(self, objs, cur, pos, movement):
+        """Plan toward the discovered win condition — a CONJUNCTION in general (`goal_mem.goals()`). Each condition becomes a
+        predicate over world-states and the rollout searches for a state satisfying ALL of them at once, so the ordering
+        (push the block onto the pad, then walk to the goal) falls out of the search rather than being sequenced by hand.
+
+        None ⇒ nothing discovered yet, or the conjunction is UNREACHABLE under the learned model — and saying so honestly is
+        what lets the basal ganglia hand over to the epistemic drive instead of the agent grinding at a goal it cannot get to."""
+        conds = self.goal_mem.goals()
+        if not conds:
+            return None
+        tests = []
+        for g in conds:
+            if isinstance(g, tuple):                                # RELATIONAL: mover g[0] resting on a g[1] landmark cell
+                mover_c, landmark_c = g
+                if mover_c not in pos or landmark_c not in pos:
+                    return None
+                target = pos[landmark_c]
+                tests.append(lambda w, m=mover_c, t=target: (m in w.objects
+                                                             and tuple(round(c) for c in w.objects[m][0]) == t))
+            else:                                                   # NAV: the self standing on that feature's cell
+                cells = [o.anchor for o in objs if o.color == g]
+                if len(cells) != 1:
+                    return None
+                tests.append(lambda w, t=cells[0]: (w.agent is not None
+                                                    and tuple(round(c) for c in w.agent[0]) == t))
+        satisfied = lambda w: 1.0 if all(t(w) for t in tests) else 0.0
+        if satisfied(self.world_state()) > 0:
+            return None                                             # already met — nothing for this drive to do
+        return self.plan(satisfied, movement, horizon=64) or None
 
     def _seek_plan(self, targets, movement):
         """The EPISTEMIC drive's plan: reach something the model cannot yet predict (None if there is nothing, or nothing

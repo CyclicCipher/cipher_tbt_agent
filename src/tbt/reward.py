@@ -154,9 +154,35 @@ class GoalMemory:
             self.w[f] = self.w.get(f, 0.0) + self.lr * err
 
     def goal(self):
-        """The most reward-contingent feature (argmax weight, if it clears `eps`) — the discovered goal, or None until a reward
-        has credited one. Feature-based, so it names the goal object wherever on the board it sits (the transfer lever)."""
+        """The single most reward-contingent condition (argmax, if it clears `eps`) — kept for callers that want one thing to
+        name. `goals()` is what a planner should use: a win condition can be a CONJUNCTION."""
         if not self.w:
             return None
         f, v = max(self.w.items(), key=lambda kv: kv[1])
         return f if v >= self.eps else None
+
+    def goals(self) -> set:
+        """The discovered win condition as a SET of conditions to satisfy — a CONJUNCTION in general, a singleton in the easy
+        case. LockPath L2 wants the block on the pad AND the agent on the goal; an argmax can only name one of those, so an
+        agent reading `goal()` pursues half a win condition and stalls having done it.
+
+        HOW A CONJUNCTION IS LEARNED AT ALL. A linear delta rule cannot represent one — that is the XOR problem — so the
+        caller offers the conjunction ITSELF as a candidate cue (a CONFIGURAL unit, a frozenset of conditions) alongside the
+        individual ones, and they compete. On L2 the agent reaches the goal many times with the pad uncovered and is paid
+        nothing, so the elemental "on the goal" is driven down; the configural "on the goal AND block on the pad" is only ever
+        present when the reward arrives, so it keeps its weight and wins the argmax. Elemental vs configural is settled by
+        evidence (`reference_cue_competition_key_discovery`), not declared.
+
+        The winning cue is expanded back into its conditions, so a caller sees a plain set either way."""
+        if not self.w:
+            return set()
+        top = max(self.w.values())
+        if top < self.eps:
+            return set()
+        # Cues that the evidence cannot separate get the SAME weight — a configural cue and a conjunct that is only ever
+        # present with it are perfectly correlated, so the delta rule splits credit and the argmax is arbitrary. Break that
+        # tie toward the MOST SPECIFIC hypothesis: it entails the others, so satisfying it satisfies them too, which makes it
+        # the safe reading of evidence that genuinely does not distinguish them (specific-to-general, as in concept learning).
+        tied = [f for f, v in self.w.items() if v >= top - 1e-9]
+        best = max(tied, key=lambda f: len(f) if isinstance(f, frozenset) else 1)
+        return set(best) if isinstance(best, frozenset) else {best}
