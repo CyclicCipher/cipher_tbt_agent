@@ -30,7 +30,6 @@ from .operator import add, norm, sub
 from .perceive import SelfTracker, segment
 from .region import Hierarchy, Region
 from .reward import GoalMemory, LearningProgress, ValueCritic
-from .successor import SuccessorFrame
 from .thalamus import Thalamus
 from .touch import contact_toward
 
@@ -76,7 +75,11 @@ class Agent:
         self.sensory = Column(sensory_n=sensory_n, n_cols=n_cols, order=1, seed=seed,
                               location=GridEncoder(scales=(7, 11, 13, 17), dims=dims, mw=1,
                                                    bounds=[(0, 63)] * dims))      # predicts next CONTENT
-        self.task = Column(sensory_n=sensory_n, n_cols=n_cols, order=1, seed=seed + 1)     # carries/predicts the STATE
+        # RENAMED from `task` 2026-07-27: it never was a task column. It is a second column driven by the SAME transducer
+        # as `sensory`, differing only in what it is read out for — content there, the sequential STATE (arithmetic's carry)
+        # here. By `region.py`'s own test it is PERIPHERAL (a transducer feeds it), where a task region is by definition fed
+        # by cortex. Keeping the name on it would have made the real one look already built.
+        self.state_col = Column(sensory_n=sensory_n, n_cols=n_cols, order=1, seed=seed + 1)   # carries/predicts the STATE
         self.read_content = _Readout(n_cols, n_content)      # order=1 → M=1 → n_cells == n_cols
         self.read_state = _Readout(n_cols, n_state)
         # decision loop (ARCHITECTURE §3): the BASAL GANGLIA selects an action by value; the THALAMUS relays the percept
@@ -122,19 +125,14 @@ class Agent:
         self._ident_enc = CategoryEncoder(w=8, capacity=256)
         # The declared HETERARCHY (`region.py`): which column is fed by what. Peripheral regions are fed by a modality's
         # transducer; higher ones by another region's output — which is the only structural difference between them.
-        # EVERY region here is still declared `proximal="vision"`, so `hierarchy.edges()` is EMPTY and says so: the
-        # compositional column's L4 is genuinely driven (objects-at-poses, learned and predicted), but what drives it is a
-        # TRANSDUCED colour, not a lower region's settled output. Making it cortico-cortical needs the sensory region to
-        # HAVE an output to send — an L2/3 identity — and it has no pooler, because it was built without a frame.
-        # The TASK frame: a LEARNED L6a for structure that has no metric to hand it (`successor.py`). The spatial frame
-        # stays a GridEncoder — physical space IS metric and the grid's vector-navigation is worth keeping — while this
-        # learns the configuration graph the agent actually moves through. It is fed the JOINT world state deliberately,
-        # which is the decision experiment the legacy HETERARCHY_PLAN's H0 asks for: feed one frame the joint transitions
-        # and find out whether position and task-state separate inside it before allocating a second column for them.
-        self.task_frame = SuccessorFrame()
+        # The two peripheral regions below are fed by the `vision` transducer; `scene` and `task` are fed by cortex, which
+        # is what `edges()` reports. `_task` is built lazily, like the other cortical regions, when there is a scene to
+        # have a task over.
         self.hierarchy = Hierarchy()
-        self.hierarchy.add(Region("sensory", self.sensory, proximal="vision", frame=None, target="task"))
-        self.hierarchy.add(Region("task", self.task, proximal="vision", frame=None, target="striatum"))
+        self.hierarchy.add(Region("sensory", self.sensory, proximal="vision", frame=None, target="state"))
+        self.hierarchy.add(Region("state", self.state_col, proximal="vision", frame=None, target="striatum"))
+        self._task = None
+        self._last_task = None            # the previous step's task state, so the task L6a can learn the EDGE
         self._n_cols = int(n_cols)
         self._seed = int(seed)
         self._dims = int(dims)    # the SPACE the body moves in — 2 for an ARC frame, 3 for a 3-D environment. A property of
@@ -144,7 +142,7 @@ class Agent:
     def _sense(self, feature: SDR, state: int, learn: bool):
         st = self.state_enc.encode(state)
         s_cells = self.sensory.observe(feature, st, learn=learn)
-        t_cells = self.task.observe(feature, st, learn=learn)
+        t_cells = self.state_col.observe(feature, st, learn=learn)
         return s_cells, t_cells
 
     def learn_fixation(self, feature: SDR, state_in: int, next_content: int, state_out: int) -> None:
@@ -346,6 +344,44 @@ class Agent:
         """The relational STATE of a scene object (the geometry of its relations) — what the behaviour is conditioned on."""
         return self._scene_col().state_of(object_id)
 
+    # ----- THE TASK REGION (H2): a column over the SCENE's relational configuration, with NO position in it ------------
+    def _task_col(self) -> Column:
+        """The TASK column — the SAME `Column` class again, fed a different input, which is the whole of what makes it a
+        task region (Mountcastle; the legacy plan's non-negotiable: never a bespoke task module).
+
+        ITS L6a IS A LEARNED GRAPH, not a grid, because task space has no metric to hand it: "the block rests on the pad"
+        is not a point in R^n. That is `successor.py`, and it is why H0 had to run first — H0 measured that ONE frame over
+        the joint `(position, configuration)` state does not factorise, so this frame must not be given position at all.
+
+        ANATOMY DECIDES THE SPLIT. Nothing here works out which variables are "task" ones. The task column simply never
+        receives position, because its proximal input is the SCENE region's relational output and the body's pose goes to
+        `nav` instead — the split is in the wiring, exactly as it is in cortex, where what a region represents is settled
+        by which axons arrive. **The bold assumption, named** (`feedback_prefer_generalize_then_correct`): that a fixed
+        wiring split serves any game. **Its falsifier is concrete:** a game whose task state genuinely depends on WHERE it
+        holds — a switch that does different things in different rooms — would make this column's transitions
+        non-deterministic (one state, one action, two successors) and it would stop predicting. That is measurable, and it
+        retracts the assumption rather than excusing it."""
+        if self._task is None:
+            self._task = Column(sensory_n=1, n_cols=self._n_cols, order=1, seed=self._seed + 6, graph=True)
+            self.hierarchy.add(Region("task", self._task, proximal="scene", frame="graph", target="striatum"))
+        return self._task
+
+    def task_state(self) -> frozenset:
+        """The scene's configuration as ONE hashable state — every object's RELATIONS to the others, and nothing else.
+
+        Position-free BY CONSTRUCTION rather than by filtering: a relation is a difference of poses, so absolute position
+        cancels in the arithmetic (`Column.state_in`, already built for state-conditioned behaviour). Translate the whole
+        board and this is unchanged; walk the agent around and this is unchanged, because the agent is not among the
+        relata — its pose is the nav column's business.
+
+        An EMPTY scene gives the empty state, and that is the honest answer rather than a degenerate one: a pure-navigation
+        level HAS no task structure, so a task region with one state is correctly reporting that there is nothing here for
+        it to model and the nav column is doing the work."""
+        if self._scene is None:
+            return frozenset()
+        objects = self._scene.scene_snapshot()
+        return frozenset((oid, self._scene.state_in(objects, oid)) for oid in objects)
+
     def learn_behavior(self, action, object_id, after_pose) -> None:
         """Learn what `action` does to a scene object, CONDITIONED on its relational state — the override, learned not coded
         (a supported object staying is just the effect keyed on the support state)."""
@@ -363,7 +399,10 @@ class Agent:
         the columns hold the slow learned model, the returned map is the fast forkable state. The map borrows the nav
         column's learned body operator BY REFERENCE, so a fork path-integrates the agent under the one shared model.
         ARC's board is world-anchored, so the nav pose and the scene objects already share one world frame (DESIGN §4)."""
-        objects = self._scene_col().scene_snapshot() if self._scene is not None else {}
+        scene = self._scene_col().scene_snapshot() if self._scene is not None else {}
+        objects = {oid: p for oid, p in scene.items() if oid in self._movers}   # the rollout simulates BODIES: the scene
+        #   holds every object (that is what the region represents), and being DYNAMIC is this consumer's filter, applied
+        #   here rather than upstream — statics reach the model as `static=self._surface`, which is a different mechanism.
         bounds = getattr(self, "_extent", None) or [(0, 63)] * self._dims
         return WorldMap(self.pose(), objects, bounds, body=self._nav_col().operator, static=self._surface)
 
@@ -508,8 +547,6 @@ class Agent:
                 payoff += self.progress.observe(self._model_loss(prev_cur, action, prev_pos, cur, pos))   # SCORE the model
                 self._track_movers(prev_pos, pos, sc)               # BEFORE it learns — the PREQUENTIAL loss (epiplexity)
                 self._learn_dynamics(action, prev_objs, prev_skin, prev_pos, pos, prev_cur, cur, sc)  # learn the change from FELT contact
-            if prev_cur is not None and cur is not None:          # the TASK frame learns the configuration transition
-                self.task_frame.observe(self._world_key(prev_cur, prev_pos), action, self._world_key(cur, pos))
             if self._last_mode is not None:                          # TONIC DOPAMINE = the average PAYOFF rate, extrinsic ⊕
                 self.bg.learn(self._MODE_CTX, self._last_mode, payoff - self.critic.rho())   # epistemic; the BG's drive choice
             self.critic.tonic(payoff)                                # is trained by that payoff's RPE against the rate
@@ -519,7 +556,12 @@ class Agent:
                 self.new_level()                                     # but the learned model + goal + movers PERSIST
             elif moved and cur is not None and cur != prev_cur:      # the self MOVED → the operator learns this action's Δ
                 self.learn_pose_move(action, self._as_pose(prev_cur), self._as_pose(cur))
-        self._route_movers(objs, pos)                                      # place visible movers into the scene column (world_state/rollout)
+        self._route_scene(objs, pos)                                 # every perceived object → the scene region (task state, rollout)
+        if self._scene is not None:                                  # the TASK region's L6a learns one edge of the
+            task = self.task_state()                                 # configuration graph — but only once there IS a scene
+            if self._last is not None and self._last_task is not None and action is not None:
+                self._task_col().learn_transition(self._last_task, action, task)
+            self._last_task = task
         self._surface, self._l4_surprise = self._sense_frame(objs, sc)   # L4 ⊗ thalamus: sense, bind, recall the surface
         skin = self._skin(fd.grid, objs, cur)                       # what the body FEELS now — the agency signal for next step
         action = self._act(objs, cur, pos, fd.available_actions)
@@ -581,12 +623,6 @@ class Agent:
     def _learn_delta(self, tag, felt, beyond, eff, observed, impeded=False) -> None:
         """Teach the column's L5 from one felt interaction."""
         self._nav_col().learn_change(tag, felt, beyond, eff, observed, impeded)
-
-    def _world_key(self, cur, pos):
-        """The world CONFIGURATION as one hashable state — the agent's cell plus where every tracked mover is. This is what
-        the task frame's transitions are over: not a coordinate, just a state that either follows from another or does not,
-        which is all an SR needs."""
-        return (cur, frozenset((c, pos[c]) for c in self._movers if c in pos))
 
     def _beyond(self, objs, cell):
         """What backs a contact: the feature at `cell`, or the "edge" beyond the board, or None (in-bounds and empty). The
@@ -779,24 +815,33 @@ class Agent:
         self._learn_delta("into", felt, beyond, eff, sub(body_disp, eff), impeded)
         self._learn_delta("of", felt, beyond, eff, obj_disp, impeded)
 
-    def _route_movers(self, objs, pos) -> None:
-        """Place every currently-visible known mover into the SCENE region, so `world_state()` (hence the rollout) includes it,
-        and DRIVE that region's L4 with the mover's settled IDENTITY — the sensory region's conclusion, not its input. That is
-        what makes this a cortico-cortical edge rather than a transducer reaching two levels up.
+    def _route_scene(self, objs, pos) -> None:
+        """Place every unambiguously-perceived object into the SCENE region, and DRIVE that region's L4 with its settled
+        IDENTITY — the sensory region's conclusion, not its input. That is what makes this a cortico-cortical edge rather
+        than a transducer reaching two levels up.
 
-        An identity is skipped while `commit` is still deferring (L4 has not yet learned enough of the object to ground one);
-        the pose is recorded regardless, so the rollout never loses a mover waiting on recognition. STATIC features are not
-        routed: they are landmarks for the goal predicate, not simulated bodies."""
-        if not self._movers:
+        EVERY OBJECT, NOT ONLY THE MOVERS — changed 2026-07-27, and it is what made the task region non-degenerate. This
+        routed `self._movers` alone, on the reasoning that statics "are landmarks for the goal predicate, not simulated
+        bodies". But a compositional region represents WHAT OBJECTS ARE WHERE; whether a thing moves is a separate fact,
+        and using it as the criterion for admission meant the pad was never in the scene at all — so "the block rests on
+        the pad" had no relatum and the task state could not exist. Measured before the change: 1 task state and 4
+        self-loops over a whole Sokoban play. Being dynamic is now the ROLLOUT's filter, applied where the rollout
+        consumes the scene (`world_state`), which is where a need belongs rather than upstream of everyone else's.
+
+        An identity is skipped while `commit` is still deferring (L4 has not yet learned enough of the object to ground
+        one); the pose is recorded regardless, so nothing is lost waiting on recognition."""
+        if not pos:
             return
         self.clear_scene()
         by_colour = {o.color: o for o in objs}
-        for c in self._movers:
-            if c not in pos:
-                continue
+        sc = self.self_color()                                       # the SELF is not a scene object: it is the body, and
+        for c, cell in pos.items():                                  # its pose is the nav column's (that IS the split —
+            if c == sc:                                              # measured: leaving it in put the agent's own position
+                continue                                             # back into the task state, 106 states against 89
+            #                                                          joint ones, i.e. worse than not factoring at all)
             obj = by_colour.get(c)
             identity = self._object_identity(obj) if obj is not None else None
-            self.place_object(c, self._as_pose(pos[c]),
+            self.place_object(c, self._as_pose(cell),
                               identity=SDR(self.sensory.pooler.n, identity) if identity else None)
 
     def _target_cell(self, cell, action):

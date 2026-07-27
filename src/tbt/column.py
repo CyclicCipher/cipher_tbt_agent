@@ -251,6 +251,7 @@ from tbt.encoders import SDR, CategoryEncoder, GridEncoder, SpatialPooler
 from tbt.htm import HTMLayer
 from tbt.operator import MotionOperator, add, compose, dist, eye, gram_schmidt, invert, norm, rotate, solve_rotation, sub
 from tbt.pooler import ColumnPooler
+from tbt.successor import SuccessorFrame
 
 _TOL = 1e-6          # geometric slack: distances are exact floats here, so this only absorbs round-off
 
@@ -317,7 +318,7 @@ class Column:
     because the pose's orientation is a rotation MATRIX rather than a scalar angle."""
 
     def __init__(self, sensory_n: int, n_cols: int = 1024, order: int = 2, seed: int = 0,
-                 location: Optional[GridEncoder] = None) -> None:
+                 location: Optional[GridEncoder] = None, graph: bool = False) -> None:
         # Proximal front-end: only L4 turns a RAW input space into columns (§10 P4, §12). All other layers take SDRs.
         self.n_cols = int(n_cols)
         l4_sp = SpatialPooler(n_inputs=sensory_n, n_cols=n_cols, seed=seed)
@@ -398,6 +399,15 @@ class Column:
         # L2/3's POOLING engine (ARCHITECTURE §8): the stable object-IDENTITY that pools the L4 feature-at-location stream
         # (`pooler.ColumnPooler`) — a decoupled stable output + persistence, which the L2/3 HTMLayer (associate) cannot do.
         self.pooler = ColumnPooler(seed=seed + 4) if location is not None else None
+        # L6a FOR A NON-METRIC REGION — the LEARNED frame. `location` (a GridEncoder) is the frame you are GIVEN, and it
+        # works because physical space is metric: you can hand it coordinates and path-integrate on them. A region above the
+        # sensorimotor one has no coordinates to be handed — "the block rests on the pad" is not a point in R^n — so its L6a
+        # is an SR over that region's own transition graph, which is TEM's path integration over an ARBITRARY graph
+        # (`reference_hierarchy_substrate`, re-confirmed: a higher region's "movement" is an action operator on its graph,
+        # not bodily motion). Same layer, same job — hold where you are and what follows from here — different substrate,
+        # because the space is different. A column has ONE L6a: `location` XOR `graph`.
+        self.graph = SuccessorFrame() if graph else None
+        self._state = None                                      # L6a's current state, when the frame is a graph
         # The OBJECT-CENTRIC frame anchor: a canonical origin the frame is RE-ORIGINED to at each object onset, so a location
         # is measured RELATIVE to the object (grid frames have no origin — Lewis 2019; an arbitrary origin gives translation
         # invariance). One shared origin suffices because the L2/3 pooler individuates objects, not the phase.
@@ -521,6 +531,43 @@ class Column:
         """The current pose `(position, R)`; None before locate()/set_pose()."""
         self._require_location()
         return self._pose
+
+    # ── L6a over a LEARNED GRAPH (a non-metric region) — the SAME layer, the same four jobs ──────────────────────────
+    # `learn_move`/`locate`/`path_integrate`/`where` above are these four over a METRIC frame; below they are the same
+    # four over a frame with no metric to assume. That the interface is identical is TEM's claim, not a convenience: a
+    # higher region path-integrates over its transition graph exactly as a sensorimotor one integrates over space.
+    def _require_graph(self) -> None:
+        if self.graph is None:
+            raise ValueError("this column has no graph frame: construct it with graph=True.")
+
+    def learn_transition(self, state, action, nxt) -> None:
+        """L6a LEARNS: one edge of this region's transition graph, folded into the SR. The counterpart of `learn_move`,
+        and the same act — what does this action do to where I am? — over states rather than coordinates."""
+        self._require_graph()
+        self.graph.observe(state, action, nxt)
+        self._state = nxt
+
+    def enter_state(self, state) -> None:
+        """L6a is ANCHORED to an observed state (the counterpart of `locate`)."""
+        self._require_graph()
+        self._state = state
+
+    def state_code(self, state=None):
+        """The LOCATION CODE for a state — its SR row, correlated with the codes of states reachable from it. The
+        counterpart of the grid code, and the reason this is a frame at all rather than a table of names."""
+        self._require_graph()
+        return self.graph.code(self.where_state() if state is None else state)
+
+    def state_value(self, rewards, state=None) -> float:
+        """`V = M·R` over this region's own graph — the SR's whole point as a planner: once occupancy is known, value for
+        ANY reward function is a dot product, so a MOVED goal re-values the space with no relearning."""
+        self._require_graph()
+        return self.graph.value(self.where_state() if state is None else state, rewards)
+
+    def where_state(self):
+        """The state L6a currently holds (the counterpart of `where`); None before the first transition."""
+        self._require_graph()
+        return self._state
 
     # ── L5PT: the EFFERENCE COPY + flow parsing (moving-sensor fix; notes/l5_efference_broadcast_design.md) ────────────
     def efference(self, action):

@@ -4,8 +4,8 @@ The legacy `HETERARCHY_PLAN` makes this the gate on everything above it: *"H0 ga
 H1–H4 simplify to a structured single column. Run it first."* Feed ONE frame the joint `(position, configuration)`
 transitions and find out whether position and task-state separate INSIDE it, before allocating a second column for them.
 Either answer is a real finding: separation means the heterarchy collapses to one structured column and no task column is
-ever built; failure to separate is what justifies the second one. `Agent.task_frame` is fed `_world_key` — the agent's cell
-plus every tracked mover's cell — deliberately, so the live loop runs the experiment rather than a mock of it.
+ever built; failure to separate is what justifies the second one. The live arm below feeds one frame the agent's own
+joint `(cell, mover-cells)` transitions as it plays, so the experiment runs on real perception rather than a mock of it.
 
 WHAT IS MEASURED, AND WHY NOT THE EIGENFRAME. The plan phrases H0 as "does the SR eigenframe factorise", written when the
 frame was assumed to be an eigendecomposition. Ours is not, on the record: an O(n^3) decomposition is prohibitive online and
@@ -140,13 +140,18 @@ def test_two_frames_over_the_same_experience_do_transfer():
 
 
 def test_the_live_agent_shows_the_same_blow_up_on_lockpath():
-    """H0 ON THE LIVE LOOP, not a mock of it: the agent plays LockPath and `task_frame` accumulates its own `_world_key`
-    transitions. The same shape appears — states well in excess of cells, most cells re-entered under more than one
+    """H0 ON THE LIVE LOOP, not a mock of it: the agent plays LockPath and one frame accumulates its own joint
+    (cell, mover-cells) transitions. The same shape appears — states well in excess of cells, most cells re-entered under more than one
     configuration and stored afresh each time, and the same cell under two configurations sharing NO code at all."""
     env = Environment(LockPath())
     fd = env.reset()
     agent = Agent(feat_n=8, n_content=2, n_state=2, n_cols=64, seed=0)
-    tf = agent.task_frame
+    tf = SuccessorFrame()                            # the JOINT frame, built HERE by the measurement rather than carried by
+    #                                                  the agent: H0 is what justified deleting the agent's joint key, so
+    #                                                  leaving one in the live loop to keep this test running would preserve
+    #                                                  exactly the machinery the finding condemns. The transitions are the
+    #                                                  agent's own, read off the same perception the task region now uses.
+    prev = None
 
     def _by_cell():
         out: dict = {}
@@ -157,6 +162,13 @@ def test_the_live_agent_shows_the_same_blow_up_on_lockpath():
     for _ in range(400):                             # stops as soon as the measurement is available — the blow-up shows up
         action, coords = agent.step(fd)              # early, and playing on would only cost suite time to restate it
         fd = env.step(action, coords)
+        objs = agent.transduce(fd.grid)
+        cur, pos = agent._self_pos(objs), agent._positions(objs)
+        if cur is not None:
+            key = (cur, frozenset((c, pos[c]) for c in agent._movers if c in pos))   # position AND configuration, jointly
+            if prev is not None:
+                tf.observe(prev, action, key)
+            prev = key
         by_cell = _by_cell()
         if fd.is_terminal() or fd.is_win() or sum(len(c) > 1 for c in by_cell.values()) >= 5:
             break

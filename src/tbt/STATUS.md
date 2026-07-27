@@ -95,6 +95,38 @@ name). We had logged that locus error on 2026-07-22 as debt and left the thalami
     (`sensory`/`nav`/`scene` are hierarchically related, not peers viewing one object). Its first real use is a sensory
     ARRAY over a 64×64 ARC frame, where one column sweeping serially is exactly the cost voting removes.
 
+**H2 — BUILT 2026-07-27: the TASK region, a column over the scene's configuration with NO position in it.**
+The second column H0 justified. Governed by the legacy plan's non-negotiable — *"a task column is NOT a different kind of
+unit; it is the SAME column fed a different INPUT"* — so there is no task module: it is `Column(graph=True)`, differing
+only in that its **L6a is a LEARNED graph frame** (`successor.py`) rather than a given metric one, because "the block rests
+on the pad" is not a point in R^n. `Column` grew the graph half of L6a with the SAME four jobs as the metric half
+(`learn_transition`/`enter_state`/`state_code`/`state_value`/`where_state` against `learn_move`/`locate`/`path_integrate`/
+`where`) — that the interface is identical is TEM's claim, not a convenience. A column has ONE L6a: `location` XOR `graph`.
+  * **ANATOMY DECIDES THE SPLIT** (the chosen option). Nothing works out which variables are "task" ones — the task column
+    never receives position because its proximal input is the SCENE region's relational output and the body's pose goes to
+    `nav`. `task_state()` is position-free BY CONSTRUCTION: a relation is a difference of poses, so absolute position
+    cancels in the arithmetic (`Column.state_in`, already built for state-conditioned behaviour).
+  * **Measured on LockPath:** **13 task states against 89 joint** over the same play, and ONE task state abstracts over **35
+    distinct agent positions** — the blow-up H0 measured, undone. Translation-invariant (whole scene shifted ⇒ same state;
+    block moved onto the pad ⇒ different state). LockPath unchanged at 15/19 and 19/19 actions over 3 seeds.
+  * **THE BOLD ASSUMPTION, NAMED, with its falsifier** (`feedback_prefer_generalize_then_correct`): that a fixed wiring
+    split serves any game. A game whose task state genuinely depends on WHERE it holds — a switch doing different things in
+    different rooms — would make this column's transitions non-deterministic (one state, one action, two successors) and it
+    would stop predicting. Measurable, and it retracts the assumption rather than excusing it.
+  * **TWO CORRECTIONS, both found by looking at what it LEARNED rather than whether it ran:** (1) the scene held only
+    MOVERS, so the pad was never in it, "block on pad" had no relatum, and a whole Sokoban play gave **1 task state and 4
+    self-loops**; a compositional region represents WHAT OBJECTS ARE WHERE, and being dynamic is now the ROLLOUT's filter
+    applied where the rollout consumes the scene (`world_state`). (2) Routing every object then put the AGENT in the scene
+    and its relations moved as it walked — **106 task states against 89 joint, worse than not factoring at all**; the self
+    is the body, not a scene object, and which colour it is was DISCOVERED (`self_color`), never declared.
+  * **CUT in the same move:** `Agent.task_frame` + `_world_key` DELETED (built for H0, and H0 answered), and the degenerate
+    `Agent.task` RENAMED to `state_col` — it never was a task column but a second column on the SAME transducer, read out
+    for arithmetic's carry, and by `region.py`'s own test PERIPHERAL. Keeping the name would have made the real one look
+    already built. `test_h0_factorisation` now builds its own joint frame, so the finding survives without the machinery it
+    condemned living on in the agent.
+  * **HONEST LIMIT:** the task column LEARNS its graph and is read by nothing yet — no planner consults `state_value`. That
+    is the next step, and until it happens this is a region that models the task rather than one that uses the model.
+
 **Generalization investigation — RESOLVED 2026-07-09 (now wired into the column, above).** Two durable results,
 full detail in memory `project_place_invariance_needs_factored_state` + `reference_htm_canonical_pipeline`, plain-English
 writeup in `ARCHITECTURE.md` §7:

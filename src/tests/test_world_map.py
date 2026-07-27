@@ -38,8 +38,9 @@ def test_world_state_binds_agent_and_objects():
     """The state combines the agent's self-location (nav column) with the scene's objects (scene column) + the frame extent
     — one coherent world, where before they lived in two columns with no joint handle."""
     a = _agent_that_can_move()
-    a.place_object(7, ((5.0, 5.0), eye(2)))
-    a.place_object(9, ((20.0, 20.0), eye(2)))
+    a._movers.update({7, 9})              # DECLARED bodies: the map simulates movers, and being a mover is
+    a.place_object(7, ((5.0, 5.0), eye(2)))        #   a fact the live agent DISCOVERS from motion; a test that wants
+    a.place_object(9, ((20.0, 20.0), eye(2)))      #   an object simulated has to say so rather than have it assumed
     w = a.world_state()
     assert _close(w.agent[0], (10.0, 10.0)), "the agent's self-location is in the map"
     assert set(w.objects) == {7, 9}, "the scene's objects are in the map"
@@ -51,6 +52,7 @@ def test_agent_path_integrates_inside_the_map():
     """move_agent applies the SHARED learned operator to the agent within the map — the map borrows the model, it does not
     re-derive motion. It returns a NEW map (a fork), leaving the parent untouched, and objects are unmoved by the agent."""
     a = _agent_that_can_move()
+    a._movers.add(7)
     a.place_object(7, ((5.0, 5.0), eye(2)))
     w = a.world_state()
     w2 = w.move_agent("E")
@@ -63,6 +65,7 @@ def test_the_fork_is_independent():
     """Simulability: edits to a forked branch (place/remove an object) never leak back to the parent — the property a rollout
     tree needs to branch hypotheticals safely."""
     a = _agent_that_can_move()
+    a._movers.add(7)
     a.place_object(7, ((5.0, 5.0), eye(2)))
     w = a.world_state()
     branch = w.move_agent("E")
