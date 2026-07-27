@@ -43,6 +43,34 @@ RULES.md #2 goal.
 | `perceive.py` | the peripheral RETINA (the game-loop bridge, step 1) — `segment(grid)` turns a game FRAME (colour grid) into OBJECTS (same-colour 4-connected components: colour ⊕ cells ⊕ top-left anchor), Core-Knowledge OBJECTNESS with NO semantics read (the mechanic is inferred from colour + score, like the human in `play.py`); the deeper COMMON-FATE / RECOGNITION grouping refines it. `SelfTracker` DISCOVERS the controllable ROOT (the 'self') from MOTION — the object that moves with the action — never colour-as-self (`feedback_bitter_lesson`; `reference_l5_operator_kinds`). Wired via `Agent.transduce`/`observe_self`/`self_color`; verified on the real LockPath frame (recovers wall boundary + agent + goal + block/pad at true positions; the self discovered as it moves) | WIRED | `test_perceive` |
 | `hippocampus/featurize.py` | the world-state → SDR FEATURISER for the value critic — `WorldFeaturizer.encode(world)` maps a `WorldMap` (agent self-location + objects at places) to an OVERLAP-BEARING SDR of `(entity, axis-bit)` bits. Position is a per-axis METRIC `ScalarEncoder` (overlap decreases monotonically with distance), NOT the modular `GridEncoder` — the grid ALIASES over distance and would break value smoothness (`reference_sdr_regime_and_phase_codes`: SDR great for IDENTITY, breaks for METRIC). Closes replay.py's leaf-value seam: `Agent.value_of` = the `ValueCritic` scoring the featurised world (the rollout leaf, defaulted in `plan`); `Agent.learn_value` trains it on world-state transitions by TD. Measured: adjacent states share 17/18 place-bits, far states 0; a trained critic pulls the rollout toward a goal beyond the horizon where an untrained one gives no plan | WIRED | `test_featurize` |
 | `hippocampus/ca1.py` | the CA1 COMPARATOR + multi-chart REMAPPING (DESIGN §2/§3, slice 5). `CA1.compare(observed, recalled)` = the match/novelty detector (Lisman/Hasselmo): MATCH iff the recall explains every observed bit (observed ⊆ recalled) — the §3½ rule one region up, so a PARTIAL view matches (absence) and a CONTRADICTED bit mismatches (novelty). `Remapper` composes CA3 (recall) + CA1 (compare): revisit → RECALL the chart, a novel/CHANGED environment → MINT a new one. Comparison runs on CONTENT tokens (subset-preserving), NOT DG keys (k-WTA breaks the subset relation) — DG separates full signatures at the index layer, composed in slice 6. Wired via `Agent.visit_environment`. Measured: glimpse recalls chart 0, `A`+contradicting-`X` remaps (novelty 0.25) | WIRED | `test_ca1` |
+| `region.py` | a cortical REGION = one `Column` + the declared WIRING that says what it is (`proximal` source, `frame` source, `target`), plus `Hierarchy` holding them and `edges()` reporting the region→region links. The same argument `htm.py` makes for a LAYER, one level up: biology fixes the role by CONNECTIVITY inside a uniform microcircuit, not by a different algorithm. A REGION is not a MODALITY — a modality has a transducer at the periphery; a higher region's proximal drive is another region's OUTPUT, which is why "an event modality" was a category error and PFC needs no special case. Live edge: `sensory → scene` | WIRED | `test_l23_pooling` |
+| `successor.py` | the LEARNED frame — `SuccessorFrame`, an online TD successor representation over an ARBITRARY transition graph of any hashable state (`observe`/`code`/`similarity`/`value`/`states`). `GridEncoder` is the frame you are GIVEN and works because physical space is metric; a task space has no coordinates to hand it, so this is the frame you LEARN. Deliberately NOT: eigendecomposition (O(n³) online, and the eigenpurpose built on it was dropped), a matrix operator over SR rows (built once, failed measurably), orthogonalisation (SR codes are MEANT to be correlated — that overlap IS the topology). It does not replace the grid: physical space keeps its metric prior. Measured: similarity falls monotonically with graph distance; `V = M·R` re-values a MOVED goal with no relearning. Fed the agent's joint `_world_key` transitions — the H0 setup below | WIRED | `test_successor`, `test_h0_factorisation` |
+
+**H0 — ANSWERED 2026-07-27: one frame over the joint state does NOT factorise ⇒ the second column is justified.**
+The legacy `HETERARCHY_PLAN` makes this the gate on everything above it ("H0 gates everything — run it first"): feed ONE
+frame the joint `(position, configuration)` transitions and find out whether the two separate INSIDE it before allocating a
+column for the task factor. `Agent.task_frame` is fed `_world_key` precisely so the live loop runs the experiment.
+Measured (`test_h0_factorisation`), in a world built as the BEST case — position and configuration moving independently, a
+true Cartesian product, as separable as a world can be made:
+  * **State count multiplies:** 32 joint states for 8 positions × 4 configurations, where factored needs 8+4=12.
+  * **No shared position code:** the same position under a distant configuration overlaps **0.279**, LOWER than a genuinely
+    DIFFERENT position at the same configuration (**0.705**). Collecting a key moves you further, as the frame sees it, than
+    walking does. On the LIVE LockPath loop the same cell under two configurations shares **0.000** — literally nothing.
+  * **No shared operator:** the code-change for the SAME step across configurations aligns at **0.325** (1.0 = one operator).
+    Mechanism: a row is supported on successors, and the successors of `(p,c)` all carry `c`, so the supports are disjoint by
+    construction. This is `project_place_invariance_needs_factored_state` one level up.
+  * **No transfer:** learn the corridor exhaustively at one configuration, take ONE step at a second, ask for the route —
+    **V = 0.0000**. The counterfactual arm (a frame indexed by position ALONE, same experience) has it at 0.123.
+  * **LIVE LockPath:** 92 joint states = 40 cells × 7 configurations; **29 of 40 cells** were re-entered under another
+    configuration and stored afresh each time.
+WHY THE EIGEN PHRASING WAS NOT USED. The plan says "does the SR *eigenframe* factorise", written when the frame was assumed
+to be a decomposition; ours is not, on the record. The test is run on the CODE where the agent reads it — also the sounder
+instrument, since a product graph has DEGENERATE eigenvalues, an eigenspace has an arbitrary basis, and "is this eigenvector
+separable" then asks about the basis numpy returned. **And the spectral route would not rescue it anyway:** the state count
+is multiplicative in EXPERIENCE, you can only decompose states you have VISITED, so a decomposition describes experience
+already had and cannot supply experience not had. ⇒ **H1 (inter-column communication) → H2 (the task column) stand.** The
+open problem the counterfactual arm names honestly: its split was made BY HAND, so it measures the CEILING factoring buys,
+not a mechanism that earns it. WHO DECIDES THE SPLIT is what H1/H2 must deliver rather than assume.
 
 **Generalization investigation — RESOLVED 2026-07-09 (now wired into the column, above).** Two durable results,
 full detail in memory `project_place_invariance_needs_factored_state` + `reference_htm_canonical_pipeline`, plain-English
@@ -299,6 +327,17 @@ ARCHITECTURE.md §3/§5.1):
        theorem) instead of a contingency that cannot fall.** Not shipped — a design step, not a knob.
      * NEXT after that: L2 is the block+pad Sokoban, needing a RELATIONAL goal discovered while a bare-feature goal is already
        believed.
+     * ⚠ **CORRECTION 2026-07-27 — the CONJUNCTIVE win condition was DEAD CODE for seven commits.** `a67177c` inserted the new
+       `_credit_goal`/`_goal_plan` ABOVE the old ones without deleting them, so Python bound the OLD definitions (the later of
+       two same-named methods wins) and every run since executed the elemental credit + single-goal planner. Deleted the stale
+       copies; the conjunction is now genuinely live. **It changes nothing measurable, and could not have:** LockPath is
+       unchanged (L0/L1 at 15/19 and 19/19 actions over 3 seeds, score 2 — same as before), because the configural cue is only
+       credited when a reward ARRIVES with both conjuncts holding, and L2 is never won, so no conjunction is ever credited. The
+       machinery is credit-assignment for a win already achieved; it cannot produce the first one. That is exactly why no test
+       caught the deletion — `test_learning_progress` exercises `GoalMemory` directly, and nothing downstream depended on the
+       wiring yet (RULES.md #3: not done until wired AND exercised — this was neither, while STATUS claimed both).
+       Observed after the L2 refutation: `goal_mem.goals()` is EMPTY — the belief was correctly dropped and nothing replaced it.
+       **The L2 blocker is upstream of credit assignment**, in what the agent does before any win exists to learn from.
    The touch COLUMN (recognise-BY-touch, for OCCLUSION) is DEFERRED; the fully-observed push needs only the skin (agency) + the
    behavior model. In full observation contact is geometric; touch earns its place as the agency/reafference signal.
    **INVERSE-MODEL planner, step 1 (NAV) ✅ DONE (2026-07-21, `operator.utilities`, `BasalGanglia.select(salience=)`,
