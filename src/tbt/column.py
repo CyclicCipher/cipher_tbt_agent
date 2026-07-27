@@ -415,6 +415,57 @@ class Column:
         # them. It is NOT the retired rotation table: that memorised the ANSWER per orientation; this stores the object ONCE
         # in its own frame and the pose is SOLVED from it (`notes/rotation_invariance_plan.md` R4).
         self._link: dict = {}                                   # feature key -> [(identity, location in the object frame)]
+        # LONG-RANGE LATERAL peers — the columns this one votes with (arXiv:2507.05888). Peers, not a hierarchy: there is no
+        # relay and no ordering between them, which is what makes the heterarchy a heterarchy.
+        self.peers: list = []
+        self._candidates: set = set()                           # the identities this column currently holds LIVE (its vote)
+
+    # ── LONG-RANGE LATERAL VOTING (arXiv:2507.05888) — consensus between PEER columns ────────────────────────────────
+    def link(self, other: "Column") -> None:
+        """Wire this column laterally to another. SYMMETRIC, because the anatomy is: L3 cells project both ways, and a vote
+        that only travelled one way would make one column an authority rather than a peer."""
+        if other is not self and other not in self.peers:
+            self.peers.append(other)
+            other.peers.append(self)
+
+    def cast_vote(self) -> frozenset:
+        """What this column broadcasts laterally: the union of the identity cells it currently holds as LIVE. An UNCERTAIN
+        column votes for everything still standing rather than staying silent or picking one — a population, not a scalar
+        (`reference_population_code_belief`) — and that is exactly what lets two partial opinions intersect. Committing to a
+        single answer first would throw away the evidence the other column needs."""
+        return frozenset().union(*self._candidates) if self._candidates else self.pooler.active
+
+    def receive_votes(self) -> frozenset:
+        """ONE round of consensus: let the peers' opinions depolarise this column's live identities and keep the best-backed.
+        Returns the settled identity (empty = still ambiguous, honestly).
+
+        MODULATORY, NEVER DRIVING. The vote can only re-rank identities already live here, so a column cannot be talked into
+        an object its own senses refute — the failure mode that would make voting an echo chamber rather than evidence
+        pooling. If no peer depolarises anything, the maximum is zero and every candidate survives, which leaves the column
+        exactly as ambiguous as it was: silence is not a vote."""
+        if not self.peers or len(self._candidates) < 2:
+            return self.pooler.active
+        heard = frozenset().union(*(p.cast_vote() for p in self.peers)) if self.peers else frozenset()
+        scored = {ident: self.pooler.vote(heard, ident) for ident in self._candidates}
+        best = max(scored.values())
+        if best <= 0.0:
+            return self.pooler.active                            # nobody had an opinion about any of these
+        winners = {ident for ident, v in scored.items() if v >= best}
+        self._candidates = winners
+        self._pop = [h for h in self._pop if h.identity in winners]
+        return self.pooler.settle(next(iter(winners)) if len(winners) == 1 else frozenset())
+
+    def learn_lateral(self) -> None:
+        """Hebbian co-experience: bind the peers' current opinion to what THIS column concluded. Called when the columns
+        attend the same thing together, which is the only occasion on which their private codes can be put in
+        correspondence (`ColumnPooler.learn_lateral`)."""
+        mine = self.pooler.active
+        if not mine:
+            return
+        for p in self.peers:
+            theirs = p.cast_vote()
+            if theirs:
+                self.pooler.learn_lateral(theirs, mine)
 
     # ── L6a path integration (the TRANSFORM primitive; ARCHITECTURE §8) — a SPATIAL column only ─────────────────────
     def _require_location(self) -> None:
@@ -586,6 +637,8 @@ class Column:
         if not self._pop and len(self._sweep) > 1:
             self._sweep = [(pos, feature)]               # every hypothesis died ⇒ a BOUNDARY: the episode starts HERE
         candidates = {h.identity for h in self._pop} or self._union_identities(feature)
+        self._candidates = set(candidates)          # kept so a lateral vote has something to act on: the column's opinion is
+        #                                             the SET it still holds live, and `receive_votes` re-ranks within it
         return self.pooler.settle(next(iter(candidates)) if len(candidates) == 1 else frozenset())
 
     def _narrow(self, pos, feature: SDR) -> list:

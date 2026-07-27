@@ -7,7 +7,7 @@ unit (the 2^K conjunctive explosion; ARCHITECTURE §2). The thalamus itself is a
 
 SCOPE. `relay` + `gate` = the cortex→BG→motor path of the decision loop. `project` = the transthalamic relay of a recognised
 object UP to a compositional column (the override slice). **Phase 5 adds the CONTENT ⊗ LOCATION binding** (`bind`/`bundle`/
-`read`) — the conjunctive register for place-value (a digit AT a place) and cross-column CMP VOTING (an object bound to a
+`read`) — the conjunctive register for place-value (a digit AT a place) and for the L4 feature-at-location surface (a
 pose), the Smolensky/VSA tensor product. Grounded: Sherman & Guillery (transthalamic relay); `reference_tbt_layers_4_23` (the
 CMP vote is STRUCTURE-PRESERVING — content bound to location, not a bag of features); reference_htm_pooling_recall_heterarchy.
 """
@@ -46,9 +46,14 @@ class Thalamus:
         return frozenset((c, l) for c in content for l in location)
 
     def bundle(self, *bounds) -> Counter:
-        """Superpose bound pairs into one REGISTER — a support Counter over conjunctions — the shared register columns write
-        their votes into. OVERLAP = AGREEMENT: a `(content, location)` conjunction bound by k votes accrues support k, so the
-        count IS the cross-column vote tally (the substrate for consensus)."""
+        """Superpose bound pairs into one REGISTER — a support Counter over conjunctions. OVERLAP = AGREEMENT: a
+        `(content, location)` conjunction bound k times accrues support k, so the count grades how many writers assert it.
+
+        THIS IS NOT WHERE COLUMNS VOTE, and it used to say it was. Per arXiv:2507.05888 consensus between peer columns
+        travels on DIRECT LATERAL cortico-cortical links (`pooler.learn_lateral`/`vote`, `Column.receive_votes`); the
+        thalamus's long-range job is HIERARCHICAL — relaying a recognised object UP (`project`). The register is real and
+        used, for structure-preserving recall (place-value; the L4 feature-at-location surface); it is the "cross-column
+        vote tally" reading of it that was the wrong locus."""
         register: Counter = Counter()
         for b in bounds:
             register.update(b)
@@ -57,8 +62,8 @@ class Thalamus:
     def read(self, register, location, min_support: int = 1) -> frozenset:
         """UNBIND: the content bits bound at `location` with at least `min_support` — a content bit `c` is "at `location`" to
         the extent it is bound with EVERY bit of `location` (its support = the weakest of those conjunction counts). So
-        `min_support=1` is exact recall (place-value: recover the digit at a place); `min_support=k` is the VOTING threshold
-        (only content ≥ k columns agree on survives, filtering a single column's distractor). Empty location ⇒ nothing."""
+        `min_support=1` is exact recall (place-value: recover the digit at a place); `min_support=k` keeps only content
+        asserted by at least k writers. Empty location ⇒ nothing."""
         loc = list(location)
         if not loc:
             return frozenset()

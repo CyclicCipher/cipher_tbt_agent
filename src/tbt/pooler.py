@@ -35,10 +35,20 @@ like L4's) in a POOLING regime: the OUTPUT (the identity SDR) is DECOUPLED from 
 recurrent self-support — which an `HTMLayer` cannot do (its active cells ARE its proximal input). So L2/3 gets this small
 dedicated engine, exactly as L6a gets `operator.MotionOperator` for the TRANSFORM it cannot do as sequence memory.
 
+CROSS-COLUMN VOTING LIVES HERE, AND THAT IS A CORRECTION. This docstring used to say voting was "the THALAMUS's job, not
+this single column's", and the agent did it through the thalamic content⊗location register. Per TBP's long-range-connections
+paper (arXiv:2507.05888, `reference_long_range_connections`) that is the wrong locus: consensus travels on DIRECT LATERAL
+cortico-cortical connections — "cells in L3 in different columns are associatively linked via a simple Hebbian learning
+rule" — while the thalamus carries a SEPARATE, HIERARCHICAL route (L5a's efference copy up, and the transthalamic
+child-of/compositional path `Agent.place_object` uses, which was always right). Two columns are PEERS, and a peer's opinion
+does not need a relay to reach you. So the lateral synapses are here, on L2/3, and they are the SAME associative primitive
+the feedforward ones are — `_recall` serves both, differing only in where the axons come from (`htm.py`'s thesis: a layer is
+one mechanism plus a declared wiring). The vote MODULATES, it never drives: it re-weights identities the column already
+holds as live hypotheses and can never conjure one, which is what keeps voting from being an echo.
+
 SCOPE (honest, per RULES): object BOUNDARIES during learning are given by the caller's episode (`Column.start_object`); the
-fully-unsupervised boundary is the refinement (TBT leaves it open too). Cross-column VOTING over identities is the THALAMUS's
-job (a multi-column slice), not this single column's. Pure stdlib. Sources: Hawkins/Ahmad/Cui 2017 (columns); TBP/Monty 2024
-(arXiv:2412.18354); Numenta temporal pooler.
+fully-unsupervised boundary is the refinement (TBT leaves it open too). Pure stdlib. Sources: Hawkins/Ahmad/Cui 2017
+(columns); TBP/Monty 2024 (arXiv:2412.18354); Numenta temporal pooler.
 """
 
 from __future__ import annotations
@@ -64,7 +74,8 @@ class ColumnPooler:
         self.rho = float(rho)                           # ART's VIGILANCE — 1.0 = "nothing may go unexplained"; < 1 tolerates
         #                                                 contradictions, which is the deferred sensor-NOISE knob
         self.rng = random.Random(seed)
-        self.ff: dict = {}                 # L4 cell -> {l23 identity cell: permanence}  (feedforward)
+        self.ff: dict = {}                 # L4 cell -> {l23 identity cell: permanence}  (feedforward, from below)
+        self.lat: dict = {}                # PEER l23 cell -> {own l23 identity cell: permanence}  (lateral, from beside)
         self.objects: list = []            # the library: each object = a frozenset of `w` identity cells
         self.active: frozenset = frozenset()   # the CURRENT identity (persists across fixations)
 
@@ -72,14 +83,27 @@ class ColumnPooler:
         """An object BOUNDARY: drop the current identity so the next `pool` starts a fresh object (recognise or mint)."""
         self.active = frozenset()
 
-    # ---- the L2/3 cells SUPPORTED (connected feedforward) by the current L4 code ------------------------------
-    def _supported(self, l4_active) -> set:
-        sup = set()
-        for c in l4_active:
-            for l23, p in self.ff.get(c, {}).items():
+    # ---- the L2/3 cells RECALLED by a set of afferents — ONE mechanism, two wirings --------------------------
+    def _drive(self, afferent, table: dict) -> dict:
+        """For each L2/3 identity cell, HOW MANY active afferents converge on it through connected synapses. `table=self.ff`
+        reads the feedforward wiring (L4 below); `table=self.lat` reads the lateral one (a peer column beside). Deliberately
+        one function: associative recall is the same act whichever axons arrive, and duplicating it per wiring is how a
+        second mechanism gets built by accident.
+
+        IT COUNTS, rather than returning a set, because a dendrite integrates: a cell depolarises when enough synapses are
+        coincidently active, and ONE is not enough. Measured the day this was written — two identities that happen to share
+        a single cell out of 2048 made a peer's vote recall the other object's identity IN FULL (that one shared cell fans
+        out to all forty of its cells), so every candidate scored a perfect 1.0 and the vote could not discriminate at all.
+        Set-union recall gives a lone spurious synapse the same authority as forty genuine ones."""
+        out: dict = {}
+        for c in afferent:
+            for l23, p in table.get(c, {}).items():
                 if p >= self.connected:
-                    sup.add(l23)
-        return sup
+                    out[l23] = out.get(l23, 0) + 1
+        return out
+
+    def _supported(self, l4_active) -> set:
+        return set(self._drive(l4_active, self.ff))
 
     def _match(self, obj: frozenset, sup: set) -> float:
         """Fraction of an object's identity cells that the current L4 code supports (the recall score)."""
@@ -112,6 +136,31 @@ class ColumnPooler:
             syn = self.ff.setdefault(c, {})
             for l23 in identity:
                 syn[l23] = min(1.0, syn.get(l23, self.init_perm) + self.perm_inc)
+
+    # ---- LATERAL: the long-range cortico-cortical vote (arXiv:2507.05888) -------------------------------------
+    def learn_lateral(self, peer_active, identity: frozenset) -> None:
+        """Hebbian across columns: a peer's identity cells were active while THIS column concluded `identity`, so link them.
+        Exactly `bind`'s rule on the lateral wiring, and it has to be LEARNED rather than shared — two columns mint their own
+        random SDRs for the same object (`mint`), so nothing makes A's code for a cup resemble B's. What the columns share is
+        the WORLD, and co-experience is how that becomes a correspondence. This is also why voting cannot be bootstrapped
+        from nothing: columns must have attended the same objects together before their opinions mean anything to each other."""
+        for c in peer_active:
+            syn = self.lat.setdefault(c, {})
+            for l23 in identity:
+                syn[l23] = min(1.0, syn.get(l23, self.init_perm) + self.perm_inc)
+
+    def vote(self, peer_active, identity: frozenset) -> float:
+        """How strongly the peers' current opinions DEPOLARISE one identity of ours, in [0, 1] — the lateral counterpart of
+        `support`. Modulatory: the caller uses it to re-rank hypotheses it already holds, never to add one.
+
+        GRADED BY CONVERGENCE (mean afferents per identity cell, over the most any cell could hear) rather than thresholded,
+        so no cut-off has to be invented for "enough of a vote". An identity the peer genuinely knows has every one of its
+        cells driven by every one of the peer's; an identity reached through a single accidental shared cell scores its
+        1/w. The separation is ~40× here and it falls out of the anatomy, not a tuned constant."""
+        if not peer_active or not self.w:
+            return 0.0
+        drive = self._drive(peer_active, self.lat)
+        return sum(drive.get(c, 0) for c in identity) / (self.w * len(peer_active))
 
     # ---- INFER: hold the identity the column concluded --------------------------------------------------------
     def settle(self, identity: frozenset) -> frozenset:

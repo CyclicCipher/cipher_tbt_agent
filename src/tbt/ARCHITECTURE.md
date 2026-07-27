@@ -61,7 +61,7 @@ as a sensory object, but the object is a goal/plan and the frame is abstract.
                              ▼                                         │
  ┌────────────── THALAMUS — GATE / ROUTE ──────────────────────────┐   │
  │  default-off; DISINHIBIT the selected channel to the motor;     │   │
- │  route + bind content⊗location across columns for voting ───────┼───┘
+ │  route + bind content⊗location; relay a recognised object UP ───┼───┘
  └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -74,7 +74,7 @@ study, `notes/bg_thalamus_value_research.md`): **no region uses backprop / an AN
 | PFC / task column | goal-state + plan hierarchy (same column, abstract frame) | same as the column | the SAME column on a task frame (`reference_hierarchy_substrate`) |
 | **value / dopamine critic** | expected reward → the scalar RPE δ + tonic ρ | SDR-linear TD = the **successor-representation** read-off | `reward.ValueCritic` (BUILT — linear TD `δ=r+γV(s′)−V(s)`; the SR read-off `V=M·R` is the deferred refinement) |
 | basal ganglia | SELECT by value (disinhibition) — the Go/NoGo ACTOR | modified-HTM/SDR — LOCAL **dopamine-gated three-factor Hebbian**, D1/D2 opponent (OpAL) | `basal_ganglia` (`BasalGanglia`, `OpponentActor`) |
-| thalamus | route + gate the selection (disinhibition) + bind content⊗location for voting | **DETERMINISTIC** — no learner inside; only optional slow gain | `thalamus` |
+| thalamus | route + gate the selection (disinhibition) + bind content⊗location (NOT voting — that is lateral, §8) | **DETERMINISTIC** — no learner inside; only optional slow gain | `thalamus` |
 | hippocampus | ROLLOUT — prospective sweep over the model — + episodic binding | orchestration over the column's model (holds NO model of its own) | `hippocampus` |
 
 **The value critic, precisely.** Value is not a separate network: it is a **read-off of L6's predictive map** (the
@@ -95,7 +95,7 @@ and the `_Readout` — one rule, three places, reused.*
 - **cortical column:** `observe(feature, location)` · `predict()` · `recognise() → (object, pose)` · `motor() → SDR` · `goal`
 - **value critic:** `value(φ) → v` · `dopamine(φ, r, φ′) → δ` · `rho() → ρ`
 - **basal ganglia:** `select(candidates) → winner` · `learn(δ)`
-- **thalamus:** `bind(content, location) → R` · `bundle(*R)` · `read(R, location, min_support)` · `gate(winner) → motor` — BUILT (Phase 5: the content⊗location register for place-value + voting; `gate` a real default-off disinhibition)
+- **thalamus:** `bind(content, location) → R` · `bundle(*R)` · `read(R, location, min_support)` · `gate(winner) → motor` — BUILT (Phase 5: the content⊗location register for place-value + the L4 surface; `gate` a real default-off disinhibition)
 - **hippocampus:** `rollout(goal, cortex) → trajectories`
 - **agent:** `step(obs) → action` — plumbing ONLY: `transduce → cortex.observe → «loop» → thalamus.gate → decode`; and `reward → critic → δ → bg.learn`.
 
@@ -338,7 +338,14 @@ TRANSFORM. What it adds is a **stable output decoupled from the instantaneous in
 `operator.MotionOperator`. The two primitives above are unchanged. Crucially, **L2/3 holds the IDENTITY only** — the
 object's structure (which feature at which location, the displacements between them) stays DISTRIBUTED across L4 (features),
 L6a (locations), L5 (displacements); the object model is not one layer's data structure (`reference_tbt_layers_4_23`).
-Cross-column VOTING over these identities is the THALAMUS's job (§3), a multi-column slice, not the single column's.
+Cross-column VOTING over these identities travels on DIRECT LATERAL cortico-cortical links between PEER columns — "cells
+in L3 in different columns are associatively linked via a simple Hebbian learning rule" (arXiv:2507.05888,
+`reference_long_range_connections`), built as `pooler.learn_lateral`/`vote` + `Column.link`/`cast_vote`/`receive_votes`.
+**This corrects what this section used to say** ("the THALAMUS's job"): the thalamus's long-range role is HIERARCHICAL —
+relaying a recognised object UP to a compositional region (`project`) — and peers need no relay to reach each other. Because
+two columns mint their own random identity SDRs, the correspondence between their codes is LEARNED from co-experience; and
+the vote is MODULATORY, re-ranking identities a column already holds live and never adding one, which is what keeps
+consensus from being an echo.
 
 **Object-centric frame + the emergent boundary — ONE event does both.** Recognition must be TRANSLATION-invariant: an object
 is the same wherever it sits. Per Lewis et al. 2019, allocating a fresh grid-frame origin for an object is the *same act* as

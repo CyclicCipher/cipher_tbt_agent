@@ -425,14 +425,17 @@ class Agent:
         still recalls the chart (absence ≠ novelty); a CONTRADICTED view (a landmark the chart lacks) mismatches and remaps."""
         return self.hippocampus.visit(observed)
 
-    # ----- CROSS-COLUMN VOTING via the thalamus content⊗location register (ARCHITECTURE §3; Phase 5) -----------------
-    def vote_consensus(self, votes, location, min_support: int = 1):
-        """Reach a CONSENSUS across columns' votes through the thalamus's content⊗location register. Each vote is a
-        `(content_bits, location_bits)` pair a column casts — content BOUND to location (the structure-preserving CMP vote:
-        an object bound to a pose, a digit bound to a place). Bind + bundle them, then read the content at `location` that
-        at least `min_support` columns agree on (`min_support=k` filters a single column's distractor; `=1` is exact recall,
-        i.e. place-value). Returns the consensus content bits. The thalamus is the shared register; the columns do the voting."""
-        register = self.thalamus.bundle(*(self.thalamus.bind(c, l) for c, l in votes))
+    # ----- the thalamic content⊗location REGISTER (ARCHITECTURE §3; Phase 5) -----------------------------------------
+    def read_register(self, entries, location, min_support: int = 1):
+        """Bind `(content_bits, location_bits)` pairs into the thalamus's conjunctive register and read back the content at
+        `location` — structure-preserving recall (a digit AT a place, a feature AT a cell), reversible because the binding
+        is a tensor product rather than a bag.
+
+        RENAMED FROM `vote_consensus` 2026-07-27, because that is not what it is. Cross-column consensus travels on DIRECT
+        LATERAL cortico-cortical links (arXiv:2507.05888) and now does — `Column.receive_votes` over `pooler`'s lateral
+        synapses. The register survives on its real merits (place-value, the L4 surface `_sense_frame` writes); only the
+        voting reading of it was the wrong locus, and keeping both would have left two mechanisms for one job."""
+        register = self.thalamus.bundle(*(self.thalamus.bind(c, l) for c, l in entries))
         return self.thalamus.read(register, location, min_support)
 
     # ----- L5 DISPLACEMENT / RELATIONS (ARCHITECTURE §9): location + location → the relation -------------------------
