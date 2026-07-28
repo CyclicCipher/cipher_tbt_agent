@@ -305,9 +305,18 @@ leg per step, so a whole Sokoban is a CHAIN whose every leg is in-distribution w
     across 3 seeds. No regression elsewhere: Crates 4/4 at [15,4,2,5], LockPath [15,19], suite 236 green.
     The three fixes were each real and each verified, and none of them was the binding constraint. What remains untested
     is the transformer line's own precondition: **its scratchpad had SUPERVISED intermediates**, and TBT has none — nobody
-    tells it that "both crates placed" passes through "one crate placed". The chain here is climbed by a value field whose
-    reach is 3 cells, and on these levels that is evidently not enough to find the intermediate unaided. Discovering the
-    intermediate — not chaining, which now works — is the open problem.
+    tells it that "both crates placed" passes through "one crate placed". Widening the field's reach from 2 cells to 10
+    did not change the outcome either, so the reach was not it. Discovering the intermediate — not chaining, which now
+    works — is the open problem.
+  * **AND THE EPISTEMIC DRIVE CANNOT DISCOVER IT, measured.** On Warehouse `_unlearned_cells` goes **24 → 0 by step 20**
+    and stays 0 for the rest of the game, while the BG selects the epistemic drive on **194 of 200 steps** — it is chosen
+    constantly and has nothing to propose, so the step falls through to the fallback. The drive is EXHAUSTED, not unused.
+    The cause is its SCOPE: `_unlearned_cells` asks whether the model can predict what pressing into a FEATURE does, so
+    once a wall has been bumped and a crate pushed every feature is known and the set is empty forever — even though only
+    **18 task configurations** had been visited out of a far larger space. Novelty is measured in the SENSORY region
+    (feature dynamics) and nowhere in the TASK region (configurations), so nothing in the agent can say "this arrangement
+    is one I have never produced". That is the missing drive. It is a different object from the epiplexity signal
+    (`progress`), which scores the forward model's prequential loss — also about dynamics, not coverage.
 
 **Generalization investigation — RESOLVED 2026-07-09 (now wired into the column, above).** Two durable results,
 full detail in memory `project_place_invariance_needs_factored_state` + `reference_htm_canonical_pipeline`, plain-English
