@@ -1,0 +1,89 @@
+# Can a transformer be as smart as a bee?
+
+*Direction set 2026-07-27. "Smart" is defined narrowly and deliberately: **speed of skill acquisition** — how many trials
+it takes to solve a problem it has never seen — not asymptotic performance on a benchmark it was trained for.*
+
+## Why a bee is the right bar
+
+A bumblebee has on the order of a million neurons and does the following:
+
+- learns to **pull a string** to drag an artificial flower out from under a screen, a task with no natural analogue, in a
+  few dozen trials — and naive bees acquire it by *watching* a trained demonstrator (Alem et al. 2016, *PLOS Biology*);
+- learns to **roll a ball** to a goal for reward, again from demonstration, and then **improves on the demonstration** —
+  when given a choice, bees rolled the *nearest* ball rather than the one the demonstrator used (Loukola et al. 2017,
+  *Science*). That is not imitation; it is extracting the goal and re-solving it;
+- learns a new flower colour/shape association within a handful of visits.
+
+So the bar is: **single- to double-digit trials on a genuinely novel problem**, with transfer of a *goal* rather than a
+motor sequence. No gradient descent over millions of examples anywhere in that story.
+
+The comparison is not meant to be cute. It is the same quantity ARC-AGI-3 scores (`reference_arc_agi3_scoring`: RHAE, on
+actions taken), and the same quantity the TBT line in `src/tbt/` exists to attack. A bee is the existence proof that the
+number can be small at a scale where "just scale it" is not the explanation.
+
+## What we already measured, and why it reframes the question
+
+`linreg.py` (results in `NOTES.md`) found that a 4-layer transformer performs **in-context linear regression within
+0.005–0.02 of the Bayes-optimal predictor after 1–4 examples**, with *no gradient steps at inference*. Read as skill
+acquisition, that is already bee-speed: a fresh `w` it has never seen, solved in about four trials.
+
+The catch is what counts as novel. A fresh `w` is a new *instance*; it is not a new *task family*. The model saw ten
+thousand batches of exactly that family in training. So:
+
+> **A transformer is already bee-fast INSIDE a task family it was trained on, and needs a full retraining run to acquire a
+> family it was not. The bee's advantage is not speed per trial — it is that its "training distribution" seems to cover
+> string-pulling without ever having contained it.**
+
+That is the actual gap, and it is the one worth attacking.
+
+## Where LID and harnesses come in
+
+Alex Zhang, *Language Model Harnesses Are Compositional Generalizers*
+(<https://alexzhang13.github.io/blog/2026/harness/>; memory `reference_lid_locally_in_distribution`):
+
+- **LID — "locally in-distribution":** a task state can be globally out-of-distribution while *every individual model call*
+  on it stays inside the training distribution. The claim is about **structural** similarity, not token overlap — prompts
+  landing in an ε-ball in trajectory space.
+- **A harness** is the program between the world and the network: it decides how to encode state into inputs and how to
+  turn outputs into actions. Its real job, on this account, is **reducing an unfamiliar problem to a composition of
+  familiar ones** — not calling tools.
+- The harness therefore **induces an equivalence relation between tasks with latent similarities**, so isomorphic tasks
+  look identical to the model.
+- Evidence: Recursive LMs trained on 2–64k-token contexts generalise to tasks **8–32× longer**, and a decomposition
+  strategy learned on Jeopardy questions transfers to spam classification. ~10× the eval lift of a base transformer at
+  matched train improvement.
+- **Explicitly not claimed:** that we should hand-tune task-specific harnesses. He calls that walking straight into the
+  bitter lesson. The claim is about *scalable* architectural bias.
+
+**The connection to the bee:** LID is a hypothesis about *why* a bee is fast. String-pulling is globally novel, but every
+local operation in it — approach, grip, pull toward self, monitor reward — is something a bee's control system already
+does. The bee is not solving a new problem; it is *composing* old ones, and the composition is what is new. If that is
+right, then "make a transformer bee-fast" is not "train it on more" but "**give it a decomposition under which the novel
+task is locally familiar**".
+
+## The experiment this implies
+
+The blog tests LID with pretrained LLMs and expensive harnesses, where "structurally isomorphic" is informal (an ε-ball
+under an unspecified metric). We can test the *principle* in a synthetic setting small enough to iterate in seconds, and —
+the part that makes it worth doing — where **isomorphism is exactly definable rather than asserted**: two tasks are
+isomorphic when related by a group action the model has already seen, which is a statement we can construct and check,
+not an intuition.
+
+The measure throughout is **trials-to-criterion**, the bee measure, not final loss.
+
+1. **Baseline — where does in-context acquisition stop?** Train on a family of function classes; measure trials-to-criterion
+   on (A) a held-out instance of a trained class, (B) a class that is globally new but *locally isomorphic* to a trained
+   one, (C) a class that is globally new and *not* locally isomorphic. LID predicts A ≈ B ≪ C. If B is slow, LID is wrong
+   at this scale and the rest is moot — so this runs first, and it is designed to be able to say that.
+2. **Does a harness convert C into B?** Add a decomposition step that re-expresses the C-task as a composition of trained
+   operations, and re-measure. This is the falsifiable core of the harness claim: the *same* network, the *same* weights,
+   the only change being how the problem is presented.
+3. **The bee's real trick — transfer of a goal, not a sequence.** Loukola's bees improved on the demonstration. The
+   corresponding test: after a harness makes a task solvable, is what transfers the *decomposition* (reusable on a task
+   needing a different sequence of the same parts) or just the sequence? This is where the honest failure is most likely.
+
+**Standing caution, from the memory and from this project's own history:** Zhang's harness wraps a *pretrained* model with
+broad competence, and ours will not. Nothing here licenses hand-coding task logic into the harness — a harness that
+encodes the answer measures nothing. The discriminator to apply at every step is the one already recorded: *scalable
+inductive bias* (legitimate) versus *task-specific hack / environment-rigging* (not), and a proposed harness that cannot
+state its equivalence relation in advance is the latter wearing the former's clothes.
