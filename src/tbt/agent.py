@@ -133,8 +133,12 @@ class Agent:
         self.hierarchy.add(Region("state", self.state_col, proximal="vision", frame=None, target="striatum"))
         self._task = None
         self._last_task = None            # the previous step's task state, so the task L6a can learn the EDGE
-        self.task_reward = GoalMemory()    # R over configurations — which ones PAID; `V = M.R` reads it against
-        #                                   the task column's map, so the column itself never holds a value
+        # `R` — which configurations PAY — learned over RELATION SDR BITS rather than over whole configurations, so it
+        # GENERALISES: a configuration never seen before, whose relations resemble a paying one's, inherits its value. The
+        # learner is the existing SDR-linear `ValueCritic` (`reference_htm_canonical_pipeline`), not a new one; `V = M.R`
+        # reads it against the task column's map, so the column itself still holds no value.
+        self.task_reward = ValueCritic()
+        self._task_R: dict = {}            # R over the KNOWN task states, recomputed once per step (not per rollout leaf)
         self._n_cols = int(n_cols)
         self._seed = int(seed)
         self._dims = int(dims)    # the SPACE the body moves in — 2 for an ARC frame, 3 for a 3-D environment. A property of
@@ -453,16 +457,38 @@ class Agent:
         The fork carries only BODIES (`world_state` filters to movers), so the statics are taken from the live scene, where
         they sit unchanged for the whole rollout. Both halves go through `_configuration`, so a fork's key is the same key
         the live loop learned the graph under."""
-        rewards = self._task_rewards()
-        if not rewards:
+        if self._task is None or self._scene is None:
             return 0.0
-        return self._task.state_value(rewards, self._world_configuration(world))
+        configuration = self._world_configuration(world)
+        rewards = self._task_rewards()
+        if rewards and configuration in self._task.graph.states():
+            return self._task.state_value(rewards, configuration)     # KNOWN: the SR knows how far off the payoff is
+        return self._relation_value(configuration)                    # UNVISITED: the relations still say what it is worth
+
+    def _configuration_bits(self, configuration) -> list:
+        """A configuration as the LIST of its relations' SDR bits, with MULTIPLICITY — a bit repeated once per relation that
+        carries it. Multiplicity is what makes this the sum of per-relation values rather than a union: `ValueCritic.value`
+        sums the active entries, so this reads as Σ over relations of that relation's value, and `learn` shares the error
+        across them normalised by the total. Set-union would collapse a dozen relations into a saturated code that cannot
+        tell two configurations apart (measured, `Column.relation_code`)."""
+        col = self._scene_col()
+        return [b for _oid, relations in configuration for rel in relations for b in col.relation_code(rel)]
+
+    def _relation_value(self, configuration) -> float:
+        """What a configuration is worth from its RELATIONS alone — the generalising estimate, defined for configurations
+        that have never been visited, which is exactly where the exact-match key gave nothing."""
+        return self.task_reward.value(self._configuration_bits(configuration))
 
     def _task_rewards(self) -> dict:
-        """`R` — the configurations that PAID, above zero. Empty until reward has been seen, which is the honest prior."""
-        if self._task is None or self._scene is None:
+        """`R` over the KNOWN task states, each valued by its relations. The per-step cache is a PERFORMANCE device, never
+        the source of truth — a rollout asks for value at every leaf, and re-deriving R over the whole library per leaf is
+        the scan this codebase is disciplined against. It derives on demand when cold, so a caller outside the live loop
+        gets a real answer instead of silently reading an empty R (which it did, until three tests caught it)."""
+        if self._task is None:
             return {}
-        return {s: w for s, w in self.task_reward.w.items() if w > 0.0}
+        if not self._task_R:
+            self._task_R = {st: self._relation_value(st) for st in self._task.graph.states()}
+        return self._task_R
 
     def _world_configuration(self, world) -> frozenset:
         """The task state a FORKED world is in. The fork carries only BODIES (`world_state` filters to movers), so statics
@@ -486,15 +512,21 @@ class Agent:
 
         The subgoal is CHOSEN by learned value over a LEARNED graph — no enumeration of subgoal kinds anywhere
         (`feedback_subgoal_types_from_dynamics`)."""
-        rewards = self._task_rewards()
         here = self._last_task
-        if not rewards or here is None:
+        if self._task is None or here is None or not self._task_rewards():
             return None
         successors = set(self._task.graph.graph.get(here, {}).values()) - {here}
         if not successors:
             return None
-        best = max(successors, key=lambda s: self._task.state_value(rewards, s))
-        gain = self._task.state_value(rewards, best) - self._task.state_value(rewards, here)
+        # RANKED BY `R`, NOT BY `V` — a subgoal is a TARGET STATE ("how good is it to BE there"), where `V = M·R` answers
+        # "how good is it to be there counting everything that follows". Those come apart whenever a reward is not consumed
+        # on arrival: measured here, V(block beside the pad) = 1.565 against V(block ON the pad) = 0.999, because from
+        # beside it you still collect the pad's reward AND your own. Ranking by V therefore proposes staying put. It read
+        # correctly only while R was exactly zero everywhere except the paying configuration — i.e. it was working by
+        # accident, and the generalising R exposed it (`reference_hypothesis_generation`: a hypothesis is a candidate
+        # TARGET-state). `V` keeps its own job as the rollout's distance-aware leaf estimate.
+        best = max(successors, key=self._relation_value)
+        gain = self._relation_value(best) - self._relation_value(here)
         return (best, gain) if gain > 0.0 else None
 
     def _task_plan(self, movement, horizon: int = 48):
@@ -639,12 +671,14 @@ class Agent:
         self._route_scene(objs, pos)                                 # every perceived object → the scene region (task state, rollout)
         if self._scene is not None and self._last_task is not None and prev_seen:
             task = self.task_state()                                 # R over CONFIGURATIONS, by the same delta rule as every
-            self.task_reward.credit({self._last_task}, step_reward)  # other contingency here: cortex holds M, never R.
+            self.task_reward.learn(self._configuration_bits(self._last_task), step_reward)   # over RELATION bits, so it
             if not step_reward and action is not None:               # A LEVEL BOUNDARY pays, but its frames do not
                 self._task_col().learn_transition(self._last_task, action, task)   # correspond — so it is credited and
             self._last_task = task                                   # NO edge is learned across it.
         elif self._scene is not None:
             self._last_task = self.task_state()
+        if self._task is not None:                                   # refresh R over the known states, ONCE per step
+            self._task_R = {st: self._relation_value(st) for st in self._task.graph.states()}
         self._surface, self._l4_surprise = self._sense_frame(objs, sc)   # L4 ⊗ thalamus: sense, bind, recall the surface
         skin = self._skin(fd.grid, objs, cur)                       # what the body FEELS now — the agency signal for next step
         action = self._act(objs, cur, pos, fd.available_actions)

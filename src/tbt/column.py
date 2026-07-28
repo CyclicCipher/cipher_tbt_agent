@@ -396,6 +396,16 @@ class Column:
         self.l5 = Transform(self._l5_dims)                      # the L5 transform (press-frame base + occasion overrides)
         self._l5_enc = GridEncoder(scales=(7, 11, 13, 17), dims=self._l5_dims, mw=3)   # the press's SITUATION code
         self._l5_const = {("p", b) for b in self._l5_enc.encode(tuple(0.0 for _ in range(self._l5_dims))).active}
+        # RELATION CODES — a relation rendered as an OVERLAP-BEARING SDR rather than an exact-match key. `state_in` returns
+        # relations as quantised tuples, which are all-or-nothing: "the block one cell from the pad" and "the block on the
+        # pad" are as unrelated as either is to a wall across the board, so nothing a configuration teaches transfers to a
+        # configuration next to it. A relation is a DISPLACEMENT — a metric quantity — and the grid code is what gives a
+        # metric graded overlap (`reference_sdr_regime_and_phase_codes`: SDRs carry IDENTITY well, but a metric needs a code
+        # whose overlap falls off with distance). Measured on this encoder: (3,2) against (4,2) shares 0.71 of its bits,
+        # against (6,2) 0.33, against (-7,5) nothing.
+        self._rel_enc = GridEncoder(scales=(17, 19, 23, 29), dims=self._l5_dims, mw=3,
+                                    bounds=[(-63, 63)] * self._l5_dims)
+        self._rel_cache: dict = {}                              # quantised relation -> its code (see `relation_code`)
         # L2/3's POOLING engine (ARCHITECTURE §8): the stable object-IDENTITY that pools the L4 feature-at-location stream
         # (`pooler.ColumnPooler`) — a decoupled stable output + persistence, which the L2/3 HTMLayer (associate) cannot do.
         self.pooler = ColumnPooler(seed=seed + 4) if location is not None else None
@@ -1092,6 +1102,18 @@ class Column:
         me = objects[object_id]
         return frozenset(self._quantise(self.relate(me, other))
                          for oid, other in objects.items() if oid != object_id)
+
+    def relation_code(self, rel) -> tuple:
+        """One relation as an overlap-bearing SDR — the generalising form of `_quantise`'s exact key. Returned as a TUPLE of
+        bits so a caller can keep multiplicity: a configuration is scored relation BY relation, never as one union, because
+        a union of a dozen relations saturates the code (measured: 86% of bits active, at which point every configuration
+        looks like every other one) and the overlap that was the entire point is destroyed."""
+        got = self._rel_cache.get(rel)
+        if got is None:                                     # MEMOISED: a relation's code is a pure function of its quantised
+            dp = rel[0]                                     # displacement, and this is read at every rollout LEAF — thousands
+            got = tuple(self._rel_enc.encode(tuple(float(c) for c in dp)).active)   # of numpy encodes per step otherwise,
+            self._rel_cache[rel] = got                      # which timed a live run out at >115s (the 2-minute law caught it)
+        return got
 
     @staticmethod
     def _quantise(rel) -> tuple:

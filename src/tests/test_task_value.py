@@ -57,7 +57,8 @@ def _pad_world():
     col = a._task_col()
     for _ in range(200):
         col.learn_transition(off, "push", on)
-    a.task_reward.credit({on}, 1.0)
+    for _ in range(30):
+        a.task_reward.learn(a._configuration_bits(on), 1.0)   # R is learned over RELATION bits now
     return a, col, off, on
 
 
@@ -91,7 +92,7 @@ def test_the_reward_vector_is_learned_OUTSIDE_the_column():
     """ARCHITECTURE's rule that the neocortex never sees a value, checked rather than asserted: the column holds only the map,
     and `R` lives in `task_reward` — the same delta-rule learner used for every other contingency, no new machinery."""
     a, col, _off, on = _pad_world()
-    assert a.task_reward.w.get(on, 0.0) > 0.0, "the paying configuration must be learned by the delta rule"
+    assert a._relation_value(on) > 0.0, "the paying configuration must be learned by the delta rule"
     assert not hasattr(col.graph, "rewards"), "the column's frame must hold no reward of its own"
     assert col.state_value({}, on) == 0.0, "with no reward vector there is no value — the map alone is value-free"
 

@@ -166,6 +166,35 @@ The goal came from the task region, which sees the configuration, not from anyth
   * On LockPath the drive is additionally inert for the H2 reason (a level ENDS when it pays, so the paying configuration
     never recurs). LockPath unchanged at 15/19 and 19/19; Push still 8/8 at oracle-6.
 
+**THE KEY PROBLEM FIXED 2026-07-27: relations as OVERLAP-BEARING SDRs, not exact-match keys** (`test_relation_codes`).
+H3's bottleneck was that a task state was a frozenset of quantised relations, so "the block one cell from the pad" and "the
+block ON the pad" were as unrelated as either was to a wall across the board: nothing transferred to a neighbouring
+configuration, and an unvisited one was worth exactly 0. A relation is a DISPLACEMENT — a metric quantity — and a metric
+needs a code whose overlap falls off with distance (`reference_sdr_regime_and_phase_codes`). `Column.relation_code` is that
+code (a `GridEncoder` over the displacement): measured, (3,2) shares **0.71** of its bits with (4,2), **0.33** with (6,2),
+**0.00** with (-7,5).
+  * **THE SHAPE WAS FORCED BY MEASUREMENT, and the obvious implementation is the trap.** Unioning a configuration's
+    relations into ONE SDR saturates it — **86% of bits active at a dozen relations** — at which point every configuration
+    looks like every other and the overlap that was the point is destroyed. So a configuration is a bit LIST with
+    MULTIPLICITY, scored relation by relation, and the learner is the existing SDR-linear `ValueCritic` (`value` sums the
+    active entries = Σ over relations; `learn` shares the error across them). No new learner, no union.
+  * **RESULT — a potential field over configuration space from ONE rewarded example.** Only the block-on-pad configuration
+    was ever rewarded; every other is unvisited and was worth 0 before. Now: |dx|=0 → **0.999**, |dx|=1 → **0.832**,
+    |dx|=2 → **0.666**, |dx|=4 → **0.499**. That gradient is what a planner can descend.
+  * **A REAL ERROR THE GENERALISING R EXPOSED:** subgoals were ranked by `V = M·R`, the discounted STREAM, so with a reward
+    that is not consumed on arrival, standing NEXT to the payoff scores higher than standing on it — measured **V(beside)
+    = 1.565 against V(on) = 0.999**, i.e. the rule proposed staying put. It had read correctly only while R was exactly
+    zero everywhere except the payer — working by accident until the reward generalised. A subgoal is a TARGET STATE
+    (`reference_hypothesis_generation`), so it is now ranked by `R`; `V` keeps its job as the distance-aware leaf estimate.
+  * **PERF:** `relation_code` is MEMOISED — it is read at every rollout leaf, and recomputing it timed a live run out at
+    >115s (the 2-minute law caught it). LockPath unchanged at 15/19 and 19/19; Push still 8/8 at oracle-6.
+  * **HONEST LIMIT ON THE LIVE EVIDENCE:** the generalisation is demonstrated in controlled measurement, not on a benchmark,
+    because it bites where a rollout FORK changes the configuration — i.e. in a PUSHING game — and our pushing games never
+    pay (Sokoban pays nothing; LockPath L2 is never reached), while the games that pay (CollectAll, LockPath L0/L1) have no
+    pushing, so every forked leaf shares the current configuration. Measured: 0 of the forked leaves on CollectAll had an
+    unvisited configuration. **A game that both PAYS and PUSHES is the missing fixture**, and it is the next thing to build
+    if this is to be shown live rather than in vitro.
+
 **Generalization investigation — RESOLVED 2026-07-09 (now wired into the column, above).** Two durable results,
 full detail in memory `project_place_invariance_needs_factored_state` + `reference_htm_canonical_pipeline`, plain-English
 writeup in `ARCHITECTURE.md` §7:

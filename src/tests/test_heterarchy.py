@@ -68,7 +68,8 @@ def _world(passes: int = 200):
     for _ in range(passes):
         col.learn_transition(left, "push", paid)
         col.learn_transition(right, "push", paid)
-    a.task_reward.credit({paid}, 1.0)
+    for _ in range(30):
+        a.task_reward.learn(a._configuration_bits(paid), 1.0)
     return a, left, right, paid
 
 
