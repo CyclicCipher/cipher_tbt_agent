@@ -40,4 +40,45 @@ prior (posterior mean = min-norm least squares), so it is a floor and not a comp
 survive label noise (where ridge with the right λ is optimal and OLS is not)? does it extrapolate to k beyond the training
 length, and to a d it was never trained on?
 
+---
+
+## H1 — is LID the right explanatory variable? (2026-07-27) — `h1_lid.py`
+
+**Status: apparatus BUILT and validated, question NOT YET ANSWERED.** Recorded at this state deliberately rather than tuned
+until something looked significant.
+
+**Design.** Sequences of L=4 digits (V=6); eight primitives, each a bijection (reverse, rot left/right, swap pairs/halves,
++1, -1, x2); a task is an ordered composition of TWO primitives shown as K=6 in-context (input, output) demonstrations.
+The one design decision that makes this a test of LID rather than of distribution shift: **global novelty is held
+CONSTANT** — every held-out task is a composition that was never trained, so all are equally novel as wholes, and the only
+thing varying is how familiar their PARTS are. Parts are made graded by training the primitives at frequencies spanning
+~150x. Functional duplicates and no-op compositions are removed by signature, so a "held-out" task cannot secretly be a
+trained one under another name.
+
+**What works.** Local familiarity comes out cleanly graded and tracks training weight almost monotonically —
+`swap_halves` 0.199 error at weight 1.0 through to `dec` 2.691 at weight 0.007. That is the independent variable behaving
+exactly as the design needs.
+
+**TWO BUGS, both caught by the apparatus rather than by inspection, and both worth keeping:**
+1. **The Spearman implementation did not handle TIES**, and the first run reported **rho = +1.000** — a perfect
+   correlation — on data where every single task was censored at the same value and therefore contained no information at
+   all. A false positive manufactured entirely by the metric. Fixed with average ranks.
+2. **There was no sanity gate.** With the model solving 0/27 trained compositions, the held-out table was meaningless, and
+   nothing in the output said so. There is now a gate that checks the model can do the tasks it WAS trained on and prints
+   that the measurement is uninterpretable when it cannot.
+
+**Where it stands** (2800 steps, 84 s, train loss 0.137): the model solves **8/21 trained** compositions to criterion
+(mean final acc 0.48) but **0/8 held-out** — every held-out task is censored, so the primary measure (trials-to-criterion)
+still carries no information. The graded secondary measure gives Spearman(worst local error, final accuracy) = **-0.241**,
+weakly in the LID-predicted direction, on n=8. That is a trend, not a result, and it is reported as secondary *because the
+primary was censored* — not selected after seeing which looked better.
+
+**The early signal that matters more than the correlation:** the model learns its training compositions (0.48) and
+transfers to new pairs of the SAME primitives essentially not at all (0.01–0.19). Composition is not free here. If that
+survives a longer run it is directly relevant to H2/H3 — a base model with no compositional generalisation of its own is
+precisely the situation where a harness would have to supply it, which is the claim under test.
+
+**To actually answer H1:** the model needs to solve held-out compositions at all, which needs more training than a
+2-minute local budget allows at this domain size. Either a longer run (a GPU job, not a laptop one) or a smaller task
+(fewer primitives, more demonstrations). The apparatus is ready for either — `--steps`, `--seed`, `--k`, `--crit`.
 

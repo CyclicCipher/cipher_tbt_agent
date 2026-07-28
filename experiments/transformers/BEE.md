@@ -61,6 +61,41 @@ does. The bee is not solving a new problem; it is *composing* old ones, and the 
 right, then "make a transformer bee-fast" is not "train it on more" but "**give it a decomposition under which the novel
 task is locally familiar**".
 
+## Three refinements to Zhang's setup (2026-07-27, the user's)
+
+**1. Train THROUGH the harness from scratch, rather than wrapping a pretrained model.** If the harness is a quotient map
+`π`, a pretrained model was trained on the UNQUOTIENTED distribution, so bolting `π` on afterwards only works if the fibers
+of `π` happen to land where the model is already competent — and Zhang's RL step is precisely the search that repairs that
+mismatch. Train through the harness and the training distribution IS the quotient space: LID stops being something you
+search for and becomes true by construction, because the model never saw anything else. Prediction: the from-scratch
+version needs far less search over decompositions. **The honest counter**, to be held in view: pretraining is where the
+broad competence to RECOMBINE comes from, so from-scratch may be sharper but more brittle — excellent on one quotient with
+no reservoir when it is the wrong one. The bee is evidence for the user's side: no pretraining, and it still composes.
+
+**2. Context offloading is the wrong quotient for this question, so it is dropped.** Offloading quotients out ONE OOD
+direction — context length — which is the axis LLMs happen to be bad at. Our novel direction is TASK STRUCTURE. Keep the
+idea (quotient, equivalence class); discard that instance of it.
+
+**3. Token edit distance is a surface proxy for a model-relative property, so it is replaced.** "In-distribution" is a fact
+about the MODEL, not about the strings — two prompts can be token-similar and structurally different, or token-different
+and structurally identical. The measure used here is the model's own **prediction error on the local call**
+(`feedback_epistemic_value_is_prediction_error`; the epiplexity work in `src/tbt/`): low loss on a local operation IS what
+"locally in-distribution" means. Model-relative, cheap, and non-circular as long as it is measured after the fact rather
+than used to build the harness. It turns LID into a number instead of a vibe.
+
+## The hypothesis ladder
+
+Cheapest falsifier first. Each step is built so it can come out negative.
+
+- **H1 — is LID even the right explanatory variable?** Hold GLOBAL novelty constant and vary only how familiar the LOCAL
+  operations are; see whether trials-to-criterion tracks local familiarity. If it does not, the frame is wrong and the rest
+  of the ladder is moot. **This runs first precisely because it can kill the programme.**
+- **H2 — the from-scratch claim.** Same network, same task: trained THROUGH a given correct harness from scratch, versus
+  pretrained-then-wrapped. Predicts from-scratch wins and needs less search.
+- **H3 — the prize.** Can the quotient be DISCOVERED rather than given? A harness we hand over is an inductive bias we
+  chose; a harness the system finds is the bee. This is where the bitter-lesson discriminator actually bites
+  (`reference_lid_locally_in_distribution`: scalable inductive bias, never task-specific rigging).
+
 ## The experiment this implies
 
 The blog tests LID with pretrained LLMs and expensive harnesses, where "structurally isomorphic" is informal (an ε-ball
