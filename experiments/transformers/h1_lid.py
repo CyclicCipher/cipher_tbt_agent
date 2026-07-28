@@ -34,6 +34,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from aurora import aurora
+
 L, V = 6, 5            # sequence length, digit vocabulary. Kept SMALL on purpose: the point of H1 is whether
 #                        acquisition speed tracks local familiarity, and that needs a model that has actually
 #                        learned the training distribution inside a runnable budget. A domain the model cannot
@@ -310,6 +312,8 @@ def main():
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--compile", type=int, default=1)
     p.add_argument("--bf16", type=int, default=1)
+    p.add_argument("--opt", default="adamw", choices=["adamw", "aurora"])
+    p.add_argument("--aurora_lr", type=float, default=0.05, help="Aurora eta (the repo default)")
     p.add_argument("--crit", type=float, default=0.8)
     p.add_argument("--pos", default="learned", choices=["learned", "rope", "pope"],
                    help="positional scheme: learned-absolute, RoPE, or PoPE (arXiv:2509.10534)")
@@ -318,15 +322,28 @@ def main():
     torch.manual_seed(args.seed)
 
     train, test, probs, weights = build_tasks(args.seed)
-    print(f"device {dev} | pos={args.pos} | {len(train)} trained, {len(test)} held out | K={args.k} steps={args.steps}")
+    print(f"device {dev} | pos={args.pos} opt={args.opt} | {len(train)} trained, {len(test)} held out | K={args.k} steps={args.steps}")
     print("primitive training weight: " + ", ".join(f"{n}={w:.3f}" for n, w in zip(NAMES, weights.tolist())))
 
     model = Model(max_len=args.k * 2 * L + 2, pos=args.pos).to(dev)
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01, betas=(0.9, 0.98),
-                            fused=(dev == "cuda"))
+    # AURORA (github.com/tilde-research/aurora-release, vendored in `aurora.py`) is a MUON variant: it orthogonalises the
+    # momentum before applying it, and for TALL matrices additionally balances the update across ROWS. Following Muon
+    # practice it takes only the 2D HIDDEN weights; embeddings, the output head and every 1D parameter (LayerNorm, biases)
+    # stay on AdamW, which is also what `aurora()` requires — it raises on anything that is not 2D.
+    # In this model the tall matrices are `qkv` (288x96) and the first MLP layer (384x96), 6 in all, so Aurora's
+    # distinctive path is genuinely exercised rather than falling back to plain Muon everywhere.
+    hidden = [p for n, p in model.named_parameters()
+              if p.ndim == 2 and not n.startswith(("emb", "head"))] if args.opt == "aurora" else []
+    hidden_ids = {id(p) for p in hidden}
+    rest = [p for p in model.parameters() if id(p) not in hidden_ids]
+    opt = torch.optim.AdamW(rest, lr=args.lr, weight_decay=0.01, betas=(0.9, 0.98), fused=(dev == "cuda"))
+    momenta = [torch.zeros_like(p) for p in hidden]
     warm = args.steps // 20
-    sched = torch.optim.lr_scheduler.LambdaLR(
-        opt, lambda s: s / max(1, warm) if s < warm else 0.5 * (1 + math.cos(math.pi * (s - warm) / (args.steps - warm))))
+    def lr_at(s):                                  # one schedule, shared: Aurora's eta gets the same warmup+cosine shape
+        # (s+1) so the first step is not exactly zero: Aurora rejects a non-positive eta, and a zero-LR first
+        # step is meaningless anyway. Applied to BOTH arms so the schedules stay identical.
+        return (s + 1) / max(1, warm) if s < warm else 0.5 * (1 + math.cos(math.pi * (s - warm) / (args.steps - warm)))
+    sched = torch.optim.lr_scheduler.LambdaLR(opt, lr_at)
 
     g = torch.Generator(device=dev).manual_seed(args.seed)
     # COMPUTE, measured rather than guessed. Profiling said forward+backward was 94% of the step (55 ms) and data
@@ -344,8 +361,13 @@ def main():
         m = out_mask(args.k, dev)[1:]
         loss = F.cross_entropy(logits[:, m].reshape(-1, V).float(), tok[:, 1:][:, m].reshape(-1))
         opt.zero_grad(set_to_none=True)
+        for p in hidden:
+            p.grad = None
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        for w, mom in zip(hidden, momenta):       # Aurora owns its own weight write (decoupled decay, then W -= eta*U),
+            if w.grad is not None:                #   so it is applied here rather than through the optimiser; note it
+                aurora(w, w.grad, mom, eta=args.aurora_lr * lr_at(step))   # MUTATES the grad in place under Nesterov
         opt.step()
         sched.step()
     print(f"trained in {time.time() - t0:.0f}s | final train loss {loss.item():.4f}")

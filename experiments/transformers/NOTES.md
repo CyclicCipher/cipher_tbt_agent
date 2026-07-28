@@ -167,3 +167,50 @@ orthogonalisation adds per-step work, our 2D matrices are tiny (96×288, 96×96,
 step-count saving has to beat the added per-step cost, which at this scale is not obvious. Muon-family gains are usually
 reported at nanoGPT scale and up. Cheap to test now that the harness is fast.
 
+### Aurora (Muon variant) — real sample-efficiency gain, cancelled by its own cost at this scale (2026-07-27)
+
+Vendored VERBATIM from <https://github.com/tilde-research/aurora-release> (MIT) into `aurora.py`, so the comparison is
+against the authors' update rule rather than my reading of it. Aurora is a **Muon** variant: orthogonalise the momentum
+before applying it, and for TALL matrices additionally balance the update across ROWS — iteratively approximating a
+projection onto the intersection of the row-oblique and Stiefel manifolds, driving each row's squared norm toward `n/m`.
+Square/wide matrices fall back to plain Muon. `polar` is CANS-12 (nine Chebyshev-optimised cubic Newton–Schulz iterations
+then three classic), FP32.
+
+Wired per Muon practice: the 2D HIDDEN weights get Aurora, embeddings/head/all 1D parameters stay on AdamW (which
+`aurora()` also requires — it raises on non-2D). In this model the tall matrices are `qkv` (288×96) and the first MLP
+layer (384×96), six in all, so the distinctive path is genuinely exercised. LRs are each side's default and the pairing
+the repo itself uses (`ADAM_LR=1e-3`, Aurora `eta=0.05`), on one shared warmup+cosine schedule.
+
+| optimizer | steps | wall | train loss | TRAINED solved | mean acc |
+|---|---|---|---|---|---|
+| AdamW | 3200 | 248 s* | 0.0580 | 9/17 | 0.54 |
+| **Aurora** | **1000** | **52 s** | 0.0573 | **9/17** | 0.55 |
+| AdamW | 11000 | 266 s | 0.0385 | **14/17** | **0.86** |
+| Aurora | 5000 | 280 s | 0.0439 | 13/17 | 0.78 |
+
+\* before the throughput work; step counts are still comparable since the model is unchanged.
+
+1. **The sample-efficiency gain is real**: Aurora reaches 9/17 in **1000 steps** where AdamW needs **3200** — 3.2× fewer.
+2. **It shrinks as training goes on**: at the higher quality level it is 5000 vs 11000, i.e. 2.2× fewer.
+3. **And it is cancelled by its own per-step cost.** Aurora runs ~55 ms/step against AdamW's ~24 ms (2.3×), because
+   CANS-12 is twelve fixed iterations per tall matrix however small the matrix is — and ours are 288×96, so the cost is
+   launch-dominated and never amortises. **At matched wall clock (~270 s) the two are a wash**, AdamW marginally ahead
+   (14/17 @ 0.86 vs 13/17 @ 0.78).
+
+**Read this as a scale result, not a verdict on Aurora.** Muon-family gains are reported at nanoGPT scale and up, where
+the matrices are large enough that orthogonalisation is cheap relative to the matmuls it improves. The prediction that
+follows: Aurora should start winning here as `d_model` grows, and that is a one-line sweep worth running before dismissing
+it. Defaults were used on both sides and nothing was tuned; tuning one arm only would have made the comparison worthless.
+
+**THE PART THAT MATTERS MORE.** Aurora changes nothing about the actual failure: **0/8 held-out compositions, exactly as
+with AdamW.** A better optimiser gets to the same place faster and stops at the same wall. That is evidence the
+compositional failure is *structural rather than an optimisation problem* — which lines up with this repo's own earlier
+result on a completely different architecture: `binding_rule.py` found that Mamba-3 learned to bind and recall rules but
+broke on applying them compositionally (`NOTES.md`: "compositionally — the wall — is genuinely where vanilla breaks, even
+though recall-binding worked"). An SSM and a transformer, different mixing mechanisms, same seam: **parts learned,
+composition absent.** Whatever is missing is not a gradient-quality problem, and that is precisely the gap the harness
+(H2/H3 in `BEE.md`) is supposed to fill.
+
+**Also, the LID measure is now conclusively noise at n=8.** Secondary Spearman across all runs to date:
+−0.886, −0.441, −0.273, −0.063, −0.420, **+0.174** — both signs. No signal.
+
