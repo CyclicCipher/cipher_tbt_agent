@@ -507,7 +507,7 @@ class Agent:
         return self._configuration({**statics, **world.objects})
 
     # ----- H3: the TASK region proposes a SUBGOAL, the spatial region achieves it -------------------------------------
-    def _task_subgoal(self):
+    def _task_subgoal(self, movement):
         """The configuration this region wants to be in next: the best-valued SUCCESSOR of where the task graph currently
         is, with the value it would gain. `None` when there is nothing to want — no reward seen yet, no learned successors,
         or none worth more than staying put.
@@ -519,12 +519,56 @@ class Agent:
         spatial→task sends reached-subgoal / prediction-error"). A subgoal is one state, not a product of two spaces, so
         nothing multiplies.
 
-        The subgoal is CHOSEN by learned value over a LEARNED graph — no enumeration of subgoal kinds anywhere
-        (`feedback_subgoal_types_from_dynamics`)."""
-        here = self._last_task
-        if self._task is None or here is None or not self._task_rewards():
+        The subgoal is CHOSEN by learned value over IMAGINED next configurations — no enumeration of subgoal KINDS
+        anywhere (`feedback_subgoal_types_from_dynamics`); what is enumerated is one push of each discovered mover under
+        each learned action effect, which is the model imagining, not a vocabulary of goals.
+
+        CHAINING IS THE POINT, and it happens across steps rather than inside one: each call proposes the single best next
+        configuration, the rollout achieves it, and the next call proposes again from where that left the world. A whole
+        Sokoban is then a CHAIN of single pushes, every leg of which is in-distribution while the composite never was —
+        which is the `experiments/transformers` result (held-out 0.046 → 0.363) carried over: composing m operations needs
+        m applications, and this is where TBT's m comes from in TASK space rather than in space."""
+        if self._task is None or self._scene is None or not self._task_rewards():
             return None
-        successors = set(self._task.graph.graph.get(here, {}).values()) - {here}
+        here = self.task_state()
+        scene = self._scene.scene_snapshot()
+        # CANDIDATES ARE IMAGINED, NOT LOOKED UP. This asked the task graph what had FOLLOWED from here, and the graph is
+        # learned strictly behind the agent: measured, the mean number of learned successors of the state it is standing in
+        # is 0.02, so the drive was starved on ~215 steps out of 220 — not out-competed, simply with nothing to say.
+        # A configuration one push away is something the FORWARD MODEL can imagine whether or not it was ever visited, and
+        # imagining it is what turns a lookup into a computation. Nothing is enumerated but what the model already knows:
+        # the movers were DISCOVERED from motion, and the displacements are the operator's own learned action effects.
+        moved = []
+        for oid, pose in scene.items():
+            if self._scene.feature_of(oid) not in self._movers:
+                continue
+            for action in movement:
+                cell = tuple(round(c) for c in pose[0])
+                nxt = self._target_cell(cell, action)
+                if nxt is None or nxt == cell:
+                    continue
+                # ASK THE MODEL WHETHER THE PUSH HAPPENS. Imagining a crate one cell along says nothing about whether it
+                # CAN go there: with two crates on a small board most single pushes are into a wall, an edge or the other
+                # crate, and proposing one produces a target the rollout then fails to reach — measured, `_task_plan`
+                # returned None on every step while subgoals were being offered throughout. The L5 transform already
+                # predicts what pressing a thing backed by another thing does, so the filter is the model's own
+                # prediction rather than a rule about solidity (`feedback_bitter_lesson`).
+                eff = tuple(float(n - c) for n, c in zip(nxt, cell))
+                behind = tuple(round(n + e) for n, e in zip(nxt, eff))
+                beyond = getattr(self, "_surface", {}).get(behind)
+                if beyond is None:
+                    for other, opose in scene.items():
+                        if other != oid and tuple(round(c) for c in opose[0]) == behind:
+                            beyond = self._scene.feature_of(other)
+                ext = getattr(self, "_extent", None)          # not set until the first frame is perceived
+                if beyond is None and ext is not None and any(
+                        not (lo <= c <= hi) for c, (lo, hi) in zip(behind, ext)):
+                    beyond = "edge"
+                delta = self._dynamics_delta("of", self._scene.feature_of(oid), beyond, eff)
+                if norm(delta) < 1e-6:                    # the model says it would not move — do not want it there
+                    continue
+                moved.append({**scene, oid: (tuple(float(c) for c in nxt), pose[1])})
+        successors = {self._configuration(m) for m in moved} - {here}
         if not successors:
             return None
         # RANKED BY `R`, NOT BY `V` — a subgoal is a TARGET STATE ("how good is it to BE there"), where `V = M·R` answers
@@ -542,7 +586,7 @@ class Agent:
         """Plan the SPATIAL region to bring about the configuration the TASK region asked for — the achieving half of the
         loop. The subgoal becomes a reward predicate over world-states, so the same rollout that pursues a discovered goal
         pursues this one; no second planner (`feedback_reuse_canonical_components`)."""
-        want = self._task_subgoal()
+        want = self._task_subgoal(movement)
         if want is None:
             return None
         target, _gain = want
@@ -682,7 +726,14 @@ class Agent:
         self._track_index_movers(before_scene, sc)                   # …and motion is read off the INDEXES, not the features
         if self._scene is not None and self._last_task is not None and prev_seen:
             task = self.task_state()                                 # R over CONFIGURATIONS, by the same delta rule as every
-            self.task_reward.learn(self._configuration_bits(self._last_task), step_reward)   # over RELATION bits, so it
+            # TD WITH BOOTSTRAP, not an immediate-reward fit. `learn(..., done=True)` every step made this a predictor of
+            # THIS step's reward, so the hundreds of zero-reward steps drove every weight back to zero and the single
+            # paying event was washed out: measured on Warehouse, R held 0 positive bits even after a level was completed,
+            # and the potential field the whole chaining loop climbs was flat noise (~0.00-0.01). Bootstrapping from the
+            # next configuration is what makes it a VALUE — expected future reward — so a configuration that LEADS to the
+            # payoff keeps its worth. `done` only on a paying step, which is a genuine level boundary.
+            self.task_reward.learn(self._configuration_bits(self._last_task), step_reward,   # over RELATION bits, so it
+                                   self._configuration_bits(task), done=bool(step_reward))
             if not step_reward and action is not None:               # A LEVEL BOUNDARY pays, but its frames do not
                 self._task_col().learn_transition(self._last_task, action, task)   # correspond — so it is credited and
             self._last_task = task                                   # NO edge is learned across it.
@@ -1100,7 +1151,7 @@ class Agent:
         # generator out here. `src/tests/test_rule_proposal.py` keeps the fixture that disproved it.
         # THREE drives now (H3): the third is the TASK region asking for a CONFIGURATION — what it offers is the VALUE it
         # would gain by getting there, on the same scale as the other two offers, and the BG arbitrates as before.
-        want = self._task_subgoal()
+        want = self._task_subgoal(movement)
         salience = [self.goal_mem.w.get(g, 0.0) if g is not None else float("-inf"),
                     self.progress.progress() if targets else float("-inf"),
                     want[1] if want is not None else float("-inf")]
