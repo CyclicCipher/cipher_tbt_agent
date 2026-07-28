@@ -418,3 +418,46 @@ the inference-time computation, not just a training signal. That is the harness 
 supplying iteration a bounded architecture cannot — and it converges with the depth argument: composing *m* operations
 needs *m* applications, and a one-shot read-out has one.
 
+### Chaining at INFERENCE time: the first inductive gain (2026-07-27) — `scratchpad.py`
+
+`chaining.py` made chaining a training signal and got a transductive result only. The diagnosis was that at inference the
+model still answered in ONE SHOT, so chained targets taught the answers and not the procedure. The fix is to make chaining
+the computation performed at inference: the model decodes **`[intermediate, output]`** instead of `[output]`. For a
+composition `(a,b)` the target is `[φ_a(x), φ_b(φ_a(x))]`; for a primitive it is `[x, φ_p(x)]` — identity, then the
+primitive — so the SECOND decode step is always the same operation, "apply one primitive to the intermediate", exercised
+by every task in training.
+
+The demonstrations stay `[in, out]` as the environment provides them and never show an intermediate: showing one would
+reveal the decomposition of an unseen task at test time. On a held-out composition the model must infer where to break,
+unsupervised.
+
+| arm | prims | labelled | HELD-OUT | solved | secs |
+|---|---|---|---|---|---|
+| control (one-shot) | 0.961 | 0.937 | 0.046 | **0/34** | 164 |
+| **scratchpad** | 0.871 | 0.886 | **0.363** | **7/34** | 164 |
+
+**Held-out 0.046 → 0.363, and 0 → 7 tasks solved, on compositions never presented in any form** — the unlabelled and eval
+pools combined, neither of which receives a gradient here. Unlike `chaining.py`'s 0.593-on-the-unlabelled-pool, these
+tasks were never touched, so this is compositional generalisation rather than transduction. It is the first inductive gain
+in the line, against a background of: architecture null, optimiser null, task diversity null, training-signal chaining
+transductive-only.
+
+It also costs a little in-distribution accuracy (0.961 → 0.871 on primitives, 0.937 → 0.886 on labelled), so the
+scratchpad trades supervised fit for generalisation rather than being free.
+
+**WHAT WAS HANDED OVER, stated precisely: the ARITY, not the DECOMPOSITION.** The format has exactly one intermediate
+slot, which tells the model that tasks break into two steps. It is never told WHERE to break for a held-out task, and the
+demonstrations never show it. Whether that arity prior is doing the work is directly testable — 3-compositions with one
+slot, or a variable number of slots — and that is the honest next experiment rather than a caveat to be waved at.
+
+**And a real bug the verification caught**, worth keeping because the experiment would otherwise have been quietly
+corrupt: vectorising the data generator required classifying each primitive as a position permutation or a value map, and
+the test "leaves a constant sequence unchanged" was run on the all-ZEROS sequence — which `negate` fixes, since
+`(V−0) mod V = 0`. `negate` was classified positional and four tasks were generated wrongly. Found only by checking the
+fast generator against the reference `apply_task` on every task; the fix tests every constant, and all 63 tasks now match.
+
+**Honest limits.** 0.363 with 7/34 solved is a real effect and not a solved problem — most held-out compositions still
+fail. One seed. And the result validates a specific chain of reasoning (composing *m* operations needs *m* applications; a
+one-shot read-out has one) whose next prediction is concrete: the gain should extend to 3-compositions only if the
+intermediate count extends with them.
+
