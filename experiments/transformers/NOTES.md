@@ -282,3 +282,48 @@ operative variable; we simply cannot reach the regime from below with 2-composit
 tasks needs length-3 compositions (12 primitives ⇒ far more than 62) or many more primitives, and both make each task
 harder to infer in-context, which is the trade that has to be designed around rather than tuned. That is the next build.
 
+### The failure is in the READ-OUT, not the representation (2026-07-27) — `compositional_rep.py`
+
+The behavioural numbers cannot distinguish two stories: (A) the model never built the primitives as reusable objects and
+stored 42 atoms, so there is nothing for a harness to recombine and the gap is architectural; (B) the task CODE is
+compositional and what fails is turning it into behaviour on an untried combination. **The representation can tell them
+apart**, using the one formal measure ML has for this — Andreas 2019's Tree Reconstruction Error (arXiv:1902.07181), where
+the primitives are INFERRED rather than read off, which is what makes it usable when the model only ever sees
+2-compositions and no primitive alone.
+
+Task code = the residual stream at the last demonstration's final input token (where the model must commit), averaged over
+256 random inputs so the input content marginalises out. Fitted form `rep(a,b) ≈ α_a + β_b` — ordered, so order-sensitive,
+and 24 role vectors for 42 training codes, so a good fit is compression rather than re-description. A per-primitive matrix
+operator would be ~110k parameters for 4k numbers and would fit anything, so it is deliberately not used.
+
+| | R² |
+|---|---|
+| TRAINING compositions (fit) | **+0.819** |
+| **HELD-OUT compositions (the test)** | **+0.522** |
+| held-out, SHUFFLED labels (control) | **−0.631** |
+
+with behaviour at train acc 0.625, **held-out acc 0.038**.
+
+**The model's representation of a composition it has NEVER been trained on is predictable at R² = 0.52 from role vectors
+fitted only on training compositions — while the same fit with the labels shuffled scores −0.63.** The shuffled control is
+what makes this real: shuffling preserves the codes' subspace geometry and destroys only the label correspondence, so the
+structure is genuinely tied to which primitives the task is made of.
+
+⇒ **Story (B). The primitives ARE separable and reusable, the model composes their codes correctly for pairs it has never
+seen, and then fails to act on the result.** It can REPRESENT `a∘b` and cannot EXECUTE it — which is exactly the
+estimate-versus-execute distinction: mixing is native to attention, function application is not. The probe separates them
+empirically rather than by argument.
+
+**This redirects the agenda, and mostly by subtraction:**
+* **"Pressure to factorise" drops in priority.** It was premised on story (A). The model already factorises without any
+  such pressure, so the interesting question is no longer how to make it decompose.
+* **Execution becomes the prime suspect** — and with it the depth constraint, since composing *m* operations needs *m*
+  sequential applications and a fixed-depth model cannot supply them. This is the one place a harness has a clear
+  mechanical job: supplying iteration a bounded architecture cannot.
+
+**Honest limits.** One seed, one extraction point, one composition form — the claim is "compositional structure OF THIS
+FORM is present", not that the code is exactly additive. R²=0.52 is substantial but far from 1, so the code is PARTLY
+compositional. And the model is undertrained at 6000 steps (train acc 0.625); the R² comparison is internally valid
+because control and test come from the same model, but the absolute numbers would move. Worth repeating at 11000 steps and
+across seeds before it carries much weight.
+
