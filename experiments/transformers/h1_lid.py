@@ -118,16 +118,17 @@ def make_batch(B, K, task_list, probs, dev, g=None, fixed=None):
     """B sequences of K (input, output) demonstrations of ONE task each. The task is re-drawn per sequence, so the model
     cannot memorise any particular map — it must infer the rule from the demonstrations it has already seen."""
     if fixed is not None:
-        idx = torch.full((B,), fixed, dtype=torch.long)
+        idx = torch.full((B,), fixed, dtype=torch.long, device=dev)
     else:
-        idx = torch.multinomial(probs, B, replacement=True, generator=g)
-    x = torch.randint(0, V, (B, K, L), generator=g)
+        idx = torch.multinomial(probs.to(dev), B, replacement=True, generator=g)
+    x = torch.randint(0, V, (B, K, L), generator=g, device=dev)
     y = torch.empty_like(x)
     for t in idx.unique():
         m = idx == t
         y[m] = apply_pair(x[m], task_list[int(t)])
     tok = torch.stack([x, y], dim=2).reshape(B, K * 2 * L)     # in,out,in,out,… ; roles are fixed by position
-    return tok.to(dev), idx
+    return tok, idx                                            # already on the device: the old version built every batch
+    #                                                            on the CPU and copied it across on every single step
 
 
 def _freqs(hd, dev, base=10000.0):
@@ -160,6 +161,8 @@ class Attn(nn.Module):
         self.proj = nn.Linear(d_model, d_model)
         if pos == "pope":
             self.delta = nn.Parameter(torch.empty(self.hd).uniform_(-2 * math.pi, 0.0))
+        if pos in ("rope", "pope"):                       # cached, not rebuilt every forward: it never changes
+            self.register_buffer("theta", _freqs(self.hd // 2 if pos == "rope" else self.hd, "cpu"), persistent=False)
 
     def forward(self, x):
         B, T, C = x.shape
@@ -167,23 +170,24 @@ class Attn(nn.Module):
         q, k, v = (z.view(B, T, self.h, self.hd).transpose(1, 2) for z in (q, k, v))
         t = torch.arange(T, device=x.device, dtype=torch.float32)[:, None]
         if self.pos == "rope":
-            th = _freqs(self.hd // 2, x.device)
-            ang = t * th                                              # (T, hd/2)
+            ang = t * self.theta                                              # (T, hd/2)
             cos, sin = ang.cos()[None, None], ang.sin()[None, None]
             def rot(z):
                 a, b = z[..., 0::2], z[..., 1::2]
                 return torch.stack([a * cos - b * sin, a * sin + b * cos], dim=-1).flatten(-2)
             q, k = rot(q), rot(k)
         elif self.pos == "pope":
-            ang = t * _freqs(self.hd, x.device)                       # phase is POSITION ONLY — the whole point
+            ang = t * self.theta                                      # phase is POSITION ONLY — the whole point
             d = self.delta.clamp(-2 * math.pi, 0.0)
             mq, mk = F.softplus(q), F.softplus(k)                     # magnitude is CONTENT only
             q = torch.cat([mq * ang.cos(), mq * ang.sin()], dim=-1)
             k = torch.cat([mk * (ang + d).cos(), mk * (ang + d).sin()], dim=-1)
-        att = (q @ k.transpose(-2, -1)) / math.sqrt(self.hd)
-        att = att.masked_fill(torch.ones(T, T, device=x.device, dtype=torch.bool).triu(1), float("-inf"))
-        y = (att.softmax(-1) @ v).transpose(1, 2).reshape(B, T, C)
-        return self.proj(y)
+        # FUSED attention. The hand-rolled version materialised a T*T score matrix and allocated a fresh causal mask on
+        # every block of every step (3 blocks x 3200 steps = ~9600 allocations of each), which is pure overhead for a model
+        # this small. `scale` is passed explicitly because PoPE doubles the query width to 2*hd and SDPA would otherwise
+        # rescale by the wrong dimension, silently changing the attention temperature between schemes.
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=True, scale=1.0 / math.sqrt(self.hd))
+        return self.proj(y.transpose(1, 2).reshape(B, T, C))
 
 
 class Block(nn.Module):
@@ -304,6 +308,8 @@ def main():
     p.add_argument("--k", type=int, default=8, help="demonstrations per sequence")
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--compile", type=int, default=1)
+    p.add_argument("--bf16", type=int, default=1)
     p.add_argument("--crit", type=float, default=0.8)
     p.add_argument("--pos", default="learned", choices=["learned", "rope", "pope"],
                    help="positional scheme: learned-absolute, RoPE, or PoPE (arXiv:2509.10534)")
@@ -316,16 +322,27 @@ def main():
     print("primitive training weight: " + ", ".join(f"{n}={w:.3f}" for n, w in zip(NAMES, weights.tolist())))
 
     model = Model(max_len=args.k * 2 * L + 2, pos=args.pos).to(dev)
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01, betas=(0.9, 0.98))
+    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01, betas=(0.9, 0.98),
+                            fused=(dev == "cuda"))
     warm = args.steps // 20
     sched = torch.optim.lr_scheduler.LambdaLR(
         opt, lambda s: s / max(1, warm) if s < warm else 0.5 * (1 + math.cos(math.pi * (s - warm) / (args.steps - warm))))
 
-    g = torch.Generator().manual_seed(args.seed)
+    g = torch.Generator(device=dev).manual_seed(args.seed)
+    # COMPUTE, measured rather than guessed. Profiling said forward+backward was 94% of the step (55 ms) and data
+    # generation only 3.5 ms, so the model — not the pipeline — was the cost, and 55 ms for a 340k-parameter model is ~5x
+    # off what the card should do: many tiny kernels in fp32. Measured on this box, batch 256:
+    #     baseline fp32 54.6 ms | bf16 32.5 | torch.compile fp32 41.5 | compile + bf16 17.6  => 3.1x
+    # With the fused attention and GPU-side batching above, ~3.7x overall, which is spent on STEPS rather than saved.
+    trainer = torch.compile(model) if args.compile and dev == "cuda" else model
+    amp = torch.autocast("cuda", dtype=torch.bfloat16, enabled=(args.bf16 and dev == "cuda"))
     t0 = time.time()
     for step in range(args.steps):
         tok, _ = make_batch(args.batch, args.k, train, probs, dev, g)
-        loss = loss_of(model, tok, args.k).mean()
+        with amp:
+            logits = trainer(tok)[:, :-1]
+        m = out_mask(args.k, dev)[1:]
+        loss = F.cross_entropy(logits[:, m].reshape(-1, V).float(), tok[:, 1:][:, m].reshape(-1))
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)

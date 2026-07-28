@@ -125,3 +125,45 @@ than a 5-minute budget buys — a GPU job), or the dependent measure must move t
 than 8 held-out tasks. Raising the primitive count raises both the task supply and the difficulty, so those trade against
 each other, and that trade is the next thing to design around rather than tune.
 
+### Compute: ~3.7x, and it was not where I first guessed (2026-07-27)
+
+**Question: how to greatly reduce the compute to train the same model. Answer: profile first.** My first guess — that the
+CPU-side data pipeline was the cost — was wrong, and the fix based on it bought only ~23%. Profiling settled it:
+
+    data generation 3.45 ms/step | forward only 18.40 | forward+backward+step 54.95   => the MODEL is 94% of the step
+
+55 ms for a 340k-parameter model is ~5x off what the card should manage: many tiny kernels in fp32, i.e. launch-bound
+rather than FLOP-bound. (The tell was already in earlier runs: sample throughput went from 1,344/s at batch 64 to 2,611/s
+at batch 384. Throughput that rises with batch size means fixed per-step overhead.) Measured on the 3050 Ti, batch 256:
+
+| | ms/step | speedup |
+|---|---|---|
+| baseline fp32 | 54.6 | — |
+| bf16 autocast | 32.5 | 1.7x |
+| `torch.compile` fp32 | 41.5 | 1.3x |
+| **`torch.compile` + bf16** | **17.6** | **3.1x** |
+
+Plus fused SDPA attention (the hand-rolled version materialised a T×T score matrix and allocated a fresh causal mask per
+block per step), cached frequency buffers, GPU-side batch generation, and a fused AdamW: **~3.7x overall**, spent on steps
+rather than saved. 3200 steps in 248 s became **11,000 steps in 266 s**.
+
+**And that changed the result qualitatively.** With the extra training the model finally MASTERS its training
+distribution — **14/17 trained compositions solved, mean accuracy 0.86** — so the sanity gate passes for the first time.
+But held-out compositions of the *same primitives* stay at **0/8**, accuracies 0.00–0.37. That is no longer "the model is
+too weak": **compositional transfer is essentially absent in a model that has demonstrably learned the parts.**
+
+⚠ **And the LID correlation is not reproducible.** Two runs at IDENTICAL config and seed gave secondary Spearman
+**−0.063** and **−0.420** (bf16 + autotune are not bit-deterministic). Combined with −0.886/−0.441/−0.273 across the
+earlier conditions, the measure is plainly noise-dominated at n=8. **H1 remains unanswered — but now for a better reason:**
+not "the model is too weak to measure" but "the effect, if any, is smaller than run-to-run noise". The binding constraint
+is now the number of held-out tasks, and that trades directly against difficulty (more primitives ⇒ more tasks AND harder).
+
+**Where Aurora fits** (<https://github.com/tilde-research/aurora-release>, arXiv 2606.27715): it is a **Muon variant** — a
+better orthogonalised update for 2D weight matrices, projecting onto the intersection of the row-oblique and Stiefel
+manifolds for more balanced per-row updates. That is a **sample-efficiency** lever (fewer steps to a given loss), which is
+orthogonal to the throughput work above and therefore *stacks* with it. So: a good SECOND start, not a first — the
+first-order win was ours to take and is now taken. **The caveat to measure before adopting it:** Newton–Schulz
+orthogonalisation adds per-step work, our 2D matrices are tiny (96×288, 96×96, 96×384), and we are overhead-bound — so the
+step-count saving has to beat the added per-step cost, which at this scale is not obvious. Muon-family gains are usually
+reported at nanoGPT scale and up. Cheap to test now that the harness is fast.
+
