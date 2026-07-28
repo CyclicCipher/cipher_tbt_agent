@@ -88,17 +88,30 @@ def test_the_instances_are_indistinguishable_by_colour_AND_by_shape():
     assert len(shapes) == 1, "and they must be the same shape, so shape cannot disambiguate them either"
 
 
-def test_the_blocker_is_UPSTREAM_the_agent_never_even_sees_a_crate():
-    """THE FINDING. The retina segments the crates correctly, and then `_positions` — a `{feature: cell}` map — drops them
-    because two instances cannot share one key. Nothing downstream recovers: `_movers` stays empty, so the push is never
-    learned; the scene holds only the wall; and the goal learner has nothing to credit. The failure is representational and
-    sits well before any question about goals, values or subgoals."""
+def test_the_crates_are_now_TRACKED_and_the_push_is_learned():
+    """WHAT THE INDEXES FIXED. `_positions` still cannot hold two crates — a `{feature: cell}` map never will — but the
+    scene is no longer keyed on appearance: every object gets an INDEX (`Column.track`), so both crates are held apart, one
+    of them is seen to MOVE, and the kind it carries is learned as a mover. Before this the scene held only the wall and
+    `_movers` was empty through an entire game.
+
+    The pads are NOT movers, which is the part that took the work: a pointer that may jump to the nearest same-coloured
+    thing will claim the other pad the moment a crate occludes its own, and that phantom displacement taught "pad moves"."""
     a, fd = _play()
     objects = a.transduce(fd.grid)
-    assert {o.color for o in objects} >= {6, 7}, "the crates and pads ARE perceived"
-    assert 6 not in a._positions(objects), "but an ambiguous feature has no place in a feature-keyed index"
-    assert not a._movers, "so the crates are never discovered to move, and the push is never learned"
-    assert a.goal_mem.goals() == set(), "and the pair goal learns nothing, as the fixture predicted"
+    assert 6 not in a._positions(objects), "the feature-keyed index still cannot hold two crates — that is not what fixed it"
+    assert a._movers == {6}, f"the crate kind must be discovered to move, and ONLY it, got {a._movers}"
+    scene = a._scene_col()
+    crates = [i for i in scene.scene_snapshot() if scene.feature_of(i) == 6]
+    assert len(crates) == 2, f"both crates must be held as separate things, got {len(crates)}"
+
+
+def test_what_is_STILL_unsolved_is_the_set_goal_itself():
+    """The fixture's original question, still open and now isolated. Perception and tracking no longer hide it: the agent
+    sees both crates, knows they push, and still cannot say what winning IS, because `goal_mem` credits `(kind, landmark)`
+    pairs and "EVERY pad covered" is not a pair. It reaches 1 of 3 levels, by exploration."""
+    a, fd = _play()
+    assert a.goal_mem.goals() == set(), "no pair names this win condition, which is the point of the fixture"
+    assert fd.score < 3, "and the agent does not finish the game"
 
 
 def test_the_relational_value_cannot_help_because_the_blocker_is_below_it():

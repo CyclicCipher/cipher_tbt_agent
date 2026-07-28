@@ -36,11 +36,14 @@ class WorldMap:
     (returns a NEW map) so a rollout branches without disturbing its parent; `place`/`remove`/`anchor` mutate the fork you
     hold, which is what an in-progress simulation does to its own copy."""
 
-    def __init__(self, agent, objects=None, bounds=None, body=None, static=None) -> None:
+    def __init__(self, agent, objects=None, bounds=None, body=None, static=None, kinds=None) -> None:
         self.agent = agent                                   # (position, R) — self-location (place cells); may be None pre-localize
         self.objects = dict(objects) if objects else {}      # object_id -> (position, R) — objects at world poses
         self.bounds = tuple(bounds) if bounds else None      # per-axis (lo, hi) extent (boundary cells); None = unbounded
         self.body = body                                     # the SHARED, learned body operator (ego); referenced, not owned
+        self.kinds = dict(kinds) if kinds else {}            # object_id -> the FEATURE that object is an instance of. The id
+        #   says WHICH one (so the right body moves); the kind says WHAT it is (so its dynamics are learned once for the type
+        #   and not afresh per instance). They were the same thing only while every object had a unique colour.
         self.static = dict(static) if static else {}         # {cell: feature} — what is PERCEIVED at each untracked cell. Raw
         #                                                       sensory occupancy, NOT a verdict: whether pressing into a feature
         #                                                       goes anywhere is the forward model's prediction, never stored here.
@@ -48,7 +51,13 @@ class WorldMap:
     def snapshot(self) -> "WorldMap":
         """A forked copy for a hypothetical branch: the poses (immutable tuples) and the object dict are copied, the learned
         `body` operator + `static` occupancy are shared. Cheap — O(objects), which is why the state is data, not a re-run column."""
-        return WorldMap(self.agent, self.objects, self.bounds, self.body, self.static)
+        return WorldMap(self.agent, self.objects, self.bounds, self.body, self.static, self.kinds)
+
+    def kind_of(self, occupant):
+        """What KIND a thing pressed into is. A tracked object maps to its feature; a static feature, the "edge" and None are
+        already kinds and pass through. This is what the forward model must key its learned dynamics on — pressing a crate
+        teaches you about CRATES, not about that particular crate."""
+        return self.kinds.get(occupant, occupant)
 
     def place(self, obj_id, pose) -> None:
         """Put/replace an object at a world pose (mutates this fork)."""

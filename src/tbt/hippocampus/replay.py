@@ -57,13 +57,15 @@ class WorldModel:
         if felt is None:
             return tentative
         beyond = world.occupant(tuple(int(round(c + d)) for c, d in zip(contact, eff)))
-        body = add(eff, self.delta("into", felt, beyond, eff))                # free motion + the learned correction
+        kind = world.kind_of(felt)                                            # WHAT was pressed (dynamics are per TYPE) …
+        back = world.kind_of(beyond)                                          # … and what backs it
+        body = add(eff, self.delta("into", kind, back, eff))                  # free motion + the learned correction
         out = world.snapshot()
         out.agent = (add(world.agent[0], body), world.agent[1]) if norm(body) > _TOL else world.agent
         pose = world.objects.get(felt)
-        if pose is not None:                                                  # a TRACKED thing also takes its own learned delta
-            out.objects = dict(world.objects)
-            out.objects[felt] = (add(pose[0], self.delta("of", felt, beyond, eff)), pose[1])
+        if pose is not None:                                # a TRACKED thing also takes its own learned delta — looked up by
+            out.objects = dict(world.objects)               # its KIND, but applied to the INDEX that was actually pressed, so
+            out.objects[felt] = (add(pose[0], self.delta("of", kind, back, eff)), pose[1])   # one of two identical crates moves
         return out
 
 

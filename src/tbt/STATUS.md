@@ -218,12 +218,28 @@ crate and a pad, leaving the ASSIGNMENT with nowhere to live. Oracle 9/9/8, all 
   * **The relational value is unchanged by ablation here too — but for a different reason than in `Crates`.** There it was
     redundant against a sharper mechanism; here it is STARVED, because the representation never delivers a crate for any
     relation to be about. A fixture built to discriminate two mechanisms discriminated neither, and said why.
-  * ⇒ **`project_representation_shortcut_lesson` for the FIFTH time:** indexing the world by FEATURE was convenient while
-    every fixture had unique features, and it fails at the seam where that stops holding. The general state is a **LIST OF
-    INSTANCES with the feature as a read-out**. NOT fixed here on purpose — it reaches `_track_movers`, `_learn_dynamics`,
-    `_credit_goal`, `_route_scene`, `_model_loss` and the world map, so it is a direction to take deliberately rather than
-    a repair slipped into a fixture commit. **This is the next thing to build**, and it is squarely on the ARC path: real
-    ARC-AGI-3 frames are full of identical objects.
+  * ✅ **FIXED 2026-07-27 with OBJECT INDEXES (`Column.track`, `test_object_index`)** — and NOT as "a list of instances",
+    which was a program's answer to a question with a biological one. The brain does not tell objects apart by their
+    properties: it allocates POINTERS (Pylyshyn's FINSTs, Kahneman & Treisman's object files) that stick to a thing and
+    follow it, prior to and separable from what it looks like. Multiple Object Tracking settles it — people track several
+    targets among IDENTICAL distractors, so nothing featural distinguishes any of them. Correspondence is by PREDICTION
+    (nearest to where the object was expected), which is why tracking survives absent features and fails on jumps; and
+    permanence is the same mechanism run without input — an index survives being unseen, and is dropped only when its place
+    is VISIBLE and empty (`reference_recognition_under_occlusion`'s rule one level down).
+    **Measured on Warehouse: the scene went from holding only the wall to holding all five objects with distinct indexes,
+    and `_movers` from EMPTY to `{6}`** — the push is learned for the first time in a game with identical objects.
+  * **THE DISTINCTION THAT MADE IT WORK: the INDEX says which one, the FEATURE says what kind.** They were the same thing
+    only while every object had a unique colour. Learning belongs to the KIND (pressing a crate teaches you about crates),
+    the index picks out which body moves — so `WorldMap` gained `kinds`/`kind_of`, the forward model looks its deltas up by
+    kind while applying them to the pressed index, and a relational goal is satisfied by ANY object of the named kind.
+  * **Two tracking bugs found by measurement, both instructive:** (1) the forward model is object-agnostic, so asking it
+    where a PAD will be answered with dynamics learned from shoving crates — correspondence uses the object's OWN smooth
+    motion instead; (2) an unbounded nearest-match let the surviving pad's pointer claim the other pad two cells away the
+    moment a crate occluded its own, and that phantom displacement taught the agent that **pads move**. The bound is
+    learned, not tuned: a pointer may follow its object as far as anything has actually been seen to move in one frame.
+  * ⚠ **STILL UNSOLVED, and now isolated:** the SET GOAL itself. The agent sees both crates, knows they push, and still
+    cannot say what winning IS — `goal_mem` credits `(kind, landmark)` PAIRS and "every pad covered" is not a pair. 1 of 3
+    levels, by exploration. Perception no longer hides the question.
 
 **Generalization investigation — RESOLVED 2026-07-09 (now wired into the column, above).** Two durable results,
 full detail in memory `project_place_invariance_needs_factored_state` + `reference_htm_canonical_pipeline`, plain-English

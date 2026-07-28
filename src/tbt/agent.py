@@ -26,7 +26,7 @@ from .encoders import SDR, CategoryEncoder, GridEncoder
 from .operator import eye
 from .hippocampus import Hippocampus, WorldMap, WorldModel
 from .modality import touch, vision
-from .operator import add, norm, sub
+from .operator import add, dist, norm, sub
 from .perceive import SelfTracker, segment
 from .region import Hierarchy, Region
 from .reward import GoalMemory, LearningProgress, ValueCritic
@@ -133,6 +133,7 @@ class Agent:
         self.hierarchy.add(Region("state", self.state_col, proximal="vision", frame=None, target="striatum"))
         self._task = None
         self._last_task = None            # the previous step's task state, so the task L6a can learn the EDGE
+        self._prev_scene: dict = {}       # the scene's poses BEFORE this frame's tracking, so motion is visible per INDEX
         # `R` — which configurations PAY — learned over RELATION SDR BITS rather than over whole configurations, so it
         # GENERALISES: a configuration never seen before, whose relations resemble a paying one's, inherits its value. The
         # learner is the existing SDR-linear `ValueCritic` (`reference_htm_canonical_pipeline`), not a new one; `V = M.R`
@@ -376,7 +377,13 @@ class Agent:
         """An arbitrary `{object_id: pose}` as ONE hashable configuration — every object's relations to the others. The SINGLE
         mapping from objects to a task state, used for both the live scene and a FORKED world inside a rollout, because the
         two must produce the SAME key or the frame lookup silently misses and the value reads zero."""
-        return frozenset((oid, self._scene_col().state_in(objects, oid)) for oid in objects)
+        col = self._scene_col()                                      # labelled by KIND, not by index: an index is a
+        #   tracking pointer whose number is an allocation accident and would differ between runs and levels, so a task
+        #   state keyed on it could never match anything. What the task region is about is "a crate standing HERE relative
+        #   to a pad" — the kind plus the relations. Two crates with different relations stay two entries; two in the same
+        #   relational position are genuinely the same situation and collapsing them is correct.
+        return frozenset((col.feature_of(oid) if col.feature_of(oid) is not None else oid,
+                          col.state_in(objects, oid)) for oid in objects)
 
     def task_state(self) -> frozenset:
         """The scene's configuration as ONE hashable state — every object's RELATIONS to the others, and nothing else.
@@ -409,11 +416,13 @@ class Agent:
         column's learned body operator BY REFERENCE, so a fork path-integrates the agent under the one shared model.
         ARC's board is world-anchored, so the nav pose and the scene objects already share one world frame (DESIGN §4)."""
         scene = self._scene_col().scene_snapshot() if self._scene is not None else {}
-        objects = {oid: p for oid, p in scene.items() if oid in self._movers}   # the rollout simulates BODIES: the scene
+        objects = {oid: p for oid, p in scene.items()                          # the rollout simulates BODIES: the scene
+                   if self._scene_col().feature_of(oid) in self._movers}
         #   holds every object (that is what the region represents), and being DYNAMIC is this consumer's filter, applied
         #   here rather than upstream — statics reach the model as `static=self._surface`, which is a different mechanism.
         bounds = getattr(self, "_extent", None) or [(0, 63)] * self._dims
-        return WorldMap(self.pose(), objects, bounds, body=self._nav_col().operator, static=self._surface)
+        return WorldMap(self.pose(), objects, bounds, body=self._nav_col().operator, static=self._surface,
+                        kinds={oid: self._scene_col().feature_of(oid) for oid in objects})
 
     def world_model(self) -> WorldModel:
         """The learned FORWARD MODEL over the world-state (`hippocampus/replay.py`), driven by the ONE L5 transform: the rollout
@@ -668,7 +677,9 @@ class Agent:
                 self.new_level()                                     # but the learned model + goal + movers PERSIST
             elif moved and cur is not None and cur != prev_cur:      # the self MOVED → the operator learns this action's Δ
                 self.learn_pose_move(action, self._as_pose(prev_cur), self._as_pose(cur))
-        self._route_scene(objs, pos)                                 # every perceived object → the scene region (task state, rollout)
+        before_scene = dict(self._scene.scene_snapshot()) if self._scene is not None else {}
+        self._route_scene(objs, sc)                                  # every perceived object → the scene region, by INDEX
+        self._track_index_movers(before_scene, sc)                   # …and motion is read off the INDEXES, not the features
         if self._scene is not None and self._last_task is not None and prev_seen:
             task = self.task_state()                                 # R over CONFIGURATIONS, by the same delta rule as every
             self.task_reward.learn(self._configuration_bits(self._last_task), step_reward)   # over RELATION bits, so it
@@ -874,6 +885,25 @@ class Agent:
             if c != sc and c in prev_pos and prev_pos[c] != cell:
                 self._movers.add(c)
 
+
+    def _track_index_movers(self, before, sc) -> None:
+        """Discover movers from INDEX motion — the only way motion can be seen when two objects are alike.
+
+        `_track_movers` above reads `pos`, which is keyed on the FEATURE, so a colour realised twice never appears in it and
+        the motion of either object was invisible. Measured on Warehouse: `_movers` stayed EMPTY through a whole game while
+        two crates were being shoved around, and with no mover there is no push model, no scene body, and nothing for any
+        goal or value to be about. An index says WHICH one moved; the feature it carries says what KIND moves, and the KIND
+        is what generalises — a crate is pushable because it is a crate, not because it is that particular crate."""
+        if sc is None or self._scene is None:
+            return
+        col = self._scene_col()
+        for idx, was in before.items():
+            now = col._scene_objects.get(idx)
+            if now is not None and dist(was[0], now[0]) > 1e-9:
+                kind = col.feature_of(idx)
+                if kind is not None and kind != sc:
+                    self._movers.add(kind)
+
     def _pushed(self, prev_pos, pos) -> bool:
         """Did any known mover change cell in this transition? (So a self non-move that PUSHED a box is not mislabelled a wall bump.)"""
         return any(c in prev_pos and c in pos and prev_pos[c] != pos[c] for c in self._movers)
@@ -947,18 +977,18 @@ class Agent:
 
         An identity is skipped while `commit` is still deferring (L4 has not yet learned enough of the object to ground
         one); the pose is recorded regardless, so nothing is lost waiting on recognition."""
-        if not pos:
-            return
-        self.clear_scene()
-        by_colour = {o.color: o for o in objs}
         sc = self.self_color()                                       # the SELF is not a scene object: it is the body, and
-        for c, cell in pos.items():                                  # its pose is the nav column's (that IS the split —
-            if c == sc:                                              # measured: leaving it in put the agent's own position
-                continue                                             # back into the task state, 106 states against 89
-            #                                                          joint ones, i.e. worse than not factoring at all)
-            obj = by_colour.get(c)
-            identity = self._object_identity(obj) if obj is not None else None
-            self.place_object(c, self._as_pose(cell),
+        #                                                              its pose is the nav column's (that IS the split —
+        #   measured: leaving it in put the agent's own position back into the task state, 106 states against 89 joint ones)
+        seen = [o for o in objs if o.color != sc]
+        observed = [(o.color, self._as_pose(o.anchor)) for o in seen]
+        assignment = self._scene_col().track(observed)               # INDEXES, by predicted position — not by appearance
+        for idx, obs_i in assignment.items():
+            if obs_i is None:
+                continue                                             # kept but unseen: its pose stands, and permanence is
+            obj = seen[obs_i]                                        #   the default (`Column.track`)
+            identity = self._object_identity(obj)
+            self.place_object(idx, observed[obs_i][1],
                               identity=SDR(self.sensory.pooler.n, identity) if identity else None)
 
     def _target_cell(self, cell, action):
@@ -1157,8 +1187,11 @@ class Agent:
                 if mover_c not in pos or landmark_c not in pos:
                     return None
                 target = pos[landmark_c]
-                tests.append(lambda w, m=mover_c, t=target: (m in w.objects
-                                                             and tuple(round(c) for c in w.objects[m][0]) == t))
+                # ANY object of that KIND on the landmark's cell. The world is keyed by INDEX now, so a goal naming a kind
+                # cannot look itself up directly — and it should not: "a crate is on the pad" is satisfied by whichever
+                # crate gets there, which is also the only reading that survives two crates being alike.
+                tests.append(lambda w, m=mover_c, t=target: any(
+                    w.kind_of(oid) == m and tuple(round(c) for c in p[0]) == t for oid, p in w.objects.items()))
             else:                                                   # NAV: the self standing on that feature's cell
                 cells = [o.anchor for o in objs if o.color == g]
                 if len(cells) != 1:

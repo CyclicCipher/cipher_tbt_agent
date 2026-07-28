@@ -380,6 +380,14 @@ class Column:
         # own features-at-locations ("object id as a FEATURE → compositional objects", `reference_tbt_layers_4_23`), the same
         # Column one level up. Fed from the sensory column via the thalamus. Only the scene column uses it.
         self._scene_objects: dict = {}                          # object_id -> pose
+        # The INDEX side of the scene (`track`): which THING each pose belongs to, kept apart from what it looks like. An
+        # index is an allocated pointer (an object file), so it never collides when two objects are indistinguishable.
+        self._scene_feature: dict = {}                          # object_id -> the feature attached to that index
+        self._next_index: int = 0                               # indexes are allocated, never derived from appearance
+        self._scene_velocity: dict = {}                         # object_id -> its last observed displacement
+        self._scene_reach: float = 0.0                          # the largest step anything has been seen to take
+        self._last_action = None                                # what the world was last acted on with, so `track` can
+        #                                                         correspond by PREDICTED pose rather than by last pose
         # KEY DISCOVERY (ARCHITECTURE §9): Rescorla-Wagner cue competition over the state's features. The free kernel is the
         # background (always present); each state CUE learns its correction to the effect by PREDICTION ERROR (the delta rule).
         # A spurious cue (a neighbour co-present with support) is BLOCKED — it arrives when the error is already ~0, so it
@@ -1070,6 +1078,9 @@ class Column:
         compositional column had no cortical input at all and the "hierarchy" was Python calls between sibling columns."""
         self._require_location()
         self._scene_objects[object_id] = pose
+        self._scene_feature.setdefault(object_id, object_id)   # placed directly, with no tracking to say otherwise, an
+        #   object IS its own kind — which is the pre-index behaviour exactly, so a caller that names its objects keeps
+        #   working. `track` sets the kind explicitly, and that is where index and kind come apart.
         if identity is not None:
             saved = self._pose
             self.set_pose(pose[0], pose[1])
@@ -1079,6 +1090,87 @@ class Column:
     def clear_scene(self) -> None:
         """Start a fresh scene configuration."""
         self._scene_objects = {}
+        self._scene_feature = {}
+        self._scene_velocity = {}
+
+    # ── OBJECT INDEXES: what makes two identical things two things (object files / FINSTs) ───────────────────────────
+    def track(self, observed) -> dict:
+        """Maintain one INDEX per object across frames, and return `{index: observed_i}` (`None` where an index was kept
+        without being seen). `observed` is `[(feature, pose)]` — this frame's objects, in no particular order.
+
+        THE BRAIN DOES NOT TELL OBJECTS APART BY THEIR PROPERTIES. It allocates a small set of pointers — Pylyshyn's FINSTs,
+        Kahneman & Treisman's object files — that stick to a thing and follow it, and the pointer is PRIOR TO and separable
+        from what the thing looks like. The decisive evidence is Multiple Object Tracking (Pylyshyn & Storm 1988): people
+        track several targets among IDENTICAL distractors, so nothing featural distinguishes any of them at any moment. An
+        index keyed on appearance is therefore the wrong shape however carefully it is built, which is what a scene keyed on
+        colour was — two identical crates collided in it and BOTH were lost.
+
+        CORRESPONDENCE IS SOLVED BY PREDICTION, not by matching content: the index goes to whatever turns up nearest where
+        the object was PREDICTED to be, which is why tracking survives a total absence of features and fails on
+        discontinuous jumps. The prediction is this column's own forward model (`predict_object_move`), so a moving object is
+        followed through its motion rather than assumed stationary; with no dynamics learned yet it defaults to staying put,
+        which is the correct prior for a thing nobody has pushed. Spatiotemporal individuation precedes featural
+        individuation (Xu & Carey 1996) — the same finding `commit` already leans on for segmentation, applied here to
+        keeping a pointer ON a thing rather than to carving one out.
+
+        PERSISTENCE IS THE DEFAULT AND DELETION NEEDS REFUTATION — which is object permanence, not a separate faculty: an
+        index survives when its object is merely not seen, and is dropped only when its predicted place is VISIBLE and the
+        object is demonstrably not there. The mirror of `reference_recognition_under_occlusion`'s rule one level down (mint
+        on refutation, never on incompleteness).
+
+        Capacity is NOT capped here. Humans track about four, but a hard constant would be exactly the hand-coded heuristic
+        this codebase refuses; a real limit should fall out of cortical capacity (`reference_cortical_capacity`)."""
+        # Where each index is EXPECTED: its own pose carried forward by its own recent motion. Smooth extrapolation, which
+        # is what tracking actually needs — NOT the forward model's `predict_object_move`. That kernel is object-agnostic, so
+        # asking it where a PAD will be answers with dynamics learned from shoving crates: measured, it displaced stationary
+        # pads far enough that one pad's pointer claimed the other's observation, and "pad" was learned as a MOVER. A thing
+        # at rest is expected to stay at rest, and a thing in motion to continue — the assumption tracking is entitled to.
+        want = {idx: (add(pose[0], self._scene_velocity.get(idx, tuple(0.0 for _ in pose[0]))), pose[1])
+                for idx, pose in self._scene_objects.items()}
+        # BEST-FIRST correspondence, globally: every (index, observation) pair of the same KIND, nearest first. Assigning in
+        # index order instead lets one object's pointer claim another's observation before its owner gets to — measured, two
+        # pads swapped pointers when a crate covered one of them, and the phantom displacement made "pad" look like a MOVER.
+        pairs = sorted(((dist(want[idx][0], obs[0]), idx, i)
+                        for idx in self._scene_objects
+                        for i, (feat, obs) in enumerate(observed)
+                        if feat == self._scene_feature.get(idx)), key=lambda t: (t[0], str(t[1]), t[2]))
+        taken, out = set(), {}
+        reach = max(1.0, self._scene_reach)      # how far a pointer may follow its object in one frame: the largest
+        #   single-step displacement anything has actually been seen to make, floored at one cell. NOT a tuned radius —
+        #   it is learned from motion, and it is why tracking survives smooth movement but not teleportation, which is the
+        #   behaviour MOT shows. Without it a pointer will cross the board to the nearest same-coloured thing: measured, the
+        #   surviving pad's pointer claimed the OTHER pad two cells away the moment a crate occluded its own, and the phantom
+        #   displacement taught the agent that "pad" is a MOVER.
+        for _d, idx, i in pairs:
+            if idx in out or i in taken or _d > reach:
+                continue
+            taken.add(i)
+            was = self._scene_objects[idx][0]
+            self._scene_objects[idx] = observed[i][1]
+            self._scene_velocity[idx] = sub(observed[i][1][0], was)      # its own motion, for the next frame's expectation
+            self._scene_reach = max(self._scene_reach, dist(observed[i][1][0], was))
+            out[idx] = i
+        for idx in self._scene_objects:
+            out.setdefault(idx, None)                            # not seen — KEPT, because absence is not refutation
+        occupied = {tuple(round(c) for c in obs[0]) for _f, obs in observed}
+        for idx in [i for i, v in out.items() if v is None]:
+            where = tuple(round(c) for c in self._scene_objects[idx][0])
+            if where not in occupied:                            # its place is VISIBLE and EMPTY ⇒ refuted, so drop it.
+                del self._scene_objects[idx], self._scene_feature[idx]   # Something else standing there is OCCLUSION, and an
+                self._scene_velocity.pop(idx, None)               # occluded object persists — that is object permanence.
+                del out[idx]                                     # occluded object persists — that is object permanence.
+        for i, (feat, pose) in enumerate(observed):              # anything unclaimed is a NEW object entering the scene
+            if i not in taken:
+                idx = self._next_index
+                self._next_index += 1
+                self._scene_objects[idx], self._scene_feature[idx] = pose, feat
+                out[idx] = i
+        return out
+
+    def feature_of(self, object_id):
+        """What KIND of thing an index is pointing at. The index says WHICH one; this says WHAT it is — kept apart, because
+        two objects can be the same kind and still be two things."""
+        return self._scene_feature.get(object_id)
 
     def scene_snapshot(self) -> dict:
         """A COPY of the scene's `{object_id: pose}` — the raw geometry the hippocampal world-map assembles a forkable
