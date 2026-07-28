@@ -327,3 +327,46 @@ compositional. And the model is undertrained at 6000 steps (train acc 0.625); th
 because control and test come from the same model, but the absolute numbers would move. Worth repeating at 11000 steps and
 across seeds before it carries much weight.
 
+### MIXING vs APPLICATION — the architectural hypothesis FAILS (2026-07-27) — `apply_vs_mix.py`
+
+I argued the missing primitive was APPLICATION: attention mixes value vectors into a residual stream and never applies one
+as a function, which would explain why Mamba-3 failed identically (an SSM also mixes, via state). `compositional_rep.py`
+seemed to support it — the code is compositional, the behaviour is not, so the model can represent `a∘b` and not execute
+it. **The direct test says the hypothesis is wrong.**
+
+One-variable design: both arms share the demonstration encoder, the input embedding and the decoder, and differ ONLY in
+what happens to the task code `z` — `MIX: h = MLP([e(x), z])` against `APPLY: h = M(z)·e(x)` with `M(z) = Σ zₖ Bₖ`, the
+`operator.py` move cross-pollinated from TBT. Nothing tells APPLY that tasks compose or that `M(z_{a∘b})` should be
+`M(z_b)M(z_a)`.
+
+| arm | params | train acc | train solved | HELD-OUT acc | held-out solved |
+|---|---|---|---|---|---|
+| MIX | 234k | 0.943 | 42/42 | 0.018 | **0/20** |
+| APPLY (rank 10, d=96) | 235k | 0.424 | 2/42 | 0.005 | **0/20** |
+| **APPLY (rank 40, d=64)** | 229k | **0.985** | **42/42** | 0.042 | **0/20** |
+| transformer (from `diversity.py`) | ~340k | 0.754 | 22/42 | 0.077 | **0/20** |
+
+**The first APPLY run was uninterpretable and is kept to show why**: at rank 10 it never fit the TRAINING set (0.424,
+2/42), and held-out cannot be compared across arms that differ in train fit — the same sanity-gate failure as H1. Trading
+width for basis rank at fixed parameters fixed it (0.985, 42/42), and only then is the comparison fair.
+
+**With the comparison fair, application does not rescue composition.** APPLY generalises marginally better than MIX (0.042
+vs 0.018) but neither solves a single held-out task, and the plain transformer's 0.077 is the HIGHEST of the three — which
+also undercuts "attention is the wrong architecture" from the other direction.
+
+⇒ **The failure is invariant across four architectures** — attention over a sequence, a state-space model
+(`binding_rule.py`), MLP-with-concatenation, and MLP-with-operator — **and across optimisers** (AdamW vs Aurora) **and
+across task diversity** (4 → 42 tasks). Architecture is not the lever, on this evidence, and neither is the optimiser, and
+neither is data.
+
+**Taken with `compositional_rep.py`, that leaves a sharp diagnosis.** The representation already factorises (held-out R²
++0.52), and giving the model an explicit apply-primitive changes nothing. So the missing thing is neither reusable parts
+nor a mechanism to apply them. What all four share is that they are trained by gradient descent on a loss that is FULLY
+SATISFIED by memorising the training tasks: on the training distribution, a model that composes and a model that memorises
+are indistinguishable, so nothing in the objective ever prefers the former. The code lands in roughly the right place for
+a held-out composition and the READ-OUT has simply never been trained to decode that region.
+
+That reframes "pressure to factorise": the representation factorises on its own, and it is the read-out that has no reason
+to. The next lever is therefore an OBJECTIVE that separates the two solutions, not another architecture — and note it
+cannot be more data of the same kind, which is what the diversity sweep already ruled out.
+
