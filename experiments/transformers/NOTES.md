@@ -242,3 +242,43 @@ MLP + optimiser. The one untried lever is `torch.compile(mode="reduce-overhead")
 `max-autotune-no-cudagraphs`, and since the profile says launch overhead rather than FLOPs, CUDA graphs are the thing most
 likely to still pay. That is a one-line change worth measuring before any kernel work.
 
+### Does it compose, or memorise? The task-diversity sweep (2026-07-27) — `diversity.py`
+
+**H1 was retired first, and for a reason worth keeping.** It asked how FAST a novel task is acquired and how that tracks
+the familiarity of its parts. The measured acquisition rate on held-out compositions is ZERO — every one, in every
+optimiser and positional scheme tried. You cannot correlate a speed against anything when nothing is acquired. The
+censoring was the finding, not an obstacle to it, and the question upstream is whether the model composes at all.
+
+**The hypothesis has a known shape.** Raventós et al. 2023 (arXiv:2306.15063) found a TASK-DIVERSITY THRESHOLD in
+in-context regression: below a critical number of distinct pretraining tasks a transformer behaves as if it memorised
+them; above it, it implements the general algorithm and generalises to unseen tasks. That would explain both of our
+results at once — `linreg.py` drew a fresh `w` per sequence (effectively INFINITE diversity) and learned the general
+algorithm to within 0.005–0.02 of Bayes-optimal; `h1_lid.py` had 17 discrete tasks and memorised.
+
+Design: 12 primitives give **62 distinct 2-compositions** (deduplicated by signature). The held-out set is **FIXED at 20**
+across every condition, training sets are **NESTED**, sampling is uniform, compute is fixed at 8000 steps.
+
+| \|train\| | train acc | train solved | HELD-OUT acc | held-out solved |
+|---|---|---|---|---|
+| 4 | 0.999 | 4/4 | 0.020 | **0/20** |
+| 10 | 0.997 | 10/10 | 0.046 | **0/20** |
+| 22 | 0.986 | 22/22 | 0.049 | **0/20** |
+| 42 | 0.754 | 22/42 | 0.077 | **0/20** |
+
+1. **Memorisation is complete and transfer is absent.** Up to 22 tasks the model fits EVERY training task (0.986–0.999,
+   all solved) — so nothing here is an undertraining artefact — while held-out accuracy sits at 2–5% and **not one of the
+   20 held-out compositions is solved at any diversity level**.
+2. **A 10x increase in task diversity buys ~6 percentage points and zero solved tasks.** No threshold anywhere in range.
+3. **The largest point is partly undertrained** (train 0.754, 22/42) at fixed compute, so it is the weakest row; note the
+   trend across 4→22, where the fit IS complete, is equally flat.
+
+⚠ **WHAT THIS CANNOT CONCLUDE, and it is the main limitation.** Raventós located the threshold at roughly 10³–10⁴ distinct
+tasks. Our ENTIRE task universe is 62. So this cannot refute the diversity hypothesis — it can only say the threshold is
+not at ≤42 tasks for this family, which is unsurprising if the real one is two orders of magnitude further out. The
+contrast with `linreg` (unbounded diversity ⇒ general algorithm learned) remains *consistent* with diversity being the
+operative variable; we simply cannot reach the regime from below with 2-compositions of 12 primitives.
+
+**So the task space is now the binding constraint** — the same shape of blocker as before, one level up. Getting to 10³
+tasks needs length-3 compositions (12 primitives ⇒ far more than 62) or many more primitives, and both make each task
+harder to infer in-context, which is the trade that has to be designed around rather than tuned. That is the next build.
+

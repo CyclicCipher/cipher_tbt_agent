@@ -87,7 +87,12 @@ than used to build the harness. It turns LID into a number instead of a vibe.
 
 Cheapest falsifier first. Each step is built so it can come out negative.
 
-- **H1 — is LID even the right explanatory variable?** Hold GLOBAL novelty constant and vary only how familiar the LOCAL
+- ~~**H1 — is LID even the right explanatory variable?**~~ **RETIRED 2026-07-27.** Unanswerable as posed: the measured
+  acquisition rate on held-out tasks is ZERO in every condition, and a speed cannot be correlated against anything when
+  nothing is acquired. Superseded by **H0′ — does it compose at all, or memorise?** (`diversity.py`), which found complete
+  memorisation and zero transfer across a 10x task-diversity range, with the task SUPPLY (62 distinct) now the blocker.
+  Original wording kept below, since the design decision it turned on — holding global novelty constant — still stands.
+- **H1 (original) — is LID even the right explanatory variable?** Hold GLOBAL novelty constant and vary only how familiar the LOCAL
   operations are; see whether trials-to-criterion tracks local familiarity. If it does not, the frame is wrong and the rest
   of the ladder is moot. **This runs first precisely because it can kill the programme.**
 - **H2 — the from-scratch claim.** Same network, same task: trained THROUGH a given correct harness from scratch, versus
