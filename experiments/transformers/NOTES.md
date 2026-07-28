@@ -370,3 +370,51 @@ That reframes "pressure to factorise": the representation factorises on its own,
 to. The next lever is therefore an OBJECTIVE that separates the two solutions, not another architecture — and note it
 cannot be more data of the same kind, which is what the diversity sweep already ruled out.
 
+### Chaining consistency — it works TRANSDUCTIVELY and does not generalise (2026-07-27) — `chaining.py`
+
+The objective, designed before testing: ground the PARTS with supervision and constrain the WHOLES with a label-free
+consistency term, `L = L_sup + λ·CE(M(D_ab, x), sg[M(D_b, M(D_a, x))])`. The argument was that ERM cannot separate a
+composer from a memoriser because they are extensionally identical on the labelled tasks, so the loss must be enlarged to
+a region where they differ — and a chained prediction is a MANUFACTURED TARGET on tasks that have no label.
+
+Three-way split, built in because transduction was the named risk: 12 primitives + 17 compositions LABELLED, 17
+compositions UNLABELLED (consistency term only), 17 compositions EVAL (never presented in any form). Dedup runs across
+BOTH lengths, since `rot1∘rot1 = rot2` would otherwise let an "unseen" task be a labelled primitive under another name.
+
+| arm | prims | labelled | UNLABELLED | solved | EVAL | solved |
+|---|---|---|---|---|---|---|
+| `lam0` (control) | 0.997 | 0.997 | 0.021 | 0/17 | 0.017 | 0/17 |
+| **`full`** | 0.922 | 0.885 | **0.593** | **5/17** | **0.018** | **0/17** |
+| `noprim` (falsifier) | 0.000 | 1.000 | 0.000 | 0/17 | 0.001 | 0/17 |
+| `full`, no grounding warmup | 0.000 | 0.000 | 0.000 | 0/17 | 0.000 | 0/17 |
+
+**COLLAPSE HAPPENED FIRST, and it was predicted.** At λ=1 with the consistency term on from step 0, the model went to
+**0.000 on everything, primitives included**, against a working 0.997 control — the model distilling its own garbage, and
+that attractor beating the supervised loss outright. This was failure mode 1 in the proposal and the proposed mitigation
+("`L_sup` forbids collapse") was **not enough**. The fix is the mechanism story enforced in time: switch the term on only
+after the primitives are learned, because at step 0 there are no learned parts to ground the chain.
+
+**THE RESULT, both halves.** On the unlabelled pool the objective does exactly what the theory said: **0.021 → 0.593, and
+5/17 solved where nothing in this entire line had solved a single held-out composition before.** It converts unlabelled
+tasks into correct behaviour using only supervision on the parts. **And it does not transfer at all** — EVAL is 0.018
+against the control's 0.017, i.e. unchanged, 0/17.
+
+This is precisely the outcome named as a falsifier in advance: *"if UNLABELLED lifts but EVAL does not, that is
+transduction, not composition, and it must be reported that way."* So it is reported that way. The objective is a
+TRANSDUCTIVE fix, not an inductive one.
+
+**And the failure has an exact form worth stating:** we removed memorisation by manufacturing labels, and the model
+memorised the manufactured labels. It learned that *these seventeen* compositions have the chained answer; it did not
+learn to chain. The original problem, one level up.
+
+Cost noted: the term slightly degrades supervised accuracy (0.997 → 0.922 prims, 0.997 → 0.885 labelled).
+Caveat on the falsifier: `noprim` also has fewer supervised tasks (17 vs 29), so its failure is ambiguous between an
+ungrounded chain and thinner supervision. It could only cleanly FALSIFY (by matching `full`), which it did not, so the
+mechanism story survives without being confirmed by it.
+
+**WHERE THIS POINTS.** At inference the model is still asked to answer in ONE SHOT from demonstrations of `(a,b)` — it
+never has to chain. So chained targets teach the ANSWERS, not the PROCEDURE. To learn the procedure, chaining has to be
+the inference-time computation, not just a training signal. That is the harness with its one defensible mechanical job —
+supplying iteration a bounded architecture cannot — and it converges with the depth argument: composing *m* operations
+needs *m* applications, and a one-shot read-out has one.
+
