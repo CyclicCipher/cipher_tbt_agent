@@ -214,3 +214,31 @@ composition absent.** Whatever is missing is not a gradient-quality problem, and
 **Also, the LID measure is now conclusively noise at n=8.** Secondary Spearman across all runs to date:
 −0.886, −0.441, −0.273, −0.063, −0.420, **+0.174** — both signs. No signal.
 
+### FlashAttention: measured, and NOT worth it at our shapes (2026-07-27)
+
+Measured on the COMPILED model (what we actually train with), batch 256, seq 96, head_dim 24:
+
+| | ms/step |
+|---|---|
+| rope, full | 17.32 |
+| rope, attention short-circuited | 13.23 |
+| learned positions (no rotation) | 17.10 |
+
+So **all attention machinery is 23.6% of the step (4.1 ms)** and the **RoPE rotation is 1.3%** — `torch.compile` already
+fused the rotation away, which is why the hand-written `stack`/`flatten` never showed up as a cost.
+
+FlashAttention could only target part of that 4.1 ms, and four things say it would recover almost none of it:
+1. **The attention math is not the cost.** At seq 96 / head_dim 24 the QKᵀ and AV matmuls are ~8 GFLOP fwd+bwd across the
+   whole model — roughly 0.4 ms at this card's bf16 throughput. We spend 4.1 ms, i.e. ~10x off roofline, so what is left is
+   memory traffic and launch overhead, not the softmax·V arithmetic FA optimises.
+2. **FA's win scales as O(N²) memory traffic, and N=96.** The N×N matrix it avoids materialising is trivially small here;
+   the whole point of FA is that this term dominates at long context, which is exactly the regime we are not in.
+3. **head_dim = 24 is off the fast path.** FA kernels are specialised for 32/64/128; 24 wastes tensor-core tiles.
+4. **FA3 is Hopper-only** (FP8, async warp specialisation, TMA). This box is Ampere (3050 Ti), so the newest variants
+   contribute literally nothing.
+
+**Verdict: a long-context optimisation, correctly guessed. Not our bottleneck.** The remaining 13.2 ms is linear layers +
+MLP + optimiser. The one untried lever is `torch.compile(mode="reduce-overhead")` (CUDA graphs) — we used
+`max-autotune-no-cudagraphs`, and since the profile says launch overhead rather than FLOPs, CUDA graphs are the thing most
+likely to still pay. That is a one-line change worth measuring before any kernel work.
+
