@@ -82,3 +82,46 @@ precisely the situation where a harness would have to supply it, which is the cl
 2-minute local budget allows at this domain size. Either a longer run (a GPU job, not a laptop one) or a smaller task
 (fewer primitives, more demonstrations). The apparatus is ready for either — `--steps`, `--seed`, `--k`, `--crit`.
 
+### H1 round 2 — smaller task, and PoPE added (2026-07-27)
+
+**Run budget for this line raised to 5 minutes** (user, 2026-07-27); the 2-minute law still governs `src/tbt/`.
+
+**Task shrunk BY COUNTING, not by taste.** A first shrink to 6 primitives at L=4 collapsed 36 writings to **14 distinct
+functions** — rotations form a small cyclic group and most compositions coincided — which left **6 training tasks against
+8 held-out**, i.e. the split inverted, and then crashed with a KeyError because some primitives appeared only in held-out
+tasks. Counting distinct compositions across candidate configs picked **7 primitives at L=6, V=5 → 25 distinct** (17 train
+/ 8 test). *Distinct-function count, not primitive count, is the quantity the design needs.* Two other real defects fixed
+on the way: `double` (x·2 mod V) was never a bijection at even V despite the docstring saying so — replaced by `negate`;
+and the weight vector was hardcoded to 8 entries, so when the primitive set shrank it silently used only the first 6 and
+halved the exposure spread the whole experiment depends on.
+
+**PoPE implemented** (arXiv:2509.10534, ICML 2026), which needed custom attention — position has to reach the QK product,
+and `nn.TransformerEncoderLayer` gives no way in. RoPE's score is `Σ_c μ_q μ_k cos((s−t)θ_c + φ_k − φ_q)`, where the
+content-dependent phases interact, entangling what and where; PoPE puts content in the MAGNITUDE (`softplus(q)`, so
+non-negative) and position in the PHASE ALONE (`t·θ_c`, no content term), giving `Σ_c μ_q μ_k cos((s−t)θ_c + δ_c)` with no
+interaction term, computed as an ordinary dot product in 2·hd dims. `δ_c` learnable, init U(−2π,0), clipped there.
+
+| positional scheme | steps | train loss | TRAINED solved | mean acc | held-out solved |
+|---|---|---|---|---|---|
+| learned absolute | 4000 | 0.165 | 3/17 | 0.31 | 0/8 |
+| RoPE | 3200 | 0.058 | **9/17** | **0.54** | 0/8 |
+| PoPE | 3200 | 0.076 | 7/17 | 0.46 | 0/8 |
+
+1. **Positional encoding matters a lot here.** Both rotary schemes roughly triple the trained-task solve rate against
+   learned-absolute — and do it with 20% FEWER steps, so the comparison understates them. Worth knowing before any
+   conclusion about LID is drawn on this substrate.
+2. **PoPE did not beat RoPE in our run** (7/17 vs 9/17), on one seed at a scale far below the paper's 124M–774M. Not
+   evidence against the paper; just no reproduction of the advantage here.
+3. **H1 IS STILL NOT ANSWERED.** Every held-out task is censored in every condition, so the primary measure — trials-to-
+   criterion — carries no information in any of the three runs.
+4. ⚠ **AND THE SECONDARY MEASURE IS NOT STABLE.** It came out **−0.886, −0.441, −0.273** across three otherwise-comparable
+   runs. The first of those looks like strong support for LID (n=8, p≈0.003 taken alone) and it would have been easy to
+   report it as the headline. Across conditions it is clearly noise-dominated at n=8. **No LID signal is established**, and
+   the honest statement is that this design cannot yet measure the thing it was built to measure.
+
+**What it would take.** The blocker is unchanged and now well characterised: the model never solves a held-out composition,
+so acquisition speed on novel tasks cannot be timed. Either the model must get strong enough to compose (more scale/steps
+than a 5-minute budget buys — a GPU job), or the dependent measure must move to something graded and stable with far more
+than 8 held-out tasks. Raising the primitive count raises both the task supply and the difficulty, so those trade against
+each other, and that trade is the next thing to design around rather than tune.
+

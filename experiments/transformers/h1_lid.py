@@ -34,13 +34,20 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-L, V = 4, 6            # sequence length, digit vocabulary. Kept SMALL on purpose: the point of H1 is whether
+L, V = 6, 5            # sequence length, digit vocabulary. Kept SMALL on purpose: the point of H1 is whether
 #                        acquisition speed tracks local familiarity, and that needs a model that has actually
 #                        learned the training distribution inside a runnable budget. A domain the model cannot
 #                        fit censors every task at the same value and measures nothing (see the sanity gate).
 
 
 # ── the primitives: each a bijection on a batch of digit sequences ───────────────────────────────────────────────────
+# SEVEN, at L=6/V=5, CHOSEN BY COUNTING rather than by taste: the shrink to 6 primitives at L=4 collapsed 36 writings
+# to just 14 distinct functions, because rotations form a small cyclic group and most compositions coincided — which
+# left 6 training tasks against 8 held-out ones, i.e. the split inverted. This config yields 25 distinct compositions
+# (17 train / 8 test). Distinct-function count, not primitive count, is what the design actually needs.
+# `double` was DELETED, and it was a real flaw rather than a trim: x*2 mod V is a bijection only when gcd(2,V)=1, so at
+# V=6 it sent {0,1,2,3,4,5} to {0,2,4,0,2,4} and was not invertible at all, while the docstring claimed every primitive
+# was a bijection. `negate` replaces it — x -> -x mod V, which genuinely is one.
 PRIMS = {
     "reverse":     lambda s: s.flip(-1),
     "rot_left":    lambda s: torch.roll(s, -1, dims=-1),
@@ -48,8 +55,7 @@ PRIMS = {
     "swap_pairs":  lambda s: s.reshape(*s.shape[:-1], L // 2, 2).flip(-1).reshape(*s.shape),
     "swap_halves": lambda s: torch.roll(s, L // 2, dims=-1),
     "inc":         lambda s: (s + 1) % V,
-    "dec":         lambda s: (s - 1) % V,
-    "double":      lambda s: (s * 2) % V,
+    "negate":      lambda s: (V - s) % V,
 }
 NAMES = list(PRIMS)
 
@@ -71,7 +77,9 @@ def build_tasks(seed: int):
     ~150x so that local familiarity is GRADED rather than binary."""
     g = torch.Generator().manual_seed(seed)
     probe = torch.randint(0, V, (16, L), generator=g)
-    ident = signature((NAMES.index("inc"), NAMES.index("dec")), probe)   # any pair equal to this is a no-op task
+    ident = tuple(probe.flatten().tolist())      # the do-nothing signature, taken directly rather than via some pair of
+    #                                              primitives that happen to be inverses — which broke the moment one of
+    #                                              those primitives was removed, and would break again on any edit here
 
     by_sig, pairs = {}, []
     for i in range(len(NAMES)):
@@ -82,13 +90,25 @@ def build_tasks(seed: int):
             by_sig[sig] = (i, j)
             pairs.append((i, j))
 
-    order = torch.randperm(len(pairs), generator=g).tolist()
-    n_test = max(8, len(pairs) // 4)
-    test = [pairs[k] for k in order[:n_test]]
-    train = [pairs[k] for k in order[n_test:]]
+    # Split, with the guard that EVERY primitive must appear in the training half. Without it a primitive can end up only
+    # in held-out tasks, and then it has no measured familiarity at all — which is not a missing number but a crash, and
+    # before that guard existed it was a KeyError in the middle of the results table.
+    n_test = 8
+    for _ in range(200):
+        order = torch.randperm(len(pairs), generator=g).tolist()
+        test = [pairs[k] for k in order[:n_test]]
+        train = [pairs[k] for k in order[n_test:]]
+        if {i for pr in train for i in pr} == set(range(len(NAMES))):
+            break
+    else:
+        raise RuntimeError("could not split with every primitive represented in training")
 
-    weights = torch.tensor([1.0, 0.5, 0.25, 0.12, 0.06, 0.03, 0.015, 0.007])   # ~150x spread over the primitives
-    weights = weights[torch.randperm(len(NAMES), generator=g)]
+    # A geometric spread SIZED TO THE PRIMITIVE COUNT, so the graded exposure the whole experiment depends on survives a
+    # change to that count. A hardcoded 8-long list silently used only its first 6 entries when the set shrank, quietly
+    # halving the spread that makes local familiarity graded rather than binary.
+    n = len(NAMES)
+    weights = torch.tensor([150.0 ** (-i / (n - 1)) for i in range(n)])        # ~150x from most to least frequent
+    weights = weights[torch.randperm(n, generator=g)]
     w_pair = torch.tensor([weights[i] * weights[j] for i, j in train])
     return train, test, w_pair / w_pair.sum(), weights
 
@@ -110,24 +130,94 @@ def make_batch(B, K, task_list, probs, dev, g=None, fixed=None):
     return tok.to(dev), idx
 
 
+def _freqs(hd, dev, base=10000.0):
+    """Per-channel angular frequencies. RoPE runs over d/2 PAIRS, PoPE over all d channels — that difference is part of
+    the method, not a detail. Decaying exponents, so wavelengths span ~2π to ~2π·base."""
+    return base ** (-torch.arange(hd, device=dev, dtype=torch.float32) / hd)
+
+
+class Attn(nn.Module):
+    """Causal self-attention with a swappable positional scheme, because position has to reach the QK product for RoPE and
+    PoPE and `nn.TransformerEncoderLayer` gives no way in.
+
+      learned — no position here; a learned absolute embedding is added to the input instead (the usual baseline).
+      rope    — rotate each (2c, 2c+1) pair of q and k by position·θ_c, so the score depends on s−t.
+      pope    — POLAR COORDINATE POSITIONAL EMBEDDINGS (arXiv:2509.10534, ICML 2026).
+
+    PoPE's argument is that RoPE ENTANGLES what and where: its score is
+    `Σ_c μ_q μ_k cos((s−t)θ_c + φ_k − φ_q)`, where the content-dependent phases φ interact, so the model cannot match on
+    content and position independently. PoPE makes the MAGNITUDE carry content and the PHASE carry position ALONE —
+    magnitudes are `softplus(q)`, `softplus(k)` (non-negative), phases are `t·θ_c` and `s·θ_c` with no content term — giving
+    `Σ_c μ_q μ_k cos((s−t)θ_c + δ_c)` with no interaction term. Written in Cartesian form it is an ordinary dot product in
+    2·hd dims, which is how it is computed here. `δ_c` is a learnable per-channel bias, initialised U(−2π, 0) and clipped
+    there (the paper's in-distribution setting; zero-init is for length extrapolation, which we are not testing).
+    Reported effect: 11% → 95% on their indexing diagnostic, and small consistent perplexity gains at 124M–774M."""
+
+    def __init__(self, d_model, n_head, pos):
+        super().__init__()
+        self.h, self.hd, self.pos = n_head, d_model // n_head, pos
+        self.qkv = nn.Linear(d_model, 3 * d_model)
+        self.proj = nn.Linear(d_model, d_model)
+        if pos == "pope":
+            self.delta = nn.Parameter(torch.empty(self.hd).uniform_(-2 * math.pi, 0.0))
+
+    def forward(self, x):
+        B, T, C = x.shape
+        q, k, v = self.qkv(x).chunk(3, dim=-1)
+        q, k, v = (z.view(B, T, self.h, self.hd).transpose(1, 2) for z in (q, k, v))
+        t = torch.arange(T, device=x.device, dtype=torch.float32)[:, None]
+        if self.pos == "rope":
+            th = _freqs(self.hd // 2, x.device)
+            ang = t * th                                              # (T, hd/2)
+            cos, sin = ang.cos()[None, None], ang.sin()[None, None]
+            def rot(z):
+                a, b = z[..., 0::2], z[..., 1::2]
+                return torch.stack([a * cos - b * sin, a * sin + b * cos], dim=-1).flatten(-2)
+            q, k = rot(q), rot(k)
+        elif self.pos == "pope":
+            ang = t * _freqs(self.hd, x.device)                       # phase is POSITION ONLY — the whole point
+            d = self.delta.clamp(-2 * math.pi, 0.0)
+            mq, mk = F.softplus(q), F.softplus(k)                     # magnitude is CONTENT only
+            q = torch.cat([mq * ang.cos(), mq * ang.sin()], dim=-1)
+            k = torch.cat([mk * (ang + d).cos(), mk * (ang + d).sin()], dim=-1)
+        att = (q @ k.transpose(-2, -1)) / math.sqrt(self.hd)
+        att = att.masked_fill(torch.ones(T, T, device=x.device, dtype=torch.bool).triu(1), float("-inf"))
+        y = (att.softmax(-1) @ v).transpose(1, 2).reshape(B, T, C)
+        return self.proj(y)
+
+
+class Block(nn.Module):
+    def __init__(self, d_model, n_head, pos):
+        super().__init__()
+        self.n1, self.n2 = nn.LayerNorm(d_model), nn.LayerNorm(d_model)
+        self.attn = Attn(d_model, n_head, pos)
+        self.mlp = nn.Sequential(nn.Linear(d_model, 4 * d_model), nn.GELU(), nn.Linear(4 * d_model, d_model))
+
+    def forward(self, x):
+        x = x + self.attn(self.n1(x))
+        return x + self.mlp(self.n2(x))
+
+
 class Model(nn.Module):
     """A small causal decoder over digits. Predicts every OUTPUT block from everything before it, so the accuracy at the
     j-th block IS the accuracy after j-1 demonstrations — the trials curve falls out of one forward pass."""
 
-    def __init__(self, d_model=96, n_layer=3, n_head=4, max_len=256):
+    def __init__(self, d_model=96, n_layer=3, n_head=4, max_len=256, pos="learned"):
         super().__init__()
         self.emb = nn.Embedding(V, d_model)
-        self.pos = nn.Parameter(torch.randn(1, max_len, d_model) * 0.02)
-        layer = nn.TransformerEncoderLayer(d_model, n_head, 4 * d_model, batch_first=True,
-                                           norm_first=True, dropout=0.0, activation="gelu")
-        self.blocks = nn.TransformerEncoder(layer, n_layer, enable_nested_tensor=False)
+        self.pos_kind = pos
+        self.pos = nn.Parameter(torch.randn(1, max_len, d_model) * 0.02) if pos == "learned" else None
+        self.blocks = nn.ModuleList([Block(d_model, n_head, pos) for _ in range(n_layer)])
+        self.norm = nn.LayerNorm(d_model)
         self.head = nn.Linear(d_model, V)
 
     def forward(self, tok):
-        n = tok.shape[1]
-        h = self.emb(tok) + self.pos[:, :n]
-        mask = nn.Transformer.generate_square_subsequent_mask(n, device=tok.device)
-        return self.head(self.blocks(h, mask=mask, is_causal=True))
+        h = self.emb(tok)
+        if self.pos is not None:
+            h = h + self.pos[:, :tok.shape[1]]                        # rope/pope inject position inside attention instead
+        for b in self.blocks:
+            h = b(h)
+        return self.head(self.norm(h))
 
 
 def out_mask(K, dev):
@@ -211,19 +301,21 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--steps", type=int, default=3000)
     p.add_argument("--batch", type=int, default=256)
-    p.add_argument("--k", type=int, default=6, help="demonstrations per sequence")
+    p.add_argument("--k", type=int, default=8, help="demonstrations per sequence")
     p.add_argument("--lr", type=float, default=1e-3)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--crit", type=float, default=0.8)
+    p.add_argument("--pos", default="learned", choices=["learned", "rope", "pope"],
+                   help="positional scheme: learned-absolute, RoPE, or PoPE (arXiv:2509.10534)")
     args = p.parse_args()
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     torch.manual_seed(args.seed)
 
     train, test, probs, weights = build_tasks(args.seed)
-    print(f"device {dev} | {len(train)} trained compositions, {len(test)} held out | K={args.k} steps={args.steps}")
+    print(f"device {dev} | pos={args.pos} | {len(train)} trained, {len(test)} held out | K={args.k} steps={args.steps}")
     print("primitive training weight: " + ", ".join(f"{n}={w:.3f}" for n, w in zip(NAMES, weights.tolist())))
 
-    model = Model(max_len=args.k * 2 * L + 2).to(dev)
+    model = Model(max_len=args.k * 2 * L + 2, pos=args.pos).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.01, betas=(0.9, 0.98))
     warm = args.steps // 20
     sched = torch.optim.lr_scheduler.LambdaLR(
