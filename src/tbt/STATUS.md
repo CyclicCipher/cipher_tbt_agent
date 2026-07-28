@@ -203,6 +203,28 @@ code (a `GridEncoder` over the displacement): measured, (3,2) shares **0.71** of
     no predicate is reached inside the search and only a leaf GRADIENT can steer. Those are the discriminating fixtures;
     this one says clearly that this regime is not one.
 
+⚠ **THE SET-GOAL FIXTURE (2026-07-27) FOUND A BLOCKER UPSTREAM OF EVERYTHING IT WAS AIMED AT** —
+`tasks/games/warehouse.py`, `test_warehouse`. Built as the case a PAIR goal cannot state, breaking the pair representation
+two ways at once: the win is "EVERY pad covered" (a SET property — one crate on a pad is not a win, so a pair is true while
+the level is half done), and every crate is one colour and every pad another, so `(6,7)` names a COLOUR PAIR rather than a
+crate and a pad, leaving the ASSIGNMENT with nowhere to live. Oracle 9/9/8, all levels BFS-verified.
+  * **The pair goal fails exactly as predicted** (`goal_mem.goals()` empty). **But so does everything else**, for a reason
+    far below goals and values: **`Agent._positions` is a `{feature: cell}` MAP** — one cell per feature — which
+    structurally cannot hold two instances of one feature. Two identical 1×1 crates are distinguishable neither by colour
+    NOR by shape (shape-disambiguation cannot help: they are the same shape), so they are dropped as ambiguous. Measured:
+    the retina segments `[1, 2, 6, 6, 7, 7]` correctly, `_positions` returns only `{1, 2}`, **`_movers` stays EMPTY**, the
+    push is never learned, the scene holds only the wall, and the goal learner has nothing to credit. The agent reaches
+    1/3 levels at 45 actions against oracle 9, by exploration alone.
+  * **The relational value is unchanged by ablation here too — but for a different reason than in `Crates`.** There it was
+    redundant against a sharper mechanism; here it is STARVED, because the representation never delivers a crate for any
+    relation to be about. A fixture built to discriminate two mechanisms discriminated neither, and said why.
+  * ⇒ **`project_representation_shortcut_lesson` for the FIFTH time:** indexing the world by FEATURE was convenient while
+    every fixture had unique features, and it fails at the seam where that stops holding. The general state is a **LIST OF
+    INSTANCES with the feature as a read-out**. NOT fixed here on purpose — it reaches `_track_movers`, `_learn_dynamics`,
+    `_credit_goal`, `_route_scene`, `_model_loss` and the world map, so it is a direction to take deliberately rather than
+    a repair slipped into a fixture commit. **This is the next thing to build**, and it is squarely on the ARC path: real
+    ARC-AGI-3 frames are full of identical objects.
+
 **Generalization investigation — RESOLVED 2026-07-09 (now wired into the column, above).** Two durable results,
 full detail in memory `project_place_invariance_needs_factored_state` + `reference_htm_canonical_pipeline`, plain-English
 writeup in `ARCHITECTURE.md` §7:
