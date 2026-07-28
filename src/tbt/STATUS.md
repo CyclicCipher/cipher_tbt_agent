@@ -142,6 +142,30 @@ on the pad" is not a point in R^n. `Column` grew the graph half of L6a with the 
     ⇒ **the right value on the wrong decision variable.** Its consumer is subgoal selection — WHICH configuration to aim
     for — which is the plan's H3, and this is the evidence for going there rather than tuning the leaf further.
 
+**H3 — BUILT 2026-07-27: the SPATIAL and TASK regions composed; the planner distinguishes two board-states.**
+The plan's own test for H3 is *"the planner distinguishes two board-states at the same position (picks different actions)"*
+— the C4 regression, fixed BY FACTORISATION rather than by a joint blob. **PASSES decisively:** with the agent on the SAME
+cell and only the block's relation to the pad differing, the plans are OPPOSITE — west to push east, east to push west.
+The goal came from the task region, which sees the configuration, not from anything positional.
+  * **THE PLAN'S SUBSTRATE CORRECTED A THIRD TIME** (after H0's eigenframe and H1's thalamic voting). H3 says to have the
+    thalamus bind "spatial-position ⊗ task-state so the planner sees the joint state" — precisely the joint state H0
+    measured as un-factorising, so building it would undo H0's finding two steps after it was established. What passes
+    between regions is a GOAL STATE down and ARRIVAL up (`reference_hierarchy_substrate`): a subgoal is ONE state, not a
+    product of two spaces, so nothing multiplies. Asserted in `test_heterarchy`, not trusted.
+  * **The build:** `Agent._task_subgoal` (the best-valued LEARNED successor of the current task state, with the value it
+    would gain) + `_task_plan` (the subgoal becomes a reward predicate over world-states, so the SAME rollout pursues it —
+    no second planner). Added as a THIRD drive whose offer is that value gain, arbitrated by the BG on the same scale as
+    the other two (ARCHITECTURE rule 4). Chosen by learned value over a LEARNED graph — no enumeration of subgoal kinds.
+  * ⚠ **THE LIVE BOTTLENECK, measured, and it is the next thing to fix.** The drive fires but is STARVED: on CollectAll the
+    mean number of LEARNED successors of the state the agent is standing in is **0.02**, so a subgoal is offered on ~5 steps
+    out of 220 — and the BG chose it on every one of those (starved, not out-competed). A task graph is learned strictly
+    BEHIND the agent while configurations rarely recur (collecting consumes; pushing does not return), and task states are
+    EXACT-MATCH keys, so nothing generalises from a similar configuration to an unvisited one. That is the KEY problem
+    `Column._quantise` already names ("overlap recall over relation SDRs is the refinement") — now with a number on it and
+    a consumer that needs it.
+  * On LockPath the drive is additionally inert for the H2 reason (a level ENDS when it pays, so the paying configuration
+    never recurs). LockPath unchanged at 15/19 and 19/19; Push still 8/8 at oracle-6.
+
 **Generalization investigation — RESOLVED 2026-07-09 (now wired into the column, above).** Two durable results,
 full detail in memory `project_place_invariance_needs_factored_state` + `reference_htm_canonical_pipeline`, plain-English
 writeup in `ARCHITECTURE.md` §7:

@@ -453,13 +453,59 @@ class Agent:
         The fork carries only BODIES (`world_state` filters to movers), so the statics are taken from the live scene, where
         they sit unchanged for the whole rollout. Both halves go through `_configuration`, so a fork's key is the same key
         the live loop learned the graph under."""
-        if self._task is None or self._scene is None or not self.task_reward.w:
-            return 0.0
-        rewards = {s: w for s, w in self.task_reward.w.items() if w > 0.0}
+        rewards = self._task_rewards()
         if not rewards:
             return 0.0
+        return self._task.state_value(rewards, self._world_configuration(world))
+
+    def _task_rewards(self) -> dict:
+        """`R` — the configurations that PAID, above zero. Empty until reward has been seen, which is the honest prior."""
+        if self._task is None or self._scene is None:
+            return {}
+        return {s: w for s, w in self.task_reward.w.items() if w > 0.0}
+
+    def _world_configuration(self, world) -> frozenset:
+        """The task state a FORKED world is in. The fork carries only BODIES (`world_state` filters to movers), so statics
+        come from the live scene, where they sit unchanged for the whole rollout; both halves go through `_configuration`,
+        so a fork's key is the same key the live loop learned the graph under."""
         statics = {oid: p for oid, p in self._scene.scene_snapshot().items() if oid not in self._movers}
-        return self._task.state_value(rewards, self._configuration({**statics, **world.objects}))
+        return self._configuration({**statics, **world.objects})
+
+    # ----- H3: the TASK region proposes a SUBGOAL, the spatial region achieves it -------------------------------------
+    def _task_subgoal(self):
+        """The configuration this region wants to be in next: the best-valued SUCCESSOR of where the task graph currently
+        is, with the value it would gain. `None` when there is nothing to want — no reward seen yet, no learned successors,
+        or none worth more than staying put.
+
+        THIS IS WHAT THE TWO COLUMNS EXCHANGE, and it is a correction to the plan. H3 says to have the thalamus bind
+        "spatial-position ⊗ task-state so the planner sees the joint state" — which is precisely the joint state H0
+        measured as un-factorising, so building it would undo H0's own finding. What passes DOWN is a GOAL STATE and what
+        passes UP is arrival (`reference_hierarchy_substrate`: "top-down task→spatial sends a subgoal; bottom-up
+        spatial→task sends reached-subgoal / prediction-error"). A subgoal is one state, not a product of two spaces, so
+        nothing multiplies.
+
+        The subgoal is CHOSEN by learned value over a LEARNED graph — no enumeration of subgoal kinds anywhere
+        (`feedback_subgoal_types_from_dynamics`)."""
+        rewards = self._task_rewards()
+        here = self._last_task
+        if not rewards or here is None:
+            return None
+        successors = set(self._task.graph.graph.get(here, {}).values()) - {here}
+        if not successors:
+            return None
+        best = max(successors, key=lambda s: self._task.state_value(rewards, s))
+        gain = self._task.state_value(rewards, best) - self._task.state_value(rewards, here)
+        return (best, gain) if gain > 0.0 else None
+
+    def _task_plan(self, movement, horizon: int = 48):
+        """Plan the SPATIAL region to bring about the configuration the TASK region asked for — the achieving half of the
+        loop. The subgoal becomes a reward predicate over world-states, so the same rollout that pursues a discovered goal
+        pursues this one; no second planner (`feedback_reuse_canonical_components`)."""
+        want = self._task_subgoal()
+        if want is None:
+            return None
+        target, _gain = want
+        return self.plan(lambda w: 1.0 if self._world_configuration(w) == target else 0.0, movement, horizon=horizon)
 
     def learn_value(self, before, reward: float, after=None, done: bool = True) -> float:
         """Train the value critic on a world-state TRANSITION by TD (`δ = r + γ·V(after) − V(before)`), over the featurised
@@ -988,14 +1034,23 @@ class Agent:
         # alone a contradiction between a testimony and an autopsy report. Proposing hypotheses is cortical work, and it
         # belongs where objects are already recognised, ranked and refuted (`Column.Hypothesis`), not in a hand-written
         # generator out here. `src/tests/test_rule_proposal.py` keeps the fixture that disproved it.
+        # THREE drives now (H3): the third is the TASK region asking for a CONFIGURATION — what it offers is the VALUE it
+        # would gain by getting there, on the same scale as the other two offers, and the BG arbitrates as before.
+        want = self._task_subgoal()
         salience = [self.goal_mem.w.get(g, 0.0) if g is not None else float("-inf"),
-                    self.progress.progress() if targets else float("-inf")]
+                    self.progress.progress() if targets else float("-inf"),
+                    want[1] if want is not None else float("-inf")]
+        plans = [lambda: self._goal_plan(objs, cur, pos, movement, conds),
+                 lambda: self._seek_plan(targets, movement),
+                 lambda: self._task_plan(movement)]
         if max(salience) > float("-inf"):
-            mode = self.bg.select(self._MODE_CTX, 2, rho=self.critic.rho(), salience=salience)
+            mode = self.bg.select(self._MODE_CTX, len(salience), rho=self.critic.rho(), salience=salience)
             self._last_mode = mode
-            plan = self._goal_plan(objs, cur, pos, movement, conds) if mode == 0 else self._seek_plan(targets, movement)
-            if not plan:                                           # the selected drive had nothing reachable → try the other
-                plan = self._seek_plan(targets, movement) if mode == 0 else self._goal_plan(objs, cur, pos, movement, conds)
+            plan = plans[mode]()
+            if not plan:                                           # the selected drive had nothing reachable → try the others,
+                for i, other in enumerate(plans):                  #   best-offer first, so a silent drive never stalls the step
+                    if i != mode and salience[i] > float("-inf") and (plan := other()):
+                        break
             if plan:
                 self._last_plan = plan
                 return plan[0]
