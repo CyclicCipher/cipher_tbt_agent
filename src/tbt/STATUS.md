@@ -188,12 +188,20 @@ code (a `GridEncoder` over the displacement): measured, (3,2) shares **0.71** of
     (`reference_hypothesis_generation`), so it is now ranked by `R`; `V` keeps its job as the distance-aware leaf estimate.
   * **PERF:** `relation_code` is MEMOISED — it is read at every rollout leaf, and recomputing it timed a live run out at
     >115s (the 2-minute law caught it). LockPath unchanged at 15/19 and 19/19; Push still 8/8 at oracle-6.
-  * **HONEST LIMIT ON THE LIVE EVIDENCE:** the generalisation is demonstrated in controlled measurement, not on a benchmark,
-    because it bites where a rollout FORK changes the configuration — i.e. in a PUSHING game — and our pushing games never
-    pay (Sokoban pays nothing; LockPath L2 is never reached), while the games that pay (CollectAll, LockPath L0/L1) have no
-    pushing, so every forked leaf shares the current configuration. Measured: 0 of the forked leaves on CollectAll had an
-    unvisited configuration. **A game that both PAYS and PUSHES is the missing fixture**, and it is the next thing to build
-    if this is to be shown live rather than in vitro.
+  * ⚠ **THE MISSING FIXTURE WAS BUILT, AND IT DISPROVED THE VALUE OF THIS TERM IN THIS REGIME** (`tasks/games/crates.py`,
+    `test_crates`, 2026-07-27). `Crates` both PAYS and PUSHES: each level is one delivery, so reward arrives per push, and
+    the crate and pad sit at DIFFERENT cells with a DIFFERENT push direction every level, so nothing positional can carry
+    and only the relation can. Built deliberately so a NULL would be visible rather than hidden.
+    **Result: the agent wins 4/4 at [15, 4, 2, 5] against oracle [4, 4, 2, 5]** — the first level carries the discovery
+    cost and every level after it is exactly ORACLE, at cells never seen. But **ablating the relational value changes
+    NOTHING, action for action, seed for seed.** What solves it is `goal_mem`'s `(crate, pad)` PAIR goal — measured
+    `{(6,7)}` at weight 0.88, with the task-value drive selected **0 times** — which already names the win condition and is
+    position-invariant because it is keyed on FEATURES, not cells, so it transfers across levels for free and exactly.
+    ⇒ **a graded relational value is REDUNDANT wherever a discrete pair-goal already names the win.** Its distinct
+    contribution must lie where a pair CANNOT: a win that is a property of a SET rather than an arrangement of two objects
+    (`test_rule_proposal` already records CollectAll's tour as exactly this), or a goal beyond the rollout's horizon, where
+    no predicate is reached inside the search and only a leaf GRADIENT can steer. Those are the discriminating fixtures;
+    this one says clearly that this regime is not one.
 
 **Generalization investigation — RESOLVED 2026-07-09 (now wired into the column, above).** Two durable results,
 full detail in memory `project_place_invariance_needs_factored_state` + `reference_htm_canonical_pipeline`, plain-English
