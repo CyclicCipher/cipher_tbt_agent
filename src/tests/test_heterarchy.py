@@ -145,11 +145,12 @@ def test_a_configuration_never_left_before_still_offers_a_subgoal():
     assert want[1] > 0.0, "the imagined configuration must be worth more than standing still"
 
     # AND THE HONEST LIMIT, measured rather than left implicit. The potential field is the relation code's overlap, so it
-    # reaches exactly as far as that code does: measured here at 0.999 / 0.832 / 0.666 / 0.499 / 0.499 / 0.499 for the
-    # block 0,1,2,3,4,6 cells from the pad — informative to three cells, FLAT beyond. Inside the reach every push gains a
-    # clean constant +0.167 and the chain climbs; outside it there is nothing to climb and the drive is correctly silent.
-    # This is the nav dead-zone `reference_eigenoptions_subgoals` names, now with a number and a specific cause.
-    _scene(a, (9, 4))
+    # reaches exactly as far as that code does — `mw - 1` cells. Widening the code (mw 3 → 11) moved the reach from TWO
+    # cells to TEN: measured 0.999 / 0.817 / 0.636 / 0.545 / 0.499 for the block 0,4,8,10,12 cells from the pad, with a
+    # clean constant +0.045 gain per push everywhere inside it, and flat beyond. Inside the reach the chain climbs;
+    # outside there is nothing to climb and the drive is correctly silent — the nav dead-zone
+    # `reference_eigenoptions_subgoals` names, pushed further out but NOT removed, since the reach is still finite.
+    _scene(a, (8 + 9, 4))                                # 12 cells out, past the widened code's overlap
     assert a._task_subgoal(list(D)) is None, "beyond the code's overlap the field is flat and it must say so"
 
 

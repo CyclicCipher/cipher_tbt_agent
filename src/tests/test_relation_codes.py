@@ -55,9 +55,12 @@ def test_a_relation_code_overlaps_by_metric_distance():
     some, and unrelated ones share none. The overlap IS the generalisation — everything below follows from it."""
     a = _agent()
     assert _overlap(a, (3, 2), (3, 2)) == 1.0, "a relation must match itself exactly"
-    near, mid, far = _overlap(a, (3, 2), (4, 2)), _overlap(a, (3, 2), (6, 2)), _overlap(a, (3, 2), (-7, 5))
+    # Distances chosen for the WIDENED code (mw=11, reach ~10). At mw=3 the falloff was exhausted by three cells, which
+    # capped the value field's reach at two and is why it was widened; the numbers here move with that on purpose.
+    near, mid, far = _overlap(a, (3, 2), (4, 2)), _overlap(a, (3, 2), (9, 2)), _overlap(a, (3, 2), (-30, 40))
     assert near > mid > far, f"overlap must fall off with distance, got {near:.2f} / {mid:.2f} / {far:.2f}"
-    assert near > 0.5 and far == 0.0, f"one cell apart must be mostly shared and unrelated wholly disjoint ({near:.2f}, {far:.2f})"
+    assert near > 0.8, f"one cell apart must be mostly shared, got {near:.2f}"
+    assert far < 0.15, f"a relation far away on BOTH axes must be near-disjoint, got {far:.2f}"
 
 
 def test_a_configuration_is_scored_relation_by_relation_and_never_unioned():

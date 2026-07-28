@@ -411,7 +411,12 @@ class Column:
         # metric graded overlap (`reference_sdr_regime_and_phase_codes`: SDRs carry IDENTITY well, but a metric needs a code
         # whose overlap falls off with distance). Measured on this encoder: (3,2) against (4,2) shares 0.71 of its bits,
         # against (6,2) 0.33, against (-7,5) nothing.
-        self._rel_enc = GridEncoder(scales=(17, 19, 23, 29), dims=self._l5_dims, mw=3,
+        # WIDENED 2026-07-28. The overlap falls off over the grid WINDOW, so a displacement of d shares max(0, mw-|d|)
+        # cells per module and the reach is mw-1: at mw=3 the value field was informative for exactly two cells and flat
+        # beyond, which is the 0.999/0.832/0.666/0.499/0.499 measured on the pad. Raising mw alone would make the code
+        # dense and cost discrimination, so the SCALES grow with it — at (101,103,107,109) with mw=11 the code is 10.5%
+        # dense against the old 13.6%, i.e. reach ~10 for LESS density, not a trade.
+        self._rel_enc = GridEncoder(scales=(101, 103, 107, 109), dims=self._l5_dims, mw=11,
                                     bounds=[(-63, 63)] * self._l5_dims)
         self._rel_cache: dict = {}                              # quantised relation -> its code (see `relation_code`)
         # L2/3's POOLING engine (ARCHITECTURE §8): the stable object-IDENTITY that pools the L4 feature-at-location stream
