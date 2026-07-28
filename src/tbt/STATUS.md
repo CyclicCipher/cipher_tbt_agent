@@ -20,6 +20,45 @@ no per-game code. **Design + rationale: `ARCHITECTURE.md`. Discipline: `RULES.md
 The system is **ALWAYS MULTI-COLUMN** — at least one sensory column *and* one PFC/task column, never single-column, no
 exceptions (`ARCHITECTURE.md` §5.1). **First concrete target:** win one trivial replica level end-to-end through that loop.
 
+## ⏸ RESUME HERE — paused 2026-07-27 to build something else under `experiments/`
+
+**Where we stopped.** The whole legacy `HETERARCHY_PLAN` arc ran to completion, plus two adversarial fixtures and one
+mechanism rebuild. Working tree clean, **suite 236 green (~107 s)**, last commit `7f770fb`. Every step below has its full
+record further down this file — this block is the map, not a second copy.
+
+| step | commit | what came of it |
+|---|---|---|
+| **H0** — does one frame over the joint state factorise? | `503a85a` | **NO.** No shared position code, no shared operator, no transfer, multiplicative state count. Justified everything after it. |
+| **H1** — inter-column communication | `ad291a5` | Two peer columns reach consensus over DIRECT LATERAL links; the plan's thalamic locus was wrong and was cut over. |
+| **H2** — the task column | `7662470` | `Column(graph=True)` over the scene's configuration, with NO position in it. 13 task states against 89 joint on LockPath. |
+| planner reads `V = M·R` | `89ab03e` | Wired, verified — and **flat across moves that change no configuration**, which is by design. |
+| **H3** — the heterarchy composed | `f05bd84` | The planner tells two board-states apart at the SAME position. Plan's substrate corrected a 3rd time. |
+| the KEY problem | `12b3937` | Relations as overlap-bearing SDRs; a potential field over configuration space from ONE rewarded example. |
+| `Crates` — pays AND pushes | `c1d8fb9` | **Disproof:** the relational value changes nothing where a PAIR goal already names the win. Agent 4/4, oracle after L0. |
+| `Warehouse` — the SET goal | `3fb13e2` | The pair goal fails as predicted — but the blocker was far upstream. |
+| **object indexes** | `7f770fb` | The brain's answer, not a data structure: pointers that follow a thing (FINSTs / object files), permanence, index-vs-kind. |
+
+**Live benchmark numbers** (all in the suite, so a regression shows up as a red test):
+LockPath **15/19 and 19/19** actions on L0/L1 (stalls at L2) · Crates **4/4**, `[15, 4, 2, 5]` against oracle `[4, 4, 2, 5]` ·
+Push **8/8 at oracle-6** · Warehouse **1/3**, by exploration.
+
+**THE ONE OPEN THING, now cleanly isolated: the SET GOAL.** `Warehouse` is the fixture and it is the only failing target.
+The agent sees both crates, knows they push, tracks them as separate things — and still cannot say what WINNING IS, because
+`goal_mem` credits `(kind, landmark)` PAIRS and "every pad covered" is not a pair. Perception no longer hides the question,
+which is what the last three commits were for. Note the shape of the trap before starting: a pair grammar was already
+deleted once for being a hand-chosen schema (`test_rule_proposal` keeps the fixture that disproved it), so the answer is
+not "add a set grammar alongside it" — whatever names a win condition has to cover a pair, a set, and eventually
+"this testimony contradicts that report", or it is the same mistake at a larger size.
+
+**Also open, in priority order:** LockPath L2 (exploration wrecks the board before any win exists to learn from) · tonic DA
+is live but inert (needs a per-drive payoff RATE / MVT) · SP topology for a layered visual cortex (Numenta recipe recorded
+in `notes/htm notes.txt`, not built) · CA3/CA1/DG still dead in the live loop.
+
+**Two working rules that cost real time to relearn:** no command or background task may run over **2 minutes** — size the
+work to the limit, never the limit to the work; and **a duplicated `def` fails silently in Python**, so after any
+replacement prove the old is gone (`grep -n "^    def " f.py | … | sort | uniq -d`) — a dead-code duplicate once survived
+seven commits while STATUS claimed the new code was live.
+
 ## What is BUILT + WIRED in the new system
 FIRST VERTICAL SLICE DONE (2026-07-10): everything is now reachable from the live entry point — STANDALONE is empty, the
 RULES.md #2 goal.
