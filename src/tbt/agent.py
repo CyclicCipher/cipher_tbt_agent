@@ -133,6 +133,8 @@ class Agent:
         self.hierarchy.add(Region("state", self.state_col, proximal="vision", frame=None, target="striatum"))
         self._task = None
         self._last_task = None            # the previous step's task state, so the task L6a can learn the EDGE
+        self.task_reward = GoalMemory()    # R over configurations — which ones PAID; `V = M.R` reads it against
+        #                                   the task column's map, so the column itself never holds a value
         self._n_cols = int(n_cols)
         self._seed = int(seed)
         self._dims = int(dims)    # the SPACE the body moves in — 2 for an ARC frame, 3 for a 3-D environment. A property of
@@ -366,6 +368,12 @@ class Agent:
             self.hierarchy.add(Region("task", self._task, proximal="scene", frame="graph", target="striatum"))
         return self._task
 
+    def _configuration(self, objects) -> frozenset:
+        """An arbitrary `{object_id: pose}` as ONE hashable configuration — every object's relations to the others. The SINGLE
+        mapping from objects to a task state, used for both the live scene and a FORKED world inside a rollout, because the
+        two must produce the SAME key or the frame lookup silently misses and the value reads zero."""
+        return frozenset((oid, self._scene_col().state_in(objects, oid)) for oid in objects)
+
     def task_state(self) -> frozenset:
         """The scene's configuration as ONE hashable state — every object's RELATIONS to the others, and nothing else.
 
@@ -377,10 +385,7 @@ class Agent:
         An EMPTY scene gives the empty state, and that is the honest answer rather than a degenerate one: a pure-navigation
         level HAS no task structure, so a task region with one state is correctly reporting that there is nothing here for
         it to model and the nav column is doing the work."""
-        if self._scene is None:
-            return frozenset()
-        objects = self._scene.scene_snapshot()
-        return frozenset((oid, self._scene.state_in(objects, oid)) for oid in objects)
+        return frozenset() if self._scene is None else self._configuration(self._scene.scene_snapshot())
 
     def learn_behavior(self, action, object_id, after_pose) -> None:
         """Learn what `action` does to a scene object, CONDITIONED on its relational state — the override, learned not coded
@@ -425,10 +430,36 @@ class Agent:
         return self.hippocampus.plan(self.world_state(), self.world_model(), reward, actions, horizon, value)
 
     def value_of(self, world) -> float:
-        """The learned value of a world-STATE — the `ValueCritic` scoring the featurised world (`Hippocampus.featurize`, the
-        overlap-bearing world→SDR). This is the rollout's leaf heuristic; it replaces `replay.py`'s stand-in with the real
-        critic. Returns 0 until the critic is trained (the honest prior)."""
-        return self.critic.value(self.hippocampus.featurize(world))
+        """The rollout's LEAF HEURISTIC: what a world-state is worth when the goal lies beyond the horizon. Two learned
+        estimates over two different state spaces, and they are added because they answer for structure neither can see in
+        the other.
+
+          * the `ValueCritic` over the featurised world — POSITIONAL, and provably limited: a linear value over grid
+            features cannot represent a relational V* (`project_linear_value_cannot_hold_sokoban`), which is why relational
+            tasks needed a rollout at all.
+          * the TASK column's `V = M·R` over the scene's CONFIGURATION — RELATIONAL, and the same linearity is no longer a
+            ceiling because the state space is relations rather than cells. This is the leaf estimate that can say "this
+            arrangement is nearer to one that paid" while the positional critic sees an unremarkable cell.
+
+        Cortex stays value-free (ARCHITECTURE rule): the task column holds the MAP `M`, and `R` — which configurations paid
+        — is learned outside it by the same delta rule as every other contingency here (`task_reward`, a `GoalMemory` over
+        configurations). `V = M·R` is exactly that split. Both terms are 0 until trained, so an untrained agent is driven by
+        goal reward alone (the honest prior)."""
+        return self.critic.value(self.hippocampus.featurize(world)) + self._task_value_of(world)
+
+    def _task_value_of(self, world) -> float:
+        """The TASK column's value for the configuration a forked world is in — the rollout's relational leaf estimate.
+
+        The fork carries only BODIES (`world_state` filters to movers), so the statics are taken from the live scene, where
+        they sit unchanged for the whole rollout. Both halves go through `_configuration`, so a fork's key is the same key
+        the live loop learned the graph under."""
+        if self._task is None or self._scene is None or not self.task_reward.w:
+            return 0.0
+        rewards = {s: w for s, w in self.task_reward.w.items() if w > 0.0}
+        if not rewards:
+            return 0.0
+        statics = {oid: p for oid, p in self._scene.scene_snapshot().items() if oid not in self._movers}
+        return self._task.state_value(rewards, self._configuration({**statics, **world.objects}))
 
     def learn_value(self, before, reward: float, after=None, done: bool = True) -> float:
         """Train the value critic on a world-state TRANSITION by TD (`δ = r + γ·V(after) − V(before)`), over the featurised
@@ -531,11 +562,14 @@ class Agent:
         operator (`learn_pose_move`), the scene column's object dynamics, and the hippocampal rollout (`plan`). No game semantics
         are read (`feedback_bitter_lesson`): walls learned by bumping, movers by motion, the goal by reward."""
         objs = self.transduce(fd.grid)
+        step_reward, prev_seen = 0.0, False
         self._extent = [(0, len(fd.grid[0]) - 1), (0, len(fd.grid) - 1)] if fd.grid else None
         pos = self._positions(objs)                                   # {feature: cell} for the unambiguous single-instance objects
         if self._last is not None:
             prev_objs, action, prev_cur, prev_score, prev_pos, prev_skin = self._last
             reward = float(fd.score - prev_score)                    # the sparse score's delta = this step's reward
+            step_reward, prev_seen = reward, True                    # kept past `new_level`, which nulls `_last` on exactly
+            #                                                          the paying step — see the task-credit block below
             if reward == 0:                                          # a within-level transition: confirm the self FIRST, so `sc`
                 self.observe_self(prev_objs, objs, action)           #   below reflects this move (else the first push is missed)
         sc = self.self_color()
@@ -557,11 +591,14 @@ class Agent:
             elif moved and cur is not None and cur != prev_cur:      # the self MOVED → the operator learns this action's Δ
                 self.learn_pose_move(action, self._as_pose(prev_cur), self._as_pose(cur))
         self._route_scene(objs, pos)                                 # every perceived object → the scene region (task state, rollout)
-        if self._scene is not None:                                  # the TASK region's L6a learns one edge of the
-            task = self.task_state()                                 # configuration graph — but only once there IS a scene
-            if self._last is not None and self._last_task is not None and action is not None:
-                self._task_col().learn_transition(self._last_task, action, task)
-            self._last_task = task
+        if self._scene is not None and self._last_task is not None and prev_seen:
+            task = self.task_state()                                 # R over CONFIGURATIONS, by the same delta rule as every
+            self.task_reward.credit({self._last_task}, step_reward)  # other contingency here: cortex holds M, never R.
+            if not step_reward and action is not None:               # A LEVEL BOUNDARY pays, but its frames do not
+                self._task_col().learn_transition(self._last_task, action, task)   # correspond — so it is credited and
+            self._last_task = task                                   # NO edge is learned across it.
+        elif self._scene is not None:
+            self._last_task = self.task_state()
         self._surface, self._l4_surprise = self._sense_frame(objs, sc)   # L4 ⊗ thalamus: sense, bind, recall the surface
         skin = self._skin(fd.grid, objs, cur)                       # what the body FEELS now — the agency signal for next step
         action = self._act(objs, cur, pos, fd.available_actions)

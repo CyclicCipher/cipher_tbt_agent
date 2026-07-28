@@ -124,8 +124,23 @@ on the pad" is not a point in R^n. `Column` grew the graph half of L6a with the 
     for arithmetic's carry, and by `region.py`'s own test PERIPHERAL. Keeping the name would have made the real one look
     already built. `test_h0_factorisation` now builds its own joint frame, so the finding survives without the machinery it
     condemned living on in the agent.
-  * **HONEST LIMIT:** the task column LEARNS its graph and is read by nothing yet — no planner consults `state_value`. That
-    is the next step, and until it happens this is a region that models the task rather than one that uses the model.
+  * **WIRED INTO THE PLANNER 2026-07-27 (`test_task_value`).** `value_of` — the rollout's LEAF heuristic — is now the
+    positional `ValueCritic` PLUS the task column's `V = M·R` over the scene configuration. Cortex stays value-free: the
+    column holds `M`, and `R` (which configurations paid) is learned outside it by `task_reward`, a `GoalMemory` over
+    configurations — the same delta rule as every other contingency, no new machinery. Level boundaries are credited but
+    learn NO edge (their frames do not correspond); a bug found by measuring — `new_level` nulls `_last` on exactly the
+    paying step, so the first version credited nothing at all and R stayed empty through two completed levels.
+  * **MECHANISM VERIFIED:** value decays by exactly γ per step back from a payer (0.729 / 0.81 / 0.9 / 1.0), and the block
+    ON the pad outranks the block beside it — a relational judgement the positional critic provably cannot make
+    (`project_linear_value_cannot_hold_sokoban`).
+  * ⚠ **AND IT CHANGES NO BEHAVIOUR, for a STRUCTURAL reason worth more than the wiring.** Measured on CollectAll: over 119
+    consecutive steps the four one-step successors had IDENTICAL task value EVERY time — walking changes no object's
+    relations, so a primitive-action rollout's leaves all share one task state and the value cannot rank them. It
+    discriminates precisely when a move changes the configuration (a push), and is flat otherwise BY DESIGN, since
+    position-freeness is what H2 was for. Live on CollectAll (non-zero on 172/399 steps), INERT on LockPath (0/399: a level
+    ENDS when it pays, so the paying configuration never recurs and no new-level state connects to it).
+    ⇒ **the right value on the wrong decision variable.** Its consumer is subgoal selection — WHICH configuration to aim
+    for — which is the plan's H3, and this is the evidence for going there rather than tuning the leaf further.
 
 **Generalization investigation — RESOLVED 2026-07-09 (now wired into the column, above).** Two durable results,
 full detail in memory `project_place_invariance_needs_factored_state` + `reference_htm_canonical_pipeline`, plain-English
