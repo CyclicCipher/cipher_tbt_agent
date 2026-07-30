@@ -615,7 +615,7 @@ together.** That is one local step, and it is where the next experiment has to g
 
 ---
 
-## IDENTIFY vs APPLY — the composition failure, LOCATED (2026-07-28) — `identify.py`
+## FACTORISE vs APPLY — the composition failure, LOCATED (2026-07-28) — `identify.py`
 
 **This resolves the whole composition line.** Every null in it — architecture, optimiser, task diversity, chaining as a
 training signal, chaining at inference, matched decode depth, self-chosen depth — was varying the EXECUTION pathway. It
@@ -647,7 +647,7 @@ Supervised pools: `given` 1.000/0.999/1.000; `predicted` 0.994/0.999/0.996 with 
    three of them it has never seen composed, **free-running** — it generates every intermediate itself; only the identity
    slots are injected. Compositional execution over novel combinations is essentially perfect. This is the LID claim
    holding exactly: every local step is in-distribution, and the composite being novel costs nothing.
-2. **IDENTIFICATION IS THE BOTTLENECK, and it fails outright.** Asked to name the parts, the model **never once emits the
+2. **FACTORISATION IS THE BOTTLENECK, and it fails outright.** Asked to name the parts, the model **never once emits the
    correct program** for a held-out triple — PROG = 0.000 across 18 tasks × 128 samples. ID@1 is 0.365 against a chance
    floor of 0.200, so there is *some* signal about which primitive comes first and nowhere near enough to run a chain on.
 3. **Making the key explicit does not help if the model cannot fill it in.** `predicted` (0.020) is no better than `none`
@@ -666,7 +666,7 @@ is missing. Nothing here solves compositional generalisation.
 **What it implies.** The thing to build is not a better executor, a better objective, or a better format — it is a
 mechanism that PRODUCES the decomposition: search over candidate programs, or an inference procedure that reads part
 identities out of demonstrations. That reframes the harness's job precisely: not supplying iteration (the `scratchpad.py`
-story, now retracted) but supplying **identification**. It also explains why explicit-program prompting works so well on
+story, now retracted) but supplying **factorisation**. It also explains why explicit-program prompting works so well on
 LLMs — the program supplies the identities, which is the one thing the network cannot recover.
 
 For `src/tbt/` this is the same shape as `reference_cue_competition_key_discovery` (discovering what the condition
@@ -674,7 +674,7 @@ actually is) and `reference_hypothesis_generation` (a small context-cued sample 
 problem is a hypothesis-generation problem, and this line has now proved it by elimination rather than by assertion.
 
 **Honest limits.** One seed per arm. Five primitives, compositions of at most three, one domain. And ID@1 slightly
-understates identification, since a task can admit an alternative valid split that scores as wrong — though PROG = 0.000
+understates factorisation, since a task can admit an alternative valid split that scores as wrong — though PROG = 0.000
 leaves little room for that to matter.
 
 ### Hypothesise-and-test: the executor as its own verifier (2026-07-28) — `search.py`
@@ -723,12 +723,12 @@ each building block), prediction-error localisation (`reference_tbt_segmentation
 mismatch), or context-cued memory sampling (`reference_hypothesis_generation`). Those are the candidates enumeration
 stands in for.
 
-### Can identification be LEARNED? The coverage sweep says no (2026-07-28) — `decompose.py`
+### Can factorisation be LEARNED? The coverage sweep says no (2026-07-28) — `decompose.py`
 
-The deflationary hypothesis, tested before building any mechanism: maybe identification failed only because it never had
-COVERAGE. Execution composes, so thirty tasks teach it; identification may compose not at all, so thirty tasks teach it
+The deflationary hypothesis, tested before building any mechanism: maybe factorisation failed only because it never had
+COVERAGE. Execution composes, so thirty tasks teach it; factorisation may compose not at all, so thirty tasks teach it
 thirty labels. If that were the whole story it would be free to fix — a system that can execute can generate its own
-labelled identification data (sample a program, run it, keep the pair), which is wake-sleep used as a learning algorithm
+labelled factorisation data (sample a program, run it, keep the pair), which is wake-sleep used as a learning algorithm
 and whose biological analogue is replay.
 
 Decomposition isolated: given demonstrations of an unfamiliar function, emit the PROGRAM and nothing else — no blocks, no
@@ -751,7 +751,7 @@ Chance for ID@1 is 1/12 = 0.083.
    (1.000 → 0.871 → 0.268) exactly as pure memorisation with fixed capacity and compute must, while held-out never leaves
    zero. There is no shared structure being built for the gradient to exploit.
 3. **The dissociation against execution is total.** Execution generalises to novel compositions from **30** examples at
-   0.997. Identification does not generalise from **134**, with explicit discrete labels, in the same architecture, on the
+   0.997. Factorisation does not generalise from **134**, with explicit discrete labels, in the same architecture, on the
    same primitives, from the same data source. Whatever makes composition free for the executor is simply absent here.
 4. **Held-out ID@1 is at or BELOW chance** (0.051 vs 0.083 at N=134): it is confidently wrong, presumably biased toward
    primitives frequent in training, not uncertain.
@@ -764,6 +764,52 @@ Chance for ID@1 is 1/12 = 0.083.
 coverage specifically — the same weakness `diversity.py`'s largest point had, and it is the weakest row here for the same
 reason. The conclusion rests on N=10 and N=40, where the fit is complete and transfer is still exactly zero. Settling the
 top of the range needs more compute than the 5-minute budget allows (that arm already ran 501 s).
+
+### The coverage sweep on a 41x bigger group — and why it cannot fully settle the question (2026-07-28) — `bigroup.py`
+
+`decompose.py` found held-out factorisation at exactly 0.000 for |train| = 10, 40, 134, and I read that as a
+hypothesis-class fact rather than a sample-size one. The competing account — learnable but under-sampled — was never
+excluded. This tries to exclude it.
+
+**First, a measurement that reframes the earlier experiment: the 12 primitives at L=6, V=5 generate a group of order only
+360** (BFS over the Cayley graph, diameter 6). So `decompose.py`'s "universe" of 174 functions was already *half the entire
+group*, and no sweep on it could have gone much further. Adding one transposition to the rotations generates the full
+symmetric group, giving **S6 × Aff(Z5) = 7200** elements (measured, matching theory exactly), diameter 9. Enumeration is by
+BFS, which yields every element with its MINIMAL program — i.e. its Cayley-graph distance — making the object explicit.
+
+Capped at depth ≤ 5 for tractability (2350 functions, **13.5× the old universe**), held-out set fixed and depth-stratified,
+training sets nested, compute fixed at 8000 steps. Generation is vectorised to one gather pair per function, so per-step
+cost no longer grows with |train| — which is what makes the sweep possible at all (`decompose.py`'s per-batch Python loop
+is why its |train|=134 arm took 501 s).
+
+| \|train\| | TRAIN PROG-fn | **HELD-OUT PROG-fn** | HELD-OUT ID@1 (chance 0.077) |
+|---|---|---|---|
+| 50 | 0.587 | **0.000** | 0.153 |
+| 200 | 0.060 | **0.000** | 0.150 |
+| 800 | 0.009 | **0.000** | 0.155 |
+
+1. **Held-out factorisation is exactly 0.000 at every coverage level, at every depth** — including depth 1, where the task
+   is pure RECOGNITION. Six primitives were held out from standalone training while still appearing inside training
+   compositions, and the model never names one. That is a within-run dissociation needing no cross-run comparison.
+2. **Train fit collapses 0.587 → 0.060 → 0.009 over a 16× coverage increase.** Pure per-item storage with no sharing: at
+   fixed compute the model exhausts itself immediately, exactly as memorisation must and exactly as compositional reuse
+   would not.
+3. **A stable quantitative signature across both universes.** Held-out ID@1 sits at ~2× chance and never converts:
+   0.150–0.155 against 0.077 here, and 0.365 against 0.200 in the 174-element universe. Weak first-primitive signal,
+   zero correct programs, in both.
+
+⚠ **AND THIS DOES NOT FULLY SETTLE IT, for a reason intrinsic to the object.** In a group, a bigger universe means DEEPER
+words — the diameter grows with the group — so "bigger group" and "harder task" are not separable here. Depth-9 targets
+were long enough that the model failed to fit even 50 of them (train 0.366), which is why the cap. And at fixed compute,
+raising coverage LOWERS train fit, so there is no range over which fit is held constant while coverage varies. The
+"no improvement" therefore cannot be cleanly attributed to unlearnability rather than to undertraining at the high-coverage
+end.
+
+**What the evidence does support:** the failure is *exactly* 0.000 rather than small-and-rising, at every level, in two
+universes differing 13.5× in size and one primitive in vocabulary, with the depth-1 recognition control failing inside a
+run whose train fit was 0.587. A sample-complexity story predicts a small positive value that grows; nothing grows. So the
+hypothesis-class reading is **strongly indicated but not proven**, and the decisive version — compute scaled with coverage
+so train fit stays high throughout — is a GPU job rather than a laptop one.
 
 ### The GCML proposal mechanism: a last-step RECOGNISER, not a decomposer (2026-07-28) — `propose.py`
 
@@ -786,7 +832,7 @@ COMPOSED map, not the union of three parts.
 
 (Enumeration: 155 candidates, 0.778 on held-out triples. `first@beam` is trivially 1.000 at beam 5 with 5 primitives.)
 
-1. **FIRST-STEP IDENTIFICATION IS AT CHANCE for all three scorers.** beam 1: 0.136 / 0.136 / 0.182 against a 0.200 floor;
+1. **FIRST-STEP FACTORISATION IS AT CHANCE for all three scorers.** beam 1: 0.136 / 0.136 / 0.182 against a 0.200 floor;
    beam 2: 0.386 / 0.273 / 0.341 against 0.400; beam 3: 0.636 / 0.409 / 0.545 against 0.600. Difference-scoring carries
    **no information** about which primitive comes first in a composition.
 2. **But it is an excellent LAST-step recogniser.** Held-out PAIRS reach 1.000 at beam 5 — because a beam of 5 covers
@@ -819,7 +865,7 @@ test only ever presents single steps.
 
 The second proposal candidate. `reference_tbt_segmentation_and_grouping` says boundaries come from prediction MISMATCH;
 `propose.py` had just measured that error is **worthless in the interior** of a composition (chance-level first-step
-identification) and **exact next to a boundary** (held-out pairs 1.000 once one step from the goal). A bidirectional method
+factorisation) and **exact next to a boundary** (held-out pairs 1.000 once one step from the goal). A bidirectional method
 is what that asymmetry licenses: grow a frontier forward from the input and backward from the observation using primitive
 INVERSES, and the decomposition point is where the two coincide — zero prediction error at the join, checked across every
 demonstration at once so a coincidence on one cannot fake a meet. Inverse tables are asserted exact, not assumed.
@@ -844,7 +890,7 @@ intersecting a relational signature across demonstrations so accidental coincide
 never the hard part. What remains is **factoring a known group element into generators**, i.e. the word problem on a
 Cayley graph, whose difficulty is combinatorial and intrinsic rather than statistical.
 
-**That retro-explains `decompose.py`.** Identification showed no improvement from 10 to 134 training programs because
+**That retro-explains `decompose.py`.** Factorisation showed no improvement from 10 to 134 training programs because
 factorisation is not a pattern-recognition problem — no coverage could have helped. The flat sweep was the correct answer
 to a badly-posed question. Search is not a workaround for a missing learned mechanism here; for this problem class it is
 what the problem *is*.
@@ -921,7 +967,7 @@ proposal mechanism is only as good as the structure it exploits, and the structu
 rather than inherited with the method.**
 
 **WHERE THIS LEAVES IT.** Amortised decomposition is not learnable in this setting, by gradient descent, at any coverage
-tested. So `search.py`'s hypothesise-and-test is not a scaffold standing in for a learnable identifier — it is, so far,
+tested. So `search.py`'s hypothesise-and-test is not a scaffold standing in for a learnable factoriser — it is, so far,
 **the only thing that works at all**, and its scaling problem is therefore the real problem rather than an implementation
 detail. That promotes the proposal-distribution question from "interesting next step" to "the thing to solve": how to
 sample a handful of candidate decompositions instead of enumerating `|prims|^depth` of them. The three candidates named
@@ -1265,7 +1311,7 @@ free when the circuit can be shared. The composition line's model, by contrast, 
 and cannot name the first (FIRST 0.344). Counting the parts without identifying them is the signature of estimating a
 scalar rather than factoring. **So: hand the composition model an explicit primitive-identity token at each decode step —
 the same status the operation token has here.** If FIRST jumps and held-out composition works, the missing operation was
-IDENTIFICATION, not application, and the two lines are one finding. If it does not, application really is absent and the
+FACTORISATION, not application, and the two lines are one finding. If it does not, application really is absent and the
 analogy fails. Either way it is decisive, and it is the same shape as `reference_cue_competition_key_discovery` —
 discovering what the condition actually is.
 
