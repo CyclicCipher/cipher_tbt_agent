@@ -76,7 +76,8 @@ def _world(passes: int = 200):
 def _plan_for(a: Agent, block, configuration):
     _scene(a, block)
     a._last_task = configuration
-    return a._task_plan(list(D), horizon=24)
+    want = a._task_subgoal(list(D))                      # the task region asks for a configuration…
+    return a._task_plan(list(D), want[0], horizon=24) if want else None   # …and the spatial region achieves it
 
 
 def test_the_planner_distinguishes_two_board_states_at_the_SAME_position():
@@ -124,7 +125,7 @@ def test_the_task_region_wants_nothing_until_something_has_paid():
         col.learn_transition(left, "push", paid)
     a._last_task = left
     assert a._task_subgoal(list(D)) is None, "no reward seen ⇒ nothing to want"
-    assert a._task_plan(list(D)) is None, "and so no plan to make"
+    assert a._task_plan(list(D), None) is None, "and so no plan to make"
 
 
 def test_a_configuration_never_left_before_still_offers_a_subgoal():
@@ -173,3 +174,30 @@ def test_arrival_teaches_the_task_graph_from_below():
     a, left, _right, paid = _world()
     assert paid in a._task.graph.graph.get(left, {}).values(), "the edge must come from an observed transition"
     assert a._task.where_state() is not None, "and L6a holds where the task region currently is"
+
+
+def test_the_epistemic_drive_over_CONFIGURATIONS_wants_what_the_value_model_has_not_seen():
+    """The drive the agent did not have. `_unlearned_cells` measures novelty in the SENSORY region — "can L5 predict what
+    pressing this FEATURE does" — and empties within twenty steps (measured on Warehouse: 24 → 0 by step 20) while the
+    configuration space stays almost untouched (18 produced). Nothing could say "this arrangement is one I have never
+    produced", so exploration had nowhere to go once the dynamics were known.
+
+    Novelty is read off the VALUE MODEL's own state — the fraction of a configuration's relation bits the critic has never
+    updated — so it is prediction error rather than a visit counter, and it falls to zero as the space is covered instead
+    of paying forever (`feedback_epistemic_value_is_prediction_error`)."""
+    a, left, _right, paid = _world()
+    _scene(a, (3, 4))
+    unseen = a._task_novelty(a.task_state())
+    assert 0.0 <= unseen <= 1.0, "novelty is a fraction of bits"
+
+    # A configuration built only from relations the critic HAS been trained on is not novel; one built from relations it
+    # has never seen is. `_world` trains the critic on the paid configuration only.
+    b, _l, _r, _p = _world()
+    on_pad = b._task_novelty(_scene(b, PAD))          # the configuration the critic WAS trained on
+    far = b._task_novelty(_scene(b, (40, 4)))         # one built from relations it has never seen
+    assert on_pad < 1.0, "the trained configuration must not read as wholly novel"
+    assert far > on_pad, f"unseen relations must be MORE novel, got {far:.3f} vs {on_pad:.3f}"
+
+    # And the drive proposes the most novel IMAGINED configuration, sharing one generator with the pragmatic subgoal.
+    _scene(b, (3, 4))
+    assert b._imagined_configurations(list(D)), "the imagination must produce candidates for either drive to rank"
