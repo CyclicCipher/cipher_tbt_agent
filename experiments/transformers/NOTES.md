@@ -765,6 +765,82 @@ coverage specifically — the same weakness `diversity.py`'s largest point had, 
 reason. The conclusion rests on N=10 and N=40, where the fit is complete and transfer is still exactly zero. Settling the
 top of the range needs more compute than the 5-minute budget allows (that arm already ran 501 s).
 
+## LEARN THE DISTANCE, SEARCH THE PROGRAM (2026-07-28) — `costtogo.py`, `canonical.py`
+
+The constructive end of the arc. Everything above says the same thing: the forward model is smooth and learnable (0.997),
+a scalar property of the decomposition is smooth and learnable (~0.84), and the program is discontinuous and learnable at
+0.000 anywhere. So stop amortising the answer and amortise the DISTANCE — DeepCubeA's move (McAleer, Agostinelli, Shmakov
+& Baldi, *Nat Mach Intell* 2019) on what is literally this problem, since Rubik's cube is factoring a group element into
+generators. **It is also a direct correction to `decompose.py`:** that file used self-generated data to amortise the ANSWER
+and was flat at 0.000 over a 36× coverage range; the same data engine aimed at the DISTANCE is a smooth target.
+
+### Attempt 1 — distance from BEHAVIOUR (`costtogo.py`): fails, loses to a free baseline
+
+The heuristic saw interleaved `[current, goal]` demonstration pairs and predicted the distance class.
+
+| | exact | MAE |
+|---|---|---|
+| train | 0.238 | 1.62 |
+| HELD-OUT | 0.276 | 1.38 |
+
+| heuristic | found | expansions | exp (solved) |
+|---|---|---|---|
+| zero | 0.290 | 316.4 | 111.5 |
+| **hamming** (free, hand-coded) | 0.261 | 305.7 | **38.5** |
+| learned | 0.275 | 317.1 | 98.8 |
+
+Weak (0.276 against a 0.167 floor) and **beaten by a free hand-coded Hamming heuristic** on cost-per-success. The
+diagnosis: DeepCubeA has a CANONICAL state — the cube's 54 stickers *are* the input — whereas this made the network first
+infer a transformation from a behavioural sample and only then estimate its distance.
+
+### Attempt 2 — distance from the CANONICAL state (`canonical.py`): works, decisively
+
+Two earlier results combine to make this possible. `localise.py` showed the composed map is exactly recoverable from a
+handful of demonstrations; and every element of this group is a permutation composed with a value map from `Aff(Z5)`, so a
+group element IS `(idx, vmp)` — **11 tokens**. Recovery brute-forces the 10 affine maps and matches columns: **87/87 exact
+on held-out functions from 8 demonstrations.**
+
+The formulation improves too, not just the input. With `h` the program so far, the residual is `r = f∘h⁻¹` and one more
+primitive right-multiplies it, `r' = r∘p⁻¹`. So the search is a walk on the Cayley graph from `f` to the identity and **the
+heuristic is a function of ONE group element — its distance to the identity — not of a (state, goal) pair.** Exactly
+DeepCubeA's state → cost-to-go. Canonical tables, inverses and composition are all asserted against the reference action.
+
+| | exact | MAE | (behavioural, for comparison) |
+|---|---|---|---|
+| train | 1.000 | 0.00 | 0.238 / 1.62 |
+| **HELD-OUT** | **0.724** | **0.34** | 0.276 / 1.38 |
+
+Search on 87 held-out transformations, weighted A*, λ=2, cap 400:
+
+| heuristic | found | expansions | exp (solved) | optimal |
+|---|---|---|---|---|
+| zero | 0.724 | 226.8 | 160.8 | 1.000 |
+| misplaced (free, hand-coded) | 0.943 | 152.9 | 137.8 | 0.951 |
+| **learned** | **0.989** | **52.5** | **48.5** | 0.965 |
+
+1. **The learned heuristic wins on every axis** — highest solve rate (0.989), **2.8× fewer expansions than the hand-coded
+   baseline** (48.5 vs 137.8) and 3.3× fewer than uninformed, and it still returns the MINIMAL program 96.5% of the time
+   despite weighted A* being inadmissible at λ=2.
+2. **Held-out distance estimation went 0.276 → 0.724 exact and MAE 1.38 → 0.34** purely by changing the input from
+   behaviour to canonical state. The extra inference step was the problem, as diagnosed.
+3. **And the cleanest statement of the whole thesis, from one comparison on the same group and architecture:**
+
+   | target | train | held-out |
+   |---|---|---|
+   | the PROGRAM (`bigroup.py`) | 0.587 | **0.000** |
+   | the DISTANCE (`canonical.py`) | 1.000 | **0.724** |
+
+   The program target memorises *instead of* generalising. The distance target memorises *and* generalises. That is the
+   signature difference between a discontinuous and a smooth target, measured rather than argued.
+
+⚠ **WHERE THE DOMAIN KNOWLEDGE WENT, stated plainly.** The canonical state is not learned — recovery is a hand-written
+brute-force over the 10 affine value maps plus a column match, which exploits knowing that the group factors as
+`S6 × Aff(Z5)`. It is exact (87/87) and cheap, and DeepCubeA gets the equivalent for free because a cube's state is
+canonical by construction. But it IS a prior, and the honest reading is: **the win comes from having a canonical state, and
+obtaining one was domain-specific here.** Where the state is already canonical (a board, a program AST, a cube) it is free;
+where it is not (pixels, language) obtaining it is its own problem — and that is where the remaining difficulty lives, not
+in the heuristic.
+
 ### The coverage sweep on a 41x bigger group — and why it cannot fully settle the question (2026-07-28) — `bigroup.py`
 
 `decompose.py` found held-out factorisation at exactly 0.000 for |train| = 10, 40, 134, and I read that as a
