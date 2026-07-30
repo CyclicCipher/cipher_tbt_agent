@@ -461,3 +461,567 @@ fail. One seed. And the result validates a specific chain of reasoning (composin
 one-shot read-out has one) whose next prediction is concrete: the gain should extend to 3-compositions only if the
 intermediate count extends with them.
 
+> ⚠ **RETRACTED 2026-07-28 — the 0.363 was TEACHER FORCING, not chaining.** Accuracy was read from a single forward pass
+> over a sequence that already contained the TRUE intermediate, so the model was handed `φ_a(x)` for a held-out task and
+> only had to apply the second step. Re-measured free-running (`rollout`, same file, same config), the arm is **0.024
+> against the control's 0.047** — the gain is gone and slightly reversed. Full account in the arity entry below.
+
+---
+
+## THE ARITY TEST — and the measurement bug it exposed (2026-07-28) — `arity.py`
+
+The prediction under test, stated in advance: if the scratchpad works because *composing m operations needs m
+applications*, then on 3-compositions `slots=2` (depth matched) ≫ `slots=1` (too shallow) ≈ `slots=0` (one shot). The
+arity — how many decode blocks the format supplies — is the only thing that varies.
+
+**Design.** Every distinct function writable in ≤3 primitives, deduplicated ACROSS lengths so a "3-composition" cannot be
+solvable in one application. Primitives all supervised; pairs and triples split in half into supervised and held-out. The
+chain is packed over the slots by one formula (`prefix()`): `front` absorbs any excess at the FRONT, so the LAST block is
+always "apply one primitive" and a task deeper than the slots must take a COMPOUND first step — which is exactly the
+arity mismatch. `end` runs the chain from the start and REPEATS once finished, which is the **no-arity** form (the user's
+point, 2026-07-28: *there is no program that can always hand the correct arity*).
+
+**The primitive set was chosen by counting, and the sanity gate is what forced it.** All 12 primitives give 174 distinct
+functions and a 92-task supervised pool, at which size the model does not fit its own training distribution — the
+one-shot control reached **0.171 on supervised primitives**, which makes every held-out number uninterpretable. Five
+primitives give 56 distinct functions and a supervised pool of 30, the size `scratchpad.py` actually fit. The gate is now
+enforced in code rather than eyeballed.
+
+### The bug, and how it announced itself
+
+The no-arity arm returned **1.000 on every pool, held-out included.** A perfect held-out score is not a result, and the
+cause was immediate: under `end` packing the block *before* the answer is by construction IDENTICAL to the answer, and
+evaluation was a single teacher-forced forward pass, so the model scored 1.000 by copying its own context.
+
+Chasing that exposed the general form, which was in `scratchpad.py` all along: **teacher-forced evaluation hands the
+model the true intermediate.** The whole claim was that on a held-out composition the model must infer where to break —
+but it was never asked to produce the break point, only to finish from a correct one supplied for free. The environment
+can never supply an intermediate, so free-running generation is the only evaluation the claim was ever entitled to.
+`rollout()` now cuts the sequence back to the demonstrations plus the query input and lets the model generate every block
+itself, feeding its own tokens back.
+
+### Corrected results — free-running, 10000 steps, all arms matched
+
+| arm | sup prims | sup pairs | sup triples | HELD pairs | HELD triples | *forced* HELD triples |
+|---|---|---|---|---|---|---|
+| `slots=0` one shot (control) | 0.996 | 0.992 | 0.987 | 0.104 **0/8** | 0.113 **0/18** | 0.113 |
+| `slots=1` one intermediate | 0.905 | 0.689 | 0.673 | 0.061 **0/8** | 0.120 **0/18** | **0.477** |
+| `slots=2` depth matched | 0.793 | 0.710 | 0.569 | 0.051 **0/8** | 0.068 **0/18** | **0.591** |
+| `slots=4 pack=end` no arity | 0.838 | 0.833 | 0.711 | 0.072 **0/8** | 0.068 **0/18** | 1.000 *(copying)* |
+
+And `scratchpad.py` itself, re-run at its own original config:
+
+| arm | prims | labelled | HELD-OUT (free) | solved | *forced* |
+|---|---|---|---|---|---|
+| control | 0.964 | 0.940 | **0.047** | 0/34 | 0.047 |
+| scratchpad | 0.827 | 0.392 | **0.024** | 0/34 | **0.313** |
+
+1. **Free-running, no arm beats the control, and not one held-out task is solved anywhere.** The `forced` column
+   reproduces the apparent gain exactly (0.477 / 0.591 against a 0.113 control, and 0.313 on the original config, versus
+   the 0.363 originally reported). The entire effect was the evaluation.
+2. **The arity question is moot as posed.** You cannot ask whether matching the slot count to the composition length
+   helps when no arm chains at all. Inside the forced column the ordering `slots=2` (0.591) > `slots=1` (0.477) >
+   `slots=0` (0.113) is consistent with the depth argument — but that column measures "finish, given a correct partial
+   result", so it cannot carry the claim.
+3. **What DOES survive, stated at its real size.** Given the true intermediate, the model completes a held-out
+   composition at 0.48–0.59 against a 0.11 one-shot control. That is a genuine LID statement about the LAST step: one
+   primitive applied to a supplied partial result stays in-distribution even when the whole task is novel. It is not
+   chaining, and the gap between the two columns is precisely the thing that is missing.
+4. **The scratchpad makes the model WORSE at its own supervised tasks under free-running** (0.987 → 0.673 → 0.569 on
+   supervised triples as slots grow, and 0.940 → 0.392 on the original config). Errors in its own intermediates compound:
+   it can produce the chain when each step is corrected for it and cannot when they are not. The three deeper arms all
+   FAIL the sanity gate free-running, which is itself the finding rather than a nuisance.
+5. **The no-arity design has a separate, structural flaw.** Padding by REPETITION creates a copy shortcut that dominates
+   the training loss — most predicted blocks are "the same as the last one" — so the model learns to copy rather than to
+   compute. Any honest no-arity format must let the model stop without giving it something to copy: a HALT token, which
+   the model emits and which ends the chain, is the version that does not have this hole.
+
+**Where this leaves the line.** The last standing positive result is withdrawn, and the ledger is now: architecture null,
+optimiser null, task diversity null, training-signal chaining transductive-only, inference-time chaining **null once
+evaluated honestly**. What survives is sharper than any of them — the model can execute one local step on a novel
+composition but cannot sequence two of its own — and that is exactly the estimate-versus-execute seam
+`compositional_rep.py` located, now measured on behaviour instead of on representations.
+
+**The methodological lesson, which is the third of its kind in this line and the most expensive.** A metric manufactured
+a false positive: Spearman without tie handling gave ρ = +1.000 on information-free data; a rank-deficient `lstsq` gave
+NaN for every score; and now teacher-forced decoding gave a phantom 8× gain that survived a commit and a write-up. All
+three were found by checking the apparatus against a case whose answer was known in advance, never by reading the
+numbers. **If a model is scored at a sequence position, look at what is in its context at that position.**
+
+---
+
+## THE HALT TOKEN — arity removed, and it was never the bottleneck (2026-07-28) — `halt.py`
+
+The standing constraint: **no arity may be handed over**, because no program can always supply the correct one. The
+decode stream is `b_1 b_2 … b_m HALT` and `m` is the model's own output — it emits blocks of L digits until it emits
+HALT, and the answer is the last complete block before it. Nothing says how many blocks a task needs.
+
+**The design point `arity.py` paid for.** The previous no-arity attempt padded a fixed-depth format by REPEATING the
+answer and scored a perfect 1.000 by copying. Repetition does not remove the arity, it removes the task. Here a task of
+length m is supervised on exactly m blocks — prefixes 1…m, one primitive per step — then HALT; everything past the first
+HALT is filler and is MASKED OUT of the loss, so **there is no repeated block to copy**. The HALT itself is scored,
+because deciding to stop IS the output under test. Held-out compositions get no gradient in any form, so the model must
+infer from `[in, out]` pairs alone both where to break AND how many breaks there are.
+
+Five measurements, because "accuracy" alone cannot say what went wrong. ANSWER (the claim), DEPTH (emitted exactly the
+task's own number of blocks — the arity question asked directly), FIRST (its first block equals `φ_a(x)`), HALTED
+(terminated at all), and *forced* (teacher-forced answer block — read the sanity gate against THIS, since it asks
+whether the model learned the training distribution, whereas free-running additionally asks whether it survives its own
+intermediate errors).
+
+| pool | n | ANSWER | solved | DEPTH | FIRST | HALTED | *forced* |
+|---|---|---|---|---|---|---|---|
+| supervised prims | 5 | 0.930 | 5/5 | 0.981 | 0.941 | 1.000 | 0.941 |
+| supervised pairs | 7 | 0.907 | 7/7 | 0.994 | 0.949 | 1.000 | 0.949 |
+| supervised triples | 18 | 0.818 | 11/18 | 0.995 | 0.903 | 1.000 | 0.981 |
+| **HELD-OUT pairs** | 8 | 0.084 | **0/8** | **0.772** | 0.329 | 1.000 | 0.407 |
+| **HELD-OUT triples** | 18 | 0.048 | **0/18** | **0.842** | 0.344 | 1.000 | 0.518 |
+
+14000 steps, gate passed at 0.941. Baseline: the one-shot control (`arity.py --slots 0`, same splits/seed/primitives)
+scores 0.113 free-running on held-out triples.
+
+1. **The model learns to run its own chain.** On supervised tasks, free-running, it terminates 100% of the time, picks
+   the right depth 0.98–0.99, and solves 5/5, 7/7 and 11/18 — losing only ~0.01–0.16 against teacher forcing. The
+   format works; the earlier 10000-step run failed the gate only because the halt format is markedly harder to FIT than
+   a fixed-depth one (supervised primitives 0.723 forced at 10000 against `slots=0`'s 0.996). Choosing your own depth
+   costs accuracy on the parts.
+2. **THE ARITY IS INFERRED, and this is the line's first genuine positive.** On compositions never supervised in any
+   form, the model emits exactly the right number of blocks **0.842** of the time for triples and **0.772** for pairs.
+   That is not the prior: the supervised pool is 60% triples, so guessing by base rate gives ~0.60 on triples and ~0.23
+   on pairs, and always-emit-3 gives 1.00/0.00. It discriminates — it reads the required DEPTH of a novel composition
+   off `[in, out]` demonstrations alone.
+3. **And the arity was never the bottleneck.** ANSWER on held-out triples is **0.048 against the one-shot control's
+   0.113** — null, and slightly WORSE than not chaining at all. FIRST is 0.344 against 0.903 on supervised triples: the
+   model takes the wrong first step two times in three, and every later step inherits it. So a self-chosen chain makes
+   held-out performance worse, for a mechanically clear reason.
+4. **The diagnosis, sharper than anything before it: it knows how many steps a novel task needs, and cannot take the
+   first one.** Held-out triples score 0.518 *forced* against 0.048 free — the same dissociation `arity.py` found, now
+   with the arity removed as an explanation. Nothing left to hand over made a difference.
+
+**Stability.** The 10000-step run agrees on everything that matters: ANSWER 0.066, DEPTH 0.886, FIRST 0.326, HALTED
+1.000 on held-out triples. The conclusion does not rest on the long run. One seed, though — and the DEPTH number is the
+one that most deserves a second, being the only positive.
+
+⚠ **Run-time note:** the 14000-step run took 349 s, over the 5-minute transformer budget. The 10000-step run (244 s) is
+inside it and carries the same conclusion; use `--steps 10000` unless the gate specifically needs the extra fit.
+
+**WHERE THE LINE NOW STANDS.** Every lever that could be varied from the outside has been: architecture, optimiser, task
+diversity, chaining as a training signal, chaining at inference, matched decode depth, and now self-chosen decode depth
+with no arity handed over. All null on held-out composition. What is left is not a format question. The model represents
+a novel composition correctly (`compositional_rep.py`, held-out R² +0.52), knows how deep it is (0.84 here), can finish
+it when handed a correct partial result (0.52 forced) — and cannot produce that partial result itself (0.34). **The
+missing operation is applying a primitive it has identified to a value it is holding, when the pair was never trained
+together.** That is one local step, and it is where the next experiment has to go.
+
+---
+
+## IDENTIFY vs APPLY — the composition failure, LOCATED (2026-07-28) — `identify.py`
+
+**This resolves the whole composition line.** Every null in it — architecture, optimiser, task diversity, chaining as a
+training signal, chaining at inference, matched decode depth, self-chosen depth — was varying the EXECUTION pathway. It
+was never broken.
+
+The hypothesis came from the arithmetic line: `engine.py` showed routing on a GIVEN discrete key is exact (swap the
+operation token and the model computes the other operation at 1.000), `alloc.py` showed such routing is nearly free when
+the circuit can be shared, while the composition model builds WHOLE-task keys perfectly (supervised ~0.95) and cannot
+factor an observed whole into PART keys — it knows a held-out 3-composition needs three steps (DEPTH 0.842) and cannot
+produce the first (FIRST 0.344). Counting the parts while unable to name them is the signature of estimating a scalar
+rather than factoring a function.
+
+**The design.** Put an explicit primitive-identity token before each block — `ID_1 b_1 ID_2 b_2 … ID_m b_m HALT`, with
+HALT a value of the identity slot so the no-arity property is kept — and vary ONLY whether that token is an input or an
+output. `given` supplies it at train and test and excludes it from the loss; `predicted` supervises it on labelled tasks
+and makes the model emit its own at test. **`predicted` is therefore an exact control for `given`:** identical
+architecture, vocabulary, sequence length and token layout, differing in one bit of experimental design.
+
+| arm | HELD-OUT triples ANSWER | solved | DEPTH | FIRST | ID@1 | PROG | *forced* |
+|---|---|---|---|---|---|---|---|
+| `none` (= `halt.py`) | 0.048 | 0/18 | 0.842 | 0.344 | — | — | 0.518 |
+| **`given`** (identity = INPUT) | **0.997** | **18/18** | 1.000 | 0.998 | — | — | 0.999 |
+| `predicted` (identity = OUTPUT) | 0.020 | 0/18 | 0.815 | 0.386 | **0.365** | **0.000** | 0.955 |
+
+Supervised pools: `given` 1.000/0.999/1.000; `predicted` 0.994/0.999/0.996 with PROG 0.994–0.999. Both gates passed at
+1.000 teacher-forced. 12000 steps, ~280 s per arm.
+
+1. **APPLICATION IS NOT THE BOTTLENECK — 0.048 → 0.997, 0/18 → 18/18.** Told which primitives to apply, the model chains
+   three of them it has never seen composed, **free-running** — it generates every intermediate itself; only the identity
+   slots are injected. Compositional execution over novel combinations is essentially perfect. This is the LID claim
+   holding exactly: every local step is in-distribution, and the composite being novel costs nothing.
+2. **IDENTIFICATION IS THE BOTTLENECK, and it fails outright.** Asked to name the parts, the model **never once emits the
+   correct program** for a held-out triple — PROG = 0.000 across 18 tasks × 128 samples. ID@1 is 0.365 against a chance
+   floor of 0.200, so there is *some* signal about which primitive comes first and nowhere near enough to run a chain on.
+3. **Making the key explicit does not help if the model cannot fill it in.** `predicted` (0.020) is no better than `none`
+   (0.048) — slightly worse. The format was never the problem either.
+4. **The sharpest single pair of numbers in this line:** with the true identities in its context the model answers at
+   **0.955**; producing those same identities itself, **0.020**.
+5. **It converges with the representational probe.** `compositional_rep.py` found the code for a held-out composition
+   predictable at R² = 0.52 from role vectors — *partly* compositional. ID@1 = 0.365 against 0.200 is *partly* above
+   chance. A behavioural and a representational measure independently agree that real but insufficient part-information
+   is present.
+
+⚠ **`given` IS A DIAGNOSTIC AND AN UPPER BOUND, NOT A SOLUTION.** It hands over the decomposition of a held-out task,
+which is exactly the rigging this line otherwise refuses. Its value is that it isolates one ability and settles which one
+is missing. Nothing here solves compositional generalisation.
+
+**What it implies.** The thing to build is not a better executor, a better objective, or a better format — it is a
+mechanism that PRODUCES the decomposition: search over candidate programs, or an inference procedure that reads part
+identities out of demonstrations. That reframes the harness's job precisely: not supplying iteration (the `scratchpad.py`
+story, now retracted) but supplying **identification**. It also explains why explicit-program prompting works so well on
+LLMs — the program supplies the identities, which is the one thing the network cannot recover.
+
+For `src/tbt/` this is the same shape as `reference_cue_competition_key_discovery` (discovering what the condition
+actually is) and `reference_hypothesis_generation` (a small context-cued sample of candidate targets). The composition
+problem is a hypothesis-generation problem, and this line has now proved it by elimination rather than by assertion.
+
+**Honest limits.** One seed per arm. Five primitives, compositions of at most three, one domain. And ID@1 slightly
+understates identification, since a task can admit an alternative valid split that scores as wrong — though PROG = 0.000
+leaves little room for that to matter.
+
+---
+
+## THE DISCRETE-LOG PROBE — the model discovered logarithms (2026-07-28) — `arith.py`
+
+**The question:** what do the weights of a MULTIPLICATION operator actually look like? **The prediction, derived before
+running rather than found afterwards.** Nanda et al. 2023 (arXiv:2301.05217) reverse-engineered modular ADDITION in a
+one-layer transformer and found the embedding sparse in the FOURIER basis; Chughtai, Chan & Nanda (arXiv:2302.03025)
+generalised it — a network learning a GROUP operation implements it through the group's IRREDUCIBLE REPRESENTATIONS, and
+a cyclic group's irreps are the Fourier modes. The units mod `p` are cyclic under multiplication, and the isomorphism
+carrying them to addition is the DISCRETE LOGARITHM. So a transformer trained on modular multiplication must be sparse in
+the Fourier basis of the **discrete-log index**, not the value index — i.e. its multiplication operator is `log → add →
+exp`.
+
+Setup: p=97 (primitive root g=5, found by checking order, never hardcoded), inputs restricted to the units 1..96 for
+both operations so both spectra are FFTs of the SAME 96 embedding rows and are directly comparable. One layer, d=128,
+4 heads, full batch, weight decay 1.0, 50% train split, 10000 steps (~100 s). Sparsity is reported as the PARTICIPATION
+RATIO `1/Σp²` — the effective NUMBER of frequencies in use, needing no choice of k. A uniform spectrum over 48
+frequencies gives 48; a single spike gives 1.
+
+`addm` is the exactly-matched crossed control: addition **mod 96** over the same domain. Addition mod 97 sampled at only
+96 points would leak across FFT bins and understate its value-basis sparsity; mod 96 is a clean group operation on
+Z₉₆ — the SAME order as the multiplicative group — so the two operations live on isomorphic groups and differ *only* in
+whether the natural coordinate is the value or its logarithm.
+
+| model | test acc | value-basis eff. freqs | log-basis eff. freqs |
+|---|---|---|---|
+| untrained | 0.012 | 47.7 | 47.5 |
+| shuffled labels (memorised, train 1.000) | 0.010 | 47.7 | 47.6 |
+| **× mod 97** | **1.000** | 46.3 | **6.6** |
+| **+ mod 96** | **1.000** | **8.0** | 45.8 |
+
+**The crossed prediction is exact.** Multiplication is flat in the value basis (46.3 of 48) and sparse in the discrete-log
+basis (6.6); addition is the mirror image (8.0 / 45.8). A pipeline that reported log-basis sparsity for both would have
+been detecting the reindexing rather than the model, and it does not.
+
+**And it is CAUSAL, not just correlational** — the lesson of the teacher-forcing retraction above. Ablation keeps or
+removes the top-5 frequencies of each basis, with random controls matched to the same non-DC rank (10 real dimensions)
+and the row mean retained in every condition, so the two conditions differ *only* in which non-DC directions they use:
+
+| model | basis | keep named | keep random | drop named | drop random |
+|---|---|---|---|---|---|
+| × mod 97 | value index | 0.023 | 0.015 | 0.721 | 0.890 |
+| × mod 97 | **DISCRETE LOG** | **0.893** | 0.015 | **0.083** | 0.859 |
+| + mod 96 | **value index** | **0.760** | 0.013 | **0.113** | 0.897 |
+| + mod 96 | DISCRETE LOG | 0.015 | 0.015 | 0.811 | 0.911 |
+
+1. **The multiplication circuit is `log → Fourier-add → exp`, and it is TINY.** Keeping 11 of 96 row-dimensions — DC plus
+   five conjugate frequency pairs in the discrete-log index — retains **0.893** accuracy; a random subspace of the same
+   rank retains 0.015. Removing those same 11 collapses the model to 0.083 while removing a matched random subspace
+   leaves 0.859.
+2. **The test correctly reports NOTHING in the wrong basis.** For multiplication the value-basis frequencies behave
+   exactly like random directions (0.023 vs 0.015), and for addition the log-basis frequencies do (0.015 vs 0.015). The
+   ablation is not rigged to fire; it fires in the operation's own basis and nowhere else.
+3. **Sparsity tracks GENERALISATION, not fit.** The shuffled-label model reaches train accuracy 1.000 — it memorises 4608
+   random labels perfectly — and its spectrum is flat in both bases (47.7 / 47.6), indistinguishable from an untrained
+   network. So the sparse basis is not what fitting data looks like; it is what *learning the group* looks like. The
+   trace shows it forming: effective frequencies 40.4 → 9.3 → 6.1 → 6.6 over training, while test accuracy was already
+   at 1.000 by step 2000.
+
+**THE FINDING THAT MATTERS FOR THE INITIALISATION IDEA, and it is a conceptual one.** The structure of an operation is
+not in the values — it is in the **coordinate system**. Multiplication and addition have *the same circuit*; they differ
+only in the basis it is expressed in. So **an "instinct" is a basis, not a rule.** That is a much better thing to build
+in than any hand-written procedure: it is revisable by training (unlike a rule), it is the general answer for abelian
+group structure rather than a task-specific rig — so it passes the bitter-lesson discriminator recorded in `BEE.md` — and
+the model's remaining job shrinks to *choosing which frequencies*, about 11 dimensions out of 96.
+
+**It also confirms, in transformer weights, the design this repo already adopted for a different reason.**
+`reference_operator_as_group_representation` says motion is a learned group-representation matrix acting on a location
+code. Two independent lines — mechanistic interpretability of a transformer, and cortical operator theory in `src/tbt/` —
+converge on *an operation is a change of basis in which it becomes coordinate-wise*.
+
+**Honest limits.** One seed per arm; the crossed design is the control, not replication. Modular arithmetic only —
+multi-digit non-modular multiplication needs carries and partial products and its circuits are far less legible, which is
+why it was scoped out. And Zhong et al. (arXiv:2306.17844) showed the circuit for a given task is not unique ("clock" vs
+"pizza"), so this is *a* solution the optimiser reaches, not the only one.
+
+**NEXT, and it is the half of the original question still unanswered.** This settles what a SINGLE operation looks like.
+The "arithmetic engine" question — one shared basis with an operation-conditioned read-out, or two duplicated circuits —
+needs a model trained on `{+, ×}` together with an operation token, then asked in the weights whether the bases coincide.
+That is the same recruit-vs-duplicate question as the composition failure above, at a scale where the answer is visible,
+and the apparatus for it now exists.
+
+---
+
+## THE ARITHMETIC ENGINE — two circuits in one matrix, and a perfect multiplexer (2026-07-28) — `engine.py`
+
+One model, `[a, OP, b, EQ] → c`, both operations, p=97, units-only domain so both spectra are FFTs over the same 96
+embedding rows. Addition is mod 96 so that both operations live on cyclic groups of the SAME ORDER — otherwise two
+different frequency sets would be trivially distinguishable by group order rather than by basis. 12000 steps, ~260 s.
+
+**The prior, stated before running.** There is no single basis in which addition and multiplication are simultaneously
+diagonal — that is close to what makes a field a field, and the map between their diagonalising bases is the discrete
+logarithm, which is not linear. So the model *cannot* share a coordinate system. Duplication is forced by mathematics,
+not chosen by the optimiser, and the real question is how it SELECTS. **That is a boundary on the recruit-versus-
+duplicate framing worth keeping: some pairs of operations have no shared basis to recruit, and the cost is unavoidable.**
+
+**(1) Both operations generalise perfectly** — test + 1.000, × 1.000 — so everything below is interpretable.
+
+**(2) Both bases are carried at once.** Effective frequencies: value index **22–29**, discrete-log index **26–27** (two
+runs at the same seed; bf16+autotune is not bit-deterministic, and the spread is itself a reason not to read much into
+the exact value). A single-operation model was ~6.6 in its own basis and ~46 (flat) in the other; here both sit in
+between, which is the signature of two sparse frequency sets superposed in one matrix.
+
+**(3) Basis ablation — a double dissociation, and the correction to (2).** Top-5 frequencies of each basis kept or
+dropped, rank-matched random controls, row mean retained in every condition:
+
+| basis | condition | + acc | × acc |
+|---|---|---|---|
+| value index | **keep named** (11 of 96 dims) | **0.887** | 0.021 |
+| value index | keep random (matched) | 0.016 | 0.013 |
+| value index | **drop named** | **0.070** | 0.840 |
+| value index | drop random (matched) | 0.917 | 0.905 |
+| discrete log | **keep named** (11 of 96 dims) | 0.017 | **0.957** |
+| discrete log | keep random (matched) | 0.013 | 0.016 |
+| discrete log | **drop named** | 0.829 | **0.131** |
+| discrete log | drop random (matched) | 0.898 | 0.887 |
+
+Removing addition's frequencies destroys addition and **leaves multiplication almost untouched**, and vice versa. Two
+separate representations sharing one embedding matrix, each surgically removable.
+
+⚠ **AND THE KEEP COLUMN RETRACTS THE "LESS SPARSE" READING OF (2).** Keeping only 11 of 96 row-dimensions still gives
+**+ 0.887 and × 0.957** — as good as, or better than, the single-operation models' 0.760 and 0.876 on the same test. So
+**neither circuit degraded at all**: each still needs five frequencies and eleven dimensions. The risen participation
+ratio is an artifact of superposition — the value-index FFT necessarily now also sees multiplication's structure, which
+is *diffuse in that basis* (that is exactly why a mul-only model read 46.3 there) — and a participation ratio cannot
+separate "one sparse structure got blurred" from "a sparse structure plus a diffuse one". Only the causal keep/drop test
+can, and it says the circuits are intact. **The cost of the second operation is the step delay alone.**
+
+**(4) The switch lives in the MLP, as two preferentially-tuned populations.** Per-neuron selectivity
+`(m_add − m_mul)/(m_add + m_mul)` on activation magnitude at the answer position, over 512 neurons: **156 with |s| > 0.5**,
+183 shared at |s| < 0.1, **none above 0.9**, median |s| 0.145.
+
+| ablated (top decile, 51 neurons) | + acc | × acc |
+|---|---|---|
+| most ADD-selective | **0.105** | **1.000** |
+| most MUL-selective | **0.998** | **0.049** |
+| 51 random (control) | 0.930 | 0.669 |
+
+⚠ **Half of this is definitional and must be read that way.** Selectivity is measured from activation magnitude, so
+"ablating neurons that barely fire for ×" cannot be expected to hurt × — the SPARING is close to built in. The finding is
+the other half: the top decile by one operation's preference is **necessary** for that operation (0.105 / 0.049), while a
+random decile of the same size costs +ableness almost nothing (0.930). And the informative structural fact is that
+**selectivity is GRADED, not absolute** — no neuron exceeds |s| = 0.9 — yet the top decile alone is enough to carry an
+operation. A clean switch does not require dedicated units; a preferential population code suffices
+(`reference_population_code_belief`).
+
+**(5) The operation token is a PURE MULTIPLEXER, and this is the cleanest result of the five.** Replace the token and ask
+not whether accuracy drops but *what the model then computes*:
+
+| swap | matches the TOKEN | matches the operands' original operation |
+|---|---|---|
+| `+ → ×` | **1.000** | 0.011 |
+| `× → +` | **1.000** | 0.010 |
+
+It does not degrade — it **switches**, at full accuracy for whichever operation it is told. The token is not a hint that
+perturbs a shared computation; it is a selector, and it selects perfectly. (The swapped queries overlap the other
+operation's training pairs, but that is immaterial: per-operation *test* accuracy is already 1.000, so there is nothing
+train/test membership could add.)
+
+### The mechanism, assembled
+
+**A shared embedding holding both coordinate systems in superposition, plus an operation-token-gated selection of largely
+disjoint MLP populations.** Not one engine that "does arithmetic" — two circuits in one matrix with a clean demultiplexer
+in front of them. Asked directly: the circuit chooses by *routing*, not by computing both and picking, and the routing
+signal is the operation token acting on which MLP population is driven.
+
+### The measured cost of the second operation, and what it is NOT
+
+**Generalisation moved from step ~2000 to step ~6000 — a 3× delay — and that is the ENTIRE cost.** The circuits do not
+degrade (11 dimensions still carry each operation, above). Two things rule out the obvious explanations:
+
+* **It is not data dilution.** Per-operation training examples per step are *identical* in the two experiments: the
+  single-op run trained on 4608 examples of one operation, and the engine trains on 9216 examples of which ~4608 are that
+  same operation. Same architecture, same per-op gradient signal per step, 3× the steps to generalise.
+* **It is not running out of capacity.** The two circuits occupy 11 + 11 = 22 of 96 available row-dimensions, so there
+  was ample room. The difficulty is not fitting them in; it is *finding the split*.
+
+**So the extra 4000 steps buy an ALLOCATION, not a circuit** — two mutually non-interfering subspaces plus a routing
+function from the operation token to disjoint MLP populations. And the trace says the allocation is a shared prerequisite
+rather than something learned per operation: both operations sit at chance together (0.298 / 0.295 at step 2000), rise
+together (0.508 / 0.520 at 4000), and are both perfect together (1.000 / 1.000 at 6000). They do not appear in sequence.
+Nothing can specialise until there is somewhere to specialise into, and once there is, both circuits crystallise at once.
+
+### Why this might bear on LLM scale — and the three experiments that would decide it
+
+The tempting extrapolation: if skills are individually cheap (11 dimensions) and what costs compute is *carving shared
+parameters into non-interfering subspaces and learning to route between them*, then large-scale training compute is
+mostly an **allocation search**, not a knowledge-storage cost. Two things here support that framing beyond analogy: the
+cost appeared with per-op data held constant, and the joint phase transition matches emergent abilities arriving as
+transitions rather than smooth accumulation. The forced-duplication result adds a second lever — where no shared basis
+exists, parameters must grow with the number of mutually *incompatible* structures rather than with the number of skills.
+
+**What this evidence cannot support.** Two data points establish no scaling law: 1→2 operations costing 3× is not
+`3^n`, and it is not even known to be superlinear. The regime is also unlike LLM training — full batch, weight decay 1.0,
+an exactly-specified algebraic task, many epochs, and delayed generalisation that is partly an artifact of that setup,
+against ~1 epoch on heavy-tailed statistical structure with weak regularisation. Treat the above as a hypothesis this
+apparatus can now test, not as a finding.
+
+Three cheap experiments, in order of how much they would settle:
+1. **Operation-count sweep** (1, 2, 3, 4, …): steps-to-generalise and per-circuit rank. Superlinear steps with flat
+   per-circuit cost is the claim; linear steps make it mild.
+2. **Sequential vs joint** — teach `+` first, then add `×`. If sequential is much cheaper, the cost was interference
+   during joint learning; if not, it was discovering the routing.
+3. **PRE-SUPPLY THE BASES in the initialisation** — the structured-init idea, now with a sharp prediction. If the 3×
+   delay is the basis search, initialising the embedding with both frequency sets present should remove most of it. That
+   makes the "an instinct is a basis" claim directly testable *and* makes it a test of the scale hypothesis at the same
+   time.
+
+---
+
+## WHAT THE ALLOCATION COST ACTUALLY IS: basis conflict, and it is avoidable (2026-07-28) — `alloc.py`, `instinct.py`
+
+Two axes that `engine.py` confounded, separated. All runs 10000 steps, p=97, same architecture; the reported number is
+**steps to 90% test accuracy**, traced at 500-step resolution.
+
+### Axis 1 — does it matter whether the operations CAN share a basis?
+
+Every Z-linear map `(αa + βb) mod 96` is diagonal in the SAME value-index Fourier basis, and `×`/`÷` are both diagonal in
+the discrete-log basis, so those pairs *can* share a coordinate system entirely. `+` and `×` cannot — no basis
+diagonalises both. Coefficients are chosen coprime to 96 so every map is balanced in each argument.
+
+| operations | can share? | steps to 90% | own-basis eff. freqs | op-selective neurons? |
+|---|---|---|---|---|
+| `+` alone | — | **1500** | 8.4 | — |
+| `+`, `−` | yes (value basis) | **2500** | **7.7** | **none** |
+| `×`, `÷` | yes (log basis) | **2500** | **8.9** | **none** |
+| `+`, `×` | **no** | **5000–5500** | 26.1 / 26.5 | **clean diagonal** |
+
+1. **The optimiser RECRUITS when recruiting is possible.** For `{+, −}` the value basis stays at 7.7 effective
+   frequencies — as sparse as a *single* operation — and one frequency set serves both: keeping it gives 0.915 / 0.911,
+   dropping it gives 0.031 / 0.029. Both operations live or die together on the same ten dimensions. `{×, ÷}` replicates
+   this in the other basis (keep 0.712 / 0.684, drop 0.178 / 0.116).
+2. **And it builds no routing machinery it does not need.** For `{+, −}`, ablating the decile most selective for either
+   operation leaves BOTH at 1.000, while a *random* decile is worse (0.744 / 0.734). There is no selective population to
+   find, so "most selective" degenerates to "least active" — which is a caution about the selectivity index at
+   near-zero activation, and simultaneously the cleanest evidence that no switch exists. None is needed: one circuit
+   computes both.
+3. **Where sharing is impossible, both duplication and routing appear.** `{+, ×}` shows two superposed frequency sets and
+   a textbook routing diagonal — ablate the `+`-selective decile: `+` 0.101, `×` 0.997; ablate the `×`-selective decile:
+   `+` 0.999, `×` 0.041; random: 0.786 / 0.862.
+4. **So the cost is BASIS CONFLICT, not operation count.** Adding a second operation costs **1.67×** (2500/1500) when it
+   can share and **3.3–3.7×** (5000–5500/1500) when it cannot. The extra factor is entirely attributable to having to
+   carve out a second coordinate system and learn to route between them.
+
+### The count sweep, and the refinement it forces
+
+Four operations all diagonal in the value basis (`lin:1:1, lin:1:-1, lin:1:5, lin:5:1`):
+
+| operations | steps to 90% (last) | own-basis eff. freqs |
+|---|---|---|
+| 1 | 1500 | 8.4 |
+| 2 compatible (`+`, `−`) | 2500 | 7.7 |
+| **4 compatible** | **5000** (3000 / 4000 / 5000 / 5000) | **12.4** |
+| 2 *incompatible* (`+`, `×`) | 5000–5500 | 26.1 / 26.5 |
+
+⚠ **This arm does NOT isolate routing count, and the spectrum is what caught it.** Sharing a *basis* is not sharing a
+*circuit*. For op `(α, β)` the read-out needs `cos(ω(αa + βb − c))`, hence frequency `ωα` of `a` — so the frequency set has
+to be closed under multiplication by α, and `lin:1:5` / `lin:5:1` demand **different frequencies within the shared basis**
+than `lin:1:1` does. That is exactly the 12.4-against-7.7: roughly 1.6× more frequencies for four operations. So this arm
+raised frequency demand as well as routing count, and its 3.3× cannot be attributed to routing.
+
+It also explains why `{+, −}` was the clean case: α=1 for both and β = ±1 is only a conjugation, so those two share basis
+*and* frequencies — which is why that arm showed no extra frequencies and no routing machinery at all.
+
+**The unified statement, better than "basis conflict costs":** *cost tracks how much of the circuit must be DUPLICATED,
+not how many operations there are.*
+
+| what is shared | cost | frequencies | routing |
+|---|---|---|---|
+| basis **and** frequencies (`+`, `−`) | 1.67× | no increase (7.7) | none built |
+| basis only, different frequencies (4 linear) | 3.3× | 1.6× more (12.4) | not measured |
+| nothing (`+`, `×`) | 3.3–3.7× | two full sets (26) | disjoint populations |
+
+Minor mechanistic note, one seed and not to be leaned on: the four compatible operations came online **staggered**
+(3000/4000/5000/5000) rather than crystallising together as the incompatible pair did — consistent with the basis being
+built once and each read-out added incrementally.
+
+**The clean routing-count test is therefore still open, and is now well specified:** N operations needing the IDENTICAL
+frequency set, e.g. `(a + b + c_i) mod 96` for distinct constants, since an additive constant is a pure phase shift and
+adds no frequencies. If N of those cost nothing beyond the first, routing alone is free and the whole cost is frequency
+demand. One line in `alloc.py`'s op parser.
+
+### Axis 2 — pre-supplying the coordinate system (`instinct.py`)
+
+Same incompatible pair `{+, ×}`. The initialisation replaces the value-token embedding with a superposition of `m=5`
+frequencies per basis, **chosen at random** — deliberately not the ones a trained model turns out to use, which is what
+keeps this from handing over the answer. *Which* frequencies is arbitrary (different seeds pick different sets and all
+work), so what is supplied is the structure "the code is sparse in these two coordinate systems", not the computation, the
+group structure, or the routing.
+
+| init | `+` steps to 90% | `×` steps to 90% |
+|---|---|---|
+| random (the baseline) | 5500 | 5000 |
+| **fourier** (5 random frequencies per basis) | **1500** | **1000** |
+| **shuffled** — same matrix, ROWS PERMUTED | 6000 | 6000 |
+
+1. **A structured init removes the allocation cost entirely — 3.7× and 5×.** And the number to notice is that `{+, ×}`
+   from a Fourier init reaches criterion *faster than a SINGLE operation does from random init* (1000–1500 against 1500).
+   Holding two mutually incompatible operations became free.
+2. **THE FALSIFIER PASSES, and it is what makes this a mechanism rather than a speedup.** `shuffled` permutes the rows of
+   the identical matrix: same singular values, same rank, same scale, same sinusoidal shape — only the correspondence
+   between a row's position and its value is destroyed, which is precisely what makes it a *coordinate system*. It gives
+   **nothing** (6000, marginally worse than random). So the benefit is not low-rank structure, not spectral shape, and
+   not scale. It is the coordinate system.
+3. **The model keeps what it was given.** The supplied frequencies (value 17/36/42/45/47, log 5/6/24/38/39) are still the
+   dominant ones after 10000 steps. It did not discard the offered basis and search for its own.
+
+### What this does to the LLM-scale hypothesis
+
+It sharpens it in one direction and undercuts it in another, and both are worth having.
+
+**Sharpened:** the cost does not scale with the number of skills. It scales with **the number of distinct coordinate
+directions that must be carved out and routed to** — skills sharing both basis and frequencies are recruited into one
+circuit at almost no cost (1.67× for a second, with no routing built at all), while four skills needing different
+frequency subsets cost as much as two mutually incompatible ones. That is a much more specific claim than "more
+capabilities cost more", and it predicts that what makes a domain expensive is structural heterogeneity rather than
+breadth.
+
+**Undercut:** the cost is **avoidable**. Supplying the coordinate systems at initialisation removed 3.7–5× of it, in a
+case where duplication was mathematically forced. If the same holds at scale, a large part of pretraining compute is
+buying coordinate systems that could in principle be supplied — which is an argument that scale is currently a *substitute*
+for structure rather than a requirement. The honest caveat is unchanged and still binding: this regime (full batch, weight
+decay 1.0, exact algebraic tasks, many epochs) is not LLM training, we know the right bases here analytically and for
+language we do not, and 1→2 operations is not a scaling law.
+
+**Still open.** Built but not yet run: sequential-versus-joint (`--seq 1`), to separate interference-during-joint-learning
+from routing discovery — the first operation's accuracy after the switch also measures catastrophic forgetting. Not yet
+built: the clean routing-count test specified above (`(a + b + c_i) mod 96`, identical frequency set, N ops).
+
+And the experiment that would connect this line to the composition failure, which is the most valuable of the lot.
+`engine.py` showed routing on a GIVEN discrete key is exact (1.000 on the token swap) and `alloc.py` shows it is nearly
+free when the circuit can be shared. The composition line's model, by contrast, builds WHOLE-task keys fine (supervised
+~0.95) but cannot factor an observed whole into PART keys: it knows a held-out composition has three steps (DEPTH 0.842)
+and cannot name the first (FIRST 0.344). Counting the parts without identifying them is the signature of estimating a
+scalar rather than factoring. **So: hand the composition model an explicit primitive-identity token at each decode step —
+the same status the operation token has here.** If FIRST jumps and held-out composition works, the missing operation was
+IDENTIFICATION, not application, and the two lines are one finding. If it does not, application really is absent and the
+analogy fails. Either way it is decisive, and it is the same shape as `reference_cue_competition_key_discovery` —
+discovering what the condition actually is.
+
+**What it says for a structured initialisation.** The engine's shape is buildable as an init: superpose the candidate
+bases in the embedding, and provide a gating pathway from a control token to disjoint hidden populations. That is
+architecture, not task knowledge — the model still has to learn which frequencies and which population does what.
+
+**Honest limits.** One seed. Two operations only, both on cyclic groups, both single-step. The 183 shared neurons are
+unexplained — they may be doing input encoding common to both operations rather than anything operation-general, and
+distinguishing those would need a further probe.
+

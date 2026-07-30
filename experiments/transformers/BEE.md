@@ -101,6 +101,41 @@ Cheapest falsifier first. Each step is built so it can come out negative.
   chose; a harness the system finds is the bee. This is where the bitter-lesson discriminator actually bites
   (`reference_lid_locally_in_distribution`: scalable inductive bias, never task-specific rigging).
 
+### Where the ladder actually stands (2026-07-28)
+
+**Everything up to and including inference-time chaining is null.** `scratchpad.py` appeared to clear the bar — held-out
+composition 0.046 → 0.363 — and the arity test **retracted it**: the measurement was teacher-forced, so the model was
+handed the true intermediate and only had to finish. Free-running it scores 0.024 against a 0.047 control (`NOTES.md`,
+the arity entry). The ledger is architecture null, optimiser null, diversity null, chaining-as-training-signal
+transductive-only, chaining-at-inference null.
+
+**The one thing measured that is not null**, and it is the sharpest statement the line has produced: given a correct
+partial result, the model applies one more primitive to a NOVEL composition at 0.48–0.59 against a 0.11 one-shot control.
+It can execute a local step out of distribution; it cannot sequence two of its own. That is LID confirmed at *m*=1 and
+refuted at *m*=2, and it is where H2/H3 now have to bite.
+
+**The standing constraint on any harness we build from here (the user, 2026-07-28): NO ARITY MAY BE HANDED OVER.** There
+is no program that can always supply the correct number of steps, so a format that fixes the decode depth in advance has
+smuggled in the answer's shape. Two things learned about doing this properly:
+- Padding a fixed-depth format by REPEATING the answer does not remove the arity, it removes the task — the repeated
+  blocks give the model something to copy, copying dominates the loss, and the measured 1.000 was exactly that.
+- So the depth must be the model's own output: a HALT it emits, with no repeated blocks to copy and no supervision of the
+  step COUNT for any held-out task.
+
+**BUILT, and the arity turned out not to be the bottleneck** (`halt.py`, `NOTES.md` 2026-07-28). With nothing handed
+over, the model **infers the depth of a novel composition**: 0.842 exactly-right block count on held-out triples and
+0.772 on held-out pairs, against a base-rate ~0.60/0.23, terminating 100% of the time. That is the first genuine
+positive in the line. But the ANSWER is 0.048 against a 0.113 one-shot control — a self-chosen chain makes held-out
+accuracy *worse*, because the FIRST block is wrong two times in three (0.344, against 0.903 on supervised tasks) and
+every later step inherits it.
+
+**So the ladder's remaining question is no longer about the harness at all.** The model represents a novel composition
+(held-out R² +0.52), knows how many steps it needs (0.84), and finishes it correctly when handed a correct partial
+result (0.52) — and cannot produce that partial result (0.34). Every external lever has now been varied and come back
+null. **The missing operation is applying an identified primitive to a held value when that pair was never trained
+together** — one local step, which is exactly the LID claim at its smallest unit, and it is where H2/H3 have to be
+re-aimed.
+
 ## The experiment this implies
 
 The blog tests LID with pretrained LLMs and expensive harnesses, where "structurally isomorphic" is informal (an ε-ball

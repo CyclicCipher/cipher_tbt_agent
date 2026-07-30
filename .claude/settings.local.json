@@ -449,7 +449,15 @@
       "WebFetch(domain:docs.thousandbrains.org)",
       "WebFetch(domain:www.kaggle.com)",
       "WebFetch(domain:nupic.docs.numenta.org)",
-      "WebFetch(domain:www.cnbc.cmu.edu)"
+      "WebFetch(domain:www.cnbc.cmu.edu)",
+      "WebFetch(domain:gershmanlab.com)",
+      "Bash(./venv/Scripts/python.exe -c \"import importlib; [print\\(m, importlib.util.find_spec\\(m\\) is not None\\) for m in \\('pypdf','PyPDF2','pdfplumber','fitz','pdfminer'\\)]\")",
+      "Bash(./venv/Scripts/python.exe -c ' *)",
+      "Bash(timeout 120 ./venv/Scripts/python.exe -m pip install pypdf --quiet)",
+      "Bash(./venv/Scripts/python.exe -c \"import pypdf; print\\('pypdf', pypdf.__version__\\)\")",
+      "Bash(timeout 120 ./venv/Scripts/python.exe -m pip install pypdf --quiet --trusted-host pypi.org --trusted-host files.pythonhosted.org)",
+      "Bash(./venv/Scripts/python.exe -c \"import pypdf; print\\('ok', pypdf.__version__\\)\")",
+      "Bash(cd \"C:/Users/julia/GitHub/predictive-coding-agent\" && grep -n -iE \"^\\(Methods|Details of the CML|Algorithm|Learning of|Inverse model|Forward model|equation \\\\\\(1[0-9]\\\\\\)|Compositional|Grid.cell model|Path integration|GCML algorithm|Local synaptic plasticity\\)\" \"src/../scratchpad/paper.txt\" 2>/dev/null | head -50 || grep -n -iE \"Methods|Details of the CML|equation \\\\\\(1[0-9]\\\\\\)|inverse model|Algorithm [0-9]\" \"C:/Users/julia/AppData/Local/Temp/claude/C--Users-julia-GitHub-predictive-coding-agent/60bd9239-2bb1-4f4d-90b9-e7bfa4541973/scratchpad/paper.txt\" | head -60)"
     ]
   }
 }

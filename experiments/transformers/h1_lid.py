@@ -208,14 +208,15 @@ class Model(nn.Module):
     """A small causal decoder over digits. Predicts every OUTPUT block from everything before it, so the accuracy at the
     j-th block IS the accuracy after j-1 demonstrations — the trials curve falls out of one forward pass."""
 
-    def __init__(self, d_model=96, n_layer=3, n_head=4, max_len=256, pos="learned"):
+    def __init__(self, d_model=96, n_layer=3, n_head=4, max_len=256, pos="learned", n_vocab=V):
         super().__init__()
-        self.emb = nn.Embedding(V, d_model)
+        # `n_vocab` defaults to the digit alphabet; `halt.py` widens it by one for a HALT token the model emits itself.
+        self.emb = nn.Embedding(n_vocab, d_model)
         self.pos_kind = pos
         self.pos = nn.Parameter(torch.randn(1, max_len, d_model) * 0.02) if pos == "learned" else None
         self.blocks = nn.ModuleList([Block(d_model, n_head, pos) for _ in range(n_layer)])
         self.norm = nn.LayerNorm(d_model)
-        self.head = nn.Linear(d_model, V)
+        self.head = nn.Linear(d_model, n_vocab)
 
     def forward(self, tok):
         h = self.emb(tok)

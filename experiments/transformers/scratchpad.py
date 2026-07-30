@@ -101,16 +101,32 @@ def masks(K, pad, dev):
 
 
 @torch.no_grad()
-def accuracy(model, tasks, dev, K, pad, n=384):
+def rollout(model, tok, K, slots):
+    """FREE-RUNNING generation: cut the sequence back to the demonstrations plus the query INPUT, then let the model
+    produce every decoded block itself, feeding its own tokens back. The answer comes off the end of its OWN chain.
+
+    ADDED AFTER THE FACT, and it overturned this file's headline. The original measurement was a single teacher-forced
+    forward pass over a sequence that ALREADY CONTAINED the true intermediate, so the model was handed `phi_a(x)` for a
+    held-out task and only had to apply the second step. That is not chaining; it is finishing. The environment can
+    never supply an intermediate, so this is the only evaluation the claim was ever entitled to."""
+    seq = tok[:, :(K - 1) * 2 * L + L]
+    for _ in range((slots + 1) * L):
+        seq = torch.cat([seq, model(seq)[:, -1].argmax(-1, keepdim=True)], dim=1)
+    return seq[:, -L:]
+
+
+@torch.no_grad()
+def accuracy(model, tasks, dev, K, pad, n=256):
+    """Free-running accuracy (the claim) and teacher-forced accuracy (the strictly easier diagnostic), side by side."""
     tab = tables(tasks, dev)
     _, final = masks(K, pad, dev)
-    hits = []
+    free, forced = [], []
     for t in range(len(tasks)):
         tok, ans = make(n, K, tasks, dev, None, pad, fixed=t, tab=tab)
-        pred = model(tok)[:, :-1].argmax(-1)
-        got = pred[:, final[1:]].reshape(n, L)
-        hits.append((got == ans).all(-1).float().mean().item())
-    return sum(hits) / len(hits), sum(h >= 0.8 for h in hits)
+        free.append((rollout(model, tok, K, pad) == ans).all(-1).float().mean().item())
+        got = model(tok)[:, :-1].argmax(-1)[:, final[1:]].reshape(n, L)
+        forced.append((got == ans).all(-1).float().mean().item())
+    return sum(free) / len(free), sum(h >= 0.8 for h in free), sum(forced) / len(forced)
 
 
 def main():
@@ -158,11 +174,13 @@ def main():
     pr = accuracy(model, prims, dev, args.k, args.pad)
     la = accuracy(model, lab, dev, args.k, args.pad)
     hl = accuracy(model, held, dev, args.k, args.pad)
-    print(f"\n{'arm':<14}{'prims':>9}{'labelled':>11}{'HELD-OUT':>11}{'solved':>10}{'secs':>8}")
+    print(f"\n{'arm':<14}{'prims':>9}{'labelled':>11}{'HELD-OUT':>11}{'solved':>10}{'hl forced':>11}{'secs':>8}")
     print(f"{'scratchpad' if args.pad else 'control':<14}{pr[0]:>9.3f}{la[0]:>11.3f}{hl[0]:>11.3f}"
-          f"{hl[1]:>6}/{len(held):<4}{time.time()-t0:>8.0f}")
+          f"{hl[1]:>6}/{len(held):<4}{hl[2]:>11.3f}{time.time()-t0:>8.0f}")
     print("\nHELD-OUT here is every composition never supervised in any form -- the unlabelled and eval pools of")
     print("`chaining.py` combined, since neither receives a gradient in this experiment.")
+    print("All accuracies are FREE-RUNNING (the model generates its own intermediate). `hl forced` is the old")
+    print("teacher-forced number, which handed the model the TRUE intermediate and is reported only as the diagnostic.")
 
 
 if __name__ == "__main__":
