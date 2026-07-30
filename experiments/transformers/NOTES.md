@@ -677,6 +677,258 @@ problem is a hypothesis-generation problem, and this line has now proved it by e
 understates identification, since a task can admit an alternative valid split that scores as wrong — though PROG = 0.000
 leaves little room for that to matter.
 
+### Hypothesise-and-test: the executor as its own verifier (2026-07-28) — `search.py`
+
+Analysis-by-synthesis on the asymmetry: do not invert, hypothesise a decomposition, render it forward with the model's
+own 0.99-accurate executor, and keep what reproduces the observation. **Unlike `identify.py --ids given`, the program is
+DERIVED, not handed over** — a candidate is scored only by whether executing it reproduces a demonstration the model was
+not shown, which is information the environment supplies.
+
+That verification requirement forced one design change worth recording: the probe demonstration must be OUT of context,
+or a candidate could be "verified" by the model copying the answer out of its own prompt, every candidate would score
+alike, and the search would degenerate silently. So the demonstrations are split (6 in context, 1 held back) and the
+executor is trained with the demonstration count **sampled per batch** so that split is in-distribution. Verifying
+against an in-context demonstration would have been self-diagnosing, but a confound argued away is worse than one
+designed out.
+
+| pool | ANSWER | solved | found fn | #matching | no match |
+|---|---|---|---|---|---|
+| supervised prims | 0.925 | 4/5 | 0.925 | 7.6 | 0.000 |
+| supervised pairs | 0.911 | 6/7 | 0.911 | 1.8 | 0.000 |
+| supervised triples | 0.861 | 13/18 | 0.861 | 3.1 | 0.000 |
+| **HELD-OUT pairs** | **0.891** | **6/8** | 0.891 | 1.8 | 0.000 |
+| **HELD-OUT triples** | **0.778** | **7/18** | 0.778 | 2.8 | 0.007 |
+
+Against 0.048 (`halt.py`), 0.020 (`identify.py --ids predicted`) and 0.113 (one-shot control).
+
+1. **0.048 → 0.778 on held-out 3-compositions, with the program derived.** The forward/inverse asymmetry is real and
+   exploitable: a model that cannot name a decomposition can still *find* one by running candidates through the executor
+   it already has.
+2. **ANSWER equals `found fn` to three decimals in every row.** The answer is right exactly when the search found the
+   right function — so the executor is faithful and the whole error budget is in selection, not execution-given-selection.
+3. **The generalisation gap is nearly closed.** Held-out triples 0.778 against supervised triples 0.861 — a gap of 0.083,
+   where every previous method in this line had a gap of ~0.9. And the absolute shortfall from 1.0 is mostly EXECUTOR
+   error (this executor was trained 9000 steps with variable demonstration count and reaches only 0.925 on primitives),
+   not search error.
+4. **Ties are common and the Occam rule is load-bearing.** 1.8–3.1 candidates reproduce the probe on average, so
+   functionally equivalent writings genuinely exist and shortest-first is doing real work. `no match` ≈ 0.000: the search
+   essentially always finds something.
+
+⚠ **AND THIS DOES NOT SOLVE THE PROBLEM** (the user's note, 2026-07-28, recorded because it is the correct reading of the
+number above). 155 candidates is exhaustively checkable; the space is `|prims|^depth` and exhaustive search dies
+immediately past a toy. What this establishes is that the asymmetry is exploitable and a CEILING for what any smarter
+proposal mechanism could reach. It supplies no proposal mechanism, and **the proposal distribution is where the science
+is** — difference-scoring (GCML's Hebbian inverse model, which becomes an overlap detector between a state-difference and
+each building block), prediction-error localisation (`reference_tbt_segmentation_and_grouping`: boundaries come from
+mismatch), or context-cued memory sampling (`reference_hypothesis_generation`). Those are the candidates enumeration
+stands in for.
+
+### Can identification be LEARNED? The coverage sweep says no (2026-07-28) — `decompose.py`
+
+The deflationary hypothesis, tested before building any mechanism: maybe identification failed only because it never had
+COVERAGE. Execution composes, so thirty tasks teach it; identification may compose not at all, so thirty tasks teach it
+thirty labels. If that were the whole story it would be free to fix — a system that can execute can generate its own
+labelled identification data (sample a program, run it, keep the pair), which is wake-sleep used as a learning algorithm
+and whose biological analogue is replay.
+
+Decomposition isolated: given demonstrations of an unfamiliar function, emit the PROGRAM and nothing else — no blocks, no
+execution. Twelve primitives give 174 distinct functions of length ≤ 3, so there is room for a real sweep. Held-out set
+FIXED at 40 across every condition, training sets NESTED, compute fixed — the `diversity.py` design. `PROG-fn` scores an
+EQUIVALENT decomposition as correct (signature match), so multiple writings do not cause undercounting.
+
+| \|train\| | TRAIN PROG-fn | **HELD-OUT PROG-fn** | HELD-OUT ID@1 | HELD-OUT LEN |
+|---|---|---|---|---|
+| 10 | 1.000 | **0.000** | 0.095 | 0.487 |
+| 40 | 0.871 | **0.000** | 0.095 | 0.531 |
+| 134 | 0.268 | **0.000** | 0.051 | 0.539 |
+
+Chance for ID@1 is 1/12 = 0.083.
+
+1. **THE DEFLATIONARY HYPOTHESIS IS REJECTED. Held-out decomposition is exactly 0.000 at every coverage level** — over a
+   13× range, including the two levels where the model fit its training set completely (1.000 and 0.871). Coverage does
+   not help. Not a little; not at all.
+2. **It is memorising, and the numbers show it directly.** Train fit falls monotonically as coverage grows
+   (1.000 → 0.871 → 0.268) exactly as pure memorisation with fixed capacity and compute must, while held-out never leaves
+   zero. There is no shared structure being built for the gradient to exploit.
+3. **The dissociation against execution is total.** Execution generalises to novel compositions from **30** examples at
+   0.997. Identification does not generalise from **134**, with explicit discrete labels, in the same architecture, on the
+   same primitives, from the same data source. Whatever makes composition free for the executor is simply absent here.
+4. **Held-out ID@1 is at or BELOW chance** (0.051 vs 0.083 at N=134): it is confidently wrong, presumably biased toward
+   primitives frequent in training, not uncertain.
+5. **And the length signal survives, again.** LEN ≈ 0.49–0.54 throughout, above what guessing gives — the third
+   independent replication of the same profile (`halt.py` DEPTH 0.842, `identify.py` DEPTH 0.815, here LEN ~0.53).
+   **A scalar property of the decomposition is estimable; the identities are not.** That is a stable, three-way-replicated
+   fact about what this architecture can extract from demonstrations.
+
+⚠ **The N=134 arm is UNDERTRAINED** (train PROG-fn 0.268) at fixed compute, so it cannot support a claim about *total*
+coverage specifically — the same weakness `diversity.py`'s largest point had, and it is the weakest row here for the same
+reason. The conclusion rests on N=10 and N=40, where the fit is complete and transfer is still exactly zero. Settling the
+top of the range needs more compute than the 5-minute budget allows (that arm already ran 501 s).
+
+### The GCML proposal mechanism: a last-step RECOGNISER, not a decomposer (2026-07-28) — `propose.py`
+
+The first of the three proposal candidates, built and measured. GCML's learned inverse model `W` maps a state DIFFERENCE
+to the action that reduces it (`u = W(s* − s)`), trained by one Hebbian rule from single-step transitions, with a
+saturating variant under which `W` becomes an overlap detector. **Crucially `W` is trained ONLY on single-primitive
+transitions — never a composition, never a program label** — so this is a proposal mechanism rather than the classifier
+that failed in `decompose.py`. Beam search over programs, every beam entry verified exactly against all demonstrations.
+
+The structural worry was stated before running: GCML's overlap detector works because in *their* task composition is
+ADDITIVE in the difference space (adding building blocks to an image makes the total difference the union of the parts).
+Functional composition of group elements is not additive — the difference of `φ_c∘φ_b∘φ_a` is the signature of the
+COMPOSED map, not the union of three parts.
+
+| scorer | beam | cands | HELD-OUT pairs | HELD-OUT triples | supervised triples | first@beam |
+|---|---|---|---|---|---|---|
+| hebb-onehot | 1 / 5 | 3 / 14 | 0.125 / 0.375 | 0.056 / **0.056** | 0.000 / 0.167 | 0.136 / 1.000 |
+| hebb-relational | 1 / 5 | 3 / 13 | 0.250 / **1.000** | 0.000 / **0.389** | 0.000 / 0.278 | 0.136 / 1.000 |
+| greedy-forward | 1 / 5 | 3 / 13 | 0.625 / **1.000** | 0.222 / 0.222 | 0.278 / 0.444 | 0.182 / 1.000 |
+
+(Enumeration: 155 candidates, 0.778 on held-out triples. `first@beam` is trivially 1.000 at beam 5 with 5 primitives.)
+
+1. **FIRST-STEP IDENTIFICATION IS AT CHANCE for all three scorers.** beam 1: 0.136 / 0.136 / 0.182 against a 0.200 floor;
+   beam 2: 0.386 / 0.273 / 0.341 against 0.400; beam 3: 0.636 / 0.409 / 0.545 against 0.600. Difference-scoring carries
+   **no information** about which primitive comes first in a composition.
+2. **But it is an excellent LAST-step recogniser.** Held-out PAIRS reach 1.000 at beam 5 — because a beam of 5 covers
+   every possible first step, after which the state is one step from the goal and the remaining difference genuinely IS a
+   single primitive's signature. TRIPLES top out at 0.389, since two of three steps must be guessed.
+   ⇒ **The mechanism recognises a single transformation; it does not decompose a composed one.** That is the pre-stated
+   worry confirmed, and it locates GCML's success precisely in the additivity of its difference space.
+3. **The `greedy-forward` baseline rules out the approximation as the culprit.** It uses the TRUE forward model and plain
+   Hamming distance — no learned map, no feature choice — and is *also* at chance for the first step (0.182). So the
+   failure is the idea of difference-guided selection on a non-additive composition, not the linearity or the
+   representation. That baseline earned its place.
+4. **A representation prediction of mine was too narrow, and the diagnostic corrected it.** I predicted permutations
+   specifically would be invisible in a one-hot (position, value) difference. Measured, the mean one-hot difference is
+   sampling noise (0.041–0.066) for **every** primitive including `add1` and `negate` — because *every* primitive here is a
+   bijection and a bijection preserves the uniform marginal. There is no signal for a Hebbian `W` to learn on that
+   representation at all, which is the whole explanation for `hebb-onehot` sitting flat at 0.056. Relational signatures
+   are 2.7–3.5 throughout.
+5. **And it is not even an efficiency win.** 13 candidates against 155 is a real reduction, but at 0.389 against 0.778 —
+   it trades more than half the accuracy for it. Enumeration remains the only thing that solves the task.
+
+**What survives.** One usable crumb: because the last step *is* reliably identifiable, the final level of a search can be
+pruned to a shortlist — a factor-of-`|prims|` saving, linear rather than exponential, so it postpones the wall without
+moving it. Of the three brain candidates, **difference-scoring is now eliminated** for this problem; prediction-error
+localisation (`reference_tbt_segmentation_and_grouping`) and context-cued memory sampling
+(`reference_hypothesis_generation`) remain untested. And there is a caution worth carrying to both: this result shows a
+mechanism can be perfectly good at *recognition* and useless at *decomposition*, and the two are easy to conflate when the
+test only ever presents single steps.
+
+### Prediction-error localisation: the boundary is where two predictions MEET (2026-07-28) — `localise.py`
+
+The second proposal candidate. `reference_tbt_segmentation_and_grouping` says boundaries come from prediction MISMATCH;
+`propose.py` had just measured that error is **worthless in the interior** of a composition (chance-level first-step
+identification) and **exact next to a boundary** (held-out pairs 1.000 once one step from the goal). A bidirectional method
+is what that asymmetry licenses: grow a frontier forward from the input and backward from the observation using primitive
+INVERSES, and the decomposition point is where the two coincide — zero prediction error at the join, checked across every
+demonstration at once so a coincidence on one cannot fake a meet. Inverse tables are asserted exact, not assumed.
+
+| method | HELD-OUT pairs | HELD-OUT triples | supervised triples | candidates |
+|---|---|---|---|---|
+| **meet-in-the-middle** | 1.000 | **1.000** | 1.000 | **29.3** |
+| forward enumeration | 1.000 | 1.000 | 1.000 | 69.9 |
+
+1. **Same completeness at 2.4× fewer expansions**, and the asymptotics are the point: `|prims|^⌈d/2⌉ + |prims|^⌊d/2⌋`
+   against `|prims|^d`. At depth 3 that is 2.4×; at depth 6 it would be 250 against 15625, i.e. 62×. **The exponent halves
+   — and it is still exponential**, so this moves the wall rather than removing it. It is a search improvement, not a
+   learning one, and it does not answer the standing objection about enumeration.
+2. **It only works because the primitives are invertible.** Every primitive here is a bijection. Real actions generally
+   are not, and a backward frontier needs inverses — so this is limited in exactly the way GCML's overlap detector was
+   limited by additivity. Both mechanisms are excellent given a structural property their task happens to have.
+
+### The reframing, which is worth more than the mechanism
+
+**The composed map is EXACTLY recoverable from demonstrations — 18/18 held-out triples from 8 demonstrations** — by
+intersecting a relational signature across demonstrations so accidental coincidences cancel. Perception of the whole was
+never the hard part. What remains is **factoring a known group element into generators**, i.e. the word problem on a
+Cayley graph, whose difficulty is combinatorial and intrinsic rather than statistical.
+
+**That retro-explains `decompose.py`.** Identification showed no improvement from 10 to 134 training programs because
+factorisation is not a pattern-recognition problem — no coverage could have helped. The flat sweep was the correct answer
+to a badly-posed question. Search is not a workaround for a missing learned mechanism here; for this problem class it is
+what the problem *is*.
+
+### And a reusable diagnostic fell out of getting it wrong
+
+My first feature space tested only `y[j] == x[i] + d` — the TRANSLATION subgroup — but `negate` is `x → −x`, so the value
+group is affine `{x → ±x + c}`. Recovery under the wrong space was **10/18 and FLAT from 4 to 64 demonstrations**; under
+the correct affine space it is 14/18 at four demonstrations and **18/18 by eight**.
+
+| feature space | 4 demos | 8 | 16 | 32 | 64 |
+|---|---|---|---|---|---|
+| translation-only (wrong group) | 9/18 | 10/18 | 10/18 | 10/18 | 10/18 |
+| **affine (correct group)** | 14/18 | **18/18** | 18/18 | 18/18 | 18/18 |
+
+**A failure that is FLAT in the amount of data is a wrong hypothesis space; a failure that IMPROVES with data is
+insufficient evidence.** Two failures that look identical in a single run are distinguishable by their data-dependence,
+and that is cheap to test. Applied backwards, it says `decompose.py`'s perfectly flat coverage sweep was never a
+data problem either — a feedforward classifier over demonstrations cannot represent factorisation, so it was the wrong
+hypothesis space, measured three times.
+
+### Context-cued memory sampling: real but weak, and dominated (2026-07-28) — `recall.py`
+
+The third candidate. `reference_hypothesis_generation` (Dasgupta & Gershman): hypotheses come from a small, stochastic,
+context-cued sample from memory. Structurally it has an advantage over the other two — it proposes **whole programs**, so
+it never has to identify a step in isolation, which is the thing measured at chance. Memory holds the 30 tasks whose
+programs are known; the cue is computed from demonstrations only (execute each memory program on the query's own inputs and
+score agreement with the observed outputs); candidates are the retrieved programs plus their edit-neighbourhoods, since a
+held-out program is by construction not in memory.
+
+**Diagnostic 1 — reachability, and the artifact it exposes.** Every held-out program is exactly 1 edit from something in
+memory (pairs {1: 8}, triples {1: 18}). That looks favourable until you ask how much of the space those neighbourhoods
+cover: **radius 1 covers 131/155 = 84.5%, radius 2 covers 100%.** So in this toy, memory almost spans the program space,
+and at radius 2 "retrieval" is a REORDERING of enumeration rather than a reduction of it. Any result at radius 2 is
+therefore uninformative about scaling, and 30 memories could not span a realistic space.
+
+**Diagnostic 2 — cue validity.** Spearman(behavioural similarity, program-edit distance) = **−0.151** over 1540 task
+pairs. In the predicted direction and weak. This is the quantity that would govern the mechanism at scale, and it is
+nearly nothing: in a group, two elements one generator apart can act very differently on a probe and two that act alike
+can be far apart in the Cayley graph.
+
+| retrieval | k | radius | cands | HELD pairs | HELD triples |
+|---|---|---|---|---|---|
+| cued (sampled) | 1 | 1 | 19 | 0.875 | **0.389** |
+| cued (top-k) | 1 | 1 | 19 | 0.875 | 0.278 |
+| random | 1 | 1 | 14 | 0.375 | **0.000** |
+| cued (sampled) | 3 | 1 | 43 | 1.000 | **0.833** |
+| random | 3 | 1 | 39 | 0.375 | 0.444 |
+| cued (sampled) | 5 | 1 | 60 | 1.000 | 0.889 |
+| cued (sampled) | 3 | 2 | 139 | 1.000 | 1.000 |
+| random | 3 | 2 | 131 | 1.000 | 1.000 |
+
+1. **Context-cueing carries real signal at small budgets** — 0.389 against random's 0.000 at k=1, and 0.833 against 0.444
+   at ~43 candidates. So retrieval is not nothing, despite ρ = −0.151.
+2. **Stochastic sampling beats greedy top-k at k=1** (0.389 vs 0.278): with a single draw, diversity is worth more than
+   the argmax. A small point in Dasgupta/Gershman's favour, and the only place stochasticity mattered.
+3. **At radius 2 cued and random are identical (1.000/1.000)** because both are enumerating 131–139 of 155. That row is
+   the artifact, not a result.
+4. **It is DOMINATED by meet-in-the-middle**: 0.833 at 43 candidates against 1.000 at 29.3.
+
+### All three proposal mechanisms, scored — held-out 3-compositions
+
+| mechanism | accuracy | candidates | needs |
+|---|---|---|---|
+| difference-scoring (GCML) | 0.389 | 13 | additive composition — **absent here** |
+| context-cued memory sampling | 0.833 | 43 | similarity ⇒ program proximity — **ρ = −0.151** |
+| **meet-in-the-middle** | **1.000** | **29.3** | invertible primitives |
+| plain enumeration | 1.000 | ~70 | nothing |
+
+**The winner needs no learning at all**, only invertibility — and it wins by halving an exponent rather than by removing
+it. Each of the other two turns out to depend on a structural property its source domain had and this one lacks:
+additivity for GCML, similarity-tracks-proximity for memory retrieval. That is the general lesson of the three: **a
+proposal mechanism is only as good as the structure it exploits, and the structure has to be verified in the target domain
+rather than inherited with the method.**
+
+**WHERE THIS LEAVES IT.** Amortised decomposition is not learnable in this setting, by gradient descent, at any coverage
+tested. So `search.py`'s hypothesise-and-test is not a scaffold standing in for a learnable identifier — it is, so far,
+**the only thing that works at all**, and its scaling problem is therefore the real problem rather than an implementation
+detail. That promotes the proposal-distribution question from "interesting next step" to "the thing to solve": how to
+sample a handful of candidate decompositions instead of enumerating `|prims|^depth` of them. The three candidates named
+above are where to look, and the GCML inverse model is the one with an actual mechanism attached
+(`notes/gcml_neural_sampling_cognitive_maps.md` — a difference-to-primitive overlap detector learned by one Hebbian rule,
+which is a *proposal* mechanism rather than a classifier, and therefore not obviously subject to what just failed here).
+
 ---
 
 ## THE DISCRETE-LOG PROBE — the model discovered logarithms (2026-07-28) — `arith.py`
