@@ -127,3 +127,96 @@ def test_solves_the_key_and_door_level():
             break
     assert len(per_level) >= 2, f"the agent must clear L0 AND the key+door level L1, got {per_level}"
     assert per_level[1] < 60, f"and clear L1 without flailing (oracle 12), took {per_level[1]}"
+
+
+# L2 is the CONJUNCTION case: `agent == goal and pads.issubset(blocks)`, with one pad, so the win is "the block is on the
+# pad AND I am on the goal". The board is laid out so the win is five moves away — the block one cell left of the pad with
+# the agent behind it — which is a legitimate OFFLINE reproduction rather than a longer run
+# (`feedback_no_debug_by_extending_actions`): the question is whether the win is LEARNABLE given a positive example, not
+# whether exploration can find one. Exploration on L2 is a separate, known-open problem.
+_L2_NEAR_WIN = [
+    [
+        "##########",
+        "#........#",
+        "#........#",
+        "#........#",
+        "#...AB P.#",     # agent (4,4), block (5,4), pad (7,4)
+        "#.......G#",     # goal (8,5)
+        "##########",
+    ],
+    # A SECOND level, and it is not decoration. Reward is the SCORE DELTA between two frames, so a win on the last level
+    # ends the game and the agent never gets a frame in which to OBSERVE the payment — measured, the first version of this
+    # fixture completed the level and `_credit_goal` was never once called with a positive reward, so the positive example
+    # the fixture exists to supply never reached the learner. Something must come after the win for the win to be seen.
+    [
+        "##########",
+        "#A......G#",
+        "##########",
+    ],
+]
+
+
+def _play_near_win(budget: int = 24):
+    game = LockPath(levels=_L2_NEAR_WIN)
+    env = Environment(game)
+    fd = env.reset()
+    a = Agent(feat_n=8, n_content=2, n_state=2, n_cols=64, seed=0)
+    for _ in range(budget):
+        action, coords = a.step(fd)
+        fd = env.step(action, coords)
+        if fd.is_terminal() or fd.is_win():
+            break
+    return a, fd
+
+
+def test_the_win_CONDITION_of_a_sokoban_level_is_observable_at_the_moment_it_holds():
+    """LANDMARK PERMANENCE, and why it is the prerequisite for a win condition of this shape.
+
+    A pad with a block on it is NOT RENDERED — measured on L2, the pad's cell reads colour 7 uncovered and colour 6
+    covered — so the landmark vanishes from perception at exactly the moment the condition it belongs to becomes true.
+    `_static_feature_at` read the raw frame, so "the block is on the pad" was unobservable and the conjunction that IS
+    this level's win condition could never form, however many times the agent won.
+
+    `Column.track` already keeps an index on a thing that is merely not seen (`reference_recognition_under_occlusion`:
+    mint on refutation, never on incompleteness), and it holds the pad UNDER the block correctly. The goal path was
+    bypassing it. Reading the scene instead of the frame is the whole fix."""
+    # Checked AT the moment the pad is covered, not at the end of the run — by then the fixture has moved on to its
+    # second level and there is no block to occlude anything.
+    game = LockPath(levels=_L2_NEAR_WIN)
+    env = Environment(game)
+    fd = env.reset()
+    a = Agent(feat_n=8, n_content=2, n_state=2, n_cols=64, seed=0)
+    seen_covered = False
+    for _ in range(24):
+        action, coords = a.step(fd)
+        col, scene = a._scene_col(), a._scene_col().scene_snapshot()
+        cells: dict = {}
+        for idx, pose in scene.items():
+            cells.setdefault(tuple(int(round(c)) for c in pose[0]), set()).add(col.feature_of(idx))
+        for cell, kinds in cells.items():
+            if 7 in kinds and kinds & a._movers:                 # a pad and a block share this cell
+                seen_covered = True
+                assert 7 not in {o.color for o in a.transduce(fd.grid) if cell in o.cells}, (
+                    "the premise: a covered pad is NOT in the frame at all, so the frame cannot report it")
+                assert a._static_feature_at(a.transduce(fd.grid), cell, a.self_color()) == 7, (
+                    "yet the goal path must SEE the pad there — via the scene, which has permanence")
+        fd = env.step(action, coords)
+        if fd.is_terminal() or fd.is_win():
+            break
+    assert seen_covered, "the fixture must actually cover the pad, or this test asserts nothing"
+
+
+def test_a_sokoban_win_condition_is_DISCOVERED_when_a_positive_example_arrives():
+    """THE CONJUNCTION FORMS AND SURVIVES. Given a win it can actually reach, the agent must end up holding "block on pad
+    AND self on goal" as a live hypothesis — a configural cue, because a linear rule cannot represent an AND — and it must
+    NOT have been refuted, since it is true exactly when payment arrives.
+
+    This is the pair of halves the disambiguation loop needs: refutation removes what mispredicts, but only a positive
+    example can CONFIRM, and confirmation was impossible while the pad was invisible."""
+    a, fd = _play_near_win()
+    assert fd.score >= 1, f"the fixture must be winnable in budget, got score {fd.score}"
+    conj = [c for c in a.goal_mem.w if isinstance(c, frozenset)]
+    assert conj, "a CONFIGURAL cue must form — the win is an AND and no elemental cue can state it"
+    live = a._live_hypotheses()
+    assert any(isinstance(c, frozenset) and len(c) > 1 for c in live), (
+        f"and a multi-condition hypothesis must SURVIVE refutation, live={live}")

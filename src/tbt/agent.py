@@ -1042,7 +1042,23 @@ class Agent:
         and each time some downstream mechanism was starved of the evidence it needed."""
         if cell is None:
             return None
-        for o in objs:                                          # scan for a STATIC one rather than stopping at the first
+        # THE SCENE FIRST, because it has PERMANENCE and the frame does not. A pad with a block on it is not rendered at
+        # all — measured on LockPath L2, the pad's cell reads colour 7 uncovered and colour 6 covered — so a landmark
+        # DISAPPEARS from perception at exactly the moment the win condition it belongs to becomes true. Reading the raw
+        # frame therefore made "the block is on the pad" unobservable, and the conjunction that IS L2's win condition
+        # could never form. `Column.track` already keeps an index on a thing that is merely not seen (object permanence,
+        # `reference_recognition_under_occlusion`: mint on refutation, never on incompleteness) and it holds the pad
+        # under the block correctly — this path was simply bypassing it.
+        if self._scene is not None:
+            col = self._scene_col()
+            want = tuple(int(round(c)) for c in cell)
+            for idx, pose in col.scene_snapshot().items():
+                if tuple(int(round(c)) for c in pose[0]) != want:
+                    continue
+                kind = col.feature_of(idx)
+                if kind is not None and kind != sc and kind not in self._movers:
+                    return kind
+        for o in objs:                                          # …then the raw frame, for anything not yet routed
             if cell in o.cells and o.color != sc and o.color not in self._movers:
                 return o.color
         return None
