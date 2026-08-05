@@ -127,12 +127,24 @@ def test_the_push_DELTA_is_learned_and_not_learned_as_zero():
 
 
 def test_what_is_STILL_unsolved_is_the_set_goal_itself():
-    """The fixture's original question, still open and now isolated. Perception and tracking no longer hide it: the agent
-    sees both crates, knows they push, and still cannot say what winning IS, because `goal_mem` credits `(kind, landmark)`
-    pairs and "EVERY pad covered" is not a pair. It reaches 1 of 3 levels, by exploration."""
+    """The fixture's original question, now ACTUALLY REACHED. This used to assert `goals() == set()` and passed for the
+    wrong reason: `_winning_conditions` read the feature-keyed `_positions`, so on two identical crates it generated no
+    mover condition at all and `goal_mem` had nothing to compete over. An empty goal set was being read as "no pair names
+    this win" when the truth was "no candidate was ever offered".
+
+    Read per INDEX, a pair goal IS discovered — `(6, 7)`, "a crate rests on a pad" — and it is the WRONG one for exactly
+    the reason the fixture was built to expose: the condition set collapses two deliveries into one element, so it is
+    already true when the level is half done and cannot tell half-done from done. That is the set goal, isolated at last,
+    with perception, tracking, dynamics and candidate generation all out of the way."""
     a, fd = _play()
-    assert a.goal_mem.goals() == set(), "no pair names this win condition, which is the point of the fixture"
-    assert fd.score < 3, "and the agent does not finish the game"
+    assert a.goal_mem.goals() == {(6, 7)}, f"a pair goal must now be discovered at all, got {a.goal_mem.goals()}"
+    game = Warehouse()
+    game.load_level(0)
+    half = {sorted(game.pads)[0]}
+    game.crates = half | {c for c in sorted(game.crates) if c not in game.pads}
+    assert not game.level_complete(), "the level is NOT won with one pad covered …"
+    assert (6, 7) in a.goal_mem.goals(), "… yet the discovered pair goal is already satisfied there, which is the gap"
+    assert fd.score < 3, "so the agent still does not finish the game"
 
 
 def test_the_relational_value_cannot_help_because_the_blocker_is_below_it():

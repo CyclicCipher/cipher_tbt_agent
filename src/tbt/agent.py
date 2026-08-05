@@ -1066,20 +1066,30 @@ class Agent:
         latter is the point: a conjunct satisfied earlier is still part of why the reward arrived.
 
         The self reaching a MOVER is never a condition (that is the push itself, which the dynamics own), which keeps "reach
-        the box" from masquerading as a goal."""
+        the box" from masquerading as a goal.
+
+        PER INDEX, NOT PER FEATURE — the same defect the dynamics lesson had. This iterated `self._movers` and read
+        `prev_pos[c]`, the `{feature: cell}` map, which holds NOTHING for a colour realised by two identical crates: on
+        Warehouse the loop skipped every time, so no mover condition was ever generated and `goal_mem` had nothing to
+        compete over. That is why its goal set was empty — not because a pair cannot state the win (it cannot, but that
+        question was never reached), simply because no candidate ever arrived. Indexes are what survive duplicate
+        appearances, so the instances are read from the scene."""
         out, self_target = set(), self._target_cell(prev_cur, action)
         reached = self._static_feature_at(prev_objs, self_target, sc)
         if reached is not None:
             out.add(reached)
-        for c in self._movers:
-            if c not in prev_pos:
+        scene = self._scene.scene_snapshot() if self._scene is not None else {}
+        col = self._scene_col() if self._scene is not None else None
+        for idx, pose in scene.items():
+            kind = col.feature_of(idx)
+            if kind not in self._movers:
                 continue
-            cell = prev_pos[c]
+            cell = tuple(int(round(c)) for c in pose[0])
             if self_target == cell:                                    # this action pushed it — it advances one along the push
                 cell = self._target_cell(cell, action)
             landmark = self._static_feature_at(prev_objs, cell, sc)
             if landmark is not None:
-                out.add((c, landmark))
+                out.add((kind, landmark))                              # the KIND is what generalises across levels …
         return out
 
     def _self_pos(self, objs):
