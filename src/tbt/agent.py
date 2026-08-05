@@ -649,7 +649,7 @@ class Agent:
         operator (`learn_pose_move`), the scene column's object dynamics, and the hippocampal rollout (`plan`). No game semantics
         are read (`feedback_bitter_lesson`): walls learned by bumping, movers by motion, the goal by reward."""
         objs = self.transduce(fd.grid)
-        step_reward, prev_seen = 0.0, False
+        step_reward, prev_seen, pending_dynamics = 0.0, False, None
         self._extent = [(0, len(fd.grid[0]) - 1), (0, len(fd.grid) - 1)] if fd.grid else None
         pos = self._positions(objs)                                   # {feature: cell} for the unambiguous single-instance objects
         if self._last is not None:
@@ -667,7 +667,9 @@ class Agent:
             if reward == 0:                                          # (frames across a level boundary don't correspond)
                 payoff += self.progress.observe(self._model_loss(prev_cur, action, prev_pos, cur, pos))   # SCORE the model
                 self._track_movers(prev_pos, pos, sc)               # BEFORE it learns — the PREQUENTIAL loss (epiplexity)
-                self._learn_dynamics(action, prev_objs, prev_skin, prev_pos, pos, prev_cur, cur, sc)  # learn the change from FELT contact
+                # DEFERRED until after the scene is tracked below: the felt thing's displacement is only visible per INDEX,
+                # and the indexes for THIS frame do not exist until `_route_scene` has run.
+                pending_dynamics = (action, prev_objs, prev_skin, prev_pos, prev_cur)
             if self._last_mode is not None:                          # TONIC DOPAMINE = the average PAYOFF rate, extrinsic ⊕
                 self.bg.learn(self._MODE_CTX, self._last_mode, payoff - self.critic.rho())   # epistemic; the BG's drive choice
             self.critic.tonic(payoff)                                # is trained by that payoff's RPE against the rate
@@ -680,6 +682,8 @@ class Agent:
         before_scene = dict(self._scene.scene_snapshot()) if self._scene is not None else {}
         self._route_scene(objs, sc)                                  # every perceived object → the scene region, by INDEX
         self._track_index_movers(before_scene, sc)                   # …and motion is read off the INDEXES, not the features
+        if pending_dynamics is not None:                             # and so is the DISPLACEMENT the L5 transform learns
+            self._learn_dynamics(*pending_dynamics, pos, cur, sc, before_scene)
         if self._scene is not None and self._last_task is not None and prev_seen:
             task = self.task_state()                                 # R over CONFIGURATIONS, by the same delta rule as every
             self.task_reward.learn(self._configuration_bits(self._last_task), step_reward)   # over RELATION bits, so it
@@ -925,7 +929,29 @@ class Agent:
                 return set(o.cells)
         return {cur}
 
-    def _learn_dynamics(self, action, prev_objs, prev_skin, prev_pos, pos, prev_cur, cur, sc) -> None:
+    def _pressed_displacement(self, before, contact):
+        """How far the thing at `contact` ACTUALLY moved, read off the object INDEXES rather than the feature map.
+        `None` when it was not observable — which is a different fact from zero, and the distinction is the whole fix.
+
+        `_positions` is `{feature: cell}` and holds NOTHING for a colour realised by two identical objects, so the old
+        feature-keyed lookup returned "no displacement" for precisely the case where two crates are being shoved around —
+        and `_learn_dynamics` then taught that zero as if it were an observation. Measured on Warehouse:
+        `_dynamics_delta("of", 6, …)` came back (0, 0), i.e. the agent had actively LEARNED that crates do not move, and
+        every planner above it was correct to conclude a push does nothing. Indexes are what survive duplicate appearances
+        (`Column.track`, spatiotemporal individuation), so displacement is read from them."""
+        if self._scene is None:
+            return None
+        now = self._scene.scene_snapshot()
+        for idx, was in before.items():
+            if tuple(int(round(c)) for c in was[0]) != tuple(contact):
+                continue
+            seen = now.get(idx)
+            if seen is None:                                  # the index did not survive — nothing was observed
+                return None
+            return sub(tuple(float(c) for c in seen[0]), tuple(float(c) for c in was[0]))
+        return None                                           # nothing indexed was there to be pressed
+
+    def _learn_dynamics(self, action, prev_objs, prev_skin, prev_pos, prev_cur, pos, cur, sc, before) -> None:
         """Teach the L5 TRANSFORM from one felt interaction (`behavior.py`, `notes/touch_and_body_design.md` §7). The self FELT
         something at its leading face (AGENCY — the skin, in the efference direction), so this transition is SELF-CAUSED and may
         be attributed; an object that moved without being felt (a box shoved by another box) teaches nothing here, which is why
@@ -954,13 +980,17 @@ class Agent:
             return
         z = tuple(0.0 for _ in range(self._dims))
         body_disp = sub(tuple(float(c) for c in cur), tuple(float(c) for c in prev_cur)) if cur is not None else z
-        obj_disp = (sub(tuple(float(c) for c in pos[felt]), tuple(float(c) for c in prev_pos[felt]))
-                    if felt in pos and felt in prev_pos else z)
         contact = tuple(int(round(c + d)) for c, d in zip(prev_cur, eff))       # the cell the body pressed into
+        obj_disp = self._pressed_displacement(before, contact)                   # per INDEX; `None` = not observable
         beyond = self._beyond(prev_objs, tuple(int(round(c + d)) for c, d in zip(contact, eff)))
         impeded = norm(sub(body_disp, eff)) > 1e-9                               # the body did NOT advance by its full efference
+        # The BODY's correction is always observable — it has an efference copy to compare against — so "into" is always
+        # learned. The felt thing's own displacement is not: when no index was there to be pressed, or the index did not
+        # survive the frame, DECLINE the lesson rather than teach a zero. Absence of evidence is not evidence of absence,
+        # and teaching it as one is what made the agent believe crates are immovable.
         self._learn_delta("into", felt, beyond, eff, sub(body_disp, eff), impeded)
-        self._learn_delta("of", felt, beyond, eff, obj_disp, impeded)
+        if obj_disp is not None:
+            self._learn_delta("of", felt, beyond, eff, obj_disp, impeded)
 
     def _route_scene(self, objs, pos) -> None:
         """Place every unambiguously-perceived object into the SCENE region, and DRIVE that region's L4 with its settled

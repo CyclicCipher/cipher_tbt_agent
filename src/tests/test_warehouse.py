@@ -31,6 +31,7 @@ if _PKG not in sys.path:
     sys.path.insert(0, _PKG)
 
 from tbt.agent import Agent                            # noqa: E402
+from tbt.operator import norm, sub                     # noqa: E402
 from tasks.games.warehouse import Warehouse, _LEVELS   # noqa: E402
 from tasks.harness import Environment                  # noqa: E402
 from tasks.oracle import solve_level                   # noqa: E402
@@ -103,6 +104,26 @@ def test_the_crates_are_now_TRACKED_and_the_push_is_learned():
     scene = a._scene_col()
     crates = [i for i in scene.scene_snapshot() if scene.feature_of(i) == 6]
     assert len(crates) == 2, f"both crates must be held as separate things, got {len(crates)}"
+
+
+def test_the_push_DELTA_is_learned_and_not_learned_as_zero():
+    """THE BLOCKER UNDER THE BLOCKER. `_movers` knows the crate KIND moves — that is the test above — but the L5 transform
+    has to know HOW MUCH it moves, and that is a different fact learned in a different place. Measured before the fix:
+    `_dynamics_delta("of", 6, ...)` returned (0, 0). The agent had not failed to learn; it had actively learned that
+    CRATES DO NOT MOVE, and every planner above it was then correct to conclude a push does nothing.
+
+    The cause was that `_learn_dynamics` read displacement out of the FEATURE-keyed `_positions`, which holds nothing for a
+    colour realised by two identical objects, and then taught the resulting zero as if it were an observation. Absence of
+    evidence was being learned as evidence of absence — so the fix is not only to read motion off the INDEXES, but to
+    decline the lesson when the pressed thing's displacement was not observable at all."""
+    a, _fd = _play()
+    for action, eff in ((None, (1.0, 0.0)), (None, (-1.0, 0.0)), (None, (0.0, 1.0)), (None, (0.0, -1.0))):
+        delta = a._dynamics_delta("of", 6, None, eff)
+        if norm(delta) > 1e-6:
+            assert norm(sub(delta, eff)) < 1e-6, f"a pushed crate must move BY the press, got {delta} for {eff}"
+            break
+    else:
+        raise AssertionError("the crate push delta is still (0, 0) in every direction — 'crates do not move' was learned")
 
 
 def test_what_is_STILL_unsolved_is_the_set_goal_itself():
