@@ -76,8 +76,7 @@ def _world(passes: int = 200):
 def _plan_for(a: Agent, block, configuration):
     _scene(a, block)
     a._last_task = configuration
-    want = a._task_subgoal(list(D))                      # the task region asks for a configuration…
-    return a._task_plan(list(D), want[0], horizon=24) if want else None   # …and the spatial region achieves it
+    return a._task_plan(list(D), horizon=24)
 
 
 def test_the_planner_distinguishes_two_board_states_at_the_SAME_position():
@@ -103,14 +102,12 @@ def test_what_passes_between_the_regions_is_ONE_state_not_a_product():
     a, left, _right, paid = _world()
     _scene(a, (3, 4))
     a._last_task = left
-    want = a._task_subgoal(list(D))
+    want = a._task_subgoal()
     assert want is not None, "with a reward and a learned successor there must be something to want"
     target, gain = want
-    assert isinstance(target, frozenset), "the message is ONE configuration, not a pair with a position"
-    assert target != left, "and it is somewhere other than here"
+    assert target == paid, "the subgoal is the paying configuration"
+    assert target in a._task.graph.states(), "and it is a state of the TASK graph — not a pair with a position"
     assert gain > 0.0, "a subgoal is only proposed when it is worth more than staying put"
-    # The next SINGLE PUSH, not the finished arrangement: chaining happens across steps, one leg at a time.
-    assert {oid for oid, _r in target} == {oid for oid, _r in left}, "a push moves a mover, it does not add one"
 
 
 def test_the_task_region_wants_nothing_until_something_has_paid():
@@ -124,35 +121,25 @@ def test_the_task_region_wants_nothing_until_something_has_paid():
     for _ in range(50):
         col.learn_transition(left, "push", paid)
     a._last_task = left
-    assert a._task_subgoal(list(D)) is None, "no reward seen ⇒ nothing to want"
-    assert a._task_plan(list(D), None) is None, "and so no plan to make"
+    assert a._task_subgoal() is None, "no reward seen ⇒ nothing to want"
+    assert a._task_plan(list(D)) is None, "and so no plan to make"
 
 
-def test_a_configuration_never_left_before_still_offers_a_subgoal():
+def test_a_configuration_never_left_before_offers_nothing_and_that_is_the_LIVE_BOTTLENECK():
     """THE MEASURED LIMIT OF H3, and the thing to fix next. A subgoal is chosen among the current state's LEARNED
-    successors, and the task graph is learned strictly BEHIND the agent. On the live games it almost never had one:
+    successors, so it needs the agent to have left this configuration before. On the live games it almost never has:
     measured on CollectAll, the mean number of learned successors of the state the agent is standing in is **0.02**, so the
     drive is offered on ~5 steps out of 220 (the BG chose it every one of those times — it is starved, not out-competed).
 
     The cause is that a task graph is learned strictly BEHIND the agent while configurations rarely recur — collecting
     consumes, pushing does not return — and task states are EXACT-MATCH keys, so nothing generalises from a similar
-    configuration to an unvisited one. FIXED by imagining candidates with the forward model instead of looking them up:
-    nothing is enumerated but one push of each DISCOVERED mover under each LEARNED action effect."""
+    configuration to an unvisited one. That is the same KEY problem `Column._quantise` already names ("overlap recall over
+    relation SDRs is the refinement"), now with a number on it and a consumer that needs it."""
     a, left, _right, paid = _world()
-    unvisited = _scene(a, (8, 4))                        # a configuration the agent has never left
-    assert not a._task.graph.graph.get(unvisited, {}), "it still has no learned outgoing edge"
-    want = a._task_subgoal(list(D))
-    assert want is not None, "and it is NO LONGER STARVED: candidates are imagined by the forward model, not looked up"
-    assert want[1] > 0.0, "the imagined configuration must be worth more than standing still"
-
-    # AND THE HONEST LIMIT, measured rather than left implicit. The potential field is the relation code's overlap, so it
-    # reaches exactly as far as that code does — `mw - 1` cells. Widening the code (mw 3 → 11) moved the reach from TWO
-    # cells to TEN: measured 0.999 / 0.817 / 0.636 / 0.545 / 0.499 for the block 0,4,8,10,12 cells from the pad, with a
-    # clean constant +0.045 gain per push everywhere inside it, and flat beyond. Inside the reach the chain climbs;
-    # outside there is nothing to climb and the drive is correctly silent — the nav dead-zone
-    # `reference_eigenoptions_subgoals` names, pushed further out but NOT removed, since the reach is still finite.
-    _scene(a, (8 + 9, 4))                                # 12 cells out, past the widened code's overlap
-    assert a._task_subgoal(list(D)) is None, "beyond the code's overlap the field is flat and it must say so"
+    unvisited = _scene(a, (9, 4))                        # a configuration the agent has never left
+    a._last_task = unvisited
+    assert not a._task.graph.graph.get(unvisited, {}), "this configuration has no learned outgoing edge"
+    assert a._task_subgoal() is None, "so there is nothing it knows how to want from here"
 
 
 def test_the_task_drive_is_arbitrated_in_the_basal_ganglia():
@@ -162,7 +149,7 @@ def test_the_task_drive_is_arbitrated_in_the_basal_ganglia():
     a, left, _right, _paid = _world()
     _scene(a, (3, 4))
     a._last_task = left
-    want = a._task_subgoal(list(D))
+    want = a._task_subgoal()
     chosen = a.bg.select(a._MODE_CTX, 3, rho=a.critic.rho(), salience=[float("-inf"), float("-inf"), want[1]])
     assert chosen == 2, "with only the task drive offering anything, the BG must select it"
 
@@ -174,30 +161,3 @@ def test_arrival_teaches_the_task_graph_from_below():
     a, left, _right, paid = _world()
     assert paid in a._task.graph.graph.get(left, {}).values(), "the edge must come from an observed transition"
     assert a._task.where_state() is not None, "and L6a holds where the task region currently is"
-
-
-def test_the_epistemic_drive_over_CONFIGURATIONS_wants_what_the_value_model_has_not_seen():
-    """The drive the agent did not have. `_unlearned_cells` measures novelty in the SENSORY region — "can L5 predict what
-    pressing this FEATURE does" — and empties within twenty steps (measured on Warehouse: 24 → 0 by step 20) while the
-    configuration space stays almost untouched (18 produced). Nothing could say "this arrangement is one I have never
-    produced", so exploration had nowhere to go once the dynamics were known.
-
-    Novelty is read off the VALUE MODEL's own state — the fraction of a configuration's relation bits the critic has never
-    updated — so it is prediction error rather than a visit counter, and it falls to zero as the space is covered instead
-    of paying forever (`feedback_epistemic_value_is_prediction_error`)."""
-    a, left, _right, paid = _world()
-    _scene(a, (3, 4))
-    unseen = a._task_novelty(a.task_state())
-    assert 0.0 <= unseen <= 1.0, "novelty is a fraction of bits"
-
-    # A configuration built only from relations the critic HAS been trained on is not novel; one built from relations it
-    # has never seen is. `_world` trains the critic on the paid configuration only.
-    b, _l, _r, _p = _world()
-    on_pad = b._task_novelty(_scene(b, PAD))          # the configuration the critic WAS trained on
-    far = b._task_novelty(_scene(b, (40, 4)))         # one built from relations it has never seen
-    assert on_pad < 1.0, "the trained configuration must not read as wholly novel"
-    assert far > on_pad, f"unseen relations must be MORE novel, got {far:.3f} vs {on_pad:.3f}"
-
-    # And the drive proposes the most novel IMAGINED configuration, sharing one generator with the pragmatic subgoal.
-    _scene(b, (3, 4))
-    assert b._imagined_configurations(list(D)), "the imagination must produce candidates for either drive to rank"

@@ -134,7 +134,6 @@ class Agent:
         self._task = None
         self._last_task = None            # the previous step's task state, so the task L6a can learn the EDGE
         self._prev_scene: dict = {}       # the scene's poses BEFORE this frame's tracking, so motion is visible per INDEX
-        self._bits_cache: dict = {}       # configuration -> its relation bits (see `_configuration_bits`)
         # `R` — which configurations PAY — learned over RELATION SDR BITS rather than over whole configurations, so it
         # GENERALISES: a configuration never seen before, whose relations resemble a paying one's, inherits its value. The
         # learner is the existing SDR-linear `ValueCritic` (`reference_htm_canonical_pipeline`), not a new one; `V = M.R`
@@ -481,13 +480,8 @@ class Agent:
         sums the active entries, so this reads as Σ over relations of that relation's value, and `learn` shares the error
         across them normalised by the total. Set-union would collapse a dozen relations into a saturated code that cannot
         tell two configurations apart (measured, `Column.relation_code`)."""
-        got = self._bits_cache.get(configuration)
-        if got is None:                                   # MEMOISED: a configuration's bits are a pure function of it, and
-            col = self._scene_col()                       # both task drives ask for them on every candidate every step.
-            got = [b for _oid, relations in configuration for rel in relations for b in col.relation_code(rel)]
-            if len(self._bits_cache) < 4096:              # bounded: a long game must not grow this without limit
-                self._bits_cache[configuration] = got
-        return got
+        col = self._scene_col()
+        return [b for _oid, relations in configuration for rel in relations for b in col.relation_code(rel)]
 
     def _relation_value(self, configuration) -> float:
         """What a configuration is worth from its RELATIONS alone — the generalising estimate, defined for configurations
@@ -513,70 +507,7 @@ class Agent:
         return self._configuration({**statics, **world.objects})
 
     # ----- H3: the TASK region proposes a SUBGOAL, the spatial region achieves it -------------------------------------
-    def _imagined_configurations(self, movement) -> set:
-        """Every configuration ONE push away, imagined with the forward model — the single generator behind BOTH task
-        drives. The pragmatic one ranks these by VALUE and the epistemic one by NOVELTY; sharing the imagination is what
-        stops the two from drifting apart (`feedback_reuse_canonical_components`).
-
-        IMAGINED, NOT LOOKED UP. Asking the task graph what had FOLLOWED from here gave a mean of 0.02 learned successors
-        of the state the agent stands in, so both drives would be starved. Nothing is enumerated but one push of each
-        DISCOVERED mover under each LEARNED action effect, and each candidate is filtered by the L5 transform's own
-        prediction of whether that push would move anything — the model imagining, not a vocabulary of goals."""
-        if self._task is None or self._scene is None:
-            return set()
-        scene = self._scene.scene_snapshot()
-        moved = []
-        for oid, pose in scene.items():
-            if self._scene.feature_of(oid) not in self._movers:
-                continue
-            for action in movement:
-                cell = tuple(round(c) for c in pose[0])
-                nxt = self._target_cell(cell, action)
-                if nxt is None or nxt == cell:
-                    continue
-                eff = tuple(float(n - c) for n, c in zip(nxt, cell))
-                behind = tuple(round(n + e) for n, e in zip(nxt, eff))
-                beyond = getattr(self, "_surface", {}).get(behind)
-                if beyond is None:
-                    for other, opose in scene.items():
-                        if other != oid and tuple(round(c) for c in opose[0]) == behind:
-                            beyond = self._scene.feature_of(other)
-                ext = getattr(self, "_extent", None)
-                if beyond is None and ext is not None and any(
-                        not (lo <= c <= hi) for c, (lo, hi) in zip(behind, ext)):
-                    beyond = "edge"
-                if norm(self._dynamics_delta("of", self._scene.feature_of(oid), beyond, eff)) < 1e-6:
-                    continue                              # the model says it would not move
-                moved.append({**scene, oid: (tuple(float(c) for c in nxt), pose[1])})
-        return {self._configuration(m) for m in moved}
-
-    def _task_novelty(self, configuration) -> float:
-        """How little the VALUE model knows about a configuration, in [0, 1]: the fraction of its relation bits the critic
-        has never updated. This is the task-region twin of `_unlearned_cells`, which asks whether L5 can predict what
-        pressing a FEATURE does — and which is why that drive goes silent here, measured at 24 unlearned cells falling to
-        0 by step 20 while only 18 configurations had ever been produced. Novelty had nowhere to live above the sensory
-        region. Read off the model's own state rather than a visit counter, so it is prediction error and not bookkeeping
-        (`feedback_epistemic_value_is_prediction_error`), and it falls to 0 as the space is covered rather than paying
-        forever."""
-        bits = self._configuration_bits(configuration)
-        if not bits:
-            return 0.0
-        return sum(1 for b in bits if b not in self.task_reward.w) / len(bits)
-
-    def _task_explore(self, movement, cands=None):
-        """The EPISTEMIC drive over CONFIGURATIONS: the imagined arrangement the value model knows least about. Its
-        counterpart `_task_subgoal` wants the BEST configuration; this one wants the one that would TEACH most."""
-        cands = self._imagined_configurations(movement) if cands is None else cands
-        if not cands:
-            return None
-        here = self.task_state()
-        best = max(cands - {here}, key=self._task_novelty, default=None)
-        if best is None:
-            return None
-        novelty = self._task_novelty(best)
-        return (best, novelty) if novelty > 0.0 else None
-
-    def _task_subgoal(self, movement, cands=None):
+    def _task_subgoal(self):
         """The configuration this region wants to be in next: the best-valued SUCCESSOR of where the task graph currently
         is, with the value it would gain. `None` when there is nothing to want — no reward seen yet, no learned successors,
         or none worth more than staying put.
@@ -588,21 +519,12 @@ class Agent:
         spatial→task sends reached-subgoal / prediction-error"). A subgoal is one state, not a product of two spaces, so
         nothing multiplies.
 
-        The subgoal is CHOSEN by learned value over IMAGINED next configurations — no enumeration of subgoal KINDS
-        anywhere (`feedback_subgoal_types_from_dynamics`); what is enumerated is one push of each discovered mover under
-        each learned action effect, which is the model imagining, not a vocabulary of goals.
-
-        CHAINING IS THE POINT, and it happens across steps rather than inside one: each call proposes the single best next
-        configuration, the rollout achieves it, and the next call proposes again from where that left the world. A whole
-        Sokoban is then a CHAIN of single pushes, every leg of which is in-distribution while the composite never was —
-        which is the `experiments/transformers` result (held-out 0.046 → 0.363) carried over: composing m operations needs
-        m applications, and this is where TBT's m comes from in TASK space rather than in space."""
-        if not self._task_rewards():
+        The subgoal is CHOSEN by learned value over a LEARNED graph — no enumeration of subgoal kinds anywhere
+        (`feedback_subgoal_types_from_dynamics`)."""
+        here = self._last_task
+        if self._task is None or here is None or not self._task_rewards():
             return None
-        here = self.task_state()
-        # The imagination is SHARED with `_task_explore` when the caller passes it in: `_act` needs both rankings every
-        # step, and generating the candidates twice doubled the suite's runtime.
-        successors = (self._imagined_configurations(movement) if cands is None else cands) - {here}
+        successors = set(self._task.graph.graph.get(here, {}).values()) - {here}
         if not successors:
             return None
         # RANKED BY `R`, NOT BY `V` — a subgoal is a TARGET STATE ("how good is it to BE there"), where `V = M·R` answers
@@ -616,12 +538,14 @@ class Agent:
         gain = self._relation_value(best) - self._relation_value(here)
         return (best, gain) if gain > 0.0 else None
 
-    def _task_plan(self, movement, target, horizon: int = 48):
+    def _task_plan(self, movement, horizon: int = 48):
         """Plan the SPATIAL region to bring about the configuration the TASK region asked for — the achieving half of the
         loop. The subgoal becomes a reward predicate over world-states, so the same rollout that pursues a discovered goal
         pursues this one; no second planner (`feedback_reuse_canonical_components`)."""
-        if target is None:
+        want = self._task_subgoal()
+        if want is None:
             return None
+        target, _gain = want
         return self.plan(lambda w: 1.0 if self._world_configuration(w) == target else 0.0, movement, horizon=horizon)
 
     def learn_value(self, before, reward: float, after=None, done: bool = True) -> float:
@@ -758,24 +682,14 @@ class Agent:
         self._track_index_movers(before_scene, sc)                   # …and motion is read off the INDEXES, not the features
         if self._scene is not None and self._last_task is not None and prev_seen:
             task = self.task_state()                                 # R over CONFIGURATIONS, by the same delta rule as every
-            # TD WITH BOOTSTRAP, not an immediate-reward fit. `learn(..., done=True)` every step made this a predictor of
-            # THIS step's reward, so the hundreds of zero-reward steps drove every weight back to zero and the single
-            # paying event was washed out: measured on Warehouse, R held 0 positive bits even after a level was completed,
-            # and the potential field the whole chaining loop climbs was flat noise (~0.00-0.01). Bootstrapping from the
-            # next configuration is what makes it a VALUE — expected future reward — so a configuration that LEADS to the
-            # payoff keeps its worth. `done` only on a paying step, which is a genuine level boundary.
-            self.task_reward.learn(self._configuration_bits(self._last_task), step_reward,   # over RELATION bits, so it
-                                   self._configuration_bits(task), done=bool(step_reward))
+            self.task_reward.learn(self._configuration_bits(self._last_task), step_reward)   # over RELATION bits, so it
             if not step_reward and action is not None:               # A LEVEL BOUNDARY pays, but its frames do not
                 self._task_col().learn_transition(self._last_task, action, task)   # correspond — so it is credited and
             self._last_task = task                                   # NO edge is learned across it.
         elif self._scene is not None:
             self._last_task = self.task_state()
-        if self._task is not None and step_reward:                   # refresh R only when reward is CREDITED — that is
-            self._task_R = {}                                        # when it changes meaningfully, and rebuilding it
-            self._task_R = self._task_rewards()                      # every step cost O(states x bits) with nothing to
-        #   show for it: with the widened relation code that is ~1760 bits per state over every state visited, and it put
-        #   the suite at 259 s against a 2-minute budget. `_task_rewards` derives lazily when the cache is cold.
+        if self._task is not None:                                   # refresh R over the known states, ONCE per step
+            self._task_R = {st: self._relation_value(st) for st in self._task.graph.states()}
         self._surface, self._l4_surprise = self._sense_frame(objs, sc)   # L4 ⊗ thalamus: sense, bind, recall the surface
         skin = self._skin(fd.grid, objs, cur)                       # what the body FEELS now — the agency signal for next step
         action = self._act(objs, cur, pos, fd.available_actions)
@@ -1186,21 +1100,13 @@ class Agent:
         # generator out here. `src/tests/test_rule_proposal.py` keeps the fixture that disproved it.
         # THREE drives now (H3): the third is the TASK region asking for a CONFIGURATION — what it offers is the VALUE it
         # would gain by getting there, on the same scale as the other two offers, and the BG arbitrates as before.
-        # FOUR drives. The fourth is the EPISTEMIC one over CONFIGURATIONS — the arrangement the value model knows least
-        # about — which is the drive the agent did not have: `_unlearned_cells` measures novelty in the SENSORY region and
-        # empties within 20 steps (24 → 0 on Warehouse) while the configuration space stays almost untouched, so nothing
-        # could say "this arrangement is one I have never produced".
-        cands = self._imagined_configurations(movement)      # imagined ONCE, ranked twice
-        want = self._task_subgoal(movement, cands)
-        curious = self._task_explore(movement, cands)
+        want = self._task_subgoal()
         salience = [self.goal_mem.w.get(g, 0.0) if g is not None else float("-inf"),
                     self.progress.progress() if targets else float("-inf"),
-                    want[1] if want is not None else float("-inf"),
-                    curious[1] if curious is not None else float("-inf")]
+                    want[1] if want is not None else float("-inf")]
         plans = [lambda: self._goal_plan(objs, cur, pos, movement, conds),
                  lambda: self._seek_plan(targets, movement),
-                 lambda: self._task_plan(movement, want[0]) if want else None,
-                 lambda: self._task_plan(movement, curious[0]) if curious else None]
+                 lambda: self._task_plan(movement)]
         if max(salience) > float("-inf"):
             mode = self.bg.select(self._MODE_CTX, len(salience), rho=self.critic.rho(), salience=salience)
             self._last_mode = mode

@@ -55,12 +55,9 @@ def test_a_relation_code_overlaps_by_metric_distance():
     some, and unrelated ones share none. The overlap IS the generalisation — everything below follows from it."""
     a = _agent()
     assert _overlap(a, (3, 2), (3, 2)) == 1.0, "a relation must match itself exactly"
-    # Distances chosen for the WIDENED code (mw=11, reach ~10). At mw=3 the falloff was exhausted by three cells, which
-    # capped the value field's reach at two and is why it was widened; the numbers here move with that on purpose.
-    near, mid, far = _overlap(a, (3, 2), (4, 2)), _overlap(a, (3, 2), (9, 2)), _overlap(a, (3, 2), (-30, 40))
+    near, mid, far = _overlap(a, (3, 2), (4, 2)), _overlap(a, (3, 2), (6, 2)), _overlap(a, (3, 2), (-7, 5))
     assert near > mid > far, f"overlap must fall off with distance, got {near:.2f} / {mid:.2f} / {far:.2f}"
-    assert near > 0.8, f"one cell apart must be mostly shared, got {near:.2f}"
-    assert far < 0.15, f"a relation far away on BOTH axes must be near-disjoint, got {far:.2f}"
+    assert near > 0.5 and far == 0.0, f"one cell apart must be mostly shared and unrelated wholly disjoint ({near:.2f}, {far:.2f})"
 
 
 def test_a_configuration_is_scored_relation_by_relation_and_never_unioned():
@@ -114,22 +111,9 @@ def test_a_subgoal_is_ranked_by_R_and_not_by_V():
     assert col.state_value(rewards, beside) > col.state_value(rewards, on), (
         "the V inversion this guards against must still be real — otherwise the test is guarding nothing")
     assert a._relation_value(on) > a._relation_value(beside), "R ranks them the right way round"
-    # The subgoal is now the next SINGLE PUSH rather than the finished arrangement — candidates are imagined one push at
-    # a time and chained across steps — so what is asserted is the RANKING, which is what this test is about.
-    # The operator must be taught first: imagining a push requires knowing what an action DOES, and with no learned action
-    # effect there is nothing to imagine and the drive correctly proposes nothing.
-    from tasks.core import GameAction
-    moves = {GameAction.ACTION1: (0., -1.), GameAction.ACTION2: (0., 1.),
-             GameAction.ACTION3: (-1., 0.), GameAction.ACTION4: (1., 0.)}
-    for act, d in moves.items():
-        a.learn_pose_move(act, a._as_pose((4, 3)), a._as_pose((4 + int(d[0]), 3 + int(d[1]))))
-        a._learn_delta("of", 6, None, d, d)      # …and that pressing the block MOVES it. A candidate push is filtered by
-        a._learn_delta("into", 6, None, d, (0., 0.))   #   the model's own prediction, so with no push model there is
-    #                                                    nothing to imagine and the drive correctly proposes nothing.
-    _scene(a, PAD - 2)
-    want = a._task_subgoal(list(moves))
-    assert want is not None and want[1] > 0.0, f"a push toward the pad must be proposed and be an improvement, got {want}"
-    assert a._relation_value(want[0]) > a._relation_value(beside), "and it must move UP the potential field"
+    a._last_task = beside
+    want = a._task_subgoal()
+    assert want is not None and want[0] == on, f"the subgoal must be the pad configuration, got {want}"
 
 
 def test_relation_codes_are_memoised():
