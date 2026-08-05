@@ -765,6 +765,171 @@ coverage specifically — the same weakness `diversity.py`'s largest point had, 
 reason. The conclusion rests on N=10 and N=40, where the fit is complete and transfer is still exactly zero. Settling the
 top of the range needs more compute than the 5-minute budget allows (that arm already ran 501 s).
 
+## THE DETECTIVE — agency emerges from a tight budget, optimality does not (2026-07-31) — `detective.py`
+
+`canonicaliser.py` failed to recover the correspondence from RANDOMLY sampled demonstrations. The information-theoretic
+reading (Gwern, *Death Note: L, Anonymity & Eluding Entropy*) says why: identifying a transformation costs log2(2350) =
+11.2 bits, and a random length-6 input over 5 symbols carries only ~3.7 distinct values, so positions sharing a value are
+indistinguishable and recovery needs an INTERSECTION across observations — the operation the encoder cannot do. Designed
+probes make it a LOOKUP instead: `x = [0,1,2,3,4,0]` leaves 4 candidates, and a second probe with the duplicate moved
+resolves it.
+
+So: give the model AGENCY and see whether it discovers that. The game is `[BOS] x1→y1 x2→y2 [ANSWER]`, the model emits
+every `x`, the environment supplies every `y`, and **nothing supervises which query to ask** — only the answer is
+supervised, plus a free dense term for predicting each response before seeing it. Query choice is trained by sampling K
+traces and self-imitating the one with the lowest answer loss (XM's Forward objective applied to actions).
+
+**The bitter-lesson shape, which is the design claim:** the hypothesis space is never enumerated — it is the model's own
+predictive distribution over responses — and there is no information-gain term anywhere. The budget is tight and only the
+outcome is rewarded, so informative probes must emerge because nothing else wins.
+
+| training regime | train exact | **HELD-OUT exact** | distinct/6 |
+|---|---|---|---|
+| random probes | 0.012 | **0.008** | 3.72 |
+| **model's own probes** | 0.527 | **0.246** | **2.63** |
+| designed probes (hand-derived ceiling) | 1.000 | **0.969** | 5.00 |
+
+Adaptivity of the model's policy (x1 forced identical across tasks, fraction of x2 differing from the modal x2):
+**0.910**.
+
+1. **The bits derivation is confirmed empirically.** Two hand-designed probes give **0.969 held-out** — 11.2 bits of
+   identification from 12 tokens of query. Two RANDOM probes give **0.008**. The gap between them is entirely
+   experimental design.
+2. **Agency emerged: the model's self-chosen probes reach 0.246, ~30x the random floor**, from outcome reward alone with
+   no information-gain term, no supervision on what to ask, and no enumerated hypothesis space. That is the
+   bitter-lesson claim working qualitatively.
+3. **But it did NOT discover the principle we derived.** Its queries carry **2.63** distinct values — *lower* than
+   random's 3.72, and far from the optimal 5.00 — and it lands 4x short of the designed ceiling. It found a different and
+   worse strategy.
+4. **It is, however, genuinely ADAPTIVE (0.910).** With the first probe forced identical, its second probe varies across
+   tasks — it conditions the next question on the last answer, which the hand-designed probe set does not do. So what
+   emerged is investigation-shaped behaviour that is not yet good investigation.
+
+⚠ **AN APPARATUS ERROR OF MINE, and the reason the first run looked like a null.** I initially evaluated one model under
+all three query regimes and got 0.000 for random and designed. That is not a baseline — a model trained on its own query
+distribution collapses when fed anyone else's, so those numbers measure DISTRIBUTION SHIFT, not probe quality. The valid
+comparison trains a separate model under each regime and evaluates ON-POLICY, which is the table above. (Relatedly,
+the adaptivity number is only meaningful for the model-trained arm; it always rolls out the model's own policy.)
+
+**Where it stands.** Outcome-only reward with a tight budget does produce information-seeking, which is the thesis. It
+reaches a quarter of what the hand-derived probe achieves, so "let it emerge" is not yet competitive with "derive it".
+The open levers are credit assignment for the query policy (best-of-4 is a weak signal; REINFORCE with a baseline or a
+much larger K), budget annealing from B=6 down to B=2 to shape the policy, and a per-probe breakdown of the learned
+strategy — the low diversity plus high adaptivity is consistent with "probe 1 pins the value map, probe 2 adapts for the
+permutation", but that is a hypothesis, not a measurement.
+
+---
+
+## THE LEARNED CANONICALISER — it recovers the value map and NOT the correspondence (2026-07-31) — `canonicaliser.py`
+
+The retraction below made canonicalisation the main line, so: can it be LEARNED, with no group knowledge? A canonical
+form is a complete invariant (same object → same code, different objects → different codes), which is exactly a
+contrastive objective — and **the positives are free because we can execute**: sample a transformation, draw two
+independent demonstration sets, those are a positive pair. No labels, no group structure, only the forward model.
+
+| pooling | retr(train) | retr(held) | cos same | cos diff | IDX probe | VMP probe | DIST probe |
+|---|---|---|---|---|---|---|---|
+| random init | 0.035 | 0.027–0.040 | 0.975 | 0.975 | 0.000/0.000 | 0.45–0.54 | 0.58/0.30 |
+| **mean** | 0.059 | 0.053 | 0.999 | 0.128 | **0.002/0.000** | **0.745/0.689** | 0.595/0.281 |
+| **set** (cross-demo attention) | 0.071 | 0.093 | 1.000 | 0.119 | **0.001/0.000** | 0.689/0.630 | 0.585/0.296 |
+
+Retrieval chance is 0.0074 (bank of 135). Probes are train/held-out exact-match on FROZEN codes, trained on all 1200
+training transformations. Reference points for the distance probe: exact canonical state **0.714** (ceiling), raw
+behaviour **0.276** (floor).
+
+1. **The value map is learned and generalises** — 0.689 held-out against a random-encoder 0.44–0.54. Contrastive training
+   genuinely recovered half the canonical form with no supervision and no group knowledge.
+2. **The permutation is never recovered — 0.000, at or below the random encoder**, under both architectures.
+3. **And it is not a generalisation failure.** Retrieval on TRAINING transformations is 0.059 / 0.071, essentially the
+   same as held-out. The objective does not solve its own training task, because without the permutation there is not
+   enough in the code to tell transformations apart.
+4. **So the distance probe stays at the raw-behaviour floor** (0.281–0.296 against 0.276), nowhere near the 0.714 that
+   the exact canonical state supports. The learned code is not a substitute for the hand-derived one.
+
+**The split is exactly along the line the retraction predicted.** `vmp` is a global, position-independent property —
+readable off any single position, and learned fine. `idx` is a CORRESPONDENCE — which output position came from which
+input position — and that is the binding/matching operation. Half the canonical form is easy and the other half is the
+whole problem.
+
+⚠ **A failed fix of mine, kept as a record.** I first tried concatenating all demonstrations into one sequence with the
+positional code repeated per block, reasoning that cross-demonstration attention would let the model compute a
+*consistency constraint* (an intersection) where mean-pooling can only *average*. It collapsed completely — cos same =
+cos diff = 1.000, InfoNCE pinned at ln(batch), under two learning rates. The cause is my design, not the hypothesis:
+repeating the positional code makes the demo index invisible to attention, which was the intent, but it also makes token
+*j* of demo 1 indistinguishable from token *j* of demo 5, so the model cannot pair `x[j]` with `y[j]` **within** a
+demonstration either. A fix that deletes the signal is not a test. The `set` architecture (per-demo encoding, then
+attention *across* demo embeddings) is the correct version, it trains fine, and it does **not** rescue the permutation —
+so the intersection-vs-averaging hypothesis is now tested and is not the explanation.
+
+**Honest limits.** Two working architectures, one objective (InfoNCE), modest compute. This is not proof that no learned
+canonicaliser can recover a correspondence — it is a well-controlled negative with a precise localisation.
+
+**What it points at.** The hand-written `recover` does explicit matching: try each of 10 value maps, then match columns by
+comparison. A generic encoder does not discover that, so the next move is to **supply matching as architecture** — a
+differentiable assignment layer (Sinkhorn / soft-permutation) whose output *is* a correspondence — rather than hoping a
+transformer induces it. That is the same lesson as `project_an_operation_is_a_basis`: supply the *structure* the
+operation needs and let training fill in which one, instead of expecting the structure itself to be learned.
+
+And it names the shared component with the other line precisely. A correspondence between sensed features and object-frame
+locations **is a pose** (`reference_tbt_pose_invariant_recognition`). Both lines are now stuck on the same operation.
+
+---
+
+## ⚠ RETRACTION: it was the INPUT, not the TARGET (2026-07-31) — `canon2prog.py`
+
+**Read this before anything below it.** Across this line two things changed together and I credited the wrong one.
+
+    (1) the INPUT   -- from a behavioural sample (demonstrations) to a canonical group element
+    (2) the TARGET  -- from the PROGRAM (claimed discontinuous) to the DISTANCE (claimed smooth)
+
+Every 0.000 in `decompose.py` and `bigroup.py` had a behavioural input AND a program target, so those runs cannot
+separate the two. `canon2prog.py` holds the input fixed at the canonical state and varies ONLY the target — same
+architecture, same 6000 steps, same split:
+
+| target | train | HELD-OUT | extra |
+|---|---|---|---|
+| DISTANCE | 1.000 | 0.714 | MAE 0.00 / 0.35 |
+| **PROGRAM** | 1.000 | **0.733** | first-primitive 1.000 / **0.914** |
+
+**The program is learned as well as the distance — marginally better.** First-primitive accuracy is 0.914 against a
+0.077 floor, where with behavioural input it sat at ~0.15.
+
+**WHAT IS RETRACTED.** "Factorisation is a discontinuous target that gradient descent cannot interpolate, and no amount
+of data helps" is WRONG as stated. Given a canonical input the program is learnable and generalises. The
+"learn-the-distance-search-the-program" prescription is therefore **not forced**: where you can canonicalise, you can
+learn the program directly. `canonical.py`'s method still works and its numbers stand — it is simply no longer the only
+route, and its advantage was never the change of target.
+
+**WHAT SURVIVES.** The measurement that behaviour → program is not learnable stands (0.000 in every condition tested,
+across two universes and a 36x coverage sweep); only its interpretation changes. The two-stage decomposition is right —
+**A**: behaviour → transformation, **B**: transformation → program — and what was wrong is which stage is hard.
+**A is the hard one. B was never the problem.**
+
+**WHY I GOT IT WRONG**, since the failure mode is reusable:
+* I varied the target across files (`decompose.py` vs `costtogo.py`) and the input across files (`costtogo.py` vs
+  `canonical.py`), and never varied one with the other held fixed until now. Two things changed between experiments and
+  I attributed the effect to the more theoretically interesting one.
+* `recall.py`'s rho = -0.151 measured that BEHAVIOURAL similarity does not track program distance. I generalised that to
+  "factorisation is intrinsically discontinuous" without ever measuring similarity in canonical coordinates.
+* And the mathematics should have warned me: **factorisation in a permutation group is not hard** — Schreier-Sims
+  factorises into generators in polynomial time. Invoking the word problem and discrete-log-like hardness was wrong for
+  precisely this class of group.
+
+**THE CORRECTED PICTURE, and it is more useful than what it replaces.** The unlearnable step is **recovering the
+canonical form from behavioural samples** — determining which output position corresponds to which input position, under
+an unknown value map. That is a matching/binding problem, and it is what the hand-written `recover` in `localise.py` does
+by brute-forcing 10 value maps and matching columns: a small search, not a smooth function. Once the canonical form is
+supplied *by any means*, everything downstream — distance AND program — is learnable and generalises.
+
+So the priority inverts. The thing to build is the **canonicaliser**, not the cost-to-go. And this is the same operation
+the TBT line calls pose-invariant object recognition (`reference_tbt_pose_invariant_recognition`): map samples taken from
+an arbitrary viewpoint onto the object's identity. Both lines now point at the same missing component.
+
+*(Minor note on the apparatus: `eval_prog` draws n=32 samples per task but decoding is greedy and the input is fixed, so
+all 32 are identical — the per-task score is 0 or 1 and n is redundant. Wasteful, not wrong.)*
+
+---
+
 ## LEARN THE DISTANCE, SEARCH THE PROGRAM (2026-07-28) — `costtogo.py`, `canonical.py`
 
 The constructive end of the arc. Everything above says the same thing: the forward model is smooth and learnable (0.997),
