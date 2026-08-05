@@ -1031,13 +1031,19 @@ class Agent:
         return tuple(round(c) for c in tgt[0])
 
     def _static_feature_at(self, objs, cell, sc):
-        """The STATIC feature at a cell — the colour of a non-self, non-mover object there (a landmark: pad, goal tile) — or None
-        if the cell is empty or occupied by the self / a mover. What a discovered GOAL attaches to (a place-to-reach, not a body)."""
+        """The STATIC feature at a cell — the colour of a non-self, non-mover object there (a landmark: pad, goal tile) — or
+        None if there is none. What a discovered GOAL attaches to (a place-to-reach, not a body).
+
+        A LANDMARK UNDER A MOVER IS STILL THAT LANDMARK. This returned the FIRST object found at the cell, so a crate
+        resting on a pad HID the pad and the condition "a crate rests on a pad" was generated only on the single step the
+        push landed, never on the steps it sat there. Third instance of one bug family, with the feature-keyed
+        `_positions` and `_winning_conditions`: the representation silently drops information when two things COINCIDE,
+        and each time some downstream mechanism was starved of the evidence it needed."""
         if cell is None:
             return None
-        for o in objs:
-            if cell in o.cells:
-                return o.color if (o.color != sc and o.color not in self._movers) else None
+        for o in objs:                                          # scan for a STATIC one rather than stopping at the first
+            if cell in o.cells and o.color != sc and o.color not in self._movers:
+                return o.color
         return None
 
     def _credit_goal(self, prev_objs, prev_pos, action, prev_cur, reward, sc) -> None:
