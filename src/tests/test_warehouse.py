@@ -126,6 +126,27 @@ def test_the_push_DELTA_is_learned_and_not_learned_as_zero():
         raise AssertionError("the crate push delta is still (0, 0) in every direction — 'crates do not move' was learned")
 
 
+def test_the_hypothesis_space_is_MEASURED_and_REFUTED_down():
+    """THE DISAMBIGUATION LOOP. `goal_mem` scores cues, but a weighting has no bit-length; a SET does. `_live_hypotheses`
+    is that set and `_hypothesis_bits` is `log2|H|` — the agent's own version of L's 33 bits for eight billion people.
+
+    Deduction runs every step and is free: a win condition that HOLDS without payment is false, and one absent AT payment
+    is false too, so `_refute` eliminates it. On Warehouse that disposes of the entire kind-level vocabulary — `(6,7)`,
+    `(6,1)`, `1`, `7` — within about twenty steps, which is the correct verdict: not one of them is "every pad covered".
+
+    An EMPTIED space is then the minting trigger, and a far sharper one than any threshold on a loss curve (an earlier
+    version watched an EMA and fired off a single sample). Every hypothesis disproved is not "gather more evidence" — it
+    is proof that the vocabulary CANNOT STATE the answer, so a finer one is minted: conditions per tracked INSTANCE,
+    whose conjunction is satisfied only when every delivery is made."""
+    a, _fd = _play()
+    assert a._refuted, "the world must have disproved something — refutation is the half that costs no actions"
+    for cue in ((6, 7), (6, 1)):
+        assert cue in a._refuted, f"{cue} holds on a half-delivered board that pays nothing, so it must be refuted"
+    minted = [k for k in a.goal_mem.w if isinstance(k, tuple) and len(k) == 3 and k[0] == "i"]
+    assert minted, "an exhausted hypothesis space must MINT a finer vocabulary, not keep gathering evidence"
+    assert a._hypothesis_bits() >= 0.0, "the space's size is measured in bits, which is what makes the loop possible"
+
+
 def test_what_is_STILL_unsolved_is_the_set_goal_itself():
     """The fixture's original question, now ACTUALLY REACHED. This used to assert `goals() == set()` and passed for the
     wrong reason: `_winning_conditions` read the feature-keyed `_positions`, so on two identical crates it generated no

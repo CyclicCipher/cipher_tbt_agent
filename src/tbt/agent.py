@@ -94,6 +94,7 @@ class Agent:
         self.progress = LearningProgress()  # LEARNABLE NOVELTY: the epistemic reward = how fast the agent's OWN forward model
         #                                     is learning (prediction-error REDUCTION, prequential — `reward.py`). No shadow model.
         self._MODE_CTX = frozenset({("drive",)})   # the striatal context the BG arbitrates the two DRIVES in (goal vs seek)
+        self._refuted: set = set()          # win-condition hypotheses the world has DISPROVED (see `_refute`)
         self._last_mode = None                     # the drive the BG last selected — trained by the payoff RPE next step
         # SENSORY MODALITIES (modality.py): a sense = (transduce, feature, location, pose_source); the column + connections are
         # modality-INVARIANT, so this list is all it takes. VISION (segment) + TOUCH (the skin) ship by default; touch's skin is
@@ -1046,6 +1047,61 @@ class Agent:
                 return o.color
         return None
 
+    # ----- DISAMBIGUATION: measure the hypothesis space in BITS, then act to halve it ---------------------------------
+    @staticmethod
+    def _conds_of(cue) -> set:
+        """A cue as the SET of conditions it asserts — elemental cues are singletons, configural ones are their own set."""
+        return set(cue) if isinstance(cue, frozenset) else {cue}
+
+    def _live_hypotheses(self) -> set:
+        """The win-condition hypotheses the world has not yet disproved. `goal_mem` scores cues; this is the SET they are
+        drawn from, and it is the thing that has a SIZE — which is what makes an information-theoretic loop possible at
+        all. A weighting has no bit-length; a set does."""
+        return {c for c in self.goal_mem.w if c not in self._refuted}
+
+    def _hypothesis_bits(self) -> float:
+        """`log2 |H|` — how much is still unknown about the win condition. L's 33 bits for eight billion people, in the
+        agent's own terms. Zero means one hypothesis survives and there is nothing left to find out."""
+        n = len(self._live_hypotheses())
+        return math.log2(n) if n > 1 else 0.0
+
+    def _refute(self, conds, reward) -> None:
+        """Eliminate every hypothesis that MISPREDICTED this transition — the half of detection that is deduction rather
+        than experiment, and the larger half: L's biggest single gain came from reasoning about what the evidence implied,
+        not from the broadcast. A win condition satisfied without payment is false; one unsatisfied at payment is false
+        too. Refutation persists across levels because a win condition is a property of the GAME, not of a board."""
+        paid = reward > 0
+        for c in list(self._live_hypotheses()):
+            if (self._conds_of(c) <= conds) != paid:
+                self._refuted.add(c)
+
+    def _probe(self):
+        """The experiment to run next: the live hypothesis whose SATISFACTION splits the live set most evenly, with the
+        bits that outcome is expected to yield. `None` when nothing is left to learn or nothing can separate what remains.
+
+        This is the Lind L. Tailor move. Do not wait for the world to volunteer a discriminating case — go and CREATE one,
+        by making true the thing one hypothesis claims is a win. If payment follows it survives and its rivals fall; if it
+        does not, it falls and they survive. Either outcome pays, which is what makes an even split the thing to maximise:
+        the expected yield is the binary entropy of the split, so a 50/50 probe is worth a full bit and a 90/10 probe
+        almost nothing.
+
+        Note what this does NOT need: no imagined configurations, no enumeration of states. A hypothesis already names the
+        state that tests it, and `_goal_plan` already turns a condition set into a rollout predicate."""
+        live = self._live_hypotheses()
+        if len(live) < 2:
+            return None
+        best, best_gain = None, 0.0
+        for h in live:
+            hc = self._conds_of(h)
+            yes = sum(1 for c in live if self._conds_of(c) <= hc)
+            p = yes / len(live)
+            if p <= 0.0 or p >= 1.0:
+                continue                                           # everything agrees here — this probe teaches nothing
+            gain = -(p * math.log2(p) + (1 - p) * math.log2(1 - p))
+            if gain > best_gain:
+                best, best_gain = hc, gain
+        return (best, best_gain) if best else None
+
     def _credit_goal(self, prev_objs, prev_pos, action, prev_cur, reward, sc) -> None:
         """Discover the win condition by the delta rule (`goal_mem`) from the state the reward was paid IN — not from the last
         transition alone.
@@ -1064,9 +1120,22 @@ class Agent:
         cues = set(conds)                                              # the ELEMENTAL conditions …
         if len(conds) > 1:
             cues.add(frozenset(conds))                                 # … and the CONJUNCTION itself as a configural cue,
-        self.goal_mem.credit(cues, reward)                             # because a linear rule cannot represent an AND
+        #                                                                because a linear rule cannot represent an AND
+        # MINT WHEN THE SPACE IS EXHAUSTED. Every hypothesis disproved is not "keep gathering evidence" — it is proof that
+        # the vocabulary CANNOT STATE THE ANSWER, and it is a far sharper trigger than any threshold on a loss curve
+        # (an earlier version watched an EMA and fired off a single sample). A kind-level condition cannot count: two
+        # crates delivered give the same element `(6, 7)` as one, so it is already true at half done and no evidence can
+        # rescue it. Per-INSTANCE conditions can, because their conjunction holds only when every delivery is made.
+        if self.goal_mem.w and not self._live_hypotheses():
+            inst = self._winning_conditions(prev_objs, prev_pos, action, prev_cur, sc, by_index=True)
+            if inst:
+                cues |= set(inst)
+                if len(inst) > 1:
+                    cues.add(frozenset(inst))
+        self.goal_mem.credit(cues, reward)
+        self._refute(set(conds), reward)                               # …and the world DISPROVES what mispredicted
 
-    def _winning_conditions(self, prev_objs, prev_pos, action, prev_cur, sc) -> set:
+    def _winning_conditions(self, prev_objs, prev_pos, action, prev_cur, sc, by_index: bool = False) -> set:
         """The conditions TRUE in the state this action leads to: the static landmark the SELF is standing on, and every MOVER
         resting on a static landmark — whether this action put it there or it has been sitting there for twenty steps. The
         latter is the point: a conjunct satisfied earlier is still part of why the reward arrived.
@@ -1094,8 +1163,10 @@ class Agent:
             if self_target == cell:                                    # this action pushed it — it advances one along the push
                 cell = self._target_cell(cell, action)
             landmark = self._static_feature_at(prev_objs, cell, sc)
-            if landmark is not None:
-                out.add((kind, landmark))                              # the KIND is what generalises across levels …
+            if landmark is not None:                                   # the KIND is what generalises across levels …
+                out.add((("i", idx, landmark) if by_index else (kind, landmark)))
+        #   … the INDEX is what can be COUNTED: two deliveries are two elements rather than one, so a conjunction over
+        #   instances is satisfied ONLY when every one of them is made. Instance cues are episode-local by construction.
         return out
 
     def _self_pos(self, objs):
@@ -1147,12 +1218,20 @@ class Agent:
         # THREE drives now (H3): the third is the TASK region asking for a CONFIGURATION — what it offers is the VALUE it
         # would gain by getting there, on the same scale as the other two offers, and the BG arbitrates as before.
         want = self._task_subgoal()
+        # FOUR drives. The fourth is the DETECTIVE: when several win-condition hypotheses survive, going to a state that
+        # SPLITS them is worth bits, and bits are what stand between the agent and knowing what winning is. It offers the
+        # expected information gain — already in bits, already on the same scale as the other offers — and the BG
+        # arbitrates as before (ARCHITECTURE rule 4). Passive deduction (`_refute`) runs every step regardless and is
+        # free; this is the part that costs actions, so it competes for them.
+        probe = self._probe()
         salience = [self.goal_mem.w.get(g, 0.0) if g is not None else float("-inf"),
                     self.progress.progress() if targets else float("-inf"),
-                    want[1] if want is not None else float("-inf")]
+                    want[1] if want is not None else float("-inf"),
+                    probe[1] if probe is not None else float("-inf")]
         plans = [lambda: self._goal_plan(objs, cur, pos, movement, conds),
                  lambda: self._seek_plan(targets, movement),
-                 lambda: self._task_plan(movement)]
+                 lambda: self._task_plan(movement),
+                 lambda: self._goal_plan(objs, cur, pos, movement, probe[0]) if probe else None]
         if max(salience) > float("-inf"):
             mode = self.bg.select(self._MODE_CTX, len(salience), rho=self.critic.rho(), salience=salience)
             self._last_mode = mode
@@ -1228,6 +1307,16 @@ class Agent:
             return None
         tests = []
         for g in conds:
+            # An INSTANCE condition `("i", index, landmark)` names a particular tracked object; the ROLLOUT cannot address
+            # one, and does not need to — getting SOME object of that kind onto that landmark satisfies it. So it is
+            # translated to its kind form here. Instance conditions exist to DISCRIMINATE hypotheses, which is a different
+            # job from naming a plannable target, and this is the seam between the two.
+            if isinstance(g, tuple) and len(g) == 3 and g[0] == "i":
+                col = self._scene_col() if self._scene is not None else None
+                kind = col.feature_of(g[1]) if col is not None else None
+                if kind is None:
+                    return None
+                g = (kind, g[2])
             if isinstance(g, tuple):                                # RELATIONAL: mover g[0] resting on a g[1] landmark cell
                 mover_c, landmark_c = g
                 if mover_c not in pos or landmark_c not in pos:
