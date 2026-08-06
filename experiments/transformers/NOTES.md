@@ -765,6 +765,92 @@ coverage specifically — the same weakness `diversity.py`'s largest point had, 
 reason. The conclusion rests on N=10 and N=40, where the fit is complete and transfer is still exactly zero. Settling the
 top of the range needs more compute than the 5-minute budget allows (that arm already ran 501 s).
 
+## BITS, MEASURED AT LAST — and random probes were never the problem (2026-08-05) — `bits.py`
+
+Until now every claim in this line about probe informativeness was inferred BACKWARDS from answer accuracy, with
+"distinct values out of 6" standing in for bits. `bits.py` computes the real thing: the universe is 2350 transformations,
+so the posterior after a probe set is exact — keep every transformation whose response matches what was observed, and
+`log2` the count. It also supplies the agent the framing always implied but never had: greedy expected-information-gain
+selection, `EIG(x) = log2|H| − Σ_r p(r) log2|H_r|`, maximised over ALL `5^6 = 15625` candidate probes exhaustively, then
+observe and discard. L's move, in the loop, every step.
+
+Bits of hypothesis space remaining, 75 held-out transformations, 11.20 to start:
+
+| policy | after 1 | after 2 | after 3 | after 4 | identified |
+|---|---|---|---|---|---|
+| random | 1.56 | 0.24 | 0.04 | 0.01 | 0.987 |
+| designed (hand-derived) | 1.20 | 0.00 | 0.00 | 0.00 | 1.000 |
+| **greedy EIG** | **0.61** | 0.00 | 0.00 | 0.00 | 1.000 |
+
+⚠ **RETRACTION: "random probes are uninformative" is FALSE, and I asserted it repeatedly.** Two random probes leave
+**0.24 bits** and identify the transformation 98.7% of the time within four. The information was always there. Yet
+`detective.py`'s random arm answered **0.008** while its designed arm answered **0.969** — a 120× gap that a 1.56-vs-1.20
+bit difference cannot begin to explain. **The failure was EXTRACTION, not query quality.**
+
+The original `detective.py` note was more careful than my later paraphrases of it: it said recovery from random probes
+needs an INTERSECTION across observations, which the encoder cannot do, whereas designed probes make it a LOOKUP. That
+distinction is now quantified — the two probe sets are nearly equally informative, and differ almost entirely in how hard
+their information is to extract. Everything I said about blind spots overlapping by chance was wrong.
+
+**THE LEARNED PROBES, SCORED (`detective.py --dump_probes` → `bits.py --probes`).** Same 100 held-out transformations,
+budget 2:
+
+| policy | after 1 | after 2 | identified |
+|---|---|---|---|
+| designed | 1.03 | **0.00** | 1.000 |
+| greedy EIG | 0.65 | **0.00** | 1.000 |
+| random | 1.68 | 0.23 | 0.790 |
+| **learned** | 5.47 | **2.70** | **0.060** |
+
+**The learned queries are far WORSE than random — 2.70 bits left against 0.23, and 6% identified against 79%.** Its first
+probe is `[1, 1, 1, 1, 1, 4]`: five identical values, so every position carrying a 1 is mutually indistinguishable and
+almost nothing about the permutation can be read. It is close to the least informative probe available.
+
+(Caveat: 1000 training steps rather than 3000, to fit the 5-minute budget — this policy scores 0.078 held-out where the
+recorded one scored 0.246, and 2.25 distinct values where it scored 2.63. A weaker instance of the same policy. The
+2.70-vs-0.23 gap is far too large to be an artefact of that, but the exact figure would move with full training.)
+
+**AND THAT COMBINATION IS THE FINDING.** Set it beside the answer accuracies: designed probes leave 0 bits and are
+answered at 0.969; random probes leave 0.23 bits and are answered at 0.008; the learned probes destroy most of the
+information and are still answered at 0.246 — **30× better than random queries that carry an order of magnitude more
+information.** The policy did not fail to find informative questions. It found questions it could ANSWER, and traded
+information away to get them.
+
+That is the co-adaptation hypothesis confirmed, and more sharply than expected: unable to extract information from
+informative queries, the model degraded its queries to ones its own answerer could handle. It optimised the pair, and the
+pair has a bad joint optimum. A near-constant probe also makes the response trivially predictable, which the dense
+response-prediction term in the loss rewards — a plausible second driver, and unmeasured.
+
+⚠ **This retracts my own reading from one turn earlier.** Having found that random probes are informative, I suggested the
+learned policy's 0.246 might likewise be an answerer artefact with the queries fine. Measured, the queries are much worse
+than random. What survives — strengthened — is that the ANSWERER is the root cause: it is why the queries are bad.
+
+**GREEDY BEATS THE HAND-DERIVED PRINCIPLE, and the reason is the interesting part.**
+
+    greedy    [4, 2, 4, 3, 1, 0]   EIG 10.54 bits   5/6 distinct
+    designed  [0, 1, 2, 3, 4, 0]   EIG 10.09 bits   5/6 distinct
+
+Identical distinct-value counts, so the gain is NOT about symbol diversity — which is what the hand derivation optimised
+and what `detective.py` measures its policy against. It is about WHICH pair is left confusable and WHERE. Only 2350 of
+the 14400 group elements are reachable at depth ≤5, so the posterior is not symmetric under position, and a probe tuned
+to the actual reachable set beats one tuned to an abstract symbol-counting argument. **The principle we derived was
+slightly wrong because it reasoned about symbols instead of about the hypothesis space.**
+
+**And one probe provably cannot suffice.** A response carries up to log2(15625) = 13.9 bits against the 11.2 needed, so
+this was genuinely open; the exhaustive optimum leaves 0.61 bits, so two probes are REQUIRED. Measured, not assumed.
+
+**A note on comparing this to `sinkhorn.py`'s K=8.** They do not solve the same problem. `bits.py` knows the universe
+(2350 candidates, 11.2 bits); the Sinkhorn solver knows nothing of reachability and searches all permutations × value
+maps (~86400, 16.4 bits). That is 5.2 bits of prior, and it is most of why one needs two observations and the other
+eight. Both numbers are now denominated in the same unit, which they were not before.
+
+⚠ **This is the ENUMERATING version, deliberately.** `detective.py` refuses to enumerate on principle — informativeness
+should emerge from outcome reward. Enumeration will not scale past a small closed universe. What it buys is the thing an
+emergent policy cannot: a CEILING in bits. Without it "the model reached 0.246" had no denominator, and we could not
+distinguish a bad policy from a hard problem. We now can, and the answer changed.
+
+---
+
 ## BEHAVIOUR → PROGRAM CLOSES, and a canonical representation has NO METRIC (2026-08-05) — `endtoend.py`
 
 The composition, with nothing hand-derived in the middle. The program model is trained ONCE on TRUE canonical states

@@ -196,6 +196,7 @@ def main():
     # than probe quality. The first run of this file reported exactly that and it is not a baseline.
     ap.add_argument("--train_mode", default="model", choices=["model", "random", "designed"],
                     help="query source during training; evaluation is on-policy")
+    ap.add_argument("--dump_probes", default="", help="path to save the learned probes for scoring by bits.py")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     dev = "cuda" if torch.cuda.is_available() else "cpu"
@@ -257,6 +258,17 @@ def main():
     print("baseline. distinct/6: random ~3.72, the hand-derived optimum 5.00.")
     ad = adaptivity(model, tabs_he, held, B, dev, args.seed)
     print(f"\nadaptivity (x1 forced identical, fraction of x2 differing from the modal x2): {ad:.3f}")
+
+    # The learned probes themselves, for scoring in BITS by `bits.py`. Every informativeness claim in this file is
+    # inferred from answer accuracy, which `bits.py` showed confounds query quality with the ANSWERER's competence:
+    # two RANDOM probes leave only 0.24 bits yet this file's random arm answers 0.008. So the policy's queries have to
+    # be measured directly against the posterior they actually eliminate. Greedy decoding, to match `evaluate`.
+    if args.dump_probes:
+        sel = torch.arange(len(held), device=dev)
+        tok = rollout(model, tabs_he, sel, B, dev, g, mode="model", temp=0.0)
+        probes = torch.stack([tok[:, q_slice(b)] - DIG0 for b in range(B)], dim=1)     # (n_held, B, L)
+        torch.save({"probes": probes.cpu(), "progs": [tuple(w) for w in held]}, args.dump_probes)
+        print(f"wrote {probes.shape[0]} x {B} learned probes to {args.dump_probes}")
     print("A fixed probe policy gives ~0.0; an investigator that conditions on the last response gives a high value.")
 
 
