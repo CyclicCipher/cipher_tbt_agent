@@ -765,6 +765,115 @@ coverage specifically — the same weakness `diversity.py`'s largest point had, 
 reason. The conclusion rests on N=10 and N=40, where the fit is complete and transfer is still exactly zero. Settling the
 top of the range needs more compute than the 5-minute budget allows (that arm already ran 501 s).
 
+## BEHAVIOUR → PROGRAM CLOSES, and a canonical representation has NO METRIC (2026-08-05) — `endtoend.py`
+
+The composition, with nothing hand-derived in the middle. The program model is trained ONCE on TRUE canonical states
+(`canon2prog.py`'s setup); only the evaluation input changes, to the state `sinkhorn.py` RECOVERS from demonstrations.
+Targets are always the true tables, so a recovered state naming a different function scores zero.
+
+| demonstrations | 1 | 2 | 3 | 4 | 8 |
+|---|---|---|---|---|---|
+| recovery exact (both halves) | 0.019 | 0.505 | 0.838 | 0.981 | **1.000** |
+| **end-to-end program (held-out)** | 0.010 | 0.352 | 0.667 | 0.752 | **0.762** |
+| cliff prediction = recovery × 0.762 | 0.015 | 0.385 | 0.639 | 0.747 | 0.762 |
+
+**Behaviour → program is 0.762 held-out where it measured 0.000** (`decompose.py`, `bigroup.py`: every condition, two
+universes, a 36× coverage sweep). Nothing in the pipeline uses the group: the correspondence and the value map both come
+from reconstruction of executed demonstrations, never from the `S6 × Aff(Z5)` factorisation `localise.py` relies on.
+Reference line (true state in) is 0.762 here against `canon2prog.py`'s 0.733 — 3000 steps rather than 6000 and a
+different stratified draw, so the small excess is sampling, not a new effect.
+
+**THE PREDICTION WAS STATED BEFORE RUNNING AND HELD.** I predicted a CLIFF: end-to-end ≈ P(recovery exactly right) ×
+0.762, because a canonical state wrong in one position is not a noisy description of the right transformation but an
+EXACT description of a different one, which the model reads confidently and answers wrongly. Measured deviations from
+that product are 0.005–0.028 with no consistent sign (below at K=1,2, above at K=3,4) — a conditioning effect, since the
+transformations where recovery succeeds are not a random subset, not a failure of the model.
+
+**So a canonical representation has no metric, and that is the flip side of the whole canonicalisation win.** Five-sixths
+of a permutation is worth nothing; the value is entirely in being exact. Three consequences:
+1. The recovery step had to reach **1.000**, not merely improve — which retroactively justifies treating `sinkhorn.py`'s
+   0.000 → 1.000 (solver) as the result and its 0.756 (amortised) as insufficient rather than as most of the way there.
+2. The number that matters about a canonicaliser is **how many observations it needs to be exact**, not its per-slot
+   accuracy. Partial credit columns are diagnostics, never objectives.
+3. An approximate canonicaliser cannot be repaired downstream. Any tolerance for error has to be bought before the
+   canonical state is committed to — by taking more observations, or better ones.
+
+That last point is where this meets the detective line. Identifying a transformation costs log2(2350) = 11.2 bits and
+RANDOM demonstrations are redundant, which is why K=8 is needed for exactness; a designed probe should reach 1.000 in
+fewer. The demonstration curve above is an entropy-depletion curve, and the solver is now a clean read-out for measuring
+whether chosen queries beat random ones — the experiment `detective.py` could not score before, because it had no way to
+tell whether a query had actually narrowed the space.
+
+---
+
+## MATCHING AS ARCHITECTURE — the correspondence is recovered, 0.000 → 0.756 (2026-08-05) — `sinkhorn.py`
+
+`canonicaliser.py` ended with a prescription: stop hoping a generic encoder INDUCES matching, supply it as architecture.
+A Sinkhorn layer projects a score matrix onto the Birkhoff polytope, so the model's output IS a soft permutation and
+nothing has to discover that a correspondence is the right kind of object. Both unknowns are parameterised as assignments
+— `P` (L×L, output slot ← input slot) and `M` (V×V, the value map) — and the ONLY signal is reconstruction of executed
+demonstrations, `log p(y[a]=v) = logsumexp_b (logP[a,b] + logM[x[b],v])`. **`idx` and `vmp` are never supplied**, so this
+uses strictly less than `localise.py`'s `recover`, which brute-forces the 10 affine value maps using the fact that the
+group factors as `S6 × Aff(Z5)`.
+
+Each unknown is inferred THROUGH the other, which is what the contrastive setup could not express: you cannot tell which
+input position feeds output `a` without a value map, and you cannot read the value map off a position whose source you do
+not know. Sinkhorn makes that joint constraint differentiable.
+
+**ARM 1 — per-transformation solver (the ceiling).** Free logits, 400 Adam steps, each held-out transformation solved
+independently. Chance is 0.0014 exact / 0.167 per slot for the permutation.
+
+| demonstrations | 1 | 2 | 3 | 4 | 8 | 16 |
+|---|---|---|---|---|---|---|
+| IDX exact | 0.037 | 0.511 | 0.859 | 0.963 | **1.000** | 1.000 |
+| IDX per-slot | 0.305 | 0.717 | 0.926 | 0.983 | 1.000 | 1.000 |
+| VMP exact | 0.170 | 0.681 | 0.904 | 0.985 | 1.000 | 1.000 |
+
+**Exact recovery at 8 demonstrations, with no group knowledge.** The K=1 point is the apparatus check and it behaves:
+one demonstration cannot identify the correspondence (two input slots carrying the same value are indistinguishable, at
+5^-K per pair), and it scores 0.037 — above chance, nowhere near solved. A clean monotone curve, not a leak.
+
+**The Sinkhorn constraint buys DEMONSTRATIONS, not capability.** Row-softmax only (pairwise scoring kept, assignment
+constraint dropped): K=2 → 0.215 vs 0.511, K=4 → 0.933 vs 0.963, K=8 → 1.000 vs 1.000. The doubly-stochastic prior is
+worth roughly one to two demonstrations and nothing at all once the data is sufficient. That is the honest size of the
+architectural win: it is a sample-efficiency prior, which is exactly what this line is about.
+
+**ARM 2 — the amortised canonicaliser**, a network emitting the score matrix in one forward pass, trained across
+transformations by the same label-free objective. 3000 steps, 8 demonstrations, train/HELD-OUT:
+
+| aggregation | IDX exact | IDX per-slot | VMP exact | VMP per-slot |
+|---|---|---|---|---|
+| contrastive code (`canonicaliser.py`) | — / **0.000** | — | — / 0.689 | — |
+| pair-score sum | — / 0.652 | — / 0.652 | — / 0.644 | — / 0.676 |
+| **per-slot mean** | 0.693 / **0.756** | 0.770 / **0.827** | 0.660 / 0.667 | 0.803 / 0.785 |
+
+**The correspondence is recovered — 0.000 → 0.756 held-out**, label-free and group-agnostic. (The `pair` row is
+held-out only; the train column was added after that arm ran.)
+
+⚠ **AND MY ARCHITECTURAL PREDICTION WAS WRONG, in a way that corrects the earlier diagnosis.** I predicted `pair` would
+win: summing per-demonstration pair scores is a product of compatibilities = the INTERSECTION, where `canonicaliser.py`
+could only average, and NOTES.md recorded that as "averaging is not intersecting". Measured, **averaging wins**, 0.756 vs
+0.652. The reason is that the diagnosis named the wrong axis. Mean-pooling per SLOT across demonstrations builds each
+slot's value-PROFILE, and matching profiles is precisely what the hand-written `recover` does when it "matches columns" —
+columns are profiles across demonstrations. `canonicaliser.py`'s fatal step was collapsing the SLOT axis into one opaque
+code, not averaging over the demonstration axis. Note also `pair` gives IDX exact == IDX per-slot == 0.652 to three
+places: all-or-nothing per transformation, no partial credit anywhere, which is a structural split rather than a gradual
+one and is unexplained.
+
+**Train ≈ held-out at every step** (0.693 vs 0.756 — held-out is if anything higher). So the gap between the solver's
+1.000 and the network's 0.756 is **amortisation, not generalisation**: one forward pass is worse than 400 gradient steps
+on the same information. Same shape as `canonicaliser.py`'s diagnosis — the objective does not solve its own training
+task — but now at 0.75 rather than 0.00.
+
+**WHAT THIS CLOSES.** `canon2prog.py` measured that from a canonical state the program is learnable at **0.733** held-out
+while from behaviour it is **0.000**. The missing step was behaviour → canonical state, and Arm 1 now does it exactly at
+K=8 with no group knowledge. The composition needs no separate run to be claimed at K=8 — the recovered `(idx, vmp)` is
+bit-identical to `compile_progs`'s, so `canon2prog.py`'s number carries over by construction. What DOES need a run is the
+regime where the canonicaliser is imperfect (K≤4, or the amortised 0.756): whether program accuracy degrades gracefully
+with canonicalisation error, or falls off a cliff, is unmeasured and is the next thing to know.
+
+---
+
 ## THE DETECTIVE — agency emerges from a tight budget, optimality does not (2026-07-31) — `detective.py`
 
 `canonicaliser.py` failed to recover the correspondence from RANDOMLY sampled demonstrations. The information-theoretic
