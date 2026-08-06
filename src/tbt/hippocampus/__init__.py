@@ -13,10 +13,12 @@ from .ca1 import CA1, Remapper
 from .ca3 import CA3
 from .dg import DG
 from .featurize import WorldFeaturizer
+from .hypotheses import WinHypotheses, world_facts
 from .map import WorldMap
 from .replay import Rollout, WorldModel
 
-__all__ = ["WorldMap", "Rollout", "WorldModel", "CA3", "DG", "CA1", "Remapper", "WorldFeaturizer", "Hippocampus"]
+__all__ = ["WorldMap", "Rollout", "WorldModel", "CA3", "DG", "CA1", "Remapper", "WorldFeaturizer",
+           "WinHypotheses", "world_facts", "Hippocampus"]
 
 
 class Hippocampus:
@@ -38,6 +40,8 @@ class Hippocampus:
 
     def __init__(self, n_inputs: int = 512, dims: int = 2, bounds=None, seed: int = 0) -> None:
         self.episodic = CA3()                            # one-shot scene/episode memory (store + partial-cue completion)
+        self.win = WinHypotheses()                       # WHAT PAYS, over allocentric world-states — the only place
+        #                                                  self-location and objects are bound in one frame
         self.dg = DG(n_inputs=n_inputs, seed=seed)       # environment signature → separated chart key
         self.remapper = Remapper()                       # multi-chart remapping (its own CA3 + CA1 comparator)
         self.featurizer = WorldFeaturizer(dims=dims, bounds=bounds)   # world-state → SDR for the value critic (rollout leaf)
