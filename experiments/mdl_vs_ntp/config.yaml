@@ -1,0 +1,10 @@
+# Shared settings for every arm. B is the compute budget in token-equivalents; it is measured, not chosen:
+#   python experiments/mdl_vs_ntp/train.py --arm ntp --measure_throughput 200
+# sets it so one ntp run takes ~30 min of wall-clock on this machine. Record the printed value here.
+B: null
+lr: 1.0e-3          # pilot sweeps {3e-4, 1e-3, 3e-3} on ntp only and records the winner here
+size: 4M            # ~4M params: d_model 256, 5 layers, 4 heads, vocab 73, max_len 192
+weight_decay: 0.01  # the repo baseline's AdamW weight decay; betas (0.9, 0.95) and grad clip 1.0 are fixed in train.py
+beta: 0.1           # REINFORCE weight (G5 fallback: 0.03)
+amp: true           # bf16 autocast on CUDA; set false for the fp32 fallback if a run is unstable
+compile: false      # the repo uses torch.compile on CUDA successfully; off by default so the first runs are simple
