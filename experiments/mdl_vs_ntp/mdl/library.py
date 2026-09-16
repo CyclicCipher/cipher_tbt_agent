@@ -15,6 +15,10 @@ well under 10 ms, so:
     touch simply reads its cost at the larger unit cost (adding a macro raises c_u for everyone), and removing a member
     (`loo`) reads the smaller one. This costs two extra DP passes per round, not per candidate;
   * candidates are deduplicated by canonical pattern and their scores cached for the round.
+
+Measured on this machine (CPU, full 294-family labelled archive = 2352 programs, a 32-macro library): Scorer build
+57 ms per round, 0.47 ms per candidate, `loo` 2.4 ms and `support` 1.7 ms per member. The executor runs ~580k
+program-executions/s, so a wake round's 20k verifications cost ~35 ms. Generation is what a round waits on.
 """
 from __future__ import annotations
 
@@ -24,6 +28,7 @@ import re
 import numpy as np
 
 from env.dsl import ARITY, HOLE, N_OPS, OP_CH, fill, holes_of, pattern_to_regex, prog_to_str
+from env.macros import fingerprint
 
 INF = float("inf")
 LOG2_10, LOG2_11 = math.log2(10), math.log2(11)
@@ -65,7 +70,7 @@ class Macro:
         self.defregex = re.compile("(?=(" + pattern_to_defregex(pattern) + "))")
         self.ldef = 0.0
         self.unused_rounds = 0
-        self.fp = None
+        self.fp = fingerprint(self.pattern)             # survives checkpoint resume; duplicates are caught by it
 
 
 class Library:

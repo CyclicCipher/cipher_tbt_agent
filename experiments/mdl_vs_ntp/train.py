@@ -60,7 +60,7 @@ class Run:
         self.args, self.cfg = args, cfg
         self.arm = args.arm
         self.sampling, self.do_wake, self.target, self.has_lib, self.scoring = ARMS[self.arm]
-        self.dev = "cuda" if torch.cuda.is_available() else "cpu"
+        self.dev = cfg.get("device") or ("cuda" if torch.cuda.is_available() else "cpu")
         self.out = Path(args.out) if args.out else HERE / "runs" / f"{self.arm}_s{args.seed}"
         self.out.mkdir(parents=True, exist_ok=True)
         self.env = load_env()
@@ -226,8 +226,8 @@ class Run:
         self.curriculum.load_state(st["curriculum"])
         self.buffer.load_state(st["buffer"])
         self.rng.bit_generator.state = st["rng"]
-        self.trng.set_state(st["trng"])
-        torch.set_rng_state(st["torch_rng"])
+        self.trng.set_state(st["trng"].cpu())                      # generator states are CPU ByteTensors
+        torch.set_rng_state(st["torch_rng"].cpu())
         self.cpu_seconds, self.ckpt_te = st["cpu_seconds"], st["ckpt_te"]
         self.t_start = time.time() - st["wall"]
 

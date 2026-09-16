@@ -144,7 +144,6 @@ def propose_round(adapter, opt, env, library, buffer, grammar, arm, rnd, rng, tr
             library.remove(worst.slot)
             adapter.reset_slot(worst.slot)
         slot = library.add(pat, rnd)
-        library.macros[slot].fp = fingerprint(pat)
         adapter.init_slot(slot, [OP0 + op for op, _s in pat])
         events.append(dict(event="accept", slot=slot, pattern=pattern_str(pat), dJ=dj, support=sup, L_def=ldef))
         cands.pop(pat, None)
