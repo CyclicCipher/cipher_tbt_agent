@@ -83,7 +83,8 @@ class Run:
         self.grammar = Grammar(self.library if self.has_lib else None)
         self.buffer = Buffer(per_entry=1 if self.arm == "exit" else 4)
         self.curriculum = Curriculum(self.train_fids, mode={"uniform": "uniform", "gain": "gain",
-                                                            "curio": "curio"}[self.sampling])
+                                                            "curio": "curio"}[self.sampling],
+                                     mix=float(cfg.get("curriculum_mix", 0.1)))
         self.te = self.step = 0
         self.next_round = self.round_te
         self.cpu_seconds = 0.0
@@ -231,11 +232,51 @@ class Run:
         self.cpu_seconds, self.ckpt_te = st["cpu_seconds"], st["ckpt_te"]
         self.t_start = time.time() - st["wall"]
 
+    def proposer_warm_start(self, n_steps):
+        """G3 remedy from the plan: supervised P-format steps whose DEF target is a random contiguous 2-3-op window of a
+        context program (arguments kept as consts). Counted in TE like any training step."""
+        from env.tokens import encode_P, PROMPT_P
+        lab = [f for f in self.env.by_split["train"] if self.env.fam(f).labeled]
+        loss = torch.zeros(())
+        for _ in range(n_steps):
+            seqs, masks = [], []
+            for _b in range(BATCH):
+                fs = self.rng.choice(lab, size=5, replace=False)
+                progs = [self.env.archive[f][int(self.rng.integers(8))][1] for f in fs]
+                ctx = [prog_tokens(segment_units(p, self.library) if self.has_lib else prim_units(p)) for p in progs]
+                src = progs[int(self.rng.integers(5))]
+                ln = min(int(self.rng.integers(2, 4)), len(src))
+                st = int(self.rng.integers(len(src) - ln + 1))
+                def_toks = prog_tokens(prim_units(src[st:st + ln]))
+                toks = encode_P(ctx, def_toks)
+                m = [False] * len(toks)
+                for j in range(PROMPT_P, PROMPT_P + len(def_toks) + 2):        # DEF tokens, </def>, EOS
+                    m[j] = True
+                seqs.append(toks)
+                masks.append(m)
+            ids = torch.tensor(seqs, dtype=torch.long, device=self.dev)
+            msk = torch.tensor(masks, dtype=torch.bool, device=self.dev)
+            self.set_lr()
+            self.adapter.train()
+            logits, _ = self.adapter(ids)
+            tgt, m = ids[:, 1:], msk[:, 1:]
+            loss = (F.cross_entropy(logits[:, :-1].reshape(-1, logits.shape[-1]), tgt.reshape(-1),
+                                    reduction="none").reshape(tgt.shape) * m).sum() / m.sum()
+            self.opt.zero_grad(set_to_none=True)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.adapter.parameters(), 1.0)
+            self.opt.step()
+            self.te += 3 * int((ids != PAD).sum())
+        self.logs["train"].write(json.dumps(dict(step=self.step, te=self.te, warm_start_steps=n_steps,
+                                                 warm_start_loss=float(loss.detach()))) + "\n")
+
     # ── the loop ─────────────────────────────────────────────────────────────────────────────────────────────────────
     def train(self):
         if self.step == 0 and self.sampling != "uniform":
             losses = self.probe_all()                                        # baseline at TE = 0
             self.curriculum.update(losses)
+        if self.step == 0 and self.has_lib and int(self.cfg.get("proposer_warm_start", 0)) > 0:
+            self.proposer_warm_start(int(self.cfg["proposer_warm_start"]))
         rnd = 0
         last_log, tok_window = time.time(), 0
         while self.te < self.B:

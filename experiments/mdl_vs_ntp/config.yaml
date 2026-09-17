@@ -8,3 +8,5 @@ weight_decay: 0.01  # the repo baseline's AdamW weight decay; betas (0.9, 0.95) 
 beta: 0.1           # REINFORCE weight (G5 fallback: 0.03)
 amp: true           # bf16 autocast on CUDA; set false for the fp32 fallback if a run is unstable
 compile: false      # the repo uses torch.compile on CUDA successfully; off by default so the first runs are simple
+curriculum_mix: 0.1     # uniform share in the curriculum arms (G6 fallback: 0.2)
+proposer_warm_start: 0  # G3 fallback: 200 supervised P-format steps for every library arm

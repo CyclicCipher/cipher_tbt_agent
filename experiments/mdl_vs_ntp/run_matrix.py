@@ -27,29 +27,27 @@ TIER_SEEDS = {1: [0, 1, 2], 2: [0, 1, 2], 3: [0, 1]}
 SIZE_SEEDS = [0]                                              # E6 size runs: seed 0 only
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--tiers", default="1,2,3")
-    ap.add_argument("--seeds", default=None, help="override seeds for every tier, e.g. 0,1")
-    ap.add_argument("--budget_frac", type=float, default=1.0)
-    ap.add_argument("--dry", action="store_true")
-    args = ap.parse_args()
+def build_jobs(tiers, seeds=None, tier_seeds=None):
+    tier_seeds = tier_seeds or TIER_SEEDS
+    jobs = []
+    for t in tiers:
+        for arm, size in TIERS[t]:
+            ss = seeds if seeds is not None else (SIZE_SEEDS if size != "4M" else tier_seeds[t])
+            for s in ss:
+                jobs.append((arm, size, s))
+    return jobs
+
+
+def run_jobs(jobs, budget_frac=1.0, dry=False, say=None):
+    """Sequential, resumable: skips runs with a final checkpoint and eval, resumes runs with a latest checkpoint."""
     RUNS.mkdir(parents=True, exist_ok=True)
     log = open(RUNS / "matrix.log", "a")
-
-    def say(msg):
-        line = f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {msg}"
-        print(line, flush=True)
-        log.write(line + "\n")
-        log.flush()
-
-    jobs = []
-    for t in [int(x) for x in args.tiers.split(",")]:
-        for arm, size in TIERS[t]:
-            seeds = [int(s) for s in args.seeds.split(",")] if args.seeds else (
-                SIZE_SEEDS if size != "4M" else TIER_SEEDS[t])
-            for s in seeds:
-                jobs.append((arm, size, s))
+    if say is None:
+        def say(msg):
+            line = f"{time.strftime('%Y-%m-%d %H:%M:%S')}  {msg}"
+            print(line, flush=True)
+            log.write(line + "\n")
+            log.flush()
     say(f"matrix: {len(jobs)} runs")
     for arm, size, seed in jobs:
         name = f"{arm}_s{seed}" + ("" if size == "4M" else f"_{size}")
@@ -58,11 +56,11 @@ def main():
             say(f"skip {name} (done)")
             continue
         cmd = [PY, str(HERE / "train.py"), "--arm", arm, "--seed", str(seed), "--size", size, "--out", str(out),
-               "--budget_frac", str(args.budget_frac)]
+               "--budget_frac", str(budget_frac)]
         if (out / "ckpt_latest.pt").exists() and not (out / "ckpt_final.pt").exists():
             cmd += ["--resume", str(out / "ckpt_latest.pt")]
         say(f"run  {name}: {' '.join(cmd)}")
-        if args.dry:
+        if dry:
             continue
         t0 = time.time()
         if not (out / "ckpt_final.pt").exists():
@@ -76,6 +74,17 @@ def main():
                                  stdout=fh, stderr=subprocess.STDOUT, cwd=str(HERE.parent.parent))
         say(f"done {name} rc={rc} in {(time.time() - t0) / 60:.1f} min")
     say("matrix complete")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--tiers", default="1,2,3")
+    ap.add_argument("--seeds", default=None, help="override seeds for every tier, e.g. 0,1")
+    ap.add_argument("--budget_frac", type=float, default=1.0)
+    ap.add_argument("--dry", action="store_true")
+    args = ap.parse_args()
+    seeds = [int(s) for s in args.seeds.split(",")] if args.seeds else None
+    run_jobs(build_jobs([int(x) for x in args.tiers.split(",")], seeds), args.budget_frac, args.dry)
 
 
 if __name__ == "__main__":
