@@ -9,6 +9,7 @@ from model_adapter import ModelAdapter, causality_test
 def test_causality_and_size():
     a = ModelAdapter("4M", amp=False)
     assert causality_test(a) < 1e-5
+    assert a.cache_matches_model() < 1e-4                    # the adapter's KV-cached decode equals the model's forward
     assert 3.5e6 < a.num_params() < 4.5e6, a.num_params()
     assert a.set_loop_depth(2) is False
 

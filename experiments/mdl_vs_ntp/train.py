@@ -77,7 +77,7 @@ class Run:
         self.opt = torch.optim.AdamW(self.adapter.parameters(), lr=args.lr, betas=(0.9, 0.95),
                                      weight_decay=cfg.get("weight_decay", 0.01))
         self.B = int(args.budget * args.budget_frac)
-        self.round_te = int(args.round_pct * self.B)
+        self.round_te = int(args.round_pct * args.budget)              # a fraction of the FULL B, not of the smoke slice
         self.ckpt_te = [int(self.B * q) for q in (0.25, 0.5, 0.75, 1.0)]
         self.library = Library()
         self.grammar = Grammar(self.library if self.has_lib else None)
@@ -189,7 +189,7 @@ class Run:
         t0 = time.time()
         stats, te = wake_round(self.adapter, self.env, self.library, self.grammar, self.sample_fids, self.rng,
                                self.trng, self.buffer, rnd, self.dev)
-        self.cpu_seconds += time.time() - t0
+        self.cpu_seconds += time.time() - t0 - stats.pop("gpu_seconds", 0.0)
         self.te += te
         stats.update(round=rnd, te=self.te, buffer=len(self.buffer))
         self.logs["wake"].write(json.dumps(stats) + "\n")
@@ -198,7 +198,7 @@ class Run:
             t0 = time.time()
             rrec, te = propose_round(self.adapter, self.opt, self.env, self.library, self.buffer, self.grammar,
                                      self.arm, rnd, self.rng, self.trng, self.dev, self.cfg.get("beta", 0.1), used)
-            self.cpu_seconds += time.time() - t0
+            self.cpu_seconds += time.time() - t0 - rrec.pop("gpu_seconds", 0.0)
             self.te += te
             rrec.update(te=self.te)
             self.logs["rounds"].write(json.dumps(rrec) + "\n")
@@ -270,11 +270,11 @@ class Run:
                     sel = torch.tensor([kk[0] == k for kk in kinds], device=self.dev)
                     if sel.any():
                         mm = m[sel]
-                        by[k] = float((per_tok[sel] * mm).sum() / mm.sum())
+                        by[k] = float((per_tok[sel].detach() * mm).sum() / mm.sum())
                 comp = dict(collections.Counter(kk[1] for kk in kinds))
                 now = time.time()
                 self.logs["train"].write(json.dumps(dict(
-                    step=self.step, te=self.te, lr=lr, loss=float(loss), loss_by=by, grad_norm=float(gn),
+                    step=self.step, te=self.te, lr=lr, loss=float(loss.detach()), loss_by=by, grad_norm=float(gn),
                     tok_s=tok_window / max(now - last_log, 1e-6), wall=now - self.t_start,
                     batch=comp, cpu_seconds=self.cpu_seconds)) + "\n")
                 self.logs["train"].flush()

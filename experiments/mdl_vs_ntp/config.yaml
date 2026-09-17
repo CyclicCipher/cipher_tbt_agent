@@ -1,7 +1,7 @@
 # Shared settings for every arm. B is the compute budget in token-equivalents; it is measured, not chosen:
 #   python experiments/mdl_vs_ntp/train.py --arm ntp --measure_throughput 200
 # sets it so one ntp run takes ~30 min of wall-clock on this machine. Record the printed value here.
-B: null
+B: 627000000        # measured 2026-09-16: 348k TE/s steady state on the RTX 3050 Ti (600 ntp steps)
 lr: 1.0e-3          # pilot sweeps {3e-4, 1e-3, 3e-3} on ntp only and records the winner here
 size: 4M            # ~4M params: d_model 256, 5 layers, 4 heads, vocab 73, max_len 192
 weight_decay: 0.01  # the repo baseline's AdamW weight decay; betas (0.9, 0.95) and grad clip 1.0 are fixed in train.py

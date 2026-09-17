@@ -61,6 +61,7 @@ def propose_round(adapter, opt, env, library, buffer, grammar, arm, rnd, rng, tr
     scorer_S = Scorer({f: arch[f] for f in S_r}, library, family_avg=True)
     member_fps = {m.fp for m in library.members()}
     te = 0
+    gpu_seconds = 0.0
     cands = {}                                                   # pattern -> (dj, support, ldef)
     rl_log = collections.Counter()
     rewards_all = []
@@ -71,7 +72,10 @@ def propose_round(adapter, opt, env, library, buffer, grammar, arm, rnd, rng, tr
             progs = [arch[f][int(rng.integers(len(arch[f])))] for f in fs]
             prompts.append(encode_P([prog_tokens(segment_units(p, library)) for p in progs])[:PROMPT_P])
         prompts = torch.tensor(prompts, dtype=torch.long, device=dev)
+        import time as _t
+        t0 = _t.time()
         out = adapter.generate(prompts, LEN_P - PROMPT_P, 1.0, grammar, "def", rng=trng)
+        gpu_seconds += _t.time() - t0
         te += int((out != PAD).sum())
         gen = out[:, PROMPT_P:].tolist()
         rewards = []
@@ -106,12 +110,14 @@ def propose_round(adapter, opt, env, library, buffer, grammar, arm, rnd, rng, tr
         gen_mask = torch.zeros_like(out, dtype=torch.bool)
         gen_mask[:, PROMPT_P:] = out[:, PROMPT_P:] != PAD
         adapter.train()
+        t0 = _t.time()
         lp = adapter.seq_logprob(out, gen_mask, grammar, "def", PROMPT_P)
         loss = beta * (-(adv.detach() * lp)).mean()
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(adapter.parameters(), 1.0)
         opt.step()
+        gpu_seconds += _t.time() - t0
         te += 3 * int((out != PAD).sum())
 
     # ── accept ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -179,7 +185,8 @@ def propose_round(adapter, opt, env, library, buffer, grammar, arm, rnd, rng, tr
                validity_rate=rl_log["valid"] / max(1, sum(rl_log.values())),
                best_proposed_dJ=best_prop, miner_best=miner_best, miner_pattern=miner_pat,
                proposer_regret=(miner_best - best_prop) if best_prop == best_prop else float("nan"),
-               J_S=scorer_S.J, library=lib_rows, events=events, accepted=accepted, library_size=len(library))
+               J_S=scorer_S.J, library=lib_rows, events=events, accepted=accepted, library_size=len(library),
+               gpu_seconds=gpu_seconds)
     return rec, te
 
 

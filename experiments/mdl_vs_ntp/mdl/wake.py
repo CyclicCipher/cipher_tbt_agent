@@ -91,7 +91,10 @@ def wake_round(adapter, env, library, grammar, sample_fids, rng, trng, buffer, r
     insts = [make_instance(env.fam(f), int(rng.integers(1 << 30)), "wake") for f in fids]
     prompts = torch.tensor([prompt_I(i) for i in insts], dtype=torch.long, device=dev)
     prompts = prompts.repeat_interleave(N, dim=0)
+    import time as _t
+    t0 = _t.time()
     out = adapter.generate(prompts, PROG_BUDGET + 1, 1.0, grammar, "prog", rng=trng)     # program, </prog>, EOS
+    gpu_seconds = _t.time() - t0
     gen = out[:, PROMPT_I:].tolist()
     te = int((out != PAD).sum())
     stats = collections.Counter()
@@ -125,6 +128,7 @@ def wake_round(adapter, env, library, grammar, sample_fids, rng, trng, buffer, r
     stats["verified_rate"] = n_verified / W
     stats["by_category"] = {k: v[0] / v[1] for k, v in by_cat.items()}
     stats["macro_usage"] = {int(k): int(v) for k, v in usage.items()}
+    stats["gpu_seconds"] = gpu_seconds
     return dict(stats), te
 
 
