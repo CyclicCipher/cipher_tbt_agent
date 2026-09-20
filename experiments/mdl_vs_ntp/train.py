@@ -198,7 +198,8 @@ class Run:
             used = {t - 41 for t in stats["macro_usage"]}          # macro tokens -> slots (M0 = 41)
             t0 = time.time()
             rrec, te = propose_round(self.adapter, self.opt, self.env, self.library, self.buffer, self.grammar,
-                                     self.arm, rnd, self.rng, self.trng, self.dev, self.cfg.get("beta", 0.1), used)
+                                     self.arm, rnd, self.rng, self.trng, self.dev, self.cfg.get("beta", 0.1), used,
+                                     source=self.args.library_source)
             self.cpu_seconds += time.time() - t0 - rrec.pop("gpu_seconds", 0.0)
             self.te += te
             rrec.update(te=self.te)
@@ -359,8 +360,12 @@ def main():
     ap.add_argument("--out", default=None)
     ap.add_argument("--resume", default=None)
     ap.add_argument("--measure_throughput", type=int, default=0)
+    ap.add_argument("--library_source", default=None, choices=[None, "model", "miner"],
+                    help="who proposes macros: the model (REINFORCE, the plan) or the symbolic miner (the quick variant)")
     args = ap.parse_args()
     cfg = load_config()
+    if args.library_source is None:
+        args.library_source = cfg.get("library_source", "model")
     if args.lr is None:
         args.lr = float(cfg.get("lr", 1e-3))
     if args.budget is None:

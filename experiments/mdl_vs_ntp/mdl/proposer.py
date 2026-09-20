@@ -49,7 +49,26 @@ def candidate_reward(pattern, scorer, library, member_fps):
     return float(np.clip(dj / max(ldef, 1e-6), -1.0, 5.0)), dj, sup, ldef, fp
 
 
-def propose_round(adapter, opt, env, library, buffer, grammar, arm, rnd, rng, trng, dev, beta, used_slots):
+def mine_candidates(arch, fids, top=200):
+    """Every contiguous 2-4-op window of the given families' programs, with up to 2 args turned into holes, ranked by
+    family support (distinct families containing the window). Returns the top patterns."""
+    support = collections.defaultdict(set)
+    for f in fids:
+        for p in arch[f]:
+            n = len(p)
+            for ln in (2, 3, 4):
+                for s in range(n - ln + 1):
+                    w = p[s:s + ln]
+                    argpos = [i for i, (_o, a) in enumerate(w) if a is not None]
+                    for k in range(0, min(2, len(argpos)) + 1):
+                        for hs in itertools.combinations(argpos, k):
+                            pat = tuple((op, HOLE if i in hs else a) for i, (op, a) in enumerate(w))
+                            support[pat].add(f)
+    return [pat for pat, _fs in sorted(support.items(), key=lambda kv: -len(kv[1]))[:top]]
+
+
+def propose_round(adapter, opt, env, library, buffer, grammar, arm, rnd, rng, trng, dev, beta, used_slots,
+                  source="model"):
     """Runs REINFORCE, acceptance, pruning and diagnostics. Returns (round record, TE consumed)."""
     arch = build_archive(env, buffer)
     fids = list(arch)
@@ -65,7 +84,23 @@ def propose_round(adapter, opt, env, library, buffer, grammar, arm, rnd, rng, tr
     cands = {}                                                   # pattern -> (dj, support, ldef)
     rl_log = collections.Counter()
     rewards_all = []
-    for _step in range(N_RL_STEPS):
+    if source == "miner":
+        # THE QUICK VARIANT: no learned proposer. Candidates are mined from the PROPOSAL half P_r and paid for by what
+        # they do to the SCORING half S_r -- the plan's anti-leakage structure, with the model's DEF sampling replaced
+        # by the symbolic window miner it already runs as a diagnostic. Acceptance, replacement, pruning, slot init and
+        # the shortest-solution rewriting are untouched. No model calls, so no TE is charged (CPU work, per the plan).
+        for pat in mine_candidates(arch, P_r):
+            pat = canonical(pat)
+            if pat in library.patterns():
+                continue
+            fp = fingerprint(pat)
+            if fp in PRIM_FPS or fp in member_fps:
+                continue
+            sc = Scorer({f: arch[f] for f in P_r}, library, family_avg=False) if insample else scorer_S
+            dj, sup, ldef = sc.score(pat)
+            cands[pat] = (dj, sup, ldef)
+        rl_log["mined"] = len(cands)
+    for _step in range(N_RL_STEPS if source == "model" else 0):
         ctx_fams = [rng.choice(P_r, size=N_CTX_PROGS, replace=False) for _ in range(N_CONTEXTS)]
         prompts = []
         for fs in ctx_fams:
@@ -198,23 +233,9 @@ def _insample_best(pat, arch, P_r, library):
 
 
 def mine(arch, S_r, scorer, top=200):
-    """Every contiguous 2-4-op window in S_r programs, with up to 2 args turned into holes; the top-200 by family
-    support are scored. Returns (best ΔJ, its pattern)."""
-    support = collections.defaultdict(set)
-    for f in S_r:
-        for p in arch[f]:
-            n = len(p)
-            for ln in (2, 3, 4):
-                for s in range(n - ln + 1):
-                    w = p[s:s + ln]
-                    argpos = [i for i, (_o, a) in enumerate(w) if a is not None]
-                    for k in range(0, min(2, len(argpos)) + 1):
-                        for hs in itertools.combinations(argpos, k):
-                            pat = tuple((op, HOLE if i in hs else a) for i, (op, a) in enumerate(w))
-                            support[pat].add(f)
-    ranked = sorted(support.items(), key=lambda kv: -len(kv[1]))[:top]
+    """The diagnostic: the best in-sample window of S_r under the scorer. Returns (best ΔJ, its pattern)."""
     best, best_pat = float("-inf"), None
-    for pat, _fs in ranked:
+    for pat in mine_candidates(arch, S_r, top):
         dj, _sup, _ld = scorer.score(pat)
         if dj > best:
             best, best_pat = dj, pattern_str(pat)

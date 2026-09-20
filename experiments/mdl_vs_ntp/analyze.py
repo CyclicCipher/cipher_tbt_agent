@@ -18,6 +18,15 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 RUNS, RES = HERE / "runs", HERE / "results"
 N_BOOT = 10000
+import argparse                                                       # noqa: E402
+_ap = argparse.ArgumentParser()
+_ap.add_argument("--runs", default=None)
+_ap.add_argument("--out", default=None)
+_args, _ = _ap.parse_known_args()
+if _args.runs:
+    RUNS = Path(_args.runs)
+if _args.out:
+    RES = Path(_args.out)
 
 
 def load_evals():
