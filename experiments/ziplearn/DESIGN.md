@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
-*v0.5, 2026-09-20 (v0.1–v0.4 the same day; v0.5 moves the results log to `RESULTS.md` and collects every
-pre-registration in §11). E0–E18 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
+*v0.6, 2026-09-21 (v0.1–v0.5 on 2026-09-20; v0.6 records E14–E18: capacity, precision, order dependence, blocks across
+layers, relational goals, written attention). E0–E18 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -455,7 +455,7 @@ in §16 (first form, designed 2026-09-20 evening) with E9 as its first test.
 **OPEN-3** — whether the per-layer sweep settles (§6; measured in E2).
 **OPEN-4** — what the capacity C of a given network is, numerically, in the price's units (§8).
 **OPEN-5 → BUILT in its first form (E8):** structures of structures — `WordLibrary`, `consolidate`. Remaining: words of words; inferred template parameters. Originally: whether §7's discovery is enough, or the library itself needs a library. *E7 priced it: E3's library is 23 bits cheaper as two generators + words, E6's shift blocks 4.6 bits cheaper as one template with a per-context offset; the missing piece is one structure kind whose parameters are other structures.*
-**OPEN-8** — writing attention weights under PoPE: content matching is not separable from the phase cosines (E0), so "same digit anywhere" is not one written parameter; what the written form of an induction head is, is not designed.
+**OPEN-8** — writing attention weights under PoPE: content matching is not separable from the phase cosines (E0), so "same digit anywhere" is not one written parameter; what the written form of an induction head is, is not designed. *E18: written, under RoPE — a previous-token head in the high-frequency rotary pairs and an induction head in the low-frequency ones, 100% with no training. Open: ZipLearner choosing such a circuit as the cheapest description; PoPE.*
 **OPEN-9** — the J-space of the gradient arm (Gurnee et al., Anthropic, July 2026: J-lens = the average Jacobian of the final residual with respect to a layer's residual, pulled back through the unembedding; J-space = sparse non-negative combinations of the per-token J-lens directions; a mid-layer global workspace, ≤10% of variance but causal for flexible reasoning). Under attention residuals the Jacobian's identity highway becomes a content-dependent route weight, so the J-space should localise to the sources later mixers read. *Measured (E8b): it does — identity share 0.06/0.04/0.12/0.77 = the routes; early-layer J-lens swaps drop from 72–89% to 13–23%.*
 
 ## 13. Results — the log is `RESULTS.md`
@@ -543,7 +543,7 @@ What is *not* decided: whether the gradient arm's per-token softmax routing or t
 the right comparison when both exist; E2 will run the written network, E0 the gradient arm, and the two are reported
 side by side, not merged.
 
-## 16. The outer objective — first loop BUILT (E9, E10, E10b), the rest DESIGNED / OPEN
+## 16. The outer objective — the loop BUILT (E9–E12, E17), the games first contact (E13), the rest OPEN
 
 **The problem.** Everything before this section is a world model: descriptions that say what comes out when something
 goes in. The outer objective is to *act*: given a goal, choose actions that reach it. The ideal is that any goal can
@@ -575,9 +575,9 @@ demand, with the inner objective paying it back in bits: OPEN-11.
 **The games (E13).** The loop above runs on the ARC-AGI-3 replica games through `arcgames.py`: the state is the frame, an action's description is a local rule (a window → the centre's new colour, tied across cells), the goal is a set of win keys learned from the score, and the planner is the search above over predicted frames. First contact solved 5 of 16 levels by discovery; see the log for what fails and why.
 
 **OPEN-10** — when the map is too large to search: what to cache (a cost-to-go per state, or per description?), and
-whether the cache is itself a written structure. **OPEN-11** — acting to learn: the price of trying an unknown
+whether the cache is itself a written structure. *E12: coordinates where the actions commute (8.9 bits), a word table where they do not (E8's `WordLibrary`, a written structure); a map too large for either is not tested.* **OPEN-11** — acting to learn: the price of trying an unknown
 action against the bits its description would save. *E10: the saving must be counted over the goals still to come (a description is an asset); the myopic version does not explore. E10b (useless + noisy actions): price 92% of goals in 2.3 steps, novelty policies 36%/23% — trapped by the noisy actions; BUILT in its first form.* **OPEN-12** — goals that are relations, not states ("make the
-output the reverse of the input"), and goals over the library ("find a shorter word").
+output the reverse of the input"), and goals over the library ("find a shorter word"). *E17: a relation given as examples is planned for by matching plans to the examples (0.99); identifying it first fails at the identification limit (0.51). Goals over the library: not built.*
 
 ## 17. Files
 
