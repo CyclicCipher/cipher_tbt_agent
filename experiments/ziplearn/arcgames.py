@@ -116,11 +116,13 @@ class ActionModel:
 
 
 class GoalModel:
-    """Win and death keys: the windows around the cells that changed at a scoring / fatal transition."""
+    """Win and death keys: the windows around the cells that changed at a scoring / fatal transition. Each key keeps
+    a count of the times it fired and the outcome followed, and the times it fired and it did not (E19: hindsight
+    as exception accounting on the goal model): a key that is wrong more often than right stops predicting."""
 
     def __init__(self, radius=1):
         self.r = radius
-        self.win, self.death = {}, {}                   # action -> set of windows
+        self.win, self.death = {}, {}                   # action -> {window: [confirmed, refuted]}
         self.probe = LocalRule(radius)
 
     def record(self, action, before, after, outcome, recent=()):
@@ -133,17 +135,29 @@ class GoalModel:
             return
         win = self.probe.windows(before)
         keys = {win[(int(i), int(j))] for i, j in changed}
-        target = self.win if outcome == "win" else self.death
-        target.setdefault(action, set()).update(keys)
+        target = (self.win if outcome == "win" else self.death).setdefault(action, {})
+        for k in keys:
+            target.setdefault(k, [0, 0])[0] += 1
+
+    def live(self, which, action):
+        keys = (self.win if which == "win" else self.death).get(action, {})
+        return {k for k, (c, r) in keys.items() if c > r}    # trusted while confirmed more often than refuted
 
     def predicts(self, which, action, frame):
-        keys = (self.win if which == "win" else self.death).get(action)
+        keys = self.live(which, action)
         if not keys:
             return False
         return any(k in keys for k in self.probe.windows(frame).values())
 
+    def refute(self, which, action, frame):
+        """Hindsight: this (frame, action) was predicted to win / kill and did not -- every key that fired is refuted."""
+        keys = (self.win if which == "win" else self.death).get(action, {})
+        for k in self.probe.windows(frame).values():
+            if k in keys:
+                keys[k][1] += 1
+
     def known(self):
-        return any(self.win.values())
+        return any(self.live("win", a) for a in self.win)
 
 
 class Player:
@@ -157,6 +171,7 @@ class Player:
         self.visited = set()
         self.last_changed = set()
         self.plan = []
+        self.expect_win = self.expect_win_at_end = False
         self.stats = dict(predictions=0, correct=0, unknown_cells=0, cells=0, replans=0, explore_plans=0, goal_plans=0)
 
     def frame_key(self, frame):
@@ -208,7 +223,9 @@ class Player:
 
     def choose(self, frame):
         if self.plan:
-            return self.plan.pop(0)
+            a = self.plan.pop(0)
+            self.expect_win = (not self.plan) and self.expect_win_at_end
+            return a
         plan, kind = self.search(frame, want_goal=self.goal.known())
         if plan is None:
             plan, kind = self.search(frame, want_goal=False)
@@ -216,6 +233,8 @@ class Player:
             plan, kind = [self.actions[len(self.visited) % len(self.actions)]], "blind"
         self.stats["goal_plans" if kind == "goal" else "explore_plans"] += 1
         self.plan = plan[1:]
+        self.expect_win_at_end = kind == "goal"
+        self.expect_win = kind == "goal" and not self.plan
         return plan[0]
 
 
@@ -267,6 +286,10 @@ def play(env, budget_per_level=200, max_levels=None, seed=0, verbose=False):
             player.plan = []
             continue
         player.observe(a, frame, after, "none")
+        if player.expect_win:                                              # a goal-directed plan ended without a score
+            player.goal.refute("win", a, frame)                            # -- hindsight: its keys were wrong here
+            player.stats["goal_refutations"] = player.stats.get("goal_refutations", 0) + 1
+            player.expect_win = False
         if pred is not None and pred.shape == after.shape:
             player.stats["predictions"] += 1
             player.stats["correct"] += int(np.array_equal(pred, after))

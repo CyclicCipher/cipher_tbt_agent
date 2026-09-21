@@ -450,6 +450,11 @@ retains at least as much evidence-weighted accuracy at no more bits; refute: the
 **E23 — macro-actions as the cache (OPEN-10).** E9's environment, goals 4–6 actions away, the library's named permutations
 as macro-actions; pass: nodes expanded fall by ≥ 2× at no loss; refute: no reduction.
 
+**E19 — hindsight by description (pre-registered in `notes/opsd_and_learning_from_experience.md`).** After an episode,
+price the goal model's predictions against the outcomes: a win key that fired without a score is refuted; keys refuted
+more often than confirmed stop predicting. Test on E13's LockPath door level. Pass: solved within the budget with no
+game worse; refute: the same failure.
+
 ## 12. Open questions
 
 **OPEN-1 — the outer objective (deferred by request, recorded here verbatim in substance).** ZipLearner learns a
@@ -498,6 +503,7 @@ changed) are in `RESULTS.md`, appended and never edited.
 | E21 | measured | a near-duplicate rule is minted its own block 6.4 observations after it starts — the wait for a refuting input (OPEN-6) |
 | E22 | REFUTED here | annealing the budget vs a hard cap: no difference — nothing fuzzy to crystallise in one-hot rules |
 | E23 | REFUTED here | macro-actions raise search nodes 192 → 522 in a 720-state map: a cache needs depth (OPEN-10 stays open) |
+| E19 | PASS (outcome) | goal keys priced by outcome (confirmed vs refuted): LockPath's door level solved, CollectAll 3/3, 8/16 levels (E13: 5/16) |
 
 ## 14. Glossary
 
@@ -583,7 +589,7 @@ first; bits = length × log₂ actions) → execute → the next states are new 
 would be cheaper through such an action is a reason to *try* it. That is exploration as the outer objective's own
 demand, with the inner objective paying it back in bits: OPEN-11.
 
-**The games (E13).** The loop above runs on the ARC-AGI-3 replica games through `arcgames.py`: the state is the frame, an action's description is a local rule (a window → the centre's new colour, tied across cells), the goal is a set of win keys learned from the score, and the planner is the search above over predicted frames. First contact solved 5 of 16 levels by discovery; see the log for what fails and why.
+**The games (E13).** The loop above runs on the ARC-AGI-3 replica games through `arcgames.py`: the state is the frame, an action's description is a local rule (a window → the centre's new colour, tied across cells), the goal is a set of win keys learned from the score, and the planner is the search above over predicted frames. First contact solved 5 of 16 levels by discovery (E13); with the goal model priced against the score (E19) 8 of 16; see the log for what fails and why.
 
 **OPEN-10** — when the map is too large to search: what to cache (a cost-to-go per state, or per description?), and
 whether the cache is itself a written structure. *E12: coordinates where the actions commute (8.9 bits), a word table where they do not (E8's `WordLibrary`, a written structure); a map too large for either is not tested.* **OPEN-11** — acting to learn: the price of trying an unknown

@@ -34,6 +34,7 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E21 | measured | a near-duplicate rule is minted its own block 6.4 observations after it starts — the wait for a refuting input (OPEN-6) |
 | E22 | REFUTED here | annealing the budget vs a hard cap: no difference — nothing fuzzy to crystallise in one-hot rules |
 | E23 | REFUTED here | macro-actions raise search nodes 192 → 522 in a 720-state map: a cache needs depth (OPEN-10 stays open) |
+| E19 | PASS (outcome) | goal keys priced by outcome (confirmed vs refuted): LockPath's door level solved, CollectAll 3/3, 8/16 levels (E13: 5/16) |
 
 ## Format
 
@@ -609,3 +610,24 @@ verdict: REFUTED. The goals were built from words of 4–6 actions, but the grou
          pays only when depth is large relative to branching; in this map nothing is deep. OPEN-10 stays open for the
          reason it was opened: it needs a map too large to search, and we do not have one yet.
 changed: nothing; the honest status of OPEN-10 is "not reachable in the current domains".
+
+### 2026-09-21 — E19 — hindsight as exception accounting on the goal model: the door level is solved, 8 of 16 levels (PASS on the outcome; the first form of "learn from experience")
+command: `python experiments/ziplearn/play_games.py --budget 150 --out experiments/ziplearn/runs/e19` (all six games, 150 actions per level; CPU, seconds)
+files:   `experiments/ziplearn/runs/e19/play.json`; code: `GoalModel` keys with confirmed/refuted counts, `GoalModel.refute`, `Player.expect_win` in `arcgames.py`
+numbers: levels solved / actions (oracle): LockPath **2/4** — L0 87 (8), **L1 79 (12)**, L2 not solved; MultiKey 2/2 (77, 49);
+         Sokoban 0/3; CollectAll **3/3** — 80, **58 (13)**, **94 (15)**; Toggle 1/1 (71); Tetris 0/3. **Total 8/16** (E13: 5/16). No
+         game did worse. LockPath's goal-directed plans fell from 136 to 2 per run: the wrong key fired once, was
+         refuted, and exploration resumed.
+verdict: PASS on the outcome pre-registered in the OPSD note (the level that failed on a wrong goal is solved within
+         the budget), with the mechanism stated exactly: every win key now counts the times it fired and the score
+         followed against the times it fired and nothing came; a key refuted more often than confirmed stops
+         predicting. That is the rate price of E4 applied to the goal model — a learned goal is a description like
+         any other, confirmed by the score and refuted by its absence — and it is the hindsight half of OPSD in this
+         framework: the outcome, known afterwards, prices the prediction made before. What the note's items 1–2
+         describe — searching in hindsight for the *missing* structure that would have predicted the failure — is
+         not built; this pass only withdraws trust from the wrong description, and exploration does the rest. The
+         remaining failures are world-model failures, not goal failures: pushes (LockPath L2, Sokoban) need the
+         radius-2 rule that exploration never buys enough observations of, and Tetris moves every tick.
+changed: the goal model keeps counts, not sets. §16's game paragraph: the goal is learned from the score AND priced
+         against it. The user's point 3 (learned goals per the ARC-AGI-3 rules) has its first mechanism; points 1
+         (a sleep pass) and the rest of point 2 (finding the missing structure in hindsight) are the next two.
