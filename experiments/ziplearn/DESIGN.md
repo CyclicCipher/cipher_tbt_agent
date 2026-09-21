@@ -408,6 +408,15 @@ every level, a fixed action budget, the oracle's shortest solution beside it, an
 accuracy reported separately from the levels solved — so "could not learn" and "could not solve" are distinguishable.
 Criterion for the interface: every game runs end to end and every action is exercised. No claim about solving.
 
+**E14 — the order dependence of the price of a collection (pre-registered 2026-09-20, late; §8 change 3, §7).** The
+25 compositions as a stream in several orders — primitives-first, compositions-first, and eight random orders — each
+from an empty library. Measured: total bits paid over the stream; the final library (named items, the generating set
+E8's word description chooses); the price of a fixed held-out set under each final library. The curriculum gap is best
+minus worst total; an ideal compressor's gap is zero (symmetry of information), so the gap measures the learner's
+distance from ideal. Predictions: primitives-first is cheapest; random orders spread by more than 10% of the mean;
+final libraries differ across orders (hysteresis) and so do held-out prices; the run-2 transformer on the same orders
+(held-out bits per digit) is order-dependent in the extreme. Refute: totals agree within noise.
+
 ## 12. Open questions
 
 **OPEN-1 — the outer objective (deferred by request, recorded here verbatim in substance).** ZipLearner learns a
