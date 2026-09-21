@@ -1,0 +1,20 @@
+Experiment A: 300000 training characters, 60000 held out (online); V = 70; grid K = 24 (a in [0.6, 0.8, 1.0, 1.2], b in [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]); share alpha 0.01
+  [word] bits/char online: chain 2.229 | word 3.245 | linear (E34 Mixer) 2.213 | grid-Bayes 2.180 (alpha0 2.175; by seen 2.168; by ctx 2.158) | best fixed a=0.8 b=0.4 -> 2.175 | chain tempered best a=1.0 -> 2.229 | posterior favourite at end a=0.8 b=0.4 (w 0.23), time-avg favourite a=0.6 b=0.6, mean (a,b)=(0.79,0.48) | other's context seen 89% of chars; on those, best fixed a=0.6 b=0.6 | mixer mean weight on chain 0.87  [train 11s, test 10s]
+      fixed-grid bits/char (rows a, columns b):  b =   0.0    0.2    0.4    0.6    0.8    1.0
+        a = 0.6: 2.393  2.263  2.197  2.178  2.193  2.235
+        a = 0.8: 2.262  2.195  2.175  2.190  2.231  2.291
+        a = 1.0: 2.229  2.203  2.214  2.251  2.308  2.380
+        a = 1.2: 2.255  2.257  2.288  2.340  2.409  2.490
+  [match] bits/char online: chain 2.229 | match 3.247 | linear (E34 Mixer) 2.230 | grid-Bayes 2.205 (alpha0 2.202; by seen 2.204; by ctx 2.162) | best fixed a=0.8 b=0.2 -> 2.202 | chain tempered best a=1.0 -> 2.229 | posterior favourite at end a=1.0 b=0.2 (w 0.30), time-avg favourite a=0.8 b=0.2, mean (a,b)=(0.90,0.26) | other's context seen 100% of chars; on those, best fixed a=0.8 b=0.2 | mixer mean weight on chain 0.89  [train 11s, test 11s]
+      fixed-grid bits/char (rows a, columns b):  b =   0.0    0.2    0.4    0.6    0.8    1.0
+        a = 0.6: 2.393  2.272  2.250  2.306  2.426  2.594
+        a = 0.8: 2.262  2.202  2.222  2.309  2.449  2.630
+        a = 1.0: 2.229  2.207  2.254  2.359  2.511  2.699
+        a = 1.2: 2.255  2.259  2.323  2.440  2.598  2.790
+  [order4] bits/char online: chain 2.229 | order4 3.129 | linear (E34 Mixer) 2.216 | grid-Bayes 2.215 (alpha0 2.212; by seen 2.213; by ctx 2.182) | best fixed a=0.8 b=0.4 -> 2.212 | chain tempered best a=1.0 -> 2.229 | posterior favourite at end a=0.6 b=0.6 (w 0.21), time-avg favourite a=0.8 b=0.2, mean (a,b)=(0.83,0.36) | other's context seen 98% of chars; on those, best fixed a=0.8 b=0.4 | mixer mean weight on chain 0.89  [train 12s, test 10s]
+      fixed-grid bits/char (rows a, columns b):  b =   0.0    0.2    0.4    0.6    0.8    1.0
+        a = 0.6: 2.393  2.275  2.222  2.218  2.251  2.310
+        a = 0.8: 2.262  2.213  2.212  2.245  2.305  2.385
+        a = 1.0: 2.229  2.225  2.256  2.314  2.392  2.486
+        a = 1.2: 2.255  2.281  2.335  2.410  2.501  2.604
+wrote C:\Users\julia\GitHub\predictive-coding-agent\experiments\ziplearn\research\expA_exponent_grid.json

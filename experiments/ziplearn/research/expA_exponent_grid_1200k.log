@@ -1,0 +1,29 @@
+Experiment A: 1200000 training characters, 60000 held out (online); V = 70; grid K = 63 (a in [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1], b in [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]); share alpha 0.01
+  [word] bits/char online: chain 1.817 | word 2.555 | linear (E34 Mixer) 1.814 | grid-Bayes 1.787 (alpha0 1.784; by seen 1.784; by ctx 1.776) | best fixed a=0.7 b=0.4 -> 1.784 | chain tempered best a=1.0 -> 1.817 | posterior favourite at end a=0.8 b=0.3 (w 0.05), time-avg favourite a=0.6 b=0.5, mean (a,b)=(0.77,0.42) | other's context seen 96% of chars; on those, best fixed a=0.7 b=0.5 | mixer mean weight on chain 0.84  [train 57s, test 16s]
+      fixed-grid bits/char (rows a, columns b):  b =   0.0    0.1    0.2    0.3    0.4    0.5    0.6    0.7    0.8
+        a = 0.5: 2.060  1.971  1.905  1.857  1.825  1.806  1.798  1.798  1.806
+        a = 0.6: 1.952  1.889  1.843  1.813  1.795  1.787  1.788  1.796  1.810
+        a = 0.7: 1.884  1.839  1.809  1.791  1.784  1.784  1.792  1.807  1.826
+        a = 0.8: 1.844  1.813  1.795  1.786  1.787  1.794  1.808  1.827  1.850
+        a = 0.9: 1.823  1.803  1.794  1.794  1.800  1.813  1.831  1.854  1.881
+        a = 1.0: 1.817  1.807  1.805  1.811  1.822  1.840  1.861  1.887  1.916
+        a = 1.1: 1.824  1.820  1.824  1.835  1.851  1.872  1.897  1.925  1.957
+  [match] bits/char online: chain 1.817 | match 2.913 | linear (E34 Mixer) 1.823 | grid-Bayes 1.811 (alpha0 1.805; by seen 1.810; by ctx 1.790) | best fixed a=0.9 b=0.1 -> 1.805 | chain tempered best a=1.0 -> 1.817 | posterior favourite at end a=1.0 b=0.1 (w 0.25), time-avg favourite a=0.9 b=0.1, mean (a,b)=(0.89,0.20) | other's context seen 100% of chars; on those, best fixed a=0.9 b=0.1 | mixer mean weight on chain 0.90  [train 82s, test 15s]
+      fixed-grid bits/char (rows a, columns b):  b =   0.0    0.1    0.2    0.3    0.4    0.5    0.6    0.7    0.8
+        a = 0.5: 2.060  1.980  1.931  1.909  1.913  1.940  1.987  2.051  2.131
+        a = 0.6: 1.952  1.895  1.864  1.859  1.876  1.913  1.968  2.040  2.125
+        a = 0.7: 1.884  1.843  1.827  1.833  1.859  1.904  1.966  2.042  2.131
+        a = 0.8: 1.844  1.816  1.810  1.825  1.858  1.909  1.974  2.054  2.146
+        a = 0.9: 1.823  1.805  1.808  1.829  1.868  1.923  1.992  2.074  2.167
+        a = 1.0: 1.817  1.808  1.817  1.844  1.887  1.945  2.016  2.100  2.194
+        a = 1.1: 1.824  1.821  1.835  1.866  1.913  1.973  2.046  2.131  2.226
+  [order4] bits/char online: chain 1.817 | order4 2.333 | linear (E34 Mixer) 1.807 | grid-Bayes 1.809 (alpha0 1.807; by seen 1.809; by ctx 1.791) | best fixed a=0.8 b=0.3 -> 1.807 | chain tempered best a=1.0 -> 1.817 | posterior favourite at end a=0.5 b=0.5 (w 0.05), time-avg favourite a=0.8 b=0.2, mean (a,b)=(0.81,0.33) | other's context seen 99% of chars; on those, best fixed a=0.8 b=0.3 | mixer mean weight on chain 0.88  [train 57s, test 31s]
+      fixed-grid bits/char (rows a, columns b):  b =   0.0    0.1    0.2    0.3    0.4    0.5    0.6    0.7    0.8
+        a = 0.5: 2.060  1.975  1.914  1.871  1.844  1.830  1.828  1.834  1.848
+        a = 0.6: 1.952  1.894  1.854  1.829  1.817  1.815  1.822  1.837  1.857
+        a = 0.7: 1.884  1.846  1.822  1.810  1.809  1.816  1.830  1.851  1.877
+        a = 0.8: 1.844  1.820  1.808  1.807  1.814  1.828  1.848  1.873  1.904
+        a = 0.9: 1.823  1.811  1.809  1.815  1.829  1.848  1.873  1.903  1.936
+        a = 1.0: 1.817  1.814  1.820  1.833  1.852  1.876  1.905  1.938  1.974
+        a = 1.1: 1.824  1.828  1.840  1.858  1.882  1.910  1.942  1.978  2.016
+wrote experiments/ziplearn/research/expA_exponent_grid_1200k.json

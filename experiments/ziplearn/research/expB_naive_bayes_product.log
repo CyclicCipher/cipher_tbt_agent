@@ -1,0 +1,80 @@
+expB: 300000 training characters (prefix of the concatenated books), 60000 held out (prefix of the book); V = 70
+
+[diverse] experts ['chain', 'word', 'match', 'line']  [train 42s, redundancy 1s, test 60s]
+   solo bits/char: chain 2.229, word 3.245, match 3.247, line 3.552 | reference (shortest training code): chain
+   r_agree (pairwise, training slice):
+          chain: 0.00 0.61 0.45 0.25
+           word: 0.61 0.00 0.38 0.36
+          match: 0.45 0.38 0.00 0.27
+           line: 0.25 0.36 0.27 0.00
+   r_cmi (normalised conditional MI of the argmax given the next character):
+          chain: 0.00 0.39 0.24 0.11
+           word: 0.39 0.00 0.16 0.22
+          match: 0.24 0.16 0.00 0.07
+           line: 0.11 0.22 0.07 0.00
+   mean exponent at test (over positions where seen): agree chain 0.45, word 0.43, match 0.49, line 0.55 | cmi chain 0.59, word 0.56, match 0.69, line 0.73 | ref chain 1.00, word 0.39, match 0.55, line 0.75
+   mean SUM of exponents per position: nb 3.89, agree 1.86, cmi 2.51, ref 2.65 (geo 1.00)
+   bits/char online, held out: CHAIN alone 2.229 | linear 2.218 | product_kt 3.316 | geometric_kt 2.201 | nb_kt 3.134 | nb_prior 2.987 | nb_geo_kt 2.365 | nb_geo_prior 2.427 | nb_agree_kt 2.190 | nb_agree_prior 2.207 | nb_cmi_kt 2.353 | nb_cmi_prior 2.329 | nb_flat_kt 2.180 | nb_flat_prior 2.193 | nb_ref_kt 2.456 | nb_ref_prior 2.425
+   vs chain: linear -0.011, product_kt +1.087, geometric_kt -0.027, nb_kt +0.905, nb_prior +0.758, nb_geo_kt +0.136, nb_geo_prior +0.198, nb_agree_kt -0.038, nb_agree_prior -0.022, nb_cmi_kt +0.124, nb_cmi_prior +0.100, nb_flat_kt -0.049, nb_flat_prior -0.035, nb_ref_kt +0.227, nb_ref_prior +0.196
+
+[redundant] experts ['chain', 'order2', 'order4']  [train 41s, redundancy 0s, test 37s]
+   solo bits/char: chain 2.229, order2 2.953, order4 3.129 | reference (shortest training code): chain
+   r_agree (pairwise, training slice):
+          chain: 0.00 0.40 0.67
+         order2: 0.40 0.00 0.47
+         order4: 0.67 0.47 0.00
+   r_cmi (normalised conditional MI of the argmax given the next character):
+          chain: 0.00 0.15 0.37
+         order2: 0.15 0.00 0.22
+         order4: 0.37 0.22 0.00
+   mean exponent at test (over positions where seen): agree chain 0.49, order2 0.54, order4 0.47 | cmi chain 0.66, order2 0.73, order4 0.63 | ref chain 1.00, order2 0.60, order4 0.33
+   mean SUM of exponents per position: nb 2.98, agree 1.49, cmi 2.00, ref 1.92 (geo 1.00)
+   bits/char online, held out: CHAIN alone 2.229 | linear 2.201 | product_kt 2.967 | geometric_kt 2.193 | nb_kt 3.227 | nb_prior 3.025 | nb_geo_kt 2.309 | nb_geo_prior 2.373 | nb_agree_kt 2.284 | nb_agree_prior 2.299 | nb_cmi_kt 2.477 | nb_cmi_prior 2.430 | nb_flat_kt 2.278 | nb_flat_prior 2.291 | nb_ref_kt 2.446 | nb_ref_prior 2.426
+   vs chain: linear -0.028, product_kt +0.739, geometric_kt -0.035, nb_kt +0.999, nb_prior +0.796, nb_geo_kt +0.080, nb_geo_prior +0.144, nb_agree_kt +0.055, nb_agree_prior +0.070, nb_cmi_kt +0.248, nb_cmi_prior +0.202, nb_flat_kt +0.049, nb_flat_prior +0.062, nb_ref_kt +0.217, nb_ref_prior +0.197
+
+[all18] experts ['chain', 'order1', 'order2', 'order3', 'order4', 'order5', 'order6', 'order7', 'order8', 'skip2', 'skip3', 'skip4', 'pair1_3', 'pair1_4', 'word', 'prevword', 'line', 'match']  [train 41s, redundancy 4s, test 48s]
+   solo bits/char: chain 2.229, order1 3.467, order2 2.953, order3 2.785, order4 3.129, order5 3.725, order6 4.195, order7 4.421, order8 4.485, skip2 3.926, skip3 4.155, skip4 4.244, pair1_3 3.175, pair1_4 3.382, word 3.245, prevword 4.361, line 3.552, match 3.247 | reference (shortest training code): chain
+   r_agree (pairwise, training slice):
+          chain: 0.00 0.26 0.40 0.54 0.67 0.78 0.86 0.92 1.00 0.21 0.18 0.17 0.35 0.30 0.61 0.76 0.25 0.45
+         order1: 0.26 0.00 0.43 0.32 0.28 0.26 0.25 0.25 0.26 0.24 0.28 0.28 0.45 0.53 0.38 0.18 0.89 0.27
+         order2: 0.40 0.43 0.00 0.57 0.47 0.41 0.38 0.37 0.37 0.32 0.23 0.22 0.42 0.39 0.54 0.36 0.41 0.30
+         order3: 0.54 0.32 0.57 0.00 0.67 0.56 0.51 0.48 0.47 0.27 0.22 0.20 0.50 0.37 0.65 0.49 0.32 0.34
+         order4: 0.67 0.28 0.47 0.67 0.00 0.73 0.64 0.59 0.57 0.24 0.20 0.19 0.42 0.37 0.68 0.64 0.28 0.40
+         order5: 0.78 0.26 0.41 0.56 0.73 0.00 0.78 0.71 0.67 0.23 0.19 0.18 0.38 0.34 0.65 0.73 0.26 0.49
+         order6: 0.86 0.25 0.38 0.51 0.64 0.78 0.00 0.84 0.78 0.22 0.19 0.18 0.36 0.32 0.63 0.78 0.25 0.67
+         order7: 0.92 0.25 0.37 0.48 0.59 0.71 0.84 0.00 0.88 0.22 0.19 0.18 0.35 0.32 0.62 0.79 0.25 0.64
+         order8: 1.00 0.26 0.37 0.47 0.57 0.67 0.78 0.88 0.00 0.23 0.20 0.19 0.35 0.32 0.62 0.79 0.26 0.63
+          skip2: 0.21 0.24 0.32 0.27 0.24 0.23 0.22 0.22 0.23 0.00 0.50 0.43 0.23 0.22 0.18 0.17 0.24 0.37
+          skip3: 0.18 0.28 0.23 0.22 0.20 0.19 0.19 0.19 0.20 0.50 0.00 0.58 0.27 0.25 0.17 0.14 0.27 0.41
+          skip4: 0.17 0.28 0.22 0.20 0.19 0.18 0.18 0.18 0.19 0.43 0.58 0.00 0.23 0.29 0.16 0.14 0.27 0.40
+        pair1_3: 0.35 0.45 0.42 0.50 0.42 0.38 0.36 0.35 0.35 0.23 0.27 0.23 0.00 0.43 0.41 0.28 0.44 0.28
+        pair1_4: 0.30 0.53 0.39 0.37 0.37 0.34 0.32 0.32 0.32 0.22 0.25 0.29 0.43 0.00 0.37 0.28 0.51 0.28
+           word: 0.61 0.38 0.54 0.65 0.68 0.65 0.63 0.62 0.62 0.18 0.17 0.16 0.41 0.37 0.00 0.37 0.36 0.38
+       prevword: 0.76 0.18 0.36 0.49 0.64 0.73 0.78 0.79 0.79 0.17 0.14 0.14 0.28 0.28 0.37 0.00 0.19 0.47
+           line: 0.25 0.89 0.41 0.32 0.28 0.26 0.25 0.25 0.26 0.24 0.27 0.27 0.44 0.51 0.36 0.19 0.00 0.27
+          match: 0.45 0.27 0.30 0.34 0.40 0.49 0.67 0.64 0.63 0.37 0.41 0.40 0.28 0.28 0.38 0.47 0.27 0.00
+   r_cmi (normalised conditional MI of the argmax given the next character):
+          chain: 0.00 0.12 0.15 0.24 0.37 0.53 0.67 0.80 1.00 0.10 0.05 0.05 0.12 0.09 0.39 0.61 0.11 0.24
+         order1: 0.12 0.00 0.34 0.19 0.14 0.13 0.12 0.13 0.15 0.13 0.06 0.05 0.32 0.38 0.24 0.19 0.79 0.07
+         order2: 0.15 0.34 0.00 0.34 0.22 0.17 0.15 0.15 0.16 0.29 0.07 0.08 0.22 0.21 0.38 0.22 0.29 0.09
+         order3: 0.24 0.19 0.34 0.00 0.38 0.25 0.20 0.19 0.19 0.18 0.08 0.07 0.26 0.16 0.48 0.30 0.17 0.10
+         order4: 0.37 0.14 0.22 0.38 0.00 0.44 0.32 0.27 0.26 0.14 0.06 0.06 0.17 0.15 0.49 0.43 0.13 0.14
+         order5: 0.53 0.13 0.17 0.25 0.44 0.00 0.53 0.42 0.38 0.12 0.06 0.06 0.14 0.12 0.45 0.54 0.12 0.20
+         order6: 0.67 0.12 0.15 0.20 0.32 0.53 0.00 0.63 0.54 0.11 0.06 0.06 0.13 0.11 0.42 0.62 0.12 0.36
+         order7: 0.80 0.13 0.15 0.19 0.27 0.42 0.63 0.00 0.71 0.11 0.07 0.07 0.13 0.11 0.42 0.64 0.13 0.32
+         order8: 1.00 0.15 0.16 0.19 0.26 0.38 0.54 0.71 0.00 0.12 0.08 0.08 0.14 0.13 0.43 0.64 0.14 0.32
+          skip2: 0.10 0.13 0.29 0.18 0.14 0.12 0.11 0.11 0.12 0.00 0.10 0.10 0.13 0.12 0.14 0.17 0.12 0.05
+          skip3: 0.05 0.06 0.07 0.08 0.06 0.06 0.06 0.07 0.08 0.10 0.00 0.06 0.12 0.07 0.06 0.13 0.06 0.03
+          skip4: 0.05 0.05 0.08 0.07 0.06 0.06 0.06 0.07 0.08 0.10 0.06 0.00 0.07 0.14 0.05 0.12 0.05 0.03
+        pair1_3: 0.12 0.32 0.22 0.26 0.17 0.14 0.13 0.13 0.14 0.13 0.12 0.07 0.00 0.21 0.24 0.19 0.28 0.07
+        pair1_4: 0.09 0.38 0.21 0.16 0.15 0.12 0.11 0.11 0.13 0.12 0.07 0.14 0.21 0.00 0.20 0.17 0.33 0.07
+           word: 0.39 0.24 0.38 0.48 0.49 0.45 0.42 0.42 0.43 0.14 0.06 0.05 0.24 0.20 0.00 0.30 0.22 0.16
+       prevword: 0.61 0.19 0.22 0.30 0.43 0.54 0.62 0.64 0.64 0.17 0.13 0.12 0.19 0.17 0.30 0.00 0.17 0.27
+           line: 0.11 0.79 0.29 0.17 0.13 0.12 0.12 0.13 0.14 0.12 0.06 0.05 0.28 0.33 0.22 0.17 0.00 0.07
+          match: 0.24 0.07 0.09 0.10 0.14 0.20 0.36 0.32 0.32 0.05 0.03 0.03 0.07 0.07 0.16 0.27 0.07 0.00
+   mean exponent at test (over positions where seen): agree chain 0.13, order1 0.16, order2 0.15, order3 0.14, order4 0.13, order5 0.13, order6 0.12, order7 0.11, order8 0.11, skip2 0.20, skip3 0.20, skip4 0.20, pair1_3 0.16, pair1_4 0.16, word 0.13, prevword 0.12, line 0.16, match 0.15 | cmi chain 0.22, order1 0.24, order2 0.25, order3 0.24, order4 0.23, order5 0.21, order6 0.19, order7 0.18, order8 0.16, skip2 0.34, skip3 0.50, skip4 0.50, pair1_3 0.28, pair1_4 0.29, word 0.19, prevword 0.16, line 0.25, match 0.35 | ref chain 1.00, order1 0.74, order2 0.60, order3 0.46, order4 0.33, order5 0.22, order6 0.14, order7 0.08, order8 0.00, skip2 0.79, skip3 0.82, skip4 0.83, pair1_3 0.65, pair1_4 0.70, word 0.39, prevword 0.24, line 0.75, match 0.55
+   mean SUM of exponents per position: nb 15.76, agree 2.41, cmi 4.39, ref 8.98 (geo 1.00)
+   bits/char online, held out: CHAIN alone 2.229 | linear 2.211 | product_kt 8.558 | geometric_kt 2.191 | nb_kt 62.450 | nb_prior 9.154 | nb_geo_kt 2.692 | nb_geo_prior 2.828 | nb_agree_kt 2.467 | nb_agree_prior 2.324 | nb_cmi_kt 6.722 | nb_cmi_prior 2.535 | nb_flat_kt 2.527 | nb_flat_prior 2.286 | nb_ref_kt 10.665 | nb_ref_prior 4.995
+   vs chain: linear -0.018, product_kt +6.329, geometric_kt -0.038, nb_kt +60.222, nb_prior +6.925, nb_geo_kt +0.463, nb_geo_prior +0.599, nb_agree_kt +0.238, nb_agree_prior +0.095, nb_cmi_kt +4.493, nb_cmi_prior +0.306, nb_flat_kt +0.298, nb_flat_prior +0.057, nb_ref_kt +8.436, nb_ref_prior +2.766
+
+total 276s -> C:\Users\julia\GitHub\predictive-coding-agent\experiments\ziplearn\research\expB_naive_bayes_product.json

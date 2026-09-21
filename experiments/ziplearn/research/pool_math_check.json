@@ -1,0 +1,98 @@
+{
+ "nested": {
+  "best_single": 0.3319863423443273,
+  "exact_posterior": 0.3319863423443273,
+  "linear_best_simplex": 0.3319863423443273,
+  "geometric_best_simplex_sum1": 0.3319863423443273,
+  "geometric_best_free_exponents": 0.3319863423443273,
+  "free_exponents": [
+   0.0,
+   0.0,
+   1.0
+  ],
+  "free_exponent_sum": 1.0,
+  "naive_bayes_product_exp1": 0.4741056220235705,
+  "e34_product_no_prior_division": 0.4741042905275791,
+  "lindley_lda_closed_form": 0.337311168496265,
+  "lindley_weights": [
+   -0.01,
+   -0.18,
+   1.6
+  ],
+  "partial_info_closed_form": 0.333322871749222,
+  "partial_info_weights_latent": [
+   -0.01,
+   0.09,
+   0.94
+  ],
+  "partial_info_delta": [
+   0.352,
+   0.651,
+   0.88
+  ]
+ },
+ "disjoint": {
+  "best_single": 0.8171642400150516,
+  "exact_posterior": 0.32702746081222056,
+  "linear_best_simplex": 0.7511349372180119,
+  "geometric_best_simplex_sum1": 0.717973493578787,
+  "geometric_best_free_exponents": 0.3309473635090291,
+  "free_exponents": [
+   3.0,
+   3.0,
+   3.0
+  ],
+  "free_exponent_sum": 9.0,
+  "naive_bayes_product_exp1": 0.4596013727078469,
+  "e34_product_no_prior_division": 0.4595256379629938,
+  "lindley_lda_closed_form": 0.35169600824112973,
+  "lindley_weights": [
+   3.01,
+   3.1,
+   3.24
+  ],
+  "partial_info_closed_form": 0.3270391399975849,
+  "partial_info_weights_latent": [
+   1.0,
+   1.0,
+   1.0
+  ],
+  "partial_info_delta": [
+   0.35,
+   0.302,
+   0.251
+  ]
+ },
+ "overlap": {
+  "best_single": 0.6068713681757697,
+  "exact_posterior": 0.326152718213521,
+  "linear_best_simplex": 0.5369613880653893,
+  "geometric_best_simplex_sum1": 0.47334580384825137,
+  "geometric_best_free_exponents": 0.3294703141817376,
+  "free_exponents": [
+   1.0,
+   1.0,
+   1.0
+  ],
+  "free_exponent_sum": 3.0,
+  "naive_bayes_product_exp1": 0.3294703141817376,
+  "e34_product_no_prior_division": 0.329243315806585,
+  "lindley_lda_closed_form": 0.3495532694191344,
+  "lindley_weights": [
+   1.11,
+   1.27,
+   1.2
+  ],
+  "partial_info_closed_form": 0.3261515039293925,
+  "partial_info_weights_latent": [
+   0.5,
+   0.5,
+   0.5
+  ],
+  "partial_info_delta": [
+   0.649,
+   0.55,
+   0.601
+  ]
+ }
+}

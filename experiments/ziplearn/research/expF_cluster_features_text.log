@@ -1,0 +1,55 @@
+Experiment F: 289123 training characters (4517 chunks of 64), 60000 held-out, alphabet 70, window +-3, mask schedule [0.0, 0.25, 0.5, 0.75, 1.0]
+   E35 SeqRule fitted (full windows: block1 263214, block2 197026)  [3s]
+   E35 SeqRule at mask 0.5: one shot 0.317, chain 0.306 over 29952 masked characters (E35 logged 0.320 / 0.309)
+   masked training rows: level 2 144454, level 1 72365; block-2 targets that are MASK: 0.501
+   level-2 keys + predictors (one shot and block 2 share the input level):
+      k-means k=256: 8 iters, 256 clusters used, last pass moved 778  [3s]
+      k-means k=1024: 8 iters, 1024 clusters used, last pass moved 445  [14s]
+      k-means k=4096: 8 iters, 4096 clusters used, last pass moved 40  [50s]
+      MI(position; target) bits: 0.098 0.200 0.427 0.000 0.429 0.205 0.097
+      k-means (MI-weighted) k=256: 8 iters, 256 used  [53s]
+      k-means (MI-weighted) k=1024: 8 iters, 1024 used  [63s]
+      k-means (MI-weighted) k=4096: 7 iters, 4096 used  [95s]
+      PCA 16 directions: variance 0.281 0.276 0.265 ... 0.048 (of 6 total one-hot variance at most)  [96s]
+      PCA 32 directions: variance 0.281 0.276 0.265 ... 0.034 (of 6 total one-hot variance at most)  [96s]
+      25 predictors fitted  [145s]
+   level-1 keys + predictors:
+      k-means k=256: 8 iters, 256 clusters used, last pass moved 1107  [1s]
+      k-means k=1024: 8 iters, 1024 clusters used, last pass moved 587  [7s]
+      k-means k=4096: 8 iters, 4096 clusters used, last pass moved 49  [29s]
+      MI(position; target) bits: 0.154 0.305 0.647 0.000 0.650 0.310 0.152
+      k-means (MI-weighted) k=256: 8 iters, 256 used  [30s]
+      k-means (MI-weighted) k=1024: 8 iters, 1024 used  [34s]
+      k-means (MI-weighted) k=4096: 8 iters, 4096 used  [47s]
+      PCA 16 directions: variance 0.200 0.200 0.198 ... 0.072 (of 6 total one-hot variance at most)  [47s]
+      PCA 32 directions: variance 0.200 0.200 0.198 ... 0.051 (of 6 total one-hot variance at most)  [47s]
+      25 predictors fitted  [59s]
+   evaluating 25 predictors on 29952 masked held-out characters ...
+   exact                one shot 0.317  chain 0.307 (block 2 filled 0.27 at 0.396)  levels: r3 0.54@0.261 | r2 0.37@0.383 | r1 0.08@0.387 | r0 0.00@0.500
+   km256                one shot 0.176  chain 0.176 (block 2 filled 0.00 at 1.000)  levels: km256 1.00@0.176
+   exact3>km256         one shot 0.232  chain 0.225 (block 2 filled 0.16 at 0.330)  levels: r3 0.54@0.261 | km256 0.46@0.197
+   exact3(n3)>km256     one shot 0.198  chain 0.187 (block 2 filled 0.05 at 0.316)  levels: r3 0.36@0.216 | km256 0.64@0.188
+   km-mi256             one shot 0.229  chain 0.236 (block 2 filled 0.00 at nan)  levels: km('mi', 256) 1.00@0.229
+   exact3>km-mi256      one shot 0.260  chain 0.259 (block 2 filled 0.16 at 0.329)  levels: r3 0.54@0.261 | km('mi', 256) 0.46@0.259
+   km1024               one shot 0.199  chain 0.195 (block 2 filled 0.00 at 0.618)  levels: km1024 1.00@0.199
+   exact3>km1024        one shot 0.240  chain 0.236 (block 2 filled 0.17 at 0.331)  levels: r3 0.54@0.261 | km1024 0.46@0.214
+   exact3(n3)>km1024    one shot 0.214  chain 0.206 (block 2 filled 0.06 at 0.317)  levels: r3 0.36@0.216 | km1024 0.64@0.212
+   km-mi1024            one shot 0.266  chain 0.270 (block 2 filled 0.01 at 0.916)  levels: km('mi', 1024) 1.00@0.266
+   exact3>km-mi1024     one shot 0.282  chain 0.279 (block 2 filled 0.17 at 0.352)  levels: r3 0.54@0.261 | km('mi', 1024) 0.46@0.307
+   km4096               one shot 0.233  chain 0.214 (block 2 filled 0.03 at 0.503)  levels: km4096 1.00@0.233
+   exact3>km4096        one shot 0.258  chain 0.246 (block 2 filled 0.19 at 0.345)  levels: r3 0.54@0.261 | km4096 0.46@0.254
+   exact3(n3)>km4096    one shot 0.239  chain 0.222 (block 2 filled 0.08 at 0.366)  levels: r3 0.36@0.216 | km4096 0.64@0.252
+   km-mi4096            one shot 0.291  chain 0.284 (block 2 filled 0.04 at 0.639)  levels: km('mi', 4096) 1.00@0.291
+   exact3>km-mi4096     one shot 0.297  chain 0.287 (block 2 filled 0.19 at 0.368)  levels: r3 0.54@0.261 | km('mi', 4096) 0.46@0.339
+   km-hier              one shot 0.258  chain 0.246 (block 2 filled 0.19 at 0.345)  levels: r3 0.54@0.261 | km4096 0.46@0.254
+   km-mi-hier           one shot 0.297  chain 0.287 (block 2 filled 0.19 at 0.368)  levels: r3 0.54@0.261 | km('mi', 4096) 0.46@0.339
+   pca16                one shot 0.184  chain 0.164 (block 2 filled 0.04 at 0.230)  levels: pca16_16 0.99@0.185 | pca16_14 0.01@0.134 | pca16_12 0.00@0.136 | pca16_10 0.00@0.133 | pca16_8 0.00@0.000
+   exact3>pca16         one shot 0.229  chain 0.204 (block 2 filled 0.20 at 0.311)  levels: r3 0.54@0.261 | pca16_16 0.45@0.192 | pca16_14 0.01@0.134 | pca16_12 0.00@0.136 | pca16_10 0.00@0.133 | pca16_8 0.00@0.000
+   pca32                one shot 0.213  chain 0.184 (block 2 filled 0.33 at 0.237)  levels: pca32_32 0.74@0.232 | pca32_30 0.03@0.153 | pca32_28 0.04@0.154 | pca32_26 0.04@0.147 | pca32_24 0.03@0.163 | pca32_22 0.03@0.150 | pca32_20 0.03@0.152 | pca32_18 0.03@0.187 | pca32_16 0.02@0.179 | pca32_14 0.01@0.134 | pca32_12 0.00@0.136 | pca32_10 0.00@0.133 | pca32_8 0.00@0.000
+   exact3>pca32         one shot 0.223  chain 0.193 (block 2 filled 0.37 at 0.249)  levels: r3 0.54@0.261 | pca32_32 0.20@0.205 | pca32_30 0.03@0.153 | pca32_28 0.04@0.154 | pca32_26 0.04@0.147 | pca32_24 0.03@0.163 | pca32_22 0.03@0.150 | pca32_20 0.03@0.152 | pca32_18 0.03@0.187 | pca32_16 0.02@0.179 | pca32_14 0.01@0.134 | pca32_12 0.00@0.136 | pca32_10 0.00@0.133 | pca32_8 0.00@0.000
+   nb                   one shot 0.309  chain 0.307 (block 2 filled 0.08 at 0.702)
+   exact3>nb            one shot 0.309  chain 0.301 (block 2 filled 0.23 at 0.429)  levels: r3 0.54@0.261 | nb 0.46@0.367
+   exact32>nb           one shot 0.320  chain 0.310 (block 2 filled 0.29 at 0.404)  levels: r3 0.54@0.261 | r2 0.37@0.383 | nb 0.08@0.425
+
+Experiment F: best one shot exact32>nb 0.320 vs exact 0.317 (E35 SeqRule 0.317); chain 0.310 vs 0.307  [227s]
+exit 0

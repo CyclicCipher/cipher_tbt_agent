@@ -1,0 +1,54 @@
+{
+ "ex48_V70": {
+  "p_max(symbol 1)": 0.6,
+  "geo_simplex(symbol 1)": 0.9942656667437265,
+  "entropy_components": [
+   0.9779486826861529,
+   0.977948682686153
+  ],
+  "entropy_geo_simplex": 0.06292423285959313,
+  "bits_if_symbol1_true": {
+   "best_expert": 0.7369655941662062,
+   "geo": 0.008296704987470016
+  }
+ },
+ "binary_simplex_geo_exceeds_pmax_count": 0,
+ "disjoint_Sw_two_scales": {
+  "bits_exact": 0.3300309703666896,
+  "bits_probit_pool": 0.3300309703666896,
+  "probit_exponents": [
+   2.55,
+   2.646,
+   2.739
+  ],
+  "probit_Sw": 7.933873855386813,
+  "logit_pool_same_exponents_bits": 0.3326431423259498,
+  "logit_pool_best_common_scale": 1.0499999999999998,
+  "logit_Sw_at_best_scale": 8.330567548156152,
+  "logit_pool_best_bits": 0.33209323910973554,
+  "satopaa_weights_conditional_expectation_scale": [
+   1.003,
+   0.998,
+   1.003
+  ],
+  "satopaa_Sw": 3.0034507153763386,
+  "pool_math_check_free_grid_cap_per_exponent": 3.0
+ },
+ "remark47_per_symbol_only": {
+  "bits_per_symbol": {
+   "expert_A": 1.6755372202734393,
+   "expert_B": 1.6755372202734393,
+   "fixed_share_linear": 0.04969554091546949
+  }
+ },
+ "arithmetic": {
+  "-log2(0.98)": 0.029146345659516508,
+  "KT_unseen_N1_V70": 0.013888888888888888,
+  "dominance_price_global_63_over_60k": 9.962133205833195e-05,
+  "dominance_price_per_context_36x42_over_60k": 0.0032353904536672564,
+  "mattern_book1_gap_rel_GEO": 0.04566003616636527,
+  "mattern_book1_gap_rel_BETA": 0.04366623432771292,
+  "mattern_avg_gap_rel_GEO": 0.03566529492455432,
+  "mattern_avg_gap_rel_BETA": 0.03443708609271536
+ }
+}

@@ -1,0 +1,88 @@
+expD: 289123 training characters (spread over 15 books), 60000 held out; V = 70
+   training pass done [28s]
+   20000 test characters [17s]
+   40000 test characters [34s]
+   60000 test characters [53s]
+
+baselines (bits/char, online, 60000 held-out chars after 289123 training chars): chain 2.030, linear Bayesian 2.021, geometric w/ Bayesian exponents 2.001, raw product 7.872
+mean number of ACTIVE experts (context seen): all 16.05 of 18, nonnested 9.20 of 10
+solo bits/char: chain 2.03 (seen 1.00), order1 3.42 (seen 1.00), order2 2.84 (seen 1.00), order3 2.61 (seen 1.00), order4 2.90 (seen 0.98), order5 3.47 (seen 0.93), order6 3.98 (seen 0.81), order7 4.27 (seen 0.65), order8 4.39 (seen 0.48), skip2 3.88 (seen 1.00), skip3 4.11 (seen 1.00), skip4 4.21 (seen 1.00), pair1_3 3.07 (seen 1.00), pair1_4 3.28 (seen 1.00), word 3.01 (seen 0.91), prevword 4.31 (seen 0.29), line 3.52 (seen 1.00), match 3.12 (seen 1.00)
+
+MAIN GRID  e_m = g(N_m) / n_active^q   (bits/char | entropy | mean total exponent mass)
+  subset=all       chain=deepest
+    g=N/(N+2)        q=0   8.214|H 0.34|m 14.47   q=0.5 2.662|H 1.27|m 3.61   q=1   2.728|H 4.02|m 0.90
+    g=N/(N+8)        q=0   7.785|H 0.40|m 13.14   q=0.5 2.649|H 1.44|m 3.28   q=1   2.903|H 4.27|m 0.82
+    g=N/(N+32)       q=0   7.360|H 0.49|m 11.66   q=0.5 2.680|H 1.69|m 2.91   q=1   3.128|H 4.52|m 0.73
+    g=1[N>0]         q=0   8.764|H 0.29|m 16.05   q=0.5 2.713|H 1.11|m 4.00   q=1   2.554|H 3.73|m 1.00
+    g=KT N/(N+35)    q=0   7.334|H 0.50|m 11.57   q=0.5 2.683|H 1.71|m 2.89   q=1   3.144|H 4.54|m 0.72
+  subset=all       chain=full   
+    g=N/(N+2)        q=0   8.469|H 0.32|m 14.89   q=0.5 2.693|H 1.20|m 3.71   q=1   2.620|H 3.81|m 0.93
+    g=N/(N+8)        q=0   8.171|H 0.36|m 13.82   q=0.5 2.681|H 1.31|m 3.45   q=1   2.707|H 3.90|m 0.86
+    g=N/(N+32)       q=0   7.770|H 0.43|m 12.52   q=0.5 2.675|H 1.48|m 3.13   q=1   2.845|H 4.05|m 0.78
+    g=1[N>0]         q=0   8.764|H 0.29|m 16.05   q=0.5 2.713|H 1.11|m 4.00   q=1   2.554|H 3.73|m 1.00
+    g=KT N/(N+35)    q=0   7.741|H 0.43|m 12.43   q=0.5 2.675|H 1.49|m 3.11   q=1   2.855|H 4.06|m 0.78
+  subset=nonnested chain=deepest
+    g=N/(N+2)        q=0   5.575|H 0.64|m 8.56   q=0.5 2.664|H 1.78|m 2.82   q=1   2.828|H 3.81|m 0.93
+    g=N/(N+8)        q=0   5.501|H 0.73|m 8.07   q=0.5 2.734|H 1.96|m 2.66   q=1   2.988|H 4.03|m 0.88
+    g=N/(N+32)       q=0   5.459|H 0.83|m 7.57   q=0.5 2.828|H 2.15|m 2.50   q=1   3.157|H 4.23|m 0.82
+    g=1[N>0]         q=0   5.733|H 0.56|m 9.20   q=0.5 2.614|H 1.58|m 3.03   q=1   2.643|H 3.52|m 1.00
+    g=KT N/(N+35)    q=0   5.457|H 0.83|m 7.54   q=0.5 2.834|H 2.17|m 2.49   q=1   3.167|H 4.24|m 0.82
+  subset=nonnested chain=full   
+    g=N/(N+2)        q=0   5.720|H 0.58|m 8.97   q=0.5 2.630|H 1.62|m 2.96   q=1   2.668|H 3.55|m 0.98
+    g=N/(N+8)        q=0   5.699|H 0.60|m 8.75   q=0.5 2.648|H 1.66|m 2.88   q=1   2.700|H 3.58|m 0.95
+    g=N/(N+32)       q=0   5.645|H 0.64|m 8.43   q=0.5 2.669|H 1.73|m 2.78   q=1   2.754|H 3.63|m 0.92
+    g=1[N>0]         q=0   5.733|H 0.56|m 9.20   q=0.5 2.614|H 1.58|m 3.03   q=1   2.643|H 3.52|m 1.00
+    g=KT N/(N+35)    q=0   5.639|H 0.64|m 8.41   q=0.5 2.670|H 1.74|m 2.77   q=1   2.758|H 3.64|m 0.92
+
+TEMPERATURE  e_m = T g(N_m)/sum g   (bits/char per T = 0.5, 1, 1.5, 2, 3)
+  subset=all       chain=deepest
+    g=N/(N+2)        3.658  2.591  2.271  2.224  2.432
+    g=N/(N+8)        3.671  2.639  2.341  2.306  2.530
+    g=N/(N+32)       3.686  2.718  2.454  2.435  2.681
+    g=1[N>0]         3.639  2.554  2.218  2.161  2.354
+    g=KT N/(N+35)    3.687  2.725  2.463  2.445  2.692
+  subset=all       chain=full   
+    g=N/(N+2)        3.564  2.529  2.233  2.199  2.420
+    g=N/(N+8)        3.510  2.531  2.271  2.253  2.496
+    g=N/(N+32)       3.470  2.566  2.340  2.339  2.601
+    g=1[N>0]         3.639  2.554  2.218  2.161  2.354
+    g=KT N/(N+35)    3.468  2.569  2.345  2.345  2.608
+  subset=nonnested chain=deepest
+    g=N/(N+2)        3.624  2.753  2.505  2.480  2.712
+    g=N/(N+8)        3.711  2.851  2.607  2.587  2.828
+    g=N/(N+32)       3.786  2.952  2.722  2.712  2.969
+    g=1[N>0]         3.510  2.643  2.397  2.372  2.601
+    g=KT N/(N+35)    3.790  2.959  2.730  2.720  2.979
+  subset=nonnested chain=full   
+    g=N/(N+2)        3.490  2.643  2.410  2.395  2.637
+    g=N/(N+8)        3.477  2.651  2.431  2.423  2.677
+    g=N/(N+32)       3.469  2.669  2.463  2.464  2.729
+    g=1[N>0]         3.510  2.643  2.397  2.372  2.601
+    g=KT N/(N+35)    3.468  2.671  2.465  2.467  2.733
+
+BAYES x CONF  e_m = T w_m g(N_m)/sum w g   (bits/char per T)
+  subset=all      
+    g=N/(N+2)        2.439  2.005  2.024  2.195  2.712
+    g=N/(N+8)        2.482  2.018  2.021  2.180  2.678
+    g=N/(N+32)       2.594  2.064  2.034  2.168  2.629
+    g=1[N>0]         2.420  2.001  2.028  2.205  2.732
+    g=KT N/(N+35)    2.604  2.069  2.036  2.168  2.626
+  subset=nonnested
+    g=N/(N+2)        2.422  2.014  2.051  2.238  2.785
+    g=N/(N+8)        2.456  2.025  2.048  2.224  2.754
+    g=N/(N+32)       2.551  2.063  2.055  2.208  2.703
+    g=1[N>0]         2.405  2.011  2.055  2.246  2.802
+    g=KT N/(N+35)    2.560  2.067  2.057  2.208  2.700
+
+best 8 variants:
+   2.001  bayes_x_conf subset=all       chain=deepest g=1[N>0]         T=1   entropy 2.21  mass 1.00
+   2.005  bayes_x_conf subset=all       chain=deepest g=N/(N+2)        T=1   entropy 2.24  mass 1.00
+   2.011  bayes_x_conf subset=nonnested chain=deepest g=1[N>0]         T=1   entropy 2.19  mass 1.00
+   2.014  bayes_x_conf subset=nonnested chain=deepest g=N/(N+2)        T=1   entropy 2.21  mass 1.00
+   2.018  bayes_x_conf subset=all       chain=deepest g=N/(N+8)        T=1   entropy 2.29  mass 1.00
+   2.021  bayes_x_conf subset=all       chain=deepest g=N/(N+8)        T=1.5   entropy 1.71  mass 1.50
+   2.024  bayes_x_conf subset=all       chain=deepest g=N/(N+2)        T=1.5   entropy 1.68  mass 1.50
+   2.025  bayes_x_conf subset=nonnested chain=deepest g=N/(N+8)        T=1   entropy 2.25  mass 1.00
+
+[train 28s, test 53s, total 81s]
+saved C:\Users\julia\GitHub\predictive-coding-agent\experiments\ziplearn\research\expD_confidence_exponents.json

@@ -1,0 +1,72 @@
+Experiment C (SSE as a count table): 300000 training characters (the first of the concatenated books), 60000 held-out characters (the start of De Bello Civili); V = 70; B = 24 buckets on stretch [-10, 6]
+   18 SSE tables, 9 averages, 3 stacks, one pass
+   training slice done (300000 chars) [92s]
+   chain alone: 2.2288 bits/char online  [144s]
+   chain + SSE, bits/char at lam = 1/2 / 3/4 / 1 (gain at 3/4 vs the chain):
+      conf_cls           2.1838 / 2.1806 / 2.1872   (+0.0482)
+      cls_deep_interp    2.1875 / 2.1822 / 2.1805   (+0.0466)
+      prev_interp        2.1884 / 2.1827 / 2.1809   (+0.0461)
+      prev_deep          2.1879 / 2.1866 / 2.1965   (+0.0422)
+      conf_interp        2.1926 / 2.1873 / 2.1865   (+0.0415)
+      prev               2.1910 / 2.1884 / 2.1915   (+0.0405)
+      cls_deep           2.1904 / 2.1884 / 2.1919   (+0.0404)
+      prev_fresh         2.1879 / 2.1892 / 2.2138   (+0.0396)
+      prev_cap1024       2.1917 / 2.1909 / 2.2026   (+0.0380)
+      cls                2.1941 / 2.1922 / 2.1949   (+0.0366)
+      conf               2.1958 / 2.1942 / 2.1992   (+0.0346)
+      cls_deep_fresh     2.1930 / 2.1944 / 2.2126   (+0.0344)
+      cls_deep_cap1024   2.1944 / 2.1945 / 2.2065   (+0.0343)
+      char               2.1995 / 2.1984 / 2.2037   (+0.0304)
+      conf_cap1024       2.2047 / 2.2058 / 2.2226   (+0.0230)
+      deep               2.2063 / 2.2063 / 2.2100   (+0.0225)
+      none               2.2094 / 2.2097 / 2.2131   (+0.0191)
+      conf_fresh         2.2073 / 2.2145 / 2.2591   (+0.0143)
+   average of two:
+      conf_cls+prev      2.1860 / 2.1818 / 2.1830   (+0.0470)
+      conf_cls+char      2.1871 / 2.1821 / 2.1820   (+0.0467)
+      prev_deep+char     2.1894 / 2.1853 / 2.1860   (+0.0435)
+      conf+prev          2.1912 / 2.1873 / 2.1880   (+0.0415)
+      cls_deep+prev      2.1902 / 2.1874 / 2.1896   (+0.0414)
+      cls_deep+conf      2.1909 / 2.1875 / 2.1890   (+0.0413)
+      cls_deep+char      2.1911 / 2.1875 / 2.1884   (+0.0413)
+      prev+char          2.1918 / 2.1880 / 2.1884   (+0.0408)
+      conf+char          2.1948 / 2.1914 / 2.1923   (+0.0374)
+   two-stage:
+      cls_deep>char      2.1791 / 2.1793 / 2.1827   (+0.0495)
+      cls_deep>conf      2.1839 / 2.1847 / 2.1888   (+0.0441)
+      cls_deep>prev      2.1876 / 2.1894 / 2.1940   (+0.0394)
+   calibration of the chain at the end (context `none`; bucket: stretch_lo, n, mean raw p -> empirical rate):
+      b 0 st>=-10.00 n= 17710312 raw 0.00001 -> rate 0.00011  (under-confident x0.05)
+      b 1 st>= -9.33 n=   670128 raw 0.00013 -> rate 0.00080  (under-confident x0.16)
+      b 2 st>= -8.67 n=   641125 raw 0.00024 -> rate 0.00101  (under-confident x0.24)
+      b 3 st>= -8.00 n=   605114 raw 0.00048 -> rate 0.00140  (under-confident x0.34)
+      b 4 st>= -7.33 n=   579444 raw 0.00093 -> rate 0.00204  (under-confident x0.45)
+      b 5 st>= -6.67 n=   568089 raw 0.00181 -> rate 0.00304  (under-confident x0.59)
+      b 6 st>= -6.00 n=   565521 raw 0.00351 -> rate 0.00492  (under-confident x0.71)
+      b 7 st>= -5.33 n=   572250 raw 0.00682 -> rate 0.00804  (under-confident x0.85)
+      b 8 st>= -4.67 n=   592014 raw 0.01321 -> rate 0.01371  (under-confident x0.96)
+      b 9 st>= -4.00 n=   639545 raw 0.02551 -> rate 0.02419  (over-confident x1.05)
+      b10 st>= -3.33 n=   673172 raw 0.04810 -> rate 0.04288  (over-confident x1.12)
+      b11 st>= -2.67 n=   579499 raw 0.08835 -> rate 0.07412  (over-confident x1.19)
+      b12 st>= -2.00 n=   370294 raw 0.15611 -> rate 0.13947  (over-confident x1.12)
+      b13 st>= -1.33 n=   204360 raw 0.26438 -> rate 0.26795  (under-confident x0.99)
+      b14 st>= -0.67 n=   108542 raw 0.40839 -> rate 0.44648  (under-confident x0.91)
+      b15 st>=  0.00 n=    49626 raw 0.57068 -> rate 0.64744  (under-confident x0.88)
+      b16 st>=  0.67 n=    27052 raw 0.72476 -> rate 0.81103  (under-confident x0.89)
+      b17 st>=  1.33 n=    15777 raw 0.83549 -> rate 0.89085  (under-confident x0.94)
+      b18 st>=  2.00 n=     9058 raw 0.90779 -> rate 0.93983  (under-confident x0.97)
+      b19 st>=  2.67 n=     4730 raw 0.95028 -> rate 0.96533  (under-confident x0.98)
+      b20 st>=  3.33 n=     3042 raw 0.97406 -> rate 0.98192  (under-confident x0.99)
+      b21 st>=  4.00 n=     2166 raw 0.98668 -> rate 0.99400  (under-confident x0.99)
+      b22 st>=  4.67 n=     1871 raw 0.99315 -> rate 0.99893  (under-confident x0.99)
+      b23 st>=  5.33 n=     7269 raw 0.99871 -> rate 0.99835  (over-confident x1.00)
+   the same by deepest order (mean raw p -> rate for the buckets with p >= 0.15, i.e. b12+, n >= 50):
+      deep 1: 0.15->0.15  0.26->0.23  0.41->0.22  0.59->0.32
+      deep 2: 0.16->0.15  0.26->0.25  0.40->0.35  0.57->0.53  0.71->0.76  0.84->0.59  0.91->0.71
+      deep 3: 0.16->0.15  0.26->0.26  0.40->0.39  0.57->0.58  0.72->0.75  0.83->0.76  0.91->0.93  0.95->0.99  0.97->0.97  0.99->0.99  0.99->1.00  1.00->1.00
+      deep 4: 0.16->0.15  0.26->0.27  0.41->0.42  0.57->0.60  0.72->0.76  0.83->0.85  0.91->0.95  0.95->0.97  0.97->1.00  0.99->0.99  0.99->1.00  1.00->1.00
+      deep 5: 0.16->0.15  0.26->0.27  0.41->0.44  0.57->0.63  0.72->0.79  0.83->0.89  0.91->0.95  0.95->0.98  0.97->0.99  0.99->1.00  0.99->1.00  1.00->1.00
+      deep 6: 0.16->0.14  0.26->0.27  0.41->0.46  0.57->0.66  0.72->0.81  0.83->0.89  0.91->0.94  0.95->0.97  0.97->0.99  0.99->1.00  0.99->1.00  1.00->1.00
+      deep 7: 0.16->0.13  0.26->0.27  0.41->0.46  0.57->0.65  0.72->0.82  0.84->0.91  0.91->0.94  0.95->0.96  0.97->0.99  0.99->1.00  0.99->1.00  1.00->1.00
+      deep 8: 0.16->0.12  0.26->0.26  0.41->0.47  0.57->0.69  0.73->0.84  0.84->0.90  0.91->0.94  0.95->0.96  0.97->0.98  0.99->0.99  0.99->1.00  1.00->1.00
+   saved C:\Users\julia\GitHub\predictive-coding-agent\experiments\ziplearn\research\expC_sse_refinement.json
