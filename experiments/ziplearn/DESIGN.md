@@ -746,6 +746,16 @@ first; bits = length × log₂ actions) → execute → the next states are new 
 would be cheaper through such an action is a reason to *try* it. That is exploration as the outer objective's own
 demand, with the inner objective paying it back in bits: OPEN-11.
 
+**E10 — acting to learn (pre-registered 2026-09-20, late; OPEN-11).** E9's environment; the agent starts knowing four
+actions (3 observations each) and never having seen three; a stream of goals reachable with all seven, some unreachable
+with the known four. Before planning each goal it may spend up to 2 tries (execute an action to see what it does;
+every executed action, try or plan step, is an observation). Policies for the tries: none; random; least observed
+(count-based novelty); **price** — the action with the largest expected plan-bit saving for the current goal over the
+hypotheses its partial description still allows, minus the try's own cost, and only if positive. Measures: goals
+reached within a 6-step budget; mean steps to goal (failures count as the budget); goals until all seven actions are
+described. Pass: price reaches at least as many goals as random and least-observed with fewer mean steps. Refute:
+price worse than random.
+
 **OPEN-10** — when the map is too large to search: what to cache (a cost-to-go per state, or per description?), and
 whether the cache is itself a written structure. **OPEN-11** — acting to learn: the price of trying an unknown
 action against the bits its description would save. **OPEN-12** — goals that are relations, not states ("make the

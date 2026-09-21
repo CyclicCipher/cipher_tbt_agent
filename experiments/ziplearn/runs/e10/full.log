@@ -1,0 +1,11 @@
+E10: 5 streams of 40 goals; known at start ['rot_left', 'swap_pairs', 'inc', 'negate']; up to 2 tries per goal; step budget 6
+
+policy                          reached  mean steps   goals until all 7 described   tries  on unknown
+none                              0.620        3.56                         never     0.0         0.0
+random                            0.850        4.50                          13.2    77.8         5.8
+least observed                    0.830        4.62                           4.6    76.6         6.4
+least observed (until known)      0.910        2.30                           3.6     6.6         6.6
+price (this goal)                 0.705        3.17                         never     2.6         2.6
+price (horizon)                   0.955        2.17                           8.4     7.4         7.4
+
+E10 verdict: price (this goal) REFUTED; price (horizon) PASS

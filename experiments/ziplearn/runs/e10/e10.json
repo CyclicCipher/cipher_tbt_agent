@@ -1,0 +1,90 @@
+{
+ "none": {
+  "reached": 0.62,
+  "mean_steps": 3.56,
+  "goals_until_all_known": [
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "tries": 0.0,
+  "tries_on_unknown": 0.0,
+  "described": 3.8
+ },
+ "random": {
+  "reached": 0.85,
+  "mean_steps": 4.505,
+  "goals_until_all_known": [
+   10,
+   4,
+   16,
+   24,
+   12
+  ],
+  "tries": 77.8,
+  "tries_on_unknown": 5.8,
+  "described": 7.0
+ },
+ "least observed": {
+  "reached": 0.8299999999999998,
+  "mean_steps": 4.62,
+  "goals_until_all_known": [
+   3,
+   4,
+   3,
+   8,
+   5
+  ],
+  "tries": 76.6,
+  "tries_on_unknown": 6.4,
+  "described": 7.0
+ },
+ "least observed (until known)": {
+  "reached": 0.9099999999999999,
+  "mean_steps": 2.3,
+  "goals_until_all_known": [
+   3,
+   3,
+   4,
+   3,
+   5
+  ],
+  "tries": 6.6,
+  "tries_on_unknown": 6.6,
+  "described": 7.0
+ },
+ "price (this goal)": {
+  "reached": 0.705,
+  "mean_steps": 3.1700000000000004,
+  "goals_until_all_known": [
+   null,
+   null,
+   null,
+   null,
+   null
+  ],
+  "tries": 2.6,
+  "tries_on_unknown": 2.6,
+  "described": 4.8
+ },
+ "price (horizon)": {
+  "reached": 0.9550000000000001,
+  "mean_steps": 2.1700000000000004,
+  "goals_until_all_known": [
+   4,
+   12,
+   10,
+   10,
+   6
+  ],
+  "tries": 7.4,
+  "tries_on_unknown": 7.4,
+  "described": 7.0
+ },
+ "verdict": {
+  "price (this goal)": "REFUTED",
+  "price (horizon)": "PASS"
+ }
+}
