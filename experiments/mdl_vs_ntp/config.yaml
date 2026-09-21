@@ -12,3 +12,4 @@ curriculum_mix: 0.1     # uniform share in the curriculum arms (G6 fallback: 0.2
 proposer_warm_start: 0  # G3 fallback: 200 supervised P-format steps for every library arm
 library_source: model   # model = the plan's REINFORCE proposer; miner = the 20-minute variant (quick.py)
 te_per_s: 348000        # measured ntp throughput, used by quick.py to size its budget
+batch: 64

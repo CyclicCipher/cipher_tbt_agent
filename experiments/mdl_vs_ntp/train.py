@@ -46,7 +46,7 @@ ARMS = {
     "curio":        ("curio",   True,  "mdl",      True,  "disjoint"),
     "mdl_insample": ("gain",    True,  "mdl",      True,  "insample"),
 }
-BATCH, N_BUFFER = 64, 16
+BATCH, N_BUFFER = 64, 16                    # overridden from config `batch` in Run.__init__; buffer share stays 1/4
 PROBE_POS = probe_positions()
 
 
@@ -58,6 +58,9 @@ def load_config():
 class Run:
     def __init__(self, args, cfg):
         self.args, self.cfg = args, cfg
+        global BATCH, N_BUFFER
+        BATCH = int(cfg.get("batch", 64))
+        N_BUFFER = BATCH // 4
         self.arm = args.arm
         self.sampling, self.do_wake, self.target, self.has_lib, self.scoring = ARMS[self.arm]
         self.dev = cfg.get("device") or ("cuda" if torch.cuda.is_available() else "cpu")
