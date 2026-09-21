@@ -39,6 +39,7 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E25 | measured | the trace diagnostic: discovery is 2/3 revisits; errors are missed changes from the 'unchanged' default; pushes too rare; goal keys too specific |
 | E26 | measured | looped transformer: untied growth 2→4 gives 13/17 trained and held-out accuracy 0.12–0.20 (vanilla 8/17, 0.03); held-out solved still 0/8 |
 | E27 | REFUTED on discovery, 9/16 levels | exploration valued in bits over whole plans; Tetris L0 solved; discovery is coverage-bound, unchanged |
+| E28 | PASS | the rules learned on LockPath, written into one looped attention block, reproduce the planner's rollouts 530/530 (509/509 seed 1); the nearest-key default beats 'unchanged' on unknown windows |
 
 ## Format
 
@@ -733,3 +734,36 @@ changed: exploration is now §16's price of ignorance over frames, not a first-u
          distinct frames as the coverage measure. What would actually cut discovery is not a better walk but a
          smaller room to cover — a prior over where goals are, learned across levels (E19's keys do this once a
          goal is known, not before) — or a goal that announces itself (a relation, E17). Left as the next question.
+
+### 2026-09-21 — E28 — the written looped block: the rules learned on LockPath written into one attention block, looped once per action, reproduce the planner's rollouts exactly (530/530, 509/509) and beat its default on unknown windows
+command: `python experiments/ziplearn/e28.py` (seed 0; `--seed 1 --out runs/e28/seed1`); CPU, about 1 minute each
+files:   `experiments/ziplearn/runs/e28/e28.json`, `runs/e28/seed1/e28.json`; code `e28.py` (`WrittenSim`), `Attn.causal` in `transformers/h1_lid.py`, `play(..., return_player=True)` in `arcgames.py`
+numbers: the rules after playing levels 0–1 with sleep (levels solved in 93 and 31 actions, both seeds — the player is deterministic):
+         ACTION1 3 cells 36 entries, ACTION2 3 cells 32 entries (radius 2), ACTION3 3 cells 36 entries, ACTION4 2 cells 17 entries;
+         the union of their masks is the four neighbours. The block: d = 128, 4 gather heads (one per neighbour) + 1 lookup
+         head, 121 memory tokens (one per entry) + 2 null tokens, up to 88 cell tokens; every weight written from the tables,
+         none trained. Random plans of 1–4 actions from 40 random-walk states per level, judged by snapshot/restore in
+         the true game:
+         — plans whose every window was known to the table: written block = planner's own rollout **300/300, 230/230**
+           (seed 0; 277/277, 232/232 seed 1) at every plan length 1–4; written = truth exactly where the planner = truth
+           (level 1: 186/230 — the planner's known-window errors are the hidden key state, and the block reproduces them);
+         — plans that met an unknown window (level 1: 70 and 58; level 2, never played: 300 and 300): the block's default,
+           the NEAREST stored window, matched the truth 39/70 and 56/58 on level 1 and 246/300 and 276/300 on level 2, against the
+           planner's "unchanged" default 23/70, 43/58, 222/300, 264/300 — better in all four;
+         — colour codes that were not one-hot before the boundary re-quantisation (ties between equally near entries): 1434, 1475.
+verdict: PASS (pre-registered ≥ 0.98: 1.000). ZipLearner's world model runs as a looped transformer block: the
+         table is a key/value memory, the frame is the sequence, a neighbour is a written coordinate permutation, one
+         pass is one action, the loop count is the plan's length, and the action is the per-pass anchor. What the block
+         adds that the table did not have is a DEFAULT for the unseen — attention has no "no entry", it lands on the
+         nearest key — and that default is better than the planner's on every level measured, including a level the
+         rules were never learned on. Two defects on the way, both leaks of the written scheme rather than of the
+         idea: the null token's colour leaked into the memory entries' keys (they now attend to a second, empty null),
+         and the re-quantisation read its own zeroed view. Not measured: the block as the planner's search inside
+         `Player` (it is a drop-in for `LocalRule.predict` but slower on CPU than the dict), and rules over larger masks
+         (the radius-2 rule survived sleep with 3 cells; a 25-cell mask would be 24 heads).
+changed: §16's "a plan is an n-layer written network" is now one block looped n times (E26's substrate), and OPEN-8's
+         written attention has its second form (E18 the induction head; E28 the world model). Open: (1) the nearest-key
+         default is a free generalisation the description-length account does not price — its cost is the exceptions it
+         will produce, to be learned by the same rule as everything else; (2) the sleep pass's masks give the heads;
+         what gives the loop count when there is no plan — thinking without acting — is the E26 question in the
+         written form.

@@ -159,6 +159,7 @@ class Attn(nn.Module):
     def __init__(self, d_model, n_head, pos, n_zero=0):
         super().__init__()
         self.h, self.hd, self.pos, self.n_zero = n_head, d_model // n_head, pos, n_zero
+        self.causal = True                                # a written simulator over a grid sets this False (E28)
         self.qkv = nn.Linear(d_model, 3 * d_model)
         self.proj = nn.Linear(d_model, d_model)
         if pos == "pope":
@@ -193,7 +194,7 @@ class Attn(nn.Module):
         # every block of every step (3 blocks x 3200 steps = ~9600 allocations of each), which is pure overhead for a model
         # this small. `scale` is passed explicitly because PoPE doubles the query width to 2*hd and SDPA would otherwise
         # rescale by the wrong dimension, silently changing the attention temperature between schemes.
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=True, scale=1.0 / math.sqrt(self.hd))
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=self.causal, scale=1.0 / math.sqrt(self.hd))
         return self.proj(y.transpose(1, 2).reshape(B, T, C))
 
 

@@ -397,7 +397,7 @@ def crop_box(frame):
     return (max(0, i0 - m), max(0, j0 - m), min(frame.shape[0], i1 + 1 + m), min(frame.shape[1], j1 + 1 + m))
 
 
-def play(env, budget_per_level=200, max_levels=None, seed=0, verbose=False, sleep=False, trace=None):
+def play(env, budget_per_level=200, max_levels=None, seed=0, verbose=False, sleep=False, trace=None, return_player=False):
     """`trace`, if a list, receives one record per step: what the player saw, chose, expected and got."""
     """Drive one Environment with a Player. Returns per-level results and the player's statistics."""
     fd = env.reset()
@@ -475,4 +475,6 @@ def play(env, budget_per_level=200, max_levels=None, seed=0, verbose=False, slee
         r["model"] = {a.name: {"radius": player.models[a].best().r if player.models[a].n_obs else None,
                                "windows": len(player.models[a].best().table) if player.models[a].n_obs else 0}
                       for a in player.actions}
+    if return_player:
+        return results, player.stats, player
     return results, player.stats

@@ -1,0 +1,300 @@
+{
+ "rules": {
+  "ACTION1": {
+   "radius": 1,
+   "cells": 3,
+   "entries": 36
+  },
+  "ACTION2": {
+   "radius": 2,
+   "cells": 3,
+   "entries": 32
+  },
+  "ACTION3": {
+   "radius": 1,
+   "cells": 3,
+   "entries": 36
+  },
+  "ACTION4": {
+   "radius": 1,
+   "cells": 2,
+   "entries": 17
+  }
+ },
+ "play": [
+  {
+   "level": 0,
+   "solved": true,
+   "actions": 93,
+   "sleep": {
+    "ACTION1": {
+     "1": {
+      "bits_before": 536.0,
+      "bits_after": 104.0,
+      "cells": 3
+     },
+     "2": {
+      "bits_before": 1848.0,
+      "bits_after": 128.0,
+      "cells": 3
+     }
+    },
+    "ACTION2": {
+     "1": {
+      "bits_before": 472.0,
+      "bits_after": 156.0,
+      "cells": 4
+     },
+     "2": {
+      "bits_before": 1508.0,
+      "bits_after": 96.0,
+      "cells": 3
+     }
+    },
+    "ACTION3": {
+     "1": {
+      "bits_before": 488.0,
+      "bits_after": 104.0,
+      "cells": 3
+     },
+     "2": {
+      "bits_before": 2004.0,
+      "bits_after": 104.0,
+      "cells": 3
+     }
+    },
+    "ACTION4": {
+     "1": {
+      "bits_before": 416.0,
+      "bits_after": 44.0,
+      "cells": 2
+     },
+     "2": {
+      "bits_before": 1784.0,
+      "bits_after": 44.0,
+      "cells": 2
+     }
+    }
+   },
+   "model": {
+    "ACTION1": {
+     "radius": 1,
+     "windows": 36
+    },
+    "ACTION2": {
+     "radius": 2,
+     "windows": 32
+    },
+    "ACTION3": {
+     "radius": 1,
+     "windows": 36
+    },
+    "ACTION4": {
+     "radius": 1,
+     "windows": 17
+    }
+   }
+  },
+  {
+   "level": 1,
+   "solved": true,
+   "actions": 31,
+   "sleep": {
+    "ACTION1": {
+     "1": {
+      "bits_before": 144.0,
+      "bits_after": 144.0,
+      "cells": 3
+     },
+     "2": {
+      "bits_before": 152.0,
+      "bits_after": 152.0,
+      "cells": 3
+     }
+    },
+    "ACTION2": {
+     "1": {
+      "bits_before": 230.7,
+      "bits_after": 230.7,
+      "cells": 4
+     },
+     "2": {
+      "bits_before": 128.0,
+      "bits_after": 128.0,
+      "cells": 3
+     }
+    },
+    "ACTION3": {
+     "1": {
+      "bits_before": 151.2,
+      "bits_after": 151.2,
+      "cells": 3
+     },
+     "2": {
+      "bits_before": 151.2,
+      "bits_after": 151.2,
+      "cells": 3
+     }
+    },
+    "ACTION4": {
+     "1": {
+      "bits_before": 78.1,
+      "bits_after": 78.1,
+      "cells": 2
+     },
+     "2": {
+      "bits_before": 78.1,
+      "bits_after": 78.1,
+      "cells": 2
+     }
+    }
+   },
+   "model": {
+    "ACTION1": {
+     "radius": 1,
+     "windows": 36
+    },
+    "ACTION2": {
+     "radius": 2,
+     "windows": 32
+    },
+    "ACTION3": {
+     "radius": 1,
+     "windows": 36
+    },
+    "ACTION4": {
+     "radius": 1,
+     "windows": 17
+    }
+   }
+  }
+ ],
+ "d": 128,
+ "heads": 4,
+ "offsets": [
+  [
+   -1,
+   0
+  ],
+  [
+   1,
+   0
+  ],
+  [
+   0,
+   -1
+  ],
+  [
+   0,
+   1
+  ]
+ ],
+ "memory_tokens": 121,
+ "ties": 1434,
+ "levels": {
+  "0": {
+   "n": 300,
+   "known": 300,
+   "wp_known": 300,
+   "wp_all": 300,
+   "wt_known": 300,
+   "pt_known": 300,
+   "wt_unk": 0,
+   "pt_unk": 0,
+   "wp_unk": 0,
+   "skipped": 0,
+   "by_len": {
+    "1": [
+     75,
+     75
+    ],
+    "2": [
+     76,
+     76
+    ],
+    "3": [
+     69,
+     69
+    ],
+    "4": [
+     80,
+     80
+    ]
+   },
+   "playfield": [
+    7,
+    9
+   ]
+  },
+  "1": {
+   "n": 300,
+   "known": 230,
+   "wp_known": 230,
+   "wp_all": 279,
+   "wt_known": 186,
+   "pt_known": 186,
+   "wt_unk": 39,
+   "pt_unk": 23,
+   "wp_unk": 49,
+   "skipped": 0,
+   "by_len": {
+    "1": [
+     61,
+     61
+    ],
+    "2": [
+     63,
+     63
+    ],
+    "3": [
+     56,
+     56
+    ],
+    "4": [
+     50,
+     50
+    ]
+   },
+   "playfield": [
+    7,
+    11
+   ]
+  },
+  "2": {
+   "n": 300,
+   "known": 0,
+   "wp_known": 0,
+   "wp_all": 265,
+   "wt_known": 0,
+   "pt_known": 0,
+   "wt_unk": 246,
+   "pt_unk": 222,
+   "wp_unk": 265,
+   "skipped": 0,
+   "by_len": {
+    "1": [
+     0,
+     0
+    ],
+    "2": [
+     0,
+     0
+    ],
+    "3": [
+     0,
+     0
+    ],
+    "4": [
+     0,
+     0
+    ]
+   },
+   "playfield": [
+    8,
+    11
+   ]
+  }
+ },
+ "verdict": "PASS",
+ "ratio": 1.0
+}

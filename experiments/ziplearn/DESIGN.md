@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
 *v0.6, 2026-09-21 (v0.1–v0.5 on 2026-09-20; v0.6 records E14–E18: capacity, precision, order dependence, blocks across
-layers, relational goals, written attention). E0–E27 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
+layers, relational goals, written attention). E0–E28 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -471,6 +471,16 @@ frame the model can predict: whole plans valued in bits (unknown windows to lear
 visited frame worth the remaining budget spread over the unvisited frames in reach; untested predictions worth the
 rule's exception rate), less the plan's cost. Pass: fewer discovery actions than E25 at no loss of levels; refute: more.
 
+**E28 — the written looped block (pre-registered 2026-09-21; OPEN-8, §16 item 1).** The `LocalRule` tables learned on
+LockPath (levels 0–1, with sleep) written into one attention block with no training: the entries as memory tokens
+(window colours per offset, action, outcome), the frame's cells as tokens with one-hot coordinates; a gather layer
+(one head per mask offset, query = the cell's coordinates permuted by the offset) and a lookup layer (query = the
+window and the action, keys = the entries, value = new colour minus old); looped once per action of a plan, the action
+as the per-pass anchor, the boundary operator clears the gathered subspaces and re-quantises the colour. Pass: the
+block's rollouts equal the planner's on ≥ 0.98 of random 1–4-action plans whose windows were all known; refute:
+< 0.9. Reported: agreement with the true game, and the block's nearest-key default against the planner's
+"unchanged" on plans that met unknown windows.
+
 ## 12. Open questions
 
 **OPEN-1 — the outer objective (deferred by request, recorded here verbatim in substance).** ZipLearner learns a
@@ -524,6 +534,7 @@ changed) are in `RESULTS.md`, appended and never edited.
 | E25 | measured | the trace diagnostic: discovery is 2/3 revisits; errors are missed changes from the 'unchanged' default; pushes too rare; goal keys too specific |
 | E26 | measured | looped transformer: untied growth 2→4 gives 13/17 trained and held-out accuracy 0.12–0.20 (vanilla 8/17, 0.03); held-out solved still 0/8 |
 | E27 | REFUTED on discovery, 9/16 levels | exploration valued in bits over whole plans; Tetris L0 solved; discovery is coverage-bound, unchanged |
+| E28 | PASS | the rules learned on LockPath, written into one looped attention block, reproduce the planner's rollouts 530/530 (509/509 seed 1); the nearest-key default beats 'unchanged' on unknown windows |
 
 ## 14. Glossary
 
@@ -591,7 +602,10 @@ be plugged in without changing the machinery.
 1. *A map — states joined by actions.* Each action is a structure (what it does to a state), and actions chain. E7/E8
    found that the library already holds this map: the named permutations form a group reachable from three
    generators, and a word in the generators is a path through it. **A plan is a word.** Read as a network, a plan of n
-   actions is an n-layer written network whose routes are the order of the actions; executing it is the forward pass.
+   actions is an n-layer written network whose routes are the order of the actions; executing it is the forward pass. *E28
+   built it as ONE block looped n times (E26's substrate): the rule table as memory tokens, the frame as the sequence,
+   a neighbour as a written coordinate permutation, the action as the per-pass anchor — exact agreement with the
+   planner's rollouts, and a nearest-key default for windows never seen that beats "unchanged".*
 2. *An inverse — from a wanted change to the action that causes it.* Free for bijective structures (apply S⁻¹); for
    actions that are not bijections, one more matrix from state-difference to action, learned by counting (§4).
 3. *A goal slot and a price for plans.* A goal is a description in the model's own language — a target state, or a
@@ -624,6 +638,7 @@ output the reverse of the input"), and goals over the library ("find a shorter w
 - `experiments/ziplearn/RESULTS.md` — the results log (append-only), with the summary table mirrored in §13.
 - `experiments/ziplearn/arcgames.py`, `play_games.py` — the interface to the replica games (`src/tasks/games`) and the harness (E13).
 - `experiments/ziplearn/e0.py` … `e11.py`, `anatomy.py`, `jspace.py` — the experiments of §11, one file each; outputs in `runs/e*/`.
+- `experiments/ziplearn/e28.py` — `WrittenSim`: the learned rules of a game written into one looped attention block (E28).
 - `experiments/ziplearn/refs/` — reference notes (`attention_residuals.md`) and the paper PDF.
 - `experiments/transformers/h1_lid.py` — the transformer substrate: PoPE (+ the withdrawn `--n_zero`), attention residuals
   (`AttnRes`, `--res attnres|attnres_full`), `Model.routes`, `--json`.
