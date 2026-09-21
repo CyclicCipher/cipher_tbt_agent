@@ -190,6 +190,11 @@ class ActionModel:
     def sleep(self):
         return {r: rule.sleep() for r, rule in self.rules.items()}
 
+    def exception_rate(self):
+        st = self.best().stats.values()
+        right, wrong = sum(s[0] for s in st), sum(s[1] for s in st)
+        return wrong / (right + wrong) if right + wrong else 0.0
+
 
 class GoalModel:
     """Win and death keys: the windows around the cells that changed at a scoring / fatal transition. Each key keeps
@@ -249,6 +254,8 @@ class Player:
         self.plan = []
         self.expect_win = self.expect_win_at_end = False
         self.last_choice = None
+        self.remaining = 100                                             # the level's remaining action budget
+        self.trans = {}                                                  # (frame key, action) -> the observed next frame
         self.stats = dict(predictions=0, correct=0, unknown_cells=0, cells=0, replans=0, explore_plans=0, goal_plans=0)
 
     def frame_key(self, frame):
@@ -266,18 +273,26 @@ class Player:
     def observe(self, action, before, after, outcome):
         if outcome != "win":                                  # a winning move's after-frame is the next level: not seen
             self.models[action].observe(before, after)
+            self.trans[(self.frame_key(before), action)] = after.copy()    # a transition seen is a transition known
         if outcome in ("win", "death"):
             self.goal.record(action, before, after, outcome, recent=self.last_changed)
         self.last_changed = set(zip(*np.nonzero(before != after)))
         self.visited.add(self.frame_key(after))
 
     def predict(self, action, frame):
+        """The observed successor when this exact transition has been seen (exact, nothing to learn); otherwise the
+        model's prediction and how many windows it had never seen."""
+        known = self.trans.get((self.frame_key(frame), action))
+        if known is not None:
+            return known, 0
         pred, unknown = self.models[action].predict(frame)
         return pred, unknown
 
     def search(self, frame, want_goal):
-        """Breadth-first over predicted frames. want_goal: a (frame, action) the goal model predicts to win; otherwise
-        the nearest frame with unknown windows under some action, or never visited."""
+        """Breadth-first over predicted frames to a (frame, action) the goal model predicts to win, avoiding predicted
+        deaths. With want_goal False, defers to `explore`."""
+        if not want_goal:
+            return self.explore(frame)
         start_key = self.frame_key(frame)
         seen = {start_key: []}
         frontier = deque([(frame, [])])
@@ -290,22 +305,69 @@ class Player:
                 nodes += 1
                 if self.goal.predicts("death", a, f):
                     continue
-                if want_goal and self.goal.predicts("win", a, f):
+                if self.goal.predicts("win", a, f):
                     return path + [a], "goal"
                 pred, unknown = self.predict(a, f)
-                if pred is None or unknown:                      # an effect not yet described: bits to learn
-                    if not want_goal:
-                        return path + [a], "explore"
-                    if pred is None:
-                        continue
+                if pred is None:
+                    continue
                 k = self.frame_key(pred)
                 if k in seen:
                     continue
                 seen[k] = path + [a]
-                if not want_goal and k not in self.visited:      # a frame never visited: novelty
-                    return path + [a], "explore"
                 frontier.append((pred, path + [a]))
         return None, None
+
+    def explore(self, frame):
+        """E27: exploration as the price of ignorance over the whole reachable set the model can predict. Every
+        frame the search reaches is valued in bits -- the windows that would be learned by acting there (unknown
+        windows x log2 V, for actions whose rule is not mostly refuted: the noisy-TV filter) plus one entry's worth
+        for a frame never visited -- less the plan's cost (its length x log2 actions). The best value wins; a
+        visited frame with nothing to learn is worth nothing and is never a target. Plans are whole paths, not the
+        first step to the nearest unknown."""
+        bits_action = math.log2(max(2, len(self.actions)))
+        learnable = [a for a in self.actions if self.models[a].n_obs == 0 or self.models[a].exception_rate() < 0.5]
+        start_key = self.frame_key(frame)
+        seen = {start_key: []}
+        frontier = deque([(frame, [])])
+        candidates = []                                                  # (plan, info bits, reaches a new frame)
+        nodes = 0
+        while frontier and nodes < self.max_nodes:
+            f, path = frontier.popleft()
+            for a in self.actions:
+                nodes += 1
+                if self.goal.predicts("death", a, f):
+                    continue
+                pred, unknown = self.predict(a, f)
+                if pred is None or unknown:                          # doing THIS here is information: a complete plan
+                    if a in learnable:
+                        candidates.append((path + [a], (unknown if pred is not None else f.size) * math.log2(V), False))
+                    if pred is None:
+                        continue
+                elif (self.frame_key(f), a) not in self.trans and a in learnable:
+                    # predicted from a rule but never observed here: worth testing in proportion to the rule's own
+                    # exception rate -- untested predictions are the model's remaining uncertainty once nothing is
+                    # unknown, and they are what keeps the explorer from oscillating between two known frames
+                    candidates.append((path + [a], max(0.02, self.models[a].exception_rate()) * math.log2(V), False))
+                k = self.frame_key(pred)
+                if k in seen:
+                    continue
+                seen[k] = path + [a]
+                candidates.append((path + [a], 0.0, k not in self.visited))
+                if len(path) + 1 < self.max_depth:
+                    frontier.append((pred, path + [a]))
+        if not candidates:
+            return None, None
+        # Under an unknown goal every never-visited frame is equally likely to hold it, so reaching one is worth the
+        # bits the rest of the level would cost, spread over the unvisited frames in reach: the last unvisited frame
+        # is worth everything, and a far one is still worth the walk when nothing nearer is new.
+        n_new = sum(1 for _p, _i, new in candidates if new)
+        novelty_bits = (self.remaining * bits_action / max(1, n_new)) if not self.goal.known() else math.log2(V)
+
+        def value(c):
+            path, info, new = c
+            return info + (novelty_bits if new else 0.0) - len(path) * bits_action
+        best = max(candidates, key=value)                                 # the budget is spent either way: the best
+        return best[0], "explore"                                        # plan is taken even at a negative value
 
     def choose(self, frame):
         if self.plan:
@@ -348,6 +410,7 @@ def play(env, budget_per_level=200, max_levels=None, seed=0, verbose=False, slee
     n_levels = env.game.level_count if max_levels is None else min(max_levels, env.game.level_count)
     while env.state not in (GameState.WIN,) and level < n_levels:
         frame = np.array(fd.grid, dtype=np.int16)[box[0]:box[2], box[1]:box[3]]
+        player.remaining = max(1, budget_per_level - used)
         a = player.choose(frame)
         pred, _unknown = player.predict(a, frame)
         rec = None
@@ -372,7 +435,7 @@ def play(env, budget_per_level=200, max_levels=None, seed=0, verbose=False, slee
                 results[-1]["sleep"] = {a: {str(r): dict(bits_before=round(b, 1), bits_after=round(af, 1), cells=c)
                                             for r, (b, af, c) in rr.items()} for a, rr in rep.items()}
             level, used = env.level, 0
-            player.plan, player.visited = [], set()
+            player.plan, player.visited, player.trans = [], set(), {}
             if env.state != GameState.WIN:
                 box = crop_box(after_full)
             continue

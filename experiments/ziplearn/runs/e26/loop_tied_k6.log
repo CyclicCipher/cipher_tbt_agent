@@ -1,0 +1,32 @@
+W0920 23:23:10.487000 40632 Lib\site-packages\torch\_inductor\utils.py:1679] [0/0] Not enough SMs to use max_autotune_gemm mode
+device cuda | pos=rope n_zero=0 res=loop loops=6 untied=0 grow_at=0.0 opt=adamw | 17 trained, 8 held out | K=8 steps=3200
+primitive training weight: reverse=0.035, rot_left=0.188, rot_right=0.015, swap_pairs=1.000, swap_halves=0.434, inc=0.082, negate=0.007
+trained in 194s | final train loss 0.0575
+
+SANITY: the model solves 9/17 TRAINED compositions to criterion (mean final acc 0.54)
+
+LOCAL familiarity (mean error on TRAINED compositions containing it; lower = more in-distribution)
+   swap_halves  weight 0.434   local error 0.0996
+   rot_left     weight 0.188   local error 0.1058
+   swap_pairs   weight 1.000   local error 0.3037
+   rot_right    weight 0.015   local error 0.9839
+   reverse      weight 0.035   local error 1.1660
+   inc          weight 0.082   local error 1.1974
+   negate       weight 0.007   local error 2.0298
+
+HELD-OUT compositions — global novelty is IDENTICAL for all of them (none was ever trained)
+   composition                worst local err   trials  final acc
+   rot_right>swap_pairs                0.9839        8       0.05
+   swap_pairs>rot_right                0.9839        8       0.09
+   reverse>rot_left                    1.1660        8       0.05
+   reverse>swap_pairs                  1.1660        8       0.00
+   swap_halves>inc                     1.1974        8       0.00
+   swap_halves>negate                  2.0298        8       0.00
+   rot_right>negate                    2.0298        8       0.00
+   rot_left>negate                     2.0298        8       0.00
+
+PRIMARY  Spearman(worst local error, trials-to-criterion) = +0.000   over 8 held-out tasks
+   !! EVERY held-out task is CENSORED at the context limit, so the primary measure carries no information.
+      A rank correlation over identical values says nothing about LID -- it says the model is too weak.
+   SECONDARY  Spearman(worst local error, FINAL accuracy) = -0.796   (graded, so it can still separate the tasks)
+      Reported as secondary BECAUSE the primary was censored -- not chosen after seeing which one looked better.

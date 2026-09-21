@@ -2,6 +2,7 @@
  "CollectAll": {
   "0": {
    "actions": 80,
+   "distinct_frames": 25,
    "spent": {
     "discovery": 80
    },
@@ -74,6 +75,7 @@
   },
   "1": {
    "actions": 23,
+   "distinct_frames": 21,
    "spent": {
     "exploratory": 22,
     "goal-directed": 1
@@ -149,6 +151,7 @@
   },
   "2": {
    "actions": 34,
+   "distinct_frames": 34,
    "spent": {
     "exploratory": 32,
     "goal-directed": 2
@@ -217,6 +220,7 @@
  "LockPath": {
   "0": {
    "actions": 87,
+   "distinct_frames": 20,
    "spent": {
     "discovery": 87
    },
@@ -289,6 +293,7 @@
   },
   "1": {
    "actions": 25,
+   "distinct_frames": 23,
    "spent": {
     "exploratory": 23,
     "goal-directed": 2
@@ -354,6 +359,7 @@
   },
   "2": {
    "actions": 150,
+   "distinct_frames": 111,
    "spent": {
     "exploratory": 149,
     "goal-directed": 1
@@ -430,6 +436,7 @@
  "MultiKey": {
   "0": {
    "actions": 77,
+   "distinct_frames": 19,
    "spent": {
     "discovery": 77
    },
@@ -502,6 +509,7 @@
   },
   "1": {
    "actions": 25,
+   "distinct_frames": 19,
    "spent": {
     "discovery": 19,
     "exploratory": 5,
@@ -586,6 +594,7 @@
  "Sokoban": {
   "0": {
    "actions": 150,
+   "distinct_frames": 34,
    "spent": {
     "discovery": 150
    },
@@ -665,6 +674,7 @@
  "Tetris": {
   "0": {
    "actions": 142,
+   "distinct_frames": 24,
    "spent": {
     "discovery": 142
    },
@@ -748,6 +758,7 @@
  "Toggle": {
   "0": {
    "actions": 71,
+   "distinct_frames": 17,
    "spent": {
     "discovery": 71
    },

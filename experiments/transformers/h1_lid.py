@@ -288,6 +288,54 @@ class Model(nn.Module):
         return {n: [round(float(a), 3) for a in m.last] for n, m in mixers}
 
 
+class LoopedModel(nn.Module):
+    """A looped transformer after Chen, Vegesna, Dahal & Wilson (arXiv:2609.19107; their MIT-licensed code at
+    github.com/qlabs-eng/scaling-exponents, models/transformer.py): prelude block(s) -> a CORE applied K times ->
+    coda block(s). Between core passes the stream is RMS-normalised and the prelude's output (the "anchor") is
+    re-injected, x <- norm(x) + alpha * anchor, and once more before the coda -- the boundary operator, which stops the
+    residual stream growing with depth and keeps every pass conditioned on the input. `tied`: one core applied K
+    times (weights shared); untied: K distinct cores (a deeper plain stack with the operator). `active_k` may be
+    raised during training (model growth); untied growth copies core j % previous into the new cores."""
+
+    def __init__(self, d_model=96, n_head=4, max_len=256, pos="rope", n_vocab=V, loops=4, tied=True, n_prelude=1, n_coda=1,
+                 alpha=1.0, res="std", n_zero=0):
+        super().__init__()
+        self.emb = nn.Embedding(n_vocab, d_model)
+        self.pos = nn.Parameter(torch.randn(1, max_len, d_model) * 0.02) if pos == "learned" else None
+        self.prelude = nn.ModuleList([Block(d_model, n_head, pos, "std", n_zero) for _ in range(n_prelude)])
+        self.cores = nn.ModuleList([Block(d_model, n_head, pos, "std", n_zero) for _ in range(1 if tied else loops)])
+        self.coda = nn.ModuleList([Block(d_model, n_head, pos, "std", n_zero) for _ in range(n_coda)])
+        self.norm = nn.LayerNorm(d_model)
+        self.head = nn.Linear(d_model, n_vocab)
+        self.alpha = nn.Parameter(torch.tensor(float(alpha)))
+        self.loops, self.tied, self.active_k = loops, tied, loops
+
+    def grow(self, new_k):
+        """Model growth: run more passes from now on; untied cores are copy-initialised from the trained ones."""
+        if not self.tied:
+            prev = self.active_k
+            for j in range(prev, new_k):
+                src, dst = self.cores[j % prev], self.cores[j]
+                for ps, pd in zip(src.parameters(), dst.parameters()):
+                    pd.data.copy_(ps.data)
+        self.active_k = new_k
+
+    def forward(self, tok):
+        h = self.emb(tok)
+        if self.pos is not None:
+            h = h + self.pos[:, :tok.shape[1]]
+        for b in self.prelude:
+            h = b(h)
+        anchor = h
+        for k in range(self.active_k):
+            core = self.cores[0] if self.tied else self.cores[k]
+            h = core(h)
+            h = F.rms_norm(h, (h.shape[-1],)) + self.alpha * anchor      # the boundary operator, every pass
+        for b in self.coda:
+            h = b(h)
+        return self.head(self.norm(h))
+
+
 def out_mask(K, dev):
     """True at positions holding an OUTPUT digit — the only places a prediction is scored."""
     m = torch.zeros(K * 2 * L, dtype=torch.bool, device=dev)
@@ -380,8 +428,12 @@ def main():
     p.add_argument("--pos", default="learned", choices=["learned", "rope", "pope"],
                    help="positional scheme: learned-absolute, RoPE, or PoPE (arXiv:2509.10534)")
     p.add_argument("--n_zero", type=int, default=0, help="PoPE only: channels per head with no position (content-only)")
-    p.add_argument("--res", default="std", choices=["std", "attnres", "attnres_full"],
-                   help="residual scheme: plain sum, or attention residuals (arXiv:2603.15031) per block / per sub-layer")
+    p.add_argument("--res", default="std", choices=["std", "attnres", "attnres_full", "loop"],
+                   help="residual scheme: plain sum, attention residuals (arXiv:2603.15031) per block / per sub-layer, or "
+                        "a looped transformer with a boundary operator (arXiv:2609.19107; --loops, --untied, --grow_at)")
+    p.add_argument("--loops", type=int, default=4, help="loop: core passes (final count if growing)")
+    p.add_argument("--untied", type=int, default=0, help="loop: 1 = distinct core weights per pass")
+    p.add_argument("--grow_at", type=float, default=0.0, help="loop: fraction of training at which passes double to --loops (0 = no growth)")
     p.add_argument("--json", default="", help="also write the headline numbers (and the learned routes) to this file")
     p.add_argument("--save", default="", help="save the trained model's state_dict here (for the E8b Jacobian analysis)")
     args = p.parse_args()
@@ -389,11 +441,17 @@ def main():
     torch.manual_seed(args.seed)
 
     train, test, probs, weights = build_tasks(args.seed)
-    print(f"device {dev} | pos={args.pos} n_zero={args.n_zero} res={args.res} opt={args.opt} | {len(train)} trained, "
-          f"{len(test)} held out | K={args.k} steps={args.steps}")
+    print(f"device {dev} | pos={args.pos} n_zero={args.n_zero} res={args.res}"
+          + (f" loops={args.loops} untied={args.untied} grow_at={args.grow_at}" if args.res == "loop" else "")
+          + f" opt={args.opt} | {len(train)} trained, {len(test)} held out | K={args.k} steps={args.steps}")
     print("primitive training weight: " + ", ".join(f"{n}={w:.3f}" for n, w in zip(NAMES, weights.tolist())))
 
-    model = Model(max_len=args.k * 2 * L + 2, pos=args.pos, res=args.res, n_zero=args.n_zero).to(dev)
+    if args.res == "loop":
+        model = LoopedModel(max_len=args.k * 2 * L + 2, pos=args.pos, loops=args.loops, tied=not args.untied, n_zero=args.n_zero).to(dev)
+        if args.grow_at > 0:
+            model.active_k = max(1, args.loops // 2)
+    else:
+        model = Model(max_len=args.k * 2 * L + 2, pos=args.pos, res=args.res, n_zero=args.n_zero).to(dev)
     # AURORA (github.com/tilde-research/aurora-release, vendored in `aurora.py`) is a MUON variant: it orthogonalises the
     # momentum before applying it, and for TALL matrices additionally balances the update across ROWS. Following Muon
     # practice it takes only the 2D HIDDEN weights; embeddings, the output head and every 1D parameter (LayerNorm, biases)
@@ -423,6 +481,9 @@ def main():
     amp = torch.autocast("cuda", dtype=torch.bfloat16, enabled=(args.bf16 and dev == "cuda"))
     t0 = time.time()
     for step in range(args.steps):
+        if args.res == "loop" and args.grow_at > 0 and step == int(args.grow_at * args.steps):
+            model.grow(args.loops)                                             # model growth: double the passes
+            print(f"  grew to {args.loops} core passes at step {step}", flush=True)
         tok, _ = make_batch(args.batch, args.k, train, probs, dev, g)
         with amp:
             logits = trainer(tok)[:, :-1]
@@ -486,7 +547,7 @@ def main():
 
     if args.json:
         routes = None
-        if args.res != "std":
+        if args.res in ("attnres", "attnres_full"):
             tok, _ = make_batch(64, args.k, train, probs, dev, g)
             routes = model.routes(tok)
             print("\nLEARNED ROUTES (mean attention-residual weight per source; sources = [embedding, block 1, block 2, ...])")

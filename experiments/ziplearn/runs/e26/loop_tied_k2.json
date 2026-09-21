@@ -1,0 +1,25 @@
+{
+ "pos": "rope",
+ "n_zero": 0,
+ "res": "loop",
+ "steps": 3200,
+ "seed": 0,
+ "trained_solved": 10,
+ "n_trained": 17,
+ "trained_mean_acc": 0.5893841911764706,
+ "held_solved": 0,
+ "n_held": 8,
+ "held_mean_acc": 0.068603515625,
+ "held_trials": [
+  8,
+  8,
+  8,
+  8,
+  8,
+  8,
+  8,
+  8
+ ],
+ "routes": null,
+ "train_loss": 0.05638665333390236
+}

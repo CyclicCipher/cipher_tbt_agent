@@ -37,6 +37,8 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E19 | PASS (outcome) | goal keys priced by outcome (confirmed vs refuted): LockPath's door level solved, CollectAll 3/3, 8/16 levels (E13: 5/16) |
 | E24 | PASS | the sleep pass: rules keep 2–4 of 9 context cells, ~10× fewer bits, next levels solved 2–3× faster; lossless of the evidence, or it forgets what the planner needs |
 | E25 | measured | the trace diagnostic: discovery is 2/3 revisits; errors are missed changes from the 'unchanged' default; pushes too rare; goal keys too specific |
+| E26 | measured | looped transformer: untied growth 2→4 gives 13/17 trained and held-out accuracy 0.12–0.20 (vanilla 8/17, 0.03); held-out solved still 0/8 |
+| E27 | REFUTED on discovery, 9/16 levels | exploration valued in bits over whole plans; Tetris L0 solved; discovery is coverage-bound, unchanged |
 
 ## Format
 
@@ -684,3 +686,50 @@ verdict: none (a measurement). What hindsight would have to learn, in order of a
          over-specific description, found by comparing what was predicted with what happened — which is what the
          trace now records at every step.
 changed: nothing in the design; the next builds are ranked by the numbers above.
+
+### 2026-09-21 — E26 — the looped transformer on the composition task: growth with untied cores is the best gradient arm we have had (13/17 trained, held-out accuracy 0.12–0.20 vs 0.03), still 0/8 held-out solved
+command: `python experiments/ziplearn/e26.py` (RoPE, 3200 steps, seed 0, E0's task and budget; the `LoopedModel` in `transformers/h1_lid.py`, built after Chen et al. arXiv:2609.19107 and their MIT-licensed `models/transformer.py`; GPU, ~15 min)
+files:   `experiments/ziplearn/runs/e26/summary.json`, per-cell JSON and logs; code `h1_lid.LoopedModel`, `--res loop --loops K --untied --grow_at`, `e26.py`
+numbers: trained compositions solved / mean accuracy / held-out solved / held-out mean accuracy —
+         vanilla d3 (E0) 8/17 / 0.52 / 0/8 / 0.03;  tied K = 2 (executed depth 4, three blocks' parameters) 10/17 / 0.59 / 0/8 / 0.07;
+         tied K = 4 (depth 6) 9/17 / 0.56 / 0/8 / 0.07;  tied K = 6 (depth 8) 9/17 / 0.54 / 0/8 / 0.02;  untied K = 4
+         (a six-block stack with the boundary operator) 10/17 / **0.69** / 0/8 / **0.20**;  tied growth 2 → 4 at half
+         of training 10/17 / 0.65 / 0/8 / 0.07;  **untied growth 2 → 4: 13/17 / 0.76 / 0/8 / 0.12**, final loss 0.042
+         (vanilla 0.061). Wall-clock per cell 95–207 s (executed depth costs).
+verdict: consistent with the paper's ordering on our task: growth beats a fixed depth, untied beats tied, and the
+         boundary operator alone (tied K = 2 is three blocks with the operator between passes) already beats vanilla.
+         Held-out compositions are still never solved to criterion, but their mean accuracy rose from 0.03 to 0.12–0.20
+         with untied depth — the first movement on that number since the LID experiments (transformers/NOTES.md). One
+         seed, so the ranking among the loop cells (K = 2, 4, 6 within 0.05 of each other) is not established; the gap
+         between vanilla and the growth/untied cells (0.52 → 0.69–0.76 trained, 0.03 → 0.12–0.20 held-out) is larger
+         than E0's seed-to-seed spread.
+changed: the gradient arm gains a looped substrate. Not built: ZipLearner writing a looped block (see the chat note of
+         2026-09-21: rules as an attention key/value memory, the loop count as the plan depth, the anchor as the goal).
+
+### 2026-09-21 — E27 — the exploration fix: value every reachable frame in bits, plan whole paths, remember transitions; 9 of 16 levels, Tetris's first level solved, discovery itself unchanged (coverage-bound)
+command: `python experiments/ziplearn/play_games.py --budget 150 --sleep 1 --trace 1 --out experiments/ziplearn/runs/e27` then `diagnose.py --runs runs/e27` (all six games; CPU, ~2 min)
+files:   `experiments/ziplearn/runs/e27/play.json`, `trace_*.json`, `diagnosis.json`; code: `Player.explore`, `Player.trans`, `ActionModel.exception_rate` in `arcgames.py`; `distinct_frames` in `diagnose.py`
+numbers: levels 9/16 (E24/E25: 8/16): LockPath 2/4 (93, 31), MultiKey 2/2 (73, 28), Sokoban 0/3, CollectAll 3/3 (83, 31,
+         40), Toggle 1/1 (78), **Tetris 1/3 (level 0 in 92 actions — never solved before)**. Discovery actions on first
+         levels 73–93 against E25's 71–87; revisits 55–69 of them against 53–66; distinct frames stood in during
+         discovery 17–27 (Tetris 65). Prediction accuracy on the fully explored games rose to 0.95–0.99.
+verdict: the fix as pre-registered — fewer discovery actions — is REFUTED, and the reason corrects E25's reading:
+         discovery is COVERAGE. Finding an unknown goal in a room of ~25 reachable frames means standing in most of
+         them, and a walk over a grid with four moves backtracks about as often as it advances; the old "nearest
+         unknown" walk was already near that bound, and so is the new one. What the new explorer changed is elsewhere:
+         (1) it plans whole paths and values them in bits — unknown windows to learn, weighted by the rule's learnability
+         (the noisy-TV filter of E10b), a frame never visited worth the remaining budget spread over the unvisited
+         frames in reach (so a far new frame is worth the walk when nothing nearer is new), untested predictions worth
+         the rule's exception rate — which is what got Tetris's first level: multi-step plans through a world that
+         moves; (2) it remembers observed transitions and uses them over the model's prediction, which removed an
+         attractor the first version had (a mispredicted "new" frame that could never be reached); (3) it never
+         goes blind. Three defects were found and fixed on the way, each a lesson about exploration as a price:
+         summing a frame's information over all its actions made the agent walk toward "rich" frames without ever
+         acting on them (value must be a complete plan: reach, then do the informative thing); requiring a positive
+         value left the agent idle when everything near was known (the budget is spent either way — take the best
+         plan); and with nothing unknown and nothing unvisited in reach the agent oscillated between two known frames
+         (untested predictions carry the model's remaining uncertainty, priced by the rule's exception rate).
+changed: exploration is now §16's price of ignorance over frames, not a first-unknown walk; the diagnostic reports
+         distinct frames as the coverage measure. What would actually cut discovery is not a better walk but a
+         smaller room to cover — a prior over where goals are, learned across levels (E19's keys do this once a
+         goal is known, not before) — or a goal that announces itself (a relation, E17). Left as the next question.

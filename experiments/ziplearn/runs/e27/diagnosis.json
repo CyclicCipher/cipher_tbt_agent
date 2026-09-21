@@ -1,0 +1,927 @@
+{
+ "CollectAll": {
+  "0": {
+   "actions": 83,
+   "distinct_frames": 27,
+   "spent": {
+    "discovery": 83
+   },
+   "prediction_errors": {
+    "missed change": 50,
+    "spurious change": 0,
+    "wrong colour": 0
+   },
+   "wrong_predictions": 34,
+   "predictions": 78,
+   "wrong_by_knowledge": {
+    "unknown windows in the frame": 34
+   },
+   "no_effect": 7,
+   "revisits": 55,
+   "goal_keys_refuted": 0,
+   "won": true,
+   "examples": [
+    {
+     "step": 4,
+     "action": "ACTION1",
+     "choice": {
+      "kind": "explore",
+      "plan": [
+       "ACTION1"
+      ]
+     },
+     "unknown": 14,
+     "frame": "########.\n#..k...#.\n#.A....#.\n#.k..k.#.\n########.\n.........",
+     "predicted": "########.\n#..k...#.\n#.A....#.\n#.k..k.#.\n########.\n.........",
+     "observed": "########.\n#.Ak...#.\n#......#.\n#.k..k.#.\n########.\n.........",
+     "missed": [
+      [
+       1,
+       2
+      ],
+      [
+       2,
+       2
+      ]
+     ],
+     "spurious": []
+    },
+    {
+     "step": 5,
+     "action": "ACTION3",
+     "choice": {
+      "kind": "explore",
+      "plan": [
+       "ACTION3"
+      ]
+     },
+     "unknown": 13,
+     "frame": "########.\n#.Ak...#.\n#......#.\n#.k..k.#.\n########.\n.........",
+     "predicted": "########.\n#.Ak...#.\n#......#.\n#.k..k.#.\n########.\n.........",
+     "observed": "########.\n#A.k...#.\n#......#.\n#.k..k.#.\n########.\n.........",
+     "missed": [
+      [
+       1,
+       1
+      ],
+      [
+       1,
+       2
+      ]
+     ],
+     "spurious": []
+    }
+   ]
+  },
+  "1": {
+   "actions": 31,
+   "distinct_frames": 25,
+   "spent": {
+    "exploratory": 29,
+    "goal-directed": 2
+   },
+   "prediction_errors": {
+    "missed change": 10,
+    "spurious change": 0,
+    "wrong colour": 0
+   },
+   "wrong_predictions": 9,
+   "predictions": 30,
+   "wrong_by_knowledge": {
+    "unknown windows in the frame": 5,
+    "all windows known": 4
+   },
+   "no_effect": 0,
+   "revisits": 6,
+   "goal_keys_refuted": 2,
+   "won": true,
+   "examples": [
+    {
+     "step": 2,
+     "action": "ACTION2",
+     "choice": {
+      "kind": "continuing",
+      "plan": [
+       "ACTION2"
+      ]
+     },
+     "unknown": 1,
+     "frame": "#########.\n#...k...#.\n#.A.....#.\n#.k...k.#.\n#...k...#.\n#########.\n..........",
+     "predicted": "#########.\n#...k...#.\n#.A.....#.\n#.k...k.#.\n#...k...#.\n#########.\n..........",
+     "observed": "#########.\n#...k...#.\n#.......#.\n#.A...k.#.\n#...k...#.\n#########.\n..........",
+     "missed": [
+      [
+       2,
+       2
+      ],
+      [
+       3,
+       2
+      ]
+     ],
+     "spurious": []
+    },
+    {
+     "step": 8,
+     "action": "ACTION2",
+     "choice": {
+      "kind": "continuing",
+      "plan": [
+       "ACTION2",
+       "ACTION2",
+       "ACTION4",
+       "ACTION4",
+       "ACTION4",
+       "ACTION3",
+       "ACTION3",
+       "ACTION3",
+       "ACTION3"
+      ]
+     },
+     "unknown": 2,
+     "frame": "#########.\n#...k...#.\n#...A...#.\n#.....k.#.\n#.......#.\n#########.\n..........",
+     "predicted": "#########.\n#...k...#.\n#...A...#.\n#...A.k.#.\n#.......#.\n#########.\n..........",
+     "observed": "#########.\n#...k...#.\n#.......#.\n#...A.k.#.\n#.......#.\n#########.\n..........",
+     "missed": [
+      [
+       2,
+       4
+      ]
+     ],
+     "spurious": []
+    }
+   ]
+  },
+  "2": {
+   "actions": 40,
+   "distinct_frames": 32,
+   "spent": {
+    "exploratory": 38,
+    "goal-directed": 2
+   },
+   "prediction_errors": {
+    "missed change": 6,
+    "spurious change": 4,
+    "wrong colour": 0
+   },
+   "wrong_predictions": 9,
+   "predictions": 39,
+   "wrong_by_knowledge": {
+    "unknown windows in the frame": 5,
+    "all windows known": 4
+   },
+   "no_effect": 4,
+   "revisits": 8,
+   "goal_keys_refuted": 2,
+   "won": true,
+   "examples": [
+    {
+     "step": 4,
+     "action": "ACTION3",
+     "choice": {
+      "kind": "continuing",
+      "plan": [
+       "ACTION3"
+      ]
+     },
+     "unknown": 3,
+     "frame": "##########.\n#....k...#.\n#..kA..k.#.\n#........#.\n#.k....k.#.\n##########.\n...........",
+     "predicted": "##########.\n#....k...#.\n#..k...k.#.\n#........#.\n#.k....k.#.\n##########.\n...........",
+     "observed": "##########.\n#....k...#.\n#..A...k.#.\n#........#.\n#.k....k.#.\n##########.\n...........",
+     "missed": [
+      [
+       2,
+       3
+      ]
+     ],
+     "spurious": []
+    },
+    {
+     "step": 16,
+     "action": "ACTION3",
+     "choice": {
+      "kind": "continuing",
+      "plan": [
+       "ACTION3",
+       "ACTION3",
+       "ACTION3",
+       "ACTION4",
+       "ACTION3",
+       "ACTION3"
+      ]
+     },
+     "unknown": 1,
+     "frame": "##########.\n#........#.\n#........#.\n#......A.#.\n#.k....k.#.\n##########.\n...........",
+     "predicted": "##########.\n#........#.\n#........#.\n#.....AA.#.\n#.k....k.#.\n##########.\n...........",
+     "observed": "##########.\n#........#.\n#........#.\n#.....A..#.\n#.k....k.#.\n##########.\n...........",
+     "missed": [
+      [
+       3,
+       7
+      ]
+     ],
+     "spurious": []
+    }
+   ]
+  }
+ },
+ "LockPath": {
+  "0": {
+   "actions": 93,
+   "distinct_frames": 23,
+   "spent": {
+    "discovery": 93
+   },
+   "prediction_errors": {
+    "missed change": 52,
+    "spurious change": 0,
+    "wrong colour": 0
+   },
+   "wrong_predictions": 38,
+   "predictions": 88,
+   "wrong_by_knowledge": {
+    "unknown windows in the frame": 38
+   },
+   "no_effect": 7,
+   "revisits": 69,
+   "goal_keys_refuted": 0,
+   "won": true,
+   "examples": [
+    {
+     "step": 2,
+     "action": "ACTION2",
+     "choice": {
+      "kind": "explore",
+      "plan": [
+       "ACTION2"
+      ]
+     },
+     "unknown": 8,
+     "frame": "########.\n#......#.\n#A.....#.\n#......#.\n#.....G#.\n########.\n.........",
+     "predicted": "########.\n#......#.\n#A.....#.\n#A.....#.\n#.....G#.\n########.\n.........",
+     "observed": "########.\n#......#.\n#......#.\n#A.....#.\n#.....G#.\n########.\n.........",
+     "missed": [
+      [
+       2,
+       1
+      ]
+     ],
+     "spurious": []
+    },
+    {
+     "step": 3,
+     "action": "ACTION2",
+     "choice": {
+      "kind": "explore",
+      "plan": [
+       "ACTION2"
+      ]
+     },
+     "unknown": 8,
+     "frame": "########.\n#......#.\n#......#.\n#A.....#.\n#.....G#.\n########.\n.........",
+     "predicted": "########.\n#......#.\n#......#.\n#......#.\n#.....G#.\n########.\n.........",
+     "observed": "########.\n#......#.\n#......#.\n#......#.\n#A....G#.\n########.\n.........",
+     "missed": [
+      [
+       4,
+       1
+      ]
+     ],
+     "spurious": []
+    }
+   ]
+  },
+  "1": {
+   "actions": 31,
+   "distinct_frames": 24,
+   "spent": {
+    "discovery": 21,
+    "exploratory": 9,
+    "goal-directed": 1
+   },
+   "prediction_errors": {
+    "missed change": 6,
+    "spurious change": 1,
+    "wrong colour": 0
+   },
+   "wrong_predictions": 5,
+   "predictions": 30,
+   "wrong_by_knowledge": {
+    "unknown windows in the frame": 5
+   },
+   "no_effect": 1,
+   "revisits": 6,
+   "goal_keys_refuted": 0,
+   "won": true,
+   "examples": [
+    {
+     "step": 3,
+     "action": "ACTION1",
+     "choice": {
+      "kind": "continuing",
+      "plan": [
+       "ACTION1",
+       "ACTION4",
+       "ACTION2",
+       "ACTION4",
+       "ACTION4",
+       "ACTION3",
+       "ACTION1",
+       "ACTION2",
+       "ACTION3",
+       "ACTION3",
+       "ACTION1"
+      ]
+     },
+     "unknown": 6,
+     "frame": "##########.\n#....#...#.\n#A...D...#.\n#k...#...#.\n#....#..G#.\n##########.\n...........",
+     "predicted": "##########.\n#A...#...#.\n#A...D...#.\n#k...#...#.\n#....#..G#.\n##########.\n...........",
+     "observed": "##########.\n#A...#...#.\n#....D...#.\n#k...#...#.\n#....#..G#.\n##########.\n...........",
+     "missed": [
+      [
+       2,
+       1
+      ]
+     ],
+     "spurious": []
+    },
+    {
+     "step": 7,
+     "action": "ACTION4",
+     "choice": {
+      "kind": "continuing",
+      "plan": [
+       "ACTION4",
+       "ACTION1",
+       "ACTION3",
+       "ACTION2",
+       "ACTION4",
+       "ACTION1",
+       "ACTION3",
+       "ACTION1",
+       "ACTION4",
+       "ACTION2",
+       "ACTION3"
+      ]
+     },
+     "unknown": 1,
+     "frame": "##########.\n#....#...#.\n#....D...#.\n#kA..#...#.\n#....#..G#.\n##########.\n...........",
+     "predicted": "##########.\n#....#...#.\n#....D...#.\n#kAA.#...#.\n#....#..G#.\n##########.\n...........",
+     "observed": "##########.\n#....#...#.\n#....D...#.\n#k.A.#...#.\n#....#..G#.\n##########.\n...........",
+     "missed": [
+      [
+       3,
+       2
+      ]
+     ],
+     "spurious": []
+    }
+   ]
+  },
+  "2": {
+   "actions": 150,
+   "distinct_frames": 100,
+   "spent": {
+    "exploratory": 147,
+    "goal-directed": 3
+   },
+   "prediction_errors": {
+    "missed change": 28,
+    "spurious change": 0,
+    "wrong colour": 1
+   },
+   "wrong_predictions": 19,
+   "predictions": 150,
+   "wrong_by_knowledge": {
+    "unknown windows in the frame": 16,
+    "all windows known": 3
+   },
+   "no_effect": 10,
+   "revisits": 50,
+   "goal_keys_refuted": 3,
+   "won": false,
+   "examples": [
+    {
+     "step": 10,
+     "action": "ACTION2",
+     "choice": {
+      "kind": "goal",
+      "plan": [
+       "ACTION2"
+      ]
+     },
+     "unknown": 2,
+     "frame": "##########.\n#........#.\n#..B.....#.\n#........#.\n#.....P.A#.\n#.......G#.\n##########.\n...........",
+     "predicted": "##########.\n#........#.\n#..B.....#.\n#........#.\n#.....P.A#.\n#.......G#.\n##########.\n...........",
+     "observed": "##########.\n#........#.\n#..B.....#.\n#........#.\n#.....P..#.\n#.......A#.\n##########.\n...........",
+     "missed": [
+      [
+       4,
+       8
+      ],
+      [
+       5,
+       8
+      ]
+     ],
+     "spurious": []
+    },
+    {
+     "step": 11,
+     "action": "ACTION3",
+     "choice": {
+      "kind": "explore",
+      "plan": [
+       "ACTION3",
+       "ACTION1",
+       "ACTION4",
+       "ACTION1",
+       "ACTION3",
+       "ACTION1",
+       "ACTION2",
+       "ACTION3",
+       "ACTION1",
+       "ACTION1",
+       "ACTION3",
+       "ACTION3"
+      ]
+     },
+     "unknown": 6,
+     "frame": "##########.\n#........#.\n#..B.....#.\n#........#.\n#.....P..#.\n#.......A#.\n##########.\n...........",
+     "predicted": "##########.\n#........#.\n#..B.....#.\n#........#.\n#.....P..#.\n#......A.#.\n##########.\n...........",
+     "observed": "##########.\n#........#.\n#..B.....#.\n#........#.\n#.....P..#.\n#......AG#.\n##########.\n...........",
+     "missed": [],
+     "spurious": []
+    }
+   ]
+  }
+ },
+ "MultiKey": {
+  "0": {
+   "actions": 73,
+   "distinct_frames": 17,
+   "spent": {
+    "discovery": 73
+   },
+   "prediction_errors": {
+    "missed change": 53,
+    "spurious change": 0,
+    "wrong colour": 0
+   },
+   "wrong_predictions": 31,
+   "predictions": 68,
+   "wrong_by_knowledge": {
+    "unknown windows in the frame": 31
+   },
+   "no_effect": 14,
+   "revisits": 55,
+   "goal_keys_refuted": 0,
+   "won": true,
+   "examples": [
+    {
+     "step": 4,
+     "action": "ACTION1",
+     "choice": {
+      "kind": "explore",
+      "plan": [
+       "ACTION1"
+      ]
+     },
+     "unknown": 13,
+     "frame": "##########.\n#..k#...G#.\n#.A.D....#.\n##########.\n...........",
+     "predicted": "##########.\n#..k#...G#.\n#.A.D....#.\n##########.\n...........",
+     "observed": "##########.\n#.Ak#...G#.\n#...D....#.\n##########.\n...........",
+     "missed": [
+      [
+       1,
+       2
+      ],
+      [
+       2,
+       2
+      ]
+     ],
+     "spurious": []
+    },
+    {
+     "step": 5,
+     "action": "ACTION3",
+     "choice": {
+      "kind": "explore",
+      "plan": [
+       "ACTION3"
+      ]
+     },
+     "unknown": 13,
+     "frame": "##########.\n#.Ak#...G#.\n#...D....#.\n##########.\n...........",
+     "predicted": "##########.\n#.Ak#...G#.\n#...D....#.\n##########.\n...........",
+     "observed": "##########.\n#A.k#...G#.\n#...D....#.\n##########.\n...........",
+     "missed": [
+      [
+       1,
+       1
+      ],
+      [
+       1,
+       2
+      ]
+     ],
+     "spurious": []
+    }
+   ]
+  },
+  "1": {
+   "actions": 28,
+   "distinct_frames": 18,
+   "spent": {
+    "discovery": 28
+   },
+   "prediction_errors": {
+    "missed change": 6,
+    "spurious change": 0,
+    "wrong colour": 0
+   },
+   "wrong_predictions": 4,
+   "predictions": 27,
+   "wrong_by_knowledge": {
+    "unknown windows in the frame": 3,
+    "all windows known": 1
+   },
+   "no_effect": 5,
+   "revisits": 10,
+   "goal_keys_refuted": 0,
+   "won": true,
+   "examples": [
+    {
+     "step": 0,
+     "action": "ACTION4",
+     "choice": {
+      "kind": "explore",
+      "plan": [
+       "ACTION4"
+      ]
+     },
+     "unknown": 8,
+     "frame": "############.\n#A.k#.X.#.G#.\n#...D...*..#.\n############.\n.............",
+     "predicted": "############.\n#..k#.X.#.G#.\n#...D...*..#.\n############.\n.............",
+     "observed": "############.\n#.Ak#.X.#.G#.\n#...D...*..#.\n############.\n.............",
+     "missed": [
+      [
+       1,
+       2
+      ]
+     ],
+     "spurious": []
+    },
+    {
+     "step": 2,
+     "action": "ACTION4",
+     "choice": {
+      "kind": "explore",
+      "plan": [
+       "ACTION4",
+       "ACTION2",
+       "ACTION3",
+       "ACTION3",
+       "ACTION3"
+      ]
+     },
+     "unknown": 0,
+     "frame": "############.\n#.Ak#.X.#.G#.\n#...D...*..#.\n############.\n.............",
+     "predicted": "############.\n#..A#.X.#.G#.\n#...D...*..#.\n############.\n.............",
+     "observed": "############.\n#..A#.X.#.G#.\n#.......*..#.\n############.\n.............",
+     "missed": [
+      [
+       2,
+       4
+      ]
+     ],
+     "spurious": []
+    }
+   ]
+  }
+ },
+ "Sokoban": {
+  "0": {
+   "actions": 150,
+   "distinct_frames": 43,
+   "spent": {
+    "discovery": 150
+   },
+   "prediction_errors": {
+    "missed change": 107,
+    "spurious change": 0,
+    "wrong colour": 6
+   },
+   "wrong_predictions": 66,
+   "predictions": 146,
+   "wrong_by_knowledge": {
+    "unknown windows in the frame": 66
+   },
+   "no_effect": 18,
+   "revisits": 107,
+   "goal_keys_refuted": 0,
+   "won": false,
+   "examples": [
+    {
+     "step": 4,
+     "action": "ACTION4",
+     "choice": {
+      "kind": "explore",
+      "plan": [
+       "ACTION4"
+      ]
+     },
+     "unknown": 9,
+     "frame": "##########.\n#........#.\n#.AB..P..#.\n#.......G#.\n##########.\n...........",
+     "predicted": "##########.\n#........#.\n#.AAB.P..#.\n#.......G#.\n##########.\n...........",
+     "observed": "##########.\n#........#.\n#..AB.P..#.\n#.......G#.\n##########.\n...........",
+     "missed": [
+      [
+       2,
+       2
+      ]
+     ],
+     "spurious": []
+    },
+    {
+     "step": 5,
+     "action": "ACTION4",
+     "choice": {
+      "kind": "explore",
+      "plan": [
+       "ACTION4"
+      ]
+     },
+     "unknown": 9,
+     "frame": "##########.\n#........#.\n#..AB.P..#.\n#.......G#.\n##########.\n...........",
+     "predicted": "##########.\n#........#.\n#...A.P..#.\n#.......G#.\n##########.\n...........",
+     "observed": "##########.\n#........#.\n#...ABP..#.\n#.......G#.\n##########.\n...........",
+     "missed": [
+      [
+       2,
+       5
+      ]
+     ],
+     "spurious": []
+    }
+   ]
+  }
+ },
+ "Tetris": {
+  "0": {
+   "actions": 92,
+   "distinct_frames": 65,
+   "spent": {
+    "discovery": 92
+   },
+   "prediction_errors": {
+    "missed change": 269,
+    "spurious change": 26,
+    "wrong colour": 9
+   },
+   "wrong_predictions": 61,
+   "predictions": 87,
+   "wrong_by_knowledge": {
+    "unknown windows in the frame": 61
+   },
+   "no_effect": 0,
+   "revisits": 23,
+   "goal_keys_refuted": 0,
+   "won": true,
+   "examples": [
+    {
+     "step": 5,
+     "action": "ACTION2",
+     "choice": {
+      "kind": "continuing",
+      "plan": [
+       "ACTION2",
+       "ACTION3",
+       "ACTION4",
+       "ACTION2"
+      ]
+     },
+     "unknown": 16,
+     "frame": "#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#..AA..#.\n#..AA..#.\n#......#.\n#GGGG..#.\n########.\n.........",
+     "predicted": "#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#..AA..#.\n#......#.\n#......#.\n#GGGG..#.\n########.\n.........",
+     "observed": "#.A....#.\n#.AAA..#.\n#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#..GG..#.\n#..GG..#.\n#GGGG..#.\n########.\n.........",
+     "missed": [
+      [
+       0,
+       2
+      ],
+      [
+       1,
+       2
+      ],
+      [
+       1,
+       3
+      ],
+      [
+       1,
+       4
+      ],
+      [
+       6,
+       3
+      ],
+      [
+       6,
+       4
+      ]
+     ],
+     "spurious": []
+    },
+    {
+     "step": 6,
+     "action": "ACTION4",
+     "choice": {
+      "kind": "explore",
+      "plan": [
+       "ACTION4",
+       "ACTION2",
+       "ACTION3",
+       "ACTION3",
+       "ACTION4",
+       "ACTION2"
+      ]
+     },
+     "unknown": 24,
+     "frame": "#.A....#.\n#.AAA..#.\n#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#..GG..#.\n#..GG..#.\n#GGGG..#.\n########.\n.........",
+     "predicted": "#.A....#.\n#.AAA..#.\n#...AA.#.\n#......#.\n#......#.\n#......#.\n#......#.\n#..GG..#.\n#..GG..#.\n#GGGG..#.\n########.\n.........",
+     "observed": "#......#.\n#..A...#.\n#..AAA.#.\n#......#.\n#......#.\n#......#.\n#......#.\n#..GG..#.\n#..GG..#.\n#GGGG..#.\n########.\n.........",
+     "missed": [
+      [
+       0,
+       2
+      ],
+      [
+       1,
+       2
+      ],
+      [
+       1,
+       4
+      ],
+      [
+       2,
+       3
+      ]
+     ],
+     "spurious": []
+    }
+   ]
+  },
+  "1": {
+   "actions": 145,
+   "distinct_frames": 89,
+   "spent": {
+    "exploratory": 143,
+    "goal-directed": 2
+   },
+   "prediction_errors": {
+    "missed change": 335,
+    "spurious change": 55,
+    "wrong colour": 24
+   },
+   "wrong_predictions": 81,
+   "predictions": 145,
+   "wrong_by_knowledge": {
+    "unknown windows in the frame": 75,
+    "all windows known": 6
+   },
+   "no_effect": 0,
+   "revisits": 52,
+   "goal_keys_refuted": 2,
+   "won": false,
+   "examples": [
+    {
+     "step": 0,
+     "action": "ACTION4",
+     "choice": {
+      "kind": "goal",
+      "plan": [
+       "ACTION4",
+       "ACTION4",
+       "ACTION4",
+       "ACTION3",
+       "ACTION2"
+      ]
+     },
+     "unknown": 10,
+     "frame": "#.AA...#.\n#..AA..#.\n#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#GG.GGG#.\n########.\n.........",
+     "predicted": "#..A...#.\n#..AA..#.\n#...AA.#.\n#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#GG.GGG#.\n########.\n.........",
+     "observed": "#......#.\n#..AA..#.\n#...AA.#.\n#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#GG.GGG#.\n########.\n.........",
+     "missed": [
+      [
+       0,
+       3
+      ]
+     ],
+     "spurious": []
+    },
+    {
+     "step": 1,
+     "action": "ACTION4",
+     "choice": {
+      "kind": "goal",
+      "plan": [
+       "ACTION4",
+       "ACTION3",
+       "ACTION2"
+      ]
+     },
+     "unknown": 2,
+     "frame": "#......#.\n#..AA..#.\n#...AA.#.\n#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#GG.GGG#.\n########.\n.........",
+     "predicted": "#......#.\n#...A..#.\n#...AA.#.\n#....AA#.\n#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#GG.GGG#.\n########.\n.........",
+     "observed": "#......#.\n#......#.\n#...AA.#.\n#....AA#.\n#......#.\n#......#.\n#......#.\n#......#.\n#......#.\n#GG.GGG#.\n########.\n.........",
+     "missed": [
+      [
+       1,
+       4
+      ]
+     ],
+     "spurious": []
+    }
+   ]
+  }
+ },
+ "Toggle": {
+  "0": {
+   "actions": 78,
+   "distinct_frames": 17,
+   "spent": {
+    "discovery": 78
+   },
+   "prediction_errors": {
+    "missed change": 54,
+    "spurious change": 0,
+    "wrong colour": 0
+   },
+   "wrong_predictions": 28,
+   "predictions": 73,
+   "wrong_by_knowledge": {
+    "unknown windows in the frame": 27,
+    "all windows known": 1
+   },
+   "no_effect": 15,
+   "revisits": 60,
+   "goal_keys_refuted": 0,
+   "won": true,
+   "examples": [
+    {
+     "step": 4,
+     "action": "ACTION1",
+     "choice": {
+      "kind": "explore",
+      "plan": [
+       "ACTION1"
+      ]
+     },
+     "unknown": 14,
+     "frame": "########.\n#..S..G#.\n#.A..###.\n########.\n.........",
+     "predicted": "########.\n#..S..G#.\n#.A..###.\n########.\n.........",
+     "observed": "########.\n#.AS..G#.\n#....###.\n########.\n.........",
+     "missed": [
+      [
+       1,
+       2
+      ],
+      [
+       2,
+       2
+      ]
+     ],
+     "spurious": []
+    },
+    {
+     "step": 5,
+     "action": "ACTION3",
+     "choice": {
+      "kind": "explore",
+      "plan": [
+       "ACTION3"
+      ]
+     },
+     "unknown": 13,
+     "frame": "########.\n#.AS..G#.\n#....###.\n########.\n.........",
+     "predicted": "########.\n#.AS..G#.\n#....###.\n########.\n.........",
+     "observed": "########.\n#A.S..G#.\n#....###.\n########.\n.........",
+     "missed": [
+      [
+       1,
+       1
+      ],
+      [
+       1,
+       2
+      ]
+     ],
+     "spurious": []
+    }
+   ]
+  }
+ }
+}

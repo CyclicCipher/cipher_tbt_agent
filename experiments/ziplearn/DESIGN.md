@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
 *v0.6, 2026-09-21 (v0.1–v0.5 on 2026-09-20; v0.6 records E14–E18: capacity, precision, order dependence, blocks across
-layers, relational goals, written attention). E0–E25 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
+layers, relational goals, written attention). E0–E27 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -462,6 +462,15 @@ Pass: bits fall by ≥ 20% and the levels that follow are solved in no more acti
 decomposed into discovery / goal-directed / exploratory / blind; wrong predictions into missed, spurious and
 wrong-colour changes; revisits, no-effect actions, refuted goal keys; "what was it thinking" examples on failed levels.
 
+**E26 — the looped transformer (pre-registered 2026-09-21).** The gradient arm as prelude → core × K with the boundary
+operator (RMSNorm + α·anchor between passes) → coda, after Chen et al. 2609.19107; tied K = 2/4/6, untied K = 4, tied and
+untied growth 2 → 4; E0's task and budget. Pass: more executed depth raises the trained solve rate; any held-out
+composition solved is the result to look for. Refute: no cell better than vanilla.
+**E27 — the exploration fix (pre-registered 2026-09-21).** Exploration as the price of ignorance over every reachable
+frame the model can predict: whole plans valued in bits (unknown windows to learn, filtered by learnability; a never-
+visited frame worth the remaining budget spread over the unvisited frames in reach; untested predictions worth the
+rule's exception rate), less the plan's cost. Pass: fewer discovery actions than E25 at no loss of levels; refute: more.
+
 ## 12. Open questions
 
 **OPEN-1 — the outer objective (deferred by request, recorded here verbatim in substance).** ZipLearner learns a
@@ -513,6 +522,8 @@ changed) are in `RESULTS.md`, appended and never edited.
 | E19 | PASS (outcome) | goal keys priced by outcome (confirmed vs refuted): LockPath's door level solved, CollectAll 3/3, 8/16 levels (E13: 5/16) |
 | E24 | PASS | the sleep pass: rules keep 2–4 of 9 context cells, ~10× fewer bits, next levels solved 2–3× faster; lossless of the evidence, or it forgets what the planner needs |
 | E25 | measured | the trace diagnostic: discovery is 2/3 revisits; errors are missed changes from the 'unchanged' default; pushes too rare; goal keys too specific |
+| E26 | measured | looped transformer: untied growth 2→4 gives 13/17 trained and held-out accuracy 0.12–0.20 (vanilla 8/17, 0.03); held-out solved still 0/8 |
+| E27 | REFUTED on discovery, 9/16 levels | exploration valued in bits over whole plans; Tetris L0 solved; discovery is coverage-bound, unchanged |
 
 ## 14. Glossary
 

@@ -97,9 +97,10 @@ def analyse(trace):
             if r.get("fired_win") and r["outcome"] != "win":
                 refuted += 1
         n = len(recs)
+        distinct = len({str(r["frame"]) for r in recs})                  # coverage: frames actually stood in
         wrong_preds = sum(wrong_windows.values())
         with_pred = sum(1 for r in recs if r["predicted"] is not None and "observed" in r)
-        out[level] = dict(actions=n, spent=dict(spent), prediction_errors=dict(errors), wrong_predictions=wrong_preds,
+        out[level] = dict(actions=n, distinct_frames=distinct, spent=dict(spent), prediction_errors=dict(errors), wrong_predictions=wrong_preds,
                           predictions=with_pred, wrong_by_knowledge=dict(wrong_windows), no_effect=no_effect,
                           revisits=revisits, goal_keys_refuted=refuted, won=any(r["outcome"] == "win" for r in recs),
                           examples=examples)
@@ -117,12 +118,12 @@ def main():
         game = path.stem[len("trace_"):]
         trace = json.load(open(path))
         report[game] = analyse(trace)
-    print(f"{'game':<11}{'lvl':>4}{'won':>5}{'acts':>6} | {'discovery':>9}{'goal-dir':>9}{'explore':>8}{'blind':>6} | "
+    print(f"{'game':<11}{'lvl':>4}{'won':>5}{'acts':>6}{'frames':>7} | {'discovery':>9}{'goal-dir':>9}{'explore':>8}{'blind':>6} | "
           f"{'wrong pred':>10}{'/preds':>7} | {'missed':>7}{'spur.':>6}{'colour':>7} | {'no-eff':>7}{'revisit':>8}{'refuted':>8}")
     for game, levels in report.items():
         for lvl, d in levels.items():
             s, e = d["spent"], d["prediction_errors"]
-            print(f"{game:<11}{lvl:>4}{str(d['won'])[0]:>5}{d['actions']:>6} | {s.get('discovery', 0):>9}{s.get('goal-directed', 0):>9}"
+            print(f"{game:<11}{lvl:>4}{str(d['won'])[0]:>5}{d['actions']:>6}{d['distinct_frames']:>7} | {s.get('discovery', 0):>9}{s.get('goal-directed', 0):>9}"
                   f"{s.get('exploratory', 0):>8}{s.get('blind', 0):>6} | {d['wrong_predictions']:>10}{d['predictions']:>7} | "
                   f"{e.get('missed change', 0):>7}{e.get('spurious change', 0):>6}{e.get('wrong colour', 0):>7} | "
                   f"{d['no_effect']:>7}{d['revisits']:>8}{d['goal_keys_refuted']:>8}")

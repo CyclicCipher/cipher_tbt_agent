@@ -1,0 +1,8 @@
+vanilla_d3 (E0): trained 8/17 (acc 0.52) | held-out 0/8 (acc 0.03)
+loop_tied_k2: 95s | trained 10/17 (acc 0.59) | held-out 0/8 (acc 0.07) | loss 0.056
+loop_tied_k4: 156s | trained 9/17 (acc 0.56) | held-out 0/8 (acc 0.07) | loss 0.058
+loop_tied_k6: 207s | trained 9/17 (acc 0.54) | held-out 0/8 (acc 0.02) | loss 0.058
+loop_untied_k4: 171s | trained 10/17 (acc 0.69) | held-out 0/8 (acc 0.20) | loss 0.047
+loop_tied_grow2to4: 129s | trained 10/17 (acc 0.65) | held-out 0/8 (acc 0.07) | loss 0.052
+loop_untied_grow2to4: 138s | trained 13/17 (acc 0.76) | held-out 0/8 (acc 0.12) | loss 0.042
+done
