@@ -1,0 +1,80 @@
+{
+ "primitives": {
+  "reached": 1.0,
+  "nodes": 191.66666666666666,
+  "steps": 2.92,
+  "oracle": 2.92
+ },
+ "primitives + macros": {
+  "reached": 1.0,
+  "nodes": 522.2,
+  "steps": 2.92,
+  "oracle": 2.92
+ },
+ "verdict": "REFUTED",
+ "macros": {
+  "macro:swap_pairs\u2218rot_left": [
+   "swap_pairs",
+   "rot_left"
+  ],
+  "macro:rot_right": [
+   "rot_right"
+  ],
+  "macro:reverse\u2218swap_pairs": [
+   "reverse",
+   "swap_pairs"
+  ],
+  "macro:rot_left": [
+   "rot_left"
+  ],
+  "macro:swap_pairs\u2218swap_halves": [
+   "swap_pairs",
+   "swap_halves"
+  ],
+  "macro:reverse\u2218rot_right": [
+   "reverse",
+   "rot_right"
+  ],
+  "macro:reverse\u2218rot_left": [
+   "reverse",
+   "rot_left"
+  ],
+  "macro:rot_right\u2218swap_pairs": [
+   "rot_right",
+   "swap_pairs"
+  ],
+  "macro:swap_pairs": [
+   "swap_pairs"
+  ],
+  "macro:rot_left\u2218swap_pairs": [
+   "rot_left",
+   "swap_pairs"
+  ],
+  "macro:rot_left\u2218rot_left": [
+   "rot_left",
+   "rot_left"
+  ],
+  "macro:swap_pairs\u2218rot_right": [
+   "swap_pairs",
+   "rot_right"
+  ],
+  "macro:swap_halves": [
+   "swap_halves"
+  ],
+  "macro:reverse": [
+   "reverse"
+  ],
+  "macro:rot_left\u2218swap_halves": [
+   "rot_left",
+   "swap_halves"
+  ],
+  "macro:swap_halves\u2218swap_pairs": [
+   "swap_halves",
+   "swap_pairs"
+  ],
+  "macro:reverse\u2218swap_halves": [
+   "reverse",
+   "swap_halves"
+  ]
+ }
+}

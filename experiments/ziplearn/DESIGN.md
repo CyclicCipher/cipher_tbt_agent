@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
 *v0.6, 2026-09-21 (v0.1–v0.5 on 2026-09-20; v0.6 records E14–E18: capacity, precision, order dependence, blocks across
-layers, relational goals, written attention). E0–E18 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
+layers, relational goals, written attention). E0–E23 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -270,7 +270,8 @@ not in version 1.
 
 What this does not solve — **OPEN-6:** if two rules agree on every observation in the recent window and differ
 elsewhere, no selector can tell them apart; the price treats them as one description until an observation refutes
-it, which is the correct behaviour and also a guaranteed error on the first refuting case. **OPEN-7:** in a
+it, which is the correct behaviour and also a guaranteed error on the first refuting case. *E21 measured it: the mint
+comes 6.4 observations after the near-duplicate starts — the wait for a refuting input — at the cost of one wrong answer each.* **OPEN-7:** in a
 multi-layer network a new block in layer 1 changes what layer 2 sees for that context; the sweep of §6 handles it,
 but whether block counts stay small across layers, or multiply, is not known. E6 measures both.
 
@@ -442,6 +443,13 @@ in the high-frequency rotary pairs) and an induction head (content match in the 
 training; test: a pattern of distinct tokens repeated, predict the second copy. Pass: ≥ 0.95 with a random model at
 chance; refute: < 0.6.
 
+**E21 — near-duplicate rules (OPEN-6; a measurement).** A, then D = A on 9 of 11 inputs: observations until D is minted its own
+block; A's exception rate; D's accuracy on its differing inputs.
+**E22 — annealing the budget (§8).** E15's stream under a hard cap of 40 bits against 80 → 40 in steps; pass: annealing
+retains at least as much evidence-weighted accuracy at no more bits; refute: the hard cap retains more.
+**E23 — macro-actions as the cache (OPEN-10).** E9's environment, goals 4–6 actions away, the library's named permutations
+as macro-actions; pass: nodes expanded fall by ≥ 2× at no loss; refute: no reduction.
+
 ## 12. Open questions
 
 **OPEN-1 — the outer objective (deferred by request, recorded here verbatim in substance).** ZipLearner learns a
@@ -487,6 +495,9 @@ changed) are in `RESULTS.md`, appended and never edited.
 | E16 | PASS | continual learning of whole two-layer tasks: 100% retention, exactly 3 blocks — blocks do not multiply across layers (OPEN-7) |
 | E17 | REFUTED on the letter | relational goals: identify-then-plan 0.51 (identification limit); words matched to the examples directly 0.99 |
 | E18 | PASS | an induction circuit written into a RoPE transformer with no training copies patterns at 100% (OPEN-8 first form) |
+| E21 | measured | a near-duplicate rule is minted its own block 6.4 observations after it starts — the wait for a refuting input (OPEN-6) |
+| E22 | REFUTED here | annealing the budget vs a hard cap: no difference — nothing fuzzy to crystallise in one-hot rules |
+| E23 | REFUTED here | macro-actions raise search nodes 192 → 522 in a 720-state map: a cache needs depth (OPEN-10 stays open) |
 
 ## 14. Glossary
 

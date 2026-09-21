@@ -31,6 +31,9 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E16 | PASS | continual learning of whole two-layer tasks: 100% retention, exactly 3 blocks — blocks do not multiply across layers (OPEN-7) |
 | E17 | REFUTED on the letter | relational goals: identify-then-plan 0.51 (identification limit); words matched to the examples directly 0.99 |
 | E18 | PASS | an induction circuit written into a RoPE transformer with no training copies patterns at 100% (OPEN-8 first form) |
+| E21 | measured | a near-duplicate rule is minted its own block 6.4 observations after it starts — the wait for a refuting input (OPEN-6) |
+| E22 | REFUTED here | annealing the budget vs a hard cap: no difference — nothing fuzzy to crystallise in one-hot rules |
+| E23 | REFUTED here | macro-actions raise search nodes 192 → 522 in a 720-state map: a cache needs depth (OPEN-10 stays open) |
 
 ## Format
 
@@ -566,3 +569,43 @@ changed: OPEN-8 has its first form: an attention circuit can be written as a des
          heads' q/k/v with rotary phases as parameters) and works exactly. Not built: the general step — ZipLearner
          *choosing* such a circuit as the cheapest description of in-context data — and PoPE, under which the content
          match is not separable (E0); the written network uses RoPE.
+
+### 2026-09-21 — E21 — a near-duplicate rule gets its own block as soon as an observation refutes the old one: 6.4 observations, the waiting time for a differing input (a measurement; OPEN-6)
+command: `python experiments/ziplearn/e21.py` (A = shift 3 for 40 pairs, then D = A on 9 of 11 inputs for 120; 20 streams; CPU, ~20 s)
+files:   `experiments/ziplearn/runs/e21/e21.json`; code `e21.py`
+numbers: a block of its own for D minted after **6.4** D-observations on average (min 1, max 21; never in
+         0 streams); A's block carries an exception rate of 0.000 at the end; D's accuracy on its two differing
+         inputs, given a context that contains them, 0.95.
+verdict: none (a measurement). OPEN-6's expectation held to the letter: while the window contains only inputs on
+         which A and D agree, D is "A" — the correct description of the evidence — and the first differing input is
+         an exception; because A's block is established (40 clean pairs), that exception is expensive (≈ 9.7 bits
+         under the rate price) and the change-point rule mints within a few more observations. 6.4 is 11/2: the
+         expected wait for one of the two differing inputs. The ambiguity is real but short-lived, and its cost is
+         one wrong answer per differing input before the mint.
+changed: nothing. OPEN-6 closed as "measured": the guaranteed error is the first refuting case, and the recovery is
+         a few observations.
+
+### 2026-09-21 — E22 — annealing the budget does nothing here: there is nothing fuzzy to crystallise (REFUTED in this setting; §8's annealing reading)
+command: `python experiments/ziplearn/e22.py` (E15's stream; a hard cap of 40 bits from the first stretch against 80 → 40 in steps of 8; 10 streams; CPU, ~20 s)
+files:   `experiments/ziplearn/runs/e22/e22.json`; code `e22.py`
+numbers: hard cap: 36.1 bits, 3.6 blocks, evidence-weighted retention **0.723**; annealed: 35.6 bits,
+         3.4 blocks, **0.701**. Different blocks are dropped (an affine and a shift instead of two affines)
+         with no advantage either way.
+verdict: REFUTED for this stream. §8's argument for raising λ gradually is that fuzzy descriptions harden into
+         discrete ones as the budget tightens; in this stream every description is discrete from the start and the
+         budget only chooses which block to drop, so the schedule changes the order of drops and nothing else.
+         Annealing has a job only where §7 step 2 (a table re-described by a structure) has fuzzy descriptions to
+         harden — not built, and not testable on one-hot rules.
+changed: §8's annealing is marked "no effect where descriptions are already discrete; untested where they are not".
+
+### 2026-09-21 — E23 — macro-actions from the library make the search LARGER in a small map (REFUTED here; OPEN-10 first form)
+command: `python experiments/ziplearn/e23.py` (E9's environment, 150 goals 4–6 actions away, 17 macro-actions = the library's named permutations as words; CPU, ~1 min)
+files:   `experiments/ziplearn/runs/e23/e23.json`; code `e23.py`
+numbers: primitives only: 100% reached, **192** nodes per goal, plans 2.92 steps (the oracle's 2.92);
+         primitives + macros: 100% reached, **522** nodes per goal, plans 2.92.
+verdict: REFUTED. The goals were built from words of 4–6 actions, but the group is small and words cancel: the
+         oracle's mean plan is 2.9 steps, breadth-first search with a visited set touches at most the 720 reachable
+         states, and adding 17 macros raises the branching factor from 7 to 24 without shortening anything. A cache
+         pays only when depth is large relative to branching; in this map nothing is deep. OPEN-10 stays open for the
+         reason it was opened: it needs a map too large to search, and we do not have one yet.
+changed: nothing; the honest status of OPEN-10 is "not reachable in the current domains".
