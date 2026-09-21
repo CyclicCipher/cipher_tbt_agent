@@ -1,0 +1,15 @@
+17:28:13  calibration: 57 ms/step -> 2368 steps per arm (9.0 min of training)
+17:30:22  A: 129s | train acc 0.246 | held acc 0.009 | held solved 0.00 | demos-to-criterion 8.00
+17:32:57  B: 155s | train acc 0.003 | held acc 0.000 | held solved 0.00 | demos-to-criterion 8.00
+17:35:35  Ap: 157s | train acc 0.285 | held acc 0.011 | held solved 0.00 | demos-to-criterion 8.00
+17:38:34  Bp: 179s | train acc 0.004 | held acc 0.000 | held solved 0.00 | demos-to-criterion 8.00
+17:38:34  gate C0 (baseline solves >= half the held-out compositions): FAIL (0.00)
+17:39:09  inspection: 35s rc=0
+17:41:25  A seed 1: 137s | held acc 0.054 | demos-to-criterion 8.00
+17:44:02  B seed 1: 157s | held acc 0.001 | demos-to-criterion 8.00
+17:44:02  INCONCLUSIVE  P1 competence: demos-to-criterion A 8.00 vs B 8.00; held-out accuracy A 0.009 vs B 0.000
+17:44:02  FAIL          P2 noise immunity: noise families cost A -0.002 and B -0.000 of held-out accuracy; noise-family trust under B 0.322
+17:44:02  INCONCLUSIVE  P3 what the mask does: peak masked fraction 0.54; near-zero weights A 0.011 vs B 0.017
+17:44:02  INCONCLUSIVE  P4 organisation: primitive regions A 3 vs B 5; mean selectivity A 0.799 vs B 0.882; functional selectivity A 0.341 vs B 0.013 (random-set control 0.013)
+17:44:02  FAIL          P5 no harm on training: training accuracy A 0.246 vs B 0.003
+17:44:02  done in 16.0 min; report at C:\Users\julia\GitHub\predictive-coding-agent\experiments\inner_objective\runs\results\report.md

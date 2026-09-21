@@ -1,0 +1,4 @@
+A: primitive regions 3/9 | mean selectivity 0.836 | functional selectivity 0.052 (random-set control 0.052) | dead 0.0% near-zero 1.0% | noise participation None vs real 0.106
+B: primitive regions 1/9 | mean selectivity 0.800 | functional selectivity 0.000 (random-set control 0.000) | dead 0.0% near-zero 1.7% | noise participation None vs real 0.094
+Ap: primitive regions 1/9 | mean selectivity 0.778 | functional selectivity 0.005 (random-set control 0.005) | dead 0.0% near-zero 1.0% | noise participation 0.05846063420176506 vs real 0.108
+Bp: primitive regions 2/9 | mean selectivity 0.814 | functional selectivity 0.000 (random-set control 0.000) | dead 0.0% near-zero 1.7% | noise participation 0.02704496495425701 vs real 0.090

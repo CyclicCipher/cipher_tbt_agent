@@ -1,0 +1,13 @@
+per-group gradients: vmap (verified against the loop)
+arm Ap | params 150,725 | envs 20 (3 noise) | steps 2368 | per-env 16 | c 3.0 trust 0.2 | dev cuda
+  step   250 | loss 1.486 | train acc 0.001 | held acc 0.001 solved 0.00 ttc 8.00 | 15s
+  step   500 | loss 1.374 | train acc 0.018 | held acc 0.003 solved 0.00 ttc 8.00 | 31s
+  step   750 | loss 1.263 | train acc 0.040 | held acc 0.003 solved 0.00 ttc 8.00 | 47s
+  step  1000 | loss 1.138 | train acc 0.151 | held acc 0.005 solved 0.00 ttc 8.00 | 62s
+  step  1250 | loss 1.038 | train acc 0.224 | held acc 0.008 solved 0.00 ttc 8.00 | 78s
+  step  1500 | loss 0.969 | train acc 0.259 | held acc 0.008 solved 0.00 ttc 8.00 | 94s
+  step  1750 | loss 0.930 | train acc 0.278 | held acc 0.008 solved 0.00 ttc 8.00 | 110s
+  step  2000 | loss 0.904 | train acc 0.295 | held acc 0.013 solved 0.00 ttc 8.00 | 125s
+  step  2250 | loss 0.902 | train acc 0.309 | held acc 0.012 solved 0.00 ttc 8.00 | 141s
+  step  2368 | loss 0.912 | train acc 0.285 | held acc 0.011 solved 0.00 ttc 8.00 | 149s
+done in 149s

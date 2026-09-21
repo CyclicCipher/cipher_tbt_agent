@@ -1,0 +1,46 @@
+{
+ "A": {
+  "held_digit_acc": 0.08344184296826522,
+  "held_bits": 7.382135391235352,
+  "train_digit_acc": 0.7727593456705412,
+  "train_bits": 1.1043620804945629,
+  "steps_to": {
+   "0.1": 1250,
+   "0.2": null,
+   "0.3": null
+  }
+ },
+ "B": {
+  "held_digit_acc": 0.08767361442248027,
+  "held_bits": 4.685792605082194,
+  "train_digit_acc": 0.4325900711119175,
+  "train_bits": 2.311650296052297,
+  "steps_to": {
+   "0.1": null,
+   "0.2": null,
+   "0.3": null
+  }
+ },
+ "Ap": {
+  "held_digit_acc": 0.08523220693071683,
+  "held_bits": 4.9986699024836225,
+  "train_digit_acc": 0.4251030931870143,
+  "train_bits": 2.0356659094492593,
+  "steps_to": {
+   "0.1": null,
+   "0.2": null,
+   "0.3": null
+  }
+ },
+ "Bp": {
+  "held_digit_acc": 0.08865017568071683,
+  "held_bits": 4.272246638933818,
+  "train_digit_acc": 0.3897840827703476,
+  "train_bits": 2.4660506745179496,
+  "steps_to": {
+   "0.1": null,
+   "0.2": null,
+   "0.3": null
+  }
+ }
+}

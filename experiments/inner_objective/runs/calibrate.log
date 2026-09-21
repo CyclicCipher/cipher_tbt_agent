@@ -1,0 +1,3 @@
+per-group gradients: vmap (verified against the loop)
+arm B | params 150,725 | envs 17 (0 noise) | steps 100 | per-env 16 | c 3.0 trust 0.2 | dev cuda
+80 steps in 4.6s -> 57 ms/step

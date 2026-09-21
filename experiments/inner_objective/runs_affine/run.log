@@ -1,0 +1,16 @@
+17:48:10  calibration: 75 ms/step -> 1800 steps per arm (9.0 min of training)
+17:50:30  A: 139s | train acc 0.184 | held acc 0.000 | held solved 0.00 | demos-to-criterion 8.00
+17:53:04  B: 154s | train acc 0.000 | held acc 0.000 | held solved 0.00 | demos-to-criterion 8.00
+17:55:44  Ap: 160s | train acc 0.003 | held acc 0.000 | held solved 0.00 | demos-to-criterion 8.00
+17:58:36  Bp: 171s | train acc 0.000 | held acc 0.000 | held solved 0.00 | demos-to-criterion 8.00
+17:58:36  gate C0 (baseline solves >= half the held-out compositions): FAIL (0.00)
+17:59:17  inspection: 41s rc=0
+18:01:48  A seed 1: 143s | held acc 0.000 | demos-to-criterion 8.00
+18:04:23  B seed 1: 155s | held acc 0.000 | demos-to-criterion 8.00
+18:04:23  INCONCLUSIVE  P1 competence: demos-to-criterion A 8.00 vs B 8.00; held-out accuracy A 0.000 vs B 0.000
+18:04:23  FAIL          P2 noise immunity: noise families cost A +0.000 and B +0.000 of held-out accuracy; noise-family trust under B 0.118
+18:04:23  INCONCLUSIVE  P3 what the mask does: peak masked fraction 0.96; near-zero weights A 0.010 vs B 0.017
+18:04:23  INCONCLUSIVE  P4 organisation: primitive regions A 3 vs B 1; mean selectivity A 0.836 vs B 0.800; functional selectivity A 0.052 vs B 0.000 (random-set control 0.000)
+18:04:23  PASS          P1b graded: held-out bits/digit A 7.382 vs B 3.686; per-digit accuracy A 0.083 vs B 0.061; steps to 20% training accuracy A None vs B None
+18:04:23  FAIL          P5 no harm on training: training accuracy A 0.184 vs B 0.000
+18:04:23  done in 16.4 min; report at experiments\inner_objective\runs_affine\results\report.md

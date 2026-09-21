@@ -1,0 +1,5 @@
+arm  | held digit acc held bits/digit | train digit acc train bits | steps to train acc 0.1 / 0.2 / 0.3
+A    |          0.083           7.382 |           0.773      1.104 | 1250 / None / None
+B    |          0.088           4.686 |           0.433      2.312 | None / None / None
+Ap   |          0.085           4.999 |           0.425      2.036 | None / None / None
+Bp   |          0.089           4.272 |           0.390      2.466 | None / None / None
