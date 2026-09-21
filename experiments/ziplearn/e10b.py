@@ -102,10 +102,10 @@ class Agent:
         if self.n_obs[a] >= 2 and self.exception_rate(a) >= 0.5:
             return []
         best_price = min(bits + learner.bits_value_name + pos.cost + learner.bits_pos_name
-                         for (_n, _ab, bits), pid, pperm in learner.runs for pos in (pid, pperm))
+                         for (_n, _ab, bits), *positions in learner.runs for pos in positions)
         hyps = []
-        for (name, (va, vb), bits), pid, pperm in learner.runs:
-            for pos in (pid, pperm):
+        for (name, (va, vb), bits), *positions in learner.runs:
+            for pos in positions:
                 if bits + learner.bits_value_name + pos.cost + learner.bits_pos_name > best_price + 2.0:
                     continue
                 if isinstance(pos, PositionPerm):

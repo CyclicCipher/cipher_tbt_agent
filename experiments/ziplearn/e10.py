@@ -81,10 +81,10 @@ class Agent:
             return [(tuple(self.rng.permutation(L)), 1, 0) for _ in range(M)]
         best = learner.best()
         best_price = min(bits + learner.bits_value_name + pos.cost + learner.bits_pos_name
-                         for (_n, _ab, bits), pid, pperm in learner.runs for pos in (pid, pperm))
+                         for (_n, _ab, bits), *positions in learner.runs for pos in positions)
         hyps = []
-        for (name, (va, vb), bits), pid, pperm in learner.runs:
-            for pos in (pid, pperm):
+        for (name, (va, vb), bits), *positions in learner.runs:
+            for pos in positions:
                 price = bits + learner.bits_value_name + pos.cost + learner.bits_pos_name
                 if price > best_price + 2.0:
                     continue

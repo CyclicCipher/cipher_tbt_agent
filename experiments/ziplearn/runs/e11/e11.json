@@ -1,0 +1,171 @@
+{
+ "A": {
+  "1": {
+   "per_action": {
+    "reverse": 0.0025,
+    "rot_left": 0.0,
+    "rot_right": 0.0,
+    "swap_pairs": 0.0032500000000000003,
+    "swap_halves": 0.0005,
+    "inc": 1.0,
+    "negate": 1.0,
+    "copy01": 0.20025000000000004,
+    "set0": 0.20049999999999998,
+    "fill0": 0.05
+   },
+   "kept": {
+    "reverse": "position permutation",
+    "rot_left": "position permutation",
+    "rot_right": "position permutation",
+    "swap_pairs": "position permutation",
+    "swap_halves": "position permutation",
+    "inc": "position identity",
+    "negate": "position identity",
+    "copy01": "position identity",
+    "set0": "position identity",
+    "fill0": "position permutation"
+   },
+   "bij": 0.2866071428571429,
+   "nonbij": 0.15025000000000002
+  },
+  "2": {
+   "per_action": {
+    "reverse": 0.558,
+    "rot_left": 0.50025,
+    "rot_right": 0.55,
+    "swap_pairs": 0.6,
+    "swap_halves": 0.301,
+    "inc": 1.0,
+    "negate": 1.0,
+    "copy01": 0.579,
+    "set0": 0.63875,
+    "fill0": 0.80375
+   },
+   "kept": {
+    "reverse": "position permutation",
+    "rot_left": "position permutation",
+    "rot_right": "position permutation",
+    "swap_pairs": "position permutation",
+    "swap_halves": "position permutation",
+    "inc": "position identity",
+    "negate": "position identity",
+    "copy01": "position edit",
+    "set0": "position edit",
+    "fill0": "position edit"
+   },
+   "bij": 0.6441785714285714,
+   "nonbij": 0.6738333333333334
+  },
+  "3": {
+   "per_action": {
+    "reverse": 0.9,
+    "rot_left": 0.85,
+    "rot_right": 0.9,
+    "swap_pairs": 0.95,
+    "swap_halves": 0.9,
+    "inc": 1.0,
+    "negate": 1.0,
+    "copy01": 0.8717499999999999,
+    "set0": 0.91975,
+    "fill0": 0.8712499999999999
+   },
+   "kept": {
+    "reverse": "position permutation",
+    "rot_left": "position permutation",
+    "rot_right": "position permutation",
+    "swap_pairs": "position permutation",
+    "swap_halves": "position permutation",
+    "inc": "position identity",
+    "negate": "position identity",
+    "copy01": "position edit",
+    "set0": "position edit",
+    "fill0": "position edit"
+   },
+   "bij": 0.9285714285714286,
+   "nonbij": 0.8875833333333333
+  },
+  "4": {
+   "per_action": {
+    "reverse": 1.0,
+    "rot_left": 0.9,
+    "rot_right": 1.0,
+    "swap_pairs": 0.908,
+    "swap_halves": 1.0,
+    "inc": 1.0,
+    "negate": 1.0,
+    "copy01": 0.95,
+    "set0": 1.0,
+    "fill0": 1.0
+   },
+   "kept": {
+    "reverse": "position permutation",
+    "rot_left": "position permutation",
+    "rot_right": "position permutation",
+    "swap_pairs": "position permutation",
+    "swap_halves": "position permutation",
+    "inc": "position identity",
+    "negate": "position identity",
+    "copy01": "position edit",
+    "set0": "position edit",
+    "fill0": "position edit"
+   },
+   "bij": 0.9725714285714285,
+   "nonbij": 0.9833333333333334
+  },
+  "8": {
+   "per_action": {
+    "reverse": 1.0,
+    "rot_left": 1.0,
+    "rot_right": 1.0,
+    "swap_pairs": 1.0,
+    "swap_halves": 1.0,
+    "inc": 1.0,
+    "negate": 1.0,
+    "copy01": 1.0,
+    "set0": 1.0,
+    "fill0": 0.959
+   },
+   "kept": {
+    "reverse": "position permutation",
+    "rot_left": "position permutation",
+    "rot_right": "position permutation",
+    "swap_pairs": "position permutation",
+    "swap_halves": "position permutation",
+    "inc": "position identity",
+    "negate": "position identity",
+    "copy01": "position edit",
+    "set0": "position edit",
+    "fill0": "position map"
+   },
+   "bij": 1.0,
+   "nonbij": 0.9863333333333334
+  }
+ },
+ "B": {
+  "1": {
+   "reached": 0.125,
+   "same_length": 1.0
+  },
+  "2": {
+   "reached": 0.615,
+   "same_length": 0.8617886178861789
+  },
+  "3": {
+   "reached": 0.885,
+   "same_length": 0.9887005649717514
+  },
+  "4": {
+   "reached": 1.0,
+   "same_length": 1.0
+  },
+  "8": {
+   "reached": 1.0,
+   "same_length": 1.0
+  }
+ },
+ "C": {
+  "one_to_one_unknowns": 0.0,
+  "many_to_one_unknowns": 0.48
+ },
+ "verdict": "PASS"
+}

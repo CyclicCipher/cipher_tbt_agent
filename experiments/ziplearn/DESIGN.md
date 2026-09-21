@@ -122,6 +122,8 @@ answer to a query x  =  row x of W_keep
 | tied blocks | one small matrix reused at every position | pairs at any position | the small matrix's price | "the same rule at every digit position" |
 | position permutation | a permutation of the 6 positions | 6 pairs of positions | log₂(6!) ≈ 9.5 | reverse, rotate, swap — digits moving between slots |
 | read-from (route) | which earlier source this layer reads | try each source, keep the cheapest description | log₂(number of sources) | the wiring between layers (§6, §15) |
+| position map | for each output: a source (repeats allowed) or a constant | candidate intersection, no one-to-one rule | log₂5 per unresolved digit | many-to-one actions: copies and writes (E11) |
+| position edit | the identity, with per-slot edits | a slot is free while it reads itself; contradicted, it becomes a map slot | one exception per edited slot, then as a map | "everything stays except…" (E11) |
 
 Two structures for later, when inputs are no longer one-hot digits but distributed activity (many units partly active):
 
@@ -707,6 +709,35 @@ changed: OPEN-11 is BUILT in its first form: the value of trying an action = its
          act → the plan's failures and the price of ignorance decide what to try next. Not built: OPEN-10 (a large
          map), OPEN-12 (goals that are relations), actions that are not bijections (the learned inverse of §16 item 2).
 
+### 2026-09-20 — E11 — non-bijective actions: refuted with a plain map, passed with "identity plus edits"; a try of a many-to-one action erases the goal half the time
+command: `python experiments/ziplearn/e11.py` (E9's seven actions + copy01, set0, fill0; 200 goals; 20 learners per (action, k); CPU, ~2 min; run three times, see below)
+files:   `experiments/ziplearn/runs/e11/e11.json` (final), `e11_first_run_map_only.json`; code: `PositionMap`, `PositionEdit` in `ziplearner.py`, `e11.py`
+numbers: run 1 (library + a many-to-one position MAP only): the many-to-one actions were exactly described after 4
+         observations in **0.51** of learners (0.87 at 8); copy01 and set0 were kept as "position identity" — the
+         identity with a systematic exception at one slot was cheaper than the map, which pays log₂5 for every slot
+         until each is resolved. REFUTED (A 0.51 < 0.8). Run 2, with `PositionEdit` (the identity with per-slot edits: a
+         slot costs nothing while it reads itself, one exception when contradicted, then it is solved like a map slot):
+         many-to-one exact **0.983** at k = 4, planning reached 0.875 at k = 4 — and fill0 was being kept as a "position
+         permutation" that read slot 0 six times: `PositionPerm` never checked that two settled slots cannot share a
+         source. Run 3, with that fixed: A — one-to-one 0.29 / 0.64 / 0.93 / 0.97 / 1.00 and many-to-one 0.15 / 0.67 /
+         0.89 / **0.98** / 0.99 exact at k = 1 / 2 / 3 / 4 / 8; B — goals reached 0.13 / 0.62 / 0.89 / **1.00** / 1.00 with
+         plans as short as the oracle's 1.00 / 0.86 / 0.99 / **1.00** / 1.00 (84 of the 200 goals need a many-to-one
+         action in every shortest plan); C — a try of an unknown one-to-one action never makes the goal unreachable
+         within the budget; a try of an unknown many-to-one action does so **0.48** of the time.
+verdict: PASS on the final run (A 0.983 ≥ 0.95; B 1.000 reached, plans optimal), after a refutation and a bug. k = 4
+         is at the edge for this world (0.875 reached on run 2 with the same criteria), so the pass is not a wide one.
+         The design claim survives: nothing in the loop needed an inverse — forward search over learned effects plans
+         with many-to-one actions as it did with permutations — and the cost of non-bijectivity shows up exactly
+         where §16 said it would, in acting to learn: a try that cannot be undone is not worth one step, it is worth
+         one step plus the goals it erases (48% here), and E10's price does not yet charge for that.
+changed: (1) library: `PositionMap` (any source, repeats allowed, or a constant) and `PositionEdit` (identity with
+         per-slot edits) added; the edit structure is the second time "generalise then correct" had to be made
+         slot-wise because the rate price treats exceptions as exchangeable — an exception that recurs at the same
+         place is structure, and a structure has to exist to say so. (2) `PositionPerm` refuses two settled slots with
+         the same source (a real bug; it could not affect E2/E3, whose actions are all permutations, but it labelled
+         fill0 wrongly). (3) OPEN-11 gains a term: the price of a try must include the expected plan bits from the
+         state it leaves you in, not only the step. Not built.
+
 ## 14. Glossary
 
 - **bits** — the unit of price; log₂11 ≈ 3.46 bits is the cost of naming one digit out of eleven with no information.
@@ -809,6 +840,14 @@ with exception rate < 0.5 (it refuses to call noise known and keeps trying it �
 hypotheses for an action refuted more often than not are empty, so its expected saving is zero. Pass: price reaches at
 least as many goals as every novelty policy with fewer mean steps, and spends fewer tries on the noisy actions than
 the ε-aware novelty policy. Refute: price worse than random.
+
+**E11 — non-bijective actions (pre-registered 2026-09-20, late; §16 item 2).** E9's environment plus three many-to-one
+actions — copy01 (position 1 := position 0), set0 (position 0 := 0), fill0 (every position := position 0) — and one new
+structure, a position MAP (an output reads any input position, repeats allowed, or is written a constant). A: the
+effect of each action learned from k observations, tested on 200 random states, one-to-one vs many-to-one, k = 1..4, 8.
+B: planning with all ten actions by forward search, as E9. C (reported, not judged): how often a try of an unknown action
+makes the goal unreachable within the budget — one-to-one unknowns vs many-to-one. Pass: A ≥ 0.95 exact at k = 4 for
+the many-to-one actions and B ≥ 0.95 reached at k = 4 with plans no longer than the oracle's; refute: either < 0.8.
 
 **OPEN-10** — when the map is too large to search: what to cache (a cost-to-go per state, or per description?), and
 whether the cache is itself a written structure. **OPEN-11** — acting to learn: the price of trying an unknown

@@ -298,17 +298,113 @@ class PositionPerm:
                     self.dead = True
             else:
                 pay(self, True)
-        # one-to-one: a settled source is unavailable to the others (repeat until nothing changes)
+        # one-to-one: a settled source is unavailable to the others (repeat until nothing changes); two settled
+        # slots reading the same source is not a permutation at all (found by E11's fill0, which reads slot 0 six times)
         changed = True
         while changed and not self.dead:
             changed = False
-            settled = {self.pi(j) for j in range(self.L) if self.pi(j) is not None}
+            settled_list = [self.pi(j) for j in range(self.L) if self.pi(j) is not None]
+            if len(settled_list) != len(set(settled_list)):
+                self.dead = True
+                break
+            settled = set(settled_list)
             for j in range(self.L):
                 if self.pi(j) is None and self.cand[j] & settled:
                     self.cand[j] -= settled
                     changed = True
                     if not self.cand[j]:
                         self.dead = True
+
+
+class PositionMap:
+    """Output position j either READS an input position (any, repeats allowed -- a copy) or is WRITTEN a constant.
+    Not one-to-one: a many-to-one map, the position layer of a non-bijective action (E11). Solved by intersecting
+    candidates as PositionPerm does, but with no one-to-one propagation and with the constants as extra candidates:
+    after each demonstration, output j's source can only be a position whose digit equalled y_j, or the constant
+    y_j itself. Costs as PositionPerm. A permutation is a special case, and cheaper when it fits (it resolves faster),
+    so this structure is kept only when a permutation cannot describe the action."""
+    name, n_params = "position map", 11
+
+    def __init__(self, L, V, price=None):
+        self.L, self.V, self.price = L, V, price or PRICE
+        self.cand = [set(("src", i) for i in range(L)) | set(("const", c) for c in range(V)) for _ in range(L)]
+        self.cost, self.dead = 0.0, False
+        self.n_right = self.n_wrong = 0
+
+    def rule(self, j):
+        c = self.cand[j]
+        return next(iter(c)) if len(c) == 1 else None
+
+    def pi(self, j):                                                   # the source position, if it is a read
+        r = self.rule(j)
+        return r[1] if r and r[0] == "src" else None
+
+    def _apply(self, r, x_seq):
+        return int(x_seq[r[1]]) if r[0] == "src" else int(r[1])
+
+    def predict(self, x_seq):
+        return [None if self.rule(j) is None else self._apply(self.rule(j), x_seq) for j in range(self.L)]
+
+    def observe_demo(self, x_seq, y_seq):
+        x_seq, y_seq = [int(v) for v in x_seq], [int(v) for v in y_seq]
+        for j in range(self.L):
+            r = self.rule(j)
+            if self.dead or (r is not None and self._apply(r, x_seq) != y_seq[j]):
+                pay(self, False)
+                self.dead = True
+                continue
+            if r is None:
+                self.cost += math.log2(self.V)
+                self.cand[j] = {c for c in self.cand[j] if self._apply(c, x_seq) == y_seq[j]}
+                if not self.cand[j]:
+                    self.dead = True
+            else:
+                pay(self, True)
+
+
+class PositionEdit(PositionMap):
+    """The identity with per-slot edits: every output position starts as "reads itself" and costs nothing while that
+    holds; a slot that is contradicted pays one exception and becomes an unresolved map slot (any source, or a
+    constant), solved by intersection like PositionMap's, then pays like a resolved slot. Describes "everything stays
+    except slot 1 is a copy of slot 0" for the price of the one slot that differs. Built after E11's first run: the
+    rate price treats exceptions as exchangeable, so "identity with a systematic exception at slot 1" looked cheaper
+    than the full map for far too long; an exception that is always at the same slot is structure, and this structure
+    says so."""
+    name, n_params = "position edit", 10.5
+
+    def __init__(self, L, V, price=None):
+        super().__init__(L, V, price)
+        self.edited = [False] * L                                        # slot contradicted the identity at least once
+
+    def rule(self, j):
+        if not self.edited[j]:
+            return ("src", j)
+        return super().rule(j)
+
+    def observe_demo(self, x_seq, y_seq):
+        x_seq, y_seq = [int(v) for v in x_seq], [int(v) for v in y_seq]
+        for j in range(self.L):
+            if self.dead:
+                pay(self, False)
+                continue
+            self.cand[j] = {c for c in self.cand[j] if self._apply(c, x_seq) == y_seq[j]}   # always tracked
+            if not self.edited[j]:
+                if x_seq[j] == y_seq[j]:
+                    pay(self, True)
+                else:
+                    pay(self, False)                                     # the identity default is refuted for this slot
+                    self.edited[j] = True
+                continue
+            r = super().rule(j)
+            if r is None:
+                self.cost += math.log2(self.V)
+                if not self.cand[j]:
+                    self.dead = True
+            elif self._apply(r, x_seq) == y_seq[j]:
+                pay(self, True)
+            else:
+                pay(self, False)
+                self.dead = True
 
 
 class PositionIdentity:
@@ -344,23 +440,23 @@ class TwoLayer:
         self.L, self.V = L, V
         self.hyps = value_hypotheses(V)
         self.bits_value_name = math.log2(3)                       # identity / shift / affine
-        self.bits_pos_name = math.log2(2)                         # identity / permutation
-        self.runs = [(h, PositionIdentity(L, V), PositionPerm(L, V)) for h in self.hyps]
+        self.bits_pos_name = math.log2(4)                         # identity / permutation / map / edit
+        self.runs = [(h, PositionIdentity(L, V), PositionPerm(L, V), PositionMap(L, V), PositionEdit(L, V)) for h in self.hyps]
 
     @staticmethod
     def invert(a, b, y, V):
         return (inv(a, V) * (y - b)) % V
 
     def observe_demo(self, x_seq, y_seq):
-        for (name, (a, b), _bits), pid, pperm in self.runs:
+        for (name, (a, b), _bits), *positions in self.runs:
             t = [self.invert(a, b, int(y), self.V) for y in y_seq]   # what layer 1 must produce for layer 2 to give y
-            pid.observe_demo(x_seq, t)
-            pperm.observe_demo(x_seq, t)
+            for pos in positions:
+                pos.observe_demo(x_seq, t)
 
     def best(self):
         best, best_price = None, (float("inf"), 0)
-        for (name, ab, bits), pid, pperm in self.runs:
-            for pos in (pid, pperm):
+        for (name, ab, bits), *positions in self.runs:
+            for pos in positions:
                 price = bits + self.bits_value_name + pos.cost + self.bits_pos_name
                 key = (round(price, 9), pos.n_params)
                 if best is None or key < best_price:
