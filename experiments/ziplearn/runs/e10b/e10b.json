@@ -1,0 +1,53 @@
+{
+ "none": {
+  "reached": 0.62,
+  "mean_steps": 3.56,
+  "tries": {
+   "real": 0.0,
+   "noop": 0.0,
+   "noisy": 0.0
+  },
+  "described_real": 3.8
+ },
+ "random": {
+  "reached": 0.585,
+  "mean_steps": 4.995,
+  "tries": {
+   "real": 48.2,
+   "noop": 13.2,
+   "noisy": 16.4
+  },
+  "described_real": 7.0
+ },
+ "least observed (until known)": {
+  "reached": 0.36000000000000004,
+  "mean_steps": 5.01,
+  "tries": {
+   "real": 7.0,
+   "noop": 2.0,
+   "noisy": 57.4
+  },
+  "described_real": 6.6
+ },
+ "least observed (until known, eps-aware)": {
+  "reached": 0.23000000000000004,
+  "mean_steps": 5.6450000000000005,
+  "tries": {
+   "real": 8.8,
+   "noop": 2.0,
+   "noisy": 69.0
+  },
+  "described_real": 7.0
+ },
+ "price (horizon)": {
+  "reached": 0.9199999999999999,
+  "mean_steps": 2.3,
+  "tries": {
+   "real": 7.0,
+   "noop": 2.0,
+   "noisy": 2.4
+  },
+  "described_real": 6.8
+ },
+ "verdict": "PASS"
+}

@@ -686,6 +686,27 @@ changed: OPEN-11 keeps its currency (plan bits) with one correction: multiplied 
          nothing. Next test, not built: E10b with useless (no-op) and noisy (undescribable) actions, where the price
          should stop trying what the rate price has shown to be noise and novelty-with-stopping cannot.
 
+### 2026-09-20 — E10b — with useless and noisy actions, price is the only policy that both learns what matters and leaves noise alone (PASS)
+command: `python experiments/ziplearn/e10b.py --streams 5 --goals 40` (E10's environment + 2 no-op + 2 noisy actions; 4 real actions known at start; up to 2 tries per goal; 6-step budget; CPU, ~8 min, detached)
+files:   `experiments/ziplearn/runs/e10b/e10b.json`, `full.log`; code `e10b.py`
+numbers: goals reached / mean steps (failures = 6) / tries spent on real, no-op, noisy actions / real actions described at the end —
+         none 0.620 / 3.56 / 0, 0, 0 / 3.8;  random 0.585 / 5.00 / 48, 13, 16 / 7.0;  least observed until known (any
+         description) 0.360 / 5.01 / 7, 2, **57** / 6.6;  least observed until known (exception rate < 0.5) 0.230 /
+         5.65 / 9, 2, **69** / 7.0;  **price (horizon) 0.920 / 2.30 / 7, 2, 2.4 / 6.8**.
+verdict: PASS on every pre-registered clause, and this time not within noise: the price policy reaches 92% of goals in
+         2.3 steps; the novelty policies reach 36% and 23% in ~5 steps because they spend 57–69 tries on the two
+         actions whose effect is random (the ε-aware one worst of all, since it can never call noise "known"); random
+         tries do worse than not trying (0.585 vs 0.620). The price policy tries each noisy action about once (2.4
+         tries across both), sees its description refuted, prices its expected saving at zero and never touches it
+         again; it tries each no-op once, describes it as the identity, and never needs it; it learns the three
+         useful unknown actions (7 tries) and stops. The mechanism is the rate price of E4 doing double duty: the
+         exception rate that says "learned nothing" (noisy TV) is the same number that says "not worth trying".
+changed: OPEN-11 is BUILT in its first form: the value of trying an action = its expected plan-bit saving over the
+         goals still to come, over the hypotheses its evidence allows — none, once its best description is refuted more
+         often than not — minus the try's cost. Together with E9/E10 this closes §16's first loop: describe → plan →
+         act → the plan's failures and the price of ignorance decide what to try next. Not built: OPEN-10 (a large
+         map), OPEN-12 (goals that are relations), actions that are not bijections (the learned inverse of §16 item 2).
+
 ## 14. Glossary
 
 - **bits** — the unit of price; log₂11 ≈ 3.46 bits is the cost of naming one digit out of eleven with no information.
@@ -741,7 +762,7 @@ What is *not* decided: whether the gradient arm's per-token softmax routing or t
 the right comparison when both exist; E2 will run the written network, E0 the gradient arm, and the two are reported
 side by side, not merged.
 
-## 16. The outer objective — first form BUILT (E9), the rest DESIGNED / OPEN
+## 16. The outer objective — first loop BUILT (E9, E10, E10b), the rest DESIGNED / OPEN
 
 **The problem.** Everything before this section is a world model: descriptions that say what comes out when something
 goes in. The outer objective is to *act*: given a goal, choose actions that reach it. The ideal is that any goal can
@@ -780,9 +801,18 @@ reached within a 6-step budget; mean steps to goal (failures count as the budget
 described. Pass: price reaches at least as many goals as random and least-observed with fewer mean steps. Refute:
 price worse than random.
 
+**E10b — acting to learn with useless and noisy actions (pre-registered 2026-09-20, late).** E10's environment plus
+two no-op actions and two noisy ones (a fresh random permutation every use; no description ever fits). Goals use the
+seven real actions only. Policies: none; random; least observed until known, "known" = any description (it calls a
+noisy action "identity with exceptions" after one try and stops); least observed until known, "known" = a description
+with exception rate < 0.5 (it refuses to call noise known and keeps trying it — the trap); price (horizon), whose
+hypotheses for an action refuted more often than not are empty, so its expected saving is zero. Pass: price reaches at
+least as many goals as every novelty policy with fewer mean steps, and spends fewer tries on the noisy actions than
+the ε-aware novelty policy. Refute: price worse than random.
+
 **OPEN-10** — when the map is too large to search: what to cache (a cost-to-go per state, or per description?), and
 whether the cache is itself a written structure. **OPEN-11** — acting to learn: the price of trying an unknown
-action against the bits its description would save. *E10: the saving must be counted over the goals still to come (a description is an asset); the myopic version does not explore. Discriminating test still to run: useless and noisy actions (E10b).* **OPEN-12** — goals that are relations, not states ("make the
+action against the bits its description would save. *E10: the saving must be counted over the goals still to come (a description is an asset); the myopic version does not explore. E10b (useless + noisy actions): price 92% of goals in 2.3 steps, novelty policies 36%/23% — trapped by the noisy actions; BUILT in its first form.* **OPEN-12** — goals that are relations, not states ("make the
 output the reverse of the input"), and goals over the library ("find a shorter word").
 
 **E9 — planning in the written map (pre-registered).** The composition domain's seven primitives as the actions of an

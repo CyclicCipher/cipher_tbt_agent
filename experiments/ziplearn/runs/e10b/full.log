@@ -1,0 +1,10 @@
+E10b: 5 streams of 40 goals; actions = 7 real + 2 no-op + 2 noisy; known at start ['rot_left', 'swap_pairs', 'inc', 'negate']; up to 2 tries per goal; budget 6
+
+policy                                reached  mean steps   tries real/noop/noisy  real described
+none                                    0.620        3.56       0.0/0.0 /0.0                 3.8
+random                                  0.585        5.00      48.2/13.2/16.4                7.0
+least observed (until known)            0.360        5.01       7.0/2.0 /57.4                6.6
+least observed (until known, eps-aware)    0.230        5.65       8.8/2.0 /69.0                7.0
+price (horizon)                         0.920        2.30       7.0/2.0 /2.4                 6.8
+
+E10b verdict: PASS
