@@ -35,6 +35,8 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E22 | REFUTED here | annealing the budget vs a hard cap: no difference — nothing fuzzy to crystallise in one-hot rules |
 | E23 | REFUTED here | macro-actions raise search nodes 192 → 522 in a 720-state map: a cache needs depth (OPEN-10 stays open) |
 | E19 | PASS (outcome) | goal keys priced by outcome (confirmed vs refuted): LockPath's door level solved, CollectAll 3/3, 8/16 levels (E13: 5/16) |
+| E24 | PASS | the sleep pass: rules keep 2–4 of 9 context cells, ~10× fewer bits, next levels solved 2–3× faster; lossless of the evidence, or it forgets what the planner needs |
+| E25 | measured | the trace diagnostic: discovery is 2/3 revisits; errors are missed changes from the 'unchanged' default; pushes too rare; goal keys too specific |
 
 ## Format
 
@@ -631,3 +633,54 @@ verdict: PASS on the outcome pre-registered in the OPSD note (the level that fai
 changed: the goal model keeps counts, not sets. §16's game paragraph: the goal is learned from the score AND priced
          against it. The user's point 3 (learned goals per the ARC-AGI-3 rules) has its first mechanism; points 1
          (a sleep pass) and the rest of point 2 (finding the missing structure in hindsight) are the next two.
+
+### 2026-09-21 — E24 — the sleep pass: each action's rule keeps the 2–4 context cells it needs, the model shrinks ~10×, and the next levels are solved 2–3× faster (PASS after one correction)
+command: `python experiments/ziplearn/play_games.py --budget 150 --sleep 1 --out experiments/ziplearn/runs/e24` (all six games; a sleep pass after every completed level; CPU, ~2 min)
+files:   `experiments/ziplearn/runs/e24/play.json`; code: `LocalRule.sleep` (with `full` as the kept evidence and `mask` as the description), `ActionModel.sleep`, `Player.sleep`, the checkpoint in `play` (`arcgames.py`)
+numbers: bits of the world model at the first sleep: LockPath 9192 → 660, MultiKey 8800 → 1192, CollectAll 9144 → 752,
+         Toggle 7190 → 1754; context cells kept per action out of 9 (radius 1): LockPath [3, 3, 3, 2], MultiKey [4, 3, 3, 3],
+         CollectAll [3, 3, 3, 2], Toggle [4, 4, 4, 4] — a move needs its own cell and the cells along its axis, nothing
+         else. Levels after a sleep: LockPath L1 **25** actions (79 without sleep; oracle 12), MultiKey L1 **25** (49; 13),
+         CollectAll L1 **23** (58; 13) and L2 **34** (94; 15). Levels solved 8/16, the same three failures (LockPath L2,
+         Sokoban, Tetris — no level completed, so no sleep ever ran there). Prediction accuracy on LockPath 0.78 (0.70).
+verdict: PASS: more compact (≈ 10× fewer bits) and more general (the same rule now predicts windows it never saw,
+         because the cells that differed were dropped), measured as faster solutions on the levels that follow. The
+         correction: the first version let the price alone choose the mask and it merged away the rare cells that
+         change — forgetting a rare change costs fewer bits than an entry — which dropped accuracy to 0.45 and lost a
+         level. The planner lives on exactly those cells. The adopted rule: drop context cells while the merged table
+         is cheaper AND explains the evidence no worse (no new exceptions): compact without losing what was known.
+         That is the tension between the inner objective (bits) and the outer one (plans) in one line, and the
+         sleep pass resolves it by refusing lossy compression of the evidence it plans on.
+changed: the world-model rule keeps its evidence (`full`) separate from its description (`mask` + merged table) — the
+         first place in the design where the two are stored apart; §7 step 2 (re-describing a table by a cheaper
+         structure) now has an instance. A per-entry mask (each rule entry keeping only the cells it needs) is the
+         obvious next form; E25 says why.
+
+### 2026-09-21 — E25 — what hindsight would have to learn: the diagnostic over the player's traces (a measurement)
+command: `python experiments/ziplearn/play_games.py --budget 150 --sleep 1 --trace 1 --out experiments/ziplearn/runs/e25`, then `python experiments/ziplearn/diagnose.py --runs experiments/ziplearn/runs/e25`
+files:   `experiments/ziplearn/runs/e25/trace_*.json` (every step: frame, choice and its reason, prediction, outcome), `diagnosis.json`; code `diagnose.py`, the `trace` option in `arcgames.play`
+numbers: actions spent, per level — first levels are ALL discovery (80, 77, 87, 71 actions, oracles 7–9); later levels
+         are mostly exploration after the goal is known (CollectAll L1: 22 exploratory + 1 goal-directed; LockPath L1:
+         23 + 2) — the win keys are radius-1 windows and fire only when the agent is adjacent in a seen arrangement.
+         Revisits: **54 of 80, 66 of 87, 57 of 77, 53 of 71** discovery actions return to a frame already seen; Sokoban
+         **116 of 150**. Wrong predictions are almost all MISSED CHANGES (a cell changed, predicted unchanged): LockPath
+         L0 40 of 30 wrong predictions, Sokoban 106, Tetris 424 (plus 42 spurious and 40 wrong colours), and they occur
+         with unknown windows in the frame — the "unchanged" default. Failed levels, read from the examples: LockPath
+         L2 — the agent's move is predicted to vacate its cell but not to arrive, because the destination's window
+         has the block one cell above and that key was never seen: a rule that does not depend on that cell is paying
+         for it; Sokoban — no win found in 150 actions, 116 revisits: pushes happen by accident, the model never
+         predicts them, and exploration cannot plan the moves that would make new frames; Tetris — every tick moves
+         the piece whatever the action, and a model whose default is "unchanged" is wrong on every cell that moves.
+verdict: none (a measurement). What hindsight would have to learn, in order of actions lost: (1) **exploration**, not
+         the model: two thirds of discovery actions revisit known frames, because plans are one step long and end at
+         the first unknown; a plan that reached the nearest unvisited frame and stayed away from visited ones would
+         halve discovery; (2) **the unknown-window default**: "unchanged" is wrong wherever things move; the default
+         should be learned (Tetris) or, better, the rule should not depend on cells it does not need — the per-entry
+         mask (LockPath L2's block); (3) **rare events**: a push is seen a few times by accident and the price never
+         gets the observations it would need to prefer the radius-2 rule — E10's price of ignorance should be buying
+         those observations, and is not wired to the games; (4) **goal keys too specific**: a win key is a whole
+         radius-1 window, so a goal learned at one spot does not fire at another; the sleep pass's mask applied to
+         goal keys is the same fix. None of these is credit assignment over a trajectory; every one is a missing or
+         over-specific description, found by comparing what was predicted with what happened — which is what the
+         trace now records at every step.
+changed: nothing in the design; the next builds are ranked by the numbers above.

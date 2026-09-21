@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
 *v0.6, 2026-09-21 (v0.1–v0.5 on 2026-09-20; v0.6 records E14–E18: capacity, precision, order dependence, blocks across
-layers, relational goals, written attention). E0–E23 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
+layers, relational goals, written attention). E0–E25 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -455,6 +455,13 @@ price the goal model's predictions against the outcomes: a win key that fired wi
 more often than confirmed stop predicting. Test on E13's LockPath door level. Pass: solved within the budget with no
 game worse; refute: the same failure.
 
+**E24 — the sleep pass (pre-registered 2026-09-21).** After every completed level, each action's rule drops the context
+cells it does not need — greedy, while the merged table is cheaper and explains the evidence with no new exceptions.
+Pass: bits fall by ≥ 20% and the levels that follow are solved in no more actions; refute: accuracy or levels lost.
+**E25 — the trace diagnostic (a measurement).** Every step's frame, choice, prediction and outcome recorded; actions
+decomposed into discovery / goal-directed / exploratory / blind; wrong predictions into missed, spurious and
+wrong-colour changes; revisits, no-effect actions, refuted goal keys; "what was it thinking" examples on failed levels.
+
 ## 12. Open questions
 
 **OPEN-1 — the outer objective (deferred by request, recorded here verbatim in substance).** ZipLearner learns a
@@ -504,6 +511,8 @@ changed) are in `RESULTS.md`, appended and never edited.
 | E22 | REFUTED here | annealing the budget vs a hard cap: no difference — nothing fuzzy to crystallise in one-hot rules |
 | E23 | REFUTED here | macro-actions raise search nodes 192 → 522 in a 720-state map: a cache needs depth (OPEN-10 stays open) |
 | E19 | PASS (outcome) | goal keys priced by outcome (confirmed vs refuted): LockPath's door level solved, CollectAll 3/3, 8/16 levels (E13: 5/16) |
+| E24 | PASS | the sleep pass: rules keep 2–4 of 9 context cells, ~10× fewer bits, next levels solved 2–3× faster; lossless of the evidence, or it forgets what the planner needs |
+| E25 | measured | the trace diagnostic: discovery is 2/3 revisits; errors are missed changes from the 'unchanged' default; pushes too rare; goal keys too specific |
 
 ## 14. Glossary
 

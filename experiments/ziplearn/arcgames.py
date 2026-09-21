@@ -40,16 +40,31 @@ V = 16                              # ARC colours
 BORDER = -1
 
 
+def entropy(p):
+    return 0.0 if p in (0.0, 1.0) else -(p * math.log2(p) + (1 - p) * math.log2(1 - p))
+
+
 class LocalRule:
-    """One action's effect as a table from windows to the centre cell's new colour, shared by every cell."""
+    """One action's effect as a table from windows to the centre cell's new colour, shared by every cell. The
+    description is the table over the cells of the window the MASK keeps; the evidence (`full`, counts over whole
+    windows) is kept so that a SLEEP pass can try smaller masks -- fewer context cells -- and adopt one when the
+    merged table is cheaper: the same knowledge in fewer, more general entries (E24)."""
 
     def __init__(self, radius):
         self.r = radius
-        self.table = {}                                 # window -> {colour: count}
-        self.stats = {}                                 # window -> [n_right, n_wrong]
+        n = (2 * radius + 1) ** 2
+        self.mask = np.ones(n, dtype=bool)
+        self.centre = n // 2
+        self.full = {}                                  # whole window -> {colour: count}: the evidence
+        self.table = {}                                 # masked window -> {colour: count}: the description
+        self.stats = {}                                 # masked window -> [n_right, n_wrong]
         self.cost = 0.0
 
+    def _project(self, full_key):
+        return np.frombuffer(full_key, dtype=np.int16)[self.mask].tobytes()
+
     def windows(self, frame):
+        """(i, j) -> (whole-window key, masked key)."""
         r = self.r
         H, W = frame.shape
         pad = np.full((H + 2 * r, W + 2 * r), BORDER, dtype=np.int16)
@@ -57,13 +72,16 @@ class LocalRule:
         out = {}
         for i in range(H):
             for j in range(W):
-                out[(i, j)] = pad[i:i + 2 * r + 1, j:j + 2 * r + 1].tobytes()
+                w = np.ascontiguousarray(pad[i:i + 2 * r + 1, j:j + 2 * r + 1]).reshape(-1)
+                out[(i, j)] = (w.tobytes(), w[self.mask].tobytes())
         return out
 
     def observe(self, before, after):
         win = self.windows(before)
-        for (i, j), k in win.items():
+        for (i, j), (fk, k) in win.items():
             y = int(after[i, j])
+            f = self.full.setdefault(fk, {})
+            f[y] = f.get(y, 0) + 1
             e = self.table.get(k)
             if e is None:                               # a new window: its outcome is a parameter
                 self.cost += math.log2(V)
@@ -81,17 +99,72 @@ class LocalRule:
             e[y] = e.get(y, 0) + 1
 
     def predict(self, frame):
-        """The predicted frame and the number of cells whose window was never seen (left unchanged)."""
+        """The predicted frame and the number of cells whose (masked) window was never seen (left unchanged)."""
         win = self.windows(frame)
         out = frame.copy()
         unknown = 0
-        for (i, j), k in win.items():
+        for (i, j), (_fk, k) in win.items():
             e = self.table.get(k)
             if e is None:
                 unknown += 1
             else:
                 out[i, j] = max(e, key=e.get)
         return out, unknown
+
+    # -- the sleep pass ----------------------------------------------------------------------------------------
+    def _merged(self, mask):
+        merged = {}
+        for fk, counts in self.full.items():
+            k = np.frombuffer(fk, dtype=np.int16)[mask].tobytes()
+            m = merged.setdefault(k, {})
+            for y, c in counts.items():
+                m[y] = m.get(y, 0) + c
+        return merged
+
+    @staticmethod
+    def _price(merged):
+        """Two-part code of the evidence under a table: one parameter per entry, exceptions by their rate."""
+        bits = 0.0
+        for counts in merged.values():
+            n = sum(counts.values())
+            wrong = n - max(counts.values())
+            bits += math.log2(V) + n * entropy(wrong / n) + wrong * math.log2(V - 1)
+        return bits
+
+    @staticmethod
+    def _wrong(merged):
+        return sum(sum(c.values()) - max(c.values()) for c in merged.values())
+
+    def sleep(self):
+        """Drop context cells while the merged table gets cheaper AND explains the evidence no worse -- no new
+        exceptions (greedy, the centre always kept). The first run let the price alone decide and it merged away the
+        rare cells that change, since forgetting a rare change costs fewer bits than an entry; the planner lives on
+        exactly those cells. Compact without losing what was known. Returns (bits before, bits after, cells kept)."""
+        if not self.full:
+            return 0.0, 0.0, int(self.mask.sum())
+        merged0 = self._merged(self.mask)
+        before, wrong0 = self._price(merged0), self._wrong(merged0)
+        mask, price = self.mask.copy(), before
+        while True:
+            best_mask, best_price = None, price
+            for c in np.flatnonzero(mask):
+                if c == self.centre:
+                    continue
+                cand = mask.copy()
+                cand[c] = False
+                m = self._merged(cand)
+                pr = self._price(m)
+                if pr < best_price and self._wrong(m) <= wrong0:
+                    best_mask, best_price = cand, pr
+            if best_mask is None:
+                break
+            mask, price = best_mask, best_price
+        self.mask = mask
+        merged = self._merged(mask)
+        self.table = merged
+        self.stats = {k: [max(c.values()), sum(c.values()) - max(c.values())] for k, c in merged.items()}
+        self.cost = price
+        return before, price, int(mask.sum())
 
 
 class ActionModel:
@@ -114,6 +187,9 @@ class ActionModel:
             return None, None
         return self.best().predict(frame)
 
+    def sleep(self):
+        return {r: rule.sleep() for r, rule in self.rules.items()}
+
 
 class GoalModel:
     """Win and death keys: the windows around the cells that changed at a scoring / fatal transition. Each key keeps
@@ -134,7 +210,7 @@ class GoalModel:
         if not changed:
             return
         win = self.probe.windows(before)
-        keys = {win[(int(i), int(j))] for i, j in changed}
+        keys = {win[(int(i), int(j))][0] for i, j in changed}
         target = (self.win if outcome == "win" else self.death).setdefault(action, {})
         for k in keys:
             target.setdefault(k, [0, 0])[0] += 1
@@ -147,14 +223,14 @@ class GoalModel:
         keys = self.live(which, action)
         if not keys:
             return False
-        return any(k in keys for k in self.probe.windows(frame).values())
+        return any(fk in keys for fk, _m in self.probe.windows(frame).values())
 
     def refute(self, which, action, frame):
         """Hindsight: this (frame, action) was predicted to win / kill and did not -- every key that fired is refuted."""
         keys = (self.win if which == "win" else self.death).get(action, {})
-        for k in self.probe.windows(frame).values():
-            if k in keys:
-                keys[k][1] += 1
+        for fk, _m in self.probe.windows(frame).values():
+            if fk in keys:
+                keys[fk][1] += 1
 
     def known(self):
         return any(self.live("win", a) for a in self.win)
@@ -172,10 +248,20 @@ class Player:
         self.last_changed = set()
         self.plan = []
         self.expect_win = self.expect_win_at_end = False
+        self.last_choice = None
         self.stats = dict(predictions=0, correct=0, unknown_cells=0, cells=0, replans=0, explore_plans=0, goal_plans=0)
 
     def frame_key(self, frame):
         return frame.tobytes()
+
+    def sleep(self):
+        """The sleep pass at a checkpoint: every action's rules drop the context cells they do not need."""
+        report = {}
+        for a, m in self.models.items():
+            if m.n_obs:
+                report[a.name] = m.sleep()
+        self.stats["sleeps"] = self.stats.get("sleeps", 0) + 1
+        return report
 
     def observe(self, action, before, after, outcome):
         if outcome != "win":                                  # a winning move's after-frame is the next level: not seen
@@ -225,6 +311,7 @@ class Player:
         if self.plan:
             a = self.plan.pop(0)
             self.expect_win = (not self.plan) and self.expect_win_at_end
+            self.last_choice = dict(kind="continuing", plan=[a.name] + [x.name for x in self.plan])
             return a
         plan, kind = self.search(frame, want_goal=self.goal.known())
         if plan is None:
@@ -235,6 +322,7 @@ class Player:
         self.plan = plan[1:]
         self.expect_win_at_end = kind == "goal"
         self.expect_win = kind == "goal" and not self.plan
+        self.last_choice = dict(kind=kind, plan=[a.name for a in plan])
         return plan[0]
 
 
@@ -247,7 +335,8 @@ def crop_box(frame):
     return (max(0, i0 - m), max(0, j0 - m), min(frame.shape[0], i1 + 1 + m), min(frame.shape[1], j1 + 1 + m))
 
 
-def play(env, budget_per_level=200, max_levels=None, seed=0, verbose=False):
+def play(env, budget_per_level=200, max_levels=None, seed=0, verbose=False, sleep=False, trace=None):
+    """`trace`, if a list, receives one record per step: what the player saw, chose, expected and got."""
     """Drive one Environment with a Player. Returns per-level results and the player's statistics."""
     fd = env.reset()
     actions = [a for a in env.game.available_actions()]
@@ -261,15 +350,27 @@ def play(env, budget_per_level=200, max_levels=None, seed=0, verbose=False):
         frame = np.array(fd.grid, dtype=np.int16)[box[0]:box[2], box[1]:box[3]]
         a = player.choose(frame)
         pred, _unknown = player.predict(a, frame)
+        rec = None
+        if trace is not None:
+            rec = dict(level=level, step=used, action=a.name, choice=player.last_choice, unknown=_unknown,
+                       frame=frame.tolist(), predicted=(pred.tolist() if pred is not None else None),
+                       fired_win=bool(player.goal.predicts("win", a, frame)), visited_before=None, outcome="none")
+            trace.append(rec)
         fd = env.step(a)
         used += 1
         after_full = np.array(fd.grid, dtype=np.int16)
         if env.level != level or env.state == GameState.WIN:              # the level was completed by this action;
+            if rec is not None:
+                rec["outcome"] = "win"
             guess = pred if pred is not None else frame                    # the next frame is another level, so the
             player.observe(a, frame, guess, "win")                          # changed cells are the model's prediction
             results.append(dict(level=level, solved=True, actions=used))
             if verbose:
                 print(f"   level {level} solved in {used} actions")
+            if sleep:                                                          # the checkpoint: sleep before the next level
+                rep = player.sleep()
+                results[-1]["sleep"] = {a: {str(r): dict(bits_before=round(b, 1), bits_after=round(af, 1), cells=c)
+                                            for r, (b, af, c) in rr.items()} for a, rr in rep.items()}
             level, used = env.level, 0
             player.plan, player.visited = [], set()
             if env.state != GameState.WIN:
@@ -279,6 +380,10 @@ def play(env, budget_per_level=200, max_levels=None, seed=0, verbose=False):
         if after.shape != frame.shape:                                      # the playfield grew: re-crop next step
             box = crop_box(after_full)
             after = after_full[box[0]:box[2], box[1]:box[3]]
+        if rec is not None:
+            rec["observed"] = after.tolist()
+            rec["visited_before"] = player.frame_key(after) in player.visited
+            rec["outcome"] = "death" if env.state == GameState.GAME_OVER else "none"
         if env.state == GameState.GAME_OVER:
             player.observe(a, frame, after, "death")
             fd = env.step(GameAction.RESET)
