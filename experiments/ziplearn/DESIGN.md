@@ -644,6 +644,24 @@ changed: OPEN-9 gets its first numbers. One design consequence for the written n
          everywhere; under attention residuals a source is heard only where a route reads it, so a written matrix's
          effect is *addressable* — the same property that made §6's pinned interfaces literal.
 
+### 2026-09-20 — E9 — planning in the written map: goals reached with optimal plans from three observations per action, no value function (PASS)
+command: `python experiments/ziplearn/e9.py` (7 actions, 200 goals within 3 actions, k = 1/2/3/8 observations per action; CPU, ~20 s)
+files:   `experiments/ziplearn/runs/e9/e9.json`; code `e9.py` (learning by `TwoLayer`, planning by breadth-first search over words in the learned actions)
+numbers: goals reached / plans as short as the oracle's / mean plan bits / single-action control —
+         k = 1: 0.230 / 0.978 / 3.72 / 0.165;  k = 2: 0.945 / 0.751 / 5.99 / 0.365;  k = 3: **1.000 / 1.000 / 4.83** / 0.490;
+         k = 8: 1.000 / 1.000 / 4.83 / 0.490. The oracle's mean shortest plan is 1.72 actions (4.83 bits at log₂7 per
+         action); 49% of goals are one action away, which is all the no-composition control can reach.
+verdict: PASS on the letter (≥ 95% reached at k = 3 with plans no longer than the oracle's; measured 100% and 100%).
+         Nothing was learned from reward and no value function exists: the map (§16 item 1) is the learned action
+         descriptions, the inverse (item 2) is search over words, the goal (item 3) is a target state, and the price
+         of a plan is its bits. The k = 2 row is the interesting one: 94.5% of goals are still reached, but a quarter
+         of the plans are longer than necessary — with two observations some actions have unresolved positions, the
+         planner treats them as unusable and *routes around its own ignorance* with longer words (5.99 bits against
+         4.83). That number, plan bits lost to an undescribed action, is exactly the price OPEN-11 needs: the value
+         of trying an unknown action is the plan bits its description would save.
+changed: §16's first form is BUILT for the case of a small map and bijective actions. OPEN-10 (caching when the map
+         is large) and OPEN-11 (acting to learn) are untouched; OPEN-11 now has its currency.
+
 ## 14. Glossary
 
 - **bits** — the unit of price; log₂11 ≈ 3.46 bits is the cost of naming one digit out of eleven with no information.
@@ -699,7 +717,7 @@ What is *not* decided: whether the gradient arm's per-token softmax routing or t
 the right comparison when both exist; E2 will run the written network, E0 the gradient arm, and the two are reported
 side by side, not merged.
 
-## 16. The outer objective — DESIGNED (first form), from OPEN-1
+## 16. The outer objective — first form BUILT (E9), the rest DESIGNED / OPEN
 
 **The problem.** Everything before this section is a world model: descriptions that say what comes out when something
 goes in. The outer objective is to *act*: given a goal, choose actions that reach it. The ideal is that any goal can
