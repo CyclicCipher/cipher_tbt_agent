@@ -557,3 +557,119 @@ class ContinualLayer:
             params = {"shift": lambda s: f"b={s.b}", "affine": lambda s: f"a={s.a} b={s.b}"}.get(s.name, lambda s: "")(s)
             out.append(f"{s.name} {params} (n={b['n']}, exceptions {s.rate:.2f})")
         return out
+
+
+# ── structures of structures (DESIGN §7 one level up, OPEN-5; E8) ───────────────────────────────────────────────────
+def perm_then(p, q):
+    """First p, then q, in the "output j reads input pi[j]" convention: z[j] = x[p[q[j]]]."""
+    return tuple(p[q[j]] for j in range(len(p)))
+
+
+class WordLibrary:
+    """The library re-describing itself: a small GENERATING set of items, chosen by price, and every other item -- and
+    every permutation the generators reach -- written as a WORD in them. A word of length n over g generators costs
+    n * log2(g) + log2(1 + n) bits; a generator costs the flat entry price log2(L!). The description is chosen by
+    the same rule as everything else: the cheapest total wins."""
+
+    def __init__(self, items, L, max_generators=4):
+        self.L = L
+        self.items = [tuple(p) for p in items]
+        self.entry_bits = math.log2(math.factorial(L))
+        self.generators, self.words, self.price = None, None, float("inf")
+        self.search(max_generators)
+
+    @staticmethod
+    def word_bits(n, g):
+        return n * math.log2(g) + math.log2(1 + n) if g > 1 else math.log2(1 + n)
+
+    @staticmethod
+    def reach(gens, limit=None):
+        """Every permutation reachable from the identity by composing generators, with its shortest word."""
+        from collections import deque
+        ident = tuple(range(len(gens[0])))
+        best = {ident: []}
+        frontier = deque([ident])
+        while frontier:
+            g = frontier.popleft()
+            for i, s in enumerate(gens):
+                h = perm_then(g, s)
+                if h not in best:
+                    best[h] = best[g] + [i]
+                    frontier.append(h)
+        return best
+
+    def price_flat(self):
+        return len(self.items) * self.entry_bits
+
+    def search(self, max_generators):
+        import itertools
+        targets = set(self.items)
+        for k in range(1, max_generators + 1):
+            for gens in itertools.combinations(self.items, k):
+                words = self.reach(list(gens))
+                if not targets <= set(words):
+                    continue
+                price = k * self.entry_bits + sum(self.word_bits(len(words[c]), k) for c in self.items if c not in gens)
+                if price < self.price:
+                    self.generators, self.words, self.price = list(gens), words, price
+        return self.price
+
+    def group(self):
+        """Every permutation the chosen generators reach (the group they generate), with its word cost in bits."""
+        g = len(self.generators)
+        return {perm: (self.word_bits(len(w), g) if w else 0.0) for perm, w in self.words.items()}
+
+
+class TwoLayerWithWords(TwoLayer):
+    """TwoLayer whose position layer can also select ANY permutation in the group the library generates, priced by
+    its word -- so a permutation never seen, but reachable from ones that were, is a candidate from the first
+    demonstration."""
+
+    def __init__(self, L, V, word_library):
+        super().__init__(L, V)
+        self.bits_pos_name = math.log2(3)                                # identity / permutation / a word
+        group = word_library.group()
+        self.runs = [(h, PositionIdentity(L, V), PositionPerm(L, V),
+                      [NamedPerm(L, V, pi, bits) for pi, bits in group.items() if any(pi[j] != j for j in range(L))])
+                     for h in self.hyps]
+
+    def observe_demo(self, x_seq, y_seq):
+        for (name, (a, b), _bits), pid, pperm, named in self.runs:
+            t = [self.invert(a, b, int(y), self.V) for y in y_seq]
+            pid.observe_demo(x_seq, t)
+            pperm.observe_demo(x_seq, t)
+            for s in named:
+                s.observe_demo(x_seq, t)
+
+    def best(self):
+        best, best_price = None, (float("inf"), 0)
+        for (name, ab, bits), pid, pperm, named in self.runs:
+            for pos in (pid, pperm, *named):
+                price = bits + self.bits_value_name + pos.cost + self.bits_pos_name
+                key = (round(price, 9), pos.n_params)
+                if best is None or key < best_price:
+                    best, best_price = (name, ab, pos), key
+        return best
+
+
+def consolidate(layer):
+    """Rule 3's merge as a description (DESIGN §9): blocks of the SAME structure kind become one template -- the
+    kind named once, one parameter set per context. The matrices, the evidence and the routing do not change; only
+    the bits do. Returns (bits before, bits after, the templates)."""
+    kinds = {}
+    for b in layer.blocks:
+        kinds.setdefault(b["layer"].keep().name, []).append(b)
+    n_kinds = len(layer.blocks[0]["layer"].structs) if layer.blocks else 1
+    n_entries_before, n_entries_after = len(layer.blocks), len(kinds)
+    name_before = math.log2(n_entries_before) if n_entries_before > 1 else 0.0
+    name_after = math.log2(n_entries_after) if n_entries_after > 1 else 0.0
+    before = after = 0.0
+    templates = []
+    for kind, blocks in kinds.items():
+        params = {"shift": 1, "affine": 2, "identity": 0}.get(kind, 0)
+        per_block = [b["layer"].price(b["layer"].keep()) - math.log2(n_kinds) for b in blocks]   # parameters + flags
+        before += sum(p + math.log2(n_kinds) + name_before for p in per_block)
+        after += name_after + math.log2(n_kinds) + sum(per_block)
+        templates.append(dict(kind=kind, contexts=len(blocks), parameters_each=params,
+                              params=[{k: getattr(b["layer"].keep(), k) for k in ("a", "b") if hasattr(b["layer"].keep(), k)} for b in blocks]))
+    return before, after, templates

@@ -383,6 +383,7 @@ def main():
     p.add_argument("--res", default="std", choices=["std", "attnres", "attnres_full"],
                    help="residual scheme: plain sum, or attention residuals (arXiv:2603.15031) per block / per sub-layer")
     p.add_argument("--json", default="", help="also write the headline numbers (and the learned routes) to this file")
+    p.add_argument("--save", default="", help="save the trained model's state_dict here (for the E8b Jacobian analysis)")
     args = p.parse_args()
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     torch.manual_seed(args.seed)
@@ -438,6 +439,9 @@ def main():
         opt.step()
         sched.step()
     print(f"trained in {time.time() - t0:.0f}s | final train loss {loss.item():.4f}")
+    if args.save:
+        torch.save(dict(state=model.state_dict(), pos=args.pos, res=args.res, n_zero=args.n_zero, k=args.k, seed=args.seed,
+                        d_model=96, n_layer=3, n_head=4), args.save)
 
     # SANITY GATE. Held-out numbers mean nothing until the model can do the tasks it WAS trained on: if it solves none of
     # those either, every held-out task is censored at the same value and the correlation is measuring nothing. The first

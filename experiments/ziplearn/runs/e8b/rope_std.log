@@ -1,0 +1,31 @@
+device cuda | pos=rope n_zero=0 res=std opt=adamw | 17 trained, 8 held out | K=8 steps=3200
+primitive training weight: reverse=0.035, rot_left=0.188, rot_right=0.015, swap_pairs=1.000, swap_halves=0.434, inc=0.082, negate=0.007
+trained in 67s | final train loss 0.0588
+
+SANITY: the model solves 9/17 TRAINED compositions to criterion (mean final acc 0.52)
+
+LOCAL familiarity (mean error on TRAINED compositions containing it; lower = more in-distribution)
+   swap_halves  weight 0.434   local error 0.1150
+   rot_left     weight 0.188   local error 0.1563
+   swap_pairs   weight 1.000   local error 0.2493
+   inc          weight 0.082   local error 1.0023
+   rot_right    weight 0.015   local error 1.1731
+   reverse      weight 0.035   local error 1.3161
+   negate       weight 0.007   local error 1.7010
+
+HELD-OUT compositions — global novelty is IDENTICAL for all of them (none was ever trained)
+   composition                worst local err   trials  final acc
+   swap_halves>inc                     1.0023        8       0.00
+   rot_right>swap_pairs                1.1731        8       0.08
+   swap_pairs>rot_right                1.1731        8       0.07
+   reverse>rot_left                    1.3161        8       0.07
+   reverse>swap_pairs                  1.3161        8       0.01
+   swap_halves>negate                  1.7010        8       0.00
+   rot_right>negate                    1.7010        8       0.01
+   rot_left>negate                     1.7010        8       0.00
+
+PRIMARY  Spearman(worst local error, trials-to-criterion) = +0.000   over 8 held-out tasks
+   !! EVERY held-out task is CENSORED at the context limit, so the primary measure carries no information.
+      A rank correlation over identical values says nothing about LID -- it says the model is too weak.
+   SECONDARY  Spearman(worst local error, FINAL accuracy) = -0.269   (graded, so it can still separate the tasks)
+      Reported as secondary BECAUSE the primary was censored -- not chosen after seeing which one looked better.

@@ -1,0 +1,121 @@
+{
+ "rope_std": {
+  "0": {
+   "identity_share": 0.732229471206665,
+   "gain": 0.9550460577011108,
+   "future_share": 0.03300866112112999,
+   "top_singular": 2.7832016944885254,
+   "effective_rank": 71.9798355102539,
+   "jspace_share": 0.0018551046960055828,
+   "swap": 0.890625,
+   "persistence": 0.9809166789054871
+  },
+  "1": {
+   "identity_share": 0.7757450342178345,
+   "gain": 0.9797478914260864,
+   "future_share": 0.03235607221722603,
+   "top_singular": 2.8295397758483887,
+   "effective_rank": 74.84017944335938,
+   "jspace_share": 0.005753971170634031,
+   "swap": 0.72265625,
+   "persistence": 0.9469907879829407
+  },
+  "2": {
+   "identity_share": 0.9111234545707703,
+   "gain": 1.0697886943817139,
+   "future_share": 0.023870961740612984,
+   "top_singular": 3.3671858310699463,
+   "effective_rank": 79.82809448242188,
+   "jspace_share": 0.0877934992313385,
+   "swap": 0.84375,
+   "persistence": 0.6469079852104187
+  },
+  "3": {
+   "identity_share": 1.0,
+   "gain": 1.0000001192092896,
+   "future_share": 0.0,
+   "top_singular": 1.0,
+   "effective_rank": 96.0,
+   "jspace_share": 0.5910685062408447,
+   "swap": 0.81640625,
+   "persistence": NaN
+  }
+ },
+ "rope_attnres": {
+  "0": {
+   "identity_share": 0.059499792754650116,
+   "gain": 0.07611320167779922,
+   "future_share": 0.10952871292829514,
+   "top_singular": 0.2162257432937622,
+   "effective_rank": 74.52864074707031,
+   "jspace_share": 0.015132210217416286,
+   "swap": 0.21875,
+   "persistence": 0.8921617865562439
+  },
+  "1": {
+   "identity_share": 0.04114199057221413,
+   "gain": 0.06591333448886871,
+   "future_share": 0.12166174501180649,
+   "top_singular": 0.2296658456325531,
+   "effective_rank": 60.23018264770508,
+   "jspace_share": 0.1083904579281807,
+   "swap": 0.1328125,
+   "persistence": 0.7356444001197815
+  },
+  "2": {
+   "identity_share": 0.11458279937505722,
+   "gain": 0.15875749289989471,
+   "future_share": 0.0834193080663681,
+   "top_singular": 0.6267163157463074,
+   "effective_rank": 67.50912475585938,
+   "jspace_share": 0.04495558887720108,
+   "swap": 0.23046875,
+   "persistence": 0.4886559545993805
+  },
+  "3": {
+   "identity_share": 0.7653423547744751,
+   "gain": 0.7703537940979004,
+   "future_share": 0.0,
+   "top_singular": 1.4746098518371582,
+   "effective_rank": 95.10242462158203,
+   "jspace_share": 0.6479946970939636,
+   "swap": 0.7578125,
+   "persistence": NaN
+  },
+  "routes": {
+   "blocks.0.res_attn": [
+    1.0
+   ],
+   "blocks.0.res_mlp": [
+    0.205,
+    0.795
+   ],
+   "blocks.1.res_attn": [
+    0.366,
+    0.634
+   ],
+   "blocks.1.res_mlp": [
+    0.107,
+    0.167,
+    0.726
+   ],
+   "blocks.2.res_attn": [
+    0.279,
+    0.229,
+    0.493
+   ],
+   "blocks.2.res_mlp": [
+    0.037,
+    0.031,
+    0.117,
+    0.815
+   ],
+   "res_final": [
+    0.064,
+    0.049,
+    0.114,
+    0.774
+   ]
+  }
+ }
+}

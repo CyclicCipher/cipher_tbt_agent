@@ -339,6 +339,15 @@ products of others, the smallest generating set, and the library priced flat aga
 arithmetic for E6's blocks; the gradient arm's learned routes as a figure. What would be surprising: a generated group
 much larger than the library, or no item being a product of others.
 
+
+**E8 — structures of structures (pre-registered 2026-09-20 evening from E7's numbers).** One new kind of description whose
+parameters are other descriptions, in two places. A: the library re-describes itself as a generating set chosen by price
+plus a word for every other item; pass: ≤ 138.1 bits (flat 161.4); refute: never below flat. B: tasks whose permutation
+is in the group the library generates but was never named (19 of 36), three learners on the same tasks — from scratch,
+named items only, words; pass: with words, exact after ≤ 2 demonstrations on average and fewer bits than from scratch;
+refute: no better than from scratch. C: E6's blocks consolidate into templates (same-kind blocks share one structure
+name); pass: the two shift blocks ≤ 17.5 bits (22.2 separate) with retention unchanged; refute: no saving.
+
 ## 12. Open questions
 
 **OPEN-1 — the outer objective (deferred by request, recorded here verbatim in substance).** ZipLearner learns a
@@ -351,9 +360,9 @@ addressed after the world-model experiments (E1–E6); not designed.
 **OPEN-2** — inverting a nonlinearity for hidden-layer targets (§6).
 **OPEN-3** — whether the per-layer sweep settles (§6; measured in E2).
 **OPEN-4** — what the capacity C of a given network is, numerically, in the price's units (§8).
-**OPEN-5** — structures of structures: whether §7's discovery is enough, or the library itself needs a library. *E7 priced it: E3's library is 23 bits cheaper as two generators + words, E6's shift blocks 4.6 bits cheaper as one template with a per-context offset; the missing piece is one structure kind whose parameters are other structures.*
+**OPEN-5 → BUILT in its first form (E8):** structures of structures — `WordLibrary`, `consolidate`. Remaining: words of words; inferred template parameters. Originally: whether §7's discovery is enough, or the library itself needs a library. *E7 priced it: E3's library is 23 bits cheaper as two generators + words, E6's shift blocks 4.6 bits cheaper as one template with a per-context offset; the missing piece is one structure kind whose parameters are other structures.*
 **OPEN-8** — writing attention weights under PoPE: content matching is not separable from the phase cosines (E0), so "same digit anywhere" is not one written parameter; what the written form of an induction head is, is not designed.
-**OPEN-9** — the J-space of the gradient arm (Gurnee et al., Anthropic, July 2026: J-lens = the average Jacobian of the final residual with respect to a layer's residual, pulled back through the unembedding; J-space = sparse non-negative combinations of the per-token J-lens directions; a mid-layer global workspace, ≤10% of variance but causal for flexible reasoning). Under attention residuals the Jacobian's identity highway becomes a content-dependent route weight, so the J-space should localise to the sources later mixers read; not measured (E8 proposal in the chat log).
+**OPEN-9** — the J-space of the gradient arm (Gurnee et al., Anthropic, July 2026: J-lens = the average Jacobian of the final residual with respect to a layer's residual, pulled back through the unembedding; J-space = sparse non-negative combinations of the per-token J-lens directions; a mid-layer global workspace, ≤10% of variance but causal for flexible reasoning). Under attention residuals the Jacobian's identity highway becomes a content-dependent route weight, so the J-space should localise to the sources later mixers read. *Measured (E8b): it does — identity share 0.06/0.04/0.12/0.77 = the routes; early-layer J-lens swaps drop from 72–89% to 13–23%.*
 
 ## 13. Results log
 
@@ -572,6 +581,68 @@ changed: OPEN-5 gains its numbers and a concrete proposal (E8 candidate: a "word
          context parameter" structure, priced by the same rule; pass = the library and the blocks re-describe
          themselves and the bits fall by at least the amounts above). OPEN-9 added: the J-space of the gradient arm
          under attention residuals (see the entry's discussion in the chat log of 2026-09-20 and §12).
+
+### 2026-09-20 — E8 — structures of structures: the library compresses itself and generalises one level up (A, B PASS; C misses its own letter by 0.2 bits)
+command: `python experiments/ziplearn/e8.py` (CPU, ~1 min)
+files:   `experiments/ziplearn/runs/e8/e8.json`; code: `WordLibrary`, `TwoLayerWithWords`, `consolidate` in `ziplearner.py`, `e8.py`
+numbers: A — the library, described by a generating set chosen by price plus a word for every other item: **120.8
+         bits** (flat 161.4; the anatomy pass's hand-found two-generator description was 138.1) with **3**
+         generators — swap_pairs∘rot_left, rot_left, reverse — and a longest word of 4; the group they reach has
+         36 permutations. Three generators beat two because shorter words are cheaper than a saved entry.
+         B — 18 permutations that are in that group but were never named, each with a value map, 20 instances:
+         from scratch 2.80 demonstrations to exact and
+         30.6 bits; with the named items only
+         2.81 and 31.5
+         (no item matches, as expected); with words **1.33** demonstrations
+         and **11.8 bits**. The learner identifies a permutation it has never
+         seen at a quarter of the cost, because it can be written in items it has.
+         C — E6's blocks consolidate into templates: shift ×2 contexts + affine ×1; all blocks 36.3 bits
+         separate → 31.3 as templates; the two shift blocks 22.2 → 17.7;
+         retention with the template description A 1.000 B 1.000 C 1.000.
+verdict: A PASS, B PASS, C REFUTED on the letter: the criterion was 17.5 bits and the measurement is 17.7. The 0.2 bits
+         is an accounting difference between the anatomy pass's estimate (which named the template's kind among 3
+         kinds) and `consolidate` (which names it among the library's 5); the saving is 4.5 bits of the estimated 4.6,
+         retention is unchanged, and the point stands — but the letter is the letter, and I set it from an estimate I
+         did not check against the code. Overall REFUTED under the pre-registration's "all three".
+changed: OPEN-5 is BUILT in its first form — a description whose parameters are other descriptions: `WordLibrary` (a
+         library that chooses its own generators by price and writes every item, seen or not, as a word) and
+         `consolidate` (same-kind blocks under one name). What is NOT built: using the word description to grow the
+         library further (words of words), and letting the template's per-context parameter be *inferred* for a new
+         context rather than stored — both are the next compression steps, and both are again "a structure whose
+         parameters are structures".
+
+### 2026-09-20 — E8b — the J-space of the gradient arm: under attention residuals the Jacobian IS the route weights, and early-layer J-lens directions lose their causal power (measured; three predictions checked)
+command: `python experiments/ziplearn/jspace.py` on two models retrained with `--save` (RoPE, standard residual vs attention residuals, same seed/task/steps; both solve 9/17 trained compositions); GPU, ~1 min. Jacobians in forward mode, exact.
+files:   `experiments/ziplearn/runs/e8b/jspace.json`, `jspace.png`, the two models `rope_std.pt`, `rope_attnres.pt`; code `jspace.py`
+numbers: per state after block 0 (embedding) / 1 / 2 / 3, standard vs attention residuals —
+         identity share trace(J)/d (same position): **0.732 / 0.776 / 0.911 / 1.000** vs **0.059 / 0.041 / 0.115 / 0.765**.
+         The attention-residual numbers are the output mixer's learned routes (E0/E8b: embedding 0.05, block 1 0.03,
+         block 2 0.14, block 3 0.79) read back through the Jacobian: the identity highway has become a route weight.
+         gain ||J||/√d: 0.96 / 0.98 / 1.07 / 1.00 vs 0.08 / 0.07 / 0.16 / 0.77.
+         future share (the part of a perturbation's effect carried to LATER positions, i.e. through attention to other
+         tokens): 0.03 / 0.03 / 0.02 / 0.00 vs 0.11 / 0.12 / 0.08 / 0.00 — what early
+         sources still influence, they influence through attention, not the stream.
+         J-space share of activation variance (span of the 5 J-lens vectors): 0.002 / 0.006 / 0.088 / 0.591 vs
+         0.015 / 0.108 / 0.045 / 0.648 — in the standard net the mid states are dominated by non-verbalizable
+         content (0.6% at block 1); under attention residuals block 1's source is 10.8% verbalizable, because a source
+         holds one block's contribution rather than the accumulated sum.
+         persistence of a token's J-lens direction to the next state: 0.981 / 0.947 / 0.647 vs
+         0.892 / 0.736 / 0.489 — without the identity map, directions do not persist as well.
+         swap rate (add a J-lens direction at the predicting position; fraction of predictions that flip to that
+         digit): **0.89 / 0.72 / 0.84 / 0.82** vs **0.22 / 0.13 / 0.23 / 0.76** — in the standard net a
+         J-lens direction written at ANY depth flips the output 72–89% of the time; under attention residuals only the
+         last block's does (76%); the earlier sources' directions flip it 13–23%.
+verdict: an analysis; the three predictions made before running (chat log, 2026-09-20): (i) the J-space localises to
+         the sources the output reads — CONFIRMED, quantitatively (identity share = route weight); (ii) a local
+         workspace inside each block plus a global one across blocks — NOT TESTABLE here (one transformer layer per
+         block); (iii) broadcast becomes readable from the weights — PARTLY: the embedding is read by every attention
+         mixer (0.28–0.37) and the future share rises from 0.03 to 0.11, but a 3-block, 5-token model cannot show a
+         mid-depth workspace over concepts. Caveats: one seed, 3 blocks, a 5-digit vocabulary; the Jacobian structure
+         is exact for these models, the analogy to a 100-layer LM is not.
+changed: OPEN-9 gets its first numbers. One design consequence for the written network: in a standard residual net
+         "what a layer says" is readable at the output from any depth (the highway), which is why J-lens swaps work
+         everywhere; under attention residuals a source is heard only where a route reads it, so a written matrix's
+         effect is *addressable* — the same property that made §6's pinned interfaces literal.
 
 ## 14. Glossary
 
