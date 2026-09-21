@@ -1,0 +1,2 @@
+E34: 2726046 training characters, 240588 held out; V = 70
+   trained on 2726046 characters; held-out book online, bits/char: linear (Bayesian) 1.820, geometric (Bayesian exponents over seen experts) 1.801, product of seen experts 7.665  [330s]

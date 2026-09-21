@@ -1,0 +1,18 @@
+{
+ "V": 70,
+ "n_train": 2726046,
+ "n_test": 240588,
+ "survivors": [
+  "chain",
+  "order1",
+  "order2"
+ ],
+ "select_chars": 30000,
+ "bpc": 1.8110287678283499,
+ "solo_bpc": {
+  "chain": 1.8225516395680632,
+  "order1": 3.4247852175202658,
+  "order2": 2.804899785280592
+ },
+ "verdict": "INCONCLUSIVE"
+}

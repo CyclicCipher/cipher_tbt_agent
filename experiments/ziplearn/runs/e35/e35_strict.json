@@ -1,0 +1,103 @@
+{
+ "frames": {
+  "schedule": [
+   0.0,
+   0.125,
+   0.25,
+   0.375,
+   0.5,
+   0.625,
+   0.75,
+   0.875,
+   1.0
+  ],
+  "n_train": 115,
+  "n_held": 135,
+  "blocks": {
+   "1": {
+    "entries_before": 12804,
+    "entries_after": 12804,
+    "bits_before": 51998,
+    "bits_after": 51998,
+    "cells": 9
+   },
+   "2": {
+    "entries_before": 20924,
+    "entries_after": 20924,
+    "bits_before": 86340,
+    "bits_after": 86340,
+    "cells": 9
+   },
+   "3": {
+    "entries_before": 26068,
+    "entries_after": 26068,
+    "bits_before": 105613,
+    "bits_after": 105613,
+    "cells": 9
+   },
+   "4": {
+    "entries_before": 28811,
+    "entries_after": 28811,
+    "bits_before": 115735,
+    "bits_after": 115735,
+    "cells": 9
+   },
+   "5": {
+    "entries_before": 30099,
+    "entries_after": 30099,
+    "bits_before": 120596,
+    "bits_after": 120596,
+    "cells": 9
+   },
+   "6": {
+    "entries_before": 30556,
+    "entries_after": 30556,
+    "bits_before": 122255,
+    "bits_after": 122255,
+    "cells": 9
+   },
+   "7": {
+    "entries_before": 30624,
+    "entries_after": 30624,
+    "bits_before": 122496,
+    "bits_after": 122496,
+    "cells": 9
+   },
+   "8": {
+    "entries_before": 30629,
+    "entries_after": 30629,
+    "bits_before": 122540,
+    "bits_after": 122540,
+    "cells": 9
+   }
+  },
+  "repair": {
+   "2": {
+    "t": 0.25,
+    "chain": 0.945995670995671,
+    "one_shot": 0.93999518999519,
+    "noisy": 0.7670554753888087
+   },
+   "4": {
+    "t": 0.5,
+    "chain": 0.8795494628827962,
+    "one_shot": 0.8540243706910374,
+    "noisy": 0.5320185986852654
+   },
+   "6": {
+    "t": 0.75,
+    "chain": 0.8004449254449254,
+    "one_shot": 0.7318261984928651,
+    "noisy": 0.29695366362033027
+   }
+  },
+  "generation": {
+   "agreement_nearest_training": 0.7984728234728233,
+   "distinct": 100,
+   "n": 100
+  }
+ },
+ "text": null,
+ "verdict": "REFUTED",
+ "strict": true
+}

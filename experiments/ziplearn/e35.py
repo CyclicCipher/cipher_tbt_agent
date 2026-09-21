@@ -1,7 +1,8 @@
 """E35 — the written denoising chain (DESIGN §20; pre-registered 2026-09-21). The looped block fitted BLOCKWISE by
 counting, no gradient anywhere: the diffusion interpretation gives every block a known target (the data at the next
 noise level), so each block is a table learned from its own (noisier, cleaner) pairs, priced by the two-part code and
-compressed by the sleep pass; running the chain from pure noise is generation, from level k is repair.
+compressed by the sleep pass (the price alone deciding, `strict=False`: with noisy targets the no-new-exceptions rule
+of E24 forbids every drop); running the chain from pure noise is generation, from level k is repair.
 
 Domain 1 — the replica games' frames. Clean data: the frames stood in during exploration of LockPath and CollectAll
 (levels 0–1 for training, level 2 held out). Corruption: each cell replaced by a uniform random colour with probability
@@ -99,16 +100,16 @@ class NearestRule(LocalRule):
         return out.reshape(frame.shape), len(unknown)
 
 
-def fit_block(pairs, sleep=True):
+def fit_block(pairs, sleep=True, strict=False):
     rule = NearestRule(1)
     for before, after in pairs:
         rule.observe(before, after)
     n_before = len(rule.table)
-    b, a, cells = rule.sleep() if sleep else (rule.cost, rule.cost, 9)
+    b, a, cells = rule.sleep(strict=strict) if sleep else (rule.cost, rule.cost, 9)   # strict=False: the price alone (noisy targets)
     return rule, dict(entries_before=n_before, entries_after=len(rule.table), bits_before=round(b), bits_after=round(a), cells=cells)
 
 
-def run_frames(rng, K=8, draws=4, n_gen=100, verbose=True):
+def run_frames(rng, K=8, draws=4, n_gen=100, verbose=True, strict=False):
     schedule = [k / K for k in range(K + 1)]
     lp = collect_frames(LockPath, [0, 1, 2])
     ca = collect_frames(CollectAll, [0, 1, 2])
@@ -123,7 +124,7 @@ def run_frames(rng, K=8, draws=4, n_gen=100, verbose=True):
     t0 = time.time()
     for k in range(1, K + 1):
         pairs = [(c[k], c[k - 1]) for c in chains]
-        blocks[k], block_stats[k] = fit_block(pairs)
+        blocks[k], block_stats[k] = fit_block(pairs, strict=strict)
         if verbose:
             s = block_stats[k]
             print(f"   block {k} (t {schedule[k]:.3f} -> {schedule[k - 1]:.3f}): {s['entries_before']} -> {s['entries_after']} entries, "
@@ -132,7 +133,7 @@ def run_frames(rng, K=8, draws=4, n_gen=100, verbose=True):
     oneshot = {}
     for k in (2, 4, 6):
         pairs = [(c[k], c[0]) for c in chains]
-        oneshot[k], _ = fit_block(pairs)
+        oneshot[k], _ = fit_block(pairs, strict=strict)
     # repair on held-out frames
     repair = {}
     for k in (2, 4, 6):
@@ -287,13 +288,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--skip_text", type=int, default=0)
+    ap.add_argument("--strict", type=int, default=0, help="1: E24's strict sleep (no new exceptions) -- under noise it keeps every window: a nearest-neighbour denoiser")
     ap.add_argument("--out", default=str(HERE / "runs" / "e35"))
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(args.seed)
     print("E35 (1) frames: the written denoising chain, blockwise counting, K = 8", flush=True)
-    frames = run_frames(rng)
+    frames = run_frames(rng, strict=bool(args.strict))
     text = None
     if not args.skip_text:
         print("E35 (2) text: masked-character diffusion, K = 4", flush=True)
@@ -305,7 +307,7 @@ def main():
     verdict = "PASS" if (ok_frames and ok_text and shrink) else ("REFUTED" if not ok_frames and (text is None or not ok_text) else "INCONCLUSIVE")
     print(f"\nE35 verdict: {verdict} — frames at t = 0.5: chain {r4['chain']:.3f} vs one shot {r4['one_shot']:.3f}; tables shrink under sleep: {shrink}"
           + (f"; text at 0.5: chain {text['repair']['0.5']['chain']:.3f} vs one shot {text['repair']['0.5']['one_shot']:.3f}" if text else ""), flush=True)
-    json.dump(dict(frames=frames, text=text, verdict=verdict), open(out / "e35.json", "w"), indent=1, default=str)
+    json.dump(dict(frames=frames, text=text, verdict=verdict, strict=bool(args.strict)), open(out / ("e35_strict.json" if args.strict else "e35.json"), "w"), indent=1, default=str)
 
 
 if __name__ == "__main__":

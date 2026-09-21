@@ -43,6 +43,8 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E29 | PASS | learned search: imagined paths enumerated by bits under a learned strategy = BFS until it learns; then room-20 89 vs 818 calls, room 40 solved at oracle 74 (BFS cannot); the 20-bit strategy reads the wall, not the goal |
 | E30 | PASS | the depth loop under attention residuals: held-out 1/8 solved (0.22) with a tied core — the first ever; the learned route lets the anchor fade and reads every earlier pass; windowed sources collapse at 2× passes |
 | E33 (a) | measured | the discrete machinery on Latin text = a PPM-style blended-backoff model: 1.87 bits/char frozen, 1.82 online at 2.7M chars (xz 2.26); the E24 sleep price is wrong for text, the prequential one keeps every position; transformer/hybrid arms shelved |
+| E35 | REFUTED on the letter | written denoising chain: memory blocks beat one shot by +0.07 at t = 0.75 and generate rooms from noise; the MDL price collapses denoisers to the identity; text ±3: no gain |
+| E34 | INCONCLUSIVE | gradient-free context mixing: 18 experts, Bayesian mixing 1.820 vs the table 1.823; geometric with Bayesian exponents 1.801; the raw product 7.7 — the learned multiplicative mixer is the first irreducible gradient |
 
 ## Format
 
@@ -885,3 +887,65 @@ verdict: measured (the pre-registered arms (b) the gradient transformer and (c) 
          would have measured, and it is where §19's thesis says the gains beyond this table must come from.
 changed: `textlm.py` is the discrete machinery's language model; its ceiling on text is PPM's. The two evaluations
          (frozen, online) are both reported from here on for sequential learners.
+
+### 2026-09-22 — E35 — the written denoising chain: blockwise fitting by counting works, the chain beats one shot more the noisier the input (+0.07 at t = 0.75) and generates frame-like rooms from pure noise — with MEMORY blocks; the description-length price collapses every denoising block to the identity; refuted on the pre-registered letter
+command: `python experiments/ziplearn/e35.py` (the price-only sleep) and `--strict 1 --skip_text 1` (E24's strict sleep = every window kept); CPU, ~5 min each
+files:   `experiments/ziplearn/runs/e35/e35.json`, `e35_strict.json`, `run.log`, `run_strict.log`; code `e35.py` (`NearestRule`, `corrupt_chain`, `SeqRule`, `mask_chain`), `LocalRule.sleep(strict=)` in `arcgames.py`
+numbers: frames: 115 training (LockPath and CollectAll levels 0–1), 135 held out (level 2 of each); K = 8 blocks, radius 1,
+         each fitted from 460 coupled (noisier, cleaner) frame pairs in 1–2 s (all eight in 11 s).
+         Repair on held-out frames, cell accuracy — corrupted input / one shot / chain:
+         | t | input | one shot | chain, memory blocks (strict) | chain, price-compressed blocks |
+         | 0.25 | 0.767 | 0.940 | **0.946** | 0.905 (one shot 0.911) |
+         | 0.50 | 0.532 | 0.854 | **0.880** | 0.788 (one shot 0.839) |
+         | 0.75 | 0.297 | 0.732 | **0.800** | 0.651 (one shot 0.773) |
+         Generation from pure noise, 100 samples: memory blocks — agreement with the nearest training frame 0.798, 100 distinct,
+         samples that read as rooms (a wall border, a floor, a wall segment, an agent, a goal); price-compressed blocks — 0.530,
+         scattered colours. The tables: memory blocks keep every window (12,804 → 30,629 entries from block 1 to 8, 9 cells);
+         under the price alone every block collapses to 16 entries reading ONE cell — the identity, colour by colour (block 4:
+         28,811 entries / 115,735 bits → 16 entries / 26,968 bits).
+         Text (masked-character diffusion, ±3 window, K = 4, 300k training characters): masked-character accuracy on the
+         held-out book at mask rate 0.15: chain 0.503, one shot 0.503; at 0.5: chain 0.309, one shot 0.320; the all-masked top
+         block had 7 windows.
+verdict: REFUTED on the letter (pre-registered: chain ≥ one shot + 0.05 at t = 0.5 — measured +0.026 — and tables shrinking
+         under sleep, which holds only for the variant that fails). What the run established: (1) the diffusion interpretation
+         delivers what §20 says — eight blocks with known local targets, fitted by counting, no gradient, and the chain runs;
+         (2) with memory blocks the chain's gain over one shot GROWS with the noise (+0.006, +0.026, +0.068) and it generates
+         frame-like rooms from noise — iterative refinement pays exactly where one shot lacks clean context; (3) the
+         description-length price is the wrong price for a denoiser as E24 wrote it: under noise the cheapest two-part
+         description of "the cleaner cell" is the identity with exceptions paid at their rate, so the sleep pass prunes the
+         very memory the nearest-window default generalises from — E28's open point ("a free generalisation the price does not
+         account for") demonstrated; the strict rule keeps everything and is a nearest-neighbour denoiser with no compression
+         at all, which is the opposite of the thesis; (4) on text a ±3 window is too little context for a block to add
+         anything over one shot. The quality of a written radius-1 block, not the credit assignment, is the limit —
+         DiffusionBlocks' blocks are transformers with global context.
+changed: `LocalRule.sleep(strict=)`; the price question is now sharp: the price must count the nearest-neighbour
+         generalisation (a memory's worth is the exceptions it will avoid on unseen windows, not the entries it costs), or the
+         block must be given the context a denoiser needs (larger receptive fields, E28's gather heads at radius 2+). Neither
+         is designed.
+
+### 2026-09-22 — E34 — gradient-free context mixing on the Latin stream: a library of eighteen context experts mixed by Bayesian weights gains nothing over the table (1.820 vs 1.823); a geometric mixture with Bayesian exponents gains 0.02 (1.801); the raw product over-sharpens (7.7). The multiplicative combination of evidence with LEARNED exponents is where the compression literature's gain lives, and it is the first place a gradient is needed
+command: `python experiments/ziplearn/e34.py` (selection on a 30k prefix), `--select_chars 0` (all experts, the mixer selects online), `--mixtures 1` (linear / geometric / product in one pass); CPU, 2–6 min each
+files:   `experiments/ziplearn/runs/e34/e34.json`, `e34_all.json`, `e34_mixtures.json`, the logs; code `e34.py` (`Stream`, `Expert`, `Chain`, `Mixer`, `run_stream`, `run_mixtures`)
+numbers: the experts and their solo online bits/char on the held-out book after the 2.7M-character training pass: chain (E33's
+         blended order-8 table) 1.823; single orders 1–8: 3.43, 2.81, 2.35, 2.22, 2.44, 2.92, 3.44, 3.86; skips at 2/3/4 back: 3.88,
+         4.11, 4.20; pairs (1,3), (1,4): 3.00, 3.21; the current word 2.44; previous word + current word 4.11; line position 3.44;
+         the match model (E18's induction head as a context: the character that followed the last occurrence of the current
+         6-gram, with the match length) 2.88.
+         Selection by prequential bits on a 30k prefix kept chain + order1 + order2 (the data-hungry experts dropped before they had
+         data): mixture 1.811. All experts, mixer weights learned online per mixing context (mean weight on the chain 0.60, the rest
+         0.01–0.05): linear (Bayesian) mixture **1.820**; the same experts combined geometrically with the Bayesian weights as
+         exponents over the experts whose context was seen **1.801**; the plain product of the seen experts 7.665. References:
+         the table alone 1.822 (E33), xz 2.263.
+verdict: INCONCLUSIVE on the letter (pre-registered pass ≤ 1.6; better than the table by 0.02 at best). The finding is about
+         the mixing, not the library: a Bayesian (linear) mixture can only CHOOSE among experts — averaging probabilities, two
+         contexts that each give the right character 0.4 for independent reasons give 0.4 together — so eighteen contexts
+         weighted online add nothing to the best one. Combining evidence multiplicatively is what a context-mixing compressor
+         does (PAQ's logistic mixer, in the stretch domain), and here the gradient-free forms bracket it: a product with fixed
+         unit exponents is far too sharp (7.7 bits/char), a geometric mean with Bayesian exponents is barely sharper than
+         linear (−0.02). What PAQ learns is the exponents, by an online gradient step on the coding loss — a few thousand
+         weights, a convex loss, no backpropagation through anything — and that, on the evidence of this run, is the smallest
+         and first irreducible use of a gradient in ZipLearn (§19–§20; the answer given to the user's question of
+         2026-09-22). Caveats: PAQ also uses bit-level models and many more contexts; the library here is eighteen experts;
+         one corpus, one held-out book.
+changed: the gradient question has a measured answer on text: structure, memory and choice are gradient-free; the
+         multiplicative combination of many weak cues is not. Not built: the learned-exponent mixer (a gradient, if allowed).

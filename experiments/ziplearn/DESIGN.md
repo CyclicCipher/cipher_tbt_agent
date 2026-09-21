@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
 *v0.8, 2026-09-21 (v0.1–v0.5 on 2026-09-20; v0.6 records E14–E18; v0.7 adds §18 thinking inside the block, §19 the library problem and the continuous thesis; v0.8 adds §20 credit assignment without backpropagation; earlier: capacity, precision, order dependence, blocks across
-layers, relational goals, written attention). E0–E30 and E33(a) have been run (E29 retracted as a design; E31 running; E32 and E33(b,c) shelved; E35 then E34 next); one line each in §13, the full entries in `RESULTS.md`. Code:
+layers, relational goals, written attention). E0–E30 and E33(a) have been run (E29 retracted as a design; E31 stopped after 2 cells; E32 and E33(b,c) shelved; E34 and E35 run); one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -560,6 +560,9 @@ probability t (absorbing: masked stays masked until a block fills it), a block f
 book at t = 0.15 / 0.5, chain against one shot. Pass: repair at t = 0.5 with the chain at least 0.05 above one shot on
 the frames, and the same sign on text; sleep shrinking the per-block tables. Refute: the chain no better than one shot
 anywhere.
+*Result: REFUTED on the letter (`RESULTS.md`): with memory blocks the chain beats one shot by +0.026 at t = 0.5 and +0.068 at
+0.75 and generates rooms from noise; under the price alone every block collapses to the identity — the price prunes the
+memory that generalises (E28's open point); text at ±3: no gain.*
 **E34 — gradient-free context mixing on the Latin stream (pre-registered 2026-09-21; §19–§20; second).** A library of
 context functions — character orders 1–8, skip pairs at distances 2–4, the previous word (the characters since the last
 space), the position in the line, and a match model (E18's induction written: the character that followed the last
@@ -568,6 +571,9 @@ add and drop, E33's price); mixing by Bayesian weights in closed form (exponenti
 fixed-share switching for non-stationarity), no trained mixer. Measured: online bits per character on the held-out book
 against the table's 1.822 and xz's 2.263; which contexts survive selection. Pass: at or below 1.6 (the literature's
 fraction would put it near 1.3–1.4); refute: no gain over the table.
+*Result: INCONCLUSIVE (`RESULTS.md`): Bayesian mixing of 18 experts 1.820 vs the table 1.823; geometric with Bayesian
+exponents 1.801; the raw product 7.7. A linear mixture can only choose; the gain of context mixing is the multiplicative
+combination of evidence with LEARNED exponents — the first irreducible gradient (§20, "Where a gradient is needed").*
 
 ## 12. Open questions
 
@@ -626,6 +632,8 @@ changed) are in `RESULTS.md`, appended and never edited.
 | E29 | PASS, then RETRACTED | learned search as a procedure: room-20 89 vs 818 calls, room 40 solved at oracle 74; rejected as a design (a search written around the model) and deleted; the rooms stay as the test bed for §18 |
 | E30 | PASS | the depth loop under attention residuals: held-out 1/8 solved (0.22) with a tied core — the first ever; the learned route lets the anchor fade and reads every earlier pass; windowed sources collapse at 2× passes |
 | E33 (a) | measured | the discrete machinery on Latin text = a PPM-style blended-backoff model: 1.87 bits/char frozen, 1.82 online at 2.7M chars (xz 2.26); the E24 sleep price is wrong for text, the prequential one keeps every position; transformer/hybrid arms shelved |
+| E35 | REFUTED on the letter | written denoising chain: memory blocks beat one shot by +0.07 at t = 0.75 and generate rooms from noise; the MDL price collapses denoisers to the identity; text ±3: no gain |
+| E34 | INCONCLUSIVE | gradient-free context mixing: 18 experts, Bayesian mixing 1.820 vs the table 1.823; geometric with Bayesian exponents 1.801; the raw product 7.7 — the learned multiplicative mixer is the first irreducible gradient |
 
 ## 14. Glossary
 
@@ -784,6 +792,7 @@ output the reverse of the input"), and goals over the library ("find a shorter w
 - `experiments/ziplearn/e30.py`, `e31.py` — the recurrence-scheme experiments of §18 (drivers over the two files above).
 - `experiments/ziplearn/textlm.py` — the discrete machinery as a character language model on `corpora/latin books` (E33 a).
 - `experiments/ziplearn/refs/diffusionblocks_2506.14202.md` — the reference behind §20.
+- `experiments/ziplearn/e35.py` — the written denoising chain (E35); `e34.py` — gradient-free context mixing on the Latin stream (E34).
 - `experiments/inner_objective/tasks.py` — the two task families (arithmetic, composition), reused by every experiment.
 - `experiments/inner_objective/ziplearn.py`, `runs/ziplearn_*.json` — the earlier arithmetic-only version and its numbers (§2).
 
@@ -1035,4 +1044,16 @@ on 2.7M characters of Latin by any method. On Latin the goal is the fraction: th
 table (~1.9 on enwik8) to context mixing (~1.3) is a third; the Latin analogue is 1.82 → ~1.3, and it is gradient-free
 territory (E34). What remains beyond it, if E34 and E35 land, is measured rather than assumed.
 
-**Order of work (approved 2026-09-21): E35, then E34; E31 finishes on its own; no gradient-arm work otherwise.**
+**Where a gradient is needed — the measured answer (2026-09-22, E34/E35; asked by the user).** Not needed, shown:
+exact structure over discrete codes (E3, E8, E12, E18, E28); memory and continual learning (E6 vs E6b); choosing among
+experts (E34: the Bayesian mixture equals the linear mixer); credit assignment through refinement depth (§20, E35: eight
+blocks fitted locally); linear representation learning (an SVD). Needed, most likely, in two local places: (1)
+combining evidence MULTIPLICATIVELY — E34: eighteen contexts averaged gain nothing (1.820 vs 1.823), a geometric mean with
+Bayesian exponents 0.02, a raw product over-sharpens (7.7); the learned exponents of a logistic mixer (PAQ) are a
+few thousand weights on a convex online loss, no backpropagation; (2) features inside a block when generalisation must
+come from shared structure rather than lookup — E35: a written radius-1 denoiser either remembers windows (works, no
+compression) or collapses to the identity (the price), where DiffusionBlocks' blocks generalise by learned features;
+per block, on the block's local target, never end to end. The alternative — priced search over compositions (§19) —
+is unproven, not refuted.
+
+**Order of work (approved 2026-09-21): E35, then E34 — both run (2026-09-22); E31 stopped after 2 cells; no gradient-arm work otherwise.**

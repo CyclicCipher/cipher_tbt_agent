@@ -1,0 +1,8 @@
+E34: 2726046 training characters, 240588 held out; V = 70
+   all 18 experts on the first 30000 characters: mixture 2.915 bits/char; solo: chain 2.90, order1 3.60, order2 3.65, order3 4.20, order4 4.54, order5 4.57, order6 4.51, order7 4.46, order8 4.43, skip2 4.03, skip3 4.24, skip4 4.33, pair1_3 3.98, pair1_4 4.18, word 3.99, prevword 4.43, line 3.96, match 4.12  [2s]
+   round 1: dropped ['order3', 'order4', 'order5', 'order6', 'order7', 'order8', 'skip3', 'skip4', 'pair1_3', 'pair1_4', 'word', 'prevword', 'line', 'match'] -> mixture 2.902 bits/char  [46s]
+   round 2: dropped ['skip2'] -> mixture 2.899 bits/char  [51s]
+   survivors: ['chain', 'order1', 'order2']
+   held-out book, online: MIXTURE 1.811 bits/char (table alone, E33: 1.822; xz: 2.263) | solo: chain 1.823, order1 3.425, order2 2.805  [train 118s, test 10s]
+
+E34 verdict: INCONCLUSIVE — mixture 1.811 bits/char online (pass <= 1.6; table 1.822)

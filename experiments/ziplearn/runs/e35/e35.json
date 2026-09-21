@@ -1,0 +1,126 @@
+{
+ "frames": {
+  "schedule": [
+   0.0,
+   0.125,
+   0.25,
+   0.375,
+   0.5,
+   0.625,
+   0.75,
+   0.875,
+   1.0
+  ],
+  "n_train": 115,
+  "n_held": 135,
+  "blocks": {
+   "1": {
+    "entries_before": 12804,
+    "entries_after": 1065,
+    "bits_before": 51998,
+    "bits_after": 11840,
+    "cells": 3
+   },
+   "2": {
+    "entries_before": 20924,
+    "entries_after": 16,
+    "bits_before": 86340,
+    "bits_after": 22958,
+    "cells": 1
+   },
+   "3": {
+    "entries_before": 26068,
+    "entries_after": 16,
+    "bits_before": 105613,
+    "bits_after": 25267,
+    "cells": 1
+   },
+   "4": {
+    "entries_before": 28811,
+    "entries_after": 16,
+    "bits_before": 115735,
+    "bits_after": 26968,
+    "cells": 1
+   },
+   "5": {
+    "entries_before": 30099,
+    "entries_after": 16,
+    "bits_before": 120596,
+    "bits_after": 28150,
+    "cells": 1
+   },
+   "6": {
+    "entries_before": 30556,
+    "entries_after": 16,
+    "bits_before": 122255,
+    "bits_after": 29427,
+    "cells": 1
+   },
+   "7": {
+    "entries_before": 30624,
+    "entries_after": 16,
+    "bits_before": 122496,
+    "bits_after": 29003,
+    "cells": 1
+   },
+   "8": {
+    "entries_before": 30629,
+    "entries_after": 16,
+    "bits_before": 122540,
+    "bits_after": 30085,
+    "cells": 1
+   }
+  },
+  "repair": {
+   "2": {
+    "t": 0.25,
+    "chain": 0.9046336379669713,
+    "one_shot": 0.9109347442680775,
+    "noisy": 0.7670554753888087
+   },
+   "4": {
+    "t": 0.5,
+    "chain": 0.7875821709155043,
+    "one_shot": 0.838560205226872,
+    "noisy": 0.5320185986852654
+   },
+   "6": {
+    "t": 0.75,
+    "chain": 0.6505772005772006,
+    "one_shot": 0.7731802148468814,
+    "noisy": 0.29695366362033027
+   }
+  },
+  "generation": {
+   "agreement_nearest_training": 0.5301462241462243,
+   "distinct": 100,
+   "n": 100
+  }
+ },
+ "text": {
+  "schedule": [
+   0.0,
+   0.25,
+   0.5,
+   0.75,
+   1.0
+  ],
+  "n_train": 289123,
+  "n_test": 60000,
+  "repair": {
+   "0.15": {
+    "t": 0.15,
+    "chain": 0.5033747006313956,
+    "one_shot": 0.5033747006313956,
+    "n_masked": 9186
+   },
+   "0.5": {
+    "t": 0.5,
+    "chain": 0.30888405554626064,
+    "one_shot": 0.32036138531035635,
+    "n_masked": 29885
+   }
+  }
+ },
+ "verdict": "REFUTED"
+}

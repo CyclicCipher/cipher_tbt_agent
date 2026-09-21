@@ -1,0 +1,6 @@
+E34: 2726046 training characters, 240588 held out; V = 70
+   survivors: ['chain', 'order1', 'order2', 'order3', 'order4', 'order5', 'order6', 'order7', 'order8', 'skip2', 'skip3', 'skip4', 'pair1_3', 'pair1_4', 'word', 'prevword', 'line', 'match']
+   mixer weights (mean over mixing contexts): chain 0.60, order1 0.04, order2 0.04, order3 0.05, order4 0.02, order5 0.01, order6 0.01, order7 0.01, order8 0.01, skip2 0.01, skip3 0.03, skip4 0.04, pair1_3 0.02, pair1_4 0.03, word 0.01, prevword 0.01, line 0.04, match 0.01
+   held-out book, online: MIXTURE 1.820 bits/char (table alone, E33: 1.822; xz: 2.263) | solo: chain 1.823, order1 3.425, order2 2.805, order3 2.354, order4 2.216, order5 2.440, order6 2.917, order7 3.440, order8 3.860, skip2 3.878, skip3 4.105, skip4 4.197, pair1_3 3.001, pair1_4 3.206, word 2.438, prevword 4.113, line 3.435, match 2.876  [train 214s, test 20s]
+
+E34 verdict: INCONCLUSIVE — mixture 1.820 bits/char online (pass <= 1.6; table 1.822)

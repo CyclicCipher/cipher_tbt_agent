@@ -144,11 +144,13 @@ class LocalRule:
     def _wrong(merged):
         return sum(sum(c.values()) - max(c.values()) for c in merged.values())
 
-    def sleep(self):
-        """Drop context cells while the merged table gets cheaper AND explains the evidence no worse -- no new
+    def sleep(self, strict=True):
+        """Drop context cells while the merged table gets cheaper AND (strict) explains the evidence no worse -- no new
         exceptions (greedy, the centre always kept). The first run let the price alone decide and it merged away the
         rare cells that change, since forgetting a rare change costs fewer bits than an entry; the planner lives on
-        exactly those cells. Compact without losing what was known. Returns (bits before, bits after, cells kept)."""
+        exactly those cells. Compact without losing what was known. Returns (bits before, bits after, cells kept).
+        `strict=False` lets the price alone decide: right when the targets are noisy by construction (E35's denoising
+        blocks), where "no new exceptions" forbids every drop and the pass does nothing."""
         if not self.full:
             return 0.0, 0.0, int(self.mask.sum())
         merged0 = self._merged(self.mask)
@@ -163,7 +165,7 @@ class LocalRule:
                 cand[c] = False
                 m = self._merged(cand)
                 pr = self._price(m)
-                if pr < best_price and self._wrong(m) <= wrong0:
+                if pr < best_price and (not strict or self._wrong(m) <= wrong0):
                     best_mask, best_price = cand, pr
             if best_mask is None:
                 break
