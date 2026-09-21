@@ -813,3 +813,81 @@ def enforce_capacity(layer, capacity, log=None):
         if log is not None:
             log.append(dict(dropped=victim["layer"].keep().name, evidence=victim["n"], bits_after=after))
     return dropped
+
+
+# ── blocks across layers (OPEN-7; E16): a continual layer whose blocks are TWO-LAYER descriptions ──────────────────
+class ContinualTwoLayer(ContinualLayer):
+    """§9 for whole tasks: each block is a TwoLayer description (a position layer and a value layer); the stream is
+    demonstrations (x_seq, y_seq) with no task labels. Routing prices a window of demonstrations under each block --
+    an established block under its kept description, frozen (the value hypothesis and the solved position structure
+    do not change; foreign demonstrations are exceptions to them); a young block with all its runs live -- and
+    mints on a change point exactly as the digit-level layer does. What OPEN-7 asked: do blocks multiply when a
+    block spans two layers? They should not, if a description is priced as one thing."""
+
+    def __init__(self, L, V, window=3):
+        super().__init__(V, window)
+        self.L = L
+
+    def _fresh(self):
+        return TwoLayer(self.L, self.V)
+
+    @staticmethod
+    def _price_of(learner):
+        name, ab, pos = learner.best()
+        bits = next(b for (n, a, b), *_ in learner.runs if n == name and a == ab)
+        return bits + learner.bits_value_name + pos.cost + learner.bits_pos_name
+
+    @classmethod
+    def _window_cost(cls, learner, demos, n=None):
+        import copy
+        if n is None or n >= cls.MIN_EVIDENCE:
+            _name, (a, b), pos = learner.best()
+            probe = copy.deepcopy(pos)
+            before = probe.cost
+            for x, y in demos:
+                t = [learner.invert(a, b, int(v), learner.V) for v in y]
+                probe.observe_demo(x, t)
+            return probe.cost - before
+        probe = copy.deepcopy(learner)
+        before = cls._price_of(probe)
+        for x, y in demos:
+            probe.observe_demo(x, y)
+        return cls._price_of(probe) - before
+
+    def observe_demo(self, x_seq, y_seq):
+        """Route one demonstration (a whole sequence pair) to a block, minting on a change point (see the parent)."""
+        x_seq, y_seq = np.array(x_seq), np.array(y_seq)
+        self.recent = (self.recent + [(x_seq, y_seq)])[-self.window:]
+        W = len(self.recent)
+        change = math.log2(self.V) * self.L
+        whole_block, whole = self.select(self.recent)
+        options = [(whole, whole_block, None)]
+        for k in range(W):
+            _pb, prefix = self.select(self.recent[:k]) if k else (None, 0.0)
+            sb, suffix = self.select(self.recent[k:])
+            fresh = self._window_cost(self._fresh(), self.recent[k:], 0) + self.bits_block_name()
+            if sb is not None and suffix <= fresh:
+                options.append((prefix + change + suffix, sb, None))
+            else:
+                options.append((prefix + change + fresh, None, k))
+        cost, block, mint_k = min(options, key=lambda o: o[0])
+        if block is None:
+            fresh = self._fresh()
+            for px, py in self.recent[mint_k:-1]:
+                fresh.observe_demo(px, py)
+            block = dict(layer=fresh, n=len(self.recent[mint_k:-1]))
+            self.blocks.append(block)
+            self.n_minted += 1
+        block["layer"].observe_demo(x_seq, y_seq)
+        block["n"] += 1
+        return block
+
+    def predict_in_context(self, context_demos, x_seq):
+        block, _c = self.select([(np.array(x), np.array(y)) for x, y in context_demos])
+        return None if block is None else block["layer"].predict_seq(np.array(x_seq))
+
+    def total_bits(self, consolidated=False):
+        return sum(self._price_of(b["layer"]) for b in self.blocks) + len(self.blocks) * self.bits_block_name()
+
+    def describe(self):
+        return [f"{b['layer'].describe()} (n={b['n']})" for b in self.blocks]

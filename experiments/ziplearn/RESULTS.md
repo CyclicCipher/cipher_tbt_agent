@@ -28,6 +28,7 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E13 | analysis | the replica games: interface complete, 5/16 levels by discovery; goal transfer on MultiKey; failures named |
 | E15 | PASS | budget: price forgets the least valuable, keeps the best-evidenced (0.84 vs FIFO 0.52); precision step ∝ 1/√n |
 | E14 | mechanism confirmed | order matters exactly as much as earlier compression is reused: gap 28 bits by name, 185 by words, 1193 for the transformer |
+| E16 | PASS | continual learning of whole two-layer tasks: 100% retention, exactly 3 blocks — blocks do not multiply across layers (OPEN-7) |
 
 ## Format
 
@@ -504,3 +505,18 @@ changed: the curriculum gap is now a defined, measured quantity: worst minus bes
          its stated consequence: "how much knowledge fits" has an answer per curriculum, and the best curriculum is
          parts first. Not built: letting the learner *choose* the order (ask for the parts) — the outer objective's
          exploration of §16 applied to what to learn next.
+
+### 2026-09-20 — E16 — blocks across layers: whole two-layer descriptions as blocks keep 100% retention with exactly three blocks (PASS; OPEN-7 answered)
+command: `python experiments/ziplearn/e16.py` (rot_left∘inc, reverse∘negate, swap_pairs∘inc, then the first again; 25 demonstrations each; 10 streams; CPU, ~1 min)
+files:   `experiments/ziplearn/runs/e16/e16.json`; code `ContinualTwoLayer` in `ziplearner.py`, `e16.py`
+numbers: retention (2 demonstrations as context, exact match on a fresh query) **1.00 for every rule after every
+         stretch**; blocks 1.0 → 2.1 → 3.1 → **3.1** (exactly three at the end in 90% of streams; one stream minted
+         a fourth at a transition); bits 37 → 77 → 114 → 114. One stream's blocks at the end: "position permutation
+         then shift b=1 (n=50)", "position permutation then affine a=4 b=0 (n=25)", "position permutation then shift
+         b=1 (n=25)" — the returning rule reused its block.
+verdict: PASS. OPEN-7 asked whether blocks multiply when a block spans two layers; they do not, because a block is
+         priced as one description whatever its depth: the frozen kept description of an established block is the
+         pair (value hypothesis, solved position structure) and foreign demonstrations are exceptions to it, exactly
+         as at the digit level. Nothing in §9's rules needed changing; the unit of routing became a demonstration.
+changed: `ContinualTwoLayer` (§9 for whole tasks). OPEN-7 closed in its first form; a block spanning *more* than two
+         layers, or layers with distributed codes, is not tested.
