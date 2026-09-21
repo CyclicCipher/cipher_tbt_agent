@@ -765,6 +765,262 @@ coverage specifically — the same weakness `diversity.py`'s largest point had, 
 reason. The conclusion rests on N=10 and N=40, where the fit is complete and transfer is still exactly zero. Settling the
 top of the range needs more compute than the 5-minute budget allows (that arm already ran 501 s).
 
+## STEP 6: THE PRIOR IS NOT INERT — it hurts by 28 points where it is false (2026-08-05) — `audit.py`
+
+A prior is not bad for existing; it is bad when it is too large, too complicated, or when it helps one task while
+hindering another. The Sinkhorn layer passes the first two easily — one layer, no task content, it states only what KIND
+of object an answer is. The third was never tested. Testing it requires a case where the prior is FALSE, not merely
+unnecessary: if output positions read input positions through a NON-INJECTIVE map, the truth is not a permutation, a
+row-stochastic matrix expresses it fine, and a doubly-stochastic one cannot.
+
+Fitted on 8 demonstrations, scored by reconstruction on FRESH inputs the fit never saw (per-slot / whole-sequence):
+
+| structure | prior is | sinkhorn | row-softmax |
+|---|---|---|---|
+| permutation | TRUE | 1.000 / **1.000** | 1.000 / **1.000** |
+| many-to-one | FALSE | 0.907 / **0.713** | 0.993 / **0.990** |
+| global (Σx mod V) | IRRELEVANT | 0.201 / 0.009 | 0.199 / 0.199 |
+
+**1. WHERE THE PRIOR IS FALSE IT COSTS 28 POINTS OF EXACT RECONSTRUCTION** (0.713 vs 0.990). So the answer to the third
+criterion is **yes, it hinders** — decisively, on a task that is one small step outside the one it was built for.
+
+**2. AND WHERE IT IS TRUE, AT THIS DATA VOLUME, IT BUYS NOTHING.** Both reach 1.000 on permutations. That is consistent
+with the original measurement — Sinkhorn's advantage was at K=2 (0.511 vs 0.215) and gone by K=8 — but it is worth
+stating plainly: **in the K=8 regime where most of this arc was run, the prior was contributing nothing at all.** Its
+entire measured value lives at K ≤ 4.
+
+**3. THE CONTROL BEHAVES, and then says the same thing again.** On the global structure both are at chance per slot
+(0.201 / 0.199), so the metric is not leaking. But row-softmax scores 0.199 on whole-sequence against sinkhorn's 0.009,
+because that task's output is CONSTANT across positions and only a many-to-one map can collapse outputs onto one input.
+Every row where the prior loses is a row that needs collapse, which is exactly what double stochasticity forbids.
+
+**VERDICT: a good prior for this domain and a liability one step outside it.** The honest summary of the whole Sinkhorn
+arc is narrower than its framing implied — combined with step 5 (the solver it amortises costs ~10 steps, and a trained
+one-shot init is worse than noise), the assignment constraint is a LOW-DATA prior, not a capability.
+
+**The fix is known and should precede step 7.** Unbalanced/relaxed optimal transport drops the column constraint, and
+interpolating between row-stochastic and doubly-stochastic with a learned weight would let the data decide whether the
+correspondence is a bijection. Any move to a universe where it is not — which is step 7 by definition — needs that first.
+
+---
+
+## STEP 5: AMORTISATION WAS NEVER THE PROBLEM — the solver costs 10 steps, not 400 (2026-08-05) — `unroll.py`
+
+Step 5 set out to close the 0.756-vs-1.000 gap between the one-shot amortised matcher and the per-task solver, on the
+premise that 400 Adam steps per task is fine here and hopeless at scale. **Both halves of that premise were wrong, and
+the control caught it.**
+
+| arm | IDX exact | note |
+|---|---|---|
+| matcher, one forward pass (600 steps' training) | 0.371 | the amortised baseline |
+| **trained unrolled, T=6** | **1.000** | looks like the fix |
+| **UNTRAINED net + 6 refinement steps** | **0.981** | ⚠ the control |
+| UNTRAINED net + 10 refinement steps | **1.000** | ⚠ the learned part contributes nothing |
+| solver from NOISE, 10 Adam steps | 0.981 | |
+| solver from NOISE, 40 Adam steps | **1.000** | |
+
+**1. THE COST PREMISE WAS INFLATED TENFOLD.** The solver reaches 1.000 from noise in **40** Adam steps and 0.981 in
+**10**. Every measurement in this line ran it at 400 because that is what I picked, and convergence was never checked.
+"400 gradient steps per task is hopeless beyond this scale" overstated the real cost by an order of magnitude.
+
+**2. THE UNROLLED NETWORK'S 1.000 IS NOT THE NETWORK.** An UNTRAINED network with the same refinement reaches 0.981 at
+T=6 and 1.000 at T=10. The refinement steps do all the work; training the initialiser buys nothing measurable. A
+near-ceiling number was a bug report again (`feedback_verify_the_apparatus_not_the_number`), and the arm that would have
+been reported as "unrolling fixes amortisation" is really "this problem needs ten steps of a decent optimiser".
+
+**3. WHAT IS GENUINELY NEW, AND IT IS THE OPPOSITE OF THE HYPOTHESIS.** The one-shot matcher's output is an actively
+HARMFUL initialisation: refining from it reaches 0.648 after 200 Adam steps, far worse than noise after 10 (0.981). A
+network trained to emit the ANSWER produces a confident wrong answer in a basin gradient descent cannot escape. Trained
+to emit a STARTING POINT (through the unrolled steps) it produces a good one — 1.000 after 10 Adam steps. Same
+architecture, same data, opposite utility, decided entirely by what the objective asked of it.
+
+**THE FALSIFIER I WROTE HAD TWO HORNS AND BOTH WERE WRONG.** It said: if the unrolled solver plateaus below 1.000, the
+limit is the score function rather than the step count. It did not plateau — but the step count was never the limit
+either, because the solver was already cheap.
+
+**The lesson, stated generally: measure what an optimiser actually costs before building a network to replace it.** This
+line spent the whole Sinkhorn arc treating 0.756-vs-1.000 as an amortisation gap worth closing, when the thing being
+amortised took ten steps. The amortised network was never the cheap path — it was the slower, worse one.
+
+---
+
+## STEP 4: THE OUTPUT QUOTIENT — a small accuracy gain, and a clean ontological one (2026-08-05) — `quotient.py`
+
+`endtoend.py` quotients the INPUT by equivalence and leaves the OUTPUT in surface form: the target is one particular
+writing of the program. And the ambiguity is not small — `cayley` stores each function's MINIMAL program, so targets are
+length-canonical, but ties among equally-short programs are broken by BFS visit order:
+
+    13 primitives, 2350 functions at depth <= 5
+    minimal-length writings per function:  mean 12.53, max 120, fraction with more than one: 0.902
+
+So for 90% of functions the model is pushed toward one of ~12 equally valid, equally short answers. The fix is the class
+MARGINAL, `loss = -log Σ_{p ∈ class} P(p)`, which is minimised by putting all mass on whichever member the model finds
+easiest and is indifferent to which — that indifference is what quotienting the output means. (Training on a RANDOM
+member instead optimises `E_p[log P(p)]` and forces mass to SPREAD, which is the opposite of what is wanted.)
+
+| target | functional (held-out) | class mass | mass on the BFS writing |
+|---|---|---|---|
+| single writing | 0.867 | 0.859 | **0.859** |
+| **class marginal** | **0.895** | 0.848 | **0.280** |
+
+**THE ACCURACY GAIN IS REAL BUT SMALL** — +0.028, a 21% cut in error rate (0.133 → 0.105). My motivation for this step
+implied more, and the reason it does not deliver more is the interesting part.
+
+**THE SINGLE-TARGET MODEL DID NOT SPLIT ITS PROBABILITY. IT COLLAPSED ONTO ONE WRITING.** Its class mass EQUALS its
+single-writing mass to three decimals (0.859 / 0.859), so it assigns essentially ZERO probability to the other ~11
+correct answers, and its accuracy (0.867) simply tracks that one writing's mass. Nothing was being lost to hedging
+between equivalent answers, which is why fixing the hedge buys little. Committing to one writing is a perfectly good
+strategy when you are graded functionally.
+
+**But the ontology point survives intact, and is now measured rather than argued.** A model trained on surface form
+assigns ~0 probability to eleven of twelve equally correct answers — asked whether any of them computes the function, it
+would say no. It has a phrasing, not the content. The quotient-trained model puts 0.848 on the class while giving the
+BFS writing only 0.280, i.e. it holds the equivalence class and picks within it by its own preference. **That is the
+difference between knowing the thing and reproducing the corpus's preferred wording of it, isolated in one table.**
+
+⚠ **Caveats.** The 0.867 baseline here is not comparable to `canon2prog.py`'s 0.733 or `endtoend.py`'s 0.762 — different
+batch (128 vs 512) and steps (3000 vs 6000); only the single-vs-class comparison, which holds everything fixed, is
+valid. And the class arm costs 3.5× the wall-clock per step (145 s vs 42 s) since it scores 8 members; matched on
+gradient updates and functions seen, not on FLOPs.
+
+---
+
+## STEPS 3 AND 2: CHOOSING BEATS SAMPLING, 2× — and nothing is enumerated (2026-08-05) — `eig.py`
+
+Expected information gain over the SOLVER'S OWN hypothesis space, with no enumeration on either axis. Run the solver R
+times from different initialisations on what has been observed; where the data determines the answer the restarts agree,
+where it does not they spread, and that spread IS a posterior sample. Score a candidate by how much the samples disagree
+about what it would return — `EIG(x) ≈ H({h(x) : h ~ posterior})`, which is exactly expected information gain when the
+observation is deterministic given the hypothesis (Query-by-Committee / BALD). Hypotheses are SAMPLED (R=12), candidates
+are SAMPLED (C=512). Before any observation the samples come from the solver's own prior: uniform permutations.
+
+150 held-out transformations, solver recovery = both halves of the canonical form exact:
+
+| probes | budget 2 | budget 4 | bits left (enumerating observer) | distinct/6 |
+|---|---|---|---|---|
+| random | 0.436 | 0.970 | 0.21 / 0.01 | 3.75 / 3.63 |
+| designed (hand-derived) | 0.105 | 0.684 | 0.00 / 0.00 | 5.00 |
+| **sampled EIG** | **0.669** | **1.000** | 0.02 / 0.00 | 3.99 / 3.50 |
+
+**CHOOSING BEATS SAMPLING, AND THE FACTOR IS 2×.** Exact recovery at **4 chosen probes** where `sinkhorn.py` needed
+**8 random demonstrations** (random reaches 0.963–0.970 at 4). At the tight budget of 2 the gain is +0.233 absolute,
++53% relative. This is the first time the L framing has bought data efficiency INSIDE our own pipeline rather than
+against a hand-derived ceiling, and it is what step 2 existed to test.
+
+**AND THE FIRST VERSION LOST, which is the useful part.** Before a one-line guard, sampled EIG scored 0.789 at budget 4
+— WORSE than random's 0.970 — while still winning at budget 2. The diagnosis, measured rather than assumed:
+
+| | probe 1 | probe 2 | probe 3 | probe 4 |
+|---|---|---|---|---|
+| distinct hypotheses among R=12 | 11.88 | 8.61 | 3.47 | 2.32 |
+| max disagreement | 2.485 | 2.067 | 0.819 | 0.579 |
+
+The restart ensemble COLLAPSES. By the third probe only ~3.5 of 12 restarts are distinct, disagreement is flat across
+candidates, the argmax is arbitrary — and **98.5% of tasks re-asked a question they had already asked**. Excluding
+already-asked probes fixes it completely. Note the collapse is partly OVERCONFIDENCE, not knowledge: accuracy at that
+point was 0.789, so restarts were agreeing on answers that were wrong. Restart-spread is a proxy for posterior spread
+and it is a poor one once the optimiser has a favourite basin.
+
+*(I predicted the guard would restore parity with random, not beat it, reasoning that a flat disagreement surface makes
+the second choice effectively arbitrary. It reached 1.000. The surface is evidently not as flat as the collapse
+statistics suggested.)*
+
+**A GENERAL RULE FALLS OUT, and it is the constructive half of step 1b.** EIG computed for the prior-free solver leaves
+0.02 bits for the ENUMERATING observer — near-optimal for both. The hand-designed probe, optimised for the enumerating
+observer, is that observer's best (0.00) and the solver's worst (0.105). **Design the experiment for the least-informed
+reader and it works for better-informed ones too; the converse fails.** A question that is only informative to someone
+who already knows the universe is barely a question.
+
+---
+
+## STEP 1b: THERE IS NO OBSERVER-INDEPENDENT GOOD QUESTION (2026-08-05) — `detective.py --answerer sinkhorn`
+
+Step 1b set out to repeat step 1 with the non-enumerating Sinkhorn solver in place of the exact posterior. **It did not
+answer that question — see the budget failure below — but it settled a more basic one first.**
+
+**THE TWO ANSWERERS RANK PROBE SETS IN OPPOSITE ORDER.** Measured directly, no training involved:
+
+| probe set | exact posterior (bits left after 2) | Sinkhorn solver (IDX exact) |
+|---|---|---|
+| designed `[0,1,2,3,4,0]` / `[0,1,2,3,4,1]` | **0.00** — best | **0.110** — worst |
+| random (~3.7 distinct) | 0.23 | **0.495** — best |
+
+**And the mechanism is provable, not empirical.** If a probe's values are all distinct, then for ANY candidate
+permutation `idx'` there is a value map `vmp'` reproducing the observed output exactly — define
+`vmp'[v] = y[(x∘idx')⁻¹(v)]`, which is well-defined because `x∘idx'` is a bijection. So an all-distinct probe constrains
+`idx` **not at all** on its own; position-permutation and value-relabelling are perfectly confounded. Only REPEATED
+values break the confound, because two positions sharing an input value must produce the same output value, and no
+relabelling can absorb that.
+
+At L=6 > V=5 one value must repeat, so the hand-derived probe supplies exactly ONE constraint — which is why the solver
+scores 0.110 on it. Random probes carry ~2.3 repeats and score 0.495. **The exact posterior escapes the confound only
+because it knows the answer is one of 2350 specific `(idx, vmp)` pairs**; a prior-free solver searching 720 × 120 cannot.
+
+**So "maximise distinct values" was never a principle about experiments. It is a principle about experiments read by an
+observer that already knows the universe.** Every probe comparison in this line — including `bits.py`'s greedy optimum —
+is relative to an observer, and we had been treating probe quality as if it were intrinsic.
+
+⚠ **THE TRAINING ARM IS INCONCLUSIVE, and it is a budget failure, not a result.** The solver costs ~19 ms per Adam step
+at training scale, capping the run at 150 steps against the oracle arm's 1000. The policy did move as predicted — 2.96
+distinct values rather than climbing to 5, converging on balanced repeats like `(4,0,1,0,1,4)` — but it is undertrained
+(query loss still 1.599) and its probes are worse than random under BOTH measures: 0.20 bits after two (random 0.23) and
+solver IDX exact 0.210 (random 0.495). **No conclusion about whether the solver is an adequate answerer can be drawn**;
+what is shown is that 150 steps is not enough to train this arm, and a proper run needs compute outside the interactive
+budget.
+
+**ROADMAP CONSEQUENCE, and it saves a run that would have failed.** Step 2 was to feed greedy-EIG probes to the Sinkhorn
+solver and show that choosing beats sampling. Those probes are near-optimal for the posterior and near-PESSIMAL for the
+solver, so step 2 as written would have produced a confident negative for the wrong reason. **Step 3 (EIG computed over
+the solver's OWN hypothesis space) is therefore a prerequisite for step 2, not a follow-up**, and the two are reordered.
+
+---
+
+## STEP 1: SWAP THE ANSWERER AND THE POLICY DISCOVERS THE PRINCIPLE (2026-08-05) — `detective.py --answerer oracle`
+
+The co-adaptation hypothesis, tested by changing ONE thing. Same rollout, same best-of-K self-imitation, same K=4, same
+query loss, same 1000 steps — only what SCORES a trace changes, from the model's own answer loss to the exact posterior
+over the 2350-transformation universe. That answerer is Bayes-optimal, untrained, and therefore cannot be
+off-distribution and cannot memorise, which removes co-adaptation and nothing else.
+
+| policy | after 1 | after 2 | identified | distinct/6 | adaptivity |
+|---|---|---|---|---|---|
+| learned, OWN answerer | 5.47 | 2.70 | 0.060 | 2.25 | 0.926 |
+| **learned, ORACLE answerer** | **1.15** | **0.03** | **0.970** | **4.88** | 0.965 |
+| designed (hand-derived) | 1.03 | 0.00 | 1.000 | 5.00 | — |
+| greedy EIG (exhaustive) | 0.65 | 0.00 | 1.000 | — | — |
+| random | 1.68 | 0.23 | 0.790 | 3.72 | — |
+
+**2.70 bits → 0.03. Six percent identified → ninety-seven.** A 90× reduction in surviving hypotheses from swapping the
+answerer, with the credit-assignment scheme untouched.
+
+**And it found the principle, not just a better score.** Its probes are `(1,4,0,3,2,0)` then `(1,3,0,2,4,2)`: all five
+values present, and the DUPLICATED VALUE MOVED between them. That is exactly the hand-derived design — maximise
+distinguishability within a probe, relocate the irreducible ambiguity between probes — reached with no derivation, no
+information-gain term, and no enumerated hypothesis space in the model. Distinct values went 2.25 → 4.88 against an
+optimum of 5.00.
+
+**THE FALSIFIER RESOLVED, AGAINST THE LEVER WE HAD QUEUED.** `ROADMAP.md` step 1 said: if bits stay near 2.70 with a
+perfect answerer, co-adaptation was not the cause and CREDIT ASSIGNMENT is. Bits went to 0.03, so **credit assignment
+was never the binding constraint** — best-of-4 self-imitation over a 15625-wide action space was adequate all along. The
+`detective.py` entry below lists REINFORCE-with-a-baseline and a much larger K as the first levers to pull; they are not
+needed, and that list is superseded.
+
+**What the policy inherited along with the principle.** It sits at 1.15 bits after one probe, essentially level with the
+hand-derived 1.03 and well short of the exhaustive greedy optimum at 0.65. So it rediscovered our principle *including
+our blind spot*: both reason about symbol diversity, and neither exploits the fact that only 2350 of 14400 group
+elements are reachable, which is what greedy uses to choose WHICH pair to leave confusable.
+
+⚠ **This is a query-policy result and not an agent.** The model's own answer accuracy is 0.000 — its answer head no
+longer drives trace selection, so it never learned to answer. Query quality and answer accuracy are now demonstrably
+SEPARABLE, which was the confound the whole diagnosis turned on, but nothing here is an end-to-end investigator.
+
+⚠ **And the answerer used enumeration**, which does not scale and is the thing `detective.py` refuses to do on principle.
+That makes the scalable competent answerer MORE urgent, not less: the result says answerer quality is the whole game, and
+`sinkhorn.py`'s solver is the non-enumerating candidate. Repeating this with the solver in place of the posterior is now
+the immediate next run.
+
+---
+
 ## BITS, MEASURED AT LAST — and random probes were never the problem (2026-08-05) — `bits.py`
 
 Until now every claim in this line about probe informativeness was inferred BACKWARDS from answer accuracy, with

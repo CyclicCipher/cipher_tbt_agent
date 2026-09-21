@@ -59,6 +59,8 @@ import torch
 import torch.nn.functional as F
 
 from bigroup import cayley, compile_progs
+from bits import respond as posterior_codes          # the exact-posterior answerer; `respond` below is the environment
+from sinkhorn import solve                           # the NON-ENUMERATING answerer (step 1b)
 from h1_lid import L, V, Model
 
 MAXM = 5
@@ -150,6 +152,50 @@ def losses(model, tok, B, dev):
 
 
 @torch.no_grad()
+def oracle_bits(all_idx, all_vmp, uni_sel, probes, pw):
+    """Bits of hypothesis space a probe set leaves for a BAYES-OPTIMAL answerer — the exact posterior over the whole
+    2350-transformation universe, kept if it would have produced the response actually observed.
+
+    This is the answerer `ROADMAP.md` step 1 asks for, and stronger than the Sinkhorn solver it names: it is optimal by
+    construction, it is not trained, so it CANNOT be off-distribution and CANNOT memorise. That removes co-adaptation
+    entirely — the query policy can no longer be rewarded for asking questions its own answerer happens to cope with.
+
+    Note what this makes the reward, stated plainly rather than discovered later: a Bayes-optimal answerer's accuracy is
+    `1/|survivors|`, so with a perfect answerer "answer correctly" and "eliminate hypotheses" are THE SAME objective.
+    That is not circularity, it is what perfect answering means — and it sharpens the falsifier, because a policy that
+    still cannot improve when its reward is exactly aligned with information is limited by CREDIT ASSIGNMENT, not by
+    what it was being asked to optimise."""
+    n = probes.shape[0]
+    keep = torch.ones(n, all_idx.shape[0], dtype=torch.bool, device=probes.device)
+    for b in range(probes.shape[1]):
+        code = posterior_codes(all_idx, all_vmp, probes[:, b], pw)
+        keep &= code == code.gather(1, uni_sel[:, None])
+    return torch.log2(keep.sum(1).float().clamp(min=1.0))
+
+
+def solver_error(tabs, sel, probes, solver_steps):
+    """Answer via the SINKHORN SOLVER instead of the exact posterior — the same swap as `oracle_bits`, but with an
+    answerer that does NOT enumerate, which is the version that could scale.
+
+    It shares the two properties that made the oracle work: it is per-task and untrained, so it cannot be
+    off-distribution and cannot memorise. It is weaker, and how much weaker is the question step 1b asks.
+
+    Scored GRADED (per-slot recovery) rather than 0/1, because a binary signal over K=4 traces ranks almost nothing.
+    Note it is scored against the TRUE `(idx, vmp)`, which is privileged — consistent with `detective.py` already
+    supervising the answer, but a real difference from the oracle arm, which used only the observed responses.
+    Reconstruction NLL would avoid the privilege and is the WRONG signal: a near-constant probe is trivially easy to
+    reconstruct while being maximally uninformative, so NLL would reward exactly the failure being fixed."""
+    n, Bp, _ = probes.shape
+    ys = torch.stack([respond(tabs, sel, probes[:, b]) for b in range(Bp)], dim=1)
+    xy = torch.cat([probes, ys], dim=2)
+    with torch.enable_grad():                        # `solve` runs its own Adam; the caller is inside no_grad
+        P, M, _nll = solve(xy, solver_steps, 0.1, 20, 0.5, True, 0)
+    idx_t, vmp_t = tabs
+    acc = torch.cat([(P.argmax(-1) == idx_t[sel]).float(), (M.argmax(-1) == vmp_t[sel]).float()], dim=1).mean(1)
+    return 1.0 - acc
+
+
+@torch.no_grad()
 def evaluate(model, tabs, ws, B, dev, seed, mode, n=256):
     g = torch.Generator(device=dev).manual_seed(seed)
     sel = torch.randint(0, len(ws), (n,), generator=g, device=dev)
@@ -196,6 +242,9 @@ def main():
     # than probe quality. The first run of this file reported exactly that and it is not a baseline.
     ap.add_argument("--train_mode", default="model", choices=["model", "random", "designed"],
                     help="query source during training; evaluation is on-policy")
+    ap.add_argument("--answerer", default="model", choices=["model", "oracle", "sinkhorn"],
+                    help="what scores a trace: the model's own answer loss, the EXACT posterior, or the Sinkhorn solver")
+    ap.add_argument("--solver_steps", type=int, default=40, help="Adam steps for the sinkhorn answerer")
     ap.add_argument("--dump_probes", default="", help="path to save the learned probes for scoring by bits.py")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
@@ -210,6 +259,8 @@ def main():
     progs = [progs[i] for i in order]
     held, train = progs[:args.held], progs[args.held:]
     tabs_tr, tabs_he = compile_progs(train, dev), compile_progs(held, dev)
+    all_idx, all_vmp = compile_progs(progs, dev)      # the whole universe, for the oracle answerer
+    pw = (V ** torch.arange(L, device=dev))
     print(f"device {dev} | {len(progs)} transformations ({math.log2(len(progs)):.1f} bits) | train {len(train)} | "
           f"held-out {len(held)} | budget {B} queries | seq {seq_len(B)} | K={args.k}")
     print("The model EMITS every query. Nothing supervises which query to ask; only the ANSWER is supervised.\n")
@@ -229,7 +280,22 @@ def main():
         if args.train_mode == "model":
             toks = [rollout(model, tabs_tr, sel, B, dev, g, mode="model", temp=args.temp) for _ in range(args.k)]
             with torch.no_grad():
-                scores = torch.stack([losses(model, t, B, dev)[0] for t in toks])    # (K, batch) answer loss
+                if args.answerer == "sinkhorn":
+                    # All K traces in ONE batched solve: the per-item losses are independent, so K*batch rows cost the
+                    # same wall-clock as one. Without this the answerer alone would dominate the step.
+                    pk = torch.stack([torch.stack([t[:, q_slice(b)] - DIG0 for b in range(B)], dim=1) for t in toks])
+                    scores = solver_error(tabs_tr, sel.repeat(args.k), pk.reshape(-1, B, L),
+                                          args.solver_steps).reshape(args.k, -1)
+                elif args.answerer == "oracle":
+                    # ONLY the answerer changes. Same rollout, same best-of-K self-imitation, same query loss -- so any
+                    # difference in the learned policy is attributable to co-adaptation and nothing else.
+                    uni = args.held + sel                            # train items are progs[held:] in the same order
+                    scores = torch.stack([
+                        oracle_bits(all_idx, all_vmp, uni,
+                                    torch.stack([t[:, q_slice(b)] - DIG0 for b in range(B)], dim=1), pw)
+                        for t in toks])
+                else:
+                    scores = torch.stack([losses(model, t, B, dev)[0] for t in toks])    # (K, batch) answer loss
             best = scores.argmin(0)
             tok = torch.stack(toks)[best, torch.arange(args.batch, device=dev)]       # the winning trace per task
         else:
