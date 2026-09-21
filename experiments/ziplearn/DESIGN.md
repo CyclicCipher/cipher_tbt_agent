@@ -331,6 +331,14 @@ Pass: 100% retention throughout; blocks = 3 (A's second visit reuses its block, 
 lossless table's. Refute: retention drops after any stretch, or a fourth block appears for A's return. Comparison arm:
 the run-2 transformer trained on the same sequence by gradient, where forgetting is expected — the number to beat.
 
+
+**E7 — the anatomy pass (added 2026-09-20 evening, after E0–E6; an analysis, not a pass/refute test).** Read the
+network ZipLearner wrote: every written matrix with its structure, parameters, evidence and exceptions (E2's two
+layers, E6's blocks); the algebra of E3's library — the group the named permutations generate, which items are
+products of others, the smallest generating set, and the library priced flat against generators + words; the merge
+arithmetic for E6's blocks; the gradient arm's learned routes as a figure. What would be surprising: a generated group
+much larger than the library, or no item being a product of others.
+
 ## 12. Open questions
 
 **OPEN-1 — the outer objective (deferred by request, recorded here verbatim in substance).** ZipLearner learns a
@@ -343,8 +351,9 @@ addressed after the world-model experiments (E1–E6); not designed.
 **OPEN-2** — inverting a nonlinearity for hidden-layer targets (§6).
 **OPEN-3** — whether the per-layer sweep settles (§6; measured in E2).
 **OPEN-4** — what the capacity C of a given network is, numerically, in the price's units (§8).
-**OPEN-5** — structures of structures: whether §7's discovery is enough, or the library itself needs a library.
+**OPEN-5** — structures of structures: whether §7's discovery is enough, or the library itself needs a library. *E7 priced it: E3's library is 23 bits cheaper as two generators + words, E6's shift blocks 4.6 bits cheaper as one template with a per-context offset; the missing piece is one structure kind whose parameters are other structures.*
 **OPEN-8** — writing attention weights under PoPE: content matching is not separable from the phase cosines (E0), so "same digit anywhere" is not one written parameter; what the written form of an induction head is, is not designed.
+**OPEN-9** — the J-space of the gradient arm (Gurnee et al., Anthropic, July 2026: J-lens = the average Jacobian of the final residual with respect to a layer's residual, pulled back through the unembedding; J-space = sparse non-negative combinations of the per-token J-lens directions; a mid-layer global workspace, ≤10% of variance but causal for flexible reasoning). Under attention residuals the Jacobian's identity highway becomes a content-dependent route weight, so the J-space should localise to the sources later mixers read; not measured (E8 proposal in the chat log).
 
 ## 13. Results log
 
@@ -534,6 +543,35 @@ verdict: the comparison arm named in E6 is now run: gradient training on this se
          (the same model, optimiser and format as run 2); nothing about ZipLearner was tuned to succeed beyond the
          three mechanisms recorded under E6.
 changed: nothing.
+
+### 2026-09-20 — E7 — anatomy: the written network is the task's own primitives, and the library has a two-generator description it has not used yet
+command: `python experiments/ziplearn/anatomy.py` (CPU, seconds)
+files:   `experiments/ziplearn/runs/e7/anatomy.json`, `anatomy.png`; code `anatomy.py`
+numbers: (1) E2's network, read off: for rot_left∘negate, layer 1 is the position permutation "output j reads input
+         [1, 2, 3, 4, 5, 0]" (rot_left itself, 40 right / 0 wrong) and layer 2 is affine a=4 b=0 (negate itself: −x ≡ 4x
+         mod 5); for swap_halves∘inc, [3, 4, 5, 0, 1, 2] then shift b=1. The network became, literally, the two
+         primitives the task was made of. (2) E3's 17 named permutations generate a group of order **36** inside the
+         720 permutations of six positions — the same group the five primitives generate — so the library can express
+         19 permutations it never saw as products of ones it did. **17/17** items are products of two other named
+         items. The smallest generating set has **2** items (rot_right and reverse∘swap_pairs); the longest word is 8.
+         Priced flat, the library costs 161.4 bits; as two generators plus words, **138.1** bits — 23 bits (14%)
+         cheaper, and the learner has not taken them, because no structure in the library says "an item is a word in
+         other items". (3) E6's blocks on one stream: shift b=3 (evidence 80, exceptions 0, 9.8 bits; a table would be
+         44), shift b=5 (40, 0, 9.3), affine a=2 b=1 (40, 0, 12.6). The two shift blocks as one template with a
+         per-context offset would cost 17.5 bits against 22.2 for two blocks — rule 3's merge would pay 4.6 bits, and
+         again no structure exists to express it. (4) The gradient arm's routes (figure): every attention sub-layer
+         reads the embedding at 0.28–0.37; each layer otherwise reads its immediate predecessor; the output reads the
+         last block at 0.79.
+verdict: n/a (an analysis). Two findings worth stating plainly. First, nothing in the written network is latent:
+         every "region" is a named matrix, every wire is a route, and the regions are the primitives of the domain —
+         the transformer's clusters in the inner-objective runs never were. Second, OPEN-5 is now concrete and priced:
+         the library's next compression step is to describe items as words in a small generating set (23 bits on the
+         table), and E6's next step is a template with a per-context parameter (4.6 bits); both need one new kind of
+         structure — a structure whose parameters are OTHER structures — which is the same kind in both places.
+changed: OPEN-5 gains its numbers and a concrete proposal (E8 candidate: a "word" structure and a "template with a
+         context parameter" structure, priced by the same rule; pass = the library and the blocks re-describe
+         themselves and the bits fall by at least the amounts above). OPEN-9 added: the J-space of the gradient arm
+         under attention residuals (see the entry's discussion in the chat log of 2026-09-20 and §12).
 
 ## 14. Glossary
 
