@@ -1,0 +1,25 @@
+{
+ "pos": "pope",
+ "n_zero": 2,
+ "res": "std",
+ "steps": 3200,
+ "seed": 0,
+ "trained_solved": 0,
+ "n_trained": 17,
+ "trained_mean_acc": 0.0744485294117647,
+ "held_solved": 0,
+ "n_held": 8,
+ "held_mean_acc": 0.014892578125,
+ "held_trials": [
+  8,
+  8,
+  8,
+  8,
+  8,
+  8,
+  8,
+  8
+ ],
+ "routes": null,
+ "train_loss": 0.6209874749183655
+}

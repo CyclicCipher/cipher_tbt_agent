@@ -1,0 +1,55 @@
+W0920 19:47:23.231000 37492 Lib\site-packages\torch\_inductor\utils.py:1679] [0/0] Not enough SMs to use max_autotune_gemm mode
+C:\Users\julia\GitHub\predictive-coding-agent\venv\Lib\site-packages\torch\_inductor\lowering.py:7627: UserWarning: 
+Online softmax is disabled on the fly since Inductor decides to
+split the reduction. Cut an issue to PyTorch if this is an
+important use case and you want to speed it up with online
+softmax.
+
+  warnings.warn(
+C:\Users\julia\GitHub\predictive-coding-agent\venv\Lib\site-packages\torch\_inductor\lowering.py:7627: UserWarning: 
+Online softmax is disabled on the fly since Inductor decides to
+split the reduction. Cut an issue to PyTorch if this is an
+important use case and you want to speed it up with online
+softmax.
+
+  warnings.warn(
+device cuda | pos=pope n_zero=0 res=attnres opt=adamw | 17 trained, 8 held out | K=8 steps=3200
+primitive training weight: reverse=0.035, rot_left=0.188, rot_right=0.015, swap_pairs=1.000, swap_halves=0.434, inc=0.082, negate=0.007
+trained in 203s | final train loss 0.0592
+
+SANITY: the model solves 9/17 TRAINED compositions to criterion (mean final acc 0.56)
+
+LOCAL familiarity (mean error on TRAINED compositions containing it; lower = more in-distribution)
+   swap_halves  weight 0.434   local error 0.0916
+   rot_left     weight 0.188   local error 0.1327
+   swap_pairs   weight 1.000   local error 0.2501
+   inc          weight 0.082   local error 1.0488
+   rot_right    weight 0.015   local error 1.1444
+   reverse      weight 0.035   local error 1.3098
+   negate       weight 0.007   local error 1.8835
+
+HELD-OUT compositions — global novelty is IDENTICAL for all of them (none was ever trained)
+   composition                worst local err   trials  final acc
+   swap_halves>inc                     1.0488        8       0.00
+   rot_right>swap_pairs                1.1444        8       0.11
+   swap_pairs>rot_right                1.1444        8       0.09
+   reverse>rot_left                    1.3098        8       0.10
+   reverse>swap_pairs                  1.3098        8       0.01
+   swap_halves>negate                  1.8835        8       0.00
+   rot_right>negate                    1.8835        8       0.02
+   rot_left>negate                     1.8835        8       0.01
+
+PRIMARY  Spearman(worst local error, trials-to-criterion) = +0.000   over 8 held-out tasks
+   !! EVERY held-out task is CENSORED at the context limit, so the primary measure carries no information.
+      A rank correlation over identical values says nothing about LID -- it says the model is too weak.
+   SECONDARY  Spearman(worst local error, FINAL accuracy) = -0.174   (graded, so it can still separate the tasks)
+      Reported as secondary BECAUSE the primary was censored -- not chosen after seeing which one looked better.
+
+LEARNED ROUTES (mean attention-residual weight per source; sources = [embedding, block 1, block 2, ...])
+   blocks.0.res_attn      1.00
+   blocks.0.res_mlp       0.16 0.84
+   blocks.1.res_attn      0.40 0.60
+   blocks.1.res_mlp       0.10 0.21 0.69
+   blocks.2.res_attn      0.19 0.19 0.62
+   blocks.2.res_mlp       0.06 0.12 0.18 0.65
+   res_final              0.03 0.04 0.17 0.75

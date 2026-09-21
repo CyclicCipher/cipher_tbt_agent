@@ -1,0 +1,1559 @@
+{
+ "log": [
+  {
+   "i": 0,
+   "task": "reverse\u2218rot_left",
+   "kept": "position permutation",
+   "pi": [
+    4,
+    3,
+    2,
+    1,
+    0,
+    5
+   ],
+   "was_named": false,
+   "bits_position_layer": 27.67,
+   "demos_to_exact": 2,
+   "promoted": false,
+   "n_named": 0
+  },
+  {
+   "i": 1,
+   "task": "rot_left\u2218negate",
+   "kept": "position permutation",
+   "pi": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    0
+   ],
+   "was_named": false,
+   "bits_position_layer": 29.98,
+   "demos_to_exact": 3,
+   "promoted": false,
+   "n_named": 0
+  },
+  {
+   "i": 2,
+   "task": "inc\u2218negate",
+   "kept": "position identity",
+   "pi": null,
+   "was_named": null,
+   "bits_position_layer": 4.62,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 0
+  },
+  {
+   "i": 3,
+   "task": "swap_pairs\u2218rot_left",
+   "kept": "position permutation",
+   "pi": [
+    0,
+    3,
+    2,
+    5,
+    4,
+    1
+   ],
+   "was_named": false,
+   "bits_position_layer": 27.67,
+   "demos_to_exact": 3,
+   "promoted": false,
+   "n_named": 0
+  },
+  {
+   "i": 4,
+   "task": "rot_left\u2218swap_pairs",
+   "kept": "position permutation",
+   "pi": [
+    2,
+    1,
+    4,
+    3,
+    0,
+    5
+   ],
+   "was_named": false,
+   "bits_position_layer": 23.07,
+   "demos_to_exact": 2,
+   "promoted": false,
+   "n_named": 0
+  },
+  {
+   "i": 5,
+   "task": "inc\u2218inc",
+   "kept": "position identity",
+   "pi": null,
+   "was_named": null,
+   "bits_position_layer": 4.62,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 0
+  },
+  {
+   "i": 6,
+   "task": "rot_right\u2218inc",
+   "kept": "position permutation",
+   "pi": [
+    5,
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "was_named": false,
+   "bits_position_layer": 27.67,
+   "demos_to_exact": 2,
+   "promoted": false,
+   "n_named": 0
+  },
+  {
+   "i": 7,
+   "task": "swap_pairs\u2218rot_left",
+   "kept": "position permutation",
+   "pi": [
+    0,
+    3,
+    2,
+    5,
+    4,
+    1
+   ],
+   "was_named": false,
+   "bits_position_layer": 27.67,
+   "demos_to_exact": 2,
+   "promoted": true,
+   "n_named": 1
+  },
+  {
+   "i": 8,
+   "task": "rot_right\u2218negate",
+   "kept": "position permutation",
+   "pi": [
+    5,
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "was_named": false,
+   "bits_position_layer": 30.56,
+   "demos_to_exact": 3,
+   "promoted": true,
+   "n_named": 2
+  },
+  {
+   "i": 9,
+   "task": "reverse\u2218swap_pairs",
+   "kept": "position permutation",
+   "pi": [
+    4,
+    5,
+    2,
+    3,
+    0,
+    1
+   ],
+   "was_named": false,
+   "bits_position_layer": 32.86,
+   "demos_to_exact": 3,
+   "promoted": false,
+   "n_named": 2
+  },
+  {
+   "i": 10,
+   "task": "rot_right\u2218inc",
+   "kept": "named permutation",
+   "pi": [
+    5,
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "was_named": true,
+   "bits_position_layer": 6.21,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 2
+  },
+  {
+   "i": 11,
+   "task": "reverse\u2218swap_halves",
+   "kept": "position permutation",
+   "pi": [
+    2,
+    1,
+    0,
+    5,
+    4,
+    3
+   ],
+   "was_named": false,
+   "bits_position_layer": 28.26,
+   "demos_to_exact": 2,
+   "promoted": false,
+   "n_named": 2
+  },
+  {
+   "i": 12,
+   "task": "inc\u2218inc",
+   "kept": "position identity",
+   "pi": null,
+   "was_named": null,
+   "bits_position_layer": 5.21,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 2
+  },
+  {
+   "i": 13,
+   "task": "reverse\u2218swap_pairs",
+   "kept": "position permutation",
+   "pi": [
+    4,
+    5,
+    2,
+    3,
+    0,
+    1
+   ],
+   "was_named": false,
+   "bits_position_layer": 42.07,
+   "demos_to_exact": 4,
+   "promoted": true,
+   "n_named": 3
+  },
+  {
+   "i": 14,
+   "task": "rot_right\u2218inc",
+   "kept": "named permutation",
+   "pi": [
+    5,
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "was_named": true,
+   "bits_position_layer": 6.79,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 3
+  },
+  {
+   "i": 15,
+   "task": "rot_left\u2218negate",
+   "kept": "position permutation",
+   "pi": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    0
+   ],
+   "was_named": false,
+   "bits_position_layer": 35.17,
+   "demos_to_exact": 3,
+   "promoted": true,
+   "n_named": 4
+  },
+  {
+   "i": 16,
+   "task": "rot_right\u2218swap_pairs",
+   "kept": "position permutation",
+   "pi": [
+    0,
+    5,
+    2,
+    1,
+    4,
+    3
+   ],
+   "was_named": false,
+   "bits_position_layer": 25.96,
+   "demos_to_exact": 2,
+   "promoted": false,
+   "n_named": 4
+  },
+  {
+   "i": 17,
+   "task": "rot_left\u2218rot_left",
+   "kept": "position permutation",
+   "pi": [
+    2,
+    3,
+    4,
+    5,
+    0,
+    1
+   ],
+   "was_named": false,
+   "bits_position_layer": 23.65,
+   "demos_to_exact": 2,
+   "promoted": false,
+   "n_named": 4
+  },
+  {
+   "i": 18,
+   "task": "reverse\u2218swap_pairs",
+   "kept": "named permutation",
+   "pi": [
+    4,
+    5,
+    2,
+    3,
+    0,
+    1
+   ],
+   "was_named": true,
+   "bits_position_layer": 7.21,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 4
+  },
+  {
+   "i": 19,
+   "task": "swap_pairs\u2218swap_halves",
+   "kept": "position permutation",
+   "pi": [
+    2,
+    5,
+    4,
+    1,
+    0,
+    3
+   ],
+   "was_named": false,
+   "bits_position_layer": 32.86,
+   "demos_to_exact": 3,
+   "promoted": false,
+   "n_named": 4
+  },
+  {
+   "i": 20,
+   "task": "rot_left\u2218negate",
+   "kept": "named permutation",
+   "pi": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    0
+   ],
+   "was_named": true,
+   "bits_position_layer": 7.21,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 4
+  },
+  {
+   "i": 21,
+   "task": "reverse\u2218rot_right",
+   "kept": "position permutation",
+   "pi": [
+    0,
+    5,
+    4,
+    3,
+    2,
+    1
+   ],
+   "was_named": false,
+   "bits_position_layer": 42.07,
+   "demos_to_exact": 3,
+   "promoted": false,
+   "n_named": 4
+  },
+  {
+   "i": 22,
+   "task": "swap_pairs\u2218swap_halves",
+   "kept": "position permutation",
+   "pi": [
+    2,
+    5,
+    4,
+    1,
+    0,
+    3
+   ],
+   "was_named": false,
+   "bits_position_layer": 23.65,
+   "demos_to_exact": 2,
+   "promoted": true,
+   "n_named": 5
+  },
+  {
+   "i": 23,
+   "task": "rot_right\u2218inc",
+   "kept": "named permutation",
+   "pi": [
+    5,
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "was_named": true,
+   "bits_position_layer": 7.53,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 5
+  },
+  {
+   "i": 24,
+   "task": "reverse\u2218rot_right",
+   "kept": "position permutation",
+   "pi": [
+    0,
+    5,
+    4,
+    3,
+    2,
+    1
+   ],
+   "was_named": false,
+   "bits_position_layer": 37.47,
+   "demos_to_exact": 3,
+   "promoted": true,
+   "n_named": 6
+  },
+  {
+   "i": 25,
+   "task": "reverse\u2218rot_left",
+   "kept": "position permutation",
+   "pi": [
+    4,
+    3,
+    2,
+    1,
+    0,
+    5
+   ],
+   "was_named": false,
+   "bits_position_layer": 30.56,
+   "demos_to_exact": 3,
+   "promoted": true,
+   "n_named": 7
+  },
+  {
+   "i": 26,
+   "task": "rot_right\u2218negate",
+   "kept": "named permutation",
+   "pi": [
+    5,
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.01,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 7
+  },
+  {
+   "i": 27,
+   "task": "swap_pairs\u2218negate",
+   "kept": "position permutation",
+   "pi": [
+    1,
+    0,
+    3,
+    2,
+    5,
+    4
+   ],
+   "was_named": false,
+   "bits_position_layer": 28.26,
+   "demos_to_exact": 3,
+   "promoted": false,
+   "n_named": 7
+  },
+  {
+   "i": 28,
+   "task": "swap_halves\u2218negate",
+   "kept": "position permutation",
+   "pi": [
+    3,
+    4,
+    5,
+    0,
+    1,
+    2
+   ],
+   "was_named": false,
+   "bits_position_layer": 28.26,
+   "demos_to_exact": 3,
+   "promoted": false,
+   "n_named": 7
+  },
+  {
+   "i": 29,
+   "task": "reverse\u2218rot_right",
+   "kept": "named permutation",
+   "pi": [
+    0,
+    5,
+    4,
+    3,
+    2,
+    1
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.01,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 7
+  },
+  {
+   "i": 30,
+   "task": "negate\u2218inc",
+   "kept": "position identity",
+   "pi": null,
+   "was_named": null,
+   "bits_position_layer": 5.21,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 7
+  },
+  {
+   "i": 31,
+   "task": "rot_right\u2218swap_pairs",
+   "kept": "position permutation",
+   "pi": [
+    0,
+    5,
+    2,
+    1,
+    4,
+    3
+   ],
+   "was_named": false,
+   "bits_position_layer": 42.07,
+   "demos_to_exact": 5,
+   "promoted": true,
+   "n_named": 8
+  },
+  {
+   "i": 32,
+   "task": "swap_pairs\u2218negate",
+   "kept": "position permutation",
+   "pi": [
+    1,
+    0,
+    3,
+    2,
+    5,
+    4
+   ],
+   "was_named": false,
+   "bits_position_layer": 39.77,
+   "demos_to_exact": 4,
+   "promoted": true,
+   "n_named": 9
+  },
+  {
+   "i": 33,
+   "task": "rot_left\u2218swap_pairs",
+   "kept": "position permutation",
+   "pi": [
+    2,
+    1,
+    4,
+    3,
+    0,
+    5
+   ],
+   "was_named": false,
+   "bits_position_layer": 30.56,
+   "demos_to_exact": 1,
+   "promoted": true,
+   "n_named": 10
+  },
+  {
+   "i": 34,
+   "task": "rot_right\u2218swap_pairs",
+   "kept": "named permutation",
+   "pi": [
+    0,
+    5,
+    2,
+    1,
+    4,
+    3
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.53,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 10
+  },
+  {
+   "i": 35,
+   "task": "swap_pairs\u2218rot_right",
+   "kept": "position permutation",
+   "pi": [
+    4,
+    1,
+    0,
+    3,
+    2,
+    5
+   ],
+   "was_named": false,
+   "bits_position_layer": 23.65,
+   "demos_to_exact": 2,
+   "promoted": false,
+   "n_named": 10
+  },
+  {
+   "i": 36,
+   "task": "inc\u2218negate",
+   "kept": "position identity",
+   "pi": null,
+   "was_named": null,
+   "bits_position_layer": 5.21,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 10
+  },
+  {
+   "i": 37,
+   "task": "rot_left\u2218rot_left",
+   "kept": "position permutation",
+   "pi": [
+    2,
+    3,
+    4,
+    5,
+    0,
+    1
+   ],
+   "was_named": false,
+   "bits_position_layer": 37.47,
+   "demos_to_exact": 3,
+   "promoted": true,
+   "n_named": 11
+  },
+  {
+   "i": 38,
+   "task": "rot_right\u2218swap_pairs",
+   "kept": "named permutation",
+   "pi": [
+    0,
+    5,
+    2,
+    1,
+    4,
+    3
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.67,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 11
+  },
+  {
+   "i": 39,
+   "task": "swap_pairs\u2218rot_right",
+   "kept": "position permutation",
+   "pi": [
+    4,
+    1,
+    0,
+    3,
+    2,
+    5
+   ],
+   "was_named": false,
+   "bits_position_layer": 28.26,
+   "demos_to_exact": 3,
+   "promoted": true,
+   "n_named": 12
+  },
+  {
+   "i": 40,
+   "task": "swap_pairs\u2218rot_right",
+   "kept": "named permutation",
+   "pi": [
+    4,
+    1,
+    0,
+    3,
+    2,
+    5
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.79,
+   "demos_to_exact": 2,
+   "promoted": false,
+   "n_named": 12
+  },
+  {
+   "i": 41,
+   "task": "reverse\u2218negate",
+   "kept": "position permutation",
+   "pi": [
+    5,
+    4,
+    3,
+    2,
+    1,
+    0
+   ],
+   "was_named": false,
+   "bits_position_layer": 32.86,
+   "demos_to_exact": 3,
+   "promoted": false,
+   "n_named": 12
+  },
+  {
+   "i": 42,
+   "task": "rot_right\u2218inc",
+   "kept": "named permutation",
+   "pi": [
+    5,
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.79,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 12
+  },
+  {
+   "i": 43,
+   "task": "swap_pairs\u2218inc",
+   "kept": "named permutation",
+   "pi": [
+    1,
+    0,
+    3,
+    2,
+    5,
+    4
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.79,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 12
+  },
+  {
+   "i": 44,
+   "task": "swap_pairs\u2218swap_halves",
+   "kept": "named permutation",
+   "pi": [
+    2,
+    5,
+    4,
+    1,
+    0,
+    3
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.79,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 12
+  },
+  {
+   "i": 45,
+   "task": "rot_left\u2218swap_pairs",
+   "kept": "named permutation",
+   "pi": [
+    2,
+    1,
+    4,
+    3,
+    0,
+    5
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.79,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 12
+  },
+  {
+   "i": 46,
+   "task": "rot_left\u2218negate",
+   "kept": "named permutation",
+   "pi": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    0
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.79,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 12
+  },
+  {
+   "i": 47,
+   "task": "swap_pairs\u2218inc",
+   "kept": "named permutation",
+   "pi": [
+    1,
+    0,
+    3,
+    2,
+    5,
+    4
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.79,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 12
+  },
+  {
+   "i": 48,
+   "task": "rot_right\u2218swap_pairs",
+   "kept": "named permutation",
+   "pi": [
+    0,
+    5,
+    2,
+    1,
+    4,
+    3
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.79,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 12
+  },
+  {
+   "i": 49,
+   "task": "rot_left\u2218swap_halves",
+   "kept": "position permutation",
+   "pi": [
+    4,
+    5,
+    0,
+    1,
+    2,
+    3
+   ],
+   "was_named": false,
+   "bits_position_layer": 28.26,
+   "demos_to_exact": 2,
+   "promoted": false,
+   "n_named": 12
+  },
+  {
+   "i": 50,
+   "task": "rot_left\u2218inc",
+   "kept": "named permutation",
+   "pi": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    0
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.79,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 12
+  },
+  {
+   "i": 51,
+   "task": "reverse\u2218rot_right",
+   "kept": "named permutation",
+   "pi": [
+    0,
+    5,
+    4,
+    3,
+    2,
+    1
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.79,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 12
+  },
+  {
+   "i": 52,
+   "task": "swap_halves\u2218negate",
+   "kept": "position permutation",
+   "pi": [
+    3,
+    4,
+    5,
+    0,
+    1,
+    2
+   ],
+   "was_named": false,
+   "bits_position_layer": 37.47,
+   "demos_to_exact": 4,
+   "promoted": true,
+   "n_named": 13
+  },
+  {
+   "i": 53,
+   "task": "swap_halves\u2218swap_pairs",
+   "kept": "position permutation",
+   "pi": [
+    4,
+    3,
+    0,
+    5,
+    2,
+    1
+   ],
+   "was_named": false,
+   "bits_position_layer": 42.07,
+   "demos_to_exact": 5,
+   "promoted": false,
+   "n_named": 13
+  },
+  {
+   "i": 54,
+   "task": "swap_pairs\u2218swap_halves",
+   "kept": "named permutation",
+   "pi": [
+    2,
+    5,
+    4,
+    1,
+    0,
+    3
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.91,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 13
+  },
+  {
+   "i": 55,
+   "task": "reverse\u2218rot_right",
+   "kept": "named permutation",
+   "pi": [
+    0,
+    5,
+    4,
+    3,
+    2,
+    1
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.91,
+   "demos_to_exact": 2,
+   "promoted": false,
+   "n_named": 13
+  },
+  {
+   "i": 56,
+   "task": "rot_right\u2218inc",
+   "kept": "named permutation",
+   "pi": [
+    5,
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.91,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 13
+  },
+  {
+   "i": 57,
+   "task": "rot_right\u2218swap_pairs",
+   "kept": "named permutation",
+   "pi": [
+    0,
+    5,
+    2,
+    1,
+    4,
+    3
+   ],
+   "was_named": true,
+   "bits_position_layer": 8.91,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 13
+  },
+  {
+   "i": 58,
+   "task": "reverse\u2218negate",
+   "kept": "position permutation",
+   "pi": [
+    5,
+    4,
+    3,
+    2,
+    1,
+    0
+   ],
+   "was_named": false,
+   "bits_position_layer": 30.56,
+   "demos_to_exact": 3,
+   "promoted": true,
+   "n_named": 14
+  },
+  {
+   "i": 59,
+   "task": "swap_pairs\u2218rot_left",
+   "kept": "named permutation",
+   "pi": [
+    0,
+    3,
+    2,
+    5,
+    4,
+    1
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.01,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 14
+  },
+  {
+   "i": 60,
+   "task": "reverse\u2218negate",
+   "kept": "named permutation",
+   "pi": [
+    5,
+    4,
+    3,
+    2,
+    1,
+    0
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.01,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 14
+  },
+  {
+   "i": 61,
+   "task": "rot_left\u2218swap_halves",
+   "kept": "position permutation",
+   "pi": [
+    4,
+    5,
+    0,
+    1,
+    2,
+    3
+   ],
+   "was_named": false,
+   "bits_position_layer": 28.26,
+   "demos_to_exact": 2,
+   "promoted": true,
+   "n_named": 15
+  },
+  {
+   "i": 62,
+   "task": "rot_right\u2218swap_pairs",
+   "kept": "named permutation",
+   "pi": [
+    0,
+    5,
+    2,
+    1,
+    4,
+    3
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.11,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 15
+  },
+  {
+   "i": 63,
+   "task": "reverse\u2218negate",
+   "kept": "named permutation",
+   "pi": [
+    5,
+    4,
+    3,
+    2,
+    1,
+    0
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.11,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 15
+  },
+  {
+   "i": 64,
+   "task": "reverse\u2218swap_pairs",
+   "kept": "named permutation",
+   "pi": [
+    4,
+    5,
+    2,
+    3,
+    0,
+    1
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.11,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 15
+  },
+  {
+   "i": 65,
+   "task": "rot_left\u2218swap_halves",
+   "kept": "named permutation",
+   "pi": [
+    4,
+    5,
+    0,
+    1,
+    2,
+    3
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.11,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 15
+  },
+  {
+   "i": 66,
+   "task": "swap_halves\u2218swap_pairs",
+   "kept": "position permutation",
+   "pi": [
+    4,
+    3,
+    0,
+    5,
+    2,
+    1
+   ],
+   "was_named": false,
+   "bits_position_layer": 28.26,
+   "demos_to_exact": 2,
+   "promoted": true,
+   "n_named": 16
+  },
+  {
+   "i": 67,
+   "task": "rot_left\u2218rot_left",
+   "kept": "named permutation",
+   "pi": [
+    2,
+    3,
+    4,
+    5,
+    0,
+    1
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.21,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 16
+  },
+  {
+   "i": 68,
+   "task": "rot_left\u2218swap_pairs",
+   "kept": "named permutation",
+   "pi": [
+    2,
+    1,
+    4,
+    3,
+    0,
+    5
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.21,
+   "demos_to_exact": 2,
+   "promoted": false,
+   "n_named": 16
+  },
+  {
+   "i": 69,
+   "task": "inc\u2218negate",
+   "kept": "position identity",
+   "pi": null,
+   "was_named": null,
+   "bits_position_layer": 5.21,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 16
+  },
+  {
+   "i": 70,
+   "task": "swap_halves\u2218inc",
+   "kept": "named permutation",
+   "pi": [
+    3,
+    4,
+    5,
+    0,
+    1,
+    2
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.21,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 16
+  },
+  {
+   "i": 71,
+   "task": "rot_left\u2218rot_left",
+   "kept": "named permutation",
+   "pi": [
+    2,
+    3,
+    4,
+    5,
+    0,
+    1
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.21,
+   "demos_to_exact": 2,
+   "promoted": false,
+   "n_named": 16
+  },
+  {
+   "i": 72,
+   "task": "rot_left\u2218rot_left",
+   "kept": "named permutation",
+   "pi": [
+    2,
+    3,
+    4,
+    5,
+    0,
+    1
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.21,
+   "demos_to_exact": 3,
+   "promoted": false,
+   "n_named": 16
+  },
+  {
+   "i": 73,
+   "task": "reverse\u2218negate",
+   "kept": "named permutation",
+   "pi": [
+    5,
+    4,
+    3,
+    2,
+    1,
+    0
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.21,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 16
+  },
+  {
+   "i": 74,
+   "task": "swap_halves\u2218swap_pairs",
+   "kept": "named permutation",
+   "pi": [
+    4,
+    3,
+    0,
+    5,
+    2,
+    1
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.21,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 16
+  },
+  {
+   "i": 75,
+   "task": "rot_left\u2218swap_pairs",
+   "kept": "named permutation",
+   "pi": [
+    2,
+    1,
+    4,
+    3,
+    0,
+    5
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.21,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 16
+  },
+  {
+   "i": 76,
+   "task": "rot_left\u2218swap_halves",
+   "kept": "named permutation",
+   "pi": [
+    4,
+    5,
+    0,
+    1,
+    2,
+    3
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.21,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 16
+  },
+  {
+   "i": 77,
+   "task": "inc\u2218inc",
+   "kept": "position identity",
+   "pi": null,
+   "was_named": null,
+   "bits_position_layer": 5.21,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 16
+  },
+  {
+   "i": 78,
+   "task": "rot_right\u2218swap_pairs",
+   "kept": "named permutation",
+   "pi": [
+    0,
+    5,
+    2,
+    1,
+    4,
+    3
+   ],
+   "was_named": true,
+   "bits_position_layer": 9.21,
+   "demos_to_exact": 1,
+   "promoted": false,
+   "n_named": 16
+  },
+  {
+   "i": 79,
+   "task": "reverse\u2218swap_halves",
+   "kept": "position permutation",
+   "pi": [
+    2,
+    1,
+    0,
+    5,
+    4,
+    3
+   ],
+   "was_named": false,
+   "bits_position_layer": 28.26,
+   "demos_to_exact": 2,
+   "promoted": true,
+   "n_named": 17
+  }
+ ],
+ "named": [
+  [
+   0,
+   3,
+   2,
+   5,
+   4,
+   1
+  ],
+  [
+   5,
+   0,
+   1,
+   2,
+   3,
+   4
+  ],
+  [
+   4,
+   5,
+   2,
+   3,
+   0,
+   1
+  ],
+  [
+   1,
+   2,
+   3,
+   4,
+   5,
+   0
+  ],
+  [
+   2,
+   5,
+   4,
+   1,
+   0,
+   3
+  ],
+  [
+   0,
+   5,
+   4,
+   3,
+   2,
+   1
+  ],
+  [
+   4,
+   3,
+   2,
+   1,
+   0,
+   5
+  ],
+  [
+   0,
+   5,
+   2,
+   1,
+   4,
+   3
+  ],
+  [
+   1,
+   0,
+   3,
+   2,
+   5,
+   4
+  ],
+  [
+   2,
+   1,
+   4,
+   3,
+   0,
+   5
+  ],
+  [
+   2,
+   3,
+   4,
+   5,
+   0,
+   1
+  ],
+  [
+   4,
+   1,
+   0,
+   3,
+   2,
+   5
+  ],
+  [
+   3,
+   4,
+   5,
+   0,
+   1,
+   2
+  ],
+  [
+   5,
+   4,
+   3,
+   2,
+   1,
+   0
+  ],
+  [
+   4,
+   5,
+   0,
+   1,
+   2,
+   3
+  ],
+  [
+   4,
+   3,
+   0,
+   5,
+   2,
+   1
+  ],
+  [
+   2,
+   1,
+   0,
+   5,
+   4,
+   3
+  ]
+ ],
+ "summary": {
+  "n_named": 17,
+  "bits_named": 8.67358974358974,
+  "bits_unnamed": 31.269705882352945,
+  "demos_named": 1.1538461538461537,
+  "demos_unnamed": 2.764705882352941,
+  "drops": [
+   18.660000000000004,
+   21.408333333333335,
+   29.305000000000003,
+   24.311666666666667,
+   19.405,
+   31.199999999999996,
+   25.145000000000003,
+   25.225,
+   17.744999999999997,
+   21.349999999999998,
+   17.165,
+   23.655,
+   22.6,
+   19.1,
+   25.955
+  ],
+  "need": 5.404390255079335,
+  "verdict": "PASS"
+ }
+}

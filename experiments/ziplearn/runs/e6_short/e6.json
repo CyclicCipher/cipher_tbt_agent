@@ -1,0 +1,61 @@
+{
+ "summary": {
+  "after 1 (A)": {
+   "retention": {
+    "A": 1.0
+   },
+   "blocks": 1.0,
+   "bits": 8.21209744060857,
+   "table_bits": 25.868912238756565,
+   "blocks_hist": {
+    "1": 20
+   }
+  },
+  "after 2 (B)": {
+   "retention": {
+    "A": 1.0,
+    "B": 1.0
+   },
+   "blocks": 2.0,
+   "bits": 18.42419488121714,
+   "table_bits": 64.09137948046848,
+   "blocks_hist": {
+    "2": 20
+   }
+  },
+  "after 3 (C)": {
+   "retention": {
+    "A": 1.0,
+    "B": 1.0,
+    "C": 1.0
+   },
+   "blocks": 3.05,
+   "bits": 33.2643146220437,
+   "table_bits": 99.00593357136385,
+   "blocks_hist": {
+    "3": 19,
+    "4": 1
+   }
+  },
+  "after 4 (A)": {
+   "retention": {
+    "A": 1.0,
+    "B": 1.0,
+    "C": 1.0
+   },
+   "blocks": 3.05,
+   "bits": 33.797297697730656,
+   "table_bits": 125.73339273748357,
+   "blocks_hist": {
+    "3": 19,
+    "4": 1
+   }
+  }
+ },
+ "example": [
+  "shift b=3 (n=20, exceptions 0.00)",
+  "shift b=5 (n=10, exceptions 0.00)",
+  "affine a=2 b=1 (n=10, exceptions 0.00)"
+ ],
+ "verdict": "REFUTED"
+}

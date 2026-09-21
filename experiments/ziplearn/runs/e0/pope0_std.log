@@ -1,0 +1,34 @@
+W0920 19:36:28.266000 31712 Lib\site-packages\torch\_inductor\utils.py:1679] [0/0] Not enough SMs to use max_autotune_gemm mode
+device cuda | pos=pope n_zero=2 res=std opt=adamw | 17 trained, 8 held out | K=8 steps=3200
+primitive training weight: reverse=0.035, rot_left=0.188, rot_right=0.015, swap_pairs=1.000, swap_halves=0.434, inc=0.082, negate=0.007
+trained in 104s | final train loss 0.6210
+
+SANITY: the model solves 0/17 TRAINED compositions to criterion (mean final acc 0.07)
+   => it has not learned the training distribution, so the held-out measurement below is UNINTERPRETABLE.
+      Fix the training run before reading anything into it (more steps / larger batch / easier domain).
+
+LOCAL familiarity (mean error on TRAINED compositions containing it; lower = more in-distribution)
+   swap_halves  weight 0.434   local error 0.6436
+   rot_left     weight 0.188   local error 0.7489
+   swap_pairs   weight 1.000   local error 0.9532
+   rot_right    weight 0.015   local error 1.1960
+   reverse      weight 0.035   local error 1.5398
+   inc          weight 0.082   local error 1.9010
+   negate       weight 0.007   local error 2.2922
+
+HELD-OUT compositions — global novelty is IDENTICAL for all of them (none was ever trained)
+   composition                worst local err   trials  final acc
+   rot_right>swap_pairs                1.1960        8       0.01
+   swap_pairs>rot_right                1.1960        8       0.02
+   reverse>rot_left                    1.5398        8       0.06
+   reverse>swap_pairs                  1.5398        8       0.02
+   swap_halves>inc                     1.9010        8       0.00
+   swap_halves>negate                  2.2922        8       0.00
+   rot_right>negate                    2.2922        8       0.00
+   rot_left>negate                     2.2922        8       0.00
+
+PRIMARY  Spearman(worst local error, trials-to-criterion) = +0.000   over 8 held-out tasks
+   !! EVERY held-out task is CENSORED at the context limit, so the primary measure carries no information.
+      A rank correlation over identical values says nothing about LID -- it says the model is too weak.
+   SECONDARY  Spearman(worst local error, FINAL accuracy) = -0.790   (graded, so it can still separate the tasks)
+      Reported as secondary BECAUSE the primary was censored -- not chosen after seeing which one looked better.

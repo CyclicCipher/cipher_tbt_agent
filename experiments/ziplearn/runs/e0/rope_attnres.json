@@ -1,0 +1,59 @@
+{
+ "pos": "rope",
+ "n_zero": 0,
+ "res": "attnres",
+ "steps": 3200,
+ "seed": 0,
+ "trained_solved": 9,
+ "n_trained": 17,
+ "trained_mean_acc": 0.5955882352941176,
+ "held_solved": 0,
+ "n_held": 8,
+ "held_mean_acc": 0.068603515625,
+ "held_trials": [
+  8,
+  8,
+  8,
+  8,
+  8,
+  8,
+  8,
+  8
+ ],
+ "routes": {
+  "blocks.0.res_attn": [
+   1.0
+  ],
+  "blocks.0.res_mlp": [
+   0.191,
+   0.809
+  ],
+  "blocks.1.res_attn": [
+   0.374,
+   0.626
+  ],
+  "blocks.1.res_mlp": [
+   0.088,
+   0.177,
+   0.735
+  ],
+  "blocks.2.res_attn": [
+   0.275,
+   0.203,
+   0.522
+  ],
+  "blocks.2.res_mlp": [
+   0.039,
+   0.033,
+   0.15,
+   0.778
+  ],
+  "res_final": [
+   0.047,
+   0.034,
+   0.135,
+   0.785
+  ]
+ },
+ "train_loss": 0.053889039903879166
+}

@@ -1,0 +1,30 @@
+rope_std: 104s | trained solved 8/17 (mean acc 0.52) | held-out solved 0/8 (mean acc 0.03) | loss 0.061
+pope0_std: 114s | trained solved 0/17 (mean acc 0.07) | held-out solved 0/8 (mean acc 0.01) | loss 0.621
+rope_attnres: 206s | trained solved 9/17 (mean acc 0.60) | held-out solved 0/8 (mean acc 0.07) | loss 0.054
+pope0_attnres: 189s | trained solved 2/17 (mean acc 0.24) | held-out solved 0/8 (mean acc 0.02) | loss 0.299
+
+| cell | trained solved | trained mean acc | held-out solved | held-out mean acc | final loss |
+|---|---|---|---|---|---|
+| rope_std | 8/17 | 0.52 | 0/8 | 0.03 | 0.061 |
+| pope0_std | 0/17 | 0.07 | 0/8 | 0.01 | 0.621 |
+| rope_attnres | 9/17 | 0.60 | 0/8 | 0.07 | 0.054 |
+| pope0_attnres | 2/17 | 0.24 | 0/8 | 0.02 | 0.299 |
+
+routes, rope_attnres (mean weight per source; sources = embedding, block 1, block 2, ..., current partial sum):
+   blocks.0.res_attn    1.00
+   blocks.0.res_mlp     0.19 0.81
+   blocks.1.res_attn    0.37 0.63
+   blocks.1.res_mlp     0.09 0.18 0.73
+   blocks.2.res_attn    0.28 0.20 0.52
+   blocks.2.res_mlp     0.04 0.03 0.15 0.78
+   res_final            0.05 0.03 0.14 0.79
+
+routes, pope0_attnres (mean weight per source; sources = embedding, block 1, block 2, ..., current partial sum):
+   blocks.0.res_attn    1.00
+   blocks.0.res_mlp     0.11 0.89
+   blocks.1.res_attn    0.20 0.80
+   blocks.1.res_mlp     0.07 0.23 0.70
+   blocks.2.res_attn    0.22 0.21 0.57
+   blocks.2.res_mlp     0.06 0.08 0.24 0.61
+   res_final            0.06 0.05 0.23 0.66
+done

@@ -1,0 +1,59 @@
+{
+ "pos": "pope",
+ "n_zero": 2,
+ "res": "attnres",
+ "steps": 3200,
+ "seed": 0,
+ "trained_solved": 2,
+ "n_trained": 17,
+ "trained_mean_acc": 0.23598345588235295,
+ "held_solved": 0,
+ "n_held": 8,
+ "held_mean_acc": 0.01806640625,
+ "held_trials": [
+  8,
+  8,
+  8,
+  8,
+  8,
+  8,
+  8,
+  8
+ ],
+ "routes": {
+  "blocks.0.res_attn": [
+   1.0
+  ],
+  "blocks.0.res_mlp": [
+   0.107,
+   0.893
+  ],
+  "blocks.1.res_attn": [
+   0.198,
+   0.802
+  ],
+  "blocks.1.res_mlp": [
+   0.066,
+   0.234,
+   0.7
+  ],
+  "blocks.2.res_attn": [
+   0.222,
+   0.209,
+   0.569
+  ],
+  "blocks.2.res_mlp": [
+   0.063,
+   0.082,
+   0.242,
+   0.612
+  ],
+  "res_final": [
+   0.055,
+   0.054,
+   0.229,
+   0.662
+  ]
+ },
+ "train_loss": 0.2993132472038269
+}

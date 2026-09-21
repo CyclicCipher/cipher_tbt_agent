@@ -1,0 +1,254 @@
+{
+ "rope_std": {
+  "pos": "rope",
+  "n_zero": 0,
+  "res": "std",
+  "steps": 3200,
+  "seed": 0,
+  "trained_solved": 8,
+  "n_trained": 17,
+  "trained_mean_acc": 0.5165441176470589,
+  "held_solved": 0,
+  "n_held": 8,
+  "held_mean_acc": 0.029541015625,
+  "held_trials": [
+   8,
+   8,
+   8,
+   8,
+   8,
+   8,
+   8,
+   8
+  ],
+  "routes": null,
+  "train_loss": 0.060829419642686844
+ },
+ "pope0_std": {
+  "pos": "pope",
+  "n_zero": 2,
+  "res": "std",
+  "steps": 3200,
+  "seed": 0,
+  "trained_solved": 0,
+  "n_trained": 17,
+  "trained_mean_acc": 0.0744485294117647,
+  "held_solved": 0,
+  "n_held": 8,
+  "held_mean_acc": 0.014892578125,
+  "held_trials": [
+   8,
+   8,
+   8,
+   8,
+   8,
+   8,
+   8,
+   8
+  ],
+  "routes": null,
+  "train_loss": 0.6209874749183655
+ },
+ "rope_attnres": {
+  "pos": "rope",
+  "n_zero": 0,
+  "res": "attnres",
+  "steps": 3200,
+  "seed": 0,
+  "trained_solved": 9,
+  "n_trained": 17,
+  "trained_mean_acc": 0.5955882352941176,
+  "held_solved": 0,
+  "n_held": 8,
+  "held_mean_acc": 0.068603515625,
+  "held_trials": [
+   8,
+   8,
+   8,
+   8,
+   8,
+   8,
+   8,
+   8
+  ],
+  "routes": {
+   "blocks.0.res_attn": [
+    1.0
+   ],
+   "blocks.0.res_mlp": [
+    0.191,
+    0.809
+   ],
+   "blocks.1.res_attn": [
+    0.374,
+    0.626
+   ],
+   "blocks.1.res_mlp": [
+    0.088,
+    0.177,
+    0.735
+   ],
+   "blocks.2.res_attn": [
+    0.275,
+    0.203,
+    0.522
+   ],
+   "blocks.2.res_mlp": [
+    0.039,
+    0.033,
+    0.15,
+    0.778
+   ],
+   "res_final": [
+    0.047,
+    0.034,
+    0.135,
+    0.785
+   ]
+  },
+  "train_loss": 0.053889039903879166
+ },
+ "pope0_attnres": {
+  "pos": "pope",
+  "n_zero": 2,
+  "res": "attnres",
+  "steps": 3200,
+  "seed": 0,
+  "trained_solved": 2,
+  "n_trained": 17,
+  "trained_mean_acc": 0.23598345588235295,
+  "held_solved": 0,
+  "n_held": 8,
+  "held_mean_acc": 0.01806640625,
+  "held_trials": [
+   8,
+   8,
+   8,
+   8,
+   8,
+   8,
+   8,
+   8
+  ],
+  "routes": {
+   "blocks.0.res_attn": [
+    1.0
+   ],
+   "blocks.0.res_mlp": [
+    0.107,
+    0.893
+   ],
+   "blocks.1.res_attn": [
+    0.198,
+    0.802
+   ],
+   "blocks.1.res_mlp": [
+    0.066,
+    0.234,
+    0.7
+   ],
+   "blocks.2.res_attn": [
+    0.222,
+    0.209,
+    0.569
+   ],
+   "blocks.2.res_mlp": [
+    0.063,
+    0.082,
+    0.242,
+    0.612
+   ],
+   "res_final": [
+    0.055,
+    0.054,
+    0.229,
+    0.662
+   ]
+  },
+  "train_loss": 0.2993132472038269
+ },
+ "pope_std": {
+  "pos": "pope",
+  "n_zero": 0,
+  "res": "std",
+  "steps": 3200,
+  "seed": 0,
+  "trained_solved": 6,
+  "n_trained": 17,
+  "trained_mean_acc": 0.45749080882352944,
+  "held_solved": 0,
+  "n_held": 8,
+  "held_mean_acc": 0.03466796875,
+  "held_trials": [
+   8,
+   8,
+   8,
+   8,
+   8,
+   8,
+   8,
+   8
+  ],
+  "routes": null,
+  "train_loss": 0.07755446434020996
+ },
+ "pope_attnres": {
+  "pos": "pope",
+  "n_zero": 0,
+  "res": "attnres",
+  "steps": 3200,
+  "seed": 0,
+  "trained_solved": 9,
+  "n_trained": 17,
+  "trained_mean_acc": 0.5567555147058824,
+  "held_solved": 0,
+  "n_held": 8,
+  "held_mean_acc": 0.04150390625,
+  "held_trials": [
+   8,
+   8,
+   8,
+   8,
+   8,
+   8,
+   8,
+   8
+  ],
+  "routes": {
+   "blocks.0.res_attn": [
+    1.0
+   ],
+   "blocks.0.res_mlp": [
+    0.161,
+    0.839
+   ],
+   "blocks.1.res_attn": [
+    0.396,
+    0.604
+   ],
+   "blocks.1.res_mlp": [
+    0.103,
+    0.208,
+    0.689
+   ],
+   "blocks.2.res_attn": [
+    0.19,
+    0.191,
+    0.619
+   ],
+   "blocks.2.res_mlp": [
+    0.056,
+    0.115,
+    0.181,
+    0.649
+   ],
+   "res_final": [
+    0.033,
+    0.042,
+    0.173,
+    0.752
+   ]
+  },
+  "train_loss": 0.05918039754033089
+ }
+}

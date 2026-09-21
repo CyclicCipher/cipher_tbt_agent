@@ -156,15 +156,18 @@ class Attn(nn.Module):
     there (the paper's in-distribution setting; zero-init is for length extrapolation, which we are not testing).
     Reported effect: 11% → 95% on their indexing diagnostic, and small consistent perplexity gains at 124M–774M."""
 
-    def __init__(self, d_model, n_head, pos):
+    def __init__(self, d_model, n_head, pos, n_zero=0):
         super().__init__()
-        self.h, self.hd, self.pos = n_head, d_model // n_head, pos
+        self.h, self.hd, self.pos, self.n_zero = n_head, d_model // n_head, pos, n_zero
         self.qkv = nn.Linear(d_model, 3 * d_model)
         self.proj = nn.Linear(d_model, d_model)
         if pos == "pope":
             self.delta = nn.Parameter(torch.empty(self.hd).uniform_(-2 * math.pi, 0.0))
         if pos in ("rope", "pope"):                       # cached, not rebuilt every forward: it never changes
-            self.register_buffer("theta", _freqs(self.hd // 2 if pos == "rope" else self.hd, "cpu"), persistent=False)
+            theta = _freqs(self.hd // 2 if pos == "rope" else self.hd, "cpu")
+            if pos == "pope" and n_zero:                  # ziplearn DESIGN §15: a few channels with NO position, so a
+                theta[:n_zero] = 0.0                      # pure content match has a home that does not depend on distance
+            self.register_buffer("theta", theta, persistent=False)
 
     def forward(self, x):
         B, T, C = x.shape
@@ -181,6 +184,8 @@ class Attn(nn.Module):
         elif self.pos == "pope":
             ang = t * self.theta                                      # phase is POSITION ONLY — the whole point
             d = self.delta.clamp(-2 * math.pi, 0.0)
+            if self.n_zero:
+                d = d * (self.theta != 0)                             # position-free channels: no offset either
             mq, mk = F.softplus(q), F.softplus(k)                     # magnitude is CONTENT only
             q = torch.cat([mq * ang.cos(), mq * ang.sin()], dim=-1)
             k = torch.cat([mk * (ang + d).cos(), mk * (ang + d).sin()], dim=-1)
@@ -192,12 +197,35 @@ class Attn(nn.Module):
         return self.proj(y.transpose(1, 2).reshape(B, T, C))
 
 
+class AttnRes(nn.Module):
+    """Attention residuals (Kimi Team, arXiv:2603.15031; notes in experiments/ziplearn/refs/attention_residuals.md).
+    A layer's input is a softmax-weighted mix of SOURCES -- the token embedding and earlier outputs -- instead of their
+    plain sum: one learned pseudo-query vector per mixer (initialised to ZERO, so training starts from the equal-weight
+    average, as the paper requires), RMSNorm on the keys, the raw sources as values. `last` keeps the mean weight per
+    source from the latest forward when `record` is set, which is how the learned routes are read."""
+
+    def __init__(self, d_model):
+        super().__init__()
+        self.w = nn.Parameter(torch.zeros(d_model))
+        self.norm = nn.RMSNorm(d_model)
+        self.record, self.last = False, None
+
+    def forward(self, sources):
+        v = torch.stack(sources)                                      # (n_sources, B, T, d)
+        a = torch.einsum("d,nbtd->nbt", self.w.to(v.dtype), self.norm(v)).softmax(0)
+        if self.record:
+            self.last = a.detach().float().mean(dim=(1, 2))
+        return torch.einsum("nbt,nbtd->btd", a, v)
+
+
 class Block(nn.Module):
-    def __init__(self, d_model, n_head, pos):
+    def __init__(self, d_model, n_head, pos, res="std", n_zero=0):
         super().__init__()
         self.n1, self.n2 = nn.LayerNorm(d_model), nn.LayerNorm(d_model)
-        self.attn = Attn(d_model, n_head, pos)
+        self.attn = Attn(d_model, n_head, pos, n_zero)
         self.mlp = nn.Sequential(nn.Linear(d_model, 4 * d_model), nn.GELU(), nn.Linear(4 * d_model, d_model))
+        if res != "std":                                              # one mixer before each sub-layer, as in the paper
+            self.res_attn, self.res_mlp = AttnRes(d_model), AttnRes(d_model)
 
     def forward(self, x):
         x = x + self.attn(self.n1(x))
@@ -208,23 +236,56 @@ class Model(nn.Module):
     """A small causal decoder over digits. Predicts every OUTPUT block from everything before it, so the accuracy at the
     j-th block IS the accuracy after j-1 demonstrations — the trials curve falls out of one forward pass."""
 
-    def __init__(self, d_model=96, n_layer=3, n_head=4, max_len=256, pos="learned", n_vocab=V):
+    def __init__(self, d_model=96, n_layer=3, n_head=4, max_len=256, pos="learned", n_vocab=V, res="std", n_zero=0):
         super().__init__()
         # `n_vocab` defaults to the digit alphabet; `halt.py` widens it by one for a HALT token the model emits itself.
+        # `res`: "std" = the usual residual sum; "attnres" = attention residuals with one transformer block per AttnRes
+        # block (the paper's Block AttnRes, S = 2 sub-layers); "attnres_full" = every sub-layer output its own source.
         self.emb = nn.Embedding(n_vocab, d_model)
-        self.pos_kind = pos
+        self.pos_kind, self.res = pos, res
         self.pos = nn.Parameter(torch.randn(1, max_len, d_model) * 0.02) if pos == "learned" else None
-        self.blocks = nn.ModuleList([Block(d_model, n_head, pos) for _ in range(n_layer)])
+        self.blocks = nn.ModuleList([Block(d_model, n_head, pos, res, n_zero) for _ in range(n_layer)])
         self.norm = nn.LayerNorm(d_model)
         self.head = nn.Linear(d_model, n_vocab)
+        if res != "std":
+            self.res_final = AttnRes(d_model)                         # the output aggregates all block representations
 
     def forward(self, tok):
         h = self.emb(tok)
         if self.pos is not None:
             h = h + self.pos[:, :tok.shape[1]]                        # rope/pope inject position inside attention instead
-        for b in self.blocks:
-            h = b(h)
+        if self.res == "std":
+            for b in self.blocks:
+                h = b(h)
+        elif self.res == "attnres":
+            blocks, partial = [], h                                   # b0 = the embedding, appended at the first boundary
+            for b in self.blocks:
+                x = b.res_attn(blocks + [partial])
+                blocks.append(partial)                                # block boundary: the finished sum becomes a source
+                partial = b.attn(b.n1(x))                             # a block's sum holds OUTPUTS only, not its input
+                x = b.res_mlp(blocks + [partial])
+                partial = partial + b.mlp(b.n2(x))
+            h = self.res_final(blocks + [partial])
+        else:                                                         # attnres_full
+            src = [h]
+            for b in self.blocks:
+                x = b.res_attn(src)
+                src.append(b.attn(b.n1(x)))
+                x = b.res_mlp(src)
+                src.append(b.mlp(b.n2(x)))
+            h = self.res_final(src)
         return self.head(self.norm(h))
+
+    @torch.no_grad()
+    def routes(self, tok):
+        """Mean attention-residual weight per source for each mixer, on this batch: the learned wiring diagram."""
+        mixers = [(n, m) for n, m in self.named_modules() if isinstance(m, AttnRes)]
+        for _n, m in mixers:
+            m.record = True
+        self(tok)
+        for _n, m in mixers:
+            m.record = False
+        return {n: [round(float(a), 3) for a in m.last] for n, m in mixers}
 
 
 def out_mask(K, dev):
@@ -318,15 +379,20 @@ def main():
     p.add_argument("--crit", type=float, default=0.8)
     p.add_argument("--pos", default="learned", choices=["learned", "rope", "pope"],
                    help="positional scheme: learned-absolute, RoPE, or PoPE (arXiv:2509.10534)")
+    p.add_argument("--n_zero", type=int, default=0, help="PoPE only: channels per head with no position (content-only)")
+    p.add_argument("--res", default="std", choices=["std", "attnres", "attnres_full"],
+                   help="residual scheme: plain sum, or attention residuals (arXiv:2603.15031) per block / per sub-layer")
+    p.add_argument("--json", default="", help="also write the headline numbers (and the learned routes) to this file")
     args = p.parse_args()
     dev = "cuda" if torch.cuda.is_available() else "cpu"
     torch.manual_seed(args.seed)
 
     train, test, probs, weights = build_tasks(args.seed)
-    print(f"device {dev} | pos={args.pos} opt={args.opt} | {len(train)} trained, {len(test)} held out | K={args.k} steps={args.steps}")
+    print(f"device {dev} | pos={args.pos} n_zero={args.n_zero} res={args.res} opt={args.opt} | {len(train)} trained, "
+          f"{len(test)} held out | K={args.k} steps={args.steps}")
     print("primitive training weight: " + ", ".join(f"{n}={w:.3f}" for n, w in zip(NAMES, weights.tolist())))
 
-    model = Model(max_len=args.k * 2 * L + 2, pos=args.pos).to(dev)
+    model = Model(max_len=args.k * 2 * L + 2, pos=args.pos, res=args.res, n_zero=args.n_zero).to(dev)
     # AURORA (github.com/tilde-research/aurora-release, vendored in `aurora.py`) is a MUON variant: it orthogonalises the
     # momentum before applying it, and for TALL matrices additionally balances the update across ROWS. Following Muon
     # practice it takes only the 2D HIDDEN weights; embeddings, the output head and every 1D parameter (LayerNorm, biases)
@@ -413,6 +479,21 @@ def main():
     else:
         print("LID predicts a POSITIVE correlation: less familiar parts => more trials, global novelty constant.")
         print("A correlation near zero says local familiarity is NOT what governs acquisition speed here.")
+
+    if args.json:
+        routes = None
+        if args.res != "std":
+            tok, _ = make_batch(64, args.k, train, probs, dev, g)
+            routes = model.routes(tok)
+            print("\nLEARNED ROUTES (mean attention-residual weight per source; sources = [embedding, block 1, block 2, ...])")
+            for name, a in routes.items():
+                print(f"   {name:<22} " + " ".join(f"{x:.2f}" for x in a))
+        import json
+        json.dump(dict(pos=args.pos, n_zero=args.n_zero, res=args.res, steps=args.steps, seed=args.seed,
+                       trained_solved=len(solved), n_trained=len(seen),
+                       trained_mean_acc=sum(r[2] for r in seen) / len(seen),
+                       held_solved=sum(1 for y in ys if y < args.k), n_held=len(ys), held_mean_acc=sum(accs) / len(accs),
+                       held_trials=ys, routes=routes, train_loss=loss.item()), open(args.json, "w"), indent=1)
 
 
 if __name__ == "__main__":

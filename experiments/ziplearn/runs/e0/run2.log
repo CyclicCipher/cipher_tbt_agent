@@ -1,0 +1,43 @@
+rope_std: reusing C:\Users\julia\GitHub\predictive-coding-agent\experiments\ziplearn\runs\e0\rope_std.json
+pope0_std: reusing C:\Users\julia\GitHub\predictive-coding-agent\experiments\ziplearn\runs\e0\pope0_std.json
+rope_attnres: reusing C:\Users\julia\GitHub\predictive-coding-agent\experiments\ziplearn\runs\e0\rope_attnres.json
+pope0_attnres: reusing C:\Users\julia\GitHub\predictive-coding-agent\experiments\ziplearn\runs\e0\pope0_attnres.json
+pope_std: 114s | trained solved 6/17 (mean acc 0.46) | held-out solved 0/8 (mean acc 0.03) | loss 0.078
+pope_attnres: 215s | trained solved 9/17 (mean acc 0.56) | held-out solved 0/8 (mean acc 0.04) | loss 0.059
+
+| cell | trained solved | trained mean acc | held-out solved | held-out mean acc | final loss |
+|---|---|---|---|---|---|
+| rope_std | 8/17 | 0.52 | 0/8 | 0.03 | 0.061 |
+| pope0_std | 0/17 | 0.07 | 0/8 | 0.01 | 0.621 |
+| rope_attnres | 9/17 | 0.60 | 0/8 | 0.07 | 0.054 |
+| pope0_attnres | 2/17 | 0.24 | 0/8 | 0.02 | 0.299 |
+| pope_std | 6/17 | 0.46 | 0/8 | 0.03 | 0.078 |
+| pope_attnres | 9/17 | 0.56 | 0/8 | 0.04 | 0.059 |
+
+routes, rope_attnres (mean weight per source; sources = embedding, block 1, block 2, ..., current partial sum):
+   blocks.0.res_attn    1.00
+   blocks.0.res_mlp     0.19 0.81
+   blocks.1.res_attn    0.37 0.63
+   blocks.1.res_mlp     0.09 0.18 0.73
+   blocks.2.res_attn    0.28 0.20 0.52
+   blocks.2.res_mlp     0.04 0.03 0.15 0.78
+   res_final            0.05 0.03 0.14 0.79
+
+routes, pope0_attnres (mean weight per source; sources = embedding, block 1, block 2, ..., current partial sum):
+   blocks.0.res_attn    1.00
+   blocks.0.res_mlp     0.11 0.89
+   blocks.1.res_attn    0.20 0.80
+   blocks.1.res_mlp     0.07 0.23 0.70
+   blocks.2.res_attn    0.22 0.21 0.57
+   blocks.2.res_mlp     0.06 0.08 0.24 0.61
+   res_final            0.06 0.05 0.23 0.66
+
+routes, pope_attnres (mean weight per source; sources = embedding, block 1, block 2, ..., current partial sum):
+   blocks.0.res_attn    1.00
+   blocks.0.res_mlp     0.16 0.84
+   blocks.1.res_attn    0.40 0.60
+   blocks.1.res_mlp     0.10 0.21 0.69
+   blocks.2.res_attn    0.19 0.19 0.62
+   blocks.2.res_mlp     0.06 0.12 0.18 0.65
+   res_final            0.03 0.04 0.17 0.75
+done

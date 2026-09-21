@@ -1,0 +1,59 @@
+{
+ "summary": {
+  "after 1 (A)": {
+   "retention": {
+    "A": 1.0
+   },
+   "blocks": 1.0,
+   "bits": 9.254432783612199,
+   "table_bits": 40.112234916269756,
+   "blocks_hist": {
+    "1": 20
+   }
+  },
+  "after 2 (B)": {
+   "retention": {
+    "A": 1.0,
+    "B": 1.0
+   },
+   "blocks": 2.0,
+   "bits": 20.508865567224397,
+   "table_bits": 218.17173966058084,
+   "blocks_hist": {
+    "2": 20
+   }
+  },
+  "after 3 (C)": {
+   "retention": {
+    "A": 1.0,
+    "B": 1.0,
+    "C": 1.0
+   },
+   "blocks": 3.0,
+   "bits": 35.82221334180811,
+   "table_bits": 366.36271738387205,
+   "blocks_hist": {
+    "3": 20
+   }
+  },
+  "after 4 (A)": {
+   "retention": {
+    "A": 1.0,
+    "B": 1.0,
+    "C": 1.0
+   },
+   "blocks": 3.0,
+   "bits": 36.32955189815644,
+   "table_bits": 452.1476283865019,
+   "blocks_hist": {
+    "3": 20
+   }
+  }
+ },
+ "example": [
+  "shift b=3 (n=80, exceptions 0.00)",
+  "shift b=5 (n=41, exceptions 0.00)",
+  "affine a=2 b=1 (n=39, exceptions 0.00)"
+ ],
+ "verdict": "PASS"
+}
