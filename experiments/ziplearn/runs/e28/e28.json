@@ -3,17 +3,17 @@
   "ACTION1": {
    "radius": 1,
    "cells": 3,
-   "entries": 36
+   "entries": 39
   },
   "ACTION2": {
    "radius": 2,
    "cells": 3,
-   "entries": 32
+   "entries": 35
   },
   "ACTION3": {
    "radius": 1,
    "cells": 3,
-   "entries": 36
+   "entries": 37
   },
   "ACTION4": {
    "radius": 1,
@@ -79,15 +79,15 @@
    "model": {
     "ACTION1": {
      "radius": 1,
-     "windows": 36
+     "windows": 39
     },
     "ACTION2": {
      "radius": 2,
-     "windows": 32
+     "windows": 35
     },
     "ACTION3": {
      "radius": 1,
-     "windows": 36
+     "windows": 37
     },
     "ACTION4": {
      "radius": 1,
@@ -98,41 +98,41 @@
   {
    "level": 1,
    "solved": true,
-   "actions": 31,
+   "actions": 40,
    "sleep": {
     "ACTION1": {
      "1": {
-      "bits_before": 144.0,
-      "bits_after": 144.0,
+      "bits_before": 156.0,
+      "bits_after": 156.0,
       "cells": 3
      },
      "2": {
-      "bits_before": 152.0,
-      "bits_after": 152.0,
+      "bits_before": 157.9,
+      "bits_after": 157.9,
       "cells": 3
      }
     },
     "ACTION2": {
      "1": {
-      "bits_before": 230.7,
-      "bits_after": 230.7,
+      "bits_before": 240.7,
+      "bits_after": 240.7,
       "cells": 4
      },
      "2": {
-      "bits_before": 128.0,
-      "bits_after": 128.0,
+      "bits_before": 140.0,
+      "bits_after": 140.0,
       "cells": 3
      }
     },
     "ACTION3": {
      "1": {
-      "bits_before": 151.2,
-      "bits_after": 151.2,
+      "bits_before": 155.2,
+      "bits_after": 155.2,
       "cells": 3
      },
      "2": {
-      "bits_before": 151.2,
-      "bits_after": 151.2,
+      "bits_before": 155.2,
+      "bits_after": 155.2,
       "cells": 3
      }
     },
@@ -152,15 +152,15 @@
    "model": {
     "ACTION1": {
      "radius": 1,
-     "windows": 36
+     "windows": 39
     },
     "ACTION2": {
      "radius": 2,
-     "windows": 32
+     "windows": 35
     },
     "ACTION3": {
      "radius": 1,
-     "windows": 36
+     "windows": 37
     },
     "ACTION4": {
      "radius": 1,
@@ -189,109 +189,41 @@
    1
   ]
  ],
- "memory_tokens": 121,
- "ties": 1434,
+ "memory_tokens": 128,
+ "ties": 0,
  "levels": {
   "0": {
-   "n": 300,
-   "known": 300,
-   "wp_known": 300,
-   "wp_all": 300,
-   "wt_known": 300,
-   "pt_known": 300,
+   "n": 50,
+   "known": 50,
+   "wp_known": 50,
+   "wp_all": 50,
+   "wt_known": 50,
+   "pt_known": 50,
    "wt_unk": 0,
    "pt_unk": 0,
    "wp_unk": 0,
    "skipped": 0,
    "by_len": {
     "1": [
-     75,
-     75
+     17,
+     17
     ],
     "2": [
-     76,
-     76
+     12,
+     12
     ],
     "3": [
-     69,
-     69
+     8,
+     8
     ],
     "4": [
-     80,
-     80
+     13,
+     13
     ]
    },
    "playfield": [
     7,
     9
-   ]
-  },
-  "1": {
-   "n": 300,
-   "known": 230,
-   "wp_known": 230,
-   "wp_all": 279,
-   "wt_known": 186,
-   "pt_known": 186,
-   "wt_unk": 39,
-   "pt_unk": 23,
-   "wp_unk": 49,
-   "skipped": 0,
-   "by_len": {
-    "1": [
-     61,
-     61
-    ],
-    "2": [
-     63,
-     63
-    ],
-    "3": [
-     56,
-     56
-    ],
-    "4": [
-     50,
-     50
-    ]
-   },
-   "playfield": [
-    7,
-    11
-   ]
-  },
-  "2": {
-   "n": 300,
-   "known": 0,
-   "wp_known": 0,
-   "wp_all": 265,
-   "wt_known": 0,
-   "pt_known": 0,
-   "wt_unk": 246,
-   "pt_unk": 222,
-   "wp_unk": 265,
-   "skipped": 0,
-   "by_len": {
-    "1": [
-     0,
-     0
-    ],
-    "2": [
-     0,
-     0
-    ],
-    "3": [
-     0,
-     0
-    ],
-    "4": [
-     0,
-     0
-    ]
-   },
-   "playfield": [
-    8,
-    11
    ]
   }
  },

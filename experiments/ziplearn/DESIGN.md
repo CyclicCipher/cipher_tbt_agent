@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
 *v0.6, 2026-09-21 (v0.1–v0.5 on 2026-09-20; v0.6 records E14–E18: capacity, precision, order dependence, blocks across
-layers, relational goals, written attention). E0–E29 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
+layers, relational goals, written attention). E0–E29 have been run (E29 retracted as a design); one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -492,6 +492,26 @@ first imagined success at each level's first plan; the strategy's features and c
 learned, so it must not lose), (b) calls to the first success on the rooms of 20 and 40 below BFS's on the room of
 20 and at most 3× the path length × 4, and (c) the room of 40 solved by the learned arm. Refute: (a) above 1.25×,
 or (c) not solved.
+*Result: PASS on these criteria (`RESULTS.md`). REJECTED as a design the same day and deleted — a search procedure
+written around the model, with a thought defined in the task's terms and a hand-built context (§18, the rule).*
+**E30 — the depth loop under attention residuals (pre-registered 2026-09-21; §18).** `LoopedModel` with attention
+residuals across passes: the sources at pass k are the anchor and the outputs of passes 1..k−1. Cells, on E0's task and
+budget (3200 steps, seed 0): (a) the fixed boundary operator — E26's tied K = 4 and untied growth 2 → 4; (b) attention
+residuals with the mixers tied to the core (routing by content); (c) one mixer query per pass; (d) windowed sources,
+the anchor + the last 2 passes. Measured: trained and held-out compositions solved and mean accuracy (E26: 13/17,
+held-out 0.12–0.20); the routes (mean weight per source at each pass); accuracy when run at twice the trained loop
+count, for (a), (b) and (d). Pass: some attention-residual cell at or above E26's best held-out accuracy with routes
+that are not uniform; the question answered either way: does the learned route reproduce the boundary operator
+(anchor + last pass) or read further back. Refute: every attention-residual cell below the fixed operator.
+**E31 — continuous thoughts under attention residuals (pre-registered 2026-09-21; §18).** Coconut's recurrence in the
+gradient arm on E0's composition task: c thought positions between the demonstrations and the answer, each fed the
+previous position's final state; trained with Coconut's curriculum from a chain-of-thought form of the task (the
+intermediate result written as tokens, then replaced by thoughts stage by stage). Cells: c ∈ {1, 2, 3} × {plain
+residuals, attention residuals} × {raw feedback, the boundary operator on the fed-back state: RMSNorm + anchor}.
+Measured: held-out composition accuracy (E26's best 0.20); training-loss spikes at c = 3 (Coconut's instability) with
+and without the operator; a probe of the thought for the intermediate result and for more than one candidate at once
+(the breadth-first claim). Pass: held-out accuracy above 0.20 in some cell, and the operator removing the c = 3
+instability where it appears. Refute: no cell above the looped model.
 
 ## 12. Open questions
 
@@ -547,7 +567,7 @@ changed) are in `RESULTS.md`, appended and never edited.
 | E26 | measured | looped transformer: untied growth 2→4 gives 13/17 trained and held-out accuracy 0.12–0.20 (vanilla 8/17, 0.03); held-out solved still 0/8 |
 | E27 | REFUTED on discovery, 9/16 levels | exploration valued in bits over whole plans; Tetris L0 solved; discovery is coverage-bound, unchanged |
 | E28 | PASS | the rules learned on LockPath, written into one looped attention block, reproduce the planner's rollouts 530/530 (509/509 seed 1); the nearest-key default beats 'unchanged' on unknown windows |
-| E29 | PASS | learned search: imagined paths enumerated by bits under a learned strategy = BFS until it learns; then room-20 89 vs 818 calls, room 40 solved at oracle 74 (BFS cannot); the 20-bit strategy reads the wall, not the goal |
+| E29 | PASS, then RETRACTED | learned search as a procedure: room-20 89 vs 818 calls, room 40 solved at oracle 74; rejected as a design (a search written around the model) and deleted; the rooms stay as the test bed for §18 |
 
 ## 14. Glossary
 
@@ -604,6 +624,15 @@ What is *not* decided: whether the gradient arm's per-token softmax routing or t
 the right comparison when both exist; E2 will run the written network, E0 the gradient arm, and the two are reported
 side by side, not merged.
 
+**Recurrence scheme — DECIDED in outline 2026-09-21, the cells in E30/E31 (§18).** Two recurrences: depth (the core
+looped over the same positions, `LoopedModel`, E26) and sequence (Coconut's continuous thoughts: a position's final
+state as the next position's input). One boundary operator for both axes: normalise the carried state, re-inject the
+anchor (Geiping et al.: a recurrence that does not re-read its input each step is unstable), and let attention
+residuals choose the rest — the fixed `rms_norm(x) + α·anchor` is the one-source special case. The loop count and the
+thought count are a convergence test on the state or a written halting head, never a pad or a budget. The block is
+read as an interpreter (Giannou et al.): weights written once, programs — knowledge and behaviour — as tokens in the
+context. The interactions with attention residuals are argued in §18 and measured in E30 (depth) and E31 (sequence).
+
 ## 16. The outer objective — the loop BUILT (E9–E12, E17), the games first contact (E13), the rest OPEN
 
 **The problem.** Everything before this section is a world model: descriptions that say what comes out when something
@@ -629,7 +658,7 @@ be plugged in without changing the machinery.
 
 **The loop (first form).** Observe (state, action, next state) triples → each action gets a description by the core
 loop of §4 (one matrix per action; the library of §5 supplies the structures) → given a goal, search the words in the
-learned actions for the cheapest one that reaches it (breadth-first over depth, so the shortest word is found
+learned actions for the cheapest one that reaches it (breadth-first over depth *— the first form; superseded by §18: the search is not a procedure —*, so the shortest word is found
 first; bits = length × log₂ actions) → execute → the next states are new observations for the inner objective.
 
 **Where the two objectives meet.** An action whose effect is not yet described cannot be planned with; a plan that
@@ -643,70 +672,6 @@ whether the cache is itself a written structure. *E12: coordinates where the act
 action against the bits its description would save. *E10: the saving must be counted over the goals still to come (a description is an asset); the myopic version does not explore. E10b (useless + noisy actions): price 92% of goals in 2.3 steps, novelty policies 36%/23% — trapped by the noisy actions; BUILT in its first form.* **OPEN-12** — goals that are relations, not states ("make the
 output the reverse of the input"), and goals over the library ("find a shorter word"). *E17: a relation given as examples is planned for by matching plans to the examples (0.99); identifying it first fails at the identification limit (0.51). Goals over the library: not built.*
 
-## 18. Learned search — thinking as acting (BUILT 2026-09-21; E29 PASS — the breadth-first search is deleted)
-
-**The problem.** `Player.search` in `arcgames.py` was breadth-first search: a loop I wrote that expands every action
-from every reached frame, one depth at a time, up to `max_nodes = 4000` model calls. It is exponential in depth, it
-forgets everything between one call and the next, and it exists only because a plan here is a sequence of frames —
-over anything that is not a frame (a hypothesis, a word in the library, an idea) there is no enumeration to write. A
-strategy has to be learned instead, and we do not know what the right one looks like. So the strategy is a table.
-
-**The principle: breadth-first search is what a learned search does before it has learned anything.** Enumerate
-candidate plans in order of their description length under a prior over actions, cheapest first. Under a prior that
-knows nothing — every action equally likely — a plan's description length is its length times log₂(actions), so all
-plans of length k come before any of length k+1: breadth-first. This is Levin search (Levin 1973: enumerate programs
-by 2^−length, optimal up to a constant), and Schmidhuber's OOPS (2004) is the same with the prior *learned* from
-earlier solutions. So the search algorithm is the prior, and the prior is a table like every other table here:
-learned by counting, priced in bits, compressed by sleep. We do not write BFS; BFS is what the empty table does.
-
-**The pieces (all in `arcgames.py`).**
-1. *A thought* is one expansion of an imagined frame by the world model (`Player.predict` on an imagined frame). Thoughts
-   cost model calls, not actions; a real step's budget of calls is `max_nodes` (4000), the number BFS had, so the two
-   compare at equal simulation. Predictions on imagined frames are cached while the model is unchanged.
-2. *The context of a thought* is the imagined frame seen from where the actions act — the LOCUS: among the cells the
-   model predicts an action to change, the one whose new colour is rarest in the frame (the figure, not the ground; a
-   moved thing's new cell). Along an imagined path the locus follows the last thought's change. Around the locus the
-   context is a retina (`PolicyRule.context`): the frame exact within radius `NEAR = 2` (25 cells), and beyond it,
-   for each of `SECTORS = 8` compass sectors, which colours are present (8 × 16 bits) — one representation for a room
-   of any size. This retina and the figure/ground rule are the two priors of the section; both are about seeing, not
-   about any game.
-3. *The strategy* is `PolicyRule`: a table context → counts per action, filled by hindsight on imagination — the steps
-   of the SHORTEST imagined path that reached the goal in each batch — priced as a two-part code plus the bits naming
-   the features it reads, and compressed by the sleep pass (the greedy feature elimination of `LocalRule.sleep`, rows
-   hashed exactly by random integer weights; features constant over the evidence go first). An unseen context takes
-   the counts of the nearest stored one (E28's default). Its bits for an action are −log₂ of (count + ½) over the
-   total (`PolicyRule.bits`); with nothing stored, log₂ of the options.
-4. *The imagination* (`Player.imagine`) enumerates imagined paths from the real frame in order of their bits under the
-   strategy, summed along the path, cheapest first (a heap). A frame already reached by a cheaper path is not expanded
-   again — a frame already imagined is worth nothing, E27's price of ignorance at the level of thoughts. An action the
-   goal model predicts to kill is never imagined; one it predicts to win completes a path. The batch ends at 5
-   successes or at the budget; the shortest success is the plan (executed with re-planning on a wrong prediction, as
-   before) and its steps are counted into the strategy. No success: the real action is E27's exploration —
-   imagination cannot learn the world, only how to move through the one it has.
-5. *What is ours and what is the table's.* Ours: the retina, the figure/ground rule, the pseudo-count ½, the stop at 5,
-   the budget of calls. Each of the last three is a number that should be a price — the value of a computation — and
-   is not yet. The table's: which action to expand first, how deep to go before trying an alternative, what to prune;
-   that is the whole of what BFS decided by fiat.
-
-**What should emerge.** On a level whose goal is known, the strategy after sleep reads a handful of features — where
-the goal's colour lies — and the enumeration runs straight down the confident actions: calls to the first success grow
-with the *length of the path*, where BFS's grow with the *area of the room*. In a room too large for BFS at the same
-budget, the strategy finds the goal and BFS does not. The plan-as-word of §16 item 1 is here a table rather than a
-recognised shift; the two meet when the library prices this table as a shift.
-
-**The written form.** The strategy's entries are memory tokens beside the rules in E28's block (context features →
-action); the enumeration is the block's loop with the expanded action as the pass's anchor; the heap is the one
-thing with no written form yet — the paper's boundary operator chooses which pass comes next by a fixed rule, and
-this needs it chosen by bits. Not built.
-
-**Pre-registration — E29 (§11).** *Result: PASS. Equal to breadth-first search until it has learned (E27's numbers to the
-action); then calls to the first success 89 vs 818 on the room of 20 and 165 vs 3,258 on the room of 40, which it solved at
-the oracle's 74 where breadth-first cannot reach the goal at the budget. The strategy after sleep was 20 bits — two
-features, whether the north-east sector holds floor and whether it holds wall — a shortcut that carried across room
-sizes 12 → 20 → 40. `Player.search` is deleted; `strategy=False` is the baseline arm.*
-
----
-
 ## 17. Files
 
 - `experiments/ziplearn/ziplearner.py` — the weight-writing ZipLearner: `Structure` and the library v1 (`Table`, `Identity`,
@@ -716,9 +681,119 @@ sizes 12 → 20 → 40. `Player.search` is deleted; `strategy=False` is the base
 - `experiments/ziplearn/arcgames.py`, `play_games.py` — the interface to the replica games (`src/tasks/games`) and the harness (E13).
 - `experiments/ziplearn/e0.py` … `e11.py`, `anatomy.py`, `jspace.py` — the experiments of §11, one file each; outputs in `runs/e*/`.
 - `experiments/ziplearn/e28.py` — `WrittenSim`: the learned rules of a game written into one looped attention block (E28).
-- `experiments/ziplearn/e29.py` — learned search (§18): the imagination against breadth-first search on the games and on rooms (E29).
-- `experiments/ziplearn/refs/` — reference notes (`attention_residuals.md`) and the paper PDF.
+- `experiments/ziplearn/refs/` — reference notes: `attention_residuals.md` (+ PDF), `scaling_exponents_recursion.md`,
+  `latent_reasoning_and_looped_planning.md` (overview) and one file per paper of §18 (Coconut, recurrent depth, looped latent
+  thoughts, looped transformers as computers, VIN, Universal Transformers, ACT, Searchformer, Stream of Search, Thinker).
 - `experiments/transformers/h1_lid.py` — the transformer substrate: PoPE (+ the withdrawn `--n_zero`), attention residuals
   (`AttnRes`, `--res attnres|attnres_full`), `Model.routes`, `--json`.
 - `experiments/inner_objective/tasks.py` — the two task families (arithmetic, composition), reused by every experiment.
 - `experiments/inner_objective/ziplearn.py`, `runs/ziplearn_*.json` — the earlier arithmetic-only version and its numbers (§2).
+
+---
+
+## 18. Thinking inside the block — the recurrence scheme (DESIGNED 2026-09-21; E29's procedure REJECTED and deleted)
+
+**The rule (2026-09-21).** Four constraints, set by the review of E29 and binding on everything behavioural:
+1. *The only primitives the model reaches for are the game's controls.* No meta-actions (imagine / reset / commit), no
+   policy over thoughts.
+2. *The only context is the context window*: the history of frames (cells as tokens, E28's layout), the actions
+   taken, and the memory tokens ZipLearner writes. No retina, no locus, no feature extractor outside the model. "The
+   cell at offset (di, dj) from the thing that moves" is a gather head with a written coordinate permutation (E28);
+   "colour c anywhere to the east" is a head with a directional positional phase (E18); which such heads exist is the
+   sleep pass's choice, written as weights.
+3. *A thought is the block's own computation* — one pass of the looped core over its latent state. It assumes
+   nothing about frames; what a pass computes is whatever the written weights compute. Code for the thinking process
+   — an expansion, an enumeration, a heap, a budget, even an adaptive one — is forbidden, and so is defining a thought
+   in the task's terms ("one expansion of an imagined frame").
+4. *What the block does when it loops is written by ZipLearner from experience*, or it does not exist yet.
+
+What this removed: `Player.search` (E27's breadth-first search) and `Player.imagine` / `PolicyRule` / the retina and
+locus (E29), all deleted from `arcgames.py`. The games are explored (E27's price of ignorance) and not solved on
+purpose until the block plans. E29's numbers stand in `RESULTS.md` as a measurement of what a procedure could do; its
+design is retracted.
+
+**The frame: the block is an interpreter; knowledge and behaviour are programs in the context.** Giannou et al.
+(ICML 2023) loop a 13-layer transformer with WRITTEN weights and get a general-purpose computer: "our input sequence
+acts as a punchcard, consisting of instructions and memory for data read/writes" — a program counter, conditional
+branches, function calls, all as attention over the input. E28 is this in miniature: the lookup head is one
+instruction (match the window, write the colour), the memory tokens are the program, a loop executes it once per
+action. Under the rule, planning, valuing and exploring must be programs too — tokens ZipLearner writes by compressing
+experience — executed by the same loop. The search for programs is compression, priced in bits; the execution is
+looping. This is exactly the idea. What no paper gives is how the programs are found: theirs are written by the
+authors; ours must be the cheapest description of the agent's own successful behaviour, and that is the open
+question of this section.
+
+**Two recurrences, and what each is for.**
+- *Depth*: the core applied K times to the same positions (Chen et al. 2609.19107, our `LoopedModel`; Geiping et al.
+  2502.05171, 3.5B parameters, "iterating a recurrent block, thereby unrolling to arbitrary depth at test-time";
+  Saunshi et al., ICLR 2025: T loops simulate T steps of chain-of-thought). Its state is the residual stream of a
+  fixed set of positions; a pass refines them all toward a fixed point — Geiping et al. see most tokens "converge to a
+  fixed point", some fall into "an orbit pattern", some drift "in a single direction".
+- *Sequence*: Coconut (Hao et al. 2412.06769) — the last hidden state of position t is fed back "as the subsequent
+  input embedding directly in the continuous space": a continuous thought is a new position that attends to the
+  question and the earlier thoughts. Their finding: "the continuous thought can encode multiple alternative next
+  reasoning steps, allowing the model to perform a breadth-first search" — a frontier in superposition, no search
+  written.
+They are not substitutes. Depth recurrence refines a fixed state; sequence recurrence ADDS state — positions the loop
+can write to and read back, memory for a plan of unknown length. A fixed-point computation (a value over the frame,
+VIN below) wants depth; a rollout wants sequence — E28's rollout was the sequence recurrence done by hand, one pass
+per action; under Coconut's form the same computation is the block adding a thought position per step. The block gets
+both: K passes per thought position until the state converges, then the converged state becomes the next thought.
+
+**How the depth loop interacts with attention residuals (the question to settle first; E30).** As built,
+`LoopedModel` ignores `res` — its blocks are always "std" — and uses the fixed boundary operator
+`x ← rms_norm(x) + α·anchor`: a two-source mix, the last pass normalised plus the prelude's output. Attention
+residuals generalise it. At pass k the sources are {anchor, out₁, …, out_{k−1}} (each pass's output, in the paper's
+Block form) and the core's mixers read them with a learned query per mixer, softmax over sources, RMSNorm on the keys,
+the raw sources as values. What follows: (i) Geiping et al.'s stability condition — the input must enter EVERY pass, or
+"the iterative process would not be stable" — holds by construction, with the amount learned per token instead of
+the constant α; (ii) a pass can read a state from several passes back, not only the last: a learned combination of
+previous iterates, which is what Anderson mixing / momentum does for a fixed-point iteration — the concrete reason to
+expect help, not harm; (iii) with tied cores the mixers are tied too, so the routing is by content (the query matches a
+source's normalised content), unless one small query vector per pass is added (untied mixers on a tied core); both
+are cells; (iv) the source set grows with K, so at a test depth beyond the trained one the softmax spreads over more
+sources — a WINDOWED source set (the anchor + the last m passes) keeps the pass a function of a fixed-size state, which
+is also what a fixed point and a convergence test require; m = 1 is the boundary operator itself; (v) the paper's
+mix is one weight per source for all channels, but the written block's boundary operator clears SOME subspaces (the
+gathered colours) and keeps others — a per-source scalar cannot; in the written form the clearing must happen inside
+the heads (write new − old; E28's lookup value already has that form). Not decided, noted.
+
+**How Coconut interacts with attention residuals (E31).** A thought position's "embedding" source is the previous
+position's final state (under Full AttnRes, the final mixer's output that feeds the head). With plain residuals that
+vector re-enters at layer 0 and is re-processed upward; with attention residuals every layer reads the embedding
+source directly, so depth-j content of the previous thought reaches depth j of the next — a recurrence between
+matching layers across positions (the Feedback Transformer of Fan et al. 2020 built this with a fixed mix, from
+memory). The reason to expect it positive: a late-layer plan state carries to the layer that continues it without a
+round trip through the early layers. The hazards, verified in the papers: Coconut needs a curriculum — trained
+without it "the models trained this way do not perform any better than no-CoT" — and gets unstable as thoughts per
+step grow ("c=3 … a sharp spike in training loss"); its number of thoughts is a pad, not a decision; its arithmetic
+results trail chain-of-thought (GSM8k 34.1% vs 42.9%). The user's recollection of a drift problem matches the closest
+verified statements: Coconut feeds the raw last hidden state back with no normalisation between thoughts, and
+Geiping et al. prove a recurrence that does not re-read its input each step is unstable. Consequence: ONE boundary
+operator for both axes — normalise the carried state, re-inject the anchor (the question, the goal), let attention
+residuals choose the rest — between passes (depth) and between thoughts (sequence). The thought count: not a pad but
+the same convergence test as the depth loop (Geiping's KL threshold on successive states) or a written halting head
+(Graves's ACT, the Universal Transformer).
+
+**What the loop can compute that E29 wrote as a procedure.** Value Iteration Networks (Tamar et al. 2016): value
+iteration on a grid is K iterations of one layer — a convolution per action and a max — so the planner IS a looped
+layer over the frame; the E28 block has the convolution (gather heads) and the transition (lookup head), and a backup
+is a max over the anchor slot. Coconut: a superposed frontier in the state, pruned by the model. E29's rooms
+(`RESULTS.md`) stay as the test bed: calls to the goal grew with the room's area under breadth-first search and stayed
+flat under a strategy; the block, looped, must show that flatness with nothing around it but the game.
+
+**Search learned from one's own traces.** Searchformer (Lehnert et al. 2024) and Stream of Search (Gandhi et al.
+2024): the second stage of both — compress the model's own successful traces — beats the teacher and solves what no
+hand-written strategy could. That stage is the ZipLearner loop. The first stage (imitate a written search) is
+forbidden by the rule and unnecessary when the first successes come from exploration (E27).
+
+**Order of work (set 2026-09-21).** First the recurrence scheme, measured on the gradient arm where it is cheap: E30
+(the depth loop under attention residuals) and E31 (continuous thoughts under attention residuals, with the hazards
+above as the things to watch). Then the written block adopts the scheme they pick. Not designed yet, and stated as
+such: what compressing behaviour writes into the block.
+
+**References** (one file per paper in `refs/`, abstract verbatim plus notes; the overview is
+`refs/latent_reasoning_and_looped_planning.md`): `coconut_2412.06769.md`, `recurrent_depth_2502.05171.md`,
+`looped_latent_thoughts_2502.17416.md` (+ PDF, CC BY), `looped_transformers_programmable_computers_2301.13196.md`,
+`value_iteration_networks_1602.02867.md`, `universal_transformers_1807.03819.md`, `adaptive_computation_time_1603.08983.md`,
+`searchformer_2402.14083.md`, `stream_of_search_2404.03683.md` (+ PDF, CC BY), `thinker_2307.14993.md` (+ PDF, CC BY).

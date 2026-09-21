@@ -44,7 +44,6 @@ def main():
     ap.add_argument("--max_levels", type=int, default=None)
     ap.add_argument("--sleep", type=int, default=0, help="1: a sleep pass (context minimisation) after every level")
     ap.add_argument("--trace", type=int, default=0, help="1: write every step's frame, choice, prediction and outcome to <out>/trace_<game>.json")
-    ap.add_argument("--strategy", type=int, default=1, help="1: learn the search strategy (§18); 0: never learn it -> breadth-first (E29's baseline)")
     ap.add_argument("--out", default=str(HERE / "runs" / "e13"))
     args = ap.parse_args()
     out = Path(args.out)
@@ -57,8 +56,7 @@ def main():
         n_levels = env.game.level_count if args.max_levels is None else min(args.max_levels, env.game.level_count)
         t0 = time.time()
         trace = [] if args.trace else None
-        results, stats = play(env, budget_per_level=args.budget, max_levels=args.max_levels, sleep=bool(args.sleep), trace=trace,
-                              strategy=bool(args.strategy))
+        results, stats = play(env, budget_per_level=args.budget, max_levels=args.max_levels, sleep=bool(args.sleep), trace=trace)
         if trace is not None:
             json.dump(trace, open(out / f"trace_{name}.json", "w"))
         secs = time.time() - t0

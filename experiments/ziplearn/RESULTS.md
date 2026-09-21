@@ -803,3 +803,19 @@ changed: `Player.search` (breadth-first) deleted; planning = imagination under t
          (3) the strategy over things that are not frames (a hypothesis, a word) — the context is the model's own
          representation, so the retina generalises only where the model's state is a picture; (4) the written form: the
          strategy as memory tokens beside the rules, the heap as the boundary operator choosing the next pass by bits.
+
+### 2026-09-21 — E29 retracted as a design (the numbers stand); the code is deleted
+command: none — a review, not a run
+files:   deleted from `arcgames.py`: `PolicyRule`, `locus_of_change`, the retina (`NEAR`, `SECTORS`), `Player.locus`, `Player.imagine`, the `strategy`
+         flag; deleted `e29.py`; `play_games.py --strategy` removed. `Player.search` (E27's breadth-first search) had been deleted by E29 and is
+         not restored. `runs/e29/` is kept as the record. Kept from the E29 work: the per-level budget in `play()`, the vectorised
+         `LocalRule._rows`/`predict` (a speed-up, not behaviour), the prediction cache, and `Attn.causal` (E28).
+numbers: none new
+verdict: the user's review: a thought defined as "one expansion of an imagined frame by the world model" is task-specific and
+         against the bitter lesson; code for the thinking process, even adaptive, is the same error; the context is the context
+         window, not a retina; a strategy as an enumerated table is wrong; the only primitives are the game's controls; "an
+         imagine function is strictly against the rules." Accepted. What E29 measured — calls flat in the path length under a
+         strategy, growing with the area under breadth-first search — remains the target the block must hit by itself.
+changed: `arcgames.py` has no planner: the games are explored (E27), not solved on purpose, until the looped block plans
+         (DESIGN §18, rewritten: the rule, the interpreter frame, the two recurrences, their interaction with attention
+         residuals, Coconut's hazards, E30/E31 pre-registered). Ten reference notes added under `refs/`.
