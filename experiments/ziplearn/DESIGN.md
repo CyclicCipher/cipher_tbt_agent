@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
-*v0.7, 2026-09-21 (v0.1–v0.5 on 2026-09-20; v0.6 records E14–E18; v0.7 adds §18 thinking inside the block, §19 the library problem and the continuous thesis; earlier: capacity, precision, order dependence, blocks across
-layers, relational goals, written attention). E0–E30 and E33(a) have been run (E29 retracted as a design; E31 running; E32 and E33(b,c) shelved); one line each in §13, the full entries in `RESULTS.md`. Code:
+*v0.8, 2026-09-21 (v0.1–v0.5 on 2026-09-20; v0.6 records E14–E18; v0.7 adds §18 thinking inside the block, §19 the library problem and the continuous thesis; v0.8 adds §20 credit assignment without backpropagation; earlier: capacity, precision, order dependence, blocks across
+layers, relational goals, written attention). E0–E30 and E33(a) have been run (E29 retracted as a design; E31 running; E32 and E33(b,c) shelved; E35 then E34 next); one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -543,6 +543,32 @@ every position once its price is the prequential code (E24's per-context price w
 the discrete machinery on text is PPM. Arms (b) and (c) shelved by the user's instruction of 2026-09-21: no further
 gradient-arm work unless stated. E32 is shelved by the same rule (it needs a gradient-trained net).*
 
+**E35 — the written denoising chain (pre-registered 2026-09-21; §20; first in the approved order).** The looped block
+fitted BLOCKWISE by counting, no gradient anywhere: K blocks on a noise schedule 1 = t_K > … > t_1 > t_0 = 0; block k
+maps the data at t_k to the data at t_{k−1}; a block is a `LocalRule`-style table from the window around a cell at t_k
+to the cell's value at t_{k−1}, learned from (noisier, cleaner) pairs generated from clean data, priced by the two-part
+code, compressed by the sleep pass; running the chain from pure noise is generation, from level k is repair. Domain 1,
+the replica games' frames (the frames stood in during exploration of LockPath and CollectAll levels, split into training
+and held-out frames), corruption = each cell replaced by a uniform random colour with probability t, K = 8. Measured:
+(a) REPAIR — a held-out frame corrupted at t = 0.25 / 0.5 / 0.75, cell accuracy of the chain from that level against the
+ONE-SHOT control (a single table from the corrupted window straight to the clean cell — the "no depth" model at the
+same window size); (b) GENERATION from pure noise — per-cell agreement with the nearest training frame, and the number
+of distinct frames among 100 samples; (c) each block's table before and after sleep (entries, bits, cells kept).
+Domain 2, text (`corpora/latin books`, the E33 split): masked-character diffusion — each character masked with
+probability t (absorbing: masked stays masked until a block fills it), a block fills masked characters from a window of
+±4 characters in which masks are visible; measured: reconstruction accuracy of the masked characters on the held-out
+book at t = 0.15 / 0.5, chain against one shot. Pass: repair at t = 0.5 with the chain at least 0.05 above one shot on
+the frames, and the same sign on text; sleep shrinking the per-block tables. Refute: the chain no better than one shot
+anywhere.
+**E34 — gradient-free context mixing on the Latin stream (pre-registered 2026-09-21; §19–§20; second).** A library of
+context functions — character orders 1–8, skip pairs at distances 2–4, the previous word (the characters since the last
+space), the position in the line, and a match model (E18's induction written: the character that followed the last
+occurrence of the current 6-gram) — each a count table with the KT rate; selection by the prequential code (greedy
+add and drop, E33's price); mixing by Bayesian weights in closed form (exponential weights per context class, with
+fixed-share switching for non-stationarity), no trained mixer. Measured: online bits per character on the held-out book
+against the table's 1.822 and xz's 2.263; which contexts survive selection. Pass: at or below 1.6 (the literature's
+fraction would put it near 1.3–1.4); refute: no gain over the table.
+
 ## 12. Open questions
 
 **OPEN-1 — the outer objective (deferred by request, recorded here verbatim in substance).** ZipLearner learns a
@@ -757,6 +783,7 @@ output the reverse of the input"), and goals over the library ("find a shorter w
 - `experiments/transformers/coconut.py` — continuous thoughts (E31): the curriculum, raw vs operator feedback, the probe.
 - `experiments/ziplearn/e30.py`, `e31.py` — the recurrence-scheme experiments of §18 (drivers over the two files above).
 - `experiments/ziplearn/textlm.py` — the discrete machinery as a character language model on `corpora/latin books` (E33 a).
+- `experiments/ziplearn/refs/diffusionblocks_2506.14202.md` — the reference behind §20.
 - `experiments/inner_objective/tasks.py` — the two task families (arithmetic, composition), reused by every experiment.
 - `experiments/inner_objective/ziplearn.py`, `runs/ziplearn_*.json` — the earlier arithmetic-only version and its numbers (§2).
 
@@ -960,3 +987,52 @@ interest is data efficiency — bits per character against training characters, 
 messy, continuous version of what we have (shapes with continuous variation, where "macro + arguments" can be checked
 against ground truth), and only then pixels. Not to be done: throwing away the discrete machinery (it is the exact
 edge case), or starting from real vision before the compression step is shown to work on something readable.
+
+---
+
+## 20. Credit assignment without backpropagation — the diffusion interpretation (DECIDED 2026-09-21; the vital clue)
+
+**The objection this answers.** §19 left one thing to gradient descent: the last third of the way to a frontier
+language model, the *nonlinear composition of learned features across layers*, because backpropagation is credit
+assignment through a differentiable composition and the gradient-free alternatives — greedy layer-wise fits, local
+rules, search over compositions — had lost to it or were blind. The user's question (2026-09-21): if the data is
+compressed into weights, can the *compositions* be compressed too? The clue is DiffusionBlocks.
+
+**The paper.** Shing, Koyama & Akiba (Sakana AI), *DiffusionBlocks: Block-wise Neural Network Training via Diffusion
+Interpretation*, arXiv:2506.14202 (v4, June 2026); abstract verbatim in `refs/diffusionblocks_2506.14202.md`. Its
+key sentence: "residual connections naturally correspond to updates in a dynamical system. With minimal modifications
+to this system, we can convert the updates to those of a denoising process, where each block can be learned
+independently by leveraging the score matching objective." Trained one block at a time, it "matches the performance of
+end-to-end training" on vision, diffusion, autoregressive, masked-diffusion and RECURRENT-DEPTH transformers — the last
+being our looped block's family (Geiping et al., §18).
+
+**What it means.** Credit assignment through depth is needed only when the intermediate representations are unknown.
+The diffusion interpretation DEFINES them: block k's input is the data at noise level t_k and its target is the data at
+t_{k−1}; every block's (input, target) pairs are observable from the data and the noise, so every block can be fitted
+LOCALLY by any method — including ZipLearner's — with no gradient through the stack. For refinement-type depth (a
+state improved pass by pass toward the data) the problem dissolves. Our loop was already this shape without the name:
+Geiping et al. start the recurrence from noise; the anchor is the conditioning; E30's decaying reads of earlier passes
+are what multi-step ODE solvers do with previous steps (Adams–Bashforth, DPM-Solver++). Two corrections to §19 follow:
+(1) *nonlinearity is not the obstacle* — a denoising block may be as nonlinear as we like (a table, a piecewise fit),
+because its target is known; what had no closed form was the composition, and the schedule supplies it; (2) *size is
+not the obstacle* — the limit on end-to-end training was memory across the stack, which blockwise fitting removes, so a
+written network can be as deep as its schedule.
+
+**"Compress the compositions" — two levels.**
+- *Composition fixed by a schedule.* Each block's weights are the cheapest description of its own (noisier in, cleaner
+  out) pairs: DiffusionBlocks written rather than trained — E24's counting and sleep pass per block, or §5's continuous
+  structures fitted by least squares when the continuous rework comes, the discrete case as the exact limit.
+- *Composition not given by a schedule* — programs whose intermediate states are not noisy versions of the answer. Then
+  the composition itself is the description to compress: which block reads what (routes as flag-conditioned tables,
+  priced, §15), how many passes (convergence, §18), which macro (library growth, §19). That is DreamCoder's abstraction
+  step in our words. Their intermediate targets come from tools already here: §6/E2's inversion of the next layer;
+  Coconut's curriculum (E31: the intermediate written as tokens, then latent).
+What the interpretation does not give: a schedule for arbitrary programs. Its class is refinement — and that class is
+large: generation, repair, planning as iteration on the frame (VIN, §18), and the masked-diffusion form of language.
+
+**The target, restated (2026-09-21).** 1.0 bits/character is a number of enwik8's scale (10⁸ characters), unreachable
+on 2.7M characters of Latin by any method. On Latin the goal is the fraction: the compression literature's step from a
+table (~1.9 on enwik8) to context mixing (~1.3) is a third; the Latin analogue is 1.82 → ~1.3, and it is gradient-free
+territory (E34). What remains beyond it, if E34 and E35 land, is measured rather than assumed.
+
+**Order of work (approved 2026-09-21): E35, then E34; E31 finishes on its own; no gradient-arm work otherwise.**
