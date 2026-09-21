@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
 *v0.6, 2026-09-21 (v0.1–v0.5 on 2026-09-20; v0.6 records E14–E18: capacity, precision, order dependence, blocks across
-layers, relational goals, written attention). E0–E28 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
+layers, relational goals, written attention). E0–E29 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -481,6 +481,18 @@ block's rollouts equal the planner's on ≥ 0.98 of random 1–4-action plans wh
 < 0.9. Reported: agreement with the true game, and the block's nearest-key default against the planner's
 "unchanged" on plans that met unknown windows.
 
+**E29 — learned search: thinking as acting (pre-registered 2026-09-21; §18).** The imagination of §18 against E27's
+breadth-first search, both with the sleep pass, 150 actions per level, 4000 model calls per real step, on (a) the
+four games whose goal is learnable on their first level — LockPath, MultiKey, CollectAll, Toggle — and (b) a LockPath
+made of LockPath's level 0 followed by three empty rooms of side 12, 20 and 40 with the goal in the far corner
+(oracle 8, 20, 36, 76), the search depth unlimited for both arms (the BFS arm gets 3 actions on the room of 40, whose
+1,600 positions exceed the 1,000 frames its budget can expand). Measured: real actions per level; model calls to the
+first imagined success at each level's first plan; the strategy's features and contexts after each sleep. Pass:
+(a) the learned arm's total actions over the four games within 1.1× of BFS's (it IS breadth-first until it has
+learned, so it must not lose), (b) calls to the first success on the rooms of 20 and 40 below BFS's on the room of
+20 and at most 3× the path length × 4, and (c) the room of 40 solved by the learned arm. Refute: (a) above 1.25×,
+or (c) not solved.
+
 ## 12. Open questions
 
 **OPEN-1 — the outer objective (deferred by request, recorded here verbatim in substance).** ZipLearner learns a
@@ -535,6 +547,7 @@ changed) are in `RESULTS.md`, appended and never edited.
 | E26 | measured | looped transformer: untied growth 2→4 gives 13/17 trained and held-out accuracy 0.12–0.20 (vanilla 8/17, 0.03); held-out solved still 0/8 |
 | E27 | REFUTED on discovery, 9/16 levels | exploration valued in bits over whole plans; Tetris L0 solved; discovery is coverage-bound, unchanged |
 | E28 | PASS | the rules learned on LockPath, written into one looped attention block, reproduce the planner's rollouts 530/530 (509/509 seed 1); the nearest-key default beats 'unchanged' on unknown windows |
+| E29 | PASS | learned search: imagined paths enumerated by bits under a learned strategy = BFS until it learns; then room-20 89 vs 818 calls, room 40 solved at oracle 74 (BFS cannot); the 20-bit strategy reads the wall, not the goal |
 
 ## 14. Glossary
 
@@ -630,6 +643,70 @@ whether the cache is itself a written structure. *E12: coordinates where the act
 action against the bits its description would save. *E10: the saving must be counted over the goals still to come (a description is an asset); the myopic version does not explore. E10b (useless + noisy actions): price 92% of goals in 2.3 steps, novelty policies 36%/23% — trapped by the noisy actions; BUILT in its first form.* **OPEN-12** — goals that are relations, not states ("make the
 output the reverse of the input"), and goals over the library ("find a shorter word"). *E17: a relation given as examples is planned for by matching plans to the examples (0.99); identifying it first fails at the identification limit (0.51). Goals over the library: not built.*
 
+## 18. Learned search — thinking as acting (BUILT 2026-09-21; E29 PASS — the breadth-first search is deleted)
+
+**The problem.** `Player.search` in `arcgames.py` was breadth-first search: a loop I wrote that expands every action
+from every reached frame, one depth at a time, up to `max_nodes = 4000` model calls. It is exponential in depth, it
+forgets everything between one call and the next, and it exists only because a plan here is a sequence of frames —
+over anything that is not a frame (a hypothesis, a word in the library, an idea) there is no enumeration to write. A
+strategy has to be learned instead, and we do not know what the right one looks like. So the strategy is a table.
+
+**The principle: breadth-first search is what a learned search does before it has learned anything.** Enumerate
+candidate plans in order of their description length under a prior over actions, cheapest first. Under a prior that
+knows nothing — every action equally likely — a plan's description length is its length times log₂(actions), so all
+plans of length k come before any of length k+1: breadth-first. This is Levin search (Levin 1973: enumerate programs
+by 2^−length, optimal up to a constant), and Schmidhuber's OOPS (2004) is the same with the prior *learned* from
+earlier solutions. So the search algorithm is the prior, and the prior is a table like every other table here:
+learned by counting, priced in bits, compressed by sleep. We do not write BFS; BFS is what the empty table does.
+
+**The pieces (all in `arcgames.py`).**
+1. *A thought* is one expansion of an imagined frame by the world model (`Player.predict` on an imagined frame). Thoughts
+   cost model calls, not actions; a real step's budget of calls is `max_nodes` (4000), the number BFS had, so the two
+   compare at equal simulation. Predictions on imagined frames are cached while the model is unchanged.
+2. *The context of a thought* is the imagined frame seen from where the actions act — the LOCUS: among the cells the
+   model predicts an action to change, the one whose new colour is rarest in the frame (the figure, not the ground; a
+   moved thing's new cell). Along an imagined path the locus follows the last thought's change. Around the locus the
+   context is a retina (`PolicyRule.context`): the frame exact within radius `NEAR = 2` (25 cells), and beyond it,
+   for each of `SECTORS = 8` compass sectors, which colours are present (8 × 16 bits) — one representation for a room
+   of any size. This retina and the figure/ground rule are the two priors of the section; both are about seeing, not
+   about any game.
+3. *The strategy* is `PolicyRule`: a table context → counts per action, filled by hindsight on imagination — the steps
+   of the SHORTEST imagined path that reached the goal in each batch — priced as a two-part code plus the bits naming
+   the features it reads, and compressed by the sleep pass (the greedy feature elimination of `LocalRule.sleep`, rows
+   hashed exactly by random integer weights; features constant over the evidence go first). An unseen context takes
+   the counts of the nearest stored one (E28's default). Its bits for an action are −log₂ of (count + ½) over the
+   total (`PolicyRule.bits`); with nothing stored, log₂ of the options.
+4. *The imagination* (`Player.imagine`) enumerates imagined paths from the real frame in order of their bits under the
+   strategy, summed along the path, cheapest first (a heap). A frame already reached by a cheaper path is not expanded
+   again — a frame already imagined is worth nothing, E27's price of ignorance at the level of thoughts. An action the
+   goal model predicts to kill is never imagined; one it predicts to win completes a path. The batch ends at 5
+   successes or at the budget; the shortest success is the plan (executed with re-planning on a wrong prediction, as
+   before) and its steps are counted into the strategy. No success: the real action is E27's exploration —
+   imagination cannot learn the world, only how to move through the one it has.
+5. *What is ours and what is the table's.* Ours: the retina, the figure/ground rule, the pseudo-count ½, the stop at 5,
+   the budget of calls. Each of the last three is a number that should be a price — the value of a computation — and
+   is not yet. The table's: which action to expand first, how deep to go before trying an alternative, what to prune;
+   that is the whole of what BFS decided by fiat.
+
+**What should emerge.** On a level whose goal is known, the strategy after sleep reads a handful of features — where
+the goal's colour lies — and the enumeration runs straight down the confident actions: calls to the first success grow
+with the *length of the path*, where BFS's grow with the *area of the room*. In a room too large for BFS at the same
+budget, the strategy finds the goal and BFS does not. The plan-as-word of §16 item 1 is here a table rather than a
+recognised shift; the two meet when the library prices this table as a shift.
+
+**The written form.** The strategy's entries are memory tokens beside the rules in E28's block (context features →
+action); the enumeration is the block's loop with the expanded action as the pass's anchor; the heap is the one
+thing with no written form yet — the paper's boundary operator chooses which pass comes next by a fixed rule, and
+this needs it chosen by bits. Not built.
+
+**Pre-registration — E29 (§11).** *Result: PASS. Equal to breadth-first search until it has learned (E27's numbers to the
+action); then calls to the first success 89 vs 818 on the room of 20 and 165 vs 3,258 on the room of 40, which it solved at
+the oracle's 74 where breadth-first cannot reach the goal at the budget. The strategy after sleep was 20 bits — two
+features, whether the north-east sector holds floor and whether it holds wall — a shortcut that carried across room
+sizes 12 → 20 → 40. `Player.search` is deleted; `strategy=False` is the baseline arm.*
+
+---
+
 ## 17. Files
 
 - `experiments/ziplearn/ziplearner.py` — the weight-writing ZipLearner: `Structure` and the library v1 (`Table`, `Identity`,
@@ -639,6 +716,7 @@ output the reverse of the input"), and goals over the library ("find a shorter w
 - `experiments/ziplearn/arcgames.py`, `play_games.py` — the interface to the replica games (`src/tasks/games`) and the harness (E13).
 - `experiments/ziplearn/e0.py` … `e11.py`, `anatomy.py`, `jspace.py` — the experiments of §11, one file each; outputs in `runs/e*/`.
 - `experiments/ziplearn/e28.py` — `WrittenSim`: the learned rules of a game written into one looped attention block (E28).
+- `experiments/ziplearn/e29.py` — learned search (§18): the imagination against breadth-first search on the games and on rooms (E29).
 - `experiments/ziplearn/refs/` — reference notes (`attention_residuals.md`) and the paper PDF.
 - `experiments/transformers/h1_lid.py` — the transformer substrate: PoPE (+ the withdrawn `--n_zero`), attention residuals
   (`AttnRes`, `--res attnres|attnres_full`), `Model.routes`, `--json`.

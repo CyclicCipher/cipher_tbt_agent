@@ -1,0 +1,499 @@
+{
+ "games": {
+  "learned": {
+   "LockPath": {
+    "levels": [
+     {
+      "level": 0,
+      "solved": true,
+      "actions": 93,
+      "plans": 0,
+      "first_plan_calls": null,
+      "first_plan_shortest": null,
+      "hits": 0,
+      "mean_calls": null,
+      "strategy": {
+       "bits_before": 0.0,
+       "bits_after": 0.0,
+       "features": 153,
+       "contexts": 0
+      }
+     },
+     {
+      "level": 1,
+      "solved": true,
+      "actions": 31,
+      "plans": 12,
+      "first_plan_calls": null,
+      "first_plan_shortest": null,
+      "hits": 1,
+      "mean_calls": 1055.0833333333333,
+      "strategy": {
+       "bits_before": 1130.4,
+       "bits_after": 39.0,
+       "features": 4,
+       "contexts": 5
+      }
+     },
+     {
+      "level": 2,
+      "solved": false,
+      "actions": 150,
+      "plans": 112,
+      "first_plan_calls": 145,
+      "first_plan_shortest": 10,
+      "hits": 4,
+      "mean_calls": 903.7857142857143,
+      "strategy": null
+     }
+    ],
+    "seconds": 21.14462447166443,
+    "goal_plans": 5,
+    "calls": 113885
+   },
+   "MultiKey": {
+    "levels": [
+     {
+      "level": 0,
+      "solved": true,
+      "actions": 73,
+      "plans": 0,
+      "first_plan_calls": null,
+      "first_plan_shortest": null,
+      "hits": 0,
+      "mean_calls": null,
+      "strategy": {
+       "bits_before": 0.0,
+       "bits_after": 0.0,
+       "features": 153,
+       "contexts": 0
+      }
+     },
+     {
+      "level": 1,
+      "solved": true,
+      "actions": 28,
+      "plans": 20,
+      "first_plan_calls": null,
+      "first_plan_shortest": null,
+      "hits": 0,
+      "mean_calls": 251.2,
+      "strategy": {
+       "bits_before": 0.0,
+       "bits_after": 0.0,
+       "features": 153,
+       "contexts": 0
+      }
+     }
+    ],
+    "seconds": 1.7338528633117676,
+    "goal_plans": 0,
+    "calls": 5024
+   },
+   "CollectAll": {
+    "levels": [
+     {
+      "level": 0,
+      "solved": true,
+      "actions": 83,
+      "plans": 0,
+      "first_plan_calls": null,
+      "first_plan_shortest": null,
+      "hits": 0,
+      "mean_calls": null,
+      "strategy": {
+       "bits_before": 0.0,
+       "bits_after": 0.0,
+       "features": 153,
+       "contexts": 0
+      }
+     },
+     {
+      "level": 1,
+      "solved": true,
+      "actions": 31,
+      "plans": 2,
+      "first_plan_calls": 29,
+      "first_plan_shortest": 3,
+      "hits": 2,
+      "mean_calls": 313.0,
+      "strategy": {
+       "bits_before": 1122.4,
+       "bits_after": 31.8,
+       "features": 3,
+       "contexts": 5
+      }
+     },
+     {
+      "level": 2,
+      "solved": true,
+      "actions": 44,
+      "plans": 2,
+      "first_plan_calls": 86,
+      "first_plan_shortest": 7,
+      "hits": 2,
+      "mean_calls": 2008.0,
+      "strategy": {
+       "bits_before": 59.0,
+       "bits_after": 51.0,
+       "features": 2,
+       "contexts": 4
+      }
+     }
+    ],
+    "seconds": 4.903228759765625,
+    "goal_plans": 4,
+    "calls": 4642
+   },
+   "Toggle": {
+    "levels": [
+     {
+      "level": 0,
+      "solved": true,
+      "actions": 78,
+      "plans": 0,
+      "first_plan_calls": null,
+      "first_plan_shortest": null,
+      "hits": 0,
+      "mean_calls": null,
+      "strategy": {
+       "bits_before": 0.0,
+       "bits_after": 0.0,
+       "features": 153,
+       "contexts": 0
+      }
+     }
+    ],
+    "seconds": 1.069014072418213,
+    "goal_plans": 0,
+    "calls": 0
+   }
+  },
+  "bfs": {
+   "LockPath": {
+    "levels": [
+     {
+      "level": 0,
+      "solved": true,
+      "actions": 93,
+      "plans": 0,
+      "first_plan_calls": null,
+      "first_plan_shortest": null,
+      "hits": 0,
+      "mean_calls": null,
+      "strategy": {
+       "bits_before": 0.0,
+       "bits_after": 0.0,
+       "features": 153,
+       "contexts": 0
+      }
+     },
+     {
+      "level": 1,
+      "solved": true,
+      "actions": 31,
+      "plans": 12,
+      "first_plan_calls": null,
+      "first_plan_shortest": null,
+      "hits": 1,
+      "mean_calls": 549.5,
+      "strategy": {
+       "bits_before": 0.0,
+       "bits_after": 0.0,
+       "features": 153,
+       "contexts": 0
+      }
+     },
+     {
+      "level": 2,
+      "solved": false,
+      "actions": 150,
+      "plans": 108,
+      "first_plan_calls": 770,
+      "first_plan_shortest": 10,
+      "hits": 3,
+      "mean_calls": 652.7592592592592,
+      "strategy": null
+     }
+    ],
+    "seconds": 11.364787340164185,
+    "goal_plans": 4,
+    "calls": 77092
+   },
+   "MultiKey": {
+    "levels": [
+     {
+      "level": 0,
+      "solved": true,
+      "actions": 73,
+      "plans": 0,
+      "first_plan_calls": null,
+      "first_plan_shortest": null,
+      "hits": 0,
+      "mean_calls": null,
+      "strategy": {
+       "bits_before": 0.0,
+       "bits_after": 0.0,
+       "features": 153,
+       "contexts": 0
+      }
+     },
+     {
+      "level": 1,
+      "solved": true,
+      "actions": 28,
+      "plans": 20,
+      "first_plan_calls": null,
+      "first_plan_shortest": null,
+      "hits": 0,
+      "mean_calls": 62.2,
+      "strategy": {
+       "bits_before": 0.0,
+       "bits_after": 0.0,
+       "features": 153,
+       "contexts": 0
+      }
+     }
+    ],
+    "seconds": 1.2439990043640137,
+    "goal_plans": 0,
+    "calls": 1244
+   },
+   "CollectAll": {
+    "levels": [
+     {
+      "level": 0,
+      "solved": true,
+      "actions": 83,
+      "plans": 0,
+      "first_plan_calls": null,
+      "first_plan_shortest": null,
+      "hits": 0,
+      "mean_calls": null,
+      "strategy": {
+       "bits_before": 0.0,
+       "bits_after": 0.0,
+       "features": 153,
+       "contexts": 0
+      }
+     },
+     {
+      "level": 1,
+      "solved": true,
+      "actions": 31,
+      "plans": 2,
+      "first_plan_calls": 22,
+      "first_plan_shortest": 3,
+      "hits": 2,
+      "mean_calls": 32.0,
+      "strategy": {
+       "bits_before": 0.0,
+       "bits_after": 0.0,
+       "features": 153,
+       "contexts": 0
+      }
+     },
+     {
+      "level": 2,
+      "solved": true,
+      "actions": 40,
+      "plans": 2,
+      "first_plan_calls": 91,
+      "first_plan_shortest": 5,
+      "hits": 2,
+      "mean_calls": 223.0,
+      "strategy": {
+       "bits_before": 0.0,
+       "bits_after": 0.0,
+       "features": 153,
+       "contexts": 0
+      }
+     }
+    ],
+    "seconds": 4.147448778152466,
+    "goal_plans": 4,
+    "calls": 510
+   },
+   "Toggle": {
+    "levels": [
+     {
+      "level": 0,
+      "solved": true,
+      "actions": 78,
+      "plans": 0,
+      "first_plan_calls": null,
+      "first_plan_shortest": null,
+      "hits": 0,
+      "mean_calls": null,
+      "strategy": {
+       "bits_before": 0.0,
+       "bits_after": 0.0,
+       "features": 153,
+       "contexts": 0
+      }
+     }
+    ],
+    "seconds": 0.9779951572418213,
+    "goal_plans": 0,
+    "calls": 0
+   }
+  }
+ },
+ "rooms": {
+  "learned": {
+   "levels": [
+    {
+     "level": 0,
+     "solved": true,
+     "actions": 93,
+     "plans": 0,
+     "first_plan_calls": null,
+     "first_plan_shortest": null,
+     "hits": 0,
+     "mean_calls": null,
+     "strategy": {
+      "bits_before": 0.0,
+      "bits_after": 0.0,
+      "features": 153,
+      "contexts": 0
+     }
+    },
+    {
+     "level": 1,
+     "solved": true,
+     "actions": 18,
+     "plans": 2,
+     "first_plan_calls": 293,
+     "first_plan_shortest": 12,
+     "hits": 2,
+     "mean_calls": 385.0,
+     "strategy": {
+      "bits_before": 1134.4,
+      "bits_after": 20.5,
+      "features": 2,
+      "contexts": 3
+     }
+    },
+    {
+     "level": 2,
+     "solved": true,
+     "actions": 34,
+     "plans": 2,
+     "first_plan_calls": 89,
+     "first_plan_shortest": 20,
+     "hits": 2,
+     "mean_calls": 897.0,
+     "strategy": {
+      "bits_before": 20.5,
+      "bits_after": 20.5,
+      "features": 2,
+      "contexts": 3
+     }
+    },
+    {
+     "level": 3,
+     "solved": true,
+     "actions": 74,
+     "plans": 2,
+     "first_plan_calls": 165,
+     "first_plan_shortest": 40,
+     "hits": 2,
+     "mean_calls": 2529.0,
+     "strategy": {
+      "bits_before": 20.5,
+      "bits_after": 20.5,
+      "features": 2,
+      "contexts": 3
+     }
+    }
+   ],
+   "oracle": [
+    8,
+    18,
+    34,
+    74
+   ],
+   "seconds": 10.144735097885132,
+   "calls": 7622
+  },
+  "bfs": {
+   "levels": [
+    {
+     "level": 0,
+     "solved": true,
+     "actions": 93,
+     "plans": 0,
+     "first_plan_calls": null,
+     "first_plan_shortest": null,
+     "hits": 0,
+     "mean_calls": null,
+     "strategy": {
+      "bits_before": 0.0,
+      "bits_after": 0.0,
+      "features": 153,
+      "contexts": 0
+     }
+    },
+    {
+     "level": 1,
+     "solved": true,
+     "actions": 18,
+     "plans": 2,
+     "first_plan_calls": 290,
+     "first_plan_shortest": 12,
+     "hits": 2,
+     "mean_calls": 202.0,
+     "strategy": {
+      "bits_before": 0.0,
+      "bits_after": 0.0,
+      "features": 153,
+      "contexts": 0
+     }
+    },
+    {
+     "level": 2,
+     "solved": true,
+     "actions": 34,
+     "plans": 2,
+     "first_plan_calls": 818,
+     "first_plan_shortest": 20,
+     "hits": 2,
+     "mean_calls": 666.0,
+     "strategy": {
+      "bits_before": 0.0,
+      "bits_after": 0.0,
+      "features": 153,
+      "contexts": 0
+     }
+    },
+    {
+     "level": 3,
+     "solved": false,
+     "actions": 3,
+     "plans": 1,
+     "first_plan_calls": 3258,
+     "first_plan_shortest": 40,
+     "hits": 1,
+     "mean_calls": 3258.0,
+     "strategy": null
+    }
+   ],
+   "oracle": [
+    8,
+    18,
+    34,
+    74
+   ],
+   "seconds": 6.218015432357788,
+   "calls": 4994
+  }
+ },
+ "verdict": {
+  "verdict": "PASS",
+  "ratio_a": 1.0065897858319606,
+  "c20": 89,
+  "c40": 165,
+  "b20": 818,
+  "room40": true
+ }
+}

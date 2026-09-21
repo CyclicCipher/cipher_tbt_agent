@@ -1,0 +1,26 @@
+E29 (a) the four goal-learnable games, learned imagination vs breadth-first search, sleep on, 150 actions/level, 4000 calls/step
+   learned LockPath   L0 won in 93  L1 won in 31  L2 LOST in 150 (first plan: success after 145 calls)  [21s, 5 goal plans]
+   learned MultiKey   L0 won in 73  L1 won in 28  [2s, 0 goal plans]
+   learned CollectAll L0 won in 83  L1 won in 31 (first plan: success after 29 calls)  L2 won in 44 (first plan: success after 86 calls)  [5s, 4 goal plans]
+   learned Toggle     L0 won in 78  [1s, 0 goal plans]
+   learned: 611 actions in total
+   bfs     LockPath   L0 won in 93  L1 won in 31  L2 LOST in 150 (first plan: success after 770 calls)  [11s, 4 goal plans]
+   bfs     MultiKey   L0 won in 73  L1 won in 28  [1s, 0 goal plans]
+   bfs     CollectAll L0 won in 83  L1 won in 31 (first plan: success after 22 calls)  L2 won in 40 (first plan: success after 91 calls)  [4s, 4 goal plans]
+   bfs     Toggle     L0 won in 78  [1s, 0 goal plans]
+   bfs: 607 actions in total
+
+E29 (b) rooms: LockPath level 0, then empty rooms of side 12, 20, 40 (goal in the far corner); depth unlimited
+   oracle: [8, 18, 34, 74]
+   learned room level 0 (oracle 8): won in 93 actions; first plan: no success; 0 plans, mean 0 calls; strategy after sleep: 153 features, 0 contexts, 0 bits
+   learned room level 1 (oracle 18): won in 18 actions; first plan: success after 293 calls, plan of 12; 2 plans, mean 385 calls; strategy after sleep: 2 features, 3 contexts, 20 bits
+   learned room level 2 (oracle 34): won in 34 actions; first plan: success after 89 calls, plan of 20; 2 plans, mean 897 calls; strategy after sleep: 2 features, 3 contexts, 20 bits
+   learned room level 3 (oracle 74): won in 74 actions; first plan: success after 165 calls, plan of 40; 2 plans, mean 2529 calls; strategy after sleep: 2 features, 3 contexts, 20 bits
+   learned: 10s
+   bfs     room level 0 (oracle 8): won in 93 actions; first plan: no success; 0 plans, mean 0 calls; strategy after sleep: 153 features, 0 contexts, 0 bits
+   bfs     room level 1 (oracle 18): won in 18 actions; first plan: success after 290 calls, plan of 12; 2 plans, mean 202 calls; strategy after sleep: 153 features, 0 contexts, 0 bits
+   bfs     room level 2 (oracle 34): won in 34 actions; first plan: success after 818 calls, plan of 20; 2 plans, mean 666 calls; strategy after sleep: 153 features, 0 contexts, 0 bits
+   bfs     room level 3 (oracle 74): LOST in 3 actions; first plan: success after 3258 calls, plan of 40; 1 plans, mean 3258 calls
+   bfs: 6s
+
+E29 verdict: PASS — (a) actions learned/bfs = 1.007; (b) calls to first success: room 20 learned 89 vs bfs 818, room 40 learned 165 (bounds 3x4xoracle: 408, 888); (c) room 40 solved: True

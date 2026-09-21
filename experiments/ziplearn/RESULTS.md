@@ -40,6 +40,7 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E26 | measured | looped transformer: untied growth 2→4 gives 13/17 trained and held-out accuracy 0.12–0.20 (vanilla 8/17, 0.03); held-out solved still 0/8 |
 | E27 | REFUTED on discovery, 9/16 levels | exploration valued in bits over whole plans; Tetris L0 solved; discovery is coverage-bound, unchanged |
 | E28 | PASS | the rules learned on LockPath, written into one looped attention block, reproduce the planner's rollouts 530/530 (509/509 seed 1); the nearest-key default beats 'unchanged' on unknown windows |
+| E29 | PASS | learned search: imagined paths enumerated by bits under a learned strategy = BFS until it learns; then room-20 89 vs 818 calls, room 40 solved at oracle 74 (BFS cannot); the 20-bit strategy reads the wall, not the goal |
 
 ## Format
 
@@ -767,3 +768,38 @@ changed: §16's "a plan is an n-layer written network" is now one block looped n
          will produce, to be learned by the same rule as everything else; (2) the sleep pass's masks give the heads;
          what gives the loop count when there is no plan — thinking without acting — is the E26 question in the
          written form.
+
+### 2026-09-21 — E29 — learned search, thinking as acting: imagined paths enumerated by their bits under a learned strategy; equal to breadth-first search until it has learned, then 9× fewer calls on a room of 20 and the room of 40 solved at the oracle's length (74) where breadth-first search cannot reach the goal
+command: `python experiments/ziplearn/e29.py` (CPU, ~1 min); the run was made against E27's `Player.search` as the baseline arm; that breadth-first search was then DELETED, because the imagination with a strategy that never learns reproduces its numbers exactly (`play(..., strategy=False)`; checked: LockPath 93/31/150, CollectAll 83/31/40)
+files:   `experiments/ziplearn/runs/e29/e29.json`, `run.log`; code `PolicyRule`, `locus_of_change`, `Player.locus/imagine` in `arcgames.py` (DESIGN §18); `--strategy` in `play_games.py`; `e29.py`
+numbers: (a) the four goal-learnable games, sleep on, 150 actions/level, 4,000 calls/step — learned 611 actions in total, breadth-first 607
+         (ratio 1.007): LockPath 93/31/lost, MultiKey 73/28, CollectAll 83/31/44 (BFS 40), Toggle 78; identical except CollectAll's
+         third level, where the shortest of the five successes found in bits-order was 4 actions longer than the shortest plan.
+         (b) rooms — LockPath's level 0, then empty rooms of side 12, 20, 40, goal in the far corner (oracle 8, 18, 34, 74):
+         calls to the first imagined success at each level's first plan, learned vs breadth-first: room 12 **293 vs 290** (the
+         strategy was still empty — level 0 was won by exploration, so nothing had been imagined); room 20 **89 vs 818**; room 40
+         **165 vs 3,258**. Actions: learned 18, 34, 74 = the oracle on every room; breadth-first 18, 34, and on the room of 40 its
+         budget cannot reach the goal (the true plan needs every frame within 74 steps expanded: ~1,444 frames × 4 = 5,800 calls
+         > 4,000; the plan both arms found first was a 40-step plan to a spurious win key at the bottom wall, refuted on arrival
+         and re-planned — the learned arm's second plan found the remaining 34 steps after 137 calls). The strategy after sleep:
+         **2 features, 3 contexts, 20 bits** — it reads only whether the NORTH-EAST sector contains floor and whether it contains
+         wall: (wall, no floor) → down, (floor and wall) → right, (floor, no wall) → down. It never read the goal's colour: with the
+         goal always in the bottom-right corner, "right until the wall shows to the north-east, then down" is the cheapest
+         description of the successful paths, and it carried across room sizes 12 → 20 → 40 unchanged.
+verdict: PASS (pre-registered: ratio ≤ 1.1, room-20 calls below BFS's and ≤ 12× oracle, room 40 solved — 89 < 818 and < 408; 165 < 888).
+         The search strategy is a learned table and nothing else: `imagine` orders imagined paths by their description
+         length under `PolicyRule`, which is breadth-first while the table is empty (E27's numbers to the action) and a
+         directed enumeration once it has counted a few successful paths. What was measured is the two claims of §18:
+         calls to the first success grow with the room's AREA for breadth-first (290 → 818 → 3,258) and stay flat for the
+         strategy (293 → 89 → 165), and the 20-bit strategy transferred to a room four times the side of any it had seen.
+         What the strategy learned is a SHORTCUT (the wall, not the goal) — correct for these rooms, wrong the first time
+         the goal sits elsewhere, when its exceptions will force it to read a feature that does distinguish (the
+         representation-shortcut lesson, generalise-then-correct). Two costs seen: the shortest-of-five rule is not the
+         shortest plan (CollectAll +4), and the batch runs to the budget hunting a fifth success when only one pre-win
+         frame exists (room 40, second plan: 4,001 calls for a plan found at 137) — both are the "numbers, not prices" of §18.
+changed: `Player.search` (breadth-first) deleted; planning = imagination under the strategy; `strategy=False` is the
+         baseline. Open: (1) the value of a computation — when to stop imagining (the 5, the 4,000, the ½ are numbers);
+         (2) `explore` still enumerates by its own loop: fold it into the imagination with the epistemic value as the goal;
+         (3) the strategy over things that are not frames (a hypothesis, a word) — the context is the model's own
+         representation, so the retina generalises only where the model's state is a picture; (4) the written form: the
+         strategy as memory tokens beside the rules, the heap as the boundary operator choosing the next pass by bits.

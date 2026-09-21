@@ -12,9 +12,12 @@ the agent learns is a LOCAL RULE learned by counting with the rate price -- the 
   goal model    the windows present around the cells that changed at a transition that raised the score (win keys,
                 per action) or ended the game (death keys). A (frame, action) is predicted to win / kill when a
                 window of the frame is a known win / death key for that action.
-  planner       breadth-first search over PREDICTED frames to a (frame, action) predicted to win, avoiding predicted
-                deaths; with no known goal, to the nearest frame that still has unknown windows (bits to learn) or
-                was never visited (novelty) -- exploration as the price of ignorance, §16.
+  planner       the imagination (§18, E29): imagined paths over PREDICTED frames, enumerated by their description
+                length under a learned search STRATEGY (`PolicyRule`: what the frame looks like from where the
+                actions act -> which action the shortest successful imagined paths took), to a (frame, action)
+                predicted to win, avoiding predicted deaths. With nothing learned the enumeration is breadth-first;
+                with a strategy it runs down the confident actions. With no known goal, `explore`: the plan worth the
+                most bits -- unknown windows to learn, frames never visited -- exploration as the price of ignorance.
   loop          plan, execute one step, observe (the transition trains the world and goal models), re-plan when the
                 observation differs from the prediction.
 
@@ -23,6 +26,7 @@ cells plus a margin, fixed per level -- a constant background costs nothing and 
 """
 from __future__ import annotations
 
+import heapq
 import math
 import sys
 from collections import deque
@@ -57,24 +61,27 @@ class LocalRule:
         self.centre = n // 2
         self.full = {}                                  # whole window -> {colour: count}: the evidence
         self.table = {}                                 # masked window -> {colour: count}: the description
+        self.majority = {}                              # masked window -> the colour predicted (the entry's majority)
         self.stats = {}                                 # masked window -> [n_right, n_wrong]
         self.cost = 0.0
 
     def _project(self, full_key):
         return np.frombuffer(full_key, dtype=np.int16)[self.mask].tobytes()
 
-    def windows(self, frame):
-        """(i, j) -> (whole-window key, masked key)."""
+    def _rows(self, frame):
+        """Every cell's window as a row: (whole windows, masked windows), each (H*W, cells), in raster order."""
         r = self.r
         H, W = frame.shape
         pad = np.full((H + 2 * r, W + 2 * r), BORDER, dtype=np.int16)
         pad[r:r + H, r:r + W] = frame
-        out = {}
-        for i in range(H):
-            for j in range(W):
-                w = np.ascontiguousarray(pad[i:i + 2 * r + 1, j:j + 2 * r + 1]).reshape(-1)
-                out[(i, j)] = (w.tobytes(), w[self.mask].tobytes())
-        return out
+        full = np.ascontiguousarray(np.lib.stride_tricks.sliding_window_view(pad, (2 * r + 1, 2 * r + 1)).reshape(H * W, -1))
+        return full, np.ascontiguousarray(full[:, self.mask])
+
+    def windows(self, frame):
+        """(i, j) -> (whole-window key, masked key)."""
+        H, W = frame.shape
+        full, masked = self._rows(frame)
+        return {(t // W, t % W): (full[t].tobytes(), masked[t].tobytes()) for t in range(H * W)}
 
     def observe(self, before, after):
         win = self.windows(before)
@@ -86,9 +93,10 @@ class LocalRule:
             if e is None:                               # a new window: its outcome is a parameter
                 self.cost += math.log2(V)
                 self.table[k] = {y: 1}
+                self.majority[k] = y
                 self.stats[k] = [0, 0]
                 continue
-            pred = max(e, key=e.get)
+            pred = self.majority[k]
             st = self.stats[k]
             if pred == y:
                 self.cost += flag_bits(False, st[0], st[1])
@@ -97,19 +105,21 @@ class LocalRule:
                 self.cost += flag_bits(True, st[0], st[1]) + math.log2(V - 1)
                 st[1] += 1
             e[y] = e.get(y, 0) + 1
+            self.majority[k] = max(e, key=e.get)
 
     def predict(self, frame):
         """The predicted frame and the number of cells whose (masked) window was never seen (left unchanged)."""
-        win = self.windows(frame)
-        out = frame.copy()
+        _full, masked = self._rows(frame)
+        out = frame.copy().reshape(-1)
         unknown = 0
-        for (i, j), (_fk, k) in win.items():
-            e = self.table.get(k)
-            if e is None:
+        majority = self.majority
+        for t in range(out.size):
+            y = majority.get(masked[t].tobytes())
+            if y is None:
                 unknown += 1
             else:
-                out[i, j] = max(e, key=e.get)
-        return out, unknown
+                out[t] = y
+        return out.reshape(frame.shape), unknown
 
     # -- the sleep pass ----------------------------------------------------------------------------------------
     def _merged(self, mask):
@@ -162,6 +172,7 @@ class LocalRule:
         self.mask = mask
         merged = self._merged(mask)
         self.table = merged
+        self.majority = {k: max(c, key=c.get) for k, c in merged.items()}
         self.stats = {k: [max(c.values()), sum(c.values()) - max(c.values())] for k, c in merged.items()}
         self.cost = price
         return before, price, int(mask.sum())
@@ -241,14 +252,170 @@ class GoalModel:
         return any(self.live("win", a) for a in self.win)
 
 
-class Player:
-    """The loop of §16 on a game: describe, plan, act, learn from what happened."""
+NEAR = 2                              # the strategy's context: the frame exact within this radius of the locus ...
+SECTORS = 8                           # ... and beyond it, which colours lie in which of 8 compass sectors (a retina)
 
-    def __init__(self, actions, max_depth=14, max_nodes=4000):
+
+def entropy_vec(p):
+    p = np.clip(p, 1e-12, 1 - 1e-12)
+    return -(p * np.log2(p) + (1 - p) * np.log2(1 - p))
+
+
+def locus_of_change(before, after):
+    """Where an action acted: among the cells it changed, the one whose new colour is rarest in the frame after (the
+    figure, not the ground; a moved thing's new cell, not the floor it left); their centroid on a tie; None when
+    nothing changed."""
+    ij = np.argwhere(before != after)
+    if len(ij) == 0:
+        return None
+    freq = np.bincount(after.ravel().astype(np.int64), minlength=V)
+    rarity = freq[after[ij[:, 0], ij[:, 1]].astype(np.int64)]
+    pick = ij[rarity == rarity.min()]
+    return tuple(int(round(float(v))) for v in pick.mean(0))
+
+
+class PolicyRule:
+    """The search strategy as a table (§18): what the imagined frame looks like from where the actions act -> which
+    action the shortest successful imagined paths took there. Context = a retina at the locus: exact colours within
+    NEAR, and for the far field which colours lie in which compass sector -- one representation for every room size.
+    Learned by counting (hindsight on imagination), priced as a two-part code plus the bits naming the features kept,
+    compressed by the sleep pass (the greedy elimination of `LocalRule.sleep`, vectorised: rows hashed exactly with
+    random integer weights), and an unseen context takes the NEAREST stored one (E28's default). Nothing known ->
+    no counts -> the imagination samples uniformly, which is where breadth-first search comes from (§18)."""
+
+    def __init__(self, n_actions):
+        self.nA = n_actions
+        self.n_near = (2 * NEAR + 1) ** 2
+        self.n_feat = self.n_near + SECTORS * V
+        self.mask = np.ones(self.n_feat, dtype=bool)
+        self.rows, self.acts = [], []                   # the evidence: contexts and the action taken there
+        self.table, self.stats = {}, {}                 # masked context -> counts per action; -> [n_right, n_wrong]
+        self.cost = 0.0
+        self.beta = 0.5                                  # the pseudo-count: a number, not yet a price (§18)
+        self._keys = self._vals = None
+
+    def context(self, frame, locus):
+        H, W = frame.shape
+        li, lj = locus
+        r = NEAR
+        pad = np.full((H + 2 * r, W + 2 * r), BORDER, dtype=np.int16)
+        pad[r:r + H, r:r + W] = frame
+        near = np.ascontiguousarray(pad[li:li + 2 * r + 1, lj:lj + 2 * r + 1]).reshape(-1)
+        ii, jj = np.mgrid[0:H, 0:W]
+        di, dj = ii - li, jj - lj
+        far = np.maximum(np.abs(di), np.abs(dj)) > r
+        presence = np.zeros((SECTORS, V), dtype=np.int16)
+        if far.any():
+            sec = np.round(np.arctan2(di[far], dj[far]) / (math.pi / 4)).astype(int) % SECTORS
+            presence[sec, frame[far].astype(int)] = 1
+        return np.concatenate([near, presence.reshape(-1)])
+
+    def key(self, w):
+        return w[self.mask].tobytes()
+
+    def observe(self, w, a):
+        self.rows.append(np.asarray(w, dtype=np.int16))
+        self.acts.append(int(a))
+        k = self.key(w)
+        c = self.table.get(k)
+        if c is None:
+            self.table[k] = c = np.zeros(self.nA)
+            self.stats[k] = [0, 0]
+            self.cost += math.log2(self.nA)
+            self._keys = None
+        else:
+            st = self.stats[k]
+            if int(c.argmax()) == a:
+                self.cost += flag_bits(False, st[0], st[1])
+                st[0] += 1
+            else:
+                self.cost += flag_bits(True, st[0], st[1]) + math.log2(max(2, self.nA) - 1)
+                st[1] += 1
+        c[a] += 1
+
+    def counts(self, w):
+        """The counts at this context, or at the nearest stored one (Hamming over the kept features); None if empty."""
+        if not self.table:
+            return None
+        c = self.table.get(self.key(w))
+        if c is not None:
+            return c
+        if self._keys is None:
+            self._keys = np.stack([np.frombuffer(k, dtype=np.int16) for k in self.table])
+            self._vals = list(self.table.values())
+        dist = (self._keys != w[self.mask][None, :]).sum(1)
+        return sum(self._vals[i] for i in np.flatnonzero(dist == dist.min()))
+
+    def bits(self, w, n_options):
+        """The description length of each action at this context under the strategy: -log2 of its count plus a
+        pseudo-count, over the total. Nothing known: log2 of the options -- the uniform prior, under which the
+        enumeration of paths by their bits is breadth-first search (§18)."""
+        c = self.counts(w)
+        if c is None:
+            return np.full(self.nA, math.log2(max(2, n_options)))
+        p = (c + self.beta) / (c.sum() + self.beta * self.nA)
+        return -np.log2(p)
+
+    def _price(self, h, y, n_kept):
+        """Two-part code of the evidence grouped by the hash h: one parameter per context, exceptions by their rate;
+        plus the bits naming the kept features."""
+        _u, inv = np.unique(h, return_inverse=True)
+        G = int(inv.max()) + 1
+        cnt = np.bincount(inv * self.nA + y, minlength=G * self.nA).reshape(G, self.nA)
+        n = cnt.sum(1)
+        wrong = n - cnt.max(1)
+        bits = G * math.log2(self.nA) + float((n * entropy_vec(wrong / n)).sum()) + wrong.sum() * math.log2(max(2, self.nA) - 1)
+        return bits + n_kept * math.log2(self.n_feat), int(wrong.sum())
+
+    def sleep(self):
+        """Drop features while the price falls and the exceptions do not rise (the rule of `LocalRule.sleep`); the
+        features constant over the evidence go first, at once. Returns (bits before, bits after, features kept)."""
+        if not self.rows:
+            return 0.0, 0.0, int(self.mask.sum())
+        E = np.stack(self.rows).astype(np.int64)
+        y = np.array(self.acts)
+        w = np.random.default_rng(0).integers(1, 2 ** 40, size=self.n_feat, dtype=np.int64)
+        mask = self.mask.copy()
+        before, wrong0 = self._price(E[:, mask] @ w[mask], y, int(mask.sum()))
+        mask &= ~(E == E[0]).all(0)
+        cur, _w = self._price(E[:, mask] @ w[mask], y, int(mask.sum()))
+        while True:
+            h = E[:, mask] @ w[mask]
+            best_c, best_price = None, cur
+            for c in np.flatnonzero(mask):
+                pr, wr = self._price(h - E[:, c] * w[c], y, int(mask.sum()) - 1)
+                if pr < best_price and wr <= wrong0:
+                    best_c, best_price = c, pr
+            if best_c is None:
+                break
+            mask[best_c] = False
+            cur = best_price
+        self.mask = mask
+        self.table = {}
+        for row, a in zip(np.stack(self.rows), y):
+            self.table.setdefault(row[mask].tobytes(), np.zeros(self.nA))[a] += 1
+        self.stats = {k: [int(c.max()), int(c.sum() - c.max())] for k, c in self.table.items()}
+        self.cost = cur
+        self._keys = None
+        return before, cur, int(mask.sum())
+
+
+class Player:
+    """The loop of §16 on a game: describe, plan, act, learn from what happened. Planning is `imagine` (§18: imagined
+    paths enumerated by their bits under a learned strategy); with no goal known, `explore` (E27: the price of
+    ignorance over the reachable frames)."""
+
+    def __init__(self, actions, max_depth=14, max_nodes=4000, strategy=True, seed=0):
         self.actions = list(actions)
         self.models = {a: ActionModel() for a in self.actions}
         self.goal = GoalModel()
         self.max_depth, self.max_nodes = max_depth, max_nodes
+        self.strategy = strategy                                         # False: the strategy never learns -> the imagination stays breadth-first (E29's baseline arm)
+        self.policy = PolicyRule(len(self.actions))
+        self.rng = np.random.default_rng(seed)
+        self.beta, self.n_successes = 0.5, 5                             # pseudo-count; successes that end a batch: numbers, not yet prices (§18)
+        self.last_think = None
+        self._cache = {}                                                 # (frame key, action) -> the model's prediction
         self.visited = set()
         self.last_changed = set()
         self.plan = []
@@ -256,7 +423,8 @@ class Player:
         self.last_choice = None
         self.remaining = 100                                             # the level's remaining action budget
         self.trans = {}                                                  # (frame key, action) -> the observed next frame
-        self.stats = dict(predictions=0, correct=0, unknown_cells=0, cells=0, replans=0, explore_plans=0, goal_plans=0)
+        self.stats = dict(predictions=0, correct=0, unknown_cells=0, cells=0, replans=0, explore_plans=0, goal_plans=0,
+                          calls=0, thoughts=0)
 
     def frame_key(self, frame):
         return frame.tobytes()
@@ -267,10 +435,13 @@ class Player:
         for a, m in self.models.items():
             if m.n_obs:
                 report[a.name] = m.sleep()
+        self.last_policy_sleep = self.policy.sleep()
+        self._cache = {}
         self.stats["sleeps"] = self.stats.get("sleeps", 0) + 1
         return report
 
     def observe(self, action, before, after, outcome):
+        self._cache = {}
         if outcome != "win":                                  # a winning move's after-frame is the next level: not seen
             self.models[action].observe(before, after)
             self.trans[(self.frame_key(before), action)] = after.copy()    # a transition seen is a transition known
@@ -281,41 +452,93 @@ class Player:
 
     def predict(self, action, frame):
         """The observed successor when this exact transition has been seen (exact, nothing to learn); otherwise the
-        model's prediction and how many windows it had never seen."""
-        known = self.trans.get((self.frame_key(frame), action))
+        model's prediction and how many windows it had never seen (cached per frame while the model is unchanged)."""
+        key = (self.frame_key(frame), action)
+        known = self.trans.get(key)
         if known is not None:
             return known, 0
+        hit = self._cache.get(key)
+        if hit is not None:
+            return hit
         pred, unknown = self.models[action].predict(frame)
+        self._cache[key] = (pred, unknown)
         return pred, unknown
 
-    def search(self, frame, want_goal):
-        """Breadth-first over predicted frames to a (frame, action) the goal model predicts to win, avoiding predicted
-        deaths. With want_goal False, defers to `explore`."""
-        if not want_goal:
-            return self.explore(frame)
+    def locus(self, frame):
+        """Where the actions act in this frame: the loci of the changes the world model predicts for each action,
+        averaged; the centre when it predicts none."""
+        pts = []
+        for a in self.actions:
+            pred, _ = self.models[a].predict(frame)
+            if pred is not None:
+                pt = locus_of_change(frame, pred)
+                if pt is not None:
+                    pts.append(pt)
+        if not pts:
+            return (frame.shape[0] // 2, frame.shape[1] // 2)
+        return tuple(int(round(float(v))) for v in np.mean(pts, axis=0))
+
+    def imagine(self, frame):
+        """§18: thinking as acting. A thought is one expansion of an imagined frame by the world model. Imagined paths
+        from the real frame are enumerated in order of their DESCRIPTION LENGTH under the strategy (`PolicyRule.bits`,
+        summed along the path): the cheapest-to-describe unexplored path is expanded first -- Levin search with a
+        learned prior. With nothing learned every action costs the same and the order is breadth-first; with a
+        strategy the confident actions cost nothing and the enumeration runs straight down them. A frame already
+        reached by a cheaper path is not expanded again (a frame already imagined is worth nothing: E27's price of
+        ignorance at the level of thoughts); an action the goal model predicts to kill is never imagined; one it
+        predicts to win completes a path. The batch ends at `n_successes` successes or at the budget of model calls
+        (`max_nodes`, the number the breadth-first search had). The shortest success is the plan, and its steps are
+        counted into the strategy (hindsight on imagination). No success: None -- imagination cannot learn the world."""
+        budget = self.max_nodes
+        calls = thoughts = 0
+        successes, first = [], None
+        loc0 = self.locus(frame)
+        calls += len(self.actions)
         start_key = self.frame_key(frame)
-        seen = {start_key: []}
-        frontier = deque([(frame, [])])
-        nodes = 0
-        while frontier and nodes < self.max_nodes:
-            f, path = frontier.popleft()
-            if len(path) >= self.max_depth:
-                continue
+        seen = {start_key}
+        frontier = [(0.0, 0, frame, loc0, [], [])]                      # (bits, tie, frame, locus, path, contexts)
+        tie = 1
+        while frontier and calls < budget and len(successes) < self.n_successes:
+            bits, _t, img, loc, path, contexts = heapq.heappop(frontier)
+            thoughts += 1
+            w = self.policy.context(img, loc)
+            options = []
             for a in self.actions:
-                nodes += 1
-                if self.goal.predicts("death", a, f):
+                if self.goal.predicts("death", a, img):
                     continue
-                if self.goal.predicts("win", a, f):
-                    return path + [a], "goal"
-                pred, unknown = self.predict(a, f)
-                if pred is None:
+                if self.goal.predicts("win", a, img):
+                    successes.append((path + [a], contexts + [w]))
+                    if first is None:
+                        first = calls
+                    options = None
+                    break
+                nxt, _unknown = self.predict(a, img)
+                calls += 1
+                if nxt is None:
                     continue
-                k = self.frame_key(pred)
-                if k in seen:
-                    continue
-                seen[k] = path + [a]
-                frontier.append((pred, path + [a]))
-        return None, None
+                k = self.frame_key(nxt)
+                if k not in seen:
+                    options.append((a, nxt, k))
+            if not options:
+                continue
+            cost = self.policy.bits(w, len(options))
+            for a, nxt, k in options:
+                seen.add(k)
+                heapq.heappush(frontier, (bits + float(cost[self.actions.index(a)]), tie, nxt, locus_of_change(img, nxt) or loc,
+                                          path + [a], contexts + [w]))
+                tie += 1
+        self.stats["calls"] += calls
+        self.stats["thoughts"] += thoughts
+        if not successes:
+            self.last_think = dict(calls=calls, thoughts=thoughts, successes=0, first=None, shortest=None)
+            return None, None
+        path, contexts = min(successes, key=lambda s: len(s[0]))
+        if self.strategy:
+            for w, a in zip(contexts, path):
+                self.policy.observe(w, self.actions.index(a))
+        self.last_think = dict(calls=calls, thoughts=thoughts, successes=len(successes), first=first, shortest=len(path),
+                               longest=max(len(s[0]) for s in successes))
+        return path, "goal"
 
     def explore(self, frame):
         """E27: exploration as the price of ignorance over the whole reachable set the model can predict. Every
@@ -370,14 +593,17 @@ class Player:
         return best[0], "explore"                                        # plan is taken even at a negative value
 
     def choose(self, frame):
+        self.last_think = None
         if self.plan:
             a = self.plan.pop(0)
             self.expect_win = (not self.plan) and self.expect_win_at_end
             self.last_choice = dict(kind="continuing", plan=[a.name] + [x.name for x in self.plan])
             return a
-        plan, kind = self.search(frame, want_goal=self.goal.known())
+        plan, kind = None, None
+        if self.goal.known():
+            plan, kind = self.imagine(frame)
         if plan is None:
-            plan, kind = self.search(frame, want_goal=False)
+            plan, kind = self.explore(frame)
         if plan is None:                                             # nothing known and nothing new: any action
             plan, kind = [self.actions[len(self.visited) % len(self.actions)]], "blind"
         self.stats["goal_plans" if kind == "goal" else "explore_plans"] += 1
@@ -397,12 +623,14 @@ def crop_box(frame):
     return (max(0, i0 - m), max(0, j0 - m), min(frame.shape[0], i1 + 1 + m), min(frame.shape[1], j1 + 1 + m))
 
 
-def play(env, budget_per_level=200, max_levels=None, seed=0, verbose=False, sleep=False, trace=None, return_player=False):
-    """`trace`, if a list, receives one record per step: what the player saw, chose, expected and got."""
-    """Drive one Environment with a Player. Returns per-level results and the player's statistics."""
+def play(env, budget_per_level=200, max_levels=None, seed=0, verbose=False, sleep=False, trace=None, return_player=False,
+         strategy=True, max_depth=14, max_nodes=4000):
+    """Drive one Environment with a Player. Returns per-level results and the player's statistics. `trace`, if a list,
+    receives one record per step: what the player saw, chose, expected and got."""
     fd = env.reset()
     actions = [a for a in env.game.available_actions()]
-    player = Player(actions)
+    player = Player(actions, max_depth=max_depth, max_nodes=max_nodes, strategy=strategy, seed=seed)
+    think_log = []                                                       # this level's thinking, one entry per fresh plan
     results = []
     level = env.level
     used = 0
@@ -410,8 +638,11 @@ def play(env, budget_per_level=200, max_levels=None, seed=0, verbose=False, slee
     n_levels = env.game.level_count if max_levels is None else min(max_levels, env.game.level_count)
     while env.state not in (GameState.WIN,) and level < n_levels:
         frame = np.array(fd.grid, dtype=np.int16)[box[0]:box[2], box[1]:box[3]]
-        player.remaining = max(1, budget_per_level - used)
+        budget = budget_per_level[level] if isinstance(budget_per_level, (list, tuple)) else budget_per_level
+        player.remaining = max(1, budget - used)
         a = player.choose(frame)
+        if player.last_think is not None:
+            think_log.append(player.last_think)
         pred, _unknown = player.predict(a, frame)
         rec = None
         if trace is not None:
@@ -427,13 +658,17 @@ def play(env, budget_per_level=200, max_levels=None, seed=0, verbose=False, slee
                 rec["outcome"] = "win"
             guess = pred if pred is not None else frame                    # the next frame is another level, so the
             player.observe(a, frame, guess, "win")                          # changed cells are the model's prediction
-            results.append(dict(level=level, solved=True, actions=used))
+            results.append(dict(level=level, solved=True, actions=used, think=think_log))
+            think_log = []
             if verbose:
                 print(f"   level {level} solved in {used} actions")
             if sleep:                                                          # the checkpoint: sleep before the next level
                 rep = player.sleep()
                 results[-1]["sleep"] = {a: {str(r): dict(bits_before=round(b, 1), bits_after=round(af, 1), cells=c)
                                             for r, (b, af, c) in rr.items()} for a, rr in rep.items()}
+                b, af, k = player.last_policy_sleep
+                results[-1]["sleep_policy"] = dict(bits_before=round(b, 1), bits_after=round(af, 1), features=k,
+                                                   contexts=len(player.policy.table))
             level, used = env.level, 0
             player.plan, player.visited, player.trans = [], set(), {}
             if env.state != GameState.WIN:
@@ -466,8 +701,8 @@ def play(env, budget_per_level=200, max_levels=None, seed=0, verbose=False, slee
             if not np.array_equal(pred, after):
                 player.plan = []
                 player.stats["replans"] += 1
-        if used >= budget_per_level:
-            results.append(dict(level=level, solved=False, actions=used))
+        if used >= budget:
+            results.append(dict(level=level, solved=False, actions=used, think=think_log))
             if verbose:
                 print(f"   level {level} NOT solved in {used} actions")
             break
