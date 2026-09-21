@@ -170,11 +170,14 @@ class Attn(nn.Module):
                 theta[:n_zero] = 0.0                      # pure content match has a home that does not depend on distance
             self.register_buffer("theta", theta, persistent=False)
 
-    def forward(self, x):
+    def forward(self, x, cache=None, start=0):
+        """`cache` (a dict) and `start` make this an incremental forward: the new positions start..start+T-1 attend to the
+        cached keys/values of all earlier positions and to each other causally; the cache is extended. Positions enter
+        RoPE/PoPE as absolute indices, so a cached prefix and a fresh full pass agree exactly (E31)."""
         B, T, C = x.shape
         q, k, v = self.qkv(x).chunk(3, dim=-1)
         q, k, v = (z.view(B, T, self.h, self.hd).transpose(1, 2) for z in (q, k, v))
-        t = torch.arange(T, device=x.device, dtype=torch.float32)[:, None]
+        t = torch.arange(start, start + T, device=x.device, dtype=torch.float32)[:, None]
         if self.pos == "rope":
             ang = t * self.theta                                              # (T, hd/2)
             cos, sin = ang.cos()[None, None], ang.sin()[None, None]
@@ -194,7 +197,16 @@ class Attn(nn.Module):
         # every block of every step (3 blocks x 3200 steps = ~9600 allocations of each), which is pure overhead for a model
         # this small. `scale` is passed explicitly because PoPE doubles the query width to 2*hd and SDPA would otherwise
         # rescale by the wrong dimension, silently changing the attention temperature between schemes.
-        y = F.scaled_dot_product_attention(q, k, v, is_causal=self.causal, scale=1.0 / math.sqrt(self.hd))
+        if cache is None:
+            y = F.scaled_dot_product_attention(q, k, v, is_causal=self.causal, scale=1.0 / math.sqrt(self.hd))
+        else:
+            if "k" in cache:
+                k, v = torch.cat([cache["k"], k], dim=2), torch.cat([cache["v"], v], dim=2)
+            cache["k"], cache["v"] = k, v
+            S = k.shape[2]
+            qpos = torch.arange(start, start + T, device=x.device)[:, None]
+            kpos = torch.arange(S, device=x.device)[None, :]
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=(kpos <= qpos), scale=1.0 / math.sqrt(self.hd))
         return self.proj(y.transpose(1, 2).reshape(B, T, C))
 
 
@@ -209,13 +221,14 @@ class AttnRes(nn.Module):
         super().__init__()
         self.w = nn.Parameter(torch.zeros(d_model))
         self.norm = nn.RMSNorm(d_model)
-        self.record, self.last = False, None
+        self.record, self.last, self.log = False, None, []
 
     def forward(self, sources):
         v = torch.stack(sources)                                      # (n_sources, B, T, d)
         a = torch.einsum("d,nbtd->nbt", self.w.to(v.dtype), self.norm(v)).softmax(0)
         if self.record:
             self.last = a.detach().float().mean(dim=(1, 2))
+            self.log.append(self.last)                                # one entry per call: a tied mixer logs every pass
         return torch.einsum("nbt,nbtd->btd", a, v)
 
 
@@ -228,8 +241,8 @@ class Block(nn.Module):
         if res != "std":                                              # one mixer before each sub-layer, as in the paper
             self.res_attn, self.res_mlp = AttnRes(d_model), AttnRes(d_model)
 
-    def forward(self, x):
-        x = x + self.attn(self.n1(x))
+    def forward(self, x, cache=None, start=0):
+        x = x + self.attn(self.n1(x), cache, start)
         return x + self.mlp(self.n2(x))
 
 
@@ -252,30 +265,42 @@ class Model(nn.Module):
             self.res_final = AttnRes(d_model)                         # the output aggregates all block representations
 
     def forward(self, tok):
+        return self.head(self.norm(self.forward_embedded(self.embed(tok))))
+
+    def embed(self, tok, start=0):
         h = self.emb(tok)
         if self.pos is not None:
-            h = h + self.pos[:, :tok.shape[1]]                        # rope/pope inject position inside attention instead
+            h = h + self.pos[:, start:start + tok.shape[1]]           # rope/pope inject position inside attention instead
+        return h
+
+    def new_caches(self):
+        return [{} for _ in self.blocks]
+
+    def forward_embedded(self, h, caches=None, start=0):
+        """The blocks on already-embedded inputs; returns the final residual (before the output norm and head). With
+        `caches` (one dict per block, from `new_caches`) the call is incremental from position `start` (E31)."""
+        cs = caches if caches is not None else [None] * len(self.blocks)
         if self.res == "std":
-            for b in self.blocks:
-                h = b(h)
+            for b, c in zip(self.blocks, cs):
+                h = b(h, c, start)
         elif self.res == "attnres":
             blocks, partial = [], h                                   # b0 = the embedding, appended at the first boundary
-            for b in self.blocks:
+            for b, c in zip(self.blocks, cs):
                 x = b.res_attn(blocks + [partial])
                 blocks.append(partial)                                # block boundary: the finished sum becomes a source
-                partial = b.attn(b.n1(x))                             # a block's sum holds OUTPUTS only, not its input
+                partial = b.attn(b.n1(x), c, start)                   # a block's sum holds OUTPUTS only, not its input
                 x = b.res_mlp(blocks + [partial])
                 partial = partial + b.mlp(b.n2(x))
             h = self.res_final(blocks + [partial])
         else:                                                         # attnres_full
             src = [h]
-            for b in self.blocks:
+            for b, c in zip(self.blocks, cs):
                 x = b.res_attn(src)
-                src.append(b.attn(b.n1(x)))
+                src.append(b.attn(b.n1(x), c, start))
                 x = b.res_mlp(src)
                 src.append(b.mlp(b.n2(x)))
             h = self.res_final(src)
-        return self.head(self.norm(h))
+        return h
 
     @torch.no_grad()
     def routes(self, tok):
@@ -299,7 +324,7 @@ class LoopedModel(nn.Module):
     raised during training (model growth); untied growth copies core j % previous into the new cores."""
 
     def __init__(self, d_model=96, n_head=4, max_len=256, pos="rope", n_vocab=V, loops=4, tied=True, n_prelude=1, n_coda=1,
-                 alpha=1.0, res="std", n_zero=0):
+                 alpha=1.0, res="std", n_zero=0, mix="tied", window=0):
         super().__init__()
         self.emb = nn.Embedding(n_vocab, d_model)
         self.pos = nn.Parameter(torch.randn(1, max_len, d_model) * 0.02) if pos == "learned" else None
@@ -310,16 +335,40 @@ class LoopedModel(nn.Module):
         self.head = nn.Linear(d_model, n_vocab)
         self.alpha = nn.Parameter(torch.tensor(float(alpha)))
         self.loops, self.tied, self.active_k = loops, tied, loops
+        # E30 (DESIGN §18): attention residuals ACROSS PASSES. The sources at pass k are the anchor (the prelude's output)
+        # and the sums of passes 1..k-1 (the paper's Block form: a pass's sum holds its outputs only); the mixers read
+        # them with a learned query, softmax over sources, RMSNorm on the keys, raw sources as values. `mix`: "tied" = one
+        # mixer per sub-layer shared by every pass (routing by content); "per_pass" = one query per pass. `window` = m > 0
+        # keeps only the anchor and the last m pass sums, so the pass is a function of a fixed-size state (what a fixed
+        # point and a convergence test need); m = 1 is the fixed boundary operator's source set. The fixed operator
+        # (res="std") is the special case: norm(last pass) + alpha * anchor.
+        self.res, self.mix, self.window = res, mix, window
+        if res == "attnres":
+            n_mix = 1 if mix == "tied" else loops
+            self.mix_attn = nn.ModuleList([AttnRes(d_model) for _ in range(n_mix)])
+            self.mix_mlp = nn.ModuleList([AttnRes(d_model) for _ in range(n_mix)])
+            self.res_final = AttnRes(d_model)
 
     def grow(self, new_k):
-        """Model growth: run more passes from now on; untied cores are copy-initialised from the trained ones."""
+        """Model growth: run more passes from now on; untied cores (and per-pass mixers) are copy-initialised from the
+        trained ones."""
+        prev = self.active_k
         if not self.tied:
-            prev = self.active_k
             for j in range(prev, new_k):
                 src, dst = self.cores[j % prev], self.cores[j]
                 for ps, pd in zip(src.parameters(), dst.parameters()):
                     pd.data.copy_(ps.data)
+        if self.res == "attnres" and self.mix == "per_pass":
+            for mixers in (self.mix_attn, self.mix_mlp):
+                for j in range(prev, new_k):
+                    mixers[j].w.data.copy_(mixers[j % prev].w.data)
         self.active_k = new_k
+
+    def _sources(self, anchor, sums):
+        return [anchor] + (sums[-self.window:] if self.window > 0 else sums)
+
+    def _mixer(self, mixers, k):
+        return mixers[0] if self.mix == "tied" else mixers[k % len(mixers)]
 
     def forward(self, tok):
         h = self.emb(tok)
@@ -328,13 +377,38 @@ class LoopedModel(nn.Module):
         for b in self.prelude:
             h = b(h)
         anchor = h
-        for k in range(self.active_k):
-            core = self.cores[0] if self.tied else self.cores[k]
-            h = core(h)
-            h = F.rms_norm(h, (h.shape[-1],)) + self.alpha * anchor      # the boundary operator, every pass
+        if self.res == "std":
+            for k in range(self.active_k):
+                core = self.cores[0] if self.tied else self.cores[k]
+                h = core(h)
+                h = F.rms_norm(h, (h.shape[-1],)) + self.alpha * anchor  # the boundary operator, every pass
+        else:                                                         # attention residuals across passes (E30)
+            sums, partial = [], anchor
+            for k in range(self.active_k):
+                core = self.cores[0] if self.tied else self.cores[k % len(self.cores)]
+                x = self._mixer(self.mix_attn, k)(self._sources(anchor, sums))
+                partial = core.attn(core.n1(x))
+                x = self._mixer(self.mix_mlp, k)(self._sources(anchor, sums) + [partial])
+                partial = partial + core.mlp(core.n2(x))
+                sums.append(partial)                                  # the pass's sum: its outputs only
+            h = self.res_final(self._sources(anchor, sums))
         for b in self.coda:
             h = b(h)
         return self.head(self.norm(h))
+
+    @torch.no_grad()
+    def routes(self, tok):
+        """The learned wiring across passes: for each mixer, the mean weight per source at every pass it was called on
+        (sources = [anchor, pass 1, pass 2, ...] within the window; the MLP mixer also sees the pass's own attention)."""
+        if self.res != "attnres":
+            return None
+        mixers = [(n, m) for n, m in self.named_modules() if isinstance(m, AttnRes)]
+        for _n, m in mixers:
+            m.record, m.log = True, []
+        self(tok)
+        for _n, m in mixers:
+            m.record = False
+        return {n: [[round(float(a), 3) for a in call] for call in m.log] for n, m in mixers}
 
 
 def out_mask(K, dev):
@@ -435,6 +509,11 @@ def main():
     p.add_argument("--loops", type=int, default=4, help="loop: core passes (final count if growing)")
     p.add_argument("--untied", type=int, default=0, help="loop: 1 = distinct core weights per pass")
     p.add_argument("--grow_at", type=float, default=0.0, help="loop: fraction of training at which passes double to --loops (0 = no growth)")
+    p.add_argument("--loop_res", default="std", choices=["std", "attnres"],
+                   help="loop: std = the fixed boundary operator; attnres = attention residuals across passes (E30)")
+    p.add_argument("--mix", default="tied", choices=["tied", "per_pass"], help="loop+attnres: mixers shared by every pass, or one query per pass")
+    p.add_argument("--window", type=int, default=0, help="loop+attnres: keep the anchor + the last m pass sums as sources (0 = all)")
+    p.add_argument("--extrap", type=int, default=2, help="loop: also evaluate at this multiple of the trained passes (0 = skip)")
     p.add_argument("--json", default="", help="also write the headline numbers (and the learned routes) to this file")
     p.add_argument("--save", default="", help="save the trained model's state_dict here (for the E8b Jacobian analysis)")
     args = p.parse_args()
@@ -443,12 +522,13 @@ def main():
 
     train, test, probs, weights = build_tasks(args.seed)
     print(f"device {dev} | pos={args.pos} n_zero={args.n_zero} res={args.res}"
-          + (f" loops={args.loops} untied={args.untied} grow_at={args.grow_at}" if args.res == "loop" else "")
+          + (f" loops={args.loops} untied={args.untied} grow_at={args.grow_at} loop_res={args.loop_res} mix={args.mix} window={args.window}" if args.res == "loop" else "")
           + f" opt={args.opt} | {len(train)} trained, {len(test)} held out | K={args.k} steps={args.steps}")
     print("primitive training weight: " + ", ".join(f"{n}={w:.3f}" for n, w in zip(NAMES, weights.tolist())))
 
     if args.res == "loop":
-        model = LoopedModel(max_len=args.k * 2 * L + 2, pos=args.pos, loops=args.loops, tied=not args.untied, n_zero=args.n_zero).to(dev)
+        model = LoopedModel(max_len=args.k * 2 * L + 2, pos=args.pos, loops=args.loops, tied=not args.untied, n_zero=args.n_zero,
+                            res=args.loop_res, mix=args.mix, window=args.window).to(dev)
         if args.grow_at > 0:
             model.active_k = max(1, args.loops // 2)
     else:
@@ -546,20 +626,40 @@ def main():
         print("LID predicts a POSITIVE correlation: less familiar parts => more trials, global novelty constant.")
         print("A correlation near zero says local familiarity is NOT what governs acquisition speed here.")
 
+    extrap = None
+    if args.res == "loop" and args.extrap and args.extrap > 1:
+        # E30: the same model run at more passes than it was trained with -- does the recurrence extrapolate?
+        k0 = model.active_k
+        model.active_k = k0 * args.extrap
+        ex_seen = trials_to_criterion(model, train, dev, args.k, args.crit, n=256)
+        ex_rows = trials_to_criterion(model, test, dev, args.k, args.crit)
+        model.active_k = k0
+        extrap = dict(passes=k0 * args.extrap, trained_mean_acc=sum(r[2] for r in ex_seen) / len(ex_seen),
+                      trained_solved=sum(1 for r in ex_seen if r[1] < args.k),
+                      held_mean_acc=sum(r[2] for r in ex_rows) / len(ex_rows), held_solved=sum(1 for r in ex_rows if r[1] < args.k))
+        print(f"\nEXTRAPOLATION to {extrap['passes']} passes (trained with {k0}): trained acc {extrap['trained_mean_acc']:.2f} "
+              f"({extrap['trained_solved']}/{len(ex_seen)} solved), held-out acc {extrap['held_mean_acc']:.2f} ({extrap['held_solved']}/{len(ex_rows)})")
     if args.json:
         routes = None
-        if args.res in ("attnres", "attnres_full"):
+        if args.res in ("attnres", "attnres_full") or (args.res == "loop" and args.loop_res == "attnres"):
             tok, _ = make_batch(64, args.k, train, probs, dev, g)
             routes = model.routes(tok)
-            print("\nLEARNED ROUTES (mean attention-residual weight per source; sources = [embedding, block 1, block 2, ...])")
-            for name, a in routes.items():
-                print(f"   {name:<22} " + " ".join(f"{x:.2f}" for x in a))
+            if args.res == "loop":
+                print("\nLEARNED ROUTES ACROSS PASSES (mean weight per source at each call; sources = [anchor, pass 1, pass 2, ...])")
+                for name, calls in routes.items():
+                    for k, a in enumerate(calls):
+                        print(f"   {name:<22} call {k}: " + " ".join(f"{x:.2f}" for x in a))
+            else:
+                print("\nLEARNED ROUTES (mean attention-residual weight per source; sources = [embedding, block 1, block 2, ...])")
+                for name, a in routes.items():
+                    print(f"   {name:<22} " + " ".join(f"{x:.2f}" for x in a))
         import json
         json.dump(dict(pos=args.pos, n_zero=args.n_zero, res=args.res, steps=args.steps, seed=args.seed,
+                       loops=args.loops, untied=args.untied, grow_at=args.grow_at, loop_res=args.loop_res, mix=args.mix, window=args.window,
                        trained_solved=len(solved), n_trained=len(seen),
                        trained_mean_acc=sum(r[2] for r in seen) / len(seen),
                        held_solved=sum(1 for y in ys if y < args.k), n_held=len(ys), held_mean_acc=sum(accs) / len(accs),
-                       held_trials=ys, routes=routes, train_loss=loss.item()), open(args.json, "w"), indent=1)
+                       held_trials=ys, routes=routes, extrap=extrap, train_loss=loss.item()), open(args.json, "w"), indent=1)
 
 
 if __name__ == "__main__":

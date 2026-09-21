@@ -107,9 +107,11 @@ concentrations appear — learned skip connections. Pre-MLP mixes are sharper an
   of read and write subspaces (what `inner_objective/inspect_weights.py` had to do).
 - With sharp routing, a layer's input is a *chosen* earlier output — DESIGN §6's pinned interface becomes literal, and
   running a layer backwards gives a clean target for the layer it read from.
-- In the ZipLearner-*written* network the route is a **fixed choice per layer**, priced at log₂(number of sources) bits
-  and chosen by description length (try each source as the layer's input, keep the cheapest); the per-token softmax is
-  for the gradient-trained comparison arm only.
+- ~~In the ZipLearner-*written* network the route is a **fixed choice per layer**, priced at log₂(number of sources) bits~~
+  WITHDRAWN 2026-09-21 (re-read, §5.3 and Fig. 8): the paper's own ablation puts a fixed route (DenseFormer 1.767; learned
+  scalars without query/key 1.749) at or near the baseline — the gain is content-dependent selection. The written route
+  is therefore a pseudo-query over content: in our block, over the token-class and state flags, i.e. a hard per-token
+  branch priced as a small table over those flags (DESIGN §15, "What the attention residuals learn").
 - The paper's "block" (a unit whose summed output can be selected) and DESIGN §9's "block" (rows for one context) are
   the same object seen from two sides: a selectable output per block is the substrate "context selects the block" needs.
 - Cautions the ablations give us: keep the RMSNorm on keys (magnitude differences between sources otherwise bias the

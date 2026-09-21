@@ -624,6 +624,41 @@ What is *not* decided: whether the gradient arm's per-token softmax routing or t
 the right comparison when both exist; E2 will run the written network, E0 the gradient arm, and the two are reported
 side by side, not merged.
 
+**What the attention residuals learn, and what that means for the written route (paper re-read 2026-09-21; asked by
+the user).** The paper's ablations on its 16-layer model (validation loss): a fixed per-layer scalar route over all
+earlier layers (DenseFormer) 1.767 = the baseline 1.766; its own mix with the query and key removed and learned scalars
+instead 1.749; full AttnRes with the content keys 1.737; a sliding window over the last 8 layers 1.764. So a route that
+does not depend on the token's content is worth nothing, and what is worth something is selective, content-dependent
+access to DISTANT layers. What the trained routes look like (their Fig. 8): "each layer attends most strongly to its
+immediate predecessor, yet selective off-diagonal concentrations emerge … indicating learned skip connections"; "the
+embedding h₁ retains non-trivial weight throughout, especially in pre-attention layers"; pre-MLP mixes sharper and
+local, pre-attention mixes broader; and (§6.2) "depth-wise attention sinks, where certain layers consistently attract
+high weight regardless of input". Their frame (§6.1): the standard residual is a linear recurrence over depth; AttnRes
+is softmax attention over depth, "just as Transformers replaced temporal recurrence with self-attention".
+Consequences here. (1) The earlier note that the written route is "a fixed choice per layer priced at log₂(sources)"
+is withdrawn: a fixed choice is what the ablation shows to be worthless. The written route is a pseudo-query over
+CONTENT — in our block the content that should decide a route is explicit (the token-class flags cell / entry / null,
+and state flags such as "the lookup found an entry"), so a written query on those dims is a hard, per-token route: a
+branch, which is also how Giannou et al. get conditional branching; its price is a small table over the flags. (2) The
+paper's sink layer is our anchor: kept as a source at every pass. (3) The structure to expect from a trained loop, and
+so the shape to write, is local + anchor + a few skips; E30 measures it across passes (its first attention-residual
+cell: the pre-attention mixer reads the last pass at 0.78–0.89 with a decaying tail to earlier passes and the anchor
+fading from 1.00 to 0.01; the pre-MLP mixer keeps 0.23 on the previous pass and ~0.1 on each older one beside 0.46 on
+the current attention — an Anderson-like blend of iterates; the final mixer 0.79 on the last pass, 0.14 on the one
+before). (4) Attention weights in a frontier model, for the same question (from memory of Olsson et al. 2022, Elhage
+et al. 2021, Wang et al. 2022, Geva et al. 2021, Todd et al. 2023): attention is the ROUTING — previous-token and
+induction heads, retrieval heads, binding/name-mover heads, function-vector heads that identify the task in context —
+while knowledge sits mostly in the MLPs as key-value memories; the clean algorithmic heads are few, composed across
+layers (Q/K-composition), and gradient descent finds them in phase transitions. In ZipLearner's terms a head is a
+PREDICATE on earlier positions (relative offset; same content; a class flag → q/k) and a TRANSFORM of what is copied
+(→ v/o); predicates are already learned as position structures (`PositionPerm`/`PositionMap`, E9–E12) and transforms
+as content structures, and E28's gather head / E18's induction head are what two of them compile to. So "ZipLearner
+writes attention weights" means: the head KINDS are the instruction set, a small library of predicate/transform pairs
+with written weight templates; ZipLearner chooses which instances exist by description length (the sleep pass does
+this for offsets), writes the programs they execute, and mints a new kind only when no program in the existing set
+compresses the data (§7's bet). Not designed: the minting, and the compiler from a learned predicate to q/k phases in
+general (E18 did one case by hand).
+
 **Recurrence scheme — DECIDED in outline 2026-09-21, the cells in E30/E31 (§18).** Two recurrences: depth (the core
 looped over the same positions, `LoopedModel`, E26) and sequence (Coconut's continuous thoughts: a position's final
 state as the next position's input). One boundary operator for both axes: normalise the carried state, re-inject the
