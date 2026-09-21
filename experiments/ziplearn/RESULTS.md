@@ -27,6 +27,7 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E12 | PASS | commutativity found from learned maps; abelian planner 8.9 bits vs a 112-word table of 1190 bits |
 | E13 | analysis | the replica games: interface complete, 5/16 levels by discovery; goal transfer on MultiKey; failures named |
 | E15 | PASS | budget: price forgets the least valuable, keeps the best-evidenced (0.84 vs FIFO 0.52); precision step ∝ 1/√n |
+| E14 | mechanism confirmed | order matters exactly as much as earlier compression is reused: gap 28 bits by name, 185 by words, 1193 for the transformer |
 
 ## Format
 
@@ -475,3 +476,31 @@ verdict: PASS on both. A's fine print: the kept rules B, C, D retain 0.80–0.82
          uniform quantisation error — and `precision_bits` now says so (½·log₂n + log₂(span/σ) − ½·log₂12).
 changed: §8 changes 2 and 3 and §9 rule 3 are BUILT in their first form. The "annealing" reading of §8 (raise λ
          gradually so structures crystallise) is not built: the budget here is a hard cap enforced after each stretch.
+
+### 2026-09-20 — E14 — the price of a collection is order-independent when reuse is by name, strongly order-dependent when reuse is compositional, and order-dependent through forgetting in the transformer (REFUTED on the letter; the hypothesis confirmed in its mechanism)
+command: `python experiments/ziplearn/e14.py`, `... --words 1`, `python experiments/ziplearn/e14b.py` (25 compositions once each in 10 orders; the transformer 100 steps per task in 4 orders; CPU seconds + GPU 2 min)
+files:   `experiments/ziplearn/runs/e14/e14.json`, `e14_words.json`, `e14b.json`; code `e14.py`, `e14b.py`; `TwoLayerWithWords.solved_pi` added
+numbers: ZipLearner, reuse by NAME only (E3's rule): total bits parts-first 758, wholes-first
+         735, eight random orders 730–747
+         (spread 2.3%); the same 5 items named in every order; the frozen re-pass 544 bits in
+         every order; curriculum gap 28 bits (3.8%). ZipLearner with WORDS (E8's compositional reuse): parts-first
+         **532**, wholes-first **716**, random 552–692 (spread
+         **22.5%**); 3 or 4 items named depending on the order but the group they generate is the same, so the
+         frozen re-pass is 337 bits in every order; curriculum gap **185 bits (35% of the best)**. The
+         transformer, prequential bits over the stream: parts-first 3990, wholes-first 3386,
+         random 4579 and 4529 (gap 35%); final bits per digit on all 25 tasks 4.5–9.6,
+         all far above the 2.3 of guessing: it keeps the last tasks and is confidently wrong on the rest (E6b).
+verdict: REFUTED on the letter for the name-only learner (totals agree within 2.3%; parts-first is even the most
+         expensive, by a few naming bits, since a full library charges log₂5 per use) and INCONCLUSIVE for the words
+         learner (three of four clauses: parts-first cheapest, spread 22.5%, libraries differ; the frozen re-pass does
+         not differ, because what the orders change is which items get named, not the group they generate). In
+         substance the hypothesis is confirmed with its mechanism exposed: **order matters exactly to the extent that
+         earlier compression is reused to compress later information.** Naming alone ends in the same library
+         whatever the order and the totals barely move; let products be words in named parts and parts-first is 26%
+         cheaper than wholes-first, because a whole met before its parts pays full price. The transformer's 35% gap
+         is a different thing — forgetting, not building — and its final model is worse than guessing in every order.
+changed: the curriculum gap is now a defined, measured quantity: worst minus best total over orders, zero for an
+         ideal compressor, 28 bits for naming, 185 for words, 1193 (of ~3400) for the gradient learner. §8 change 3 gets
+         its stated consequence: "how much knowledge fits" has an answer per curriculum, and the best curriculum is
+         parts first. Not built: letting the learner *choose* the order (ask for the parts) — the outer objective's
+         exploration of §16 applied to what to learn next.

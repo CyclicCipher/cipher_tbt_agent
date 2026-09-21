@@ -749,6 +749,14 @@ class TwoLayerWithWords(TwoLayer):
                     best, best_price = (name, ab, pos), key
         return best
 
+    def solved_pi(self):
+        _n, _ab, pos = self.best()
+        if isinstance(pos, PositionPerm) and not pos.dead and all(pos.pi(j) is not None for j in range(self.L)):
+            return tuple(pos.pi(j) for j in range(self.L))
+        if isinstance(pos, NamedPerm):
+            return pos._pi
+        return None
+
 
 def consolidate(layer):
     """Rule 3's merge as a description (DESIGN §9): blocks of the SAME structure kind become one template -- the

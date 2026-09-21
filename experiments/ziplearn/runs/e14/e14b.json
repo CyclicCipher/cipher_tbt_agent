@@ -1,0 +1,22 @@
+{
+ "parts first": {
+  "prequential": 3989.5984409102975,
+  "final_bits": 5.594804747104645,
+  "seconds": 28.401000261306763
+ },
+ "wholes first": {
+  "prequential": 3386.4366313404935,
+  "final_bits": 4.523422524929047,
+  "seconds": 28.513240098953247
+ },
+ "random 0": {
+  "prequential": 4579.417068581242,
+  "final_bits": 9.582358980178833,
+  "seconds": 29.313119649887085
+ },
+ "random 1": {
+  "prequential": 4529.130842840558,
+  "final_bits": 7.301060175299645,
+  "seconds": 30.003114938735962
+ }
+}
