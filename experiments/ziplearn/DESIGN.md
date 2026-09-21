@@ -662,6 +662,30 @@ verdict: PASS on the letter (≥ 95% reached at k = 3 with plans no longer than 
 changed: §16's first form is BUILT for the case of a small map and bijective actions. OPEN-10 (caching when the map
          is large) and OPEN-11 (acting to learn) are untouched; OPEN-11 now has its currency.
 
+### 2026-09-20 — E10 — acting to learn: myopic plan-bit value does not explore (REFUTED); the same value counted over the goals still to come does (PASS, by a margin inside stream noise)
+command: `python experiments/ziplearn/e10.py --streams 5 --goals 40` (E9's environment; 4 actions known at start, 3 never seen; up to 2 tries per goal; 6-step budget; CPU, ~6 min, run detached)
+files:   `experiments/ziplearn/runs/e10/e10.json`, `full.log`; code `e10.py`
+numbers: goals reached / mean steps to goal (failures = 6) / goals until all seven actions are described / tries spent —
+         none 0.620 / 3.56 / never / 0;  random 0.850 / 4.50 / 13.2 / 77.8;  least observed (2 tries every goal) 0.830 /
+         4.62 / 4.6 / 76.6;  least observed until all are known 0.910 / 2.30 / 3.6 / 6.6;  **price, this goal only
+         0.705 / 3.17 / never / 2.6**;  **price, horizon 0.955 / 2.17 / 8.4 / 7.4**. (A 3-stream × 30-goal run beforehand:
+         price-horizon 0.878 / 2.56 against until-known 0.933 / 2.23 — the ordering of those two flips between runs.)
+verdict: "price (this goal)" — the pre-registered policy — is REFUTED: the expected saving of a never-seen action on
+         the goal in front of it, over random-permutation hypotheses, almost never exceeds the try's own 2.8 bits, so it
+         tries 2–3 times in 40 goals and never learns the three unknown actions. "price (horizon)" PASSES the letter
+         (more goals and fewer steps than random, than fixed-budget novelty and than novelty-with-a-stopping-rule) —
+         but the margin over novelty-with-stopping (0.045 goals, 0.13 steps) is inside the run-to-run noise at 5
+         streams, and I report it as a tie in substance. The robust findings: (1) a description is an ASSET — its
+         value is its per-plan saving times the plans that will use it, and counting only the current plan makes an
+         agent that will not learn; (2) in a world where every unknown action is useful, "try what you do not know,
+         then stop" is as good as any price, and the price only earns its keep where trying is expensive or some
+         actions are useless or noisy — that is the discriminating test, not this one.
+changed: OPEN-11 keeps its currency (plan bits) with one correction: multiplied by the horizon. Also found in
+         passing: an action never observed must be treated as having NO description, not the cheapest one — the
+         first run described never-seen actions as the identity (zero evidence, zero cost) and planned as if they did
+         nothing. Next test, not built: E10b with useless (no-op) and noisy (undescribable) actions, where the price
+         should stop trying what the rate price has shown to be noise and novelty-with-stopping cannot.
+
 ## 14. Glossary
 
 - **bits** — the unit of price; log₂11 ≈ 3.46 bits is the cost of naming one digit out of eleven with no information.
@@ -758,7 +782,7 @@ price worse than random.
 
 **OPEN-10** — when the map is too large to search: what to cache (a cost-to-go per state, or per description?), and
 whether the cache is itself a written structure. **OPEN-11** — acting to learn: the price of trying an unknown
-action against the bits its description would save. **OPEN-12** — goals that are relations, not states ("make the
+action against the bits its description would save. *E10: the saving must be counted over the goals still to come (a description is an asset); the myopic version does not explore. Discriminating test still to run: useless and noisy actions (E10b).* **OPEN-12** — goals that are relations, not states ("make the
 output the reverse of the input"), and goals over the library ("find a shorter word").
 
 **E9 — planning in the written map (pre-registered).** The composition domain's seven primitives as the actions of an
