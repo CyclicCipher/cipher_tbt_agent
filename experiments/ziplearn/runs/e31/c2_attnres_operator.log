@@ -1,0 +1,2 @@
+E31 coconut: c=2 res=attnres feedback=operator curriculum=1 (switch at step 960) K=8 steps=3200 batch=128 | 17 trained, 8 held out
+  step 0 loss 1.7025 (cot)

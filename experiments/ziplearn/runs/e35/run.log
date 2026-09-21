@@ -1,0 +1,12 @@
+E35 (1) frames: the written denoising chain, blockwise counting, K = 8
+   frames: 115 training (LockPath 0-1: 52, CollectAll 0-1: 63), 135 held out (level 2 of each)
+   block 1 (t 0.125 -> 0.000): 12804 -> 12804 entries, 51998 -> 51998 bits, 9 cells kept  [1s]
+   block 2 (t 0.250 -> 0.125): 20924 -> 20924 entries, 86340 -> 86340 bits, 9 cells kept  [2s]
+   block 3 (t 0.375 -> 0.250): 26068 -> 26068 entries, 105613 -> 105613 bits, 9 cells kept  [3s]
+   block 4 (t 0.500 -> 0.375): 28811 -> 28811 entries, 115735 -> 115735 bits, 9 cells kept  [4s]
+   block 5 (t 0.625 -> 0.500): 30099 -> 30099 entries, 120596 -> 120596 bits, 9 cells kept  [6s]
+   block 6 (t 0.750 -> 0.625): 30556 -> 30556 entries, 122255 -> 122255 bits, 9 cells kept  [8s]
+   block 7 (t 0.875 -> 0.750): 30624 -> 30624 entries, 122496 -> 122496 bits, 9 cells kept  [9s]
+   block 8 (t 1.000 -> 0.875): 30629 -> 30629 entries, 122540 -> 122540 bits, 9 cells kept  [11s]
+   repair at t = 0.25: chain 0.946, one shot 0.940 (corrupted input 0.767 correct)
+   repair at t = 0.50: chain 0.880, one shot 0.854 (corrupted input 0.532 correct)

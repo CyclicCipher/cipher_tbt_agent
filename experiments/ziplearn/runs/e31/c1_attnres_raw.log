@@ -1,0 +1,10 @@
+E31 coconut: c=1 res=attnres feedback=raw curriculum=1 (switch at step 960) K=8 steps=3200 batch=128 | 17 trained, 8 held out
+  step 0 loss 1.7025 (cot)
+  step 400 loss 0.5544 (cot)
+  step 800 loss 0.1860 (cot)
+C:\Users\julia\GitHub\predictive-coding-agent\venv\Lib\site-packages\torch\nn\functional.py:2954: UserWarning: Mismatch dtype between input and weight: input dtype = struct c10::BFloat16, weight dtype = float, Cannot dispatch to fused implementation. (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\layer_norm.cpp:347.)
+  return torch.rms_norm(input, normalized_shape, weight, eps)
+  step 1200 loss 0.0957 (thought)
+  step 1600 loss 0.0730 (thought)
+  step 2000 loss 0.0689 (thought)
+  step 2400 loss 0.0519 (thought)

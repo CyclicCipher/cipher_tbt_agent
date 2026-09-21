@@ -1,0 +1,8 @@
+c1_std_raw: 1428s | thought: trained 10/17 (acc 0.65), held-out 0/8 (acc 0.14) | cot: trained acc 0.01, held-out acc 0.01 | spikes 3 | probe t0: held 0.52 (+1.1)
+c1_std_operator: 1191s | thought: trained 10/17 (acc 0.66), held-out 0/8 (acc 0.13) | cot: trained acc 0.03, held-out acc 0.01 | spikes 6 | probe t0: held 0.50 (+1.1)
+c1_attnres_raw: FAILED rc=1
+c1_attnres_operator: FAILED rc=1
+c1_attnres_operator_nocurriculum: FAILED rc=1
+c2_std_raw: FAILED rc=1
+c2_std_operator: FAILED rc=1
+c2_attnres_raw: FAILED rc=1

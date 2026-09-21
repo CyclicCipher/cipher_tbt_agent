@@ -1,0 +1,14 @@
+E31 coconut: c=1 res=std feedback=operator curriculum=1 (switch at step 960) K=8 steps=3200 batch=128 | 17 trained, 8 held out
+  step 0 loss 1.7026 (cot)
+  step 400 loss 0.6984 (cot)
+  step 800 loss 0.2378 (cot)
+  step 1200 loss 0.1191 (thought)
+  step 1600 loss 0.0734 (thought)
+  step 2000 loss 0.0755 (thought)
+  step 2400 loss 0.0562 (thought)
+  step 2800 loss 0.0449 (thought)
+trained in 1174s | final loss 0.0541
+THOUGHT mode: trained 10/17 (acc 0.66) | held-out 0/8 (acc 0.13)
+COT mode:     trained 0/17 (acc 0.03) | held-out 0/8 (acc 0.01)
+loss spikes after the switch: 6; probe of the thought for the intermediate digits: thought 0: train acc 0.58 (+1.05 candidates), held acc 0.50 (+1.06)
+HELD-OUT (thought mode): swap_halves>negate 0.00, swap_halves>inc 0.00, rot_right>swap_pairs 0.50, swap_pairs>rot_right 0.25, reverse>rot_left 0.21, reverse>swap_pairs 0.03, rot_right>negate 0.04, rot_left>negate 0.03
