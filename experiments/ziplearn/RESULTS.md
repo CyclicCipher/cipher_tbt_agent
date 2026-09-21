@@ -26,6 +26,7 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E11 | PASS after a refutation | many-to-one actions need 'identity + edits'; forward search plans with them; a try erases the goal 48% of the time |
 | E12 | PASS | commutativity found from learned maps; abelian planner 8.9 bits vs a 112-word table of 1190 bits |
 | E13 | analysis | the replica games: interface complete, 5/16 levels by discovery; goal transfer on MultiKey; failures named |
+| E15 | PASS | budget: price forgets the least valuable, keeps the best-evidenced (0.84 vs FIFO 0.52); precision step ∝ 1/√n |
 
 ## Format
 
@@ -455,3 +456,22 @@ changed: the interface exists and is the fixed point from here: `arcgames.py` tu
          order of what the numbers point at: a goal predicate with conditions (OPEN-12), the push rule (radius chosen
          by price needs the observations exploration should be buying — E10's price would go looking for them), and
          a default for unknown windows that is learned rather than "unchanged".
+
+### 2026-09-20 — E15 — under a budget the price rule forgets what is worth least and keeps what it has most evidence for; a parameter's precision follows 1/√n (PASS)
+command: `python experiments/ziplearn/e15.py` (A: six rules, A seen 60 times, the rest 20, budget 48 bits, 5 streams; B: 200 random offsets × 5 sample sizes; CPU, ~20 s)
+files:   `experiments/ziplearn/runs/e15/e15.json`; code: `enforce_capacity`, `block_value`, `precision_bits`, `ContinualLayer.total_bits(consolidated=True)` in `ziplearner.py`, `e15.py`
+numbers: A — no budget: 62.9 bits, every rule retained. FIFO under 48 bits: 44.9 bits, retention
+         A 0.09 B 0.27 C 0.64 D 1.00 E 1.00 F 1.00, evidence-weighted **0.523** — it drops A first (the oldest, and the
+         one with three times the evidence). Price under 48 bits: **41.1 bits**, retention A 1.00 B 0.80 C 0.82 D 0.82 E 0.27 F 1.00,
+         evidence-weighted **0.839**; it consolidates the shifts into one template and drops
+         one affine block with 21 pairs of evidence. B — the grid step that minimises the expected total code length
+         for an offset estimated from n noisy observations: n = 4 → 1.56, 16 → 0.91, 64 → 0.49, 256 → 0.23,
+         1024 → 0.11, against σ·√(12/n) = 1.73, 0.87, 0.43, 0.22, 0.11; slope of log step against log n **−0.48**
+         (the rule predicts −0.5).
+verdict: PASS on both. A's fine print: the kept rules B, C, D retain 0.80–0.82 rather than 1.00 under the price rule —
+         the selector occasionally routes a three-pair context to the wrong surviving block once a neighbour is gone,
+         a cost of forgetting that is real and small; the dropped rule E keeps 0.27 (it is answered by whichever block
+         prices its context least badly). B's constant: the best step is σ·√(12/n), not σ/√n — the √12 is the
+         uniform quantisation error — and `precision_bits` now says so (½·log₂n + log₂(span/σ) − ½·log₂12).
+changed: §8 changes 2 and 3 and §9 rule 3 are BUILT in their first form. The "annealing" reading of §8 (raise λ
+         gradually so structures crystallise) is not built: the budget here is a hard cap enforced after each stretch.

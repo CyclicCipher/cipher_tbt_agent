@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
 *v0.5, 2026-09-20 (v0.1–v0.4 the same day; v0.5 moves the results log to `RESULTS.md` and collects every
-pre-registration in §11). E0–E13 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
+pre-registration in §11). E0–E15 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -190,7 +190,7 @@ The bet, stated so it can lose: *the library of generic matrix structures is sma
 items are points inside those structures that fitting finds and step 2–3 name.* It loses if the items a task needs are
 not inside any generic structure, or if step 3 finds nothing that recurs. E3 tests it.
 
-## 8. Lossy compression for a finite network — change 1 BUILT (E4), changes 2–3 DESIGNED
+## 8. Lossy compression for a finite network — changes 1–3 BUILT (E4, E15); annealing DESIGNED
 
 The price in §4 is lossless: every exception is stored individually at log₂11 + 1 bits, so a rule with a few
 exceptions carries every one of them forever, and the total grows with the number of observations. A finite network
@@ -226,7 +226,7 @@ The risk to watch: a lossy price can excuse the wrong thing. With λ small enoug
 cheap as "a shift", and the learner stops looking for structure. E4 measures the ε the learner reports against the true
 exception rate and checks that the structure is still chosen.
 
-## 9. Continual learning without a replay buffer — rules 1–2 BUILT (E6), rule 3 DESIGNED
+## 9. Continual learning without a replay buffer — rules 1–3 BUILT (E6, E15)
 
 The problem: a network trained by gradient on task A and then on task B forgets A, because B's gradient moves the
 same weights A used, indiscriminately. The usual remedies keep A's examples (a replay buffer), keep A's weights in a
@@ -417,6 +417,14 @@ distance from ideal. Predictions: primitives-first is cheapest; random orders sp
 final libraries differ across orders (hysteresis) and so do held-out prices; the run-2 transformer on the same orders
 (held-out bits per digit) is order-dependent in the extreme. Refute: totals agree within noise.
 
+**E15 — the capacity budget and parameter precision (pre-registered 2026-09-20, late; §8 changes 2–3, §9 rule 3).**
+A: six rules in sequence, A seen 60 times and the others 20, under a budget of 48 bits (all six need ≈ 70); the layer
+consolidates same-kind blocks into templates and then drops the block worth least (evidence × bits saved over a
+table); compared with FIFO (drop the oldest) and no budget. Pass: the price rule ends under budget, keeps A where
+FIFO drops it, and its evidence-weighted retention is at least FIFO's; refute: over budget or A dropped. B: a
+real-valued offset from n noisy observations, written at the grid step that minimises the total code length; pass:
+the best step shrinks as 1/√n (slope −0.5 ± 0.15 on log–log), which is what `precision_bits` assumes.
+
 ## 12. Open questions
 
 **OPEN-1 — the outer objective (deferred by request, recorded here verbatim in substance).** ZipLearner learns a
@@ -457,6 +465,7 @@ changed) are in `RESULTS.md`, appended and never edited.
 | E11 | PASS after a refutation | many-to-one actions need 'identity + edits'; forward search plans with them; a try erases the goal 48% of the time |
 | E12 | PASS | commutativity found from learned maps; abelian planner 8.9 bits vs a 112-word table of 1190 bits |
 | E13 | analysis | the replica games: interface complete, 5/16 levels by discovery; goal transfer on MultiKey; failures named |
+| E15 | PASS | budget: price forgets the least valuable, keeps the best-evidenced (0.84 vs FIFO 0.52); precision step ∝ 1/√n |
 
 ## 14. Glossary
 

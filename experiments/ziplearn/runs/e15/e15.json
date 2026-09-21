@@ -1,0 +1,88 @@
+{
+ "none": {
+  "bits": 62.88383310686972,
+  "retention": {
+   "A": 1.0,
+   "B": 1.0,
+   "C": 1.0,
+   "D": 1.0,
+   "E": 1.0,
+   "F": 1.0
+  },
+  "evidence_weighted": 1.0,
+  "example_blocks": [
+   "shift b=3 (n=60, exceptions 0.00)",
+   "shift b=5 (n=21, exceptions 0.00)",
+   "affine a=2 b=1 (n=20, exceptions 0.00)",
+   "shift b=8 (n=20, exceptions 0.00)",
+   "affine a=3 b=4 (n=21, exceptions 0.05)",
+   "shift b=10 (n=20, exceptions 0.00)"
+  ],
+  "example_dropped": []
+ },
+ "fifo": {
+  "bits": 44.902646639702695,
+  "retention": {
+   "A": 0.09090909090909091,
+   "B": 0.27272727272727265,
+   "C": 0.6363636363636364,
+   "D": 1.0,
+   "E": 1.0,
+   "F": 1.0
+  },
+  "evidence_weighted": 0.5227272727272727,
+  "example_blocks": [
+   "affine a=2 b=1 (n=20, exceptions 0.00)",
+   "shift b=8 (n=20, exceptions 0.00)",
+   "affine a=3 b=4 (n=21, exceptions 0.05)",
+   "shift b=10 (n=20, exceptions 0.00)"
+  ],
+  "example_dropped": [
+   {
+    "dropped": "shift",
+    "evidence": 60
+   },
+   {
+    "dropped": "shift",
+    "evidence": 21
+   }
+  ]
+ },
+ "price": {
+  "bits": 41.10368260945393,
+  "retention": {
+   "A": 1.0,
+   "B": 0.8,
+   "C": 0.8181818181818181,
+   "D": 0.8181818181818181,
+   "E": 0.27272727272727265,
+   "F": 1.0
+  },
+  "evidence_weighted": 0.8386363636363636,
+  "example_blocks": [
+   "shift b=3 (n=60, exceptions 0.00)",
+   "shift b=5 (n=21, exceptions 0.00)",
+   "affine a=2 b=1 (n=20, exceptions 0.00)",
+   "shift b=8 (n=20, exceptions 0.00)",
+   "shift b=10 (n=20, exceptions 0.00)"
+  ],
+  "example_dropped": [
+   {
+    "dropped": "affine",
+    "evidence": 21,
+    "bits_after": 61.13987209826812
+   }
+  ]
+ },
+ "precision": {
+  "best_delta": {
+   "4": 1.5605486450070734,
+   "16": 0.9077853991937549,
+   "64": 0.4887374631624422,
+   "256": 0.22539339047347912,
+   "1024": 0.11231045018329516
+  },
+  "slope": -0.4801442288408624
+ },
+ "verdict": "PASS"
+}

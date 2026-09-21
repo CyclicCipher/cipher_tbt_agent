@@ -643,7 +643,9 @@ class ContinualLayer:
         block, _c = self.select(context_pairs)
         return None if block is None else block["layer"].predict(x)
 
-    def total_bits(self):
+    def total_bits(self, consolidated=False):
+        if consolidated and self.blocks:
+            return consolidate(self)[1]
         return sum(b["layer"].price(b["layer"].keep()) for b in self.blocks) + len(self.blocks) * self.bits_block_name()
 
     def describe(self):
@@ -769,3 +771,37 @@ def consolidate(layer):
         templates.append(dict(kind=kind, contexts=len(blocks), parameters_each=params,
                               params=[{k: getattr(b["layer"].keep(), k) for k in ("a", "b") if hasattr(b["layer"].keep(), k)} for b in blocks]))
     return before, after, templates
+
+
+# ── the capacity budget (DESIGN §8 change 3, §9 rule 3) and parameter precision (§8 change 2); E15 ─────────────────
+def precision_bits(n, span, sigma):
+    """§8 change 2: a continuous parameter estimated from n observations with noise sigma is written at the precision
+    the data justify. E15 measured the step that minimises the expected total code length: delta = sigma * sqrt(12 / n)
+    (the 1/sqrt(n) law, with the constant of a uniform quantisation error), so it costs log2(span / delta) =
+    1/2 log2 n + log2(span / sigma) - 1/2 log2 12 bits."""
+    return 0.5 * math.log2(max(1, n)) + math.log2(span / sigma) - 0.5 * math.log2(12)
+
+
+def block_value(layer, block):
+    """What a block is worth keeping: the bits its description saves over a table, weighted by the evidence behind
+    it (§9 rule 3: forgetting drops the block with the least evidence x bits saved)."""
+    lay = block["layer"]
+    kept = lay.price(lay.keep())
+    table = lay.price(next(s for s in lay.structs if s.name == "table"))
+    return block["n"] * max(0.0, table - kept)
+
+
+def enforce_capacity(layer, capacity, log=None):
+    """Bring a ContinualLayer under `capacity` bits: first count same-kind blocks as one template (consolidate), then
+    drop blocks in order of least value until the consolidated total fits. Returns the blocks dropped."""
+    dropped = []
+    while layer.blocks:
+        _before, after, _t = consolidate(layer)
+        if after <= capacity:
+            break
+        victim = min(layer.blocks, key=lambda b: block_value(layer, b))
+        layer.blocks.remove(victim)
+        dropped.append(victim)
+        if log is not None:
+            log.append(dict(dropped=victim["layer"].keep().name, evidence=victim["n"], bits_after=after))
+    return dropped
