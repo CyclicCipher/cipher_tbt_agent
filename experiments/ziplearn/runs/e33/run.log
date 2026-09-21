@@ -1,0 +1,6 @@
+E33 (a): Latin corpus, 15 training books (2726046 characters), held out COMMENTARIORUM LIBRI III DE BELLO CIVILI.txt (240588 characters), alphabet 70 (rare characters as <other>)
+         990 chars | ZipLM mask [1, 2, 3, 4, 5, 6, 7, 8] (training text 1 -> 1 KiB) | frozen bpc: ZipLM 4.504, n-gram 2/4/6/8 4.534/4.508/4.505/4.504 | online bpc: ZipLM 2.129, n-gram 2/4/6/8 2.784/2.237/2.144/2.129, xz 2.535 | 16s
+        9990 chars | ZipLM mask [1, 2, 3, 4, 5, 6, 7, 8] (training text 4 -> 4 KiB) | frozen bpc: ZipLM 2.983, n-gram 2/4/6/8 3.182/3.008/2.987/2.983 | online bpc: ZipLM 2.097, n-gram 2/4/6/8 2.771/2.209/2.113/2.097, xz 2.508 | 18s
+       99990 chars | ZipLM mask [1, 2, 3, 4, 5, 6, 7, 8] (training text 34 -> 34 KiB) | frozen bpc: ZipLM 2.346, n-gram 2/4/6/8 2.881/2.422/2.354/2.346 | online bpc: ZipLM 2.007, n-gram 2/4/6/8 2.763/2.131/2.022/2.007, xz 2.437 | 31s
+      826605 chars | ZipLM mask [1, 2, 3, 4, 5, 6, 7, 8] (training text 261 -> 261 KiB) | frozen bpc: ZipLM 1.980, n-gram 2/4/6/8 2.809/2.113/1.987/1.980 | online bpc: ZipLM 1.882, n-gram 2/4/6/8 2.780/2.041/1.897/1.882, xz 2.324 | 53s
+     2726046 chars | ZipLM mask [1, 2, 3, 4, 5, 6, 7, 8] (training text 850 -> 850 KiB) | frozen bpc: ZipLM 1.873, n-gram 2/4/6/8 2.810/2.048/1.886/1.873 | online bpc: ZipLM 1.822, n-gram 2/4/6/8 2.798/2.014/1.842/1.822, xz 2.263 | 72s

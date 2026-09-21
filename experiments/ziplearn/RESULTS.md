@@ -42,6 +42,7 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E28 | PASS | the rules learned on LockPath, written into one looped attention block, reproduce the planner's rollouts 530/530 (509/509 seed 1); the nearest-key default beats 'unchanged' on unknown windows |
 | E29 | PASS | learned search: imagined paths enumerated by bits under a learned strategy = BFS until it learns; then room-20 89 vs 818 calls, room 40 solved at oracle 74 (BFS cannot); the 20-bit strategy reads the wall, not the goal |
 | E30 | PASS | the depth loop under attention residuals: held-out 1/8 solved (0.22) with a tied core — the first ever; the learned route lets the anchor fade and reads every earlier pass; windowed sources collapse at 2× passes |
+| E33 (a) | measured | the discrete machinery on Latin text = a PPM-style blended-backoff model: 1.87 bits/char frozen, 1.82 online at 2.7M chars (xz 2.26); the E24 sleep price is wrong for text, the prequential one keeps every position; transformer/hybrid arms shelved |
 
 ## Format
 
@@ -851,3 +852,36 @@ changed: the boundary operator to WRITE for the looped block (§18): the pass's 
          read of all earlier passes, the anchor fading rather than re-injected at a constant weight; a windowed state is out.
          E31 (Coconut) runs next on the same substrate. The E30 cells ran while a game shared the GPU — wall-clock per cell
          is not comparable to E26's.
+
+### 2026-09-21 — E33 (a) — the ZipLearner language model on the Latin corpus: the discrete machinery on text is a PPM-style blended-backoff character model; the E24 sleep price was wrong for text and the corrected price keeps every context position; 1.87 bits/char frozen and 1.82 online at 2.7M characters against xz's 2.26; the transformer and hybrid arms are shelved
+command: `python experiments/ziplearn/textlm.py --sizes 1000 10000 100000 1000000 all` (CPU, ~4 min)
+files:   `experiments/ziplearn/runs/e33/e33.json`, `run.log`; code `textlm.py` (`ContextLM`, `xz_bits_per_char`)
+numbers: `corpora/latin books`: 15 training books (2,726,046 characters), held out Caesar's *De Bello Civili* (240,588
+         characters; his *De Bello Gallico* is in training), alphabet 70 (characters rarer than 200 occurrences as one symbol).
+         Bits per character on the held-out book, FROZEN (trained on N characters, then predicting) and ONLINE (prequential:
+         the counts keep growing through the book, which is what xz does):
+         | training characters | ZipLM frozen | n-gram order 2 / 4 / 6 frozen | ZipLM online | n-gram 2 / 4 / 6 online | xz (online) |
+         | 990 | 4.504 | 4.534 / 4.508 / 4.505 | 2.129 | 2.784 / 2.237 / 2.144 | 2.535 |
+         | 9,990 | 2.983 | 3.182 / 3.008 / 2.987 | 2.097 | 2.771 / 2.209 / 2.113 | 2.508 |
+         | 99,990 | 2.346 | 2.881 / 2.422 / 2.354 | 2.007 | 2.763 / 2.131 / 2.022 | 2.437 |
+         | 826,605 | 1.980 | 2.809 / 2.113 / 1.987 | 1.882 | 2.780 / 2.041 / 1.897 | 2.324 |
+         | 2,726,046 | **1.873** | 2.810 / 2.048 / 1.886 | **1.822** | 2.798 / 2.014 / 1.842 | 2.263 |
+         The ZipLM's mask after sleep was all eight positions at every size, so its numbers equal the order-8 n-gram's; the
+         prequential code of the whole training text under it is 850 KiB, 2.6 bits/char — the price of learning the corpus
+         from nothing, sequentially. Runtime 16–72 s per size.
+verdict: measured (the pre-registered arms (b) the gradient transformer and (c) the hybrid are SHELVED by the user's
+         instruction of 2026-09-21 — no more gradient-arm work unless stated — so the crossover the pre-registration asked
+         for is not measured; the apparatus test passes trivially, the ZipLM being the order-8 control itself). Two findings
+         that matter: (1) E24's sleep price — the per-context two-part code — is WRONG for a predictor that backs off: it
+         priced sparse high-order contexts as waste and kept only the previous one or two characters (frozen 2.88 at 100k
+         characters, against 2.35 with all eight); the honest price is the PREQUENTIAL code the predictor actually pays
+         on the training text, and under it no position is ever dropped. The sleep pass is a no-op on text: what the
+         "modified ZipLearner" brings to language is the blended-backoff table itself — E28's memory tokens with the
+         nearest-key default as recency-ordered backoff — which is PPM (Cleary & Witten 1984) in a new costume. (2) Its
+         data efficiency: 4.5 → 1.87 bits/char frozen from 1k to 2.7M characters, and online it reaches 2.13 at 1k, learning
+         the book from the book; better than xz at every size. Against neural models the literature (from memory) puts
+         PPM-class models level with small character transformers up to roughly a million characters and far behind them
+         at scale (enwik8 is near 1.0 bits/char for large models against PPM's ~2); that is the crossover the shelved arm
+         would have measured, and it is where §19's thesis says the gains beyond this table must come from.
+changed: `textlm.py` is the discrete machinery's language model; its ceiling on text is PPM's. The two evaluations
+         (frozen, online) are both reported from here on for sequential learners.

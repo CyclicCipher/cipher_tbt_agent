@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
 *v0.7, 2026-09-21 (v0.1–v0.5 on 2026-09-20; v0.6 records E14–E18; v0.7 adds §18 thinking inside the block, §19 the library problem and the continuous thesis; earlier: capacity, precision, order dependence, blocks across
-layers, relational goals, written attention). E0–E30 have been run (E29 retracted as a design; E31 running); one line each in §13, the full entries in `RESULTS.md`. Code:
+layers, relational goals, written attention). E0–E30 and E33(a) have been run (E29 retracted as a design; E31 running; E32 and E33(b,c) shelved); one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -538,6 +538,10 @@ size at which (b) overtakes (a); a general compressor's bits per character on th
 reference; a plain order-8 n-gram with KT smoothing as the control for (a). Expectation, pre-registered: (a) wins below
 the crossover, (b) above, and (c) shifts the crossover left if the thesis is right. Refute the apparatus: (a) no better
 than the plain n-gram. (a) and (b) can run before E32; (c) needs it.
+*Result (a): measured, `RESULTS.md` — frozen 1.87 and online 1.82 bits/char at 2.7M characters (xz 2.26); the sleep pass keeps
+every position once its price is the prequential code (E24's per-context price was wrong for a backing-off predictor);
+the discrete machinery on text is PPM. Arms (b) and (c) shelved by the user's instruction of 2026-09-21: no further
+gradient-arm work unless stated. E32 is shelved by the same rule (it needs a gradient-trained net).*
 
 ## 12. Open questions
 
@@ -595,6 +599,7 @@ changed) are in `RESULTS.md`, appended and never edited.
 | E28 | PASS | the rules learned on LockPath, written into one looped attention block, reproduce the planner's rollouts 530/530 (509/509 seed 1); the nearest-key default beats 'unchanged' on unknown windows |
 | E29 | PASS, then RETRACTED | learned search as a procedure: room-20 89 vs 818 calls, room 40 solved at oracle 74; rejected as a design (a search written around the model) and deleted; the rooms stay as the test bed for §18 |
 | E30 | PASS | the depth loop under attention residuals: held-out 1/8 solved (0.22) with a tied core — the first ever; the learned route lets the anchor fade and reads every earlier pass; windowed sources collapse at 2× passes |
+| E33 (a) | measured | the discrete machinery on Latin text = a PPM-style blended-backoff model: 1.87 bits/char frozen, 1.82 online at 2.7M chars (xz 2.26); the E24 sleep price is wrong for text, the prequential one keeps every position; transformer/hybrid arms shelved |
 
 ## 14. Glossary
 
@@ -751,6 +756,7 @@ output the reverse of the input"), and goals over the library ("find a shorter w
   --mix --window --extrap`, routes per pass); a key/value cache for incremental forwards (`forward_embedded`).
 - `experiments/transformers/coconut.py` — continuous thoughts (E31): the curriculum, raw vs operator feedback, the probe.
 - `experiments/ziplearn/e30.py`, `e31.py` — the recurrence-scheme experiments of §18 (drivers over the two files above).
+- `experiments/ziplearn/textlm.py` — the discrete machinery as a character language model on `corpora/latin books` (E33 a).
 - `experiments/inner_objective/tasks.py` — the two task families (arithmetic, composition), reused by every experiment.
 - `experiments/inner_objective/ziplearn.py`, `runs/ziplearn_*.json` — the earlier arithmetic-only version and its numbers (§2).
 
