@@ -1,0 +1,30 @@
+{
+ "results": {
+  "1": {
+   "reached": 0.23,
+   "same_length_as_oracle": 0.9782608695652174,
+   "mean_plan_bits": 3.722796744467693,
+   "single_action_control": 0.165
+  },
+  "2": {
+   "reached": 0.945,
+   "same_length_as_oracle": 0.7513227513227513,
+   "mean_plan_bits": 5.986053087773622,
+   "single_action_control": 0.365
+  },
+  "3": {
+   "reached": 1.0,
+   "same_length_as_oracle": 1.0,
+   "mean_plan_bits": 4.82865046593908,
+   "single_action_control": 0.49
+  },
+  "8": {
+   "reached": 1.0,
+   "same_length_as_oracle": 1.0,
+   "mean_plan_bits": 4.82865046593908,
+   "single_action_control": 0.49
+  }
+ },
+ "oracle_mean_length": 1.72,
+ "verdict": "PASS"
+}

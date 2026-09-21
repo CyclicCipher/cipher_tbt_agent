@@ -1,6 +1,6 @@
 # ZipLearner — design document
 
-*v0.3, 2026-09-20 (v0.1 and v0.2 the same day). E0–E6 and E6b have been RUN — every verdict, with the numbers and
+*v0.4, 2026-09-20 (v0.1–v0.3 the same day; v0.4 adds §16, the outer objective). E0–E6 and E6b have been RUN — every verdict, with the numbers and
 what each one changed, is in §13. Code: `experiments/ziplearn/ziplearner.py` (the weight-writing learner: one matrix,
 two layers, the cross-task library, the continual layer) and `e0.py` … `e6b.py`; the earlier arithmetic-only
 version is still `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project; experimental results are reported in §13
@@ -354,8 +354,8 @@ name); pass: the two shift blocks ≤ 17.5 bits (22.2 separate) with retention u
 generalisable world model — a model of everything put into its "world". It does not, by itself, say what to *do* with
 that model, or in what order, to achieve an objective. In the language of the earlier experiments: ZipLearner's inner
 objective may be very good, but the outer objective — using the world model to behave toward a goal — is unsolved. The
-ideal is a general way of implementing an outer objective, so that any outer objective can be plugged in. To be
-addressed after the world-model experiments (E1–E6); not designed.
+ideal is a general way of implementing an outer objective, so that any outer objective can be plugged in. Addressed
+in §16 (first form, designed 2026-09-20 evening) with E9 as its first test.
 
 **OPEN-2** — inverting a nonlinearity for hidden-layer targets (§6).
 **OPEN-3** — whether the per-layer sweep settles (§6; measured in E2).
@@ -699,7 +699,52 @@ What is *not* decided: whether the gradient arm's per-token softmax routing or t
 the right comparison when both exist; E2 will run the written network, E0 the gradient arm, and the two are reported
 side by side, not merged.
 
-## 16. Files
+## 16. The outer objective — DESIGNED (first form), from OPEN-1
+
+**The problem.** Everything before this section is a world model: descriptions that say what comes out when something
+goes in. The outer objective is to *act*: given a goal, choose actions that reach it. The ideal is that any goal can
+be plugged in without changing the machinery.
+
+**What acting needs, and what compression already built.**
+
+1. *A map — states joined by actions.* Each action is a structure (what it does to a state), and actions chain. E7/E8
+   found that the library already holds this map: the named permutations form a group reachable from three
+   generators, and a word in the generators is a path through it. **A plan is a word.** Read as a network, a plan of n
+   actions is an n-layer written network whose routes are the order of the actions; executing it is the forward pass.
+2. *An inverse — from a wanted change to the action that causes it.* Free for bijective structures (apply S⁻¹); for
+   actions that are not bijections, one more matrix from state-difference to action, learned by counting (§4).
+3. *A goal slot and a price for plans.* A goal is a description in the model's own language — a target state, or a
+   relation. A plan costs its bits (word length × log₂ actions). A goal's **worth** is the one external number; it is
+   what makes the objective pluggable. Selection = cheapest (plan bits − worth) wins: the same rule as everywhere.
+4. *Not required, until shown otherwise:* a value learned by reward for every state. With a map and an inverse,
+   cost-to-go is computed by search on demand and cached only where search is too expensive (OPEN-10 below).
+
+**The loop (first form).** Observe (state, action, next state) triples → each action gets a description by the core
+loop of §4 (one matrix per action; the library of §5 supplies the structures) → given a goal, search the words in the
+learned actions for the cheapest one that reaches it (breadth-first over depth, so the shortest word is found
+first; bits = length × log₂ actions) → execute → the next states are new observations for the inner objective.
+
+**Where the two objectives meet.** An action whose effect is not yet described cannot be planned with; a plan that
+would be cheaper through such an action is a reason to *try* it. That is exploration as the outer objective's own
+demand, with the inner objective paying it back in bits: OPEN-11.
+
+**OPEN-10** — when the map is too large to search: what to cache (a cost-to-go per state, or per description?), and
+whether the cache is itself a written structure. **OPEN-11** — acting to learn: the price of trying an unknown
+action against the bits its description would save. **OPEN-12** — goals that are relations, not states ("make the
+output the reverse of the input"), and goals over the library ("find a shorter word").
+
+**E9 — planning in the written map (pre-registered).** The composition domain's seven primitives as the actions of an
+environment over 6-digit sequences (V = 5). Phase 1: the agent observes each action k times on random states and
+describes it (§4, one matrix per action; the position primitives as position permutations, inc/negate as value maps).
+Phase 2: goals — a target sequence reachable from a random start in ≤ 3 actions — and the agent plans by
+breadth-first search over words in its *learned* action descriptions, then the plan is executed on the true
+environment. Measures: fraction of goals reached; plan length against the shortest possible (an oracle search on the
+true actions); plan bits; all as a function of k = 1, 2, 3, 8 demonstrations per action. Control: a planner with the
+same learned actions but no composition (single actions only) — it can only reach one-step goals. Pass: ≥ 95% of
+goals reached at k = 3 with plans no longer than the oracle's; refute: < 80% at k = 3, or plans systematically longer
+than the oracle's. Nothing is learned from reward; there is no value function.
+
+## 17. Files
 
 - `experiments/ziplearn/ziplearner.py` — the weight-writing ZipLearner: `Structure` and the library v1 (`Table`, `Identity`,
   `Shift`, `Affine`, `Permutation`), `Layer` (one matrix, §4), the rate price (`flag_bits`, `pay`, §8), `PositionPerm` /
