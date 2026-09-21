@@ -1,0 +1,48 @@
+fixed__tied_k4: 386s | trained 10/17 (acc 0.60) | held-out 0/8 (acc 0.06) | at 8 passes: trained acc 0.08, held-out acc 0.00 | loss 0.056
+attnres_tied__tied_k4: 443s | trained 13/17 (acc 0.77) | held-out 1/8 (acc 0.22) | at 8 passes: trained acc 0.60, held-out acc 0.13 | loss 0.040
+      mix_attn.0     last call: 0.01 0.04 0.17 0.78
+      mix_mlp.0      last call: 0.09 0.10 0.12 0.23 0.46
+      res_final      last call: 0.04 0.02 0.02 0.14 0.79
+attnres_per_pass__tied_k4: 396s | trained 13/17 (acc 0.79) | held-out 1/8 (acc 0.22) | at 8 passes: trained acc 0.75, held-out acc 0.12 | loss 0.041
+      mix_attn.0     last call: 1.00
+      mix_attn.1     last call: 0.07 0.93
+      mix_attn.2     last call: 0.03 0.19 0.78
+      mix_attn.3     last call: 0.06 0.07 0.07 0.80
+      mix_mlp.0      last call: 0.19 0.81
+      mix_mlp.1      last call: 0.07 0.09 0.84
+      mix_mlp.2      last call: 0.15 0.07 0.08 0.70
+      mix_mlp.3      last call: 0.12 0.15 0.12 0.23 0.38
+      res_final      last call: 0.04 0.04 0.03 0.14 0.75
+attnres_window2__tied_k4: 390s | trained 12/17 (acc 0.74) | held-out 0/8 (acc 0.09) | at 8 passes: trained acc 0.19, held-out acc 0.02 | loss 0.041
+      mix_attn.0     last call: 0.08 0.29 0.62
+      mix_mlp.0      last call: 0.04 0.09 0.20 0.67
+      res_final      last call: 0.10 0.20 0.70
+fixed__untied_grow2to4: FAILED rc=1
+attnres_tied__untied_grow2to4: 383s | trained 13/17 (acc 0.77) | held-out 0/8 (acc 0.09) | at 8 passes: trained acc 0.77, held-out acc 0.09 | loss 0.040
+      mix_attn.0     last call: 0.07 0.22 0.28 0.42
+      mix_mlp.0      last call: 0.07 0.10 0.16 0.14 0.54
+      res_final      last call: 0.12 0.11 0.16 0.11 0.50
+attnres_per_pass__untied_grow2to4: 478s | trained 13/17 (acc 0.77) | held-out 0/8 (acc 0.09) | at 8 passes: trained acc 0.76, held-out acc 0.08 | loss 0.040
+      mix_attn.0     last call: 1.00
+      mix_attn.1     last call: 0.16 0.84
+      mix_attn.2     last call: 0.20 0.27 0.53
+      mix_attn.3     last call: 0.09 0.18 0.40 0.34
+      mix_mlp.0      last call: 0.20 0.80
+      mix_mlp.1      last call: 0.10 0.15 0.75
+      mix_mlp.2      last call: 0.10 0.11 0.36 0.43
+      mix_mlp.3      last call: 0.09 0.09 0.17 0.13 0.52
+      res_final      last call: 0.09 0.13 0.22 0.13 0.43
+attnres_window2__untied_grow2to4: 432s | trained 13/17 (acc 0.77) | held-out 0/8 (acc 0.09) | at 8 passes: trained acc 0.20, held-out acc 0.00 | loss 0.040
+      mix_attn.0     last call: 0.12 0.26 0.62
+      mix_mlp.0      last call: 0.09 0.14 0.16 0.61
+      res_final      last call: 0.14 0.17 0.69
+done
+fixed__tied_k4: reusing
+attnres_tied__tied_k4: reusing
+attnres_per_pass__tied_k4: reusing
+attnres_window2__tied_k4: reusing
+fixed__untied_grow2to4: 167s | trained 13/17 (acc 0.76) | held-out 0/8 (acc 0.13) | at 8 passes: trained acc 0.69, held-out acc 0.05 | loss 0.041
+attnres_tied__untied_grow2to4: reusing
+attnres_per_pass__untied_grow2to4: reusing
+attnres_window2__untied_grow2to4: reusing
+done

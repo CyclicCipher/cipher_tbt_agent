@@ -379,7 +379,7 @@ class LoopedModel(nn.Module):
         anchor = h
         if self.res == "std":
             for k in range(self.active_k):
-                core = self.cores[0] if self.tied else self.cores[k]
+                core = self.cores[0] if self.tied else self.cores[k % len(self.cores)]   # beyond the trained passes: cycle
                 h = core(h)
                 h = F.rms_norm(h, (h.shape[-1],)) + self.alpha * anchor  # the boundary operator, every pass
         else:                                                         # attention residuals across passes (E30)

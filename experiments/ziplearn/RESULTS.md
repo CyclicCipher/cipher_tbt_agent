@@ -41,6 +41,7 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E27 | REFUTED on discovery, 9/16 levels | exploration valued in bits over whole plans; Tetris L0 solved; discovery is coverage-bound, unchanged |
 | E28 | PASS | the rules learned on LockPath, written into one looped attention block, reproduce the planner's rollouts 530/530 (509/509 seed 1); the nearest-key default beats 'unchanged' on unknown windows |
 | E29 | PASS | learned search: imagined paths enumerated by bits under a learned strategy = BFS until it learns; then room-20 89 vs 818 calls, room 40 solved at oracle 74 (BFS cannot); the 20-bit strategy reads the wall, not the goal |
+| E30 | PASS | the depth loop under attention residuals: held-out 1/8 solved (0.22) with a tied core — the first ever; the learned route lets the anchor fade and reads every earlier pass; windowed sources collapse at 2× passes |
 
 ## Format
 
@@ -819,3 +820,34 @@ verdict: the user's review: a thought defined as "one expansion of an imagined f
 changed: `arcgames.py` has no planner: the games are explored (E27), not solved on purpose, until the looped block plans
          (DESIGN §18, rewritten: the rule, the interpreter frame, the two recurrences, their interaction with attention
          residuals, Coconut's hazards, E30/E31 pre-registered). Ten reference notes added under `refs/`.
+
+### 2026-09-21 — E30 — the depth loop under attention residuals: the first held-out compositions ever solved (1/8, twice), the learned route is NOT the boundary operator, and reading every earlier pass is what extrapolates
+command: `python experiments/ziplearn/e30.py` (8 cells, RoPE, 3200 steps, seed 0, E0's task; `h1_lid.LoopedModel` with `--loop_res attnres --mix tied|per_pass --window m`, `--extrap 2`; GPU — seven cells ran while a game shared the card, 383–478 s each; the rerun of the eighth alone took 167 s)
+files:   `experiments/ziplearn/runs/e30/summary.json`, per-cell JSON and logs; code: `LoopedModel(res="attnres", mix, window)`, `LoopedModel.routes`, `AttnRes.log`, the extrapolation block in `h1_lid.main`
+numbers: trained solved (mean acc) / held-out solved (mean acc) / at 8 passes instead of 4: trained acc, held-out acc —
+         tied core, K = 4:   fixed boundary operator 10/17 (0.60) / 0/8 (0.06) / 0.08, 0.00;
+                             **attention residuals, tied mixers 13/17 (0.77) / 1/8 (0.22) / 0.60, 0.13** (reverse>rot_left solved at trial 4, acc 0.88; rot_left>negate 0.56);
+                             **attention residuals, one query per pass 13/17 (0.79) / 1/8 (0.22) / 0.75, 0.12**;
+                             attention residuals windowed (anchor + last 2) 12/17 (0.74) / 0/8 (0.09) / 0.19, 0.02.
+         untied growth 2→4:  fixed 13/17 (0.76) / 0/8 (0.13) / 0.69, 0.05 (E26's same cell: 13/17, 0.12);  tied mixers 13/17 (0.77) / 0/8 (0.09) / 0.77, 0.09;
+                             per pass 13/17 (0.77) / 0/8 (0.09) / 0.76, 0.08;  windowed 13/17 (0.77) / 0/8 (0.09) / 0.20, 0.00. Final losses 0.040–0.041 (fixed tied 0.056).
+         The routes (mean weight per source; sources = [anchor, pass 1, pass 2, …]) of the tied-mixer tied-core cell: pre-attention
+         pass 1 [1.00], pass 2 [0.11 0.89], pass 3 [0.03 0.20 0.77], pass 4 [0.01 0.04 0.17 0.78]; pre-MLP pass 4 [0.09 0.10 0.12 0.23 | 0.46 on
+         the pass's own attention]; final [0.04 0.02 0.02 0.14 0.79]. One query per pass: the same shape (pass 4 pre-attention
+         [0.06 0.07 0.07 0.80], pre-MLP [0.12 0.15 0.12 0.23 | 0.38]). Windowed: [0.08 0.29 0.62] over (anchor, pass k−2, pass k−1).
+         Untied core with tied mixers: broader, pass 4 pre-attention [0.07 0.22 0.28 0.42].
+verdict: PASS (pre-registered: an attention-residual cell at or above E26's best held-out accuracy 0.20 with non-uniform
+         routes: 0.22, twice). The question answered: the learned route is NOT the boundary operator. The fixed operator
+         re-injects α·anchor at every pass; the trained mixers let the anchor fade to 0.01–0.06 by the fourth pass, read the
+         last pass at ~0.8, and keep a small, decaying read of EVERY earlier pass (0.04–0.20 before attention, ~0.1–0.23 before
+         the MLP) — a learned momentum over iterates, as §18(ii) hoped. §18(iv) is REFUTED: restricting the sources to the
+         anchor and the last two passes does not help extrapolation, it destroys it (0.19–0.20 at 8 passes, against 0.60–0.77
+         with every pass readable), and it loses the held-out gain; the tied-core fixed operator collapses at 8 passes
+         (0.08). The held-out gain — the first in the whole line, E0 through E26 were 0/8 — appears only with the TIED core:
+         the same block reused with learned routes across its own passes. A stack of distinct cores (untied growth) gets
+         nothing from the routes (0.09 against the fixed operator's 0.13) though it extrapolates on its own (0.69). One seed,
+         one held-out task solved: the sign is what is established, not the size.
+changed: the boundary operator to WRITE for the looped block (§18): the pass's input = mostly the last pass plus a decaying
+         read of all earlier passes, the anchor fading rather than re-injected at a constant weight; a windowed state is out.
+         E31 (Coconut) runs next on the same substrate. The E30 cells ran while a game shared the GPU — wall-clock per cell
+         is not comparable to E26's.

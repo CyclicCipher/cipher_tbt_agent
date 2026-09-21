@@ -1,0 +1,38 @@
+{
+ "pos": "rope",
+ "n_zero": 0,
+ "res": "loop",
+ "steps": 3200,
+ "seed": 0,
+ "loops": 4,
+ "untied": 0,
+ "grow_at": 0.0,
+ "loop_res": "std",
+ "mix": "tied",
+ "window": 0,
+ "trained_solved": 10,
+ "n_trained": 17,
+ "trained_mean_acc": 0.5971966911764706,
+ "held_solved": 0,
+ "n_held": 8,
+ "held_mean_acc": 0.064697265625,
+ "held_trials": [
+  8,
+  8,
+  8,
+  8,
+  8,
+  8,
+  8,
+  8
+ ],
+ "routes": null,
+ "extrap": {
+  "passes": 8,
+  "trained_mean_acc": 0.08386948529411764,
+  "trained_solved": 1,
+  "held_mean_acc": 0.0009765625,
+  "held_solved": 0
+ },
+ "train_loss": 0.05589853599667549
+}

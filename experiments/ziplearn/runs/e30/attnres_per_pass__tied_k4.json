@@ -1,0 +1,104 @@
+{
+ "pos": "rope",
+ "n_zero": 0,
+ "res": "loop",
+ "steps": 3200,
+ "seed": 0,
+ "loops": 4,
+ "untied": 0,
+ "grow_at": 0.0,
+ "loop_res": "attnres",
+ "mix": "per_pass",
+ "window": 0,
+ "trained_solved": 13,
+ "n_trained": 17,
+ "trained_mean_acc": 0.7860753676470589,
+ "held_solved": 1,
+ "n_held": 8,
+ "held_mean_acc": 0.22265625,
+ "held_trials": [
+  8,
+  8,
+  8,
+  7,
+  8,
+  8,
+  8,
+  8
+ ],
+ "routes": {
+  "mix_attn.0": [
+   [
+    1.0
+   ]
+  ],
+  "mix_attn.1": [
+   [
+    0.075,
+    0.925
+   ]
+  ],
+  "mix_attn.2": [
+   [
+    0.032,
+    0.193,
+    0.775
+   ]
+  ],
+  "mix_attn.3": [
+   [
+    0.064,
+    0.066,
+    0.068,
+    0.803
+   ]
+  ],
+  "mix_mlp.0": [
+   [
+    0.194,
+    0.806
+   ]
+  ],
+  "mix_mlp.1": [
+   [
+    0.07,
+    0.094,
+    0.836
+   ]
+  ],
+  "mix_mlp.2": [
+   [
+    0.15,
+    0.07,
+    0.08,
+    0.7
+   ]
+  ],
+  "mix_mlp.3": [
+   [
+    0.117,
+    0.149,
+    0.124,
+    0.233,
+    0.377
+   ]
+  ],
+  "res_final": [
+   [
+    0.045,
+    0.043,
+    0.031,
+    0.135,
+    0.746
+   ]
+  ]
+ },
+ "extrap": {
+  "passes": 8,
+  "trained_mean_acc": 0.7532169117647058,
+  "trained_solved": 13,
+  "held_mean_acc": 0.123779296875,
+  "held_solved": 0
+ },
+ "train_loss": 0.04080459102988243
+}

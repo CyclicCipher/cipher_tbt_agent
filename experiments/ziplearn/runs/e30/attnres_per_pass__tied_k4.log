@@ -1,0 +1,50 @@
+W0921 01:12:45.904000 19328 Lib\site-packages\torch\_inductor\utils.py:1679] [0/0] Not enough SMs to use max_autotune_gemm mode
+C:\Users\julia\GitHub\predictive-coding-agent\venv\Lib\site-packages\torch\_inductor\lowering.py:7627: UserWarning: 
+Online softmax is disabled on the fly since Inductor decides to
+split the reduction. Cut an issue to PyTorch if this is an
+important use case and you want to speed it up with online
+softmax.
+
+  warnings.warn(
+device cuda | pos=rope n_zero=0 res=loop loops=4 untied=0 grow_at=0.0 loop_res=attnres mix=per_pass window=0 opt=adamw | 17 trained, 8 held out | K=8 steps=3200
+primitive training weight: reverse=0.035, rot_left=0.188, rot_right=0.015, swap_pairs=1.000, swap_halves=0.434, inc=0.082, negate=0.007
+trained in 374s | final train loss 0.0408
+
+SANITY: the model solves 13/17 TRAINED compositions to criterion (mean final acc 0.79)
+
+LOCAL familiarity (mean error on TRAINED compositions containing it; lower = more in-distribution)
+   swap_halves  weight 0.434   local error 0.0583
+   rot_left     weight 0.188   local error 0.0701
+   swap_pairs   weight 1.000   local error 0.0702
+   rot_right    weight 0.015   local error 0.2999
+   inc          weight 0.082   local error 0.4776
+   reverse      weight 0.035   local error 0.6433
+   negate       weight 0.007   local error 1.0088
+
+HELD-OUT compositions — global novelty is IDENTICAL for all of them (none was ever trained)
+   composition                worst local err   trials  final acc
+   rot_right>swap_pairs                0.2999        8       0.24
+   swap_pairs>rot_right                0.2999        8       0.13
+   swap_halves>inc                     0.4776        8       0.00
+   reverse>rot_left                    0.6433        7       0.80
+   reverse>swap_pairs                  0.6433        8       0.00
+   swap_halves>negate                  1.0088        8       0.00
+   rot_right>negate                    1.0088        8       0.00
+   rot_left>negate                     1.0088        8       0.60
+
+PRIMARY  Spearman(worst local error, trials-to-criterion) = +0.000   over 8 held-out tasks
+LID predicts a POSITIVE correlation: less familiar parts => more trials, global novelty constant.
+A correlation near zero says local familiarity is NOT what governs acquisition speed here.
+
+EXTRAPOLATION to 8 passes (trained with 4): trained acc 0.75 (13/17 solved), held-out acc 0.12 (0/8)
+
+LEARNED ROUTES ACROSS PASSES (mean weight per source at each call; sources = [anchor, pass 1, pass 2, ...])
+   mix_attn.0             call 0: 1.00
+   mix_attn.1             call 0: 0.07 0.93
+   mix_attn.2             call 0: 0.03 0.19 0.78
+   mix_attn.3             call 0: 0.06 0.07 0.07 0.80
+   mix_mlp.0              call 0: 0.19 0.81
+   mix_mlp.1              call 0: 0.07 0.09 0.84
+   mix_mlp.2              call 0: 0.15 0.07 0.08 0.70
+   mix_mlp.3              call 0: 0.12 0.15 0.12 0.23 0.38
+   res_final              call 0: 0.04 0.04 0.03 0.14 0.75

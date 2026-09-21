@@ -19,9 +19,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 CC = HERE.parent / "transformers" / "coconut.py"
-CELLS = [(f"c{c}_{res}_{fb}", ["--c", str(c), "--res", res, "--feedback", fb])
-         for c in (1, 2) for res in ("std", "attnres") for fb in ("raw", "operator")]
+CELLS = [(f"c1_{res}_{fb}", ["--c", "1", "--res", res, "--feedback", fb]) for res in ("std", "attnres") for fb in ("raw", "operator")]
 CELLS.append(("c1_attnres_operator_nocurriculum", ["--c", "1", "--res", "attnres", "--feedback", "operator", "--curriculum", "0"]))
+CELLS += [(f"c2_{res}_{fb}", ["--c", "2", "--res", res, "--feedback", fb]) for res in ("std", "attnres") for fb in ("raw", "operator")]
 
 
 def main():

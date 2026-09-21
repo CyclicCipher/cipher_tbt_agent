@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
-*v0.6, 2026-09-21 (v0.1–v0.5 on 2026-09-20; v0.6 records E14–E18: capacity, precision, order dependence, blocks across
-layers, relational goals, written attention). E0–E29 have been run (E29 retracted as a design); one line each in §13, the full entries in `RESULTS.md`. Code:
+*v0.7, 2026-09-21 (v0.1–v0.5 on 2026-09-20; v0.6 records E14–E18; v0.7 adds §18 thinking inside the block, §19 the library problem and the continuous thesis; earlier: capacity, precision, order dependence, blocks across
+layers, relational goals, written attention). E0–E30 have been run (E29 retracted as a design; E31 running); one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -503,6 +503,9 @@ held-out 0.12–0.20); the routes (mean weight per source at each pass); accurac
 count, for (a), (b) and (d). Pass: some attention-residual cell at or above E26's best held-out accuracy with routes
 that are not uniform; the question answered either way: does the learned route reproduce the boundary operator
 (anchor + last pass) or read further back. Refute: every attention-residual cell below the fixed operator.
+*Result: PASS — held-out 1/8 (0.22) in both tied-core attention-residual cells, the first held-out composition solved in
+the line; the route lets the anchor fade (1.00 → 0.01) and reads every earlier pass with decaying weight; the windowed
+variant loses the gain and collapses at twice the passes (0.19), so §18(iv) is refuted; untied stacks gain nothing.*
 **E31 — continuous thoughts under attention residuals (pre-registered 2026-09-21; §18).** Coconut's recurrence in the
 gradient arm on E0's composition task: c thought positions between the demonstrations and the answer, each fed the
 previous position's final state; trained with Coconut's curriculum from a chain-of-thought form of the task (the
@@ -512,6 +515,29 @@ Measured: held-out composition accuracy (E26's best 0.20); training-loss spikes 
 and without the operator; a probe of the thought for the intermediate result and for more than one candidate at once
 (the breadth-first claim). Pass: held-out accuracy above 0.20 in some cell, and the operator removing the c = 3
 instability where it appears. Refute: no cell above the looped model.
+**E32 — "look for a name" on a continuous representation (pre-registered 2026-09-21; §19).** The gradient-trained
+tied-core looped model of E30 (attention residuals, tied mixers) — a net whose contents E7's anatomy can check. A
+sleep pass over its activations and weights: (1) a sparse dictionary over the residual stream at each pass (features as
+directions, Bricken et al.'s form), priced in bits at §8/E15's precision; (2) low-rank factors of the core's matrices
+at the same price; (3) where a written table or program is cheaper (the digit primitives), that. Measured: the
+description length before and after; the behaviour under the compressed description (trained and held-out accuracy
+within 0.02 of the original); whether the dictionary's features coincide with the task's primitives (each feature's
+effect matched to a primitive, as E7 did for the written net); and continual learning — a second task family trained
+by gradient descent after consolidation, the first family's accuracy retained (E6's measure) against plain fine-tuning.
+Pass: lossless within 0.02 at no more than half the bits, features that match primitives, retention above fine-tuning.
+Refute: the compressed description loses more than 0.1 accuracy, or nothing structured is found.
+**E33 — a language model on the Latin corpus: data efficiency (pre-registered 2026-09-21; §19; asked by the user).**
+`corpora/latin books` (16 books, 3.0 MB, 404k words), one book held out, character level. Arms: (a) the ZipLearner
+language model — the discrete machinery of E24/E28 on text: a table over the last R = 8 characters with the sleep
+pass choosing which context positions matter, the count-based two-part code, prediction by the KT rate and the
+nearest-context default; it is E28's block with the corpus as the memory tokens; (b) the gradient transformer
+(`h1_lid.Model`, 3 blocks, d = 96, RoPE, a 128-character context) trained at each data size; (c) the hybrid the
+continuous thesis proposes: (b) consolidated by E32's sleep, then trained on. Measured: bits per character on the
+held-out book at 10³, 10⁴, 10⁵, 10⁶ and 3×10⁶ training characters — the data-efficiency curve — and the crossover
+size at which (b) overtakes (a); a general compressor's bits per character on the same split (xz) as the classical
+reference; a plain order-8 n-gram with KT smoothing as the control for (a). Expectation, pre-registered: (a) wins below
+the crossover, (b) above, and (c) shifts the crossover left if the thesis is right. Refute the apparatus: (a) no better
+than the plain n-gram. (a) and (b) can run before E32; (c) needs it.
 
 ## 12. Open questions
 
@@ -568,6 +594,7 @@ changed) are in `RESULTS.md`, appended and never edited.
 | E27 | REFUTED on discovery, 9/16 levels | exploration valued in bits over whole plans; Tetris L0 solved; discovery is coverage-bound, unchanged |
 | E28 | PASS | the rules learned on LockPath, written into one looped attention block, reproduce the planner's rollouts 530/530 (509/509 seed 1); the nearest-key default beats 'unchanged' on unknown windows |
 | E29 | PASS, then RETRACTED | learned search as a procedure: room-20 89 vs 818 calls, room 40 solved at oracle 74; rejected as a design (a search written around the model) and deleted; the rooms stay as the test bed for §18 |
+| E30 | PASS | the depth loop under attention residuals: held-out 1/8 solved (0.22) with a tied core — the first ever; the learned route lets the anchor fade and reads every earlier pass; windowed sources collapse at 2× passes |
 
 ## 14. Glossary
 
@@ -720,7 +747,10 @@ output the reverse of the input"), and goals over the library ("find a shorter w
   `latent_reasoning_and_looped_planning.md` (overview) and one file per paper of §18 (Coconut, recurrent depth, looped latent
   thoughts, looped transformers as computers, VIN, Universal Transformers, ACT, Searchformer, Stream of Search, Thinker).
 - `experiments/transformers/h1_lid.py` — the transformer substrate: PoPE (+ the withdrawn `--n_zero`), attention residuals
-  (`AttnRes`, `--res attnres|attnres_full`), `Model.routes`, `--json`.
+  (`AttnRes`, `--res attnres|attnres_full`), `Model.routes`, `--json`; `LoopedModel` (`--res loop`, with `--loop_res attnres
+  --mix --window --extrap`, routes per pass); a key/value cache for incremental forwards (`forward_embedded`).
+- `experiments/transformers/coconut.py` — continuous thoughts (E31): the curriculum, raw vs operator feedback, the probe.
+- `experiments/ziplearn/e30.py`, `e31.py` — the recurrence-scheme experiments of §18 (drivers over the two files above).
 - `experiments/inner_objective/tasks.py` — the two task families (arithmetic, composition), reused by every experiment.
 - `experiments/inner_objective/ziplearn.py`, `runs/ziplearn_*.json` — the earlier arithmetic-only version and its numbers (§2).
 
@@ -822,6 +852,17 @@ flat under a strategy; the block, looped, must show that flatness with nothing a
 hand-written strategy could. That stage is the ZipLearner loop. The first stage (imitate a written search) is
 forbidden by the rule and unnecessary when the first successes come from exploration (E27).
 
+**E30's answer (2026-09-21, `RESULTS.md`).** The trained routes are not the boundary operator. Before attention a
+pass reads the last pass at ~0.8, keeps a decaying read of every earlier pass (0.04–0.20), and lets the anchor fade
+from 1.00 to 0.01 by the fourth pass; before the MLP the mix is broader (0.1–0.23 on each earlier pass beside 0.46 on
+the pass's own attention) — the momentum over iterates of (ii). Restricting the sources to the anchor and the last two
+passes (iv) is refuted: it loses the held-out gain and collapses at twice the passes (0.19), where every-pass access
+keeps 0.60–0.77. The held-out compositions solved (1/8 in both tied-core attention-residual cells, the first in the
+line) came only with the TIED core — the same block, learned routes across its own passes; a stack of distinct blocks
+gained nothing from the routes. What to write for the block, then: the pass's input is the last pass plus a decaying
+memory of all earlier passes, the anchor fading rather than re-injected at a fixed weight, no window — and in the
+written form the weights of that mix are flag-conditioned (§15), with the decay as the default.
+
 **Order of work (set 2026-09-21).** First the recurrence scheme, measured on the gradient arm where it is cheap: E30
 (the depth loop under attention residuals) and E31 (continuous thoughts under attention residuals, with the hazards
 above as the things to watch). Then the written block adopts the scheme they pick. Not designed yet, and stated as
@@ -832,3 +873,84 @@ such: what compressing behaviour writes into the block.
 `looped_latent_thoughts_2502.17416.md` (+ PDF, CC BY), `looped_transformers_programmable_computers_2301.13196.md`,
 `value_iteration_networks_1602.02867.md`, `universal_transformers_1807.03819.md`, `adaptive_computation_time_1603.08983.md`,
 `searchformer_2402.14083.md`, `stream_of_search_2404.03683.md` (+ PDF, CC BY), `thinker_2307.14993.md` (+ PDF, CC BY).
+
+---
+
+## 19. The library problem, and the continuous thesis (DESIGNED 2026-09-21)
+
+**The library problem, stated.** §5's library is a list I typed, and §7 grows it by three steps that have all been
+run: fit fuzzily (the table), look for a name (adopt a structure when cheaper — E3, E8), compare across tasks (a
+recurring matrix becomes an item — E8, E12). Every item those steps have ever minted is an INSTANCE of a kind already
+in the list: a particular permutation, a word in the generators. They have never minted a KIND — a new form of
+predicate or feature. The games interface never used this library at all; `arcgames.py` has a second, smaller one
+(windows over cells, masks from sleep, goal keys), also typed. E17 met the wall exactly (a relation is not in any kind:
+identify-then-plan 0.51), and E29's only real generalisation came from a kind typed for it (the sector features). §7's
+own loss condition — "the items a task needs are not inside any generic structure" — is the one that bites on any game
+the library was not written for: counting, ordering, "the same colour as the key", a piece that rotates. The plan as
+written cannot scale.
+
+**The resolution, in the interpreter frame (§18).** The library is not a list of structures but the INSTRUCTION SET of
+the written block — a fixed, small, complete set: what one attention head, the residual and a threshold can compute
+(read by offset, read by content, read by direction, pool, write, compare, branch). Everything else is a program over
+it, data in the context; a new kind is a program, never a new instruction; and §7's third step becomes the right rule
+at the right level — a sub-program recurring across programs is compressed into a named macro. That is library
+learning as DreamCoder does it (Ellis et al. 2021: wake = solve tasks by search with the current library, sleep =
+abstract recurring sub-programs into new primitives; Stitch and LILO are the faster and language-guided successors,
+from memory), and it is the only form known to grow kinds by compression. Completeness comes from the instruction set
+(Giannou et al.: a one-instruction computer suffices); the cost is the search, exponential in the length of what is
+new and tamed only by the ladder of macros. The rule from E29 applies to the instruction set itself: it must be the
+substrate's own primitives, not features I like.
+
+**The continuous thesis (the rethink, 2026-09-21).** Transformers trained by gradient descent are the one design that
+has compressed a messy, high-dimensional world — the frontier's robot models generalise to an unknown house through
+in-context learning — and they keep getting better at it. So the substrate is a continuous transformer whose
+representations are learned by gradient descent, and ZipLearner is the COMPRESSION THAT ACTS ON IT. The neat discrete
+world is the case where the cheapest description is exact — E28's block is the M → ∞ limit of soft attention over
+sparse features — and is not special-cased. What is known about how gradient descent uncovers continuous
+representations, and it is a fairly complete picture (from memory of the papers; notes to follow):
+1. *Features are directions, more of them than dimensions* (Elhage et al. 2022, superposition; Bricken/Templeton et
+   al. 2023–24, sparse dictionaries): a trained net stores a feature as a direction, packing sparse features into
+   nearly-orthogonal directions; composition is roughly addition. Our one-hot code is this with orthogonality exact.
+2. *Gradient descent extracts the data's statistical modes, strongest first, each in a burst* (Saxe, McClelland &
+   Ganguli 2014, 2019): a deep linear net learns the singular modes of the input–output correlation in order of
+   singular value, each with a sigmoidal transition, and in a hierarchical domain those modes are the hierarchy of
+   concepts, coarse to fine. Rare compositional structure comes late or never — E0–E26's 0/8.
+3. *The parameter-to-function map is biased toward simple functions* (Valle-Pérez, Camargo & Louis 2018; Mingard et
+   al. 2021; Hochreiter & Schmidhuber's flat minima 1997; Hinton & van Camp's MDL training 1993): the volume of
+   parameters mapping to a function falls off with its complexity, so init plus SGD samples from a Solomonoff-like
+   prior. Gradient descent in an overparameterised net is already a soft, approximate search biased toward short
+   descriptions; ZipLearner's principle is what it approximates, made exact where exactness pays.
+4. *In-context learning is learned inference over a task family* (Xie et al. 2021; von Oswald et al. 2023; Garg et
+   al. 2022): trained across many tasks, the net's features are the family's parameters and the forward pass infers
+   them — "fit first, name later" inside the forward pass.
+5. *What it does not do*: exact algorithms and their length generalisation; compositions that are not statistical
+   modes; learning without forgetting (E6b below chance vs E6's 100%); readability. Those are where description length
+   must be enforced rather than approximated.
+Hence the division of labour: (a) SLEEP = consolidate the learned representation into the cheapest description — a
+sparse dictionary, low-rank factors, and, where cheaper, exact tables and programs; §7's "look for a name" on
+continuous activations, which is what a sparse autoencoder is mechanically; (b) THINKING = §18, the looped block
+running programs over those features; (c) CONTINUAL LEARNING = consolidation by price instead of replay (E6's win,
+on continuous representations). The library of §5 becomes the forms a compression can take — dictionary, low-rank,
+convolution, program — priced.
+
+**The reach, asked 2026-09-21 (mathematics; goodness and justice; a chair and its 3D form).** Mathematics: in
+principle everything with a procedural or formal description, in time exponential in the length of what is new under
+the current library — the ladder of macros is the mechanism; the general instruction set is still to be written.
+Abstract normative concepts: the MECHANISM of abstraction (a shared description with the varying parts as arguments,
+adopted when cheaper) and abstract THOUGHT (programs over programs) are in scope; the concepts are not — they have no
+short program, are graded, relational and normative, and need the continuous regime, language as the domain, and a
+source of value beyond one number; language models show they are learnable from text as distributed features, which
+discrete programs are not. Vision: the structural half is near — features at relative positions in an object-centred
+frame under a transformation group (E28's frame in 2D, E12's group, SE(3) for 3D), and "a chair without the length of
+its legs" is exactly what compression yields (the macro is what recurs, the arguments what varies; affordances are
+programs too); what is missing is the front end from pixels to a code with parts, deep learning's home ground, where
+§5's repeated diagonal (a convolution) is the unbuilt first step. The two bounds on all three: the SEARCH and the CODE
+— a concept is short only in the right representation, the seam of E29's retina and of "what attends to what".
+
+**Where to start.** With the claim everything depends on: that "look for a name" works on a continuous representation
+— E32, on a net whose contents we can read. Then the user's test case: a language model on the Latin corpus (E33),
+where the discrete machinery is at home, the transformer is the reference, and the hybrid is the thesis; the number of
+interest is data efficiency — bits per character against training characters, and where the curves cross. Then a
+messy, continuous version of what we have (shapes with continuous variation, where "macro + arguments" can be checked
+against ground truth), and only then pixels. Not to be done: throwing away the discrete machinery (it is the exact
+edge case), or starting from real vision before the compression step is shown to work on something readable.

@@ -1,0 +1,88 @@
+{
+ "pos": "rope",
+ "n_zero": 0,
+ "res": "loop",
+ "steps": 3200,
+ "seed": 0,
+ "loops": 4,
+ "untied": 1,
+ "grow_at": 0.5,
+ "loop_res": "attnres",
+ "mix": "tied",
+ "window": 2,
+ "trained_solved": 13,
+ "n_trained": 17,
+ "trained_mean_acc": 0.765625,
+ "held_solved": 0,
+ "n_held": 8,
+ "held_mean_acc": 0.09130859375,
+ "held_trials": [
+  8,
+  8,
+  8,
+  8,
+  8,
+  8,
+  8,
+  8
+ ],
+ "routes": {
+  "mix_attn.0": [
+   [
+    1.0
+   ],
+   [
+    0.262,
+    0.738
+   ],
+   [
+    0.166,
+    0.461,
+    0.373
+   ],
+   [
+    0.122,
+    0.256,
+    0.622
+   ]
+  ],
+  "mix_mlp.0": [
+   [
+    0.183,
+    0.817
+   ],
+   [
+    0.134,
+    0.146,
+    0.719
+   ],
+   [
+    0.115,
+    0.125,
+    0.184,
+    0.576
+   ],
+   [
+    0.09,
+    0.14,
+    0.159,
+    0.611
+   ]
+  ],
+  "res_final": [
+   [
+    0.138,
+    0.173,
+    0.689
+   ]
+  ]
+ },
+ "extrap": {
+  "passes": 8,
+  "trained_mean_acc": 0.19715073529411764,
+  "trained_solved": 1,
+  "held_mean_acc": 0.0048828125,
+  "held_solved": 0
+ },
+ "train_loss": 0.04035608097910881
+}
