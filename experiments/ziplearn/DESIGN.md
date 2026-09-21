@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
 *v0.5, 2026-09-20 (v0.1–v0.4 the same day; v0.5 moves the results log to `RESULTS.md` and collects every
-pre-registration in §11). E0–E12 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
+pre-registration in §11). E0–E13 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -397,6 +397,17 @@ and the bits describing each planner. Pass: A 6/6 abelian pairs commute and ≤ 
 coordinate planner ≥ 95% of goals with optimal plans and fewer planner bits than the word table. Refute: A wrong, or
 the coordinate planner < 80%.
 
+**E13 — the replica games (added 2026-09-20, late; an interface, then an analysis).** `arcgames.py` puts the loop of
+§16 on the ARC-AGI-3 replica games in `src/tasks/games` (LockPath, MultiKey, Sokoban, CollectAll, Toggle, Tetris): the
+frame is the state, the game's actions are the actions, the score and WIN / GAME_OVER are the only feedback, nothing
+about any game is known. World model: one local rule per action — the new colour of a cell as a table over the
+window around it, the same table at every cell, radius chosen by price. Goal model: the windows around the cells
+that changed at a scoring or fatal transition, per action. Planner: search over predicted frames to a predicted win,
+avoiding predicted deaths; with no known goal, to the nearest unknown or unvisited frame. Harness: `play_games.py`,
+every level, a fixed action budget, the oracle's shortest solution beside it, and the world model's prediction
+accuracy reported separately from the levels solved — so "could not learn" and "could not solve" are distinguishable.
+Criterion for the interface: every game runs end to end and every action is exercised. No claim about solving.
+
 ## 12. Open questions
 
 **OPEN-1 — the outer objective (deferred by request, recorded here verbatim in substance).** ZipLearner learns a
@@ -436,6 +447,7 @@ changed) are in `RESULTS.md`, appended and never edited.
 | E10b | PASS | with no-op and noisy actions: price 92% of goals in 2.3 steps; novelty policies 36%/23%, trapped by noise |
 | E11 | PASS after a refutation | many-to-one actions need 'identity + edits'; forward search plans with them; a try erases the goal 48% of the time |
 | E12 | PASS | commutativity found from learned maps; abelian planner 8.9 bits vs a 112-word table of 1190 bits |
+| E13 | analysis | the replica games: interface complete, 5/16 levels by discovery; goal transfer on MultiKey; failures named |
 
 ## 14. Glossary
 
@@ -521,6 +533,8 @@ first; bits = length × log₂ actions) → execute → the next states are new 
 would be cheaper through such an action is a reason to *try* it. That is exploration as the outer objective's own
 demand, with the inner objective paying it back in bits: OPEN-11.
 
+**The games (E13).** The loop above runs on the ARC-AGI-3 replica games through `arcgames.py`: the state is the frame, an action's description is a local rule (a window → the centre's new colour, tied across cells), the goal is a set of win keys learned from the score, and the planner is the search above over predicted frames. First contact solved 5 of 16 levels by discovery; see the log for what fails and why.
+
 **OPEN-10** — when the map is too large to search: what to cache (a cost-to-go per state, or per description?), and
 whether the cache is itself a written structure. **OPEN-11** — acting to learn: the price of trying an unknown
 action against the bits its description would save. *E10: the saving must be counted over the goals still to come (a description is an asset); the myopic version does not explore. E10b (useless + noisy actions): price 92% of goals in 2.3 steps, novelty policies 36%/23% — trapped by the noisy actions; BUILT in its first form.* **OPEN-12** — goals that are relations, not states ("make the
@@ -532,6 +546,7 @@ output the reverse of the input"), and goals over the library ("find a shorter w
   `Shift`, `Affine`, `Permutation`), `Layer` (one matrix, §4), the rate price (`flag_bits`, `pay`, §8), `PositionPerm` /
   `PositionIdentity` / `TwoLayer` (two layers, §6), `NamedPerm` / `PermLibrary` / `TwoLayerWithLibrary` (§7), `ContinualLayer` (§9).
 - `experiments/ziplearn/RESULTS.md` — the results log (append-only), with the summary table mirrored in §13.
+- `experiments/ziplearn/arcgames.py`, `play_games.py` — the interface to the replica games (`src/tasks/games`) and the harness (E13).
 - `experiments/ziplearn/e0.py` … `e11.py`, `anatomy.py`, `jspace.py` — the experiments of §11, one file each; outputs in `runs/e*/`.
 - `experiments/ziplearn/refs/` — reference notes (`attention_residuals.md`) and the paper PDF.
 - `experiments/transformers/h1_lid.py` — the transformer substrate: PoPE (+ the withdrawn `--n_zero`), attention residuals

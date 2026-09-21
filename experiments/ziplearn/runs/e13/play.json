@@ -1,0 +1,333 @@
+{
+ "LockPath": {
+  "levels": [
+   {
+    "level": 0,
+    "solved": true,
+    "actions": 87,
+    "model": {
+     "ACTION1": {
+      "radius": 1,
+      "windows": 151
+     },
+     "ACTION2": {
+      "radius": 1,
+      "windows": 156
+     },
+     "ACTION3": {
+      "radius": 1,
+      "windows": 141
+     },
+     "ACTION4": {
+      "radius": 1,
+      "windows": 138
+     }
+    }
+   },
+   {
+    "level": 1,
+    "solved": false,
+    "actions": 150,
+    "model": {
+     "ACTION1": {
+      "radius": 1,
+      "windows": 151
+     },
+     "ACTION2": {
+      "radius": 1,
+      "windows": 156
+     },
+     "ACTION3": {
+      "radius": 1,
+      "windows": 141
+     },
+     "ACTION4": {
+      "radius": 1,
+      "windows": 138
+     }
+    }
+   }
+  ],
+  "oracle": [
+   8,
+   12,
+   13,
+   18
+  ],
+  "stats": {
+   "predictions": 232,
+   "correct": 196,
+   "unknown_cells": 418,
+   "cells": 16716,
+   "replans": 36,
+   "explore_plans": 85,
+   "goal_plans": 136
+  },
+  "seconds": 0.24476885795593262,
+  "solved": 1,
+  "n_levels": 4
+ },
+ "MultiKey": {
+  "levels": [
+   {
+    "level": 0,
+    "solved": true,
+    "actions": 77,
+    "model": {
+     "ACTION1": {
+      "radius": 1,
+      "windows": 207
+     },
+     "ACTION2": {
+      "radius": 1,
+      "windows": 192
+     },
+     "ACTION3": {
+      "radius": 1,
+      "windows": 183
+     },
+     "ACTION4": {
+      "radius": 1,
+      "windows": 177
+     }
+    }
+   },
+   {
+    "level": 1,
+    "solved": true,
+    "actions": 49,
+    "model": {
+     "ACTION1": {
+      "radius": 1,
+      "windows": 207
+     },
+     "ACTION2": {
+      "radius": 1,
+      "windows": 192
+     },
+     "ACTION3": {
+      "radius": 1,
+      "windows": 183
+     },
+     "ACTION4": {
+      "radius": 1,
+      "windows": 177
+     }
+    }
+   }
+  ],
+  "oracle": [
+   9,
+   13
+  ],
+  "stats": {
+   "predictions": 120,
+   "correct": 71,
+   "unknown_cells": 579,
+   "cells": 7080,
+   "replans": 49,
+   "explore_plans": 111,
+   "goal_plans": 1
+  },
+  "seconds": 0.25467467308044434,
+  "solved": 2,
+  "n_levels": 2
+ },
+ "Sokoban": {
+  "levels": [
+   {
+    "level": 0,
+    "solved": false,
+    "actions": 150,
+    "model": {
+     "ACTION1": {
+      "radius": 1,
+      "windows": 229
+     },
+     "ACTION2": {
+      "radius": 1,
+      "windows": 214
+     },
+     "ACTION3": {
+      "radius": 1,
+      "windows": 199
+     },
+     "ACTION4": {
+      "radius": 1,
+      "windows": 178
+     }
+    }
+   }
+  ],
+  "oracle": [
+   9,
+   12,
+   12
+  ],
+  "stats": {
+   "predictions": 146,
+   "correct": 69,
+   "unknown_cells": 624,
+   "cells": 9636,
+   "replans": 77,
+   "explore_plans": 126,
+   "goal_plans": 0
+  },
+  "seconds": 0.13355588912963867,
+  "solved": 0,
+  "n_levels": 3
+ },
+ "CollectAll": {
+  "levels": [
+   {
+    "level": 0,
+    "solved": true,
+    "actions": 80,
+    "model": {
+     "ACTION1": {
+      "radius": 1,
+      "windows": 201
+     },
+     "ACTION2": {
+      "radius": 1,
+      "windows": 181
+     },
+     "ACTION3": {
+      "radius": 1,
+      "windows": 157
+     },
+     "ACTION4": {
+      "radius": 1,
+      "windows": 163
+     }
+    }
+   },
+   {
+    "level": 1,
+    "solved": false,
+    "actions": 150,
+    "model": {
+     "ACTION1": {
+      "radius": 1,
+      "windows": 201
+     },
+     "ACTION2": {
+      "radius": 1,
+      "windows": 181
+     },
+     "ACTION3": {
+      "radius": 1,
+      "windows": 157
+     },
+     "ACTION4": {
+      "radius": 1,
+      "windows": 163
+     }
+    }
+   }
+  ],
+  "oracle": [
+   8,
+   13,
+   15
+  ],
+  "stats": {
+   "predictions": 225,
+   "correct": 173,
+   "unknown_cells": 534,
+   "cells": 14550,
+   "replans": 52,
+   "explore_plans": 90,
+   "goal_plans": 131
+  },
+  "seconds": 0.22683477401733398,
+  "solved": 1,
+  "n_levels": 3
+ },
+ "Toggle": {
+  "levels": [
+   {
+    "level": 0,
+    "solved": true,
+    "actions": 71,
+    "model": {
+     "ACTION1": {
+      "radius": 1,
+      "windows": 140
+     },
+     "ACTION2": {
+      "radius": 1,
+      "windows": 140
+     },
+     "ACTION3": {
+      "radius": 1,
+      "windows": 140
+     },
+     "ACTION4": {
+      "radius": 1,
+      "windows": 131
+     }
+    }
+   }
+  ],
+  "oracle": [
+   7
+  ],
+  "stats": {
+   "predictions": 66,
+   "correct": 37,
+   "unknown_cells": 399,
+   "cells": 2970,
+   "replans": 29,
+   "explore_plans": 59,
+   "goal_plans": 0
+  },
+  "seconds": 0.049835920333862305,
+  "solved": 1,
+  "n_levels": 1
+ },
+ "Tetris": {
+  "levels": [
+   {
+    "level": 0,
+    "solved": false,
+    "actions": 152,
+    "model": {
+     "ACTION2": {
+      "radius": 1,
+      "windows": 239
+     },
+     "ACTION3": {
+      "radius": 1,
+      "windows": 90
+     },
+     "ACTION4": {
+      "radius": 1,
+      "windows": 84
+     },
+     "ACTION5": {
+      "radius": 1,
+      "windows": 65
+     }
+    }
+   }
+  ],
+  "oracle": [
+   6,
+   5,
+   15
+  ],
+  "stats": {
+   "predictions": 131,
+   "correct": 0,
+   "unknown_cells": 240,
+   "cells": 14148,
+   "replans": 131,
+   "explore_plans": 142,
+   "goal_plans": 0
+  },
+  "seconds": 0.236100435256958,
+  "solved": 0,
+  "n_levels": 3
+ }
+}

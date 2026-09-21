@@ -25,6 +25,7 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E10b | PASS | with no-op and noisy actions: price 92% of goals in 2.3 steps; novelty policies 36%/23%, trapped by noise |
 | E11 | PASS after a refutation | many-to-one actions need 'identity + edits'; forward search plans with them; a try erases the goal 48% of the time |
 | E12 | PASS | commutativity found from learned maps; abelian planner 8.9 bits vs a 112-word table of 1190 bits |
+| E13 | analysis | the replica games: interface complete, 5/16 levels by discovery; goal transfer on MultiKey; failures named |
 
 ## Format
 
@@ -424,3 +425,33 @@ changed: "these actions commute" is now a measured, cheap property of a learned 
          and the precondition for a coordinate description — the first structure-of-structures (OPEN-5) that is
          about the *relations between* items rather than words in them. Not built into the library; E12 computes it
          outside. OPEN-10 gains a candidate: cache coordinates where actions commute, words where they do not.
+
+### 2026-09-20 — E13 — first contact with the replica games: the interface runs all six end to end; 5 of 16 levels solved by discovery, with the failure modes named (an analysis, not a verdict)
+command: `python experiments/ziplearn/play_games.py --budget 150` (six games, every level, 150 actions per level, no game knowledge; CPU, seconds)
+files:   `experiments/ziplearn/runs/e13/play.json`; code `arcgames.py` (the interface and the first player), `play_games.py` (the harness with the oracle)
+numbers: levels solved / actions on solved levels (oracle shortest) / world-model prediction accuracy —
+         LockPath 1/4 (L0 in 87, oracle 8) / 0.84;  MultiKey **2/2** (77 then **49**, oracle 9 and 13) / 0.59;
+         Sokoban 0/3 / 0.47;  CollectAll 1/3 (80, oracle 8) / 0.77;  Toggle 1/1 (71, oracle 7) / 0.56;  Tetris 0/3 / 0.00.
+         Total 5/16. Every action of every game was exercised; every model kept radius 1 on price.
+verdict: none pre-registered beyond "the interface is complete: the only thing between the agent and a level is its
+         ability to learn the mechanics and to solve the level, and the two are reported separately" — that holds.
+         What the numbers say: (1) first levels are solved by *discovery* — novelty-directed search over predicted
+         frames walks the room until the score rises; 70–90 actions against an oracle of 7–9, which is the cost of not
+         knowing what winning is; (2) the goal model transfers: MultiKey's second level was reached in 49 actions with
+         a single goal-directed plan, the win keys learned on level 0 ("this local arrangement, this action, scored")
+         pointing the planner straight at it; (3) LockPath's key-and-door level fails because the win keys are
+         location-free and fire before the door is dealt with — the planner walks to the door and pushes into it
+         for the rest of the budget: the goal predicate needs a *condition* (the door is closed) the local window does
+         not contain, which is E11's many-to-one lesson again at the goal level; (4) Sokoban's world model is 47%
+         right — pushes need the radius-2 rule, and the price never got enough push observations to prefer it;
+         (5) Tetris is 0% predicted: the board changes every tick whatever the action, and a window never seen
+         predicts "unchanged", the wrong default for a world where everything moves.
+changed: the interface exists and is the fixed point from here: `arcgames.py` turns a frame into a state, the game's
+         actions into actions, and the score / WIN / GAME_OVER signals into the goal model; the world model is one
+         local rule per action (§5's tied blocks, the rate price choosing the window radius); planning is §16's
+         search; exploration is the price of ignorance. One correction on the way: goal keys must never be "every
+         window of the frame" (the first run's fallback when the winning transition's change was unobservable) —
+         they are the windows around the cells that changed, or were predicted to, or changed just before. Next, in
+         order of what the numbers point at: a goal predicate with conditions (OPEN-12), the push rule (radius chosen
+         by price needs the observations exploration should be buying — E10's price would go looking for them), and
+         a default for unknown windows that is learned rather than "unchanged".
