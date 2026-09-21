@@ -1,0 +1,19 @@
+{
+ "results": {
+  "state": {
+   "solved": 138,
+   "first_pair_only": 150
+  },
+  "relation": {
+   "solved": 77,
+   "none": 61
+  },
+  "relation_direct": {
+   "solved": 149,
+   "none": 0
+  }
+ },
+ "n": 150,
+ "verdict": "REFUTED",
+ "mean_len_relation": 1.4935064935064934
+}

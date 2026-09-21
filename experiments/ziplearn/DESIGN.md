@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
 *v0.5, 2026-09-20 (v0.1–v0.4 the same day; v0.5 moves the results log to `RESULTS.md` and collects every
-pre-registration in §11). E0–E16 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
+pre-registration in §11). E0–E17 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -430,6 +430,12 @@ rot_left∘inc, reverse∘negate, swap_pairs∘inc, then the first again — a b
 a demonstration the unit of routing and minting. Pass: retention ≥ 0.95 for every rule after every stretch and
 exactly 3 blocks at the end in ≥ 90% of streams; refute: retention < 0.8 or more than 4 blocks on average.
 
+**E17 — goals that are relations (pre-registered 2026-09-20, late; OPEN-12).** In E9's environment a goal is two
+demonstration pairs of an unknown transformation (a composition of 1–3 actions); the plan must implement it on inputs
+never seen. State planner (E9: any word taking the first input to its output) against a relation planner (identify
+the transformation from the pairs with E2's learner, then the shortest word whose effect equals it on probe states).
+Pass: the relation planner ≥ 90% on 20 fresh inputs and the state planner lower; refute: the relation planner < 70%.
+
 ## 12. Open questions
 
 **OPEN-1 — the outer objective (deferred by request, recorded here verbatim in substance).** ZipLearner learns a
@@ -473,6 +479,7 @@ changed) are in `RESULTS.md`, appended and never edited.
 | E15 | PASS | budget: price forgets the least valuable, keeps the best-evidenced (0.84 vs FIFO 0.52); precision step ∝ 1/√n |
 | E14 | mechanism confirmed | order matters exactly as much as earlier compression is reused: gap 28 bits by name, 185 by words, 1193 for the transformer |
 | E16 | PASS | continual learning of whole two-layer tasks: 100% retention, exactly 3 blocks — blocks do not multiply across layers (OPEN-7) |
+| E17 | REFUTED on the letter | relational goals: identify-then-plan 0.51 (identification limit); words matched to the examples directly 0.99 |
 
 ## 14. Glossary
 

@@ -29,6 +29,7 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E15 | PASS | budget: price forgets the least valuable, keeps the best-evidenced (0.84 vs FIFO 0.52); precision step ∝ 1/√n |
 | E14 | mechanism confirmed | order matters exactly as much as earlier compression is reused: gap 28 bits by name, 185 by words, 1193 for the transformer |
 | E16 | PASS | continual learning of whole two-layer tasks: 100% retention, exactly 3 blocks — blocks do not multiply across layers (OPEN-7) |
+| E17 | REFUTED on the letter | relational goals: identify-then-plan 0.51 (identification limit); words matched to the examples directly 0.99 |
 
 ## Format
 
@@ -520,3 +521,22 @@ verdict: PASS. OPEN-7 asked whether blocks multiply when a block spans two layer
          as at the digit level. Nothing in §9's rules needed changing; the unit of routing became a demonstration.
 changed: `ContinualTwoLayer` (§9 for whole tasks). OPEN-7 closed in its first form; a block spanning *more* than two
          layers, or layers with distributed codes, is not tested.
+
+### 2026-09-20 — E17 — goals that are relations: identify-then-plan fails at the identification limit (REFUTED); matching words to the goal's examples directly implements the relation on unseen inputs 99% of the time
+command: `python experiments/ziplearn/e17.py` (150 relational goals, each a composition of 1–3 actions given as two demonstration pairs; actions learned from 4 observations; CPU, ~1 min)
+files:   `experiments/ziplearn/runs/e17/e17.json`; code `e17.py`
+numbers: state planner (E9 on the first pair as a state goal): reaches that pair's output 1.00, implements the relation on
+         20 fresh inputs **0.92**. Relation planner as pre-registered (identify the transformation from the
+         two pairs with E2's learner, then the shortest word matching it on probes): **0.51**, no word found
+         0.41. Relation planner, direct (the shortest word whose learned effect matches both demonstration
+         pairs, no identification step): **0.99**, nothing left unfound.
+verdict: REFUTED on the letter (0.51 < 0.70). The cause is E2's identification limit: two pairs do not settle a
+         position structure (~0.26 of the time at V = 5), so the identify-first planner has no target to match 41% of
+         the time. The state planner does well (0.92) because a six-digit state is nearly a fingerprint: a word that
+         maps one random input correctly is usually the relation. And the direct planner shows what a relational goal
+         needs here: not a *description* of the relation, but the relation's examples used as constraints on the
+         word — the plan space is small enough to search, and two pairs constrain it almost completely (0.99).
+changed: OPEN-12 gets its first form: a goal given as examples of a relation is planned for by matching plans to the
+         examples; identifying the relation as a description is a separate, optional step, worth paying only when it
+         buys something the examples cannot (a relation outside the plan space, or one that must transfer to a new
+         action set). The pre-registered planner is kept in the code as the refuted arm.
