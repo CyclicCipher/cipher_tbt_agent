@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
 *v0.5, 2026-09-20 (v0.1–v0.4 the same day; v0.5 moves the results log to `RESULTS.md` and collects every
-pre-registration in §11). E0–E11 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
+pre-registration in §11). E0–E12 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -387,6 +387,16 @@ B: planning with all ten actions by forward search, as E9. C (reported, not judg
 makes the goal unreachable within the budget — one-to-one unknowns vs many-to-one. Pass: A ≥ 0.95 exact at k = 4 for
 the many-to-one actions and B ≥ 0.95 reached at k = 4 with plans no longer than the oracle's; refute: either < 0.8.
 
+**E12 — abelian vs non-abelian action sets (pre-registered 2026-09-20, late).** Two sets of four actions learned from
+4 observations each: abelian (rot_left, rot_right, inc, dec — rotations and value shifts commute) and non-abelian
+(rot_left, reverse, inc, negate). A: from the learned maps alone, which pairs commute. B: do words of length ≤ 3 with the
+same letter counts have the same effect (abelian: the effect of a word is its counts). C: planning by search (E9), by
+COORDINATES for the abelian set (identify the rotation and shift needed, then arithmetic), by a WORD TABLE for the
+non-abelian set (every reachable transformation with its shortest word); goals reached, optimality, states examined,
+and the bits describing each planner. Pass: A 6/6 abelian pairs commute and ≤ 4/6 non-abelian; B 1.00 vs < 1.00; C the
+coordinate planner ≥ 95% of goals with optimal plans and fewer planner bits than the word table. Refute: A wrong, or
+the coordinate planner < 80%.
+
 ## 12. Open questions
 
 **OPEN-1 — the outer objective (deferred by request, recorded here verbatim in substance).** ZipLearner learns a
@@ -425,6 +435,7 @@ changed) are in `RESULTS.md`, appended and never edited.
 | E10 | myopic REFUTED; horizon PASS (tie) | a description is an asset: value = per-plan saving × plans to come |
 | E10b | PASS | with no-op and noisy actions: price 92% of goals in 2.3 steps; novelty policies 36%/23%, trapped by noise |
 | E11 | PASS after a refutation | many-to-one actions need 'identity + edits'; forward search plans with them; a try erases the goal 48% of the time |
+| E12 | PASS | commutativity found from learned maps; abelian planner 8.9 bits vs a 112-word table of 1190 bits |
 
 ## 14. Glossary
 

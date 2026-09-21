@@ -1,0 +1,62 @@
+{
+ "abelian": {
+  "commutation": {
+   "rot_left,rot_right": 1.0,
+   "rot_left,inc": 1.0,
+   "rot_left,dec": 1.0,
+   "rot_right,inc": 1.0,
+   "rot_right,dec": 1.0,
+   "inc,dec": 1.0
+  },
+  "commuting_pairs": 6,
+  "summarisable": 1.0,
+  "distinct_effects_len_le_3": 22,
+  "planning": {
+   "search": {
+    "reached": 1.0,
+    "optimal": 1.0,
+    "states_examined": 8.8
+   },
+   "coordinates": {
+    "reached": 1.0,
+    "optimal": 1.0,
+    "states_examined": 12.62,
+    "planner_bits": 8.906890595608518,
+    "orders": {
+     "rot_left": 6,
+     "rot_right": 6,
+     "inc": 5,
+     "dec": 5
+    }
+   }
+  }
+ },
+ "non-abelian": {
+  "commutation": {
+   "rot_left,reverse": 0.0,
+   "rot_left,inc": 1.0,
+   "rot_left,negate": 1.0,
+   "reverse,inc": 1.0,
+   "reverse,negate": 1.0,
+   "inc,negate": 0.0
+  },
+  "commuting_pairs": 4,
+  "summarisable": 0.7058823529411765,
+  "distinct_effects_len_le_3": 35,
+  "planning": {
+   "search": {
+    "reached": 1.0,
+    "optimal": 1.0,
+    "states_examined": 11.83
+   },
+   "word table": {
+    "reached": 1.0,
+    "optimal": 1.0,
+    "states_examined": 9.495,
+    "planner_bits": 1190.2674043753518,
+    "table_size": 112
+   }
+  }
+ },
+ "verdict": "PASS"
+}

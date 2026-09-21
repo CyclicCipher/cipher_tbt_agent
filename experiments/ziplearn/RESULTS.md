@@ -24,6 +24,7 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E10 | myopic REFUTED; horizon PASS (tie) | a description is an asset: value = per-plan saving × plans to come |
 | E10b | PASS | with no-op and noisy actions: price 92% of goals in 2.3 steps; novelty policies 36%/23%, trapped by noise |
 | E11 | PASS after a refutation | many-to-one actions need 'identity + edits'; forward search plans with them; a try erases the goal 48% of the time |
+| E12 | PASS | commutativity found from learned maps; abelian planner 8.9 bits vs a 112-word table of 1190 bits |
 
 ## Format
 
@@ -396,3 +397,30 @@ changed: (1) library: `PositionMap` (any source, repeats allowed, or a constant)
          the same source (a real bug; it could not affect E2/E3, whose actions are all permutations, but it labelled
          fill0 wrongly). (3) OPEN-11 gains a term: the price of a try must include the expected plan bits from the
          state it leaves you in, not only the step. Not built.
+
+### 2026-09-20 — E12 — commutativity is found from the learned maps, and it is worth 130× in description: two numbers instead of a table of 112 words (PASS)
+command: `python experiments/ziplearn/e12.py` (two sets of four actions, 4 observations each, 200 goals per set; CPU, ~1 min)
+files:   `experiments/ziplearn/runs/e12/e12.json`; code `e12.py`
+numbers: A — from the learned maps alone, commuting pairs: abelian set **6/6**; non-abelian set **4/6**, the two that
+         fail being exactly rot_left/reverse (0.00 agreement) and inc/negate (0.00). B — words of length ≤ 3 with the
+         same letter counts have the same effect: abelian **1.00** (22 distinct effects), non-abelian **0.71** (35).
+         C — search over words: both sets 100% reached, 100% optimal, 8.8 vs 11.8 states examined per goal. The
+         coordinate planner (abelian): identify the rotation and shift the goal needs, then the plan is "i rotations
+         one way or 6 − i the other, j shifts or 5 − j": **100% reached, 100% optimal**, planner description
+         **8.9 bits** (two generators and two cycle orders, found from the maps: rot_left has order 6, inc order 5).
+         The word-table planner (non-abelian): 112 distinct transformations within six letters, each with its
+         shortest word: 100% reached, 100% optimal, **1190 bits** of table.
+verdict: PASS on every clause. What non-commutativity costs is not the learning of actions (E9/E11: a map is a map)
+         and, at this depth, hardly the search (8.8 vs 11.8 states) — it is the *summary*: an abelian set of
+         actions is described by counts, a vector that adds, and a plan is arithmetic on it; a non-abelian set has
+         no such coordinate, every reachable transformation is its own word, and the planner is a table 130× larger.
+         The parallel with E11 holds: non-bijectivity loses invertibility, non-commutativity loses summarisability;
+         in both the learner keeps the whole object (map, word) instead of a summary (inverse, counts). Honest
+         limit: my coordinate planner still enumerates the 30 (i, j) pairs to identify the needed transformation
+         (12.6 checks per goal, more than search's 8.8); the arithmetic saving would need the transformation read
+         off the goal directly (where did a marked digit go?), which is not built — the bits claim stands, the
+         speed claim is not demonstrated.
+changed: "these actions commute" is now a measured, cheap property of a learned library (40 random states per pair)
+         and the precondition for a coordinate description — the first structure-of-structures (OPEN-5) that is
+         about the *relations between* items rather than words in them. Not built into the library; E12 computes it
+         outside. OPEN-10 gains a candidate: cache coordinates where actions commute, words where they do not.
