@@ -1,0 +1,12 @@
+{
+ "random": 0.1155133917927742,
+ "written_second_copy": 1.0,
+ "written_overall": 0.4375,
+ "by_period": {
+  "4": 1.0,
+  "6": 1.0,
+  "8": 1.0
+ },
+ "ambiguous_repeats": 0.3959517180919647,
+ "verdict": "PASS"
+}

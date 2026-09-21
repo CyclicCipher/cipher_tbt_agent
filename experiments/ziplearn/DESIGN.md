@@ -1,7 +1,7 @@
 # ZipLearner — design document
 
 *v0.5, 2026-09-20 (v0.1–v0.4 the same day; v0.5 moves the results log to `RESULTS.md` and collects every
-pre-registration in §11). E0–E17 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
+pre-registration in §11). E0–E18 have been run; one line each in §13, the full entries in `RESULTS.md`. Code:
 `experiments/ziplearn/ziplearner.py` (the weight-writing learner: structures, one matrix, two layers, the cross-task
 library, the continual layer, the word library) and `e0.py` … `e11.py`; the earlier arithmetic-only version is
 `experiments/inner_objective/ziplearn.py`. This document is the source of truth for the ZipLearner project;
@@ -436,6 +436,12 @@ never seen. State planner (E9: any word taking the first input to its output) ag
 the transformation from the pairs with E2's learner, then the shortest word whose effect equals it on probe states).
 Pass: the relation planner ≥ 90% on 20 fresh inputs and the state planner lower; refute: the relation planner < 70%.
 
+**E18 — writing attention weights (pre-registered 2026-09-21; OPEN-8).** An induction circuit written into the
+2-layer RoPE model from a description — a previous-token head (constant-channel query/key, phases set for "one back"
+in the high-frequency rotary pairs) and an induction head (content match in the low-frequency pairs) — with no
+training; test: a pattern of distinct tokens repeated, predict the second copy. Pass: ≥ 0.95 with a random model at
+chance; refute: < 0.6.
+
 ## 12. Open questions
 
 **OPEN-1 — the outer objective (deferred by request, recorded here verbatim in substance).** ZipLearner learns a
@@ -480,6 +486,7 @@ changed) are in `RESULTS.md`, appended and never edited.
 | E14 | mechanism confirmed | order matters exactly as much as earlier compression is reused: gap 28 bits by name, 185 by words, 1193 for the transformer |
 | E16 | PASS | continual learning of whole two-layer tasks: 100% retention, exactly 3 blocks — blocks do not multiply across layers (OPEN-7) |
 | E17 | REFUTED on the letter | relational goals: identify-then-plan 0.51 (identification limit); words matched to the examples directly 0.99 |
+| E18 | PASS | an induction circuit written into a RoPE transformer with no training copies patterns at 100% (OPEN-8 first form) |
 
 ## 14. Glossary
 

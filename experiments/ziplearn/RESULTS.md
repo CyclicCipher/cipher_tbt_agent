@@ -30,6 +30,7 @@ pre-registered in `DESIGN.md` §11 before the run.*
 | E14 | mechanism confirmed | order matters exactly as much as earlier compression is reused: gap 28 bits by name, 185 by words, 1193 for the transformer |
 | E16 | PASS | continual learning of whole two-layer tasks: 100% retention, exactly 3 blocks — blocks do not multiply across layers (OPEN-7) |
 | E17 | REFUTED on the letter | relational goals: identify-then-plan 0.51 (identification limit); words matched to the examples directly 0.99 |
+| E18 | PASS | an induction circuit written into a RoPE transformer with no training copies patterns at 100% (OPEN-8 first form) |
 
 ## Format
 
@@ -540,3 +541,28 @@ changed: OPEN-12 gets its first form: a goal given as examples of a relation is 
          examples; identifying the relation as a description is a separate, optional step, worth paying only when it
          buys something the examples cannot (a relation outside the plan space, or one that must transfer to a new
          action set). The pre-registered planner is kept in the code as the refuted arm.
+
+### 2026-09-21 — E18 — attention weights written from a description, no training: the induction circuit copies a pattern with 100% accuracy (PASS; OPEN-8 first form)
+command: `python experiments/ziplearn/e18.py` (a 2-layer, 2-head RoPE `h1_lid` model, every weight written; 256 sequences: BOS, a pattern of 8 distinct tokens, the pattern again; CPU, seconds)
+files:   `experiments/ziplearn/runs/e18/e18.json`; code `e18.py` (`write`: the circuit as a description; `accuracy`)
+numbers: random-initialised model, next-token accuracy inside the second copy 0.116 (chance 0.125); the written model
+         **1.000** for patterns of length 4, 6 and 8 (0.438 over all positions, the first copy being unpredictable).
+         With repeated tokens in the pattern (length 12 over 8 tokens) 0.396 — the ambiguity any first-order induction
+         head has: "the position after an earlier copy of this token" is not unique.
+verdict: PASS. The circuit is two written heads: a previous-token head whose query and key come from a constant
+         channel so that under RoPE their score depends only on distance, with the key's phases set in the four
+         highest-frequency rotary pairs so the peak is one position back; and an induction head whose query is the
+         current token and whose key is the previous-token subspace, both in the lowest-frequency pairs where the
+         rotation over the sequence is negligible — content match, not position. Values copy token identities; the
+         output projections route them between subspaces; the MLPs and the other heads are zero; the unembedding
+         reads the output subspace. Three lessons on the way, all recorded because they are what "writing weights"
+         actually meets: (1) with V = 5 and patterns of 12 the test itself was ambiguous (0.40) — the vocabulary had to
+         be widened to make the circuit's job well-defined; (2) position 0, having no predecessor, attended to itself
+         and so became its own "previous token", which made the first token of the pattern match twice (0.91) — a
+         BOS token fixed it, as in every real model; (3) the previous-token head must use the HIGH-frequency rotary
+         pairs and the induction head the LOW-frequency ones: the same RoPE frequency axis separates "where" from
+         "what" by frequency, which is what E0's failed θ = 0 channels were trying to do by hand.
+changed: OPEN-8 has its first form: an attention circuit can be written as a description (subspaces, routes, two
+         heads' q/k/v with rotary phases as parameters) and works exactly. Not built: the general step — ZipLearner
+         *choosing* such a circuit as the cheapest description of in-context data — and PoPE, under which the content
+         match is not separable (E0); the written network uses RoPE.
